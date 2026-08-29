@@ -9,6 +9,7 @@
 | File | Purpose |
 |------|---------|
 | `editor-state.js` | Global variables, constants, `BUILD_HASH` placeholder |
+| `editor-a11y.js` | Accessibility primitives shared across modules. Today: `prefersReducedMotion()` (live `matchMedia` query, not cached — the OS setting can flip while the page is open) and `scrollIntoViewMotionSafe()`. Loaded second, right after `editor-state.js`, because the graph tween asks it whether it may animate before its first frame. The declarative half of reduced-motion lives in the `@media (prefers-reduced-motion: reduce)` block at the END of `editor-styles.css`; this module covers only what CSS cannot reach (the RAF tween, smooth scrolling). |
 | `web/runtime/graphden-popover.js` | Platform-shared popover primitives (NOT editor-specific) — `anchorBelowClamped` viewport-clamped positioner + `installPopoverDismiss` outside-pointerdown/Esc handler. Pure DOM (no cy/graphData/editor-state); bundled into BOTH the editor bundle and the standalone `/assets/graphden-runtime.js` (see `:_graphden-runtime-js-paths`) so user-composed pages can build info/form popovers too. |
 | `editor-busy.js` | Visible feedback for multi-step user actions (reparent / extend / delete cascades) — `withBusy(opKey, label, fn)` helper + bottom-centre banner |
 | `editor-prefs.js` | Theme + sidebar-collapsed prefs (localStorage); the collapsed-state left-edge expand tab (`installFloatingExpandBtn`) that also hosts the non-default-branch badge |

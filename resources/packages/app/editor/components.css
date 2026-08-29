@@ -38,7 +38,7 @@ body {
   color: var(--gd-fg);
   background: var(--gd-bg);
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size: 16px;
+  font-size: 1rem;
   line-height: 1.5;
   margin: 0;
 }

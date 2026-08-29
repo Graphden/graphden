@@ -74,12 +74,15 @@
      `@media (hover:none)` can grow them for touch without
      touching the JS that builds the icons. `applyActionIconBox`
      reads --icon-size; the pinning helpers use --icon-pin-r-1
-     (closest to edge) and --icon-pin-r-2 (one slot in). */
-  --icon-size: 15px;
-  --icon-font-size: 10px;
-  --icon-pin-r-1: 6px;
-  --icon-pin-r-2: 24px;
-  --icon-pin-r-3: 42px;
+     (closest to edge) and --icon-pin-r-2 (one slot in).
+     In rem so the whole badge (box, glyph and the pin offsets that
+     space the boxes apart) scales together with the user's browser
+     font-size — a px box around a rem glyph overflows at 150%. */
+  --icon-size: 0.9375rem;
+  --icon-font-size: 0.625rem;
+  --icon-pin-r-1: 0.375rem;
+  --icon-pin-r-2: 1.5rem;
+  --icon-pin-r-3: 2.625rem;
   /* Monospace font stack — shared between the layout-affecting JS
      pinning helpers (none yet) and editor's :code-shaped surfaces. */
   --mono: ui-monospace, monospace;
@@ -256,6 +259,26 @@ body.theme-dark {
   overflow: hidden; clip-path: inset(50%);
   white-space: nowrap; border: 0;
 }
+
+/* Skip link (WCAG 2.4.1) — the first tab stop on the page, parked
+   off-screen until it takes focus, then pinned over the top bar. Above
+   every z-index in the file so nothing can cover it while showing. */
+.gd-skip-link {
+  position: absolute;
+  top: 0; left: 0;
+  transform: translateY(-120%);
+  z-index: 10000;
+  padding: 8px 14px;
+  background: var(--accent); color: var(--on-accent);
+  font-size: 0.8125rem; text-decoration: none;
+  border-radius: 0 0 4px 0;
+}
+.gd-skip-link:focus { transform: translateY(0); }
+
+/* The skip link's target takes focus programmatically (tabindex="-1");
+   never draw a ring around the whole canvas for it. */
+#graph-container:focus { outline: none; }
+
 body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
   background: var(--bg); color: var(--fg); }
 
@@ -357,7 +380,7 @@ body.sidebar-collapsed #sidebar-resizer { display: none; }
   width: 18px; height: 18px; border-radius: 50%;
   border: 1px dashed var(--hof-border);
   background: var(--hof-bg); color: var(--hof-fg);
-  font-size: 12px; font-style: italic; cursor: help;
+  font-size: 0.75rem; font-style: italic; cursor: help;
 }
 
 /* Hovering an edge lights the whole visual bundle it belongs to. Markers use
@@ -444,7 +467,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 .kind-toggle {
   display: inline-flex; align-items: center; gap: 3px;
   background: transparent; border: 1px solid transparent; border-radius: 8px;
-  padding: 1px 5px; font: inherit; font-size: 11px;
+  padding: 1px 5px; font: inherit; font-size: 0.6875rem;
   white-space: nowrap; flex: 0 0 auto;
   color: var(--muted-fg); cursor: pointer;
 }
@@ -456,11 +479,11 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 }
 .kind-toggle[hidden] { display: none; }
 .kind-glyph {
-  display: inline-flex; font-size: 11px; line-height: 1;
+  display: inline-flex; font-size: 0.6875rem; line-height: 1;
   user-select: none;
 }
 .kind-label { user-select: none; }
-.kind-count { font-size: 10px; opacity: 0.85; user-select: none; }
+.kind-count { font-size: 0.625rem; opacity: 0.85; user-select: none; }
 .kind-count:empty { display: none; }
 /* Active chip — this kind IS the applied lens (or "All" with an empty lens).
    A distinct ACCENT treatment (accent text + border + tint + weight) so the
@@ -482,7 +505,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   margin: 2px 0 4px; padding: 3px 8px;
   background: transparent; color: var(--accent);
   border: 1px solid var(--accent); border-radius: 8px;
-  font: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
+  font: inherit; font-size: 0.6875rem; font-weight: 600; cursor: pointer;
 }
 .gd-secret-add::before { content: "+"; font-weight: 600; }
 .gd-secret-add:hover { background: var(--selected-bg); }
@@ -490,7 +513,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 #search-input {
   flex: 1; min-width: 0; padding: 4px 8px;
   border: 1px solid var(--input-border); border-radius: 3px;
-  font-family: inherit; font-size: 13px; outline: none;
+  font-family: inherit; font-size: 0.8125rem; outline: none;
   background: var(--bg); color: var(--fg);
 }
 #search-input:focus { border-color: var(--light-fg); }
@@ -498,7 +521,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   width: 24px; align-self: stretch;
   border: 1px solid var(--input-border); border-radius: 3px;
   background: var(--bg); color: var(--muted-fg);
-  font-size: 16px; cursor: pointer;
+  font-size: 1rem; cursor: pointer;
   display: flex; align-items: center; justify-content: center; padding: 0;
   flex-shrink: 0; box-sizing: border-box;
 }
@@ -518,7 +541,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   padding-bottom: 4px; margin-bottom: 4px;
 }
 .search-exact-label {
-  font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+  font-size: 0.625rem; letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--muted-fg); padding: 4px 8px 2px;
 }
 .ns-header:hover { background: var(--hover-bg); }
@@ -526,13 +549,13 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
    a left accent. No-op without the addon — the class is only added when the
    X-Graphden-Workspace header lists the namespace. */
 .ns-header.ns-in-workspace { border-left: 2px solid var(--accent); padding-left: 6px; }
-.ns-arrow { width: 16px; font-size: 10px; color: var(--muted-fg); flex-shrink: 0; text-align: center; }
-.ns-label { font-size: 13px; font-weight: 600; color: var(--fg); }
+.ns-arrow { width: 16px; font-size: 0.625rem; color: var(--muted-fg); flex-shrink: 0; text-align: center; }
+.ns-label { font-size: 0.8125rem; font-weight: 600; color: var(--fg); }
 /* Item-count chip on the pseudo "(root)" group header. Italic +
    muted so it reads as metadata not a name. */
 .ns-count {
   margin-left: 6px;
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--muted-fg);
   font-style: italic;
 }
@@ -541,7 +564,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
    current branch. Count-chip sizing, error-colored to stand out. */
 .ns-type-error-chip {
   margin-left: 6px;
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--error-fg-strong);
   flex-shrink: 0;
 }
@@ -551,13 +574,13 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   display: flex; align-items: center; }
 #entity-list .entity-item:hover { background: var(--hover-bg); }
 #entity-list .entity-item.selected { background: var(--selected-bg); }
-#entity-list .entity-item .name { font-weight: 400; font-size: 13px; }
+#entity-list .entity-item .name { font-weight: 400; font-size: 0.8125rem; }
 
 /* Proactive per-org plan-usage badge (editor-quota.js, task #8-frontend). */
 .quota-badge {
   margin: 4px 8px;
   padding: 2px 8px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--muted-fg);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -580,7 +603,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   display: flex; flex-direction: column; gap: 8px; position: relative; }
 .menu-brand { display: flex; align-items: center; gap: 8px; }
 .menu-logo { flex: 0 0 auto; display: block; color: var(--accent); }
-.menu-header h2 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: 0.2px; }
+.menu-header h2 { font-size: 0.9375rem; font-weight: 600; margin: 0; letter-spacing: 0.2px; }
 .menu-header-actions { display: flex; flex-wrap: wrap; align-items: center;
   gap: 6px; min-height: 26px; }
 
@@ -622,7 +645,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 .auth-avatar {
   width: 22px; height: 22px; border-radius: 50%; display: inline-flex;
   align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 700; line-height: 1;
+  font-size: 0.6875rem; font-weight: 700; line-height: 1;
   background: var(--header-fg); color: var(--header-bg);
 }
 .auth-avatar.auth-avatar-op {
@@ -630,7 +653,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   box-shadow: 0 0 0 1px var(--header-fg);
 }
 .auth-signin {
-  font-size: 12px; padding: 3px 10px; border-radius: 3px;
+  font-size: 0.75rem; padding: 3px 10px; border-radius: 3px;
   border: 1px solid var(--header-fg); color: var(--header-fg);
 }
 .auth-lock-btn.auth-chip:hover .auth-signin { background: var(--header-fg); color: var(--header-bg); }
@@ -641,15 +664,15 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 4px 8px 8px; border-bottom: 1px solid var(--line, #2a3038); margin-bottom: 4px;
 }
-.auth-menu-who { font-size: 13px; font-weight: 600; word-break: break-all; }
+.auth-menu-who { font-size: 0.8125rem; font-weight: 600; word-break: break-all; }
 .auth-menu-badge {
-  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  font-size: 0.5625rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
   padding: 1px 6px; border-radius: 3px;
   background: var(--gd-flow, #0066cc); color: var(--gd-on-accent, #fff);
 }
 .auth-menu-item {
   text-align: left; background: transparent; border: none; cursor: pointer;
-  font-size: 13px; padding: 7px 8px; border-radius: 4px; color: var(--fg);
+  font-size: 0.8125rem; padding: 7px 8px; border-radius: 4px; color: var(--fg);
 }
 .auth-menu-item:hover { background: var(--bg); }
 .auth-menu-div { height: 1px; margin: 4px 2px; background: var(--border); }
@@ -658,7 +681,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 .auth-menu-support { display: block; text-decoration: none; }
 .auth-menu-social {
   display: flex; flex-wrap: wrap; gap: 2px 10px;
-  padding: 4px 8px 6px; font-size: 11px;
+  padding: 4px 8px 6px; font-size: 0.6875rem;
 }
 .auth-menu-social a { color: var(--muted-fg); text-decoration: none; }
 .auth-menu-social a:hover { color: var(--accent); text-decoration: underline; }
@@ -667,7 +690,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 .auth-logout-all-btn {
   background: transparent; color: var(--header-fg); border: 1px solid var(--header-fg); border-radius: 3px;
   width: 26px; height: 26px; padding: 3px; margin-left: 4px; cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center; font-size: 14px;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 0.875rem;
 }
 .auth-logout-all-btn:hover { background: var(--header-fg); color: var(--header-bg); }
 /* Popover positioned with `position: fixed` (relative to viewport,
@@ -683,7 +706,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 }
 .auth-popover.hidden { display: none; }
 .auth-popover input {
-  font-size: 12px; padding: 4px 6px; border: 1px solid var(--fg); border-radius: 3px;
+  font-size: 0.75rem; padding: 4px 6px; border: 1px solid var(--fg); border-radius: 3px;
   outline: none; width: 100%; box-sizing: border-box;
   background: var(--bg); color: var(--fg);
 }
@@ -694,7 +717,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 /* Username field (multi-tenant login only) sits above the password wrap. */
 .auth-username-input:not(.hidden) { margin-bottom: 6px; }
 /* Login⇄signup toggle (multi-tenant). */
-.auth-mode-toggle { display: block; margin-top: 6px; font-size: 11px; color: var(--accent); cursor: pointer; text-decoration: underline; }
+.auth-mode-toggle { display: block; margin-top: 6px; font-size: 0.6875rem; color: var(--accent); cursor: pointer; text-decoration: underline; }
 /* Fatal graph-load banner (editor-main.js initGraph catch) — tokenised so
    it themes with everything else instead of the old inline hardcoded red. */
 .editor-fatal-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 99999;
@@ -712,14 +735,14 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 .auth-toggle-visibility:hover { color: var(--fg); }
 .auth-popover-row { display: flex; gap: 6px; }
 .auth-popover-btn {
-  flex: 1; font-size: 12px; padding: 4px 8px; cursor: pointer;
+  flex: 1; font-size: 0.75rem; padding: 4px 8px; cursor: pointer;
   background: var(--fg); color: var(--bg); border: 1px solid var(--fg); border-radius: 3px;
 }
 .auth-popover-btn:hover { background: var(--bg); color: var(--fg); }
 .auth-popover-btn-secondary { background: var(--bg); color: var(--fg); }
 .auth-popover-btn-secondary:hover { background: var(--fg); color: var(--bg); }
 .auth-error {
-  font-size: 11px; color: var(--fg); background: var(--hover-bg); border: 1px solid var(--fg);
+  font-size: 0.6875rem; color: var(--fg); background: var(--hover-bg); border: 1px solid var(--fg);
   padding: 4px 6px; border-radius: 3px;
 }
 
@@ -734,7 +757,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   background: transparent; color: var(--header-fg);
   border: 1px solid var(--header-fg); border-radius: 3px;
   padding: 3px 8px; height: 26px; cursor: pointer;
-  font: inherit; font-size: 11px; line-height: 1;
+  font: inherit; font-size: 0.6875rem; line-height: 1;
   max-width: 140px;
 }
 .branch-chip-btn span {
@@ -763,7 +786,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 .branch-popover.hidden { display: none; }
 .branch-popover-loading,
 .branch-popover-error {
-  font-size: 11px; color: var(--muted-fg); padding: 4px 6px;
+  font-size: 0.6875rem; color: var(--muted-fg); padding: 4px 6px;
 }
 .branch-popover-error {
   color: var(--fg); background: var(--hover-bg); border: 1px solid var(--fg);
@@ -778,7 +801,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   background: transparent; color: var(--header-fg);
   border: 1px solid var(--header-fg); border-radius: 3px;
   padding: 3px 8px; height: 26px; cursor: pointer;
-  font: inherit; font-size: 11px; line-height: 1;
+  font: inherit; font-size: 0.6875rem; line-height: 1;
   max-width: 140px;
 }
 .org-chip-btn span {
@@ -797,7 +820,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 .org-popover-item {
   text-align: left; background: transparent; color: var(--fg);
   border: none; border-radius: 3px; padding: 4px 8px; cursor: pointer;
-  font: inherit; font-size: 12px;
+  font: inherit; font-size: 0.75rem;
 }
 .org-popover-item:hover:not(:disabled) { background: var(--hover-bg); }
 .org-popover-item-current { color: var(--muted-fg); cursor: default; }
@@ -814,7 +837,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   padding: 4px 6px;
   border-radius: 3px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 .branch-row:hover { background: var(--hover-bg); }
 .branch-row-current {
@@ -822,12 +845,12 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 }
 .branch-row-name { font-weight: 500; }
 .branch-row-tag {
-  font-size: 10px; padding: 1px 5px; border-radius: 2px;
+  font-size: 0.625rem; padding: 1px 5px; border-radius: 2px;
   background: var(--fg); color: var(--bg);
   text-transform: uppercase; letter-spacing: 0.04em;
 }
 .branch-row-meta {
-  font-size: 10px; color: var(--muted-fg);
+  font-size: 0.625rem; color: var(--muted-fg);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   min-width: 0;
 }
@@ -843,9 +866,9 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   background: transparent; color: var(--muted-fg);
   border: 0; border-radius: 2px;
   width: 18px; height: 18px; padding: 0; line-height: 1;
-  font-size: 13px; cursor: pointer;
+  font-size: 0.8125rem; cursor: pointer;
 }
-.branch-row-delete { font-size: 14px; }
+.branch-row-delete { font-size: 0.875rem; }
 .branch-row-delete:hover,
 .branch-row-merge:hover,
 .branch-row-diff:hover,
@@ -867,21 +890,21 @@ body.gd-no-write .branch-row-approve { display: none; }
 
 /* n/N approvals badge next to ✅ on a proposed row. */
 .branch-appr-count {
-  font-size: 10px; color: var(--muted-fg);
+  font-size: 0.625rem; color: var(--muted-fg);
   padding: 0 3px; align-self: center;
 }
 .branch-appr-count.ok { color: var(--accent); }
 
 /* "N proposals awaiting review" header above the branch list. */
 .branch-proposals-header {
-  font-size: 11px; color: var(--accent);
+  font-size: 0.6875rem; color: var(--accent);
   padding: 2px 4px 4px;
 }
 
 /* ⚙ protection mini-menu option rows. */
 .gd-protect-opt {
   display: flex; align-items: center; gap: 6px;
-  padding: 4px 2px; font-size: 12px; color: var(--fg); cursor: pointer;
+  padding: 4px 2px; font-size: 0.75rem; color: var(--fg); cursor: pointer;
 }
 .gd-protect-opt select { margin-left: auto; }
 
@@ -896,22 +919,22 @@ body.gd-no-write .branch-row-approve { display: none; }
    create block. All THREE are tenancy-only — without principals a write
    policy has no one to tell apart — and the mutating affordances also
    respect gd-no-write. */
-.branch-row-lock { font-size: 9px; margin-left: 2px; }
+.branch-row-lock { font-size: 0.5625rem; margin-left: 2px; }
 .branch-row-policy { display: none; }
 body.gd-tenancy .branch-row-policy { display: inline-flex; }
 body.gd-tenancy.gd-no-write .branch-row-policy { display: none; }
 .branch-adv { display: none; }
 body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 .branch-adv summary {
-  font-size: 10px; color: var(--muted-fg); cursor: pointer;
+  font-size: 0.625rem; color: var(--muted-fg); cursor: pointer;
   user-select: none;
 }
 .branch-adv summary:hover { color: var(--fg); }
 .branch-adv-label {
-  display: block; font-size: 10px; color: var(--muted-fg); margin: 6px 0 2px;
+  display: block; font-size: 0.625rem; color: var(--muted-fg); margin: 6px 0 2px;
 }
 .branch-adv select {
-  width: 100%; font-size: 11px; padding: 3px 4px;
+  width: 100%; font-size: 0.6875rem; padding: 3px 4px;
   background: var(--bg); color: var(--fg);
   border: 1px solid var(--border); border-radius: 3px;
 }
@@ -926,27 +949,27 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 .branch-hub-head {
   display: flex; align-items: baseline; gap: 6px; min-width: 0;
 }
-.branch-hub-title { font-size: 11px; font-weight: 600; color: var(--fg); }
+.branch-hub-title { font-size: 0.6875rem; font-weight: 600; color: var(--fg); }
 .branch-hub-url {
-  font-size: 10px; color: var(--muted-fg);
+  font-size: 0.625rem; color: var(--muted-fg);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   min-width: 0;
 }
 .branch-hub-actions { display: flex; gap: 4px; }
 .branch-hub-actions button:disabled { opacity: 0.5; cursor: default; }
-.branch-hub-status { font-size: 10px; color: var(--muted-fg); }
+.branch-hub-status { font-size: 0.625rem; color: var(--muted-fg); }
 .branch-hub-status:empty { display: none; }
 .branch-hub-status-error { color: var(--error-fg); }
 
 .branch-popover-create input {
-  flex: 1; font-size: 11px; padding: 4px 6px;
+  flex: 1; font-size: 0.6875rem; padding: 4px 6px;
   border: 1px solid var(--fg); border-radius: 3px;
   outline: none; background: var(--bg); color: var(--fg);
   min-width: 0;
 }
 .branch-popover-create input:focus { box-shadow: 0 0 0 1px var(--fg) inset; }
 .branch-popover-btn {
-  font-size: 11px; padding: 4px 10px; cursor: pointer;
+  font-size: 0.6875rem; padding: 4px 10px; cursor: pointer;
   background: var(--fg); color: var(--bg);
   border: 1px solid var(--fg); border-radius: 3px;
 }
@@ -963,20 +986,20 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   padding: 6px 8px; min-width: 280px; max-width: 420px;
   box-shadow: var(--shadow-md);
   display: flex; flex-direction: column; gap: 6px;
-  font-size: 12px; line-height: 1.3;
+  font-size: 0.75rem; line-height: 1.3;
 }
 .fn-versions-popover.hidden { display: none; }
 .fn-versions-loading,
 .fn-versions-error {
-  color: var(--muted-fg); font-size: 11px;
+  color: var(--muted-fg); font-size: 0.6875rem;
 }
 .fn-versions-error { color: var(--fg); }
 .fn-versions-header {
-  font-weight: 600; font-size: 12px;
+  font-weight: 600; font-size: 0.75rem;
   border-bottom: 1px solid var(--border); padding-bottom: 4px;
 }
 .fn-versions-empty {
-  color: var(--muted-fg); font-size: 11px; padding: 4px 0;
+  color: var(--muted-fg); font-size: 0.6875rem; padding: 4px 0;
 }
 .fn-versions-list {
   display: flex; flex-direction: column;
@@ -998,23 +1021,23 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 .fn-versions-branch-current {
   background: var(--fg); color: var(--bg);
   padding: 1px 5px; border-radius: 2px;
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 .fn-versions-ts {
   font-family: var(--mono);
-  font-size: 10px; color: var(--muted-fg);
+  font-size: 0.625rem; color: var(--muted-fg);
   margin-left: auto;
 }
 .fn-versions-switch,
 .fn-versions-restore {
-  font-size: 10px; padding: 1px 6px; cursor: pointer;
+  font-size: 0.625rem; padding: 1px 6px; cursor: pointer;
   background: transparent; color: var(--fg);
   border: 1px solid var(--border); border-radius: 2px;
 }
 .fn-versions-switch:hover,
 .fn-versions-restore:hover { background: var(--hover-bg); }
 .fn-versions-row-meta {
-  font-size: 10px; color: var(--muted-fg);
+  font-size: 0.625rem; color: var(--muted-fg);
   font-family: var(--mono);
   overflow-wrap: anywhere;
 }
@@ -1028,7 +1051,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   border-top: 1px dashed var(--border);
 }
 .fn-versions-execs-empty {
-  font-size: 10px; color: var(--muted-fg);
+  font-size: 0.625rem; color: var(--muted-fg);
   padding: 2px 0;
 }
 
@@ -1038,14 +1061,14 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 }
 .fn-versions-execs-row {
   display: flex; align-items: baseline; gap: 6px;
-  font-size: 10px;
+  font-size: 0.625rem;
   font-family: var(--mono);
   padding: 2px 0;
 }
 .fn-versions-execs-status {
   padding: 0 4px; border-radius: 2px;
   background: var(--hover-bg);
-  text-transform: uppercase; font-size: 9px; letter-spacing: 0.04em;
+  text-transform: uppercase; font-size: 0.5625rem; letter-spacing: 0.04em;
 }
 .fn-versions-execs-status-succeeded { background: var(--fg); color: var(--bg); }
 .fn-versions-execs-status-failed,
@@ -1076,22 +1099,22 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   max-height: 80vh; overflow-y: auto;
   box-shadow: var(--shadow-md);
   display: flex; flex-direction: column; gap: 10px;
-  font-size: 12px; line-height: 1.4;
+  font-size: 0.75rem; line-height: 1.4;
 }
 .merge-conflicts-header {
-  font-size: 14px; font-weight: 600;
+  font-size: 0.875rem; font-weight: 600;
   border-bottom: 1px solid var(--border); padding-bottom: 6px;
 }
 .merge-conflicts-help {
-  font-size: 11px; color: var(--muted-fg);
+  font-size: 0.6875rem; color: var(--muted-fg);
 }
 .merge-conflicts-batch {
   display: flex; gap: 6px; align-items: center;
-  font-size: 11px; color: var(--muted-fg);
+  font-size: 0.6875rem; color: var(--muted-fg);
 }
 .merge-conflicts-batch-label { margin-right: 2px; }
 .merge-conflicts-batch-btn {
-  font-size: 10px; padding: 2px 8px;
+  font-size: 0.625rem; padding: 2px 8px;
 }
 .merge-conflicts-rows {
   display: flex; flex-direction: column; gap: 8px;
@@ -1105,16 +1128,16 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   margin-bottom: 4px;
 }
 .merge-conflict-entity {
-  font-weight: 600; font-size: 12px;
+  font-weight: 600; font-size: 0.75rem;
   background: var(--hover-bg); padding: 1px 5px; border-radius: 2px;
 }
 .merge-conflict-id {
   font-family: var(--mono);
-  font-size: 10px; color: var(--muted-fg);
+  font-size: 0.625rem; color: var(--muted-fg);
 }
 .merge-conflict-choice {
   display: flex; flex-direction: column; gap: 4px;
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 .merge-conflict-choice label {
   cursor: pointer; display: flex; gap: 6px; align-items: baseline;
@@ -1122,10 +1145,10 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 .merge-conflict-choice code {
   font-family: var(--mono);
   background: var(--hover-bg); padding: 0 3px; border-radius: 2px;
-  color: var(--muted-fg); font-size: 10px;
+  color: var(--muted-fg); font-size: 0.625rem;
 }
 .merge-conflicts-error {
-  font-size: 11px; color: var(--fg); background: var(--hover-bg);
+  font-size: 0.6875rem; color: var(--fg); background: var(--hover-bg);
   border: 1px solid var(--fg); padding: 4px 6px; border-radius: 3px;
 }
 .merge-conflicts-error.hidden { display: none; }
@@ -1163,10 +1186,10 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   max-height: 80vh;
   display: flex; flex-direction: column;
   box-shadow: var(--shadow-md);
-  font-size: 12px; line-height: 1.4;
+  font-size: 0.75rem; line-height: 1.4;
 }
 .branch-diff-header {
-  font-size: 14px; font-weight: 600;
+  font-size: 0.875rem; font-weight: 600;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 8px;
@@ -1176,7 +1199,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   background: transparent; color: var(--muted-fg);
   border: 0; border-radius: 2px;
   width: 22px; height: 22px; padding: 0; line-height: 1;
-  font-size: 18px; cursor: pointer;
+  font-size: 1.125rem; cursor: pointer;
 }
 .branch-diff-close:hover { background: var(--hover-bg); color: var(--fg); }
 .branch-diff-body {
@@ -1187,7 +1210,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 .branch-diff-loading,
 .branch-diff-error,
 .branch-diff-empty {
-  font-size: 12px; color: var(--muted-fg);
+  font-size: 0.75rem; color: var(--muted-fg);
   padding: 8px 0;
 }
 .branch-diff-error {
@@ -1196,14 +1219,14 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   padding: 6px 8px;
 }
 .branch-diff-summary {
-  font-size: 11px; color: var(--muted-fg);
+  font-size: 0.6875rem; color: var(--muted-fg);
   padding-bottom: 6px;
 }
 .branch-diff-section {
   margin-bottom: 12px;
 }
 .branch-diff-section-head {
-  font-weight: 600; font-size: 12px;
+  font-weight: 600; font-size: 0.75rem;
   padding: 4px 0;
   border-bottom: 1px solid var(--border);
   margin-bottom: 6px;
@@ -1212,7 +1235,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 .branch-diff-count {
   background: var(--fg); color: var(--bg);
   padding: 1px 6px; border-radius: 2px;
-  font-size: 10px;
+  font-size: 0.625rem;
 }
 
 .branch-diff-rows {
@@ -1230,15 +1253,15 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   margin-bottom: 2px;
 }
 .branch-diff-entity {
-  font-weight: 600; font-size: 11px;
+  font-weight: 600; font-size: 0.6875rem;
   background: var(--bg); padding: 1px 5px; border-radius: 2px;
 }
 .branch-diff-id {
   font-family: var(--mono);
-  font-size: 10px; color: var(--muted-fg);
+  font-size: 0.625rem; color: var(--muted-fg);
 }
 .branch-diff-row-summary {
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-family: var(--mono);
   overflow-wrap: anywhere;
 }
@@ -1252,7 +1275,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
    the badge tells the user "this won't actually propagate". */
 .branch-diff-row-local-badge {
   margin-left: auto;
-  font-size: 10px;
+  font-size: 0.625rem;
   font-style: italic;
   color: var(--muted-fg);
   padding: 1px 5px;
@@ -1303,7 +1326,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 .create-btn-inline:hover { background: var(--fg); color: var(--bg); }
 /* The personal "hide from my view" (⊘) ns action — a text glyph, not an SVG,
    so size it to sit in the same 15×15 frame as the ✎/+ icons. */
-.ns-hide-btn { font-size: 11px; line-height: 1; }
+.ns-hide-btn { font-size: 0.6875rem; line-height: 1; }
 
 /* Packages popover (from the #gd-pkg-chip context-bar chip). Wider than the
    workspace popover — it hosts the installed pins + browse/install table (the
@@ -1339,7 +1362,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 }
 .create-menu-item {
   background: transparent; border: 0; border-radius: 2px;
-  padding: 6px 10px; text-align: left; font-size: 12px; cursor: pointer;
+  padding: 6px 10px; text-align: left; font-size: 0.75rem; cursor: pointer;
   color: inherit;
 }
 .create-menu-item:hover { background: var(--fg); color: var(--bg); }
@@ -1351,7 +1374,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   padding: 4px 6px;
 }
 .inline-input {
-  flex: 1; font-size: 12px; padding: 3px 6px;
+  flex: 1; font-size: 0.75rem; padding: 3px 6px;
   border: 1px solid var(--fg); border-radius: 3px; outline: none;
   background: var(--bg); color: var(--fg);
 }
@@ -1367,7 +1390,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 .inline-btn-save:hover { background: var(--fg); color: var(--bg); }
 .inline-btn:disabled { opacity: 0.4; cursor: default; }
 .inline-error {
-  font-size: 10px; color: var(--fg);
+  font-size: 0.625rem; color: var(--fg);
   background: var(--hover-bg); border: 1px solid var(--fg); border-radius: 3px;
   padding: 1px 5px; display: none;
 }
@@ -1380,7 +1403,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   padding: 10px 12px; margin: 8px 12px 12px;
   background: var(--bg); color: var(--fg);
   border: 1px dashed var(--fg); border-radius: 3px;
-  font-size: 12px; cursor: pointer;
+  font-size: 0.75rem; cursor: pointer;
 }
 .create-root-ns-btn:hover { background: var(--fg); color: var(--bg); }
 .create-root-ns-plus { display: inline-flex; align-items: center; }
@@ -1399,7 +1422,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
      band instead of collapsing. With global box-sizing: border-box the
      min-height must include vertical padding (4+4) + line-height (13) = 21. */
   min-height: 21px;
-  line-height: 13px;
+  line-height: 0.8125rem;
   transition: color 0.1s, font-weight 0.1s;
 }
 
@@ -1412,7 +1435,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 .return-type-strip {
   padding: 2px 8px;
   color: var(--muted-fg);
-  font-size: 10px;
+  font-size: 0.625rem;
   font-style: italic;
   border-top: 1px dashed var(--input-border);
   background: var(--card-bg);
@@ -1451,7 +1474,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 .return-type-strip-refine .return-type-strip-constraint {
   display: block;
   padding-left: 1em;
-  font-size: 9px;
+  font-size: 0.5625rem;
   opacity: 0.7;
 }
 
@@ -1462,7 +1485,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 .edit-type-strip {
   padding: 2px 8px;
   color: var(--muted-fg);
-  font-size: 10px;
+  font-size: 0.625rem;
   font-style: italic;
   border-top: 1px dashed var(--input-border);
   background: var(--card-bg);
@@ -1491,8 +1514,8 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   display: inline-block;
   padding: 0 5px;
   font-family: SF Mono, Monaco, monospace;
-  font-size: 8.5px;
-  line-height: 12px;
+  font-size: 0.5312rem;
+  line-height: 0.75rem;
   letter-spacing: 0.3px;
   text-transform: uppercase;
   border: 0;
@@ -1547,7 +1570,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 .effects-strip-edit {
   margin-left: auto;
   padding: 0 6px;
-  font-size: 10px;
+  font-size: 0.625rem;
   background: transparent;
   border: none;
   color: var(--muted-fg);
@@ -1573,7 +1596,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 .expects-effects-mode-row {
   display: flex;
   gap: 12px;
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 .expects-effects-mode-row label {
   display: inline-flex;
@@ -1585,7 +1608,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   display: grid;
   grid-template-columns: repeat(2, auto);
   gap: 4px 12px;
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 .expects-effects-checkbox {
   display: inline-flex;
@@ -1754,7 +1777,7 @@ body.gd-no-execute .execute-cancel-btn {
   max-width: min(420px, 90vw);
 }
 .arg-value-edit-input {
-  font-family: inherit; font-size: 12px;
+  font-family: inherit; font-size: 0.75rem;
   padding: 4px 6px; border-radius: 3px;
   border: 1px solid var(--card-border);
   background: var(--bg); color: var(--fg);
@@ -1763,7 +1786,7 @@ body.gd-no-execute .execute-cancel-btn {
 .arg-value-edit-input:focus { box-shadow: 0 0 0 1px var(--fg) inset; }
 .arg-value-edit-buttons { display: flex; gap: 6px; justify-content: flex-end; }
 .arg-value-edit-btn {
-  font-family: inherit; font-size: 11px;
+  font-family: inherit; font-size: 0.6875rem;
   padding: 3px 10px; border-radius: 3px; cursor: pointer;
   background: var(--fg); color: var(--bg);
   border: 1px solid var(--fg);
@@ -1801,7 +1824,7 @@ body.gd-no-execute .execute-cancel-btn {
   border: 1px solid color-mix(in srgb, var(--error-fg) 35%, transparent);
   border-left: 3px solid var(--error-fg);
   border-radius: 3px;
-  font-size: 11.5px; line-height: 1.4;
+  font-size: 0.7188rem; line-height: 1.4;
   color: var(--card-fg);
   overflow-wrap: anywhere;
 }
@@ -1813,14 +1836,14 @@ body.gd-no-execute .execute-cancel-btn {
   width: 16px; height: 16px;
   border-radius: 50%;
   background: var(--error-fg); color: var(--card-bg);
-  font-weight: 700; font-size: 11px;
+  font-weight: 700; font-size: 0.6875rem;
   line-height: 1;
 }
 
 /* Type-hint line above the value input. Subtle italic so it reads
    as metadata, not as a label that competes with the input. */
 .arg-value-edit-hint {
-  font-size: 11px; color: var(--muted-fg);
+  font-size: 0.6875rem; color: var(--muted-fg);
   font-style: italic;
   padding: 2px 0; opacity: 0.85;
 }
@@ -1828,7 +1851,7 @@ body.gd-no-execute .execute-cancel-btn {
 /* Live-validation status line below the input. ✓ / ✗ + short
    message; mirrors what the backend would say on save. */
 .arg-value-edit-status {
-  font-size: 11px; padding: 2px 0; min-height: 14px;
+  font-size: 0.6875rem; padding: 2px 0; min-height: 14px;
   font-family: var(--mono);
 }
 .arg-value-edit-status.ok  { color: var(--success-fg); }
@@ -1844,11 +1867,11 @@ body.gd-no-execute .execute-cancel-btn {
   outline: none;
 }
 .value-form-loading {
-  font-size: 11px; color: var(--muted-fg);
+  font-size: 0.6875rem; color: var(--muted-fg);
   font-style: italic; padding: 4px 0;
 }
 .value-form-error {
-  font-size: 11.5px; color: var(--error-fg);
+  font-size: 0.7188rem; color: var(--error-fg);
   padding: 4px 0;
 }
 /* Raw-value escape hatch — the "{} raw" / "⊞ form" toggle row above a
@@ -1858,7 +1881,7 @@ body.gd-no-execute .execute-cancel-btn {
 }
 .value-form-raw-toggle {
   background: none; border: none; padding: 0 2px;
-  font-family: var(--mono); font-size: 10.5px;
+  font-family: var(--mono); font-size: 0.6562rem;
   color: var(--muted-fg); cursor: pointer;
 }
 .value-form-raw-toggle:hover { color: var(--accent); }
@@ -1881,7 +1904,7 @@ textarea.arg-value-edit-input {
   display: flex; flex-direction: column; gap: 2px;
 }
 .value-form-label {
-  font-size: 11px; color: var(--muted-fg);
+  font-size: 0.6875rem; color: var(--muted-fg);
 }
 /* Hiccup EDN textarea — a page/element source needs real width and
    height: widen the hosting popover (and the read-only viewer) past
@@ -1910,7 +1933,7 @@ textarea.value-form-hiccup {
 }
 .value-form-widget-range { flex: 1; }
 .value-form-widget-readout {
-  font-size: 11px; color: var(--muted-fg);
+  font-size: 0.6875rem; color: var(--muted-fg);
   font-family: var(--mono);
   white-space: nowrap;
 }
@@ -1927,7 +1950,7 @@ textarea.value-form-hiccup {
   box-shadow: var(--shadow-lg);
   padding: 8px 10px;
   min-width: 240px; max-width: min(420px, 90vw);
-  font-family: inherit; font-size: 12px; line-height: 1.4;
+  font-family: inherit; font-size: 0.75rem; line-height: 1.4;
 }
 .value-viewer.visible { display: block; }
 .value-viewer-header {
@@ -1935,12 +1958,12 @@ textarea.value-form-hiccup {
   border-bottom: 1px solid var(--light-border);
   margin-bottom: 6px; padding-bottom: 4px;
 }
-.value-viewer-title { font-weight: 600; font-size: 12px; }
+.value-viewer-title { font-weight: 600; font-size: 0.75rem; }
 .value-viewer-close {
   width: 20px; height: 20px; padding: 0;
   background: transparent; color: var(--card-fg);
   border: 0; border-radius: 3px;
-  font-size: 18px; line-height: 1; cursor: pointer;
+  font-size: 1.125rem; line-height: 1; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
   opacity: 0.65;
 }
@@ -1960,7 +1983,7 @@ textarea.value-form-hiccup {
 .arg-type-chip {
   display: inline-flex; align-items: center; justify-content: center;
   padding: 0 4px; margin-left: 4px;
-  font-family: inherit; font-size: 9px; line-height: 14px;
+  font-family: inherit; font-size: 0.5625rem; line-height: 0.875rem;
   border: 1px solid currentColor; border-radius: 3px;
   cursor: pointer; opacity: 0.7;
   pointer-events: auto;
@@ -1993,7 +2016,7 @@ textarea.value-form-hiccup {
 .type-inline-effects-readonly {
   display: flex; align-items: center; gap: 6px;
   padding: 4px 8px;
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--muted-fg);
 }
 .type-inline-effects-label {
@@ -2001,7 +2024,7 @@ textarea.value-form-hiccup {
   opacity: 0.8;
 }
 .type-inline-effects-pure {
-  font-size: 9px;
+  font-size: 0.5625rem;
   padding: 0 6px;
   border: 1px solid currentColor;
   border-radius: 8px;
@@ -2017,14 +2040,14 @@ textarea.value-form-hiccup {
  * eye to parse `int (> 0)` as a single phrase. */
 .arg-type-chip-refine {
   flex-direction: column;
-  line-height: 11px;
+  line-height: 0.6875rem;
   padding: 1px 4px;
 }
 .arg-type-chip-refine .arg-type-chip-refine-base {
-  font-size: 9px;
+  font-size: 0.5625rem;
 }
 .arg-type-chip-refine .arg-type-chip-refine-constraint {
-  font-size: 8px;
+  font-size: 0.5rem;
   opacity: 0.7;
   margin-top: -1px;
 }
@@ -2036,11 +2059,11 @@ textarea.value-form-hiccup {
  * grammar stays consistent ("this is a subtype of X" reads top→bottom). */
 .arg-type-chip-narrowed {
   flex-direction: column;
-  line-height: 11px;
+  line-height: 0.6875rem;
   padding: 1px 4px;
 }
 .arg-type-chip-narrowed .arg-type-chip-narrowed-base {
-  font-size: 8px;
+  font-size: 0.5rem;
   opacity: 0.7;
   margin-top: -1px;
   font-style: italic;
@@ -2058,8 +2081,8 @@ textarea.value-form-hiccup {
   gap: 1px;
   margin-left: 4px;
   font-family: inherit;
-  font-size: 9px;
-  line-height: 14px;
+  font-size: 0.5625rem;
+  line-height: 0.875rem;
 }
 .arg-type-chip-list-bracket > .arg-type-chip { margin-left: 0; }
 .arg-type-chip-list-bracket::before {
@@ -2087,7 +2110,7 @@ textarea.value-form-hiccup {
   border-radius: 6px;
   box-shadow: var(--shadow-lg);
   padding: 0;
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 .type-create-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -2097,11 +2120,11 @@ textarea.value-form-hiccup {
   color: var(--header-fg);
   border-radius: 6px 6px 0 0;
 }
-.type-create-title { font-weight: 600; font-size: 11px; }
+.type-create-title { font-weight: 600; font-size: 0.6875rem; }
 .type-create-close {
   background: transparent; color: inherit;
   border: none; cursor: pointer; padding: 0 4px;
-  font-size: 16px; line-height: 1;
+  font-size: 1rem; line-height: 1;
 }
 .type-create-close:hover { opacity: 0.7; }
 .type-create-form {
@@ -2112,11 +2135,11 @@ textarea.value-form-hiccup {
   display: flex; flex-direction: column; gap: 2px;
 }
 .type-create-field-label {
-  font-size: 10px; color: var(--muted-fg);
+  font-size: 0.625rem; color: var(--muted-fg);
   text-transform: uppercase; letter-spacing: 0.04em;
 }
 .type-create-input {
-  font-family: inherit; font-size: 11px;
+  font-family: inherit; font-size: 0.6875rem;
   padding: 4px 6px;
   border: 1px solid var(--input-border);
   border-radius: 3px;
@@ -2151,7 +2174,7 @@ textarea.value-form-hiccup {
 }
 .type-create-pair-drag {
   width: 16px; flex-shrink: 0;
-  font-size: 12px; line-height: 1;
+  font-size: 0.75rem; line-height: 1;
   color: var(--muted-fg);
   cursor: grab;
   user-select: none;
@@ -2167,7 +2190,7 @@ textarea.value-form-hiccup {
   border: 1px solid var(--input-border);
   border-radius: 3px;
   background: var(--bg); color: var(--muted-fg);
-  font-size: 13px; line-height: 1;
+  font-size: 0.8125rem; line-height: 1;
   cursor: pointer;
 }
 .type-create-pair-rm:hover {
@@ -2176,7 +2199,7 @@ textarea.value-form-hiccup {
 }
 .type-create-pair-add {
   align-self: flex-start;
-  font-family: inherit; font-size: 10px;
+  font-family: inherit; font-size: 0.625rem;
   padding: 2px 8px;
   border: 1px dashed var(--input-border);
   border-radius: 3px;
@@ -2203,7 +2226,7 @@ textarea.value-form-hiccup {
 }
 .type-create-tab {
   flex: 1;
-  font-family: inherit; font-size: 10px;
+  font-family: inherit; font-size: 0.625rem;
   padding: 5px 4px;
   background: transparent; border: none;
   color: var(--muted-fg);
@@ -2232,7 +2255,7 @@ textarea.value-form-hiccup {
 }
 .refinement-op {
   width: 70px; flex-shrink: 0;
-  font-family: inherit; font-size: 11px;
+  font-family: inherit; font-size: 0.6875rem;
   padding: 3px 4px;
   border: 1px solid var(--input-border);
   border-radius: 3px;
@@ -2241,11 +2264,11 @@ textarea.value-form-hiccup {
 .refinement-val { flex: 1; min-width: 0; }
 .refinement-combinator {
   display: flex; align-items: center; gap: 4px;
-  font-size: 10px; color: var(--muted-fg);
+  font-size: 0.625rem; color: var(--muted-fg);
   text-transform: uppercase; letter-spacing: 0.04em;
 }
 .refinement-combinator-select {
-  font-family: inherit; font-size: 11px;
+  font-family: inherit; font-size: 0.6875rem;
   padding: 2px 4px;
   text-transform: lowercase;
   border: 1px solid var(--input-border);
@@ -2256,7 +2279,7 @@ textarea.value-form-hiccup {
   display: flex; justify-content: flex-end;
 }
 .refinement-advanced-toggle {
-  font-family: inherit; font-size: 10px;
+  font-family: inherit; font-size: 0.625rem;
   padding: 2px 6px;
   background: transparent;
   border: none;
@@ -2268,7 +2291,7 @@ textarea.value-form-hiccup {
 }
 
 .type-create-error {
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--error-fg);
   white-space: pre-wrap;
 }
@@ -2278,7 +2301,7 @@ textarea.value-form-hiccup {
 }
 .type-create-back,
 .type-create-submit {
-  font-family: inherit; font-size: 11px;
+  font-family: inherit; font-size: 0.6875rem;
   padding: 4px 10px;
   border-radius: 3px; cursor: pointer;
 }
@@ -2325,7 +2348,7 @@ textarea.value-form-hiccup {
 }
 .type-inline-header-name {
   font-weight: 600;
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--card-fg);
 }
 /* Cycle indicator — a chip rendered in place of an expandable one
@@ -2345,7 +2368,7 @@ textarea.value-form-hiccup {
    anonymous structural type isn't mistaken for the other kinds with
    similar-looking expanded bodies. */
 .type-inline-header-kind {
-  font-size: 9px;
+  font-size: 0.5625rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--muted-fg);
@@ -2355,7 +2378,7 @@ textarea.value-form-hiccup {
 }
 .type-inline-header-edit {
   padding: 1px 6px;
-  font-size: 9px;
+  font-size: 0.5625rem;
   font-family: inherit;
   line-height: 1.2;
   border: 1px solid var(--card-border);
@@ -2378,7 +2401,7 @@ textarea.value-form-hiccup {
    navigates rather than mutates. */
 .type-inline-header-provenance {
   padding: 1px 6px;
-  font-size: 9px;
+  font-size: 0.5625rem;
   font-family: inherit;
   line-height: 1.2;
   border: none;
@@ -2399,7 +2422,7 @@ textarea.value-form-hiccup {
   margin: 0 0 4px;
   padding-bottom: 4px;
   border-bottom: 1px solid var(--light-border);
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--muted-fg);
   font-style: italic;
 }
@@ -2409,7 +2432,7 @@ textarea.value-form-hiccup {
    just gets a `:name`, so every callsite still points at it. */
 .type-inline-promote { margin-top: 6px; }
 .type-inline-promote-btn {
-  font-family: inherit; font-size: 10px;
+  font-family: inherit; font-size: 0.625rem;
   padding: 3px 8px;
   border: 1px dashed var(--muted-fg);
   border-radius: 3px;
@@ -2435,7 +2458,7 @@ textarea.value-form-hiccup {
   border-top: 1px solid var(--light-border);
 }
 .type-inline-resolution-head {
-  font-size: 9px;
+  font-size: 0.5625rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--light-fg);
@@ -2443,7 +2466,7 @@ textarea.value-form-hiccup {
 }
 .type-inline-resolution-row {
   display: flex; align-items: baseline; gap: 6px;
-  font-size: 10px;
+  font-size: 0.625rem;
   white-space: nowrap;
   color: var(--muted-fg);
 }
@@ -2459,12 +2482,12 @@ textarea.value-form-hiccup {
 }
 .type-inline-refinement-chain-row {
   display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px;
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--muted-fg);
 }
 .type-inline-refinement-chain-sep {
   color: var(--light-fg);
-  font-size: 10px;
+  font-size: 0.625rem;
 }
 .type-inline-refinement-chain-anon {
   font-style: italic;
@@ -2505,7 +2528,7 @@ textarea.value-form-hiccup {
 .type-inline-resolution-chain-also   { color: var(--light-fg); }
 .type-inline-resolution-chain-tag {
   flex: 0 0 auto;
-  font-size: 9px;
+  font-size: 0.5625rem;
   font-style: italic;
   color: var(--light-fg);
 }
@@ -2519,7 +2542,7 @@ textarea.value-form-hiccup {
   border-top: 1px solid var(--light-border);
 }
 .type-inline-usages-head {
-  font-size: 9px;
+  font-size: 0.5625rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--light-fg);
@@ -2533,7 +2556,7 @@ textarea.value-form-hiccup {
 }
 .type-inline-usage-row {
   display: flex; align-items: baseline; gap: 6px;
-  font-size: 10px;
+  font-size: 0.625rem;
   white-space: nowrap;
 }
 .type-inline-usage-link {
@@ -2548,7 +2571,7 @@ textarea.value-form-hiccup {
 }
 .type-inline-usage-kind {
   color: var(--muted-fg);
-  font-size: 9px;
+  font-size: 0.5625rem;
 }
 .type-inline-host {
   /* Body-level floating panel — `position: fixed` so it doesn't
@@ -2565,7 +2588,7 @@ textarea.value-form-hiccup {
   border-radius: 4px;
   box-shadow: var(--shadow-md);
   font-family: 'SF Mono', Monaco, monospace;
-  font-size: 10px;
+  font-size: 0.625rem;
   line-height: 1.2;
   max-width: 260px;
   overflow-wrap: anywhere;
@@ -2589,7 +2612,7 @@ textarea.value-form-hiccup {
   background: var(--bg);
   color: var(--muted-fg);
   font-family: 'SF Mono', Monaco, monospace;
-  font-size: 10px;
+  font-size: 0.625rem;
   line-height: 1.2;
   padding: 2px 4px;
   white-space: pre;
@@ -2605,7 +2628,7 @@ textarea.value-form-hiccup {
 .type-inline-label {
   display: inline-block;
   margin-right: 4px;
-  font-size: 9px;
+  font-size: 0.5625rem;
   color: var(--muted-fg);
 }
 .type-inline-label-renameable {
@@ -2615,8 +2638,8 @@ textarea.value-form-hiccup {
 }
 .type-inline-label-renameable:hover { color: var(--fg); }
 .type-inline-chip {
-  font-size: 9px;
-  line-height: 12px;
+  font-size: 0.5625rem;
+  line-height: 0.75rem;
   margin-left: 0;
 }
 .type-inline-chip-expandable {
@@ -2630,7 +2653,7 @@ textarea.value-form-hiccup {
   border-left: 1px solid var(--light-border);
 }
 .type-inline-constraint-text {
-  font-size: 9px;
+  font-size: 0.5625rem;
   color: var(--muted-fg);
   font-family: inherit;
 }
@@ -2649,13 +2672,13 @@ textarea.value-form-hiccup {
   white-space: nowrap;
 }
 .edge-type-chain-arrow {
-  font-size: 9px;
+  font-size: 0.5625rem;
   color: var(--muted-fg);
   margin-right: 2px;
-  line-height: 14px;
+  line-height: 0.875rem;
 }
 .edge-type-chain-source {
-  font-size: 9px;
+  font-size: 0.5625rem;
   color: var(--muted-fg);
   margin-left: 4px;
   line-height: 1.2;
@@ -2663,7 +2686,7 @@ textarea.value-form-hiccup {
 /* Narrowing attribution — why a chain entry has its type
  * (binding-override vs the slot's own declaration). */
 .edge-type-chain-kind {
-  font-size: 8px;
+  font-size: 0.5rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--light-fg);
@@ -2687,7 +2710,7 @@ textarea.value-form-hiccup {
   display: inline-flex; align-items: center; justify-content: center;
   padding: 0; margin-left: 4px;
   width: 14px; height: 14px;
-  font-family: inherit; font-size: 11px; line-height: 1;
+  font-family: inherit; font-size: 0.6875rem; line-height: 1;
   border: 1px solid currentColor; border-radius: 3px;
   background: transparent; color: currentColor;
   cursor: pointer; opacity: 0.7;
@@ -2710,7 +2733,7 @@ textarea.value-form-hiccup {
   display: inline-flex; align-items: center; justify-content: center;
   padding: 0;
   width: 18px; height: 18px;
-  font-family: inherit; font-size: 14px; line-height: 1;
+  font-family: inherit; font-size: 0.875rem; line-height: 1;
   font-weight: 600;
   /* Free-arg language: amber + dashed, same as the inspector `free`
      chip and the card's ?-row — one signal across all three surfaces. */
@@ -2747,14 +2770,14 @@ textarea.value-form-hiccup {
   min-width: 280px; max-width: 360px;
 }
 .fn-picker-search {
-  font-family: inherit; font-size: 12px;
+  font-family: inherit; font-size: 0.75rem;
   padding: 5px 7px; border-radius: 3px;
   border: 1px solid var(--card-border);
   background: var(--bg); color: var(--fg);
   outline: none; box-sizing: border-box; width: 100%;
 }
 .fn-picker-expected {
-  font-size: 10px; padding: 2px 4px;
+  font-size: 0.625rem; padding: 2px 4px;
   opacity: 0.75; line-height: 1.3;
   color: var(--muted-fg);
   border-bottom: 1px dashed var(--card-border);
@@ -2772,7 +2795,7 @@ textarea.value-form-hiccup {
 .fn-picker-row {
   display: flex; align-items: center; gap: 6px;
   padding: 5px 8px; cursor: pointer;
-  font-size: 11px;
+  font-size: 0.6875rem;
   min-height: 28px;
 }
 .fn-picker-row-active {
@@ -2782,7 +2805,7 @@ textarea.value-form-hiccup {
 .fn-picker-row-rt {
   font-style: italic; opacity: 0.7;
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--muted-fg);
 }
 /* Kind annotation — small tag pill on the fn-picker row for type-row
@@ -2793,8 +2816,8 @@ textarea.value-form-hiccup {
   display: inline-block;
   flex-shrink: 0;
   padding: 0 4px;
-  font-size: 9px;
-  line-height: 14px;
+  font-size: 0.5625rem;
+  line-height: 0.875rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   border: 1px solid var(--input-border);
@@ -2836,7 +2859,7 @@ textarea.value-form-hiccup {
   background: var(--bg);
 }
 .fn-picker-section-header {
-  font-size: 10px; font-weight: 600;
+  font-size: 0.625rem; font-weight: 600;
   letter-spacing: 0.5px; text-transform: uppercase;
   padding: 4px 8px;
   color: var(--muted-fg);
@@ -2855,11 +2878,11 @@ textarea.value-form-hiccup {
   background: var(--hover-bg);
 }
 .fn-picker-disclosure-arrow {
-  font-size: 8px; opacity: 0.6;
+  font-size: 0.5rem; opacity: 0.6;
   display: inline-block; min-width: 8px;
 }
 .fn-picker-empty {
-  padding: 8px; font-size: 11px; opacity: 0.6; text-align: center;
+  padding: 8px; font-size: 0.6875rem; opacity: 0.6; text-align: center;
 }
 .fn-picker-cancel-row {
   display: flex; justify-content: flex-end;
@@ -2882,14 +2905,14 @@ textarea.value-form-hiccup {
 }
 .fn-action-toolbar-hint {
   flex: 1; padding: 0 4px;
-  font-size: 11px; font-style: italic; color: var(--muted-fg);
+  font-size: 0.6875rem; font-style: italic; color: var(--muted-fg);
 }
 .fn-action-btn {
   display: inline-flex; align-items: center; gap: 3px;
   padding: 3px 6px;
   flex: 1 1 auto;
   justify-content: center;
-  font-family: inherit; font-size: 11px;
+  font-family: inherit; font-size: 0.6875rem;
   background: transparent; color: var(--card-fg);
   border: 1px solid var(--card-border);
   border-radius: 3px;
@@ -2904,7 +2927,7 @@ textarea.value-form-hiccup {
   outline-offset: 1px;
 }
 .fn-action-btn-glyph {
-  font-size: 13px; line-height: 1;
+  font-size: 0.8125rem; line-height: 1;
 }
 .fn-action-btn-label {
   /* Label is informational on desktop; on very narrow cards / phone
@@ -2915,7 +2938,7 @@ textarea.value-form-hiccup {
    text colour so the two affordances on the root card don't blur. */
 .reparent-strip {
   padding: 2px 8px;
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--muted-fg);
   border-top: 1px solid var(--card-border);
   cursor: pointer;
@@ -2936,7 +2959,7 @@ textarea.value-form-hiccup {
 .fn-ancestor-more {
   padding: 2px 8px;
   color: var(--light-fg);
-  font-size: 10px;
+  font-size: 0.625rem;
 }
 
 /* Use-site header row of a named non-root card — an empty
@@ -2972,7 +2995,7 @@ textarea.value-form-hiccup {
    flag, descendants inherit it monotonically and cannot widen back. */
 .branch-local-strip {
   padding: 2px 8px;
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--muted-fg);
   border-top: 1px solid var(--card-border);
   background: var(--card-bg);
@@ -2982,7 +3005,7 @@ textarea.value-form-hiccup {
   cursor: help;
 }
 .branch-local-strip-glyph {
-  font-size: 11px;
+  font-size: 0.6875rem;
   line-height: 1;
 }
 .branch-local-strip-label {
@@ -2997,7 +3020,7 @@ textarea.value-form-hiccup {
   /* FREE args share one language everywhere: amber + dashed (the
      inspector's `free` chip, the ＋ binder circle, and this ?-row). */
   color: var(--gd-free);
-  font-size: 10px;
+  font-size: 0.625rem;
   font-style: italic;
   border-top: 1px dashed var(--gd-free);
   background: var(--sidebar-bg);
@@ -3032,7 +3055,7 @@ textarea.value-form-hiccup {
 .hof-args-strip {
   padding: 2px 8px;
   color: var(--hof-fg);
-  font-size: 10px;
+  font-size: 0.625rem;
   font-style: italic;
   border-top: 1px dashed var(--hof-border);
   background: var(--hof-bg);
@@ -3051,7 +3074,7 @@ textarea.value-form-hiccup {
   background: var(--tooltip-bg);
   color: var(--tooltip-fg);
   font-family: system-ui, sans-serif;
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.4;
   padding: 6px 10px;
   border-radius: 4px;
@@ -3071,7 +3094,7 @@ textarea.value-form-hiccup {
   width: 20px; height: 20px; padding: 0;
   background: transparent; color: var(--tooltip-fg);
   border: 0; border-radius: 3px;
-  font-size: 18px; line-height: 1; cursor: pointer;
+  font-size: 1.125rem; line-height: 1; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
   opacity: 0.65;
 }
@@ -3082,7 +3105,7 @@ textarea.value-form-hiccup {
    inherits `var(--tooltip-bg/--tooltip-fg)` so the buttons float on
    the same dark/light bubble that already adapts to theme. */
 .description-tooltip-btn {
-  font-family: inherit; font-size: 11px;
+  font-family: inherit; font-size: 0.6875rem;
   padding: 3px 10px; border-radius: 3px; cursor: pointer;
   background: var(--tooltip-fg); color: var(--tooltip-bg);
   border: 1px solid var(--tooltip-fg);
@@ -3094,7 +3117,7 @@ textarea.value-form-hiccup {
 }
 .description-tooltip-textarea {
   width: 320px; max-width: 100%; min-height: 60px;
-  font-family: inherit; font-size: 12px; line-height: 1.4;
+  font-family: inherit; font-size: 0.75rem; line-height: 1.4;
   padding: 4px 6px; border-radius: 3px;
   border: 1px solid var(--tooltip-fg);
   background: var(--tooltip-bg); color: var(--tooltip-fg);
@@ -3104,7 +3127,7 @@ textarea.value-form-hiccup {
   box-shadow: 0 0 0 1px var(--tooltip-fg) inset;
 }
 .description-tooltip-error {
-  margin-top: 4px; font-size: 11px;
+  margin-top: 4px; font-size: 0.6875rem;
   color: var(--error-fg);
 }
 
@@ -3121,7 +3144,7 @@ textarea.value-form-hiccup {
   padding: 4px 10px;
   border-radius: 4px;
   font-family: inherit;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   white-space: nowrap;
   pointer-events: none;
@@ -3144,7 +3167,7 @@ textarea.value-form-hiccup {
   padding: 6px 10px;
   border-radius: 4px;
   font-family: inherit;
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.35;
   max-width: 260px;
   pointer-events: auto;
@@ -3157,15 +3180,15 @@ textarea.value-form-hiccup {
 .icon-reason-popover.icon-reason-popover-menu { padding: 8px; max-width: 280px; }
 .ns-menu { display: flex; flex-direction: column; gap: 3px; min-width: 190px; }
 .ns-menu-label {
-  font-size: 10px; font-weight: 600; letter-spacing: 0.05em;
+  font-size: 0.625rem; font-weight: 600; letter-spacing: 0.05em;
   text-transform: uppercase; color: var(--gd-ink-3);
 }
 .ns-menu-path {
-  font-family: var(--mono); font-size: 12px; color: var(--fg);
+  font-family: var(--mono); font-size: 0.75rem; color: var(--fg);
   margin-bottom: 6px; word-break: break-all;
 }
 .ns-menu-btn {
-  appearance: none; text-align: left; font: inherit; font-size: 12px;
+  appearance: none; text-align: left; font: inherit; font-size: 0.75rem;
   color: var(--gd-flow); background: transparent; border: 0; border-radius: 6px;
   padding: 6px 8px; cursor: pointer;
 }
@@ -3205,7 +3228,7 @@ textarea.value-form-hiccup {
   width: 28px; height: 28px;
   border: 1px solid var(--input-border); border-radius: 4px;
   background: var(--bg); color: var(--fg);
-  font-size: 24px; cursor: pointer;
+  font-size: 1.5rem; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   padding: 0; user-select: none; flex-shrink: 0;
 }
@@ -3258,7 +3281,7 @@ textarea.value-form-hiccup {
   border: 1px solid var(--card-border);
   border-radius: 4px;
   padding: 8px 14px;
-  font-family: inherit; font-size: 12px;
+  font-family: inherit; font-size: 0.75rem;
   box-shadow: var(--shadow-lg);
   display: none;
   align-items: center;
@@ -3313,7 +3336,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   box-shadow: var(--shadow-lg);
   padding: 8px 10px;
   min-width: 220px; max-width: 360px;
-  font-family: inherit; font-size: 12px; line-height: 1.4;
+  font-family: inherit; font-size: 0.75rem; line-height: 1.4;
 }
 .type-explainer.visible { display: block; }
 
@@ -3323,7 +3346,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   margin-bottom: 6px; padding-bottom: 4px;
 }
 .type-explainer-title {
-  font-weight: 600; font-size: 12px;
+  font-weight: 600; font-size: 0.75rem;
   color: var(--accent);
   letter-spacing: 0.4px; text-transform: uppercase;
 }
@@ -3331,21 +3354,21 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   width: 20px; height: 20px; padding: 0;
   background: transparent; color: var(--card-fg);
   border: 0; border-radius: 3px;
-  font-size: 18px; line-height: 1; cursor: pointer;
+  font-size: 1.125rem; line-height: 1; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
   opacity: 0.65;
 }
 .type-explainer-close:hover { opacity: 1; background: var(--overlay-pressed); }
 
 .type-explainer-human {
-  font-size: 13px;
+  font-size: 0.8125rem;
   margin: 4px 0;
   color: var(--card-fg);
   line-height: 1.5;
 }
 .type-explainer-structural {
   font-family: ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 0.6875rem;
   margin-top: 4px;
   padding: 4px 6px;
   background: color-mix(in srgb, var(--card-fg) 5%, transparent);
@@ -3355,7 +3378,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 
 .type-explainer-btn {
-  font-family: inherit; font-size: 11px;
+  font-family: inherit; font-size: 0.6875rem;
   padding: 4px 10px; border-radius: 3px; cursor: pointer;
   background: var(--card-fg); color: var(--card-bg);
   border: 1px solid var(--card-fg);
@@ -3377,7 +3400,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   margin-bottom: 6px;
 }
 .type-explainer-tighten-select {
-  font-family: inherit; font-size: 11px;
+  font-family: inherit; font-size: 0.6875rem;
   padding: 2px 4px; border-radius: 3px;
   border: 1px solid var(--light-border);
   background: var(--card-bg); color: var(--card-fg);
@@ -3386,11 +3409,11 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .type-explainer-tighten-chk {
   display: inline-flex; align-items: center; gap: 4px;
-  font-size: 11px; cursor: pointer;
+  font-size: 0.6875rem; cursor: pointer;
 }
 .type-explainer-tighten-chk input { margin: 0; }
 .type-explainer-tighten-err {
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--error-fg);
   margin: 4px 0;
   white-space: pre-wrap;
@@ -3416,7 +3439,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   box-shadow: var(--shadow-lg);
   padding: 8px 10px;
   min-width: 240px; max-width: 360px;
-  font-family: inherit; font-size: 12px; line-height: 1.4;
+  font-family: inherit; font-size: 0.75rem; line-height: 1.4;
 }
 .mismatch-explainer.visible { display: block; }
 
@@ -3426,14 +3449,14 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   margin-bottom: 6px; padding-bottom: 4px;
 }
 .mismatch-explainer-title {
-  font-weight: 600; font-size: 12px;
+  font-weight: 600; font-size: 0.75rem;
   color: var(--error-fg);
 }
 .mismatch-explainer-close {
   width: 20px; height: 20px; padding: 0;
   background: transparent; color: var(--card-fg);
   border: 0; border-radius: 3px;
-  font-size: 18px; line-height: 1; cursor: pointer;
+  font-size: 1.125rem; line-height: 1; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
   opacity: 0.65;
 }
@@ -3448,12 +3471,12 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .mismatch-explainer-label {
   flex: 0 0 64px;
   color: var(--muted-fg);
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 .mismatch-explainer-value {
   flex: 1;
   font-family: ui-monospace, monospace;
-  font-size: 11.5px;
+  font-size: 0.7188rem;
   overflow-wrap: anywhere;
 }
 /* Reason text wraps onto multiple lines and reads as prose, not code,
@@ -3473,7 +3496,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border-top: 1px dashed var(--light-border);
 }
 .mismatch-explainer-leaves-head {
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--muted-fg);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -3481,7 +3504,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .mismatch-explainer-leaf {
   font-family: ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 0.6875rem;
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
@@ -3499,7 +3522,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   color: var(--error-fg);
 }
 .mismatch-explainer-leaf-more {
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--muted-fg);
   font-style: italic;
   margin-top: 3px;
@@ -3511,7 +3534,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border-top: 1px solid var(--light-border);
 }
 .mismatch-explainer-btn {
-  font-family: inherit; font-size: 11px;
+  font-family: inherit; font-size: 0.6875rem;
   padding: 4px 10px; border-radius: 3px; cursor: pointer;
   background: var(--card-fg); color: var(--card-bg);
   border: 1px solid var(--card-fg);
@@ -3567,7 +3590,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   background: transparent;
   border: 0;
   font: inherit;
-  font-size: 9px; line-height: 14px;
+  font-size: 0.5625rem; line-height: 0.875rem;
   color: var(--muted-fg);
   cursor: pointer;
   user-select: none;
@@ -3594,7 +3617,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   box-shadow: var(--shadow-lg);
   padding: 8px 10px;
   min-width: 240px; max-width: 380px;
-  font-family: inherit; font-size: 12px; line-height: 1.4;
+  font-family: inherit; font-size: 0.75rem; line-height: 1.4;
 }
 .provenance-popover.visible { display: block; }
 
@@ -3604,14 +3627,14 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   margin-bottom: 6px; padding-bottom: 4px;
 }
 .provenance-popover-title {
-  font-weight: 600; font-size: 12px;
+  font-weight: 600; font-size: 0.75rem;
   color: var(--accent);
 }
 .provenance-popover-close {
   width: 20px; height: 20px; padding: 0;
   background: transparent; color: var(--card-fg);
   border: 0; border-radius: 3px;
-  font-size: 18px; line-height: 1; cursor: pointer;
+  font-size: 1.125rem; line-height: 1; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
   opacity: 0.65;
 }
@@ -3631,7 +3654,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
    "Return type computed by :<parent>'s :return-type-rule" — reads as
    a sentence, not a key-value row. */
 .provenance-popover-intro {
-  font-size: 11.5px;
+  font-size: 0.7188rem;
   line-height: 1.5;
   color: var(--card-fg);
   margin-bottom: 6px;
@@ -3643,7 +3666,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
    record shape". Distinguishes the INTERPRETATION (what the rule
    did) from the raw inputs table below. */
 .provenance-popover-narrative {
-  font-size: 11.5px;
+  font-size: 0.7188rem;
   line-height: 1.5;
   color: var(--muted-fg);
   margin-bottom: 8px;
@@ -3679,7 +3702,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .provenance-popover-enum-chip {
   display: inline-block;
   padding: 1px 5px;
-  font-size: 10px;
+  font-size: 0.625rem;
   font-family: monospace;
   background: var(--card-row-highlight);
   border: 1px solid var(--light-border);
@@ -3698,7 +3721,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   background: transparent;
   border: 0;
   font: inherit;
-  font-size: 9px; line-height: 14px;
+  font-size: 0.5625rem; line-height: 0.875rem;
   color: var(--muted-fg);
   cursor: pointer;
   user-select: none;
@@ -3729,12 +3752,15 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
     /* Action-icon visual + pinning vars: bigger glyph, more breathing room
        between stacked icons. Pin offsets recomputed so a 3-icon stack
        fits at the right edge without overlap (28 + 4 gap × 2 = 92, last
-       slot = right:6+28+4+28+4 = 70 ≈ --icon-pin-r-3 below). */
-    --icon-size: 28px;
-    --icon-font-size: 14px;
-    --icon-pin-r-1: 4px;
-    --icon-pin-r-2: 38px;
-    --icon-pin-r-3: 72px;
+       slot = right:6+28+4+28+4 = 70 ≈ --icon-pin-r-3 below).
+       `max(px, rem)` rather than plain rem: the px arm is the WCAG 2.5.5
+       hit-area floor, which must hold even if the user SHRINKS their
+       browser font-size; the rem arm lets the target grow with it. */
+    --icon-size: max(28px, 1.75rem);
+    --icon-font-size: max(14px, 0.875rem);
+    --icon-pin-r-1: max(4px, 0.25rem);
+    --icon-pin-r-2: max(38px, 2.375rem);
+    --icon-pin-r-3: max(72px, 4.5rem);
   }
 
   /* Reveal hover-gated sidebar affordances unconditionally on touch.
@@ -3765,7 +3791,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 13px;
+    font-size: 0.8125rem;
   }
 
   /* Floating + sidebar-header buttons should hit Apple's 44pt baseline
@@ -3777,7 +3803,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
     min-width: var(--touch-target);
     min-height: var(--touch-target);
   }
-  .nav-btn { font-size: 28px; }
+  .nav-btn { font-size: 1.75rem; }
 
   /* Sequence ±, type chip, popover close — small glyphs but real
      actions. Bring them up to --touch-target-min. */
@@ -3799,7 +3825,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
     min-width: 0;
     min-height: var(--touch-target);
     padding: 6px 14px;
-    font-size: 13px;
+    font-size: 0.8125rem;
   }
 
   /* Sidebar overlays the graph on narrow viewports rather than
@@ -3829,7 +3855,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
      font-size < 16px on focus, but the surrounding rows stay legible
      either way). */
   .fn-picker-row { min-height: var(--touch-target); padding: 8px 10px; }
-  .fn-picker-search { font-size: 16px; padding: 8px 10px; }
+  .fn-picker-search { font-size: 1rem; padding: 8px 10px; }
   .fn-picker-section-header { padding: 6px 10px; }
 
   /* Phase 4 fn-action toolbar — buttons grow to Apple-HIG min-target
@@ -3838,9 +3864,9 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   .fn-action-btn {
     min-height: var(--touch-target);
     padding: 6px 12px;
-    font-size: 12px;
+    font-size: 0.75rem;
   }
-  .fn-action-btn-glyph { font-size: 16px; }
+  .fn-action-btn-glyph { font-size: 1rem; }
 
   /* Polish round — every text/select input across the editor's
      popovers needs to reach 16px so iPad Safari doesn't auto-zoom
@@ -3848,7 +3874,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
      leaves the user staring at the keyboard). */
   .arg-value-edit-input,
   .description-tooltip-textarea {
-    font-size: 16px;
+    font-size: 1rem;
     min-height: var(--touch-target);
     padding: 8px 10px;
   }
@@ -3895,7 +3921,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   min-width: 360px; max-width: 520px;
   max-height: 80vh;
   overflow-y: auto;
-  font-family: inherit; font-size: 12px; line-height: 1.4;
+  font-family: inherit; font-size: 0.75rem; line-height: 1.4;
 }
 .execute-popover.visible { display: block; }
 
@@ -3929,7 +3955,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 /* Non-enterable widget (fn-typed slot) — the explainer line injected
    by mountArgFormHost instead of a silent empty bar. */
 .execute-arg-form-note {
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-style: italic;
   color: var(--muted-fg);
   padding: 3px 2px;
@@ -3947,7 +3973,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border-radius: 8px;
   background: var(--gd-ink);
   color: var(--gd-paper);
-  font-size: 12.5px;
+  font-size: 0.7812rem;
   box-shadow: var(--shadow-lg);
   opacity: 0;
   pointer-events: none;
@@ -3980,7 +4006,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border: 0;
   padding: 2px 8px 2px 18px;
   font: inherit;
-  font-size: 10.5px;
+  font-size: 0.6562rem;
   font-style: italic;
   color: var(--muted-fg);
   cursor: pointer;
@@ -4007,7 +4033,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .arg-value-editable::after {
   content: " ✎";
   opacity: 0;
-  font-size: 10px;
+  font-size: 0.625rem;
   transition: opacity 0.12s;
 }
 .arg-overlay-row:hover .arg-value-editable::after { opacity: 0.6; }
@@ -4015,7 +4041,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 /* Empty-lens hint in the explorer tree (applyLensVisibility). */
 .lens-empty-hint {
   padding: 10px 12px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-style: italic;
   color: var(--muted-fg);
 }
@@ -4026,14 +4052,14 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   margin-bottom: 8px; padding-bottom: 4px;
 }
 .execute-popover-title {
-  font-weight: 600; font-size: 13px;
+  font-weight: 600; font-size: 0.8125rem;
   color: var(--accent);
 }
 /* Branch indicator — only shown when running off main; mirrors the
  * top-bar chip's inverted-pill style so the visual cue is the same
  * across the editor. */
 .execute-popover-branch {
-  font-size: 10px; letter-spacing: 0.02em;
+  font-size: 0.625rem; letter-spacing: 0.02em;
   background: var(--fg); color: var(--bg);
   padding: 2px 6px; border-radius: 2px;
   margin-left: 8px;
@@ -4051,7 +4077,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   background: var(--card-row-highlight);
   border-left: 2px solid var(--error-fg);
   border-radius: 2px;
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 .execute-effects-warning-label {
   font-weight: 600;
@@ -4070,7 +4096,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   padding: 4px 6px;
   background: var(--card-row-highlight);
   border-radius: 2px;
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--muted-fg);
 }
 .execute-runtime-effects-label {
@@ -4106,7 +4132,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   box-shadow: var(--shadow-lg);
   padding: 10px 12px;
   min-width: 280px; max-width: 360px;
-  font-family: inherit; font-size: 12px; line-height: 1.4;
+  font-family: inherit; font-size: 0.75rem; line-height: 1.4;
 }
 .service-popover.visible { display: block; }
 
@@ -4123,20 +4149,20 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .service-popover-enabled-row {
   display: flex; align-items: center; gap: 6px;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 .service-popover-note {
-  margin: 0; font-size: 11px; color: var(--muted-fg);
+  margin: 0; font-size: 0.6875rem; color: var(--muted-fg);
 }
 .service-popover-title {
-  font-weight: 600; font-size: 13px;
+  font-weight: 600; font-size: 0.8125rem;
   color: var(--accent);
 }
 .service-popover-close {
   width: 22px; height: 22px; padding: 0;
   background: transparent; color: var(--card-fg);
   border: 0; border-radius: 3px;
-  font-size: 20px; line-height: 1; cursor: pointer;
+  font-size: 1.25rem; line-height: 1; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
   opacity: 0.65;
 }
@@ -4145,7 +4171,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 
 .service-popover-status {
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--muted-fg);
   margin-bottom: 8px;
   padding: 4px 6px;
@@ -4164,14 +4190,14 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .service-popover-policy-label {
   font-weight: 600;
-  font-size: 11px;
+  font-size: 0.6875rem;
   margin-bottom: 4px;
 }
 .service-popover-policy-option {
   display: inline-flex; align-items: center;
   margin-right: 10px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 /* Cross-branch sibling-services warning — appears when another
@@ -4181,7 +4207,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .service-popover-sibling-warn {
   margin: 6px 0;
   padding: 4px 8px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--fg);
   background: color-mix(in srgb, var(--warning-fg) 12%, var(--card-bg));
   border: 1px dashed var(--warning-fg);
@@ -4197,13 +4223,13 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .service-popover-branch-label {
   font-weight: 600;
-  font-size: 11px;
+  font-size: 0.6875rem;
   margin-bottom: 4px;
 }
 .service-popover-branch-select {
   width: 100%;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 0.6875rem;
   padding: 2px 4px;
   background: var(--card-bg);
   color: var(--fg);
@@ -4219,7 +4245,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .service-popover-save-btn,
 .service-popover-delete-btn {
-  font-family: inherit; font-size: 12px;
+  font-family: inherit; font-size: 0.75rem;
   padding: 4px 10px;
   border-radius: 3px;
   cursor: pointer;
@@ -4259,7 +4285,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   left: 2px; top: 50%;
   transform: translateY(-50%);
   width: 8px; height: 8px;
-  font-size: 9px; line-height: 1;
+  font-size: 0.5625rem; line-height: 1;
   display: inline-flex; align-items: center; justify-content: center;
   user-select: none;
   z-index: 1;
@@ -4288,7 +4314,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   position: absolute;
   right: 26px; top: 50%;
   transform: translateY(-50%);
-  font-size: 10px; line-height: 1;
+  font-size: 0.625rem; line-height: 1;
   color: var(--error-fg-strong);
   user-select: none;
   z-index: 1;
@@ -4308,7 +4334,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .execute-arg-label {
   font-weight: 600;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--muted-fg);
   margin-bottom: 2px;
 }
@@ -4329,7 +4355,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .execute-option-label {
   display: inline-flex; align-items: center; gap: 4px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--muted-fg);
   cursor: pointer;
   user-select: none;
@@ -4353,7 +4379,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .execute-run-btn, .execute-cancel-btn {
   padding: 4px 12px;
-  font-family: inherit; font-size: 12px;
+  font-family: inherit; font-size: 0.75rem;
   border: 1px solid var(--card-border);
   border-radius: 3px;
   background: var(--card-bg); color: var(--card-fg);
@@ -4374,17 +4400,17 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .execute-submit-spinner, .execute-pending-pane {
   display: flex; align-items: center; gap: 6px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--muted-fg);
 }
 .execute-pending-spinner {
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--accent);
 }
 .execute-pending-text { font-family: inherit; }
 
 .execute-result-pane {
-  font-family: monospace; font-size: 11.5px;
+  font-family: monospace; font-size: 0.7188rem;
   overflow-x: auto;
 }
 .execute-result-scalar {
@@ -4439,7 +4465,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .execute-result-raw summary {
   cursor: pointer;
   color: var(--muted-fg);
-  font-size: 11px;
+  font-size: 0.6875rem;
   user-select: none;
 }
 .execute-result-raw[open] summary {
@@ -4451,7 +4477,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   padding: 4px 6px;
   margin-bottom: 6px;
   color: var(--muted-fg);
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 /* "Open interactive preview" — new-tab link in the component-preview
    caption (self-host only; server hides it under a tenancy addon). */
@@ -4499,7 +4525,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .execute-result-repr .repr-sparkline-caption {
   color: var(--muted-fg);
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 /* Record-list table repr — reuses the record-pane table styling via
    the shared execute-result-record class; only the wrap + caption
@@ -4514,7 +4540,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .execute-result-repr .repr-record-caption {
   color: var(--muted-fg);
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 /* Source-block repr (:script-tag / :style-tag / :js-source /
    :css-source) — caption line over a formatted source body. */
@@ -4525,14 +4551,14 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .execute-result-repr .repr-source-caption {
   color: var(--muted-fg);
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 .execute-result-repr .repr-source {
   margin: 0;
   padding: 6px 8px;
   background: var(--card-row-highlight);
   border-radius: 2px;
-  font-size: 12px;
+  font-size: 0.75rem;
   overflow-x: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -4544,7 +4570,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border-left: 2px solid var(--error-fg);
   border-radius: 2px;
   font-style: italic;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--muted-fg);
 }
 .execute-cancelled {
@@ -4566,7 +4592,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .execute-error-data {
   margin: 0;
-  font-family: monospace; font-size: 11px;
+  font-family: monospace; font-size: 0.6875rem;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -4585,89 +4611,89 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 /* Phase C2 error-log sidebar section. */
 .error-log-row { padding: 6px 8px; border-bottom: 1px dashed var(--light-border);
-  font-size: 11px; }
+  font-size: 0.6875rem; }
 .error-log-fn { color: var(--accent); display: block; }
 .error-log-time { color: var(--light-fg); }
 .error-log-msg { color: var(--error-fg); overflow-wrap: anywhere; }
-.error-log-data { font-size: 10px; white-space: pre-wrap; word-break: break-all;
+.error-log-data { font-size: 0.625rem; white-space: pre-wrap; word-break: break-all;
   color: var(--muted-fg); margin: 2px 0 0; }
-.error-log-details summary { cursor: pointer; color: var(--muted-fg); font-size: 10px; }
-.error-log-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 11px; }
+.error-log-details summary { cursor: pointer; color: var(--muted-fg); font-size: 0.625rem; }
+.error-log-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 0.6875rem; }
 
 /* Phase 3 type-errors sidebar section — the current branch's recorded
    type diagnostics. Same row grammar as the error-log above. */
 .type-errors-row { padding: 6px 8px; border-bottom: 1px dashed var(--light-border);
-  font-size: 11px; }
+  font-size: 0.6875rem; }
 .type-errors-fn { color: var(--accent); display: block; }
 .type-errors-arg { color: var(--light-fg); }
 .type-errors-arg:empty { display: none; }
 .type-errors-msg { color: var(--error-fg-strong); overflow-wrap: anywhere; }
-.type-errors-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 11px; }
+.type-errors-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 0.6875rem; }
 .type-errors-list { max-height: 320px; overflow-y: auto; }
 
 /* Tests ops section (Block 3.1) — summary + Run-all + per-test rows.
    Same row grammar as the error-log / type-errors families above. */
 .tests-panel-header { display: flex; align-items: center; gap: 8px;
   padding: 6px 8px; }
-.tests-panel-summary { color: var(--muted-fg); font-size: 11px; flex: 1 1 auto; }
-.tests-run-all { font-size: 11px; padding: 2px 10px; cursor: pointer;
+.tests-panel-summary { color: var(--muted-fg); font-size: 0.6875rem; flex: 1 1 auto; }
+.tests-run-all { font-size: 0.6875rem; padding: 2px 10px; cursor: pointer;
   color: var(--fg); background: var(--card-bg);
   border: 1px solid var(--input-border); border-radius: 4px; }
 .tests-run-all:hover { background: var(--hover-bg); }
 .tests-run-all:disabled { color: var(--muted-fg); cursor: default; }
 .tests-row { padding: 6px 8px; border-bottom: 1px dashed var(--light-border);
-  font-size: 11px; }
+  font-size: 0.6875rem; }
 .tests-row .test-dot { margin-right: 6px; user-select: none; }
 .test-dot.test-passed { color: var(--success-fg); }
 .test-dot.test-failed { color: var(--error-fg); }
 .test-dot.test-stale  { color: var(--muted-fg); opacity: 0.65; }
 .tests-fn { color: var(--accent); }
 .tests-err { color: var(--error-fg); overflow-wrap: anywhere; margin-top: 2px; }
-.tests-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 11px; }
+.tests-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 0.6875rem; }
 .tests-list { max-height: 320px; overflow-y: auto; }
 
 /* UI Step 1 — Assets ops section: frontend-asset override panel. */
-.gd-asset-hint { padding: 4px 8px; color: var(--muted-fg); font-size: 11px; }
+.gd-asset-hint { padding: 4px 8px; color: var(--muted-fg); font-size: 0.6875rem; }
 .gd-asset-list { max-height: 260px; overflow-y: auto; }
 .gd-asset-row { display: flex; align-items: center; gap: 6px; padding: 3px 8px;
-  border-bottom: 1px dashed var(--light-border); font-size: 11px; }
+  border-bottom: 1px dashed var(--light-border); font-size: 0.6875rem; }
 .gd-asset-path { color: var(--fg); overflow-wrap: anywhere; flex: 1; }
-.gd-asset-chip { color: var(--muted-fg); font-size: 10px; border: 1px solid var(--light-border);
+.gd-asset-chip { color: var(--muted-fg); font-size: 0.625rem; border: 1px solid var(--light-border);
   border-radius: 3px; padding: 0 4px; white-space: nowrap; }
 .gd-asset-chip-override { color: var(--accent); border-color: var(--accent); }
-.gd-asset-edit-btn { font-size: 10px; padding: 0 6px; border: 1px solid var(--input-border);
+.gd-asset-edit-btn { font-size: 0.625rem; padding: 0 6px; border: 1px solid var(--input-border);
   border-radius: 3px; background: var(--card-bg); color: var(--fg); cursor: pointer; }
 .gd-asset-edit { padding: 6px 8px; }
 .gd-asset-edit > .gd-asset-path { display: block; margin-bottom: 4px; }
 .gd-asset-edit-form { display: flex; flex-direction: column; gap: 6px; }
-.gd-asset-textarea { width: 100%; font-size: 11px; }
+.gd-asset-textarea { width: 100%; font-size: 0.6875rem; }
 .gd-asset-save-btn, .gd-asset-revert-btn, .gd-asset-diff-btn {
-  align-self: flex-start; font-size: 11px; padding: 2px 8px;
+  align-self: flex-start; font-size: 0.6875rem; padding: 2px 8px;
   border: 1px solid var(--input-border); border-radius: 3px;
   background: var(--card-bg); color: var(--fg); cursor: pointer; }
 .gd-asset-revert-btn { color: var(--error-fg); margin-top: 4px; }
 .gd-asset-diff-btn { margin-top: 4px; }
-.gd-asset-error { color: var(--error-fg); font-size: 11px; padding: 2px 0; }
+.gd-asset-error { color: var(--error-fg); font-size: 0.6875rem; padding: 2px 0; }
 .gd-asset-diff { border: 1px solid var(--light-border); border-radius: 3px;
-  max-height: 420px; overflow: auto; font-size: 12px; margin-top: 4px; }
+  max-height: 420px; overflow: auto; font-size: 0.75rem; margin-top: 4px; }
 
 /* CodeMirror host (editor-code.js upgrade of code textareas). The
    bundle injects its own .cm-* structural styles; ours only frame it. */
 .gd-code-editor { border: 1px solid var(--input-border); border-radius: 3px;
-  background: var(--card-bg); color: var(--fg); font-size: 12px;
+  background: var(--card-bg); color: var(--fg); font-size: 0.75rem;
   max-height: 420px; overflow: auto; }
 .gd-code-editor .cm-gutters { background: var(--card-row-highlight);
   color: var(--muted-fg); border-right: 1px solid var(--light-border); }
 
 /* Phase C stats sidebar section — org-scoped run rollups. */
-.stats-panel { padding: 4px 8px 8px; font-size: 11px;
+.stats-panel { padding: 4px 8px 8px; font-size: 0.6875rem;
   max-height: 480px; overflow-y: auto; }
 .stats-headline { color: var(--light-fg); font-weight: 600; padding: 4px 0 6px; }
 .stats-subhead { color: var(--muted-fg); text-transform: uppercase;
-  letter-spacing: 0.5px; font-size: 10px; margin: 8px 0 2px; }
+  letter-spacing: 0.5px; font-size: 0.625rem; margin: 8px 0 2px; }
 .stats-table { width: 100%; border-collapse: collapse; }
 .stats-table th { text-align: right; color: var(--muted-fg); font-weight: 500;
-  font-size: 10px; padding: 2px 4px; border-bottom: 1px solid var(--light-border); }
+  font-size: 0.625rem; padding: 2px 4px; border-bottom: 1px solid var(--light-border); }
 .stats-table th:first-child { text-align: left; }
 .stats-row { border-bottom: 1px dashed var(--light-border); }
 .stats-day { color: var(--light-fg); font-variant-numeric: tabular-nums; }
@@ -4678,7 +4704,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .stats-failed { color: var(--error-fg); }
 .stats-empty { padding: 4px 0; color: var(--muted-fg); }
 .stats-period-bar { display: flex; gap: 4px; margin: 2px 0 6px; }
-.stats-period { font-size: 10px; padding: 2px 8px; border-radius: 3px;
+.stats-period { font-size: 0.625rem; padding: 2px 8px; border-radius: 3px;
   border: 1px solid var(--light-border); background: none;
   color: var(--muted-fg); cursor: pointer; }
 .stats-period:hover { background: var(--hover-bg); color: var(--fg); }
@@ -4691,10 +4717,10 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .stats-org-block { margin-top: 2px; }
 
 /* Phase C1 usage-rollup strip above the history rows. */
-.execute-history-stats { font-size: 11px; color: var(--muted-fg);
+.execute-history-stats { font-size: 0.6875rem; color: var(--muted-fg);
   padding: 4px 6px; border-bottom: 1px dashed var(--light-border); }
 .execute-history-empty {
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-style: italic;
   color: var(--muted-fg);
 }
@@ -4710,13 +4736,13 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .execute-history-row:hover { background: var(--hover-bg); }
 .execute-history-row-head {
   display: flex; align-items: center; gap: 8px;
-  font-size: 10.5px;
+  font-size: 0.6562rem;
   line-height: 1.4;
 }
 .execute-history-status {
   font-weight: 600;
   text-transform: uppercase;
-  font-size: 9px;
+  font-size: 0.5625rem;
   padding: 1px 4px;
   border-radius: 2px;
 }
@@ -4740,7 +4766,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .execute-history-repeat-btn {
   margin-left: auto;
   padding: 1px 6px;
-  font-family: inherit; font-size: 10px;
+  font-family: inherit; font-size: 0.625rem;
   background: transparent;
   color: var(--accent);
   border: 1px solid var(--card-border);
@@ -4752,7 +4778,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
    whose execution captured a :path-trace (Debug P2). */
 .execute-history-path-btn {
   padding: 1px 6px;
-  font-family: inherit; font-size: 10px;
+  font-family: inherit; font-size: 0.625rem;
   background: transparent;
   color: var(--accent);
   border: 1px solid var(--card-border);
@@ -4761,7 +4787,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .execute-history-path-btn:hover { background: var(--hover-bg); }
 .execute-history-preview {
-  font-family: monospace; font-size: 10.5px;
+  font-family: monospace; font-size: 0.6562rem;
   color: var(--card-fg);
   margin-top: 2px;
   white-space: nowrap;
@@ -4792,7 +4818,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   position: absolute;
   top: 2px; right: 2px;
   z-index: 6;
-  font-size: 10px;
+  font-size: 0.625rem;
   line-height: 1.4;
   padding: 0 5px;
   border-radius: 8px;
@@ -4820,7 +4846,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border: 1px solid var(--card-border);
   border-radius: 4px;
   padding: 8px 14px;
-  font-family: inherit; font-size: 12px;
+  font-family: inherit; font-size: 0.75rem;
   box-shadow: var(--shadow-lg);
   display: inline-flex;
   align-items: center;
@@ -4830,7 +4856,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .path-view-truncated { color: var(--muted-fg); }
 .path-view-clear {
   padding: 1px 6px;
-  font-family: inherit; font-size: 11px;
+  font-family: inherit; font-size: 0.6875rem;
   background: transparent;
   color: var(--accent);
   border: 1px solid var(--card-border);
@@ -4838,14 +4864,14 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   cursor: pointer;
 }
 .path-view-clear:hover,
-.path-view-clear:focus-visible { background: var(--hover-bg); outline: none; }
+.path-view-clear:focus-visible { background: var(--hover-bg); outline: 2px solid var(--gd-flow); outline-offset: 1px; }
 
 /* "Show path on canvas" affordance appended under a traced run's
    result pane (inline run, poll completion, history row expand). */
 .execute-path-affordance { margin-top: 6px; }
 .execute-show-path-btn {
   padding: 2px 8px;
-  font-family: inherit; font-size: 10.5px;
+  font-family: inherit; font-size: 0.6562rem;
   background: transparent;
   color: var(--accent);
   border: 1px solid var(--card-border);
@@ -4853,7 +4879,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   cursor: pointer;
 }
 .execute-show-path-btn:hover,
-.execute-show-path-btn:focus-visible { background: var(--hover-bg); outline: none; }
+.execute-show-path-btn:focus-visible { background: var(--hover-bg); outline: 2px solid var(--gd-flow); outline-offset: 1px; }
 
 /* Captured-value affordance (Debug P3) — a small "= value" chip under
    the timing badge; opens the singleton value popover. */
@@ -4861,7 +4887,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   position: absolute;
   top: 20px; right: 2px;
   z-index: 6;
-  font-family: inherit; font-size: 10px;
+  font-family: inherit; font-size: 0.625rem;
   line-height: 1.4;
   padding: 0 5px;
   border-radius: 8px;
@@ -4873,7 +4899,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   white-space: nowrap;
 }
 .path-value-badge:hover,
-.path-value-badge:focus-visible { background: var(--hover-bg); outline: none; }
+.path-value-badge:focus-visible { background: var(--hover-bg); outline: 2px solid var(--gd-flow); outline-offset: 1px; }
 
 /* Captured-value popover — singleton, fixed-positioned by
    anchorBelowClamped. The <pre> body scrolls inside its own box so a
@@ -4886,7 +4912,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border: 1px solid var(--card-border);
   border-radius: 4px;
   padding: 8px 10px;
-  font-size: 12px;
+  font-size: 0.75rem;
   box-shadow: var(--shadow-lg);
 }
 .path-value-popover-head {
@@ -4901,7 +4927,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   max-height: 260px;
   max-width: 100%;
   overflow: auto;
-  font-size: 11px;
+  font-size: 0.6875rem;
   background: var(--bg);
   border: 1px solid var(--light-border);
   border-radius: 3px;
@@ -4921,7 +4947,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 #entity-list .entity-secret .secret-path {
   flex: 1 1 auto;
   font-family: monospace;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--card-fg);
   opacity: 0.7;
   margin-left: 4px;
@@ -4931,7 +4957,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 
 .secret-lock-icon {
-  font-size: 11px;
+  font-size: 0.6875rem;
   margin-right: 2px;
   flex: 0 0 auto;
 }
@@ -4939,7 +4965,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
    (All-lens) tree reads at a glance. Service markers reuse the badge's
    state palette (running/failed/disabled/pending). */
 .fn-kind-marker {
-  font-size: 10px;
+  font-size: 0.625rem;
   margin-right: 2px;
   flex: 0 0 auto;
   color: var(--muted-fg);
@@ -4949,7 +4975,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .kind-marker-service.svc-failed   { color: var(--error-fg); }
 .kind-marker-service.svc-disabled { color: var(--muted-fg); opacity: 0.65; }
 .kind-marker-app { color: var(--accent); }
-.kind-marker-type { font-size: 9px; opacity: 0.8; }
+.kind-marker-type { font-size: 0.5625rem; opacity: 0.8; }
 /* Test status dot — latest execution of the fn's CURRENT version:
    passed / failed / stale (not run since the last edit). */
 .kind-marker-test.test-passed { color: var(--success-fg); }
@@ -4976,7 +5002,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .secrets-popover .popover-label {
   display: block;
   margin-bottom: 8px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--card-fg);
 }
 
@@ -4995,18 +5021,18 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border: 1px solid var(--input-border);
   border-radius: 3px;
   font-family: inherit;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .secrets-popover .muted {
   color: var(--muted-fg);
-  font-size: 11px;
+  font-size: 0.6875rem;
   margin-bottom: 8px;
 }
 
 .secrets-popover .popover-error {
   color: var(--error-fg);
-  font-size: 11px;
+  font-size: 0.6875rem;
   margin: 4px 0 8px;
 }
 
@@ -5023,7 +5049,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border: 1px solid var(--card-border);
   border-radius: 3px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .secrets-popover .popover-buttons button.primary {
@@ -5041,7 +5067,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border: 1px solid var(--input-border);
   border-radius: 12px;
   font-family: inherit;
-  font-size: 12px;
+  font-size: 0.75rem;
   cursor: pointer;
   text-align: left;
   min-width: 80px;
@@ -5070,7 +5096,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 
 .execute-tainted-icon {
-  font-size: 18px;
+  font-size: 1.125rem;
   line-height: 1;
   margin-top: 1px;
   flex: 0 0 auto;
@@ -5078,7 +5104,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 
 .execute-tainted-text {
   flex: 1 1 auto;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--card-fg);
 }
 
@@ -5140,7 +5166,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   padding: 5px 10px;
   border: none;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.2;
   text-align: left;
   text-decoration: none;
@@ -5152,7 +5178,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .row-actions-content button[aria-label]::after,
 .row-actions-content a[aria-label]::after {
   content: attr(aria-label);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-style: normal;
   font-weight: 400;
   white-space: nowrap;
@@ -5175,7 +5201,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .row-actions-content .action-icon-disabled:hover { background: transparent; }
 .row-actions-loading,
 .row-actions-error {
-  font-size: 12px;
+  font-size: 0.75rem;
   padding: 6px 10px;
 }
 .action-icon {
@@ -5224,7 +5250,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
    only shown to authed users when the tenancy addon is active (see
    editor-grants-admin.js / editor-users-admin.js). */
 .sidebar-grants-admin .grants-admin-table,
-.sidebar-users-admin .grants-admin-table { width: 100%; font-size: 11px; border-collapse: collapse; }
+.sidebar-users-admin .grants-admin-table { width: 100%; font-size: 0.6875rem; border-collapse: collapse; }
 .sidebar-grants-admin .grants-admin-table th,
 .sidebar-grants-admin .grants-admin-table td,
 .sidebar-users-admin .grants-admin-table th,
@@ -5235,7 +5261,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 /* Apps sidebar section (Track C4b) — the tenant org's named apps
    (:app-route rows) rendered from /partials/apps-panel: a table + a create
    form + per-row delete. Auth-required, org-scoped (editor-apps.js). */
-.sidebar-apps .apps-admin-table { width: 100%; font-size: 11px; border-collapse: collapse; }
+.sidebar-apps .apps-admin-table { width: 100%; font-size: 0.6875rem; border-collapse: collapse; }
 .sidebar-apps .apps-admin-table th,
 .sidebar-apps .apps-admin-table td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--border); }
 .sidebar-apps .app-row-label { font-weight: 600; color: var(--fg); }
@@ -5249,9 +5275,9 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .sidebar-apps .app-delete:hover { color: var(--error-fg); }
 /* Create form — hint + stacked inputs + add button. */
 .sidebar-apps .app-create-form { display: flex; flex-direction: column; gap: 3px; padding: 4px; }
-.sidebar-apps .apps-create-hint { font-size: 10px; color: var(--muted-fg); }
-.sidebar-apps .app-input { font-size: 10px; padding: 1px 3px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
-.sidebar-apps .app-create-btn { align-self: flex-start; background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--accent); cursor: pointer; font-size: 10px; padding: 1px 6px; }
+.sidebar-apps .apps-create-hint { font-size: 0.625rem; color: var(--muted-fg); }
+.sidebar-apps .app-input { font-size: 0.625rem; padding: 1px 3px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
+.sidebar-apps .app-create-btn { align-self: flex-start; background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--accent); cursor: pointer; font-size: 0.625rem; padding: 1px 6px; }
 .sidebar-apps .app-create-btn:hover { background: var(--hover-bg); }
 
 /* Packages content — installed pins + browse/install registry (chip popover
@@ -5260,7 +5286,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
    only in packages content, so scoping to `.gd-pop` never touches other
    popovers. (Was `.sidebar-packages` when the panel lived in the Organization
    sidebar; that mount was retired when install became a Build act.) */
-.gd-pop .packages-panel-table { width: 100%; font-size: 11px; border-collapse: collapse; }
+.gd-pop .packages-panel-table { width: 100%; font-size: 0.6875rem; border-collapse: collapse; }
 .gd-pop .packages-panel-table th,
 .gd-pop .packages-panel-table td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--border); }
 .gd-pop .packages-panel-empty { padding: 6px 8px; color: var(--muted-fg); font-style: italic; }
@@ -5268,50 +5294,50 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .gd-pop .packages-uninstall:hover { color: var(--error-fg); }
 /* Browse/install registry — native <details> disclosure below the pins. */
 .gd-pop .packages-available { margin-top: 6px; border-top: 1px solid var(--border); }
-.gd-pop .packages-available > summary { padding: 4px; font-size: 11px; color: var(--muted-fg); cursor: pointer; }
+.gd-pop .packages-available > summary { padding: 4px; font-size: 0.6875rem; color: var(--muted-fg); cursor: pointer; }
 .gd-pop .packages-available > summary:hover { color: var(--fg); }
-.gd-pop .packages-install-btn { background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--accent); cursor: pointer; font-size: 10px; padding: 1px 6px; }
+.gd-pop .packages-install-btn { background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--accent); cursor: pointer; font-size: 0.625rem; padding: 1px 6px; }
 .gd-pop .packages-install-btn:hover { background: var(--hover-bg); }
 /* per-row update/rollback form — version input + ↑ submit, inline with ×. */
 .gd-pop .packages-update-form { display: inline-flex; gap: 2px; align-items: center; }
-.gd-pop .packages-version-input { width: 44px; font-size: 10px; padding: 0 2px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
+.gd-pop .packages-version-input { width: 44px; font-size: 0.625rem; padding: 0 2px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
 .gd-pop .packages-update-btn { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 2px; line-height: 1; }
 .gd-pop .packages-update-btn:hover { color: var(--accent); }
 /* Remote-registry install form — pull a published package from another
    graphden (cross-install), below the local browse table. */
-.gd-pop .packages-remote-note { padding: 6px 4px 2px; font-size: 10px; color: var(--muted-fg); }
+.gd-pop .packages-remote-note { padding: 6px 4px 2px; font-size: 0.625rem; color: var(--muted-fg); }
 .gd-pop .packages-remote-form { display: flex; gap: 3px; align-items: center; padding: 2px 4px 6px; flex-wrap: wrap; }
-.gd-pop .packages-remote-input { flex: 1; min-width: 90px; font-size: 10px; padding: 2px 4px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
+.gd-pop .packages-remote-input { flex: 1; min-width: 90px; font-size: 0.625rem; padding: 2px 4px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
 .gd-pop .packages-remote-version { flex: 0 0 56px; min-width: 56px; }
 /* Fork button (browse row) + transient fork notice. */
-.gd-pop .packages-fork-btn { background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--muted-fg); cursor: pointer; font-size: 10px; margin-left: 3px; padding: 1px 6px; }
+.gd-pop .packages-fork-btn { background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--muted-fg); cursor: pointer; font-size: 0.625rem; margin-left: 3px; padding: 1px 6px; }
 .gd-pop .packages-fork-btn:hover { background: var(--hover-bg); color: var(--fg); }
-.gd-pop .packages-private-badge { border: 1px solid var(--input-border); border-radius: 3px; color: var(--muted-fg); font-size: 9px; margin-left: 5px; padding: 0 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+.gd-pop .packages-private-badge { border: 1px solid var(--input-border); border-radius: 3px; color: var(--muted-fg); font-size: 0.5625rem; margin-left: 5px; padding: 0 4px; text-transform: uppercase; letter-spacing: 0.04em; }
 
 /* Packages governance (Organization surface) — read-mostly catalog + audit. */
-.sidebar-packages-governance .packages-gov-who { color: var(--muted-fg); font-size: 12px; line-height: 1.5; margin-bottom: 10px; }
-.sidebar-packages-governance .packages-gov-who code { font-family: var(--gd-mono, monospace); font-size: 11px; }
-.sidebar-packages-governance .packages-gov-title { font-size: 12px; margin: 12px 0 6px; }
-.sidebar-packages-governance .packages-panel-table { width: 100%; font-size: 11px; border-collapse: collapse; }
+.sidebar-packages-governance .packages-gov-who { color: var(--muted-fg); font-size: 0.75rem; line-height: 1.5; margin-bottom: 10px; }
+.sidebar-packages-governance .packages-gov-who code { font-family: var(--gd-mono, monospace); font-size: 0.6875rem; }
+.sidebar-packages-governance .packages-gov-title { font-size: 0.75rem; margin: 12px 0 6px; }
+.sidebar-packages-governance .packages-panel-table { width: 100%; font-size: 0.6875rem; border-collapse: collapse; }
 .sidebar-packages-governance .packages-panel-table th,
 .sidebar-packages-governance .packages-panel-table td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--border); }
 .sidebar-packages-governance .packages-panel-empty { padding: 6px 8px; color: var(--muted-fg); font-style: italic; }
-.gd-pop .packages-fork-note { font-size: 10px; padding: 3px 6px; margin-bottom: 4px; border-radius: 3px; }
+.gd-pop .packages-fork-note { font-size: 0.625rem; padding: 3px 6px; margin-bottom: 4px; border-radius: 3px; }
 .gd-pop .packages-fork-ok { color: var(--success-fg); }
 .gd-pop .packages-fork-err { color: var(--error-fg); }
 /* Publish-a-namespace form (rendered in the panel-publish response). */
 .gd-pop .packages-publish-form { display: flex; flex-direction: column; gap: 3px; padding: 4px; }
-.gd-pop .packages-publish-input { font-size: 10px; padding: 1px 3px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
+.gd-pop .packages-publish-input { font-size: 0.625rem; padding: 1px 3px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
 
 /* Per-namespace publish popover (⬆ on a namespace row → JSON publish). */
 #gd-nspub-pop { width: 300px; max-width: 92vw; padding: 12px; }
-#gd-nspub-pop .gd-nspub-sub { font-size: 11px; color: var(--muted-fg); font-family: var(--gd-mono, monospace); margin: -4px 0 8px; word-break: break-all; }
+#gd-nspub-pop .gd-nspub-sub { font-size: 0.6875rem; color: var(--muted-fg); font-family: var(--gd-mono, monospace); margin: -4px 0 8px; word-break: break-all; }
 #gd-nspub-pop .gd-nspub-field { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
-#gd-nspub-pop .gd-nspub-field label { font-size: 11px; color: var(--muted-fg); }
-#gd-nspub-pop .packages-publish-input { font-size: 12px; padding: 4px 6px; }
-#gd-nspub-pop .gd-nspub-public { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted-fg); margin-bottom: 8px; cursor: pointer; }
+#gd-nspub-pop .gd-nspub-field label { font-size: 0.6875rem; color: var(--muted-fg); }
+#gd-nspub-pop .packages-publish-input { font-size: 0.75rem; padding: 4px 6px; }
+#gd-nspub-pop .gd-nspub-public { display: flex; align-items: center; gap: 6px; font-size: 0.6875rem; color: var(--muted-fg); margin-bottom: 8px; cursor: pointer; }
 #gd-nspub-pop .gd-nspub-actions { display: flex; justify-content: flex-end; }
-#gd-nspub-pop .gd-nspub-result { margin-top: 8px; font-size: 11px; }
+#gd-nspub-pop .gd-nspub-result { margin-top: 8px; font-size: 0.6875rem; }
 #gd-nspub-pop .gd-nspub-result.packages-fork-ok { color: var(--success-fg); }
 #gd-nspub-pop .gd-nspub-result.packages-fork-err { color: var(--error-fg); }
 
@@ -5322,8 +5348,8 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .sidebar-grants-admin .grant-create-form,
 .sidebar-users-admin .grant-create-form { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; }
 .sidebar-grants-admin .grant-input,
-.sidebar-users-admin .grant-input { font-size: 11px; padding: 2px 4px; }
-.sidebar-grants-admin .grant-create-btn { font-size: 11px; padding: 2px 6px; cursor: pointer; align-self: flex-start; }
+.sidebar-users-admin .grant-input { font-size: 0.6875rem; padding: 2px 4px; }
+.sidebar-grants-admin .grant-create-btn { font-size: 0.6875rem; padding: 2px 6px; cursor: pointer; align-self: flex-start; }
 
 /* ============================================================================
  * REDESIGN 2026-08 — SHELL LAYOUT (rail + explorer | canvas | inspector).
@@ -5374,7 +5400,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   background: transparent;
   color: var(--gd-ink);
   font-family: inherit;
-  font-size: 13.5px;
+  font-size: 0.8438rem;
   letter-spacing: -0.01em;
   cursor: pointer;
   transition: background 0.12s;
@@ -5393,7 +5419,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   background: var(--gd-paper-2);
   color: var(--gd-ink);
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: 0.7812rem;
   cursor: pointer;
   transition: border-color 0.12s;
 }
@@ -5416,7 +5442,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   height: 28px;
   border-radius: 8px;
   padding: 0 10px;
-  font-size: 12px;
+  font-size: 0.75rem;
   border: 1px solid var(--gd-line-2);
   background: var(--gd-paper-2);
   color: var(--gd-ink);
@@ -5433,7 +5459,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border-color: var(--gd-flow);
   color: var(--on-accent);
 }
-#gd-exp-ctx .gd-ctx-chip { height: 28px; padding: 0 10px; font-size: 12px; }
+#gd-exp-ctx .gd-ctx-chip { height: 28px; padding: 0 10px; font-size: 0.75rem; }
 #gd-exp-ctx #branch-mount { display: flex; align-items: center; }
 /* Collapsed-state branch badge on the left-edge expand tab: only rendered
    (by editor-branches.js) when the branch is NON-default — on main the tab
@@ -5444,7 +5470,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   max-height: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 10.5px;
+  font-size: 0.6562rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--on-accent);
@@ -5464,7 +5490,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 #gd-ctxbar .auth-lock-btn { height: 32px; }
 #gd-ctxbar .auth-signin {
-  font-size: 12.5px;
+  font-size: 0.7812rem;
   padding: 6px 11px;
   border-radius: 8px;
   border: 1px solid var(--gd-line-2);
@@ -5473,7 +5499,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .gd-ctx-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gd-flow); }
 .gd-ctx-k {
-  font-size: 10.5px;
+  font-size: 0.6562rem;
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -5518,7 +5544,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .gd-pop h5 {
   margin: 2px 6px 8px;
-  font-size: 10.5px;
+  font-size: 0.6562rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -5535,7 +5561,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   background: transparent;
   color: var(--gd-ink);
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: 0.7812rem;
   text-align: left;
   cursor: pointer;
 }
@@ -5553,7 +5579,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border-radius: 8px;
   background: transparent;
   color: var(--gd-ink-4);
-  font-size: 13px;
+  font-size: 0.8125rem;
   cursor: pointer;
   opacity: 0.5;
   transition: opacity 0.12s, color 0.12s, background 0.12s;
@@ -5563,14 +5589,14 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .gd-pop-pin:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 1px; }
 .gd-pop-hint {
   margin: 8px 6px 2px;
-  font-size: 10.5px;
+  font-size: 0.6562rem;
   line-height: 1.4;
   color: var(--gd-ink-3);
 }
 /* Workspace popover — section caption + the project checklist rows. */
 .gd-pop-cap {
   margin: 4px 6px 4px;
-  font-size: 10px;
+  font-size: 0.625rem;
   letter-spacing: 0.04em;
   color: var(--gd-ink-4);
 }
@@ -5586,7 +5612,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: right;
-  font-size: 10.5px;
+  font-size: 0.6562rem;
   color: var(--gd-ink-4);
 }
 .gd-ws-opt.sel .gd-ws-desc { color: var(--gd-flow-ink); }
@@ -5603,7 +5629,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border-bottom: 1px solid var(--gd-line);
 }
 .gd-exp-title {
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -5709,7 +5735,7 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
   display: inline-flex; align-items: center; gap: 6px;
   padding: 4px 10px;
   border-radius: 7px;
-  font-size: 12.5px;
+  font-size: 0.7812rem;
   white-space: nowrap;
 }
 /* Active-tab highlight only while the drawer is OPEN — a collapsed bar
@@ -5725,7 +5751,7 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
 }
 /* Badge counts on the bar tabs (editor-diagnostics.js keeps them fresh). */
 .gd-diag-badge {
-  font-size: 11px; font-weight: 600; line-height: 1.4;
+  font-size: 0.6875rem; font-weight: 600; line-height: 1.4;
   padding: 0 6px;
   border-radius: 999px;
   background: var(--gd-paper-2);
@@ -5737,7 +5763,7 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
 .gd-diag-toggle {
   appearance: none;
   margin-left: auto;
-  font: inherit; font-size: 11px; line-height: 1;
+  font: inherit; font-size: 0.6875rem; line-height: 1;
   color: var(--gd-ink-2);
   background: transparent;
   border: 0; border-radius: 7px;
@@ -5785,7 +5811,7 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
   max-width: 280px;
   padding: 0 28px;
   text-align: center;
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.5;
   color: var(--gd-ink-2); /* ink-3 fails AA (3.63) on the panel; ink-2 clears it */
 }
@@ -5809,7 +5835,7 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
   background: none;
   border: none;
   border-radius: var(--gd-r-sm);
-  font-size: 22px;
+  font-size: 1.375rem;
   line-height: 1;
   color: var(--gd-ink-3);
   cursor: pointer;
@@ -5819,14 +5845,14 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
 .gd-insp-name {
   font-family: var(--gd-mono);
   font-weight: 700;
-  font-size: 15px;
+  font-size: 0.9375rem;
   color: var(--gd-ink);
 }
 .gd-insp-kind {
   padding: 1px 6px;
   border: 1px solid var(--gd-line-2);
   border-radius: 5px;
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -5835,12 +5861,12 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
 .gd-insp-ns {
   margin-top: 4px;
   font-family: var(--gd-mono);
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--gd-ink-3);
 }
 .gd-insp-desc {
   margin-top: 8px;
-  font-size: 12.5px;
+  font-size: 0.7812rem;
   line-height: 1.5;
   color: var(--gd-ink-2);
 }
@@ -5859,7 +5885,7 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
   margin-bottom: -1px;
   padding: 8px 10px;
   font: inherit;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--gd-ink-3);
   cursor: pointer;
 }
@@ -5876,7 +5902,7 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
 .gd-insp-k {
   flex: none;
   min-width: 64px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--gd-ink-3);
@@ -5889,7 +5915,7 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
   padding: 0 8px;
   border-radius: 6px;
   font-family: var(--gd-mono);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 600;
 }
 .gd-chip-ref { background: var(--gd-ref-wash); color: var(--gd-flow-ink); }
@@ -5903,17 +5929,17 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
   padding: 3px 8px; line-height: 1.5; max-width: 100%;
   white-space: normal; overflow-wrap: anywhere;
 }
-.gd-insp-pure { font-size: 12px; font-style: italic; color: var(--gd-ink-3); }
+.gd-insp-pure { font-size: 0.75rem; font-style: italic; color: var(--gd-ink-3); }
 .gd-insp-runs-head {
   margin: 16px 0 8px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--gd-ink-3);
 }
-.gd-insp-runs { font-size: 12px; }
-.gd-insp-runs-loading { padding: 8px 0; font-size: 12px; color: var(--gd-ink-3); }
+.gd-insp-runs { font-size: 0.75rem; }
+.gd-insp-runs-loading { padding: 8px 0; font-size: 0.75rem; color: var(--gd-ink-3); }
 
 /* ---- Inspector detail (server partial /partials/inspector-detail):
  *      bindings (the 3-way literal/ref/free language) + provenance. ---- */
@@ -5921,17 +5947,17 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
 .gd-insp-sec { margin-top: 18px; }
 .gd-insp-sec-head {
   margin-bottom: 8px;
-  font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--gd-ink-3);
 }
-.gd-insp-sec-empty { font-size: 12px; font-style: italic; color: var(--gd-ink-3); }
+.gd-insp-sec-empty { font-size: 0.75rem; font-style: italic; color: var(--gd-ink-3); }
 .gd-bind-list { display: flex; flex-direction: column; }
 .gd-bind-row {
   display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
   padding: 6px 0; border-bottom: 1px solid var(--gd-line);
 }
 .gd-bind-name {
-  font-family: var(--gd-mono); font-size: 12px; font-weight: 600;
+  font-family: var(--gd-mono); font-size: 0.75rem; font-weight: 600;
   color: var(--gd-ink);
 }
 /* The 3-way chip is encoded by SHAPE (free = dashed outline) as well as
@@ -5940,7 +5966,7 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
   margin-left: auto; max-width: 210px;
   display: inline-flex; align-items: center;
   padding: 1px 8px; border: 1px solid transparent; border-radius: 6px;
-  font-family: var(--gd-mono); font-size: 11px; font-weight: 600;
+  font-family: var(--gd-mono); font-size: 0.6875rem; font-weight: 600;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .gd-bind-lit { background: var(--gd-lit-wash); color: var(--gd-lit); }
@@ -5948,16 +5974,16 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
 .gd-bind-free { background: transparent; color: var(--gd-free); border: 1px dashed var(--gd-free); }
 .gd-bind-type {
   flex-basis: 100%;
-  font-family: var(--gd-mono); font-size: 10px; color: var(--gd-ink-3);
+  font-family: var(--gd-mono); font-size: 0.625rem; color: var(--gd-ink-3);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .gd-prov-row { display: flex; gap: 10px; align-items: baseline; padding: 5px 0; }
 .gd-prov-k {
   flex: none; min-width: 96px;
-  font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
+  font-size: 0.625rem; letter-spacing: 0.04em; text-transform: uppercase;
   color: var(--gd-ink-3);
 }
-.gd-prov-v { font-size: 12px; color: var(--gd-ink-2); min-width: 0; overflow-wrap: anywhere; }
+.gd-prov-v { font-size: 0.75rem; color: var(--gd-ink-2); min-width: 0; overflow-wrap: anywhere; }
 .gd-prov-mono { font-family: var(--gd-mono); }
 
 /* ---- Progressive disclosure: compact cards hide the dense metadata strips
@@ -5988,14 +6014,14 @@ body.gd-cards-compact .effects-strip { display: none; }
   box-shadow: var(--gd-shadow);
 }
 .gd-surface-title {
-  font-size: 20px;
+  font-size: 1.25rem;
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--gd-ink);
 }
 .gd-surface-sub {
   margin: 8px 0 18px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.5;
   color: var(--gd-ink-2);
 }
@@ -6007,7 +6033,7 @@ body.gd-cards-compact .effects-strip { display: none; }
   background: var(--gd-flow);
   color: var(--on-accent);
   font-family: inherit;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.12s;
@@ -6038,14 +6064,14 @@ body.gd-tenancy .gd-solo-only { display: none; }
 .gd-operate-head { max-width: 1100px; margin: 0 auto 18px; }
 .gd-operate-head h1 {
   margin: 0 0 4px;
-  font-size: 22px;
+  font-size: 1.375rem;
   letter-spacing: -0.01em;
   color: var(--gd-ink);
 }
 .gd-operate-head p {
   margin: 0;
   max-width: 62ch;
-  font-size: 13.5px;
+  font-size: 0.8438rem;
   line-height: 1.5;
   color: var(--gd-ink-2);
 }
@@ -6070,7 +6096,7 @@ body.gd-tenancy .gd-solo-only { display: none; }
 .gd-op-nav-btn {
   appearance: none;
   text-align: left;
-  font: inherit; font-size: 13.5px;
+  font: inherit; font-size: 0.8438rem;
   color: var(--gd-ink-2);
   background: transparent;
   border: 0; border-radius: 8px;
@@ -6089,7 +6115,7 @@ body.gd-tenancy .gd-solo-only { display: none; }
 .gd-op-card[hidden] { display: none; }
 .gd-op-card-title {
   margin: 0 0 18px;
-  font-size: 18px; font-weight: 600; letter-spacing: -0.01em;
+  font-size: 1.125rem; font-weight: 600; letter-spacing: -0.01em;
   text-transform: none;
   color: var(--gd-ink);
 }
@@ -6116,7 +6142,7 @@ body.gd-tenancy .gd-solo-only { display: none; }
 #gd-operate-panels form button, #gd-platform-panels form button { flex: 0 0 auto; }
 .gd-op-card input[type="text"], .gd-op-card input[type="email"],
 .gd-op-card input[type="search"], .gd-op-card input:not([type]) {
-  font: inherit; font-size: 13px;
+  font: inherit; font-size: 0.8125rem;
   color: var(--gd-ink); background: var(--gd-paper);
   border: 1px solid var(--gd-line); border-radius: 7px;
   padding: 7px 10px;
@@ -6125,7 +6151,7 @@ body.gd-tenancy .gd-solo-only { display: none; }
   outline: 2px solid var(--gd-flow); outline-offset: 1px; border-color: var(--gd-flow);
 }
 .gd-op-card form button, .gd-op-card .grant-create-btn, .gd-op-card .invite-btn {
-  font: inherit; font-size: 13px; font-weight: 600;
+  font: inherit; font-size: 0.8125rem; font-weight: 600;
   color: var(--on-accent); background: var(--gd-flow);
   border: 0; border-radius: 7px; padding: 8px 14px; cursor: pointer;
 }
@@ -6158,7 +6184,7 @@ body.gd-tenancy .gd-solo-only { display: none; }
    plan+role pickers, branch scopers, …) — they were raw browser controls. */
 #gd-operate-panels select,
 #gd-platform-panels select {
-  font: inherit; font-size: 13px;
+  font: inherit; font-size: 0.8125rem;
   color: var(--gd-ink); background: var(--gd-paper);
   border: 1px solid var(--gd-line); border-radius: 6px;
   padding: 5px 8px; cursor: pointer;
@@ -6195,7 +6221,7 @@ body.gd-tenancy .gd-solo-only { display: none; }
 }
 .gd-set-card h2 {
   margin: 0 0 10px;
-  font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--gd-ink-3);
 }
 .gd-set-row {
@@ -6204,11 +6230,11 @@ body.gd-tenancy .gd-solo-only { display: none; }
 }
 .gd-set-row + .gd-set-row { border-top: 1px solid var(--gd-line); }
 .gd-set-copy { min-width: 0; }
-.gd-set-label { font-size: 13px; color: var(--gd-ink); }
-.gd-set-hint { margin-top: 2px; font-size: 11.5px; line-height: 1.45; color: var(--gd-ink-3); }
+.gd-set-label { font-size: 0.8125rem; color: var(--gd-ink); }
+.gd-set-hint { margin-top: 2px; font-size: 0.7188rem; line-height: 1.45; color: var(--gd-ink-3); }
 .gd-set-btn {
   flex: none;
-  font-size: 12px; padding: 5px 12px; cursor: pointer;
+  font-size: 0.75rem; padding: 5px 12px; cursor: pointer;
   background: var(--gd-panel); color: var(--gd-ink);
   border: 1px solid var(--gd-line-2); border-radius: var(--gd-r-sm);
 }
@@ -6218,7 +6244,7 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
 /* ---- Settings: Account card (the merged /account page) ---- */
 .gd-acct-h {
   margin: 16px 0 6px;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -6248,7 +6274,7 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
   background: var(--gd-paper-2);
   color: var(--gd-ink);
   font-family: var(--gd-ui-font);
-  font-size: 12.5px;
+  font-size: 0.7812rem;
 }
 .gd-acct-input:focus-visible, .gd-acct-mint select:focus-visible {
   outline: 2px solid var(--gd-flow); outline-offset: 1px;
@@ -6256,7 +6282,7 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
 .gd-acct-scopes { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin: 10px 0; }
 .gd-acct-scopes label {
   display: flex; align-items: center; gap: 7px;
-  font-size: 12.5px; color: var(--gd-ink-2);
+  font-size: 0.7812rem; color: var(--gd-ink-2);
 }
 .gd-acct-mint { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
 .gd-acct-mint .gd-acct-input { flex: 1 1 auto; min-width: 0; }
@@ -6265,29 +6291,29 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
   padding: 10px 12px;
   border: 1px solid var(--gd-warn);
   border-radius: 8px;
-  font-size: 12.5px;
+  font-size: 0.7812rem;
   color: var(--gd-ink-2);
 }
 .gd-acct-banner .gd-set-btn { margin-top: 8px; }
-.gd-acct-msg { margin-top: 10px; font-size: 12.5px; min-height: 16px; }
+.gd-acct-msg { margin-top: 10px; font-size: 0.7812rem; min-height: 16px; }
 .gd-acct-msg.ok { color: var(--gd-ok); }
 .gd-acct-msg.err { color: var(--gd-crit); }
 .gd-set-acct-btns { display: flex; gap: 8px; flex: none; }
 .gd-set-badge {
-  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+  font-size: 0.625rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
   padding: 1px 6px; margin-left: 6px; border-radius: var(--gd-r-sm);
   background: var(--gd-flow); color: var(--gd-on-accent);
 }
 .gd-set-code {
-  font-family: var(--gd-mono); font-size: 12px; color: var(--gd-ink-2);
+  font-family: var(--gd-mono); font-size: 0.75rem; color: var(--gd-ink-2);
   background: var(--gd-paper-2); padding: 2px 6px; border-radius: 4px;
 }
 .gd-set-versions { margin: 8px 0 12px; display: flex; flex-direction: column; gap: 4px; }
-.gd-set-ver { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--gd-ink-3); }
+.gd-set-ver { display: flex; justify-content: space-between; font-size: 0.7188rem; color: var(--gd-ink-3); }
 .gd-set-ver code { font-family: var(--gd-mono); color: var(--gd-ink-2); }
 .gd-set-caps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .gd-cap {
-  font-family: var(--gd-mono); font-size: 11px; font-weight: 600;
+  font-family: var(--gd-mono); font-size: 0.6875rem; font-weight: 600;
   padding: 2px 8px; border-radius: 6px;
 }
 .gd-cap-on { background: var(--gd-flow-wash); color: var(--gd-flow-ink); }
@@ -6299,14 +6325,14 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
   display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 16px; align-items: start;
 }
-.gd-ws-summary { font-size: 12.5px; color: var(--gd-ink-2); margin: 4px 0 12px; }
+.gd-ws-summary { font-size: 0.7812rem; color: var(--gd-ink-2); margin: 4px 0 12px; }
 .gd-ws-summary b { color: var(--gd-ink); }
 .gd-ws-nslist { display: flex; flex-direction: column; gap: 4px; }
 .gd-ws-nsrow { display: flex; align-items: center; gap: 6px; }
 .gd-ws-nsbtn {
   flex: 1 1 auto; min-width: 0; text-align: left;
   display: inline-flex; align-items: center; gap: 6px;
-  font-family: var(--gd-mono); font-size: 12px;
+  font-family: var(--gd-mono); font-size: 0.75rem;
   padding: 6px 10px; cursor: pointer;
   background: var(--gd-panel); color: var(--gd-ink);
   border: 1px solid var(--gd-line-2); border-radius: var(--gd-r-sm);
@@ -6318,7 +6344,7 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
 .gd-ws-pin {
   flex: none; width: 30px; height: 30px; cursor: pointer;
   background: none; border: 1px solid transparent; border-radius: var(--gd-r-sm);
-  opacity: 0.4; font-size: 13px;
+  opacity: 0.4; font-size: 0.8125rem;
 }
 .gd-ws-pin:hover { opacity: 0.8; }
 .gd-ws-pin.pinned { opacity: 1; background: var(--gd-flow-wash); border-color: var(--gd-flow); }
@@ -6356,7 +6382,7 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
 
 .execute-history-tree-btn {
   padding: 1px 6px;
-  font-family: inherit; font-size: 10px;
+  font-family: inherit; font-size: 0.625rem;
   background: transparent;
   color: var(--accent);
   border: 1px solid var(--card-border);
@@ -6377,7 +6403,7 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 .trace-view-body { display: flex; flex-direction: column; min-height: 0; height: 100%; }
 .trace-view-header {
@@ -6387,13 +6413,13 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
   background: var(--header-bg); color: var(--header-fg);
 }
 .trace-view-title { font-weight: 600; flex: 1 1 auto; }
-.trace-note { color: var(--muted-fg); font-size: 10px; }
+.trace-note { color: var(--muted-fg); font-size: 0.625rem; }
 .trace-step-btn, .trace-close-btn {
   background: transparent;
   color: var(--header-fg);
   border: 1px solid var(--light-border);
   border-radius: 3px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   padding: 1px 7px;
   cursor: pointer;
 }
@@ -6413,13 +6439,13 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
   border-left-color: var(--accent);
 }
 .trace-row-name {
-  font-family: monospace; font-size: 11px;
+  font-family: monospace; font-size: 0.6875rem;
   margin-right: 6px;
   overflow-wrap: anywhere;
 }
 .trace-chip {
   display: inline-block;
-  font-size: 9.5px;
+  font-size: 0.5938rem;
   line-height: 1.5;
   padding: 0 5px;
   margin-right: 4px;
@@ -6439,14 +6465,14 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
 .trace-value summary {
   cursor: pointer;
   color: var(--accent);
-  font-size: 10px;
+  font-size: 0.625rem;
 }
 .trace-value pre {
   margin: 3px 0 0;
   padding: 5px 7px;
   max-height: 180px;
   overflow: auto;
-  font-size: 10.5px;
+  font-size: 0.6562rem;
   background: var(--bg); color: var(--fg);
   border: 1px solid var(--light-border);
   border-radius: 3px;
@@ -6459,12 +6485,12 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
    (/partials/debug-catch; editor-debug.js owns arm/cancel/refresh).
    ========================================================================= */
 
-.debug-panel { display: flex; flex-direction: column; gap: 10px; font-size: 12px; }
-.debug-help { color: var(--muted-fg); font-size: 11px; }
+.debug-panel { display: flex; flex-direction: column; gap: 10px; font-size: 0.75rem; }
+.debug-help { color: var(--muted-fg); font-size: 0.6875rem; }
 .debug-arm-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .debug-prefix-input {
   flex: 1 1 220px;
-  font-family: monospace; font-size: 11px;
+  font-family: monospace; font-size: 0.6875rem;
   padding: 4px 6px;
   background: var(--bg); color: var(--fg);
   border: 1px solid var(--input-border);
@@ -6472,12 +6498,12 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
 }
 .debug-capture-label {
   display: inline-flex; align-items: center; gap: 4px;
-  color: var(--card-fg); font-size: 11px;
+  color: var(--card-fg); font-size: 0.6875rem;
   white-space: nowrap;
 }
 .debug-arm-btn, .debug-cancel-btn, .debug-open-trace-btn {
   padding: 3px 10px;
-  font-family: inherit; font-size: 11px;
+  font-family: inherit; font-size: 0.6875rem;
   background: transparent;
   color: var(--accent);
   border: 1px solid var(--card-border);
@@ -6622,18 +6648,18 @@ body.gd-tour-sheet-open #side-menu {
   margin-bottom: 8px;
 }
 .gd-tour-progress {
-  font-size: 11px;
+  font-size: 0.6875rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted-fg);
 }
 .gd-tour-title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 0.875rem;
   margin-bottom: 6px;
 }
 .gd-tour-body {
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.55;
   color: var(--fg);
 }
@@ -6647,7 +6673,7 @@ body.gd-tour-sheet-open #side-menu {
   border-bottom-width: 2px;
   border-radius: 5px;
   background: var(--card-bg);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   white-space: nowrap;
   /* A long label ("I understand this will produce side effects") must wrap
@@ -6668,7 +6694,7 @@ body.gd-tour-sheet-open #side-menu {
   background: var(--hover-bg);
   color: var(--fg);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.5;
   cursor: copy;
   vertical-align: baseline;
@@ -6678,7 +6704,7 @@ body.gd-tour-sheet-open #side-menu {
   overflow-wrap: anywhere;  /* a JSON payload wraps instead of overflowing */
 }
 .gd-tour-copy-ic {
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--muted-fg);
 }
 .gd-tour-copy:hover { border-color: var(--accent); }
@@ -6695,12 +6721,12 @@ body.gd-tour-sheet-open #side-menu {
 }
 .gd-tour-hint {
   margin-right: auto;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--muted-fg);
 }
 .gd-tour-btn {
   font: inherit;
-  font-size: 12.5px;
+  font-size: 0.7812rem;
   font-weight: 600;
   padding: 6px 12px;
   border-radius: 8px;
@@ -6766,7 +6792,7 @@ body.gd-tour-sheet-open #side-menu {
   border-radius: 6px;
   background: var(--card-bg);
   color: var(--fg);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .gd-tour-filter:focus-visible {
@@ -6792,7 +6818,7 @@ body.gd-tour-sheet-open #side-menu {
 .gd-tour-chapter {
   margin: 10px 2px 2px;
   color: var(--muted-fg);
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -6819,30 +6845,30 @@ body.gd-tour-sheet-open #side-menu {
 
 /* Review-comment thread under the branch-diff modal. */
 .branch-comments { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 8px; }
-.branch-comments h4 { font-size: 12px; margin: 0 0 6px; color: var(--fg); }
+.branch-comments h4 { font-size: 0.75rem; margin: 0 0 6px; color: var(--fg); }
 .branch-comments-list { display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto; }
-.branch-comment { display: flex; gap: 6px; align-items: baseline; font-size: 12px; }
-.branch-comment-meta { color: var(--muted-fg); font-size: 10px; white-space: nowrap; }
+.branch-comment { display: flex; gap: 6px; align-items: baseline; font-size: 0.75rem; }
+.branch-comment-meta { color: var(--muted-fg); font-size: 0.625rem; white-space: nowrap; }
 .branch-comment-body { color: var(--fg); flex: 1; overflow-wrap: anywhere; }
 .branch-comment-del {
   background: transparent; color: var(--muted-fg); border: 0;
-  cursor: pointer; font-size: 12px; padding: 0 2px;
+  cursor: pointer; font-size: 0.75rem; padding: 0 2px;
 }
 .branch-comment-del:hover { color: var(--fg); }
-.branch-comment-empty { color: var(--muted-fg); font-size: 11px; }
+.branch-comment-empty { color: var(--muted-fg); font-size: 0.6875rem; }
 .branch-comment-error {
-  color: var(--error-fg); font-size: 11px; margin-top: 4px;
+  color: var(--error-fg); font-size: 0.6875rem; margin-top: 4px;
 }
 .branch-comment-error.hidden { display: none; }
 .branch-comment-form { display: flex; gap: 6px; margin-top: 6px; align-items: flex-end; }
 .branch-comment-input {
-  flex: 1; resize: vertical; font-size: 12px;
+  flex: 1; resize: vertical; font-size: 0.75rem;
   background: var(--bg); color: var(--fg);
   border: 1px solid var(--border); border-radius: 3px; padding: 4px 6px;
 }
 .branch-comment-send {
   background: var(--accent); color: var(--on-accent);
-  border: 0; border-radius: 3px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+  border: 0; border-radius: 3px; padding: 4px 10px; font-size: 0.75rem; cursor: pointer;
 }
 body.gd-no-write .branch-comment-form { display: none; }
 
@@ -6863,14 +6889,14 @@ body.gd-no-write .branch-comment-form { display: none; }
   max-height: 85vh; overflow-y: auto;
   box-shadow: var(--shadow-md);
   display: flex; flex-direction: column; gap: 8px;
-  font-size: 12px; line-height: 1.4;
+  font-size: 0.75rem; line-height: 1.4;
 }
 .feedback-title {
-  font-size: 14px; font-weight: 600;
+  font-size: 0.875rem; font-weight: 600;
   border-bottom: 1px solid var(--border); padding-bottom: 6px;
 }
 .feedback-row { display: flex; flex-direction: column; gap: 3px; }
-.feedback-row > span { font-size: 11px; color: var(--muted-fg); }
+.feedback-row > span { font-size: 0.6875rem; color: var(--muted-fg); }
 .feedback-row select,
 .feedback-row input,
 .feedback-row textarea {
@@ -6882,20 +6908,20 @@ body.gd-no-write .branch-comment-form { display: none; }
 /* Honeypot — removed from layout AND from assistive tech; only bots see it. */
 .feedback-honeypot { display: none; }
 .feedback-attach { display: flex; flex-direction: column; gap: 2px; }
-.feedback-attach-title { font-size: 11px; color: var(--muted-fg); }
-.feedback-check { font-size: 11px; display: flex; align-items: center; gap: 4px; }
+.feedback-attach-title { font-size: 0.6875rem; color: var(--muted-fg); }
+.feedback-check { font-size: 0.6875rem; display: flex; align-items: center; gap: 4px; }
 .feedback-actions { display: flex; gap: 8px; margin-top: 2px; }
 .feedback-send {
   background: var(--accent); color: var(--on-accent);
-  border: 0; border-radius: 3px; padding: 4px 12px; font-size: 12px; cursor: pointer;
+  border: 0; border-radius: 3px; padding: 4px 12px; font-size: 0.75rem; cursor: pointer;
 }
 .feedback-send:disabled { opacity: 0.6; cursor: default; }
 .feedback-cancel {
   background: var(--bg); color: var(--fg);
   border: 1px solid var(--input-border); border-radius: 3px;
-  padding: 4px 12px; font-size: 12px; cursor: pointer;
+  padding: 4px 12px; font-size: 0.75rem; cursor: pointer;
 }
-.feedback-status { font-size: 11px; color: var(--muted-fg); min-height: 14px; }
+.feedback-status { font-size: 0.6875rem; color: var(--muted-fg); min-height: 14px; }
 .feedback-status a { color: var(--accent); }
 
 /* Errors panel footer — the "report these failures" entry point
@@ -6904,7 +6930,97 @@ body.gd-no-write .branch-comment-form { display: none; }
 .errors-report-btn {
   margin-top: 6px;
   background: none; border: 0; padding: 0;
-  font-size: 11px; color: var(--muted-fg);
+  font-size: 0.6875rem; color: var(--muted-fg);
   cursor: pointer; text-align: left;
 }
 .errors-report-btn:hover { color: var(--fg); }
+
+/* =========================================================================
+ * FOCUS VISIBILITY (WCAG 2.4.7 Focus Visible)
+ *
+ * Every selector below suppresses `outline` in its base rule — inputs to
+ * avoid the double border next to their own focus border-colour, buttons
+ * because their rule styles :hover and :focus-visible together and the
+ * background tint was doing all the work. A tint alone fails 2.4.7: it is
+ * indistinguishable from a mouse hover and can sit below 3:1 against the
+ * surrounding surface.
+ *
+ * These restore a real ring for keyboard focus only (`:focus-visible`, so
+ * a mouse click still doesn't draw one). Higher specificity than the base
+ * rule and declared later than the :hover rules, so it wins either way.
+ * ========================================================================= */
+
+/* Text entry — the ring sits outside the field's own focus border. */
+#search-input:focus-visible,
+.auth-popover input:focus-visible,
+.branch-popover-create input:focus-visible,
+.inline-input:focus-visible,
+.arg-value-edit-input:focus-visible,
+.fn-picker-search:focus-visible,
+.description-tooltip-textarea:focus-visible,
+.value-form-host:focus-visible {
+  outline: 2px solid var(--gd-flow);
+  outline-offset: 1px;
+}
+
+/* Icon/text buttons whose base rule tints :hover and :focus-visible alike. */
+.edit-type-strip:focus-visible,
+.effects-strip-edit:focus-visible,
+.type-inline-header-edit:focus-visible,
+.type-inline-header-provenance:focus-visible,
+.type-inline-promote-btn:focus-visible,
+.type-inline-usage-link:focus-visible,
+.placeholder-binder:focus-visible {
+  outline: 2px solid var(--gd-flow);
+  outline-offset: 1px;
+}
+
+/* =========================================================================
+ * REDUCED MOTION (WCAG 2.3.3 Animation from Interactions)
+ *
+ * Must stay the LAST block in the file: it overrides earlier rules at
+ * equal specificity, including the touch block above.
+ *
+ * Motion is removed, information is not. Each animation below keeps the
+ * state it was communicating and drops only the movement:
+ *   - tree-flash  → a steady wash for the 1.3s the class is applied
+ *                   (editor-sidebar.js removes it on a timer), so
+ *                   "Reveal in Explorer" still points at the row
+ *   - busy spinner → kept, only slowed: it is the progress signal
+ *                   itself, and WCAG's carve-out for loading indicators
+ *                   applies. Screen readers get the parallel
+ *                   role="status" banner from editor-busy.js
+ *   - service pending pulse → decorative attention-getter, dropped for a
+ *                   steady mid opacity; the badge's colour still encodes
+ *                   the state
+ *
+ * The JS half lives in editor-a11y.js (`prefersReducedMotion`): the
+ * rAF position tween and smooth scrollIntoView cannot be reached from
+ * CSS.
+ * ========================================================================= */
+@media (prefers-reduced-motion: reduce) {
+  /* Near-zero rather than `none`: keeps transitionend firing for any
+     future listener while being imperceptible. */
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+
+  .entity-item.gd-tree-flash {
+    animation: none;
+    background-color: var(--gd-flow-wash);
+  }
+
+  /* Progress indicators are exempt — but slow the rotation down. */
+  .editor-busy-banner::before {
+    animation-duration: 1.6s !important;
+    animation-iteration-count: infinite !important;
+  }
+
+  .service-badge-pending {
+    animation: none;
+    opacity: 0.75;
+  }
+}

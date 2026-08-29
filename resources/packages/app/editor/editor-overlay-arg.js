@@ -14,7 +14,7 @@
  * Create overlay for arg value node
  */
 function createArgOverlay(node, container) {
-  const overlay = createOverlay(node.id(), { borderRadius: '4px', fontSize: '10px' });
+  const overlay = createOverlay(node.id(), { borderRadius: '4px', fontSize: '0.625rem' });
 
   // Column-flex outer: the inline content (value text + chip +
   // trigger + badges) sits in one row, the drag handle docks BELOW

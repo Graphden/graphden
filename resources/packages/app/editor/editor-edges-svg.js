@@ -45,6 +45,11 @@ function getEdgeLayer() {
 
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.id = EDGE_LAYER_ID;
+  // Hidden from the accessibility tree: these paths carry no text and no
+  // name, so a screen reader would walk a pile of anonymous graphics.
+  // The connections they draw are conveyed on the nodes themselves (the
+  // fn cards name their arguments and their producer).
+  svg.setAttribute('aria-hidden', 'true');
   // Zero-sized with `overflow: visible` (set in CSS): the layer has no extent
   // of its own, and graph coordinates run negative in both axes.
   svg.appendChild(buildEdgeMarkers());

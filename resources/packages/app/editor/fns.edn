@@ -39,6 +39,9 @@
   {:name :_editor-script-paths
    :parent :const
    :args {:value ["packages/app/editor/editor-state.js"
+                  ;; Accessibility primitives. Early because the graph
+                  ;; tween below asks it whether it may animate at all.
+                  "packages/app/editor/editor-a11y.js"
                   ;; The graph itself: two maps and a tween. No library.
                   "packages/app/editor/editor-graph-model.js"
                   ;; Viewport (pan / zoom / gestures) — owns the two numbers the
@@ -200,6 +203,12 @@
           ;; requires every page element be inside a landmark; without
           ;; this, screen-readers see flat content with no structure.
           [:div {:id "app" :class "gd-redesign"}
+           ;; Skip link (WCAG 2.4.1) — first focusable thing on the page.
+           ;; The Explorer tree sits before the graph in the DOM and can hold
+           ;; hundreds of rows, so a keyboard user reaching the canvas would
+           ;; otherwise tab through all of them. Visually hidden until
+           ;; focused (see `.gd-skip-link` in editor-styles.css).
+           [:a {:href "#graph-container" :class "gd-skip-link"} "Skip to graph"]
            ;; TOP BAR (redesign 2026-08-15 — the rail is retired). The editor
            ;; vs everything-else split is GLOBAL now: you live on Build; the
            ;; management screens (Settings / Organization / Platform) are rare
@@ -347,7 +356,10 @@
             ;; arg rows, action buttons). `role="img"` would make a screen
             ;; reader treat it as one atomic graphic and skip every
             ;; overlay control inside (axe `nested-interactive`).
-            [:main {:id "graph-container" :aria-label "Function graph"}
+            ;; `tabindex="-1"` so the skip link above actually MOVES focus
+            ;; here; without it the browser only scrolls and focus stays
+            ;; behind in the Explorer. Not in the tab order (-1).
+            [:main {:id "graph-container" :aria-label "Function graph" :tabindex "-1"}
              [:div {:id "graph-surface" :role "group" :aria-label "Composition graph"}]
              ;; Navigation controls \u2014 group with role="toolbar" so
              ;; screen readers announce the buttons as a related set.

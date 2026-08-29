@@ -8,46 +8,56 @@
   .wrap{width:100%;max-width:400px;padding:48px 20px}
   .brand{display:flex;align-items:center;gap:10px;justify-content:center;margin-bottom:28px}
   .brand svg{width:34px;height:34px}
-  .brand b{font-size:20px;letter-spacing:.2px}
+  .brand b{font-size:1.25rem;letter-spacing:.2px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:24px}
-  h1{font-size:18px;margin:0 0 4px}
-  p.sub{color:var(--muted);margin:0 0 20px;font-size:14px}
-  label{display:block;font-size:13px;color:var(--muted);margin:14px 0 6px}
+  h1{font-size:1.125rem;margin:0 0 4px}
+  p.sub{color:var(--muted);margin:0 0 20px;font-size:0.875rem}
+  label{display:block;font-size:0.8125rem;color:var(--muted);margin:14px 0 6px}
   input[type=email],input[type=password],input[type=text]{width:100%;padding:10px 12px;
-    background:var(--ink);border:1px solid var(--line);border-radius:8px;color:var(--text);font-size:15px}
-  input:focus{outline:none;border-color:var(--accent-hi)}
-  button{cursor:pointer;font-size:15px;border-radius:8px;border:1px solid transparent}
+    background:var(--ink);border:1px solid var(--line);border-radius:8px;color:var(--text);font-size:0.9375rem}
+  /* Border-colour alone is a weak focus signal (WCAG 2.4.7) — keep it
+     for the field's own affordance and add a real ring for keyboards. */
+  input:focus{border-color:var(--accent-hi)}
+  input:focus-visible{outline:2px solid var(--accent-hi);outline-offset:2px}
+  button{cursor:pointer;font-size:0.9375rem;border-radius:8px;border:1px solid transparent}
+  button:focus-visible{outline:2px solid var(--accent-hi);outline-offset:2px}
+  a:focus-visible{outline:2px solid var(--accent-hi);outline-offset:2px}
+  /* "Forgot password?" — a button (it navigates nowhere) that reads as
+     the link it replaced. */
+  .linklike{background:none;border:0;padding:0;color:var(--accent-hi);
+    font-size:inherit;font-family:inherit;text-decoration:underline}
   .btn-primary{width:100%;margin-top:20px;padding:11px;background:var(--accent);color:#fff;font-weight:600}
   .btn-primary:hover{filter:brightness(1.1)}
   .brand svg{color:var(--accent-hi)}
   .social{display:flex;flex-direction:column;gap:10px;margin-top:16px}
   .btn-social{display:flex;align-items:center;justify-content:center;gap:10px;padding:11px;
     background:var(--ink);border:1px solid var(--line);border-radius:8px;color:var(--text);
-    text-decoration:none;font-weight:500;font-size:15px}
+    text-decoration:none;font-weight:500;font-size:0.9375rem}
   .btn-social:hover{border-color:var(--accent-hi)}
   .btn-social svg{width:18px;height:18px;flex:none}
-  .divider{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:12px;margin:20px 0}
+  .divider{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:0.75rem;margin:20px 0}
   .divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--line)}
   .tabs{display:flex;gap:4px;margin-bottom:18px;background:var(--ink);padding:4px;border-radius:8px}
   .tabs button{flex:1;padding:8px;background:transparent;color:var(--muted)}
   .tabs button.on{background:var(--panel);color:var(--text);border:1px solid var(--line)}
-  .msg{margin-top:14px;font-size:13px;min-height:18px}
+  .msg{margin-top:14px;font-size:0.8125rem;min-height:18px}
   .msg.err{color:var(--danger)} .msg.ok{color:var(--accent-hi)}
   .row{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
   .row:last-child{border-bottom:none}
   .row .prov{font-weight:600;text-transform:capitalize}
-  .row .em{color:var(--muted);font-size:13px}
+  .row .em{color:var(--muted);font-size:0.8125rem}
   .btn-ghost{padding:6px 12px;background:transparent;border:1px solid var(--line);color:var(--muted)}
   .btn-ghost:hover{border-color:var(--danger);color:var(--danger)}
   .sec{margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}
-  .sec h2{font-size:14px;margin:0 0 10px}
+  .sec h2{font-size:0.875rem;margin:0 0 10px}
   code.secret{display:block;background:var(--ink);border:1px solid var(--line);border-radius:8px;
-    padding:10px;margin:10px 0;word-break:break-all;font-size:13px;color:var(--accent-hi)}
+    padding:10px;margin:10px 0;word-break:break-all;font-size:0.8125rem;color:var(--accent-hi)}
   select{width:100%;padding:10px 12px;background:var(--ink);border:1px solid var(--line);
-    border-radius:8px;color:var(--text);font-size:15px}
-  select:focus{outline:none;border-color:var(--accent-hi)}
+    border-radius:8px;color:var(--text);font-size:0.9375rem}
+  select:focus{border-color:var(--accent-hi)}
+  select:focus-visible{outline:2px solid var(--accent-hi);outline-offset:2px}
   .scopes{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:12px 0 0}
-  .scopes label{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);
+  .scopes label{display:flex;align-items:center;gap:8px;font-size:0.8125rem;color:var(--text);
     margin:0;cursor:pointer}
   .scopes input{accent-color:var(--accent)}
   a{color:var(--accent-hi)}

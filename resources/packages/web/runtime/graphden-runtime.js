@@ -137,7 +137,7 @@ async function loadPartial(host, url, opts) {
   const loading = document.createElement('span');
   loading.className = opts.loadingClass || 'partial-loading';
   loading.style.opacity = '0.55';
-  loading.style.fontSize = '11px';
+  loading.style.fontSize = '0.6875rem';
   loading.textContent = opts.loadingText || '…';
   host.appendChild(loading);
   try {

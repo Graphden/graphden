@@ -165,7 +165,7 @@ function enterDescriptionEditMode() {
     const nameRow = document.createElement('div');
     nameRow.textContent = content.name;
     nameRow.style.fontWeight = '600';
-    nameRow.style.fontSize = '13px';
+    nameRow.style.fontSize = '0.8125rem';
     nameRow.style.marginBottom = '4px';
     el.appendChild(nameRow);
   }

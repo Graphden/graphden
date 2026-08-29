@@ -1164,7 +1164,7 @@ function scrollTreeToFn(fnId) {
   requestAnimationFrame(() => {
     const row = document.querySelector('#entity-list .entity-item[data-fn-id="' + fnId + '"]');
     if (!row) return;
-    row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    window.scrollIntoViewMotionSafe(row, { block: 'center', behavior: 'smooth' });
     row.classList.add('gd-tree-flash');
     setTimeout(() => row.classList.remove('gd-tree-flash'), 1300);
   });

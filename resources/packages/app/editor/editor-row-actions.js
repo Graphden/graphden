@@ -61,7 +61,7 @@ function ensureRowActionsPopover() {
     pointerEvents: 'auto',
     whiteSpace: 'nowrap',
     fontFamily: 'SF Mono, Monaco, monospace',
-    fontSize: '11px',
+    fontSize: '0.6875rem',
     color: 'var(--card-fg)'
   });
   // Cursor leaving the popover itself dismisses it (unless pinned).

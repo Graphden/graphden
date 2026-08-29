@@ -102,7 +102,7 @@ function createOverlay(nodeId, options = {}) {
     borderRadius: options.borderRadius || '8px',
     overflow: 'hidden',
     fontFamily: 'SF Mono, Monaco, monospace',
-    fontSize: options.fontSize || '11px',
+    fontSize: options.fontSize || '0.6875rem',
     touchAction: 'none',         // Prevent browser gestures on overlay
     userSelect: 'none',
     WebkitUserSelect: 'none'

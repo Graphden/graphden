@@ -130,7 +130,7 @@ function createOpenInNewTabButton(fn, opts) {
   // ↗ glyph reads better a hair larger than the i; we bump font-size
   // by a fixed delta from the shared --icon-font-size so touch and
   // desktop both inherit the proportional bump.
-  link.style.fontSize = 'calc(var(--icon-font-size) + 1px)';
+  link.style.fontSize = 'calc(var(--icon-font-size) + 0.0625rem)';
   link.style.pointerEvents = 'auto';
   if (opts.pinRight) {
     // Sits just left of the description badge.
@@ -185,7 +185,7 @@ function createMoreActionsTrigger(opts) {
   btn.style.cursor = 'pointer';
   btn.style.fontWeight = 'normal';
   applyActionIconBox(btn);
-  btn.style.fontSize = 'calc(var(--icon-font-size) + 1px)';
+  btn.style.fontSize = 'calc(var(--icon-font-size) + 0.0625rem)';
   btn.style.padding = '0';
   btn.style.pointerEvents = 'auto';
   btn.style.position = 'absolute';

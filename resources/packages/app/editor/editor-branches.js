@@ -1121,6 +1121,9 @@ async function waitForServerBack(deadlineMs) {
 }
 
 let _conflictsModal = null;
+// Where the keyboard was before the modal took over (the merge button in
+// the branch popover), so closing hands it back.
+let _conflictsTrigger = null;
 
 function ensureConflictsModal() {
   if (_conflictsModal) return _conflictsModal;
@@ -1132,11 +1135,28 @@ function ensureConflictsModal() {
   el.setAttribute('aria-label', 'Resolve merge conflicts');
   document.body.appendChild(el);
   _conflictsModal = el;
+  // This modal shipped with no Escape handler at all — the only ways out
+  // were the Cancel button and clicking the overlay.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || el.classList.contains('hidden')) return;
+    e.preventDefault();   // consumed — see graphden-popover.js
+    closeConflictsModal();
+  });
+  // Make the declared aria-modal="true" true.
+  installTabTrap({
+    getEl: () => _conflictsModal,
+    isVisible: () => !!_conflictsModal && !_conflictsModal.classList.contains('hidden'),
+  });
   return el;
 }
 
 function closeConflictsModal() {
-  if (_conflictsModal) _conflictsModal.classList.add('hidden');
+  if (!_conflictsModal) return;
+  const hadFocus = _conflictsModal.contains(document.activeElement);
+  _conflictsModal.classList.add('hidden');
+  setSiblingsInert(_conflictsModal, false);
+  if (hadFocus) returnFocusTo(_conflictsTrigger);
+  _conflictsTrigger = null;
 }
 
 // The resolution card (header + help + batch toolbar + per-conflict
@@ -1150,6 +1170,7 @@ function closeConflictsModal() {
 // merge response — its `conflicts` array is what we render.
 async function showMergeConflictsModal(body, sourceName, targetName) {
   const modal = ensureConflictsModal();
+  _conflictsTrigger = document.activeElement;
   // Build fully, THEN reveal. The modal is read the instant it becomes
   // visible (a user tabbing in — and the e2e — expect the rows to be
   // there), so `.hidden` stays on until the server-rendered card is
@@ -1207,6 +1228,8 @@ async function showMergeConflictsModal(body, sourceName, targetName) {
   if (pickTgt) pickTgt.addEventListener('click', () => pickAll('target'));
 
   modal.classList.remove('hidden');
+  setSiblingsInert(modal, true);
+  focusIntoDialog(modal);
 }
 
 // Read each rendered row's `data-entity-*` + checked radio into the

@@ -81,6 +81,7 @@ installPopoverDismiss({
   getAnchor: () => effectExplainerAnchor,
   isVisible: effectExplainerVisible,
   onDismiss: hideEffectExplainer,
+  getReturnFocus: () => effectExplainerAnchor,
 });
 
 window.showEffectExplainer = showEffectExplainer;

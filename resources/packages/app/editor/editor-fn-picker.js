@@ -33,11 +33,24 @@
 let fnPickerEl = null;
 let fnPickerOutsideHandler = null;
 let fnPickerEscHandler = null;
+// The control the picker was opened from (an arg row, a parent chip). Every
+// caller already passes it as opts.anchorEl; keeping it here lets close()
+// hand the keyboard back however the picker was dismissed.
+let fnPickerAnchor = null;
+
+// Installed once — reads the live element and is inert while closed.
+installTabTrap({
+  getEl: () => fnPickerEl,
+  isVisible: () => !!fnPickerEl,
+});
 
 function closeFnPicker() {
   if (fnPickerEl) {
+    const hadFocus = fnPickerEl.contains(document.activeElement);
     fnPickerEl.remove();
     fnPickerEl = null;
+    if (hadFocus) returnFocusTo(fnPickerAnchor);
+    fnPickerAnchor = null;
   }
   if (fnPickerOutsideHandler) {
     document.removeEventListener('pointerdown', fnPickerOutsideHandler);
@@ -70,6 +83,7 @@ function fnRichInfo(f) {
 function openFnPicker(opts) {
   closeFnPicker();
   if (!opts?.anchorEl) return;
+  fnPickerAnchor = opts.anchorEl;
   if (!graphData || !Array.isArray(graphData.fns)) return;
 
   const excludeSet = new Set(opts.excludeIds || []);

@@ -11,6 +11,9 @@
 // hiccup itself lives in `app.editor` fn-defs.
 
 let _branchDiffModal = null;
+// The control that opened the modal, so Escape / × can hand the keyboard
+// back to it instead of dropping focus on the document.
+let _branchDiffTrigger = null;
 
 function ensureBranchDiffModal() {
   if (_branchDiffModal) return _branchDiffModal;
@@ -28,11 +31,22 @@ function ensureBranchDiffModal() {
       closeBranchDiffModal();
     }
   });
+  // It declares aria-modal="true"; make that true — Tab stays inside and the
+  // rest of the page is hidden from assistive tech while it is up.
+  installTabTrap({
+    getEl: () => _branchDiffModal,
+    isVisible: () => !!_branchDiffModal && !_branchDiffModal.classList.contains('hidden'),
+  });
   return el;
 }
 
 function closeBranchDiffModal() {
-  if (_branchDiffModal) _branchDiffModal.classList.add('hidden');
+  if (!_branchDiffModal) return;
+  const hadFocus = _branchDiffModal.contains(document.activeElement);
+  _branchDiffModal.classList.add('hidden');
+  setSiblingsInert(_branchDiffModal, false);
+  if (hadFocus) returnFocusTo(_branchDiffTrigger);
+  _branchDiffTrigger = null;
 }
 
 function escapeText(s) {
@@ -44,7 +58,10 @@ function escapeText(s) {
 async function showBranchDiff(targetName, sourceName) {
   if (!targetName || !sourceName) return;
   const modal = ensureBranchDiffModal();
+  // Remember where the keyboard was before the modal took over.
+  _branchDiffTrigger = document.activeElement;
   modal.classList.remove('hidden');
+  setSiblingsInert(modal, true);
   modal.innerHTML =
     '<div class="branch-diff-overlay"></div>'
     + '<div class="branch-diff-card">'
@@ -59,6 +76,9 @@ async function showBranchDiff(targetName, sourceName) {
     .addEventListener('click', closeBranchDiffModal);
   modal.querySelector('.branch-diff-close')
     .addEventListener('click', closeBranchDiffModal);
+  // Focus lands on Close: the diff body is still loading, and Close is the
+  // one control that exists whichever way the fetch turns out.
+  focusIntoDialog(modal);
 
   const body = modal.querySelector('.branch-diff-body');
   try {

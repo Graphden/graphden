@@ -120,10 +120,26 @@ async function _fbBuildContext(include) {
 // THE FORM POPOVER
 // ============================================================================
 
+// Where the keyboard was before the form opened (the account menu item or
+// the Errors-panel footer button).
+let _fbTrigger = null;
+
+// Installed once — it reads the live backdrop each keystroke and is inert
+// while the form is closed. Per-open installation would leak a document
+// listener on every open.
+installTabTrap({
+  getEl: () => document.getElementById('feedback-backdrop'),
+  isVisible: () => !!document.getElementById('feedback-backdrop'),
+});
+
 function closeFeedbackForm() {
   const el = document.getElementById('feedback-backdrop');
+  const hadFocus = !!el && el.contains(document.activeElement);
+  if (el) setSiblingsInert(el, false);
   if (el) el.remove();
   document.removeEventListener('keydown', _fbEscHandler, true);
+  if (hadFocus) returnFocusTo(_fbTrigger);
+  _fbTrigger = null;
 }
 
 function _fbEscHandler(e) {
@@ -158,6 +174,7 @@ function openFeedbackForm(opts = {}) {
     return;
   }
   closeFeedbackForm();
+  _fbTrigger = document.activeElement;
 
   const backdrop = document.createElement('div');
   backdrop.id = 'feedback-backdrop';
@@ -168,6 +185,7 @@ function openFeedbackForm(opts = {}) {
   const card = document.createElement('div');
   card.className = 'feedback-popover';
   card.setAttribute('role', 'dialog');
+  card.setAttribute('aria-modal', 'true');
   card.setAttribute('aria-label', 'Report a problem');
 
   const title = document.createElement('div');
@@ -290,6 +308,7 @@ function openFeedbackForm(opts = {}) {
 
   backdrop.appendChild(card);
   document.body.appendChild(backdrop);
+  setSiblingsInert(backdrop, true);
   document.addEventListener('keydown', _fbEscHandler, true);
   text.focus();
 }

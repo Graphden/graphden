@@ -184,7 +184,7 @@ function graphAnimateNodes(targets, durationMs, onFrame, easing = easeOutCubic) 
   // Reduced motion: land every node on its destination in one frame.
   // The layout still changes — only the travel between the two states
   // is dropped, which is exactly what the preference asks for.
-  if (window.prefersReducedMotion && window.prefersReducedMotion()) {
+  if (window.prefersReducedMotion?.()) {
     for (const m of moving) {
       m.node.x = m.to.x;
       m.node.y = m.to.y;

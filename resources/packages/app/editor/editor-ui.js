@@ -57,6 +57,14 @@ function selectFn(fnId, updateHistory = true) {
     window.history.pushState(null, '', '#' + getQualifiedFnName(fn));
   }
 
+  // Selecting a fn rebuilds the canvas AND the inspector without moving
+  // focus, so a screen reader gets no signal that the entire working context
+  // just changed. Polite: it follows a deliberate user action, it is not an
+  // interruption.
+  if (fn && typeof window.gdAnnounce === 'function') {
+    window.gdAnnounce(getQualifiedFnName(fn) + ' selected');
+  }
+
   renderGraph(true);
 }
 

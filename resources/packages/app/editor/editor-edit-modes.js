@@ -29,11 +29,23 @@
 // must not stream keystrokes); server-owned forms mount via /api/value-form.
 let inlineEditEl = null;
 let inlineEditOutsideHandler = null;
+// The row/chip the editor was opened from, so dismissing hands the keyboard
+// back to it rather than dropping focus on the document.
+let inlineEditAnchor = null;
+
+// Installed once — reads the live element, inert while closed.
+installTabTrap({
+  getEl: () => inlineEditEl,
+  isVisible: () => !!inlineEditEl,
+});
 
 function closeInlineEdit() {
   if (inlineEditEl) {
+    const hadFocus = inlineEditEl.contains(document.activeElement);
     inlineEditEl.remove();
     inlineEditEl = null;
+    if (hadFocus) returnFocusTo(inlineEditAnchor);
+    inlineEditAnchor = null;
   }
   if (inlineEditOutsideHandler) {
     document.removeEventListener('pointerdown', inlineEditOutsideHandler);
@@ -47,6 +59,7 @@ function closeInlineEdit() {
 // focus it and listen for Enter/Escape.
 function openInlineEditPopover(opts) {
   closeInlineEdit();
+  inlineEditAnchor = opts?.anchorEl || null;
 
   const el = document.createElement('div');
   el.className = 'arg-value-edit-popover';

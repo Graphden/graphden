@@ -61,10 +61,17 @@ function _traceStep(delta) {
 }
 
 
+let _traceViewTrigger = null;
+
 function closeTraceView() {
   if (_traceViewPanelEl) {
+    const hadFocus = _traceViewPanelEl.contains(document.activeElement);
     _traceViewPanelEl.remove();
     _traceViewPanelEl = null;
+    // Both entry points (the Debug panel and the run history) are buttons in
+    // a list the user was working through — put them back where they were.
+    if (hadFocus) returnFocusTo(_traceViewTrigger);
+    _traceViewTrigger = null;
   }
   _traceHighlightCanvas(null);
   document.removeEventListener('keydown', _traceViewOnKey);
@@ -113,7 +120,11 @@ function _bindTraceViewActions(panel) {
 
 async function openTraceView(execId) {
   if (!execId) return;
+  // Captured before the panel is built. Taken from the live focus rather
+  // than an argument so both callers get it without a signature change.
+  const trigger = document.activeElement;
   closeTraceView();
+  _traceViewTrigger = trigger;
   const panel = document.createElement('aside');
   panel.className = 'trace-view-panel';
   panel.setAttribute('role', 'dialog');

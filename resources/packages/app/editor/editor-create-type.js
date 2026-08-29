@@ -41,6 +41,10 @@ installPopoverDismiss({
   getAnchor: () => typeCreateContext?.anchorEl,
   isVisible: () => !!typeCreatePopoverEl && typeCreatePopoverEl.style.display !== 'none',
   onDismiss: hideTypeCreatePopover,
+  // A create form: Tab belongs inside it, and Escape hands the keyboard
+  // back to the `+` that opened it.
+  trapFocus: true,
+  getReturnFocus: () => typeCreateContext?.anchorEl,
 });
 
 function ensureTypeCreatePopover() {

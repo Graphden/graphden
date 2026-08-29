@@ -218,6 +218,10 @@ installPopoverDismiss({
   getAnchor: () => provenancePopoverAnchor,
   isVisible: provenancePopoverVisible,
   onDismiss: hideProvenancePopover,
+  // Through locateLiveProvenanceAnchor: the overlay this popover was
+  // opened from is rebuilt while it is open, and the remembered node is
+  // detached by then — focusing it would drop focus on the document.
+  getReturnFocus: () => locateLiveProvenanceAnchor(provenancePopoverAnchor),
 });
 
 window.showProvenancePopover = showProvenancePopover;

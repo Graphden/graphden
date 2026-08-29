@@ -354,4 +354,6 @@ installPopoverDismiss({
   getAnchor: () => valueViewerAnchor,
   isVisible: () => !!valueViewerEl && valueViewerEl.classList.contains('visible'),
   onDismiss: hideValueViewer,
+  trapFocus: true,
+  getReturnFocus: () => valueViewerAnchor,
 });

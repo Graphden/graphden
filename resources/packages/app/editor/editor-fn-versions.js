@@ -34,6 +34,8 @@ function ensureFnVersionsPopover() {
       isVisible: () => _fnVersionsPopover
         && !_fnVersionsPopover.classList.contains('hidden'),
       onDismiss: closeFnVersionsPopover,
+      trapFocus: true,
+      getReturnFocus: () => _fnVersionsAnchor,
     });
   }
   return el;

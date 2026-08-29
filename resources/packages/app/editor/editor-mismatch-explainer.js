@@ -134,6 +134,7 @@ installPopoverDismiss({
   getAnchor: () => mismatchExplainerAnchor,
   isVisible: () => !!mismatchExplainerEl && mismatchExplainerEl.classList.contains('visible'),
   onDismiss: hideMismatchExplainer,
+  getReturnFocus: () => mismatchExplainerAnchor,
 });
 
 window.showMismatchExplainer = showMismatchExplainer;

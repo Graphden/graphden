@@ -567,6 +567,8 @@ installPopoverDismiss({
   getAnchor: () => servicePopoverAnchor,
   isVisible: servicePopoverVisible,
   onDismiss: hideServicePopover,
+  trapFocus: true,
+  getReturnFocus: () => servicePopoverAnchor,
 });
 
 

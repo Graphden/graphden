@@ -9,11 +9,20 @@
 let nsPickerEl = null;
 let nsPickerOutsideHandler = null;
 let nsPickerEscHandler = null;
+let nsPickerAnchor = null;
+
+installTabTrap({
+  getEl: () => nsPickerEl,
+  isVisible: () => !!nsPickerEl,
+});
 
 function closeNamespacePicker() {
   if (nsPickerEl) {
+    const hadFocus = nsPickerEl.contains(document.activeElement);
     nsPickerEl.remove();
     nsPickerEl = null;
+    if (hadFocus) returnFocusTo(nsPickerAnchor);
+    nsPickerAnchor = null;
   }
   if (nsPickerOutsideHandler) {
     document.removeEventListener('pointerdown', nsPickerOutsideHandler);
@@ -32,6 +41,7 @@ function closeNamespacePicker() {
 function openNamespacePicker(opts) {
   closeNamespacePicker();
   if (!opts?.anchorEl) return;
+  nsPickerAnchor = opts.anchorEl;
   if (!graphData || !Array.isArray(graphData.namespaces)) return;
 
   // Build path strings for every namespace (walk parent-id chain).

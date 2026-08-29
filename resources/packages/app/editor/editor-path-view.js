@@ -139,6 +139,7 @@ function _showPathValuePopover(anchorEl, fnName, agg) {
       isVisible: () => !!_pathValuePopoverEl
                        && _pathValuePopoverEl.style.display !== 'none',
       onDismiss: _hidePathValuePopover,
+      getReturnFocus: () => _pathValuePopoverAnchor,
     });
   }
   const el = _pathValuePopoverEl;

@@ -187,11 +187,21 @@ function buildSecretRowActions(actionsEl, fn) {
 // ============================================================================
 
 let _activePopover = null;
+// The element that opened the current popover. Tracked separately from
+// `getAnchor` below, which deliberately points at the namespace PICKER
+// rather than the trigger — returning focus there would land the user in
+// a different popover.
+let _activePopoverTrigger = null;
 
 function closeActivePopover() {
   if (_activePopover) {
+    const inside = _activePopover.contains(document.activeElement);
     try { _activePopover.remove(); } catch (_) {}
     _activePopover = null;
+    // Only reclaim focus if it was inside the form we just removed;
+    // otherwise the user has already clicked elsewhere.
+    if (inside) returnFocusTo(_activePopoverTrigger);
+    _activePopoverTrigger = null;
   }
 }
 
@@ -210,11 +220,16 @@ installPopoverDismiss({
   // open picker as part of the popover for dismissal.
   getAnchor: () => document.querySelector('.fn-picker-popover'),
   isVisible: () => _activePopover != null,
-  onDismiss: closeActivePopover
+  onDismiss: closeActivePopover,
+  // Secret name / value entry — keep Tab in the form. Focus return is
+  // handled by closeActivePopover (which also covers the Save path), not
+  // by getReturnFocus, since getAnchor here is not the trigger.
+  trapFocus: true
 });
 
 async function openCreateSecretForm(anchor) {
   closeActivePopover();
+  _activePopoverTrigger = anchor || null;
   const pop = document.createElement('div');
   pop.className = 'popover secrets-popover';
   pop.dataset.popover = 'create-secret';
@@ -334,6 +349,7 @@ async function openCreateSecretForm(anchor) {
 
 async function openRotateSecretForm(anchor, secret) {
   closeActivePopover();
+  _activePopoverTrigger = anchor || null;
   const pop = document.createElement('div');
   pop.className = 'popover secrets-popover';
   pop.dataset.popover = 'rotate-secret';

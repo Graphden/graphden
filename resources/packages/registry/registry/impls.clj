@@ -469,18 +469,23 @@
     (cond-> {} (seq (str token)) (assoc "Authorization" (str "Bearer " token)))))
 
 
-(defn- resolve-remote-version
+(defbase resolve-remote-version
   "Resolve `spec` (nil/\"latest\"/\"*\" or a semver constraint) to a CONCRETE
-   published version of `pkg-name` on the remote registry `base`, by fetching
-   its version list and picking the highest that satisfies the constraint.
-   Returns the concrete version string, or nil when nothing matches / the
-   list is unreachable. Concrete specs pass straight through without a list
-   fetch."
-  [base pkg-name spec]
+   published version of `pkg-name` on the remote registry `source` — the
+   REMOTE twin of `resolve-package-version`, graph-visible so the install
+   worklist composes resolve → mirror as two named steps (a lockfile pin /
+   prefer-stable strategy is a graph edit, not a Clojure one). Fetches the
+   remote's version list and picks the highest satisfying version. Returns
+   the concrete version string, or nil when nothing matches / the list is
+   unreachable. Concrete specs pass straight through without a dial."
+  [source pkg-name spec]
+  (cr/record-effect! :network)
+  (cr/record-effect! :env)
   (if (and spec (not (contains? #{"" "latest" "*"} (str spec)))
            (not (re-find #"[*><~^ ]" (str spec))))
     spec
-    (let [constraint (if (contains? #{nil "" "latest"} (some-> spec str)) "*" (str spec))
+    (let [base (str/replace (str source) #"/+$" "")
+          constraint (if (contains? #{nil "" "latest"} (some-> spec str)) "*" (str spec))
           list-url (str base "/api/packages")
           ;; SSRF guard: `base` is caller-supplied (POST /api/packages/install
           ;; body). In a RESTRICTED (tenant/cloud) execution — `*allowed-effects*`
@@ -503,25 +508,25 @@
 
 
 (defbase mirror-remote-package!
-  "Fetch `(pkg-name, spec)` from the REMOTE registry `source` and store it
-   as a local `:package-version` row. Idempotent: an existing
-   `(name, version)` row wins. Transport is the fetch route's EDN face
-   (`?format=edn` — the JSON face stringifies fn-def keywords). `spec` may
-   be a CONCRETE version OR a constraint (`nil` / `\"latest\"` / a semver
-   range): a non-concrete spec is resolved against the remote's version
-   list first (`resolve-remote-version`). The bearer comes from
+  "Fetch the CONCRETE `(pkg-name, version)` from the REMOTE registry
+   `source` and store it as a local `:package-version` row. Idempotent: an
+   existing `(name, version)` row wins. Transport is the fetch route's EDN
+   face (`?format=edn` — the JSON face stringifies fn-def keywords).
+   Constraint → concrete resolution is the SEPARATE `resolve-remote-version`
+   base-fn, composed graph-side by the install worklist (a nil version here
+   answers the same `{:error \"remote-version-not-found\"}` as data — the
+   boundary check, not the resolution). The bearer comes from
    `GRAPHDEN_REGISTRY_TOKEN` (the caller's account token on the remote —
    a public package needs any valid account there). Errors ride as data
    (`{:error …}`) so the install worklist can wrap them."
-  [source pkg-name spec]
+  [source pkg-name version]
   (cr/record-effect! :network)
   (cr/record-effect! :db)
   (cr/record-effect! :env)
-  (let [base (str/replace (str source) #"/+$" "")
-        concrete (resolve-remote-version base pkg-name spec)]
-    (if (nil? concrete)
+  (let [base (str/replace (str source) #"/+$" "")]
+    (if (nil? version)
       {:error "remote-version-not-found" :name pkg-name}
-      (let [url (str base "/api/packages/" pkg-name "/" concrete "?format=edn")
+      (let [url (str base "/api/packages/" pkg-name "/" version "?format=edn")
             ;; SSRF guard on the concrete-spec path too (resolve-remote-version
             ;; passes concrete specs straight through without a list fetch, so
             ;; this is the only check for a pinned `?format=edn` fetch). Only in
@@ -542,11 +547,11 @@
                          (catch Exception _ ::unreadable))]
             (cond
               (= ::unreadable row) {:error "remote-bundle-unreadable" :source base}
-              (nil? row) {:error "remote-not-found" :name pkg-name :version concrete}
+              (nil? row) {:error "remote-not-found" :name pkg-name :version version}
               :else
               (let [storage (request/require-storage ctx)]
                 (when-not (seq (sp/query-entities storage :package-version
-                                                  {:name pkg-name :version concrete}))
+                                                  {:name pkg-name :version version}))
                   (sp/create-entity storage :package-version
                                     (-> row
                                         (select-keys [:name :version :ns-root :fns
@@ -557,7 +562,7 @@
                                                ;; re-published as public here
                                                :public? false
                                                :published-at (java.time.Instant/now)))))
-                {:mirrored (str pkg-name) :version (str concrete) :from base}))))))))
+                {:mirrored (str pkg-name) :version (str version) :from base}))))))))
 
 
 ;; ---------------------------------------------------------------------------
@@ -756,6 +761,7 @@
    :publish-package-apply publish-package-apply
    :withdraw-package-apply withdraw-package-apply
    :resolve-package-version resolve-package-version
+   :resolve-remote-version resolve-remote-version
    :missing-package-dependencies missing-package-dependencies
    :package-version-materialized? package-version-materialized?
    :version-qualified-ns version-qualified-ns-fn

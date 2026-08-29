@@ -30,6 +30,7 @@
 ;; so reach the private `resolve-remote-version` by load-file + ns-resolve —
 ;; the house pattern (see effect_trace_test).
 (def ^:private registry-resolve-remote-version
+  ;; A defbase now (graph-visible resolve step) — 2-arity (args-map, ctx).
   (let [r (io/resource "packages/registry/registry/impls.clj")]
     (when r (load-file (java.io.File/.getPath (io/file r))))
     (ns-resolve (find-ns 'graphden.packages.app.registry.impls)
@@ -354,27 +355,31 @@
     (binding [cr/*allowed-effects* #{:network}]
       (is (thrown-with-msg?
             clojure.lang.ExceptionInfo #"(?i)egress"
-            (registry-resolve-remote-version "http://169.254.169.254" "acme.x" "latest"))
+            (registry-resolve-remote-version
+              {:source "http://169.254.169.254" :pkg-name "acme.x" :spec "latest"}
+              {}))
           "link-local source → :egress/blocked before any dial")))
   (testing "unrestricted ctx does NOT egress-block (self-host localhost hub)"
     ;; *allowed-effects* nil → no egress check; resolve reaches the dial and
     ;; returns nil (nothing listening) rather than throwing :egress/blocked.
-    (is (nil? (registry-resolve-remote-version "http://127.0.0.1:1" "acme.x" "latest"))
+    (is (nil? (registry-resolve-remote-version
+                {:source "http://127.0.0.1:1" :pkg-name "acme.x" :spec "latest"}
+                {}))
         "loopback allowed in the unrestricted path (returns nil, not blocked)"))
   (testing "the CONCRETE-spec mirror path is guarded too (its own check-target!)"
-    ;; A concrete version skips resolve-remote-version's list dial, so
+    ;; The mirror path dials with an already-concrete version, so
     ;; mirror-remote-package!'s own guard is the ONLY one on that path —
     ;; a link-local source must still be blocked before the pinned fetch.
     (binding [cr/*allowed-effects* #{:network :db :env}]
       (is (thrown-with-msg?
             clojure.lang.ExceptionInfo #"(?i)egress"
             (registry-mirror-remote-package
-              {:source "http://169.254.169.254" :pkg-name "acme.x" :spec "1.0.0"}
+              {:source "http://169.254.169.254" :pkg-name "acme.x" :version "1.0.0"}
               {}))
           "concrete-spec mirror → :egress/blocked before the pinned dial")))
   (testing "unrestricted ctx does NOT block the concrete mirror path either"
     (let [r (registry-mirror-remote-package
-              {:source "http://127.0.0.1:1" :pkg-name "acme.x" :spec "1.0.0"}
+              {:source "http://127.0.0.1:1" :pkg-name "acme.x" :version "1.0.0"}
               {})]
       (is (= "remote-unreachable" (:error r))
           "loopback allowed unrestricted → reaches the dial, fails as data not :egress"))))

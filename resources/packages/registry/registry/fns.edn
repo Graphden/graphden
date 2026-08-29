@@ -1032,11 +1032,27 @@
                     :args {:value {:as :source :type :nullable-text}}}
                    {:parent :not :args {:value :_inst-op-mirrored?}}]}}
 
-  {:name :_inst-mirror-fetched
-   :parent :mirror-remote-package!
+  ;; Resolve → mirror as two NAMED graph steps (the remote twin of the
+  ;; local :resolve-package-version step this worklist already exposes).
+  ;; A nil resolution answers the same error-as-data shape the fused
+  ;; impl used to emit, so the worklist wrapping downstream is unchanged.
+  {:name :_inst-remote-version
+   :parent :resolve-remote-version
    :args {:source {:as :source :type :nullable-text}
           :pkg-name {:ref :_inst-op-name :type :text}
           :spec {:ref :_inst-op-spec :type :nullable-text}}}
+
+  {:name :_inst-mirror-fetched
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_inst-remote-version}}
+          :then {:parent :mirror-remote-package!
+                 :args {:source {:as :source :type :nullable-text}
+                        :pkg-name {:ref :_inst-op-name :type :text}
+                        :version :_inst-remote-version}}
+          :else {:parent :zipmap
+                 :args {:keys [{:value :error} {:value :name}]
+                        :vals [{:value "remote-version-not-found"}
+                               {:ref :_inst-op-name :type :text}]}}}}
 
   {:name :_inst-mirrored-op
    :parent :assoc
@@ -2449,11 +2465,19 @@
    :return-type :keyword-map
    :effects #{:db}}
 
-  {:name :mirror-remote-package!
-   :description "Fetch (pkg-name, spec) from the REMOTE registry `source` (?format=edn face; bearer from GRAPHDEN_REGISTRY_TOKEN) and store it as a local :package-version row — idempotent, never public. spec must be a CONCRETE version. Errors ride as data ({:error ...}) so the install worklist wraps them."
+  {:name :resolve-remote-version
+   :description "Resolve a spec (nil/latest/* or a semver constraint) to a CONCRETE published version of `pkg-name` on the REMOTE registry `source` — the remote twin of :resolve-package-version, so the install worklist composes resolve → mirror as two named graph steps. Concrete specs pass through without a dial. nil when nothing matches / the remote list is unreachable. Egress-guarded in restricted executions."
    :args {:source {:type :nullable-text :description "Remote registry base URL, e.g. https://graphden.dev."}
           :pkg-name {:type :text :description "Package name."}
-          :spec {:type :nullable-text :description "CONCRETE version (constraints are rejected as data)."}}
+          :spec {:type :nullable-text :description "nil / \"latest\" / \"*\" / a semver constraint / a concrete version."}}
+   :return-type :nullable-text
+   :effects #{:network :env}}
+
+  {:name :mirror-remote-package!
+   :description "Fetch the CONCRETE (pkg-name, version) from the REMOTE registry `source` (?format=edn face; bearer from GRAPHDEN_REGISTRY_TOKEN) and store it as a local :package-version row — idempotent, never public. Constraint resolution is :resolve-remote-version, composed graph-side by the install worklist. Errors ride as data ({:error ...}) so the worklist wraps them."
+   :args {:source {:type :nullable-text :description "Remote registry base URL, e.g. https://graphden.dev."}
+          :pkg-name {:type :text :description "Package name."}
+          :version {:type :nullable-text :description "CONCRETE version; nil answers {:error \"remote-version-not-found\"} as data."}}
    :return-type :keyword-map
    :effects #{:network :db :env}}
 

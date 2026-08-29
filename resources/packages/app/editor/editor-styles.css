@@ -1420,8 +1420,9 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   /* Each row must occupy one full text-line slot even when the content is
      empty — e.g. the top row of an anonymous fn keeps its black "no own name"
      band instead of collapsing. With global box-sizing: border-box the
-     min-height must include vertical padding (4+4) + line-height (13) = 21. */
-  min-height: 21px;
+     min-height must include vertical padding (4+4) + line-height (13) = 21,
+     expressed in rem so it tracks the (rem) line-height above it. */
+  min-height: 1.3125rem;
   line-height: 0.8125rem;
   transition: color 0.1s, font-weight 0.1s;
 }
@@ -3225,7 +3226,7 @@ textarea.value-form-hiccup {
   pointer-events: auto;
 }
 .nav-btn {
-  width: 28px; height: 28px;
+  width: 1.75rem; height: 1.75rem;
   border: 1px solid var(--input-border); border-radius: 4px;
   background: var(--bg); color: var(--fg);
   font-size: 1.5rem; cursor: pointer;
@@ -4284,7 +4285,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   position: absolute;
   left: 2px; top: 50%;
   transform: translateY(-50%);
-  width: 8px; height: 8px;
+  width: 0.5rem; height: 0.5rem;
   font-size: 0.5625rem; line-height: 1;
   display: inline-flex; align-items: center; justify-content: center;
   user-select: none;
@@ -5412,7 +5413,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  height: 32px;
+  min-height: 2rem;
   padding: 0 11px;
   border: 1px solid var(--gd-line-2);
   border-radius: 8px;
@@ -5459,7 +5460,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border-color: var(--gd-flow);
   color: var(--on-accent);
 }
-#gd-exp-ctx .gd-ctx-chip { height: 28px; padding: 0 10px; font-size: 0.75rem; }
+#gd-exp-ctx .gd-ctx-chip { min-height: 1.75rem; padding: 0 10px; font-size: 0.75rem; }
 #gd-exp-ctx #branch-mount { display: flex; align-items: center; }
 /* Collapsed-state branch badge on the left-edge expand tab: only rendered
    (by editor-branches.js) when the branch is NON-default — on main the tab

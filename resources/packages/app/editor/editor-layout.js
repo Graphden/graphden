@@ -167,6 +167,29 @@ function metadataStripsHeight(nodeData) {
   return total;
 }
 
+/**
+ * How far the user's text has been scaled away from the base the numbers
+ * in this file were calibrated against.
+ *
+ * Every estimate here is in px measured against the editor's base
+ * typography ("11px font", "SF Mono 9px ≈ 6px per char", …) at a 16px
+ * root. Those sizes are rem now, so raising the browser's font-size
+ * grows the rendered text while a raw px estimate stays put — names and
+ * type-chips then truncate far earlier than intended, which defeats the
+ * point of scaling the text up in the first place.
+ *
+ * Returns exactly 1 at the default root size, so the geometry is
+ * unchanged for everyone who has not touched the setting.
+ */
+function typographyScale() {
+  try {
+    const px = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    return Number.isFinite(px) && px > 0 ? px / 16 : 1;
+  } catch (_) {
+    return 1;
+  }
+}
+
 function calculateNodeSize(nodeData) {
   const label = nodeData.label || '';
   const type = nodeData.type;
@@ -189,9 +212,10 @@ function calculateNodeSize(nodeData) {
     // DRAG_HANDLE_HEIGHT.
     const chipBudget = 38;     // `int` / `text` / `bool` etc.
     const triggerBudget = 14;  // `▸/▾` trigger
+    const argScale = typographyScale();
     return {
-      width: Math.max(40, effectiveLen * 6 + 16 + chipBudget + triggerBudget),
-      height: 22 + DRAG_HANDLE_HEIGHT  // content (padding 4+4 + line 14) + drag handle
+      width: Math.round(Math.max(40, effectiveLen * 6 + 16 + chipBudget + triggerBudget) * argScale),
+      height: Math.round((22 + DRAG_HANDLE_HEIGHT) * argScale)  // content (padding 4+4 + line 14) + drag handle
     };
   } else {
     // Both fn and placeholder use fn-overlay rendering with potential MI rows.
@@ -236,7 +260,8 @@ function calculateNodeSize(nodeData) {
                             computeFnOverlayHeight(label, width)
                             + useSiteRow
                             + stripsExtra);
-    return { width, height };
+    const fnScale = typographyScale();
+    return { width: Math.round(width * fnScale), height: Math.round(height * fnScale) };
   }
 }
 
@@ -387,7 +412,8 @@ async function fetchBackendLayout() {
             if (!e.data.sourceNextArgId) chipOverhead += SEQ_BTN_WIDTH; // tail +
           }
         }
-        const labelWidth = widestLine * CHAR_WIDTH + LABEL_PADDING + chipOverhead;
+        const labelWidth = (widestLine * CHAR_WIDTH + LABEL_PADDING + chipOverhead)
+                         * typographyScale();
         const currentGap = colGaps.get(labelCol) || GRID_GAP_X;
         colGaps.set(labelCol, Math.max(currentGap, labelWidth));
       }

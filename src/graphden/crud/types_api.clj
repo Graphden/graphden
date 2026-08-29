@@ -128,6 +128,15 @@
       :else (record-types/type-row-role fn-row has-slots?))))
 
 
+(def type-lens-roles
+  "Roles the editor classifies as a TYPE — the server twin of the
+   sidebar lens's `TYPE_ROLES` (editor-sidebar.js); keep the two in
+   sync. Includes `:primitive`: a slot-less refine-less named row IS
+   an empty type-row (what Create-type produces before its first
+   field), and the lens shows it as one."
+  #{:refinement :list :union :variant :record :fn-type :primitive})
+
+
 (defn type-name-kinds
   "Sorted vec of `{:name :kind}` rows for the editor's type-name
    datalist: every NAMED type-row (kind via `compute-fn-role`) plus
@@ -138,7 +147,10 @@
   (let [{:keys [fns fn-slots]} (cached-or-load-graph ctx)
         slotted (into #{} (map :fn-id) fn-slots)
         rich-snapshot (registry/rich-types-snapshot)
-        type-row-roles #{:refinement :list :union :variant :record :fn-type}
+        ;; No :primitive here — the datalist appends the BARE primitives
+        ;; (`types/primitives`) below; a primitive-ROLE graph row is an
+        ;; empty type-row a user hasn't finished, noise in a picker.
+        type-row-roles (disj type-lens-roles :primitive)
         rows (keep (fn [f]
                      (when (:name f)
                        (let [role (compute-fn-role f

@@ -365,7 +365,8 @@
         b1 (java.util.UUID/randomUUID)
         anon (java.util.UUID/randomUUID)
         r1 (java.util.UUID/randomUUID)
-        child (java.util.UUID/randomUUID)]
+        child (java.util.UUID/randomUUID)
+        bcomp (java.util.UUID/randomUUID)]
     (sp/create-entity storage :ns {:id ns-a :name "alpha"})
     (sp/create-entity storage :ns {:id ns-b :name "beta"})
     ;; two named fns in ns-a, one in ns-b, one ANONYMOUS in ns-a (must be
@@ -379,6 +380,9 @@
     ;; ref binding pointing at a2 — so the reverse-ref counts on a1/a2 are
     ;; non-zero. Kept in the root bucket so ns-a / ns-b counts stay clean.
     (sp/create-entity storage :fn {:id child :name "child-of-a1" :parent-ids [a1]})
+    ;; A named COMPOSED fn in ns-b — the one row here the types lens must
+    ;; NOT count (`:type-count` below): non-empty parent-ids → :composed.
+    (sp/create-entity storage :fn {:id bcomp :name "beta-composed" :namespace-id ns-b :parent-ids [b1]})
     (let [slot (setup/create-slot! storage "sfi-ref-slot" :int)]
       (sp/create-entity storage :binding
                         {:fn-id child :slot-id (:id slot)
@@ -391,15 +395,25 @@
         (let [dump (entities/list-all-graph-entities c :tree)]
           (is (= #{:namespaces :counts} (set (keys dump)))
               ":tree payload is exactly {:namespaces :counts}")
-          (let [count-by (into {} (map (juxt :namespace-id :count)) (:counts dump))]
+          (let [count-by (into {} (map (juxt :namespace-id :count)) (:counts dump))
+                types-by (into {} (map (juxt :namespace-id :type-count)) (:counts dump))]
             (is (= 2 (get count-by ns-a))
                 "ns-a counts its 2 NAMED fns; the anonymous one is excluded")
-            (is (= 1 (get count-by ns-b)))
+            (is (= 2 (get count-by ns-b)))
             ;; The nil bucket also holds the 14 seeded primitive fn-rows, so
             ;; assert presence + that r1 lifted the count, not an exact value.
             (is (contains? count-by nil)
                 "the namespace-less bucket is present in :counts")
-            (is (pos? (get count-by nil))))))
+            (is (pos? (get count-by nil)))
+            ;; :type-count — the types-lens payload. Parent-less slot-less
+            ;; named rows classify :primitive (empty type-rows), composed
+            ;; fns are excluded.
+            (is (= 2 (get types-by ns-a))
+                "a1/a2 classify :primitive — counted as type-rows")
+            (is (= 1 (get types-by ns-b))
+                "b1 counts; the composed beta-composed does NOT")
+            (is (pos? (get types-by nil))
+                "the primitives bucket reports its seeded type-rows"))))
       (testing "scope :namespace — one namespace's light named fns"
         (let [dump (entities/list-all-graph-entities c :namespace nil ns-a nil)
               ids  (into #{} (map :id) (:fns dump))

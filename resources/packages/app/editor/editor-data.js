@@ -110,7 +110,8 @@ function clientSubtype(sub, sup) {
 //
 // Plus shared maps:
 //   fnMap, nsMap, nsPathMap
-//   fnUsedAsParent, fnUsedAsRef, nsHasChildNs, nsHasChildFn, nsTypeErrors
+//   fnUsedAsParent, fnUsedAsRef, nsHasChildNs, nsHasChildFn, nsTypeErrors,
+//   nsTypeCounts
 function buildLookups(data) {
   const fnMap = new Map();
   const slotMap = new Map();
@@ -204,6 +205,10 @@ function buildLookups(data) {
   // `:tree` counts payload's additive `:type-error-count`; feeds the
   // sidebar's ⚠ chip on namespace rows.
   const nsTypeErrors   = new Map();
+  // Per-namespace NAMED type-row counts — the `:tree` payload's additive
+  // `:type-count`. Lets the types lens keep a not-yet-loaded namespace
+  // visible (its leaves only exist client-side after an expand).
+  const nsTypeCounts   = new Map();
   const bump = (m, k) => { if (k) m.set(k, (m.get(k) || 0) + 1); };
 
   (data.fns || []).forEach(f => {
@@ -215,6 +220,7 @@ function buildLookups(data) {
   (data.counts || []).forEach(c => {
     if (c.count) nsHasChildFn.set(c['namespace-id'], c.count);
     if (c['type-error-count']) nsTypeErrors.set(c['namespace-id'], c['type-error-count']);
+    if (c['type-count']) nsTypeCounts.set(c['namespace-id'], c['type-count']);
   });
   (data.namespaces || []).forEach(ns => bump(nsHasChildNs, ns['parent-id']));
 
@@ -227,7 +233,7 @@ function buildLookups(data) {
            bindingMap, bindingsByFn, bindingByFnSlot, itemsByBinding, itemByItemId,
            nsMap, nsPathMap,
            fnUsedAsParent, fnUsedAsRef, nsHasChildNs, nsHasChildFn,
-           nsTypeErrors,
+           nsTypeErrors, nsTypeCounts,
            inheritanceLevelsCache };
 }
 

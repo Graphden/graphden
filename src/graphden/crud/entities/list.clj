@@ -228,8 +228,9 @@
 ;; --- list-all-graph-entities per-scope projections -------------------------
 ;; One shared lazily-realised env (`graph-list-env`) + one defn- per scope
 ;; (round-3 readability split of the former 6-branch cond body). Each branch
-;; forces only the delays it needs — the O(namespaces) :tree scope never
-;; realises roles over every fn.
+;; forces only the delays it needs. (The :tree scope projects no fn rows,
+;; but since the per-ns :type-count it does realise `roled-fns` — a cheap
+;; in-memory classification pass, no extra I/O.)
 
 (defn- graph-list-env
   "Shared lazy environment for the per-scope projections: the cached
@@ -274,8 +275,11 @@
    init AND every post-mutation refresh. Each count row additively
    carries `:type-error-count` (recorded diagnostics on fns of that
    namespace, current branch) when >0 — the sidebar's per-namespace
-   warning chip."
-  [{:keys [base diag-counts namespaces]}]
+   warning chip — and `:type-count` (NAMED type-rows, roles per
+   `types-api/type-lens-roles`) when >0, so the types lens can keep a
+   not-yet-loaded namespace visible instead of silently hiding every
+   namespace whose leaves were never fetched."
+  [{:keys [base diag-counts namespaces roled-fns]}]
   (let [ns-of-fn (when (seq @diag-counts)
                    (into {} (map (juxt :id :namespace-id)) (:fns base)))
         ;; Count ONLY fns present in `base` (the viewer's own+public
@@ -291,13 +295,15 @@
                            (update m (get ns-of-fn fid) (fnil + 0) n)
                            m))
                        {} @diag-counts)
-        counts (->> (:fns base)
+        counts (->> @roled-fns
                     (filter :name)
                     (group-by :namespace-id)
                     (mapv (fn [[nid fns]]
-                            (let [errs (get ns-err nid 0)]
+                            (let [errs (get ns-err nid 0)
+                                  types (count (filter (comp types-api/type-lens-roles :role) fns))]
                               (cond-> {:namespace-id nid :count (count fns)}
-                                (pos? errs) (assoc :type-error-count errs))))))
+                                (pos? errs) (assoc :type-error-count errs)
+                                (pos? types) (assoc :type-count types))))))
         ;; Namespaces whose only diagnosed fns are anonymous still
         ;; get a chip row (count 0 reads falsy client-side).
         covered (into #{} (map :namespace-id) counts)

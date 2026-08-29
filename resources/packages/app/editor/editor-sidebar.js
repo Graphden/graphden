@@ -337,6 +337,14 @@ function nodeShouldShow(node, searchMode) {
       && typeof isTestNsPath === 'function' && isTestNsPath(node.path)) {
     return true;
   }
+  // Same exception for the types lens: type-ness of an UNLOADED namespace
+  // is knowable from the `:tree` counts payload (`:type-count` →
+  // nsTypeCounts) — without this, the lens shows only the (primitives)
+  // bucket until every type-bearing namespace was expanded once.
+  if (lensKinds.has('types') && node.nsId
+      && (lookups?.nsTypeCounts?.get(node.nsId) || 0) > 0) {
+    return true;
+  }
   if (lensKinds.size > 0) return false;
   // Genuinely empty (nothing loaded here) → keep visible: this covers both
   // a just-created empty namespace AND a collapsed namespace whose leaves
@@ -929,6 +937,14 @@ function applyLensVisibility() {
       const kinds = fnKindSet(fn);
       for (const k of lensSet) if (kinds.has(k)) { matches++; break; }
       if (matches) break;
+    }
+  }
+  // The types lens can match through UNLOADED namespaces (the `:type-count`
+  // exception in nodeShouldShow) — count those too, else the hint claims
+  // "nothing matches" over a tree of visible type-bearing namespaces.
+  if (!matches && lensSet.has('types') && lookups?.nsTypeCounts) {
+    for (const n of lookups.nsTypeCounts.values()) {
+      if (n > 0) { matches++; break; }
     }
   }
   if (lensSet.size > 0 && matches === 0) {

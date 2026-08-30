@@ -120,9 +120,11 @@
     res/entity-config))
 
 
-(defn- batch-resolve
+(defn batch-resolve
   "Resolve every `entity-id` of every `entity-name` on `branch-id` in
-   one query per type. Returns `{[entity-name entity-id] resolved}`."
+   one query per type. Returns `{[entity-name entity-id] resolved}`.
+   Public so `diff-view` can resolve display names for fns a diff
+   references but does not itself contain."
   [base-storage entity-name->ids branch-id]
   ;; Chain cache is process-wide (`resolution/global-chain-cache`)
   ;; — no per-call binding required.

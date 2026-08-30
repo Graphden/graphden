@@ -61,6 +61,9 @@
     :current-org-id :current-slot-value :current-time-ms :declarable-effect-categories
     :decode-row :delete-branch! :delete-entity :deref
     :describe-type-mismatch :detect-conflicts :diff-branches
+    ;; diff-branches-view returns previews of user-authored binding
+    ;; values — same read-projection class as :diff-branches.
+    :diff-branches-view
     :diff-value-against-type :digest-hex :dispatch-to-branch :dissoc
     :distinct :div :do :drop :effective-branch-local? :empty? :env :eq
     :encode-unreadable-kws :equal? :error-boundary-wrap

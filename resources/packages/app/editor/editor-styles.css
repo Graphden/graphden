@@ -133,7 +133,7 @@
   /* ink ramp */
   --gd-ink: #181b1c;
   --gd-ink-2: #4a5254;
-  --gd-ink-3: #667072; /* darkened from #7c8688 to clear WCAG AA (4.5:1) as muted text on the panels */
+  --gd-ink-3: #626c6e; /* darkened from #7c8688 to clear WCAG AA (4.5:1) as muted text — on the PAPER bg too (4.76:1), not just the white panels */
   --gd-ink-4: #a6afb0;
   /* structural lines + the dot-grid substrate (the signature) */
   --gd-line: #dce0df;
@@ -6116,11 +6116,13 @@ body.gd-tenancy .gd-solo-only { display: none; }
 .gd-op-nav-btn:hover { background: var(--gd-paper-2); color: var(--gd-ink); }
 .gd-op-nav-btn[aria-current="page"] {
   background: var(--gd-flow-wash);
-  color: var(--gd-flow);
+  /* flow-INK, not flow: the accent proper is 4.14:1 on the wash — under AA
+     for 13.5px text. The ink variant clears it in both themes (6.5 / 9.1). */
+  color: var(--gd-flow-ink);
   font-weight: 600;
 }
 /* The pane holds exactly one section at a time; the rest are [hidden]. */
-#gd-operate-panels, #gd-platform-panels { display: block; min-width: 0; }
+#gd-operate-panels, #gd-platform-panels, #gd-settings-panels { display: block; min-width: 0; }
 .gd-op-card { min-width: 0; width: 100%; }
 .gd-op-card[hidden] { display: none; }
 .gd-op-card-title {
@@ -6214,26 +6216,10 @@ body.gd-tenancy .gd-solo-only { display: none; }
   background: var(--gd-paper);
 }
 #gd-settings[hidden], #gd-workspaces[hidden] { display: none; }
-.gd-settings-grid {
-  max-width: 1100px;
-  margin: 0 auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 16px;
-  align-items: start;
-}
-.gd-set-card {
-  min-width: 0;
-  background: var(--gd-panel);
-  border: 1px solid var(--gd-line);
-  border-radius: var(--gd-r);
-  padding: 16px 18px;
-}
-.gd-set-card h2 {
-  margin: 0 0 10px;
-  font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.06em;
-  text-transform: uppercase; color: var(--gd-ink-3);
-}
+/* Settings shares the Operate nav+pane shell (.gd-op-body / .gd-op-nav /
+   .gd-op-card). Its panes are short rows of copy + one control, so cap the
+   line length — a 900px-wide settings row reads like a lost table. */
+.gd-set-pane { max-width: 640px; }
 .gd-set-row {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 8px 0;
@@ -6251,7 +6237,7 @@ body.gd-tenancy .gd-solo-only { display: none; }
 .gd-set-btn:hover { border-color: var(--gd-flow); color: var(--gd-flow); }
 .gd-set-btn:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
 a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center; }
-/* ---- Settings: Account card (the merged /account page) ---- */
+/* ---- Settings: Account section (the merged /account page) ---- */
 .gd-acct-h {
   margin: 16px 0 6px;
   font-size: 0.75rem;

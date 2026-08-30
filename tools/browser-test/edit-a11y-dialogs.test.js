@@ -250,6 +250,75 @@ const ACTIVE = () => {
       await page.keyboard.press('Escape');
     }
 
+    // ===================================================================
+    // Phase F — the account chip's menu is a real ARIA menu.
+    // ===================================================================
+    // Before this the items sat at the very END of the page's tab order:
+    // opening the menu left focus on the chip and the next Tab went into
+    // the sidebar — "Settings" was ~50 presses away.
+    await page.click('#auth-lock-btn');
+    await page.waitForFunction(
+      () => document.querySelector('#auth-popover [role="menu"]')
+            && document.getElementById('auth-popover').contains(document.activeElement),
+      null, {timeout: 5000, polling: 50});
+    const menuState = await page.evaluate(() => ({
+      expanded: document.getElementById('auth-lock-btn').getAttribute('aria-expanded'),
+      onItem: document.activeElement?.getAttribute('role') === 'menuitem',
+    }));
+    assert(menuState.expanded === 'true', 'menu: the chip reports aria-expanded=true');
+    assert(menuState.onItem, 'menu: focus lands on the first menuitem on open');
+    const firstLabel = await page.evaluate(() => document.activeElement.textContent);
+    await page.keyboard.press('ArrowDown');
+    const secondLabel = await page.evaluate(() => document.activeElement.textContent);
+    assert(secondLabel !== firstLabel, 'menu: ArrowDown moves to the next item');
+    await page.keyboard.press('ArrowUp');
+    const backLabel = await page.evaluate(() => document.activeElement.textContent);
+    assert(backLabel === firstLabel, 'menu: ArrowUp comes back');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(
+      () => document.getElementById('auth-popover').classList.contains('hidden'),
+      null, {timeout: 5000, polling: 50});
+    const chipBack = await page.evaluate(() => ({
+      onChip: document.activeElement?.id === 'auth-lock-btn',
+      expanded: document.getElementById('auth-lock-btn').getAttribute('aria-expanded'),
+    }));
+    assert(chipBack.onChip, 'menu: Escape hands the keyboard back to the chip');
+    assert(chipBack.expanded === 'false', 'menu: and the chip reports collapsed');
+
+    // ===================================================================
+    // Phase G — a management surface behaves like a dialog.
+    // ===================================================================
+    // Opening Settings must move the keyboard in and take the covered Build
+    // chrome out of the accessibility tree; Escape returns to Build.
+    await page.evaluate(() => window.gdShellSurface('settings'));
+    await page.waitForFunction(
+      () => !document.getElementById('gd-settings').hidden
+            && document.getElementById('gd-settings').contains(document.activeElement),
+      null, {timeout: 5000, polling: 50});
+    const surf = await page.evaluate(() => ({
+      sideMenuInert: document.getElementById('side-menu').hasAttribute('inert'),
+      canvasInert: document.getElementById('graph-container').hasAttribute('inert'),
+      topBarLive: !document.getElementById('gd-ctxbar').hasAttribute('inert'),
+      onNav: !!document.activeElement?.closest('#gd-settings-nav'),
+    }));
+    assert(surf.sideMenuInert, 'surface: the Explorer under the cover is inert');
+    assert(surf.canvasInert, 'surface: the canvas under the cover is inert');
+    assert(surf.topBarLive, 'surface: the top bar stays live (brand/org/chip)');
+    assert(surf.onNav, 'surface: focus lands on the Settings section nav');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(
+      () => document.getElementById('gd-settings').hidden,
+      null, {timeout: 5000, polling: 50});
+    const surfBack = await page.evaluate(() => ({
+      surface: document.body.getAttribute('data-surface'),
+      inertCleared: !document.getElementById('side-menu').hasAttribute('inert')
+        && !document.getElementById('graph-container').hasAttribute('inert'),
+      focusHomed: document.activeElement?.id === 'graph-container',
+    }));
+    assert(surfBack.surface === 'build', 'surface: Escape returns to Build');
+    assert(surfBack.inertCleared, 'surface: leaving lifts inert from the Build chrome');
+    assert(surfBack.focusHomed, 'surface: focus re-homes on the canvas, not <body>');
+
     assert(pageErrors.length === 0, 'no page errors: ' + JSON.stringify(pageErrors));
     console.log('a11y-dialogs — PASS');
   } finally {

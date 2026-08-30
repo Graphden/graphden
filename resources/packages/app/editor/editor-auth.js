@@ -233,7 +233,8 @@ function initAuthLock() {
   const mount = document.getElementById('auth-mount');
   if (!mount) return;
   mount.innerHTML =
-    '<button id="auth-lock-btn" class="auth-lock-btn" title="Admin login"></button>' +
+    '<button id="auth-lock-btn" class="auth-lock-btn" title="Admin login"'
+    + ' aria-haspopup="menu" aria-expanded="false"></button>' +
     // Sign out of ALL sessions — multi-tenant + authenticated only.
     '<button id="auth-logout-all-btn" class="auth-logout-all-btn hidden" title="Sign out everywhere">⎋</button>' +
     '<div id="auth-popover" class="auth-popover hidden"></div>';
@@ -399,6 +400,12 @@ function openShellMenu() {
   if (!pop) return;
   const menu = document.createElement('div');
   menu.className = 'auth-menu';
+  // A real ARIA menu, not a styled div: focus moves IN on open, arrows walk
+  // the items (roving tabindex — Tab is not the navigator here), Escape and
+  // Tab close and hand focus back to the chip. Without this the items sat at
+  // the very END of the page's tab order — ~50 presses from the trigger.
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', 'Account and editor');
 
   // Identity head — accounts identity, or the bearer-session kinds.
   const isOp = (typeof window.graphdenHasCap === 'function') && window.graphdenHasCap('platform-admin');
@@ -429,6 +436,8 @@ function openShellMenu() {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'auth-menu-item';
+    b.setAttribute('role', 'menuitem');
+    b.setAttribute('tabindex', '-1');
     // Stable hook for the tutorial spotlight: which destination this row is.
     b.dataset.item = label;
     b.textContent = label;
@@ -515,6 +524,8 @@ function openShellMenu() {
   {
     const support = document.createElement('a');
     support.className = 'auth-menu-item auth-menu-support';
+    support.setAttribute('role', 'menuitem');
+    support.setAttribute('tabindex', '-1');
     support.href = 'https://boosty.to/graphden';
     support.target = '_blank';
     support.rel = 'noopener';
@@ -532,6 +543,8 @@ function openShellMenu() {
     ['YouTube', 'https://www.youtube.com/@Graphdendev'],
   ]) {
     const a = document.createElement('a');
+    a.setAttribute('role', 'menuitem');
+    a.setAttribute('tabindex', '-1');
     a.href = href;
     a.target = '_blank';
     a.rel = 'noopener';
@@ -540,10 +553,33 @@ function openShellMenu() {
   }
   menu.appendChild(social);
 
+  // Keyboard: arrows walk (and wrap over) every menuitem, Home/End jump,
+  // Escape/Tab close and put focus back on the chip. `preventDefault` on
+  // Escape marks it consumed (see graphden-popover.js) so the tour and the
+  // surface-level Escape handler don't also act on it.
+  const menuItems = () => [...menu.querySelectorAll('[role="menuitem"]')];
+  menu.addEventListener('keydown', (e) => {
+    const items = menuItems();
+    if (!items.length) return;
+    const at = items.indexOf(document.activeElement);
+    const go = (i) => { const t = items[(i + items.length) % items.length]; if (t) t.focus(); };
+    if (e.key === 'ArrowDown') { e.preventDefault(); go(at + 1); } else
+    if (e.key === 'ArrowUp') { e.preventDefault(); go(at - 1); } else
+    if (e.key === 'Home') { e.preventDefault(); go(0); } else
+    if (e.key === 'End') { e.preventDefault(); go(items.length - 1); } else
+    if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); closeAuthPopover(); }
+  });
+
   pop.replaceChildren(menu);
   pop.dataset.gdContent = 'menu';
   pop.classList.remove('hidden');
   positionAuthPopover();
+  document.getElementById('auth-lock-btn')?.setAttribute('aria-expanded', 'true');
+  const first = menuItems()[0];
+  if (first) {
+    if (typeof focusSafely === 'function') focusSafely(first);
+    else first.focus();
+  }
 }
 
 // Sign out of ALL sessions (server-side: POST /api/logout-all deletes every
@@ -658,7 +694,14 @@ function positionAuthPopover() {
 function closeAuthPopover() {
   const popover = document.getElementById('auth-popover');
   if (!popover) return;
+  // Focus RETURNS to the chip — but only when it was inside the popover;
+  // an outside click means the user has already moved on (returnTargetOf
+  // semantics, inlined since this close path predates the primitives).
+  const chip = document.getElementById('auth-lock-btn');
+  const hadFocus = popover.contains(document.activeElement);
   popover.classList.add('hidden');
+  chip?.setAttribute('aria-expanded', 'false');
+  if (hadFocus && chip && typeof focusSafely === 'function') focusSafely(chip);
   const err = document.getElementById('auth-error');
   if (err) { err.textContent = ''; err.classList.add('hidden'); }
   // Reset the eye-toggle so the next open starts masked.

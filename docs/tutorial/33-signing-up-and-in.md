@@ -72,7 +72,7 @@ answer.)
 
 Once signed in, your self-service surface lives in the editor:
 click your avatar in the top bar → **Settings** → the **Account**
-card (deep link: `/#@settings/account`; the old `/account` URL
+section (deep link: `/#@settings/account`; the old `/account` URL
 redirects here). It holds:
 
 - **Sign-in methods** — the identities linked to your account.
@@ -84,7 +84,8 @@ redirects here). It holds:
   *require* 2FA — [Lesson 25](25-grants.md) shows the
   `require-2fa` capability.)
 - **API tokens** — long-lived scoped keys for MCP/API clients
-  (the section appears on cloud/tenancy deployments).
+  (the block appears on cloud/tenancy deployments; **Create
+  token…** unfolds the scopes-and-lifetime form).
 
 **Sign out** (this device, or everywhere at once) is in the same
 account menu.
@@ -120,7 +121,7 @@ On a cloud instance:
 3. Click your avatar → **Settings** → **Account**: link a social
    provider (e.g. GitHub), then sign out and sign back in with
    that provider instead of the password — same account, same org.
-4. Back in the Account card, enable 2FA: scan/enter the secret in
+4. Back in the Account section, enable 2FA: scan/enter the secret in
    an authenticator app, confirm the code, sign out, sign in with
    the password — the code is now required.
 

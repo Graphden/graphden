@@ -161,7 +161,7 @@
                   "packages/app/editor/editor-expansion.js"
                   "packages/app/editor/editor-ui.js"
                   "packages/app/editor/editor-render.js"
-                  ;; Account card on the Settings surface (the merged /account
+                  ;; Account section on the Settings surface (the merged /account
                   ;; page) — loads before shell so gdRenderSettings can call
                   ;; its render hook.
                   "packages/app/editor/editor-account.js"
@@ -469,52 +469,66 @@
              [:div {:class "gd-op-body"}
               [:nav {:id "gd-platform-nav" :class "gd-op-nav" :aria-label "Platform sections"}]
               [:div {:id "gd-platform-panels" :class "gd-op-pane"}]]]
-            ;; SETTINGS surface — personal editor settings: appearance,
-            ;; account, and what this build is. Team access (grants / users
-            ;; / roles) is operational and lives in Operate, not here. The
-            ;; dynamic bits (theme/compact state, sign-in state, build
-            ;; hashes, capabilities) are populated by gdRenderSettings.
+            ;; SETTINGS surface — personal editor settings, one section at a
+            ;; time in the same nav+pane shell as Organization/Platform
+            ;; (.gd-op-body), so unequal panels never leave grid holes. The
+            ;; sections are static markup (unlike Operate, whose panels mount
+            ;; from the sidebar render): Appearance / Account / About this
+            ;; build / Access. gdRenderSettings (editor-shell.js) wires the
+            ;; nav, populates the dynamic bits (theme/compact state, sign-in
+            ;; state, build hashes, capabilities) and honours the
+            ;; `@settings/<section>` deep link. Team access (grants / users /
+            ;; roles) is operational and lives in Operate, not here.
             [:section {:id "gd-settings" :hidden "hidden" :aria-label "Settings"}
              [:div {:class "gd-operate-head"}
               [:h1 "Settings"]
               [:p "Your editor — appearance, account, and what this build is. Team access (grants, users, roles) lives in Organization."]]
-             [:div {:class "gd-settings-grid"}
-              [:div {:class "gd-set-card"}
-               [:h2 "Appearance"]
-               [:div {:class "gd-set-row"}
-                [:div {:class "gd-set-copy"}
-                 [:div {:class "gd-set-label"} "Theme"]
-                 [:div {:class "gd-set-hint"} "Light or dark drafting board."]]
-                [:button {:id "gd-set-theme" :type "button" :class "gd-set-btn"} "—"]]
-               [:div {:class "gd-set-row"}
-                [:div {:class "gd-set-copy"}
-                 [:div {:class "gd-set-label"} "Graph cards"]
-                 [:div {:class "gd-set-hint"} "Compact hides the type / effect strips until you reveal them."]]
-                [:button {:id "gd-set-compact" :type "button" :class "gd-set-btn"} "—"]]]
-              ;; ACCOUNT — the /account page merged in (2026-08-15): sign-in
-              ;; methods, 2FA, API tokens, the verify-email banner. Shown only
-              ;; under the open accounts addon (editor-account.js unhides it
-              ;; after the /auth/me boot probe answers); the standalone
-              ;; /account page remains as the headless-deployment fallback and
-              ;; redirects here when the editor serves it. Body content is
-              ;; session-state fetched client-side from the /auth/* JSON API —
-              ;; a graph partial can't render another principal's session.
-              [:div {:class "gd-set-card" :id "gd-set-account" :hidden "hidden"}
-               [:h2 "Account"]
-               [:div {:id "gd-acct-root"}]]
-              [:div {:class "gd-set-card"}
-               [:h2 "About this build"]
-               [:div {:class "gd-set-row"}
-                [:div {:class "gd-set-copy"}
-                 [:div {:class "gd-set-label"} "Frontend"]
-                 [:div {:class "gd-set-hint"} "The bundle hash your browser is running."]]
-                [:code {:id "gd-set-hash" :class "gd-set-code"} "—"]]
-               [:div {:id "gd-set-version" :class "gd-set-versions"}]
-               [:button {:id "gd-set-reload" :type "button" :class "gd-set-btn"} "Reload editor"]]
-              [:div {:class "gd-set-card"}
-               [:h2 "Access"]
-               [:p {:class "gd-set-hint"} "Who may touch what is enforced by the server. Under a tenancy addon your granted capabilities show below; the admin controls (grants, users, roles, orgs) live in the Organization surface."]
-               [:div {:id "gd-set-caps" :class "gd-set-caps"}]]]]
+             [:div {:class "gd-op-body"}
+              [:nav {:id "gd-settings-nav" :class "gd-op-nav" :aria-label "Settings sections"}
+               [:button {:type "button" :class "gd-op-nav-btn" :data-section "appearance" :aria-current "page"} "Appearance"]
+               ;; Account nav entry — hidden outside the open accounts addon;
+               ;; editor-account.js unhides it after the /auth/me boot probe.
+               [:button {:type "button" :class "gd-op-nav-btn" :data-section "account" :aria-current "false" :hidden "hidden"} "Account"]
+               [:button {:type "button" :class "gd-op-nav-btn" :data-section "build" :aria-current "false"} "About this build"]
+               [:button {:type "button" :class "gd-op-nav-btn" :data-section "access" :aria-current "false"} "Access"]]
+              [:div {:id "gd-settings-panels" :class "gd-op-pane"}
+               [:section {:class "gd-op-card gd-set-pane" :data-section "appearance"}
+                [:h2 {:class "gd-op-card-title"} "Appearance"]
+                [:div {:class "gd-set-row"}
+                 [:div {:class "gd-set-copy"}
+                  [:div {:class "gd-set-label"} "Theme"]
+                  [:div {:class "gd-set-hint"} "Light or dark drafting board."]]
+                 [:button {:id "gd-set-theme" :type "button" :class "gd-set-btn"} "—"]]
+                [:div {:class "gd-set-row"}
+                 [:div {:class "gd-set-copy"}
+                  [:div {:class "gd-set-label"} "Graph cards"]
+                  [:div {:class "gd-set-hint"} "Compact hides the type / effect strips until you reveal them."]]
+                 [:button {:id "gd-set-compact" :type "button" :class "gd-set-btn"} "—"]]]
+               ;; ACCOUNT — the /account page merged in (2026-08-15): sign-in
+               ;; methods, 2FA, API tokens, the verify-email banner. Shown only
+               ;; under the open accounts addon (editor-account.js unhides its
+               ;; nav button after the /auth/me boot probe answers); the
+               ;; standalone /account page remains as the headless-deployment
+               ;; fallback and redirects here when the editor serves it. Body
+               ;; content is session-state fetched client-side from the
+               ;; /auth/* JSON API — a graph partial can't render another
+               ;; principal's session.
+               [:section {:class "gd-op-card gd-set-pane" :data-section "account" :id "gd-set-account" :hidden "hidden"}
+                [:h2 {:class "gd-op-card-title"} "Account"]
+                [:div {:id "gd-acct-root"}]]
+               [:section {:class "gd-op-card gd-set-pane" :data-section "build" :hidden "hidden"}
+                [:h2 {:class "gd-op-card-title"} "About this build"]
+                [:div {:class "gd-set-row"}
+                 [:div {:class "gd-set-copy"}
+                  [:div {:class "gd-set-label"} "Frontend"]
+                  [:div {:class "gd-set-hint"} "The bundle hash your browser is running."]]
+                 [:code {:id "gd-set-hash" :class "gd-set-code"} "—"]]
+                [:div {:id "gd-set-version" :class "gd-set-versions"}]
+                [:button {:id "gd-set-reload" :type "button" :class "gd-set-btn"} "Reload editor"]]
+               [:section {:class "gd-op-card gd-set-pane" :data-section "access" :hidden "hidden"}
+                [:h2 {:class "gd-op-card-title"} "Access"]
+                [:p {:class "gd-set-hint"} "Who may touch what is enforced by the server. Under a tenancy addon your granted capabilities show below; the admin controls (grants, users, roles, orgs) live in the Organization surface."]
+                [:div {:id "gd-set-caps" :class "gd-set-caps"}]]]]]
             ;; (No Run surface: running a fn is the ▶ action on its node/card
             ;; → the execute popover; its run history is the inspector "Runs"
             ;; tab and its version timeline the "Versions" tab. A dedicated

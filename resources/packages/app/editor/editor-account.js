@@ -168,6 +168,15 @@ async function gdAcctLoadTokens() {
   gdAcctDelegate(host, '[data-revoke-token]', (el) => gdAcctRevokeToken(el.dataset.revokeToken));
 }
 
+// Show/hide the mint form (disclosure pattern — aria-expanded mirrors state).
+function gdAcctToggleMint() {
+  const btn = document.getElementById('gd-acct-tok-new');
+  const form = document.getElementById('gd-acct-mint-form');
+  if (!btn || !form) return;
+  form.hidden = !form.hidden;
+  btn.setAttribute('aria-expanded', String(!form.hidden));
+}
+
 async function gdAcctMintToken() {
   const label = document.getElementById('gd-acct-tok-label')?.value.trim();
   const scopes = [...document.querySelectorAll('#gd-acct-tok-scopes input:checked')]
@@ -185,6 +194,12 @@ async function gdAcctMintToken() {
   }
   const labelInput = document.getElementById('gd-acct-tok-label');
   if (labelInput) labelInput.value = '';
+  // Fold the form away and land the keyboard on Copy — the one-time reveal
+  // is the only thing that matters right now.
+  const form = document.getElementById('gd-acct-mint-form');
+  if (form && !form.hidden) gdAcctToggleMint();
+  const copyBtn = document.querySelector('#gd-acct-tok-reveal button');
+  if (copyBtn && typeof focusSafely === 'function') focusSafely(copyBtn);
   gdAcctLoadTokens();
   gdAcctSay('Token created.', true);
 }
@@ -212,10 +227,24 @@ async function gdAcctRevokeToken(id) {
 
 async function gdRenderAccountCard() {
   const card = document.getElementById('gd-set-account');
+  const navBtn = document.querySelector('#gd-settings-nav [data-section="account"]');
   const root = document.getElementById('gd-acct-root');
   if (!card || !root) return;
-  const accounts = (typeof window.graphdenAccountsMode === 'function') && window.graphdenAccountsMode();
-  card.hidden = !accounts;
+  // Await the boot probe rather than sampling accountsMode: a deep-linked
+  // `@settings/account` routes before the probe answers, and the nav entry's
+  // visibility must reflect the settled answer, not the race.
+  const accounts = window.gdAccountsReady
+    ? await window.gdAccountsReady
+    : ((typeof window.graphdenAccountsMode === 'function') && window.graphdenAccountsMode());
+  // Visibility belongs to the NAV entry; the pane itself is shown/hidden by
+  // the section switcher (activateOpSection via gdActivateSettingsSection).
+  if (navBtn) navBtn.hidden = !accounts;
+  // Re-assert a remembered 'account' choice now that availability is known —
+  // upgrades a deep link out of its Appearance fallback (or confirms it).
+  if (typeof window.gdSettingsSection === 'function' && window.gdSettingsSection() === 'account'
+      && typeof window.gdActivateSettingsSection === 'function') {
+    window.gdActivateSettingsSection('account');
+  }
   if (!accounts) return;
 
   const [s, j] = await gdAcctGet('/auth/me');
@@ -239,22 +268,29 @@ async function gdRenderAccountCard() {
     +   "<div class='gd-set-hint'>Long-lived keys for MCP and API clients, sent as <code>Authorization: Bearer</code>. A token can only narrow your access: pick its scopes and lifetime.</div>"
     +   "<div id='gd-acct-tok-reveal'></div>"
     +   "<div id='gd-acct-toks' class='gd-set-hint'>Loading…</div>"
-    +   "<div class='gd-acct-scopes' id='gd-acct-tok-scopes'>"
-    +     "<label><input type='checkbox' value='write' checked> Edit graph &amp; branches</label>"
-    +     "<label><input type='checkbox' value='execute' checked> Execute functions</label>"
-    +     "<label><input type='checkbox' value='merge'> Merge branches</label>"
-    +     "<label><input type='checkbox' value='services'> Manage services</label>"
-    +     "<label><input type='checkbox' value='secrets'> Write secrets</label>"
-    +     "<label><input type='checkbox' value='packages'> Publish packages</label>"
-    +   '</div>'
-    +   "<div class='gd-acct-mint'>"
-    +     "<select id='gd-acct-tok-ttl' aria-label='Token lifetime'>"
-    +       "<option value='7'>7 days</option><option value='30'>30 days</option>"
-    +       "<option value='90' selected>90 days</option><option value='365'>1 year</option>"
-    +       "<option value=''>Never</option>"
-    +     '</select>'
-    +     "<input type='text' id='gd-acct-tok-label' class='gd-acct-input' placeholder='Label (e.g. laptop MCP)'>"
-    +     "<button type='button' class='gd-set-btn' onclick='gdAcctMintToken()'>Create</button>"
+    // The mint form sits behind a disclosure: reading what tokens exist is
+    // the common visit, composing a new one is the rare act — an always-open
+    // six-checkbox form only pulled attention from everything else.
+    +   "<button type='button' class='gd-set-btn' id='gd-acct-tok-new' aria-expanded='false'"
+    +     " aria-controls='gd-acct-mint-form' onclick='gdAcctToggleMint()'>Create token…</button>"
+    +   "<div id='gd-acct-mint-form' hidden>"
+    +     "<div class='gd-acct-scopes' id='gd-acct-tok-scopes'>"
+    +       "<label><input type='checkbox' value='write' checked> Edit graph &amp; branches</label>"
+    +       "<label><input type='checkbox' value='execute' checked> Execute functions</label>"
+    +       "<label><input type='checkbox' value='merge'> Merge branches</label>"
+    +       "<label><input type='checkbox' value='services'> Manage services</label>"
+    +       "<label><input type='checkbox' value='secrets'> Write secrets</label>"
+    +       "<label><input type='checkbox' value='packages'> Publish packages</label>"
+    +     '</div>'
+    +     "<div class='gd-acct-mint'>"
+    +       "<select id='gd-acct-tok-ttl' aria-label='Token lifetime'>"
+    +         "<option value='7'>7 days</option><option value='30'>30 days</option>"
+    +         "<option value='90' selected>90 days</option><option value='365'>1 year</option>"
+    +         "<option value=''>Never</option>"
+    +       '</select>'
+    +       "<input type='text' id='gd-acct-tok-label' class='gd-acct-input' placeholder='Label (e.g. laptop MCP)'>"
+    +       "<button type='button' class='gd-set-btn' onclick='gdAcctMintToken()'>Create</button>"
+    +     '</div>'
     +   '</div>'
     + '</div>'
     + "<div id='gd-acct-msg' class='gd-acct-msg'></div>";

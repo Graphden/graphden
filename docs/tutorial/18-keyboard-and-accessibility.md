@@ -73,6 +73,19 @@ page behind, and `Escape` closes it and puts the keyboard back on
 whatever opened it. You can open the function picker, change your
 mind, press `Escape`, and continue from exactly where you were.
 
+The account button's menu is a menu in the keyboard sense too: it
+opens with focus on the first entry, `↑` `↓` walk the entries, and
+`Escape` puts you back on the button.
+
+## The other surfaces
+
+Settings, Organization and Platform are behind the leader as well:
+`Space v` opens the **Surfaces** group — `s` for Settings, `o` for
+Organization, `b` straight back to Build. A surface behaves like a
+big dialog: opening one moves the keyboard into its section list,
+everything underneath leaves the tab order, and `Escape` returns you
+to the editor.
+
 ## Seeing everything: `?`
 
 Press `?` for the full list of shortcuts. It is generated from the

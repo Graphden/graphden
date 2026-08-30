@@ -66,7 +66,9 @@ busy spinner only slows down because it IS the progress signal.
 | Pickers (fn, namespace) | Combobox — focus stays in the filter field, `aria-activedescendant` names the highlighted row | `editor-fn-picker.js`, `editor-namespace-picker.js` |
 | Inspector tabs | ARIA tabs — `aria-controls`, one tabpanel, ← → Home End | `editor-shell.js` |
 | Dialogs | Focus enters, Tab is trapped, Escape returns it | `graphden-popover.js` + each dialog |
-| Shortcuts | Registry + `Space` leader + `?` cheatsheet | `editor-shortcuts.js` |
+| Account chip menu | ARIA menu — focus enters on open, ↑ ↓ Home End walk `menuitem`s, Escape/Tab close and return focus to the chip (`aria-expanded` mirrors state) | `editor-auth.js` |
+| Management surfaces (Settings / Organization / Platform) | Dialog-like entry: `gdAnnounce` names the surface, focus moves to its section nav, the covered Build chrome inside `#main-container` goes `inert` (the top bar stays live — brand/org/chip work from any surface), Escape returns to Build (`window`-level, `defaultPrevented`-guarded so dialogs close first) | `editor-shell.js` |
+| Shortcuts | Registry + `Space` leader + `?` cheatsheet; the `Surfaces` group (`Space v …`) reaches Settings / Organization / Platform / Build | `editor-shortcuts.js` |
 
 Two deliberate exceptions, both load-bearing:
 

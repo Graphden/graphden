@@ -459,6 +459,39 @@ function registerBuiltinShortcuts() {
     description: 'Errors',
     run: () => clickIfPresent('[data-diag-tab="errors"], .gd-diag-tab[data-tab="errors"]'),
   });
+  // Surfaces — the management destinations otherwise reachable only through
+  // the account chip's menu (and, for Build, the brand button). Registered
+  // here so they show up in the Space menu and the `?` cheatsheet; Escape on
+  // a surface also returns to Build (editor-shell.js).
+  const surfaces = () => typeof window.gdShellSurface === 'function';
+  registerShortcut({
+    id: 'surface-build', keys: 'v b', group: 'Surfaces',
+    description: 'Back to Build (the editor)',
+    run: () => window.gdShellSurface('build'),
+    when: surfaces,
+  });
+  registerShortcut({
+    id: 'surface-settings', keys: 'v s', group: 'Surfaces',
+    description: 'Settings',
+    run: () => window.gdShellSurface('settings'),
+    when: surfaces,
+  });
+  registerShortcut({
+    id: 'surface-organization', keys: 'v o', group: 'Surfaces',
+    description: 'Organization',
+    run: () => window.gdShellSurface('operate'),
+    when: surfaces,
+  });
+  registerShortcut({
+    id: 'surface-platform', keys: 'v p', group: 'Surfaces',
+    description: 'Platform',
+    run: () => window.gdShellSurface('platform'),
+    // Same gate as the menu row: the body class stamped by the capability
+    // fetch, or a live platform-admin capability probe.
+    when: () => surfaces()
+      && (document.body.classList.contains('gd-platform')
+          || ((typeof window.graphdenHasCap === 'function') && window.graphdenHasCap('platform-admin'))),
+  });
   registerShortcut({
     id: 'help', keys: '?', group: 'Help',
     description: 'All keyboard shortcuts',

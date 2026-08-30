@@ -38,6 +38,11 @@
   // opts.pushHash=false suppresses the history write (used when the CALL
   // originates from hash routing — pushing again would double the entry).
   function gdShellSurface(name, btn, opts) {
+    // Whether the keyboard was inside the surface being left — decides if
+    // returning to Build must re-home focus (hiding a section silently drops
+    // focus to <body>, and the next Tab would restart from the page top).
+    const leavingWithFocus = !!document.activeElement?.closest?.(
+      '#gd-operate, #gd-platform, #gd-settings, #gd-surface-overlay');
     gdHideAllSurfaces();
     // A surface switch is a context switch: floating popovers from the
     // previous surface (Run form, pickers, viewers) must not survive on
@@ -51,7 +56,14 @@
     if (opts?.pushHash !== false) gdPushSurfaceHash(name);
 
     // Build = the graph editor (explorer | canvas | inspector), no cover.
-    if (name === 'build') return;
+    if (name === 'build') {
+      if (typeof gdAnnounce === 'function') gdAnnounce('Editor');
+      if (leavingWithFocus) {
+        const canvas = document.getElementById('graph-container');
+        if (canvas && typeof focusSafely === 'function') focusSafely(canvas);
+      }
+      return;
+    }
 
     // Real surfaces reveal their own section (+ populate dynamic content);
     // anything else falls back to the "being rebuilt" placeholder overlay.
@@ -61,6 +73,7 @@
       if (el) el.hidden = false;
       const render = { operate: gdRenderOperate, platform: gdRenderPlatform, settings: gdRenderSettings }[name];
       if (typeof render === 'function') render();
+      gdEnterSurface(el, SURFACE_LABELS[name] || name);
       return;
     }
 
@@ -71,6 +84,39 @@
     if (title) title.textContent = name;
     if (sub) sub.textContent = 'This surface is being rebuilt.';
     overlay.hidden = false;
+    gdEnterSurface(overlay, name);
+  }
+
+  // A management surface is a full-page cover over Build, so treat opening it
+  // like entering a dialog: say where we landed, move the keyboard in, and
+  // take the covered Build chrome out of the Tab order / accessibility tree.
+  // (setSiblingsInert can't serve here — the surface lives INSIDE
+  // #main-container, so that body-level ancestor would be skipped and the
+  // Build columns within it would stay reachable.)
+  function gdEnterSurface(el, label) {
+    if (typeof gdAnnounce === 'function') gdAnnounce(label);
+    gdSetBuildInert(el);
+    if (el && typeof focusIntoDialog === 'function') focusIntoDialog(el);
+  }
+
+  // Mark every #main-container child EXCEPT the active surface inert (or lift
+  // it all with null). Hidden sibling surfaces get the attribute too — inert
+  // on a [hidden] element changes nothing, and gdHideAllSurfaces clears every
+  // mark before the next switch. The top bar stays live by design: brand
+  // (back to Build), org switcher and the account chip work from any surface.
+  function gdSetBuildInert(surfaceEl) {
+    const mc = document.getElementById('main-container');
+    if (!mc) return;
+    for (const el of Array.from(mc.children)) {
+      if (surfaceEl && (el === surfaceEl || el.contains(surfaceEl))) continue;
+      if (surfaceEl) {
+        el.setAttribute('inert', '');
+        el.setAttribute('aria-hidden', 'true');
+      } else {
+        el.removeAttribute('inert');
+        el.removeAttribute('aria-hidden');
+      }
+    }
   }
 
   // Operate panels are normally mounted as a side effect of the sidebar render
@@ -106,6 +152,14 @@
     settings: 'gd-settings',
   };
 
+  // What a screen reader hears on arrival (gdEnterSurface). `operate` keeps
+  // its user-facing "Organization" label, same as the hash token.
+  const SURFACE_LABELS = {
+    operate: 'Organization',
+    platform: 'Platform',
+    settings: 'Settings',
+  };
+
   // ---- Surface deep links ---------------------------------------------------
   // surface name <-> `@` hash token. `organization` is the user-facing token
   // for the internal `operate` id (mechanics + e2e stay on `operate`).
@@ -135,7 +189,7 @@
 
   // Route an `@` surface hash (already stripped of '#'). Returns true when
   // the hash addressed a surface (handled here), false for fn-name hashes.
-  // `@settings/account` opens Settings scrolled to the Account card.
+  // `@settings/<section>` opens Settings with that section selected.
   function gdRouteSurfaceHash(hash) {
     if (hash?.charAt(0) !== '@') {
       // A fn-name (or empty) hash while a management surface is up means the
@@ -149,9 +203,8 @@
     const name = HASH_TO_SURFACE[parts[0]];
     if (!name) return true; // unknown @token: swallow, never a fn name
     gdShellSurface(name, null, { pushHash: false });
-    if (name === 'settings' && parts[1] === 'account') {
-      const card = document.getElementById('gd-set-account');
-      if (card) card.scrollIntoView({ block: 'start' });
+    if (name === 'settings' && parts[1]) {
+      gdActivateSettingsSection(parts[1]);
     }
     return true;
   }
@@ -162,6 +215,7 @@
   }
 
   function gdHideAllSurfaces() {
+    gdSetBuildInert(null);
     const overlay = document.getElementById('gd-surface-overlay');
     if (overlay) overlay.hidden = true;
     Object.values(REAL_SURFACES).forEach((id) => {
@@ -192,11 +246,45 @@
   window.gdToggleCardDetails = gdToggleCardDetails;
 
   // ---- Settings surface -----------------------------------------------------
-  // Personal editor settings. Delegates to the ctxbar controls that already
-  // own their state (theme toggle, hard-reload) so there's a single source of
-  // truth; reads sign-in via window.isAuthenticated and capabilities off the
-  // body classes the fetch layer stamps (gd-tenancy / gd-no-write / gd-no-execute).
+  // Personal editor settings, one section at a time (nav + pane — the same
+  // shell as Operate; activateOpSection in editor-sidebar.js does the
+  // showing). Delegates to the ctxbar controls that already own their state
+  // (theme toggle, hard-reload) so there's a single source of truth; reads
+  // sign-in via window.isAuthenticated and capabilities off the body classes
+  // the fetch layer stamps (gd-tenancy / gd-no-write / gd-no-execute).
+  let settingsSection = 'appearance';
+
+  // Select a Settings section by key. Unknown keys — and Account while its
+  // nav entry is hidden (no accounts addon) — fall back to Appearance.
+  // Exposed for the `@settings/<section>` deep link and editor-account.js
+  // (which re-runs the choice once the /auth/me boot probe answers).
+  function gdActivateSettingsSection(key) {
+    const nav = document.getElementById('gd-settings-nav');
+    const pane = document.getElementById('gd-settings-panels');
+    if (!nav || !pane) return;
+    // Remember the ASK, not the fallback: a deep-linked 'account' can arrive
+    // before the accounts probe unhides its nav entry, and editor-account.js
+    // re-asserts the remembered choice once the probe answers.
+    settingsSection = key;
+    const btn = nav.querySelector('[data-section="' + key + '"]');
+    const eff = (!btn || btn.hidden) ? 'appearance' : key;
+    if (typeof activateOpSection === 'function') activateOpSection(nav, pane, eff);
+  }
+  window.gdActivateSettingsSection = gdActivateSettingsSection;
+  window.gdSettingsSection = () => settingsSection;
+
   function gdRenderSettings() {
+    const nav = document.getElementById('gd-settings-nav');
+    if (nav && !nav.dataset.wired) {
+      nav.dataset.wired = '1';
+      nav.querySelectorAll('.gd-op-nav-btn').forEach((b) => {
+        b.addEventListener('click', () => gdActivateSettingsSection(b.dataset.section));
+      });
+    }
+    // Re-assert the current section: panes start [hidden] except Appearance,
+    // and the choice must survive close/re-open within the session.
+    gdActivateSettingsSection(settingsSection);
+
     const dark = document.body.classList.contains('theme-dark');
     const themeBtn = document.getElementById('gd-set-theme');
     if (themeBtn) {
@@ -739,4 +827,19 @@ document.addEventListener('keydown', (e) => {
   if (!scrims.length) return;
   e.preventDefault();
   scrims[scrims.length - 1].click();
+});
+
+// Escape leaves a management surface for Build — the keyboard's counterpart
+// of the brand button. On WINDOW (the last stop in the bubble path, same
+// rationale as the shortcut dispatcher) and only for an unconsumed key: any
+// dialog or popover that closed on this Escape has already preventDefault-ed,
+// so a stack of "close the topmost thing" semantics falls out naturally.
+// Skipped while typing — Escape in a text field means "leave the field",
+// never "throw me off the page".
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || e.defaultPrevented) return;
+  if (document.body.getAttribute('data-surface') === 'build') return;
+  if (typeof isTyping === 'function' && isTyping()) return;
+  e.preventDefault();
+  if (typeof window.gdShellSurface === 'function') window.gdShellSurface('build');
 });

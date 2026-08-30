@@ -173,7 +173,7 @@
 
   ;; =====================================================================
   ;; /account — MOVED into the editor (2026-08-15): the Settings surface's
-  ;; Account card (deep link `/#@settings/account`) owns identities / 2FA /
+  ;; Account section (deep link `/#@settings/account`) owns identities / 2FA /
   ;; API tokens now. This graph page ships with the app package — the editor
   ;; is always present alongside it — so it redirects; the BUILT-IN fallback
   ;; (graphden.accounts.pages/account-page) keeps the full standalone page
@@ -183,7 +183,7 @@
    :parent :const
    :args {:value "<div class='card'><h1>Your account</h1><p class='sub'>Account settings live in the editor now.</p><a class='btn-primary' style='display:block;text-align:center;text-decoration:none' href='/#@settings/account'>Open account settings</a></div><script>location.replace('/#@settings/account');</script>"}}
   {:name :auth-account-page
-   :description "The /account page — redirects into the editor's Settings → Account card (`/#@settings/account`), with a branded link fallback for no-JS. The full standalone account page remains as the built-in Clojure fallback for headless deployments."
+   :description "The /account page — redirects into the editor's Settings → Account section (`/#@settings/account`), with a branded link fallback for no-JS. The full standalone account page remains as the built-in Clojure fallback for headless deployments."
    :parent :_auth-page-shell
    :args {:title {:value "Account"}
           :body :_auth-account-redirect-body}

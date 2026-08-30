@@ -66,8 +66,8 @@ HttpOnly `gd_session` cookie (Max-Age 24 h); cookies are written as raw
 | Route | Behavior |
 |-------|----------|
 | `GET /login` | Self-contained sign-in page (email/password + enabled social buttons) |
-| `GET /account` | Account management. With the app package present (the graph page) this redirects into the editor's Settings → Account card (`/#@settings/account`) — identities, 2FA, verify banner, API-tokens panel with per-token scopes + expiry (the panel reveals itself only where `/api/my-tokens/*` answers, i.e. the tenancy addon is active; see [SECURITY_MODEL.md § API-token scopes](SECURITY_MODEL.md)). Headless deployments get the self-contained built-in fallback page with the same sections. |
-| `GET /auth/providers` | Enabled oauth providers as `{"providers": {"github": true, …}}` — public (the `/login` HTML exposes the same set); consumed by the editor's Account card to render link buttons |
+| `GET /account` | Account management. With the app package present (the graph page) this redirects into the editor's Settings → Account section (`/#@settings/account`) — identities, 2FA, verify banner, API-tokens panel with per-token scopes + expiry (the panel reveals itself only where `/api/my-tokens/*` answers, i.e. the tenancy addon is active; see [SECURITY_MODEL.md § API-token scopes](SECURITY_MODEL.md)). Headless deployments get the self-contained built-in fallback page with the same sections. |
+| `GET /auth/providers` | Enabled oauth providers as `{"providers": {"github": true, …}}` — public (the `/login` HTML exposes the same set); consumed by the editor's Account section to render link buttons |
 | `GET /reset` | Password-reset form (consumes the emailed token) |
 | `POST /auth/signup` | `{email,password}` → account + session cookie, sends verify mail |
 | `POST /auth/login` | `{email,password}` → session cookie, or `{totp-required}` + short-lived `gd_2fa` cookie |
@@ -128,7 +128,7 @@ on purpose — the limiter's existence isn't probeable.
 accounts router — inline CSS/JS calling the JSON `/auth/*` endpoints,
 brand-matched, with no editor coupling: enable the addon and a
 self-hosted instance has a working auth surface. Account management
-lives in the EDITOR (Settings → Account card, `/#@settings/account`,
+lives in the EDITOR (Settings → Account section, `/#@settings/account`,
 2026-08-15) when the app package is present; `/account` redirects
 there, and the self-contained built-in page remains the headless
 fallback.

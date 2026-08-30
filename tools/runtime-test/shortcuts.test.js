@@ -253,6 +253,40 @@ test('re-registering an id replaces rather than duplicates', () => {
 });
 
 
+test('the built-in Surfaces group reaches gdShellSurface — and is inert without it', () => {
+  const { ctx, press, focusOn } = makeCtx();
+  focusOn(el('div'));
+
+  // Shell not loaded yet: `when` gates the whole group off.
+  press(' ');
+  press('v');
+  press('s');
+  // Nothing to assert directly (no run target exists) — but the dispatcher
+  // must have recovered; a bare probe still works.
+  let probe = 0;
+  ctx.window.registerShortcut({ id: 't-probe', keys: 'y', leader: false, group: 'T',
+                         description: 'probe', run: () => { probe += 1; } });
+  press('y');
+  assert(probe === 1, 'dispatcher recovered from the gated-off sequence');
+
+  // Shell present: each sequence lands on the right surface name.
+  const calls = [];
+  ctx.window.gdShellSurface = (name) => calls.push(name);
+  for (const [key, want] of [['s', 'settings'], ['o', 'operate'], ['b', 'build']]) {
+    press(' ');
+    press('v');
+    press(key);
+    assert(calls[calls.length - 1] === want,
+           'Space v ' + key + ' → ' + want + ' (got ' + calls[calls.length - 1] + ')');
+  }
+  // Platform stays gated behind the capability even with the shell present.
+  press(' ');
+  press('v');
+  press('p');
+  assert(!calls.includes('platform'), 'Space v p is inert without the platform right');
+});
+
+
 test('the cheatsheet groups come from the registry', () => {
   const { ctx } = makeCtx();
   ctx.window.registerShortcut({ id: 't-grouped', keys: 'p', leader: false, group: 'Probe group',

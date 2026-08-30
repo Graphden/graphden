@@ -67,6 +67,40 @@ const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
       () => document.getElementById('gd-operate').hidden === true);
     assert(opHidden, 'brand button returns to Build and hides Organization');
 
+    // --- 2b. Settings is a nav+pane surface (sections, not a card grid) ---
+    await page.evaluate(() => window.gdShellSurface('settings'));
+    await page.waitForSelector('#gd-settings:not([hidden])', {timeout: 5000});
+    const setInitial = await page.evaluate(() => {
+      const pane = (k) => document.querySelector('#gd-settings-panels [data-section="' + k + '"]');
+      return {
+        appearanceShown: !pane('appearance').hidden,
+        accessHidden: pane('access').hidden,
+        navCurrent: document.querySelector('#gd-settings-nav [aria-current="page"]')?.dataset.section,
+      };
+    });
+    assert(setInitial.appearanceShown, 'Settings opens on the Appearance section');
+    assert(setInitial.accessHidden, 'the other sections start hidden');
+    assert(setInitial.navCurrent === 'appearance',
+           'the nav marks Appearance current (got ' + setInitial.navCurrent + ')');
+    await page.click('#gd-settings-nav [data-section="access"]');
+    const setSwitched = await page.evaluate(() => {
+      const pane = (k) => document.querySelector('#gd-settings-panels [data-section="' + k + '"]');
+      return {
+        accessShown: !pane('access').hidden,
+        appearanceHidden: pane('appearance').hidden,
+        navCurrent: document.querySelector('#gd-settings-nav [aria-current="page"]')?.dataset.section,
+      };
+    });
+    assert(setSwitched.accessShown && setSwitched.appearanceHidden,
+           'clicking a nav entry swaps the visible pane');
+    assert(setSwitched.navCurrent === 'access', 'and moves aria-current');
+    // Deep link `@settings/<section>` selects that section.
+    await page.evaluate(() => window.gdRouteSurfaceHash('@settings/build'));
+    const deepLinked = await page.evaluate(() =>
+      !document.querySelector('#gd-settings-panels [data-section="build"]').hidden);
+    assert(deepLinked, '@settings/build deep-links the About-this-build section');
+    await page.evaluate(() => window.gdShellSurface('build'));
+
     // --- 3. Workspace switcher scopes the explorer to a namespace root ---
     await page.click('#gd-ws-chip');
     await page.waitForSelector('#gd-ws-pop .gd-pop-item[data-ws]', {timeout: 5000});

@@ -1385,9 +1385,9 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Open Settings"
-               :body "Click the account button in the top-right corner and choose [[Settings]]. Below the appearance controls sits your account card — the same page as /account, folded into the editor."
+               :body "Click the account button in the top-right corner, choose [[Settings]], then pick [[Account]] in the section list on the left — the same page as /account, folded into the editor."
                :target "#auth-lock-btn, .auth-avatar"
-               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Settings\"]"]
+               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Settings\"]" "#gd-settings-nav button[data-section=\"account\"]"]
                :check {:kind "dom" :selector "#gd-acct-idents"}}
               {:title "How you sign in"
                :body "[[Sign-in methods]] lists what is attached to this account — a password, and any social provider you linked. Adding a second method is how you avoid being locked out by one; removing the last one is refused."
@@ -1398,7 +1398,7 @@
                :target "#gd-acct-tfa"
                :check {:kind "manual"}}
               {:title "A token for machines"
-               :body "[[API tokens]] are how anything that is not a browser reaches your graph: the MCP endpoint, a CLI, CI. Create one now — pick a short lifetime, leave the scopes as they come — and note that the value is shown ONCE, at creation."
+               :body "[[API tokens]] are how anything that is not a browser reaches your graph: the MCP endpoint, a CLI, CI. Create one now — click [[Create token…]] to unfold the form, pick a short lifetime, leave the scopes as they come — and note that the value is shown ONCE, at creation."
                :target "#gd-acct-tok-sec"
                :check {:kind "manual"}}
               {:title "A token can only narrow you"

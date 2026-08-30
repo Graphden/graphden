@@ -211,7 +211,50 @@ async function cleanup(page) {
            'fn row in storage has new description: '
            + JSON.stringify(updated?.description));
 
-    console.log('✓ description edit verified — hover / sticky / edit / save');
+    // ===================================================================
+    // Phase E: the save path answers honestly.
+    // ===================================================================
+    // Three cases the UI got wrong. All were reported to the user as
+    // "Save failed — check that you're signed in", on sessions that were
+    // signed in perfectly well.
+    const saves = await page.evaluate(async (fnId) => {
+      const out = {};
+      // 1. Clearing a description. `authMutate` drops empty fields, so the
+      //    request used to carry no `description` at all and the text could
+      //    never be removed.
+      out.cleared = await saveEntityDescription('fn', fnId, '');
+      out.readBack = await fetch('/api/graph/entities?scope=search&q=' + fnId)
+        .then((r) => r.json())
+        .then((j) => (j.fns || []).find((f) => f.id === fnId)?.description);
+      // 2. No id — refused locally, with no request at all.
+      out.noId = await saveEntityDescription('fn', null, 'x');
+      // 3. A refusal the server explains (a package-owned fn): the reason
+      //    has to reach the user, since it names the fix.
+      // Look the package-owned fn up through the API: `graphData` only
+      // holds the namespaces this session has loaded, so searching it by
+      // name skipped this case silently.
+      const owned = await fetch('/api/graph/entities?scope=search&q=web-server')
+        .then((r) => r.json())
+        .then((j) => (j.fns || []).find((f) => f.name === 'web-server'));
+      out.ownedFound = !!owned;
+      out.owned = owned ? await saveEntityDescription('fn', owned.id, 'nope') : null;
+      return out;
+    }, fn.id);
+
+    assert(saves.cleared?.ok === true, 'an empty description SAVES (clears the text)');
+    assert(saves.readBack === '' || saves.readBack == null,
+           'and storage really is empty: ' + JSON.stringify(saves.readBack));
+    assert(saves.noId?.ok === false && /no id/i.test(saves.noId.reason),
+           'a missing id is refused locally: ' + JSON.stringify(saves.noId));
+    assert(saves.ownedFound, 'the package-owned probe fn was found (case is not skipped)');
+    if (saves.owned) {
+      assert(saves.owned.ok === false, 'a package-owned fn refuses the edit');
+      assert(/package-owned/.test(saves.owned.reason),
+             'and the SERVER\'s explanation reaches the user, rather than a '
+             + 'sign-in hint: ' + JSON.stringify(saves.owned.reason));
+    }
+
+    console.log('✓ description edit verified — hover / sticky / edit / save / refusals');
   } catch (e) {
     process.exitCode = 1;
     console.error('✗ test failed:', e.message);

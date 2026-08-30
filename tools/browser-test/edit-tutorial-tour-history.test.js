@@ -96,6 +96,20 @@ async function setDescription(page, text) {
                                     && f.description === v);
     }, text, {timeout: 20000, polling: 500}).then(() => true).catch(() => false);
     if (landed) return;
+    // Why it did not land. The editor puts the reason in the tooltip's
+    // error line — a refusal the server explained, a missing id, a real
+    // auth problem. Before this, three silent retries and a bare "did not
+    // land" was all a failing gate reported, and diagnosing it meant
+    // reproducing a load-dependent flake by hand.
+    const why = await page.evaluate(() => {
+      const err = document.querySelector('.description-tooltip-error');
+      return {
+        error: err && err.style.display !== 'none' ? err.textContent.trim() : null,
+        editing: !!document.querySelector('.description-tooltip-textarea'),
+        tooltipOpen: !!document.querySelector('.description-tooltip'),
+      };
+    }).catch(() => null);
+    console.log('  attempt ' + (attempt + 1) + ' did not land: ' + JSON.stringify(why));
   }
   throw new Error('setDescription("' + text + '") did not land after 3 attempts');
 }

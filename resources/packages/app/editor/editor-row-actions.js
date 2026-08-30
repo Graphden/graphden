@@ -354,7 +354,14 @@ function _bindDescriptionBadgeHover(host) {
       namespace: null,
       description: btn.dataset.description || '',
       entityType: btn.dataset.entityType || null,
+      // Resolve through the nearest ancestor carrying an id, the same way
+      // the click path below does. `host.dataset.fnId` is only set on some
+      // hosts, so the hover path could open a tooltip with a null id — and
+      // an Edit→Save against that fires PUT /api/entities/fn/null, which
+      // the server rejects with a 400 the UI then reported as "check that
+      // you're signed in" on a perfectly good session.
       entityId: btn.dataset.fnId
+                || btn.closest('[data-fn-id]')?.dataset.fnId
                 || host.dataset.fnId
                 || null
     }, e);

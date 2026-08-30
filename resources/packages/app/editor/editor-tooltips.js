@@ -207,8 +207,8 @@ function enterDescriptionEditMode() {
     cancel.disabled = true;
     errEl.style.display = 'none';
     const newDesc = ta.value;
-    const ok = await saveEntityDescription(content.entityType, content.entityId, newDesc);
-    if (ok) {
+    const res = await saveEntityDescription(content.entityType, content.entityId, newDesc);
+    if (res.ok) {
       content.description = newDesc;
       patchEntityDescriptionInState(content.entityType, content.entityId, newDesc);
       descriptionTooltipEditing = false;
@@ -216,7 +216,7 @@ function enterDescriptionEditMode() {
     } else {
       save.disabled = false;
       cancel.disabled = false;
-      errEl.textContent = 'Save failed — check that you\'re signed in.';
+      errEl.textContent = res.reason;
       errEl.style.display = 'block';
     }
   });
@@ -241,14 +241,66 @@ function enterDescriptionEditMode() {
 // Posts the new description as a form-encoded PUT. The backend's
 // permissive `parse-*-from-form` impls only update fields actually
 // present in the body, so we don't have to send name/parent/etc.
-async function saveEntityDescription(entityType, entityId, description) {
+
+/**
+ * The human-readable half of an error response.
+ *
+ * Bodies come back as `<p class="error">…</p>`; parse and take the TEXT,
+ * never the markup — this string goes straight into the tooltip.
+ */
+async function readServerError(response) {
+  if (!response || typeof response.text !== 'function') return null;
   try {
-    const r = await authMutate('PUT',
-                               API.api_entities_type_id(entityType, entityId),
-                               { description });
-    return r?.ok;
+    const body = await response.text();
+    if (!body) return null;
+    const doc = new DOMParser().parseFromString(body, 'text/html');
+    const text = (doc.body?.textContent || '').trim();
+    if (!text) return null;
+    // Long constraint explanations are worth showing in full; a runaway
+    // page (an HTML error page, say) is not.
+    return text.length > 400 ? text.slice(0, 400) + '…' : text;
   } catch (_) {
-    return false;
+    return null;
+  }
+}
+
+/**
+ * Returns `{ok}` plus, on failure, a `reason` the caller can put in front of
+ * the user.
+ *
+ * Refuses outright without an id: the URL would be
+ * `/api/entities/fn/null`, the server answers 400, and the old code
+ * reported that as "check that you're signed in" — sending the reader off
+ * to re-authenticate a session that was never the problem.
+ *
+ * An empty description is a legitimate value (it CLEARS the text), so it
+ * is sent as an explicit body rather than through authMutate, which drops
+ * empty fields.
+ */
+async function saveEntityDescription(entityType, entityId, description) {
+  if (!entityType || !entityId) {
+    return {ok: false, reason: 'This item has no id to save against.'};
+  }
+  try {
+    const body = new URLSearchParams();
+    body.set('description', description == null ? '' : String(description));
+    const r = await authFetch(API.api_entities_type_id(entityType, entityId), {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: body.toString(),
+    });
+    if (r?.ok) return {ok: true};
+    if (r && (r.status === 401 || r.status === 403)) {
+      return {ok: false, reason: 'Save failed — check that you\'re signed in.'};
+    }
+    // The server explains its refusals — a package-owned fn, for instance,
+    // says so and points at the fix ("extend it into a child fn"). Showing
+    // a generic failure instead threw that away and sent the reader off to
+    // re-authenticate a session that was fine.
+    const said = await readServerError(r);
+    return {ok: false, reason: said || ('Save failed (' + (r?.status || 'no response') + ').')};
+  } catch (_) {
+    return {ok: false, reason: 'Save failed — the request did not complete.'};
   }
 }
 

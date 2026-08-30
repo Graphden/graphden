@@ -42,16 +42,20 @@ Advanced            → (cloud/tenancy only) pick who can write the
                       new branch: everyone / only me / org admins
 row → switch        → click a branch row to switch to it
 Δ (diff)            → show the diff vs another branch
-📤 (propose)        → submit this branch for review into its base
 ✅ (approve)        → approve a proposed branch for merge
 ⇢ (merge)           → fold another branch into this one
-⚙ (protection)      → open the branch-protection menu: "push only via
-                      merge", required approvals (0–3), and whether the
-                      author's own approval counts. Works everywhere,
-                      including single-user. Lit when any is on.
-⛨ (write access)    → (cloud/tenancy only) change who can write;
-                      a 🔒 marks protected rows
-× delete
+⋯ (more)            → the labeled per-row menu:
+                        ◐ Compare with current — the editor-wide
+                          diff lens (compare mode)
+                        📤 Propose for review — submit into its base
+                        ⚙ Protection… — "push only via merge",
+                          required approvals (0–3, one-tap segments),
+                          count-own-approval. Works everywhere,
+                          including single-user.
+                        ⛨ Who can write… — (cloud/tenancy only)
+                        × Delete branch
+                      The ⋯ is accented when the row is proposed or
+                      protected; a 🔒 marks write-policy rows.
 ```
 
 A *protected* branch refuses edits — and merges into it — from
@@ -60,9 +64,9 @@ always keep access, so nothing can be locked forever). On a
 self-hosted single-user instance there are no other users to keep
 out, so the write-policy affordances (⛨ / Advanced) stay hidden.
 
-### Push only via merge (⚙ menu)
+### Push only via merge (⋯ → ⚙ Protection)
 
-Open the ⚙ menu on a branch row and tick **"Push only via merge (no
+Open `⋯` → **⚙ Protection…** on a branch row and tick **"Push only via merge (no
 direct writes)"**. Unlike write-access (⛨), this shows on a single-user
 instance too — it doesn't care *who* you are, only *how* the branch
 changes. With it on, the branch stops accepting direct edits: creating,
@@ -87,10 +91,11 @@ Beyond "who/how" you can require *review*: someone proposes a change,
 someone (with rights) approves it, then it merges. All in the branch
 popover, no separate "pull request" object:
 
-- **📤 Propose** marks a branch as submitted for review into its base.
-  Proposed branches are the reviewer's to-do list (their 📤 lights up).
+- **📤 Propose** (in the row's ⋯ menu) marks a branch as submitted for
+  review into its base. Proposed branches are the reviewer's to-do
+  list (their ⋯ lights up, and a ✅ appears on the row).
 - **⚙ Required approvals** on the *target* branch (e.g. `main`) — open
-  its ⚙ menu and set "Required approvals" to 1. A merge into `main` is
+  its `⋯` → **⚙ Protection…** and set "Required approvals" to 1. A merge into `main` is
   then refused (409, *"requires 1 approval(s)…"*) until the proposal is
   approved.
 - **✅ Approve** records your approval of a proposed branch. Who may

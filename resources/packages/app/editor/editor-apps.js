@@ -1,23 +1,28 @@
-// Editor — Apps sidebar section (Track C4b).
+// Editor — Apps (the org's NAMED APPS: `:app-route` rows, a subdomain label +
+// the fn it serves).
 //
-// Server-rendered via GET /partials/apps-panel: the current tenant org's
-// NAMED APPS (`:app-route` rows — a subdomain label + the fn it serves).
-// Graph-first — the markup (table + create form + per-row delete) is a fn-def
-// returning hiccup; this module only builds the collapsible section shell and
-// lazy-loads the panel via hx-get. Create / delete are real <form hx-post>s
-// inside the partial that swap the refreshed panel back into [data-apps-panel]
-// — no client JS here beyond the shell.
+// Two halves live here:
+//   - the app-routes CACHE the sidebar reads synchronously (▣ kind-markers,
+//     the apps lens + its chip count);
+//   - the PER-FN Apps popover — ▣ in the root-row actions menu, content
+//     server-rendered by the tenancy addon's GET /partials/fn-apps partial
+//     (graph-first: list + create form + per-row delete are fn-defs returning
+//     hiccup; create/delete are real <form hx-post>s swapping the refreshed
+//     block back into [data-fn-apps]).
 //
-// Shown to authenticated users ON A TENANCY deployment only: /partials/apps-panel
-// lives in the addon-only tenancy-admin package, so on a single-tenant instance
-// it 404s. We gate on window.API.api_orgs_apps (the /api/orgs/apps route, present
-// only when tenancy-admin is loaded) — the same "is tenancy active" signal the
-// org-switcher uses (api_memberships) — so a single-tenant editor never mounts
-// the section and never logs the 404. Mirrors editor-errors.js; the caller
-// (editor-sidebar.js mountAdminSection) runs htmx.process after appending, so
-// the hx-get on a CONNECTED node fires.
+// The old Organization "Apps" panel is retired (2026-08-30): publishing
+// starts from the fn — same model as declaring a :service — and the lens is
+// the org-wide overview.
 //
-// Globals consumed: isAuthenticated, window.API, htmx, authFetch.
+// Tenancy-only: /partials/fn-apps lives in the addon-only tenancy-admin
+// package, so on a single-tenant instance it 404s. We gate on
+// window.API.api_orgs_apps (the /api/orgs/apps route, present only when
+// tenancy-admin is loaded) — the same "is tenancy active" signal the
+// org-switcher uses (api_memberships) — and editor-row-actions.js hides the
+// ▣ menu row off the same probe, so a single-tenant editor never fetches it.
+//
+// Globals consumed: window.API, htmx, authFetch, anchorBelowClamped,
+// installPopoverDismiss, focusIntoDialog, updateEntityList, graphData.
 
 // === App-routes cache =======================================================
 // The org's :app-route rows (GET /api/orgs/apps), cached for the SYNC reads
@@ -101,22 +106,104 @@ function appRouteNsIds() {
 
 // The app label an :app-route serves under (the `<label>.<apps-domain>`
 // subdomain). The apps-domain isn't exposed client-side, so the marker
-// tooltip shows the bare label — unambiguous, and the Apps panel renders
-// the full public host.
+// tooltip shows the bare label — unambiguous, and the per-fn Apps popover
+// renders the full public host.
 function appRouteHost(route) {
   return route?.label || null;
 }
 
-function buildAppsSection() {
-  if (!isAuthenticated()) return null;
-  // Tenancy-only: no addon → no /api/orgs/apps route → no Apps section (avoids a
-  // console 404 for /partials/apps-panel on single-tenant instances).
-  if (!window.API?.api_orgs_apps) return null;
-  const wrap = document.createElement('div');
-  wrap.className = 'sidebar-apps';
-  wrap.innerHTML = ''
-    + '<div class="ns-children" hx-get="/partials/apps-panel" hx-trigger="load" hx-swap="innerHTML">'
-    +   '<div class="loading">Loading…</div>'
-    + '</div>';
-  return wrap;
+// === Per-fn Apps popover =====================================================
+// ▣ in the root-row actions menu (the Organization Apps panel is retired —
+// publishing starts from the fn, like declaring a service does). Content is
+// the tenancy addon's server partial GET /partials/fn-apps?fn-id= — this fn's
+// :app-route rows + a create form; create/delete are hx-post forms inside the
+// partial that swap the refreshed block back into [data-fn-apps]. This module
+// owns only the popover lifecycle (anchor, dismiss scaffold, focus) and
+// refreshes the client apps cache after every swap so the ▣ tree markers,
+// the apps lens and its chip count stay true immediately.
+
+let fnAppsPopoverEl = null;
+let fnAppsPopoverAnchor = null;
+// Supersession token — a slow response for fn A must not clobber a popover
+// the user has since opened for fn B (mirrors editor-service-popover.js).
+let fnAppsPopoverFnId = null;
+
+function ensureFnAppsPopoverEl() {
+  if (fnAppsPopoverEl) return fnAppsPopoverEl;
+  const el = document.createElement('div');
+  el.className = 'fn-apps-popover';
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-label', 'Apps');
+  el.addEventListener('htmx:afterSwap', () => {
+    // A create/delete just landed: the swap replaced [data-fn-apps] (focus
+    // fell to <body>) and the org's app set changed.
+    Promise.resolve(refreshAppRoutesCache()).then(() => {
+      if (typeof updateEntityList === 'function'
+          && typeof graphData !== 'undefined' && graphData) {
+        updateEntityList(graphData);
+      }
+    });
+    if (typeof focusIntoDialog === 'function') focusIntoDialog(el);
+  });
+  document.body.appendChild(el);
+  fnAppsPopoverEl = el;
+  return el;
 }
+
+function fnAppsPopoverVisible() {
+  return !!fnAppsPopoverEl && fnAppsPopoverEl.classList.contains('visible');
+}
+
+function hideFnAppsPopover() {
+  if (!fnAppsPopoverEl) return;
+  fnAppsPopoverEl.classList.remove('visible');
+  if (fnAppsPopoverAnchor) {
+    try { fnAppsPopoverAnchor.setAttribute('aria-expanded', 'false'); } catch (_) {}
+  }
+  fnAppsPopoverAnchor = null;
+  fnAppsPopoverFnId = null;
+}
+
+async function showFnAppsPopover(fnEntity, anchorEl) {
+  if (!fnEntity || !anchorEl) return;
+  // Tenancy-only (the ▣ menu row is hidden without the addon; this is the
+  // belt to that suspender).
+  if (!window.API?.api_orgs_apps) return;
+  const el = ensureFnAppsPopoverEl();
+  fnAppsPopoverFnId = fnEntity.id;
+  el.textContent = '';
+  try {
+    const resp = await authFetch('/partials/fn-apps?fn-id=' + encodeURIComponent(fnEntity.id));
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const html = await resp.text();
+    if (fnAppsPopoverFnId !== fnEntity.id) return; // superseded
+    el.innerHTML = html;
+    if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(el);
+  } catch (err) {
+    if (fnAppsPopoverFnId !== fnEntity.id) return; // superseded
+    const msg = document.createElement('div');
+    msg.className = 'fn-apps-error';
+    msg.textContent = 'Failed to load apps: ' + (err?.message || 'network error');
+    el.replaceChildren(msg);
+  }
+  if (fnAppsPopoverAnchor && fnAppsPopoverAnchor !== anchorEl) {
+    try { fnAppsPopoverAnchor.setAttribute('aria-expanded', 'false'); } catch (_) {}
+  }
+  try { anchorEl.setAttribute('aria-expanded', 'true'); } catch (_) {}
+  el.classList.add('visible');
+  anchorBelowClamped(el, anchorEl, { fallbackW: 320, fallbackH: 200 });
+  fnAppsPopoverAnchor = anchorEl;
+  if (typeof focusIntoDialog === 'function') focusIntoDialog(el);
+}
+
+installPopoverDismiss({
+  getEl: () => fnAppsPopoverEl,
+  getAnchor: () => fnAppsPopoverAnchor,
+  isVisible: fnAppsPopoverVisible,
+  onDismiss: hideFnAppsPopover,
+  trapFocus: true,
+  getReturnFocus: () => fnAppsPopoverAnchor,
+});
+
+window.showFnAppsPopover = showFnAppsPopover;
+window.hideFnAppsPopover = hideFnAppsPopover;

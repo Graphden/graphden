@@ -5268,27 +5268,48 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .sidebar-grants-admin .grants-admin-disabled,
 .sidebar-users-admin .grants-admin-disabled { padding: 6px 8px; color: var(--muted-fg); font-style: italic; }
 
-/* Apps sidebar section (Track C4b) — the tenant org's named apps
-   (:app-route rows) rendered from /partials/apps-panel: a table + a create
-   form + per-row delete. Auth-required, org-scoped (editor-apps.js). */
-.sidebar-apps .apps-admin-table { width: 100%; font-size: 0.6875rem; border-collapse: collapse; }
-.sidebar-apps .apps-admin-table th,
-.sidebar-apps .apps-admin-table td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--border); }
-.sidebar-apps .app-row-label { font-weight: 600; color: var(--fg); }
-.sidebar-apps .app-host-link { color: var(--fg); text-decoration: none; }
-.sidebar-apps .app-host-link:hover { color: var(--accent); text-decoration: underline; }
-.sidebar-apps .app-serves-link { color: var(--accent); text-decoration: none; }
-.sidebar-apps .app-serves-link:hover { text-decoration: underline; }
-.sidebar-apps .apps-admin-disabled { padding: 6px 8px; color: var(--muted-fg); font-style: italic; }
-.sidebar-apps .app-delete-form { display: inline; }
-.sidebar-apps .app-delete { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 4px; line-height: 1; }
-.sidebar-apps .app-delete:hover { color: var(--error-fg); }
-/* Create form — hint + stacked inputs + add button. */
-.sidebar-apps .app-create-form { display: flex; flex-direction: column; gap: 3px; padding: 4px; }
-.sidebar-apps .apps-create-hint { font-size: 0.625rem; color: var(--muted-fg); }
-.sidebar-apps .app-input { font-size: 0.625rem; padding: 1px 3px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
-.sidebar-apps .app-create-btn { align-self: flex-start; background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--accent); cursor: pointer; font-size: 0.625rem; padding: 1px 6px; }
-.sidebar-apps .app-create-btn:hover { background: var(--hover-bg); }
+/* Per-fn Apps popover — ▣ in the root-row actions menu (editor-apps.js).
+   Content is the tenancy addon's /partials/fn-apps partial: this fn's
+   :app-route rows (host link + delete) + a create form. Same dialog shell
+   family as .service-popover. */
+.fn-apps-popover {
+  position: fixed; z-index: 10002;
+  display: none;
+  background: var(--card-bg); color: var(--card-fg);
+  border: 1px solid var(--card-border);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  box-shadow: var(--shadow-lg);
+  padding: 10px 12px;
+  min-width: 280px; max-width: 360px;
+  font-family: inherit; font-size: 0.75rem; line-height: 1.4;
+}
+.fn-apps-popover.visible { display: block; }
+.fn-apps-popover .fn-apps-title {
+  margin: 0 0 6px; font-size: 0.75rem; font-weight: 600;
+  border-bottom: 1px solid var(--light-border); padding-bottom: 4px;
+}
+.fn-apps-popover .fn-app-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 3px 0; border-bottom: 1px solid var(--light-border);
+}
+.fn-apps-popover .app-host-link { color: var(--fg); text-decoration: none; min-width: 0; overflow-wrap: anywhere; }
+.fn-apps-popover .app-host-link:hover { color: var(--accent); text-decoration: underline; }
+.fn-apps-popover .fn-apps-empty,
+.fn-apps-popover .apps-admin-disabled { padding: 4px 0; color: var(--muted-fg); font-style: italic; }
+.fn-apps-popover .fn-apps-error { padding: 4px 0; color: var(--error-fg); }
+.fn-apps-popover .app-delete-form { display: inline; flex: none; }
+.fn-apps-popover .app-delete { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 4px; line-height: 1; }
+.fn-apps-popover .app-delete:hover { color: var(--error-fg); }
+.fn-apps-popover .app-delete:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Create form — hint + label input + add button. */
+.fn-apps-popover .app-create-form { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; }
+.fn-apps-popover .apps-create-hint { font-size: 0.6875rem; color: var(--muted-fg); }
+.fn-apps-popover .app-input { font-size: 0.6875rem; padding: 2px 4px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
+.fn-apps-popover .app-create-btn { align-self: flex-start; background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--accent); cursor: pointer; font-size: 0.6875rem; padding: 2px 8px; }
+.fn-apps-popover .app-create-btn:hover { background: var(--hover-bg); }
+.fn-apps-popover .app-create-btn:focus-visible,
+.fn-apps-popover .app-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* Packages content — installed pins + browse/install registry (chip popover
    `#gd-pkg-pop`) plus the per-namespace publish popover's inputs/button

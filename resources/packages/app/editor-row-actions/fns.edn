@@ -570,6 +570,23 @@
           :then :_partial-row-actions-service-button-disabled
           :else :_partial-row-actions-service-button-enabled}}
 
+  ;; ▣ Apps — serve this fn at a public subdomain (a named :app-route).
+  ;; Tenancy deployments only, but this CORE partial can't know whether the
+  ;; addon is loaded — the CLIENT hides the row when window.API has no
+  ;; api_orgs_apps key (editor-row-actions.js, same probe the sidebar apps
+  ;; lens uses). The popover content itself is the addon's
+  ;; GET /partials/fn-apps partial (editor-apps.js opens it).
+  {:name :_partial-row-actions-apps-button
+   :description "▣ — open the per-fn Apps popover (serve this fn at a subdomain). Hidden client-side on non-tenancy deployments."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "apps"
+                          :title "Apps — serve this fn at a public subdomain"
+                          :aria-label "Apps"}}
+          :children [{:value "▣"}]}}
+
   ;; ✎ Rename — enabled when editable, disabled-with-reason otherwise.
   {:name :_partial-row-actions-rename-button-enabled
    :parent :hiccup
@@ -672,7 +689,7 @@
 
   ;; Assembly — shared head (ns / i / ↗) + root-row buttons.
   {:name :_partial-row-actions-root-row-children-raw
-   :description "Full button list for the root-row context: ns / i / ↗ shared head + ▶ ⌛ ⚙ ✎ + ✕. Disabled-state for ⚙/✎/+/✕ baked in by the per-button `:if` wrappers."
+   :description "Full button list for the root-row context: ns / i / ↗ shared head + ▶ ⌛ ⚙ ▣ ✎ + ✕. Disabled-state for ⚙/✎/+/✕ baked in by the per-button `:if` wrappers; ▣ is client-hidden on non-tenancy deployments."
    :parent :list
    :args {:items [:_partial-row-actions-ns-button
                   :_partial-row-actions-i-button
@@ -680,6 +697,7 @@
                   :_partial-row-actions-run-button
                   :_partial-row-actions-history-button
                   :_partial-row-actions-service-button
+                  :_partial-row-actions-apps-button
                   :_partial-row-actions-rename-button-or-owned-nil
                   :_partial-row-actions-extend-button
                   :_partial-row-actions-delete-button-or-owned-nil]}}

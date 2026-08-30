@@ -374,6 +374,16 @@ function _bindDescriptionBadgeHover(host) {
 }
 
 
+// Post-swap tenancy gating for ▣ Apps — the core partial renders the row
+// unconditionally (it can't know whether the addon is loaded); the client
+// hides it off the same window.API probe the sidebar apps lens uses. Runs on
+// cached renders too (the cache stores HTML with the row present).
+function _applyAppsAvailabilityState(host) {
+  const appsBtn = host.querySelector('[data-action="apps"]');
+  if (appsBtn) appsBtn.hidden = !window.API?.api_orgs_apps;
+}
+
+
 function _applyAddMICompatibilityState(host) {
   // Post-swap MI-add compatibility check — disable + tooltip when
   // no MI parent candidates exist. Mirrors the legacy
@@ -443,6 +453,7 @@ async function loadRowActionsContent(host, fnId, context, opts) {
   if (cached != null) {
     host.innerHTML = cached;
     _applyAddMICompatibilityState(host);
+    _applyAppsAvailabilityState(host);
     if (typeof bindActionDispatch === 'function') bindActionDispatch(host);
     return Promise.resolve();
   }
@@ -458,6 +469,7 @@ async function loadRowActionsContent(host, fnId, context, opts) {
         _rowActionsHtmlCache.delete(_rowActionsHtmlCache.keys().next().value);
       }
       _applyAddMICompatibilityState(h);
+      _applyAppsAvailabilityState(h);
     }
   });
 }
@@ -704,6 +716,17 @@ registerActionHandler('service-settings', (btn, e, host) => {
   const fnEntity = lookups?.fnMap?.get(fnId);
   if (fnEntity && typeof showServicePopover === 'function') {
     showServicePopover(fnEntity, btn);
+  }
+});
+
+
+registerActionHandler('apps', (btn, e, host) => {
+  e.preventDefault();
+  e.stopPropagation();
+  const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
+  const fnEntity = lookups?.fnMap?.get(fnId);
+  if (fnEntity && typeof showFnAppsPopover === 'function') {
+    showFnAppsPopover(fnEntity, btn);
   }
 });
 

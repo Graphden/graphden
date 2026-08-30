@@ -236,25 +236,40 @@ async function lesson20(page) {
   await bindFirstPlaceholder(page,
     '{"status": 200, "headers": {"Content-Type": "text/html"},'
     + ' "body": "<h1>Hello from my app</h1>"}');
-  await waitTourTitle(page, 'Open Apps', 60000);
-  await openOperateSection(page, 'apps');
+  await waitTourTitle(page, 'Open its Apps', 60000);
+  // Publishing starts from the fn now: ⋯ on the tutorial-page row → ▣ Apps.
+  await page.waitForFunction((name) => {
+    return Array.from(document.querySelectorAll('.node-overlay')).some((ov) =>
+      ov.textContent.trim().startsWith(name)
+      && ov.querySelector('button.more-actions-trigger'));
+  }, PAGE_FN, {timeout: 90000, polling: 200});
+  await page.evaluate((name) => {
+    const ov = Array.from(document.querySelectorAll('.node-overlay')).find((o) =>
+      o.textContent.trim().startsWith(name)
+      && o.querySelector('button.more-actions-trigger'));
+    ov.querySelector('button.more-actions-trigger')
+      .dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+  }, PAGE_FN);
+  await page.waitForFunction(() => {
+    const b = document.querySelector('.row-actions-popover [data-action="apps"]');
+    return !!b && !b.hidden; // hidden = tenancy addon absent — a real failure here
+  }, null, {timeout: 15000, polling: 100});
+  await page.evaluate(() => {
+    document.querySelector('.row-actions-popover [data-action="apps"]')
+      .dispatchEvent(new MouseEvent('click', {bubbles: true}));
+  });
+  await page.waitForSelector('.fn-apps-popover.visible [data-fn-apps]', {timeout: 15000});
   await waitTourTitle(page, 'Publish it', 60000);
 
-  // Manual step in the tour — performed here, because "the row appears and
-  // the app is live" is the whole lesson.
-  await submitPanelForm(page, '[data-apps-panel] form[hx-post="/partials/apps-panel/create"]',
-                        {label: APP_LABEL, 'handler-fn-id': PAGE_FN});
+  // Manual step in the tour — performed here, because "the host appears and
+  // the app is live" is the whole lesson. The fn is implied by the popover;
+  // only the label is typed.
+  await submitPanelForm(page, '[data-fn-apps] form.app-create-form',
+                        {label: APP_LABEL});
   await page.waitForFunction((label) => {
-    return Array.from(document.querySelectorAll('[data-apps-panel] tbody tr'))
-      .some((tr) => tr.textContent.includes(label));
+    return Array.from(document.querySelectorAll('[data-fn-apps] .fn-app-row'))
+      .some((row) => row.textContent.includes(label));
   }, APP_LABEL, {timeout: 30000, polling: 300});
-  const serves = await page.evaluate((label) => {
-    const row = Array.from(document.querySelectorAll('[data-apps-panel] tbody tr'))
-      .find((tr) => tr.textContent.includes(label));
-    return row ? row.textContent.trim() : null;
-  }, APP_LABEL);
-  assert(serves && serves.includes(PAGE_FN),
-         'the app row names the fn it serves (got: ' + serves + ')');
   assert(await clickTourButton(page, 'Next'), 'lesson 27 published Next');
 
   await waitTourTitle(page, "That's publishing", 30000);
@@ -409,15 +424,13 @@ async function cleanup(page) {
           if (m) await fetch(m[1], {method: 'DELETE'}).catch(() => {});
         }
       }
-      // The app row, if the walk left one.
-      // The panel's own delete form posts the ROW ID (the label is not a key
-      // the seam accepts), so scrape it out of the rendered row.
-      const panel = await fetch('/partials/apps-panel').then((r) => r.text()).catch(() => '');
-      if (panel.includes(label)) {
-        const rows = panel.split('<tr').filter((r) => r.includes(label));
-        for (const row of rows) {
-          const m = row.match(/name="id"[^>]*value="([^"]+)"/);
-          if (m) await post('/partials/apps-panel/delete', 'id=' + encodeURIComponent(m[1]));
+      // The app row, if the walk left one. The JSON list carries row ids;
+      // the fn-apps delete route accepts a bare id (the fn-id query param
+      // only shapes the re-rendered block, which cleanup ignores).
+      const appRows = await fetch('/api/orgs/apps').then((r) => r.json()).catch(() => []);
+      for (const row of (Array.isArray(appRows) ? appRows : [])) {
+        if (row.label === label) {
+          await post('/partials/fn-apps/delete', 'id=' + encodeURIComponent(row.id));
         }
       }
       // A grant the walk left behind (its own revoke step may not have run).

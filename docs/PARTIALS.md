@@ -453,7 +453,7 @@ Addon-registered partials follow the same pattern but live outside
 its fall-through router); the tenancy addon (private repo) registers
 the admin panels — `/partials/grants-admin`, `/partials/users-admin`,
 `/partials/roles-admin`, `/partials/orgs-admin`,
-`/partials/platform-access`, `/partials/apps-panel`.
+`/partials/platform-access`, `/partials/fn-apps` (the per-fn Apps popover).
 
 ---
 

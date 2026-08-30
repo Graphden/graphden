@@ -19,11 +19,17 @@ were deliberately left in JS.
 | `col-header` | ancestor column header; read-only fall-through rows | ns / i / ↗ |
 | `cell` | MI cell; parent-edit row | ns / i / ↗ / × Remove-MI / + Add-MI (last two when `editable=true`) |
 | `use-site-arg` | argument at a use-site | ns / i / ↗ / × Remove-binding / ✎ Change-value (last two when `editable=true`) |
-| `root-row` | the selected fn's root row | ns / i / ↗ / ▶ Run / ⌛ History / ⚙ Service / ✎ Rename / + Extend / ✕ Delete |
+| `root-row` | the selected fn's root row | ns / i / ↗ / ▶ Run / ⌛ History / ⚙ Service / ▣ Apps / ✎ Rename / + Extend / ✕ Delete |
 
 Disabled-with-reason: `edit-block-reason` is a client-passed query param; the
 ⚙ reason is computed INSIDE the partial from `:service-blocking-free-args`
 (the same predicate the create-service guard uses) — no param.
+
+▣ Apps is tenancy-only, but this CORE partial can't know whether the addon
+is loaded — the row renders unconditionally and the CLIENT hides it when
+`window.API.api_orgs_apps` is absent (`_applyAppsAvailabilityState`, run on
+both fresh and cached renders). Its handler opens `showFnAppsPopover`
+(`editor-apps.js`), whose content is the addon's `GET /partials/fn-apps`.
 
 ## Query-param matrix (as actually built)
 

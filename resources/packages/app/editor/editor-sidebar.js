@@ -64,7 +64,7 @@ const _adminNavBtns = new Map();
 // entries live here, next to the mount wiring that owns which sections exist.
 const OP_SECTION_LABELS = {
   grants: 'Grants', users: 'Members', roles: 'Roles', orgs: 'Organizations',
-  packages: 'Packages', stats: 'Monitoring', apps: 'Apps',
+  packages: 'Packages', stats: 'Monitoring',
   errors: 'Errors', 'type-errors': 'Type errors', 'platform-access': 'Platform access',
   assets: 'Assets', tests: 'Tests', debug: 'Debug', executors: 'Executor',
 };
@@ -1354,9 +1354,9 @@ function mountOpsSections(fallbackList, searchMode) {
   if (typeof buildStatsSection === 'function') {
     mountAdminSection(opsHost, opsNavHost, 'stats', buildStatsSection);
   }
-  if (typeof buildAppsSection === 'function') {
-    mountAdminSection(opsHost, opsNavHost, 'apps', buildAppsSection);
-  }
+  // (No Apps section: publishing a fn as an app is the ▣ row action on the
+  // fn itself — editor-apps.js showFnAppsPopover; the apps LENS is the
+  // org-wide overview. The Organization panel was retired 2026-08-30.)
   if (typeof buildErrorsSection === 'function') {
     mountAdminSection(diagHost, diagNavHost, 'errors', buildErrorsSection);
   }

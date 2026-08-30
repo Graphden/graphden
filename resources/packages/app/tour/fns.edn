@@ -1226,18 +1226,18 @@
                :target ".placeholder-binder"
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-page" :slot "value"}}
-              {:title "Open Apps"
-               :body "Account button (top right) → [[Organization]] → [[Apps]]. The table lists every app this org serves: its subdomain label, and the fn behind it."
-               :target "#auth-lock-btn, .auth-avatar"
-               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Organization\"]" "#gd-operate-nav button[data-section=\"apps\"]"]
-               :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"apps\"]:not([hidden])"}}
+              {:title "Open its Apps"
+               :body "Publishing starts from the fn, like declaring a service does. Click [[⋯]] on the tutorial-page row and choose [[Apps]] — the popover lists the hosts this fn serves (none yet) and a form to add one."
+               :target "button.more-actions-trigger"
+               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"apps\"]" ".fn-apps-popover.visible"]
+               :check {:kind "dom" :selector ".fn-apps-popover.visible [data-fn-apps]"}}
               {:title "Publish it"
-               :body "In the form: subdomain `tutorial`, and for the fn type its NAME — `tutorial-page` (an id works too; qualify the name as ns.name if it isn't unique). Click [[+ Add app]]. The row appears, and the app is live immediately — the host answers from the graph as it stands."
-               :target "[data-apps-panel] form"
+               :body "Type the subdomain `tutorial` — the fn is already this one, nothing to copy — and click [[+ Add app]]. The host appears in the list, the row gets a ▣ marker in the Explorer, and the app is live immediately — the host answers from the graph as it stands."
+               :target "[data-fn-apps] form"
                :check {:kind "manual"}}
               {:title "That's publishing"
-               :body "Open the app's host in a new tab and your page is there — no build step, because there was nothing to build: the row points at a fn, and requests to that host are executed against it. Editing the fn changes what the host serves on the next request. The written lesson 27 covers custom domains and the request shape a handler receives. Click [[Finish]] to clean up or keep the app."
-               :target "[data-apps-panel]"
+               :body "Click the host to open your page in a new tab — no build step, because there was nothing to build: the row points at a fn, and requests to that host are executed against it. Editing the fn changes what the host serves on the next request; the [[apps]] lens under the Explorer search lists every published fn. The written lesson 27 covers custom domains and the request shape a handler receives. Click [[Finish]] to clean up or keep the app."
+               :target "[data-fn-apps]"
                :check {:kind "manual"}}]}
             {:id "29"
              :chapter "Your organization"

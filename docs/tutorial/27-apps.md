@@ -7,10 +7,10 @@ at it. You'll understand how a graphden *app* differs from the
 *editor*, and why your app code runs in a sandbox.
 
 **Concepts introduced**: an **app** (a fn served on the web), the
-**Apps panel**, a **named app** (the `:app-route` behind it), the
-**apps-domain** (`graphden.app`) vs the editor domain, the
-**globally-unique label**, **custom domains**, and the **FaaS
-sandbox** your app runs in.
+per-fn **Apps popover** (the ▣ row action), a **named app** (the
+`:app-route` behind it), the **apps-domain** (`graphden.app`) vs the
+editor domain, the **globally-unique label**, **custom domains**, and
+the **FaaS sandbox** your app runs in.
 
 This lesson assumes you can compose a fn that returns a web
 response — see [Lesson 07 (Composing pages from
@@ -32,45 +32,42 @@ response (a status/headers/body map — an `:html-page` produces one
 for you). If you want more than one page, serve a `:router` that
 picks a handler by path, exactly like the editor itself does.
 
-## The Apps panel
+## Apps in the editor
 
-On a cloud deployment (the tenancy addon is active) the editor's
-**Organization** surface (open it from the account menu in the top bar) has an **Apps**
-section. It lists your org's apps and lets
-you add or remove them. Each row shows the app's live URL and a
-link to the fn it serves.
+On a cloud deployment (the tenancy addon is active) publishing
+starts **from the fn**, the same way declaring a service does: the
+**⋯** menu on a selected fn's root row has an **Apps** entry (▣).
+Its popover lists the hosts this fn already serves — each a live
+link, with a **×** to remove it — and a form to add a new one.
 
-> On a single-tenant self-hosted instance there is no Apps panel —
+> On a single-tenant self-hosted instance there is no ▣ entry —
 > apps are a cloud concept, and a self-hoster simply points their
 > own reverse proxy at the fn they want to serve.
 
 Apps also show up in the Explorer itself: a fn that serves an app
 carries a **▣** marker on its tree row, and the **apps** lens chip
 under the sidebar search (Lesson 17) narrows the tree to just
-those fns — the chip shows a count and appears only when the
+those fns — that lens is the org-wide overview of everything
+published. The chip shows a count and appears only when the
 deployment has app routing at all.
 
 ## Creating an app
 
-In the Apps panel, the **Add app** form asks for two things:
+In the fn's ▣ popover, the **Add app** form asks for one thing:
 
-1. a **subdomain label** — the `<label>` in `<label>.graphden.app`.
-   It must be a DNS-safe subdomain (lower-case letters, digits and
-   hyphens), it can't be a reserved platform label (`www`, `api`,
-   `app`, …), and it is **globally unique**: the apps-domain is one
-   flat namespace, so `shop` is claimed by whoever takes it first
-   (like a project name on a deployment host). Pick something
-   specific to you.
-2. the **fn it serves** — the handler fn, written the way you read
-   it in the editor: `checkout`, or `shop.checkout` when that bare
-   name exists in more than one namespace. (An id works too, if you
-   have one to hand.) This is the fn graphden executes on every
-   request to the app.
+a **subdomain label** — the `<label>` in `<label>.graphden.app`.
+It must be a DNS-safe subdomain (lower-case letters, digits and
+hyphens), it can't be a reserved platform label (`www`, `api`,
+`app`, …), and it is **globally unique**: the apps-domain is one
+flat namespace, so `shop` is claimed by whoever takes it first
+(like a project name on a deployment host). Pick something
+specific to you.
 
-Submit, and the row appears. That's the whole deployment: no build
-step, no container, no restart — the app is live the instant the
-row is written, and re-pointing it at a different fn takes effect
-on the next request.
+The fn it serves is the one you opened the popover on — nothing to
+type or copy. Submit, and the host appears in the list. That's the
+whole deployment: no build step, no container, no restart — the app
+is live the instant the row is written. To serve the same host from
+a *different* fn, remove it here and add it on the other fn.
 
 ## Your app's address
 
@@ -118,17 +115,19 @@ it safe, isolated per-org, and always-current with your graph.
 
 ## Removing an app
 
-The **×** on an app row deletes it (with a confirm). The subdomain
-and any custom domain stop serving immediately; the fn it pointed
-at is untouched — you only removed the routing, not your code.
+The **×** next to a host in the fn's ▣ popover deletes it (with a
+confirm). The subdomain and any custom domain stop serving
+immediately; the fn it pointed at is untouched — you only removed
+the routing, not your code.
 
 ## Recap
 
 - An app is a fn that returns a web response, given a public
   address.
-- The Apps panel maps a globally-unique **label** →
-  `<label>.graphden.app` → your **handler fn**; custom domains
-  point at the same app once DNS-verified.
+- The fn's **▣ Apps** action maps a globally-unique **label** →
+  `<label>.graphden.app` → the fn you opened it on; custom domains
+  point at the same app once DNS-verified. The **apps** lens is the
+  org-wide overview.
 - Apps live on `graphden.app`, isolated from the editor's
   `graphden.dev` origin, and run in the effect-gated FaaS sandbox.
 - Deploying, re-pointing, and removing an app are all single

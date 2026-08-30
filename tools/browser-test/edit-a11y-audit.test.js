@@ -114,7 +114,9 @@ const AUDIT = () => {
 // Contrast of the editor's own text, computed from the live styles. Catches
 // a design-token edit that drops a surface under WCAG AA without anyone
 // opening the page.
-const CONTRAST = () => {
+const CONTRAST = (opts) => {
+  const needNormal = opts?.needNormal || 4.5;
+  const needLarge = opts?.needLarge || 3;
   const parse = (c) => {
     const m = c.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/);
     return m ? {r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4]} : null;
@@ -154,9 +156,9 @@ const CONTRAST = () => {
     if (!fg || !bg || fg.a < 0.9) continue;
     const size = parseFloat(cs.fontSize);
     const bold = (parseInt(cs.fontWeight, 10) || 400) >= 700;
-    // WCAG AA: 3:1 for large text (>=24px, or >=18.66px bold), else 4.5:1.
+    // Large text (>=24px, or >=18.66px bold) gets the lower bar.
     const large = size >= 24 || (bold && size >= 18.66);
-    const need = large ? 3 : 4.5;
+    const need = large ? needLarge : needNormal;
     const r = ratio(fg, bg);
     if (r < need) {
       bad.push(`${text.slice(0, 24)} — ${r.toFixed(2)}:1 (needs ${need}:1, ${size}px)`);
@@ -253,6 +255,66 @@ const CONTRAST = () => {
     const contrast = await page.evaluate(CONTRAST);
     assert(contrast.length === 0,
            'every text sample meets WCAG AA contrast:\n    ' + contrast.join('\n    '));
+
+    // ── prefers-contrast: more → the token overlay must reach AAA ───────
+    //
+    // The overlay's values were computed against the palette, but the
+    // палитра is not the page: text also sits on hover washes, cards and
+    // chips the enumeration missed. So the claim is enforced the same way
+    // as the base one — by sweeping the LIVE styles, with the media
+    // feature emulated, at the 7:1 threshold. Both themes: the instance
+    // boots dark, so light would otherwise ship unchecked.
+    await page.emulateMedia({contrast: 'more'});
+    await page.waitForTimeout(300);
+    const aaa = {needNormal: 7, needLarge: 4.5};
+    // Ask the page which theme it booted with rather than assuming — a
+    // fresh test profile has no stored preference, and a hardcoded label
+    // here once claimed "dark" for what was actually the light pass.
+    const theme1 = await page.evaluate(
+      () => document.body.classList.contains('theme-dark') ? 'dark' : 'light');
+    const aaaFirst = await page.evaluate(CONTRAST, aaa);
+    assert(aaaFirst.length === 0,
+           'contrast-more, ' + theme1 + ' theme, reaches AAA:\n    '
+           + aaaFirst.join('\n    '));
+
+    const wasDark = await page.evaluate(() => {
+      const dark = document.body.classList.contains('theme-dark');
+      document.body.classList.toggle('theme-dark');
+      return dark;
+    });
+    await page.waitForTimeout(300);
+    const aaaOther = await page.evaluate(CONTRAST, aaa);
+    assert(aaaOther.length === 0,
+           'contrast-more, ' + (wasDark ? 'light' : 'dark')
+           + ' theme, reaches AAA:\n    ' + aaaOther.join('\n    '));
+
+    await page.evaluate((dark) => {
+      document.body.classList.toggle('theme-dark', dark);
+    }, wasDark);
+    await page.emulateMedia({contrast: null});
+
+    // ── forced-colors → state must survive losing its colours ──────────
+    //
+    // Windows High Contrast repaints everything with the system palette,
+    // so a state conveyed ONLY by background (the selected tree row) would
+    // simply vanish. The overlay draws it as an outline in system colours;
+    // this checks the outline is really there under emulation.
+    await page.emulateMedia({forcedColors: 'active'});
+    await page.waitForTimeout(300);
+    const forced = await page.evaluate(() => {
+      const sel = document.querySelector('.entity-item.selected');
+      if (!sel) return {skip: true};
+      const cs = getComputedStyle(sel);
+      return {skip: false, style: cs.outlineStyle, width: cs.outlineWidth};
+    });
+    if (forced.skip) {
+      console.log('  – forced-colors probe skipped: no selected row');
+    } else {
+      assert(forced.style === 'solid' && parseFloat(forced.width) >= 2,
+             'forced-colors: the selected row keeps a visible outline ('
+             + forced.style + ' ' + forced.width + ')');
+    }
+    await page.emulateMedia({forcedColors: null});
 
     console.log('a11y-audit — PASS');
   } finally {

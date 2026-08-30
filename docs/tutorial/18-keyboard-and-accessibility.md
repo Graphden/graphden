@@ -89,6 +89,12 @@ them. Page zoom (`Ctrl`/`Cmd` `+`) works too and scales images as
 well; the font-size setting is the better choice when you only want
 larger *text*.
 
+If your operating system asks for **increased contrast**, the editor
+obliges: muted text darkens (or brightens, in the dark theme), hairline
+borders become real lines, and the focus ring gets heavier. Windows
+High Contrast mode works too — selection is drawn as an outline there,
+since backgrounds are repainted by the system.
+
 If you have "reduce motion" turned on in your operating system, the
 editor drops its animations: cards jump straight to their new
 positions instead of gliding, and the decorative pulses stop. Progress

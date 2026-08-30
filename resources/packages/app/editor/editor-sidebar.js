@@ -895,6 +895,7 @@ function onSearchInput(value) {
     _searchTruncated = false;
     _searchSeq++;              // cancel any in-flight query
     updateEntityList(graphData);
+    announceSearch(null);
     return;
   }
   const seq = ++_searchSeq;
@@ -906,6 +907,9 @@ function onSearchInput(value) {
       _searchResults = fns;
       _searchTruncated = truncated;
       updateEntityList(graphData);
+      // The server's own count, not a DOM tally — the tree only holds rows
+      // for namespaces that happen to be expanded.
+      announceSearch(searchFilter, fns.length, truncated);
     }).catch((err) => { console.error('sidebar search failed', err); });
   }, 180);
   // Repaint immediately so the box shows a "Searching…" state without
@@ -947,6 +951,48 @@ function toggleKind(kind) {
   // different, server-fed structure, not a lens overlay).
   if (searchFilter) updateEntityList(graphData);
   else applyLensVisibility();
+  announceLens(lensKinds.size === 0
+    ? 'All kinds'
+    : 'Lens: ' + Array.from(lensKinds).join(', '));
+}
+
+/**
+ * Say what just happened to the tree.
+ *
+ * A lens toggle or a search rewrites the list under a focus that has not
+ * moved, so a screen reader is given no reason to re-read it — the change
+ * is silent unless we say it.
+ *
+ * The wording is deliberate. Only EXPANDED namespaces have rows in the
+ * DOM, so a count of visible rows is not a count of matching functions:
+ * saying "1 function" with the tree collapsed would be worse than saying
+ * nothing. Search knows its real total and reports it; the lens reports
+ * rows, and says so.
+ */
+function announceLens(label) {
+  if (typeof window.gdAnnounce !== 'function') return;
+  const list = document.getElementById('entity-list');
+  if (!list) return;
+  // Count what the LENS governs, which is not the same as what is in the
+  // DOM. A row can be out of sight for two unrelated reasons: the lens hid
+  // it (`el.hidden`), or an ancestor is collapsed — a namespace, or the
+  // "internal N" group (`offsetParent === null`). Only the first is the
+  // lens's doing, so the denominator is "rows the lens could show":
+  // currently visible, plus the ones it is hiding.
+  const all = Array.from(list.querySelectorAll('.entity-item[data-fn-id]'));
+  const rows = all.filter((el) => el.hidden || el.offsetParent !== null);
+  const shown = rows.filter((el) => !el.hidden && el.offsetParent !== null).length;
+  window.gdAnnounce(rows.length === shown
+    ? label + ' — all ' + shown + ' shown'
+    : label + ' — ' + shown + ' of ' + rows.length + ' shown');
+}
+
+function announceSearch(query, total, truncated) {
+  if (typeof window.gdAnnounce !== 'function') return;
+  if (!query) { window.gdAnnounce('Search cleared'); return; }
+  const n = total || 0;
+  window.gdAnnounce('Search "' + query + '" — ' + n + (n === 1 ? ' match' : ' matches')
+                    + (truncated ? ' (showing the first page)' : ''));
 }
 
 // In-place lens application: re-set the `hidden` overlay on the already-built

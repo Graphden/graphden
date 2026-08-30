@@ -267,6 +267,57 @@ const rowInfo = () => {
       assert(moved.panelFollows, 'and the panel re-points at it');
     }
 
+    // ===================================================================
+    // Phase F — a lens or a search rewrites the tree; say so.
+    // ===================================================================
+    // Both change what the list holds without moving focus, so a screen
+    // reader has no reason to re-read it. The COUNT is the useful part —
+    // "did that narrow anything?" — which makes it worth checking that the
+    // number matches what is actually on screen rather than a DOM tally
+    // that includes rows inside collapsed groups.
+    const lens = await page.evaluate(async () => {
+      const read = () => (document.getElementById('gd-a11y-announcer')?.textContent || '').trim();
+      const visible = () => [...document.querySelectorAll('#entity-list .entity-item[data-fn-id]')]
+        .filter((el) => !el.hidden && el.offsetParent !== null).length;
+      if (typeof toggleKind !== 'function') return {skip: true};
+      toggleKind('type');
+      await new Promise((r) => setTimeout(r, 500));
+      const narrowed = {said: read(), visible: visible()};
+      toggleKind('all');
+      await new Promise((r) => setTimeout(r, 500));
+      const cleared = {said: read(), visible: visible()};
+      return {skip: false, narrowed, cleared};
+    });
+    if (lens.skip) {
+      console.log('  – lens probe skipped: toggleKind unavailable');
+    } else {
+      assert(/lens/i.test(lens.narrowed.said),
+             'a lens change is announced: "' + lens.narrowed.said + '"');
+      const n = parseInt((lens.narrowed.said.match(/(\d+) of/) || [])[1], 10);
+      assert(Number.isFinite(n) && n === lens.narrowed.visible,
+             'and its count matches what is on screen (' + n + ' announced, '
+             + lens.narrowed.visible + ' visible)');
+      assert(/all kinds/i.test(lens.cleared.said),
+             'clearing the lens is announced too: "' + lens.cleared.said + '"');
+    }
+
+    const search = await page.evaluate(async () => {
+      if (typeof onSearchInput !== 'function') return {skip: true};
+      const read = () => (document.getElementById('gd-a11y-announcer')?.textContent || '').trim();
+      onSearchInput('http');
+      await new Promise((r) => setTimeout(r, 1400));
+      const found = read();
+      onSearchInput('');
+      await new Promise((r) => setTimeout(r, 600));
+      return {skip: false, found, cleared: read()};
+    });
+    if (!search.skip) {
+      assert(/match/i.test(search.found),
+             'a search announces its result count: "' + search.found + '"');
+      assert(/cleared/i.test(search.cleared),
+             'and clearing it says so: "' + search.cleared + '"');
+    }
+
     assert(pageErrors.length === 0, 'no page errors: ' + JSON.stringify(pageErrors));
     console.log('a11y-tree — PASS');
   } finally {

@@ -934,7 +934,7 @@
                :target ".branch-diff-close"
                :check {:kind "dom-absent" :selector ".branch-diff-modal:not(.hidden)"}}
               {:title "That's branching"
-               :body "Fork, edit in isolation, compare — and merge with [[⇢]] when a branch has earned it. The branch row also carries a review workflow: 📤 propose, ✅ approve, ⚙ protect — the NEXT tour lesson (20 · Review) walks that whole cycle, refusal included. The written lesson 20 adds protected branches and branch-local fns (runtime config that deliberately never merges). Click [[Finish]] to clean up (the branch goes too) or keep it."
+               :body "Fork, edit in isolation, compare — and merge with [[⇢]] when a branch has earned it. The branch row also carries a review workflow: ✅ approve inline, with 📤 propose and ⚙ protection under the row's [[⋯]] menu — the NEXT tour lesson (20 · Review) walks that whole cycle, refusal included. The written lesson 20 adds protected branches and branch-local fns (runtime config that deliberately never merges). Click [[Finish]] to clean up (the branch goes too) or keep it."
                :target nil
                :check {:kind "manual"}}]}
             {:id "21"
@@ -970,12 +970,12 @@
                :check {:kind "on-branch" :name "tutorial-release"}
                :creates {:type "branch" :name "tutorial-release"}}
               {:title "Protect it"
-               :body "Open the branch chip again and click [[⚙]] on the tutorial-release row. Set [[Required approvals]] to 1 and close the menu. From now on, a merge into tutorial-release needs one recorded approval — the rule lives on the TARGET."
+               :body "Open the branch chip again, click [[⋯]] on the tutorial-release row and choose [[⚙ Protection…]]. Set [[Required approvals]] to [[1]]. From now on, a merge into tutorial-release needs one recorded approval — the rule lives on the TARGET."
                :target "#branch-chip-btn"
-               :targets ["#branch-chip-btn" ".branch-popover" ".branch-row-protect[data-protect-branch=\"tutorial-release\"]" "#gd-protect-pop"]
-               :check {:kind "dom" :selector ".branch-row-protect[data-protect-branch=\"tutorial-release\"][data-reqappr=\"1\"]"}}
+               :targets ["#branch-chip-btn" ".branch-popover" ".branch-row-more[data-more-branch=\"tutorial-release\"]" ".branch-row-more-menu.open .branch-row-protect[data-protect-branch=\"tutorial-release\"]" "#gd-protect-pop"]
+               :check {:kind "dom" :selector ".branch-row-more.on[data-more-branch=\"tutorial-release\"]"}}
               {:title "A feature branch"
-               :body "Close the ⚙ menu and get the branch popover back up (the chip toggles it). In its create row type `tutorial-feature` and click [[Create]]. It forks from the branch you are ON — tutorial-release — so that is where its proposal will aim."
+               :body "The ⚙ menu closes itself after your pick — get the branch popover back up (the chip toggles it). In its create row type `tutorial-feature` and click [[Create]]. It forks from the branch you are ON — tutorial-release — so that is where its proposal will aim."
                :target "#branch-chip-btn"
                :targets ["#branch-chip-btn" ".branch-popover"]
                :check {:kind "on-branch" :name "tutorial-feature"}
@@ -995,9 +995,10 @@
                :targets ["#branch-chip-btn" ".branch-popover" ".branch-row-merge[data-merge-source=\"tutorial-feature\"]"]
                :check {:kind "dom" :selector "#branch-popover-error:not(.hidden)"}}
               {:title "Propose it"
-               :body "Click [[📤]] on the tutorial-feature row — the branch is now submitted for review into its base, and the popover header counts “1 proposal awaiting review”. Proposed branches are the reviewer's to-do list."
-               :target ".branch-row-propose[data-propose-branch=\"tutorial-feature\"]"
-               :check {:kind "dom" :selector ".branch-row-propose.on[data-propose-branch=\"tutorial-feature\"]"}}
+               :body "Click [[⋯]] on the tutorial-feature row and choose [[📤 Propose for review]] — the branch is now submitted for review into its base, and the popover header counts “1 proposal awaiting review”. Proposed branches are the reviewer's to-do list."
+               :target ".branch-row-more[data-more-branch=\"tutorial-feature\"]"
+               :targets [".branch-row-more[data-more-branch=\"tutorial-feature\"]" ".branch-row-more-menu.open .branch-row-propose[data-propose-branch=\"tutorial-feature\"]"]
+               :check {:kind "dom" :selector ".branch-row-approve[data-approve-branch=\"tutorial-feature\"]"}}
               {:title "Approve it"
                :body "Click [[✅]] on the same row. Its badge flips to 1/1 — the requirement is met. (By default your OWN approval counts, so a solo user is never locked out; a team that wants four-eyes review unticks “Count the author's own approval” in ⚙.)"
                :target ".branch-row-approve[data-approve-branch=\"tutorial-feature\"]"

@@ -381,10 +381,21 @@ function initBranchSelector() {
   renderBranchChip();
   document.getElementById('branch-chip-btn').addEventListener('click', toggleBranchPopover);
   document.addEventListener('click', (e) => {
+    // A click anywhere outside a ⋯ button / its menu collapses the
+    // open ⋯ menu — including clicks on other popover rows.
+    if (!e.target.closest?.('.branch-row-more, .branch-row-more-menu')) {
+      closeBranchMoreMenus();
+    }
     const popover = document.getElementById('branch-popover');
     const btn = document.getElementById('branch-chip-btn');
     if (!popover || popover.classList.contains('hidden')) return;
     if (popover.contains(e.target) || btn.contains(e.target)) return;
+    // The ⚙ protection / ⛨ policy mini-menus are appended to <body>,
+    // OUTSIDE the popover element — a click on a control inside them
+    // (the approvals segment, a checkbox) used to read as "outside the
+    // popover" here and closed BOTH popovers mid-interaction (the
+    // lesson-21 "the menu closes before I can pick" bug).
+    if (e.target.closest?.('#gd-protect-pop, #gd-branch-policy-pop, .gd-pop-scrim')) return;
     if (pointerEventInTour(e)) return;
     closeBranchPopover();
   });
@@ -449,8 +460,43 @@ function toggleBranchPopover() {
 
 function closeBranchPopover() {
   closeProtectionMenu();   // don't orphan the ⚙ menu over a hidden popover
+  closeBranchMoreMenus();
   const popover = document.getElementById('branch-popover');
   if (popover) popover.classList.add('hidden');
+}
+
+// Close every open per-row ⋯ menu.
+function closeBranchMoreMenus() {
+  document.querySelectorAll('.branch-row-more-menu.open').forEach((m) => {
+    m.classList.remove('open');
+  });
+  document.querySelectorAll('.branch-row-more[aria-expanded="true"]').forEach((b) => {
+    b.setAttribute('aria-expanded', 'false');
+  });
+}
+
+// Toggle one row's ⋯ menu; position it under the button (the menu is
+// `position: fixed`, so the popover list's overflow can't clip it).
+function toggleBranchMoreMenu(btn) {
+  const name = btn.getAttribute('data-more-branch');
+  const menu = btn.parentElement?.querySelector(
+    '.branch-row-more-menu[data-more-menu="' + (window.CSS?.escape ? CSS.escape(name) : name) + '"]')
+    || btn.nextElementSibling;
+  if (!menu) return;
+  const wasOpen = menu.classList.contains('open');
+  closeBranchMoreMenus();
+  if (wasOpen) return;
+  const r = btn.getBoundingClientRect();
+  menu.style.top = (r.bottom + 4) + 'px';
+  menu.style.left = Math.max(8, Math.min(r.right - 200, window.innerWidth - 210)) + 'px';
+  menu.classList.add('open');
+  btn.setAttribute('aria-expanded', 'true');
+  // Menu items either reload the popover (propose / delete / policy)
+  // or open their own floating menu (protection) — close the ⋯ shell
+  // as soon as one is picked.
+  menu.querySelectorAll('button').forEach((item) => {
+    item.addEventListener('click', () => closeBranchMoreMenus(), { once: true });
+  });
 }
 
 function positionBranchPopover() {
@@ -569,6 +615,26 @@ function wireBranchPopoverHandlers(popover, current) {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       mergeBranchInto(btn.getAttribute('data-merge-source'), current);
+    });
+  });
+
+  // ⋯ overflow menu — server-rendered hidden inside each row (so the
+  // propose / protect / policy / delete bindings above keep finding
+  // their buttons); JS toggles + positions it. One open menu at a time.
+  popover.querySelectorAll('.branch-row-more').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleBranchMoreMenu(btn);
+    });
+  });
+
+  // ◐ compare mode — the editor-wide diff lens (editor-diff-mode.js).
+  popover.querySelectorAll('.branch-row-compare').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const other = btn.getAttribute('data-compare-branch');
+      closeBranchPopover();
+      if (typeof gdEnterDiffMode === 'function') gdEnterDiffMode(other);
     });
   });
 
@@ -813,38 +879,64 @@ function openProtectionMenu(btn) {
                          { 'require-merge': rmBox.checked },
                          'Could not change branch protection'));
   rmLabel.appendChild(rmBox);
-  rmLabel.append(' Push only via merge (no direct writes)');
+  const rmText = document.createElement('span');
+  rmText.textContent = 'Push only via merge (no direct writes)';
+  rmLabel.appendChild(rmText);
   pop.appendChild(rmLabel);
 
-  // required-approvals select + self-approval checkbox (POSTed together)
-  const raLabel = document.createElement('label');
-  raLabel.className = 'gd-protect-opt';
-  raLabel.append('Required approvals: ');
-  const sel = document.createElement('select');
+  // Required approvals — a 0…3 SEGMENTED control, not a <select>: the
+  // range is four known values (one tap each beats a two-step native
+  // dropdown), and a native dropdown over a floating menu was fragile
+  // (the outside-click closer used to swallow it mid-pick).
+  const raRow = document.createElement('div');
+  raRow.className = 'gd-protect-opt gd-protect-appr';
+  const raText = document.createElement('span');
+  raText.id = 'gd-protect-appr-label';
+  raText.textContent = 'Required approvals';
+  raRow.appendChild(raText);
+  const seg = document.createElement('div');
+  seg.className = 'gd-protect-seg';
+  seg.setAttribute('role', 'radiogroup');
+  seg.setAttribute('aria-labelledby', 'gd-protect-appr-label');
+  let currentAppr = reqAppr;
+  const saBox = document.createElement('input');   // created early — posted together
+  const pushPolicy = () =>
+    postBranchProtection(rpUrl,
+                         { 'required-approvals': currentAppr,
+                           'allow-self-approval': saBox.checked },
+                         'Could not change the review policy');
   for (let n = 0; n <= 3; n++) {
-    const o = document.createElement('option');
-    o.value = String(n); o.textContent = String(n);
-    if (n === reqAppr) o.selected = true;
-    sel.appendChild(o);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'gd-protect-seg-btn' + (n === reqAppr ? ' sel' : '');
+    b.textContent = String(n);
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', n === reqAppr ? 'true' : 'false');
+    b.title = n === 0 ? 'No review required'
+      : ('Merges into ' + branchName + ' need ' + n + ' approval' + (n === 1 ? '' : 's'));
+    b.addEventListener('click', () => {
+      if (n === currentAppr) return;
+      currentAppr = n;
+      seg.querySelectorAll('.gd-protect-seg-btn').forEach((x) => {
+        x.classList.toggle('sel', x === b);
+        x.setAttribute('aria-checked', x === b ? 'true' : 'false');
+      });
+      pushPolicy();
+    });
+    seg.appendChild(b);
   }
-  raLabel.appendChild(sel);
-  pop.appendChild(raLabel);
+  raRow.appendChild(seg);
+  pop.appendChild(raRow);
 
   const saLabel = document.createElement('label');
   saLabel.className = 'gd-protect-opt';
-  const saBox = document.createElement('input');
   saBox.type = 'checkbox';
   saBox.checked = allowSelf;
   saLabel.appendChild(saBox);
-  saLabel.append(" Count the author's own approval");
+  const saText = document.createElement('span');
+  saText.textContent = "Count the author's own approval";
+  saLabel.appendChild(saText);
   pop.appendChild(saLabel);
-
-  const pushPolicy = () =>
-    postBranchProtection(rpUrl,
-                         { 'required-approvals': parseInt(sel.value, 10),
-                           'allow-self-approval': saBox.checked },
-                         'Could not change the review policy');
-  sel.addEventListener('change', pushPolicy);
   saBox.addEventListener('change', pushPolicy);
 
   const r = btn.getBoundingClientRect();

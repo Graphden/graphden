@@ -108,19 +108,24 @@ const {
     // POST reloads the popover; the ⚙ button's data-attr reflects it.
     await waitClickable(page, '#branch-chip-btn');
     await page.evaluate(() => document.getElementById('branch-chip-btn').click());
+    // ⚙ lives in the row's ⋯ menu now (readability redesign).
     await page.waitForSelector(
-      '.branch-row-protect[data-protect-branch="tutorial-release"]', {timeout: 15000});
+      '.branch-row-more[data-more-branch="tutorial-release"]', {timeout: 15000});
+    await page.evaluate(() => document.querySelector(
+      '.branch-row-more[data-more-branch="tutorial-release"]').click());
+    await page.waitForSelector(
+      '.branch-row-more-menu.open .branch-row-protect[data-protect-branch="tutorial-release"]',
+      {timeout: 15000});
     await page.evaluate(() => document.querySelector(
       '.branch-row-protect[data-protect-branch="tutorial-release"]').click());
-    await page.waitForSelector('#gd-protect-pop select', {timeout: 15000});
+    await page.waitForSelector('#gd-protect-pop .gd-protect-seg', {timeout: 15000});
     await page.evaluate(() => {
-      const sel = document.querySelector('#gd-protect-pop select');
-      sel.value = '1';
-      sel.dispatchEvent(new Event('change', {bubbles: true}));
+      // Segmented 0…3 control (diff-v2 redesign) — "1" is the 2nd button.
+      document.querySelectorAll('#gd-protect-pop .gd-protect-seg-btn')[1].click();
     });
     await page.waitForSelector(
       '.branch-row-protect[data-protect-branch="tutorial-release"][data-reqappr="1"]',
-      {timeout: 30000});
+      {timeout: 30000, state: 'attached'});   // lives inside the closed ⋯ menu
     await waitTourTitle(page, 'A feature branch', 150000);
     // Close the ⚙ menu. Whether its scrim click also dismissed the branch
     // popover depends on event order — the chip TOGGLES, so click it only
@@ -159,7 +164,7 @@ const {
     await page.evaluate(() => document.querySelector(
       '.branch-row-propose[data-propose-branch="tutorial-feature"]').click());
     await page.waitForSelector('.branch-row-propose.on[data-propose-branch="tutorial-feature"]',
-      {timeout: 30000});
+      {timeout: 30000, state: 'attached'});   // inside the closed ⋯ menu
     await waitTourTitle(page, 'Approve it', 150000);
     await page.evaluate(() => document.querySelector(
       '.branch-row-approve[data-approve-branch="tutorial-feature"]').click());

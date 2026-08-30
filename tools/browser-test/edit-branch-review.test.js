@@ -96,9 +96,11 @@ async function readRow(page, name) {
     // Phase B: ⚙ protection menu — set Required approvals = 1 on TGT.
     // ================================================================
     await openBranchPopover(page);
-    await page.click('.branch-row[data-branch-name="' + TGT + '"] .branch-row-protect');
-    await page.waitForSelector('#gd-protect-pop select', {timeout: 10000});
-    await page.selectOption('#gd-protect-pop select', '1');
+    // ⚙ lives in the row's ⋯ menu now (readability redesign).
+    await page.click('.branch-row[data-branch-name="' + TGT + '"] .branch-row-more');
+    await page.click('.branch-row-more-menu.open .branch-row-protect');
+    await page.waitForSelector('#gd-protect-pop .gd-protect-seg', {timeout: 10000});
+    await page.click('#gd-protect-pop .gd-protect-seg-btn:nth-child(2)');
     // the change handler POSTs /review-policy; wait for the badge to appear
     const gotBadge = await waitFor(async () => {
       const r = await readRow(page, SRC);

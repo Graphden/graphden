@@ -128,7 +128,7 @@
                             :headers {}})
           body (str (:body response))]
       (is (= 200 (:status response)))
-      (is (str/includes? body "No failed runs")))))
+      (is (str/includes? body "No unresolved failures")))))
 
 
 (deftest partial-type-errors-handler-renders-test

@@ -314,14 +314,20 @@
 
 (defn create-pending-row!
   "Persist a :fn-execution row with status :pending — called BEFORE
-   the future is submitted when we know we'll need polling support."
-  [storage fn-version-id declared-effects user-id]
-  (sp/create-entity storage :fn-execution
-                    {:fn-version-id fn-version-id
-                     :started-at (java.time.Instant/now)
-                     :status :pending
-                     :declared-effects declared-effects
-                     :user-id user-id}))
+   the future is submitted when we know we'll need polling support.
+   `branch-id` (5-arity) stamps which branch's ExecutionContext ran —
+   the Errors panel's visibility scope; nil ≡ branch-unscoped (visible
+   everywhere, the pre-feature behaviour)."
+  ([storage fn-version-id declared-effects user-id]
+   (create-pending-row! storage fn-version-id declared-effects user-id nil))
+  ([storage fn-version-id declared-effects user-id branch-id]
+   (sp/create-entity storage :fn-execution
+                     {:fn-version-id fn-version-id
+                      :started-at (java.time.Instant/now)
+                      :status :pending
+                      :declared-effects declared-effects
+                      :user-id user-id
+                      :branch-id branch-id})))
 
 
 (defn create-pending-with-args!
@@ -329,10 +335,12 @@
    the parent row. Used by both `apply-execute` pre-persist and lazy-
    persist branches; the future registration happens at the callsite
    because the two paths sequence it differently."
-  [storage fn-version-id declared-effects user-id args free-slots]
-  (let [r (create-pending-row! storage fn-version-id declared-effects user-id)]
-    (persist-args! storage (:id r) args free-slots)
-    r))
+  ([storage fn-version-id declared-effects user-id args free-slots]
+   (create-pending-with-args! storage fn-version-id declared-effects user-id args free-slots nil))
+  ([storage fn-version-id declared-effects user-id args free-slots branch-id]
+   (let [r (create-pending-row! storage fn-version-id declared-effects user-id branch-id)]
+     (persist-args! storage (:id r) args free-slots)
+     r)))
 
 
 (defn tainted-fn?

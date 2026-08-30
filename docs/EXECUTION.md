@@ -282,16 +282,35 @@ is the point.
 
 ## Error log (`GET /partials/error-log`)
 
-The editor's **Errors** sidebar section lists the current org's recent FAILED
-executions (newest first) straight off the `:fn-execution` audit rows — no new
-storage. Privacy holds because the write path already sanitised each row:
-`redact-outcome` hides secret-tainted bodies, `scrub-outcome` replaces
-internal error types with an opaque `ref:` on the cloud. Rows render the fn
-name as a native `#hash` link (the editor's hashchange navigation), the finish
-time, the error text, and a collapsible ex-data block. Backed by the
-`:recent-failures` base-fn (`graphden.crud.fn-execution.errors`) — raw SQL
-with an explicit org filter, 7-day window, 50-row cap. Visibility follows the
-row TTLs (failed rows sweep after 30 days).
+The editor's **Errors** sidebar section lists the current branch view's
+**unresolved** recent failures (newest first) straight off the `:fn-execution`
+audit rows — no new storage beyond two columns (`:branch-id` stamped at
+create, `:acknowledged-at` set by dismiss). Privacy holds because the write
+path already sanitised each row: `redact-outcome` hides secret-tainted
+bodies, `scrub-outcome` replaces internal error types with an opaque `ref:`
+on the cloud. Rows render a ✕ dismiss button, the fn name as a native `#hash`
+link (the editor's hashchange navigation), the finish time, the error text,
+and a collapsible ex-data block; the list header carries **Dismiss all**.
+
+A failure counts as unresolved only while ALL of these hold (the panel is a
+worklist — every red counter has an action that clears it):
+
+- the run happened on the current branch or one of its ancestors
+  (branch-chain; `branch_id IS NULL` pre-feature rows show everywhere) —
+  siblings never see each other's failures, a parent never sees a child's;
+- the failing `fn-version` is still what the branch resolves for that fn —
+  shipping a fix, a branch-local override, or deleting the fn clears it;
+- no later `succeeded` run of the same version exists — a clean re-run
+  clears a transient failure;
+- the row wasn't dismissed (`POST /partials/error-log/ack?id=X` /
+  `/partials/error-log/ack-all`, both auth-required; they respond with the
+  refreshed body for the htmx swap).
+
+Backed by the `:recent-failures` / `:failure-ack` / `:failure-ack-all`
+base-fns (`graphden.crud.fn-execution.errors`) — raw SQL with an explicit
+org filter, 7-day window, 50-row cap; the still-current-version half of the
+predicate goes through the versioned resolver. The audit rows themselves
+keep their TTLs (failed rows sweep after 30 days) regardless of dismissal.
 
 ## Editor UI
 

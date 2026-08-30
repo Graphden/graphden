@@ -216,7 +216,7 @@
       (let [storage (:storage branch-ctx)
             row (persist/create-pending-row!
                   storage fn-version-id
-                  (persist/declared-effects-of handler-fn-id) nil)
+                  (persist/declared-effects-of handler-fn-id) nil branch-id)
             free-slots (lookup/free-arg-slot-map-cached branch-ctx handler-fn-id)]
         ;; The row is created AFTER the run (a failed persist can't leak
         ;; a zombie pending row), so correct :started-at back to the

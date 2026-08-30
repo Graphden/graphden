@@ -711,10 +711,22 @@
    :effects #{:db}}
 
   {:name :recent-failures
-   :description "The CURRENT org's most recent failed executions (newest first) from the `:fn-execution` audit rows — `[{:execution-id :fn-id :fn-name :finished-at :error :error-data} …]`. Error text/data were redacted + scrubbed at write time, so every string is already safe for the org that reads it. Empty when no pool / no failures."
+   :description "The CURRENT branch view's UNRESOLVED recent failures (newest first) from the `:fn-execution` audit rows — `[{:execution-id :fn-id :fn-name :finished-at :error :error-data} …]`. A failure counts as unresolved while: it ran on this branch or an ancestor (branch-chain; sibling branches never see each other's failures), its version is STILL what this branch resolves for the fn (a fix / override / delete clears it), no later succeeded run of the same version exists (a clean re-run clears transient failures), and it wasn't dismissed (`:failure-ack`). Error text/data were redacted + scrubbed at write time, so every string is already safe for the org that reads it. Empty when no pool / no failures."
    :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}
           :limit {:type :int :description "Row cap (e.g. 50)."}}
    :return-type [:list :keyword-map]
+   :effects #{:db}}
+
+  {:name :failure-ack
+   :description "Dismiss ONE failed execution from the Errors panel — sets `:acknowledged-at` on the row (org-guarded; the audit row itself stays for its TTL). Returns true when a row was updated, false for an unknown/foreign/already-acked id."
+   :args {:execution-id {:type :nullable-text :description "The `:execution-id` of the failure row to dismiss (uuid text; nil/malformed → false)."}}
+   :return-type :bool
+   :effects #{:db}}
+
+  {:name :failure-ack-all
+   :description "Dismiss EVERY failure the current branch view lists (same org/window/branch-chain scope as `:recent-failures`; sibling branches' failures untouched). Returns the number of rows acknowledged."
+   :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}}
+   :return-type :int
    :effects #{:db}}
 
   {:name :fn-stats-raw

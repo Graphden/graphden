@@ -149,6 +149,20 @@
   #uuid "7c2e9a41-5b83-4d06-8f1a-3e6b0d27c594")
 
 
+(def ^:private fn-execution-branch-id-field-uuid
+  ;; Which branch's ExecutionContext ran this. Drives the Errors panel's
+  ;; branch-scoped visibility: a failure shows on the branch that ran it
+  ;; and on its descendants (branch-chain), never on siblings/ancestors.
+  ;; NULL ≡ pre-feature row — visible on every branch until TTL-swept.
+  #uuid "aa7dc281-504e-40de-a771-41d4203c216d")
+
+
+(def ^:private fn-execution-acknowledged-at-field-uuid
+  ;; Explicit dismiss from the Errors panel — the row stays (audit
+  ;; trail intact) but stops counting as an unresolved failure.
+  #uuid "85ddf66c-15ea-4edb-a21b-7b840a0e0ac7")
+
+
 ;; =============================================================================
 ;; Field UUIDs — :fn-execution-arg
 ;; =============================================================================
@@ -320,7 +334,20 @@
                       ;; Tenant owner (§4 org-scoped executions). NULL ≡ public.
                       :org-id {:uuid fn-execution-org-id-field-uuid
                                :type :text
-                               :nullable? true}})
+                               :nullable? true}
+                      ;; Branch whose ExecutionContext ran this (errors-panel
+                      ;; visibility scope). Same shape as :service/:branch-id;
+                      ;; :ref carries no DB-level FK, so a later branch delete
+                      ;; leaves a harmless dangling id on an audit row.
+                      :branch-id {:uuid fn-execution-branch-id-field-uuid
+                                  :type :ref
+                                  :ref-entity :branch
+                                  :nullable? true}
+                      ;; Dismissed from the Errors panel at this instant.
+                      ;; NULL ≡ not acknowledged.
+                      :acknowledged-at {:uuid fn-execution-acknowledged-at-field-uuid
+                                        :type :timestamptz
+                                        :nullable? true}})
 
       ;; -----------------------------------------------------------------
       ;; :fn-execution-arg — one row per free-arg the executor was

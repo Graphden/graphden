@@ -2,9 +2,14 @@
  :description "Sidebar panel partials — error-log (recent failed executions), type-errors (current branch's recorded type diagnostics) and stats (org usage rollups)."
  :fns
  [;; ---------------------------------------------------------------------
-  ;; ERROR LOG partial (Phase C2) — GET /partials/error-log. The current
-  ;; org's recent failed executions (write-side redacted/scrubbed), newest
-  ;; first. Fn names link via the editor's native #hash navigation.
+  ;; ERROR LOG partial — GET /partials/error-log. The current branch
+  ;; view's UNRESOLVED failures (see :recent-failures for the four-part
+  ;; predicate: branch-chain scope, still-current version, no later
+  ;; success of the same version, not dismissed). Fn names link via the
+  ;; editor's native #hash navigation. Each row carries a ✕ dismiss
+  ;; button (POST /partials/error-log/ack); the list header carries
+  ;; «Dismiss all» — both swap the refreshed body back in place, so the
+  ;; tab badge recount (htmx:afterSettle) follows automatically.
   ;; ---------------------------------------------------------------------
   {:name :_perr-rows
    :parent :recent-failures
@@ -77,12 +82,31 @@
           :then :_perr-item-details
           :else :_hidden-span}}
 
+  {:name :_perr-item-exec-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :execution-id} :default {:value ""}}}
+
+  {:name :_perr-item-ack-url
+   :parent :str
+   :args {:parts [{:value "/partials/error-log/ack?id="} :_perr-item-exec-id]}}
+
+  {:name :_perr-item-ack-btn
+   :description "Per-row ✕ dismiss — POSTs the row's execution-id to the ack route and swaps the refreshed list body back in."
+   :parent :hx-button
+   :args {:label {:value "✕"}
+          :url :_perr-item-ack-url
+          :target {:value "closest .error-log-body"}
+          :swap {:value "outerHTML"}
+          :extras {:value {:class "error-log-ack"
+                           :title "Dismiss this failure"
+                           :aria-label "Dismiss this failure"}}}}
+
   {:name :_perr-row
-   :description "One failure row — fn link (native #hash navigation), finish time, scrubbed error text, optional ex-data details."
+   :description "One failure row — fn link (native #hash navigation), ✕ dismiss button, finish time, scrubbed error text, optional ex-data details."
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "error-log-row"}}
-          :children [:_perr-item-link :_perr-item-time-div
+          :children [:_perr-item-ack-btn :_perr-item-link :_perr-item-time-div
                      :_perr-item-error-div :_perr-item-details-opt]}}
 
   {:name :_perr-rendered-rows
@@ -97,13 +121,28 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "error-log-empty"}}
-          :children ["No failed runs in the last 7 days."]}}
+          :children ["No unresolved failures in the last 7 days."]}}
+
+  {:name :_perr-ack-all-btn
+   :description "«Dismiss all» — acks every failure the current branch view lists and swaps the (now empty) body back in."
+   :parent :hx-button
+   :args {:label {:value "Dismiss all"}
+          :url {:value "/partials/error-log/ack-all"}
+          :target {:value "closest .error-log-body"}
+          :swap {:value "outerHTML"}
+          :extras {:value {:class "error-log-ack-all"}}}}
+
+  {:name :_perr-toolbar
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "error-log-toolbar"}}
+          :children [:_perr-ack-all-btn]}}
 
   {:name :_perr-list
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "error-log-list"}}
-          :children [:_perr-rendered-rows]}}
+          :children [:_perr-toolbar :_perr-rendered-rows]}}
 
   {:name :_perr-body
    :parent :if
@@ -111,15 +150,61 @@
           :then :_perr-empty-msg
           :else :_perr-list}}
 
+  ;; Stable swap anchor: GET and both ack POSTs all return THIS div, so
+  ;; the buttons' `hx-target \"closest .error-log-body\"` + outerHTML
+  ;; swap replaces the whole body atomically.
+  {:name :_perr-wrap
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "error-log-body"}}
+          :children [:_perr-body]}}
+
   {:name :_perr-html
    :parent :render-hiccup
-   :args {:hiccup :_perr-body}}
+   :args {:hiccup :_perr-wrap}}
 
   {:name :_partial-error-log-handler
    :lambda-params []
-   :description "Ring handler for GET /partials/error-log — the org's recent failed executions as text/html. Auth-required (route side)."
+   :description "Ring handler for GET /partials/error-log — the current branch view's unresolved failures as text/html. Auth-required (route side)."
    :parent :html-ok-response
    :args {:body :_perr-html}}
+
+  ;; --- dismiss (ack) routes — POST, auth-required (route side). Each
+  ;; applies the ack THEN renders the refreshed body (`:do` forces the
+  ;; steps left-to-right), so the swapped-in fragment already reflects
+  ;; the dismissal. ---
+
+  {:name :_perr-ack-id
+   :parent :query-param
+   :args {:param-name {:value "id"}}}
+
+  {:name :_perr-ack-applied
+   :parent :failure-ack
+   :args {:execution-id :_perr-ack-id}}
+
+  {:name :_perr-ack-then-html
+   :parent :do
+   :args {:steps [:_perr-ack-applied :_perr-html]}}
+
+  {:name :_partial-error-ack-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /partials/error-log/ack?id=X — dismiss one failure row, respond with the refreshed error-log body."
+   :parent :html-ok-response
+   :args {:body :_perr-ack-then-html}}
+
+  {:name :_perr-ack-all-applied
+   :parent :failure-ack-all
+   :args {:days 7}}
+
+  {:name :_perr-ack-all-then-html
+   :parent :do
+   :args {:steps [:_perr-ack-all-applied :_perr-html]}}
+
+  {:name :_partial-error-ack-all-handler
+   :lambda-params []
+   :description "Ring handler for POST /partials/error-log/ack-all — dismiss every failure the current branch view lists, respond with the refreshed (empty) body."
+   :parent :html-ok-response
+   :args {:body :_perr-ack-all-then-html}}
 
   ;; ---------------------------------------------------------------------
   ;; TYPE ERRORS partial (error-tolerance Phase 3) — GET /partials/

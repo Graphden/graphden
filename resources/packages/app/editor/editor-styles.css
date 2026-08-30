@@ -4620,8 +4620,16 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border-radius: 2px;
 }
 /* Phase C2 error-log sidebar section. */
-.error-log-row { padding: 6px 8px; border-bottom: 1px dashed var(--light-border);
-  font-size: 0.6875rem; }
+.error-log-row { position: relative; padding: 6px 24px 6px 8px;
+  border-bottom: 1px dashed var(--light-border); font-size: 0.6875rem; }
+.error-log-ack { position: absolute; top: 4px; right: 4px;
+  background: none; border: 0; padding: 0 4px; cursor: pointer;
+  font-size: 0.6875rem; color: var(--muted-fg); }
+.error-log-ack:hover { color: var(--fg); }
+.error-log-toolbar { display: flex; justify-content: flex-end; padding: 2px 8px; }
+.error-log-ack-all { background: none; border: 0; padding: 0; cursor: pointer;
+  font-size: 0.625rem; color: var(--muted-fg); }
+.error-log-ack-all:hover { color: var(--fg); }
 .error-log-fn { color: var(--accent); display: block; }
 .error-log-time { color: var(--light-fg); }
 .error-log-msg { color: var(--error-fg); overflow-wrap: anywhere; }

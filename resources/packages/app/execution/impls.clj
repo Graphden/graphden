@@ -168,10 +168,26 @@
 
 (defbase recent-failures
   [days limit]
-  ;; Phase C2 error visibility — the current org's recent FAILED executions
-  ;; (error text/data already write-side redacted + scrubbed), newest first.
+  ;; Branch-scoped UNRESOLVED failures (error text/data already write-side
+  ;; redacted + scrubbed), newest first — see the four-part unresolved
+  ;; predicate in the `crud.fn-execution.errors` ns docstring.
   (cr/record-effect! :db)
-  (exec-errors/recent-failures (stats-pool ctx) (tc/current-org) days limit))
+  (exec-errors/recent-unresolved-failures ctx (stats-pool ctx) (tc/current-org) days limit))
+
+
+(defbase failure-ack
+  [execution-id]
+  ;; Explicit dismiss of one failure row (org-guarded UPDATE).
+  (cr/record-effect! :db)
+  (exec-errors/acknowledge! (stats-pool ctx) (tc/current-org)
+                            (request/parse-uuid-or-clear execution-id)))
+
+
+(defbase failure-ack-all
+  [days]
+  ;; Dismiss everything the current branch view lists.
+  (cr/record-effect! :db)
+  (exec-errors/acknowledge-all! ctx (stats-pool ctx) (tc/current-org) days))
 
 
 (defbase fn-stats-raw
@@ -298,4 +314,6 @@
    :usage-org-daily usage-org-daily
    :usage-org-fn-stats usage-org-fn-stats
    :usage-all-org-stats usage-all-org-stats
-   :recent-failures recent-failures})
+   :recent-failures recent-failures
+   :failure-ack failure-ack
+   :failure-ack-all failure-ack-all})

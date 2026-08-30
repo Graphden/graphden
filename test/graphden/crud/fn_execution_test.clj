@@ -373,8 +373,8 @@
 
 
 (deftest recent-failures-lists-the-failed-run-test
-  ;; Phase C2: a failed persisted execution shows up in the org-scoped
-  ;; recent-failures listing with its (write-side scrubbed) error text.
+  ;; A failed persisted execution shows up in the unresolved-failures
+  ;; listing with its (write-side scrubbed) error text.
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "errlog")
         c (assoc (setup/default-registry-ctx storage) :pg-storage @shared-storage)
@@ -385,15 +385,112 @@
                     :args {:a 1 :b "boom"}
                     :timeout-ms 5000 :persist? true})]
     (is (= :failed (:status result)))
-    (let [rows (exec-errors/recent-failures (:pool @shared-storage) nil 7 10)]
+    (let [rows (exec-errors/recent-unresolved-failures
+                 c (:pool @shared-storage) nil 7 10)]
       (is (= 1 (count rows)) "exactly the one failure listed")
       (let [row (first rows)]
         (is (= (:id composed) (:fn-id row)) "joined back to the LOGICAL fn id")
         (is (str/includes? (str (:fn-name row)) "my-test-add-errlog")
             "display name joined from the fn row")
-        (is (seq (str (:error row))) "carries the error text")))
+        (is (seq (str (:error row))) "carries the error text")
+        (is (some? (:execution-id row)) "carries the row id (dismiss target)")))
     (testing "another org's read sees nothing (explicit org filter)"
-      (is (empty? (exec-errors/recent-failures (:pool @shared-storage) "acme" 7 10))))))
+      (is (empty? (exec-errors/recent-unresolved-failures
+                    c (:pool @shared-storage) "acme" 7 10))))))
+
+
+(deftest unresolved-failure-self-resolution-test
+  ;; The self-healing half of the unresolved predicate: a later
+  ;; succeeded run of the same version clears the failure; so does
+  ;; shipping a new version of the fn; so does an explicit ack.
+  (let [storage (create-full-storage)
+        {composed :composed} (make-pure-add-fn! storage "unres")
+        c (assoc (setup/default-registry-ctx storage) :pg-storage @shared-storage)
+        pool (:pool @shared-storage)
+        run! (fn [b] (apply-and-await!
+                       c {:fn-id (:id composed) :args {:a 1 :b b}
+                          :timeout-ms 5000 :persist? true}))
+        listed (fn [] (exec-errors/recent-unresolved-failures c pool nil 7 10))]
+    (testing "a later succeeded run of the SAME version clears the failure"
+      (is (= :failed (:status (run! "boom"))))
+      (is (= 1 (count (listed))))
+      (is (= :succeeded (:status (run! 2))))
+      (is (empty? (listed)) "transient failure cleared by the clean re-run"))
+
+    (testing "a new version of the fn clears the failure"
+      (is (= :failed (:status (run! "boom"))))
+      (is (= 1 (count (listed))))
+      (sp/update-entity storage :fn (:id composed)
+                        {:description "fixed (new version)"})
+      (is (empty? (listed)) "old-version failure no longer current"))
+
+    (testing "explicit acknowledge clears the failure"
+      (is (= :failed (:status (run! "boom"))))
+      (let [rows (listed)]
+        (is (= 1 (count rows)))
+        (is (true? (exec-errors/acknowledge! pool nil (:execution-id (first rows)))))
+        (is (empty? (listed)))
+        (testing "ack is idempotent / unknown id is a no-op"
+          (is (false? (exec-errors/acknowledge! pool nil (:execution-id (first rows)))))
+          (is (false? (exec-errors/acknowledge! pool nil (random-uuid)))))))))
+
+
+(deftest unresolved-failure-branch-scoping-test
+  ;; The branch half of the unresolved predicate: a child branch
+  ;; inherits its ancestors' failures (it resolves the same broken
+  ;; version); siblings and ancestors never see a branch's own
+  ;; failures; a branch-local override clears the inherited failure
+  ;; for the child only; acknowledge-all is chain-scoped.
+  (let [storage (create-full-storage)
+        base @shared-storage
+        {composed :composed} (make-pure-add-fn! storage "brscope")
+        parent-branch-id (vs/current-branch-id storage)
+        mk-child! (fn [nm]
+                    (let [b (sp/create-entity base :branch
+                                              {:name nm
+                                               :base-branch-id parent-branch-id
+                                               :created-at (java.time.Instant/now)})]
+                      (vs/->VersionedStorage base (:id b))))
+        child-storage (mk-child! "child-a")
+        sibling-storage (mk-child! "child-b")
+        ctx-of (fn [s] (assoc (setup/default-registry-ctx s) :pg-storage base))
+        parent-ctx (ctx-of storage)
+        child-ctx (ctx-of child-storage)
+        sibling-ctx (ctx-of sibling-storage)
+        pool (:pool base)
+        listed (fn [ctx] (exec-errors/recent-unresolved-failures ctx pool nil 7 10))
+        fail-on! (fn [ctx] (apply-and-await!
+                             ctx {:fn-id (:id composed) :args {:a 1 :b "boom"}
+                                  :timeout-ms 5000 :persist? true}))]
+    (testing "a parent-branch failure is inherited by the child, not invented for it"
+      (is (= :failed (:status (fail-on! parent-ctx))))
+      (is (= 1 (count (listed parent-ctx))))
+      (is (= 1 (count (listed child-ctx)))
+          "child resolves the same broken version ran by its ancestor")
+      (is (= 1 (count (listed sibling-ctx)))
+          "the other child inherits it too — the failure sits on their shared ancestor"))
+
+    (testing "a child-branch failure stays on the child"
+      (is (= :failed (:status (fail-on! child-ctx))))
+      (is (= 2 (count (listed child-ctx))))
+      (is (= 1 (count (listed parent-ctx)))
+          "the parent never sees a descendant's runs")
+      (is (= 1 (count (listed sibling-ctx)))
+          "siblings never see each other's runs"))
+
+    (testing "a branch-local override clears inherited + own failures for that branch only"
+      (sp/update-entity child-storage :fn (:id composed)
+                        {:description "child override (new version)"})
+      (is (empty? (listed child-ctx))
+          "child now resolves its own version — old failures aren't its code")
+      (is (= 1 (count (listed parent-ctx))) "parent unaffected"))
+
+    (testing "acknowledge-all is chain-scoped"
+      (is (pos? (exec-errors/acknowledge-all! sibling-ctx pool nil 7))
+          "sibling's view lists the shared ancestor failure — ack-all clears it")
+      (is (empty? (listed sibling-ctx)))
+      (is (empty? (listed parent-ctx))
+          "the acked row WAS the parent's row — ack is per-row, not per-view"))))
 
 
 (deftest apply-stamps-touched-secret-on-rows-that-feed-side-effecting-sinks-test

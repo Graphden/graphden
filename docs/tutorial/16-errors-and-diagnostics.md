@@ -18,10 +18,10 @@ Graphden separates them on purpose, and each has its own panel:
 
 | | **Errors** | **Type errors** |
 |---|---|---|
-| What it lists | runs that FAILED | edits that don't type-check |
+| What it lists | runs that FAILED and are still unresolved | edits that don't type-check |
 | When a row appears | at run time | at write time |
-| Scope | your org, last 7 days | the branch you are on, right now |
-| Cleared by | time (the audit rows expire) | fixing the binding |
+| Scope | the branch you are on (plus its ancestors), last 7 days | the branch you are on, right now |
+| Cleared by | fixing the fn, a clean re-run, or ✕ (dismiss) | fixing the binding |
 
 A type error is not a failed run: the write **succeeded**, the fn is in
 the graph, and the diagnostic rides alongside it (lesson 05 — "a
@@ -33,19 +33,39 @@ drawer whose tabs (Errors, Type errors, Tests, Debug) open without
 leaving the editor, so a fn link in a row selects it on the canvas
 while the list stays open.
 
-## Errors — the last things that failed
+## Errors — what failed and is still your problem
 
-The **Errors** tab lists your org's recent failed executions, newest
-first. Each row is:
+The **Errors** tab lists the recent failed runs that are still
+**unresolved** on the branch you are on, newest first. Each row is:
 
 ```
+✕                                   ← dismiss this failure
 eprobe                              ← the fn, as a link
 2026-08-22 09:49:35                 ← when it finished
 Malformed JSON.                     ← the error message
 ▸ details                           ← the error data, expandable
 ```
 
-Three things are worth knowing about that list:
+The panel is a worklist, not a permanent scar — a row leaves it as
+soon as any of these happens:
+
+- **You fix the fn.** A failure is pinned to the exact version that
+  ran. Save a new version (or, on a branch, override the fn) and the
+  old failure is not your code any more — the row disappears on its
+  own.
+- **A clean re-run.** If the same version later runs to success (the
+  failure was transient — a network blip, a bad input), the failure
+  clears without an edit.
+- **You dismiss it.** The ✕ on the row (or **Dismiss all** above the
+  list) acknowledges the failure and hides it everywhere; the audit
+  row itself stays for its retention window.
+
+Failures follow branches the way code does: a branch **sees its
+ancestors' failures** (it resolves the same broken version they ran),
+but sibling branches never see each other's, and a parent never sees a
+run that happened only on a child.
+
+Three more things worth knowing about that list:
 
 **It only holds runs you asked to keep.** A transient run — the plain
 ▶ with "Save to history" unticked (lesson 12) — leaves no audit row, so
@@ -122,7 +142,12 @@ answers *why*. In that order, most of the time.
    is the top row. Expand `details` — the error data carries the typed
    `:validation-error/malformed-json`, which is what a client would
    have seen.
-4. Now make a static mistake. Extend `:http-server` and bind its
+4. Watch the row resolve itself: run `tutorial-bad-json` again, this
+   time with `string` = `{}` (valid JSON), "Save to history" ticked.
+   Reopen the drawer — the failure is gone: the same version ran to
+   success, so there is nothing left to fix. (The ✕ on a row does the
+   same by hand, for failures that no re-run will outrun.)
+5. Now make a static mistake. Extend `:http-server` and bind its
    `port` to the literal `"oops"` (a string). The write SUCCEEDS, with
    a warning, and the card grows a red type-error badge.
 5. Open **Type errors** in the same bar. There is your row,

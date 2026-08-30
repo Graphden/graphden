@@ -36,6 +36,8 @@
                   :partial-execute-history
                   :partial-stats
                   :partial-error-log
+                  :partial-error-log-ack
+                  :partial-error-log-ack-all
                   :partial-assets-panel
                   :partial-asset-edit
                   :partial-type-errors

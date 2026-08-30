@@ -796,11 +796,11 @@
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
               {:title "Open Errors"
-               :body "Click [[Errors]] in the diagnostics bar under the canvas — the drawer opens without leaving the editor. It lists your org's failed runs from the last 7 days, newest first — the fn as a link, when it finished, and the message. A fn link selects it on the canvas while the list stays open."
+               :body "Click [[Errors]] in the diagnostics bar under the canvas — the drawer opens without leaving the editor. It lists this branch's UNRESOLVED failures from the last 7 days, newest first — the fn as a link, when it finished, and the message. A fn link selects it on the canvas while the list stays open."
                :target "#gd-diag-nav button[data-section=\"errors\"]"
                :check {:kind "dom" :selector "#gd-diag-drawer[data-open=\"1\"] #gd-diag-panels > [data-section=\"errors\"]:not([hidden])"}}
               {:title "Read the row"
-               :body "Your run is at the top. Expand [[details]] — the error DATA is there too, carrying the typed :validation-error/malformed-json a client would have received. Both were scrubbed when the row was written, not when it was shown, so nothing secret is waiting here."
+               :body "Your run is at the top. Expand [[details]] — the error DATA is there too, carrying the typed :validation-error/malformed-json a client would have received. Both were scrubbed when the row was written, not when it was shown, so nothing secret is waiting here. And the row is no permanent scar: it clears on its own when you fix the fn or a clean re-run succeeds — or right now, via its [[✕]] (Dismiss)."
                :target ".error-log-list"
                :check {:kind "manual"}}
               {:title "Now a static mistake"

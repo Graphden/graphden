@@ -159,9 +159,19 @@
    :args {:path "/partials/stats" :handler :_partial-stats-handler}}
 
   {:name :partial-error-log
-   :description "GET /partials/error-log — the current org's recent failed executions (write-side redacted/scrubbed), newest first. Auth-required; the editor's Errors sidebar section lazy-loads it."
+   :description "GET /partials/error-log — the current branch view's UNRESOLVED failures (write-side redacted/scrubbed), newest first. Auth-required; the editor's Errors sidebar section lazy-loads it."
    :parent :get-auth-required
    :args {:path "/partials/error-log" :handler :_partial-error-log-handler}}
+
+  {:name :partial-error-log-ack
+   :description "POST /partials/error-log/ack?id=X — dismiss one failure row (sets :acknowledged-at; org-guarded), responds with the refreshed error-log body for the htmx swap. Auth-required."
+   :parent :post
+   :args {:path "/partials/error-log/ack" :handler :_partial-error-ack-handler}}
+
+  {:name :partial-error-log-ack-all
+   :description "POST /partials/error-log/ack-all — dismiss every failure the current branch view lists (same org/window/branch-chain scope as the GET), responds with the refreshed body. Auth-required."
+   :parent :post
+   :args {:path "/partials/error-log/ack-all" :handler :_partial-error-ack-all-handler}}
 
   {:name :partial-execute-trace
    :description "GET /partials/execute-trace?id=X — a persisted run's :path-trace as a depth-first call tree (rows carry data-seq/data-fn-id hooks). `editor-trace-view.js` owns the panel lifecycle: row-click canvas highlight + ◀/▶ stepping. Auth-required."

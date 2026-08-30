@@ -153,8 +153,12 @@
         ;; (which invalidate), never during one. See lookup ns.
         free-slots (lookup/free-arg-slot-map-cached ctx fn-id)
         declared-eff (persist/declared-effects-of fn-id)
-        org (tc/current-org)]
-    {:storage (request/require-storage ctx)
+        org (tc/current-org)
+        storage (request/require-storage ctx)]
+    {:storage storage
+     ;; Which branch's view submitted the run — stamped on the persisted
+     ;; row so the Errors panel can scope failures per branch-chain.
+     :branch-id (vs/current-branch-id storage)
      ;; A tenant's SUBMITTED fn is untrusted graph code, so it runs
      ;; effect-restricted: carry the cloud allow-list on the ctx and the
      ;; executor gates it via `record-effect!` (compile-runtime honours
@@ -220,13 +224,13 @@
    `release` is idempotent, so the future's finally re-calling it is a
    no-op."
   [{:keys [storage exec-ctx fn-id fn-version-id free-slots declared-eff
-           executor-args cancel-flag persist?]}
+           executor-args cancel-flag persist? branch-id]}
    parsed release]
   (try
     (let [row (when persist?
                 (persist/create-pending-with-args!
                   storage fn-version-id declared-eff
-                  (:user-id parsed) (:args parsed) free-slots))]
+                  (:user-id parsed) (:args parsed) free-slots branch-id))]
       (try
         (let [[fut trace path-trace]
               (persist/run-future exec-ctx fn-id executor-args cancel-flag release
@@ -263,7 +267,7 @@
    terminal state SYNCHRONOUSLY so a GET by id right after is already
    consistent."
   [{:keys [storage fn-id declared-eff stats-ctx fn-version-id free-slots
-           persist? cancel-flag]}
+           persist? cancel-flag branch-id]}
    parsed {:keys [row fut trace path-trace]}]
   (let [result (try (java.util.concurrent.Future/.get
                       fut (long (:timeout-ms parsed))
@@ -294,7 +298,7 @@
       (and (= ::pending result) (not persist?))
       (let [r (persist/create-pending-with-args!
                 storage fn-version-id declared-eff
-                (:user-id parsed) (:args parsed) free-slots)]
+                (:user-id parsed) (:args parsed) free-slots branch-id)]
         (persist/register-future! (:id r) fut cancel-flag)
         (persist/record-completion! storage (:id r) fn-id fut trace declared-eff stats-ctx path-trace)
         {:status :pending :execution-id (str (:id r))})

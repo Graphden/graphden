@@ -47,12 +47,15 @@ validate their input rather than trusting it: a caller cannot name a
 counter (the map is process-global and unbounded, so that would be a
 memory-growth vector).
 
-## 2. Error log — recent failures viewer (always on)
+## 2. Error log — unresolved failures viewer (always on)
 
-The editor's **Errors** sidebar section lists an org's recent failed
-executions (`:recent-failures` → `GET /partials/error-log`), reading the
-already-scrubbed `:error`/`:error-data` off the audit rows. No new
-storage. See [EXECUTION.md § Error log](EXECUTION.md).
+The editor's **Errors** sidebar section lists the current branch view's
+UNRESOLVED failures (`:recent-failures` → `GET /partials/error-log`),
+reading the already-scrubbed `:error`/`:error-data` off the audit rows.
+A failure clears when the fn ships a new version, when the same version
+later runs to success, or when it's dismissed (✕ / Dismiss all →
+`:failure-ack` / `:failure-ack-all`); visibility is branch-chain-scoped.
+See [EXECUTION.md § Error log](EXECUTION.md).
 
 ## 3. Alerting — two complementary paths
 

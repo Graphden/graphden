@@ -27,6 +27,19 @@ function buildOrgsAdminSection() {
     + '<div class="ns-children" hx-get="/partials/orgs-admin" hx-trigger="load" hx-swap="innerHTML">'
     +   '<div class="loading">Loading…</div>'
     + '</div>';
+  // The filter's behaviour. Markup comes from the server with the rest of
+  // the panel; the listener lives on THIS wrapper because the panel body is
+  // replaced by every HTMX swap (plan changes re-render it), and a listener
+  // inside would be thrown away with it. Name matching only — the operator
+  // is finding an org, not querying it.
+  wrap.addEventListener('input', (e) => {
+    const box = e.target.closest('[data-orgs-filter]');
+    if (!box) return;
+    const q = box.value.trim().toLowerCase();
+    for (const row of wrap.querySelectorAll('tr[data-org]')) {
+      row.hidden = q !== '' && !row.dataset.org.toLowerCase().includes(q);
+    }
+  });
   // Same lazy-load contract as the other admin sections: the CALLER runs
   // htmx.process after appending to the connected DOM (see mountAdminSection).
   return wrap;

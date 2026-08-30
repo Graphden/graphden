@@ -142,6 +142,66 @@ const {assert, newContext} = require('./edit-test-helpers');
     assert(!svcHint, 'services lens: no "nothing matches" hint while app.server is visible');
     console.log('  ✓ services lens: app.server visible unexpanded, no lying hint');
 
+    // ── the "internal N" toggle tells the truth under a lens ──────────
+    //
+    // The toggle's count was captured at build time and never updated, so
+    // a types lens kept advertising "internal 658" on app.branches while
+    // hiding every row behind it — a disclosure that could only ever
+    // reveal nothing. Now: N is the lens-visible count, and a toggle with
+    // nothing to show is hidden with its group. Checked as a sweep over
+    // EVERY toggle rather than one namespace, so the invariant holds
+    // wherever the group renders.
+    await switchLens('types');
+    await page.waitForTimeout(700);
+    const toggles = await page.evaluate(() => {
+      const out = [];
+      for (const t of document.querySelectorAll('.ns-internal-toggle')) {
+        const holder = t.nextElementSibling;
+        if (!holder || !holder.classList.contains('ns-internal-group')) continue;
+        const visibleRows = [...holder.children]
+          .filter((el) => el.classList.contains('entity-item') && !el.hidden).length;
+        const advertised = parseInt((t.textContent.match(/internal (\d+)/) || [])[1], 10);
+        out.push({hidden: t.hidden, advertised, visibleRows});
+      }
+      return out;
+    });
+    for (const t of toggles) {
+      if (t.hidden) {
+        assert(t.visibleRows === 0,
+               'a hidden internal toggle hides only when the lens left nothing: '
+               + JSON.stringify(t));
+      } else {
+        assert(t.advertised === t.visibleRows,
+               'a visible internal toggle advertises the LENS-visible count: '
+               + JSON.stringify(t));
+        assert(t.visibleRows > 0, 'and never advertises an empty group');
+      }
+    }
+    const anyHidden = toggles.some((t) => t.hidden);
+    const anyShown = toggles.some((t) => !t.hidden);
+    console.log('  ✓ internal toggles under the types lens: '
+                + toggles.length + ' checked (' + (anyHidden ? 'some hidden, ' : '')
+                + (anyShown ? 'some shown' : 'none shown') + ')');
+
+    // Clearing the lens restores the full counts.
+    await switchLens('all');
+    await page.waitForTimeout(700);
+    const restored = await page.evaluate(() => {
+      const bad = [];
+      for (const t of document.querySelectorAll('.ns-internal-toggle')) {
+        const holder = t.nextElementSibling;
+        if (!holder || !holder.classList.contains('ns-internal-group')) continue;
+        const rows = [...holder.children]
+          .filter((el) => el.classList.contains('entity-item') && !el.hidden).length;
+        const n = parseInt((t.textContent.match(/internal (\d+)/) || [])[1], 10);
+        if (t.hidden || n !== rows) bad.push({n, rows, hidden: t.hidden});
+      }
+      return bad;
+    });
+    assert(restored.length === 0,
+           'clearing the lens restores every toggle: ' + JSON.stringify(restored));
+    console.log('  ✓ lens off: every internal toggle back to its full count');
+
     console.log('PASS');
     await browser.close();
     process.exit(0);

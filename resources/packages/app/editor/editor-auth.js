@@ -498,9 +498,7 @@ function openShellMenu() {
   }
 
   // Community footer — the menu's quiet last block, the in-editor pointer at
-  // the project's channels (URLs mirror README/landing). The support link
-  // shows only where supporting is the ask: self-host installs. Cloud plans
-  // already pay — `gd-tenancy` on body marks those deployments.
+  // the project's channels (URLs mirror README/landing).
   divider();
   // Feedback — present unless the operator explicitly disabled it
   // (GRAPHDEN_FEEDBACK_URL=off → editor-feedback.js hides the affordance).
@@ -510,7 +508,11 @@ function openShellMenu() {
       if (typeof window.openFeedbackForm === 'function') window.openFeedbackForm();
     });
   }
-  if (!document.body.classList.contains('gd-tenancy')) {
+  // Everywhere, cloud included. It was gated off tenancy deployments for a
+  // while on the theory that paying customers should not be asked to
+  // donate — the project's owner disagrees, and next to the socials it
+  // reads as a community link, not a collection plate.
+  {
     const support = document.createElement('a');
     support.className = 'auth-menu-item auth-menu-support';
     support.href = 'https://boosty.to/graphden';

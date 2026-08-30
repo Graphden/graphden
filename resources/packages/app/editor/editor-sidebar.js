@@ -829,11 +829,9 @@ function buildNsChildGroup(node, nsPath, searchMode) {
       toggle.type = 'button';
       toggle.className = 'ns-internal-toggle';
       toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-      toggle.textContent = (open ? '▾ ' : '▸ ') + 'internal ' + internalFns.length;
       toggle.title = 'Private (_-prefixed) and anonymous fns of this namespace';
       const holder = document.createElement('div');
       holder.className = 'ns-internal-group';
-      holder.hidden = !open;
       for (const fn of internalFns) {
         const el = buildFnItem(fn, nsPath.split('.').length + 2);
         el.hidden = !fnKindVisible(fn);
@@ -841,12 +839,14 @@ function buildNsChildGroup(node, nsPath, searchMode) {
       }
       toggle.addEventListener('click', (e) => {
         e.stopPropagation();
-        const nowOpen = holder.hidden;
-        holder.hidden = !nowOpen;
+        const nowOpen = toggle.getAttribute('aria-expanded') !== 'true';
         toggle.setAttribute('aria-expanded', nowOpen ? 'true' : 'false');
-        toggle.textContent = (nowOpen ? '▾ ' : '▸ ') + 'internal ' + internalFns.length;
         if (nowOpen) _internalOpenNs.add(nsPath); else _internalOpenNs.delete(nsPath);
+        syncInternalToggle(toggle, holder);
       });
+      // Label, visibility and the group's collapsed state all derive from
+      // the rows' live hidden-state, through the same helper the lens uses.
+      syncInternalToggle(toggle, holder);
       childGroup.appendChild(toggle);
       childGroup.appendChild(holder);
     }
@@ -995,6 +995,22 @@ function announceSearch(query, total, truncated) {
                     + (truncated ? ' (showing the first page)' : ''));
 }
 
+
+// The "internal N" toggle advertises the private/anonymous rows behind it.
+// N must be what the CURRENT lens would let through: the count captured at
+// build time went stale the moment a lens flipped, so a types lens kept
+// advertising "internal 658" over a group whose every row it was hiding.
+// When the lens hides them all, the toggle and its group go with them —
+// an affordance that can only ever reveal nothing is noise.
+function syncInternalToggle(toggle, holder) {
+  const visible = Array.from(holder.children)
+    .filter((el) => el.classList?.contains('entity-item') && !el.hidden).length;
+  const open = toggle.getAttribute('aria-expanded') === 'true';
+  toggle.textContent = (open ? '▾ ' : '▸ ') + 'internal ' + visible;
+  toggle.hidden = visible === 0;
+  holder.hidden = visible === 0 || !open;
+}
+
 // In-place lens application: re-set the `hidden` overlay on the already-built
 // tree DOM (fn rows via fnKindVisible, namespace header+children via
 // nodeShouldShow over the node stored on the header), and re-render the small
@@ -1007,6 +1023,12 @@ function applyLensVisibility() {
   for (const el of list.querySelectorAll('.entity-item[data-fn-id]')) {
     const fn = lookups?.fnMap?.get(el.dataset.fnId);
     if (fn) el.hidden = !fnKindVisible(fn);
+  }
+  for (const toggle of list.querySelectorAll('.ns-internal-toggle')) {
+    const holder = toggle.nextElementSibling;
+    if (holder?.classList.contains('ns-internal-group')) {
+      syncInternalToggle(toggle, holder);
+    }
   }
   const cgByPath = new Map();
   for (const cg of list.querySelectorAll('.ns-children[data-ns-children]')) {

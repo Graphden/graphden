@@ -387,6 +387,13 @@
            on either side's visibility set, resolve both, and report
            added/modified. The simplest read-only comparison — it precedes the
            conflict-oriented framing below."}
+    {:ns graphden.versioning.storage.diff-view :defn diff-branches-view
+     :say "The DISPLAY model over diff-branches (diff v2): entries grouped
+           under the fn that owns them (list-items chain through their
+           binding), per-field before/after pairs for modified rows, and
+           batch name-resolution for slots and fn-typed refs. The editor's
+           diff modal renders THIS shape via the :diff-branches-view
+           base-fn; the JSON API keeps the flat v1 wire shape."}
     {:ns graphden.versioning.storage.merge :defn detect-conflicts
      :say "Finds entities modified on BOTH branches after the computed fork
            point (skipping branch-local fns). This introduces fork-point

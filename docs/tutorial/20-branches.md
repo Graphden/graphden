@@ -100,7 +100,9 @@ popover, no separate "pull request" object:
 
 Every proposal also carries a **comment thread** — open the Δ diff and
 the conversation sits right under the change: leave a note, the author
-replies, the reviewer approves when it's settled.
+replies, the reviewer approves when it's settled. A comment can also be
+**anchored to one element of the diff** — hover a diff row and click its
+💬 to pin the note to exactly that fn or arg (lesson 21 walks it).
 
 Approvals are **content-aware**: if the proposed branch is edited after
 it was approved, that approval is automatically dismissed (it went
@@ -110,8 +112,9 @@ just like GitHub dismissing stale reviews on a new push.
 By default a proposal author's **own** approval counts, so a solo user or
 a small team isn't locked out — propose → approve → merge works with one
 person. A team that wants genuine four-eyes review unticks **"Count the
-author's own approval"** in the target's ⚙ menu, and then a required
-approval must come from **someone other than the author**.
+author's own approval"** in the target row's `⋯` → **⚙ Protection**
+menu, and then a required approval must come from **someone other than
+the author**.
 
 ### Try it — the plain flow
 
@@ -123,23 +126,36 @@ approval must come from **someone other than the author**.
 3. Switch back to `main`. The fn-def is unchanged — your edit
    lives only on `feat-tutorial`.
 4. Open the branch popover, click `Δ` next to `feat-tutorial`.
-   The diff modal lists every entity that resolves differently.
+   The diff modal groups the changes **by fn**: a `+`/`−`/`±` marker
+   per row, and under a modified fn the exact args and fields that
+   changed, shown as `old → new`. Click the row — the editor opens
+   that fn on the canvas with the changed args ringed `Δ`.
+   Prefer to *stay* in the diff? Pick `⋯` → **◐ Compare with
+   current** instead: the whole editor becomes the diff — every
+   changed fn is badged in the Explorer (namespaces carry `+n ±n −n`
+   summaries), any changed fn you open rings its changed args, and
+   the `◐ vs feat-tutorial` chip by the branch chip keeps the mode
+   on until you `×` it — it survives reloads, so "always see my
+   drift vs main" is one click. You keep editing and running as
+   usual; compare mode only annotates.
 5. From `main`, click `⇢` next to `feat-tutorial`. Confirm.
    The page reloads and `main` now sees your edit.
 
 ### Try it — with review required
 
-1. Open the `⚙` menu next to `main` and set **Required approvals** to
-   `1` — `main` now requires one approval to merge into.
+1. Click `⋯` on the `main` row, choose **⚙ Protection…** and set
+   **Required approvals** to `1` — `main` now requires one approval
+   to merge into.
 2. Create a second branch `feat-review`, edit a value on it, switch
    back to `main`.
 3. From `main`, click `⇢` next to `feat-review`. It's refused —
    *"requires 1 approval(s)…"*.
-4. Click `📤` on `feat-review` (propose it), then `✅` (approve it).
-   Its badge reads `0/1` before and `1/1` after.
+4. In the `feat-review` row's `⋯` menu click **📤 Propose for
+   review**, then click `✅` on the row (approve it). Its badge reads
+   `0/1` before and `1/1` after.
 5. `⇢` now merges cleanly, and the merged proposal drops off the
-   review list. Reopen `main`'s `⚙` menu and set Required approvals
-   back to `0` to turn the requirement off.
+   review list. Reopen `main`'s `⋯` → **⚙ Protection…** and set
+   Required approvals back to `0` to turn the requirement off.
 
 ## Conflicts
 

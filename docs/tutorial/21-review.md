@@ -6,7 +6,8 @@ a change through the propose → approve cycle until it may land.
 
 **Concepts**: required approvals on the merge **target**, the 📤
 propose / ✅ approve cycle, stale-approval dismissal, self-approval,
-review comments, and why a merged branch is permanent.
+review comments (anchored and general), suggested changes, and why a
+merged branch is permanent.
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
 > [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=21)
@@ -18,14 +19,16 @@ merge. Here the missing half: making a merge *conditional on review*.
 ## The rule lives on the target
 
 On GitHub you protect `main` and require approving reviews; graphden
-works the same way, and the knobs sit in the branch popover's ⚙ menu
-**of the branch being merged into**:
+works the same way, and the knobs sit under `⋯` → **⚙ Protection…**
+on the branch-popover row **of the branch being merged into**:
 
 - **Required approvals** (0–3) — a merge into this branch is refused
   (409, *"requires N approval(s)…"*) until the proposal has N valid
   approvals.
 - **Push only via merge** — no direct writes at all; the only way in
   is a merge (lesson 20 covers this one).
+  Required approvals is a one-tap `0…3` segmented control — pick the
+  number and the rule is saved immediately.
 - **Count the author's own approval** — on by default, so a solo user
   is never locked out; untick it for genuine four-eyes review.
 
@@ -45,6 +48,20 @@ like GitHub dismissing stale reviews on a new push.
   409 with the shortfall.
 - Every proposal carries a **comment thread** under its Δ diff —
   open the diff and the conversation sits right below the change.
+- A comment can be **anchored to one element** of the diff: hover a
+  diff row (or one of its arg entries) and click 💬 — the note pins
+  to exactly that fn / arg / list item, GitHub-line-comment style.
+  Anchored threads render inline under their row; if the element
+  later drops out of the diff, the thread falls back to the general
+  conversation with a context chip.
+- The diff also lists **Suggestions** — branches forked *off the
+  proposal itself* and proposed back into it. A reviewer clicks
+  **+ Suggest a change**, lands on a fresh `suggest/…` branch, edits
+  with the full editor, and proposes it (`⋯` → 📤). The author then
+  sees it under the proposal's Δ diff and applies it with one click
+  (`⇢ apply` — an ordinary merge into the proposal, which also
+  dismisses now-stale approvals). No new machinery: a suggestion is
+  just the branch/propose/merge cycle one level down.
 
 ## Try it
 
@@ -52,15 +69,16 @@ like GitHub dismissing stale reviews on a new push.
    bind its `:value` to `1`.
 2. Create a branch `tutorial-release` (from `main`) — it will play
    the protected trunk, without touching your real one.
-3. In the branch popover, open `⚙` on the `tutorial-release` row and
-   set **Required approvals** to `1`.
+3. In the branch popover, open `⋯` on the `tutorial-release` row,
+   choose **⚙ Protection…** and set **Required approvals** to `1`.
 4. Create `tutorial-feature` — it forks from the branch you are on,
    `tutorial-release`, so that is where its proposal aims.
 5. Change `review-demo`'s value to `2` there, then switch back to
    `tutorial-release`.
 6. Click `⇢` on the `tutorial-feature` row. Refused: *"requires 1
    approval(s)…"* — the rule holds even against the branch's author.
-7. Click `📤` (propose), then `✅` (approve). The badge reads `1/1`.
+7. In the row's `⋯` menu click **📤 Propose for review**, then click
+   `✅` on the row (approve). The badge reads `1/1`.
 8. `⇢` would now land the merge.
 
 ## Why the tour stops before the merge

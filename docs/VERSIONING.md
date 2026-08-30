@@ -160,7 +160,7 @@ read endpoints sit behind it too (matches `/api/services`).
 | GET    | `/api/executions?fn-id=X`                |                                       | `{ok, executions}` — runs of X **as it resolves on the current branch** (not all-versions). Defaults to 20 rows, capped at 100 |
 | GET    | `/api/executions?fn-version-id=Y`        |                                       | `{ok, executions}` — runs of the SPECIFIC version row (drives the `⌛` panel's per-version expand) |
 
-### Diff shape
+### Diff shape (wire, v1) and the display model (v2)
 
 Each `diffs[]` entry:
 
@@ -176,7 +176,39 @@ Each `diffs[]` entry:
 
 Filters out identity-only rows so a fn that exists on one branch
 but not the other reports `:added-*` rather than spurious
-`:modified`. created-at is dissoc'd before comparison.
+`:modified`. created-at is dissoc'd before comparison. Note there is
+no `removed` change kind: deletion is a tombstone, and a tombstoned
+entity resolves to `nil` exactly like one that never existed on that
+branch — so "deleted on source" surfaces as `added-in-target`. The
+editor therefore labels these sections "Only in <branch>", which is
+always true, instead of "Added in", which sometimes isn't.
+
+The editor's diff modal does NOT render this flat wire shape. It
+renders the GROUPED display model from
+`graphden.versioning.storage.diff-view/diff-branches-view` (exposed
+as the `:diff-branches-view` base-fn, consumed only by the
+`/partials/branch-diff` partial):
+
+```edn
+{:count 3
+ :groups [{:fn-id "<uuid>" :fn-name "web-server" :fn-label ":web-server"
+           :change :modified          ; the OWNING fn's own change,
+                                      ; or :modified when only parts moved
+           :branch-local? false
+           :entries [{:entity-name :fn :entity-id "<uuid>" :change :modified
+                      :fields [{:field "description"
+                                :source "new" :target "old"}]}
+                     {:entity-name :binding :entity-id "<uuid>"
+                      :change :modified :slot-name "port"
+                      :fields [{:field "value" :source "9090" :target "8080"}]}]}]}
+```
+
+Bindings / fn-slots / list-items are grouped under the fn that owns
+them (list-items chain through their binding); slot names and
+fn-typed ref values (`ref-fn-id`, `type-override-fn-id`, …) are
+resolved to names batch-wise. One-sided entries carry a `:preview`
+string instead of `:fields`. The JSON API keeps serving the flat v1
+shape above.
 
 ### Conflict resolution shape
 
@@ -199,8 +231,9 @@ core's `case` matcher.
 | Affordance | Where | What it does |
 |------------|-------|--------------|
 | Branch chip | context bar (`#gd-ctxbar` → `#branch-mount`, between the workspace chip and the packages chip) | Shows current branch. Inverted style when off main. |
-| Branch popover | click chip | Branch list + inline create + Δ diff + 📤 propose-for-review toggle + ✅ approve (on proposed rows) + ⇢ merge + 🔀 require-merge toggle + ✔N required-approvals cycler + ⛨ write-policy (tenancy only) + × delete; a 🔒 marks write-policy-protected rows. Propose/approve/require-merge/required-approvals are all open-core |
-| Diff modal | click Δ in row | Full-viewport list of differences (`:added-in-source` / `:added-in-target` / `:modified`); :fn rows are clickable → navigate |
+| Branch popover | click chip | Branch list + inline create. Per row: Δ diff, ✅ approve (on proposed rows) and ⇢ merge inline (instant `data-tip` tooltips), everything administrative under the row's ⋯ menu with text labels — 📤 propose/withdraw, ⚙ Protection (require-merge + required-approvals 0…3 segmented control + count-self-approval), ⛨ write-policy (tenancy only), × delete; a 🔒 marks write-policy-protected rows, an accented ⋯ marks a proposed / protected row. Propose/approve/require-merge/required-approvals are all open-core |
+| Diff modal | click Δ in row | Diff v2: per-owning-fn groups with `+`/`−`/`±` markers, per-field `old → new` pairs, slot-name labels. Rows are clickable → navigate; the changed args are then ringed `Δ` on the canvas (sessionStorage `graphden.diffFocus` hand-off). Hovering a row/entry reveals 💬 — an ANCHORED comment on that element (`entity-name`+`entity-id` on the `:branch-comment` row; unanchored = the general thread below). A Suggestions section lists proposed CHILD branches of the source (reviewer suggestions) with Δ-view + one-click apply (= merge into the proposal), plus "+ Suggest a change" (fork-and-switch) |
+| Compare mode | ⋯ → "◐ Compare with current" on a branch row | The editor-wide diff lens (`editor-diff-mode.js`): Explorer rows badge +/−/± vs the compared branch (namespace headers aggregate counts), changed args ring Δ on the canvas, a `◐ vs <branch>` chip marks the mode (click = diff modal, × = exit). Persists across reloads (localStorage) so "always see the drift vs main" is one click. Annotations only — reads/writes stay on the current branch |
 | Conflict modal | merge fails with `:reason :merge-conflict` | Per-entity source/target radio, retry merge with `:conflict-resolutions` |
 | Fn-card ⌛ action | per fn-card row-actions | Version timeline + per-version `(N runs)` badge; click a row → inline-expand its executions (lazy fetch); `switch` button jumps to that version's branch |
 
@@ -361,10 +394,14 @@ allow-self-approval, approver-ids}`; `POST|DELETE /api/branches/:ref/approve`
 → `{required, have, satisfied, approvers:[{approver-id, stale}]}`.
 
 **Comments**: each proposal carries a review-comment thread —
-`:branch-comment` rows (`{source-branch-id, author-id, body, created-at}`,
-org-scoped like approvals, cascaded on branch delete). `POST|GET|DELETE
-/api/branches/:ref/comments` (`{body}` to add; `{id}` to delete — the
-author's own only). The editor shows the thread under the Δ diff modal —
+`:branch-comment` rows (`{source-branch-id, author-id, body, created-at,
+entity-name?, entity-id?}`, org-scoped like approvals, cascaded on branch
+delete). `POST|GET|DELETE /api/branches/:ref/comments` (`{body}` to add,
+optionally `{entity-name, entity-id}` to ANCHOR the comment to one diffed
+element — fn / fn-slot / binding / binding-list-item; a half-anchor or
+unknown kind is a 400; `{id}` to delete — the author's own only). The
+editor renders anchored comments as inline threads under their diff
+row/entry (💬), unanchored ones as the general thread below the diff —
 the conversation lives next to the change it reviews.
 
 **Editor** (branch popover, open-core): a ✅ **Approve** button on proposed

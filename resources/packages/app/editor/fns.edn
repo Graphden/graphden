@@ -65,6 +65,7 @@
                   "packages/app/editor/editor-org-switcher.js"
                   "packages/app/editor/editor-branches.js"
                   "packages/app/editor/editor-branch-diff.js"
+                  "packages/app/editor/editor-diff-mode.js"
                   "packages/app/editor/editor-create.js"
                   ;; Per-kind field builders + prefill parsers — loaded before
                   ;; editor-create-type.js so the popover shell can call

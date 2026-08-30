@@ -10,6 +10,25 @@
 // graph-first-exception: canvas overlay — in-place edit click target,
 // type chip and mismatch ring live in graph coordinates and re-anchor
 // per frame; data (types, provenance) is server-fed, DOM is client.
+
+// Diff-focus hand-off (diff v2): `editor-branch-diff.js` stashes the
+// clicked row's changed slots under this key; arg overlays for that fn
+// ring the matching slots until the user dismisses the focus.
+function gdReadDiffFocus() {
+  try {
+    const raw = sessionStorage.getItem('graphden.diffFocus');
+    if (!raw) return null;
+    const f = JSON.parse(raw);
+    return (f?.fnId && f.slots) ? f : null;
+  } catch (_) { return null; }
+}
+
+function gdClearDiffFocus() {
+  try { sessionStorage.removeItem('graphden.diffFocus'); } catch (_) {}
+  document.querySelectorAll('.arg-overlay-diff-focus')
+    .forEach((el) => el.classList.remove('arg-overlay-diff-focus'));
+  document.querySelectorAll('.arg-diff-badge').forEach((el) => el.remove());
+}
 /**
  * Create overlay for arg value node
  */
@@ -96,6 +115,57 @@ function createArgOverlay(node, container) {
                              { passive: true });
       row.appendChild(badge);
     }
+  })();
+
+  // Diff-focus ring (diff v2 hand-off). A diff-modal row click stashed
+  // the fn's changed slots in sessionStorage; if THIS overlay's arg is
+  // one of them, ring it and add a Δ badge whose tooltip carries the
+  // before → after summary. Clicking the badge dismisses the whole
+  // focus (every ring on the page + the stash).
+  (function annotateDiffFocus() {
+    const argLocal = (typeof argRowFromNode === 'function')
+                     ? argRowFromNode(node.data())
+                     : null;
+    if (!argLocal?.['fn-id'] || !argLocal.name) return;
+    // Two sources, one ring: the one-shot diff-modal hand-off
+    // (sessionStorage) and the persistent COMPARE MODE
+    // (editor-diff-mode.js). The one-shot stash wins when both name
+    // this fn (it carries the branch the user was just reading).
+    const focus = gdReadDiffFocus();
+    let slots = null;
+    let branchLabel = null;
+    let persistent = false;
+    if (focus && argLocal['fn-id'] === focus.fnId) {
+      slots = focus.slots || {};
+      branchLabel = focus.branch;
+    } else if (typeof gdDiffSlotsForFn === 'function') {
+      const s = gdDiffSlotsForFn(argLocal['fn-id']);
+      if (s) {
+        slots = s;
+        branchLabel = (typeof gdDiffModeBranch === 'function')
+          ? gdDiffModeBranch() : null;
+        persistent = true;
+      }
+    }
+    if (!slots || !(argLocal.name in slots)) return;
+    overlay.classList.add('arg-overlay-diff-focus');
+    const badge = document.createElement('button');
+    badge.type = 'button';
+    badge.className = 'arg-diff-badge';
+    badge.textContent = 'Δ';
+    const summary = slots[argLocal.name] || 'differs';
+    badge.title = 'Differs vs "' + branchLabel + '": ' + summary
+      + (persistent ? ' — compare mode (exit via the ◐ chip)'
+                    : ' — click to dismiss the diff highlights');
+    badge.setAttribute('aria-label', badge.title);
+    badge.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!persistent) gdClearDiffFocus();
+    });
+    badge.addEventListener('mousedown', (e) => e.stopPropagation());
+    badge.addEventListener('touchstart', (e) => e.stopPropagation(),
+                           { passive: true });
+    row.appendChild(badge);
   })();
 
   // Editability: this arg-value is in-place editable iff

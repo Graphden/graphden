@@ -857,36 +857,121 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 .branch-row-actions {
   display: inline-flex; gap: 2px; align-items: center;
 }
-.branch-row-delete,
+/* Readability redesign 2026-08: the row keeps THREE inline icon
+   actions (Δ diff, ✅ approve, ⇢ merge) plus the ⋯ overflow trigger;
+   everything administrative lives in the ⋯ menu with text labels.
+   Inline icons get an INSTANT tooltip via data-tip (native title
+   needs a ~1s hover and never shows on keyboard focus). */
 .branch-row-merge,
 .branch-row-diff,
-.branch-row-protect,
-.branch-row-propose,
-.branch-row-approve {
+.branch-row-approve,
+.branch-row-more {
   background: transparent; color: var(--muted-fg);
   border: 0; border-radius: 2px;
-  width: 18px; height: 18px; padding: 0; line-height: 1;
+  width: 20px; height: 20px; padding: 0; line-height: 1;
   font-size: 0.8125rem; cursor: pointer;
 }
-.branch-row-delete { font-size: 0.875rem; }
-.branch-row-delete:hover,
 .branch-row-merge:hover,
 .branch-row-diff:hover,
-.branch-row-protect:hover,
-.branch-row-propose:hover,
-.branch-row-approve:hover { color: var(--fg); background: var(--bg); }
-/* Propose + ⚙ protection are open-core (always visible), unlike the
-   tenancy-only ⛨ policy shield. Dim when off, accented when active;
-   still hidden for a read-only viewer. */
-.branch-row-propose,
-.branch-row-protect { opacity: 0.45; }
-.branch-row-propose.on,
-.branch-row-protect.on { opacity: 1; color: var(--accent); }
-/* Approve is a positive action — always full-strength on proposed rows. */
+.branch-row-approve:hover,
+.branch-row-more:hover { color: var(--fg); background: var(--bg); }
+/* Accent dot on ⋯ when the row carries a proposal / active protection
+   (the states that used to color the now-tucked-away 📤/⚙). */
+.branch-row-more.on { color: var(--accent); }
 .branch-row-approve { opacity: 1; }
-body.gd-no-write .branch-row-propose,
-body.gd-no-write .branch-row-protect,
-body.gd-no-write .branch-row-approve { display: none; }
+body.gd-no-write .branch-row-approve,
+body.gd-no-write .branch-row-more-menu .branch-row-propose,
+body.gd-no-write .branch-row-more-menu .branch-row-protect,
+body.gd-no-write .branch-row-more-menu .branch-row-delete { display: none; }
+
+/* Instant tooltip under the inline icon buttons. */
+.branch-row-actions [data-tip] { position: relative; }
+.branch-row-actions [data-tip]:hover::after,
+.branch-row-actions [data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute; top: calc(100% + 4px); left: 50%;
+  transform: translateX(-50%);
+  background: var(--tooltip-bg); color: var(--tooltip-fg);
+  padding: 2px 6px; border-radius: 3px;
+  font-size: 0.625rem; line-height: 1.2; white-space: nowrap;
+  pointer-events: none; z-index: 20;
+}
+
+/* The ⋯ menu itself — fixed-positioned by JS so the popover list's
+   scroll overflow can't clip it; labeled rows, gd-pop family look. */
+.branch-row-more-menu {
+  display: none;
+  position: fixed; z-index: 340;
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--fg); border-radius: 3px;
+  box-shadow: var(--shadow-md);
+  min-width: 200px;
+  padding: 3px;
+  flex-direction: column;
+}
+.branch-row-more-menu.open { display: flex; }
+.branch-row-more-menu button {
+  display: flex; align-items: center; gap: 7px;
+  background: transparent; color: var(--fg);
+  border: 0; border-radius: 2px;
+  padding: 5px 8px; cursor: pointer;
+  font-size: 0.75rem; line-height: 1.2; text-align: left;
+  width: 100%;
+}
+.branch-row-more-menu button:hover { background: var(--hover-bg); }
+.branch-row-more-menu .brm-ic {
+  width: 16px; flex: none; text-align: center;
+  font-size: 0.75rem;
+}
+.branch-row-more-menu .brm-label { flex: 1; }
+.branch-row-more-menu .branch-row-propose.on .brm-ic,
+.branch-row-more-menu .branch-row-protect.on .brm-ic { color: var(--accent); }
+/* ⛨ write-policy stays tenancy-only inside the menu too — the generic
+   `.branch-row-more-menu button` display rule outweighs the bare
+   `.branch-row-policy { display: none }` gate, so re-state it at
+   matching specificity. */
+.branch-row-more-menu .branch-row-policy { display: none; }
+body.gd-tenancy .branch-row-more-menu .branch-row-policy { display: flex; }
+body.gd-tenancy.gd-no-write .branch-row-more-menu .branch-row-policy { display: none; }
+.branch-row-more-menu .branch-row-delete:hover { color: var(--error-fg-strong); }
+
+/* ◐ compare-mode chip (next to the branch chip) + Explorer badges.
+   The editor-wide diff lens: gd-diff-badge marks a changed fn row,
+   gd-diff-ns-badge aggregates counts onto a namespace header. */
+.gd-diff-chip {
+  display: inline-flex; align-items: center; gap: 0;
+  margin-left: 4px;
+  border: 1px solid var(--warning-fg); border-radius: 3px;
+  overflow: hidden;
+}
+.gd-diff-chip-label {
+  background: transparent; color: var(--warning-fg);
+  border: 0; padding: 1px 6px;
+  font-size: 0.6875rem; line-height: 1.4; cursor: pointer;
+  white-space: nowrap;
+}
+.gd-diff-chip-label:hover { background: var(--hover-bg); }
+.gd-diff-chip-off {
+  background: transparent; color: var(--muted-fg);
+  border: 0; border-left: 1px solid var(--warning-fg);
+  padding: 1px 5px; font-size: 0.6875rem; line-height: 1.4; cursor: pointer;
+}
+.gd-diff-chip-off:hover { color: var(--fg); background: var(--hover-bg); }
+.gd-diff-badge {
+  margin-left: auto; flex: none;
+  font-family: var(--mono); font-weight: 700; font-size: 0.625rem;
+  padding: 0 3px;
+}
+.entity-item .gd-diff-badge.bd-added { color: var(--success-fg); }
+.entity-item .gd-diff-badge.bd-removed { color: var(--error-fg); }
+.entity-item .gd-diff-badge.bd-modified { color: var(--warning-fg); }
+.gd-diff-ns-badge {
+  margin-left: 4px; flex: none;
+  font-family: var(--mono); font-size: 0.5625rem;
+  color: var(--warning-fg);
+  border: 1px dotted var(--warning-fg); border-radius: 2px;
+  padding: 0 3px;
+}
 
 /* n/N approvals badge next to ✅ on a proposed row. */
 .branch-appr-count {
@@ -901,12 +986,37 @@ body.gd-no-write .branch-row-approve { display: none; }
   padding: 2px 4px 4px;
 }
 
-/* ⚙ protection mini-menu option rows. */
+/* ⚙ protection mini-menu — heading + three aligned option rows. The
+   approvals control is a 0…3 SEGMENT (one tap each), not a <select>:
+   a native dropdown over a floating menu was fragile and slower. */
+#gd-protect-pop { min-width: 250px; }
 .gd-protect-opt {
-  display: flex; align-items: center; gap: 6px;
-  padding: 4px 2px; font-size: 0.75rem; color: var(--fg); cursor: pointer;
+  display: flex; align-items: center; gap: 7px;
+  padding: 5px 4px; border-radius: 2px;
+  font-size: 0.75rem; color: var(--fg); cursor: pointer;
 }
-.gd-protect-opt select { margin-left: auto; }
+.gd-protect-opt:hover { background: var(--hover-bg); }
+.gd-protect-opt input[type="checkbox"] {
+  margin: 0; flex: none; accent-color: var(--accent);
+}
+.gd-protect-appr { cursor: default; }
+.gd-protect-seg {
+  margin-left: auto;
+  display: inline-flex;
+  border: 1px solid var(--input-border); border-radius: 3px;
+  overflow: hidden;
+}
+.gd-protect-seg-btn {
+  background: transparent; color: var(--muted-fg);
+  border: 0; border-left: 1px solid var(--input-border);
+  width: 24px; height: 20px; padding: 0;
+  font-size: 0.6875rem; line-height: 1; cursor: pointer;
+}
+.gd-protect-seg-btn:first-child { border-left: 0; }
+.gd-protect-seg-btn:hover { background: var(--hover-bg); color: var(--fg); }
+.gd-protect-seg-btn.sel {
+  background: var(--accent); color: var(--on-accent);
+}
 
 .branch-popover-create {
   display: flex; flex-direction: column; gap: 6px;
@@ -1252,23 +1362,132 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   display: flex; align-items: baseline; gap: 8px;
   margin-bottom: 2px;
 }
-.branch-diff-entity {
-  font-weight: 600; font-size: 0.6875rem;
-  background: var(--bg); padding: 1px 5px; border-radius: 2px;
-}
-.branch-diff-id {
+/* diff v2 — one row per owning fn; change marker + fn name in the
+   head, the per-entity detail entries beneath. Colors ride the
+   semantic tokens (success/error/warning) so both themes hold. */
+.branch-diff-marker {
   font-family: var(--mono);
-  font-size: 0.625rem; color: var(--muted-fg);
+  font-weight: 700; font-size: 0.75rem;
+  width: 14px; text-align: center; flex: none;
 }
-.branch-diff-row-summary {
+.bd-added > .branch-diff-marker,
+.branch-diff-marker.bd-added { color: var(--success-fg); }
+.bd-removed > .branch-diff-marker,
+.branch-diff-marker.bd-removed { color: var(--error-fg); }
+.bd-modified > .branch-diff-marker,
+.branch-diff-marker.bd-modified { color: var(--warning-fg); }
+.branch-diff-row.bd-added { border-left: 2px solid var(--success-fg); }
+.branch-diff-row.bd-removed { border-left: 2px solid var(--error-fg); }
+.branch-diff-row.bd-modified { border-left: 2px solid var(--warning-fg); }
+.branch-diff-fn-name {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+.branch-diff-entries {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 2px 0 0 20px;
+}
+.branch-diff-entry {
+  display: flex; align-items: baseline; gap: 6px;
   font-size: 0.6875rem;
+}
+.branch-diff-entry-label {
+  color: var(--muted-fg);
+  white-space: nowrap;
+}
+.branch-diff-entry-preview {
   font-family: var(--mono);
   overflow-wrap: anywhere;
 }
-.branch-diff-row-summary em {
-  font-style: normal;
-  background: var(--bg); padding: 0 3px; border-radius: 2px;
+.branch-diff-fields {
+  display: flex; flex-direction: column; gap: 1px;
+  flex: 1; min-width: 0;
 }
+.branch-diff-field {
+  display: flex; align-items: baseline; gap: 5px;
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+.branch-diff-field-name { color: var(--muted-fg); flex: none; }
+.branch-diff-field-name::after { content: ":"; }
+.bd-old {
+  color: var(--error-fg-strong);
+  text-decoration: line-through;
+  overflow-wrap: anywhere; min-width: 0;
+}
+.bd-new {
+  color: var(--accent); font-weight: 600;
+  overflow-wrap: anywhere; min-width: 0;
+}
+.bd-arrow { color: var(--muted-fg); flex: none; }
+/* 💬 anchored-comment trigger — quiet until the row is hovered or it
+   has focus; count badge appears when a thread exists. */
+.branch-diff-comment-btn {
+  margin-left: auto; flex: none;
+  background: transparent; border: 0; border-radius: 2px;
+  font-size: 0.6875rem; line-height: 1;
+  padding: 1px 4px; cursor: pointer;
+  opacity: 0;
+  color: var(--muted-fg);
+}
+.branch-diff-row:hover .branch-diff-comment-btn,
+.branch-diff-entry:hover .branch-diff-comment-btn,
+.branch-diff-comment-btn:focus-visible,
+.branch-diff-comment-btn.has-comments { opacity: 1; }
+.branch-diff-comment-btn:hover { background: var(--hover-bg); color: var(--fg); }
+.branch-diff-comment-btn .bd-comment-count {
+  font-size: 0.5625rem; font-family: var(--mono);
+  color: var(--accent); margin-left: 1px;
+}
+/* Inline anchored thread — inserted by JS right under its row/entry. */
+.branch-diff-anchor-thread {
+  margin: 4px 0 4px 20px;
+  padding: 4px 8px;
+  border-left: 2px solid var(--light-border);
+  display: flex; flex-direction: column; gap: 3px;
+}
+.branch-diff-anchor-thread .branch-comment { font-size: 0.6875rem; }
+.branch-diff-anchor-compose {
+  display: flex; gap: 4px; align-items: flex-start;
+}
+.branch-diff-anchor-compose textarea {
+  flex: 1; min-height: 20px; resize: vertical;
+  font: inherit; font-size: 0.6875rem;
+  color: var(--fg); background: var(--bg);
+  border: 1px solid var(--input-border); border-radius: 2px;
+  padding: 2px 5px;
+}
+/* Suggestions — reviewer-authored child branches of the proposal,
+   listed with Δ view + apply(merge) actions; author applies in one
+   click. */
+.branch-diff-suggestions {
+  border-top: 1px solid var(--border);
+  margin-top: 10px; padding: 8px 0 4px;
+}
+.branch-diff-suggestions h4 {
+  font-size: 0.75rem; margin: 0 0 6px; color: var(--fg);
+}
+.branch-diff-suggestion-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 0.6875rem;
+  padding: 3px 0;
+}
+.branch-diff-suggestion-name { font-family: var(--mono); overflow-wrap: anywhere; }
+.branch-diff-suggestion-row button {
+  background: transparent; color: var(--muted-fg);
+  border: 1px solid var(--light-border); border-radius: 2px;
+  font-size: 0.625rem; padding: 1px 6px; cursor: pointer;
+}
+.branch-diff-suggestion-row button:hover { color: var(--fg); border-color: var(--fg); }
+.branch-diff-suggest-new {
+  margin-top: 4px;
+  background: transparent; color: var(--muted-fg);
+  border: 1px dashed var(--light-border); border-radius: 2px;
+  font-size: 0.6875rem; padding: 2px 8px; cursor: pointer;
+}
+.branch-diff-suggest-new:hover { color: var(--fg); border-color: var(--fg); }
+.branch-diff-suggestions-empty { color: var(--muted-fg); font-size: 0.6875rem; }
 /* Branch-local annotation — appears on diff rows for fns whose
    effective branch-local is true. The diff lists them (the version
    DOES differ), but the resolver filters them out at merge time, so
@@ -1986,6 +2205,24 @@ textarea.value-form-hiccup {
 .arg-overlay-mismatch {
   box-shadow: 0 0 0 1.5px var(--error-fg) !important;
 }
+
+/* Diff-focus ring (diff v2) — after a diff-modal row click the changed
+   args of that fn are ringed on the canvas; the Δ badge's tooltip
+   carries the before → after summary, clicking it dismisses every
+   ring. Warning tint, so it never reads as the red mismatch ring. */
+.arg-overlay-diff-focus {
+  box-shadow: 0 0 0 1.5px var(--warning-fg) !important;
+}
+.arg-diff-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 0.9375rem; height: 0.9375rem;
+  margin-left: 4px; padding: 0;
+  border: 1px solid var(--warning-fg); border-radius: 50%;
+  background: transparent; color: var(--warning-fg);
+  font-size: 0.5625rem; font-weight: 700; line-height: 1;
+  cursor: pointer; pointer-events: auto;
+}
+.arg-diff-badge:hover { background: var(--hover-bg); }
 
 /* Arg type-chip — small text label "[int]" / "[fn]" docked to the
    right edge of an arg-overlay or trailing an edge-label. Click flips

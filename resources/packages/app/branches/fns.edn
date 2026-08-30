@@ -679,6 +679,13 @@
    :return-type :keyword-map
    :effects #{:db}}
 
+  {:name :diff-branches-view
+   :description "Atomic library boundary over `dv/diff-branches-view` — the GROUPED display model of the branch diff for the editor modal: `{:source-branch-id :target-branch-id :count :groups [{:fn-id :fn-name :fn-label :change :branch-local? :entries [...]}]}`. Rendering-only projection; the JSON API keeps the flat v1 `:diff-branches` shape."
+   :args {:source-branch-id {:type :uuid :description "Source branch id."}
+          :target-branch-id {:type :uuid :description "Target branch id."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
   {:name :_diff-apply-raw
    :description "Stage 1 — run the diff. The `:source-branch` / `:target-branch` free args come from the parent `:cond` which threaded them through `:_diff-source-branch` / `:_target-branch`. The `:assert-some` wraps mirror the `:cond` guards (`:_diff-source-missing?` / `:_diff-target-missing?` reject nil branches upstream) — they bridge the type-checker's per-arm narrowing gap."
    :parent :diff-branches
@@ -765,6 +772,54 @@
    :description "Ring handler for GET /api/branches/:ref/diff."
    :parent :json-handler
    :args {:data :_diff-branches-data}}
+
+  ;; --- GET /api/branches/:ref/diff-view?against=<source> ------------
+  ;; The GROUPED diff v2 payload (per-owning-fn groups, field-level
+  ;; before/after) as JSON — the editor's COMPARE MODE consumes it to
+  ;; badge the sidebar and ring changed args on the canvas. Same
+  ;; guards + branch resolution as the v1 endpoint above.
+
+  {:name :_diff-view-apply-raw
+   :description "Run the grouped display-model diff — same free-arg threading (`:source-branch` / `:target-branch` via the parent `:cond`) and `:assert-some` narrowing bridges as `:_diff-apply-raw`."
+   :parent :diff-branches-view
+   :args {:source-branch-id {:parent :assert-some
+                             :args {:value {:parent :get
+                                            :args {:coll {:as :source-branch}
+                                                   :key {:value :id}
+                                                   :default nil}}}}
+          :target-branch-id {:parent :assert-some
+                             :args {:value {:parent :get
+                                            :args {:coll {:as :target-branch}
+                                                   :key {:value :id}
+                                                   :default nil}}}}}}
+
+  {:name :_diff-view-apply
+   :description "Success branch — `{:ok true :target :source :count :groups}`. Group ids are already strings (display model), so no per-row reshape is needed."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :target} {:value :source}
+                 {:value :count} {:value :groups}]
+          :vals [{:value true}
+                 :_diff-apply-target-shaped
+                 :_diff-apply-source-shaped
+                 {:parent :get :args {:coll :_diff-view-apply-raw :key {:value :count} :default {:value 0}}}
+                 {:parent :get :args {:coll :_diff-view-apply-raw :key {:value :groups} :default {:value []}}}]}}
+
+  {:name :_diff-view-data
+   :description "GET /api/branches/:ref/diff-view?against=<source> — the v1 guards, the v2 grouped payload."
+   :parent :cond
+   :args {:clauses [:_diff-target-missing?  :_diff-err-target-missing
+                    :_diff-against-missing? :_diff-err-against-missing
+                    :_diff-source-missing?  :_diff-err-source-missing
+                    {:value true}           :_diff-view-apply]
+          :parsed :_diff-parsed
+          :target-branch :_target-branch
+          :source-branch :_diff-source-branch}}
+
+  {:name :diff-view-handler
+   :lambda-params [:branch-row :request :default]
+   :description "Ring handler for GET /api/branches/:ref/diff-view (auth-required) — the grouped diff-v2 payload the editor compare mode consumes."
+   :parent :json-handler
+   :args {:data :_diff-view-data}}
 
   ;; ---------------------------------------------------------------------
   ;; POST /api/branches — create a new branch.
@@ -1100,9 +1155,11 @@
    :effects #{:db}}
 
   {:name :add-branch-comment!
-   :description "Atomic library boundary — record a review comment on proposal `source-branch-id` by the current principal. Returns the new comment id (text)."
+   :description "Atomic library boundary — record a review comment on proposal `source-branch-id` by the current principal. Optional `entity-name` + `entity-id` anchor the comment to one diffed graph element (fn / fn-slot / binding / binding-list-item); both nil = the general branch thread. Returns the new comment id (text)."
    :args {:source-branch-id {:type :uuid :description "The proposal (source) branch commented on."}
-          :body {:type :text :description "Comment text."}}
+          :body {:type :text :description "Comment text."}
+          :entity-name {:type :nullable-text :description "Anchor kind — \"fn\" / \"fn-slot\" / \"binding\" / \"binding-list-item\"; nil = unanchored."}
+          :entity-id {:type :nullable-uuid :description "Anchored entity id; nil = unanchored."}}
    :return-type :text
    :effects #{:db}}
 
@@ -1485,10 +1542,25 @@
    :return-type :_error-result-shape
    :args {:value {:ok false :error "Comment body is required"}}}
 
+  {:name :_branch-comment-anchor-name
+   :description "Optional anchor kind out of the JSON body; nil when the comment is a general branch-thread one."
+   :parent :get
+   :args {:coll {:parent :parse-json-body} :key {:value :entity-name} :default nil}}
+
+  {:name :_branch-comment-anchor-id
+   :description "Optional anchored entity id — the body's `entity-id` string parsed to uuid (nil on absent / malformed; the impl rejects half-anchors)."
+   :parent :parse-uuid
+   :args {:string {:parent :get :args {:coll {:parent :parse-json-body} :key {:value :entity-id} :default nil}}}}
+
   {:name :_branch-comment-add
    :parent :add-branch-comment!
    :args {:source-branch-id :_branch-approve-src-id
-          :body {:parent :to-str :args {:value :_branch-comment-body}}}}
+          :body {:parent :to-str :args {:value :_branch-comment-body}}
+          :entity-name {:parent :if
+                        :args {:test {:parent :some? :args {:value :_branch-comment-anchor-name}}
+                               :then {:parent :to-str :args {:value :_branch-comment-anchor-name}}
+                               :else nil}}
+          :entity-id :_branch-comment-anchor-id}}
 
   {:name :_branch-comment-add-apply
    :parent :zipmap
@@ -1522,15 +1594,25 @@
    :parent :get
    :args {:coll {:as :item} :key {:value :created-at :literal? true} :default nil}}
 
+  {:name :_branch-comment-row-entity-id-str
+   :description "Anchored entity id as a string, or nil — `:to-str` would turn nil into \"\", so guard on presence first."
+   :parent :if
+   :args {:test {:parent :some? :args {:value {:parent :get :args {:coll {:as :item} :key {:value :entity-id :literal? true} :default nil}}}}
+          :then {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :entity-id :literal? true} :default nil}}}}
+          :else nil}}
+
   {:name :_branch-comment-row-shaped
-   :description "HOF callback per raw row — the wire shape `{:id :author-id :body :created-at}`, id/timestamp stringified."
+   :description "HOF callback per raw row — the wire shape `{:id :author-id :body :created-at :entity-name :entity-id}`, id/timestamp stringified; the anchor pair is nil on general-thread comments."
    :parent :zipmap
    :args {:keys [{:value :id :literal? true} {:value :author-id :literal? true}
-                 {:value :body :literal? true} {:value :created-at :literal? true}]
+                 {:value :body :literal? true} {:value :created-at :literal? true}
+                 {:value :entity-name :literal? true} {:value :entity-id :literal? true}]
           :vals [{:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :id :literal? true} :default nil}}}}
                  {:parent :get :args {:coll {:as :item} :key {:value :author-id :literal? true} :default nil}}
                  {:parent :get :args {:coll {:as :item} :key {:value :body :literal? true} :default nil}}
-                 {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :created-at :literal? true} :default nil}}}}]}}
+                 {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :created-at :literal? true} :default nil}}}}
+                 {:parent :get :args {:coll {:as :item} :key {:value :entity-name :literal? true} :default nil}}
+                 :_branch-comment-row-entity-id-str]}}
 
   {:name :_branch-comments-shaped
    :description "Oldest-first wire rows — `:sort-by` the raw rows by :created-at, then the per-row reshape."
@@ -2660,11 +2742,18 @@
           :key {:value :title}
           :value :_bp-row-diff-title}}
 
-  {:name :_bp-row-diff-attrs
+  {:name :_bp-row-diff-attrs-3
    :parent :assoc
    :args {:map :_bp-row-diff-attrs-2
           :key {:value :aria-label}
           :value :_bp-row-diff-aria}}
+
+  {:name :_bp-row-diff-attrs
+   :description "Adds `data-tip` — the instant CSS tooltip label (native `title` needs a ~1s hover and never shows on keyboard focus)."
+   :parent :assoc
+   :args {:map :_bp-row-diff-attrs-3
+          :key {:value :data-tip}
+          :value {:value "Diff"}}}
 
   {:name :_bp-row-diff-btn-shown
    :parent :hiccup
@@ -2711,11 +2800,17 @@
           :key {:value :title}
           :value :_bp-row-merge-title}}
 
-  {:name :_bp-row-merge-attrs
+  {:name :_bp-row-merge-attrs-3
    :parent :assoc
    :args {:map :_bp-row-merge-attrs-2
           :key {:value :aria-label}
           :value :_bp-row-merge-aria}}
+
+  {:name :_bp-row-merge-attrs
+   :parent :assoc
+   :args {:map :_bp-row-merge-attrs-3
+          :key {:value :data-tip}
+          :value {:value "Merge"}}}
 
   {:name :_bp-row-merge-btn-shown
    :parent :hiccup
@@ -2750,7 +2845,8 @@
    :parent :hiccup
    :args {:tag {:value "button"}
           :attrs :_bp-row-delete-attrs
-          :children [{:value "×"}]}}
+          :children [{:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-ic" :aria-hidden "true"}} :children [{:value "×"}]}}
+                     {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-label"}} :children [{:value "Delete branch"}]}}]}}
 
   {:name :_bp-row-delete-btn
    :parent :if
@@ -2783,7 +2879,8 @@
    :parent :hiccup
    :args {:tag {:value "button"}
           :attrs :_bp-row-policy-attrs
-          :children [{:value "⛨"}]}}
+          :children [{:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-ic" :aria-hidden "true"}} :children [{:value "⛨"}]}}
+                     {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-label"}} :children [{:value "Who can write…"}]}}]}}
 
   ;; --- Require-merge toggle (open-core; NOT tenancy-gated) ---
   ;; "Push only via merge" — the GitHub-style per-branch protection
@@ -2852,11 +2949,18 @@
           :key {:value :title}
           :value :_bp-row-propose-title}}
 
+  {:name :_bp-row-propose-label
+   :parent :if
+   :args {:test :_bp-row-proposed?
+          :then {:value "Withdraw proposal"}
+          :else {:value "Propose for review"}}}
+
   {:name :_bp-row-propose-btn-shown
    :parent :hiccup
    :args {:tag {:value "button"}
           :attrs :_bp-row-propose-attrs
-          :children [{:value "📤"}]}}
+          :children [{:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-ic" :aria-hidden "true"}} :children [{:value "📤"}]}}
+                     {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-label"}} :children [:_bp-row-propose-label]}}]}}
 
   ;; Propose is meaningless on `main` (you don't submit the trunk for review
   ;; into its own base) — hide it there to declutter.
@@ -2874,7 +2978,8 @@
   {:name :_bp-row-approve-attrs
    :parent :assoc
    :args {:map {:value {:class "branch-row-approve"
-                        :title "Approve this proposal for merge into its base"}}
+                        :title "Approve this proposal for merge into its base"
+                        :data-tip "Approve"}}
           :key {:value :data-approve-branch}
           :value :_bp-row-name}}
 
@@ -2975,13 +3080,109 @@
    :parent :hiccup
    :args {:tag {:value "button"}
           :attrs :_bp-row-protect-attrs
-          :children [{:value "⚙"}]}}
+          :children [{:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-ic" :aria-hidden "true"}} :children [{:value "⚙"}]}}
+                     {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-label"}} :children [{:value "Protection…"}]}}]}}
+
+  ;; --- ⋯ overflow menu (readability redesign 2026-08) ---
+  ;; The row keeps THREE inline icon actions a user reaches constantly
+  ;; (Δ diff, ✅ approve, ⇢ merge — each with an instant CSS tooltip);
+  ;; everything administrative (propose / protection / write-policy /
+  ;; delete) moved into this per-row ⋯ menu where every item carries a
+  ;; TEXT LABEL. The menu is server-rendered hidden inside the row so
+  ;; `wireBranchPopoverHandlers` still finds the buttons by class; JS
+  ;; only toggles `.open` + positions it. `aria-expanded` is stamped by
+  ;; JS on toggle.
+
+  {:name :_bp-row-more-active?
+   :description "Accent dot on ⋯ when the row carries a proposal or an active protection — the states that used to color the now-tucked-away 📤/⚙."
+   :parent :or
+   :args {:values [:_bp-row-proposed? :_bp-row-protect-active?]}}
+
+  {:name :_bp-row-more-class
+   :parent :if
+   :args {:test :_bp-row-more-active?
+          :then {:value "branch-row-more on"}
+          :else {:value "branch-row-more"}}}
+
+  {:name :_bp-row-more-aria
+   :parent :str
+   :args {:parts [{:value "More actions for "} :_bp-row-name]}}
+
+  {:name :_bp-row-more-attrs-1
+   :parent :assoc
+   :args {:map {:value {:aria-haspopup "menu"
+                        :title "More actions — propose, protection, delete"
+                        :data-tip "More…"}}
+          :key {:value :class}
+          :value :_bp-row-more-class}}
+
+  {:name :_bp-row-more-attrs-2
+   :parent :assoc
+   :args {:map :_bp-row-more-attrs-1
+          :key {:value :data-more-branch}
+          :value :_bp-row-name}}
+
+  {:name :_bp-row-more-attrs
+   :parent :assoc
+   :args {:map :_bp-row-more-attrs-2
+          :key {:value :aria-label}
+          :value :_bp-row-more-aria}}
+
+  {:name :_bp-row-more-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_bp-row-more-attrs
+          :children [{:value "⋯"}]}}
+
+  ;; ◐ Compare (compare mode) — turns the whole editor into a diff
+  ;; lens vs this row's branch. Meaningless on the current row (a
+  ;; branch vs itself) → placeholder there.
+  {:name :_bp-row-compare-aria
+   :parent :str
+   :args {:parts [{:value "Compare the current branch with "} :_bp-row-name]}}
+
+  {:name :_bp-row-compare-attrs-1
+   :parent :assoc
+   :args {:map {:value {:class "branch-row-compare"}}
+          :key {:value :data-compare-branch}
+          :value :_bp-row-name}}
+
+  {:name :_bp-row-compare-attrs
+   :parent :assoc
+   :args {:map :_bp-row-compare-attrs-1
+          :key {:value :aria-label}
+          :value :_bp-row-compare-aria}}
+
+  {:name :_bp-row-compare-btn-shown
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_bp-row-compare-attrs
+          :children [{:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-ic" :aria-hidden "true"}} :children [{:value "◐"}]}}
+                     {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-label"}} :children [{:value "Compare with current"}]}}]}}
+
+  {:name :_bp-row-compare-btn
+   :parent :if
+   :args {:test :_bp-row-on-current?
+          :then :_bp-row-empty-placeholder
+          :else :_bp-row-compare-btn-shown}}
+
+  {:name :_bp-row-more-menu-attrs
+   :parent :assoc
+   :args {:map {:value {:class "branch-row-more-menu" :role "menu"}}
+          :key {:value :data-more-menu}
+          :value :_bp-row-name}}
+
+  {:name :_bp-row-more-menu
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs :_bp-row-more-menu-attrs
+          :children [:_bp-row-compare-btn :_bp-row-propose-btn :_bp-row-protect-btn :_bp-row-policy-btn :_bp-row-delete-btn]}}
 
   {:name :_bp-row-actions-span
    :parent :hiccup
    :args {:tag {:value "span"}
           :attrs {:value {:class "branch-row-actions"}}
-          :children [:_bp-row-diff-btn :_bp-row-propose-btn :_bp-row-approve-btn :_bp-row-merge-btn :_bp-row-protect-btn :_bp-row-policy-btn :_bp-row-delete-btn]}}
+          :children [:_bp-row-diff-btn :_bp-row-approve-btn :_bp-row-merge-btn :_bp-row-more-btn :_bp-row-more-menu]}}
 
   ;; The full per-branch row — assembled via the named children.
   {:name :_bp-row

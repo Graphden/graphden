@@ -244,8 +244,10 @@ async function openServicePopover(page, fnHash) {
         // Find the row whose summary names our probe. Diff entities
         // emit `:fn` for an added row; the summary html contains the
         // `<strong>name</strong>` of the fn.
-        const html = r.innerHTML || '';
-        return html.includes('<strong>' + probeName + '</strong>');
+        // diff v2: the group header strong carries the fn LABEL
+        // (":name" with class attrs), so match on textContent.
+        const strong = r.querySelector('strong.branch-diff-fn-name');
+        return strong && strong.textContent === (':' + probeName);
       });
       const badge = probeRow?.querySelector('.branch-diff-row-local-badge');
       return {

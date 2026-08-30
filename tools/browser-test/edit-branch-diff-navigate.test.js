@@ -122,7 +122,7 @@ async function cleanup(page) {
       const modal = document.querySelector('.branch-diff-modal');
       const sections = Array.from(modal.querySelectorAll('.branch-diff-section'));
       const addedInSource = sections.find((s) =>
-        /Added in/.test(s.querySelector('.branch-diff-section-head')
+        /Only in/.test(s.querySelector('.branch-diff-section-head')
                           ?.textContent || ''));
       const rows = Array.from(
         addedInSource?.querySelectorAll('.branch-diff-row') || []);

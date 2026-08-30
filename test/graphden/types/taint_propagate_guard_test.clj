@@ -66,6 +66,9 @@
     :encode-unreadable-kws :equal? :error-boundary-wrap
     :error-http-status :every? :ex-data :execute-trace-rows
     :ex-info :extract-entity-params
+    ;; :failure-ack / :failure-ack-all mutate acknowledged-at on audit
+    ;; rows and return bool / count — no caller content in the return.
+    :failure-ack :failure-ack-all
     :filter :filter-xf :find-first :fn-signature :fn-type? :first :fix :flatten
     :fn-names-with-tag :fn-return-type :form-decode :fn-stats-raw :fn-type-bound-effects
     :fork-package-fns

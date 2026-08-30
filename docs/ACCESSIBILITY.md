@@ -136,5 +136,11 @@ it.
 - **No `aria-live` on the canvas itself.** Node moves are announced by the
   navigation module, which knows what the move MEANT; a live region on the
   layer would read out layout churn.
-- **No high-contrast theme.** The token palette is checked against WCAG AA;
-  `prefers-contrast` support is unimplemented, not refused.
+- **No separate high-contrast THEME.** `prefers-contrast: more` is honoured
+  as a token overlay instead (the `INCREASED CONTRAST` block in
+  `editor-styles.css`): the OS setting re-picks the tokens that sat between
+  AA and AAA, and the audit suite re-runs its live contrast sweep at 7:1
+  with the media feature emulated — in both themes — so the overlay cannot
+  rot silently. `forced-colors` (Windows High Contrast) gets the minimal
+  companion block: states conveyed only by background are redrawn as
+  outlines in system colours.

@@ -7104,6 +7104,80 @@ body.gd-no-write .branch-comment-form { display: none; }
 }
 
 /* =========================================================================
+ * INCREASED CONTRAST (prefers-contrast: more)
+ *
+ * The OS "increase contrast" setting, honoured as a token overlay. The
+ * base palette is audited to WCAG AA (4.5:1); this block re-picks the
+ * tokens that sit BETWEEN AA and AAA so that under the setting every text
+ * sample reaches 7:1 and every border is unmistakable. Values are
+ * computed, not eyeballed — the audit suite re-runs its live contrast
+ * sweep at the AAA threshold with this media feature emulated, so a
+ * token edit that regresses it fails the gate.
+ *
+ * Only the deltas: tokens already past 7:1 (--fg, --gd-ink-2, the dark
+ * theme's accent family) keep their base values.
+ * ========================================================================= */
+@media (prefers-contrast: more) {
+  :root {
+    --muted-fg: #3f4854;        /* 9.3:1 on --bg, 8.7:1 on --sidebar-bg */
+    --light-fg: #4a5560;        /* 7.6:1 — hint text stops being a hint */
+    --accent: #0b5d57;          /* 7.7:1 */
+    --success-fg: #0c5a28;      /* 8.4:1 */
+    --error-fg: #a31515;        /* 7.9:1 */
+    --warning-fg: #7a4e00;      /* 7.2:1 */
+    --gd-ink-3: #454d4f;        /* 7.6:1 on --gd-paper */
+    --hof-fg: #3d3d66;          /* 9.4:1 on --hof-bg */
+    --card-header-bg: #0b544e;  /* white header text: 6.4 -> 8.8:1 */
+    --gd-flow: #0b5d57;         /* the focus ring follows the accent */
+    --gd-flow-ink: #0a4a45;     /* pressed lens chip: 6.5 -> 8.3:1 */
+    /* Hairline borders read as texture at low vision; make them lines. */
+    --light-border: #6e7781;
+    --input-border: #57606a;
+    --gd-line: #8c9694;
+  }
+  body.theme-dark {
+    --muted-fg: #b3bdc9;        /* 10.0:1 on --bg */
+    --light-fg: #a3adbb;        /* 8.3:1 */
+    --gd-ink-3: #aab5b7;        /* 8.1:1 even on the brighter sidebar surface */
+    --gd-flow-ink: #8feee4;     /* pressed lens chip: 6.5 -> 10.2:1 */
+    --card-header-bg: #0b544e;
+    --light-border: #6e7781;
+    --input-border: #8b949e;
+    --gd-line: #57606a;
+  }
+  /* The ring is the only "where am I" signal for keyboard users; at this
+     setting it gets heavier than the 2px the component rules declare.
+     !important because those rules set the shorthand at higher
+     specificity, and out-heavying every one of them here would fork the
+     component styles this overlay exists to avoid. */
+  :focus-visible { outline-width: 3px !important; }
+}
+
+/* =========================================================================
+ * FORCED COLORS (Windows High Contrast)
+ *
+ * The browser repaints everything with the system palette; author colours
+ * vanish. Most of the editor survives (focus rings are `outline`-based,
+ * which forced-colors keeps), but states conveyed ONLY by background —
+ * the selected tree row, the active card, the picker highlight — become
+ * invisible. Give each a border-shaped signal drawn in system colours.
+ * ========================================================================= */
+@media (forced-colors: active) {
+  .entity-item.selected,
+  [role="treeitem"][aria-selected="true"],
+  .fn-picker-row-active,
+  .node-overlay.gd-node-active {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .gd-insp-tab.active,
+  .kind-toggle[aria-pressed="true"] {
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+  }
+}
+
+/* =========================================================================
  * REDUCED MOTION (WCAG 2.3.3 Animation from Interactions)
  *
  * Must stay the LAST block in the file: it overrides earlier rules at

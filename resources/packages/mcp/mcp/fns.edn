@@ -192,7 +192,7 @@
              :description "Every branch with its base, timestamps and policy — orient after a context loss: which ai/* scratch branches already exist."
              :inputSchema {:type "object" :properties {} :required []}}
             {:name "diff-branch"
-             :description "What your branch changed against another (default main): added / modified / removed entities. This is what the human reviews."
+             :description "What your branch changed against another (default main). Change kinds: added-in-source / added-in-target / modified — deletion is a tombstone, so an entity deleted on your branch reports as added-in-target (present only there). This is what the human reviews."
              :inputSchema {:type "object"
                            :properties {:branch {:type "string" :description "Your branch."}
                                         :against {:type "string" :description "Branch to compare against. Defaults to main."}}

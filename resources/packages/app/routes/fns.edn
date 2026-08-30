@@ -715,6 +715,11 @@
    :parent :get-auth-required
    :args {:path "/branches/:ref/diff" :handler :diff-branches-handler}}
 
+  {:name :api-branch-diff-view
+   :description "GET /api/branches/:ref/diff-view?against=<source-ref> — grouped diff v2 payload for the editor compare mode. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/branches/:ref/diff-view" :handler :diff-view-handler}}
+
   {:name :api-branch-conflicts
    :description "GET /api/branches/:ref/conflicts?source=<ref> — preview merge conflicts without applying. Auth-required."
    :parent :get-auth-required
@@ -875,6 +880,7 @@
                   :api-branches-root
                   :api-branch-by-ref
                   :api-branch-diff
+                  :api-branch-diff-view
                   :api-branch-conflicts
                   :api-branch-merge
                   :api-branch-policy

@@ -255,6 +255,21 @@
   #uuid "4bf21b03-1b9a-4284-bcbd-b371f42781ac")
 
 
+(def ^:private branch-comment-entity-name-field-uuid
+  ;; Optional anchor (diff v2): which entity KIND the comment sits on
+  ;; ("fn" / "fn-slot" / "binding" / "binding-list-item"). NULL = a
+  ;; general branch-level comment (the pre-anchor thread).
+  #uuid "9c1f4b7a-5d2e-4c8b-9f3a-6e7d8a9b0c1d")
+
+
+(def ^:private branch-comment-entity-id-field-uuid
+  ;; Optional anchor (diff v2): the entity the comment sits on. A bare
+  ;; uuid, not a :ref — it may point at any of the four versioned
+  ;; entity kinds, and it must survive the entity's later deletion
+  ;; (the comment then renders unanchored).
+  #uuid "3a8e2c5d-7b4f-4e1a-8c6d-9f0a1b2c3d4e")
+
+
 ;; =============================================================================
 ;; Field UUIDs — :fn-version
 ;; =============================================================================
@@ -857,7 +872,13 @@
                                    :type :timestamptz}
                       :org-id {:uuid branch-comment-org-id-field-uuid
                                :type :text
-                               :nullable? true}})
+                               :nullable? true}
+                      :entity-name {:uuid branch-comment-entity-name-field-uuid
+                                    :type :text
+                                    :nullable? true}
+                      :entity-id {:uuid branch-comment-entity-id-field-uuid
+                                  :type :uuid
+                                  :nullable? true}})
 
       ;; -----------------------------------------------------------------
       ;; fn-version — derived from gds/fn-fields (see § derivation above).

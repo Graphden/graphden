@@ -551,3 +551,46 @@
                                    :body {:source src}}))))
     (testing "review-state cleared after the merge — proposal left the inbox"
       (is (nil? (:review-state (:branch (parse-json (dispatch {:method :get :path (str "/api/branches/" src)})))))))))
+
+
+(deftest branch-comment-anchor-test
+  ;; diff v2: a comment may anchor to one diffed graph element
+  ;; (entity-name + entity-id). Anchors round-trip through the wire
+  ;; shape; unknown kinds and half-anchors are clean 400s.
+  (let [src (str "anch-" (System/currentTimeMillis))
+        cpath (str "/api/branches/" src "/comments")
+        fid (str (random-uuid))
+        comments (fn [] (:comments (parse-json (dispatch {:method :get :path cpath}))))]
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name src :base-branch-id "main"}}))))
+    (testing "anchored comment round-trips entity-name + entity-id"
+      (is (true? (:ok (parse-json (dispatch {:method :post :path cpath
+                                             :body {:body "pin me"
+                                                    :entity-name "fn"
+                                                    :entity-id fid}})))))
+      (let [c (first (comments))]
+        (is (= "fn" (:entity-name c)))
+        (is (= fid (:entity-id c)))))
+    (testing "a plain comment stays unanchored"
+      (is (true? (:ok (parse-json (dispatch {:method :post :path cpath
+                                             :body {:body "general"}})))))
+      (let [c (last (comments))]
+        (is (= "general" (:body c)))
+        (is (nil? (:entity-name c)))
+        (is (nil? (:entity-id c)))))
+    (testing "an unknown anchor kind → 400, nothing stored"
+      (let [e (try (dispatch {:method :post :path cpath
+                              :body {:body "x" :entity-name "slotx"
+                                     :entity-id fid}})
+                   nil
+                   (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (some? e) "rejected")
+        (is (= 400 (web-errors/status-for-ex-data (ex-data e)))))
+      (is (= 2 (count (comments)))))
+    (testing "a half-anchor (kind without id) → 400"
+      (let [e (try (dispatch {:method :post :path cpath
+                              :body {:body "x" :entity-name "fn"}})
+                   nil
+                   (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (some? e))
+        (is (= 400 (web-errors/status-for-ex-data (ex-data e))))))))

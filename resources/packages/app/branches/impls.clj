@@ -17,6 +17,7 @@
     [graphden.tenancy.context :as tc]
     [graphden.versioning.merge.core :as merge-policy]
     [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.diff-view :as dv]
     [graphden.versioning.storage.merge :as mrg]))
 
 
@@ -70,6 +71,19 @@
   (mrg/diff-branches (branches/base-storage ctx)
                      source-branch-id
                      target-branch-id))
+
+
+(defbase diff-branches-view
+  "Single library call over `dv/diff-branches-view` — the GROUPED
+   display model the branch-diff partial renders: entries grouped
+   under their owning fn, per-field before/after pairs for modified
+   rows, ids resolved to names. The JSON API keeps serving the flat
+   v1 shape via `diff-branches`."
+  [source-branch-id target-branch-id]
+  (cr/record-effect! :db)
+  (dv/diff-branches-view (branches/base-storage ctx)
+                         source-branch-id
+                         target-branch-id))
 
 
 ;; =============================================================================
@@ -611,27 +625,46 @@
   10000)
 
 
+(def ^:private comment-anchor-entities
+  "Valid `:entity-name` anchor kinds for a review comment — the four
+   versioned entity kinds the branch diff walks."
+  #{"fn" "fn-slot" "binding" "binding-list-item"})
+
+
 (defbase add-branch-comment!
   "Record a review comment on proposal branch `source-branch-id` by the
    current principal (`\"anonymous\"` single-tenant). WHO may comment =
    whoever can resolve the branch (org-scoped upstream) — a comment is
-   conversation, not a mutation of the branch. Rejects a body over
-   `max-comment-body-chars` with `:validation-error/comment-too-long` (400).
-   Returns the new row's id."
-  [source-branch-id body]
+   conversation, not a mutation of the branch. Optional `entity-name` +
+   `entity-id` anchor the comment to one diffed graph element (both nil
+   = the general branch thread; a half-anchor or unknown kind is a 400).
+   Rejects a body over `max-comment-body-chars` with
+   `:validation-error/comment-too-long` (400). Returns the new row's id."
+  [source-branch-id body entity-name entity-id]
   (cr/record-effect! :db)
-  (let [text (str body)]
+  (let [text (str body)
+        ename (some-> entity-name str)]
     (when (> (count text) max-comment-body-chars)
       (throw (ex-info (str "Comment too long: " (count text) " chars (max "
                            max-comment-body-chars ").")
                       {:type :validation-error/comment-too-long
                        :max max-comment-body-chars})))
+    (when (or (and ename (not (contains? comment-anchor-entities ename)))
+              (not= (some? ename) (some? entity-id)))
+      (throw (ex-info (str "Invalid comment anchor: " (pr-str ename) " / "
+                           (pr-str entity-id)
+                           " (need both a known entity kind and an id, or neither).")
+                      {:type :validation-error/invalid-comment-anchor
+                       :entity-name ename
+                       :valid comment-anchor-entities})))
     (let [author (or (:user-id tc/*current-principal*) "anonymous")
           row (sp/create-entity (branches/base-storage ctx) :branch-comment
-                                {:source-branch-id source-branch-id
-                                 :author-id author
-                                 :body text
-                                 :created-at (java.time.Instant/now)})]
+                                (cond-> {:source-branch-id source-branch-id
+                                         :author-id author
+                                         :body text
+                                         :created-at (java.time.Instant/now)}
+                                  ename (assoc :entity-name ename
+                                               :entity-id entity-id)))]
       (str (:id row)))))
 
 
@@ -666,6 +699,7 @@
 (def impls
   {:resolve-branch-ref         resolve-branch-ref
    :diff-branches              diff-branches
+   :diff-branches-view         diff-branches-view
    :create-branch!             create-branch!
    :delete-branch!             delete-branch!
    :detect-conflicts           detect-conflicts

@@ -407,9 +407,10 @@
         {composed :composed} (make-pure-add-fn! storage "unres")
         c (assoc (setup/default-registry-ctx storage) :pg-storage @shared-storage)
         pool (:pool @shared-storage)
-        run! (fn [b] (apply-and-await!
-                       c {:fn-id (:id composed) :args {:a 1 :b b}
-                          :timeout-ms 5000 :persist? true}))
+        run! (fn [b]
+               (apply-and-await!
+                 c {:fn-id (:id composed) :args {:a 1 :b b}
+                    :timeout-ms 5000 :persist? true}))
         listed (fn [] (exec-errors/recent-unresolved-failures c pool nil 7 10))]
     (testing "a later succeeded run of the SAME version clears the failure"
       (is (= :failed (:status (run! "boom"))))
@@ -459,9 +460,10 @@
         sibling-ctx (ctx-of sibling-storage)
         pool (:pool base)
         listed (fn [ctx] (exec-errors/recent-unresolved-failures ctx pool nil 7 10))
-        fail-on! (fn [ctx] (apply-and-await!
-                             ctx {:fn-id (:id composed) :args {:a 1 :b "boom"}
-                                  :timeout-ms 5000 :persist? true}))]
+        fail-on! (fn [ctx]
+                   (apply-and-await!
+                     ctx {:fn-id (:id composed) :args {:a 1 :b "boom"}
+                          :timeout-ms 5000 :persist? true}))]
     (testing "a parent-branch failure is inherited by the child, not invented for it"
       (is (= :failed (:status (fail-on! parent-ctx))))
       (is (= 1 (count (listed parent-ctx))))

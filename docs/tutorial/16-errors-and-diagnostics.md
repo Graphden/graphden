@@ -150,9 +150,9 @@ answers *why*. In that order, most of the time.
 5. Now make a static mistake. Extend `:http-server` and bind its
    `port` to the literal `"oops"` (a string). The write SUCCEEDS, with
    a warning, and the card grows a red type-error badge.
-5. Open **Type errors** in the same bar. There is your row,
+6. Open **Type errors** in the same bar. There is your row,
    with the expected refinement and the actual `:text`.
-6. Fix the binding — bind `8080` instead — and reload the panel. The
+7. Fix the binding — bind `8080` instead — and reload the panel. The
    row is gone; you did not have to dismiss it.
 
 ## Where this shows up next

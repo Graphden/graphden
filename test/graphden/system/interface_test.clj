@@ -104,6 +104,69 @@
 
 
 ;; =============================================================================
+;; merged-config — per-key merge + the notify-listener mirror
+;; =============================================================================
+
+(deftest merged-config-per-key-merge-test
+  (testing "overrides merge INTO each top-level key, untouched keys survive"
+    (binding [sys/read-config (fn [_]
+                                {:db/postgres {:jdbc-url "jdbc:postgresql://base/db"
+                                               :username "base-user"}
+                                 ::other {:tag :b}})]
+      (let [merged (#'sys/merged-config :test {:db/postgres {:jdbc-url "jdbc:postgresql://over/db"}})]
+        (is (= "jdbc:postgresql://over/db" (get-in merged [:db/postgres :jdbc-url])))
+        (is (= "base-user" (get-in merged [:db/postgres :username]))
+            "per-key merge keeps sibling entries of the overridden key")
+        (is (= {:tag :b} (::other merged)))))))
+
+
+(deftest merged-config-mirrors-pg-override-into-notify-listener
+  (let [base {:db/postgres {:jdbc-url "jdbc:postgresql://base/db"}
+              :db/notify-listener {:pg-opts {:jdbc-url "jdbc:postgresql://base/db"}}}
+        pg-over {:jdbc-url "jdbc:postgresql://container/db"
+                 :username "u" :password "p" :pool-size 7}]
+    (binding [sys/read-config (fn [_] base)]
+      (testing "a :db/postgres connection override retargets the LISTEN connection too"
+        (let [merged (#'sys/merged-config :test {:db/postgres pg-over})]
+          (is (= {:jdbc-url "jdbc:postgresql://container/db"
+                  :username "u" :password "p"}
+                 (get-in merged [:db/notify-listener :pg-opts]))
+              "only the connection keys are mirrored — no :pool-size leak")))
+      (testing "an EXPLICIT listener override is never clobbered by the mirror"
+        (let [merged (#'sys/merged-config
+                      :test
+                      {:db/postgres pg-over
+                       :db/notify-listener {:pg-opts {:jdbc-url "jdbc:postgresql://custom/db"}}})]
+          (is (= "jdbc:postgresql://custom/db"
+                 (get-in merged [:db/notify-listener :pg-opts :jdbc-url])))))
+      (testing "a pg override WITHOUT :jdbc-url doesn't touch the listener"
+        (let [merged (#'sys/merged-config :test {:db/postgres {:pool-size 3}})]
+          (is (= "jdbc:postgresql://base/db"
+                 (get-in merged [:db/notify-listener :pg-opts :jdbc-url]))))))
+    (testing "a config with no :db/notify-listener key stays listener-less"
+      (binding [sys/read-config (fn [_] {:db/postgres {:jdbc-url "jdbc:postgresql://base/db"}})]
+        (let [merged (#'sys/merged-config :test {:db/postgres pg-over})]
+          (is (not (contains? merged :db/notify-listener))))))))
+
+
+;; =============================================================================
+;; start-with-overrides! — both arities over the probe config
+;; =============================================================================
+
+(deftest start-with-overrides-lifecycle-test
+  (binding [sys/read-config (fn [_] {::probe {:tag :base :extra 1} ::other {:tag :b}})]
+    (testing "2-arity starts EVERY key with the override merged in"
+      (let [system (sys/start-with-overrides! :test {::probe {:tag :overridden}})]
+        (is (= {:tag :overridden :extra 1} (::probe system))
+            "override merges per key — untouched entries survive")
+        (is (= {:tag :b} (::other system)))))
+    (testing "3-arity starts only the named component keys"
+      (let [system (sys/start-with-overrides! :test [::probe] {::probe {:tag :subset}})]
+        (is (= :subset (get-in system [::probe :tag])))
+        (is (not (contains? system ::other)))))))
+
+
+;; =============================================================================
 ;; stop!/suspend!/resume! delegation tests
 ;; =============================================================================
 

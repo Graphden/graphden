@@ -21,6 +21,29 @@
                             "--target" "b" "--create" "--prune"]))))
 
 
+(deftest parse-opts-valueless-flags-and-empty-argv
+  (is (= {:args []} (#'cli/parse-opts [])))
+  (is (= {:args [] :no-prune true :dry-run true :include-secret-paths true}
+         (#'cli/parse-opts ["--no-prune" "--dry-run" "--include-secret-paths"]))
+      "value-less flags parse to true and consume ONE token"))
+
+
+(deftest missing-required-options-are-a-usage-error
+  (let [e (try (cli/export! {:url "http://x" :token "" :other "y"})
+               (catch clojure.lang.ExceptionInfo e e))]
+    (is (= :cli/usage (:type (ex-data e)))
+        "usage errors carry :cli/usage so -main exits 2, not 1")
+    (is (= "missing required option(s): --token --out" (ex-message e))
+        "blank counts as missing; every missing flag is listed by its CLI name")))
+
+
+(deftest fail-prints-to-stderr-and-returns-the-code
+  (let [err (java.io.StringWriter.)]
+    (binding [*err* err]
+      (is (= 2 (#'cli/fail! 2 "boom"))))
+    (is (= "boom\n" (str err)))))
+
+
 (def ^:private fixture-bundle
   {:fns [{:name :cli-a :namespace "cli.demo" :parent :add :args {:nums [1 2]}}
          {:name :cli-b :parent :const :args {:value "root"}}]
@@ -118,6 +141,55 @@
         (is (= {:query "target=hub/main&create=true"
                 :auth "Bearer lt"} @local-import)))
       (finally (hub) (local)))))
+
+
+(deftest diff-and-dry-run-preview-without-writing
+  ;; One stub instance whose export flips mid-test: export! snapshots the
+  ;; ORIGINAL bundle to disk, then the server moves on — diff! / --dry-run
+  ;; must print the snapshot-vs-server delta and never touch /api/import.
+  (let [bundle (atom fixture-bundle)
+        imports (atom 0)
+        handler (fn [req]
+                  (condp = (:uri req)
+                    "/api/export/graph"
+                    {:status 200 :headers {"Content-Type" "application/edn"}
+                     :body (pr-str @bundle)}
+                    "/api/import/graph"
+                    (do (swap! imports inc) {:status 200 :body "{\"ok\":true}"})
+                    {:status 404 :body ""}))
+        stop (hk/run-server handler {:port 0})
+        url (str "http://localhost:" (:local-port (meta stop)))
+        dir (str (Files/createTempDirectory "gd-cli-diff" (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (try
+      (is (zero? (cli/export! {:url url :token "t" :out dir})))
+      ;; server now has: cli-a CHANGED, cli-b gone, cli-new added
+      (reset! bundle {:fns [{:name :cli-a :namespace "cli.demo" :parent :add :args {:nums [9]}}
+                            {:name :cli-new :parent :const :args {:value 1}}]})
+      (testing "diff! prints the snapshot-vs-branch preview and returns 0"
+        (let [out (with-out-str
+                    (is (zero? (cli/diff! {:args [dir] :url url :token "t"}))))]
+          (is (str/includes? out "diff vs branch 'main':"))
+          (is (str/includes? out "+ added:   1"))
+          (is (str/includes? out "- removed: 1"))
+          (is (str/includes? out "~ changed: 1"))
+          (is (str/includes? out "+ :cli-b") "the snapshot's cli-b is new to the server")
+          (is (str/includes? out "- :cli-new"))
+          (is (str/includes? out "~ :cli-a"))))
+      (testing "import --dry-run prints the same preview instead of posting"
+        (let [out (with-out-str
+                    (is (zero? (cli/import! {:args [dir] :url url :token "t"
+                                             :target "main" :dry-run true}))))]
+          (is (str/includes? out "diff vs branch 'main':"))))
+      (is (zero? @imports) "no write ever reached /api/import/graph")
+      (finally (stop)))))
+
+
+(deftest import-from-an-empty-dir-is-a-usage-error
+  (let [dir (str (Files/createTempDirectory "gd-cli-empty" (make-array java.nio.file.attribute.FileAttribute 0)))
+        e (try (cli/import! {:args [dir] :url "http://unused" :token "t" :target "b"})
+               (catch clojure.lang.ExceptionInfo e e))]
+    (is (= :cli/usage (:type (ex-data e))))
+    (is (str/includes? (ex-message e) "no snapshot under"))))
 
 
 (deftest bundle-diff-classifies-added-removed-changed

@@ -864,6 +864,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
    needs a ~1s hover and never shows on keyboard focus). */
 .branch-row-merge,
 .branch-row-diff,
+.branch-row-compare,
 .branch-row-approve,
 .branch-row-more {
   background: transparent; color: var(--muted-fg);
@@ -873,8 +874,12 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 }
 .branch-row-merge:hover,
 .branch-row-diff:hover,
+.branch-row-compare:hover,
 .branch-row-approve:hover,
 .branch-row-more:hover { color: var(--fg); background: var(--bg); }
+/* ◐ — the compare-mode toggle; filled when this row IS the compared
+   branch (clicking it again exits — "сбросить выбор"). */
+.branch-row-compare.on { color: var(--warning-fg); }
 /* Accent dot on ⋯ when the row carries a proposal / active protection
    (the states that used to color the now-tucked-away 📤/⚙). */
 .branch-row-more.on { color: var(--accent); }
@@ -957,6 +962,8 @@ body.gd-tenancy.gd-no-write .branch-row-more-menu .branch-row-policy { display: 
   padding: 1px 5px; font-size: 0.6875rem; line-height: 1.4; cursor: pointer;
 }
 .gd-diff-chip-off:hover { color: var(--fg); background: var(--hover-bg); }
+/* Lens active = the annotations are a SUBSET — make the chip say so. */
+.gd-diff-chip-filtered { border-style: dashed; }
 .gd-diff-badge {
   margin-left: auto; flex: none;
   font-family: var(--mono); font-weight: 700; font-size: 0.625rem;
@@ -2231,6 +2238,12 @@ textarea.value-form-hiccup {
   cursor: pointer; pointer-events: auto;
 }
 .arg-diff-badge:hover { background: var(--hover-bg); }
+/* Compare-mode CARD rings — the fn-overlay itself marks as changed, so
+   the whole displayed graph reads as a diff. Same semantic colors as
+   the sidebar badges. */
+.fn-overlay-diff-added { box-shadow: 0 0 0 2px var(--success-fg) !important; }
+.fn-overlay-diff-missing { box-shadow: 0 0 0 2px var(--error-fg) !important; }
+.fn-overlay-diff-modified { box-shadow: 0 0 0 2px var(--warning-fg) !important; }
 
 /* Arg type-chip — small text label "[int]" / "[fn]" docked to the
    right edge of an arg-overlay or trailing an edge-label. Click flips

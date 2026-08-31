@@ -630,12 +630,24 @@ function wireBranchPopoverHandlers(popover, current) {
   });
 
   // ◐ compare mode — the editor-wide diff lens (editor-diff-mode.js).
+  // Entering = picking the second branch; the picked row's ◐ is lit,
+  // and clicking it again clears the pick (exits).
+  const comparedNow = (typeof gdDiffModeBranch === 'function')
+    ? gdDiffModeBranch() : null;
   popover.querySelectorAll('.branch-row-compare').forEach((btn) => {
+    const mine = btn.getAttribute('data-compare-branch');
+    if (comparedNow && mine === comparedNow) {
+      btn.classList.add('on');
+      btn.setAttribute('data-tip', 'Stop comparing');
+    }
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const other = btn.getAttribute('data-compare-branch');
       closeBranchPopover();
-      if (typeof gdEnterDiffMode === 'function') gdEnterDiffMode(other);
+      if (btn.classList.contains('on')) {
+        if (typeof gdExitDiffMode === 'function') gdExitDiffMode();
+      } else if (typeof gdEnterDiffMode === 'function') {
+        gdEnterDiffMode(mine);
+      }
     });
   });
 

@@ -17,6 +17,63 @@
 // keep working (editing, running) with the lens on.
 
 const GD_DIFF_MODE_KEY = 'graphden.diffAgainst';
+// The TYPE LENS — which change kinds the annotations show, and whether
+// cosmetic-only edits (name / description fields alone — nothing that
+// affects behaviour) count at all. Persisted beside the branch choice.
+const GD_DIFF_LENS_KEY = 'graphden.diffLens';
+let _gdDiffLens = { added: true, missing: true, modified: true, substantiveOnly: false };
+try {
+  const raw = JSON.parse(localStorage.getItem(GD_DIFF_LENS_KEY) || 'null');
+  if (raw && typeof raw === 'object') _gdDiffLens = Object.assign(_gdDiffLens, raw);
+} catch (_) { /* malformed pref — defaults */ }
+
+function gdDiffLens() { return Object.assign({}, _gdDiffLens); }
+
+function gdDiffLensFiltering() {
+  const l = _gdDiffLens;
+  return !l.added || !l.missing || !l.modified || l.substantiveOnly;
+}
+
+function gdDiffSetLens(patch) {
+  _gdDiffLens = Object.assign({}, _gdDiffLens, patch || {});
+  try { localStorage.setItem(GD_DIFF_LENS_KEY, JSON.stringify(_gdDiffLens)); } catch (_) {}
+  gdDiffModeDecorateSidebar();
+  gdDiffModeRenderChip();
+  gdDiffModeAnnounceLens();
+  // Re-ring the open graph under the new lens.
+  if (typeof selectFn === 'function' && typeof selectedFnId !== 'undefined'
+      && selectedFnId) selectFn(selectedFnId);
+}
+
+function gdDiffModeAnnounceLens() {
+  if (typeof gdAnnounce !== 'function' || !_gdDiffMode) return;
+  const l = _gdDiffLens;
+  gdAnnounce('Diff lens: '
+    + [l.added ? 'added' : null, l.modified ? 'modified' : null,
+       l.missing ? 'only-there' : null].filter(Boolean).join(', ')
+    + (l.substantiveOnly ? ', substantive only' : ''));
+}
+
+// An entry is COSMETIC when it is a modification that touches only the
+// name / description fields — nothing execution-visible.
+function gdDiffEntryCosmetic(e) {
+  return e.change === 'modified'
+    && Array.isArray(e.fields) && e.fields.length > 0
+    && e.fields.every((f) => f.field === 'name' || f.field === 'description');
+}
+
+function gdDiffGroupSubstantive(g) {
+  return (g.entries || []).some((e) => !gdDiffEntryCosmetic(e));
+}
+
+// The group as the CURRENT lens shows it — or null when filtered out.
+function gdDiffVisibleGroup(fnId) {
+  const g = gdDiffModeGroup(fnId);
+  if (!g) return null;
+  if (!_gdDiffLens[g.__kind]) return null;
+  if (_gdDiffLens.substantiveOnly && !gdDiffGroupSubstantive(g)) return null;
+  return g;
+}
 
 // `lookups` is a top-level `let` in editor-data.js — bundle-scoped,
 // NOT a window property. Same-scope lexical access with a typeof
@@ -42,12 +99,13 @@ function gdDiffModeGroup(fnId) {
 // review direction, and reusing an arrow here with the opposite
 // meaning would mislead.
 function gdDiffSlotsForFn(fnId) {
-  const g = gdDiffModeGroup(fnId);
+  const g = gdDiffVisibleGroup(fnId);
   if (!g) return null;
   const slots = {};
   for (const e of (g.entries || [])) {
     const slot = e['slot-name'];
     if (!slot || slot in slots) continue;
+    if (_gdDiffLens.substantiveOnly && gdDiffEntryCosmetic(e)) continue;
     let summary;
     if (Array.isArray(e.fields) && e.fields.length) {
       summary = e.fields
@@ -95,22 +153,13 @@ async function gdDiffModeFetch(otherBranch) {
                  : kind === 'missing' ? 'Only on ' + otherBranch
                  : 'Differs from ' + otherBranch)
       + (entryCount > 1 ? ' — ' + entryCount + ' changes' : '');
-    byFnId.set(g['fn-id'], g);
-    // Aggregate onto every ancestor namespace path.
     const lk = gdDmLookups();
     const fn = lk?.fnMap?.get(g['fn-id']);
-    const nsPath = fn && lk?.nsPathMap?.get(fn['namespace-id']);
-    if (nsPath) {
-      const parts = nsPath.split('.');
-      for (let i = 1; i <= parts.length; i++) {
-        const p = parts.slice(0, i).join('.');
-        const c = nsCounts.get(p) || { added: 0, missing: 0, modified: 0 };
-        c[kind] += 1;
-        nsCounts.set(p, c);
-      }
-    }
+    g.__nsPath = (fn && lk?.nsPathMap?.get(fn['namespace-id'])) || null;
+    byFnId.set(g['fn-id'], g);
   }
-  return { branch: otherBranch, byFnId, nsCounts, fetchedAt: Date.now() };
+  void nsCounts;   // per-lens aggregation happens at decorate time
+  return { branch: otherBranch, byFnId, fetchedAt: Date.now() };
 }
 
 // --- sidebar decoration -----------------------------------------------------
@@ -122,8 +171,23 @@ function gdDiffModeDecorateSidebar() {
   if (!list) return;
   _gdDiffDecorating = true;
   try {
+    // ns counts under the CURRENT lens.
+    const nsCounts = new Map();
+    if (_gdDiffMode) {
+      for (const g of _gdDiffMode.byFnId.values()) {
+        if (!gdDiffVisibleGroup(g['fn-id'])) continue;
+        if (!g.__nsPath) continue;
+        const parts = g.__nsPath.split('.');
+        for (let i = 1; i <= parts.length; i++) {
+          const p = parts.slice(0, i).join('.');
+          const c = nsCounts.get(p) || { added: 0, missing: 0, modified: 0 };
+          c[g.__kind] += 1;
+          nsCounts.set(p, c);
+        }
+      }
+    }
     list.querySelectorAll('.entity-item[data-fn-id]').forEach((item) => {
-      const g = _gdDiffMode?.byFnId.get(item.dataset.fnId);
+      const g = _gdDiffMode ? gdDiffVisibleGroup(item.dataset.fnId) : null;
       let b = item.querySelector('.gd-diff-badge');
       if (!g) {
         if (b) b.remove();
@@ -141,7 +205,7 @@ function gdDiffModeDecorateSidebar() {
       b.title = g.__title;
     });
     list.querySelectorAll('.ns-header[data-ns-path]').forEach((header) => {
-      const c = _gdDiffMode?.nsCounts.get(header.dataset.nsPath);
+      const c = nsCounts.get(header.dataset.nsPath);
       let b = header.querySelector('.gd-diff-ns-badge');
       if (!c) { if (b) b.remove(); return; }
       if (!b) {
@@ -195,6 +259,14 @@ function gdDiffModeObserve() {
   _gdDiffObserver.observe(list, { childList: true, subtree: true });
 }
 
+// Card-level mark for `editor-overlay-fn.js` — ring the whole fn card
+// when the fn differs under the current lens.
+function gdDiffModeCardInfo(fnId) {
+  const g = fnId ? gdDiffVisibleGroup(fnId) : null;
+  if (!g) return null;
+  return { kind: g.__kind, cls: GD_DIFF_CLS[g.__kind], title: g.__title };
+}
+
 // --- the "◐ vs <branch>" chip ----------------------------------------------
 
 function gdDiffModeRenderChip() {
@@ -208,12 +280,8 @@ function gdDiffModeRenderChip() {
     chip.className = 'gd-diff-chip';
     const label = document.createElement('button');
     label.className = 'gd-diff-chip-label';
-    label.addEventListener('click', () => {
-      // The full diff surface — conversation + suggestions.
-      if (typeof showBranchDiff === 'function' && _gdDiffMode) {
-        showBranchDiff(getCurrentBranchName(), _gdDiffMode.branch);
-      }
-    });
+    label.setAttribute('aria-haspopup', 'menu');
+    label.addEventListener('click', () => gdOpenDiffChipMenu(label));
     chip.appendChild(label);
     const off = document.createElement('button');
     off.className = 'gd-diff-chip-off';
@@ -225,9 +293,147 @@ function gdDiffModeRenderChip() {
     mount.appendChild(chip);
   }
   const label = chip.querySelector('.gd-diff-chip-label');
-  label.textContent = '◐ vs ' + _gdDiffMode.branch;
+  // An active lens HIDES things — silent filtering is how a user ends
+  // up believing two branches are identical. Say it on the chip.
+  const filtering = gdDiffLensFiltering();
+  label.textContent = '◐ vs ' + _gdDiffMode.branch + (filtering ? ' · filtered' : '');
+  chip.classList.toggle('gd-diff-chip-filtered', filtering);
   label.title = 'Compare mode — differences vs "' + _gdDiffMode.branch
-    + '" are marked in the Explorer and on the canvas. Click for the full diff.';
+    + '" are marked in the Explorer and on the canvas. Click for the diff, '
+    + 'review actions and the type lens.'
+    + (filtering
+       ? ' LENS ACTIVE — some change kinds are hidden from the annotations '
+         + '(the Δ modal always shows everything).'
+       : '');
+}
+
+// The chip's menu — the review COCKPIT for the compared pair: the full
+// diff, propose-for-review (the merge-request act) / merge shortcuts,
+// and the type lens. Torn down on any outside click.
+function gdCloseDiffChipMenu() {
+  document.getElementById('gd-diff-chip-pop')?.remove();
+  document.getElementById('gd-diff-chip-scrim')?.remove();
+}
+
+async function gdOpenDiffChipMenu(anchorBtn) {
+  gdCloseDiffChipMenu();
+  if (!_gdDiffMode) return;
+  const other = _gdDiffMode.branch;
+  const cur = getCurrentBranchName();
+  // One list fetch resolves both branches' ids + the current proposal
+  // state (ids ride /api/branches/:ref/* paths safely — names with "/"
+  // can't).
+  let rows = [];
+  try {
+    const r = await window.authFetch(API.api_branches);
+    rows = (await r.json())?.branches || [];
+  } catch (_) { /* menu still renders; actions fall back to names */ }
+  const curRow = rows.find((b) => b.name === cur);
+  const otherRow = rows.find((b) => b.name === other);
+  const proposed = curRow?.['review-state'] === 'proposed';
+
+  const scrim = document.createElement('div');
+  scrim.id = 'gd-diff-chip-scrim';
+  scrim.className = 'gd-pop-scrim';
+  scrim.addEventListener('click', gdCloseDiffChipMenu);
+  document.body.appendChild(scrim);
+
+  const pop = document.createElement('div');
+  pop.id = 'gd-diff-chip-pop';
+  pop.className = 'gd-pop';
+  const heading = document.createElement('h5');
+  heading.textContent = cur + ' vs ' + other;
+  pop.appendChild(heading);
+
+  const item = (text, title, onClick) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'gd-pop-item';
+    b.textContent = text;
+    if (title) b.title = title;
+    b.addEventListener('click', () => { gdCloseDiffChipMenu(); onClick(); });
+    pop.appendChild(b);
+    return b;
+  };
+
+  item('Δ Open full diff', 'Field-level diff + comments + suggestions',
+       () => {
+         if (typeof showBranchDiff === 'function') {
+           showBranchDiff(cur, other, otherRow?.id);
+         }
+       });
+  // Proposing aims at the branch's BASE — the root branch has none.
+  if (curRow?.['base-branch-id']) {
+    item(proposed ? '📤 Withdraw the proposal'
+                : '📤 Propose "' + cur + '" for review',
+       proposed ? 'Take the current branch out of review'
+                : 'Submit the current branch for review into its base — the merge-request act',
+       async () => {
+         try {
+           const r = await window.authFetch(
+             API.api_branches_ref_propose(curRow?.id || cur), {
+               method: 'POST',
+               headers: { 'Content-Type': 'application/json' },
+               body: JSON.stringify({ proposed: !proposed }),
+             });
+           const d = await r.json().catch(() => ({}));
+           if (!d.ok && typeof gdToast === 'function') {
+             gdToast(d.error || ('Could not change the proposal: HTTP ' + r.status));
+           } else if (typeof gdToast === 'function') {
+             gdToast(proposed ? 'Proposal withdrawn'
+                              : '"' + cur + '" proposed for review');
+           }
+         } catch (e2) {
+           if (typeof gdToast === 'function') {
+             gdToast('Network error: ' + (e2?.message || e2));
+           }
+         }
+       });
+  }
+  item('⇢ Merge "' + other + '" into "' + cur + '"',
+       'Fold the compared branch into the one you are on',
+       async () => {
+         // The merge flow reports into the branch popover's error slot —
+         // bring the popover up first so failures stay visible.
+         if (typeof openBranchPopover === 'function') await openBranchPopover();
+         if (typeof mergeBranchInto === 'function') mergeBranchInto(other, cur);
+       });
+
+  // --- the type lens ---
+  const lensHead = document.createElement('h5');
+  lensHead.textContent = 'Show changes';
+  pop.appendChild(lensHead);
+  const lensOpt = (key, text, title) => {
+    const label = document.createElement('label');
+    label.className = 'gd-protect-opt';
+    if (title) label.title = title;
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = !!_gdDiffLens[key];
+    box.addEventListener('change', () => gdDiffSetLens({ [key]: box.checked }));
+    label.appendChild(box);
+    const span = document.createElement('span');
+    span.textContent = text;
+    label.appendChild(span);
+    pop.appendChild(label);
+  };
+  lensOpt('added', '+ added here');
+  lensOpt('modified', '± modified');
+  lensOpt('missing', '− only on ' + other);
+  lensOpt('substantiveOnly', 'Substantive only',
+          'Hide edits that touch nothing but names and descriptions');
+
+  const exit = document.createElement('button');
+  exit.type = 'button';
+  exit.className = 'gd-pop-item';
+  exit.textContent = '× Exit compare mode';
+  exit.addEventListener('click', () => { gdCloseDiffChipMenu(); gdExitDiffMode(); });
+  pop.appendChild(exit);
+
+  const r = anchorBtn.getBoundingClientRect();
+  pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 300)) + 'px';
+  pop.style.top = (r.bottom + 6) + 'px';
+  document.body.appendChild(pop);
 }
 
 // --- enter / exit / boot ----------------------------------------------------
@@ -273,6 +479,7 @@ async function gdDiffModeRefresh() {
 }
 
 function gdExitDiffMode() {
+  gdCloseDiffChipMenu();
   _gdDiffMode = null;
   try { localStorage.removeItem(GD_DIFF_MODE_KEY); } catch (_) {}
   gdDiffModeRenderChip();
@@ -316,3 +523,7 @@ window.gdDiffModeGroup = gdDiffModeGroup;
 window.gdDiffSlotsForFn = gdDiffSlotsForFn;
 window.gdEnterDiffMode = gdEnterDiffMode;
 window.gdExitDiffMode = gdExitDiffMode;
+window.gdDiffVisibleGroup = gdDiffVisibleGroup;
+window.gdDiffModeCardInfo = gdDiffModeCardInfo;
+window.gdDiffLens = gdDiffLens;
+window.gdDiffSetLens = gdDiffSetLens;

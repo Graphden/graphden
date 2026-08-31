@@ -1166,15 +1166,17 @@
      :see [[:crud "render-repr"]]}
 
     {:file "resources/packages/app/editor/editor-diff-mode.js" :defn gdEnterDiffMode
-     :say "COMPARE MODE — the editor-wide diff lens. One fetch of the grouped
-           `diff-view` payload, then pure annotation: Explorer rows badge
-           +/±/−, namespace headers aggregate counts, changed args ring on the
-           canvas via `gdDiffSlotsForFn`, and the ◐ chip persists the mode in
-           localStorage across reloads. Note what it does NOT do: no data
-           re-routing — every read and write stays on the current branch, so
-           the user keeps editing with the lens on. The one-shot cousin
-           (`graphden.diffFocus` in sessionStorage) is stashed by the diff
-           modal's row clicks; `editor-overlay-arg.js` consults both."}
+     :say "COMPARE MODE — the editor-wide diff lens, entered by picking the
+           second branch (the inline ◐ on a popover row). One fetch of the
+           grouped `diff-view` payload, then pure annotation: Explorer rows
+           badge +/±/−, namespace headers aggregate counts, changed fn cards
+           and args ring on the canvas (`gdDiffModeCardInfo` /
+           `gdDiffSlotsForFn`), and the ◐ chip persists the mode across
+           reloads. The chip's menu is the review cockpit: full diff,
+           propose-current-for-review, merge-compared-in, and the TYPE LENS
+           (`gdDiffSetLens` — kind toggles + substantive-only). Note what it
+           does NOT do: no data re-routing — every read and write stays on
+           the current branch, so the user keeps editing with the lens on."}
 
     {:file "resources/packages/app/editor/editor-auth.js" :defn authFetch
      :say "Every mutating call in the editor goes through this. It is 12 lines

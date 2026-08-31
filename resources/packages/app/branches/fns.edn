@@ -3157,18 +3157,28 @@
           :key {:value :data-compare-branch}
           :value :_bp-row-name}}
 
-  {:name :_bp-row-compare-attrs
+  {:name :_bp-row-compare-attrs-2
    :parent :assoc
    :args {:map :_bp-row-compare-attrs-1
           :key {:value :aria-label}
           :value :_bp-row-compare-aria}}
 
+  {:name :_bp-row-compare-attrs
+   :description "Instant tooltip + hover title. The ACTIVE (`on`) state is client-side — JS stamps it after the swap by matching `gdDiffModeBranch()`."
+   :parent :assoc
+   :args {:map {:parent :assoc
+                :args {:map :_bp-row-compare-attrs-2
+                       :key {:value :data-tip}
+                       :value {:value "Compare"}}}
+          :key {:value :title}
+          :value :_bp-row-compare-aria}}
+
   {:name :_bp-row-compare-btn-shown
+   :description "Inline ◐ — ENTERING compare mode is just picking the second branch, right next to Δ; clicking the lit one exits."
    :parent :hiccup
    :args {:tag {:value "button"}
           :attrs :_bp-row-compare-attrs
-          :children [{:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-ic" :aria-hidden "true"}} :children [{:value "◐"}]}}
-                     {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-label"}} :children [{:value "Compare with current"}]}}]}}
+          :children [{:value "◐"}]}}
 
   {:name :_bp-row-compare-btn
    :parent :if
@@ -3186,13 +3196,13 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs :_bp-row-more-menu-attrs
-          :children [:_bp-row-compare-btn :_bp-row-propose-btn :_bp-row-protect-btn :_bp-row-policy-btn :_bp-row-delete-btn]}}
+          :children [:_bp-row-propose-btn :_bp-row-protect-btn :_bp-row-policy-btn :_bp-row-delete-btn]}}
 
   {:name :_bp-row-actions-span
    :parent :hiccup
    :args {:tag {:value "span"}
           :attrs {:value {:class "branch-row-actions"}}
-          :children [:_bp-row-diff-btn :_bp-row-approve-btn :_bp-row-merge-btn :_bp-row-more-btn :_bp-row-more-menu]}}
+          :children [:_bp-row-diff-btn :_bp-row-compare-btn :_bp-row-approve-btn :_bp-row-merge-btn :_bp-row-more-btn :_bp-row-more-menu]}}
 
   ;; The full per-branch row — assembled via the named children.
   {:name :_bp-row

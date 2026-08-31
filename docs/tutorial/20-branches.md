@@ -42,11 +42,13 @@ Advanced            → (cloud/tenancy only) pick who can write the
                       new branch: everyone / only me / org admins
 row → switch        → click a branch row to switch to it
 Δ (diff)            → show the diff vs another branch
+◐ (compare)         → COMPARE MODE: pick this branch as the second
+                      one and the whole editor becomes the diff.
+                      The picked row's ◐ stays lit; click it again
+                      to clear the pick and exit.
 ✅ (approve)        → approve a proposed branch for merge
 ⇢ (merge)           → fold another branch into this one
 ⋯ (more)            → the labeled per-row menu:
-                        ◐ Compare with current — the editor-wide
-                          diff lens (compare mode)
                         📤 Propose for review — submit into its base
                         ⚙ Protection… — "push only via merge",
                           required approvals (0–3, one-tap segments),
@@ -135,14 +137,20 @@ the author**.
    per row, and under a modified fn the exact args and fields that
    changed, shown as `old → new`. Click the row — the editor opens
    that fn on the canvas with the changed args ringed `Δ`.
-   Prefer to *stay* in the diff? Pick `⋯` → **◐ Compare with
-   current** instead: the whole editor becomes the diff — every
-   changed fn is badged in the Explorer (namespaces carry `+n ±n −n`
-   summaries), any changed fn you open rings its changed args, and
-   the `◐ vs feat-tutorial` chip by the branch chip keeps the mode
-   on until you `×` it — it survives reloads, so "always see my
-   drift vs main" is one click. You keep editing and running as
-   usual; compare mode only annotates.
+   Prefer to *stay* in the diff? Click `◐` on the `feat-tutorial`
+   row instead — picking the second branch IS entering compare mode:
+   every changed fn is badged in the Explorer (namespaces carry
+   `+n ±n −n` summaries), changed fn CARDS ring on the canvas along
+   with their changed args, and the `◐ vs feat-tutorial` chip by the
+   branch chip keeps the mode on — it survives reloads, so "always
+   see my drift vs main" is one click. Clicking the chip opens the
+   review cockpit: the full Δ diff, **📤 propose the current branch
+   for review** (the merge-request act), **⇢ merge** the compared
+   branch in, and the **type lens** — show only additions, removals
+   or modifications, or "substantive only" (hide edits that touch
+   nothing but names and descriptions). Exit = click the lit `◐`
+   again (or the chip's `×`). You keep editing and running as usual;
+   compare mode only annotates.
 5. The diff isn't only about values — it shows the graph's SHAPE
    changing too. Each entry kind reads differently:
 

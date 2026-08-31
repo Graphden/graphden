@@ -26,6 +26,9 @@ const SUGG = 'suggest-cmp' + RUN_ID;
 // — the id-ref plumbing must keep it fully operable.
 const SLASHED = 'suggest/sl' + RUN_ID;
 const PROBE_FN = 'cmp-probe' + RUN_ID;
+// Gets a DESCRIPTION-only edit on feat — the "substantive only" lens
+// must hide it while the structural probe stays.
+const COSM_FN = 'cmp-cosm' + RUN_ID;
 
 async function cleanup(page) {
   try {
@@ -34,6 +37,12 @@ async function cleanup(page) {
                                        {headers: {'X-Graphden-Branch': branch}});
       return r.ok ? r.json() : null;
     }, FEAT);
+    const cosm = (ents?.fns || []).find((f) => f.name === COSM_FN);
+    if (cosm) {
+      await page.evaluate(async (id) => {
+        await window.authFetch('/api/entities/fn/' + id, {method: 'DELETE'});
+      }, cosm.id);
+    }
     const probe = (ents?.fns || []).find((f) => f.name === PROBE_FN);
     if (probe) {
       await page.evaluate(async ({id, branch}) => {
@@ -94,6 +103,37 @@ async function cleanup(page) {
     }, {name: PROBE_FN, parentId: identity.id, branch: FEAT});
     assert(created.body.includes('created successfully'),
            'probe fn created on feat');
+    // Cosmetic probe: exists on main, description edited on feat only.
+    const cosmCreated = await page.evaluate(async ({name, parentId}) => {
+      const body = new URLSearchParams();
+      body.set('name', name);
+      body.set('parent-ids', parentId);
+      const r = await window.authFetch('/api/entities/fn', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: body.toString(),
+      });
+      return {status: r.status, body: await r.text()};
+    }, {name: COSM_FN, parentId: identity.id});
+    assert(cosmCreated.body.includes('created successfully'),
+           'cosmetic probe created on main');
+    const cosmId = ((await api(page, 'GET', '/api/graph/entities'))?.fns || [])
+      .find((f) => f.name === COSM_FN)?.id;
+    assert(cosmId, 'cosmetic probe id resolved');
+    const cosmEdit = await page.evaluate(async ({id, branch}) => {
+      const body = new URLSearchParams();
+      body.set('description', 'reworded on the branch');
+      const r = await window.authFetch('/api/entities/fn/' + id, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-Graphden-Branch': branch,
+        },
+        body: body.toString(),
+      });
+      return r.status;
+    }, {id: cosmId, branch: FEAT});
+    assert(cosmEdit === 200, 'description-only edit landed on feat: ' + cosmEdit);
     assert((await api(page, 'POST',
                       '/api/branches/' + encodeURIComponent(FEAT) + '/propose',
                       {proposed: true}))?.ok, 'feat proposed');
@@ -105,9 +145,12 @@ async function cleanup(page) {
                       {proposed: true}))?.ok, 'suggestion proposed');
 
     // =================================================================
-    // Phase A: compare mode from main vs feat.
+    // Phase A: compare mode from main vs feat — entered from the UI:
+    // picking the second branch IS the inline ◐ on its row.
     // =================================================================
-    await page.evaluate((other) => window.gdEnterDiffMode(other), FEAT);
+    let opened0 = await openBranchPopover(page);
+    assert(opened0, 'branch popover opens for the ◐ pick');
+    await page.click('.branch-row[data-branch-name="' + FEAT + '"] .branch-row-compare');
     await page.waitForSelector('#gd-diff-chip', {timeout: 20000});
     const chipText = await page.evaluate(
       () => document.querySelector('.gd-diff-chip-label')?.textContent);
@@ -124,6 +167,52 @@ async function cleanup(page) {
     }));
     assert(modeInfo.active && modeInfo.branch === FEAT,
            'compare mode active vs feat: ' + JSON.stringify(modeInfo));
+
+    // The picked row's ◐ is lit; clicking it again clears the pick.
+    await openBranchPopover(page);
+    const litSel = '.branch-row[data-branch-name="' + FEAT + '"] .branch-row-compare.on';
+    await page.waitForSelector(litSel, {timeout: 15000});
+    await page.click(litSel);
+    await page.waitForFunction(() => !document.getElementById('gd-diff-chip'),
+                               {timeout: 15000});
+    assert(true, 'clicking the lit ◐ exits compare mode');
+    await page.evaluate((other) => window.gdEnterDiffMode(other), FEAT);
+    await page.waitForSelector('#gd-diff-chip', {timeout: 20000});
+
+    // =================================================================
+    // Phase A2: the TYPE LENS — "substantive only" hides the
+    // description-only edit, keeps the structural probe.
+    // =================================================================
+    const cosmBefore = await page.evaluate(
+      (id) => !!window.gdDiffVisibleGroup(id), cosmId);
+    assert(cosmBefore, 'cosmetic (description-only) group visible by default');
+    await page.evaluate(() => window.gdDiffSetLens({substantiveOnly: true}));
+    const lensState = await page.evaluate((id) => ({
+      cosm: !!window.gdDiffVisibleGroup(id),
+      lens: window.gdDiffLens(),
+    }), cosmId);
+    assert(lensState.cosm === false,
+           '"substantive only" hides the description-only group');
+    assert(lensState.lens.substantiveOnly === true, 'lens state persisted');
+    await page.evaluate(() => window.gdDiffSetLens({substantiveOnly: false}));
+
+    // The chip's menu (review cockpit) carries diff / propose / merge
+    // actions + the lens toggles.
+    await page.evaluate(() => document.querySelector('.gd-diff-chip-label').click());
+    await page.waitForSelector('#gd-diff-chip-pop', {timeout: 10000});
+    const menu = await page.evaluate(() => ({
+      items: Array.from(document.querySelectorAll('#gd-diff-chip-pop .gd-pop-item'))
+        .map((b) => b.textContent),
+      lensBoxes: document.querySelectorAll('#gd-diff-chip-pop input[type="checkbox"]').length,
+    }));
+    assert(menu.items.some((t) => /Open full diff/.test(t))
+           && menu.items.some((t) => /Merge/.test(t))
+           && menu.items.some((t) => /Exit compare/.test(t)),
+           'chip menu carries diff / merge / exit: ' + JSON.stringify(menu.items));
+    assert(!menu.items.some((t) => /Propose|Withdraw/.test(t)),
+           'propose hidden on the root branch (main has no base to aim at)');
+    assert(menu.lensBoxes === 4, 'chip menu carries the 4 lens toggles');
+    await page.evaluate(() => document.getElementById('gd-diff-chip-scrim').click());
 
     // =================================================================
     // Phase B: mode survives reload; × exits.

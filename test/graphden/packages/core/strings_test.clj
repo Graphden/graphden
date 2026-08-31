@@ -5,10 +5,23 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.storage.protocol.config :as sp-config]
     [graphden.test-infra.impls :as impls]))
 
 
-(use-fixtures :once (impls/impls-fixture "core" "strings"))
+;; The 100ms production default guards against pathological patterns;
+;; on a cold shared CI runner the FIRST Pattern compile can blow it on
+;; JIT/classload alone (GitHub run 33352560953 failed exactly so). The
+;; tests here exercise regex SEMANTICS, not the guard's tightness —
+;; give them slack. (No timing-based test of the guard itself: a
+;; too-small budget is a RACE against the compile thread, not a
+;; deterministic trip.) One `use-fixtures` call — a second one
+;; REPLACES the first.
+(use-fixtures :once
+  (impls/impls-fixture "core" "strings")
+  (fn [t]
+    (binding [sp-config/*regex-compile-timeout-ms* 5000]
+      (t))))
 
 
 ;; ============================================================================

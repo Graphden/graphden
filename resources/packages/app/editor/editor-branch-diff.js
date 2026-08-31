@@ -64,8 +64,11 @@ function escapeText(s) {
   return d.innerHTML;
 }
 
-async function showBranchDiff(targetName, sourceName) {
+async function showBranchDiff(targetName, sourceName, sourceRef) {
   if (!targetName || !sourceName) return;
+  // `sourceRef` — a stable /api/branches/:ref/* path ref (branch id when
+  // the caller has the row; names with "/" can't ride a path segment).
+  sourceRef = sourceRef || sourceName;
   const modal = ensureBranchDiffModal();
   // Remember where the keyboard was before the modal took over —
   // unless the modal is already up (a suggestion's Δ-view swaps the
@@ -81,6 +84,8 @@ async function showBranchDiff(targetName, sourceName) {
     +   '<div class="branch-diff-header">'
     +     'Diff: <strong>' + escapeText(sourceName)
     +     '</strong> → <strong>' + escapeText(targetName) + '</strong>'
+    +     '<button class="branch-diff-compare" title="Stay in the diff while you work: '
+    +       'badge the Explorer, ring changed args on the canvas">◐ Compare mode</button>'
     +     '<button class="branch-diff-close" aria-label="Close">×</button>'
     +   '</div>'
     +   '<div class="branch-diff-body branch-diff-loading">Loading diff…</div>'
@@ -89,6 +94,13 @@ async function showBranchDiff(targetName, sourceName) {
     .addEventListener('click', closeBranchDiffModal);
   modal.querySelector('.branch-diff-close')
     .addEventListener('click', closeBranchDiffModal);
+  // The bridge from the one-shot review surface to the persistent lens:
+  // close the modal, enter compare mode vs the branch being diffed.
+  modal.querySelector('.branch-diff-compare')
+    .addEventListener('click', () => {
+      closeBranchDiffModal();
+      if (typeof gdEnterDiffMode === 'function') gdEnterDiffMode(sourceName);
+    });
   // Focus lands on Close: the diff body is still loading, and Close is the
   // one control that exists whichever way the fetch turns out.
   focusIntoDialog(modal);
@@ -112,8 +124,8 @@ async function showBranchDiff(targetName, sourceName) {
     body.innerHTML = await resp.text();
     if (window.htmx?.process) window.htmx.process(body);
     bindDiffRowNavigation(body, sourceName, targetName);
-    initDiffConversation(body, sourceName);
-    renderDiffSuggestions(body, sourceName, targetName);
+    initDiffConversation(body, sourceName, sourceRef);
+    renderDiffSuggestions(body, sourceName, sourceRef, targetName);
   } catch (err) {
     body.classList.remove('branch-diff-loading');
     body.innerHTML = '<div class="branch-diff-error">Failed: '
@@ -203,7 +215,8 @@ function bindDiffRowNavigation(rootEl, sourceName, targetName) {
 // unanchored comments are the branch-level conversation below the
 // diff. All user content lands via textContent (no innerHTML —
 // comment bodies and branch names are user-controlled).
-function initDiffConversation(body, sourceName) {
+function initDiffConversation(body, sourceName, sourceRef) {
+  sourceRef = sourceRef || sourceName;
   const state = { comments: [] };
   let reload;
 
@@ -233,7 +246,7 @@ function initDiffConversation(body, sourceName) {
       if (del.disabled) return;
       del.disabled = true;
       try {
-        const r = await window.authFetch(API.api_branches_ref_comments(sourceName), {
+        const r = await window.authFetch(API.api_branches_ref_comments(sourceRef), {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: c.id }),
@@ -271,7 +284,7 @@ function initDiffConversation(body, sourceName) {
           payload['entity-name'] = anchorName;
           payload['entity-id'] = anchorId;
         }
-        const r = await window.authFetch(API.api_branches_ref_comments(sourceName), {
+        const r = await window.authFetch(API.api_branches_ref_comments(sourceRef), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -376,7 +389,7 @@ function initDiffConversation(body, sourceName) {
 
   reload = async () => {
     try {
-      const r = await window.authFetch(API.api_branches_ref_comments(sourceName));
+      const r = await window.authFetch(API.api_branches_ref_comments(sourceRef));
       const d = await r.json();
       if (d.ok) { state.comments = d.comments || []; render(); }
     } catch (_) { /* best-effort */ }
@@ -422,7 +435,8 @@ function initDiffConversation(body, sourceName) {
 // against the proposal and APPLY it (an ordinary merge INTO the
 // proposal — content-aware approval dismissal then works unchanged),
 // and give reviewers the "Suggest a change" fork-and-switch shortcut.
-async function renderDiffSuggestions(body, sourceName, _targetName) {
+async function renderDiffSuggestions(body, sourceName, sourceRef, _targetName) {
+  sourceRef = sourceRef || sourceName;
   const mount = body.querySelector('.branch-diff-suggestions');
   if (!mount) return;
   let branches = [];
@@ -459,7 +473,7 @@ async function renderDiffSuggestions(body, sourceName, _targetName) {
     const view = document.createElement('button');
     view.textContent = 'Δ view';
     view.title = 'Show what this suggestion changes on "' + sourceName + '"';
-    view.addEventListener('click', () => showBranchDiff(sourceName, sugg.name));
+    view.addEventListener('click', () => showBranchDiff(sourceName, sugg.name, sugg.id));
     row.appendChild(view);
 
     const apply = document.createElement('button');
@@ -471,7 +485,7 @@ async function renderDiffSuggestions(body, sourceName, _targetName) {
                    + sourceName + '"?')) return;
       apply.disabled = true;
       try {
-        const r = await window.authFetch(API.api_branches_ref_merge(sourceName), {
+        const r = await window.authFetch(API.api_branches_ref_merge(sourceRef), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ source: sugg.name }),

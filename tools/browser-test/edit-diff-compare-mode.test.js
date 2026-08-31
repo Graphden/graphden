@@ -22,6 +22,9 @@ const {assert, newContext, api, openBranchPopover} =
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
 const FEAT = 'cmp-feat' + RUN_ID;
 const SUGG = 'suggest-cmp' + RUN_ID;
+// A branch NAME with "/" can't ride a /api/branches/:ref/* path segment
+// — the id-ref plumbing must keep it fully operable.
+const SLASHED = 'suggest/sl' + RUN_ID;
 const PROBE_FN = 'cmp-probe' + RUN_ID;
 
 async function cleanup(page) {
@@ -41,9 +44,16 @@ async function cleanup(page) {
       }, {id: probe.id, branch: FEAT});
     }
   } catch (_) {}
-  for (const b of [SUGG, FEAT]) {
+  // Delete by ID where we can resolve one — the slashed name can't be
+  // a path ref.
+  let rows = [];
+  try {
+    rows = (await api(page, 'GET', '/api/branches'))?.branches || [];
+  } catch (_) {}
+  for (const b of [SLASHED, SUGG, FEAT]) {
+    const ref = rows.find((r) => r.name === b)?.id || b;
     try {
-      await api(page, 'DELETE', '/api/branches/' + encodeURIComponent(b));
+      await api(page, 'DELETE', '/api/branches/' + encodeURIComponent(ref));
     } catch (_) {}
   }
   try { await page.evaluate(() => localStorage.removeItem('graphden.diffAgainst')); }
@@ -198,6 +208,38 @@ async function cleanup(page) {
     const newBtn = await page.evaluate(() =>
       !!document.querySelector('.branch-diff-suggest-new'));
     assert(newBtn, '"+ Suggest a change" affordance present');
+
+    // =================================================================
+    // Phase E: a SLASH-named branch stays fully operable via id-refs.
+    // =================================================================
+    await page.evaluate(() => document.querySelector('.branch-diff-close').click());
+    assert((await api(page, 'POST', '/api/branches',
+                      {name: SLASHED, 'base-branch-id': FEAT}))?.ok,
+           'slash-named branch created off feat');
+    const slashedId = ((await api(page, 'GET', '/api/branches'))?.branches || [])
+      .find((b) => b.name === SLASHED)?.id;
+    assert(slashedId, 'slash-named branch id resolved');
+    const propById = await api(page, 'POST',
+                               '/api/branches/' + slashedId + '/propose',
+                               {proposed: true});
+    assert(propById?.ok, 'propose reaches a slash-named branch via its ID');
+
+    // The popover's row ops must go by id too: withdraw the proposal
+    // through the row's ⋯ → 📤 and watch the state flip.
+    opened = await openBranchPopover(page);
+    assert(opened, 'branch popover re-opens');
+    const rowSelSl = '.branch-row[data-branch-name="' + SLASHED + '"]';
+    await page.waitForSelector(rowSelSl, {timeout: 15000});
+    const rowId = await page.evaluate(
+      (sel) => document.querySelector(sel)?.getAttribute('data-branch-id'), rowSelSl);
+    assert(rowId === slashedId, 'row carries data-branch-id: ' + rowId);
+    await page.evaluate((sel) => {
+      document.querySelector(sel + ' .branch-row-propose').click();
+    }, rowSelSl);
+    await page.waitForSelector(
+      rowSelSl + ' .branch-row-propose:not(.on)',
+      {timeout: 20000, state: 'attached'});
+    assert(true, 'withdraw-proposal round-trips on a slash-named branch (id path)');
 
     console.log('✓ compare mode / anchored comments / suggestions verified');
     await cleanup(page);

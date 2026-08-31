@@ -607,7 +607,8 @@ function wireBranchPopoverHandlers(popover, current) {
   popover.querySelectorAll('.branch-row-delete').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      deleteBranchWithConfirm(btn.getAttribute('data-branch-name'));
+      deleteBranchWithConfirm(btn.getAttribute('data-branch-name'),
+                              branchRefFrom(btn, btn.getAttribute('data-branch-name')));
     });
   });
 
@@ -642,7 +643,9 @@ function wireBranchPopoverHandlers(popover, current) {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const source = btn.getAttribute('data-diff-source');
-      if (typeof showBranchDiff === 'function') showBranchDiff(current, source);
+      if (typeof showBranchDiff === 'function') {
+        showBranchDiff(current, source, branchRefFrom(btn, source));
+      }
     });
   });
 
@@ -752,6 +755,7 @@ function openBranchPolicyMenu(btn) {
   closeBranchPolicyMenu();
   const row = btn.closest('.branch-row');
   const branchName = btn.getAttribute('data-policy-branch');
+  const branchRef = branchRefFrom(btn, branchName);
   const current = row?.getAttribute('data-write-policy') || 'open';
   const scrim = document.createElement('div');
   scrim.id = 'gd-branch-policy-scrim';
@@ -782,7 +786,7 @@ function openBranchPolicyMenu(btn) {
       closeBranchPolicyMenu();
       const err = document.getElementById('branch-popover-error');
       try {
-        const resp = await window.authFetch(API.api_branches_ref_policy(branchName), {
+        const resp = await window.authFetch(API.api_branches_ref_policy(branchRef), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 'write-policy': item.getAttribute('data-policy-value') }),
@@ -806,6 +810,16 @@ function openBranchPolicyMenu(btn) {
   pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 300)) + 'px';
   pop.style.top = (r.bottom + 6) + 'px';
   document.body.appendChild(pop);
+}
+
+// The /api/branches/:ref/* ops take the ref as ONE path segment, so a
+// branch NAME containing "/" (the hub's push/<x> convention, or any
+// user-typed slash) can never round-trip through the URL. Every row
+// carries `data-branch-id`; prefer it — `resolve-branch-ref` accepts a
+// UUID — and fall back to the name for markup that predates the attr.
+function branchRefFrom(el, fallbackName) {
+  return el?.closest?.('.branch-row')?.getAttribute('data-branch-id')
+    || fallbackName;
 }
 
 // Tear down the ⚙ protection menu (popover + scrim) if open.
@@ -848,11 +862,12 @@ async function postBranchProtection(url, payload, errMsg) {
 function openProtectionMenu(btn) {
   closeProtectionMenu();
   const branchName = btn.getAttribute('data-protect-branch');
+  const branchRef = branchRefFrom(btn, branchName);
   const requireMerge = btn.getAttribute('data-require-merge') === '1';
   const reqAppr = parseInt(btn.getAttribute('data-reqappr') || '0', 10) || 0;
   // data-allow-self: "off" = explicitly disabled; "on"/"" = counted (default).
   const allowSelf = btn.getAttribute('data-allow-self') !== 'off';
-  const rpUrl = API.api_branches_ref_review_policy(branchName);
+  const rpUrl = API.api_branches_ref_review_policy(branchRef);
 
   const scrim = document.createElement('div');
   scrim.id = 'gd-protect-scrim';
@@ -875,7 +890,7 @@ function openProtectionMenu(btn) {
   rmBox.type = 'checkbox';
   rmBox.checked = requireMerge;
   rmBox.addEventListener('change', () =>
-    postBranchProtection(API.api_branches_ref_protect(branchName),
+    postBranchProtection(API.api_branches_ref_protect(branchRef),
                          { 'require-merge': rmBox.checked },
                          'Could not change branch protection'));
   rmLabel.appendChild(rmBox);
@@ -951,10 +966,11 @@ function openProtectionMenu(btn) {
 // a rejection surfaces in the shared slot.
 async function toggleBranchPropose(btn) {
   const branchName = btn.getAttribute('data-propose-branch');
+  const branchRef = branchRefFrom(btn, branchName);
   const next = btn.getAttribute('data-review-state') !== '1';
   const err = document.getElementById('branch-popover-error');
   try {
-    const resp = await window.authFetch(API.api_branches_ref_propose(branchName), {
+    const resp = await window.authFetch(API.api_branches_ref_propose(branchRef), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ proposed: next }),
@@ -981,7 +997,8 @@ async function approveProposal(btn) {
   const branchName = btn.getAttribute('data-approve-branch');
   const err = document.getElementById('branch-popover-error');
   try {
-    const resp = await window.authFetch(API.api_branches_ref_approve(branchName), {
+    const resp = await window.authFetch(
+      API.api_branches_ref_approve(branchRefFrom(btn, branchName)), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '{}',
@@ -1017,7 +1034,8 @@ async function populateReviewStatus(popover) {
   for (const btn of approveBtns) {
     const name = btn.getAttribute('data-approve-branch');
     try {
-      const resp = await window.authFetch(API.api_branches_ref_approvals(name));
+      const resp = await window.authFetch(
+        API.api_branches_ref_approvals(branchRefFrom(btn, name)));
       if (!resp.ok) continue;
       const st = await resp.json();
       const req = st.required ?? 0;
@@ -1074,12 +1092,12 @@ async function createBranchFromInput(parentName) {
   }
 }
 
-async function deleteBranchWithConfirm(name) {
+async function deleteBranchWithConfirm(name, ref) {
   if (!confirm('Delete branch "' + name + '"? Every version row on it will be removed.')) return;
   const err = document.getElementById('branch-popover-error');
   try {
     const resp = await window.authFetch(
-      API.api_branches_ref(name),
+      API.api_branches_ref(ref || name),
       { method: 'DELETE' });
     const body = await resp.json();
     if (resp.status === 401) {

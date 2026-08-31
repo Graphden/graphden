@@ -2639,7 +2639,7 @@
 
   ;; data-write-policy: "" when open — the JS policy editor reads its
   ;; current value off the row instead of a second fetch.
-  {:name :_bp-row-attrs
+  {:name :_bp-row-attrs-4
    :parent :assoc
    :args {:map :_bp-row-attrs-3
           :key {:value :data-write-policy}
@@ -2647,6 +2647,16 @@
                   :args {:test :_bp-row-protected?
                          :then :_bp-row-policy
                          :else {:value ""}}}}}
+
+  ;; data-branch-id — the STABLE ref for /api/branches/:ref/* calls.
+  ;; `resolve-branch-ref` accepts a UUID, and a NAME with a "/" in it
+  ;; (hub push/<x> convention, or any user-typed slash) can never
+  ;; round-trip through a path segment — the JS row ops prefer this id.
+  {:name :_bp-row-attrs
+   :parent :assoc
+   :args {:map :_bp-row-attrs-4
+          :key {:value :data-branch-id}
+          :value {:parent :to-str :args {:value :_bp-row-id}}}}
 
   ;; --- Children spans ---
 

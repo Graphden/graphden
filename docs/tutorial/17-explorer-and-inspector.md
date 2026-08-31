@@ -13,7 +13,7 @@ markers**, and the **Inspector** panel with its four tabs.
 Under the Explorer's search box sits a row of **kind chips**:
 
 ```
-◍ all   λ fn   T types   🔒 secrets   ⚙ services 2   ▣ apps 1
+◍ all   λ fn   T types   🔒 secrets   ⚙ services 2   ▣ apps 1   ✓ tests 3
 ```
 
 Click a chip and the tree narrows to rows of that kind — services
@@ -30,8 +30,8 @@ Details worth knowing:
 - The trailing `fx marks` chip is a *detail* toggle, not a lens:
   it marks every fn whose execution carries effects with a small
   `fx` (hover it for the exact footprint — `io`, `time`, …)
-  without hiding anything. Off by default; flip it off again and
-  the tree returns to normal.
+  without hiding anything. Off by default; flip it on to see the
+  footprints, off again and the tree returns to normal.
 - **services** and **apps** show a live count; the **apps** chip
   appears only when the deployment has app routing at all
   (Lesson 27).

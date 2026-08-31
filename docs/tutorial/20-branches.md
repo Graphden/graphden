@@ -88,7 +88,7 @@ any time to re-open direct writes.
 
 > Prefer to be shown? The review cycle is its own guided in-editor
 > tour — protection, the 409 refusal, proposal and approval:
-> [open the demo with tour 08b running](https://app.graphden.dev/?demo=1&tutorial=21)
+> [open the demo with tour 21 running](https://app.graphden.dev/?demo=1&tutorial=21)
 > (no sign-up), or pick lesson 21 in the editor's account menu.
 
 Beyond "who/how" you can require *review*: someone proposes a change,
@@ -171,7 +171,7 @@ the author**.
    | bound an arg to another fn (an edge!) | `+ arg handler` · `ref → :my-handler` |
    | re-aimed an existing edge | `± arg handler` · `ref-fn-id: :a → :b` |
    | added/edited a list element | `± item 0 of nums` · `1 → 2` |
-   | created a whole fn | its own `+` group under "Only in <branch>" |
+   | created a whole fn | a `−` ghost row here ("only on <branch>"), a `+` group in ITS branch's view |
 
    Try one: on `feat-tutorial`, extend some fn with a new child (or
    ⋯-bind an arg to a different fn), then compare again — the
@@ -312,10 +312,11 @@ when propagation may happen at all.
 2. Fork to `feat-dev-server`. On the new branch, copy `:web-
    server` to a new fn-def parented from `:http-server`, port
    9001.
-3. From `main`, press `Δ` on the `feat-dev-server` row (compare
-   mode) and select your new fn — the inspector's diff panel shows
-   a `📍 branch-local` badge (the Review dialog's change list
-   carries it too).
+3. Still ON `feat-dev-server`, press `Δ` on the `main` row
+   (compare mode) and select your new fn — it is "added here", and
+   the inspector's diff panel shows a `📍 branch-local` badge (the
+   Review dialog's change list carries it too; from `main` the fn
+   is only a ghost row — clicking it offers to switch over).
 4. Merge `feat-dev-server` → `main`. The alert names your fn as
    skipped. Check `main` — it's not there.
 5. Switch back to `feat-dev-server` — still there. The branch

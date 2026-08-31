@@ -1154,6 +1154,10 @@ function syncKindFilterBar() {
   });
   document.querySelectorAll('#kind-filters .kind-toggle').forEach((btn) => {
     const kind = btn.dataset.kind;
+    // The fx DETAIL toggle shares the chip row (and .kind-toggle skin)
+    // but is not a lens — its aria-pressed was set above; skip it here
+    // or this loop clobbers it back to "false" on every sync.
+    if (!kind) return;
     const active = kind === 'all' ? lensKinds.size === 0 : lensKinds.has(kind);
     btn.setAttribute('aria-pressed', String(active));
     if (kind === 'apps') {

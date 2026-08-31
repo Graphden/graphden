@@ -58,7 +58,10 @@ function gdDiffModeAnnounceLens() {
   gdAnnounce('Diff lens: '
     + [l.added ? 'added' : null, l.modified ? 'modified' : null,
        l.missing ? 'only-there' : null].filter(Boolean).join(', ')
-    + (l.substantiveOnly ? ', substantive only' : ''));
+    + (l.changedOnly ? ', only changed rows' : '')
+    + (l.substantiveOnly ? ', substantive only' : '')
+    + (l.effectsOnly ? ', effects touched only' : '')
+    + (l.notes ? '' : ', comment markers off'));
 }
 
 // An entry is COSMETIC when it is a modification that touches only the
@@ -241,6 +244,9 @@ async function gdDiffModeLoadEffects(mode) {
   }
   mode.effectsReady = true;
   gdDiffModeDecorateSidebar();
+  // The chip's visible/total under an effectsOnly lens can only be
+  // computed once the effect deltas landed — refresh it.
+  if (_gdDiffMode === mode) gdDiffModeRenderChip();
 }
 
 // --- client renderer of diff groups ----------------------------------------
@@ -416,8 +422,9 @@ async function gdDiffModeFetch(otherBranch) {
   // "/" in a NAME (hub push/<x> convention). One small list fetch.
   let curId = null;
   let otherId = null;
+  let rows = [];
   try {
-    const rows = (await (await window.authFetch(API.api_branches)).json())
+    rows = (await (await window.authFetch(API.api_branches)).json())
       ?.branches || [];
     curId = rows.find((b) => b.name === cur)?.id || null;
     otherId = rows.find((b) => b.name === otherBranch)?.id || null;
@@ -445,11 +452,23 @@ async function gdDiffModeFetch(otherBranch) {
   // Anchored review comments → per-fn counts for the tree's 💬 markers.
   // Every diffed element's entity-id is in the groups, so a comment
   // anchored to a binding/list-item attributes to its owning fn without
-  // another lookup. Best-effort: a comments failure never blocks the mode.
+  // another lookup. The thread lives on the PROPOSAL side of the pair
+  // (the branch whose base is the other side) — an author standing on
+  // their feature branch comparing vs main must see the reviewer's
+  // notes, which are anchored on the FEATURE's thread, not main's.
+  // Best-effort: a comments failure never blocks the mode.
   const noteCounts = new Map();
   try {
+    const curRow0 = rows.find((b) => b.name === cur);
+    const otherRow0 = rows.find((b) => b.name === otherBranch);
+    const proposalRef =
+      (curRow0?.['base-branch-id'] && otherRow0
+        && curRow0['base-branch-id'] === otherRow0.id) ? curRow0.id
+      : (otherRow0?.['base-branch-id'] && curRow0
+         && otherRow0['base-branch-id'] === curRow0.id) ? otherRow0.id
+      : (otherId || otherBranch);
     const cr = await window.authFetch(
-      API.api_branches_ref_comments(otherId || otherBranch));
+      API.api_branches_ref_comments(proposalRef));
     const cd = await cr.json();
     if (cd.ok) {
       const ownerOf = new Map();
@@ -576,6 +595,7 @@ function gdDiffModeDecorateSidebar() {
             + (gnotes === 1 ? '' : 's') + ' anchored here';
           ghost.appendChild(nb);
         }
+        ghost.dataset.ghostFnId = g['fn-id'];
         ghost.title = 'Exists only on "' + _gdDiffMode.branch
           + '" — click to switch there and open it';
         ghost.addEventListener('click', () => {
@@ -702,10 +722,21 @@ function gdDiffExpandChangedGroups() {
       rootChanged = true;
     }
   }
-  list.querySelectorAll('.ns-header[data-ns-path]').forEach((h) => {
-    if (changedPaths.has(h.dataset.nsPath)
-        && h.getAttribute('aria-expanded') !== 'true') h.click();
-  });
+  // Nested headers only EXIST once their parent expands (collapsed
+  // groups render no children), so one pass cannot reach a change
+  // inside a.b.c while `a` is collapsed — re-query until a pass
+  // clicks nothing (expansion is synchronous; bounded by tree depth).
+  let clicked = true;
+  while (clicked) {
+    clicked = false;
+    for (const h of list.querySelectorAll('.ns-header[data-ns-path]')) {
+      if (changedPaths.has(h.dataset.nsPath)
+          && h.getAttribute('aria-expanded') !== 'true') {
+        h.click();
+        clicked = true;
+      }
+    }
+  }
   const pseudo = list.querySelector('.ns-header-pseudo');
   if (rootChanged && pseudo
       && pseudo.getAttribute('aria-expanded') !== 'true') pseudo.click();
@@ -879,7 +910,17 @@ function gdDiffModeRenderChip() {
     }
   }
   const count = filtering ? (visible + '/' + total) : String(total);
-  label.textContent = 'Δ vs ' + _gdDiffMode.branch + ' · ' + count;
+  // Two spans, not one text node: the NAME ellipsizes on long branch
+  // names while the count always stays visible at the right edge.
+  label.textContent = '';
+  const nameEl = document.createElement('span');
+  nameEl.className = 'gd-diff-chip-name';
+  nameEl.textContent = 'Δ vs ' + _gdDiffMode.branch;
+  label.appendChild(nameEl);
+  const countEl = document.createElement('span');
+  countEl.className = 'gd-diff-chip-count';
+  countEl.textContent = ' · ' + count;
+  label.appendChild(countEl);
   chip.classList.toggle('gd-diff-chip-filtered', filtering);
   label.title = 'Compare mode — ' + total + ' changed fn'
     + (total === 1 ? '' : 's') + ' vs "' + _gdDiffMode.branch
@@ -969,13 +1010,26 @@ async function gdOpenDiffChipMenu(anchorBtn) {
     return b;
   };
 
-  item('💬 Review & comments',
-       'The proposal conversation — change list, threads, suggestions',
-       () => {
-         if (typeof showReviewDialog === 'function') {
-           showReviewDialog(other, otherRow?.id);
-         }
-       });
+  // The dialog frames a branch against its BASE — never open it for a
+  // root branch (an empty "Review: main → main"). Prefer the side of
+  // the compared pair whose base IS the other side; else any side with
+  // a base; a pair of two roots gets no review item at all.
+  const basedOn = (row, baseRow) =>
+    row?.['base-branch-id'] && baseRow?.id
+      && row['base-branch-id'] === baseRow.id;
+  const reviewRow = basedOn(otherRow, curRow) ? otherRow
+    : basedOn(curRow, otherRow) ? curRow
+    : otherRow?.['base-branch-id'] ? otherRow
+    : curRow?.['base-branch-id'] ? curRow : null;
+  if (reviewRow) {
+    item('💬 Review & comments',
+         'The proposal conversation — change list, threads, suggestions',
+         () => {
+           if (typeof showReviewDialog === 'function') {
+             showReviewDialog(reviewRow.name, reviewRow.id);
+           }
+         });
+  }
   // Proposing aims at the branch's BASE — the root branch has none.
   if (curRow?.['base-branch-id']) {
     item(proposed ? '📤 Withdraw the proposal'
@@ -1064,11 +1118,19 @@ async function gdOpenDiffChipMenu(anchorBtn) {
 
 // --- enter / exit / boot ----------------------------------------------------
 
+let _gdDiffEnterEpoch = 0;
+
 async function gdEnterDiffMode(otherBranch) {
   if (!otherBranch || otherBranch === getCurrentBranchName()) return;
+  const epoch = ++_gdDiffEnterEpoch;
   _gdDiffModeFetching = true;
   try {
-    _gdDiffMode = await gdDiffModeFetch(otherBranch);
+    const fetched = await gdDiffModeFetch(otherBranch);
+    // The user may have exited (×) or picked ANOTHER branch while the
+    // fetch was in flight — installing a stale result would resurrect
+    // a dismissed mode (the refresh path has the same guard).
+    if (epoch !== _gdDiffEnterEpoch) return;
+    _gdDiffMode = fetched;
     try { localStorage.setItem(GD_DIFF_MODE_KEY, otherBranch); } catch (_) {}
     gdDiffModeLoadEffects(_gdDiffMode);
     gdDiffModeRenderChip();
@@ -1108,6 +1170,7 @@ async function gdDiffModeRefresh() {
       _gdDiffMode = fresh;
       gdDiffModeLoadEffects(fresh);
       gdDiffModeDecorateSidebar();
+      gdDiffModeRenderChip();
     }
   } catch (_) { /* keep the stale annotations */ }
   _gdDiffModeFetching = false;

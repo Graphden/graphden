@@ -247,6 +247,82 @@
       (finally (sp/close storage)))))
 
 
+(deftest same-bare-name-in-another-namespace-is-a-removal-not-a-move
+  ;; ADR-identity stage 5: the same bare name may live in several
+  ;; namespaces. Removing pkgd.x/foo while unrelated pkgd.y/foo keeps
+  ;; syncing must NOT repoint the world at pkgd.y/foo — with the
+  ;; :preexisting-fn-ids guard the 1-candidate "move" is accepted only
+  ;; when the candidate row was minted by THIS sync.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [pkgd (ns-row! storage "pkgd" nil)
+            mx (ns-row! storage "pkgd.x" (:id pkgd))
+            my (ns-row! storage "pkgd.y" (:id pkgd))
+            removed-id (records/fn-id "pkgd.x" :dupfoo)
+            _ (sp/create-entity storage :fn
+                                {:id removed-id :name "dupfoo"
+                                 :namespace-id (:id mx) :parent-ids []})
+            unrelated-id (records/fn-id "pkgd.y" :dupfoo)
+            _ (sp/create-entity storage :fn
+                                {:id unrelated-id :name "dupfoo"
+                                 :namespace-id (:id my) :parent-ids []})
+            ;; a live caller still references the REMOVED one
+            base (setup/create-base-fn! storage "dup-caller-base")
+            slot (setup/create-slot! storage "dz" :int)
+            _ (setup/attach-slot! storage (:id base) (:id slot) 0)
+            caller (setup/create-composed-fn! storage "dup-caller" (:id base))
+            binding-row (sp/create-entity storage :binding
+                                          {:fn-id (:id caller) :slot-id (:id slot)
+                                           :ref-fn-id removed-id})
+            ;; both rows PRE-DATE the sync; only pkgd.y/dupfoo re-syncs
+            n (pkg-sync/reconcile-moved-identities!
+                storage {:packages [{:name "pkgd"}]}
+                [{:name "dupfoo" :id unrelated-id}]
+                {:preexisting-fn-ids #{removed-id unrelated-id
+                                       (:id base) (:id caller)}})]
+        (is (= 1 n) "the dropped identity is a leftover")
+        (is (some? (sp/read-entity storage :fn removed-id))
+            "still-referenced removal stays put — NOT repointed away")
+        (is (= removed-id (:ref-fn-id (sp/read-entity storage :binding (:id binding-row))))
+            "the caller's ref still targets the removed fn, not the unrelated same-name one"))
+      (finally (sp/close storage)))))
+
+
+(deftest retired-chain-with-own-type-slot-purges-fully
+  ;; A retired section whose slot is TYPED by its own type-row: the
+  ;; slot has no owning fn (external by naive attribution), but every
+  ;; fn-slot exposing it belongs to the removal set and nothing else
+  ;; binds it — the set-aware pass must see through the slot, purge
+  ;; the chain AND the orphaned slot, so the type-row isn't pinned
+  ;; forever.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [pkge (ns-row! storage "pkge" nil)
+            m1 (ns-row! storage "pkge.a" (:id pkge))
+            type-id (records/fn-id "pkge.a" :sec-type)
+            _ (sp/create-entity storage :fn
+                                {:id type-id :name "sec-type"
+                                 :namespace-id (:id m1) :parent-ids []})
+            user-id (records/fn-id "pkge.a" :sec-user)
+            _ (sp/create-entity storage :fn
+                                {:id user-id :name "sec-user"
+                                 :namespace-id (:id m1) :parent-ids []})
+            slot (sp/create-entity storage :slot
+                                   {:id (random-uuid) :name "sv"
+                                    :type-fn-id type-id})
+            _ (sp/create-entity storage :fn-slot
+                                {:fn-id user-id :slot-id (:id slot) :position 0})
+            n (pkg-sync/reconcile-moved-identities!
+                storage {:packages [{:name "pkge"}]} [])]
+        (is (= 2 n) "both retired identities counted")
+        (is (nil? (sp/read-entity storage :fn user-id)) "slot owner purged")
+        (is (nil? (sp/read-entity storage :fn type-id))
+            "type-row purged — its only pin was the set's own slot")
+        (is (nil? (sp/read-entity storage :slot (:id slot)))
+            "the fully-orphaned slot is purged too, not left dangling"))
+      (finally (sp/close storage)))))
+
+
 (deftest leaves-ambiguous-move-alone
   ;; >1 same-name candidate in the synced set = a move we cannot resolve;
   ;; the leftover is counted, warned, and left untouched.

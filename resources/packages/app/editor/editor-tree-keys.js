@@ -49,6 +49,11 @@ function treeItems() {
 function keyOf(el) {
   if (!el) return null;
   if (el.dataset.fnId) return {kind: 'fn', key: el.dataset.fnId};
+  // Compare-mode ghost rows have no fn row on THIS branch — their key
+  // is the compared branch's fn id (decorate re-creates them wholesale,
+  // so without this the focused ghost loses the tab stop on every
+  // decorate pass).
+  if (el.dataset.ghostFnId) return {kind: 'ghost', key: el.dataset.ghostFnId};
   if (el.dataset.nsPath) return {kind: 'ns', key: el.dataset.nsPath};
   // The root "(primitives)" pseudo-header carries neither.
   if (el.classList.contains('ns-header-pseudo')) return {kind: 'ns', key: '__root__'};
@@ -59,6 +64,7 @@ function elementFor(k) {
   const root = treeEl();
   if (!root || !k) return null;
   if (k.kind === 'fn') return root.querySelector('[role="treeitem"][data-fn-id="' + k.key + '"]');
+  if (k.kind === 'ghost') return root.querySelector('[role="treeitem"][data-ghost-fn-id="' + k.key + '"]');
   if (k.key === '__root__') return root.querySelector('.ns-header-pseudo');
   return root.querySelector('[role="treeitem"][data-ns-path="' + CSS.escape(k.key) + '"]');
 }

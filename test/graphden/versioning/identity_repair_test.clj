@@ -175,7 +175,10 @@
                             :aa {:id :aa :fn-id :a :ref-fn-id :a}}
                   :binding-list-item {:ci {:id :ci :binding-id :cb :ref-fn-id :a}}
                   :binding-version {:avb {:id :avb :fn-id :a}}
-                  :binding-list-item-version {:aiv {:id :aiv :binding-id :avb :ref-fn-id :b}}
+                  ;; item-version rows key their :binding-id on the IDENTITY
+                  ;; binding row (schema mirror; the versioning cascade
+                  ;; filters them by the identity id), never a version row.
+                  :binding-list-item-version {:aiv {:id :aiv :binding-id :ab :ref-fn-id :b}}
                   :slot {:sa {:id :sa :type-fn-id :a}}
                   :fn {:a {:id :a :parent-ids []}
                        :b {:id :b :parent-ids []}
@@ -195,8 +198,8 @@
              (set (:a hits)))))
 
     (testing ":b — internal ref owner is in the target set (caller can
-              classify); a version-plane binding owner resolves list-item
-              versions too"
+              classify); list-item versions resolve their owner through
+              the IDENTITY binding row"
       (is (= #{{:entity :binding :id :ab :field :ref-fn-id :owner-fn-id :a}
                {:entity :binding-list-item-version :id :aiv :field :ref-fn-id
                 :owner-fn-id :a}
@@ -259,3 +262,25 @@
 
     (testing "dry-run deletes nothing"
       (is (= seed @db)))))
+
+
+(deftest inbound-refs-many-sees-fn-version-type-refs
+  ;; The :fn-version mirror carries VERSIONED fn-type refs that can
+  ;; diverge from the identity row on a branch — a removed type-row
+  ;; pinned only by such a row must still be reported (2026-08-31
+  ;; audit hole: no scanner read this plane).
+  (let [db (atom {:binding {}
+                  :binding-list-item {}
+                  :binding-version {}
+                  :binding-list-item-version {}
+                  :fn-version {:lv {:id :lv :fn-id :live :return-type-fn-id :t}
+                               :tv {:id :tv :fn-id :t :element-fn-id :t}}
+                  :slot {}
+                  :fn {:t {:id :t :parent-ids []}
+                       :live {:id :live :parent-ids []}}})
+        hits (idr/inbound-refs-many (mem-storage db) #{:t})]
+    (is (= #{{:entity :fn-version :id :lv :field :return-type-fn-id
+              :owner-fn-id :live}}
+           (set (:t hits)))
+        "a live fn's VERSION row pins the type; the type's own version row
+         (owner == target) is excluded like every owned row")))

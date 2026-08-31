@@ -995,11 +995,14 @@ body.gd-tenancy.gd-no-write .branch-row-more-menu .branch-row-policy { display: 
   border: 0; padding: 1px 6px;
   font-size: 0.6875rem; line-height: 1.4; cursor: pointer;
   white-space: nowrap;
-  /* A long branch name must not push the chip out of the Explorer —
-     ellipsize; the full name lives in the title. */
-  overflow: hidden; text-overflow: ellipsis;
   max-width: 148px;
+  display: inline-flex; align-items: baseline;
 }
+/* A long branch name must not push the chip out of the context bar —
+   the NAME span ellipsizes (full name in the title) while the change
+   COUNT keeps its place at the right edge. */
+.gd-diff-chip-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.gd-diff-chip-count { flex: none; white-space: pre; }
 .gd-diff-chip-label:hover { background: var(--hover-bg); }
 .gd-diff-chip-off {
   background: transparent; color: var(--muted-fg);

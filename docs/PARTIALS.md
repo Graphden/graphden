@@ -17,7 +17,7 @@ client concerns (mount lifecycle, anchored positioning, dismissal).
 
 Many editor popovers/panels already fetch server partials — see the
 `:partial-*` fn-defs in `app/editor/fns.edn` (effect-explainer,
-fn-versions, branch-diff, provenance, secrets, mismatch-explainer,
+fn-versions, provenance, secrets, mismatch-explainer,
 execute-history, service-popover, …). That set is the template for any
 remaining client-built popover.
 

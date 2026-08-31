@@ -41,6 +41,11 @@
    :binding-list-item [:ref-fn-id]
    :binding-version [:ref-fn-id :type-override-fn-id :resolver-fn-id]
    :binding-list-item-version [:ref-fn-id]
+   ;; The :fn-version mirror carries VERSIONED fn-type refs that can
+   ;; diverge from the identity row on a branch — without this row a
+   ;; branch-divergent return/element/base ref was invisible to every
+   ;; scanner here (2026-08-31 audit hole).
+   :fn-version [:base-fn-id :element-fn-id :return-type-fn-id]
    :slot [:type-fn-id]})
 
 
@@ -107,7 +112,7 @@
                               (sp/query-entities base :binding {:fn-id fn-id}))
         owned? (fn [entity row]
                  (case entity
-                   (:binding :binding-version) (= fn-id (:fn-id row))
+                   (:binding :binding-version :fn-version) (= fn-id (:fn-id row))
                    (:binding-list-item :binding-list-item-version)
                    (contains? own-binding-ids (:binding-id row))
                    false))
@@ -145,17 +150,17 @@
   [storage fn-ids]
   (let [base (base-of storage)
         targets (set fn-ids)
-        ;; binding-id → owning fn-id, across BOTH planes (a list-item's
-        ;; owner is its binding's owner; version rows carry :fn-id too).
+        ;; binding-id → owning fn-id. Both list-item planes key on the
+        ;; IDENTITY binding's id (version rows carry :binding-id of the
+        ;; identity row), so one :binding scan is the whole map.
         binding-owner (into {}
                             (map (juxt :id :fn-id))
-                            (concat (sp/query-entities base :binding {})
-                                    (sp/query-entities base :binding-version {})))
+                            (sp/query-entities base :binding {}))
         hits (volatile! {})
         hit! (fn [target m] (vswap! hits update target (fnil conj []) m))
         owner-of (fn [entity row]
                    (case entity
-                     (:binding :binding-version) (:fn-id row)
+                     (:binding :binding-version :fn-version) (:fn-id row)
                      (:binding-list-item :binding-list-item-version)
                      (get binding-owner (:binding-id row))
                      :slot nil))]
@@ -181,6 +186,66 @@
         (hit! target {:entity :fn :id (:id f) :field :parent-ids
                       :owner-fn-id (:id f)})))
     @hits))
+
+
+(defn purge-fn-subgraphs-many!
+  "Batch `purge-fn-subgraph!` for a SET of fn-ids: one scan per table
+   instead of four unfiltered scans per fn (the per-fn cascade re-read
+   :binding-list-item(-version)/:binding-version/:fn-slot-version in
+   full for every removal — ~4×N scans on the first boot after a large
+   retirement, the same class as the 2026-08-31 deploy blowup).
+   Returns the number of rows removed. Also removes slots that the
+   purge fully ORPHANS (every fn-slot exposing the slot belonged to
+   the set AND no surviving binding/binding-version row references it)
+   — the per-fn variant leaves them behind to pin their type-fns
+   forever."
+  [storage fn-ids]
+  (let [base (base-of storage)
+        targets (set fn-ids)
+        n (volatile! 0)
+        zap! (fn [entity rows]
+               (doseq [r rows]
+                 (vswap! n inc)
+                 (sp/delete-entity base entity (:id r))))
+        all-bindings (sp/query-entities base :binding {})
+        own-binding-ids (into #{} (comp (filter #(contains? targets (:fn-id %)))
+                                        (map :id))
+                              all-bindings)
+        by-binding (fn [entity]
+                     (filter #(contains? own-binding-ids (:binding-id %))
+                             (sp/query-entities base entity {})))]
+    (zap! :binding-list-item-version (by-binding :binding-list-item-version))
+    (zap! :binding-list-item (by-binding :binding-list-item))
+    (zap! :binding-version
+          (filter #(contains? targets (:fn-id %))
+                  (sp/query-entities base :binding-version {})))
+    (zap! :binding (filter #(contains? targets (:fn-id %)) all-bindings))
+    (let [all-fn-slots (sp/query-entities base :fn-slot {})
+          own-fn-slots (filter #(contains? targets (:fn-id %)) all-fn-slots)
+          own-fs-ids (into #{} (map :id) own-fn-slots)
+          ;; Slots whose EVERY exposure died with the set — orphans.
+          touched-slot-ids (into #{} (map :slot-id) own-fn-slots)
+          surviving-slot-ids (into #{} (comp (remove #(contains? own-fs-ids (:id %)))
+                                             (map :slot-id))
+                                   all-fn-slots)
+          bound-slot-ids (into #{} (comp (remove #(contains? targets (:fn-id %)))
+                                         (map :slot-id))
+                               (concat all-bindings
+                                       (sp/query-entities base :binding-version {})))
+          orphan-slot-ids (remove #(or (contains? surviving-slot-ids %)
+                                       (contains? bound-slot-ids %))
+                                  touched-slot-ids)]
+      (zap! :fn-slot-version
+            (filter #(contains? own-fs-ids (:fn-slot-id %))
+                    (sp/query-entities base :fn-slot-version {})))
+      (zap! :fn-slot own-fn-slots)
+      (zap! :slot (map (fn [sid] {:id sid}) orphan-slot-ids)))
+    (zap! :fn-version (filter #(contains? targets (:fn-id %))
+                              (sp/query-entities base :fn-version {})))
+    (zap! :fn (map (fn [id] {:id id}) targets))
+    (log/info "purged retired fn subgraphs (batch)"
+              {:fns (count targets) :rows @n})
+    @n))
 
 
 (defn purge-fn-subgraph!

@@ -748,7 +748,7 @@ function wireHubSyncSection(popover) {
         const status = document.getElementById('branch-hub-status');
         if (status) {
           status.textContent = 'Pulled → ' + (d.branch || 'hub/main')
-            + ' — Δ diff it against your branch, then ⇢ merge.';
+            + ' — Δ compare it against your branch, then ⇢ merge.';
         }
       }
     });

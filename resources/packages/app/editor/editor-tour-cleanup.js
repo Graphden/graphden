@@ -83,7 +83,7 @@ async function _tourDeleted(call) {
 }
 
 // NEWEST FIRST, like the fn pass: a lesson that forks a branch OFF another
-// lesson branch (08b: tutorial-feature off tutorial-release) creates the
+// lesson branch (lesson 21: tutorial-feature off tutorial-release) creates the
 // parent first, and the server refuses to delete a branch that still has
 // children — correctly. One reversed pass clears the normal case; whatever
 // still refuses goes round once more, after the rest unblocked it.

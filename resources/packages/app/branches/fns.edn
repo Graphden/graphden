@@ -2536,9 +2536,14 @@
    :parent :equal?
    :args {:a :_bp-row-name :b {:as :current-name}}}
 
-  {:name :_bp-row-is-main?
-   :parent :equal?
-   :args {:a :_bp-row-name :b {:value "main"}}}
+  ;; The ROOT test the backend actually uses (versioning/storage/core:
+  ;; root identity is base-branch-id nil). Testing the NAME instead
+  ;; misgates a tenant branch that happens to be called "main" (names
+  ;; are only org-unique; the root's org-id is nil) — its row would
+  ;; lose Review/propose/delete while the real root kept them.
+  {:name :_bp-row-is-root?
+   :parent :nil?
+   :args {:value :_bp-row-parent-id}}
 
   ;; Parent lookup — find the branch whose :id matches THIS row's
   ;; :base-branch-id. O(n) per row but n=branch count is tiny.
@@ -2599,7 +2604,7 @@
   ;; admin can reshape by re-wiring any predicate.
   {:name :_bp-row-undeletable?
    :parent :or
-   :args {:values [:_bp-row-is-main? :_bp-row-has-children? :_bp-row-on-current?]}}
+   :args {:values [:_bp-row-is-root? :_bp-row-has-children? :_bp-row-on-current?]}}
 
   {:name :_bp-row-deletable?
    :parent :not
@@ -2991,7 +2996,7 @@
   ;; into its own base) — hide it there to declutter.
   {:name :_bp-row-propose-btn
    :parent :if
-   :args {:test :_bp-row-is-main?
+   :args {:test :_bp-row-is-root?
           :then :_bp-row-empty-placeholder
           :else :_bp-row-propose-btn-shown}}
 
@@ -3190,7 +3195,7 @@
   ;; "Review: main → main"). Hide it there, like 📤 above.
   {:name :_bp-row-review-btn
    :parent :if
-   :args {:test :_bp-row-is-main?
+   :args {:test :_bp-row-is-root?
           :then :_bp-row-empty-placeholder
           :else :_bp-row-review-btn-shown}}
 

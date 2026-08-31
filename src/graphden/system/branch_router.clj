@@ -443,7 +443,9 @@
         (empty? ids) nil
 
         (> (count ids) max-user-fn-recheck)
-        (log/warn "skipping ctx-build diagnostics recompute — user-fn count over bound"
+        (log/warn (str "skipping ctx-build diagnostics recompute — user-fn count over bound; "
+                       "this branch's rich-types slice may miss branch-authored fns "
+                       "until they are edited (post-eviction rebuild re-forks from base)")
                   {:branch-id branch-id :count (count ids)
                    :cap max-user-fn-recheck})
 
@@ -465,11 +467,44 @@
 (defn- schedule-user-fn-recheck!
   "Fire `recheck-user-fns!` on a background future. `future` conveys
    the caller's dynamic bindings (org context, the diagnostics-store
-   override the parallel test plugin binds), so the recompute records
-   into the same store the triggering thread would."
+   override the parallel test plugin binds, THIS ctx's rich-types
+   slice), so the recompute records into the same stores the
+   triggering thread would."
   [branch-ctx branch-id]
   (when *recheck-user-fns?*
     (future (recheck-user-fns! branch-ctx branch-id)))
+  nil)
+
+
+(defn recheck-ctx-types!
+  "Re-record rich-types (+ diagnostics) INTO `branch-ctx`'s own
+   rich-types slice — the propagation channel between per-branch
+   slices. `fn-ids` non-empty → re-check exactly that set (a write's
+   blast radius); empty/nil → the bounded full user-fn sweep.
+
+   Why this exists: a slice only ever learns types from type-checks
+   RUN UNDER ITS BINDING. A merge into a branch, or a base-branch
+   edit inherited by a cached child, changes what the child RESOLVES
+   without any check running on the child — its slice would stay
+   stale forever (the default branch's entry is pinned and never
+   rebuilt; non-default entries heal on rebuild only). Async +
+   best-effort, same contract as the ctx-build recompute."
+  [branch-ctx branch-id fn-ids]
+  (when *recheck-user-fns?*
+    (let [slice (:rich-types-atom branch-ctx)
+          work (fn []
+                 (binding [registry-core/*rich-types-override*
+                           (or slice registry-core/*rich-types-override*)]
+                   (if (seq fn-ids)
+                     (doseq [id fn-ids]
+                       (try
+                         (type-check/type-check-fn-after-mutation!
+                           (:storage branch-ctx) id)
+                         (catch Exception t
+                           (log/debug t "slice type re-record failed for fn"
+                                      {:branch-id branch-id :fn-id id}))))
+                     (recheck-user-fns! branch-ctx branch-id))))]
+      (future (work))))
   nil)
 
 
@@ -798,7 +833,9 @@
               ;; markers (`:lazy-seq-args` on `:cond` &c.) vanished and the
               ;; recompiled closures evaluated cond clauses EAGERLY — the
               ;; 2026-08-23 "/api" update-keys ClassCast poisoning. In
-              ;; production both overrides are nil, so behavior is unchanged.
+              ;; production the per-ctx binding below (each ctx's own
+              ;; rich-types slice) overrides these ambient captures anyway —
+              ;; they matter only for ctxs built before slice-tagging.
               rt-override registry-core/*rich-types-override*
               per-org-override registry-core/*per-org-rich-override*
               work (fn []
@@ -847,9 +884,9 @@
                   (swap! state update :w max global)))))))))
 
 
-(defn handler-for
-  "Return the Ring callable for `branch-id`, building lazily on miss.
-   Falls back to the cached default-branch entry when `branch-id` is
+(defn entry-for
+  "The cached `{:ctx :handler}` entry for `branch-id`, building lazily
+   on miss. Falls back to the default-branch entry when `branch-id` is
    nil or matches the default. Records the access via `touch!` on
    cache hits so the LRU eviction sees the freshest order."
   [{:keys [default-branch-id handlers] :as router} branch-id]
@@ -858,7 +895,13 @@
         cached (get @handlers effective)]
     (when (and cached (not= effective default-branch-id))
       (touch! handlers effective))
-    (:handler (or cached (build-and-cache! router effective)))))
+    (or cached (build-and-cache! router effective))))
+
+
+(defn handler-for
+  "Ring callable for `branch-id` — see `entry-for`."
+  [router branch-id]
+  (:handler (entry-for router branch-id)))
 
 
 (def ^:dynamic *ctx-for-override*
@@ -881,16 +924,10 @@
    `invalidate-graph-cache!` after a write.
 
    Checks `*ctx-for-override*` first (test seam — see its docstring)."
-  [{:keys [default-branch-id handlers] :as router} branch-id]
+  [router branch-id]
   (if-let [f *ctx-for-override*]
     (f router branch-id)
-    (do
-      (validate-graph-epoch! router)
-      (let [effective (or branch-id default-branch-id)
-            cached (get @handlers effective)]
-        (when (and cached (not= effective default-branch-id))
-          (touch! handlers effective))
-        (:ctx (or cached (build-and-cache! router effective)))))))
+    (:ctx (entry-for router branch-id))))
 
 
 (defn- current-scope
@@ -1006,8 +1043,13 @@
           ;; clear here, costing every cached sibling branch a whole-graph rebuild
           ;; on its next request.
           (cond
-            (seq seeds) (ctx/invalidate-graph-cache! branch-ctx seeds)
-            (nil? seeds) (ctx/invalidate-graph-cache! branch-ctx)
+            (seq seeds) (do (ctx/invalidate-graph-cache! branch-ctx seeds)
+                            ;; The child's rich-types slice learned nothing
+                            ;; from a write it INHERITS — re-record the blast
+                            ;; radius into it (async, bounded).
+                            (recheck-ctx-types! branch-ctx branch-id seeds))
+            (nil? seeds) (do (ctx/invalidate-graph-cache! branch-ctx)
+                             (recheck-ctx-types! branch-ctx branch-id nil))
             :else nil)
           (catch Exception e
             ;; Best-effort: a stale sibling ctx is worse than a slow one,
@@ -1297,12 +1339,16 @@
                               ;; land on the branch's own view. Falls back to
                               ;; the ambient override (test isolation) for
                               ;; ctxs built before this tagging existed.
-                              (let [handler (handler-for router branch-id)
-                                    bctx (ctx-for router branch-id)]
+                              ;; ONE entry lookup — handler and ctx must come
+                              ;; from the same generation (an invalidation
+                              ;; between two lookups could pair an old handler
+                              ;; with a new ctx), and validate-graph-epoch!
+                              ;; need not run twice per request.
+                              (let [entry (entry-for router branch-id)]
                                 (binding [registry-core/*rich-types-override*
-                                          (or (:rich-types-atom bctx)
+                                          (or (:rich-types-atom (:ctx entry))
                                               registry-core/*rich-types-override*)]
-                                  (handler request)))
+                                  ((:handler entry) request)))
 
                               ;; A PAGE load naming a branch that is gone (merged
                               ;; and deleted elsewhere, or by this user's own tour

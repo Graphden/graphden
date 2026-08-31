@@ -619,22 +619,21 @@
                     (finally (reset! inflight false))))]
         (if *stale-revalidate-sync?*
           (run)
-          ;; Convey ONLY the test-isolation registry overrides onto the
-          ;; revalidate thread — NOT bound-fn* (that would drag per-request
-          ;; bindings like the tenant org into a background rebuild). Same
-          ;; fix as the branch-router's graph-epoch-heal thread: fired from
-          ;; an isolated test thread, this rebuild otherwise ran against an
-          ;; EMPTY rich-types registry, lost base-fn markers
-          ;; (`:lazy-seq-args` on `:cond`) and installed closures that
-          ;; evaluate cond clauses eagerly. In production both overrides
-          ;; are nil — behavior unchanged. requiring-resolve, not :require:
+          ;; Bind the CTX'S OWN rich-types slice (branch-scoped registry,
+          ;; 2026-08-31) — falling back to the ambient override for
+          ;; untagged ctxs (test-isolation fixtures). Without this a
+          ;; revalidate kicked from a NON-dispatch thread (a service /
+          ;; cron execution on a branch ctx carries no binding) compiled
+          ;; the branch against the GLOBAL registry. NOT bound-fn* —
+          ;; that would drag per-request bindings like the tenant org
+          ;; into a background rebuild. requiring-resolve, not :require:
           ;; registry.core → executor.interface → executor.context → this
           ;; ns would cycle (see `prime-always-fresh!`).
           (let [rt-var (requiring-resolve
                          'graphden.executor.registry.core/*rich-types-override*)
                 po-var (requiring-resolve
                          'graphden.executor.registry.core/*per-org-rich-override*)
-                rt (some-> rt-var deref)
+                rt (or (:rich-types-atom ctx) (some-> rt-var deref))
                 po (some-> po-var deref)
                 run' (fn [] (with-bindings* {rt-var rt po-var po} run))
                 t (Thread. ^Runnable run' "registry-stale-revalidate")]

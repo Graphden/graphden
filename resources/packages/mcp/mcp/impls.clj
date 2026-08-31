@@ -16,6 +16,7 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
+    [graphden.executor.registry.core :as registry-core]
     [graphden.packages.owned :as owned]
     [graphden.packages.records :as records]
     [graphden.packages.sync :as pkg-sync]
@@ -53,7 +54,16 @@
   [branch-id fn-defs]
   (cr/record-effect! :db)
   (let [storage (vs/switch-branch (request/require-storage ctx) branch-id)
-        fn-ids (pkg-sync/sync-bundle! storage fn-defs)]
+        ;; The sync records rich-types as it checks; the POST /mcp request
+        ;; rides MAIN, so without this rebind those records land in the
+        ;; REQUEST branch's slice — and the sync world's deterministic
+        ;; uuid-v5 ids would clobber main's entry for a same-named fn.
+        target-slice (when-let [router (br/current-router)]
+                       (:rich-types-atom (br/ctx-for router branch-id)))
+        fn-ids (if target-slice
+                 (binding [registry-core/*rich-types-override* target-slice]
+                   (pkg-sync/sync-bundle! storage fn-defs))
+                 (pkg-sync/sync-bundle! storage fn-defs))]
     ;; Invalidate the TARGET branch's ctx, not the request's own: the AI
     ;; writes to `ai/…` while its POST /mcp rides main. Same shape as
     ;; merge-branch!'s post-merge delta.

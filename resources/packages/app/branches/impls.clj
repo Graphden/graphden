@@ -302,11 +302,16 @@
           (let [affected (mrg/merge-affected-fn-ids
                            (branches/base-storage ctx) source-branch-id)]
             (when (seq affected)
-              (exec-ctx/invalidate-graph-cache!
-                (if router
-                  (br/ctx-for router target-branch-id)
-                  ctx)
-                affected)
+              (let [target-ctx (if router
+                                 (br/ctx-for router target-branch-id)
+                                 ctx)]
+                (exec-ctx/invalidate-graph-cache! target-ctx affected)
+                ;; The target's rich-types SLICE learned nothing from the
+                ;; merged fns (their checks ran under the SOURCE's slice) —
+                ;; and the default branch's entry is pinned, so no rebuild
+                ;; will ever re-record them. Re-check the affected set into
+                ;; the target's own slice (async, bounded).
+                (br/recheck-ctx-types! target-ctx target-branch-id affected))
               ;; Cross-pod: the local invalidate + restart-services-on-branch!
               ;; below fire only on THIS pod. A merge writes no per-fn NOTIFY of
               ;; its own (registries heal cross-pod via the graph epoch), but a

@@ -11,6 +11,7 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
+    [graphden.executor.registry.core :as registry-core]
     [graphden.packages.export :as export]
     [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
@@ -699,7 +700,18 @@
             ;; adopt-bundle-identities!. Without it the first pull after a
             ;; push lands a duplicate name next to the original.
             adopted (pkg-sync/adopt-bundle-identities! storage (vec wanted))
-            fn-ids (when (seq wanted) (pkg-sync/sync-bundle! storage (vec wanted)))
+            ;; The sync records rich-types as it checks. This write targets a
+            ;; NAMED branch while the request rides its own — rebind to the
+            ;; TARGET's slice so the records don't land in (and, via the sync
+            ;; world's deterministic uuid-v5 ids, clobber) the request
+            ;; branch's registry. Mirrors mcp/sync-fn-defs-branch!.
+            target-slice (when-let [router (br/current-router)]
+                           (:rich-types-atom (br/ctx-for router (:id branch))))
+            fn-ids (when (seq wanted)
+                     (if target-slice
+                       (binding [registry-core/*rich-types-override* target-slice]
+                         (pkg-sync/sync-bundle! storage (vec wanted)))
+                       (pkg-sync/sync-bundle! storage (vec wanted))))
             pruned (when prune? (pkg-sync/reconcile-bundle-scope! storage (vec wanted)))]
         (exec-ctx/invalidate-graph-cache!
           (if-let [router (br/current-router)] (br/ctx-for router (:id branch)) ctx)

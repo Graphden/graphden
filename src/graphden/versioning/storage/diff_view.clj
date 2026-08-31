@@ -56,7 +56,10 @@
     (nil? v) "∅"
     (and (contains? ref-fields field) (uuid? v)) (fn-label fn-names v)
     (string? v) (truncate v 120)
-    :else (truncate (pr-str v) 120)))
+    ;; Bound the print itself — a page-sized hiccup value must not be
+    ;; fully serialized just to keep its first 120 chars.
+    :else (truncate (binding [*print-length* 24 *print-level* 4] (pr-str v))
+                    120)))
 
 
 (defn- changed-fields
@@ -123,6 +126,9 @@
            (remove nil?)
            (str/join " ")
            (not-empty))
+      ;; Frontend-asset override (Operate → Assets) — no owning fn;
+      ;; the served path is the whole story.
+      :resource-override (some-> (:path m) str)
       nil)))
 
 
@@ -158,7 +164,10 @@
   (if (empty? ids)
     {}
     (let [src (mrg/batch-resolve base-storage {:fn (set ids)} source-branch-id)
-          missing (set (remove #(:name (get src [:fn %])) ids))
+          ;; Retry on the target only ids that did not resolve AT ALL —
+          ;; an anonymous fn resolved with a nil name stays anonymous on
+          ;; every branch; re-querying it buys nothing.
+          missing (set (remove #(some? (get src [:fn %])) ids))
           tgt (when (seq missing)
                 (mrg/batch-resolve base-storage {:fn missing} target-branch-id))]
       (into {}
@@ -170,7 +179,7 @@
 
 
 (def ^:private entry-rank
-  {:fn 0 :fn-slot 1 :binding 2 :binding-list-item 3})
+  {:fn 0 :fn-slot 1 :binding 2 :binding-list-item 3 :resource-override 4})
 
 
 (defn diff-branches-view
@@ -235,7 +244,9 @@
                         :fn-name (get fn-names owner)
                         :fn-label (if owner
                                     (fn-label fn-names owner)
-                                    "(unowned)")
+                                    (if (every? #(= :resource-override (:entity-name %)) rs)
+                                      "(assets)"
+                                      "(unowned)"))
                         :change (if fn-row (:change fn-row) :modified)
                         :branch-local? (boolean
                                          (when owner

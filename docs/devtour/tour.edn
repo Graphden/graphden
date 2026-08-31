@@ -437,8 +437,11 @@
     {:ns graphden.system.branch-router :defn build-branch-ctx
      :say "Builds a fresh live `ExecutionContext` whose storage is a
            `VersionedStorage` rewrapped at the requested branch, with its own
-           compiled-registry and graph-cache atoms. This is how a branch gets
-           its own executor without re-sharding the graph."
+           compiled-registry and graph-cache atoms — and (2026-08-31) its own
+           RICH-TYPES SLICE, forked from the base's view at build time and
+           bound as the registry override for the ctx's compiles and every
+           request dispatched to it. This is how a branch gets its own
+           executor without re-sharding the graph."
      :see [[:executor "create-context"]]}
     {:ns graphden.system.branch-router :defn dispatch*
      :say "The top-level Ring dispatch: extract the branch ref (header or
@@ -540,11 +543,15 @@
            is checked end to end."}
     {:ns graphden.executor.registry.core :defn record-rich-types!
      :say "Where the sweep's answers are KEPT. The rich-types registry is the
-           in-memory `{fn → {:return :args :effects …}}` snapshot every
-           downstream consumer reads: the compiler's HOF-wrap decision, the
-           executor's effect gate, secret redaction on persist, the editor's
-           type chips. Aliases resolve to their structural body here, so
-           everyone downstream sees one canonical shape."
+           in-memory `{fn → {:return :args :effects …}}` map every downstream
+           consumer reads: the compiler's HOF-wrap decision, the executor's
+           effect gate, secret redaction on persist, the editor's type chips.
+           BRANCH-SCOPED since 2026-08-31: writes land on the ACTIVE atom —
+           the global for the default branch, a per-ctx fork for every other
+           (bound by the branch router at build + dispatch), so `/api/types`
+           answers per branch instead of last-compile-wins. Aliases resolve
+           to their structural body here, so everyone downstream sees one
+           canonical shape."
      :see [[:executor "compile-all"] [:web "api-rich-types"]]}
     {:ns graphden.executor.registry.core :defn rich-type-of-id
      :say "…and how it is READ — by fn **id**, not name. Names are

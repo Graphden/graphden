@@ -673,3 +673,97 @@
                 (str "branch view reaches :time — got " feat-effects))
             (is (not (contains? main-effects "time"))
                 (str "main view stays pure — got " main-effects))))))))
+
+
+(deftest diff-view-endpoint-and-partial-smoke-test
+  ;; The grouped diff-v2 surfaces: the JSON endpoint the compare mode
+  ;; consumes, and the server-rendered modal partial. Both previously
+  ;; red only through the browser e2e — a hiccup typo in the ~640-line
+  ;; partial chain would 500 in prod with no unit signal.
+  (let [run-id (str "-" (System/currentTimeMillis))
+        feat (str "dvep" run-id)
+        probe (str "dvep-fn" run-id)]
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name feat :base-branch-id "main"}}))))
+    (let [identity-fn (fn-by-name nil "identity")]
+      (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn"
+                                     :branch feat
+                                     :content-type "application/x-www-form-urlencoded"
+                                     :body (form-encode {:name probe
+                                                         :parent-ids (:id identity-fn)})})))))
+
+    (testing "GET /api/branches/:ref/diff-view?against= — grouped envelope"
+      (let [resp (dispatch {:method :get
+                            :path "/api/branches/main/diff-view"
+                            :query (str "against=" feat)})
+            body (parse-json resp)]
+        (is (= 200 (:status resp)))
+        (is (true? (:ok body)))
+        (is (vector? (:groups body)))
+        (let [grp (some #(when (= probe (:fn-name %)) %) (:groups body))]
+          (is (some? grp) "the branch-only fn groups under its own name")
+          (is (= "added-in-source" (:change grp)))
+          (is (= (str ":" probe) (:fn-label grp))))))
+
+    (testing "missing ?against= → clean error envelope, not a 500"
+      (let [body (parse-json (dispatch {:method :get
+                                        :path "/api/branches/main/diff-view"}))]
+        (is (false? (:ok body)))))
+
+    (testing "unknown source ref → clean error envelope"
+      (let [body (parse-json (dispatch {:method :get
+                                        :path "/api/branches/main/diff-view"
+                                        :query "against=no-such-branch-xyz"}))]
+        (is (false? (:ok body)))))
+
+    (testing "GET /partials/branch-diff renders the diff-v2 body hiccup"
+      (let [resp (dispatch {:method :get
+                            :path "/partials/branch-diff"
+                            :query (str "target=main&source=" feat)})]
+        (is (= 200 (:status resp)))
+        (is (str/includes? (:body resp) "branch-diff-body-content"))
+        (is (str/includes? (:body resp) "branch-diff-row")
+            "the probe renders as a group row")
+        (is (str/includes? (:body resp) "data-anchor-id")
+            "rows carry the anchored-comment hooks")))
+
+    (testing "partial with an unknown branch renders the error div"
+      (let [resp (dispatch {:method :get
+                            :path "/partials/branch-diff"
+                            :query "target=main&source=no-such-branch-xyz"})]
+        (is (= 200 (:status resp)))
+        (is (str/includes? (:body resp) "branch-diff-error"))))))
+
+
+(deftest rich-types-slice-propagation-on-merge-test
+  ;; The per-branch slices need a PROPAGATION channel: a merge's
+  ;; type-checks ran under the SOURCE's slice, and the default branch's
+  ;; entry is pinned (never rebuilt) — without the post-merge re-check
+  ;; main's /api/types would miss merged fns forever.
+  (let [run-id (str "-" (System/currentTimeMillis))
+        feat (str "rtsm" run-id)
+        moved (str "rtsm-fn" run-id)
+        types-has? (fn []
+                     (contains? (parse-json (dispatch {:method :get
+                                                       :path "/api/types"}))
+                                (keyword moved)))]
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name feat :base-branch-id "main"}}))))
+    (let [identity-fn (fn-by-name nil "identity")]
+      (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn"
+                                     :branch feat
+                                     :content-type "application/x-www-form-urlencoded"
+                                     :body (form-encode {:name moved
+                                                         :parent-ids (:id identity-fn)})})))))
+    (is (false? (types-has?)) "pre-merge: main's slice does not know the fn")
+    (is (true? (:ok (parse-json (dispatch {:method :post
+                                           :path "/api/branches/main/merge"
+                                           :body {:source feat}})))))
+    ;; The re-check is async (a bounded background future) — poll.
+    (let [deadline (+ (System/currentTimeMillis) 15000)]
+      (loop []
+        (cond
+          (types-has?) (is true "post-merge: the merged fn reached main's slice")
+          (< (System/currentTimeMillis) deadline) (do (Thread/sleep 300) (recur))
+          :else (is (types-has?)
+                    "post-merge: the merged fn reached main's slice (15s deadline)"))))))

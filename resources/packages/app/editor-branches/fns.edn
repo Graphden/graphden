@@ -658,12 +658,17 @@
    :parent :coalesce
    :args {:value :_partial-bd-e-slot :default {:value "?"}}}
 
+  {:name :_partial-bd-e-is-asset?
+   :parent :equal?
+   :args {:a :_partial-bd-e-name :b {:value :resource-override}}}
+
   {:name :_partial-bd-e-label
-   :description "Human entry label: `fn` / `slot xs` / `arg port` / `item 2 of nums`."
+   :description "Human entry label: `fn` / `slot xs` / `arg port` / `asset` / `item 2 of nums`."
    :parent :cond
    :args {:clauses [:_partial-bd-e-is-fn? {:value "fn"}
                     :_partial-bd-e-is-slot? {:parent :str :args {:parts [{:value "slot "} :_partial-bd-e-slot-text]}}
                     :_partial-bd-e-is-binding? {:parent :str :args {:parts [{:value "arg "} :_partial-bd-e-slot-text]}}
+                    :_partial-bd-e-is-asset? {:value "asset"}
                     {:value true} {:parent :str :args {:parts [{:value "item "}
                                                                {:parent :coalesce :args {:value :_partial-bd-e-pos :default {:value "?"}}}
                                                                {:value " of "} :_partial-bd-e-slot-text]}}]}}
@@ -808,9 +813,17 @@
           :attrs {:value {:class "branch-diff-entries"}}
           :children :_partial-bd-g-entries-rendered}}
 
+  {:name :_partial-bd-g-clickable?
+   :description "Only rows with a real fn behind them navigate — the ownerless `(assets)` group has nowhere to go."
+   :parent :non-blank?
+   :args {:string :_partial-bd-g-fn-id}}
+
   {:name :_partial-bd-g-class-base
    :parent :str-join
-   :args {:coll [{:value "branch-diff-row branch-diff-row-clickable"}
+   :args {:coll [{:parent :if
+                  :args {:test :_partial-bd-g-clickable?
+                         :then {:value "branch-diff-row branch-diff-row-clickable"}
+                         :else {:value "branch-diff-row"}}}
                  {:parent :_partial-bd-change-class :args {:change :_partial-bd-g-change}}]
           :separator {:value " "}}}
 

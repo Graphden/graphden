@@ -2855,8 +2855,8 @@
    :parent :hiccup
    :args {:tag {:value "button"}
           :attrs :_bp-row-delete-attrs
-          :children [{:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-ic" :aria-hidden "true"}} :children [{:value "×"}]}}
-                     {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-label"}} :children [{:value "Delete branch"}]}}]}}
+          :children [{:parent :_bp-menu-ic-span :args {:icon {:value "×"}}}
+                     {:parent :_bp-menu-label-span :args {:label {:value "Delete branch"}}}]}}
 
   {:name :_bp-row-delete-btn
    :parent :if
@@ -2889,8 +2889,8 @@
    :parent :hiccup
    :args {:tag {:value "button"}
           :attrs :_bp-row-policy-attrs
-          :children [{:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-ic" :aria-hidden "true"}} :children [{:value "⛨"}]}}
-                     {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-label"}} :children [{:value "Who can write…"}]}}]}}
+          :children [{:parent :_bp-menu-ic-span :args {:icon {:value "⛨"}}}
+                     {:parent :_bp-menu-label-span :args {:label {:value "Who can write…"}}}]}}
 
   ;; --- Require-merge toggle (open-core; NOT tenancy-gated) ---
   ;; "Push only via merge" — the GitHub-style per-branch protection
@@ -2959,6 +2959,21 @@
           :key {:value :title}
           :value :_bp-row-propose-title}}
 
+  ;; Shared ⋯-menu ITEM CONTENT — every labeled action renders the same
+  ;; icon-span + label-span pair; `:icon` / `:label` free args (same
+  ;; pattern as `:_partial-bd-marker`'s `:change`).
+  {:name :_bp-menu-ic-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "brm-ic" :aria-hidden "true"}}
+          :children [{:as :icon}]}}
+
+  {:name :_bp-menu-label-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "brm-label"}}
+          :children [{:as :label}]}}
+
   {:name :_bp-row-propose-label
    :parent :if
    :args {:test :_bp-row-proposed?
@@ -2969,8 +2984,8 @@
    :parent :hiccup
    :args {:tag {:value "button"}
           :attrs :_bp-row-propose-attrs
-          :children [{:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-ic" :aria-hidden "true"}} :children [{:value "📤"}]}}
-                     {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-label"}} :children [:_bp-row-propose-label]}}]}}
+          :children [{:parent :_bp-menu-ic-span :args {:icon {:value "📤"}}}
+                     {:parent :_bp-menu-label-span :args {:label :_bp-row-propose-label}}]}}
 
   ;; Propose is meaningless on `main` (you don't submit the trunk for review
   ;; into its own base) — hide it there to declutter.
@@ -3090,8 +3105,8 @@
    :parent :hiccup
    :args {:tag {:value "button"}
           :attrs :_bp-row-protect-attrs
-          :children [{:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-ic" :aria-hidden "true"}} :children [{:value "⚙"}]}}
-                     {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "brm-label"}} :children [{:value "Protection…"}]}}]}}
+          :children [{:parent :_bp-menu-ic-span :args {:icon {:value "⚙"}}}
+                     {:parent :_bp-menu-label-span :args {:label {:value "Protection…"}}}]}}
 
   ;; --- ⋯ overflow menu (readability redesign 2026-08) ---
   ;; The row keeps THREE inline icon actions a user reaches constantly

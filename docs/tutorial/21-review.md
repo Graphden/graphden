@@ -56,7 +56,7 @@ like GitHub dismissing stale reviews on a new push.
   conversation with a context chip.
 - The diff also lists **Suggestions** — branches forked *off the
   proposal itself* and proposed back into it. A reviewer clicks
-  **+ Suggest a change**, lands on a fresh `suggest/…` branch, edits
+  **+ Suggest a change**, lands on a fresh `suggest-…` branch, edits
   with the full editor, and proposes it (`⋯` → 📤). The author then
   sees it under the proposal's Δ diff and applies it with one click
   (`⇢ apply` — an ordinary merge into the proposal, which also

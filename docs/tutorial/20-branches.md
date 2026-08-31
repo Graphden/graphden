@@ -153,8 +153,13 @@ the author**.
    `effects: pure here · time there` mark, the strongest "this
    affects behaviour" signal. Fns that exist only on the compared branch show
    as dimmed ghost rows in expanded Explorer groups (click one to
-   switch there). Exit = click the lit `◐`
-   again (or the chip's `×`). You keep editing and running as usual;
+   switch there). While any lens filter is on, the chip turns dashed
+   and reads `· filtered` — a reminder that "no badges" now means
+   "hidden by the lens", not "no changes" (the Δ modal always shows
+   everything). The Δ modal's header carries its own **◐ Compare
+   mode** button, so you can hop from a one-off diff into the
+   persistent lens without hunting for the row. Exit = click the lit
+   `◐` again (or the chip's `×`). You keep editing and running as usual;
    compare mode only annotates.
 5. The diff isn't only about values — it shows the graph's SHAPE
    changing too. Each entry kind reads differently:

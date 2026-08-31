@@ -158,15 +158,16 @@ async function cleanup(page) {
            'feat row exposes × Delete (non-current, no children)');
 
     // ===================================================================
-    // Phase D: delete the feat branch via the row's × button.
+    // Phase D: delete the feat branch the way a USER does — the row's
+    // ⋯ menu, then the visible "× Delete branch" item (the readability
+    // redesign tucked destructive actions in there; a hidden-element
+    // JS click would pass even if the menu never opened).
     // confirm() auto-accepted by the shared dialog handler above.
     // ===================================================================
-    await page.evaluate((target) => {
-      const p = document.getElementById('branch-popover');
-      const row = Array.from(p.querySelectorAll('.branch-row'))
-        .find((r) => r.dataset.branchName === target);
-      row.querySelector('.branch-row-delete').click();
-    }, TEST_BRANCH);
+    await page.click('.branch-row[data-branch-name="' + TEST_BRANCH + '"] .branch-row-more');
+    await page.waitForSelector('.branch-row-more-menu.open .branch-row-delete',
+                               {timeout: 5000});
+    await page.click('.branch-row-more-menu.open .branch-row-delete');
 
     // Wait for branch to disappear from the API. Generous timeout —
     // under bulk-sweep load the `:branches` query can lag behind the

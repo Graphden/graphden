@@ -32,6 +32,10 @@ const COSM_FN = 'cmp-cosm' + RUN_ID;
 // Gains a ref-binding to :current-time-ms on feat — its EFFECT SET
 // changes (pure → time), which the effects lens must single out.
 const EFF_FN = 'cmp-eff' + RUN_ID;
+// Bound to 1 on main, retuned to 2 on feat — its value ARG NODE exists
+// on main, so the canvas ring assertions have something to ring (the
+// eff probe's slot is unbound here → placeholder, no arg overlay).
+const VAL_FN = 'cmp-val' + RUN_ID;
 
 async function cleanup(page) {
   try {
@@ -40,7 +44,7 @@ async function cleanup(page) {
                                        {headers: {'X-Graphden-Branch': branch}});
       return r.ok ? r.json() : null;
     }, FEAT);
-    for (const nm of [EFF_FN]) {
+    for (const nm of [EFF_FN, VAL_FN, 'cmp-sugg-fn' + RUN_ID]) {
       const f = (ents?.fns || []).find((x) => x.name === nm);
       if (f) {
         await page.evaluate(async (id) => {
@@ -82,7 +86,10 @@ async function cleanup(page) {
 
 (async () => {
   const {browser, page} = await newContext(chromium);
-  page.on('dialog', (d) => { d.accept(); });
+  page.on('dialog', (d) => {
+    console.log('  [dialog]', d.type() + ':', d.message().slice(0, 160));
+    d.accept();
+  });
   console.log('edit-diff-compare-mode — compare mode / anchored comments / suggestions');
 
   try {
@@ -186,12 +193,75 @@ async function cleanup(page) {
       return r.status;
     }, {fnId: effId, slotId: valueSlot.id, refId: timeFn.id, branch: FEAT});
     assert(bindStatus === 200, 'time-ref binding landed on feat: ' + bindStatus);
+    // Value probe: bound on main, retuned on feat.
+    const valCreated = await page.evaluate(async ({name, parentId}) => {
+      const body = new URLSearchParams();
+      body.set('name', name);
+      body.set('parent-ids', parentId);
+      const r = await window.authFetch('/api/entities/fn', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: body.toString(),
+      });
+      return await r.text();
+    }, {name: VAL_FN, parentId: coalesce.id});
+    assert(valCreated.includes('created successfully'), 'value probe created');
+    const valId = ((await api(page, 'GET', '/api/graph/entities'))?.fns || [])
+      .find((f) => f.name === VAL_FN)?.id;
+    const valBind = await page.evaluate(async ({fnId, slotId}) => {
+      const body = new URLSearchParams();
+      body.set('fn-id', fnId);
+      body.set('slot-id', slotId);
+      body.set('value', '1');
+      const r = await window.authFetch('/api/entities/binding', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: body.toString(),
+      });
+      const d = await r.text();
+      return {status: r.status, body: d.slice(0, 120)};
+    }, {fnId: valId, slotId: valueSlot.id});
+    assert(valBind.status === 200, 'value probe bound on main: ' + JSON.stringify(valBind));
+    const valBindingId = ((await api(page, 'GET', '/api/graph/entities'))?.bindings || [])
+      .find((b) => b['fn-id'] === valId)?.id;
+    assert(valBindingId, 'value probe binding id resolved');
+    const valEdit = await page.evaluate(async ({id, branch}) => {
+      const body = new URLSearchParams();
+      body.set('value', '2');
+      const r = await window.authFetch('/api/entities/binding/' + id, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-Graphden-Branch': branch,
+        },
+        body: body.toString(),
+      });
+      return r.status;
+    }, {id: valBindingId, branch: FEAT});
+    assert(valEdit === 200, 'value retuned on feat: ' + valEdit);
     assert((await api(page, 'POST',
                       '/api/branches/' + encodeURIComponent(FEAT) + '/propose',
                       {proposed: true}))?.ok, 'feat proposed');
     assert((await api(page, 'POST', '/api/branches',
                       {name: SUGG, 'base-branch-id': FEAT}))?.ok,
            'suggestion child branch created off feat');
+    // The suggestion carries a REAL change so "⇢ apply" is observable.
+    const SUGG_FN = 'cmp-sugg-fn' + RUN_ID;
+    const suggCreated = await page.evaluate(async ({name, parentId, branch}) => {
+      const body = new URLSearchParams();
+      body.set('name', name);
+      body.set('parent-ids', parentId);
+      const r = await window.authFetch('/api/entities/fn', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-Graphden-Branch': branch,
+        },
+        body: body.toString(),
+      });
+      return await r.text();
+    }, {name: SUGG_FN, parentId: identity.id, branch: SUGG});
+    assert(suggCreated.includes('created successfully'), 'suggestion fn created');
     assert((await api(page, 'POST',
                       '/api/branches/' + encodeURIComponent(SUGG) + '/propose',
                       {proposed: true}))?.ok, 'suggestion proposed');
@@ -278,6 +348,27 @@ async function cleanup(page) {
     }, PROBE_FN, {timeout: 20000});
     assert(true, 'ghost row for the branch-only fn appears in the Explorer');
 
+    // Sidebar: the modified probe's row carries the ± badge (the
+    // Explorer IS the diff in compare mode).
+    await page.fill('#search-input', EFF_FN);
+    await page.waitForFunction((nm) => {
+      const row = Array.from(document.querySelectorAll('#entity-list .entity-item'))
+        .find((e) => e.querySelector('.name')?.textContent.trim() === nm);
+      return row && row.classList.contains('gd-diff-changed')
+        && row.querySelector('.gd-diff-badge')?.textContent === '±';
+    }, EFF_FN, {timeout: 20000});
+    assert(true, 'Explorer row badges the modified fn (±)');
+
+    // Canvas: opening a changed fn rings its CARD; a fn with a bound
+    // arg that changed also rings that ARG node.
+    await page.evaluate(async (nm) => { await selectFnByName(nm); }, EFF_FN);
+    await page.waitForSelector('.fn-overlay-diff-modified', {timeout: 20000});
+    assert(true, 'canvas rings the changed card');
+    await page.evaluate(async (nm) => { await selectFnByName(nm); }, VAL_FN);
+    await page.waitForSelector('.arg-overlay-diff-focus', {timeout: 20000});
+    assert(true, 'canvas rings the changed bound arg');
+    await page.fill('#search-input', '');
+
     // The chip's menu (review cockpit) carries diff / propose / merge
     // actions + the lens toggles.
     await page.evaluate(() => document.querySelector('.gd-diff-chip-label').click());
@@ -313,10 +404,25 @@ async function cleanup(page) {
     const cleared = await page.evaluate(
       () => localStorage.getItem('graphden.diffAgainst') === null);
     assert(cleared, 'localStorage cleared on exit');
+    const ringsGone = await page.evaluate(() => ({
+      cards: document.querySelectorAll('.fn-overlay-diff').length,
+      args: document.querySelectorAll('.arg-overlay-diff-focus').length,
+    }));
+    assert(ringsGone.cards === 0 && ringsGone.args === 0,
+           'exit clears card AND arg rings: ' + JSON.stringify(ringsGone));
 
     // =================================================================
     // Phase C: anchored comment in the Δ modal.
     // =================================================================
+    // Seed an ORPHAN first — anchored to an entity that is not in the
+    // diff; it must fall back to the general thread with a context chip.
+    const featId = ((await api(page, 'GET', '/api/branches'))?.branches || [])
+      .find((b) => b.name === FEAT)?.id;
+    assert((await api(page, 'POST',
+                      '/api/branches/' + featId + '/comments',
+                      {body: 'orphan note', 'entity-name': 'fn',
+                       'entity-id': '00000000-0000-4000-8000-00000000dead'}))?.ok,
+           'orphan-anchored comment posted');
     let opened = await openBranchPopover(page);
     assert(opened, 'branch popover opens');
     await page.click(
@@ -355,6 +461,42 @@ async function cleanup(page) {
     });
     assert(inGeneral === false,
            'anchored comment does NOT duplicate into the general thread');
+    const orphan = await page.evaluate(() => {
+      const list = document.querySelector('.branch-comments-list');
+      return list && /\[on fn 00000000\]/.test(list.textContent)
+        && /orphan note/.test(list.textContent);
+    });
+    assert(orphan, 'orphaned anchor falls back to the general thread with a context chip');
+
+    // The modal header's ◐ bridge enters compare mode in one click.
+    await page.evaluate(() => document.querySelector('.branch-diff-compare').click());
+    await page.waitForSelector('#gd-diff-chip', {timeout: 20000});
+    assert(true, 'modal ◐ bridge enters compare mode');
+    await page.evaluate(() => window.gdExitDiffMode());
+    // Re-open the modal for the remaining phases.
+    opened = await openBranchPopover(page);
+    await page.click('.branch-row[data-branch-name="' + FEAT + '"] .branch-row-diff');
+    await page.waitForFunction(() => {
+      const m = document.querySelector('.branch-diff-modal');
+      return m && !m.querySelector('.branch-diff-loading')
+        && m.querySelector('.branch-comments');
+    }, {timeout: 45000});
+
+    // One-shot diff-focus: clicking the modified fn's row (compare mode
+    // OFF) still lands on the canvas with its changed arg ringed.
+    await page.evaluate((nm) => {
+      document.querySelector('.branch-diff-row[data-diff-fn-name="' + nm + '"]').click();
+    }, VAL_FN);
+    await page.waitForSelector('.arg-diff-badge', {timeout: 20000});
+    assert(true, 'modal row click hands the one-shot diff focus to the canvas');
+    await page.evaluate(() => window.gdClearDiffFocus?.());
+    opened = await openBranchPopover(page);
+    await page.click('.branch-row[data-branch-name="' + FEAT + '"] .branch-row-diff');
+    await page.waitForFunction(() => {
+      const m = document.querySelector('.branch-diff-modal');
+      return m && !m.querySelector('.branch-diff-loading')
+        && m.querySelector('.branch-diff-suggestions .branch-diff-suggestion-row, .branch-diff-suggestions-empty');
+    }, {timeout: 45000});
 
     // The effects chip lands on the effect-probe's group row.
     await page.waitForFunction(() => {
@@ -418,6 +560,29 @@ async function cleanup(page) {
       rowSelSl + ' .branch-row-propose:not(.on)',
       {timeout: 20000, state: 'attached'});
     assert(true, 'withdraw-proposal round-trips on a slash-named branch (id path)');
+
+    // =================================================================
+    // Phase F: ⇢ apply — the suggestion merges INTO the proposal.
+    // =================================================================
+    await page.evaluate(() => {
+      const row = document.querySelector('.branch-diff-suggestion-row');
+      Array.from(row.querySelectorAll('button'))
+        .find((b) => /apply/.test(b.textContent)).click();
+    });
+    // The apply reloads on success; wait for the RELOAD specifically
+    // (waitForLoadState alone passes instantly on the already-loaded page).
+    await page.waitForFunction(() => !document.getElementById('gd-diff-chip')
+      || true, {timeout: 1000}).catch(() => {});
+    await page.waitForNavigation({waitUntil: 'load', timeout: 60000})
+      .catch(() => console.log('  (no navigation after apply — merge likely errored)'));
+    await page.waitForSelector('#branch-chip-btn', {timeout: 30000});
+    const applied = await page.evaluate(async ({branch, nm}) => {
+      const r = await window.authFetch('/api/graph/entities',
+                                       {headers: {'X-Graphden-Branch': branch}});
+      const d = await r.json();
+      return (d.fns || []).some((f) => f.name === nm);
+    }, {branch: FEAT, nm: SUGG_FN});
+    assert(applied, 'applied suggestion is visible on the proposal branch');
 
     console.log('✓ compare mode / anchored comments / suggestions verified');
     await cleanup(page);

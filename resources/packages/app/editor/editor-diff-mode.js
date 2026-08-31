@@ -460,10 +460,14 @@ function gdDiffModeDecorateSidebar() {
     if (_gdDiffMode) {
       for (const g of _gdDiffMode.byFnId.values()) {
         if (!gdDiffVisibleGroup(g['fn-id'])) continue;
-        if (!g.__nsPath) continue;
-        const parts = g.__nsPath.split('.');
-        for (let i = 1; i <= parts.length; i++) {
-          const p = parts.slice(0, i).join('.');
+        // Root-level fns (no namespace) aggregate under the pseudo
+        // "(primitives)" header — without this, entering the mode
+        // shows NOTHING until the user happens to expand that group.
+        const parts = g.__nsPath ? g.__nsPath.split('.') : null;
+        const keys = parts
+          ? parts.map((_, i) => parts.slice(0, i + 1).join('.'))
+          : ['__root__'];
+        for (const p of keys) {
           const c = nsCounts.get(p) || { added: 0, missing: 0, modified: 0 };
           c[g.__kind] += 1;
           nsCounts.set(p, c);
@@ -559,8 +563,8 @@ function gdDiffModeDecorateSidebar() {
       // no ghost landed there.
       const rootGroup = list.querySelector('.ns-children[data-ns-children="__root__"]');
       if (rootGroup
-          && !rootGroup.querySelector('.gd-diff-ghost')
-          && !rootGroup.querySelector('.entity-item.gd-diff-changed:not(.gd-diff-lens-hidden)')) {
+          && !nsCounts.has('__root__')
+          && !rootGroup.querySelector('.gd-diff-ghost')) {
         rootGroup.classList.add('gd-diff-lens-hidden');
         list.querySelector('.ns-header-pseudo')
           ?.classList.add('gd-diff-lens-hidden');
@@ -569,8 +573,11 @@ function gdDiffModeDecorateSidebar() {
 
     gdDiffEnsureLensBar();
 
-    list.querySelectorAll('.ns-header[data-ns-path]').forEach((header) => {
-      const c = nsCounts.get(header.dataset.nsPath);
+    const headerTargets = [...list.querySelectorAll('.ns-header[data-ns-path]')];
+    const pseudo = list.querySelector('.ns-header-pseudo');
+    if (pseudo) headerTargets.push(pseudo);
+    headerTargets.forEach((header) => {
+      const c = nsCounts.get(header.dataset.nsPath || '__root__');
       let b = header.querySelector('.gd-diff-ns-badge');
       if (!c) { if (b) b.remove(); return; }
       if (!b) {
@@ -624,6 +631,35 @@ const GD_DIFF_LENS_CHIPS = [
     title: 'Show only changes whose effect footprint differs' },
 ];
 
+// Expand every collapsed Explorer group that holds a visible change
+// (used when the "only changed" lens flips on). Clicking the header is
+// the Explorer's own expand path, so the tree state stays consistent.
+function gdDiffExpandChangedGroups() {
+  if (!_gdDiffMode) return;
+  const list = document.getElementById('entity-list');
+  if (!list) return;
+  const changedPaths = new Set();
+  let rootChanged = false;
+  for (const g of _gdDiffMode.byFnId.values()) {
+    if (!gdDiffVisibleGroup(g['fn-id'])) continue;
+    if (g.__nsPath) {
+      const parts = g.__nsPath.split('.');
+      for (let i = 1; i <= parts.length; i++) {
+        changedPaths.add(parts.slice(0, i).join('.'));
+      }
+    } else {
+      rootChanged = true;
+    }
+  }
+  list.querySelectorAll('.ns-header[data-ns-path]').forEach((h) => {
+    if (changedPaths.has(h.dataset.nsPath)
+        && h.getAttribute('aria-expanded') !== 'true') h.click();
+  });
+  const pseudo = list.querySelector('.ns-header-pseudo');
+  if (rootChanged && pseudo
+      && pseudo.getAttribute('aria-expanded') !== 'true') pseudo.click();
+}
+
 function gdDiffEnsureLensBar() {
   const host = document.getElementById('kind-filters')?.parentElement;
   let bar = document.getElementById('gd-diff-lens');
@@ -650,7 +686,12 @@ function gdDiffEnsureLensBar() {
       label.textContent = chip.label;
       b.appendChild(label);
       b.addEventListener('click', () => {
+        const turningOn = chip.key === 'changedOnly' && !_gdDiffLens.changedOnly;
         gdDiffSetLens({ [chip.key]: !_gdDiffLens[chip.key] });
+        // "Only changed" leaves just the touched groups — expand them
+        // so the survivors are visible without a second round of
+        // clicking through collapsed headers.
+        if (turningOn) gdDiffExpandChangedGroups();
       });
       bar.appendChild(b);
     }

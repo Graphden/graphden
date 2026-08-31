@@ -2762,7 +2762,7 @@
    :parent :assoc
    :args {:map :_bp-row-diff-attrs-3
           :key {:value :data-tip}
-          :value {:value "Diff"}}}
+          :value {:value "Compare"}}}
 
   {:name :_bp-row-diff-btn-shown
    :parent :hiccup
@@ -3178,12 +3178,21 @@
           :key {:value :aria-label}
           :value :_bp-row-review-aria}}
 
-  {:name :_bp-row-review-btn
+  {:name :_bp-row-review-btn-shown
    :parent :hiccup
    :args {:tag {:value "button"}
           :attrs :_bp-row-review-attrs
           :children [{:parent :_bp-menu-ic-span :args {:icon {:value "💬"}}}
                      {:parent :_bp-menu-label-span :args {:label {:value "Review & comments"}}}]}}
+
+  ;; The review dialog frames a branch against its BASE — the root has
+  ;; none, so the dialog would compare main with itself (an empty
+  ;; "Review: main → main"). Hide it there, like 📤 above.
+  {:name :_bp-row-review-btn
+   :parent :if
+   :args {:test :_bp-row-is-main?
+          :then :_bp-row-empty-placeholder
+          :else :_bp-row-review-btn-shown}}
 
   {:name :_bp-row-more-menu-attrs
    :parent :assoc

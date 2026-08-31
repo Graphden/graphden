@@ -338,6 +338,14 @@ async function cleanup(page) {
            'effects lens keeps the effect-change, drops the cosmetic one');
     await page.evaluate(() => window.gdDiffSetLens({effectsOnly: false}));
 
+    // Root-level fns aggregate onto the pseudo "(primitives)" header —
+    // the mode must show SOMETHING before the group is expanded.
+    await page.waitForFunction(() => {
+      const b = document.querySelector('.ns-header-pseudo .gd-diff-ns-badge');
+      return b && /[+±−]/.test(b.textContent);
+    }, {timeout: 20000});
+    assert(true, 'pseudo-root header carries the aggregate badge while collapsed');
+
     // Ghost row: PROBE_FN exists only on feat → a dimmed placeholder
     // appears in the expanded root group of the Explorer.
     await page.evaluate(() => {
@@ -351,11 +359,21 @@ async function cleanup(page) {
     assert(true, 'ghost row for the branch-only fn appears in the Explorer');
 
     // The diff lens bar rides under the kind chips; "Δ changed" hides
-    // fns that did not change.
+    // fns that did not change — and auto-expands the groups that hold
+    // the survivors (collapse the root first to prove it).
     await page.waitForSelector('#gd-diff-lens', {timeout: 15000});
+    await page.evaluate(() => {
+      const h = document.querySelector('.ns-header-pseudo');
+      if (h && h.getAttribute('aria-expanded') === 'true') h.click();
+    });
     await page.evaluate(() => {
       document.querySelector('#gd-diff-lens [data-lens-key="changedOnly"]').click();
     });
+    await page.waitForFunction(() => {
+      return document.querySelector('.ns-header-pseudo')
+        ?.getAttribute('aria-expanded') === 'true';
+    }, {timeout: 15000});
+    assert(true, '"Δ changed" auto-expands the changed groups');
     await page.fill('#search-input', '');
     await page.waitForFunction(() => {
       const identityRow = Array.from(document.querySelectorAll('#entity-list .entity-item'))
@@ -475,6 +493,12 @@ async function cleanup(page) {
            'orphan-anchored comment posted');
     let opened = await openBranchPopover(page);
     assert(opened, 'branch popover opens');
+    const rootReview = await page.evaluate(() => {
+      const row = document.querySelector('.branch-row[data-branch-name="main"]');
+      return !!row?.querySelector('.branch-row-review');
+    });
+    assert(!rootReview,
+           'the root branch row hides Review & comments (no base to review into)');
     await page.click('.branch-row[data-branch-name="' + FEAT + '"] .branch-row-more');
     await page.click('.branch-row-more-menu.open .branch-row-review');
     await page.waitForSelector('.branch-diff-modal:not(.hidden)', {timeout: 20000});

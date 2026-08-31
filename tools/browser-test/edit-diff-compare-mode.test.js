@@ -29,6 +29,9 @@ const PROBE_FN = 'cmp-probe' + RUN_ID;
 // Gets a DESCRIPTION-only edit on feat — the "substantive only" lens
 // must hide it while the structural probe stays.
 const COSM_FN = 'cmp-cosm' + RUN_ID;
+// Gains a ref-binding to :current-time-ms on feat — its EFFECT SET
+// changes (pure → time), which the effects lens must single out.
+const EFF_FN = 'cmp-eff' + RUN_ID;
 
 async function cleanup(page) {
   try {
@@ -37,6 +40,14 @@ async function cleanup(page) {
                                        {headers: {'X-Graphden-Branch': branch}});
       return r.ok ? r.json() : null;
     }, FEAT);
+    for (const nm of [EFF_FN]) {
+      const f = (ents?.fns || []).find((x) => x.name === nm);
+      if (f) {
+        await page.evaluate(async (id) => {
+          await window.authFetch('/api/entities/fn/' + id, {method: 'DELETE'});
+        }, f.id);
+      }
+    }
     const cosm = (ents?.fns || []).find((f) => f.name === COSM_FN);
     if (cosm) {
       await page.evaluate(async (id) => {
@@ -134,6 +145,47 @@ async function cleanup(page) {
       return r.status;
     }, {id: cosmId, branch: FEAT});
     assert(cosmEdit === 200, 'description-only edit landed on feat: ' + cosmEdit);
+    // Effects probe: composed from :coalesce on main (pure); on feat
+    // its :value slot gets a ref to :current-time-ms → effects grow.
+    const allEnts = await api(page, 'GET', '/api/graph/entities');
+    const coalesce = allEnts.fns.find((f) => f.name === 'coalesce');
+    const timeFn = allEnts.fns.find((f) => f.name === 'current-time-ms');
+    assert(coalesce && timeFn, ':coalesce + :current-time-ms resolved');
+    const effCreated = await page.evaluate(async ({name, parentId}) => {
+      const body = new URLSearchParams();
+      body.set('name', name);
+      body.set('parent-ids', parentId);
+      const r = await window.authFetch('/api/entities/fn', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: body.toString(),
+      });
+      return await r.text();
+    }, {name: EFF_FN, parentId: coalesce.id});
+    assert(effCreated.includes('created successfully'), 'effects probe created');
+    const effId = ((await api(page, 'GET', '/api/graph/entities'))?.fns || [])
+      .find((f) => f.name === EFF_FN)?.id;
+    const valueSlot = (allEnts['fn-slots'] || [])
+      .filter((fs) => fs['fn-id'] === coalesce.id)
+      .map((fs) => (allEnts.slots || []).find((sl) => sl.id === fs['slot-id']))
+      .find((sl) => sl && sl.name === 'value');
+    assert(effId && valueSlot, 'effects probe id + :value slot resolved');
+    const bindStatus = await page.evaluate(async ({fnId, slotId, refId, branch}) => {
+      const body = new URLSearchParams();
+      body.set('fn-id', fnId);
+      body.set('slot-id', slotId);
+      body.set('ref-fn-id', refId);
+      const r = await window.authFetch('/api/entities/binding', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-Graphden-Branch': branch,
+        },
+        body: body.toString(),
+      });
+      return r.status;
+    }, {fnId: effId, slotId: valueSlot.id, refId: timeFn.id, branch: FEAT});
+    assert(bindStatus === 200, 'time-ref binding landed on feat: ' + bindStatus);
     assert((await api(page, 'POST',
                       '/api/branches/' + encodeURIComponent(FEAT) + '/propose',
                       {proposed: true}))?.ok, 'feat proposed');
@@ -196,6 +248,35 @@ async function cleanup(page) {
     assert(lensState.lens.substantiveOnly === true, 'lens state persisted');
     await page.evaluate(() => window.gdDiffSetLens({substantiveOnly: false}));
 
+    // Effects: the async registry comparison marks the probe whose
+    // effect set grew; the effects lens then singles it out.
+    await page.waitForFunction(
+      (id) => window.gdDiffModeGroup(id)?.__effects, effId, {timeout: 30000});
+    const effLabel = await page.evaluate(
+      (id) => window.gdDiffModeGroup(id).__effects, effId);
+    assert(/effects touched/.test(effLabel) && /\+time/.test(effLabel),
+           'effects-touched computed (+time — the ref wired in): ' + effLabel);
+    await page.evaluate(() => window.gdDiffSetLens({effectsOnly: true}));
+    const effLens = await page.evaluate(({a, b}) => ({
+      eff: !!window.gdDiffVisibleGroup(a),
+      cosm: !!window.gdDiffVisibleGroup(b),
+    }), {a: effId, b: cosmId});
+    assert(effLens.eff && !effLens.cosm,
+           'effects lens keeps the effect-change, drops the cosmetic one');
+    await page.evaluate(() => window.gdDiffSetLens({effectsOnly: false}));
+
+    // Ghost row: PROBE_FN exists only on feat → a dimmed placeholder
+    // appears in the expanded root group of the Explorer.
+    await page.evaluate(() => {
+      const h = document.querySelector('.ns-header-pseudo');
+      if (h && h.getAttribute('aria-expanded') !== 'true') h.click();
+    });
+    await page.waitForFunction((nm) => {
+      return Array.from(document.querySelectorAll('.gd-diff-ghost .name'))
+        .some((n) => n.textContent === nm);
+    }, PROBE_FN, {timeout: 20000});
+    assert(true, 'ghost row for the branch-only fn appears in the Explorer');
+
     // The chip's menu (review cockpit) carries diff / propose / merge
     // actions + the lens toggles.
     await page.evaluate(() => document.querySelector('.gd-diff-chip-label').click());
@@ -211,7 +292,7 @@ async function cleanup(page) {
            'chip menu carries diff / merge / exit: ' + JSON.stringify(menu.items));
     assert(!menu.items.some((t) => /Propose|Withdraw/.test(t)),
            'propose hidden on the root branch (main has no base to aim at)');
-    assert(menu.lensBoxes === 4, 'chip menu carries the 4 lens toggles');
+    assert(menu.lensBoxes === 5, 'chip menu carries the 5 lens toggles');
     await page.evaluate(() => document.getElementById('gd-diff-chip-scrim').click());
 
     // =================================================================
@@ -273,6 +354,13 @@ async function cleanup(page) {
     });
     assert(inGeneral === false,
            'anchored comment does NOT duplicate into the general thread');
+
+    // The effects chip lands on the effect-probe's group row.
+    await page.waitForFunction(() => {
+      const c = document.querySelector('.bd-effects-chip');
+      return c && /time/.test(c.textContent);
+    }, {timeout: 30000});
+    assert(true, 'modal chips the group whose effect set changed');
 
     // =================================================================
     // Phase D: suggestions section lists the proposed child + actions.

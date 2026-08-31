@@ -1228,6 +1228,9 @@ function renderRootNode(list, rootFns, searchMode) {
   if (isOpen) {
     const childGroup = document.createElement('div');
     childGroup.className = 'ns-children';
+    // Same pairing attr the real namespaces carry — compare mode's
+    // ghost-row injection addresses groups by it.
+    childGroup.dataset.nsChildren = groupPath;
     if (!loaded) {
       const loading = document.createElement('div');
       loading.className = 'loading';

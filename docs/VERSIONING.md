@@ -233,7 +233,7 @@ core's `case` matcher.
 | Branch chip | context bar (`#gd-ctxbar` → `#branch-mount`, between the workspace chip and the packages chip) | Shows current branch. Inverted style when off main. |
 | Branch popover | click chip | Branch list + inline create. Per row: Δ diff, ✅ approve (on proposed rows) and ⇢ merge inline (instant `data-tip` tooltips), everything administrative under the row's ⋯ menu with text labels — 📤 propose/withdraw, ⚙ Protection (require-merge + required-approvals 0…3 segmented control + count-self-approval), ⛨ write-policy (tenancy only), × delete; a 🔒 marks write-policy-protected rows, an accented ⋯ marks a proposed / protected row. Propose/approve/require-merge/required-approvals are all open-core |
 | Diff modal | click Δ in row | Diff v2: per-owning-fn groups with `+`/`−`/`±` markers, per-field `old → new` pairs, slot-name labels. Rows are clickable → navigate; the changed args are then ringed `Δ` on the canvas (sessionStorage `graphden.diffFocus` hand-off). Hovering a row/entry reveals 💬 — an ANCHORED comment on that element (`entity-name`+`entity-id` on the `:branch-comment` row; unanchored = the general thread below). A Suggestions section lists proposed CHILD branches of the source (reviewer suggestions) with Δ-view + one-click apply (= merge into the proposal), plus "+ Suggest a change" (fork-and-switch) |
-| Compare mode | inline ◐ on a branch row (lit on the picked one; click again = exit), or "◐ Compare mode" in the diff modal's header | The editor-wide diff lens (`editor-diff-mode.js`): Explorer rows badge +/−/± vs the compared branch (namespace headers aggregate counts), changed fn CARDS and their args ring on the canvas, a `◐ vs <branch>` chip marks the mode. The chip opens the review cockpit — full Δ diff, 📤 propose-current-for-review, ⇢ merge-compared-in, and the TYPE LENS (added / modified / only-there toggles + "substantive only", which hides name/description-only edits; persisted as `graphden.diffLens`). Mode persists across reloads (localStorage). Annotations only — reads/writes stay on the current branch |
+| Compare mode | inline ◐ on a branch row (lit on the picked one; click again = exit), or "◐ Compare mode" in the diff modal's header | The editor-wide diff lens (`editor-diff-mode.js`): Explorer rows badge +/−/± vs the compared branch (namespace headers aggregate counts), changed fn CARDS and their args ring on the canvas, a `◐ vs <branch>` chip marks the mode. The chip opens the review cockpit — full Δ diff, 📤 propose-current-for-review, ⇢ merge-compared-in, and the TYPE LENS (added / modified / only-there toggles + "substantive only" (hides name/description-only edits) + "effects touched only"; persisted as `graphden.diffLens`). Groups whose change wires an effect-carrying fn in/out are annotated "effects touched: +time −db" (derived from the changed refs — see the registry known-gap). Fns existing only on the compared branch render as dimmed GHOST ROWS in expanded Explorer groups (click = switch there); collapsed groups keep the aggregate badge. Mode persists across reloads (localStorage). Annotations only — reads/writes stay on the current branch |
 | Conflict modal | merge fails with `:reason :merge-conflict` | Per-entity source/target radio, retry merge with `:conflict-resolutions` |
 | Fn-card ⌛ action | per fn-card row-actions | Version timeline + per-version `(N runs)` badge; click a row → inline-expand its executions (lazy fetch); `switch` button jumps to that version's branch |
 
@@ -655,6 +655,22 @@ post-merge alert summarises the skipped count; the diff modal
 keeps its inline 📍 badge on the same rows.
 
 ## Known gaps
+
+- **The rich-types registry is process-global, not branch-scoped.** It
+  is id-keyed and last-compile-wins: compile a branch's context and its
+  entries land in the same registry every other branch reads, so
+  `/api/types` (and the type/effect chips it feeds) can show a
+  cross-branch union — a fn that exists only on a feature branch
+  appears in `main`'s snapshot, and an effect set reflects whichever
+  branch compiled last. Verified 2026-08-31 (fn created only on a
+  branch is present in `/api/types` under `main`). Branch-scoping the
+  registry (per-branch snapshots + `*rich-types-override*`-style
+  binding at serve time) is a real subsystem change — deliberately NOT
+  attempted alongside the diff-v2 work. Until then, cross-branch
+  comparisons must not be built on `/api/types`; compare mode's
+  "effects touched" therefore derives from the diff's changed REFS
+  (whose targets' effect sets are branch-independent in practice), not
+  from registry comparison.
 
 - **Merge is one-hop (non-transitive) — and REFUSES rather than silently drops.**
   A merge of source `S` into target `T` transfers only the versions `S` OWNS

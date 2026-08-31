@@ -972,6 +972,15 @@ body.gd-tenancy.gd-no-write .branch-row-more-menu .branch-row-policy { display: 
 .entity-item .gd-diff-badge.bd-added { color: var(--success-fg); }
 .entity-item .gd-diff-badge.bd-removed { color: var(--error-fg); }
 .entity-item .gd-diff-badge.bd-modified { color: var(--warning-fg); }
+/* Ghost row — a fn that exists only on the COMPARED branch. Dimmed,
+   dashed accent, click switches over. */
+.gd-diff-ghost {
+  opacity: 0.55;
+  font-style: italic;
+  cursor: pointer;
+}
+.gd-diff-ghost:hover { opacity: 0.85; }
+.gd-diff-ghost .name { text-decoration: line-through dotted; }
 .gd-diff-ns-badge {
   margin-left: 4px; flex: none;
   font-family: var(--mono); font-size: 0.5625rem;
@@ -1436,6 +1445,16 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   overflow-wrap: anywhere; min-width: 0;
 }
 .bd-arrow { color: var(--muted-fg); flex: none; }
+/* Effect-set delta chip on a diff group row — the "behaviour footprint
+   changed" flag. */
+.bd-effects-chip {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  color: var(--warning-fg);
+  border: 1px dashed var(--warning-fg); border-radius: 2px;
+  padding: 0 4px;
+  white-space: nowrap;
+}
 /* 💬 anchored-comment trigger — quiet until the row is hovered or it
    has focus; count badge appears when a thread exists. */
 .branch-diff-comment-btn {

@@ -21,7 +21,8 @@ const GD_DIFF_MODE_KEY = 'graphden.diffAgainst';
 // cosmetic-only edits (name / description fields alone — nothing that
 // affects behaviour) count at all. Persisted beside the branch choice.
 const GD_DIFF_LENS_KEY = 'graphden.diffLens';
-let _gdDiffLens = { added: true, missing: true, modified: true, substantiveOnly: false };
+let _gdDiffLens = { added: true, missing: true, modified: true,
+                    substantiveOnly: false, effectsOnly: false };
 try {
   const raw = JSON.parse(localStorage.getItem(GD_DIFF_LENS_KEY) || 'null');
   if (raw && typeof raw === 'object') _gdDiffLens = Object.assign(_gdDiffLens, raw);
@@ -31,7 +32,8 @@ function gdDiffLens() { return Object.assign({}, _gdDiffLens); }
 
 function gdDiffLensFiltering() {
   const l = _gdDiffLens;
-  return !l.added || !l.missing || !l.modified || l.substantiveOnly;
+  return !l.added || !l.missing || !l.modified || l.substantiveOnly
+    || l.effectsOnly;
 }
 
 function gdDiffSetLens(patch) {
@@ -72,6 +74,11 @@ function gdDiffVisibleGroup(fnId) {
   if (!g) return null;
   if (!_gdDiffLens[g.__kind]) return null;
   if (_gdDiffLens.substantiveOnly && !gdDiffGroupSubstantive(g)) return null;
+  // "Effects changed" — the strongest behaviour signal. Only applied
+  // once the async effect-set comparison landed; until then the toggle
+  // is a no-op rather than a false "everything is equal".
+  if (_gdDiffLens.effectsOnly && _gdDiffMode?.effectsReady
+      && !g.__effects) return null;
   return g;
 }
 
@@ -118,6 +125,74 @@ function gdDiffSlotsForFn(fnId) {
     slots[slot] = summary;
   }
   return Object.keys(slots).length ? slots : null;
+}
+
+// --- effects touched by a change --------------------------------------------
+
+// Full per-branch effect CLOSURES can't be compared honestly today:
+// the rich-types registry is process-global (id-keyed, last compile
+// wins), so `/api/types` answers with a cross-branch union — see the
+// known gap in VERSIONING.md. What IS honest and derivable from the
+// diff itself: which effect-CARRYING fns a change wires in or out.
+// Every changed ref lands in the display model as `:name`; the ref
+// TARGETS' own effect sets come from the local registry (base-fns and
+// platform fns — branch-independent in practice).
+
+// Collect ':name' ref targets from one entry, split by side.
+// Returns {there: Set<name>, here: Set<name>} — "there" = the compared
+// branch's side (diff SOURCE), "here" = this branch's (TARGET).
+function gdDiffEntryRefs(e) {
+  const there = new Set();
+  const here = new Set();
+  const grab = (set, v) => {
+    const m = typeof v === 'string' && v.match(/^:(.+)$/);
+    if (m) set.add(m[1]);
+  };
+  for (const f of (e.fields || [])) {
+    if (!/ref-fn-id|type-override-fn-id/.test(f.field)) continue;
+    grab(there, f.source);
+    grab(here, f.target);
+  }
+  if (e.preview) {
+    const m = e.preview.match(/(?:ref|→)\s*→?\s*:(\S+)/);
+    if (m) grab(e.change === 'added-in-target' ? here : there, ':' + m[1]);
+  }
+  return { there, here };
+}
+
+function gdDiffEffectsOfName(name) {
+  const reg = (typeof richTypes !== 'undefined' && richTypes) || {};
+  return reg[name]?.effects || [];
+}
+
+// "effects touched: +time −db" — effects reachable through refs the
+// change ADDS on the compared side (+) or DROPS (−). Null when the
+// change touches no effect-carrying refs.
+function gdDiffEffectsTouched(g) {
+  const plus = new Set();
+  const minus = new Set();
+  for (const e of (g.entries || [])) {
+    const { there, here } = gdDiffEntryRefs(e);
+    for (const n of there) {
+      if (!here.has(n)) gdDiffEffectsOfName(n).forEach((x) => plus.add(x));
+    }
+    for (const n of here) {
+      if (!there.has(n)) gdDiffEffectsOfName(n).forEach((x) => minus.add(x));
+    }
+  }
+  if (!plus.size && !minus.size) return null;
+  const parts = [];
+  if (plus.size) parts.push('+' + [...plus].sort().join(',+'));
+  if (minus.size) parts.push('−' + [...minus].sort().join(',−'));
+  return 'effects touched: ' + parts.join(' ');
+}
+
+function gdDiffModeComputeEffects(mode) {
+  for (const g of mode.byFnId.values()) {
+    g.__effects = gdDiffEffectsTouched(g);
+    if (g.__effects) g.__title += ' — ' + g.__effects;
+  }
+  mode.effectsReady = true;
 }
 
 // --- classification helpers -------------------------------------------------
@@ -204,6 +279,52 @@ function gdDiffModeDecorateSidebar() {
       b.className = 'gd-diff-badge ' + GD_DIFF_CLS[g.__kind];
       b.title = g.__title;
     });
+    // GHOST ROWS — fns that exist only on the COMPARED branch have no
+    // row of their own (the Explorer renders the current branch), so
+    // без них "− deleted here" was visible only as a namespace
+    // aggregate. Inject dimmed placeholder rows into every RENDERED
+    // (expanded) namespace group; collapsed groups keep the aggregate
+    // badge as their signal. Skipped while the filter box is active —
+    // ghosts don't participate in server-side filtering.
+    list.querySelectorAll('.gd-diff-ghost').forEach((g) => g.remove());
+    const filterBox = document.querySelector('input[placeholder="Filter..."]');
+    const filtering = !!filterBox?.value.trim();
+    if (_gdDiffMode && !filtering) {
+      for (const g of _gdDiffMode.byFnId.values()) {
+        if (g.__kind !== 'missing') continue;
+        if (!gdDiffVisibleGroup(g['fn-id'])) continue;
+        const container = g.__nsPath
+          ? list.querySelector('.ns-children[data-ns-children="'
+                               + CSS.escape(g.__nsPath) + '"]')
+          : list.querySelector('.ns-children[data-ns-children="__root__"]');
+        if (!container || container.hidden) continue;
+        const ghost = document.createElement('div');
+        ghost.className = 'entity-item gd-diff-ghost';
+        ghost.setAttribute('role', 'treeitem');
+        ghost.setAttribute('tabindex', '-1');
+        ghost.setAttribute('aria-level',
+          String((g.__nsPath ? g.__nsPath.split('.').length : 1) + 1));
+        const name = document.createElement('span');
+        name.className = 'name';
+        name.textContent = (g['fn-label'] || '').replace(/^:/, '');
+        ghost.appendChild(name);
+        const badge = document.createElement('span');
+        badge.className = 'gd-diff-badge bd-removed';
+        badge.textContent = '−';
+        ghost.appendChild(badge);
+        ghost.title = 'Exists only on "' + _gdDiffMode.branch
+          + '" — click to switch there and open it';
+        ghost.addEventListener('click', () => {
+          const nm = g['fn-name'];
+          if (!nm || typeof switchToBranch !== 'function') return;
+          if (!confirm('“' + nm + '” lives only on "' + _gdDiffMode.branch
+                       + '". Switch to that branch to view it?')) return;
+          try { window.history.pushState(null, '', '#' + nm); } catch (_) {}
+          switchToBranch(_gdDiffMode.branch);
+        });
+        container.appendChild(ghost);
+      }
+    }
     list.querySelectorAll('.ns-header[data-ns-path]').forEach((header) => {
       const c = nsCounts.get(header.dataset.nsPath);
       let b = header.querySelector('.gd-diff-ns-badge');
@@ -422,6 +543,8 @@ async function gdOpenDiffChipMenu(anchorBtn) {
   lensOpt('missing', '− only on ' + other);
   lensOpt('substantiveOnly', 'Substantive only',
           'Hide edits that touch nothing but names and descriptions');
+  lensOpt('effectsOnly', 'Effects touched only',
+          'Show only changes that wire an effect-carrying fn in or out');
 
   const exit = document.createElement('button');
   exit.type = 'button';
@@ -444,6 +567,7 @@ async function gdEnterDiffMode(otherBranch) {
   try {
     _gdDiffMode = await gdDiffModeFetch(otherBranch);
     try { localStorage.setItem(GD_DIFF_MODE_KEY, otherBranch); } catch (_) {}
+    gdDiffModeComputeEffects(_gdDiffMode);
     gdDiffModeRenderChip();
     gdDiffModeDecorateSidebar();
     gdDiffModeObserve();
@@ -473,6 +597,7 @@ async function gdDiffModeRefresh() {
   _gdDiffModeFetching = true;
   try {
     _gdDiffMode = await gdDiffModeFetch(_gdDiffMode.branch);
+    gdDiffModeComputeEffects(_gdDiffMode);
     gdDiffModeDecorateSidebar();
   } catch (_) { /* keep the stale annotations */ }
   _gdDiffModeFetching = false;

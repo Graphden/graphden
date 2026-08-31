@@ -1174,7 +1174,10 @@
            `gdDiffSlotsForFn`), and the ◐ chip persists the mode across
            reloads. The chip's menu is the review cockpit: full diff,
            propose-current-for-review, merge-compared-in, and the TYPE LENS
-           (`gdDiffSetLens` — kind toggles + substantive-only). Note what it
+           (`gdDiffSetLens` — kind toggles, substantive-only,
+           effects-touched-only). Fns existing only on the compared branch
+           inject as ghost rows; changed refs annotate the effects they wire
+           in/out (`gdDiffEffectsTouched`). Note what it
            does NOT do: no data re-routing — every read and write stays on
            the current branch, so the user keeps editing with the lens on."}
 

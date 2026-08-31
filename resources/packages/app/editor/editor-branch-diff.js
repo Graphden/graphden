@@ -126,6 +126,7 @@ async function showBranchDiff(targetName, sourceName, sourceRef) {
     bindDiffRowNavigation(body, sourceName, targetName);
     initDiffConversation(body, sourceName, sourceRef);
     renderDiffSuggestions(body, sourceName, sourceRef, targetName);
+    annotateDiffEffects(body);
   } catch (err) {
     body.classList.remove('branch-diff-loading');
     body.innerHTML = '<div class="branch-diff-error">Failed: '
@@ -201,6 +202,58 @@ function bindDiffRowNavigation(rootEl, sourceName, targetName) {
         selectFn(id);
       }
     });
+  });
+}
+
+// ============================================================================
+// Effect-set deltas — "did the behaviour's footprint change"
+// ============================================================================
+
+// Which effect-carrying fns does each group's change wire in or out?
+// Derived from the rendered rows themselves (changed refs appear as
+// `:name`), with the targets' effect sets from the local registry —
+// see editor-diff-mode.js for why full per-branch effect closures
+// can't be compared honestly today. Modal reading order is
+// was(target) → becomes(source): "+" = the source side gains it.
+function annotateDiffEffects(body) {
+  if (typeof gdDiffEffectsOfName !== 'function') return;
+  body.querySelectorAll('.branch-diff-row[data-diff-fn-id]').forEach((row) => {
+    const plus = new Set();
+    const minus = new Set();
+    const grab = (set, text) => {
+      const m = typeof text === 'string' && text.trim().match(/^:(\S+)$/);
+      if (m) gdDiffEffectsOfName(m[1]).forEach((x) => set.add(x));
+    };
+    row.querySelectorAll('.branch-diff-field').forEach((f) => {
+      const name = f.querySelector('.branch-diff-field-name')?.textContent || '';
+      if (!/ref-fn-id|type-override-fn-id/.test(name)) return;
+      grab(plus, f.querySelector('.bd-new')?.textContent);
+      grab(minus, f.querySelector('.bd-old')?.textContent);
+    });
+    row.querySelectorAll('.branch-diff-entry').forEach((e) => {
+      const prev = e.querySelector('.branch-diff-entry-preview')?.textContent || '';
+      const m = prev.match(/(?:ref\s*)?→\s*:(\S+)/);
+      if (!m) return;
+      const set = e.classList.contains('bd-removed') ? minus : plus;
+      gdDiffEffectsOfName(m[1]).forEach((x) => set.add(x));
+    });
+    for (const x of [...plus]) {
+      if (minus.has(x)) { plus.delete(x); minus.delete(x); }
+    }
+    if (!plus.size && !minus.size) return;
+    const head = row.querySelector('.branch-diff-row-head');
+    if (!head || head.querySelector('.bd-effects-chip')) return;
+    const chip = document.createElement('span');
+    chip.className = 'bd-effects-chip';
+    const parts = [];
+    if (plus.size) parts.push('+' + [...plus].sort().join(',+'));
+    if (minus.size) parts.push('−' + [...minus].sort().join(',−'));
+    chip.textContent = 'effects touched: ' + parts.join(' ');
+    chip.title = 'This change wires effect-carrying fns '
+      + (plus.size ? 'IN (' + [...plus].join(', ') + ') ' : '')
+      + (minus.size ? 'OUT (' + [...minus].join(', ') + ')' : '');
+    const badge = head.querySelector('.branch-diff-comment-btn');
+    head.insertBefore(chip, badge || null);
   });
 }
 

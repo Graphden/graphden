@@ -948,12 +948,17 @@ body.gd-tenancy.gd-no-write .branch-row-more-menu .branch-row-policy { display: 
   margin-left: 4px;
   border: 1px solid var(--warning-fg); border-radius: 3px;
   overflow: hidden;
+  max-width: 100%; min-width: 0;
 }
 .gd-diff-chip-label {
   background: transparent; color: var(--warning-fg);
   border: 0; padding: 1px 6px;
   font-size: 0.6875rem; line-height: 1.4; cursor: pointer;
   white-space: nowrap;
+  /* A long branch name must not push the chip out of the Explorer —
+     ellipsize; the full name lives in the title. */
+  overflow: hidden; text-overflow: ellipsis;
+  max-width: 148px;
 }
 .gd-diff-chip-label:hover { background: var(--hover-bg); }
 .gd-diff-chip-off {
@@ -1308,7 +1313,11 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   background: var(--bg); color: var(--fg);
   border: 1px solid var(--fg); border-radius: 3px;
   padding: 0;
-  min-width: 560px; max-width: 800px; width: 70vw;
+  /* Clamp to the viewport — a phone is narrower than the old fixed
+     560px floor and the card's Close must stay reachable. */
+  min-width: min(560px, calc(100vw - 24px));
+  max-width: min(800px, calc(100vw - 24px));
+  width: 70vw;
   max-height: 80vh;
   display: flex; flex-direction: column;
   box-shadow: var(--shadow-md);

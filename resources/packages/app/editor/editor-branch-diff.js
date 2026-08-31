@@ -236,8 +236,8 @@ async function annotateDiffEffects(body, sourceName, targetName) {
         if (head && !head.querySelector('.bd-effects-chip')) {
           const chip = document.createElement('span');
           chip.className = 'bd-effects-chip';
-          const show = (xs) => (xs.length ? xs.join(',') : 'pure');
-          chip.textContent = 'effects: ' + show(d.here) + ' → ' + show(d.there);
+          chip.textContent = 'effects: ' + gdDiffShowEffects(d.here)
+            + ' → ' + gdDiffShowEffects(d.there);
           chip.title = 'The effect set differs between "' + targetName
             + '" and "' + sourceName + '" — behaviour footprint changed';
           head.insertBefore(chip, head.querySelector('.branch-diff-comment-btn') || null);

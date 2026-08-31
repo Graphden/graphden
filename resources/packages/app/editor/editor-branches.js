@@ -615,7 +615,12 @@ function wireBranchPopoverHandlers(popover, current) {
   popover.querySelectorAll('.branch-row-merge').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      mergeBranchInto(btn.getAttribute('data-merge-source'), current);
+      // Target = the CURRENT branch; its row is in this very popover —
+      // use its id so a slash-named current branch can be a target.
+      const curRow = popover.querySelector(
+        '.branch-row[data-branch-name="' + (window.CSS?.escape ? CSS.escape(current) : current) + '"]');
+      mergeBranchInto(btn.getAttribute('data-merge-source'), current,
+                      null, curRow?.getAttribute('data-branch-id') || null);
     });
   });
 
@@ -1142,7 +1147,11 @@ async function deleteBranchWithConfirm(name, ref) {
 // MERGE — with conflict-resolution modal
 // ============================================================================
 
-async function mergeBranchInto(sourceName, targetName, conflictResolutions) {
+async function mergeBranchInto(sourceName, targetName, conflictResolutions, targetRef) {
+  // `targetRef` — an id-safe /api path ref for the TARGET (a name with
+  // "/" can't ride the :ref segment). Callers with a row in hand pass
+  // the row's id; absent → the name (pre-redesign behaviour).
+  targetRef = targetRef || targetName;
   if (!sourceName || !targetName) return;
   if (!conflictResolutions
       && !confirm('Merge "' + sourceName + '" INTO "' + targetName + '"?'
@@ -1167,7 +1176,7 @@ async function mergeBranchInto(sourceName, targetName, conflictResolutions) {
   let resp;
   try {
     resp = await window.authFetch(
-      API.api_branches_ref_merge(targetName),
+      API.api_branches_ref_merge(targetRef),
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1194,7 +1203,7 @@ async function mergeBranchInto(sourceName, targetName, conflictResolutions) {
   if (body?.ok === false && body?.reason === 'merge-conflict') {
     // Drop the popover so the modal has full attention.
     closeBranchPopover();
-    showMergeConflictsModal(body, sourceName, targetName);
+    showMergeConflictsModal(body, sourceName, targetName, targetRef);
     return;
   }
   if (!resp.ok || body?.ok === false) {
@@ -1290,7 +1299,7 @@ function closeConflictsModal() {
 // must be a flex sibling of the card so it can't come from the
 // single-root partial) and the radio/apply lifecycle. `body` is the
 // merge response — its `conflicts` array is what we render.
-async function showMergeConflictsModal(body, sourceName, targetName) {
+async function showMergeConflictsModal(body, sourceName, targetName, targetRef) {
   const modal = ensureConflictsModal();
   _conflictsTrigger = document.activeElement;
   // Build fully, THEN reveal. The modal is read the instant it becomes
@@ -1333,7 +1342,7 @@ async function showMergeConflictsModal(body, sourceName, targetName) {
   const submit = modal.querySelector('#merge-conflicts-submit');
   if (submit) {
     submit.addEventListener('click',
-      () => submitConflictResolutions(sourceName, targetName));
+      () => submitConflictResolutions(sourceName, targetName, targetRef));
   }
   const pickAll = (choice) => {
     modal.querySelectorAll('.merge-conflict-row input[type="radio"]')
@@ -1357,7 +1366,8 @@ async function showMergeConflictsModal(body, sourceName, targetName) {
 // Read each rendered row's `data-entity-*` + checked radio into the
 // `:conflict-resolutions` payload. The server owns the row markup, so the
 // JS↔partial contract is the two data-attrs + the radio `value`.
-async function submitConflictResolutions(sourceName, targetName) {
+async function submitConflictResolutions(sourceName, targetName, targetRef) {
+  targetRef = targetRef || targetName;
   const rows = Array.from(document.querySelectorAll(
     '.merge-conflicts-modal .merge-conflict-row'));
   const resolutions = rows.map((row) => {
@@ -1384,7 +1394,7 @@ async function submitConflictResolutions(sourceName, targetName) {
   let resp;
   try {
     resp = await window.authFetch(
-      API.api_branches_ref_merge(targetName),
+      API.api_branches_ref_merge(targetRef),
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

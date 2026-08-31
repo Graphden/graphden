@@ -89,7 +89,8 @@ function gdDmLookups() {
   return (typeof lookups !== 'undefined' && lookups) ? lookups : null;
 }
 
-// {branch, byFnId: Map fnId→group+ui, nsCounts: Map nsPath→{a,m,d}, fetchedAt}
+// {branch, branchId, currentId, byFnId: Map fnId→group+ui, fetchedAt}
+// (ns aggregation is computed per-lens at decorate time)
 let _gdDiffMode = null;
 let _gdDiffModeFetching = false;
 
@@ -108,10 +109,10 @@ function gdDiffModeGroup(fnId) {
 function gdDiffSlotsForFn(fnId) {
   const g = gdDiffVisibleGroup(fnId);
   if (!g) return null;
-  const slots = {};
+  const slots = Object.create(null);   // slot named "toString" must not vanish
   for (const e of (g.entries || [])) {
     const slot = e['slot-name'];
-    if (!slot || slot in slots) continue;
+    if (!slot || slots[slot] !== undefined) continue;
     if (_gdDiffLens.substantiveOnly && gdDiffEntryCosmetic(e)) continue;
     let summary;
     if (Array.isArray(e.fields) && e.fields.length) {
@@ -153,9 +154,13 @@ function gdDiffEffectSetDelta(hereTypes, thereTypes, name) {
   return { here: a, there: b };
 }
 
+function gdDiffShowEffects(xs) {
+  return xs.length ? xs.join(',') : 'pure';
+}
+
 function gdDiffEffectSetLabel(d) {
-  const show = (xs) => (xs.length ? xs.join(',') : 'pure');
-  return 'effects: ' + show(d.here) + ' here · ' + show(d.there) + ' there';
+  return 'effects: ' + gdDiffShowEffects(d.here)
+    + ' here · ' + gdDiffShowEffects(d.there) + ' there';
 }
 
 // Collect ':name' ref targets from one entry, split by side.
@@ -250,13 +255,23 @@ const GD_DIFF_CLS = { added: 'bd-added', missing: 'bd-removed', modified: 'bd-mo
 async function gdDiffModeFetch(otherBranch) {
   const cur = (typeof getCurrentBranchName === 'function')
     ? getCurrentBranchName() : 'main';
-  const url = API.api_branches_ref_diff_view(cur)
-    + '?against=' + encodeURIComponent(otherBranch);
+  // Resolve both names to IDS first — the :ref path segment (and any
+  // later /api/branches/:ref/* action from the cockpit) cannot carry a
+  // "/" in a NAME (hub push/<x> convention). One small list fetch.
+  let curId = null;
+  let otherId = null;
+  try {
+    const rows = (await (await window.authFetch(API.api_branches)).json())
+      ?.branches || [];
+    curId = rows.find((b) => b.name === cur)?.id || null;
+    otherId = rows.find((b) => b.name === otherBranch)?.id || null;
+  } catch (_) { /* fall back to names below */ }
+  const url = API.api_branches_ref_diff_view(curId || cur)
+    + '?against=' + encodeURIComponent(otherId || otherBranch);
   const r = await window.authFetch(url);
   const d = await r.json();
   if (!d.ok) throw new Error(d.error || ('HTTP ' + r.status));
   const byFnId = new Map();
-  const nsCounts = new Map();
   for (const g of (d.groups || [])) {
     if (!g['fn-id']) continue;
     const kind = gdDiffModeKind(g);
@@ -271,8 +286,8 @@ async function gdDiffModeFetch(otherBranch) {
     g.__nsPath = (fn && lk?.nsPathMap?.get(fn['namespace-id'])) || null;
     byFnId.set(g['fn-id'], g);
   }
-  void nsCounts;   // per-lens aggregation happens at decorate time
-  return { branch: otherBranch, byFnId, fetchedAt: Date.now() };
+  return { branch: otherBranch, branchId: otherId, currentId: curId,
+           byFnId, fetchedAt: Date.now() };
 }
 
 // --- sidebar decoration -----------------------------------------------------
@@ -313,9 +328,11 @@ function gdDiffModeDecorateSidebar() {
         b.className = 'gd-diff-badge';
         item.appendChild(b);
       }
-      b.textContent = GD_DIFF_GLYPH[g.__kind];
-      b.className = 'gd-diff-badge ' + GD_DIFF_CLS[g.__kind];
-      b.title = g.__title;
+      const glyph = GD_DIFF_GLYPH[g.__kind];
+      if (b.textContent !== glyph) b.textContent = glyph;
+      const cls = 'gd-diff-badge ' + GD_DIFF_CLS[g.__kind];
+      if (b.className !== cls) b.className = cls;
+      if (b.title !== g.__title) b.title = g.__title;
     });
     // GHOST ROWS — fns that exist only on the COMPARED branch have no
     // row of their own (the Explorer renders the current branch), so
@@ -325,7 +342,7 @@ function gdDiffModeDecorateSidebar() {
     // badge as their signal. Skipped while the filter box is active —
     // ghosts don't participate in server-side filtering.
     list.querySelectorAll('.gd-diff-ghost').forEach((g) => g.remove());
-    const filterBox = document.querySelector('input[placeholder="Filter..."]');
+    const filterBox = document.getElementById('search-input');
     const filtering = !!filterBox?.value.trim();
     if (_gdDiffMode && !filtering) {
       for (const g of _gdDiffMode.byFnId.values()) {
@@ -387,6 +404,14 @@ function gdDiffModeDecorateSidebar() {
           .filter(Boolean).join(', ');
     });
   } finally {
+    // MutationObserver callbacks fire on a MICROTASK — after this
+    // synchronous block ends — so a flag alone can't hide our own
+    // mutations from the observer. Drain the queued records while the
+    // flag is still up: they never reach the callback, and only real
+    // external re-renders re-trigger decoration (pre-fix this looped
+    // decorate→observe→decorate every 150ms and re-fetched the diff
+    // every 20s, forever).
+    _gdDiffObserver?.takeRecords();
     _gdDiffDecorating = false;
   }
 }
@@ -440,6 +465,7 @@ function gdDiffModeRenderChip() {
     const label = document.createElement('button');
     label.className = 'gd-diff-chip-label';
     label.setAttribute('aria-haspopup', 'menu');
+    label.setAttribute('aria-expanded', 'false');
     label.addEventListener('click', () => gdOpenDiffChipMenu(label));
     chip.appendChild(label);
     const off = document.createElement('button');
@@ -470,13 +496,42 @@ function gdDiffModeRenderChip() {
 // diff, propose-for-review (the merge-request act) / merge shortcuts,
 // and the type lens. Torn down on any outside click.
 function gdCloseDiffChipMenu() {
-  document.getElementById('gd-diff-chip-pop')?.remove();
+  const pop = document.getElementById('gd-diff-chip-pop');
+  if (pop && typeof returnFocusTo === 'function'
+      && pop.contains(document.activeElement)) {
+    returnFocusTo(document.querySelector('.gd-diff-chip-label'));
+  }
+  pop?.remove();
   document.getElementById('gd-diff-chip-scrim')?.remove();
+  document.querySelector('.gd-diff-chip-label')
+    ?.setAttribute('aria-expanded', 'false');
 }
+
+// One-time registration of the shared dismissal contract (Escape +
+// outside pointer) — the menu exists only transiently, so the hooks
+// read the live DOM each time.
+let _gdDiffChipDismissInstalled = false;
+
+function gdDiffChipInstallDismiss() {
+  if (_gdDiffChipDismissInstalled
+      || typeof installPopoverDismiss !== 'function') return;
+  _gdDiffChipDismissInstalled = true;
+  installPopoverDismiss({
+    getEl: () => document.getElementById('gd-diff-chip-pop'),
+    getAnchor: () => document.querySelector('.gd-diff-chip-label'),
+    isVisible: () => !!document.getElementById('gd-diff-chip-pop'),
+    onDismiss: gdCloseDiffChipMenu,
+    getReturnFocus: () => document.querySelector('.gd-diff-chip-label'),
+  });
+}
+
+let _gdDiffChipMenuOpening = false;
 
 async function gdOpenDiffChipMenu(anchorBtn) {
   gdCloseDiffChipMenu();
-  if (!_gdDiffMode) return;
+  if (!_gdDiffMode || _gdDiffChipMenuOpening) return;
+  _gdDiffChipMenuOpening = true;
+  try {
   const other = _gdDiffMode.branch;
   const cur = getCurrentBranchName();
   // One list fetch resolves both branches' ids + the current proposal
@@ -555,7 +610,11 @@ async function gdOpenDiffChipMenu(anchorBtn) {
          // The merge flow reports into the branch popover's error slot —
          // bring the popover up first so failures stay visible.
          if (typeof openBranchPopover === 'function') await openBranchPopover();
-         if (typeof mergeBranchInto === 'function') mergeBranchInto(other, cur);
+         if (typeof mergeBranchInto === 'function') {
+           mergeBranchInto(other, cur,
+                           null,
+                           curRow?.id || _gdDiffMode?.currentId || null);
+         }
        });
 
   // --- the type lens ---
@@ -595,6 +654,12 @@ async function gdOpenDiffChipMenu(anchorBtn) {
   pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 300)) + 'px';
   pop.style.top = (r.bottom + 6) + 'px';
   document.body.appendChild(pop);
+  anchorBtn.setAttribute('aria-expanded', 'true');
+  gdDiffChipInstallDismiss();
+  if (typeof focusIntoDialog === 'function') focusIntoDialog(pop);
+  } finally {
+    _gdDiffChipMenuOpening = false;
+  }
 }
 
 // --- enter / exit / boot ----------------------------------------------------
@@ -633,10 +698,17 @@ async function gdEnterDiffMode(otherBranch) {
 async function gdDiffModeRefresh() {
   if (!_gdDiffMode || _gdDiffModeFetching) return;
   _gdDiffModeFetching = true;
+  const prev = _gdDiffMode;
   try {
-    _gdDiffMode = await gdDiffModeFetch(_gdDiffMode.branch);
-    gdDiffModeLoadEffects(_gdDiffMode);
-    gdDiffModeDecorateSidebar();
+    const fresh = await gdDiffModeFetch(prev.branch);
+    // The user may have EXITED (or re-entered vs another branch) while
+    // the fetch was in flight — installing the stale result would
+    // resurrect a mode with no chip and no way out.
+    if (_gdDiffMode === prev) {
+      _gdDiffMode = fresh;
+      gdDiffModeLoadEffects(fresh);
+      gdDiffModeDecorateSidebar();
+    }
   } catch (_) { /* keep the stale annotations */ }
   _gdDiffModeFetching = false;
 }
@@ -647,9 +719,14 @@ function gdExitDiffMode() {
   try { localStorage.removeItem(GD_DIFF_MODE_KEY); } catch (_) {}
   gdDiffModeRenderChip();
   gdDiffModeDecorateSidebar();
-  document.querySelectorAll('.arg-overlay-diff-focus')
-    .forEach((el) => el.classList.remove('arg-overlay-diff-focus'));
-  document.querySelectorAll('.arg-diff-badge').forEach((el) => el.remove());
+  // Arg rings/badges — same cleanup the one-shot focus uses.
+  if (typeof gdClearDiffFocus === 'function') gdClearDiffFocus();
+  // Card-level rings (fn-overlay-diff-*) + the titles the mode set.
+  document.querySelectorAll('.fn-overlay-diff').forEach((el) => {
+    el.classList.remove('fn-overlay-diff', 'fn-overlay-diff-added',
+                        'fn-overlay-diff-missing', 'fn-overlay-diff-modified');
+    el.removeAttribute('title');
+  });
   if (typeof gdAnnounce === 'function') gdAnnounce('Compare mode off');
 }
 

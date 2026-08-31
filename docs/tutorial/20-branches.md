@@ -143,7 +143,24 @@ the author**.
    on until you `×` it — it survives reloads, so "always see my
    drift vs main" is one click. You keep editing and running as
    usual; compare mode only annotates.
-5. From `main`, click `⇢` next to `feat-tutorial`. Confirm.
+5. The diff isn't only about values — it shows the graph's SHAPE
+   changing too. Each entry kind reads differently:
+
+   | You did (on the branch) | The diff row says |
+   |---|---|
+   | edited a bound value | `± arg port` · `8080 → 9090` |
+   | renamed / re-described the fn | `± fn` · `description: old → new` |
+   | exposed a new arg (extended structure) | `+ slot retries` · `at position 2` |
+   | bound an arg to another fn (an edge!) | `+ arg handler` · `ref → :my-handler` |
+   | re-aimed an existing edge | `± arg handler` · `ref-fn-id: :a → :b` |
+   | added/edited a list element | `± item 0 of nums` · `1 → 2` |
+   | created a whole fn | its own `+` group under "Only in <branch>" |
+
+   Try one: on `feat-tutorial`, extend some fn with a new child (or
+   ⋯-bind an arg to a different fn), reopen `Δ` — the structural rows
+   appear under the same fn group, and in compare mode the same args
+   ring on the canvas.
+6. From `main`, click `⇢` next to `feat-tutorial`. Confirm.
    The page reloads and `main` now sees your edit.
 
 ### Try it — with review required

@@ -233,7 +233,7 @@ core's `case` matcher.
 | Branch chip | context bar (`#gd-ctxbar` → `#branch-mount`, between the workspace chip and the packages chip) | Shows current branch. Inverted style when off main. |
 | Branch popover | click chip | Branch list + inline create. Per row: Δ diff, ✅ approve (on proposed rows) and ⇢ merge inline (instant `data-tip` tooltips), everything administrative under the row's ⋯ menu with text labels — 📤 propose/withdraw, ⚙ Protection (require-merge + required-approvals 0…3 segmented control + count-self-approval), ⛨ write-policy (tenancy only), × delete; a 🔒 marks write-policy-protected rows, an accented ⋯ marks a proposed / protected row. Propose/approve/require-merge/required-approvals are all open-core |
 | Diff modal | click Δ in row | Diff v2: per-owning-fn groups with `+`/`−`/`±` markers, per-field `old → new` pairs, slot-name labels. Rows are clickable → navigate; the changed args are then ringed `Δ` on the canvas (sessionStorage `graphden.diffFocus` hand-off). Hovering a row/entry reveals 💬 — an ANCHORED comment on that element (`entity-name`+`entity-id` on the `:branch-comment` row; unanchored = the general thread below). A Suggestions section lists proposed CHILD branches of the source (reviewer suggestions) with Δ-view + one-click apply (= merge into the proposal), plus "+ Suggest a change" (fork-and-switch) |
-| Compare mode | ⋯ → "◐ Compare with current" on a branch row | The editor-wide diff lens (`editor-diff-mode.js`): Explorer rows badge +/−/± vs the compared branch (namespace headers aggregate counts), changed args ring Δ on the canvas, a `◐ vs <branch>` chip marks the mode (click = diff modal, × = exit). Persists across reloads (localStorage) so "always see the drift vs main" is one click. Annotations only — reads/writes stay on the current branch |
+| Compare mode | ⋯ → "◐ Compare with current" on a branch row, or "◐ Compare mode" in the diff modal's header | The editor-wide diff lens (`editor-diff-mode.js`): Explorer rows badge +/−/± vs the compared branch (namespace headers aggregate counts), changed args ring Δ on the canvas, a `◐ vs <branch>` chip marks the mode (click = diff modal, × = exit). Persists across reloads (localStorage) so "always see the drift vs main" is one click. Annotations only — reads/writes stay on the current branch |
 | Conflict modal | merge fails with `:reason :merge-conflict` | Per-entity source/target radio, retry merge with `:conflict-resolutions` |
 | Fn-card ⌛ action | per fn-card row-actions | Version timeline + per-version `(N runs)` badge; click a row → inline-expand its executions (lazy fetch); `switch` button jumps to that version's branch |
 
@@ -244,7 +244,11 @@ instance pushes a snapshot of its work to the hub as a branch named
 `push/<name>` (`graphden.cli push` → `POST /api/import/graph?target=…`),
 and review happens with everything in this document — diff against main,
 resolve conflicts, merge, with `forbid-invalid?` and the write-policy
-applying as usual. The convention rests on machinery, not new entities:
+applying as usual. Note on slash-named branches (`push/<x>`): a name with `/` cannot ride
+a `/api/branches/:ref/*` PATH segment — address such branches by their
+UUID (every `:ref` accepts one; the editor's row ops do this
+automatically via `data-branch-id`). The convention rests on machinery,
+not new entities:
 
 - the push branch is created with the pushing principal stamped as
   `owner-id` and the `owner` write-policy, so only its author updates it;

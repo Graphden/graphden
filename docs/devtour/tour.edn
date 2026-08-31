@@ -1165,6 +1165,17 @@
            stale and the handler re-fetches rather than re-rendering."
      :see [[:crud "render-repr"]]}
 
+    {:file "resources/packages/app/editor/editor-diff-mode.js" :defn gdEnterDiffMode
+     :say "COMPARE MODE — the editor-wide diff lens. One fetch of the grouped
+           `diff-view` payload, then pure annotation: Explorer rows badge
+           +/±/−, namespace headers aggregate counts, changed args ring on the
+           canvas via `gdDiffSlotsForFn`, and the ◐ chip persists the mode in
+           localStorage across reloads. Note what it does NOT do: no data
+           re-routing — every read and write stays on the current branch, so
+           the user keeps editing with the lens on. The one-shot cousin
+           (`graphden.diffFocus` in sessionStorage) is stashed by the diff
+           modal's row clicks; `editor-overlay-arg.js` consults both."}
+
     {:file "resources/packages/app/editor/editor-auth.js" :defn authFetch
      :say "Every mutating call in the editor goes through this. It is 12 lines
            and worth all of them: a 401 clears the stored credential and

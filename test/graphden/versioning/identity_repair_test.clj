@@ -144,7 +144,7 @@
                   :binding-list-item {:ix {:id :ix :binding-id :bx :ref-fn-id :x}
                                       :ie {:id :ie :binding-id :bo :ref-fn-id :x}}
                   :binding-version {:bvx {:id :bvx :fn-id :x :ref-fn-id :x}
-                                    :bve {:id :bve :fn-id :other :type-override-fn-id :x}}
+                                    :bvo {:id :bvo :fn-id :other :type-override-fn-id :x}}
                   :binding-list-item-version {:ivx {:id :ivx :binding-id :bx :ref-fn-id :x}}
                   :slot {:sx {:id :sx :type-fn-id :x}}
                   :fn {:x {:id :x :parent-ids [] :base-fn-id :x}
@@ -153,7 +153,7 @@
               are skipped; external refs and shared slots are reported"
       (is (= #{{:entity :binding :id :be :field :ref-fn-id}
                {:entity :binding-list-item :id :ie :field :ref-fn-id}
-               {:entity :binding-version :id :bve :field :type-override-fn-id}
+               {:entity :binding-version :id :bvo :field :type-override-fn-id}
                {:entity :slot :id :sx :field :type-fn-id}
                {:entity :fn :id :d :field :return-type-fn-id}
                {:entity :fn :id :d :field :parent-ids}}

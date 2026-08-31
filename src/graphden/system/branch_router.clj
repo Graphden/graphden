@@ -762,6 +762,40 @@
   false)
 
 
+(defn- heal-refresh-entry!
+  "One entry's stale-while-revalidate refresh for `heal-stale-ctxs!`.
+   A DELETED branch (its epoch bump is what woke the heal) is dropped
+   like the local delete path — rebuilding would resurrect a phantom
+   ctx and leave the name→id ref-cache pointing at a dead registry.
+   A live entry rebuilds under ITS OWN registry slices: two OPTIMISTIC
+   attempts (compile outside the lock, swap only if the epoch didn't
+   move mid-compile — a moved epoch means a delta already patched the
+   live registry and our snapshot would clobber it), then a blocking
+   rebuild as the correctness fallback under continuous writes."
+  [router base default-branch-id bid entry]
+  (if (and (not= bid default-branch-id)
+           (nil? (sp/read-entity base :branch bid)))
+    (invalidate! router bid)
+    (when-let [c (:ctx entry)]
+      (binding [registry-core/*rich-types-override*
+                (or (:rich-types-atom c)
+                    registry-core/*rich-types-override*)
+                registry-core/*per-org-rich-override*
+                (or (:per-org-rich-atom c)
+                    registry-core/*per-org-rich-override*)]
+        (try
+          (loop [attempt 1]
+            (let [e0 (epoch/current base)
+                  swapped? (cr/rebuild-optimistic!
+                             c #(= e0 (epoch/current base)))]
+              (when-not swapped?
+                (if (< attempt 2)
+                  (recur (inc attempt))
+                  (cr/rebuild! c)))))
+          (catch Exception e
+            (log/warn e "graph-epoch heal: ctx rebuild failed")))))))
+
+
 (defn- heal-stale-ctxs!
   "An epoch in (w, global] is neither locally-noted nor NOTIFY-covered:
    somebody's write reached the DB without this pod applying its
@@ -793,42 +827,8 @@
         (swap! state assoc :w global)
         (let [snap @handlers
               refresh! (fn [bid entry]
-                         (if (and (not= bid default-branch-id)
-                                  (nil? (sp/read-entity base :branch bid)))
-                           ;; The branch was DELETED on another pod (its
-                           ;; `:branch` epoch bump is what woke this heal).
-                           ;; Rebuilding would resurrect a phantom ctx AND
-                           ;; leave the name→id ref-cache pointing at the
-                           ;; dead branch, so a same-name recreate routes
-                           ;; here to a dead registry ("Branch handler
-                           ;; closure missing"). Drop the entry + forget
-                           ;; its ref exactly like the local delete path.
-                           (invalidate! router bid)
-                           (when-let [c (:ctx entry)]
-                             (binding [registry-core/*rich-types-override*
-                                       (or (:rich-types-atom c)
-                                           registry-core/*rich-types-override*)
-                                       registry-core/*per-org-rich-override*
-                                       (or (:per-org-rich-atom c)
-                                           registry-core/*per-org-rich-override*)]
-                               (try
-                                 ;; Two OPTIMISTIC attempts (compile outside
-                                 ;; the lock, swap only if the epoch didn't
-                                 ;; move mid-compile — a moved epoch means a
-                                 ;; delta already patched the live registry
-                                 ;; and our snapshot would clobber it), then
-                                 ;; a blocking rebuild as the correctness
-                                 ;; fallback under continuous writes.
-                                 (loop [attempt 1]
-                                   (let [e0 (epoch/current base)
-                                         swapped? (cr/rebuild-optimistic!
-                                                    c #(= e0 (epoch/current base)))]
-                                     (when-not swapped?
-                                       (if (< attempt 2)
-                                         (recur (inc attempt))
-                                         (cr/rebuild! c)))))
-                                 (catch Exception e
-                                   (log/warn e "graph-epoch heal: ctx rebuild failed")))))))
+                         (heal-refresh-entry! router base default-branch-id
+                                              bid entry))
               work (fn []
                      (when-let [e (get snap default-branch-id)]
                        (refresh! default-branch-id e))

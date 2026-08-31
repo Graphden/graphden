@@ -64,6 +64,7 @@
                   "packages/app/editor/editor-auth.js"
                   "packages/app/editor/editor-org-switcher.js"
                   "packages/app/editor/editor-branches.js"
+                  "packages/app/editor/editor-diff-render.js"
                   "packages/app/editor/editor-branch-diff.js"
                   "packages/app/editor/editor-diff-mode.js"
                   "packages/app/editor/editor-create.js"

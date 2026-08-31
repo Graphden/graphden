@@ -1017,6 +1017,14 @@ body.gd-tenancy.gd-no-write .branch-row-more-menu .branch-row-policy { display: 
 .entity-item .gd-diff-badge.bd-added { color: var(--success-fg); }
 .entity-item .gd-diff-badge.bd-removed { color: var(--error-fg); }
 .entity-item .gd-diff-badge.bd-modified { color: var(--warning-fg); }
+/* 💬 — anchored review comments on this fn's changes (compare mode).
+   Sits right after the +/±/− badge; the count rides in the text. */
+.gd-diff-note-badge {
+  flex: none;
+  font-size: 0.5625rem;
+  opacity: 0.85;
+  padding: 0 2px;
+}
 /* Ghost row — a fn that exists only on the COMPARED branch. Dimmed,
    dashed accent, click switches over. */
 .gd-diff-ghost {
@@ -5319,6 +5327,9 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .kind-marker-service.svc-failed   { color: var(--error-fg); }
 .kind-marker-service.svc-disabled { color: var(--muted-fg); opacity: 0.65; }
 .kind-marker-app { color: var(--accent); }
+/* fx detail marker — effect footprint; italic + muted so a tree full of
+   effectful web fns reads as texture, not alarm. */
+.kind-marker-fx { font-style: italic; opacity: 0.8; }
 .kind-marker-type { font-size: 0.5625rem; opacity: 0.8; }
 /* Test status dot — latest execution of the fn's CURRENT version:
    passed / failed / stale (not run since the last edit). */

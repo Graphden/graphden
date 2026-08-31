@@ -9,6 +9,8 @@
    exceeds it (aborting mid-stream — never materialising the full
    JSON), and nil for values that cannot be JSON-encoded at all."
   (:require
+    [cheshire.core :as json]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.util.json-size :as json-size]))
 
@@ -48,3 +50,48 @@
   (testing "values cheshire cannot encode (fns, atoms) → nil, same as oversize"
     (is (nil? (json-size/json-bytes-up-to (fn no-json []) 1000)))
     (is (nil? (json-size/json-bytes-up-to (atom 1) 1000)))))
+
+
+(deftest buffered-chunk-writes-count-exactly-test
+  (testing "a value larger than the writer's 8 KB internal buffer — so the
+            counter sees chunked array writes, not single bytes — still
+            returns the exact encoded length"
+    (let [s (str/join (repeat 20000 "a"))]
+      (is (= 20002 (json-size/json-bytes-up-to s 100000))
+          "20000 ASCII chars + 2 quote bytes"))))
+
+
+(deftest oversize-aborts-in-chunked-write-path-test
+  (testing "a buffer-crossing string over a small cap aborts → nil"
+    (let [s (str/join (repeat 20000 "a"))]
+      (is (nil? (json-size/json-bytes-up-to s 100))))))
+
+
+(deftest surrogate-pair-counts-four-bytes-test
+  (testing "an astral-plane char (surrogate pair in UTF-16) is 4 UTF-8 bytes"
+    ;; "😀" is 1 codepoint / 2 Java chars / 4 UTF-8 bytes; + 2 quotes = 6.
+    (is (= 6 (json-size/json-bytes-up-to "😀" 100)))
+    (is (nil? (json-size/json-bytes-up-to "😀" 5)))))
+
+
+(deftest nil-encodes-as-null-test
+  (testing "nil serializes as the 4-byte JSON literal null"
+    (is (= 4 (json-size/json-bytes-up-to nil 100)))))
+
+
+(deftest zero-limit-rejects-everything-test
+  (testing "a zero-byte cap rejects even the smallest encodable value"
+    (is (nil? (json-size/json-bytes-up-to {} 0)))
+    (is (nil? (json-size/json-bytes-up-to nil 0)))))
+
+
+(deftest nested-structure-agrees-with-materialised-encoding-test
+  (testing "the streaming count equals the byte length of the fully
+            materialised encoding for a nested keyword/string/number mix"
+    (let [v {:a [1 2 3]
+             :b {:c "ёж" :d nil}
+             :e ["текст" {:f 3.5}]}
+          expected (alength (String/.getBytes (json/generate-string v) "UTF-8"))]
+      (is (= expected (json-size/json-bytes-up-to v 10000)))
+      (is (nil? (json-size/json-bytes-up-to v (dec expected)))
+          "one byte under the materialised size rejects it"))))

@@ -349,7 +349,20 @@
                          :title "Only tests (fns in a `tests` namespace)"}
                 [:span {:class "kind-glyph" :aria-hidden "true"} "✓"]
                 [:span {:class "kind-label"} "tests"]
-                [:span {:class "kind-count" :aria-hidden "true"}]]]]
+                [:span {:class "kind-count" :aria-hidden "true"}]]
+               ;; DETAIL toggle, not a lens: marks rows instead of
+               ;; filtering them (fns whose execution carries effects
+               ;; get a small `fx`). Individually toggleable so the
+               ;; tree only carries the detail when asked for; sits in
+               ;; the same chip row but its own aria semantics say
+               ;; "show", not "focus". State: graphden.treeDetails.
+               [:button {:type "button"
+                         :class "kind-toggle tree-detail-toggle"
+                         :data-detail "fx" :aria-pressed "false"
+                         :onclick "toggleTreeDetail('fx')"
+                         :title "Mark fns whose execution has effects (io, time, …)"}
+                [:span {:class "kind-glyph" :aria-hidden "true"} "fx"]
+                [:span {:class "kind-label"} "marks"]]]]
              ;; Create-a-secret action — NOT a filter, so it sits OUTSIDE the
              ;; kind-filters role-group (and the search bar). Contextual:
              ;; syncKindFilterBar reveals it only for an authed user with the

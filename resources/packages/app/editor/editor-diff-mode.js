@@ -25,7 +25,7 @@ const GD_DIFF_MODE_KEY = 'graphden.diffAgainst';
 const GD_DIFF_LENS_KEY = 'graphden.diffLens';
 let _gdDiffLens = { added: true, missing: true, modified: true,
                     substantiveOnly: false, effectsOnly: false,
-                    changedOnly: false };
+                    changedOnly: false, notes: true };
 try {
   const raw = JSON.parse(localStorage.getItem(GD_DIFF_LENS_KEY) || 'null');
   if (raw && typeof raw === 'object') _gdDiffLens = Object.assign(_gdDiffLens, raw);
@@ -442,8 +442,31 @@ async function gdDiffModeFetch(otherBranch) {
     g.__nsPath = (fn && lk?.nsPathMap?.get(fn['namespace-id'])) || null;
     byFnId.set(g['fn-id'], g);
   }
+  // Anchored review comments → per-fn counts for the tree's 💬 markers.
+  // Every diffed element's entity-id is in the groups, so a comment
+  // anchored to a binding/list-item attributes to its owning fn without
+  // another lookup. Best-effort: a comments failure never blocks the mode.
+  const noteCounts = new Map();
+  try {
+    const cr = await window.authFetch(
+      API.api_branches_ref_comments(otherId || otherBranch));
+    const cd = await cr.json();
+    if (cd.ok) {
+      const ownerOf = new Map();
+      for (const g of byFnId.values()) {
+        ownerOf.set(g['fn-id'], g['fn-id']);
+        for (const e of (g.entries || [])) {
+          if (e['entity-id']) ownerOf.set(e['entity-id'], g['fn-id']);
+        }
+      }
+      for (const c of (cd.comments || [])) {
+        const owner = c['entity-id'] && ownerOf.get(c['entity-id']);
+        if (owner) noteCounts.set(owner, (noteCounts.get(owner) || 0) + 1);
+      }
+    }
+  } catch (_) { /* markers just stay absent */ }
   return { branch: otherBranch, branchId: otherId, currentId: curId,
-           byFnId, fetchedAt: Date.now() };
+           byFnId, noteCounts, fetchedAt: Date.now() };
 }
 
 // --- sidebar decoration -----------------------------------------------------
@@ -479,6 +502,7 @@ function gdDiffModeDecorateSidebar() {
       let b = item.querySelector('.gd-diff-badge');
       if (!g) {
         if (b) b.remove();
+        item.querySelector('.gd-diff-note-badge')?.remove();
         item.classList.remove('gd-diff-changed');
         return;
       }
@@ -493,6 +517,21 @@ function gdDiffModeDecorateSidebar() {
       const cls = 'gd-diff-badge ' + GD_DIFF_CLS[g.__kind];
       if (b.className !== cls) b.className = cls;
       if (b.title !== g.__title) b.title = g.__title;
+      // 💬 — anchored review comments live on this fn's changes.
+      const notes = _gdDiffLens.notes
+        ? (_gdDiffMode.noteCounts?.get(item.dataset.fnId) || 0) : 0;
+      let nb = item.querySelector('.gd-diff-note-badge');
+      if (!notes) { nb?.remove(); } else {
+        if (!nb) {
+          nb = document.createElement('span');
+          nb.className = 'gd-diff-note-badge';
+          item.appendChild(nb);
+        }
+        const txt = '💬' + (notes > 1 ? notes : '');
+        if (nb.textContent !== txt) nb.textContent = txt;
+        nb.title = notes + ' review comment' + (notes === 1 ? '' : 's')
+          + ' anchored here — open the fn to read the thread';
+      }
     });
     // GHOST ROWS — fns that exist only on the COMPARED branch have no
     // row of their own (the Explorer renders the current branch), so
@@ -527,6 +566,16 @@ function gdDiffModeDecorateSidebar() {
         badge.className = 'gd-diff-badge bd-removed';
         badge.textContent = '−';
         ghost.appendChild(badge);
+        const gnotes = _gdDiffLens.notes
+          ? (_gdDiffMode.noteCounts?.get(g['fn-id']) || 0) : 0;
+        if (gnotes) {
+          const nb = document.createElement('span');
+          nb.className = 'gd-diff-note-badge';
+          nb.textContent = '💬' + (gnotes > 1 ? gnotes : '');
+          nb.title = gnotes + ' review comment'
+            + (gnotes === 1 ? '' : 's') + ' anchored here';
+          ghost.appendChild(nb);
+        }
         ghost.title = 'Exists only on "' + _gdDiffMode.branch
           + '" — click to switch there and open it';
         ghost.addEventListener('click', () => {
@@ -627,6 +676,8 @@ const GD_DIFF_LENS_CHIPS = [
     title: 'Show fns that exist only on the compared branch' },
   { key: 'substantiveOnly', glyph: 'Aa', label: 'core',
     title: 'Hide edits that touch nothing but names and descriptions' },
+  { key: 'notes', glyph: '💬', label: 'notes',
+    title: 'Mark fns that carry anchored review comments' },
   { key: 'effectsOnly', glyph: 'fx', label: 'fx',
     title: 'Show only changes whose effect footprint differs' },
 ];
@@ -815,16 +866,28 @@ function gdDiffModeRenderChip() {
   }
   const label = chip.querySelector('.gd-diff-chip-label');
   // An active lens HIDES things — silent filtering is how a user ends
-  // up believing two branches are identical. Say it on the chip.
+  // up believing two branches are identical. Say it on the chip: the
+  // count goes `visible/total` while any lens filter is on (plus the
+  // dashed border), and a plain total otherwise.
   const filtering = gdDiffLensFiltering();
-  label.textContent = 'Δ vs ' + _gdDiffMode.branch + (filtering ? ' · filtered' : '');
+  const total = _gdDiffMode.byFnId.size;
+  let visible = total;
+  if (filtering) {
+    visible = 0;
+    for (const g of _gdDiffMode.byFnId.values()) {
+      if (gdDiffVisibleGroup(g['fn-id'])) visible += 1;
+    }
+  }
+  const count = filtering ? (visible + '/' + total) : String(total);
+  label.textContent = 'Δ vs ' + _gdDiffMode.branch + ' · ' + count;
   chip.classList.toggle('gd-diff-chip-filtered', filtering);
-  label.title = 'Compare mode — differences vs "' + _gdDiffMode.branch
-    + '" are marked in the Explorer and on the canvas. Click for the diff, '
+  label.title = 'Compare mode — ' + total + ' changed fn'
+    + (total === 1 ? '' : 's') + ' vs "' + _gdDiffMode.branch
+    + '", marked in the Explorer and on the canvas. Click for the '
     + 'review actions and the type lens.'
     + (filtering
-       ? ' LENS ACTIVE — some change kinds are hidden from the annotations '
-         + '(the Δ modal always shows everything).'
+       ? ' LENS ACTIVE — showing ' + visible + ' of ' + total
+         + '; the rest are hidden from the annotations.'
        : '');
 }
 

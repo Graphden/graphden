@@ -925,7 +925,7 @@
                :target "#branch-chip-btn"
                :check {:kind "manual"}}
               {:title "Compare the branches"
-               :body "Click the branch chip and press [[Δ]] on the tutorial-branch row. The EDITOR becomes the diff: a “Δ vs tutorial-branch” chip appears by the branch chip, changed fns get ± badges in the Explorer (a lens row under the kind chips filters by change type), and opening a changed fn shows its old → new details in the inspector."
+               :body "Click the branch chip and press [[Δ]] on the tutorial-branch row. The EDITOR becomes the diff: a “Δ vs tutorial-branch · 1” chip appears by the branch chip (the number counts the changed fns), changed fns get ± badges in the Explorer (a lens row under the kind chips filters by change type), and opening a changed fn shows its old → new details in the inspector."
                :target "#branch-chip-btn"
                :targets ["#branch-chip-btn" ".branch-popover" ".branch-row-diff[data-diff-source=\"tutorial-branch\"]"]
                :check {:kind "dom" :selector "#gd-diff-chip"}}

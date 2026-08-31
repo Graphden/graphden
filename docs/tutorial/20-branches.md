@@ -143,17 +143,20 @@ the author**.
    show as dimmed ghost rows (click one to switch there), and
    selecting a changed fn shows its exact `old → new` fields in the
    **inspector's diff panel** — with 💬 anchors for line-comments.
-   A `Δ vs feat-tutorial` chip appears by the branch chip; it
-   survives reloads, so "always see my drift vs main" is one click.
+   A `Δ vs feat-tutorial · 3` chip appears by the branch chip —
+   the number is how many fns differ; it survives reloads, so
+   "always see my drift vs main" is one click.
    Under the kind chips the Explorer gains a **diff lens row**:
-   `Δ changed` (show only what differs), `+`/`±`/`−` by change
-   type, `Aa core` (hide edits that touch nothing but names and
-   descriptions) and `fx` (only changes whose EFFECT SET differs —
-   those carry an `effects: pure here · time there` mark, the
-   strongest "this affects behaviour" signal). While any lens
-   filter is on, the chip turns dashed and reads `· filtered` — a
-   reminder that "no badges" means "hidden by the lens", not "no
-   changes". The chip's menu is the review cockpit: **💬 Review &
+   `Δ changed` (show only what differs, auto-expanding the groups
+   that hold them), `+`/`±`/`−` by change type, `Aa core` (hide
+   edits that touch nothing but names and descriptions), `💬 notes`
+   (mark fns that carry anchored review comments — a `💬2` rides
+   next to the badge) and `fx` (only changes whose EFFECT SET
+   differs — those carry an `effects: pure here · time there`
+   mark, the strongest "this affects behaviour" signal). While any
+   lens filter is on, the chip turns dashed and counts
+   `visible/total` (say `· 1/3`) — a reminder that "no badges"
+   means "hidden by the lens", not "no changes". The chip's menu is the review cockpit: **💬 Review &
    comments**, **📤 propose the current branch** (the merge-request
    act) and **⇢ merge** the compared branch in. Exit = click the
    lit `Δ` again (or the chip's `×`).

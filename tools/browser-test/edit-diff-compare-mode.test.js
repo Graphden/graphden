@@ -278,8 +278,9 @@ async function cleanup(page) {
     await page.waitForSelector('#gd-diff-chip', {timeout: 20000});
     const chipText = await page.evaluate(
       () => document.querySelector('.gd-diff-chip-label')?.textContent);
-    assert(chipText === 'Δ vs ' + FEAT,
-           '◐ chip renders the compared branch: ' + JSON.stringify(chipText));
+    assert(new RegExp('^Δ vs ' + FEAT + ' · \\d+$').test(chipText),
+           'chip renders the compared branch + change count: '
+           + JSON.stringify(chipText));
 
     // The probe lives only on feat → a "−1" aggregate should land on a
     // namespace header (root fns land on the pseudo-root, which carries
@@ -337,6 +338,14 @@ async function cleanup(page) {
     assert(effLens.eff && !effLens.cosm,
            'effects lens keeps the effect-change, drops the cosmetic one');
     await page.evaluate(() => window.gdDiffSetLens({effectsOnly: false}));
+
+    // While a lens filter is on the chip counts visible/total.
+    await page.evaluate(() => window.gdDiffSetLens({substantiveOnly: true}));
+    const chipFiltered = await page.evaluate(
+      () => document.querySelector('.gd-diff-chip-label')?.textContent);
+    assert(/ · \d+\/\d+$/.test(chipFiltered),
+           'lens-on chip counts visible/total: ' + JSON.stringify(chipFiltered));
+    await page.evaluate(() => window.gdDiffSetLens({substantiveOnly: false}));
 
     // Root-level fns aggregate onto the pseudo "(primitives)" header —
     // the mode must show SOMETHING before the group is expanded.
@@ -462,6 +471,29 @@ async function cleanup(page) {
     await page.waitForSelector('#branch-chip-btn', {timeout: 15000});
     await page.waitForSelector('#gd-diff-chip', {timeout: 40000});
     assert(true, 'compare mode restored after reload (chip present)');
+
+    // The fresh fetch also pulled the branch's anchored comments — the
+    // fn that got the inspector comment carries a 💬 marker in the tree.
+    await page.fill('#search-input', VAL_FN);
+    await page.waitForFunction((nm) => {
+      const row = Array.from(document.querySelectorAll('#entity-list .entity-item'))
+        .find((e) => e.querySelector('.name')?.textContent.trim() === nm);
+      return !!row?.querySelector('.gd-diff-note-badge');
+    }, VAL_FN, {timeout: 20000});
+    assert(true, 'tree row carries the 💬 anchored-comment marker');
+    // The notes chip toggles the markers off.
+    await page.evaluate(() => {
+      document.querySelector('#gd-diff-lens [data-lens-key="notes"]').click();
+    });
+    await page.waitForFunction(() => {
+      return !document.querySelector('#entity-list .gd-diff-note-badge');
+    }, {timeout: 15000});
+    assert(true, '💬 notes chip hides the markers');
+    await page.evaluate(() => {
+      document.querySelector('#gd-diff-lens [data-lens-key="notes"]').click();
+    });
+    await page.fill('#search-input', '');
+
     // JS click — the Explorer keeps re-rendering around the chip while
     // the freshly reloaded page settles, which can fail Playwright's
     // stability check even though the chip is visible and on top.
@@ -478,6 +510,32 @@ async function cleanup(page) {
     }));
     assert(ringsGone.cards === 0 && ringsGone.args === 0,
            'exit clears card AND arg rings: ' + JSON.stringify(ringsGone));
+
+    // ---- tree DETAIL toggle (outside compare mode): fx marks fns
+    // whose execution carries effects; off by default, per-part toggle.
+    const fxDefault = await page.evaluate(() =>
+      document.querySelectorAll('#entity-list .kind-marker-fx').length);
+    assert(fxDefault === 0, 'fx markers are off by default');
+    await page.evaluate(() => window.toggleTreeDetail('fx'));
+    await page.fill('#search-input', 'current-time-ms');
+    await page.waitForFunction(() => {
+      const row = Array.from(document.querySelectorAll('#entity-list .entity-item'))
+        .find((e) => e.querySelector('.name')?.textContent.trim() === 'current-time-ms');
+      return !!row?.querySelector('.kind-marker-fx');
+    }, {timeout: 20000});
+    const fxTitle = await page.evaluate(() => {
+      const row = Array.from(document.querySelectorAll('#entity-list .entity-item'))
+        .find((e) => e.querySelector('.name')?.textContent.trim() === 'current-time-ms');
+      return row?.querySelector('.kind-marker-fx')?.title;
+    });
+    assert(/time/.test(fxTitle || ''),
+           'fx detail marks the effectful fn with its footprint: '
+           + JSON.stringify(fxTitle));
+    await page.evaluate(() => window.toggleTreeDetail('fx'));
+    await page.waitForFunction(() =>
+      !document.querySelector('#entity-list .kind-marker-fx'), {timeout: 15000});
+    assert(true, 'fx toggle off removes the markers');
+    await page.fill('#search-input', '');
 
     // =================================================================
     // Phase C: anchored comment in the Δ modal.

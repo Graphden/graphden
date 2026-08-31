@@ -8,11 +8,13 @@
    each exercising a different slice of the walk. The public
    read/build helpers are also unit-tested directly."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.test-setup :as setup]
     [graphden.layout.builder-helpers :as bh]
     [graphden.layout.core :as lc]
     [graphden.layout.graph :as lg]
+    [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -525,3 +527,245 @@
           (is (seq (:nodes result))
               "the anonymous ref cycle layouts (truncated) rather than crashing"))
         (finally (sp/close storage))))))
+
+
+;; ============================================================================
+;; Pure build-graph-elements tests — literal entity maps, no storage.
+;;
+;; `build-lookups` accepts the same `{:fns :slots :fn-slots :bindings
+;; :list-items}` tables the storage read produces, so the walker's
+;; contracts can be pinned without a database. Each fixture is the
+;; minimal graph that exercises one documented behaviour.
+;; ============================================================================
+
+(defn- pure-lookups
+  "Build the lookups bundle from a literal entity map — no storage."
+  [ge]
+  (lg/build-lookups
+    (lg/ensure-synth-args
+      (merge {:fns [] :slots [] :fn-slots [] :bindings [] :list-items []}
+             ge))))
+
+
+(deftest build-elements-call-site-tree-test
+  ;; LAYOUT.md § 2.2 — node ids encode the CALL SITE: the root keys by
+  ;; `fn-<id>`; every nested fn keys by (caller-tag, source-arg-id), so
+  ;; the same fn referenced from two bindings becomes two distinct
+  ;; nodes and the graph handed to placement is a TREE.
+  (let [int-id (random-uuid)
+        leaf   (random-uuid)
+        base   (random-uuid)
+        root   (random-uuid)
+        sa     (random-uuid)
+        sb     (random-uuid)
+        lookups (pure-lookups
+                  {:fns [{:id int-id :name "int" :parent-ids []}
+                         {:id leaf :name "pcs-leaf" :parent-ids []
+                          :return-type-fn-id int-id}
+                         {:id base :name "pcs-base" :parent-ids []
+                          :return-type-fn-id int-id}
+                         {:id root :name "pcs-root" :parent-ids [base]}]
+                   :slots [{:id sa :name "a" :type-fn-id int-id :required true}
+                           {:id sb :name "b" :type-fn-id int-id :required true}]
+                   :fn-slots [{:id (random-uuid) :fn-id base :slot-id sa :position 0}
+                              {:id (random-uuid) :fn-id base :slot-id sb :position 1}]
+                   :bindings [{:id (random-uuid) :fn-id root :slot-id sa :ref-fn-id leaf}
+                              {:id (random-uuid) :fn-id root :slot-id sb :ref-fn-id leaf}]})
+        result (lg/build-graph-elements root {} lookups)
+        root-node (first (filter #(= (str "fn-" root) (get-in % [:data :id]))
+                                 (:nodes result)))
+        leaf-nodes (filter #(= (str leaf) (get-in % [:data :originalFnId]))
+                           (:nodes result))]
+    (testing "the root keys by fn-<id>, is flagged, and stacks its ancestor's name"
+      (is (some? root-node))
+      (is (true? (get-in root-node [:data :isRoot])))
+      (is (= "pcs-root" (first (str/split-lines
+                                 (get-in root-node [:data :label]))))))
+    (testing "one node PER CALL SITE — the shared leaf renders twice, scoped to the caller"
+      (is (= 2 (count leaf-nodes)))
+      (is (= 2 (count (distinct (map #(get-in % [:data :id]) leaf-nodes)))))
+      (is (every? #(str/starts-with? (get-in % [:data :id])
+                                     (str "fn-" root "-"))
+                  leaf-nodes)
+          "nested ids fold in the caller tag"))
+    (testing "each call site gets its own edge from the root, named by its slot"
+      (let [ref-edges (filter #(= (str "fn-" root) (get-in % [:data :source]))
+                              (:edges result))]
+        (is (= #{"a" "b"} (set (map #(get-in % [:data :argName]) ref-edges))))
+        (is (= 2 (count (distinct (map #(get-in % [:data :target]) ref-edges)))))))))
+
+
+(deftest type-row-synth-slot-hidden-by-id-test
+  ;; The loader synthesizes a `value` slot on every refinement and an
+  ;; `items` slot on every list type-row (deterministic id —
+  ;; `ids/slot-id owner "value"|"items"`). At the type-row's OWN page
+  ;; the synth slot is hidden (its structure is already carried by the
+  ;; base/element internal edges); the match is on the deterministic
+  ;; ID, not the resolved name.
+  (testing "a refinement root hides its synth `value` slot but still emits the base edge"
+    (let [int-id (random-uuid)
+          pos (random-uuid)
+          vslot (ids/slot-id pos "value")
+          lookups (pure-lookups
+                    {:fns [{:id int-id :name "int" :parent-ids []}
+                           {:id pos :name "pcs-pos" :parent-ids []
+                            :base-fn-id int-id :constraint [:> 0]}]
+                     :slots [{:id vslot :name "value" :type-fn-id int-id
+                              :required true}]
+                     :fn-slots [{:id (random-uuid) :fn-id pos :slot-id vslot
+                                 :position 0}]})
+          result (lg/build-graph-elements pos {} lookups)]
+      (is (not-any? #(= "value" (get-in % [:data :argName])) (:edges result))
+          "no placeholder edge for the synthetic value slot")
+      (is (some #(= (str int-id) (get-in % [:data :originalFnId]))
+                (:nodes result))
+          "the base type still surfaces via the type-row internal edge")))
+  (testing "a slot NAMED items but with a non-deterministic id is NOT hidden"
+    (let [int-id (random-uuid)
+          lst (random-uuid)
+          real-slot (random-uuid)
+          lookups (pure-lookups
+                    {:fns [{:id int-id :name "int" :parent-ids []}
+                           {:id lst :name "pcs-nums" :parent-ids []
+                            :element-fn-id int-id}]
+                     :slots [{:id real-slot :name "items" :type-fn-id int-id
+                              :required true}]
+                     :fn-slots [{:id (random-uuid) :fn-id lst :slot-id real-slot
+                                 :position 0}]})
+          result (lg/build-graph-elements lst {} lookups)]
+      (is (some #(= "items" (get-in % [:data :argName])) (:edges result))
+          "id mismatch ⇒ the slot renders — hiding matches the id, not the name")))
+  (testing "the same slot under its DETERMINISTIC id is hidden"
+    (let [int-id (random-uuid)
+          lst (random-uuid)
+          islot (ids/slot-id lst "items")
+          lookups (pure-lookups
+                    {:fns [{:id int-id :name "int" :parent-ids []}
+                           {:id lst :name "pcs-nums2" :parent-ids []
+                            :element-fn-id int-id}]
+                     :slots [{:id islot :name "items" :type-fn-id int-id
+                              :required true}]
+                     :fn-slots [{:id (random-uuid) :fn-id lst :slot-id islot
+                                 :position 0}]})
+          result (lg/build-graph-elements lst {} lookups)]
+      (is (not-any? #(= "items" (get-in % [:data :argName])) (:edges result))))))
+
+
+(deftest expansion-migrates-binding-into-ancestor-ref-consumer-test
+  ;; β-substitution rendering (process-expanded-fn-impl stages 2+5):
+  ;; the root binds a slot whose OWNER lives inside an ancestor-ref's
+  ;; inheritance chain, so on expansion the binding must "migrate" —
+  ;; its target renders as a child of the CONSUMER card (where the
+  ;; use-site lives), not as a direct child of the root card.
+  (let [int-id (random-uuid)
+        b1 (random-uuid)      ; base-fn owning :handler
+        hs (random-uuid)
+        consumer (random-uuid) ; composed of b1, :handler free
+        b2 (random-uuid)      ; base-fn owning :route
+        rs (random-uuid)
+        wrap (random-uuid)    ; composed of b2, binds :route → consumer
+        root (random-uuid)    ; composed of wrap, binds :handler → target
+        target (random-uuid)
+        lookups (pure-lookups
+                  {:fns [{:id int-id :name "int" :parent-ids []}
+                         {:id b1 :name "pcs-mb1" :parent-ids []
+                          :return-type-fn-id int-id}
+                         {:id consumer :name "pcs-consumer" :parent-ids [b1]}
+                         {:id b2 :name "pcs-mb2" :parent-ids []
+                          :return-type-fn-id int-id}
+                         {:id wrap :name "pcs-wrap" :parent-ids [b2]}
+                         {:id root :name "pcs-mroot" :parent-ids [wrap]}
+                         {:id target :name "pcs-target" :parent-ids []
+                          :return-type-fn-id int-id}]
+                   :slots [{:id hs :name "handler" :type-fn-id int-id :required true}
+                           {:id rs :name "route" :type-fn-id int-id :required true}]
+                   :fn-slots [{:id (random-uuid) :fn-id b1 :slot-id hs :position 0}
+                              {:id (random-uuid) :fn-id b2 :slot-id rs :position 0}]
+                   :bindings [{:id (random-uuid) :fn-id wrap :slot-id rs
+                               :ref-fn-id consumer}
+                              {:id (random-uuid) :fn-id root :slot-id hs
+                               :ref-fn-id target}]})
+        result (lg/build-graph-elements
+                 root
+                 {(str "fn-" root) {:full-depth 1 :partial-fns #{}}}
+                 lookups)
+        root-node-id (str "fn-" root)
+        node-id-of (fn [fid]
+                     (some #(when (= (str fid) (get-in % [:data :originalFnId]))
+                              (get-in % [:data :id]))
+                           (:nodes result)))
+        consumer-node-id (node-id-of consumer)
+        target-node-id (node-id-of target)]
+    (testing "the ancestor-ref consumer renders as a child of the root"
+      (is (some? consumer-node-id))
+      (is (some #(and (= root-node-id (get-in % [:data :source]))
+                      (= consumer-node-id (get-in % [:data :target]))
+                      (= "route" (get-in % [:data :argName])))
+                (:edges result))))
+    (testing "the migrated binding's target hangs off the CONSUMER card"
+      (is (some? target-node-id))
+      (is (some #(and (= consumer-node-id (get-in % [:data :source]))
+                      (= target-node-id (get-in % [:data :target]))
+                      (= "handler" (get-in % [:data :argName])))
+                (:edges result))))
+    (testing "the migrated binding does NOT also render from the root card"
+      (is (not-any? #(and (= root-node-id (get-in % [:data :source]))
+                          (= "handler" (get-in % [:data :argName])))
+                    (:edges result))))))
+
+
+;; ============================================================================
+;; Post-processing transforms — pure, literal inputs
+;; ============================================================================
+
+(deftest annotate-optionals-deep-free-strip-test
+  (testing "nodes listed in :deep-free-by-node get a SORTED :deepFreeArgs
+            vector; every other node passes through untouched"
+    (let [state (atom {:deep-free-by-node {"fn-a" #{"zeta" "alpha"}}})
+          nodes [{:data {:id "fn-a" :type "fn"}}
+                 {:data {:id "fn-b" :type "fn"}}]
+          [a b] (#'lg/annotate-optionals nodes state)]
+      (is (= ["alpha" "zeta"] (get-in a [:data :deepFreeArgs])))
+      (is (= {:data {:id "fn-b" :type "fn"}} b)))))
+
+
+(deftest migrate-captured-edges-test
+  (testing "an edge whose :sourceArgId resolves in the migrations map is
+            re-rooted at the inside consumer; :target/:argName survive"
+    (let [aid (random-uuid)
+          other (random-uuid)
+          edges [{:data {:id "e-1" :source "fn-root" :target "unset-x"
+                         :sourceArgId aid :argName "handler"}}
+                 {:data {:id "e-2" :source "fn-root" :target "fn-leaf"
+                         :sourceArgId other :argName "coll"}}]
+          [m u] (#'lg/migrate-captured-edges edges {aid "fn-root-consumer"})]
+      (is (= "fn-root-consumer" (get-in m [:data :source])))
+      (is (= "e-cap-fn-root-consumer-unset-x" (get-in m [:data :id])))
+      (is (= "unset-x" (get-in m [:data :target])))
+      (is (= "handler" (get-in m [:data :argName])))
+      (is (= (second edges) u) "an unmigrated edge passes through unchanged"))))
+
+
+(deftest dedup-overlays-test
+  (let [slot (random-uuid)
+        a1 (random-uuid)
+        a2 (random-uuid)
+        arg-map {a1 {:id a1 :slot-id slot}
+                 a2 {:id a2 :slot-id slot}}]
+    (testing "duplicate value-overlays on one terminal keep only the deepest consumer"
+      (let [fn-node {:data {:id "fn-r" :type "fn"}}
+            shallow {:data {:id "arg-1" :type "arg" :argId (str a1) :label "5"}}
+            deep    {:data {:id "arg-2" :type "arg" :argId (str a2) :label "5"}}
+            edges [{:data {:id "e1" :source "fn-r" :target "arg-1"}}
+                   {:data {:id "e2" :source "fn-r-x1-y2" :target "arg-2"}}]
+            {:keys [nodes edges]} (#'lg/dedup-overlays
+                                   [fn-node shallow deep] edges arg-map)]
+        (is (= ["fn-r" "arg-2"] (mapv #(get-in % [:data :id]) nodes))
+            "the shallow copy is dropped, the deepest kept")
+        (is (= ["e2"] (mapv #(get-in % [:data :id]) edges))
+            "edges pointing at dropped overlays are dropped with them")))
+    (testing "overlays with no terminal (no argId) are never deduped"
+      (let [n1 {:data {:id "arg-1" :type "arg" :label "5"}}
+            n2 {:data {:id "arg-2" :type "arg" :label "5"}}
+            {:keys [nodes]} (#'lg/dedup-overlays [n1 n2] [] arg-map)]
+        (is (= 2 (count nodes)))))))

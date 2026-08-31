@@ -27,6 +27,11 @@ Details worth knowing:
 - A fn can be several kinds at once (an app's handler may also be
   a service) — it matches *any* focused chip, and its row carries
   a marker per kind (⚙, ▣, 🔒).
+- The trailing `fx marks` chip is a *detail* toggle, not a lens:
+  it marks every fn whose execution carries effects with a small
+  `fx` (hover it for the exact footprint — `io`, `time`, …)
+  without hiding anything. Off by default; flip it off again and
+  the tree returns to normal.
 - **services** and **apps** show a live count; the **apps** chip
   appears only when the deployment has app routing at all
   (Lesson 27).

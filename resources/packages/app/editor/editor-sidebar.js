@@ -519,6 +519,27 @@ function buildNsTree(data) {
 // `level` is the ARIA depth (1-based). The tree is rendered FLAT — a
 // namespace header and its `.ns-children` are siblings, not parent and
 // child — so depth cannot be inferred from the DOM and has to be stated.
+// Optional per-row DETAIL markers — informational only, orthogonal to
+// the kind LENS (which decides visibility). Persisted per browser;
+// each detail is individually toggleable so the tree never carries
+// more than the user asked for. Today: `fx` — mark fns whose
+// execution has an effect footprint (from the /api/types registry).
+let treeDetails = { fx: false };
+try {
+  const raw = JSON.parse(localStorage.getItem('graphden.treeDetails') || 'null');
+  if (raw && typeof raw === 'object') treeDetails = Object.assign(treeDetails, raw);
+} catch (_) { /* malformed pref — defaults */ }
+
+function toggleTreeDetail(key) {
+  treeDetails[key] = !treeDetails[key];
+  try { localStorage.setItem('graphden.treeDetails', JSON.stringify(treeDetails)); } catch (_) {}
+  syncKindFilterBar();
+  // Detail markers are baked into the rows at build time — rebuild.
+  updateEntityList(graphData);
+  announceLens('Effect markers ' + (treeDetails.fx ? 'on' : 'off'));
+}
+window.toggleTreeDetail = toggleTreeDetail;
+
 function buildFnItem(fn, level = 1) {
   const item = document.createElement('div');
   item.className = 'entity-item';
@@ -587,6 +608,21 @@ function buildFnItem(fn, level = 1) {
     m.textContent = '●';
     m.title = label;
     item.appendChild(m);
+  }
+
+  // fx detail — the effect footprint, the strongest "what does running
+  // this touch" signal the registry has. Off by default (most platform
+  // web fns are effectful — a always-on marker would wallpaper the
+  // tree); the `fx` chip next to the kind lens flips it.
+  if (treeDetails.fx && typeof richTypes !== 'undefined' && fn.name) {
+    const effs = richTypes?.[fn.name]?.effects;
+    if (Array.isArray(effs) && effs.length) {
+      const m = document.createElement('span');
+      m.className = 'fn-kind-marker kind-marker-fx';
+      m.textContent = 'fx';
+      m.title = 'Effects: ' + effs.join(', ');
+      item.appendChild(m);
+    }
   }
 
   const nameSpan = document.createElement('span');
@@ -1113,6 +1149,9 @@ function refreshRootNode() {
 // (no tenancy API), + gate the "+ New secret" button on auth. Cheap
 // (≤7 nodes); runs on every render.
 function syncKindFilterBar() {
+  document.querySelectorAll('.tree-detail-toggle').forEach((btn) => {
+    btn.setAttribute('aria-pressed', String(!!treeDetails[btn.dataset.detail]));
+  });
   document.querySelectorAll('#kind-filters .kind-toggle').forEach((btn) => {
     const kind = btn.dataset.kind;
     const active = kind === 'all' ? lensKinds.size === 0 : lensKinds.has(kind);

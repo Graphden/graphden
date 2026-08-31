@@ -45,7 +45,6 @@
                   :partial-tests-stream
                   :partial-execute-trace
                   :partial-debug-catch
-                  :partial-branch-diff
                   :partial-merge-conflicts
                   :partial-execute-result-effects
                   :partial-mismatch-explainer

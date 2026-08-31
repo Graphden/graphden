@@ -2728,17 +2728,16 @@
 
   {:name :_bp-row-diff-title
    :parent :str
-   :args {:parts [{:value "Show what differs between "}
+   :args {:parts [{:value "Compare with "}
                   :_bp-row-name
-                  {:value " and "}
-                  {:as :current-name}]}}
+                  {:value " — the whole editor becomes the diff (click again to exit)"}]}}
 
   {:name :_bp-row-diff-aria
    :parent :str
-   :args {:parts [{:value "Diff "}
-                  :_bp-row-name
-                  {:value " vs "}
-                  {:as :current-name}]}}
+   :args {:parts [{:value "Compare "}
+                  {:as :current-name}
+                  {:value " with "}
+                  :_bp-row-name]}}
 
   {:name :_bp-row-diff-attrs-1
    :parent :assoc
@@ -2961,7 +2960,8 @@
 
   ;; Shared ⋯-menu ITEM CONTENT — every labeled action renders the same
   ;; icon-span + label-span pair; `:icon` / `:label` free args (same
-  ;; pattern as `:_partial-bd-marker`'s `:change`).
+  ;; free-args pattern (icon/label), mirroring the client-side
+  ;; renderer's shared marker builder.
   {:name :_bp-menu-ic-span
    :parent :hiccup
    :args {:tag {:value "span"}
@@ -3159,47 +3159,31 @@
           :attrs :_bp-row-more-attrs
           :children [{:value "⋯"}]}}
 
-  ;; ◐ Compare (compare mode) — turns the whole editor into a diff
-  ;; lens vs this row's branch. Meaningless on the current row (a
-  ;; branch vs itself) → placeholder there.
-  {:name :_bp-row-compare-aria
+  ;; 💬 Review & comments — the MR conversation dialog (threads,
+  ;; suggestions, the collapsible change list). Δ itself now TOGGLES
+  ;; compare mode, so the dialog moved here.
+  {:name :_bp-row-review-aria
    :parent :str
-   :args {:parts [{:value "Compare the current branch with "} :_bp-row-name]}}
+   :args {:parts [{:value "Review and comments for "} :_bp-row-name]}}
 
-  {:name :_bp-row-compare-attrs-1
+  {:name :_bp-row-review-attrs-1
    :parent :assoc
-   :args {:map {:value {:class "branch-row-compare"}}
-          :key {:value :data-compare-branch}
+   :args {:map {:value {:class "branch-row-review"}}
+          :key {:value :data-review-branch}
           :value :_bp-row-name}}
 
-  {:name :_bp-row-compare-attrs-2
+  {:name :_bp-row-review-attrs
    :parent :assoc
-   :args {:map :_bp-row-compare-attrs-1
+   :args {:map :_bp-row-review-attrs-1
           :key {:value :aria-label}
-          :value :_bp-row-compare-aria}}
+          :value :_bp-row-review-aria}}
 
-  {:name :_bp-row-compare-attrs
-   :description "Instant tooltip + hover title. The ACTIVE (`on`) state is client-side — JS stamps it after the swap by matching `gdDiffModeBranch()`."
-   :parent :assoc
-   :args {:map {:parent :assoc
-                :args {:map :_bp-row-compare-attrs-2
-                       :key {:value :data-tip}
-                       :value {:value "Compare"}}}
-          :key {:value :title}
-          :value :_bp-row-compare-aria}}
-
-  {:name :_bp-row-compare-btn-shown
-   :description "Inline ◐ — ENTERING compare mode is just picking the second branch, right next to Δ; clicking the lit one exits."
+  {:name :_bp-row-review-btn
    :parent :hiccup
    :args {:tag {:value "button"}
-          :attrs :_bp-row-compare-attrs
-          :children [{:value "◐"}]}}
-
-  {:name :_bp-row-compare-btn
-   :parent :if
-   :args {:test :_bp-row-on-current?
-          :then :_bp-row-empty-placeholder
-          :else :_bp-row-compare-btn-shown}}
+          :attrs :_bp-row-review-attrs
+          :children [{:parent :_bp-menu-ic-span :args {:icon {:value "💬"}}}
+                     {:parent :_bp-menu-label-span :args {:label {:value "Review & comments"}}}]}}
 
   {:name :_bp-row-more-menu-attrs
    :parent :assoc
@@ -3211,13 +3195,13 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs :_bp-row-more-menu-attrs
-          :children [:_bp-row-propose-btn :_bp-row-protect-btn :_bp-row-policy-btn :_bp-row-delete-btn]}}
+          :children [:_bp-row-review-btn :_bp-row-propose-btn :_bp-row-protect-btn :_bp-row-policy-btn :_bp-row-delete-btn]}}
 
   {:name :_bp-row-actions-span
    :parent :hiccup
    :args {:tag {:value "span"}
           :attrs {:value {:class "branch-row-actions"}}
-          :children [:_bp-row-diff-btn :_bp-row-compare-btn :_bp-row-approve-btn :_bp-row-merge-btn :_bp-row-more-btn :_bp-row-more-menu]}}
+          :children [:_bp-row-diff-btn :_bp-row-approve-btn :_bp-row-merge-btn :_bp-row-more-btn :_bp-row-more-menu]}}
 
   ;; The full per-branch row — assembled via the named children.
   {:name :_bp-row

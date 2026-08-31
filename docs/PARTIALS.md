@@ -359,13 +359,13 @@ branch fn-def. The record-shape type can be a shared alias
 (e.g. `:_error-result-shape` = `{:ok :bool :error :text}` in
 `web/crud/fns.edn`) so several handlers reuse it.
 
-Branch-diff example: `:_diff-err-target-missing` and
+Branch-diff example (historical — the partial itself retired in
+UX-v3, the technique stands): `:_diff-err-target-missing` and
 `:_diff-err-source-missing` both use `:parent :zipmap` —
 adding `:return-type :_error-result-shape` to each turned the
-cond's combined return into a union of precise records, and 4
-allowlisted partial fn-defs (`:_partial-bd-count` /
-`:-empty?` / `:-source-name` / `:-target-name`) type-checked
-cleanly without the allowlist band-aid.
+cond's combined return into a union of precise records, and the
+partial fn-defs downstream type-checked cleanly without an
+allowlist band-aid.
 
 Sweep-search heuristic — find more sites like this:
 
@@ -427,7 +427,6 @@ panels. 32 partials as of 2026-08-18, by consumer surface:
 | `:partial-execute-result-effects`    | GET /partials/execute-result-effects?runtime=&declared=   | editor-execute.js |
 | `:partial-execute-popover`           | GET /partials/execute-popover?fn-id= (auth)               | editor-execute.js (Run-popover shell) |
 | `:partial-branch-popover`            | GET /partials/branch-popover                              | editor-branches.js |
-| `:partial-branch-diff`               | GET /partials/branch-diff?target=&source=                 | editor-branch-diff.js |
 | `:partial-merge-conflicts`           | POST /partials/merge-conflicts                            | editor-branches.js (conflict modal) |
 | `:partial-mismatch-explainer`        | GET /partials/mismatch-explainer?binding-id= + optional item-id   | editor-mismatch-explainer.js |
 | `:partial-provenance`                | GET /partials/provenance?binding-id= + optional item-id (public)  | editor-provenance-popover.js |

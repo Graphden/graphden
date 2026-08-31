@@ -183,11 +183,13 @@ branch — so "deleted on source" surfaces as `added-in-target`. The
 editor therefore labels these sections "Only in <branch>", which is
 always true, instead of "Added in", which sometimes isn't.
 
-The editor's diff modal does NOT render this flat wire shape. It
-renders the GROUPED display model from
+The editor does NOT render this flat wire shape. It renders the
+GROUPED display model from
 `graphden.versioning.storage.diff-view/diff-branches-view` (exposed
-as the `:diff-branches-view` base-fn, consumed only by the
-`/partials/branch-diff` partial):
+as the `:diff-branches-view` base-fn behind
+`GET /api/branches/:ref/diff-view?against=`; the client renderer in
+`editor-diff-mode.js` consumes it for the inspector diff panel and
+the Review dialog's change list):
 
 ```edn
 {:count 3
@@ -232,8 +234,8 @@ core's `case` matcher.
 |------------|-------|--------------|
 | Branch chip | context bar (`#gd-ctxbar` → `#branch-mount`, between the workspace chip and the packages chip) | Shows current branch. Inverted style when off main. |
 | Branch popover | click chip | Branch list + inline create. Per row: Δ diff, ✅ approve (on proposed rows) and ⇢ merge inline (instant `data-tip` tooltips), everything administrative under the row's ⋯ menu with text labels — 📤 propose/withdraw, ⚙ Protection (require-merge + required-approvals 0…3 segmented control + count-self-approval), ⛨ write-policy (tenancy only), × delete; a 🔒 marks write-policy-protected rows, an accented ⋯ marks a proposed / protected row. Propose/approve/require-merge/required-approvals are all open-core |
-| Diff modal | click Δ in row | Diff v2: per-owning-fn groups with `+`/`−`/`±` markers, per-field `old → new` pairs, slot-name labels. Rows are clickable → navigate; the changed args are then ringed `Δ` on the canvas (sessionStorage `graphden.diffFocus` hand-off). Hovering a row/entry reveals 💬 — an ANCHORED comment on that element (`entity-name`+`entity-id` on the `:branch-comment` row; unanchored = the general thread below). A Suggestions section lists proposed CHILD branches of the source (reviewer suggestions) with Δ-view + one-click apply (= merge into the proposal), plus "+ Suggest a change" (fork-and-switch) |
-| Compare mode | inline ◐ on a branch row (lit on the picked one; click again = exit), or "◐ Compare mode" in the diff modal's header | The editor-wide diff lens (`editor-diff-mode.js`): Explorer rows badge +/−/± vs the compared branch (namespace headers aggregate counts), changed fn CARDS and their args ring on the canvas, a `◐ vs <branch>` chip marks the mode. The chip opens the review cockpit — full Δ diff, 📤 propose-current-for-review, ⇢ merge-compared-in, and the TYPE LENS (added / modified / only-there toggles + "substantive only" (hides name/description-only edits) + "effects touched only"; persisted as `graphden.diffLens`). Groups whose effect SET differs between the branches are annotated "effects: pure here · time there" (a full per-branch registry comparison — the registry is branch-scoped; anonymous fns fall back to a structural "effects touched: +x" signal from the changed refs). Fns existing only on the compared branch render as dimmed GHOST ROWS in expanded Explorer groups (click = switch there); collapsed groups keep the aggregate badge. Mode persists across reloads (localStorage). Annotations only — reads/writes stay on the current branch |
+| Compare mode | Δ on a branch row (lit on the picked one; click again = exit) | THE diff surface (`editor-diff-mode.js`) — there is no diff modal. Explorer rows badge +/−/± vs the compared branch (namespace headers aggregate counts), changed fn CARDS and their args ring on the canvas, a `Δ vs <branch>` chip marks the mode (its × exits). A LENS BAR under the Explorer kind-chips filters the tree by change type: "only changed" plus added / modified / only-there toggles, "substantive only" (hides name/description-only edits) and "effects touched only" — persisted as `graphden.diffLens`; any active lens dashes the chip "· filtered". Selecting a changed fn shows an inspector DIFF PANEL: change marker, per-field `old → new` entries (client-rendered from `/api/branches/:ref/diff-view?against=`), an effects-delta chip, 📍 branch-local badge, and per-element 💬 anchored-comment threads inline. Groups whose effect SET differs are annotated "effects: pure here · time there" (full per-branch registry comparison — the registry is branch-scoped; anonymous fns fall back to a structural "effects touched: +x" signal). Fns existing only on the compared branch render as dimmed GHOST ROWS in expanded Explorer groups (click = switch there). The chip menu is the review cockpit — 💬 Review & comments, 📤 propose-current-for-review, ⇢ merge-compared-in. Mode persists across reloads (localStorage). Annotations only — reads/writes stay on the current branch |
+| Review dialog | ⋯ menu → 💬 Review & comments (also the compare-mode chip menu) | The CONVERSATION surface for a branch, framed source → its base: a collapsible "What changed" summary (same grouped renderer, read-only), the general comment thread (anchored orphans get an `[on fn …]` chip), and Suggestions — proposed CHILD branches of the source with a lazy Δ preview + one-click apply (= merge into the proposal), plus "+ Suggest a change" (fork-and-switch) |
 | Conflict modal | merge fails with `:reason :merge-conflict` | Per-entity source/target radio, retry merge with `:conflict-resolutions` |
 | Fn-card ⌛ action | per fn-card row-actions | Version timeline + per-version `(N runs)` badge; click a row → inline-expand its executions (lazy fetch); `switch` button jumps to that version's branch |
 
@@ -404,9 +406,11 @@ delete). `POST|GET|DELETE /api/branches/:ref/comments` (`{body}` to add,
 optionally `{entity-name, entity-id}` to ANCHOR the comment to one diffed
 element — fn / fn-slot / binding / binding-list-item; a half-anchor or
 unknown kind is a 400; `{id}` to delete — the author's own only). The
-editor renders anchored comments as inline threads under their diff
-row/entry (💬), unanchored ones as the general thread below the diff —
-the conversation lives next to the change it reviews.
+editor renders anchored comments as inline threads on their element —
+in compare mode, under the inspector diff panel of the fn they anchor
+to (💬); unanchored ones (and orphans, with an `[on fn …]` chip) as
+the general thread in the branch's 💬 Review dialog — the conversation
+lives next to the change it reviews.
 
 **Editor** (branch popover, open-core): a ✅ **Approve** button on proposed
 rows (with an `n/N` progress badge), a "N proposals awaiting review" inbox
@@ -624,8 +628,8 @@ Implementation:
   throws `:types/branch-local-widening-forbidden` on widening.
 - Editor: 📍 strip on the fn-card (walks parent-ids via
   `lookups.fnMap` + the diff payload's `source-version` as a
-  seed for cross-branch fns); 📍 badge + dimmed row in the
-  branch-diff modal.
+  seed for cross-branch fns); 📍 badge + dimmed rows in the
+  inspector diff panel and the Review dialog's change list.
 - Merge response surfaces a `:skipped-as-branch-local` list with
   entity-ids (see "Merge audit log" below) so API consumers can
   see what didn't propagate.
@@ -651,8 +655,8 @@ their origin branch:
 The shape is forward-compatible: new categories
 (`:conflict-deferred`, `:protected-by-trait`) can land alongside
 `:branch-local` without breaking existing consumers. The editor's
-post-merge alert summarises the skipped count; the diff modal
-keeps its inline 📍 badge on the same rows.
+post-merge alert summarises the skipped count; the inspector diff
+panel keeps its inline 📍 badge on the same rows.
 
 ## Known gaps
 

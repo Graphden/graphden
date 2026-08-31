@@ -61,27 +61,23 @@ const {
     assert(mainValue.includes('main version'),
       'main still reads "main version" after the branch edit');
     assert(await clickTourButton(page, 'Next'), 'lesson 20 back-on-main Next');
-    await waitTourTitle(page, 'Open the diff', 150000);
-    // Δ on the tutorial-branch row → diff modal with the fn's changed row.
+    await waitTourTitle(page, 'Compare the branches', 150000);
+    // Δ on the tutorial-branch row → COMPARE MODE (UX-v3): the Δ chip
+    // appears by the branch chip and the tour's dom-check passes.
     await waitClickable(page, '#branch-chip-btn');
     await page.evaluate(() => document.getElementById('branch-chip-btn').click());
     await page.waitForSelector('.branch-row-diff[data-diff-source="tutorial-branch"]',
       {timeout: 15000});
     await page.evaluate(() => document.querySelector(
       '.branch-row-diff[data-diff-source="tutorial-branch"]').click());
-    await page.waitForFunction(() => {
-      const m = document.querySelector('.branch-diff-modal');
-      // The loaded diff lists the modified BINDING row (by entity id) with a
-      // difference count — the fn's NAME does not appear in the row.
-      return m && !m.classList.contains('hidden')
-        && !m.querySelector('.branch-diff-loading')
-        && /difference/.test(m.textContent || '');
-    }, null, {timeout: 60000, polling: 200});
-    await waitTourTitle(page, 'Read it, then close it', 150000);
+    await page.waitForSelector('#gd-diff-chip', {timeout: 60000});
+    await waitTourTitle(page, 'Read it, then exit', 150000);
     // The lesson stops short of merging on purpose: a branch merged into
     // main becomes part of main's history (merge is by-reference) and can
     // no longer be deleted — cleanup would leave it behind forever.
-    await page.evaluate(() => document.querySelector('.branch-diff-close').click());
+    await page.evaluate(() => document.querySelector('.gd-diff-chip-off').click());
+    await page.waitForFunction(() => !document.getElementById('gd-diff-chip'),
+      null, {timeout: 15000});
     await waitTourTitle(page, "That's branching", 150000);
     await finishAndDelete(page);
     // The cleanup must have removed the lesson's BRANCH too, not just the fn.
@@ -90,7 +86,7 @@ const {
       .map((b) => b.name);
     assert(!names.includes('tutorial-branch'),
       'tour cleanup deleted the lesson branch');
-    console.log('  lesson 20: walked + cleaned (branch too, diff opened)');
+    console.log('  lesson 20: walked + cleaned (branch too, compare mode entered)');
 
     // ---------- lesson 21 — review: refusal → propose → approve → land ----------
     await page.goto(BASE + '/?tutorial=21');

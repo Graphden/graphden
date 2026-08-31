@@ -210,11 +210,6 @@
    :parent :get-auth-required
    :args {:path "/partials/type-errors" :handler :_partial-type-errors-handler}}
 
-  {:name :partial-branch-diff
-   :description "GET /partials/branch-diff?target=X&source=Y — branch-diff body hiccup (3 sections grouped by `:change` + branch-local annotations). JS in `editor-branch-diff.js` owns the modal chrome; this fills the body mount."
-   :parent :get-auth-required
-   :args {:path "/partials/branch-diff" :handler :_partial-branch-diff-handler}}
-
   {:name :partial-merge-conflicts
    :description "POST /partials/merge-conflicts — body is the `{conflicts, source, target}` JSON the failed merge returned; renders the resolution card hiccup (header + help + batch toolbar + per-conflict source/target radios + version previews + Cancel/Apply). Renders the POSTed conflicts (no re-detection — mirrors `:partial-execute-result-inline`). JS in `editor-branches.js` owns the overlay chrome + radio/apply lifecycle."
    :parent :post

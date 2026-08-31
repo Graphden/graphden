@@ -86,8 +86,8 @@ On the hub this creates (or re-snapshots) the branch `push/my-feature`:
   its canonical identity rather than duplicated.
 
 Review happens on the hub with the tools you already know: open the
-branch popover, **Δ diff** `push/my-feature` against main, resolve
-conflicts if the modal asks, **⇢ merge**.
+branch popover, **Δ compare** `push/my-feature` against main, resolve
+conflicts if the merge asks, **⇢ merge**.
 
 ## 4. Pull the hub's main back down
 
@@ -120,7 +120,7 @@ with two buttons:
 - **⇡ Push** snapshots the branch you are currently on to the hub as
   `push/<branch>` — the same owner-protected review branch §3 creates;
 - **⇣ Pull** lands the hub's main locally as `hub/main` and refreshes
-  the branch list, so the next click is the **Δ diff** / **⇢ merge**
+  the branch list, so the next click is the **Δ compare** / **⇢ merge**
   you already know.
 
 The token stays on the server (the browser never sees it), and the hub

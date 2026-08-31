@@ -634,13 +634,12 @@ function wireBranchPopoverHandlers(popover, current) {
     });
   });
 
-  // ◐ compare mode — the editor-wide diff lens (editor-diff-mode.js).
-  // Entering = picking the second branch; the picked row's ◐ is lit,
-  // and clicking it again clears the pick (exits).
+    // Δ — TOGGLES compare mode (UX-v3: picking the branch IS entering
+  // the diff; the row's Δ is lit while comparing, click again exits).
   const comparedNow = (typeof gdDiffModeBranch === 'function')
     ? gdDiffModeBranch() : null;
-  popover.querySelectorAll('.branch-row-compare').forEach((btn) => {
-    const mine = btn.getAttribute('data-compare-branch');
+  popover.querySelectorAll('.branch-row-diff').forEach((btn) => {
+    const mine = btn.getAttribute('data-diff-source');
     if (comparedNow && mine === comparedNow) {
       btn.classList.add('on');
       btn.setAttribute('data-tip', 'Stop comparing');
@@ -656,12 +655,14 @@ function wireBranchPopoverHandlers(popover, current) {
     });
   });
 
-  popover.querySelectorAll('.branch-row-diff').forEach((btn) => {
+  // 💬 in the ⋯ menu — the review conversation dialog.
+  popover.querySelectorAll('.branch-row-review').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const source = btn.getAttribute('data-diff-source');
-      if (typeof showBranchDiff === 'function') {
-        showBranchDiff(current, source, branchRefFrom(btn, source));
+      const source = btn.getAttribute('data-review-branch');
+      closeBranchPopover();
+      if (typeof showReviewDialog === 'function') {
+        showReviewDialog(source, branchRefFrom(btn, source));
       }
     });
   });
@@ -1215,7 +1216,7 @@ async function mergeBranchInto(sourceName, targetName, conflictResolutions, targ
   // graphden.versioning.branch-local). The alert is intentionally
   // synchronous + simple: the user just clicked "Merge", we want
   // them to KNOW these entries didn't propagate before the page
-  // reloads. The diff modal's 📍 badge already showed them ahead
+  // reloads. The diff's 📍 badge already showed them ahead
   // of time; this is the post-merge confirmation.
   const skipped = body?.skipped?.['branch-local'] || [];
   if (skipped.length > 0) {
@@ -1224,7 +1225,7 @@ async function mergeBranchInto(sourceName, targetName, conflictResolutions, targ
     alert(skipped.length + ' branch-local fn'
           + (skipped.length === 1 ? '' : 's')
           + ' did NOT propagate to ' + targetName + ': ' + names
-          + '. (Marked with 📍 in the branch-diff modal.)');
+          + '. (Marked with 📍 in the diff.)');
   }
   // Success — drop everything and reload so caches refresh and the
   // editor picks up the new resolved view on the current branch.

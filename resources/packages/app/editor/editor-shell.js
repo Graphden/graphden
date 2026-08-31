@@ -229,8 +229,8 @@
   window.gdShellGoHome = gdShellGoHome;
 
   // (Review surface retired: comparing a branch against main is the per-branch
-  // diff button in the branch switcher — `.branch-row-diff` → showBranchDiff in
-  // editor-branches.js — not a separate rail surface.)
+  // Δ toggle in the branch switcher — `.branch-row-diff` → compare mode in
+  // editor-diff-mode.js — not a separate rail surface.)
 
   // Toggle the compact-cards mode, then re-lay-out so the graph reflows to the
   // new card heights (renderGraph re-measures the overlays).
@@ -436,6 +436,13 @@
     el.innerHTML = head + tabbar
       + '<div id="gd-insp-tabbody" class="gd-insp-scroll" role="tabpanel"'
       + ' aria-labelledby="gd-insp-tab-' + inspTab + '" tabindex="0"></div>';
+
+    // Compare mode's per-fn diff panel (entries old→new + anchored
+    // threads) slots in right under the head — the inspector IS where
+    // the selected node's change details live now (UX-v3).
+    if (typeof gdDiffRenderInspectorSection === 'function') {
+      gdDiffRenderInspectorSection(el, fnId);
+    }
 
     const selectTab = (id, moveFocus) => {
       if (inspTab !== id) {

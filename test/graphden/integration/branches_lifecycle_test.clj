@@ -675,11 +675,10 @@
                 (str "main view stays pure — got " main-effects))))))))
 
 
-(deftest diff-view-endpoint-and-partial-smoke-test
-  ;; The grouped diff-v2 surfaces: the JSON endpoint the compare mode
-  ;; consumes, and the server-rendered modal partial. Both previously
-  ;; red only through the browser e2e — a hiccup typo in the ~640-line
-  ;; partial chain would 500 in prod with no unit signal.
+(deftest diff-view-endpoint-smoke-test
+  ;; The grouped diff-v2 JSON — since UX-v3 the ONLY diff wire: compare
+  ;; mode, the review dialog's change list and the suggestion previews
+  ;; all render client-side from it (the server partial is retired).
   (let [run-id (str "-" (System/currentTimeMillis))
         feat (str "dvep" run-id)
         probe (str "dvep-fn" run-id)]
@@ -716,23 +715,12 @@
                                         :query "against=no-such-branch-xyz"}))]
         (is (false? (:ok body)))))
 
-    (testing "GET /partials/branch-diff renders the diff-v2 body hiccup"
+    (testing "the retired partial route is really gone (UX-v3)"
       (let [resp (dispatch {:method :get
                             :path "/partials/branch-diff"
                             :query (str "target=main&source=" feat)})]
-        (is (= 200 (:status resp)))
-        (is (str/includes? (:body resp) "branch-diff-body-content"))
-        (is (str/includes? (:body resp) "branch-diff-row")
-            "the probe renders as a group row")
-        (is (str/includes? (:body resp) "data-anchor-id")
-            "rows carry the anchored-comment hooks")))
-
-    (testing "partial with an unknown branch renders the error div"
-      (let [resp (dispatch {:method :get
-                            :path "/partials/branch-diff"
-                            :query "target=main&source=no-such-branch-xyz"})]
-        (is (= 200 (:status resp)))
-        (is (str/includes? (:body resp) "branch-diff-error"))))))
+        (is (not= 200 (:status resp))
+            "no half-alive server renderer behind the client one")))))
 
 
 (deftest rich-types-slice-propagation-on-merge-test

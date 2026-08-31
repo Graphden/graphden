@@ -46,19 +46,22 @@ like GitHub dismissing stale reviews on a new push.
   and turns green when the requirement is met.
 - **⇢ Merge** now lands. Before the requirement is met it answers
   409 with the shortfall.
-- Every proposal carries a **comment thread** under its Δ diff —
-  open the diff and the conversation sits right below the change.
-- A comment can be **anchored to one element** of the diff: hover a
-  diff row (or one of its arg entries) and click 💬 — the note pins
-  to exactly that fn / arg / list item, GitHub-line-comment style.
-  Anchored threads render inline under their row; if the element
-  later drops out of the diff, the thread falls back to the general
-  conversation with a context chip.
-- The diff also lists **Suggestions** — branches forked *off the
-  proposal itself* and proposed back into it. A reviewer clicks
+- Every proposal carries a **comment thread** in its **💬 Review &
+  comments** dialog (the row's ⋯ menu, or the Δ chip's cockpit) —
+  alongside a collapsible "What changed" list and the suggestions.
+- A comment can be **anchored to one element**: click 💬 on a change
+  row in the dialog — or right in the **inspector's diff panel**
+  while comparing — and the note pins to exactly that fn / arg /
+  list item, GitHub-line-comment style. Anchored threads render
+  inline under their row; if the element later drops out of the
+  diff, the thread falls back to the general conversation with a
+  context chip.
+- The Review dialog also lists **Suggestions** — branches forked
+  *off the proposal itself* and proposed back into it. A reviewer clicks
   **+ Suggest a change**, lands on a fresh `suggest-…` branch, edits
   with the full editor, and proposes it (`⋯` → 📤). The author then
-  sees it under the proposal's Δ diff and applies it with one click
+  sees it in the proposal's Review dialog — with a collapsible Δ
+  preview of what it changes — and applies it with one click
   (`⇢ apply` — an ordinary merge into the proposal, which also
   dismisses now-stale approvals). No new machinery: a suggestion is
   just the branch/propose/merge cycle one level down.

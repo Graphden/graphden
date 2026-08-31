@@ -924,15 +924,15 @@
                :body "branch-demo reads “main version” again — your edit is a version row that belongs to tutorial-branch alone. Time to compare the two sides properly."
                :target "#branch-chip-btn"
                :check {:kind "manual"}}
-              {:title "Open the diff"
-               :body "Click the branch chip and press [[Δ]] on the tutorial-branch row. The diff modal lists every entity that resolves differently between the two branches — here one modified row: the binding you changed. (A comment box sits under it — that is where review conversations live.)"
+              {:title "Compare the branches"
+               :body "Click the branch chip and press [[Δ]] on the tutorial-branch row. The EDITOR becomes the diff: a “Δ vs tutorial-branch” chip appears by the branch chip, changed fns get ± badges in the Explorer (a lens row under the kind chips filters by change type), and opening a changed fn shows its old → new details in the inspector."
                :target "#branch-chip-btn"
                :targets ["#branch-chip-btn" ".branch-popover" ".branch-row-diff[data-diff-source=\"tutorial-branch\"]"]
-               :check {:kind "dom" :selector ".branch-diff-modal:not(.hidden) .branch-diff-card"}}
-              {:title "Read it, then close it"
-               :body "That row is the whole difference between the branches — exactly what a reviewer would read. Close the diff ([[×]]). (Pressing [[⇢]] on the row would fold the branch into main; the tour leaves that unclicked — a merged branch becomes part of main's history and could no longer be cleaned up at the end.)"
-               :target ".branch-diff-close"
-               :check {:kind "dom-absent" :selector ".branch-diff-modal:not(.hidden)"}}
+               :check {:kind "dom" :selector "#gd-diff-chip"}}
+              {:title "Read it, then exit"
+               :body "branch-demo carries a ± in the tree — that badge IS the whole difference between the branches. Exit compare mode with the chip's [[×]]. (Pressing [[⇢]] on the row would fold the branch into main; the tour leaves that unclicked — a merged branch becomes part of main's history and could no longer be cleaned up at the end. The row's ⋯ menu also holds 💬 Review & comments — the conversation dialog.)"
+               :target ".gd-diff-chip-off"
+               :check {:kind "dom-absent" :selector "#gd-diff-chip"}}
               {:title "That's branching"
                :body "Fork, edit in isolation, compare — and merge with [[⇢]] when a branch has earned it. The branch row also carries a review workflow: ✅ approve inline, with 📤 propose and ⚙ protection under the row's [[⋯]] menu — the NEXT tour lesson (20 · Review) walks that whole cycle, refusal included. The written lesson 20 adds protected branches and branch-local fns (runtime config that deliberately never merges). Click [[Finish]] to clean up (the branch goes too) or keep it."
                :target nil
@@ -1013,7 +1013,7 @@
                :targets ["#branch-chip-btn" ".branch-popover"]
                :check {:kind "on-branch" :name "main"}}
               {:title "That's review"
-               :body "Refuse, propose, approve — with the rule on the target, exactly the pull-request shape. Editing a proposed branch dismisses its now-stale approvals (like GitHub dismissing stale reviews), every proposal carries a comment thread under its Δ diff, and ⚙ can also demand “push only via merge” (no direct writes at all). The written lesson 20 covers all of it. Click [[Finish]] to clean up — review-demo and both branches go."
+               :body "Refuse, propose, approve — with the rule on the target, exactly the pull-request shape. Editing a proposed branch dismisses its now-stale approvals (like GitHub dismissing stale reviews), every proposal carries a comment thread in its 💬 Review dialog (the row's ⋯ menu), and ⚙ can also demand “push only via merge” (no direct writes at all). The written lesson 20 covers all of it. Click [[Finish]] to clean up — review-demo and both branches go."
                :target nil
                :check {:kind "manual"}}]}
             {:id "22"

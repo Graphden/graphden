@@ -213,26 +213,27 @@ async function openServicePopover(page, fnHash) {
       PROBE_FN_NAME,
       {timeout: 5000, polling: 100}).catch(() => {});
 
-    // Drive the modal directly — UI flow goes through the branch-popover
-    // Δ button; calling the public window helper exercises the same
-    // renderer with fewer click-fragile steps.
-    // Fire-and-return for the same reason as above. The modal shell mounts
-    // instantly in a "Loading diff…" state and fills in after the fetch, so
-    // the real confirmation is the loading class clearing, not the modal
-    // appearing.
-    await page.evaluate(({target, source}) => {
-      if (typeof showBranchDiff === 'function') {
-        showBranchDiff(target, source);
+    // Drive the REVIEW dialog directly (UX-v3: Δ toggles compare mode;
+    // the 📍 badge now lives in the dialog's client-rendered change
+    // list and the inspector's diff panel — this asserts the former).
+    await page.evaluate((source) => {
+      if (typeof showReviewDialog === 'function') {
+        showReviewDialog(source);
       }
-    }, { target: 'main', source: FEAT_BRANCH });
+    }, FEAT_BRANCH);
     await page.waitForFunction(
       () => {
         const m = document.querySelector('.branch-diff-modal');
         return m && !m.classList.contains('hidden')
-               && !m.querySelector('.branch-diff-loading');
+               && !m.querySelector('.branch-diff-loading')
+               && m.querySelector('.bd-review-changes');
       },
       null,
       {timeout: 30000, polling: 100});
+    await page.evaluate(() => {
+      const d = document.querySelector('.bd-review-changes');
+      if (d && !d.open) d.open = true;
+    });
 
     const modalState = await page.evaluate((probeName) => {
       const modal = document.querySelector('.branch-diff-modal');
@@ -262,7 +263,7 @@ async function openServicePopover(page, fnHash) {
     }, PROBE_FN_NAME);
 
     assert(modalState.open,
-           'diff modal opened via showBranchDiff(main, ' + FEAT_BRANCH + ')');
+           'review dialog opened via showReviewDialog(' + FEAT_BRANCH + ')');
     assert(modalState.rowCount >= 1,
            'diff modal lists at least one entry (' + modalState.rowCount + ')');
     assert(modalState.probeRowFound,
@@ -275,7 +276,7 @@ async function openServicePopover(page, fnHash) {
            'badge text mentions "branch-local" (got '
            + JSON.stringify(modalState.probeBadgeText) + ')');
 
-    console.log('✓ branch-local UI smoke verified — picker + diff badge');
+    console.log('✓ branch-local UI smoke verified — picker + review-dialog badge');
   } catch (e) {
     process.exitCode = 1;
     console.error('✗ test failed:', e.message);

@@ -120,11 +120,13 @@ async function readRow(page, name) {
     assert(approved, 'after ✅ approve, badge reads 1/1 and is marked satisfied');
 
     // ================================================================
-    // Phase D: comment thread under the Δ diff — renders, and an HTML
-    // body is shown as TEXT (no injected element).
+    // Phase D: comment thread in the 💬 Review dialog (UX-v3: Δ now
+    // toggles compare mode; comments moved to ⋯ → Review & comments) —
+    // renders, and an HTML body is shown as TEXT (no injected element).
     // ================================================================
     await openBranchPopover(page);
-    await page.click('.branch-row[data-branch-name="' + SRC + '"] .branch-row-diff');
+    await page.click('.branch-row[data-branch-name="' + SRC + '"] .branch-row-more');
+    await page.click('.branch-row-more-menu.open .branch-row-review');
     await page.waitForSelector('.branch-comments', {timeout: 45000});
     const XSS = 'looks good <b>NOPE</b>';
     await page.fill('.branch-comment-input', XSS);

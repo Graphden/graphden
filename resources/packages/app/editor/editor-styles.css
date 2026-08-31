@@ -874,12 +874,8 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 }
 .branch-row-merge:hover,
 .branch-row-diff:hover,
-.branch-row-compare:hover,
 .branch-row-approve:hover,
 .branch-row-more:hover { color: var(--fg); background: var(--bg); }
-/* ◐ — the compare-mode toggle; filled when this row IS the compared
-   branch (clicking it again exits — "сбросить выбор"). */
-.branch-row-compare.on { color: var(--warning-fg); }
 /* Accent dot on ⋯ when the row carries a proposal / active protection
    (the states that used to color the now-tucked-away 📤/⚙). */
 .branch-row-more.on { color: var(--accent); }
@@ -940,7 +936,51 @@ body.gd-tenancy .branch-row-more-menu .branch-row-policy { display: flex; }
 body.gd-tenancy.gd-no-write .branch-row-more-menu .branch-row-policy { display: none; }
 .branch-row-more-menu .branch-row-delete:hover { color: var(--error-fg-strong); }
 
-/* ◐ compare-mode chip (next to the branch chip) + Explorer badges.
+/* Sidebar DIFF LENS bar — compare mode's second chip row under the
+   kind-lens chips; same .kind-toggle skin. */
+#gd-diff-lens {
+  display: flex; flex-wrap: wrap; gap: 2px;
+  padding: 2px 0 0;
+}
+#gd-diff-lens .gd-diff-lens-chip[aria-pressed="true"] {
+  background: var(--warning-fg); color: var(--bg);
+  border-color: var(--warning-fg);
+}
+.gd-diff-lens-hidden { display: none !important; }
+
+/* Δ lit on the row being compared — same accent family as the chip. */
+.branch-row-diff.on { color: var(--warning-fg); }
+
+/* Inspector diff panel — the selected fn's change details + threads. */
+.gd-diff-insp {
+  margin: 6px 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--light-border);
+  border-left: 2px solid var(--warning-fg);
+  border-radius: 3px;
+  font-size: 0.6875rem;
+}
+.gd-diff-insp-head {
+  display: flex; align-items: baseline; gap: 6px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.gd-diff-insp .branch-diff-entries { padding-left: 6px; }
+
+/* Review dialog extras — the collapsible change list + per-suggestion
+   Δ previews. */
+.branch-diff-header-into { color: var(--muted-fg); font-weight: 400; }
+.bd-review-changes > summary,
+.bd-sugg-preview > summary {
+  cursor: pointer; font-size: 0.6875rem; color: var(--muted-fg);
+  padding: 4px 0;
+  user-select: none;
+}
+.bd-review-changes[open] > summary { color: var(--fg); font-weight: 600; }
+.bd-sugg-preview { margin: 0 0 6px 12px; }
+.bd-sugg-preview .branch-diff-row { margin-bottom: 4px; }
+
+/* Δ compare-mode chip (next to the branch chip) + Explorer badges.
    The editor-wide diff lens: gd-diff-badge marks a changed fn row,
    gd-diff-ns-badge aggregates counts onto a namespace header. */
 .gd-diff-chip {

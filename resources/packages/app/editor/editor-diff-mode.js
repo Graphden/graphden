@@ -1,12 +1,14 @@
-// Editor COMPARE MODE (diff v2) — the editor-wide diff lens. Pick a
-// branch to compare the CURRENT branch against (⋯ → "◐ Compare…" in
-// the branch popover, persisted per browser like the branch choice)
-// and the whole editor annotates itself: the Explorer marks every
-// changed fn (+ / − / ± with counts aggregated onto namespace rows),
-// opening a changed fn rings its changed args on the canvas
-// (editor-overlay-arg.js consults `gdDiffSlotsForFn`), and a "◐ vs
-// <branch>" chip next to the branch chip shows the mode is on (click
-// it for the full diff modal — comments, suggestions — ×  to exit).
+// Editor COMPARE MODE (diff v2) — THE diff surface. Pick a branch to
+// compare the CURRENT branch against (the Δ on a branch-popover row,
+// persisted per browser like the branch choice) and the whole editor
+// annotates itself: the Explorer marks every changed fn (+ / − / ±
+// with counts aggregated onto namespace rows) and gains a lens bar
+// filtering by change type, opening a changed fn rings its changed
+// args on the canvas (editor-overlay-arg.js consults
+// `gdDiffSlotsForFn`) and shows an inspector diff panel (old → new
+// fields + anchored 💬 threads), and a "Δ vs <branch>" chip next to
+// the branch chip shows the mode is on (click it for the review
+// cockpit — Review & comments / propose / merge — × to exit).
 //
 // Data: GET /api/branches/:current/diff-view?against=<other> — the
 // grouped `:diff-branches-view` payload. Direction: target = the
@@ -22,7 +24,8 @@ const GD_DIFF_MODE_KEY = 'graphden.diffAgainst';
 // affects behaviour) count at all. Persisted beside the branch choice.
 const GD_DIFF_LENS_KEY = 'graphden.diffLens';
 let _gdDiffLens = { added: true, missing: true, modified: true,
-                    substantiveOnly: false, effectsOnly: false };
+                    substantiveOnly: false, effectsOnly: false,
+                    changedOnly: false };
 try {
   const raw = JSON.parse(localStorage.getItem(GD_DIFF_LENS_KEY) || 'null');
   if (raw && typeof raw === 'object') _gdDiffLens = Object.assign(_gdDiffLens, raw);
@@ -34,6 +37,8 @@ function gdDiffLensFiltering() {
   const l = _gdDiffLens;
   return !l.added || !l.missing || !l.modified || l.substantiveOnly
     || l.effectsOnly;
+  // (changedOnly narrows what the TREE shows, but hides nothing that
+  // changed — it is not a "some changes are hidden" state.)
 }
 
 function gdDiffSetLens(patch) {
@@ -238,6 +243,157 @@ async function gdDiffModeLoadEffects(mode) {
   gdDiffModeDecorateSidebar();
 }
 
+// --- client renderer of diff groups ----------------------------------------
+
+// The DOM the retired server partial used to emit, now built here so
+// three surfaces share it: the review dialog's "What changed" list,
+// per-suggestion Δ previews, and the inspector's diff panel. Same
+// classes → same CSS; rows/entries carry the data-anchor-* hooks the
+// thread attacher binds against.
+function gdDiffMarkerEl(change) {
+  const m = document.createElement('span');
+  m.setAttribute('aria-hidden', 'true');
+  const cls = change === 'added-in-source' ? 'bd-added'
+    : change === 'added-in-target' ? 'bd-removed' : 'bd-modified';
+  m.className = 'branch-diff-marker ' + cls;
+  m.textContent = change === 'added-in-source' ? '+'
+    : change === 'added-in-target' ? '−' : '±';
+  return m;
+}
+
+function gdDiffChangeClass(change) {
+  return change === 'added-in-source' ? 'bd-added'
+    : change === 'added-in-target' ? 'bd-removed' : 'bd-modified';
+}
+
+function gdDiffEntryLabel(e) {
+  const slot = e['slot-name'] || '?';
+  switch (e['entity-name']) {
+    case 'fn': return 'fn';
+    case 'fn-slot': return 'slot ' + slot;
+    case 'binding': return 'arg ' + slot;
+    case 'resource-override': return 'asset';
+    default: return 'item ' + (e.position ?? '?') + ' of ' + slot;
+  }
+}
+
+function gdDiffRenderEntry(e, opts) {
+  const row = document.createElement('div');
+  row.className = 'branch-diff-entry ' + gdDiffChangeClass(e.change);
+  row.setAttribute('data-anchor-name', e['entity-name']);
+  row.setAttribute('data-anchor-id', e['entity-id']);
+  if (e['slot-name']) row.setAttribute('data-slot-name', e['slot-name']);
+  row.appendChild(gdDiffMarkerEl(e.change));
+  const label = document.createElement('span');
+  label.className = 'branch-diff-entry-label';
+  label.textContent = gdDiffEntryLabel(e);
+  row.appendChild(label);
+  if (Array.isArray(e.fields) && e.fields.length) {
+    const fields = document.createElement('div');
+    fields.className = 'branch-diff-fields';
+    for (const f of e.fields) {
+      const fr = document.createElement('div');
+      fr.className = 'branch-diff-field';
+      if (f.field !== 'value') {   // "arg value — value:" read doubled
+        const fname = document.createElement('span');
+        fname.className = 'branch-diff-field-name';
+        fname.textContent = f.field;
+        fr.appendChild(fname);
+      }
+      const oldV = document.createElement('span');
+      oldV.className = 'bd-old';
+      oldV.textContent = f.target ?? '∅';
+      fr.appendChild(oldV);
+      const arrow = document.createElement('span');
+      arrow.className = 'bd-arrow';
+      arrow.setAttribute('aria-hidden', 'true');
+      arrow.textContent = '→';
+      fr.appendChild(arrow);
+      const newV = document.createElement('span');
+      newV.className = 'bd-new';
+      newV.textContent = f.source ?? '∅';
+      fr.appendChild(newV);
+      fields.appendChild(fr);
+    }
+    row.appendChild(fields);
+  } else {
+    const pv = document.createElement('span');
+    pv.className = 'branch-diff-entry-preview';
+    pv.textContent = e.preview || '';
+    row.appendChild(pv);
+  }
+  if (opts.comments !== false) {
+    row.appendChild(gdDiffCommentBtnEl(e['entity-name'], e['entity-id']));
+  }
+  return row;
+}
+
+function gdDiffCommentBtnEl(anchorName, anchorId) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'branch-diff-comment-btn';
+  b.title = 'Comment on this element';
+  b.setAttribute('aria-label', 'Comment on this element');
+  b.setAttribute('data-anchor-name', anchorName);
+  b.setAttribute('data-anchor-id', anchorId);
+  b.textContent = '💬';
+  return b;
+}
+
+// One group → one `.branch-diff-row`. `opts`:
+//   interactive: rows navigate on click (default true — dialog passes
+//                false; navigation belongs to compare mode)
+//   comments:    render 💬 anchors (default true; suggestion previews
+//                pass false)
+//   entriesOnly: skip the group head (the inspector panel — the fn is
+//                already the panel's subject)
+function gdDiffRenderGroup(g, opts) {
+  opts = opts || {};
+  const keep = (g.entries || []).filter((e) =>
+    e['entity-name'] !== 'fn' || e.fields?.length || e.preview);
+  const entries = document.createElement('div');
+  entries.className = 'branch-diff-entries';
+  keep.forEach((e) => entries.appendChild(gdDiffRenderEntry(e, opts)));
+  if (opts.entriesOnly) return entries;
+
+  const row = document.createElement('div');
+  row.className = 'branch-diff-row ' + gdDiffChangeClass(g.change)
+    + (g['branch-local?'] ? ' branch-diff-row-local' : '');
+  if (g['fn-id']) {
+    row.setAttribute('data-diff-fn-id', g['fn-id']);
+    row.setAttribute('data-diff-change', g.change);
+    row.setAttribute('data-diff-fn-name', g['fn-name'] || '');
+    row.setAttribute('data-anchor-name', 'fn');
+    row.setAttribute('data-anchor-id', g['fn-id']);
+  }
+  const head = document.createElement('div');
+  head.className = 'branch-diff-row-head';
+  head.appendChild(gdDiffMarkerEl(g.change));
+  const name = document.createElement('strong');
+  name.className = 'branch-diff-fn-name';
+  name.textContent = g['fn-label'] || '?';
+  head.appendChild(name);
+  if (g['branch-local?']) {
+    const badge = document.createElement('span');
+    badge.className = 'branch-diff-row-local-badge';
+    badge.title = "Won't propagate on merge — branch-local fn";
+    badge.textContent = '📍 branch-local';
+    head.appendChild(badge);
+  }
+  if (opts.comments !== false && g['fn-id']) {
+    head.appendChild(gdDiffCommentBtnEl('fn', g['fn-id']));
+  }
+  row.appendChild(head);
+  row.appendChild(entries);
+  return row;
+}
+
+function gdDiffRenderGroups(container, groups, opts) {
+  const frag = document.createDocumentFragment();
+  (groups || []).forEach((g) => frag.appendChild(gdDiffRenderGroup(g, opts)));
+  container.appendChild(frag);
+}
+
 // --- classification helpers -------------------------------------------------
 
 // UI classification of a group from the CURRENT branch's perspective.
@@ -380,6 +536,39 @@ function gdDiffModeDecorateSidebar() {
         container.appendChild(ghost);
       }
     }
+    // changedOnly — the tree shows ONLY what differs (ghosts included).
+    // Skipped while the server-side filter box is active, same as the
+    // ghost injection above.
+    list.querySelectorAll('.gd-diff-lens-hidden')
+      .forEach((el) => el.classList.remove('gd-diff-lens-hidden'));
+    if (_gdDiffMode && _gdDiffLens.changedOnly && !filtering) {
+      list.querySelectorAll('.entity-item[data-fn-id]').forEach((item) => {
+        if (!gdDiffVisibleGroup(item.dataset.fnId)) {
+          item.classList.add('gd-diff-lens-hidden');
+        }
+      });
+      list.querySelectorAll('.ns-header[data-ns-path]').forEach((header) => {
+        if (!nsCounts.has(header.dataset.nsPath)) {
+          header.classList.add('gd-diff-lens-hidden');
+          const group = list.querySelector('.ns-children[data-ns-children="'
+            + CSS.escape(header.dataset.nsPath) + '"]');
+          if (group) group.classList.add('gd-diff-lens-hidden');
+        }
+      });
+      // The pseudo-root group: hide when no root-level fn changed and
+      // no ghost landed there.
+      const rootGroup = list.querySelector('.ns-children[data-ns-children="__root__"]');
+      if (rootGroup
+          && !rootGroup.querySelector('.gd-diff-ghost')
+          && !rootGroup.querySelector('.entity-item.gd-diff-changed:not(.gd-diff-lens-hidden)')) {
+        rootGroup.classList.add('gd-diff-lens-hidden');
+        list.querySelector('.ns-header-pseudo')
+          ?.classList.add('gd-diff-lens-hidden');
+      }
+    }
+
+    gdDiffEnsureLensBar();
+
     list.querySelectorAll('.ns-header[data-ns-path]').forEach((header) => {
       const c = nsCounts.get(header.dataset.nsPath);
       let b = header.querySelector('.gd-diff-ns-badge');
@@ -416,6 +605,63 @@ function gdDiffModeDecorateSidebar() {
   }
 }
 
+// --- the sidebar DIFF LENS bar ---------------------------------------------
+
+// A second chip row under the kind-lens chips, present only in compare
+// mode. Same .kind-toggle look so the Explorer reads as one system.
+const GD_DIFF_LENS_CHIPS = [
+  { key: 'changedOnly', glyph: 'Δ', label: 'changed',
+    title: 'Show only what differs vs the compared branch' },
+  { key: 'added', glyph: '+', label: 'added', invertless: true,
+    title: 'Show fns added on this branch' },
+  { key: 'modified', glyph: '±', label: 'mod', invertless: true,
+    title: 'Show modified fns' },
+  { key: 'missing', glyph: '−', label: 'there', invertless: true,
+    title: 'Show fns that exist only on the compared branch' },
+  { key: 'substantiveOnly', glyph: 'Aa', label: 'core',
+    title: 'Hide edits that touch nothing but names and descriptions' },
+  { key: 'effectsOnly', glyph: 'fx', label: 'fx',
+    title: 'Show only changes whose effect footprint differs' },
+];
+
+function gdDiffEnsureLensBar() {
+  const host = document.getElementById('kind-filters')?.parentElement;
+  let bar = document.getElementById('gd-diff-lens');
+  if (!_gdDiffMode) { bar?.remove(); return; }
+  if (!host) return;
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'gd-diff-lens';
+    bar.setAttribute('role', 'group');
+    bar.setAttribute('aria-label', 'Diff lens — which changes the tree shows');
+    for (const chip of GD_DIFF_LENS_CHIPS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'kind-toggle gd-diff-lens-chip';
+      b.dataset.lensKey = chip.key;
+      b.title = chip.title;
+      const glyph = document.createElement('span');
+      glyph.className = 'kind-glyph';
+      glyph.setAttribute('aria-hidden', 'true');
+      glyph.textContent = chip.glyph;
+      b.appendChild(glyph);
+      const label = document.createElement('span');
+      label.className = 'kind-label';
+      label.textContent = chip.label;
+      b.appendChild(label);
+      b.addEventListener('click', () => {
+        gdDiffSetLens({ [chip.key]: !_gdDiffLens[chip.key] });
+      });
+      bar.appendChild(b);
+    }
+    document.getElementById('kind-filters')
+      .insertAdjacentElement('afterend', bar);
+  }
+  bar.querySelectorAll('.gd-diff-lens-chip').forEach((b) => {
+    b.setAttribute('aria-pressed', String(!!_gdDiffLens[b.dataset.lensKey]));
+  });
+}
+
 // Re-decorate whenever the Explorer re-renders (lens flips, search,
 // expand/collapse — the tree is rebuilt wholesale). The observer
 // ignores its own mutations via the `_gdDiffDecorating` flag.
@@ -443,6 +689,55 @@ function gdDiffModeObserve() {
   _gdDiffObserver.observe(list, { childList: true, subtree: true });
 }
 
+// --- the inspector diff panel ----------------------------------------------
+
+// Injected by editor-shell.js right after the inspector head whenever
+// a fn renders while compare mode is on and the fn differs under the
+// current lens: the per-fn detail surface (entries old→new, effects,
+// branch-local marker) + the ANCHORED comment threads, exactly where
+// the user is already looking at the selected node.
+function gdDiffRenderInspectorSection(inspectorEl, fnId) {
+  inspectorEl.querySelector('#gd-diff-insp')?.remove();
+  const g = fnId ? gdDiffVisibleGroup(fnId) : null;
+  if (!g || !_gdDiffMode) return;
+  const panel = document.createElement('div');
+  panel.id = 'gd-diff-insp';
+  panel.className = 'gd-diff-insp';
+  const head = document.createElement('div');
+  head.className = 'gd-diff-insp-head';
+  head.appendChild(gdDiffMarkerEl(g.change));
+  const title = document.createElement('span');
+  title.textContent = 'vs ' + _gdDiffMode.branch;
+  head.appendChild(title);
+  if (g.__effects) {
+    const fx = document.createElement('span');
+    fx.className = 'bd-effects-chip';
+    fx.textContent = g.__effects;
+    head.appendChild(fx);
+  }
+  if (g['branch-local?']) {
+    const badge = document.createElement('span');
+    badge.className = 'branch-diff-row-local-badge';
+    badge.title = "Won't propagate on merge — branch-local fn";
+    badge.textContent = '📍 branch-local';
+    head.appendChild(badge);
+  }
+  head.appendChild(gdDiffCommentBtnEl('fn', g['fn-id']));
+  // The fn-level anchor target (threads mount after this head).
+  head.setAttribute('data-anchor-name', 'fn');
+  head.setAttribute('data-anchor-id', g['fn-id']);
+  panel.appendChild(head);
+  panel.appendChild(gdDiffRenderGroup(g, { entriesOnly: true }));
+  const inspHead = inspectorEl.querySelector('.gd-insp-head');
+  (inspHead || inspectorEl).insertAdjacentElement('afterend', panel);
+  // Anchored threads (fn + entries) with composers; no general thread
+  // here — that lives in the review dialog.
+  if (typeof gdDiffAttachThreads === 'function') {
+    gdDiffAttachThreads(panel, _gdDiffMode.branch, _gdDiffMode.branchId,
+                        { anchoredOnly: true });
+  }
+}
+
 // Card-level mark for `editor-overlay-fn.js` — ring the whole fn card
 // when the fn differs under the current lens.
 function gdDiffModeCardInfo(fnId) {
@@ -451,7 +746,7 @@ function gdDiffModeCardInfo(fnId) {
   return { kind: g.__kind, cls: GD_DIFF_CLS[g.__kind], title: g.__title };
 }
 
-// --- the "◐ vs <branch>" chip ----------------------------------------------
+// --- the "Δ vs <branch>" chip ----------------------------------------------
 
 function gdDiffModeRenderChip() {
   const mount = document.getElementById('branch-mount');
@@ -481,7 +776,7 @@ function gdDiffModeRenderChip() {
   // An active lens HIDES things — silent filtering is how a user ends
   // up believing two branches are identical. Say it on the chip.
   const filtering = gdDiffLensFiltering();
-  label.textContent = '◐ vs ' + _gdDiffMode.branch + (filtering ? ' · filtered' : '');
+  label.textContent = 'Δ vs ' + _gdDiffMode.branch + (filtering ? ' · filtered' : '');
   chip.classList.toggle('gd-diff-chip-filtered', filtering);
   label.title = 'Compare mode — differences vs "' + _gdDiffMode.branch
     + '" are marked in the Explorer and on the canvas. Click for the diff, '
@@ -570,10 +865,11 @@ async function gdOpenDiffChipMenu(anchorBtn) {
     return b;
   };
 
-  item('Δ Open full diff', 'Field-level diff + comments + suggestions',
+  item('💬 Review & comments',
+       'The proposal conversation — change list, threads, suggestions',
        () => {
-         if (typeof showBranchDiff === 'function') {
-           showBranchDiff(cur, other, otherRow?.id);
+         if (typeof showReviewDialog === 'function') {
+           showReviewDialog(other, otherRow?.id);
          }
        });
   // Proposing aims at the branch's BASE — the root branch has none.
@@ -715,12 +1011,16 @@ async function gdDiffModeRefresh() {
 
 function gdExitDiffMode() {
   gdCloseDiffChipMenu();
+  document.getElementById('gd-diff-lens')?.remove();
+  document.getElementById('gd-diff-insp')?.remove();
   _gdDiffMode = null;
   try { localStorage.removeItem(GD_DIFF_MODE_KEY); } catch (_) {}
   gdDiffModeRenderChip();
   gdDiffModeDecorateSidebar();
-  // Arg rings/badges — same cleanup the one-shot focus uses.
-  if (typeof gdClearDiffFocus === 'function') gdClearDiffFocus();
+  // Arg rings/badges.
+  document.querySelectorAll('.arg-overlay-diff-focus')
+    .forEach((el) => el.classList.remove('arg-overlay-diff-focus'));
+  document.querySelectorAll('.arg-diff-badge').forEach((el) => el.remove());
   // Card-level rings (fn-overlay-diff-*) + the titles the mode set.
   document.querySelectorAll('.fn-overlay-diff').forEach((el) => {
     el.classList.remove('fn-overlay-diff', 'fn-overlay-diff-added',

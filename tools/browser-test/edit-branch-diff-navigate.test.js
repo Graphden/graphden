@@ -1,14 +1,13 @@
-// Branch-diff modal click-to-navigate e2e — extends the existing
-// `edit-branch-local.test.js` (which covered the branch-local badge
-// in the modal) with the click → navigate-to-fn flow.
+// Compare-entry + ghost-navigation e2e (UX-v3: Δ toggles COMPARE
+// MODE; the "lives only on the other branch" navigation now rides
+// the Explorer's ghost rows).
 //
 // Flow:
-//   1. Create a feat branch + a fn-def on it (so the diff modal has
-//      at least one "Added in feat" :fn row).
-//   2. Switch back to :main.
-//   3. Click the Δ button on the feat row → modal opens.
-//   4. Modal shows the probe fn in the "Added in feat" section.
-//   5. Click the row → modal closes + URL/hash updates to the probe.
+//   1. Create a feat branch + a fn-def on it.
+//   2. From :main, click Δ on the feat row → the Δ chip appears.
+//   3. The probe renders as a GHOST row in the (expanded) Explorer.
+//   4. Click the ghost → confirm → switchToBranch(feat) with the
+//      probe's name in the hash for post-reload selection.
 //
 // Run from this directory:  node edit-branch-diff-navigate.test.js
 // Exit code 0 = PASS, 1 = FAIL.
@@ -108,107 +107,44 @@ async function cleanup(page) {
 
     await page.click(
       '.branch-row[data-branch-name="' + FEAT_BRANCH + '"] .branch-row-diff');
-    await page.waitForSelector('.branch-diff-modal:not(.hidden)',
-                               {timeout: 10000});
-    await page.waitForFunction(
-      () => {
-        const m = document.querySelector('.branch-diff-modal');
-        return m && !m.querySelector('.branch-diff-loading');
-      },
-      null,
-      {timeout: 15000});
+    await page.waitForSelector('#gd-diff-chip', {timeout: 20000});
+    assert(true, 'Δ enters compare mode (chip present)');
 
-    const diffState = await page.evaluate(() => {
-      const modal = document.querySelector('.branch-diff-modal');
-      const sections = Array.from(modal.querySelectorAll('.branch-diff-section'));
-      const addedInSource = sections.find((s) =>
-        /Only in/.test(s.querySelector('.branch-diff-section-head')
-                          ?.textContent || ''));
-      const rows = Array.from(
-        addedInSource?.querySelectorAll('.branch-diff-row') || []);
-      return {
-        modalVisible: !modal.classList.contains('hidden'),
-        sectionsCount: sections.length,
-        addedInSourceRows: rows.length,
-        clickableRows: rows.filter(
-          (r) => r.classList.contains('branch-diff-row-clickable')).length,
-        rowFnIds: rows.map((r) => r.getAttribute('data-diff-fn-id')),
-      };
+    // The feat-only probe has no row on main — it must appear as a
+    // dimmed GHOST in the expanded root group.
+    await page.evaluate(() => {
+      const h = document.querySelector('.ns-header-pseudo');
+      if (h && h.getAttribute('aria-expanded') !== 'true') h.click();
     });
-    assert(diffState.modalVisible, 'diff modal visible (loading dismissed)');
-    assert(diffState.sectionsCount >= 1,
-           'diff modal renders at least one section: '
-           + diffState.sectionsCount);
-    assert(diffState.addedInSourceRows >= 1,
-           'at least one row in "Added in feat" section: '
-           + diffState.addedInSourceRows);
-    assert(diffState.clickableRows >= 1,
-           'at least one row carries .branch-diff-row-clickable: '
-           + diffState.clickableRows);
-
-    // ===================================================================
-    // Phase C: click the probe row → "lives only on feat — switch?"
-    // confirm fires → switchToBranch(feat) is called with the probe's
-    // qualified name pushed as the hash so the post-reload editor
-    // selects it. (Earlier the click invoked `selectFn(id)` directly,
-    // which silently no-op'd because lookups.fnMap on main didn't
-    // know the feat-only fn.)
-    // ===================================================================
-    const probeFnId = await page.evaluate(async (branch) => {
-      const r = await window.authFetch('/api/graph/entities',
-                                       {headers: {'X-Graphden-Branch': branch}});
-      const ents = await r.json();
-      return ents.fns.find((f) => f.name && f.name.startsWith('diff-nav-probe-'))?.id;
-    }, FEAT_BRANCH);
-    assert(probeFnId, 'probe fn-id resolved for navigation check');
+    await page.waitForFunction((nm) => {
+      return Array.from(document.querySelectorAll('.gd-diff-ghost .name'))
+        .some((n) => n.textContent === nm);
+    }, PROBE_FN, {timeout: 20000});
+    assert(true, 'ghost row for the feat-only probe appears');
 
     // Stub switchToBranch so the test doesn't actually reload — we
-    // only want to verify which branch the dialog confirm dispatches
-    // to.
+    // only want to verify which branch the ghost click dispatches to.
     await page.evaluate(() => {
       window.__switchToBranchCalledWith = null;
       window.switchToBranch = function(name) {
         window.__switchToBranchCalledWith = name;
       };
     });
-
-    // Click the matching row. The shared dialog handler auto-accepts
-    // the confirm.
-    await page.evaluate((id) => {
-      const row = document.querySelector(
-        '.branch-diff-row[data-diff-fn-id="' + id + '"]');
-      row?.click();
-    }, probeFnId);
-
-    // Row-click dismisses the modal AND kicks an async switchToBranch +
-    // hash update. Wait for ALL of it to settle before the single read
-    // below — waiting only on the modal raced the still-pending nav/hash.
+    await page.evaluate((nm) => {
+      const g = Array.from(document.querySelectorAll('.gd-diff-ghost'))
+        .find((el) => el.querySelector('.name')?.textContent === nm);
+      g?.click();
+    }, PROBE_FN);
     await page.waitForFunction(
-      ({ probe, feat }) => {
-        const m = document.querySelector('.branch-diff-modal');
-        const hidden = !m || m.classList.contains('hidden');
-        return hidden
-          && window.__switchToBranchCalledWith === feat
-          && (location.hash || '').includes(probe);
-      },
+      ({ probe, feat }) => window.__switchToBranchCalledWith === feat
+        && (location.hash || '').includes(probe),
       { probe: PROBE_FN, feat: FEAT_BRANCH },
       {timeout: 5000});
+    assert(true, 'ghost click switches to feat with the probe in the hash');
+    await page.evaluate(() => window.gdExitDiffMode());
 
-    const navState = await page.evaluate(() => ({
-      modalHidden: !!document.querySelector('.branch-diff-modal.hidden')
-                   || !document.querySelector('.branch-diff-modal:not(.hidden)'),
-      switchTo: window.__switchToBranchCalledWith,
-      hash: location.hash,
-    }));
-    assert(navState.modalHidden, 'modal dismissed after row click');
-    assert(navState.switchTo === FEAT_BRANCH,
-           'switchToBranch invoked with feat branch: '
-           + JSON.stringify(navState.switchTo) + ' vs ' + FEAT_BRANCH);
-    assert(navState.hash.includes(PROBE_FN),
-           'URL hash carries probe name for post-reload selection: '
-           + JSON.stringify(navState.hash));
+    console.log('✓ compare-entry + ghost navigation verified');
 
-    console.log('✓ branch-diff modal click-to-navigate verified');
   } catch (e) {
     process.exitCode = 1;
     console.error('✗ test failed:', e.message);

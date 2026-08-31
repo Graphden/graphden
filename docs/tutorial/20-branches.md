@@ -41,14 +41,16 @@ Create              → type a name, click Create
 Advanced            → (cloud/tenancy only) pick who can write the
                       new branch: everyone / only me / org admins
 row → switch        → click a branch row to switch to it
-Δ (diff)            → show the diff vs another branch
-◐ (compare)         → COMPARE MODE: pick this branch as the second
-                      one and the whole editor becomes the diff.
-                      The picked row's ◐ stays lit; click it again
-                      to clear the pick and exit.
+Δ (compare)         → COMPARE MODE: pick this branch as the
+                      second one and the whole editor becomes
+                      the diff. The picked row's Δ stays lit;
+                      click it again to exit.
 ✅ (approve)        → approve a proposed branch for merge
 ⇢ (merge)           → fold another branch into this one
 ⋯ (more)            → the labeled per-row menu:
+                        💬 Review & comments — the conversation
+                          dialog: what changed, the thread,
+                          suggestions
                         📤 Propose for review — submit into its base
                         ⚙ Protection… — "push only via merge",
                           required approvals (0–3, one-tap segments),
@@ -105,11 +107,12 @@ popover, no separate "pull request" object:
   explicit reviewer list set via the API). Once the count is met, the
   merge goes through.
 
-Every proposal also carries a **comment thread** — open the Δ diff and
-the conversation sits right under the change: leave a note, the author
-replies, the reviewer approves when it's settled. A comment can also be
-**anchored to one element of the diff** — hover a diff row and click its
-💬 to pin the note to exactly that fn or arg (lesson 21 walks it).
+Every proposal also carries a **comment thread** — open **💬 Review &
+comments** in the row's ⋯ menu: the conversation, a collapsible "What
+changed" list, and suggestions live there. A comment can also be
+**anchored to one element** — click 💬 on a change row (in the dialog,
+or right in the inspector's diff panel while comparing) to pin the
+note to exactly that fn or arg (lesson 21 walks it).
 
 Approvals are **content-aware**: if the proposed branch is edited after
 it was approved, that approval is automatically dismissed (it went
@@ -132,35 +135,28 @@ the author**.
    tutorial fns you made in lesson 01). Edit the value.
 3. Switch back to `main`. The fn-def is unchanged — your edit
    lives only on `feat-tutorial`.
-4. Open the branch popover, click `Δ` next to `feat-tutorial`.
-   The diff modal groups the changes **by fn**: a `+`/`−`/`±` marker
-   per row, and under a modified fn the exact args and fields that
-   changed, shown as `old → new`. Click the row — the editor opens
-   that fn on the canvas with the changed args ringed `Δ`.
-   Prefer to *stay* in the diff? Click `◐` on the `feat-tutorial`
-   row instead — picking the second branch IS entering compare mode:
-   every changed fn is badged in the Explorer (namespaces carry
-   `+n ±n −n` summaries), changed fn CARDS ring on the canvas along
-   with their changed args, and the `◐ vs feat-tutorial` chip by the
-   branch chip keeps the mode on — it survives reloads, so "always
-   see my drift vs main" is one click. Clicking the chip opens the
-   review cockpit: the full Δ diff, **📤 propose the current branch
-   for review** (the merge-request act), **⇢ merge** the compared
-   branch in, and the **type lens** — show only additions, removals
-   or modifications, or "substantive only" (hide edits that touch
-   nothing but names and descriptions), or "effects touched only" —
-   fns whose EFFECT SET differs between the branches get an
-   `effects: pure here · time there` mark, the strongest "this
-   affects behaviour" signal. Fns that exist only on the compared branch show
-   as dimmed ghost rows in expanded Explorer groups (click one to
-   switch there). While any lens filter is on, the chip turns dashed
-   and reads `· filtered` — a reminder that "no badges" now means
-   "hidden by the lens", not "no changes" (the Δ modal always shows
-   everything). The Δ modal's header carries its own **◐ Compare
-   mode** button, so you can hop from a one-off diff into the
-   persistent lens without hunting for the row. Exit = click the lit
-   `◐` again (or the chip's `×`). You keep editing and running as usual;
-   compare mode only annotates.
+4. Open the branch popover, click `Δ` next to `feat-tutorial` —
+   **the editor becomes the diff** (compare mode). Every changed fn
+   is badged `+`/`±`/`−` in the Explorer (namespaces carry
+   `+n ±n −n` summaries), changed fn CARDS and their changed args
+   ring on the canvas, fns that exist only on the compared branch
+   show as dimmed ghost rows (click one to switch there), and
+   selecting a changed fn shows its exact `old → new` fields in the
+   **inspector's diff panel** — with 💬 anchors for line-comments.
+   A `Δ vs feat-tutorial` chip appears by the branch chip; it
+   survives reloads, so "always see my drift vs main" is one click.
+   Under the kind chips the Explorer gains a **diff lens row**:
+   `Δ changed` (show only what differs), `+`/`±`/`−` by change
+   type, `Aa core` (hide edits that touch nothing but names and
+   descriptions) and `fx` (only changes whose EFFECT SET differs —
+   those carry an `effects: pure here · time there` mark, the
+   strongest "this affects behaviour" signal). While any lens
+   filter is on, the chip turns dashed and reads `· filtered` — a
+   reminder that "no badges" means "hidden by the lens", not "no
+   changes". The chip's menu is the review cockpit: **💬 Review &
+   comments**, **📤 propose the current branch** (the merge-request
+   act) and **⇢ merge** the compared branch in. Exit = click the
+   lit `Δ` again (or the chip's `×`).
 5. The diff isn't only about values — it shows the graph's SHAPE
    changing too. Each entry kind reads differently:
 
@@ -175,9 +171,9 @@ the author**.
    | created a whole fn | its own `+` group under "Only in <branch>" |
 
    Try one: on `feat-tutorial`, extend some fn with a new child (or
-   ⋯-bind an arg to a different fn), reopen `Δ` — the structural rows
-   appear under the same fn group, and in compare mode the same args
-   ring on the canvas.
+   ⋯-bind an arg to a different fn), then compare again — the
+   structural rows appear in that fn's inspector diff panel, and the
+   same args ring on the canvas.
 6. From `main`, click `⇢` next to `feat-tutorial`. Confirm.
    The page reloads and `main` now sees your edit.
 
@@ -233,14 +229,14 @@ fn-def…
 
 …is effectively branch-local because `:http-server` is. On a
 merge, the resolver filters out its version rows on the target
-branch; the editor's diff modal marks the row with `📍 branch-
-local`, and the post-merge alert names exactly what didn't
-propagate:
+branch; compare mode and the Review dialog mark such rows with
+`📍 branch-local` (the inspector's diff panel carries it too), and
+the post-merge alert names exactly what didn't propagate:
 
 ```
 2 branch-local fns did NOT propagate to main:
 :my-web-server, :my-vault-secret
-(Marked with 📍 in the branch-diff modal.)
+(Marked with 📍 in the diff.)
 ```
 
 The merge API surfaces the same list as `:skipped {:branch-local
@@ -313,9 +309,10 @@ when propagation may happen at all.
 2. Fork to `feat-dev-server`. On the new branch, copy `:web-
    server` to a new fn-def parented from `:http-server`, port
    9001.
-3. Open the branch-diff modal between `feat-dev-server` and
-   `main`. Your new fn-def shows up with a `📍 branch-local`
-   badge.
+3. From `main`, press `Δ` on the `feat-dev-server` row (compare
+   mode) and select your new fn — the inspector's diff panel shows
+   a `📍 branch-local` badge (the Review dialog's change list
+   carries it too).
 4. Merge `feat-dev-server` → `main`. The alert names your fn as
    skipped. Check `main` — it's not there.
 5. Switch back to `feat-dev-server` — still there. The branch

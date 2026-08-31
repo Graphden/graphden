@@ -1,4 +1,5 @@
-// Diff v2 e2e — compare mode + anchored comments + suggestions.
+// Diff v2 e2e — compare mode (UX-v3: Δ IS the mode), the inspector
+// diff panel, the Review dialog, anchored comments + suggestions.
 //
 // Flow:
 //   1. Seed: feat branch off main; a probe fn on feat (so the diff has
@@ -10,7 +11,8 @@
 //      it renders as an inline thread + count badge; the general
 //      thread does NOT contain it; reopening shows it again.
 //   5. Suggestions: a proposed CHILD of feat shows in feat's diff
-//      modal suggestions section with Δ view + apply buttons.
+//      Review dialog's suggestions section with a lazy Δ preview
+//      (<details class="bd-sugg-preview">) + the ⇢ apply button.
 //
 // Run from this directory:  node edit-diff-compare-mode.test.js
 // Exit code 0 = PASS, 1 = FAIL.
@@ -271,12 +273,12 @@ async function cleanup(page) {
     // picking the second branch IS the inline ◐ on its row.
     // =================================================================
     let opened0 = await openBranchPopover(page);
-    assert(opened0, 'branch popover opens for the ◐ pick');
-    await page.click('.branch-row[data-branch-name="' + FEAT + '"] .branch-row-compare');
+    assert(opened0, 'branch popover opens for the Δ pick');
+    await page.click('.branch-row[data-branch-name="' + FEAT + '"] .branch-row-diff');
     await page.waitForSelector('#gd-diff-chip', {timeout: 20000});
     const chipText = await page.evaluate(
       () => document.querySelector('.gd-diff-chip-label')?.textContent);
-    assert(chipText === '◐ vs ' + FEAT,
+    assert(chipText === 'Δ vs ' + FEAT,
            '◐ chip renders the compared branch: ' + JSON.stringify(chipText));
 
     // The probe lives only on feat → a "−1" aggregate should land on a
@@ -290,14 +292,14 @@ async function cleanup(page) {
     assert(modeInfo.active && modeInfo.branch === FEAT,
            'compare mode active vs feat: ' + JSON.stringify(modeInfo));
 
-    // The picked row's ◐ is lit; clicking it again clears the pick.
+    // The picked row's Δ is lit; clicking it again clears the pick.
     await openBranchPopover(page);
-    const litSel = '.branch-row[data-branch-name="' + FEAT + '"] .branch-row-compare.on';
+    const litSel = '.branch-row[data-branch-name="' + FEAT + '"] .branch-row-diff.on';
     await page.waitForSelector(litSel, {timeout: 15000});
     await page.click(litSel);
     await page.waitForFunction(() => !document.getElementById('gd-diff-chip'),
                                {timeout: 15000});
-    assert(true, 'clicking the lit ◐ exits compare mode');
+    assert(true, 'clicking the lit Δ exits compare mode');
     await page.evaluate((other) => window.gdEnterDiffMode(other), FEAT);
     await page.waitForSelector('#gd-diff-chip', {timeout: 20000});
 
@@ -348,6 +350,24 @@ async function cleanup(page) {
     }, PROBE_FN, {timeout: 20000});
     assert(true, 'ghost row for the branch-only fn appears in the Explorer');
 
+    // The diff lens bar rides under the kind chips; "Δ changed" hides
+    // fns that did not change.
+    await page.waitForSelector('#gd-diff-lens', {timeout: 15000});
+    await page.evaluate(() => {
+      document.querySelector('#gd-diff-lens [data-lens-key="changedOnly"]').click();
+    });
+    await page.fill('#search-input', '');
+    await page.waitForFunction(() => {
+      const identityRow = Array.from(document.querySelectorAll('#entity-list .entity-item'))
+        .find((e) => e.querySelector('.name')?.textContent.trim() === 'identity');
+      return !identityRow || identityRow.classList.contains('gd-diff-lens-hidden')
+        || identityRow.offsetParent === null;
+    }, {timeout: 20000});
+    assert(true, '"Δ changed" lens hides unchanged fns from the tree');
+    await page.evaluate(() => {
+      document.querySelector('#gd-diff-lens [data-lens-key="changedOnly"]').click();
+    });
+
     // Sidebar: the modified probe's row carries the ± badge (the
     // Explorer IS the diff in compare mode).
     await page.fill('#search-input', EFF_FN);
@@ -367,6 +387,36 @@ async function cleanup(page) {
     await page.evaluate(async (nm) => { await selectFnByName(nm); }, VAL_FN);
     await page.waitForSelector('.arg-overlay-diff-focus', {timeout: 20000});
     assert(true, 'canvas rings the changed bound arg');
+
+    // Inspector: the selected changed fn carries the diff panel — the
+    // old → new fields and a 💬 anchor right there.
+    await page.waitForSelector('#gd-diff-insp', {timeout: 20000});
+    const insp = await page.evaluate(() => {
+      const p = document.getElementById('gd-diff-insp');
+      return {
+        vs: p.querySelector('.gd-diff-insp-head')?.textContent || '',
+        oldV: p.querySelector('.bd-old')?.textContent,
+        newV: p.querySelector('.bd-new')?.textContent,
+        hasCommentBtn: !!p.querySelector('.branch-diff-comment-btn'),
+      };
+    });
+    assert(/vs /.test(insp.vs) && insp.oldV === '1' && insp.newV === '2'
+           && insp.hasCommentBtn,
+           'inspector diff panel shows old → new + 💬: ' + JSON.stringify(insp));
+    // Anchor a comment FROM the inspector.
+    await page.evaluate(() => {
+      document.querySelector('#gd-diff-insp .branch-diff-comment-btn').click();
+    });
+    await page.waitForSelector('#gd-diff-insp .branch-diff-anchor-compose textarea',
+                               {timeout: 10000});
+    await page.fill('#gd-diff-insp .branch-diff-anchor-compose textarea',
+                    'inspector says hi');
+    await page.click('#gd-diff-insp .branch-comment-send');
+    await page.waitForFunction(() => {
+      const t = document.querySelector('#gd-diff-insp .branch-diff-anchor-thread');
+      return t && /inspector says hi/.test(t.textContent);
+    }, {timeout: 20000});
+    assert(true, 'anchored comment posts from the inspector panel');
     await page.fill('#search-input', '');
 
     // The chip's menu (review cockpit) carries diff / propose / merge
@@ -378,10 +428,10 @@ async function cleanup(page) {
         .map((b) => b.textContent),
       lensBoxes: document.querySelectorAll('#gd-diff-chip-pop input[type="checkbox"]').length,
     }));
-    assert(menu.items.some((t) => /Open full diff/.test(t))
+    assert(menu.items.some((t) => /Review & comments/.test(t))
            && menu.items.some((t) => /Merge/.test(t))
            && menu.items.some((t) => /Exit compare/.test(t)),
-           'chip menu carries diff / merge / exit: ' + JSON.stringify(menu.items));
+           'chip menu carries review / merge / exit: ' + JSON.stringify(menu.items));
     assert(!menu.items.some((t) => /Propose|Withdraw/.test(t)),
            'propose hidden on the root branch (main has no base to aim at)');
     assert(menu.lensBoxes === 5, 'chip menu carries the 5 lens toggles');
@@ -425,14 +475,24 @@ async function cleanup(page) {
            'orphan-anchored comment posted');
     let opened = await openBranchPopover(page);
     assert(opened, 'branch popover opens');
-    await page.click(
-      '.branch-row[data-branch-name="' + FEAT + '"] .branch-row-diff');
+    await page.click('.branch-row[data-branch-name="' + FEAT + '"] .branch-row-more');
+    await page.click('.branch-row-more-menu.open .branch-row-review');
     await page.waitForSelector('.branch-diff-modal:not(.hidden)', {timeout: 20000});
     await page.waitForFunction(() => {
       const m = document.querySelector('.branch-diff-modal');
       return m && !m.querySelector('.branch-diff-loading')
         && m.querySelector('.branch-comments');
     }, {timeout: 45000});
+    const reviewHead = await page.evaluate(() =>
+      document.querySelector('.branch-diff-header')?.textContent || '');
+    assert(/Review:/.test(reviewHead) && /→ main/.test(reviewHead),
+           'review dialog frames the proposal against its BASE: ' + reviewHead);
+    // The change list is client-rendered from diff-view; open it.
+    await page.evaluate(() => {
+      const d = document.querySelector('.bd-review-changes');
+      if (d && !d.open) d.open = true;
+    });
+    await page.waitForSelector('.bd-review-changes .branch-diff-row', {timeout: 15000});
 
     // The probe's group row carries data-anchor attrs; open its composer.
     const rowSel = '.branch-diff-row[data-diff-fn-name="' + PROBE_FN + '"]';
@@ -468,35 +528,8 @@ async function cleanup(page) {
     });
     assert(orphan, 'orphaned anchor falls back to the general thread with a context chip');
 
-    // The modal header's ◐ bridge enters compare mode in one click.
-    await page.evaluate(() => document.querySelector('.branch-diff-compare').click());
-    await page.waitForSelector('#gd-diff-chip', {timeout: 20000});
-    assert(true, 'modal ◐ bridge enters compare mode');
-    await page.evaluate(() => window.gdExitDiffMode());
-    // Re-open the modal for the remaining phases.
-    opened = await openBranchPopover(page);
-    await page.click('.branch-row[data-branch-name="' + FEAT + '"] .branch-row-diff');
-    await page.waitForFunction(() => {
-      const m = document.querySelector('.branch-diff-modal');
-      return m && !m.querySelector('.branch-diff-loading')
-        && m.querySelector('.branch-comments');
-    }, {timeout: 45000});
-
-    // One-shot diff-focus: clicking the modified fn's row (compare mode
-    // OFF) still lands on the canvas with its changed arg ringed.
-    await page.evaluate((nm) => {
-      document.querySelector('.branch-diff-row[data-diff-fn-name="' + nm + '"]').click();
-    }, VAL_FN);
-    await page.waitForSelector('.arg-diff-badge', {timeout: 20000});
-    assert(true, 'modal row click hands the one-shot diff focus to the canvas');
-    await page.evaluate(() => window.gdClearDiffFocus?.());
-    opened = await openBranchPopover(page);
-    await page.click('.branch-row[data-branch-name="' + FEAT + '"] .branch-row-diff');
-    await page.waitForFunction(() => {
-      const m = document.querySelector('.branch-diff-modal');
-      return m && !m.querySelector('.branch-diff-loading')
-        && m.querySelector('.branch-diff-suggestions .branch-diff-suggestion-row, .branch-diff-suggestions-empty');
-    }, {timeout: 45000});
+    // (UX-v3: no modal↔mode bridge needed — Δ IS the mode; the dialog
+    // is reached from ⋯/cockpit and stays a conversation surface.)
 
     // The effects chip lands on the effect-probe's group row.
     await page.waitForFunction(() => {
@@ -523,8 +556,21 @@ async function cleanup(page) {
     assert(sugg && sugg.name === SUGG,
            'suggestion row lists the proposed child branch: '
            + JSON.stringify(sugg));
-    assert(sugg.buttons.includes('Δ view') && sugg.buttons.includes('⇢ apply'),
-           'suggestion row carries Δ view + ⇢ apply');
+    assert(sugg.buttons.includes('⇢ apply'),
+           'suggestion row carries ⇢ apply');
+    // UX-v3: the Δ view button became a lazy <details> preview that
+    // client-renders diff-view(source, against=suggestion) on open.
+    await page.evaluate(() => {
+      const d = document.querySelector(
+        '.branch-diff-suggestion-row + details.bd-sugg-preview, .bd-sugg-preview');
+      if (d && !d.open) d.querySelector('summary').click();
+    });
+    await page.waitForFunction(() => {
+      const d = document.querySelector('.bd-sugg-preview');
+      return d?.open && (d.querySelector('.branch-diff-row')
+                         || /no differences/i.test(d.textContent));
+    }, {timeout: 20000});
+    assert(true, 'suggestion Δ preview lazy-loads its diff on expand');
     const newBtn = await page.evaluate(() =>
       !!document.querySelector('.branch-diff-suggest-new'));
     assert(newBtn, '"+ Suggest a change" affordance present');

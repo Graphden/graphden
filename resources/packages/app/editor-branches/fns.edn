@@ -564,11 +564,28 @@
    :parent :get
    :args {:coll {:as :item} :key {:value :target} :default {:value "∅"}}}
 
-  {:name :_partial-bd-f-name-span
+  {:name :_partial-bd-f-name-span-shown
    :parent :hiccup
    :args {:tag {:value "span"}
           :attrs {:value {:class "branch-diff-field-name"}}
           :children [:_partial-bd-f-name]}}
+
+  {:name :_partial-bd-f-name-hidden
+   :description "Empty span in place of the field label — keeps the children-vector shape uniform."
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:hidden "1"}}
+          :children {:value []}}}
+
+  ;; "arg value — value: 1 → 2" doubled the word for the most common
+  ;; case; `value` is a binding's default payload column, so its label
+  ;; adds nothing the entry label didn't already say. Other fields
+  ;; (description, ref-fn-id, terminal …) keep theirs.
+  {:name :_partial-bd-f-name-span
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_partial-bd-f-name :b {:value "value"}}}
+          :then :_partial-bd-f-name-hidden
+          :else :_partial-bd-f-name-span-shown}}
 
   {:name :_partial-bd-f-old-span
    :parent :hiccup

@@ -1304,8 +1304,16 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 8px;
 }
-.branch-diff-close {
+.branch-diff-compare {
   margin-left: auto;
+  background: transparent; color: var(--warning-fg);
+  border: 1px solid var(--warning-fg); border-radius: 3px;
+  font-size: 0.6875rem; line-height: 1.4;
+  padding: 1px 8px; cursor: pointer;
+  white-space: nowrap; flex: none;
+}
+.branch-diff-compare:hover { background: var(--hover-bg); }
+.branch-diff-close {
   background: transparent; color: var(--muted-fg);
   border: 0; border-radius: 2px;
   width: 22px; height: 22px; padding: 0; line-height: 1;

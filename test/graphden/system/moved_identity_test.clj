@@ -164,6 +164,89 @@
       (finally (sp/close storage)))))
 
 
+(deftest purges-a-retired-chain-as-a-set
+  ;; A retired fn-def SECTION references itself (parent chains, arg
+  ;; refs). Per-row reconciling left every non-leaf member behind as
+  ;; "still referenced" — by its own removed siblings — while paying a
+  ;; full ref-surface scan per row (the 2026-08-31 deploy-health
+  ;; blowup). The set-aware pass must purge the whole chain in ONE
+  ;; boot, and still keep a member referenced from OUTSIDE the set.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [pkgc (ns-row! storage "pkgc" nil)
+            m1 (ns-row! storage "pkgc.a" (:id pkgc))
+            mk! (fn [nm parent-ids]
+                  (let [id (records/fn-id "pkgc.a" (keyword nm))]
+                    (sp/create-entity storage :fn
+                                      {:id id :name nm
+                                       :namespace-id (:id m1)
+                                       :parent-ids (vec parent-ids)})
+                    id))
+            ;; chain: root ← mid (parent) ; mid --ref--> leaf
+            leaf-id (mk! "chain-leaf" [])
+            mid-id (mk! "chain-mid" [])
+            root-id (mk! "chain-root" [mid-id])
+            slot (setup/create-slot! storage "cx" :int)
+            _ (setup/attach-slot! storage mid-id (:id slot) 0)
+            _ (sp/create-entity storage :binding
+                                {:fn-id mid-id :slot-id (:id slot)
+                                 :ref-fn-id leaf-id})
+            ;; a 4th removal referenced from a LIVE fn stays put
+            pinned-id (mk! "chain-pinned" [])
+            base (setup/create-base-fn! storage "chain-caller-base")
+            slot2 (setup/create-slot! storage "cy" :int)
+            _ (setup/attach-slot! storage (:id base) (:id slot2) 0)
+            caller (setup/create-composed-fn! storage "chain-caller" (:id base))
+            _ (sp/create-entity storage :binding
+                                {:fn-id (:id caller) :slot-id (:id slot2)
+                                 :ref-fn-id pinned-id})
+            n (pkg-sync/reconcile-moved-identities!
+                storage {:packages [{:name "pkgc"}]} [])]
+        (is (= 4 n) "all four removals counted as leftovers")
+        (doseq [[nm id] [["chain-root" root-id] ["chain-mid" mid-id]
+                         ["chain-leaf" leaf-id]]]
+          (is (nil? (sp/read-entity storage :fn id))
+              (str nm " purged — in-set refs don't pin the chain")))
+        (is (some? (sp/read-entity storage :fn pinned-id))
+            "a removal referenced from a LIVE fn is left in place"))
+      (finally (sp/close storage)))))
+
+
+(deftest inbound-refs-many-matches-per-fn-surface
+  ;; The batch scan must agree with the per-fn `inbound-refs` on the
+  ;; same storage — same targets reported, plus owner attribution.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [pkgd (ns-row! storage "pkgd" nil)
+            m1 (ns-row! storage "pkgd.a" (:id pkgd))
+            t1 (records/fn-id "pkgd.a" :t-one)
+            t2 (records/fn-id "pkgd.a" :t-two)
+            _ (sp/create-entity storage :fn {:id t1 :name "t-one"
+                                             :namespace-id (:id m1)
+                                             :parent-ids []})
+            _ (sp/create-entity storage :fn {:id t2 :name "t-two"
+                                             :namespace-id (:id m1)
+                                             :parent-ids [t1]})
+            base (setup/create-base-fn! storage "irm-base")
+            slot (setup/create-slot! storage "cz" :int)
+            _ (setup/attach-slot! storage (:id base) (:id slot) 0)
+            caller (setup/create-composed-fn! storage "irm-caller" (:id base))
+            _ (sp/create-entity storage :binding
+                                {:fn-id (:id caller) :slot-id (:id slot)
+                                 :ref-fn-id t1})
+            many (ir/inbound-refs-many storage #{t1 t2})]
+        (is (= (set (map #(dissoc % :owner-fn-id) (get many t1)))
+               (set (ir/inbound-refs storage t1)))
+            "batch scan reports the same refs as the per-fn scan (t1)")
+        (is (= (set (map #(dissoc % :owner-fn-id) (get many t2)))
+               (set (ir/inbound-refs storage t2)))
+            "batch scan reports the same refs as the per-fn scan (t2)")
+        (is (= #{(:id caller) t2}
+               (into #{} (map :owner-fn-id) (get many t1)))
+            "owner attribution: the caller's binding and t-two's parent edge"))
+      (finally (sp/close storage)))))
+
+
 (deftest leaves-ambiguous-move-alone
   ;; >1 same-name candidate in the synced set = a move we cannot resolve;
   ;; the leftover is counted, warned, and left untouched.

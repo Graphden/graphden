@@ -128,6 +128,61 @@
     @hits))
 
 
+(defn inbound-refs-many
+  "Batch `inbound-refs` for a SET of fn-ids in ONE pass over the ref
+   surface. Returns `{fn-id → [{:entity :id :field :owner-fn-id}]}`
+   (ids absent from the map have no inbound refs). `:owner-fn-id` is
+   the fn OWNING the referencing row (binding/list-item/version →
+   their fn; another fn row → itself; a shared `:slot` → nil), so a
+   caller removing a whole SET can tell internal refs (owner in the
+   set — gone once the owner is purged) from external ones.
+
+   Exists because the per-fn `inbound-refs` re-scans every table per
+   call: a boot that reconciles N removed package fns paid N full
+   scans (~1 s each against a remote managed PG), which blew the
+   deploy health window when a large fn-def section was retired
+   (2026-08-31). Same conservative surface as `inbound-refs`."
+  [storage fn-ids]
+  (let [base (base-of storage)
+        targets (set fn-ids)
+        ;; binding-id → owning fn-id, across BOTH planes (a list-item's
+        ;; owner is its binding's owner; version rows carry :fn-id too).
+        binding-owner (into {}
+                            (map (juxt :id :fn-id))
+                            (concat (sp/query-entities base :binding {})
+                                    (sp/query-entities base :binding-version {})))
+        hits (volatile! {})
+        hit! (fn [target m] (vswap! hits update target (fnil conj []) m))
+        owner-of (fn [entity row]
+                   (case entity
+                     (:binding :binding-version) (:fn-id row)
+                     (:binding-list-item :binding-list-item-version)
+                     (get binding-owner (:binding-id row))
+                     :slot nil))]
+    (doseq [[entity fields] ref-fields
+            row (sp/query-entities base entity {})
+            :let [owner (owner-of entity row)]
+            field fields
+            :let [target (get row field)]
+            :when (and (contains? targets target)
+                       ;; the target's own rows vanish with its purge —
+                       ;; not real inbound refs (same rule as inbound-refs)
+                       (not= owner target))]
+      (hit! target {:entity entity :id (:id row) :field field
+                    :owner-fn-id owner}))
+    (doseq [f (sp/query-entities base :fn {})]
+      (doseq [field [:base-fn-id :element-fn-id :return-type-fn-id]
+              :let [target (get f field)]
+              :when (and (contains? targets target) (not= (:id f) target))]
+        (hit! target {:entity :fn :id (:id f) :field field
+                      :owner-fn-id (:id f)}))
+      (doseq [target (distinct (:parent-ids f))
+              :when (and (contains? targets target) (not= (:id f) target))]
+        (hit! target {:entity :fn :id (:id f) :field :parent-ids
+                      :owner-fn-id (:id f)})))
+    @hits))
+
+
 (defn purge-fn-subgraph!
   "Remove `fn-id`'s whole owned subgraph at the base plane: its
    bindings (+ their list-items and version rows), fn-slots (+

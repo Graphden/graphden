@@ -720,49 +720,87 @@
                          (= (:id row)
                             (records/fn-id path (keyword (:name row)))))]
           row)]
-    (doseq [row leftovers]
-      (let [candidates (get synced-by-name (:name row))]
-        (if (= 1 (count candidates))
-          (let [new-id (:id (first candidates))]
-            (log/info "reconciling moved package identity"
-                      {:name (:name row) :from (:id row) :to new-id})
-            (idrepair/repoint-refs! storage {(:id row) new-id})
-            (idrepair/purge-fn-subgraph! storage (:id row))
-            (registry-core/unregister-rich-type! (keyword (:name row))
-                                                 (:id row)))
-          (if (empty? candidates)
-            ;; A 0-candidate leftover is a genuine REMOVAL (its package
-            ;; is being synced — the `package-roots` guard above — but no
-            ;; fn of that name remains). Left in the DB it stays
-            ;; name/id-resolvable AND is loaded into every compiled
-            ;; context, so a stale def whose deps changed incompatibly can
-            ;; fail the whole-graph `compile-all` (a boot crash) — and it
-            ;; accumulates forever, which is what pushed operators toward a
-            ;; DB reset. Purge it — but ONLY when nothing else references
-            ;; it (`inbound-refs` empty); a still-referenced removal is the
-            ;; author dropping a fn that is in use, which must stay LOUD,
-            ;; not be silently deleted out from under its referrer.
-            ;; Safe against a false positive: package fns carry a
-            ;; deterministic `uuid-v5(ns,name)` id, so the next full sync
-            ;; re-creates an over-eagerly-purged leaf identically.
-            (let [refs (idrepair/inbound-refs storage (:id row))]
-              (if (empty? refs)
-                (do
-                  (log/info "purging removed package identity (unreferenced dead code)"
-                            {:name (:name row) :id (:id row)})
-                  (idrepair/purge-fn-subgraph! storage (:id row))
-                  (registry-core/unregister-rich-type! (keyword (:name row))
-                                                       (:id row)))
-                (log/warn "package identity removed from EDN but STILL REFERENCED — left in place"
-                          {:name (:name row) :id (:id row)
-                           :reason :removed-but-referenced
-                           :referenced-by (count refs)})))
+    (let [removals (filterv #(empty? (get synced-by-name (:name %)))
+                            leftovers)]
+      (doseq [row leftovers]
+        (let [candidates (get synced-by-name (:name row))]
+          (cond
+            (= 1 (count candidates))
+            (let [new-id (:id (first candidates))]
+              (log/info "reconciling moved package identity"
+                        {:name (:name row) :from (:id row) :to new-id})
+              (idrepair/repoint-refs! storage {(:id row) new-id})
+              (idrepair/purge-fn-subgraph! storage (:id row))
+              (registry-core/unregister-rich-type! (keyword (:name row))
+                                                   (:id row)))
             ;; >1 same-name candidates — a move we cannot resolve
             ;; safely. THE signal this reconciler exists for.
+            (seq candidates)
             (log/warn "package identity leftover NOT auto-reconciled"
                       {:name (:name row) :id (:id row)
                        :reason :ambiguous-move-target
-                       :candidates (count candidates)})))))
+                       :candidates (count candidates)}))))
+      ;; 0-candidate leftovers are genuine REMOVALS (their package is
+      ;; being synced — the `package-roots` guard above — but no fn of
+      ;; that name remains). Left in the DB they stay name/id-resolvable
+      ;; AND load into every compiled context, so a stale def whose deps
+      ;; changed incompatibly can fail the whole-graph `compile-all` (a
+      ;; boot crash) — and they accumulate forever, which is what pushed
+      ;; operators toward a DB reset. Purge — but ONLY what nothing
+      ;; OUTSIDE the removal set references; a removal still referenced
+      ;; from live graph must stay LOUD, not be silently deleted out
+      ;; from under its referrer. Refs BETWEEN removals (a retired
+      ;; fn-def chain referencing itself) resolve by purging referrers
+      ;; before referees — that is why this runs as a SET: the per-row
+      ;; `inbound-refs` loop paid a full ref-surface scan per fn
+      ;; (~1 s × N against a managed PG — the 2026-08-31 deploy-health
+      ;; blowup) and still left whole retired chains behind as
+      ;; "referenced" by their own siblings.
+      ;; Safe against a false positive: package fns carry a
+      ;; deterministic `uuid-v5(ns,name)` id, so the next full sync
+      ;; re-creates an over-eagerly-purged leaf identically.
+      (when (seq removals)
+        (let [removal-ids (into #{} (map :id) removals)
+              refs-map (idrepair/inbound-refs-many storage removal-ids)
+              ;; An id is KEPT when any ref chain reaches it from
+              ;; outside the removal set: seed with directly-externally-
+              ;; referenced ids, then propagate through in-set refs
+              ;; (a kept member's refs keep its targets too).
+              kept (loop [kept (into #{}
+                                     (keep (fn [[id refs]]
+                                             (when (some #(not (contains? removal-ids
+                                                                          (:owner-fn-id %)))
+                                                         refs)
+                                               id)))
+                                     refs-map)]
+                     (let [kept' (into kept
+                                       (keep (fn [[id refs]]
+                                               (when (some #(contains? kept (:owner-fn-id %))
+                                                           refs)
+                                                 id)))
+                                       refs-map)]
+                       (if (= kept' kept) kept (recur kept'))))
+              purgeable (remove #(contains? kept (:id %)) removals)
+              ;; Every ref INTO a purgeable row is owned by another
+              ;; purgeable row (that is what `kept` propagation proved),
+              ;; and refs carry no FK constraint — so the whole batch
+              ;; can go in any order; sorting referrer-heavy rows later
+              ;; just keeps the transient in-set dangling window small.
+              in-set-inbound (fn [row]
+                               (count (filter #(contains? removal-ids (:owner-fn-id %))
+                                              (get refs-map (:id row)))))]
+          (doseq [row (sort-by in-set-inbound purgeable)]
+            (log/info "purging removed package identity (unreferenced dead code)"
+                      {:name (:name row) :id (:id row)})
+            (idrepair/purge-fn-subgraph! storage (:id row))
+            (registry-core/unregister-rich-type! (keyword (:name row))
+                                                 (:id row)))
+          (doseq [row removals
+                  :when (contains? kept (:id row))]
+            (log/warn "package identity removed from EDN but STILL REFERENCED — left in place"
+                      {:name (:name row) :id (:id row)
+                       :reason :removed-but-referenced
+                       :referenced-by (count (get refs-map (:id row)))})))))
     (count leftovers)))
 
 

@@ -492,9 +492,12 @@
   [branch-ctx branch-id fn-ids]
   (when *recheck-user-fns?*
     (let [slice (:rich-types-atom branch-ctx)
+          org-slice (:per-org-rich-atom branch-ctx)
           work (fn []
                  (binding [registry-core/*rich-types-override*
-                           (or slice registry-core/*rich-types-override*)]
+                           (or slice registry-core/*rich-types-override*)
+                           registry-core/*per-org-rich-override*
+                           (or org-slice registry-core/*per-org-rich-override*)]
                    (if (seq fn-ids)
                      (doseq [id fn-ids]
                        (try
@@ -528,7 +531,14 @@
                           :rich-types-atom
                           (registry-core/fork-rich-types-atom
                             (or (:rich-types-atom base-ctx)
-                                (registry-core/active-rich-types-atom))))
+                                (registry-core/active-rich-types-atom)))
+                          ;; …and its per-org cousin: tenant name-precedence
+                          ;; entries recorded under this branch stay private
+                          ;; to it (same fork-at-build contract).
+                          :per-org-rich-atom
+                          (registry-core/fork-per-org-rich-atom
+                            (or (:per-org-rich-atom base-ctx)
+                                (registry-core/active-per-org-rich-atom))))
         base-storage (vs/unwrap (:storage base-ctx))
         merge-target? (branch-is-merge-target? base-storage branch-id)
         ;; Divergence RELATIVE TO MAIN across the whole ancestor chain, not
@@ -539,7 +549,8 @@
         own-fn-ids (when-not merge-target?
                      (chain-divergent-fn-ids base-storage default-branch-id branch-id))
         base-registry (some-> (:compiled-registry base-ctx) deref)]
-    (binding [registry-core/*rich-types-override* (:rich-types-atom branch-ctx)]
+    (binding [registry-core/*rich-types-override* (:rich-types-atom branch-ctx)
+              registry-core/*per-org-rich-override* (:per-org-rich-atom branch-ctx)]
       (cond
         ;; 1. Identical to base → reuse the base registry directly.
         (and base-registry (not merge-target?) (empty? own-fn-ids))
@@ -796,7 +807,10 @@
                            (when-let [c (:ctx entry)]
                              (binding [registry-core/*rich-types-override*
                                        (or (:rich-types-atom c)
-                                           registry-core/*rich-types-override*)]
+                                           registry-core/*rich-types-override*)
+                                       registry-core/*per-org-rich-override*
+                                       (or (:per-org-rich-atom c)
+                                           registry-core/*per-org-rich-override*)]
                                (try
                                  ;; Two OPTIMISTIC attempts (compile outside
                                  ;; the lock, swap only if the epoch didn't
@@ -1103,7 +1117,9 @@
          ;; branch forks a private copy in `build-actual-entry!`.
          base-ctx (cond-> base-ctx
                     (nil? (:rich-types-atom base-ctx))
-                    (assoc :rich-types-atom (registry-core/active-rich-types-atom)))
+                    (assoc :rich-types-atom (registry-core/active-rich-types-atom))
+                    (nil? (:per-org-rich-atom base-ctx))
+                    (assoc :per-org-rich-atom (registry-core/active-per-org-rich-atom)))
          default-branch-id (vs/current-branch-id (:storage base-ctx))
          handler-fn-id (resolve-handler-fn-id (:storage base-ctx) handler-fn-name)
          ;; OPTIONAL handlers (`_registry-ring-response` / `_mcp-ring-response`)
@@ -1347,7 +1363,10 @@
                               (let [entry (entry-for router branch-id)]
                                 (binding [registry-core/*rich-types-override*
                                           (or (:rich-types-atom (:ctx entry))
-                                              registry-core/*rich-types-override*)]
+                                              registry-core/*rich-types-override*)
+                                          registry-core/*per-org-rich-override*
+                                          (or (:per-org-rich-atom (:ctx entry))
+                                              registry-core/*per-org-rich-override*)]
                                   ((:handler entry) request)))
 
                               ;; A PAGE load naming a branch that is gone (merged

@@ -668,11 +668,12 @@ panel keeps its inline 📍 badge on the same rows.
   from its base's view) and both the ctx BUILD and every dispatched
   request bind it as `*rich-types-override*` — so `/api/types`,
   type-check writes and effect-gate lookups all answer per branch
-  (covered by `rich-types-registry-branch-scope-test`). Residual
-  cousin: the per-ORG rich-types slice (`per-org-rich-types`) is still
-  process-global across branches — a tenant editing the same-named fn
-  on two branches shares one per-org name index. Narrower blast radius
-  (tenant name-resolution precedence only); left as-is.
+  (covered by `rich-types-registry-branch-scope-test`). The
+  per-ORG rich-types cousin (`per-org-rich-types`) is branch-scoped the
+  same way since 2026-09-01: branch ctxs fork it at build
+  (`fork-per-org-rich-atom`) and every bind site pairs the two
+  overrides, so a tenant's same-named fns on two branches keep separate
+  per-org name indexes (`per-org-rich-slice-is-branch-scoped-test`).
 
 - **Merge is one-hop (non-transitive) — and REFUSES rather than silently drops.**
   A merge of source `S` into target `T` transfers only the versions `S` OWNS

@@ -553,6 +553,40 @@
       (is (nil? (:review-state (:branch (parse-json (dispatch {:method :get :path (str "/api/branches/" src)})))))))))
 
 
+(deftest branch-comment-row-cap-test
+  ;; The per-branch thread has a row cap (no fairness-quota coverage,
+  ;; and the client downloads the whole thread) — over the cap = clean
+  ;; 400, nothing stored. Cap bound low for the test.
+  (let [src (str "cap-" (System/currentTimeMillis))
+        cpath (str "/api/branches/" src "/comments")]
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name src :base-branch-id "main"}}))))
+    ;; the impls ns is loader-loaded, not on the classpath — resolve
+    ;; the cap var at runtime (fixture has booted the packages).
+    ;; the impls ns is loader-loaded, not on the classpath — resolve
+    ;; the cap var at runtime (the fixture has booted the packages).
+    ;; NB the suite's dispatch sits BELOW wrap-error-boundary (it lives
+    ;; on the real server's top chain), so author errors surface as the
+    ;; raw ex-info here — assert the mapped status like the anchor test.
+    (let [cap-var (ns-resolve (find-ns 'graphden.packages.app.branches.impls)
+                              '*max-comments-per-branch*)]
+      (with-bindings {cap-var 2}
+        (is (true? (:ok (parse-json (dispatch {:method :post :path cpath
+                                               :body {:body "one"}})))))
+        (is (true? (:ok (parse-json (dispatch {:method :post :path cpath
+                                               :body {:body "two"}})))))
+        (let [e (try (dispatch {:method :post :path cpath
+                                :body {:body "three"}})
+                     nil
+                     (catch clojure.lang.ExceptionInfo ex ex))]
+          (is (some? e) "over-cap post is rejected")
+          (is (= :validation-error/comment-limit (:type (ex-data e))))
+          (is (= 400 (web-errors/status-for-ex-data (ex-data e)))
+              "maps to a clean 400 at the server's error boundary"))))
+    (is (= 2 (count (:comments (parse-json (dispatch {:method :get :path cpath})))))
+        "nothing stored past the cap")))
+
+
 (deftest branch-comment-anchor-test
   ;; diff v2: a comment may anchor to one diffed graph element
   ;; (entity-name + entity-id). Anchors round-trip through the wire
@@ -602,6 +636,33 @@
        (map (fn [[k v]]
               (str (name k) "=" (java.net.URLEncoder/encode (str v) "UTF-8"))))
        (str/join "&")))
+
+
+(deftest per-org-rich-slice-is-branch-scoped-test
+  ;; The per-ORG rich-types cousin used to stay process-global across
+  ;; branches (VERSIONING § Known gaps residual): a tenant editing the
+  ;; same-named fn on two branches shared one per-org name index. Branch
+  ;; ctxs now fork it exactly like the main slice — assert the ctx
+  ;; carries its own atom and a write into the branch's slice never
+  ;; reaches the base's.
+  (let [feat (str "orgslice-" (System/currentTimeMillis))]
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name feat :base-branch-id "main"}}))))
+    ;; Force the branch entry to build (any dispatch on it).
+    (is (= 200 (:status (dispatch {:method :get :path "/api/branches"
+                                   :branch feat}))))
+    (let [branches-resp (parse-json (dispatch {:method :get :path "/api/branches"}))
+          feat-id (:id (some #(when (= feat (:name %)) %) (:branches branches-resp)))
+          base-ctx (:base-ctx *router*)
+          feat-ctx (br/ctx-for *router* (parse-uuid feat-id))
+          base-atom (:per-org-rich-atom base-ctx)
+          feat-atom (:per-org-rich-atom feat-ctx)]
+      (is (some? feat-atom) "branch ctx carries a per-org slice atom")
+      (is (not (identical? base-atom feat-atom))
+          "…and it is a FORK, not the base's atom")
+      (swap! feat-atom assoc-in ["acme" :by-name :probe] {:effects ["io"]})
+      (is (nil? (get-in @base-atom ["acme" :by-name :probe]))
+          "a branch-slice write never reaches the base's per-org index"))))
 
 
 (deftest rich-types-registry-branch-scope-test

@@ -125,4 +125,6 @@
   "graphden.crud.type-check/type-check-binding-direct!"
   "one unit: the write-path check — resolve, check, record-or-clear the diagnostic, as one step"
   "graphden.system.init.exec/ig/init-key :exec/context"
-  "one unit: the boot wiring of the execution context; every binding is one component it needs"}}
+  "one unit: the boot wiring of the execution context; every binding is one component it needs"
+  "graphden.system.branch-router/heal-stale-ctxs!"
+  "one unit: one heal pass — snapshot, per-entry rebuild closure and the isolation-override conveyance capture the same locals; a split scatters the epoch/registry pairing the comments defend"}}

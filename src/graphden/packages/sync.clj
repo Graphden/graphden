@@ -736,31 +736,43 @@
                               (and (= 1 (count cs)) (some? preexisting)
                                    (contains? preexisting (:id (first cs)))))))
           removals (filterv not-a-move? leftovers)]
-      (doseq [row leftovers]
-        (let [candidates (get synced-by-name (:name row))]
-          (cond
-            (and (= 1 (count candidates))
-                 (or (nil? preexisting)
-                     (not (contains? preexisting (:id (first candidates))))))
-            (let [new-id (:id (first candidates))]
-              (log/info "reconciling moved package identity"
-                        {:name (:name row) :from (:id row) :to new-id})
-              (idrepair/repoint-refs! storage {(:id row) new-id})
-              (idrepair/purge-fn-subgraph! storage (:id row))
+      ;; MOVES are batched: one repoint pass over the ref surface with
+      ;; the whole old→new map + one table-scan purge cascade — a bulk
+      ;; namespace relocation used to pay a full repoint scan PER moved
+      ;; fn (the same N-scans shape as the 2026-08-31 removal blowup).
+      (let [move-row? (fn [row]
+                        (let [cs (get synced-by-name (:name row))]
+                          (and (= 1 (count cs))
+                               (or (nil? preexisting)
+                                   (not (contains? preexisting
+                                                   (:id (first cs))))))))
+            moves (filterv move-row? leftovers)]
+        (when (seq moves)
+          (let [old->new (into {}
+                               (map (fn [row]
+                                      [(:id row)
+                                       (:id (first (get synced-by-name (:name row))))]))
+                               moves)]
+            (log/info "reconciling moved package identities"
+                      {:count (count moves)
+                       :names (mapv :name moves)})
+            (idrepair/repoint-refs! storage old->new)
+            (idrepair/purge-fn-subgraphs-many! storage (keys old->new))
+            (doseq [row moves]
               (registry-core/unregister-rich-type! (keyword (:name row))
-                                                   (:id row)))
-            ;; 1 candidate that PRE-DATES this sync: not a move target —
-            ;; a removal whose bare name collides with an unrelated fn
-            ;; in another namespace. Fall through to the removal set.
-            (= 1 (count candidates))
-            nil
+                                                   (:id row)))))
+        (doseq [row leftovers
+                :when (not (move-row? row))]
+          (let [candidates (get synced-by-name (:name row))]
             ;; >1 same-name candidates — a move we cannot resolve
-            ;; safely. THE signal this reconciler exists for.
-            (seq candidates)
-            (log/warn "package identity leftover NOT auto-reconciled"
-                      {:name (:name row) :id (:id row)
-                       :reason :ambiguous-move-target
-                       :candidates (count candidates)}))))
+            ;; safely. THE signal this reconciler exists for. A
+            ;; 1-candidate row whose candidate PRE-DATES this sync is
+            ;; not warned here — it falls into the removal set below.
+            (when (> (count candidates) 1)
+              (log/warn "package identity leftover NOT auto-reconciled"
+                        {:name (:name row) :id (:id row)
+                         :reason :ambiguous-move-target
+                         :candidates (count candidates)})))))
       ;; 0-candidate leftovers are genuine REMOVALS (their package is
       ;; being synced — the `package-roots` guard above — but no fn of
       ;; that name remains). Left in the DB they stay name/id-resolvable

@@ -273,6 +273,22 @@
   (or *per-org-rich-override* per-org-rich-types))
 
 
+(defn active-per-org-rich-atom
+  "The atom per-org rich-types reads/writes CURRENTLY land on — mirrors
+   `active-rich-types-atom` so the branch router can tag ctxs."
+  []
+  (target-per-org-rich-atom))
+
+
+(defn fork-per-org-rich-atom
+  "Fresh atom seeded from `base-atom`'s state — the per-org cousin of
+   `fork-rich-types-atom`. Without it a tenant editing the same-named
+   fn on two branches shared ONE per-org name index (the residual
+   cross-branch cousin VERSIONING § Known gaps used to carry)."
+  [base-atom]
+  (atom @base-atom))
+
+
 (defn per-org-rich-snapshot-for-isolation
   "Seeder for the isolation override (so a bound override starts from the global
    per-org state, matching `snapshot-for-isolation`)."

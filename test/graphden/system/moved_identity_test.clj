@@ -323,6 +323,58 @@
       (finally (sp/close storage)))))
 
 
+(deftest bulk-namespace-move-repoints-in-one-batch
+  ;; Two fns move namespaces in the same sync — the batched path must
+  ;; repoint BOTH callers' refs in one pass and purge both ghosts.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [pkgf (ns-row! storage "pkgf" nil)
+            m-old (ns-row! storage "pkgf.old" (:id pkgf))
+            m-new (ns-row! storage "pkgf.new" (:id pkgf))
+            mk-old! (fn [nm]
+                      (let [id (records/fn-id "pkgf.old" (keyword nm))]
+                        (sp/create-entity storage :fn
+                                          {:id id :name nm
+                                           :namespace-id (:id m-old)
+                                           :parent-ids []})
+                        id))
+            mk-new! (fn [nm]
+                      (let [id (records/fn-id "pkgf.new" (keyword nm))]
+                        (sp/create-entity storage :fn
+                                          {:id id :name nm
+                                           :namespace-id (:id m-new)
+                                           :parent-ids []})
+                        id))
+            old-a (mk-old! "mv-a")
+            old-b (mk-old! "mv-b")
+            new-a (mk-new! "mv-a")
+            new-b (mk-new! "mv-b")
+            base (setup/create-base-fn! storage "mv-caller-base")
+            slot-a (setup/create-slot! storage "ma" :int)
+            slot-b (setup/create-slot! storage "mb" :int)
+            _ (setup/attach-slot! storage (:id base) (:id slot-a) 0)
+            caller (setup/create-composed-fn! storage "mv-caller" (:id base))
+            bind-a (sp/create-entity storage :binding
+                                     {:fn-id (:id caller) :slot-id (:id slot-a)
+                                      :ref-fn-id old-a})
+            bind-b (sp/create-entity storage :binding
+                                     {:fn-id (:id caller) :slot-id (:id slot-b)
+                                      :ref-fn-id old-b})
+            n (pkg-sync/reconcile-moved-identities!
+                storage {:packages [{:name "pkgf"}]}
+                [{:name "mv-a" :id new-a} {:name "mv-b" :id new-b}]
+                ;; the NEW rows were minted this sync — a true move
+                {:preexisting-fn-ids #{old-a old-b (:id base) (:id caller)}})]
+        (is (= 2 n) "both old identities are leftovers")
+        (is (= new-a (:ref-fn-id (sp/read-entity storage :binding (:id bind-a))))
+            "caller's first ref repointed at the moved id")
+        (is (= new-b (:ref-fn-id (sp/read-entity storage :binding (:id bind-b))))
+            "caller's second ref repointed in the same batch")
+        (is (nil? (sp/read-entity storage :fn old-a)) "first ghost purged")
+        (is (nil? (sp/read-entity storage :fn old-b)) "second ghost purged"))
+      (finally (sp/close storage)))))
+
+
 (deftest leaves-ambiguous-move-alone
   ;; >1 same-name candidate in the synced set = a move we cannot resolve;
   ;; the leftover is counted, warned, and left untouched.

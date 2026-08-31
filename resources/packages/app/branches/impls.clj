@@ -630,6 +630,16 @@
   10000)
 
 
+(def ^:dynamic *max-comments-per-branch*
+  "Upper bound on how many review comments one branch's thread may hold.
+   Comments have no fairness-quota coverage and the compare-mode client
+   downloads the whole thread per entry — without a row cap a tenant
+   could grow an unbounded thread (an intra-org self-DoS, but also an
+   unbounded response for every reader). 500 is far past any real
+   review conversation. Dynamic for tests."
+  500)
+
+
 (def ^:private comment-anchor-entities
   "Valid `:entity-name` anchor kinds for a review comment — the four
    versioned entity kinds the branch diff walks."
@@ -654,6 +664,15 @@
                            max-comment-body-chars ").")
                       {:type :validation-error/comment-too-long
                        :max max-comment-body-chars})))
+    (let [existing (count (sp/query-entities (branches/base-storage ctx)
+                                             :branch-comment
+                                             {:source-branch-id source-branch-id}))]
+      (when (>= existing *max-comments-per-branch*)
+        (throw (ex-info (str "Comment limit reached: this branch already holds "
+                             existing " comments (max " *max-comments-per-branch*
+                             "). Resolve and delete old threads first.")
+                        {:type :validation-error/comment-limit
+                         :max *max-comments-per-branch*}))))
     (when (or (and ename (not (contains? comment-anchor-entities ename)))
               (not= (some? ename) (some? entity-id)))
       (throw (ex-info (str "Invalid comment anchor: " (pr-str ename) " / "

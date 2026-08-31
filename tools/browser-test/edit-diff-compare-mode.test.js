@@ -254,8 +254,9 @@ async function cleanup(page) {
       (id) => window.gdDiffModeGroup(id)?.__effects, effId, {timeout: 30000});
     const effLabel = await page.evaluate(
       (id) => window.gdDiffModeGroup(id).__effects, effId);
-    assert(/effects touched/.test(effLabel) && /\+time/.test(effLabel),
-           'effects-touched computed (+time — the ref wired in): ' + effLabel);
+    assert(/^effects: pure here · time there$/.test(effLabel),
+           'full per-branch effect-set delta (registry is branch-scoped): '
+           + effLabel);
     await page.evaluate(() => window.gdDiffSetLens({effectsOnly: true}));
     const effLens = await page.evaluate(({a, b}) => ({
       eff: !!window.gdDiffVisibleGroup(a),

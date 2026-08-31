@@ -149,9 +149,9 @@ the author**.
    branch in, and the **type lens** — show only additions, removals
    or modifications, or "substantive only" (hide edits that touch
    nothing but names and descriptions), or "effects touched only" —
-   changes that wire an effect-carrying fn in or out get an
-   `effects touched: +time` mark, the strongest "this affects
-   behaviour" signal. Fns that exist only on the compared branch show
+   fns whose EFFECT SET differs between the branches get an
+   `effects: pure here · time there` mark, the strongest "this
+   affects behaviour" signal. Fns that exist only on the compared branch show
    as dimmed ghost rows in expanded Explorer groups (click one to
    switch there). Exit = click the lit `◐`
    again (or the chip's `×`). You keep editing and running as usual;

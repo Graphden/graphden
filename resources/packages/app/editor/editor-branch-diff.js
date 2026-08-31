@@ -126,7 +126,7 @@ async function showBranchDiff(targetName, sourceName, sourceRef) {
     bindDiffRowNavigation(body, sourceName, targetName);
     initDiffConversation(body, sourceName, sourceRef);
     renderDiffSuggestions(body, sourceName, sourceRef, targetName);
-    annotateDiffEffects(body);
+    annotateDiffEffects(body, sourceName, targetName);
   } catch (err) {
     body.classList.remove('branch-diff-loading');
     body.innerHTML = '<div class="branch-diff-error">Failed: '
@@ -209,15 +209,45 @@ function bindDiffRowNavigation(rootEl, sourceName, targetName) {
 // Effect-set deltas — "did the behaviour's footprint change"
 // ============================================================================
 
-// Which effect-carrying fns does each group's change wire in or out?
-// Derived from the rendered rows themselves (changed refs appear as
-// `:name`), with the targets' effect sets from the local registry —
-// see editor-diff-mode.js for why full per-branch effect closures
-// can't be compared honestly today. Modal reading order is
-// was(target) → becomes(source): "+" = the source side gains it.
-function annotateDiffEffects(body) {
+// Per-group effect deltas: the registry is branch-scoped now, so the
+// primary source is a FULL effect-set comparison between the two
+// branches' `/api/types` (fetched with explicit branch headers). For
+// rows without a name on both sides, fall back to the structural
+// signal — which effect-carrying fns the rendered refs wire in/out.
+// Modal reading order is was(target) → becomes(source).
+async function annotateDiffEffects(body, sourceName, targetName) {
   if (typeof gdDiffEffectsOfName !== 'function') return;
+  let tgtTypes = null;
+  let srcTypes = null;
+  try {
+    [tgtTypes, srcTypes] = await Promise.all([
+      gdDiffFetchTypes(targetName),
+      gdDiffFetchTypes(sourceName),
+    ]);
+  } catch (_) { /* structural fallback only */ }
+  if (!body.isConnected) return;
   body.querySelectorAll('.branch-diff-row[data-diff-fn-id]').forEach((row) => {
+    const fnName = row.getAttribute('data-diff-fn-name');
+    if (fnName && tgtTypes && srcTypes
+        && typeof gdDiffEffectSetDelta === 'function') {
+      const d = gdDiffEffectSetDelta(tgtTypes, srcTypes, fnName);
+      if (d) {
+        const head = row.querySelector('.branch-diff-row-head');
+        if (head && !head.querySelector('.bd-effects-chip')) {
+          const chip = document.createElement('span');
+          chip.className = 'bd-effects-chip';
+          const show = (xs) => (xs.length ? xs.join(',') : 'pure');
+          chip.textContent = 'effects: ' + show(d.here) + ' → ' + show(d.there);
+          chip.title = 'The effect set differs between "' + targetName
+            + '" and "' + sourceName + '" — behaviour footprint changed';
+          head.insertBefore(chip, head.querySelector('.branch-diff-comment-btn') || null);
+        }
+        return;
+      }
+      // Named on both sides and EQUAL → no chip, and no structural
+      // guess either (the closure truth beats the ref heuristic).
+      if (tgtTypes[fnName] && srcTypes[fnName]) return;
+    }
     const plus = new Set();
     const minus = new Set();
     const grab = (set, text) => {

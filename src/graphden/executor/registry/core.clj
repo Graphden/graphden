@@ -222,6 +222,25 @@
   @(target-rich-types-atom))
 
 
+(defn active-rich-types-atom
+  "The atom rich-types reads/writes CURRENTLY land on — the bound
+   override (test isolation, or a branch ctx's slice bound by the
+   branch router) or the process global. Public so the branch router
+   can tag contexts with the atom they were built under."
+  []
+  (target-rich-types-atom))
+
+
+(defn fork-rich-types-atom
+  "Fresh atom seeded from `base-atom`'s current state. Branch-ctx
+   creation: the branch starts from its base's view and then diverges
+   PRIVATELY — its compiles/type-checks no longer clobber the base's
+   entries (the pre-2026-08-31 global registry was last-compile-wins
+   across branches; see VERSIONING.md § Known gaps)."
+  [base-atom]
+  (atom @base-atom))
+
+
 (defn effective-rich-types
   "PUBLIC snapshot of the active rich-types map (override when bound,
    global otherwise). Exists for `compile-eager`'s compile-all cache

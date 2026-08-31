@@ -1176,8 +1176,10 @@
            propose-current-for-review, merge-compared-in, and the TYPE LENS
            (`gdDiffSetLens` — kind toggles, substantive-only,
            effects-touched-only). Fns existing only on the compared branch
-           inject as ghost rows; changed refs annotate the effects they wire
-           in/out (`gdDiffEffectsTouched`). Note what it
+           inject as ghost rows; effect-set deltas come from a FULL
+           per-branch registry comparison (`gdDiffEffectSetDelta` — the
+           registry is branch-scoped), with the changed-refs signal
+           (`gdDiffEffectsTouched`) as the anonymous-fn fallback. Note what it
            does NOT do: no data re-routing — every read and write stays on
            the current branch, so the user keeps editing with the lens on."}
 

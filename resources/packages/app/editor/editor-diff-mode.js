@@ -127,16 +127,36 @@ function gdDiffSlotsForFn(fnId) {
   return Object.keys(slots).length ? slots : null;
 }
 
-// --- effects touched by a change --------------------------------------------
+// --- effect deltas ----------------------------------------------------------
 
-// Full per-branch effect CLOSURES can't be compared honestly today:
-// the rich-types registry is process-global (id-keyed, last compile
-// wins), so `/api/types` answers with a cross-branch union — see the
-// known gap in VERSIONING.md. What IS honest and derivable from the
-// diff itself: which effect-CARRYING fns a change wires in or out.
-// Every changed ref lands in the display model as `:name`; the ref
-// TARGETS' own effect sets come from the local registry (base-fns and
-// platform fns — branch-independent in practice).
+// The registry is branch-scoped as of 2026-08-31 (per-ctx slices bound
+// at dispatch), so `/api/types` finally answers PER BRANCH and a full
+// effect-set comparison is honest: fetch both branches' registries and
+// diff each changed fn's `:effects`. For fns without a stable name on
+// both sides (anonymous), fall back to the structural signal below —
+// which effect-CARRYING fns the change wires in or out (every changed
+// ref lands in the display model as `:name`).
+
+async function gdDiffFetchTypes(branchName) {
+  const r = await window.authFetch(API.api_types,
+    { headers: { 'X-Graphden-Branch': branchName } });
+  if (!r.ok) throw new Error('types HTTP ' + r.status);
+  return r.json();
+}
+
+// {here, there} sorted effect arrays, or null when equal / unresolvable.
+function gdDiffEffectSetDelta(hereTypes, thereTypes, name) {
+  if (!name || !hereTypes?.[name] || !thereTypes?.[name]) return null;
+  const a = (hereTypes[name].effects || []).slice().sort();
+  const b = (thereTypes[name].effects || []).slice().sort();
+  if (JSON.stringify(a) === JSON.stringify(b)) return null;
+  return { here: a, there: b };
+}
+
+function gdDiffEffectSetLabel(d) {
+  const show = (xs) => (xs.length ? xs.join(',') : 'pure');
+  return 'effects: ' + show(d.here) + ' here · ' + show(d.there) + ' there';
+}
 
 // Collect ':name' ref targets from one entry, split by side.
 // Returns {there: Set<name>, here: Set<name>} — "there" = the compared
@@ -187,12 +207,30 @@ function gdDiffEffectsTouched(g) {
   return 'effects touched: ' + parts.join(' ');
 }
 
-function gdDiffModeComputeEffects(mode) {
+// Two fresh registry fetches (this branch + the compared one — the
+// wrapper stamps the current branch's header on the first, we stamp
+// the other explicitly), then per-group: the full effect-set delta
+// where the fn resolves by name on both sides, the structural
+// touched-refs signal otherwise. Async; annotations upgrade in place.
+async function gdDiffModeLoadEffects(mode) {
+  let hereTypes = null;
+  let thereTypes = null;
+  try {
+    [hereTypes, thereTypes] = await Promise.all([
+      window.authFetch(API.api_types).then((r) => (r.ok ? r.json() : null)),
+      gdDiffFetchTypes(mode.branch),
+    ]);
+  } catch (_) { /* fall back to the structural signal alone */ }
+  if (_gdDiffMode !== mode) return;   // mode changed under the fetch
   for (const g of mode.byFnId.values()) {
-    g.__effects = gdDiffEffectsTouched(g);
+    const d = (hereTypes && thereTypes)
+      ? gdDiffEffectSetDelta(hereTypes, thereTypes, g['fn-name'])
+      : null;
+    g.__effects = d ? gdDiffEffectSetLabel(d) : gdDiffEffectsTouched(g);
     if (g.__effects) g.__title += ' — ' + g.__effects;
   }
   mode.effectsReady = true;
+  gdDiffModeDecorateSidebar();
 }
 
 // --- classification helpers -------------------------------------------------
@@ -567,7 +605,7 @@ async function gdEnterDiffMode(otherBranch) {
   try {
     _gdDiffMode = await gdDiffModeFetch(otherBranch);
     try { localStorage.setItem(GD_DIFF_MODE_KEY, otherBranch); } catch (_) {}
-    gdDiffModeComputeEffects(_gdDiffMode);
+    gdDiffModeLoadEffects(_gdDiffMode);
     gdDiffModeRenderChip();
     gdDiffModeDecorateSidebar();
     gdDiffModeObserve();
@@ -597,7 +635,7 @@ async function gdDiffModeRefresh() {
   _gdDiffModeFetching = true;
   try {
     _gdDiffMode = await gdDiffModeFetch(_gdDiffMode.branch);
-    gdDiffModeComputeEffects(_gdDiffMode);
+    gdDiffModeLoadEffects(_gdDiffMode);
     gdDiffModeDecorateSidebar();
   } catch (_) { /* keep the stale annotations */ }
   _gdDiffModeFetching = false;

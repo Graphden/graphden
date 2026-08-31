@@ -594,3 +594,82 @@
                    (catch clojure.lang.ExceptionInfo ex ex))]
         (is (some? e))
         (is (= 400 (web-errors/status-for-ex-data (ex-data e))))))))
+
+
+(defn- form-encode
+  [m]
+  (->> m
+       (map (fn [[k v]]
+              (str (name k) "=" (java.net.URLEncoder/encode (str v) "UTF-8"))))
+       (str/join "&")))
+
+
+(deftest rich-types-registry-branch-scope-test
+  ;; 2026-08-31: the rich-types registry used to be process-global and
+  ;; last-compile-wins — compiling a branch ctx overwrote the base's
+  ;; entries, so `/api/types` answered with a cross-branch union (a fn
+  ;; existing only on a branch showed up under main) and effect sets
+  ;; reflected whichever branch compiled last. Per-ctx slices now: the
+  ;; default branch keeps the boot registry, every other branch forks a
+  ;; private copy at ctx build and the dispatcher binds it per request.
+  (let [run-id (str "-" (System/currentTimeMillis))
+        feat (str "rts" run-id)
+        only-name (str "rts-only" run-id)
+        eff-name (str "rts-eff" run-id)
+        types (fn [branch]
+                (let [resp (dispatch {:method :get :path "/api/types"
+                                      :branch branch})]
+                  (is (= 200 (:status resp)) (str "/api/types on " (or branch "main")))
+                  (parse-json resp)))
+        graph (fn [branch]
+                (parse-json (dispatch {:method :get :path "/api/graph/entities"
+                                       :branch branch})))]
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name feat :base-branch-id "main"}}))))
+    (let [ents (graph nil)
+          by-name (fn [nm] (some #(when (= nm (:name %)) %) (:fns ents)))
+          identity-fn (by-name "identity")
+          coalesce (by-name "coalesce")
+          time-fn (by-name "current-time-ms")
+          value-slot (some (fn [fs]
+                             (when (= (:id coalesce) (:fn-id fs))
+                               (some #(when (and (= (:id %) (:slot-id fs))
+                                                 (= "value" (:name %)))
+                                        %)
+                                     (:slots ents))))
+                           (:fn-slots ents))]
+      (is (and identity-fn coalesce time-fn value-slot) "baseline fns + :value slot resolved")
+
+      (testing "a fn created ONLY on a branch stays out of main's registry"
+        (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn"
+                                       :branch feat
+                                       :content-type "application/x-www-form-urlencoded"
+                                       :body (form-encode {:name only-name
+                                                           :parent-ids (:id identity-fn)})}))))
+        ;; Compile/serve the BRANCH first — the leak direction was
+        ;; "branch compile clobbers the global".
+        (is (some? (get (types feat) (keyword only-name)))
+            "the branch's own registry carries the fn")
+        (is (nil? (get (types nil) (keyword only-name)))
+            "main's registry does NOT (pre-fix: cross-branch union)"))
+
+      (testing "effect sets answer per branch"
+        (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn"
+                                       :content-type "application/x-www-form-urlencoded"
+                                       :body (form-encode {:name eff-name
+                                                           :parent-ids (:id coalesce)})}))))
+        (let [eff-id (:id (some #(when (= eff-name (:name %)) %) (:fns (graph nil))))]
+          (is (some? eff-id))
+          ;; Wire the :value slot to :current-time-ms ON THE BRANCH only.
+          (is (= 200 (:status (dispatch {:method :post :path "/api/entities/binding"
+                                         :branch feat
+                                         :content-type "application/x-www-form-urlencoded"
+                                         :body (form-encode {:fn-id eff-id
+                                                             :slot-id (:id value-slot)
+                                                             :ref-fn-id (:id time-fn)})}))))
+          (let [feat-effects (set (:effects (get (types feat) (keyword eff-name))))
+                main-effects (set (:effects (get (types nil) (keyword eff-name))))]
+            (is (contains? feat-effects "time")
+                (str "branch view reaches :time — got " feat-effects))
+            (is (not (contains? main-effects "time"))
+                (str "main view stays pure — got " main-effects))))))))

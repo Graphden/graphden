@@ -483,7 +483,17 @@
 
    No atom writes; caller installs the result."
   [{:keys [base-ctx default-branch-id handler-fn-id optional-handler-fn-ids]} branch-id]
-  (let [branch-ctx (build-branch-ctx base-ctx branch-id)
+  (let [branch-ctx (assoc (build-branch-ctx base-ctx branch-id)
+                          ;; Private rich-types slice, forked from the base's
+                          ;; view: the compile below (and every later request
+                          ;; dispatched to this branch) records type/effect
+                          ;; entries HERE, so branch compiles stop clobbering
+                          ;; the base registry (`/api/types` cross-branch
+                          ;; union — VERSIONING § Known gaps).
+                          :rich-types-atom
+                          (registry-core/fork-rich-types-atom
+                            (or (:rich-types-atom base-ctx)
+                                (registry-core/active-rich-types-atom))))
         base-storage (vs/unwrap (:storage base-ctx))
         merge-target? (branch-is-merge-target? base-storage branch-id)
         ;; Divergence RELATIVE TO MAIN across the whole ancestor chain, not
@@ -494,38 +504,41 @@
         own-fn-ids (when-not merge-target?
                      (chain-divergent-fn-ids base-storage default-branch-id branch-id))
         base-registry (some-> (:compiled-registry base-ctx) deref)]
-    (cond
-      ;; 1. Identical to base → reuse the base registry directly.
-      (and base-registry (not merge-target?) (empty? own-fn-ids))
-      (cr/instantiate-from-templates! base-ctx branch-ctx)
+    (binding [registry-core/*rich-types-override* (:rich-types-atom branch-ctx)]
+      (cond
+        ;; 1. Identical to base → reuse the base registry directly.
+        (and base-registry (not merge-target?) (empty? own-fn-ids))
+        (cr/instantiate-from-templates! base-ctx branch-ctx)
 
-      ;; 2. Divergent from main by own OR inherited version rows → delta-compile
-      ;;    on top of base.
-      ;;    A branch differs from main by a handful of fns; a full rebuild of
-      ;;    the whole ~3700-fn graph for that was measured at ~57s and BLOCKS the
-      ;;    executor (a divergent branch whose ctx was evicted from the LRU pays it
-      ;;    on next access — the `compile-all` cache is keyed by graph shape, so a
-      ;;    branch edit changes the shape and misses). Reuse the base's closures
-      ;;    for every unchanged fn; recompile only the fns this branch overrides
-      ;;    (+ their reverse-dep closure) against the branch's view.
-      (and base-registry (not merge-target?) (seq own-fn-ids))
-      (do
-        ;; Seed the branch registry + reverse-dep index from the base, but NOT the
-        ;; base graph-cache — leave it empty so `delta-recompile!` reads the
-        ;; BRANCH's resolved graph and compiles the overrides against it.
-        (reset! (:compiled-registry branch-ctx) base-registry)
-        (when-let [src-deps (some-> (:compile-deps base-ctx) deref)]
-          (when-let [holder (:compile-deps branch-ctx)]
-            (reset! holder src-deps)))
-        (cr/delta-recompile! branch-ctx (set own-fn-ids)))
+        ;; 2. Divergent from main by own OR inherited version rows → delta-compile
+        ;;    on top of base.
+        ;;    A branch differs from main by a handful of fns; a full rebuild of
+        ;;    the whole ~3700-fn graph for that was measured at ~57s and BLOCKS the
+        ;;    executor (a divergent branch whose ctx was evicted from the LRU pays it
+        ;;    on next access — the `compile-all` cache is keyed by graph shape, so a
+        ;;    branch edit changes the shape and misses). Reuse the base's closures
+        ;;    for every unchanged fn; recompile only the fns this branch overrides
+        ;;    (+ their reverse-dep closure) against the branch's view.
+        (and base-registry (not merge-target?) (seq own-fn-ids))
+        (do
+          ;; Seed the branch registry + reverse-dep index from the base, but NOT the
+          ;; base graph-cache — leave it empty so `delta-recompile!` reads the
+          ;; BRANCH's resolved graph and compiles the overrides against it.
+          (reset! (:compiled-registry branch-ctx) base-registry)
+          (when-let [src-deps (some-> (:compile-deps base-ctx) deref)]
+            (when-let [holder (:compile-deps branch-ctx)]
+              (reset! holder src-deps)))
+          (cr/delta-recompile! branch-ctx (set own-fn-ids)))
 
-      ;; 3. Merge target (merged fns own their rows on the source, not cheaply
-      ;;    seedable here), or cold start with no base registry → full compile.
-      :else
-      (cr/rebuild! branch-ctx))
-    ;; Error-tolerance: repopulate the branch's derived diagnostics for
-    ;; editor-authored fns (async; see § Ctx-build diagnostics recompute).
-    (schedule-user-fn-recheck! branch-ctx branch-id)
+        ;; 3. Merge target (merged fns own their rows on the source, not cheaply
+        ;;    seedable here), or cold start with no base registry → full compile.
+        :else
+        (cr/rebuild! branch-ctx))
+      ;; Error-tolerance: repopulate the branch's derived diagnostics for
+      ;; editor-authored fns (async; see § Ctx-build diagnostics recompute).
+      ;; Inside the binding: `future` conveys it, so the recheck records
+      ;; into THIS branch's slice.
+      (schedule-user-fn-recheck! branch-ctx branch-id))
     {:ctx branch-ctx
      :handler (compose-branch-handler branch-ctx handler-fn-id optional-handler-fn-ids)
      :built-at (java.time.Instant/now)
@@ -746,24 +759,27 @@
                            ;; its ref exactly like the local delete path.
                            (invalidate! router bid)
                            (when-let [c (:ctx entry)]
-                             (try
-                               ;; Two OPTIMISTIC attempts (compile outside
-                               ;; the lock, swap only if the epoch didn't
-                               ;; move mid-compile — a moved epoch means a
-                               ;; delta already patched the live registry
-                               ;; and our snapshot would clobber it), then
-                               ;; a blocking rebuild as the correctness
-                               ;; fallback under continuous writes.
-                               (loop [attempt 1]
-                                 (let [e0 (epoch/current base)
-                                       swapped? (cr/rebuild-optimistic!
-                                                  c #(= e0 (epoch/current base)))]
-                                   (when-not swapped?
-                                     (if (< attempt 2)
-                                       (recur (inc attempt))
-                                       (cr/rebuild! c)))))
-                               (catch Exception e
-                                 (log/warn e "graph-epoch heal: ctx rebuild failed"))))))
+                             (binding [registry-core/*rich-types-override*
+                                       (or (:rich-types-atom c)
+                                           registry-core/*rich-types-override*)]
+                               (try
+                                 ;; Two OPTIMISTIC attempts (compile outside
+                                 ;; the lock, swap only if the epoch didn't
+                                 ;; move mid-compile — a moved epoch means a
+                                 ;; delta already patched the live registry
+                                 ;; and our snapshot would clobber it), then
+                                 ;; a blocking rebuild as the correctness
+                                 ;; fallback under continuous writes.
+                                 (loop [attempt 1]
+                                   (let [e0 (epoch/current base)
+                                         swapped? (cr/rebuild-optimistic!
+                                                    c #(= e0 (epoch/current base)))]
+                                     (when-not swapped?
+                                       (if (< attempt 2)
+                                         (recur (inc attempt))
+                                         (cr/rebuild! c)))))
+                                 (catch Exception e
+                                   (log/warn e "graph-epoch heal: ctx rebuild failed")))))))
               work (fn []
                      (when-let [e (get snap default-branch-id)]
                        (refresh! default-branch-id e))
@@ -1038,7 +1054,15 @@
   ([base-ctx handler-fn-name]
    (create-router base-ctx handler-fn-name nil))
   ([base-ctx handler-fn-name {:keys [max-size optional-handler-fn-names]}]
-   (let [default-branch-id (vs/current-branch-id (:storage base-ctx))
+   (let [;; Tag the base ctx with the rich-types atom it was built under
+         ;; (the global in production, the thread's isolation override in
+         ;; tests). The default branch keeps READING AND WRITING this very
+         ;; atom — boot's package sync populated it — while every OTHER
+         ;; branch forks a private copy in `build-actual-entry!`.
+         base-ctx (cond-> base-ctx
+                    (nil? (:rich-types-atom base-ctx))
+                    (assoc :rich-types-atom (registry-core/active-rich-types-atom)))
+         default-branch-id (vs/current-branch-id (:storage base-ctx))
          handler-fn-id (resolve-handler-fn-id (:storage base-ctx) handler-fn-name)
          ;; OPTIONAL handlers (`_registry-ring-response` / `_mcp-ring-response`)
          ;; — resolved TOLERANTLY: keep only those whose fn-def exists (i.e.
@@ -1267,7 +1291,18 @@
                                 branch-id (resolve-branch-id router branch-ref)]
                             (cond
                               (or (nil? branch-ref) (some? branch-id))
-                              ((handler-for router branch-id) request)
+                              ;; Bind the target branch's rich-types slice for
+                              ;; the WHOLE request: type-checks on writes,
+                              ;; /api/types reads and effect-gate lookups all
+                              ;; land on the branch's own view. Falls back to
+                              ;; the ambient override (test isolation) for
+                              ;; ctxs built before this tagging existed.
+                              (let [handler (handler-for router branch-id)
+                                    bctx (ctx-for router branch-id)]
+                                (binding [registry-core/*rich-types-override*
+                                          (or (:rich-types-atom bctx)
+                                              registry-core/*rich-types-override*)]
+                                  (handler request)))
 
                               ;; A PAGE load naming a branch that is gone (merged
                               ;; and deleted elsewhere, or by this user's own tour

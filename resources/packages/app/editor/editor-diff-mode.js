@@ -307,39 +307,43 @@ async function gdDiffModeFetch(otherBranch) {
   // notes, which are anchored on the FEATURE's thread, not main's.
   // Best-effort: a comments failure never blocks the mode.
   const noteCounts = new Map();
-  try {
-    const curRow0 = rows.find((b) => b.name === cur);
-    const otherRow0 = rows.find((b) => b.name === otherBranch);
-    const proposalRef =
-      (curRow0?.['base-branch-id'] && otherRow0
-        && curRow0['base-branch-id'] === otherRow0.id) ? curRow0.id
-      : (otherRow0?.['base-branch-id'] && curRow0
-         && otherRow0['base-branch-id'] === curRow0.id) ? otherRow0.id
-      // same fallback chain as the cockpit's Review pick: any side
-      // WITH a base, else the compared branch — so the tree markers
-      // and the Review dialog always read the same thread.
-      : otherRow0?.['base-branch-id'] ? otherRow0.id
-      : curRow0?.['base-branch-id'] ? curRow0.id
-      : (otherId || otherBranch);
-    const cr = await window.authFetch(
-      API.api_branches_ref_comments(proposalRef));
-    const cd = await cr.json();
-    if (cd.ok) {
-      const ownerOf = new Map();
-      for (const g of byFnId.values()) {
-        ownerOf.set(g['fn-id'], g['fn-id']);
-        for (const e of (g.entries || [])) {
-          if (e['entity-id']) ownerOf.set(e['entity-id'], g['fn-id']);
+  const curRow0 = rows.find((b) => b.name === cur);
+  const otherRow0 = rows.find((b) => b.name === otherBranch);
+  // The one review thread of the compared PAIR — same pick chain as
+  // the cockpit's Review item, so all three 💬 surfaces (tree markers,
+  // inspector threads, the Review dialog) read AND post the same
+  // thread. nil when neither side has a base (two roots): there is no
+  // review context, so markers and inspector threads stay off.
+  const proposalRef =
+    (curRow0?.['base-branch-id'] && otherRow0
+      && curRow0['base-branch-id'] === otherRow0.id) ? curRow0.id
+    : (otherRow0?.['base-branch-id'] && curRow0
+       && otherRow0['base-branch-id'] === curRow0.id) ? otherRow0.id
+    : otherRow0?.['base-branch-id'] ? otherRow0.id
+    : curRow0?.['base-branch-id'] ? curRow0.id
+    : null;
+  if (proposalRef) {
+    try {
+      const cr = await window.authFetch(
+        API.api_branches_ref_comments(proposalRef));
+      const cd = await cr.json();
+      if (cd.ok) {
+        const ownerOf = new Map();
+        for (const g of byFnId.values()) {
+          ownerOf.set(g['fn-id'], g['fn-id']);
+          for (const e of (g.entries || [])) {
+            if (e['entity-id']) ownerOf.set(e['entity-id'], g['fn-id']);
+          }
+        }
+        for (const c of (cd.comments || [])) {
+          const owner = c['entity-id'] && ownerOf.get(c['entity-id']);
+          if (owner) noteCounts.set(owner, (noteCounts.get(owner) || 0) + 1);
         }
       }
-      for (const c of (cd.comments || [])) {
-        const owner = c['entity-id'] && ownerOf.get(c['entity-id']);
-        if (owner) noteCounts.set(owner, (noteCounts.get(owner) || 0) + 1);
-      }
-    }
-  } catch (_) { /* markers just stay absent */ }
+    } catch (_) { /* markers just stay absent */ }
+  }
   return { branch: otherBranch, branchId: otherId, currentId: curId,
-           byFnId, noteCounts, fetchedAt: Date.now() };
+           byFnId, noteCounts, proposalRef, fetchedAt: Date.now() };
 }
 
 // --- sidebar decoration -----------------------------------------------------
@@ -709,8 +713,12 @@ function gdDiffRenderInspectorSection(inspectorEl, fnId) {
   (inspHead || inspectorEl).insertAdjacentElement('afterend', panel);
   // Anchored threads (fn + entries) with composers; no general thread
   // here — that lives in the review dialog.
-  if (typeof gdDiffAttachThreads === 'function') {
-    gdDiffAttachThreads(panel, _gdDiffMode.branch, _gdDiffMode.branchId,
+  // Threads read/post the PAIR's one review thread (proposalRef) —
+  // not the compared branch's: an author on their feature comparing
+  // vs main anchors notes on the FEATURE's thread. No review context
+  // (two roots) → no threads here.
+  if (typeof gdDiffAttachThreads === 'function' && _gdDiffMode.proposalRef) {
+    gdDiffAttachThreads(panel, _gdDiffMode.branch, _gdDiffMode.proposalRef,
                         { anchoredOnly: true });
   }
 }

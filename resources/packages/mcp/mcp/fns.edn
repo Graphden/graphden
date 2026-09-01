@@ -348,7 +348,7 @@
                   :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :against} :default {:value "main"}}}}}]}}
 
   {:name :_mcp-tool-diff-branch
-   :description "diff-branch tool — what the human will review, in the same shape the editor's Δ view renders."
+   :description "diff-branch tool — what the human will review, in the same shape the editor's compare mode renders."
    :parent :_mcp-tool-ok
    :args {:text {:parent :to-json-string
                  :args {:data {:parent :_diff-branches-data

@@ -306,3 +306,27 @@
     (is (some? (get-in @db [:slot :src]))
         "the declaring slot SURVIVES — a live view slot still sources it")
     (is (some? (get-in @db [:slot :view])) "the view slot is untouched")))
+
+
+(deftest purge-many-protects-nested-rename-chains
+  ;; Depth-2 chain across the purge boundary: surviving view V2 →
+  ;; touched view V1 → touched source S. Single-pass protection kept
+  ;; V1 but zapped S (V1 counted as doomed while collecting sources);
+  ;; the fixpoint must keep BOTH.
+  (let [db (atom {:binding {}
+                  :binding-list-item {}
+                  :binding-version {}
+                  :binding-list-item-version {}
+                  :fn-version {}
+                  :fn-slot {:f1 {:id :f1 :fn-id :gone :slot-id :s :position 0}
+                            :f2 {:id :f2 :fn-id :gone :slot-id :v1 :position 1}}
+                  :slot {:s {:id :s :name "orig"}
+                         :v1 {:id :v1 :name "mid" :source-slot-id :s}
+                         :v2 {:id :v2 :name "leaf" :source-slot-id :v1}}
+                  :fn {:gone {:id :gone :parent-ids []}}})]
+    (idr/purge-fn-subgraphs-many! (mem-storage db) #{:gone})
+    (is (some? (get-in @db [:slot :v1]))
+        "the mid view survives — the surviving leaf still sources it")
+    (is (some? (get-in @db [:slot :s]))
+        "…and its source survives too (fixpoint, not single pass)")
+    (is (some? (get-in @db [:slot :v2])) "the untouched leaf is untouched")))

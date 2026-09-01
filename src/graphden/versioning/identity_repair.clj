@@ -235,18 +235,22 @@
           ;; A rename-view slot points at its declaring slot through
           ;; `source-slot-id` — deleting the source out from under a
           ;; SURVIVING view slot dangles the rename chain (the rename
-          ;; root resolution walks it). Protect any slot a surviving
-          ;; slot still sources from.
+          ;; root resolution walks it). Protection must run to a
+          ;; FIXPOINT: a protected touched view protects ITS source in
+          ;; turn (nested {:as} renames spanning the purge boundary —
+          ;; a single pass left depth-≥2 chains dangling).
           all-slots (sp/query-entities base :slot {})
-          doomed-so-far (set touched-slot-ids)
-          sourced-by-survivor (into #{}
-                                    (comp (remove #(contains? doomed-so-far (:id %)))
-                                          (keep :source-slot-id))
-                                    all-slots)
-          orphan-slot-ids (remove #(or (contains? surviving-slot-ids %)
-                                       (contains? bound-slot-ids %)
-                                       (contains? sourced-by-survivor %))
-                                  touched-slot-ids)]
+          orphan-slot-ids
+          (loop [doomed (into #{}
+                              (remove #(or (contains? surviving-slot-ids %)
+                                           (contains? bound-slot-ids %)))
+                              touched-slot-ids)]
+            (let [sourced (into #{}
+                                (comp (remove #(contains? doomed (:id %)))
+                                      (keep :source-slot-id))
+                                all-slots)
+                  doomed' (into #{} (remove sourced) doomed)]
+              (if (= doomed' doomed) doomed (recur doomed'))))]
       (zap! :fn-slot-version
             (filter #(contains? own-fs-ids (:fn-slot-id %))
                     (sp/query-entities base :fn-slot-version {})))

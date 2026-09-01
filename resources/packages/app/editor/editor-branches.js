@@ -134,8 +134,6 @@ function graphdenIsFnOwned(fn) {
   if (!graphdenCurrentOrg) return true;            // org unknown → fail-open (server still enforces)
   return !!fn && fn['org-id'] === graphdenCurrentOrg;
 }
-function graphdenCanWrite() { return !graphdenCapabilities || graphdenCapabilities.has('write'); }
-function graphdenCanExecute() { return !graphdenCapabilities || graphdenCapabilities.has('execute'); }
 // A namespace path is in the workspace when it equals, or is a descendant
 // of, one of the workspace roots. No workspace → false (nothing highlighted).
 function graphdenInWorkspace(nsPath) {
@@ -232,12 +230,6 @@ window.graphdenToggleWorkspaceRoot = graphdenToggleWorkspaceRoot;
 window.graphdenToggleHidden = graphdenToggleHidden;
 window.graphdenWorkspaceRoots = () => graphdenWorkspaceRoots.slice();
 window.graphdenHiddenList = () => graphdenHiddenPaths.slice();
-// Back-compat shims (older callers referenced the focus/pins split; the model
-// is now one included-roots set). graphdenInFocus ≡ in-scope; pins are gone.
-window.graphdenInFocus = graphdenInWorkspaceScope;
-window.graphdenWorkspaceFocused = graphdenWorkspaceActive;
-window.graphdenIsPinned = () => false;
-window.graphdenPins = () => [];
 // The tenancy addon is active iff we've seen a capability header (absent in
 // single-tenant). Used to gate addon-only UI like the Grants admin section.
 function graphdenTenancyActive() { return graphdenCapabilities !== null; }
@@ -251,14 +243,11 @@ function graphdenHasCap(cap) {
 // The current user owns their org (may transfer ownership) — the `org-owner`
 // signal in the capabilities header.
 function graphdenIsOrgOwner() { return graphdenHasCap('org-owner'); }
-window.graphdenCanWrite = graphdenCanWrite;
-window.graphdenCanExecute = graphdenCanExecute;
 window.graphdenInWorkspace = graphdenInWorkspace;
 window.graphdenTenancyActive = graphdenTenancyActive;
 window.graphdenHasCap = graphdenHasCap;
 window.graphdenIsOrgOwner = graphdenIsOrgOwner;
 window.graphdenIsFnOwned = graphdenIsFnOwned;
-window.graphdenIsPlatformTier = graphdenIsPlatformTier;
 
 // A branch can disappear under a tab that is still standing on it — someone
 // merges and deletes it, or the tour's own "Delete branch & return" runs in

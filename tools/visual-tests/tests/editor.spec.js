@@ -34,7 +34,6 @@ async function setTheme(page, theme) {
   await page.evaluate((t) => {
     if (t === 'dark') document.body.classList.add('theme-dark');
     else document.body.classList.remove('theme-dark');
-    try { localStorage.setItem('graphden.theme', t); } catch (_) {}
   }, theme);
   await page.evaluate(() => new Promise(requestAnimationFrame));
 }

@@ -600,9 +600,4 @@ async function renderDiffSuggestions(body, sourceName, sourceRef) {
 }
 
 window.showReviewDialog = showReviewDialog;
-// Back-compat shim for older callers: showBranchDiff(target, source, ref)
-// meant "diff source against target"; the review dialog frames source
-// against its BASE — the target arg is obsolete.
-window.showBranchDiff = (_targetName, sourceName, sourceRef) =>
-  showReviewDialog(sourceName, sourceRef);
 window.gdDiffAttachThreads = initDiffConversation;

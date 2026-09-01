@@ -864,7 +864,6 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
    needs a ~1s hover and never shows on keyboard focus). */
 .branch-row-merge,
 .branch-row-diff,
-.branch-row-compare,
 .branch-row-approve,
 .branch-row-more {
   background: transparent; color: var(--muted-fg);
@@ -1345,7 +1344,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   background: var(--fg); color: var(--bg);
 }
 
-/* Branch diff modal — opened from the Δ button in the branch popover.
+/* Branch diff modal — the review dialog (⋯ → Review & comments).
    Same overlay anatomy as the merge-conflicts modal so the user
    gets a familiar "full-viewport card on dim backdrop" pattern; the
    inner content is grouped by `:change` tag and shows a brief
@@ -1380,15 +1379,6 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 8px;
 }
-.branch-diff-compare {
-  margin-left: auto;
-  background: transparent; color: var(--warning-fg);
-  border: 1px solid var(--warning-fg); border-radius: 3px;
-  font-size: 0.6875rem; line-height: 1.4;
-  padding: 1px 8px; cursor: pointer;
-  white-space: nowrap; flex: none;
-}
-.branch-diff-compare:hover { background: var(--hover-bg); }
 .branch-diff-close {
   background: transparent; color: var(--muted-fg);
   border: 0; border-radius: 2px;
@@ -1402,8 +1392,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   flex: 1;
 }
 .branch-diff-loading,
-.branch-diff-error,
-.branch-diff-empty {
+.branch-diff-error {
   font-size: 0.75rem; color: var(--muted-fg);
   padding: 8px 0;
 }
@@ -1412,36 +1401,12 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   border: 1px solid var(--fg); border-radius: 3px;
   padding: 6px 8px;
 }
-.branch-diff-summary {
-  font-size: 0.6875rem; color: var(--muted-fg);
-  padding-bottom: 6px;
-}
-.branch-diff-section {
-  margin-bottom: 12px;
-}
-.branch-diff-section-head {
-  font-weight: 600; font-size: 0.75rem;
-  padding: 4px 0;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 6px;
-  display: flex; align-items: baseline; gap: 6px;
-}
-.branch-diff-count {
-  background: var(--fg); color: var(--bg);
-  padding: 1px 6px; border-radius: 2px;
-  font-size: 0.625rem;
-}
 
-.branch-diff-rows {
-  display: flex; flex-direction: column; gap: 4px;
-}
 .branch-diff-row {
   padding: 6px 8px; border-radius: 3px;
   background: var(--hover-bg);
   border: 1px solid transparent;
 }
-.branch-diff-row-clickable { cursor: pointer; }
-.branch-diff-row-clickable:hover { border-color: var(--fg); }
 .branch-diff-row-head {
   display: flex; align-items: baseline; gap: 8px;
   margin-bottom: 2px;
@@ -1553,7 +1518,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   padding: 2px 5px;
 }
 /* Suggestions — reviewer-authored child branches of the proposal,
-   listed with Δ view + apply(merge) actions; author applies in one
+   listed with lazy Δ preview + apply(merge) actions; author applies in one
    click. */
 .branch-diff-suggestions {
   border-top: 1px solid var(--border);

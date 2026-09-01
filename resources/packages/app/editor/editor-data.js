@@ -373,7 +373,8 @@ function getFnEditBlockReason(fnId) {
   const parts = [];
   if (asParent > 0) parts.push('extended by ' + asParent + ' fn' + (asParent === 1 ? '' : 's'));
   if (asRef    > 0) parts.push('referenced by ' + asRef    + ' arg' + (asRef    === 1 ? '' : 's'));
-  return 'In use — ' + parts.join(' and ') + '. Detach those first.';
+  return 'In use — ' + parts.join(' and ')
+    + '. Detach those first — the inspector Overview lists them under "Used by".';
 }
 
 // Look up a fn's namespace as a dotted path (e.g. "core.collections")

@@ -797,6 +797,11 @@
    :parent :get-auth-required
    :args {:path "/fns/:fn-id/versions" :handler :list-fn-versions-handler}}
 
+  {:name :api-fn-usages
+   :description "POST /api/fns/usages — every fn that USES the given fn: children (`parent-of`), ref-bindings and list items (`ref-of`), resolvers (`resolver-of`), plus the type-plane kinds when the target doubles as a type. Body: `{fn-id}`. Same handler as /api/types/usages — one graph walk serves both planes; this alias exists so the inspector's Used-by section doesn't call a 'types' URL for a composition question. Auth-required when auth is active; open when auth is off."
+   :parent :post
+   :args {:path "/fns/usages" :handler :types-usages-handler}}
+
   ;; --- /api/secrets — admin Secrets CRUD. All auth-required (matches
   ;; /api/branches pattern). GET+POST share /secrets, so they merge
   ;; method-maps into one reitit entry; DELETE on /secrets/:fn-id and
@@ -886,6 +891,7 @@
                   :api-branch-approvals
                   :api-branch-comments
                   :api-fn-versions
+                  :api-fn-usages
                   ;; The registry's `/api/packages/*` + `/api/export/*` routes
                   ;; live in the OPTIONAL `registry` package now and install via
                   ;; the route-collection seam (`:registry/router-install`), so

@@ -172,11 +172,14 @@
 
 (defbase _types-usages-apply
   "Stage 3 of types-usages — walk the graph for every reference to the
-   target type-row. Returns `{:ok :type-fn-id :type-name :count :usages}`
+   target fn row. Returns `{:ok :type-fn-id :type-name :count :usages}`
    where `:usages` is a vec of `{:fn-id :fn-name :role :kind …}` entries
-   spanning 6 categories: `:base-of`, `:element-of`, `:return-of`,
+   spanning the type plane (`:base-of`, `:element-of`, `:return-of`,
    `:union-branch` / `:variant-branch` / `:fn-type-arg-or-return`
-   (constraint uses), `:slot-of`, `:binding-of`.
+   constraint uses, `:slot-of`, `:binding-of`) AND the composition
+   plane (`:parent-of` children, `:ref-of` binding/list-item refs,
+   `:resolver-of`) — one walk serves /api/types/usages and the
+   /api/fns/usages alias behind the inspector's Used-by section.
 
    §3.3 algorithm — the constraint-uses category requires
    `constraint-contains-type-ref?` which is a RECURSIVE walk into

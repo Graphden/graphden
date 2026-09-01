@@ -6285,6 +6285,42 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
 .gd-insp-runs { font-size: 0.75rem; }
 .gd-insp-runs-loading { padding: 8px 0; font-size: 0.75rem; color: var(--gd-ink-3); }
 
+/* ---- Inspector "Used by" (editor-fn-usages.js): who extends /
+ *      references the selected fn, grouped by kind, rows navigate. ---- */
+.gd-insp-usages { margin-top: 18px; }
+.gd-insp-usages-head {
+  display: flex; align-items: baseline; gap: 6px;
+  margin-bottom: 4px;
+  font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--gd-ink-3);
+}
+.gd-insp-usages-count { font-weight: 400; color: var(--gd-ink-3); }
+.gd-insp-usage-glabel {
+  margin: 8px 0 2px;
+  font-size: 0.6875rem; color: var(--gd-ink-3);
+}
+.gd-insp-usage-list { display: flex; flex-direction: column; }
+.gd-insp-usage-row {
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 3px 4px; margin: 0; border: 0; border-radius: 4px;
+  background: transparent; text-align: left; cursor: pointer;
+  font-size: 0.75rem;
+}
+.gd-insp-usage-row:hover { background: var(--hover-bg); }
+.gd-insp-usage-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gd-insp-usage-name {
+  font-family: var(--gd-mono); font-weight: 600; color: var(--gd-flow-ink);
+  overflow-wrap: anywhere;
+}
+.gd-insp-usage-slot { font-family: var(--gd-mono); color: var(--gd-ink-3); }
+.gd-insp-usage-ns {
+  margin-left: auto; padding-left: 8px;
+  font-size: 0.6875rem; color: var(--gd-ink-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 45%;
+}
+.gd-insp-usage-more { padding: 3px 4px; font-size: 0.6875rem; font-style: italic; color: var(--gd-ink-3); }
+
 /* ---- Inspector detail (server partial /partials/inspector-detail):
  *      bindings (the 3-way literal/ref/free language) + provenance. ---- */
 .gd-insp-detail-host { margin-top: 4px; }

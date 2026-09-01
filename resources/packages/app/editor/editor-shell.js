@@ -515,6 +515,12 @@
           if (typeof formatServerTypeTexts === 'function') {
             formatServerTypeTexts(host);
           }
+          // "Used by" — who extends / references this fn, appended
+          // below the partial. A late response appends into a host a
+          // newer selection already disconnected — a no-op.
+          if (typeof gdAppendFnUsages === 'function') {
+            gdAppendFnUsages(host, fnId);
+          }
         }
       })
       .catch(() => {

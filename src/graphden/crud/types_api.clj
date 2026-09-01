@@ -21,6 +21,7 @@
     [graphden.tenancy.context :as tctx]
     [graphden.types.check :as tcheck]
     [graphden.types.core :as types]
+    [graphden.util.ns-path :as ns-path]
     [graphden.versioning.storage.core :as vs])
   (:import
     (graphden.versioning.storage.core
@@ -623,10 +624,13 @@
 
 (defn parse-types-usages-request
   "Stage 1 of types-usages — JSON body → `{:target-id}` (the
-   `type-fn-id` coerced to a UUID, or nil when absent / malformed)."
+   `type-fn-id` coerced to a UUID, or nil when absent / malformed).
+   `fn-id` is accepted as a synonym: the same walk answers the
+   inspector's fn-level 'Used by' (`/api/fns/usages`), where calling
+   the target a type would be wrong."
   [request]
   (let [body (request/read-json-body request)
-        target-id-raw (:type-fn-id body)]
+        target-id-raw (or (:type-fn-id body) (:fn-id body))]
     {:target-id (request/parse-uuid-or-clear (some-> target-id-raw str))}))
 
 
@@ -640,21 +644,51 @@
 
 (defn apply-types-usages
   "Stage 3 of types-usages — walk the graph for every reference to the
-   target type-row. Reached only after `validate-types-usages` passes."
+   target fn row. Covers BOTH reference planes: the type plane (slots,
+   type-overrides, base/element/return FKs, union/variant branches) and
+   the composition plane (`:parent-of` — fns extending the target,
+   `:ref-of` — bindings and list items referencing it, `:resolver-of`).
+   One walk serves `/api/types/usages` (the type-expand footer) and
+   `/api/fns/usages` (the inspector's Used-by section) — the kinds that
+   don't apply to a given target simply come back empty. Reached only
+   after `validate-types-usages` passes."
   [parsed ctx]
   (let [target-id (:target-id parsed)
-        {:keys [fns slots fn-slots bindings]} (cached-or-load-graph ctx)
+        {:keys [fns slots fn-slots bindings list-items]} (cached-or-load-graph ctx)
         fn-by-id (into {} (map (juxt :id identity)) fns)
         slot-by-id (into {} (map (juxt :id identity)) slots)
         slot-owner-by-id (into {} (map (juxt :slot-id :fn-id)) fn-slots)
         target-fn (get fn-by-id target-id)
         target-name (some-> target-fn :name)
+        ;; Dotted ns path per referencing fn — the Used-by section
+        ;; disambiguates same-named fns with it, and navigation to a fn
+        ;; the sidebar hasn't lazily loaded yet falls back to the
+        ;; name-resolver, which needs the QUALIFIED name. Best-effort:
+        ;; a storage without the `:ns` table (minimal test fixtures)
+        ;; just yields path-less rows.
+        ns-paths (try
+                   (ns-path/path-map
+                     (sp/query-entities
+                       (or (:compile-storage ctx) (request/require-storage ctx))
+                       :ns {}))
+                   (catch Exception _ {}))
+        ns-path (fn [nsid] (not-empty (get ns-paths nsid)))
         fn-summary (fn [fid kind & [extra]]
                      (let [f (get fn-by-id fid)]
-                       (merge {:fn-id (str fid)
-                               :fn-name (or (:name f) "(anonymous)")
-                               :role (:role f)
-                               :kind kind}
+                       (merge (cond-> {:fn-id (str fid)
+                                       :fn-name (or (:name f) "(anonymous)")
+                                       :role (:role f)
+                                       :kind kind}
+                                (:namespace-id f)
+                                (assoc :fn-namespace (ns-path (:namespace-id f)))
+                                ;; All three anon representations (nil
+                                ;; name / deduped `anonymous-hash` row /
+                                ;; auto-named `_anon-<hash>`) — the
+                                ;; client folds these into a count.
+                                (or (nil? (:name f))
+                                    (:anonymous-hash f)
+                                    (some-> (:name f) (str/starts-with? "_anon-")))
+                                (assoc :anonymous true))
                               (or extra {}))))
         base-uses (->> fns
                        (filter #(= (:base-fn-id %) target-id))
@@ -690,7 +724,37 @@
                                  (let [s (get slot-by-id (:slot-id b))]
                                    (fn-summary (:fn-id b) :binding-of
                                                {:slot-name (:name s)})))))
-        usages (vec (concat base-uses elem-uses ret-uses
+        ;; --- composition plane: who USES the target as a fn -----------
+        parent-uses (->> fns
+                         (filter #(some #{target-id} (:parent-ids %)))
+                         (map #(fn-summary (:id %) :parent-of)))
+        ref-uses (->> bindings
+                      (filter #(= (:ref-fn-id %) target-id))
+                      (map (fn [b]
+                             (let [s (get slot-by-id (:slot-id b))]
+                               (fn-summary (:fn-id b) :ref-of
+                                           {:slot-name (:name s)})))))
+        ;; List items key their owner binding — surface one row per
+        ;; (fn, slot) pair, not one per appended item.
+        binding-by-id (into {} (map (juxt :id identity)) bindings)
+        list-ref-uses (->> list-items
+                           (filter #(= (:ref-fn-id %) target-id))
+                           (keep (fn [li]
+                                   (when-let [b (get binding-by-id (:binding-id li))]
+                                     (let [s (get slot-by-id (:slot-id b))]
+                                       [(:fn-id b) (:name s)]))))
+                           (distinct)
+                           (map (fn [[fid slot-name]]
+                                  (fn-summary fid :ref-of
+                                              {:slot-name slot-name}))))
+        resolver-uses (->> bindings
+                           (filter #(= (:resolver-fn-id %) target-id))
+                           (map (fn [b]
+                                  (let [s (get slot-by-id (:slot-id b))]
+                                    (fn-summary (:fn-id b) :resolver-of
+                                                {:slot-name (:name s)})))))
+        usages (vec (concat parent-uses ref-uses list-ref-uses resolver-uses
+                            base-uses elem-uses ret-uses
                             constraint-uses slot-uses binding-uses))]
     {:ok true
      :type-fn-id (str target-id)

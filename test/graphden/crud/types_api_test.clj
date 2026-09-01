@@ -477,6 +477,49 @@
   (let [storage (setup/create-test-storage)
         c (test-ctx storage)]
     (try
+      (testing "composition plane: children, arg refs, list refs, resolvers"
+        (let [target  (setup/create-base-fn! storage "fu-target")
+              _child  (setup/create-composed-fn! storage "fu-child" (:id target))
+              host    (setup/create-base-fn! storage "fu-host")
+              callee  (setup/create-slot! storage "callee" :any)
+              items   (setup/create-slot! storage "items" :any)
+              resolvd (setup/create-slot! storage "resolved" :any)
+              _       (setup/attach-slot! storage (:id host) (:id callee) 0)
+              _       (setup/attach-slot! storage (:id host) (:id items) 1)
+              _       (setup/attach-slot! storage (:id host) (:id resolvd) 2)
+              caller  (setup/create-composed-fn! storage "fu-caller" (:id host))
+              _       (sp/create-entity storage :binding
+                                        {:fn-id (:id caller) :slot-id (:id callee)
+                                         :ref-fn-id (:id target)})
+              list-b  (sp/create-entity storage :binding
+                                        {:fn-id (:id caller) :slot-id (:id items)
+                                         :list-append true})
+              _       (sp/create-entity storage :binding-list-item
+                                        {:binding-id (:id list-b) :position 0
+                                         :ref-fn-id (:id target)})
+              _       (sp/create-entity storage :binding-list-item
+                                        {:binding-id (:id list-b) :position 1
+                                         :ref-fn-id (:id target)})
+              _       (sp/create-entity storage :binding
+                                        {:fn-id (:id caller) :slot-id (:id resolvd)
+                                         :resolver-fn-id (:id target)})
+              ;; `fn-id` is the synonym the /api/fns/usages alias sends.
+              res     (types-usages {:body {:fn-id (str (:id target))}} c)
+              by-kind (group-by :kind (:usages res))]
+          (is (true? (:ok res)))
+          (is (= ["fu-child"] (map :fn-name (:parent-of by-kind)))
+              "a child extending the target is a parent-of usage")
+          (is (= [["fu-caller" "callee"] ["fu-caller" "items"]]
+                 (sort (map (juxt :fn-name :slot-name) (:ref-of by-kind))))
+              "one ref-of per (fn, slot) — the two list items collapse to one")
+          (is (= [["fu-caller" "resolved"]]
+                 (map (juxt :fn-name :slot-name) (:resolver-of by-kind)))
+              "a resolver-fn-id reference is a resolver-of usage")))
+      (finally (sp/close storage))))
+
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
       (testing "a union branch + a binding type-override referencing the target"
         (let [int-id   (get setup/primitive-fn-ids :int)
               type-row (sp/create-entity storage :fn

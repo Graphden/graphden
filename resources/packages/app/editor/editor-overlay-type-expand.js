@@ -173,7 +173,8 @@ function appendTypeUsagesSection(host, typeName) {
     // then binding-of, refinements, list-elements, return-types,
     // union/variant branches.
     const KIND_ORDER = ['slot-of', 'binding-of', 'base-of', 'element-of',
-                        'return-of', 'union-branch', 'variant-branch'];
+                        'return-of', 'union-branch', 'variant-branch',
+                        'parent-of', 'ref-of', 'resolver-of'];
     const KIND_LABEL = {
       'slot-of':         'slot',
       'binding-of':      'binding',
@@ -182,6 +183,12 @@ function appendTypeUsagesSection(host, typeName) {
       'return-of':       'returns',
       'union-branch':    'union branch',
       'variant-branch': 'variant branch',
+      // Composition-plane kinds — the same endpoint also answers the
+      // inspector's fn-level Used-by; rare for a type-row, but a row
+      // CAN be both, and dropping them here would under-count.
+      'parent-of':       'extended by',
+      'ref-of':          'arg ref',
+      'resolver-of':     'resolver',
     };
     for (const k of KIND_ORDER) {
       const group = byKind[k];

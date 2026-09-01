@@ -839,8 +839,17 @@
                :body "Overview, Bindings, Runs. Click [[Bindings]] — it lists the same slot table you would assemble by hand from lesson 03, computed server-side."
                :target ".gd-insp-tabs"
                :check {:kind "dom" :selector ".gd-insp-tab"}}
+              {:title "Who uses a fn?"
+               :body "The graph points both ways. Type `const` in the filter and click the [[const]] row (core.logic) — the primitive that returns its :value; half the platform pins constants through it."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "const"}}
+              {:title "Used by"
+               :body "In the Inspector click [[Overview]]. Below the type rows sits Used by — every fn that extends or references the selected one, grouped by how. Click any row to jump straight to that fn. When an edit is refused with “In use — detach those first”, THIS is the list it means."
+               :target ".gd-insp-tabs"
+               :targets [".gd-insp-tabs" ".gd-insp-usages"]
+               :check {:kind "dom" :selector ".gd-insp-usages .gd-insp-usage-row"}}
               {:title "That's the view layer"
-               :body "Lenses and tabs are how you keep a big graph readable — none of it is stored in the graph itself. The written lesson 17 covers the remaining chips and the Runs tab. Click [[Finish]]."
+               :body "Lenses, tabs and the Used-by reverse index are how you keep a big graph readable — none of it is stored in the graph itself. The written lesson 17 covers the remaining chips and the Runs tab. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
             {:id "19"

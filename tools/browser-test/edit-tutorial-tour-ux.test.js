@@ -106,6 +106,33 @@ const {
       document.querySelectorAll('.gd-insp-tab')).map((t) => t.textContent.trim()));
     assert(tabs.includes('Bindings') && tabs.includes('Runs'),
       'the Inspector shows its tabs (got ' + JSON.stringify(tabs) + ')');
+    await waitTourTitle(page, 'Who uses a fn?', 150000);
+    await filterAndSelect(page, 'const', 'const');
+    await waitTourTitle(page, 'Used by', 150000);
+    // Click the Overview tab for real — the Used-by section renders
+    // below the overview partial, and the step's dom-check waits on it.
+    await page.evaluate(() => {
+      const t = Array.from(document.querySelectorAll('.gd-insp-tab'))
+        .find((b) => /Overview/.test(b.textContent));
+      if (t) t.click();
+    });
+    await page.waitForSelector('.gd-insp-usages .gd-insp-usage-row', {timeout: 30000});
+    const usage = await page.evaluate(() => ({
+      rows: document.querySelectorAll('.gd-insp-usages .gd-insp-usage-row').length,
+      glabel: document.querySelector('.gd-insp-usage-glabel')?.textContent || '',
+    }));
+    assert(usage.rows > 0, 'Used-by lists rows for :const');
+    assert(/Extended by \d+/.test(usage.glabel),
+      'children group labeled (got "' + usage.glabel + '")');
+    // A row click navigates — the selection leaves :const.
+    const beforeHash = await page.evaluate(() => location.hash);
+    await page.evaluate(() => {
+      document.querySelector('.gd-insp-usages .gd-insp-usage-row').click();
+    });
+    await page.waitForFunction((h) => location.hash !== h, beforeHash,
+      {timeout: 30000, polling: 200});
+    console.log('  lesson 17: Used-by row navigated to '
+      + await page.evaluate(() => location.hash));
     await waitTourTitle(page, "That's the view layer", 150000);
     assert(await clickTourButton(page, 'Finish'), 'lesson 17 Finish');
     await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),

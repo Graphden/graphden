@@ -125,6 +125,15 @@
       (is (false? (:ok result))))))
 
 
+(deftest types-usages-accepts-fn-id-synonym-test
+  (testing "POST {fn-id: <uuid>} parses — the body the /api/fns/usages
+            alias (inspector Used-by) sends; an unknown id is an empty
+            result, not a validation error"
+    (let [result (post-via :types-usages-handler {:fn-id (str (random-uuid))})]
+      (is (true? (:ok result)))
+      (is (zero? (:count result))))))
+
+
 ;; =============================================================================
 ;; /api/types/compatible — env-bindings + nested validation chain
 ;; =============================================================================

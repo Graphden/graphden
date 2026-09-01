@@ -116,6 +116,7 @@
                   "packages/app/editor/editor-execute-history.js"
                   "packages/app/editor/editor-execute.js"
                   "packages/app/editor/editor-fn-versions.js"
+                  "packages/app/editor/editor-fn-usages.js"
                   "packages/app/editor/editor-service-popover.js"
                   "packages/app/editor/editor-mismatch-explainer.js"
                   "packages/app/editor/editor-effect-explainer.js"

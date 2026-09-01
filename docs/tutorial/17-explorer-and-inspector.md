@@ -54,7 +54,13 @@ Click any fn — in the tree or any node on the graph canvas — and
 the right-hand **Inspector** panel shows it. Four tabs:
 
 - **Overview** — identity at a glance: name, namespace, parents,
-  return type, effects.
+  return type, effects — and **Used by**, the reverse index: every
+  fn that *extends* the selected one, *references* it from an arg
+  binding (with the slot named), or uses it as a resolver, plus the
+  type-plane references when the row doubles as a type. Each row is
+  a link — click it and the editor jumps to that caller. When an
+  edit is refused with "In use — detach those first", this is the
+  list it means.
 - **Bindings** — the resolved slot/binding table: every slot the
   fn exposes, what binds it, where each binding was inherited
   from (the provenance story from Lesson 03).
@@ -87,7 +93,10 @@ The Inspector is the "read" side of the editor: popovers are for
 3. Select any fn and walk the Inspector tabs: **Bindings** shows
    the same slot table you'd assemble by hand from Lesson 03;
    **Runs** fills after you hit ▶ once.
-4. Reload the page — your lens choice sticks.
+4. Select `const` (core.logic) and open **Overview**: the Used-by
+   section lists the crowd of fns that pin constants through it,
+   "Extended by" first. Click a row — the editor jumps there.
+5. Reload the page — your lens choice sticks.
 
 ## Next
 

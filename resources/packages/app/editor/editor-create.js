@@ -547,6 +547,9 @@ function buildCreateRow(indent) {
         : { name, 'namespace-id': activeCreate.parentNsId || '' };
       const response = await postEntity(createType, fields);
       if (response.status >= 200 && response.status < 300) {
+        if (createType !== 'ns' && typeof gdRememberLastNs === 'function') {
+          gdRememberLastNs(activeCreate.parentNsId || null);
+        }
         activeCreate = null;
         await initGraph();
         // For new fns, auto-select so the user lands on the empty

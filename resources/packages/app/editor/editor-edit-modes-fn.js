@@ -17,9 +17,49 @@
 // is the legitimate place for new args / renames). After save, the
 // editor navigates to the new fn so the user can immediately add
 // `:as` renames + value bindings to extend its interface.
+// Which namespace should a fresh child land in? The parent's — when the
+// parent is the user's own fn (extending your module keeps the module
+// together). A PACKAGE (or foreign-org) parent is different: dropping
+// add-10 into core.arithmetic pollutes a module the user doesn't own and
+// hides the child from their workspace scope — default to the user's
+// last-used namespace instead, falling back to the parent's when there
+// is no memory yet. The popover shows the choice either way ("in <ns>").
+function extendDefaultNsId(fn) {
+  const pkg = (typeof isPackageOwnedFn === 'function') && isPackageOwnedFn(fn.id);
+  const owned = (typeof graphdenIsFnOwned !== 'function') || graphdenIsFnOwned(fn);
+  if (!pkg && owned) return fn['namespace-id'] || null;
+  const last = (typeof gdLastUsedNs === 'function') ? gdLastUsedNs() : undefined;
+  return last === undefined ? (fn['namespace-id'] || null) : last;
+}
+
+// The "(root)" + every-namespace option list, sorted by dotted path.
+function buildNsSelect(defaultNsId, ariaLabel) {
+  const sel = document.createElement('select');
+  sel.className = 'extend-ns-select';
+  sel.setAttribute('aria-label', ariaLabel);
+  const rootOpt = document.createElement('option');
+  rootOpt.value = '';
+  rootOpt.textContent = '(root)';
+  sel.appendChild(rootOpt);
+  const paths = [];
+  if (typeof lookups !== 'undefined' && lookups?.nsPathMap) {
+    for (const [id, path] of lookups.nsPathMap) paths.push([path, id]);
+  }
+  paths.sort((a, b) => a[0].localeCompare(b[0]));
+  for (const [path, id] of paths) {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = path;
+    sel.appendChild(opt);
+  }
+  sel.value = defaultNsId || '';
+  return sel;
+}
+
 function enterExtendEditMode(fn, anchorEl) {
   if (!fn) return;
   let pendingName = '';
+  let nsSelect = null;
   openInlineEditPopover({
     anchorEl,
     ariaLabel: 'Extend (create child fn)',
@@ -32,6 +72,15 @@ function enterExtendEditMode(fn, anchorEl) {
       input.type = 'text';
       input.className = 'arg-value-edit-input';
       input.placeholder = 'New fn name';
+      const nsRow = document.createElement('label');
+      nsRow.className = 'extend-ns-row';
+      const nsCap = document.createElement('span');
+      nsCap.className = 'extend-ns-cap';
+      nsCap.textContent = 'in';
+      nsSelect = buildNsSelect(extendDefaultNsId(fn), 'Namespace for the new fn');
+      nsRow.appendChild(nsCap);
+      nsRow.appendChild(nsSelect);
+      root.insertBefore(nsRow, root.firstChild);
       root.insertBefore(input, root.firstChild);
       root.insertBefore(hint, root.firstChild);
       return input;
@@ -42,12 +91,15 @@ function enterExtendEditMode(fn, anchorEl) {
       const opKey = 'extend:' + fn.id + ':' + newName;
       if (typeof isOpInflight === 'function' && isOpInflight(opKey)) return false;
       pendingName = newName;
-      const fields = { name: newName, 'parent-ids': fn.id };
-      if (fn['namespace-id']) fields['namespace-id'] = fn['namespace-id'];
+      const nsId = nsSelect ? nsSelect.value : (fn['namespace-id'] || '');
+      const fields = { name: newName, 'parent-ids': fn.id, 'namespace-id': nsId };
       const work = async () => {
         try {
           const r = await postEntity('fn', fields);
-          if (r && r.status >= 200 && r.status < 300) return true;
+          if (r && r.status >= 200 && r.status < 300) {
+            if (typeof gdRememberLastNs === 'function') gdRememberLastNs(nsId || null);
+            return true;
+          }
         } catch (_) {}
         return false;
       };
@@ -288,7 +340,10 @@ function enterNamespaceMoveEditMode(fn, anchorEl) {
         const r = await authMutate('PUT',
                                    API.api_entities_type_id('fn', fn.id),
                                    body);
-        if (r?.ok && typeof initGraph === 'function') initGraph();
+        if (r?.ok) {
+          if (typeof gdRememberLastNs === 'function') gdRememberLastNs(picked.id || null);
+          if (typeof initGraph === 'function') initGraph();
+        }
       } catch (_) {}
     }
   });

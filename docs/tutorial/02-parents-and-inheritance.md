@@ -160,6 +160,17 @@ In the editor, in a namespace of your choice:
 
    Its card shows TWO rows: `:add-10` (with the bound `:nums`)
    and `:add` below it.
+
+   Doing this through the editor's **⋯ → Extend** instead: the
+   popover's **in** line picks the child's namespace. Extending
+   your own fn defaults to the parent's namespace (the module
+   stays together); extending a *platform* fn defaults to your
+   last-used namespace — a child of `:add` belongs to your
+   project, not to `core.arithmetic`. Change it right there if
+   you want it elsewhere; a fn can also be moved later via
+   **⋯ → Namespace → Move to another namespace…** (moving is
+   always safe — callers reference the fn by identity, not by
+   its namespace).
 3. Try writing a multiple-inheritance fn-def over the two real
    response axes:
 

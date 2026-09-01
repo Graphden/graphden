@@ -262,5 +262,34 @@ function installViewportWatcher() {
   });
 }
 
+// =============================================================================
+// LAST-USED NAMESPACE — the extend/create default
+// =============================================================================
+//
+// Extending a PACKAGE fn used to drop the child into the package's own
+// namespace (add-10 landing in core.arithmetic) — polluting a module the
+// user doesn't own and hiding the child from their workspace scope. The
+// extend popover now defaults to the user's last-used namespace when the
+// parent isn't theirs; this pair is that memory.
+
+const PREFS_LAST_NS_KEY = 'graphden.lastNs';
+
+// nsId may be null — "(root)" is a legitimate last choice.
+function gdRememberLastNs(nsId) {
+  writePref(PREFS_LAST_NS_KEY, nsId == null || nsId === '' ? '(root)' : String(nsId));
+}
+
+// → nsId string | null (root) | undefined (never set, or the remembered
+// ns no longer exists — deleted, or another deployment's id).
+function gdLastUsedNs() {
+  const raw = readPref(PREFS_LAST_NS_KEY, null);
+  if (raw == null) return undefined;
+  if (raw === '(root)') return null;
+  const known = (typeof graphData !== 'undefined')
+    && Array.isArray(graphData?.namespaces)
+    && graphData.namespaces.some((n) => n.id === raw);
+  return known ? raw : undefined;
+}
+
 window.initPrefsEarly = initPrefsEarly;
 window.initPrefsLate  = initPrefsLate;

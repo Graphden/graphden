@@ -496,11 +496,17 @@ registerActionHandler('namespace-move', (btn, e) => {
   const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
   const fn = lookups?.fnMap?.get(fnId);
   const signedIn = typeof isAuthenticated === 'function' && isAuthenticated();
-  // Moving a fn to another namespace is an ownership edit — offer it only on a
-  // fn the principal both structurally can edit AND owns (tenancy). Reveal +
-  // the namespace path stay available on ANY fn (read-only locate).
+  // Moving a fn to another namespace is an ownership edit — offer it on any
+  // fn the principal owns (tenancy) that isn't package-synced. It does NOT
+  // require the fn to be caller-free: identity is the id (ADR-identity-model),
+  // callers reference it by id, and the server re-checks the (ns, name)
+  // collision — the old isFnEditable gate made a mature project's namespaces
+  // unreorganisable, since every load-bearing fn has callers. Reveal + the
+  // namespace path stay available on ANY fn (read-only locate).
   const owned = (typeof graphdenIsFnOwned !== 'function') || graphdenIsFnOwned(fn);
-  const editable = (typeof isFnEditable === 'function' && isFnEditable(fnId)) && owned;
+  const editable = (typeof isPackageOwnedFn === 'function')
+    ? (!isPackageOwnedFn(fnId) && owned)
+    : ((typeof isFnEditable === 'function' && isFnEditable(fnId)) && owned);
   const nsPath = (fn && lookups?.nsPathMap && fn['namespace-id'])
     ? (lookups.nsPathMap.get(fn['namespace-id']) || '(root)')
     : '(root)';

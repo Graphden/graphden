@@ -185,8 +185,18 @@
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
-              {:title "That's inheritance"
-               :body "One parent, inherited slots, per-child bindings. The written lesson 02 goes further: multiple parents (the response-matrix diamond) and how bindings overlay closest-fn-wins. Click [[Finish]] to clean up or keep add-10."
+              {:title "Now wrap it"
+               :body "Extend went DOWN — a child under add. Wrap goes UP: a new fn that CALLS add-10 and does something with its result. Click [[⋯]] on the add-10 row, choose [[⬆ Wrap in new fn]], type `to-str` in the picker and pick [[core.strings.to-str]] — the wrapper's parent."
+               :target "button.more-actions-trigger"
+               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"wrap-fn\"]" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"to-str\"]"]
+               :check {:kind "dom" :selector ".arg-value-edit-popover .extend-ns-select"}}
+              {:title "Name the wrapper"
+               :body "Name it `add-10-text`, leave the into slot on :value — then [[Save]]. The editor creates the wrapper with add-10 already bound into it and opens it: your sum, stringified, in two clicks."
+               :target ".arg-value-edit-popover"
+               :check {:kind "fn-parent" :name "add-10-text" :parent "to-str"}
+               :creates {:type "fn" :name "add-10-text"}}
+              {:title "That's inheritance — both ways"
+               :body "One parent, inherited slots, per-child bindings — and when you need a step ABOVE what you have, Wrap builds the caller for you. (Names stay yours too: Rename and Move to another namespace work even on fns with callers — everyone references the fn by identity, not by name.) The written lesson 02 goes further: multiple parents and closest-fn-wins overlays. Click [[Finish]] to clean up or keep what you made."
                :target nil
                :check {:kind "manual"}}]}
             {:id "03"

@@ -608,7 +608,13 @@
                           :aria-label "Apps"}}
           :children [{:value "▣"}]}}
 
-  ;; ✎ Rename — enabled when editable, disabled-with-reason otherwise.
+  ;; ✎ Rename — enabled on any OWNED fn, callers or not. A name is a
+  ;; per-namespace LABEL over the id-keyed identity (ADR-identity-model):
+  ;; callers reference the fn by id, so renaming an in-use fn breaks
+  ;; nothing, and the server re-checks the (ns, name) collision. The old
+  ;; disabled-with-"fn in use" state was the delete gate misapplied — the
+  ;; same unlock ns-move got. Package-synced fns never reach here (the
+  ;; owned wrapper below strips the button).
   {:name :_partial-row-actions-rename-button-enabled
    :parent :hiccup
    :args {:tag {:value "button"}
@@ -619,24 +625,19 @@
                           :aria-label "Rename"}}
           :children [{:value "✎"}]}}
 
-  {:name :_partial-row-actions-rename-button-disabled
+  ;; ⬆ Wrap — create a NEW fn that CALLS this one (pick the wrapping
+  ;; parent, name the wrapper, this fn lands as a ref in one of its
+  ;; slots). Like Extend it modifies nothing on this fn, so it is never
+  ;; in-use-blocked and never ownership-gated — the wrapper is yours.
+  {:name :_partial-row-actions-wrap-button
    :parent :hiccup
    :args {:tag {:value "button"}
-          :attrs {:parent :assoc
-                  :args {:map {:value {:type "button"
-                                       :class "action-icon action-icon-disabled"
-                                       :data-action "rename-fn"
-                                       :aria-label "Rename — fn in use"
-                                       :aria-disabled "true"}}
-                         :key {:value :title}
-                         :value :_partial-row-actions-edit-block-reason-str}}
-          :children [{:value "✎"}]}}
-
-  {:name :_partial-row-actions-rename-button
-   :parent :if
-   :args {:test :_partial-row-actions-edit-blocked?
-          :then :_partial-row-actions-rename-button-disabled
-          :else :_partial-row-actions-rename-button-enabled}}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "wrap-fn"
+                          :title "Wrap in a new fn — a caller that feeds on this fn's result"
+                          :aria-label "Wrap in new fn"}}
+          :children [{:value "⬆"}]}}
 
   ;; + Extend — never blocked by the in-use gate: extending doesn't
   ;; modify this fn, it CREATES a child with it as :parent, so "used
@@ -693,7 +694,7 @@
   {:name :_partial-row-actions-rename-button-or-owned-nil
    :parent :if
    :args {:test :_partial-row-actions-owned?
-          :then :_partial-row-actions-rename-button
+          :then :_partial-row-actions-rename-button-enabled
           :else {:value nil}}}
 
   {:name :_partial-row-actions-delete-button-or-owned-nil
@@ -710,7 +711,7 @@
 
   ;; Assembly — shared head (ns / i / ↗) + root-row buttons.
   {:name :_partial-row-actions-root-row-children-raw
-   :description "Full button list for the root-row context: ns / i / ↗ shared head + ▶ ⌛ ⚙ ▣ ✎ + ✕. Disabled-state for ⚙/✎/+/✕ baked in by the per-button `:if` wrappers; ▣ is client-hidden on non-tenancy deployments."
+   :description "Full button list for the root-row context: ns / i / ↗ shared head + ▶ ⌛ ⚙ ▣ ✎ + ⬆ ✕. Disabled-state for ⚙/+/✕ baked in by the per-button `:if` wrappers (✎ is owned-gated only — renames are identity-safe); ▣ is client-hidden on non-tenancy deployments."
    :parent :list
    :args {:items [:_partial-row-actions-ns-button
                   :_partial-row-actions-i-button
@@ -721,6 +722,7 @@
                   :_partial-row-actions-apps-button
                   :_partial-row-actions-rename-button-or-owned-nil
                   :_partial-row-actions-extend-button
+                  :_partial-row-actions-wrap-button
                   :_partial-row-actions-delete-button-or-owned-nil]}}
 
   {:name :_partial-row-actions-root-row-children

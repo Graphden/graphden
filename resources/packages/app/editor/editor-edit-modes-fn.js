@@ -128,6 +128,191 @@ function enterExtendEditMode(fn, anchorEl) {
     }
   });
 }
+// --- Wrap in new fn (graph refactoring) ---
+//
+// "Add a step ABOVE the current fn" had no affordance: building
+// g(f(...)) starting from f meant creating g by hand, finding f in a
+// picker and binding it — five actions and a mental model inversion.
+// Wrap does it in two: pick the wrapping parent (which fn should
+// process this one's result), then name the wrapper — this fn lands as
+// a ref in the chosen slot and the editor opens the new caller.
+
+// Slot candidates for the wrapper = the picked parent's whole slot
+// closure (own + inherited), from a scope=subtree fetch kept OFF the
+// global graphData (ensureSubtreeFor would re-root the canvas view).
+// Free slots (unbound anywhere in the closure) sort first — the seam a
+// wrapper normally fills.
+async function wrapSlotCandidates(parentFn) {
+  const r = await fetch(API.api_graph_entities
+    + '?scope=subtree&root-id=' + encodeURIComponent(parentFn.id));
+  if (!r.ok) throw new Error('subtree HTTP ' + r.status);
+  const sub = await r.json();
+  const fnById = new Map((sub.fns || []).map((f) => [f.id, f]));
+  const closure = new Set();
+  const queue = [parentFn.id];
+  while (queue.length) {
+    const id = queue.shift();
+    if (closure.has(id)) continue;
+    closure.add(id);
+    for (const pid of (fnById.get(id)?.['parent-ids'] || [])) queue.push(pid);
+  }
+  const slotById = new Map((sub.slots || []).map((sl) => [sl.id, sl]));
+  const bound = new Set((sub.bindings || [])
+    .filter((b) => closure.has(b['fn-id']))
+    .map((b) => b['slot-id']));
+  const seen = new Set();
+  const out = [];
+  for (const fs of (sub['fn-slots'] || [])) {
+    if (!closure.has(fs['fn-id'])) continue;
+    const slot = slotById.get(fs['slot-id']);
+    if (!slot || seen.has(slot.id)) continue;
+    seen.add(slot.id);
+    out.push({ id: slot.id, name: slot.name, free: !bound.has(slot.id) });
+  }
+  out.sort((a, b) => (Number(b.free) - Number(a.free))
+    || String(a.name).localeCompare(String(b.name)));
+  return out;
+}
+
+function enterWrapEditMode(fn, anchorEl) {
+  if (!fn) return;
+  if (typeof openFnPicker !== 'function') return;
+  openFnPicker({
+    anchorEl,
+    excludeIds: [fn.id],
+    onPick: (parent) => {
+      if (parent?.id) promptWrapDetails(fn, parent, anchorEl);
+    }
+  });
+}
+
+function promptWrapDetails(fn, parent, anchorEl) {
+  let pendingName = '';
+  let nsSelect = null;
+  let slotSelect = null;
+  let slotsReady = null;
+  openInlineEditPopover({
+    anchorEl,
+    ariaLabel: 'Wrap ' + (fn.name || 'this fn') + ' in a new fn',
+    makeControl(root) {
+      const hint = document.createElement('div');
+      hint.className = 'arg-value-edit-hint';
+      hint.textContent = 'Creates a new fn with :parent '
+        + (parent.name || '(anonymous)') + ' that receives '
+        + (fn.name || 'this fn') + ' in the chosen slot.';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'arg-value-edit-input';
+      input.placeholder = 'Wrapper fn name';
+      const nsRow = document.createElement('label');
+      nsRow.className = 'extend-ns-row';
+      const nsCap = document.createElement('span');
+      nsCap.className = 'extend-ns-cap';
+      nsCap.textContent = 'in';
+      nsSelect = buildNsSelect(extendDefaultNsId(fn), 'Namespace for the wrapper fn');
+      nsRow.appendChild(nsCap);
+      nsRow.appendChild(nsSelect);
+      const slotRow = document.createElement('label');
+      slotRow.className = 'extend-ns-row';
+      const slotCap = document.createElement('span');
+      slotCap.className = 'extend-ns-cap';
+      slotCap.textContent = 'into';
+      slotSelect = document.createElement('select');
+      slotSelect.className = 'extend-ns-select';
+      slotSelect.setAttribute('aria-label',
+        'Slot of ' + (parent.name || 'the parent') + ' that receives '
+        + (fn.name || 'this fn'));
+      const loading = document.createElement('option');
+      loading.value = '';
+      loading.textContent = 'loading slots…';
+      slotSelect.appendChild(loading);
+      slotRow.appendChild(slotCap);
+      slotRow.appendChild(slotSelect);
+      slotsReady = wrapSlotCandidates(parent).then((slots) => {
+        slotSelect.replaceChildren();
+        for (const sl of slots) {
+          const opt = document.createElement('option');
+          opt.value = sl.id;
+          opt.textContent = ':' + sl.name + (sl.free ? '' : ' (bound — will override)');
+          slotSelect.appendChild(opt);
+        }
+        if (!slots.length) {
+          const none = document.createElement('option');
+          none.value = '';
+          none.textContent = 'no slots — pick another parent';
+          slotSelect.appendChild(none);
+        }
+        return slots;
+      }).catch(() => { slotSelect.replaceChildren(); return []; });
+      root.insertBefore(slotRow, root.firstChild);
+      root.insertBefore(nsRow, root.firstChild);
+      root.insertBefore(input, root.firstChild);
+      root.insertBefore(hint, root.firstChild);
+      return input;
+    },
+    async doSave(input) {
+      const newName = (input.value || '').trim();
+      if (!newName) return false;
+      await slotsReady;
+      const slotId = slotSelect ? slotSelect.value : '';
+      if (!slotId) return { ok: false, error: 'The parent exposes no slot to receive this fn.' };
+      const opKey = 'wrap:' + fn.id + ':' + newName;
+      if (typeof isOpInflight === 'function' && isOpInflight(opKey)) return false;
+      pendingName = newName;
+      const nsId = nsSelect ? nsSelect.value : '';
+      const work = async () => {
+        try {
+          const r = await postEntity('fn', { name: newName,
+                                             'parent-ids': parent.id,
+                                             'namespace-id': nsId });
+          if (!(r && r.status >= 200 && r.status < 300)) return false;
+          // The create endpoint answers HTML, not the new id — resolve it
+          // by (name, ns) through the search scope, with retries for
+          // read-after-write lag (same reality selectJustCreatedFn handles).
+          let newId = null;
+          for (let i = 0; i < 10 && !newId; i++) {
+            await new Promise((res) => setTimeout(res, 300));
+            try {
+              const sr = await fetch(API.api_graph_entities
+                + '?scope=search&q=' + encodeURIComponent(newName));
+              const sd = sr.ok ? await sr.json() : null;
+              newId = (sd?.fns || []).find((f) => f.name === newName
+                && String(f['namespace-id'] || '') === String(nsId || ''))?.id || null;
+            } catch (_) { /* retry */ }
+          }
+          if (!newId) return { ok: false, error: 'Created ' + newName
+            + ', but could not find it to bind — reload and bind by hand.' };
+          const b = await authMutate('POST', API.api_entities_type('binding'),
+                                     { 'fn-id': newId, 'slot-id': slotId,
+                                       'ref-fn-id': fn.id });
+          if (b?.ok) {
+            if (typeof gdRememberLastNs === 'function') gdRememberLastNs(nsId || null);
+            return true;
+          }
+        } catch (_) {}
+        return false;
+      };
+      return (typeof withBusy === 'function')
+        ? await withBusy(opKey, 'Wrapping in ' + newName + '…', work)
+        : await work();
+    },
+    onSaved() {
+      const opKey = 'wrap-finalise:' + fn.id;
+      const finalise = async () => {
+        if (typeof initGraph === 'function') await initGraph();
+        if (pendingName && typeof selectJustCreatedFn === 'function') {
+          await selectJustCreatedFn(pendingName);
+        }
+      };
+      if (typeof withBusy === 'function') {
+        withBusy(opKey, 'Loading ' + (pendingName || 'wrapper') + '…', finalise);
+      } else {
+        finalise();
+      }
+    }
+  });
+}
+
 function enterFnRenameEditMode(fn, anchorEl) {
   if (!fn) return;
   openInlineEditPopover({

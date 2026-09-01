@@ -19,7 +19,7 @@ were deliberately left in JS.
 | `col-header` | ancestor column header; read-only fall-through rows | ns / i / ↗ / 👁 Peek |
 | `cell` | MI cell; parent-edit row | ns / i / ↗ / 👁 Peek / × Remove-MI / + Add-MI (last two when `editable=true`) |
 | `use-site-arg` | argument at a use-site | ns / i / ↗ / 👁 Peek / × Remove-binding / ✎ Change-value (last two when `editable=true`) |
-| `root-row` | the selected fn's root row | ns / i / ↗ / ▶ Run / ⌛ History / ⚙ Service / ▣ Apps / ✎ Rename / + Extend / ✕ Delete |
+| `root-row` | the selected fn's root row | ns / i / ↗ / ▶ Run / ⌛ History / ⚙ Service / ▣ Apps / ✎ Rename / + Extend / ⬆ Wrap / ✕ Delete |
 
 Disabled-with-reason: `edit-block-reason` is a client-passed query param; the
 ⚙ reason is computed INSIDE the partial from `:service-blocking-free-args`

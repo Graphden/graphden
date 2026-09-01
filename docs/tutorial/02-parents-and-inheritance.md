@@ -168,9 +168,19 @@ In the editor, in a namespace of your choice:
    last-used namespace — a child of `:add` belongs to your
    project, not to `core.arithmetic`. Change it right there if
    you want it elsewhere; a fn can also be moved later via
-   **⋯ → Namespace → Move to another namespace…** (moving is
-   always safe — callers reference the fn by identity, not by
-   its namespace).
+   **⋯ → Namespace → Move to another namespace…**, and renamed via
+   **⋯ → ✎ Rename** (both are always safe, callers included —
+   everyone references the fn by identity, not by its name or
+   namespace).
+
+   The mirror of Extend is **⋯ → ⬆ Wrap in new fn**: where Extend
+   creates a child *under* the fn, Wrap builds a caller *above*
+   it — pick the wrapping parent (which fn should process this
+   one's result, say `:to-str`), name the wrapper, choose the slot
+   that receives the fn, and the editor creates the new fn with
+   the current one already bound in, then opens it. That is how
+   you add a step on top of existing logic without re-assembling
+   it by hand.
 3. Try writing a multiple-inheritance fn-def over the two real
    response axes:
 

@@ -188,9 +188,60 @@ const {
     await bindFirstPlaceholder(page, '10');
     await waitTourTitle(page, 'Run the child', 150000);
     await runViaRowActions(page);
-    await waitTourTitle(page, "That's inheritance", 150000);
+    await waitTourTitle(page, 'Now wrap it', 150000);
+    // Wrap: ⋯ on the add-10 card → ⬆ Wrap → pick :to-str as the parent.
+    await page.waitForFunction(() => {
+      return Array.from(document.querySelectorAll('.node-overlay')).some((ov) =>
+        ov.textContent.trim().startsWith('add-10')
+        && ov.querySelector('button.more-actions-trigger'));
+    }, null, {timeout: 60000, polling: 200});
+    await page.evaluate(() => {
+      const ov = Array.from(document.querySelectorAll('.node-overlay')).find((o) =>
+        o.textContent.trim().startsWith('add-10')
+        && o.querySelector('button.more-actions-trigger'));
+      ov.querySelector('button.more-actions-trigger')
+        .dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+    });
+    await page.waitForSelector('.row-actions-popover [data-action="wrap-fn"]',
+      {timeout: 15000});
+    await page.evaluate(() => {
+      document.querySelector('.row-actions-popover [data-action="wrap-fn"]')
+        .dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    });
+    await page.waitForSelector('.fn-picker-popover .fn-picker-search', {timeout: 15000});
+    await page.fill('.fn-picker-popover .fn-picker-search', 'to-str');
+    await page.waitForSelector('.fn-picker-popover .fn-picker-row[data-fn-name$="to-str"]',
+      {timeout: 15000});
+    await page.evaluate(() => {
+      document.querySelector('.fn-picker-popover .fn-picker-row[data-fn-name$="to-str"]')
+        .click();
+    });
+    await waitTourTitle(page, 'Name the wrapper', 150000);
+    await page.waitForSelector('.arg-value-edit-popover .extend-ns-select', {timeout: 15000});
+    // Wait for the slot select to resolve its candidates (":value" of to-str).
+    await page.waitForFunction(() => {
+      const sels = document.querySelectorAll('.arg-value-edit-popover .extend-ns-select');
+      const slotSel = sels[sels.length - 1];
+      return slotSel && Array.from(slotSel.options).some((o) => /:value/.test(o.textContent));
+    }, null, {timeout: 20000, polling: 200});
+    await page.evaluate((name) => {
+      const pop = document.querySelector('.arg-value-edit-popover');
+      const input = pop.querySelector('.arg-value-edit-input');
+      input.value = name;
+      input.dispatchEvent(new Event('input', {bubbles: true}));
+      Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
+        .find((b) => b.textContent.trim() === 'Save').click();
+    }, 'add-10-text');
+    await waitTourTitle(page, "That's inheritance — both ways", 150000);
+    // The wrapper exists, parented to :to-str, with add-10 bound in.
+    const wrapped = await page.evaluate(() => {
+      const w = (graphData?.fns || []).find((f) => f.name === 'add-10-text');
+      return w ? {parents: w['parent-ids']?.length, selected: location.hash} : null;
+    });
+    assert(wrapped && wrapped.parents === 1,
+      'wrapper created and loaded (' + JSON.stringify(wrapped) + ')');
     await finishAndDelete(page);
-    console.log('  lesson 02: walked + cleaned');
+    console.log('  lesson 02: walked + cleaned (extend + wrap)');
 
     // ---------- Lesson 04 — free arguments ----------
     await page.goto(BASE + '/?tutorial=04');

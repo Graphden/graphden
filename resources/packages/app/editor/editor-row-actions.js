@@ -755,6 +755,17 @@ registerActionHandler('rename-fn', (btn, e, host) => {
 });
 
 
+registerActionHandler('wrap-fn', (btn, e, host) => {
+  e.preventDefault();
+  e.stopPropagation();
+  const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
+  const fnEntity = lookups?.fnMap?.get(fnId);
+  if (fnEntity && typeof enterWrapEditMode === 'function') {
+    enterWrapEditMode(fnEntity, btn);
+  }
+});
+
+
 registerActionHandler('extend-fn', (btn, e, host) => {
   e.preventDefault();
   e.stopPropagation();

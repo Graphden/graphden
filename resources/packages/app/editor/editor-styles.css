@@ -6852,28 +6852,31 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
 
 /* ============================================================================
  * Interactive tutorial (editor-tour.js) — spotlight ring + step popover.
- * The spotlight is a fixed-position ring around the step's target; its huge
- * box-shadow dims everything else (same scrim token the modal backdrop
- * uses). pointer-events stays none so the user CLICKS THE REAL UI — the
- * tour only observes. The ring sits ABOVE the base layout (sidebar 200,
- * ctxbar 280) but BELOW every transient surface the editor floats — and
- * the LOWEST of those is the 300 family (auth/branch/org popovers), not
- * just the 10002+ menus. At 9000 the scrim dimmed the very dropdown a
- * step had just told the reader to pick from (branch popover, workspace
- * chip, ⌛ versions); at 290 anything that pops up is bright by
- * construction. The tour's own popover stays above the scrim.
+ * The spotlight is an accent ring on the current stage plus a full-viewport
+ * SVG scrim (same token the modal backdrop uses) whose mask punches one
+ * hole per bright region — every element a multi-action step involves
+ * stays readable, not just the current stage. pointer-events stays none so
+ * the user CLICKS THE REAL UI — the tour only observes. The scrim sits
+ * ABOVE the base layout (sidebar 200, ctxbar 280) but BELOW every
+ * transient surface the editor floats — and the LOWEST of those is the
+ * 300 family (auth/branch/org popovers), not just the 10002+ menus. At
+ * 9000 the scrim dimmed the very dropdown a step had just told the reader
+ * to pick from (branch popover, workspace chip, ⌛ versions); at 290
+ * anything that pops up is bright by construction. The tour's own popover
+ * stays above the scrim.
  * ========================================================================== */
-/* Two layers over one rect (see _tourEnsureEls): the scrim must sit UNDER
-   every transient surface, the ring must draw OVER them — one element's
-   border and box-shadow cannot be z-split. */
+/* Two layers (see _tourEnsureEls): the scrim must sit UNDER every transient
+   surface, the ring must draw OVER them. */
 #gd-tour-dim {
   position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   z-index: 290;
   display: none;
   pointer-events: none;
-  border-radius: 8px;
-  box-shadow: 0 0 0 9999px var(--modal-backdrop-bg);
 }
+#gd-tour-dim .gd-tour-dim-fill { fill: var(--modal-backdrop-bg); }
 #gd-tour-spot {
   position: fixed;
   /* Above even the editor's heavy floating UI (10002+) and tooltips

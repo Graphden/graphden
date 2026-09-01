@@ -47,17 +47,39 @@ function _tourStep() {
   return (lesson.steps || [])[_tourState.step] || null;
 }
 
-// The spotlight is TWO stacked elements over the same rect: `dim` carries
-// the huge box-shadow scrim and sits BELOW every transient surface (a menu
-// the step opens must float bright over it), `spot` carries the accent ring
-// and sits ABOVE them (a `:targets` chain rings items INSIDE an open menu,
-// and a ring under the menu's own panel would be invisible). One element
-// cannot do both — its border and its shadow share a z-index.
+// The spotlight is TWO stacked elements: `dim` is a full-viewport SVG scrim
+// whose mask punches out one hole PER bright region — a multi-action step
+// ("click ⋯, then Extend, then name it") involves several elements at once,
+// and the old single box-shadow hole left every element but the current
+// stage in the dark. It sits BELOW every transient surface (a menu the step
+// opens must float bright over it); `spot` carries the accent ring and sits
+// ABOVE them (a `:targets` chain rings items INSIDE an open menu, and a
+// ring under the menu's own panel would be invisible).
+const TOUR_SVG_NS = 'http://www.w3.org/2000/svg';
 function _tourEnsureEls() {
   if (_tourEls) return _tourEls;
-  const dim = document.createElement('div');
+  const dim = document.createElementNS(TOUR_SVG_NS, 'svg');
   dim.id = 'gd-tour-dim';
   dim.setAttribute('aria-hidden', 'true');
+  // Luminance mask: white keeps the scrim, black cuts a hole. Literal
+  // white/black here are mask coordinates, not theme colors — the visible
+  // scrim color is the CSS-tokened fill on .gd-tour-dim-fill.
+  const defs = document.createElementNS(TOUR_SVG_NS, 'defs');
+  const mask = document.createElementNS(TOUR_SVG_NS, 'mask');
+  mask.id = 'gd-tour-dim-mask';
+  const keep = document.createElementNS(TOUR_SVG_NS, 'rect');
+  keep.setAttribute('width', '100%');
+  keep.setAttribute('height', '100%');
+  keep.setAttribute('fill', '#fff');
+  mask.appendChild(keep);
+  defs.appendChild(mask);
+  const fill = document.createElementNS(TOUR_SVG_NS, 'rect');
+  fill.setAttribute('width', '100%');
+  fill.setAttribute('height', '100%');
+  fill.setAttribute('class', 'gd-tour-dim-fill');
+  fill.setAttribute('mask', 'url(#gd-tour-dim-mask)');
+  dim.appendChild(defs);
+  dim.appendChild(fill);
   const spot = document.createElement('div');
   spot.id = 'gd-tour-spot';
   spot.setAttribute('aria-hidden', 'true');
@@ -69,19 +91,37 @@ function _tourEnsureEls() {
   document.body.appendChild(dim);
   document.body.appendChild(spot);
   document.body.appendChild(pop);
-  _tourEls = { dim, spot, pop };
+  _tourEls = { dim, dimMask: mask, spot, pop };
   return _tourEls;
 }
 
-// Both spotlight layers move together.
+// The accent ring follows the CURRENT stage only; the scrim's holes
+// (_tourDimHoles) keep every other element of the step readable.
 function _tourSpotRect(left, top, width, height) {
-  for (const el of [_tourEls.spot, _tourEls.dim]) {
-    el.style.left = left + 'px';
-    el.style.top = top + 'px';
-    el.style.width = width + 'px';
-    el.style.height = height + 'px';
-    el.classList.add('gd-tour-visible');
+  const el = _tourEls.spot;
+  el.style.left = left + 'px';
+  el.style.top = top + 'px';
+  el.style.width = width + 'px';
+  el.style.height = height + 'px';
+  el.classList.add('gd-tour-visible');
+}
+
+// Rebuild the mask's hole rects. Overlapping holes are fine — black over
+// black — which is exactly what an evenodd path could not do.
+function _tourDimHoles(rects) {
+  const { dim, dimMask } = _tourEls;
+  while (dimMask.children.length > 1) dimMask.lastChild.remove();
+  for (const r of rects) {
+    const hole = document.createElementNS(TOUR_SVG_NS, 'rect');
+    hole.setAttribute('x', Math.round(r.left));
+    hole.setAttribute('y', Math.round(r.top));
+    hole.setAttribute('width', Math.max(0, Math.round(r.width)));
+    hole.setAttribute('height', Math.max(0, Math.round(r.height)));
+    hole.setAttribute('rx', 8);
+    hole.setAttribute('fill', '#000');
+    dimMask.appendChild(hole);
   }
+  dim.classList.add('gd-tour-visible');
 }
 
 function _tourSpotHide() {
@@ -334,6 +374,7 @@ function _tourPosition() {
     const pad = 6;
     _tourSpotRect(spotRect.left - pad, spotRect.top - pad,
                   spotRect.width + pad * 2, spotRect.height + pad * 2);
+    _tourDimHoles(_tourHoleRects(step, effSel));
     pop.classList.remove('gd-tour-centered');
     pop.style.left = '';
     pop.style.top = '';
@@ -341,6 +382,7 @@ function _tourPosition() {
     const pad = 6;
     _tourSpotRect(spotRect.left - pad, spotRect.top - pad,
                   spotRect.width + pad * 2, spotRect.height + pad * 2);
+    _tourDimHoles(_tourHoleRects(step, effSel));
 
     const pw = pop.offsetWidth || 360;
     const ph = pop.offsetHeight || 180;
@@ -407,6 +449,68 @@ function _tourPosition() {
     pop.style.left = '';
     pop.style.top = '';
   }
+}
+
+// Every bright region of the current step: each VISIBLE stage of the
+// :targets chain, plus :target and the search-upgraded row. A step that
+// says "click ⋯, choose Extend, name it" involves them all at once, and
+// a single hole over the current stage left the rest — the card being
+// extended, the row being named — in the dark. Canvas targets widen to
+// their whole neighbourhood (_tourWithCanvasNodes): a lit ⋯ button on a
+// blacked-out card is guidance without context.
+function _tourHoleRects(step, effSel) {
+  const pad = 6;
+  const sels = new Set();
+  if (step?.target) sels.add(step.target);
+  for (const s of (Array.isArray(step?.targets) ? step.targets : [])) sels.add(s);
+  if (effSel) sels.add(effSel);
+  const rects = [];
+  for (const sel of sels) {
+    if (!_tourTargetVisible(sel)) continue;
+    const el = document.querySelector(sel);
+    let r = el.getBoundingClientRect();
+    if (el.id === 'search-input') r = _tourWithEntityList(r);
+    else if (el.closest('#graph-container')) r = _tourWithCanvasNodes(r);
+    else {
+      // A control inside a form pane (the Run button in the inspector's
+      // Run pane) is unusable with the fields around it blacked out —
+      // light the whole pane, not the button.
+      const pane = el.closest('.execute-popover');
+      if (pane) r = pane.getBoundingClientRect();
+    }
+    rects.push({ left: r.left - pad, top: r.top - pad,
+                 width: r.width + pad * 2, height: r.height + pad * 2 });
+  }
+  return rects;
+}
+
+// A canvas target is one element OF the graph the step narrates — a [[+]]
+// placeholder makes no sense with its card and edges blacked out. Extend
+// the hole over the bounding box of the on-screen node cards, clamped to
+// the canvas container so it never bleeds into the panels.
+function _tourWithCanvasNodes(rect) {
+  const nodes = _tourNodeRects();
+  if (!nodes.length) return rect;
+  let left = rect.left;
+  let top = rect.top;
+  let right = rect.right;
+  let bottom = rect.bottom;
+  for (const r of nodes) {
+    left = Math.min(left, r.left);
+    top = Math.min(top, r.top);
+    right = Math.max(right, r.right);
+    bottom = Math.max(bottom, r.bottom);
+  }
+  const host = document.getElementById('graph-container');
+  if (host) {
+    const h = host.getBoundingClientRect();
+    left = Math.max(left, h.left);
+    top = Math.max(top, h.top);
+    right = Math.min(right, h.right);
+    bottom = Math.min(bottom, h.bottom);
+  }
+  return { left, top, right, bottom,
+           width: right - left, height: bottom - top };
 }
 
 // The filter input's rect extended over the result list under it. Falls back

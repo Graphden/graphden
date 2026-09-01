@@ -513,7 +513,7 @@
                                  c :view nil nil "ns:alpha"))))
                 "named fns of :alpha (anon excluded); :beta's stay out")
             (is (empty? (:fns (entities/list-all-graph-entities
-                                c :view nil nil "ns:alph")))
+                                c :view nil nil "ns:al")))
                 "a namespace PREFIX is not a match — segments only"))
           (testing "unused:true — the dead-code view"
             (is (= #{bcomp}

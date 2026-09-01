@@ -1493,7 +1493,8 @@ function renderRecentFns() {
   const rows = gdReadRecentFns()
     .filter((r) => r.id !== (typeof selectedFnId !== 'undefined' ? selectedFnId : null))
     .slice(0, RECENT_FNS_MAX - 1);
-  const searching = !!searchFilter;
+  const searching = !!searchFilter
+    || ((typeof gdActiveSmartView === 'function') && !!gdActiveSmartView());
   host.replaceChildren();
   if (!rows.length || searching) {
     host.hidden = true;
@@ -1537,19 +1538,29 @@ function updateEntityList(data) {
   primeSecretsOnce();
   primeTestStatusesOnce();
 
-  const searchMode = !!searchFilter;
+  // A smart view (editor-smart-views.js) renders through the same
+  // force-expanded pipeline as search; a typed search takes precedence
+  // while it lasts, the view resumes when the filter clears.
+  const viewActive = !searchFilter
+    && (typeof gdActiveSmartView === 'function') && !!gdActiveSmartView();
+  const searchMode = !!searchFilter || viewActive;
 
   // While a search query is in flight (debounce + round-trip) there are no
   // results yet — show a transient state rather than a misleading empty tree.
-  if (searchMode && _searchResults === null) {
+  if (searchFilter && _searchResults === null) {
     list.innerHTML = '<div class="loading">Searching…</div>';
+    return;
+  }
+  if (viewActive && gdSmartViewResults() === null) {
+    list.innerHTML = '<div class="loading">Computing view…</div>';
     return;
   }
 
   // In search mode the tree is built from the server's matches only; the
   // normal (lazy) tree is built from whatever fn leaves have been loaded.
   const tree = searchMode
-    ? buildNsTree({ namespaces: data.namespaces, fns: _searchResults || [] })
+    ? buildNsTree({ namespaces: data.namespaces,
+                    fns: (searchFilter ? _searchResults : gdSmartViewResults()) || [] })
     : buildNsTree(data);
 
   mountOpsSections(list, searchMode);
@@ -1559,7 +1570,7 @@ function updateEntityList(data) {
   // internals that merely contain "add" — the row the reader typed the
   // full name of must be first (tutorial finding 2026-08-26). Internals
   // (`_`-private / anon) sort after public exact matches.
-  if (searchMode) {
+  if (searchMode && searchFilter) {
     const q = searchFilter.trim().toLowerCase();
     const exact = [];
     (function walk(node) {

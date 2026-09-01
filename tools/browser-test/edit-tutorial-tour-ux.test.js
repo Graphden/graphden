@@ -150,6 +150,33 @@ const {
     assert(await clickTourButton(page, 'Next'), 'lesson 19 root Next');
     await waitTourTitle(page, 'And back');
     assert(await clickTourButton(page, 'Next'), 'lesson 19 back Next');
+    await waitTourTitle(page, 'Virtual groups', 150000);
+    await page.waitForSelector('#gd-views-btn', {timeout: 15000});
+    await page.evaluate(() => document.getElementById('gd-views-btn').click());
+    await page.waitForSelector('.gd-views-pop', {timeout: 15000});
+    await waitTourTitle(page, 'Save a rule', 150000);
+    await page.evaluate(() => {
+      const pop = document.querySelector('.gd-views-pop');
+      const [nameIn, ruleIn] = pop.querySelectorAll('.gd-views-input');
+      nameIn.value = 'on-const';
+      ruleIn.value = 'uses:core.logic.const';
+      pop.querySelector('.gd-views-save').click();
+    });
+    await page.waitForSelector('#gd-views-btn.gd-views-active', {timeout: 30000});
+    // The tree is now the computed membership — non-empty for :const.
+    await page.waitForFunction(() =>
+      document.querySelectorAll('#entity-list .entity-item').length > 0,
+      null, {timeout: 30000, polling: 200});
+    const viewRows = await page.evaluate(() =>
+      document.querySelectorAll('#entity-list .entity-item').length);
+    assert(viewRows > 0, 'smart view renders members (' + viewRows + ' rows)');
+    await waitTourTitle(page, 'Back to the whole tree', 150000);
+    await page.evaluate(() => document.getElementById('gd-views-btn').click());
+    await page.waitForSelector('.gd-views-pop .gd-views-row-clear', {timeout: 15000});
+    await page.evaluate(() =>
+      document.querySelector('.gd-views-pop .gd-views-row-clear').click());
+    await page.waitForFunction(() => !document.querySelector('.gd-views-active'),
+      null, {timeout: 15000, polling: 100});
     await waitTourTitle(page, "That's workspaces");
     assert(await clickTourButton(page, 'Finish'), 'lesson 19 Finish');
     await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),

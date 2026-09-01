@@ -387,6 +387,118 @@
      :truncated? (boolean (and needle (> (count matches) *default-search-limit*)))}))
 
 
+(defn- view-rule-tokens
+  "Parse the smart-view rule string — space-separated `key:value`
+   tokens (`uses:core.strings.to-str effect:io name:handler`). A bare
+   token is a `name:` substring. Unknown keys are kept (and match
+   nothing) rather than silently dropped — a typo should read as an
+   empty view, not as \"everything\"."
+  [q]
+  (->> (str/split (str/trim (or q "")) #"\s+")
+       (remove str/blank?)
+       (mapv (fn [tok]
+               (let [[_ k v] (re-matches #"([a-z-]+):(.*)" tok)]
+                 (if (and k (seq v))
+                   [(keyword k) v]
+                   [:name tok]))))))
+
+
+(defn- reverse-ref-adjacency
+  "target-fn-id → [user-fn-ids] over EVERY composition edge: parent-ids,
+   binding ref/resolver, list-item refs (through their owner binding).
+   One pass over the base rows — the `uses:` rule BFSes this map."
+  [{:keys [fns bindings list-items]}]
+  (let [owner-of-binding (into {} (map (juxt :id :fn-id)) bindings)
+        add (fn [m target user]
+              (if (and target user)
+                (update m target (fnil conj []) user)
+                m))]
+    (as-> {} m
+          (reduce (fn [m f] (reduce #(add %1 %2 (:id f)) m (:parent-ids f))) m fns)
+          (reduce (fn [m b]
+                    (-> m
+                        (add (:ref-fn-id b) (:fn-id b))
+                        (add (:resolver-fn-id b) (:fn-id b))))
+                  m bindings)
+          (reduce (fn [m li]
+                    (add m (:ref-fn-id li)
+                         (get owner-of-binding (:binding-id li))))
+                  m list-items))))
+
+
+(defn- transitive-user-ids
+  "Every fn-id that transitively USES `target-id` (children, callers,
+   callers-of-callers …). Cycle-guarded BFS over `reverse-ref-adjacency`."
+  [base target-id]
+  (let [adj (reverse-ref-adjacency base)]
+    (loop [seen #{} queue (vec (get adj target-id))]
+      (if-let [id (first queue)]
+        (if (seen id)
+          (recur seen (subvec queue 1))
+          (recur (conj seen id)
+                 (into (subvec queue 1) (get adj id))))
+        seen))))
+
+
+(def ^:private view-result-cap
+  "Smart views answer \"which fns belong to this virtual group\" — a
+   bounded list keeps a graph-wide rule (`effect:io`) renderable."
+  500)
+
+
+(defn- list-scope-view
+  "Smart-view scope: light rows for every named fn matching ALL rule
+   tokens in `q` (see `view-rule-tokens`):
+
+   - `uses:<name>`   — the fn transitively references / extends the
+                       named fn (bare or qualified name; the editor's
+                       \"virtual namespace\" of everything built on it).
+   - `effect:<kind>` — the fn's computed effect footprint carries the
+                       kind (`io`, `db`, `state`, …) — same registry
+                       data the sidebar's fx marks read.
+   - `name:<sub>`    — case-insensitive substring on the qualified name
+                       (bare tokens parse as this).
+
+   Powers the Explorer's saved views (editor-smart-views.js). Same
+   light-row shape as `:search`, capped at `view-result-cap`."
+  [{:keys [base rev-index role-of namespaces]} q]
+  (let [rules (view-rule-tokens q)
+        paths (ns-path/path-map @namespaces)
+        qualified (fn [f]
+                    (let [p (get paths (:namespace-id f))]
+                      (if (seq p) (str p "." (:name f)) (:name f))))
+        resolve-target (fn [nm]
+                         (let [needle (str/replace (str/lower-case nm) "/" ".")]
+                           (some #(when (and (:name %)
+                                             (or (= (str/lower-case (:name %)) needle)
+                                                 (= (str/lower-case (qualified %)) needle)))
+                                    (:id %))
+                                 (:fns base))))
+        snapshot (registry/rich-types-snapshot)
+        rule-pred (fn [[k v]]
+                    (case k
+                      :uses (let [target (resolve-target v)
+                                  users (when target (transitive-user-ids base target))]
+                              (fn [f] (contains? (or users #{}) (:id f))))
+                      :effect (let [kind (keyword v)]
+                                (fn [f]
+                                  (contains? (set (:effects (get snapshot (keyword (:name f)))))
+                                             kind)))
+                      :name (let [needle (str/lower-case v)]
+                              (fn [f] (str/includes? (str/lower-case (qualified f)) needle)))
+                      (constantly false)))
+        preds (mapv rule-pred rules)
+        matches (if (empty? preds)
+                  []
+                  (->> (:fns base)
+                       (filterv (fn [f]
+                                  (and (:name f)
+                                       (every? #(% f) preds))))))
+        limited (into [] (take view-result-cap) matches)]
+    {:fns (mapv (comp (partial light-fn-row @rev-index) role-of) limited)
+     :truncated? (> (count matches) view-result-cap)}))
+
+
 (defn- list-scope-index
   "Only `{:fns :namespaces}`, nil-valued fields dropped from each fn
    row. This is a sidebar / picker payload fetched fresh on every editor
@@ -460,6 +572,8 @@
    - `:tree` — `{:namespaces :counts}` only (O(namespaces) sidebar init).
    - `:namespace` with `namespace-id` — one namespace's light rows.
    - `:search` with `q` — capped light rows by substring.
+   - `:view` with `q` — smart-view rules (`uses:` / `effect:` /
+     `name:` tokens, AND-combined) — the Explorer's saved views.
    - `:index` — `{:fns :namespaces}`, nil fields dropped (CLI/batch).
    - `:subtree` with `root-id` — the fn-view slice; falls back to
      `:full` shape when `root-id` is nil / unresolved."
@@ -473,6 +587,7 @@
        (= scope :tree)               (list-scope-tree env)
        (= scope :namespace)          (list-scope-namespace env namespace-id)
        (= scope :search)             (list-scope-search env q)
+       (= scope :view)               (list-scope-view env q)
        (= scope :index)              (list-scope-index env)
        (and (= scope :subtree) root-id) (list-scope-subtree env root-id)
        :else

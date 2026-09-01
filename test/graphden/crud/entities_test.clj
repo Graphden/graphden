@@ -467,6 +467,45 @@
           (let [dump (entities/list-all-graph-entities c :search nil nil "widget")]
             (is (= 1 (count (:fns dump))) "result capped at the limit")
             (is (true? (:truncated? dump)) "more matched than were returned"))))
+      (testing "scope :view — smart-view rule tokens over the graph"
+        ;; A grandchild extends child-of-a1, so `uses:` must walk
+        ;; TRANSITIVELY, not one hop.
+        (let [grand (java.util.UUID/randomUUID)]
+          (sp/create-entity storage :fn {:id grand :name "grand-of-a1"
+                                         :parent-ids [child]})
+          (ctx/invalidate-graph-cache! c)
+          (testing "uses:<bare name> — the reverse transitive closure"
+            (is (= #{child grand}
+                   (into #{} (map :id)
+                         (:fns (entities/list-all-graph-entities
+                                 c :view nil nil "uses:alpha-widget"))))
+                "the child extending a1 AND the grandchild through it"))
+          (testing "uses:<qualified name> resolves through the ns path"
+            (is (= #{child grand}
+                   (into #{} (map :id)
+                         (:fns (entities/list-all-graph-entities
+                                 c :view nil nil "uses:alpha.alpha-widget"))))))
+          (testing "uses: through a ref binding, not only parent-ids"
+            (is (contains? (into #{} (map :id)
+                                 (:fns (entities/list-all-graph-entities
+                                         c :view nil nil "uses:alpha-gadget")))
+                           child)
+                "the fn holding the ref binding counts as a user"))
+          (testing "rules AND-combine"
+            (is (= #{child}
+                   (into #{} (map :id)
+                         (:fns (entities/list-all-graph-entities
+                                 c :view nil nil "uses:alpha-widget name:child"))))))
+          (testing "bare token = name substring; unknown target = empty view"
+            (is (= #{a1 b1}
+                   (into #{} (map :id)
+                         (:fns (entities/list-all-graph-entities
+                                 c :view nil nil "widget")))))
+            (is (empty? (:fns (entities/list-all-graph-entities
+                                c :view nil nil "uses:no-such-fn")))))
+          (testing "blank rule string is an empty view, not everything"
+            (is (empty? (:fns (entities/list-all-graph-entities
+                                c :view nil nil "  ")))))))
       (finally (sp/close storage)))))
 
 

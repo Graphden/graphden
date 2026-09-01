@@ -109,6 +109,28 @@ browser's local storage. Consequences worth knowing:
 4. Reload the page — your scope survives.
 5. Click **All functions** — the full graph is back.
 
+## Smart views — the virtual namespaces
+
+A workspace scopes by *physical* root namespace. The set you care
+about while working is often computed instead: "everything that
+talks HTTP under the hood", "everything built on `:render-hiccup`".
+The **✦ views** chip under the Explorer filter holds those as
+**smart views** — a named rule the server evaluates over the whole
+graph and renders as a force-expanded tree (the same pipeline
+search uses):
+
+- `uses:<fn>` — every fn that *transitively* extends or references
+  the named fn (bare or qualified name);
+- `effect:<kind>` — every fn whose computed effect footprint
+  carries the kind (`io`, `db`, `state`, …);
+- `name:<text>` — qualified-name substring.
+
+Rules AND-combine (`uses:core.web.http-get effect:io`). A fn can
+belong to any number of views — membership is computed, never
+maintained by hand. Views are personal (stored in your browser,
+like workspaces and lenses); the active view shows its name on the
+chip, and "× Show the whole tree" returns to the physical tree.
+
 ## Next
 
 Lesson 17 — [Finding your way: the lens and the

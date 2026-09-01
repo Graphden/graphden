@@ -118,6 +118,7 @@
                   "packages/app/editor/editor-fn-versions.js"
                   "packages/app/editor/editor-fn-usages.js"
                   "packages/app/editor/editor-fn-peek.js"
+                  "packages/app/editor/editor-smart-views.js"
                   "packages/app/editor/editor-service-popover.js"
                   "packages/app/editor/editor-mismatch-explainer.js"
                   "packages/app/editor/editor-effect-explainer.js"
@@ -376,6 +377,16 @@
                        :onclick "openCreateSecretForm(this)"}
               [:span {:class "kind-glyph" :aria-hidden "true"} "🔒"]
               [:span {:class "kind-label"} "New secret"]]
+             ;; Smart views — saved virtual groupings (editor-smart-views.js).
+             ;; NOT a kind lens, so it sits outside the kind-filters group,
+             ;; next to the secret-add action.
+             [:button {:id "gd-views-btn" :type "button" :class "gd-views-chip"
+                       :aria-pressed "false"
+                       :title "Smart views — saved virtual groupings of the tree"
+                       :aria-label "Smart views"
+                       :onclick "gdOpenSmartViewsPop(this)"}
+              [:span {:class "kind-glyph" :aria-hidden "true"} "✦"]
+              [:span {:class "kind-label"} "views"]]
              ;; Recent fns — the navigation trail. renderRecentFns
              ;; (editor-sidebar.js) fills it from localStorage on every
              ;; tree update; hidden while empty or while the filter is

@@ -898,6 +898,20 @@
                :target "#gd-ws-chip"
                :targets ["#gd-ws-chip" "#gd-ws-pop"]
                :check {:kind "manual"}}
+              {:title "Virtual groups"
+               :body "A workspace scopes by PHYSICAL root namespace. Sometimes the set you care about is computed — say, every fn built on a given primitive, wherever it lives. Click [[✦ views]] under the filter box."
+               :target "#gd-views-btn"
+               :targets ["#gd-views-btn" ".gd-views-pop"]
+               :check {:kind "dom" :selector ".gd-views-pop"}}
+              {:title "Save a rule"
+               :body "Name it `on-const`, rule `uses:core.logic.const` — then [[Save view]]. The tree becomes exactly the fns that transitively use :const — a namespace nobody maintains by hand. Rules AND-combine: uses:<fn>, effect:<kind>, name:<text>."
+               :target ".gd-views-pop"
+               :check {:kind "dom" :selector "#gd-views-btn.gd-views-active"}}
+              {:title "Back to the whole tree"
+               :body "The chip carries the view's name while it is active. Click [[✦ on-const]] again and choose [[× Show the whole tree]] — the physical tree returns; the view stays saved for next time."
+               :target "#gd-views-btn"
+               :targets ["#gd-views-btn" ".gd-views-pop"]
+               :check {:kind "dom-absent" :selector ".gd-views-active"}}
               {:title "That's workspaces"
                :body "Scope is a view, not a permission: everything stays reachable, you just stop looking at it. The written lesson 19 adds per-fn hiding (⊘) and how workspaces interact with grants. Click [[Finish]]."
                :target nil

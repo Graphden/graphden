@@ -58,9 +58,34 @@ function buildFnUsagesSection(payload, opts) {
   head.textContent = 'Used by';
   const count = document.createElement('span');
   count.className = 'gd-insp-usages-count';
-  count.textContent = String(seen.size);
+  count.textContent = String(payload.count || seen.size);
   head.appendChild(count);
   section.appendChild(head);
+  // A :const-scale list is unreadable without a filter — offer one as
+  // soon as the list outgrows a glance. Filtering hides rows in place
+  // (name OR namespace substring); group labels keep the full counts.
+  if (seen.size > 30) {
+    const filter = document.createElement('input');
+    filter.type = 'text';
+    filter.className = 'gd-insp-usage-filter';
+    filter.placeholder = 'Filter usages…';
+    filter.setAttribute('aria-label', 'Filter the Used-by list');
+    filter.addEventListener('input', () => {
+      const needle = filter.value.trim().toLowerCase();
+      for (const row of section.querySelectorAll('.gd-insp-usage-row')) {
+        row.hidden = !!needle && !(row.textContent || '')
+          .toLowerCase().includes(needle);
+      }
+    });
+    section.appendChild(filter);
+  }
+  if (payload['truncated?']) {
+    const note = document.createElement('div');
+    note.className = 'gd-insp-usage-more';
+    note.textContent = 'Showing the first '
+      + usages.length + ' of ' + (payload.count || '?') + ' usages.';
+    section.appendChild(note);
+  }
 
   for (const [kind, label] of FN_USAGE_GROUPS) {
     const group = byKind.get(kind);

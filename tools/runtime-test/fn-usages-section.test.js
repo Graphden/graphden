@@ -134,6 +134,38 @@ test('anonymous users fold into a count line, named rows stay clickable', () => 
   assert(more === '… 2 anonymous', 'anons folded into the tail line (got ' + more + ')');
 });
 
+test('a big list grows a filter that hides rows in place', () => {
+  const { ctx } = usagesCtx();
+  const usages = [];
+  for (let i = 0; i < 35; i++) {
+    usages.push({ 'fn-id': 'f' + i, 'fn-name': (i < 5 ? 'match-' : 'other-') + i,
+                  kind: 'ref-of', 'slot-name': 's' + i });
+  }
+  const sec = ctx.buildFnUsagesSection({ ok: true, usages }, {});
+  const filter = byClass(sec, 'gd-insp-usage-filter')[0];
+  assert(filter, 'filter input renders for >30 rows');
+  filter.value = 'match-';
+  filter.dispatch('input', {});
+  const rows = byClass(sec, 'gd-insp-usage-row');
+  const visible = rows.filter((r) => !r.hidden);
+  assert(visible.length === 5,
+    'only matching rows stay visible (got ' + visible.length + ')');
+  assert(visible.every((r) => r.textContent.includes('match-')),
+    'the visible rows are the matches');
+});
+
+test('a truncated payload says so and keeps the full count in the head', () => {
+  const { ctx } = usagesCtx();
+  const payload = { ok: true, count: 999, 'truncated?': true,
+    usages: [{ 'fn-id': 'a', 'fn-name': 'one', kind: 'parent-of' }] };
+  const sec = ctx.buildFnUsagesSection(payload, {});
+  assert(byClass(sec, 'gd-insp-usages-count')[0].textContent === '999',
+    'head shows the FULL count');
+  const notes = texts(sec, 'gd-insp-usage-more');
+  assert(notes.some((t) => /Showing the first 1 of 999/.test(t)),
+    'truncation note present (got ' + JSON.stringify(notes) + ')');
+});
+
 test('a group over the cap folds into a "more" line', () => {
   const { ctx } = usagesCtx();
   const usages = [];

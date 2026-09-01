@@ -123,7 +123,11 @@ search uses):
   the named fn (bare or qualified name);
 - `effect:<kind>` — every fn whose computed effect footprint
   carries the kind (`io`, `db`, `state`, …);
-- `name:<text>` — qualified-name substring.
+- `name:<text>` — qualified-name substring;
+- `ns:<path>` — the fn lives in that namespace or under it;
+- `unused:true` — nothing in the graph extends, references or
+  resolves the fn — the dead-code view (combine with `ns:` — package
+  leaves are public API and "unused in this graph" by design).
 
 Rules AND-combine (`uses:core.web.http-get effect:io`). A fn can
 belong to any number of views — membership is computed, never

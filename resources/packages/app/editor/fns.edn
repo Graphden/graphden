@@ -119,6 +119,7 @@
                   "packages/app/editor/editor-fn-usages.js"
                   "packages/app/editor/editor-fn-peek.js"
                   "packages/app/editor/editor-smart-views.js"
+                  "packages/app/editor/editor-recents.js"
                   "packages/app/editor/editor-service-popover.js"
                   "packages/app/editor/editor-mismatch-explainer.js"
                   "packages/app/editor/editor-effect-explainer.js"

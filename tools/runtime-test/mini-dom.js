@@ -126,6 +126,18 @@ class MiniElement {
     return child;
   }
 
+  // Detach from the parent — the singleton-popover teardown gesture.
+  remove() {
+    if (this.parentNode) this.parentNode.removeChild(this);
+  }
+
+  // Same contract as the real one: drop every child, adopt the given
+  // nodes (used by popovers that re-render in place).
+  replaceChildren(...nodes) {
+    for (const c of [...this.children]) this.removeChild(c);
+    for (const n of nodes) this.appendChild(n);
+  }
+
   insertBefore(child, ref) {
     if (ref == null) return this.appendChild(child);
     this.appendChild(child);
@@ -226,10 +238,25 @@ class MiniText {
 }
 
 function createDocument() {
+  const body = new MiniElement('body');
   return {
+    body,
     createElement: (tag) => new MiniElement(tag),
     createTextNode: (t) => new MiniText(t),
     createDocumentFragment: () => new MiniElement('#fragment'),
+    // Enough of getElementById for modules that sync a chip by id —
+    // walks the body tree.
+    getElementById(id) {
+      const stack = [body];
+      while (stack.length) {
+        const el = stack.pop();
+        if (el.getAttribute && el.getAttribute('id') === id) return el;
+        for (const c of (el.children || [])) {
+          if (c.tagName !== undefined) stack.push(c);
+        }
+      }
+      return null;
+    },
   };
 }
 

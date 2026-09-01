@@ -747,6 +747,14 @@
                                 {:slot-name (:name s)}))))))))
 
 
+(def ^:private usages-response-cap
+  "Rows shipped per usages response. The inspector shows 20 per group
+   and the type-expand footer a handful — 400 keeps every consumer's
+   view complete while a :get-scale target stops costing a megabyte
+   per Overview open."
+  400)
+
+
 (defn apply-types-usages
   "Stage 3 of types-usages — walk the graph for every reference to the
    target fn row. Covers BOTH reference planes: the composition plane
@@ -769,12 +777,18 @@
                                                 slot-by-id fn-summary)
                       (type-plane-usages target-id target-name graph
                                          slot-by-id slot-owner-by-id
-                                         fn-summary)))]
+                                         fn-summary)))
+        ;; :const-scale targets have hundreds of users; the clients cap
+        ;; their DISPLAY anyway, so don't ship an unbounded list —
+        ;; :count stays the full total and :truncated? says the list is
+        ;; a prefix.
+        limited (into [] (take usages-response-cap) usages)]
     {:ok true
      :type-fn-id (str target-id)
      :type-name (some-> target-name str)
      :count (count usages)
-     :usages usages}))
+     :truncated? (> (count usages) usages-response-cap)
+     :usages limited}))
 
 
 (defn all-rich-types

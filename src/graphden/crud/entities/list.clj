@@ -486,6 +486,16 @@
                                              kind)))
                       :name (let [needle (str/lower-case v)]
                               (fn [f] (str/includes? (str/lower-case (qualified f)) needle)))
+                      :ns (let [want (str/replace (str/lower-case v) "/" ".")]
+                            (fn [f]
+                              (let [p (some-> (get paths (:namespace-id f))
+                                              str/lower-case)]
+                                (boolean (and p (or (= p want)
+                                                    (str/starts-with? p (str want "."))))))))
+                      :unused (if (contains? #{"true" "yes" "1"} (str/lower-case v))
+                                (let [adj (reverse-ref-adjacency base)]
+                                  (fn [f] (empty? (get adj (:id f)))))
+                                (constantly false))
                       (constantly false)))
         preds (mapv rule-pred rules)
         matches (if (empty? preds)

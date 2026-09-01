@@ -6449,6 +6449,15 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
   text-transform: uppercase; color: var(--gd-ink-3);
 }
 .gd-insp-usages-count { font-weight: 400; color: var(--gd-ink-3); }
+.gd-insp-usage-filter {
+  width: 100%;
+  margin: 4px 0 2px;
+  font-family: var(--gd-mono); font-size: 0.75rem;
+  padding: 3px 6px;
+  background: var(--card-bg); color: var(--fg);
+  border: 1px solid var(--card-border); border-radius: 6px;
+}
+.gd-insp-usage-filter:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .gd-insp-usage-glabel {
   margin: 8px 0 2px;
   font-size: 0.6875rem; color: var(--gd-ink-3);

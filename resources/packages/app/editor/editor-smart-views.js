@@ -129,7 +129,7 @@ function _renderSmartViewsPop(el) {
   el.appendChild(head);
   const hint = document.createElement('div');
   hint.className = 'gd-views-pop-hint';
-  hint.textContent = 'A saved rule the graph answers: uses:<fn> · effect:<kind> · name:<text>. Rules AND-combine.';
+  hint.textContent = 'A saved rule the graph answers: uses:<fn> · effect:<kind> · name:<text> · ns:<path> · unused:true. Rules AND-combine.';
   el.appendChild(hint);
 
   const views = gdReadSmartViews();

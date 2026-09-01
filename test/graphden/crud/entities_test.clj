@@ -505,7 +505,28 @@
                                 c :view nil nil "uses:no-such-fn")))))
           (testing "blank rule string is an empty view, not everything"
             (is (empty? (:fns (entities/list-all-graph-entities
-                                c :view nil nil "  ")))))))
+                                c :view nil nil "  ")))))
+          (testing "ns:<path> — the fn's namespace, or anything under it"
+            (is (= #{a1 a2}
+                   (into #{} (map :id)
+                         (:fns (entities/list-all-graph-entities
+                                 c :view nil nil "ns:alpha"))))
+                "named fns of :alpha (anon excluded); :beta's stay out")
+            (is (empty? (:fns (entities/list-all-graph-entities
+                                c :view nil nil "ns:alph")))
+                "a namespace PREFIX is not a match — segments only"))
+          (testing "unused:true — the dead-code view"
+            (is (= #{bcomp}
+                   (into #{} (map :id)
+                         (:fns (entities/list-all-graph-entities
+                                 c :view nil nil "unused:true ns:beta"))))
+                "beta-composed has no users; beta-widget is extended by it")
+            (is (empty? (:fns (entities/list-all-graph-entities
+                                c :view nil nil "unused:true ns:alpha")))
+                "both alpha fns are used (parented / ref'd) — not dead")
+            (is (empty? (:fns (entities/list-all-graph-entities
+                                c :view nil nil "unused:banana")))
+                "a non-true value matches nothing, not everything"))))
       (finally (sp/close storage)))))
 
 

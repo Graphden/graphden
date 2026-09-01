@@ -15,6 +15,29 @@
 let fnPeekEl = null;
 let fnPeekAnchor = null;
 let fnPeekFnId = null;
+let fnPeekViewportHooked = false;
+
+// The ⋯ menu that launched the peek unmounts right after the click, so
+// the menu button is a dead anchor within a second. Anchor to the fn's
+// CARD instead (any row carrying its data-fn-id), falling back to the
+// launcher; re-resolved on reposition since a re-render swaps overlays.
+function fnPeekResolveAnchor(fnId, fallback) {
+  const row = document.querySelector('.node-overlay [data-fn-id="' + fnId + '"]');
+  return row?.closest('.node-overlay') || fallback || null;
+}
+
+// Follow the card through pan / zoom / resize — a fixed panel over a
+// moving canvas detaches from the node it narrates within one drag.
+function fnPeekReposition() {
+  if (!fnPeekEl) return;
+  const a = fnPeekAnchor?.isConnected
+    ? fnPeekAnchor
+    : fnPeekResolveAnchor(fnPeekFnId, null);
+  if (a && typeof anchorBelowClamped === 'function') {
+    fnPeekAnchor = a;
+    anchorBelowClamped(fnPeekEl, a);
+  }
+}
 
 function fnPeekVisible() {
   return !!fnPeekEl;
@@ -91,10 +114,17 @@ async function openFnPeek(fnId, anchorEl) {
   el.appendChild(body);
   document.body.appendChild(el);
   fnPeekEl = el;
-  fnPeekAnchor = anchorEl || null;
+  fnPeekAnchor = fnPeekResolveAnchor(fnId, anchorEl);
   fnPeekFnId = fnId;
-  if (typeof anchorBelowClamped === 'function' && anchorEl) {
-    anchorBelowClamped(el, anchorEl);
+  if (typeof anchorBelowClamped === 'function' && fnPeekAnchor) {
+    anchorBelowClamped(el, fnPeekAnchor);
+  }
+  if (!fnPeekViewportHooked) {
+    fnPeekViewportHooked = true;
+    if (typeof gv !== 'undefined' && typeof gv?.onViewportChange === 'function') {
+      gv.onViewportChange(fnPeekReposition);
+    }
+    window.addEventListener('resize', fnPeekReposition);
   }
   if (typeof focusIntoDialog === 'function') focusIntoDialog(el);
 

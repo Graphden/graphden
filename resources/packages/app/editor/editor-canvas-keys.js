@@ -327,7 +327,7 @@ function onCanvasKeydown(e) {
   // from anywhere in the subtree stole Escape from whatever was open inside.
   // (The landing gate caught this: the tour-history e2e closes a pinned
   // description tooltip with Escape and then could not reopen it.)
-  if (!e.target.classList || !e.target.classList.contains('node-overlay')) return;
+  if (!e.target.classList?.contains('node-overlay')) return;
 
   // Shift+arrows MOVE the node rather than moving between nodes — the
   // keyboard equivalent of dragging it, in grid-sized steps.

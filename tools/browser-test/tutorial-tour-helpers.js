@@ -53,12 +53,26 @@ async function hardCleanup(page) {
     }
   } catch (_) { /* best-effort */ }
   const leftovers = ['tutorial-versioned', 'tutorial-bad-json',
-                     'tutorial-b', 'tutorial-a', 'add-10', 'tutorial-json',
+                     'tutorial-b', 'tutorial-a', 'add-10-text', 'add-10',
+                     'tutorial-json',
                      'tutorial-typed', 'tutorial-map', 'branch-demo',
                      'two-plus-two', 'tutorial-bump', 'tutorial-cell',
                      'tutorial-card', 'tutorial-button', 'tutorial-script',
                      'tutorial-renamed', 'tutorial-point', 'tutorial-daemon',
-                     'tutorial-tick', 'review-demo'];
+                     'tutorial-tick', 'review-demo',
+                     // lesson 15's chain — a crash between its create and
+                     // finishAndDelete 409s the next run's create.
+                     'tutorial-outer', 'tutorial-inner'];
+  // Per-browser view-state the lessons exercise (smart views, recents,
+  // last-used ns) — a leftover active view renders the next lesson's
+  // Explorer as somebody else's virtual tree.
+  try {
+    await page.evaluate(() => {
+      for (const k of ['graphden.smartViews', 'graphden.recentFns',
+                       'graphden.lastNs']) localStorage.removeItem(k);
+      if (typeof gdClearSmartView === 'function') gdClearSmartView();
+    });
+  } catch (_) { /* page may not be on the editor yet */ }
   for (let pass = 0; pass < 2; pass++) {
     for (const nm of leftovers) {
       await retryingDelete(() => deleteFnByName(page, nm));

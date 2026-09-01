@@ -1448,79 +1448,9 @@ function mountOpsSections(fallbackList, searchMode) {
 }
 
 
-// =============================================================================
-// RECENT FNS — the navigation trail
-// =============================================================================
-//
-// Deep reading is a chain of jumps (a named ref is a leaf — you re-root
-// to read it); before this the only way back was browser-back, blind.
-// The last few selected NAMED fns render as rows above the tree; each
-// row navigates via gdNavigateToFn (by id when loaded, by qualified
-// name when not). localStorage-persisted like every other view pref.
-
-const RECENT_FNS_KEY = 'graphden.recentFns';
-const RECENT_FNS_MAX = 6;
-
-function gdReadRecentFns() {
-  try {
-    const raw = localStorage.getItem(RECENT_FNS_KEY);
-    const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr : [];
-  } catch (_) { return []; }
-}
-
-function gdPushRecentFn(fnId) {
-  const fn = (typeof lookups !== 'undefined') ? lookups?.fnMap?.get(fnId) : null;
-  // Anonymous / auto-named rows have no recognisable identity to return
-  // to — the trail keeps named fns only.
-  if (!fn?.name || fn.name.startsWith('_anon-')) return;
-  const nsPath = (fn['namespace-id'] && lookups?.nsPathMap)
-    ? (lookups.nsPathMap.get(fn['namespace-id']) || '') : '';
-  const entry = { id: fnId, name: fn.name,
-                  qname: nsPath ? nsPath + '.' + fn.name : fn.name };
-  const rest = gdReadRecentFns().filter((r) => r.id !== fnId);
-  try {
-    localStorage.setItem(RECENT_FNS_KEY,
-      JSON.stringify([entry].concat(rest).slice(0, RECENT_FNS_MAX)));
-  } catch (_) { /* private mode — the trail just doesn't persist */ }
-}
-
-function renderRecentFns() {
-  const host = document.getElementById('gd-recent-fns');
-  if (!host) return;
-  // The current selection heads the list by construction — showing it
-  // as "recent" is noise, so the trail starts at the previous stop.
-  const rows = gdReadRecentFns()
-    .filter((r) => r.id !== (typeof selectedFnId !== 'undefined' ? selectedFnId : null))
-    .slice(0, RECENT_FNS_MAX - 1);
-  const searching = !!searchFilter
-    || ((typeof gdActiveSmartView === 'function') && !!gdActiveSmartView());
-  host.replaceChildren();
-  if (!rows.length || searching) {
-    host.hidden = true;
-    return;
-  }
-  host.hidden = false;
-  const cap = document.createElement('div');
-  cap.className = 'gd-recent-cap';
-  cap.textContent = 'Recent';
-  host.appendChild(cap);
-  for (const r of rows) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'gd-recent-row';
-    btn.title = r.qname;
-    btn.setAttribute('aria-label', 'Back to ' + r.qname);
-    btn.textContent = r.name;
-    btn.addEventListener('click', () => {
-      if (typeof gdNavigateToFn === 'function') gdNavigateToFn(r.id, r.qname);
-    });
-    host.appendChild(btn);
-  }
-}
 
 function updateEntityList(data) {
-  renderRecentFns();
+  if (typeof renderRecentFns === 'function') renderRecentFns();
   // A search reply (or an early auth repaint) can land before the graph
   // data primes on a fresh tab — painting from null threw mid-function
   // and left the sidebar dead. An empty shape renders the transient
@@ -1608,7 +1538,19 @@ function updateEntityList(data) {
   // place. Workspace-focus IS a structural skip — it's lens-independent (a lens
   // toggle never changes workspace scope), so out-of-scope namespaces need not
   // be in the DOM.
-  const sortedNs = [...tree.children.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  // Search escapes the workspace scope on purpose (finding IS the
+  // point) — but YOUR namespaces still deserve the top: results from
+  // in-workspace roots sort before the rest, alphabetical within each
+  // half. Outside search the order stays purely alphabetical (the
+  // workspace already scopes structurally there).
+  const wsRank = (name) => {
+    if (!searchMode || typeof window.graphdenWorkspaceActive !== 'function'
+        || !window.graphdenWorkspaceActive()) return 0;
+    return (typeof window.graphdenInWorkspaceScope === 'function'
+            && window.graphdenInWorkspaceScope(name)) ? 0 : 1;
+  };
+  const sortedNs = [...tree.children.entries()].sort((a, b) =>
+    (wsRank(a[0]) - wsRank(b[0])) || a[0].localeCompare(b[0]));
   const wsActive = !searchMode && typeof window.graphdenWorkspaceActive === 'function'
     && window.graphdenWorkspaceActive();
   for (const [name, node] of sortedNs) {

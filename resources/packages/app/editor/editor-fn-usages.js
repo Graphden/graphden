@@ -126,20 +126,13 @@ function buildFnUsagesSection(payload, opts) {
   return section;
 }
 
-// Navigate to a usage row's fn. A fn the sidebar has lazily loaded
-// selects by id; one it hasn't (deep in a collapsed namespace) resolves
-// through the server name-resolver, which needs the QUALIFIED name.
+// Navigate to a usage row's fn — the shared by-id-else-by-qualified-name
+// jump (gdNavigateToFn, editor-ui.js).
 function gdNavigateToUsage(u) {
-  const id = u['fn-id'];
-  const loaded = (typeof lookups !== 'undefined') && lookups?.fnMap?.has(id);
-  if (loaded && typeof selectFn === 'function') {
-    selectFn(id);
-    return;
-  }
   const qname = u['fn-namespace']
     ? u['fn-namespace'] + '.' + u['fn-name']
     : u['fn-name'];
-  if (typeof selectFnByName === 'function') selectFnByName(qname);
+  if (typeof gdNavigateToFn === 'function') gdNavigateToFn(u['fn-id'], qname);
 }
 
 // Fetch + append into the Overview host. The host node is the staleness

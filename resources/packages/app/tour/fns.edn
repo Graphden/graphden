@@ -759,6 +759,15 @@
                :target ".placeholder-binder"
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-inner\"]"]
                :check {:kind "bindings-count" :name "tutorial-outer" :count 1}}
+              {:title "Peek inside without leaving"
+               :body "tutorial-inner sits on this canvas as a single closed card — names are boundaries. To read it WITHOUT jumping: click [[⋯]] on the tutorial-inner node, choose [[👁 Peek bindings]] — its slot table opens in a floating panel, straight from the same server render the Inspector uses."
+               :target "button.more-actions-trigger"
+               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"peek-fn\"]" ".fn-peek-panel"]
+               :check {:kind "dom" :selector ".fn-peek-panel"}}
+              {:title "Close the peek"
+               :body "[[Open]] in its header would jump to tutorial-inner; you want to stay. Press [[Esc]] (or the [[×]]) — the panel closes and the canvas is untouched."
+               :target ".fn-peek-panel"
+               :check {:kind "dom-absent" :selector ".fn-peek-panel"}}
               {:title "Run it with a trace"
                :body "[[⋯]] → [[▶ Run]], tick [[Trace path]], then [[Run]]. The answer is HI — and under it a new button appears: [[Show path on canvas]]."
                :target "button.more-actions-trigger"
@@ -768,8 +777,13 @@
                :body "Click [[Show path on canvas]]. Every fn the run traversed is highlighted with a timing badge, and a small panel offers to clear the view. Ticking [[+ capture values]] as well would put each node's return value on its card."
                :target ".execute-show-path-btn"
                :check {:kind "dom" :selector ".path-view-panel"}}
+              {:title "Your trail"
+               :body "You have hopped between const, str-upper and your two fns — the Explorer keeps that trail. Clear the filter (the [[×]] next to it): the Recent list appears just above the tree; any row takes you straight back."
+               :target "#search-clear"
+               :targets ["#search-clear" "#gd-recent-fns"]
+               :check {:kind "dom" :selector "#gd-recent-fns:not([hidden]) .gd-recent-row"}}
               {:title "That's debugging in place"
-               :body "No log statements, no rebuild: the run you just did carries its own map of what it touched. The written lesson 15 adds the call-tree view and catching a live HTTP request. Click [[Finish]] to clean up or keep the two fns."
+               :body "No log statements, no rebuild: the run you just did carries its own map of what it touched — and peek + Recent keep the reading itself in one place. The written lesson 15 adds the call-tree view and catching a live HTTP request. Click [[Finish]] to clean up or keep the two fns."
                :target nil
                :check {:kind "manual"}}]}
             {:id "16"

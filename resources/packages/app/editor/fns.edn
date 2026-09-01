@@ -117,6 +117,7 @@
                   "packages/app/editor/editor-execute.js"
                   "packages/app/editor/editor-fn-versions.js"
                   "packages/app/editor/editor-fn-usages.js"
+                  "packages/app/editor/editor-fn-peek.js"
                   "packages/app/editor/editor-service-popover.js"
                   "packages/app/editor/editor-mismatch-explainer.js"
                   "packages/app/editor/editor-effect-explainer.js"
@@ -375,6 +376,12 @@
                        :onclick "openCreateSecretForm(this)"}
               [:span {:class "kind-glyph" :aria-hidden "true"} "🔒"]
               [:span {:class "kind-label"} "New secret"]]
+             ;; Recent fns — the navigation trail. renderRecentFns
+             ;; (editor-sidebar.js) fills it from localStorage on every
+             ;; tree update; hidden while empty or while the filter is
+             ;; active (search owns that space).
+             [:div {:id "gd-recent-fns" :hidden "hidden"
+                    :aria-label "Recently selected functions"}]
              ;; role="tree": the rows inside are treeitems with an
              ;; explicit aria-level (the tree renders flat — a namespace
              ;; header and its children are siblings, so depth cannot be

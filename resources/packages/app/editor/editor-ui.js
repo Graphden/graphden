@@ -22,8 +22,21 @@ const PREVIEW_DEBOUNCE_MS = 100;
 /**
  * Select a function by ID
  */
+// Navigate to a fn wherever it lives: by id when the client has it
+// loaded, else by qualified name through the server resolver (a fn
+// deep in a collapsed namespace isn't in lookups yet). Shared by the
+// Used-by rows, the peek panel's Open and the Recent list.
+function gdNavigateToFn(fnId, qname) {
+  if (fnId && typeof lookups !== 'undefined' && lookups?.fnMap?.has(fnId)) {
+    selectFn(fnId);
+    return;
+  }
+  if (qname && typeof selectFnByName === 'function') selectFnByName(qname);
+}
+
 function selectFn(fnId, updateHistory = true) {
   selectedFnId = fnId;
+  if (typeof gdPushRecentFn === 'function') gdPushRecentFn(fnId);
   expansionState.clear();
   previewState.clear();
   userMovedNodes.clear();

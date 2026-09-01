@@ -574,6 +574,13 @@ registerActionHandler('description', (btn, e, host) => {
 });
 
 
+registerActionHandler('peek-fn', (btn, e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
+  if (fnId && typeof openFnPeek === 'function') openFnPeek(fnId, btn);
+});
+
 registerActionHandler('open', (btn, e) => {
   // Open THIS node's fn in a new tab. The server-rendered href is a fallback;
   // the editor navigates by the URL HASH (`#<qualified-name>`), not a `?fn=`

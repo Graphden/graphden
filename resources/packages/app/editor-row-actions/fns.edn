@@ -227,6 +227,24 @@
           :then :_partial-row-actions-open-button
           :else {:value nil}}}
 
+  {:name :_partial-row-actions-peek-button
+   :description "`<button class=\"peek-badge\" data-action=\"peek-fn\">👁</button>` — open this fn's bindings in a floating read-only panel (editor-fn-peek.js) WITHOUT re-rooting the canvas. Named fns only: same `show-open` gate as ↗ — an anonymous inline body is already drawn where it is used."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "peek-badge action-icon"
+                          :data-action "peek-fn"
+                          :title "Peek — read this fn's bindings here, without leaving the canvas"
+                          :aria-label "Peek bindings"}}
+          :children [{:value "👁"}]}}
+
+  {:name :_partial-row-actions-peek-button-or-nil
+   :description "The 👁 button when `show-open=true`; nil otherwise (filtered like ↗)."
+   :parent :if
+   :args {:test :_partial-row-actions-show-open?
+          :then :_partial-row-actions-peek-button
+          :else {:value nil}}}
+
   ;; --- Toolbar assembly ---
 
   {:name :_partial-row-actions-col-header-children-raw
@@ -234,7 +252,8 @@
    :parent :list
    :args {:items [:_partial-row-actions-ns-button
                   :_partial-row-actions-i-button
-                  :_partial-row-actions-open-button-or-nil]}}
+                  :_partial-row-actions-open-button-or-nil
+                  :_partial-row-actions-peek-button-or-nil]}}
 
   {:name :_partial-row-actions-col-header-children
    :description "Non-nil children — `↗` drops out when the caller requested `show-open=false`."
@@ -307,6 +326,7 @@
    :args {:items [:_partial-row-actions-ns-button
                   :_partial-row-actions-i-button
                   :_partial-row-actions-open-button-or-nil
+                  :_partial-row-actions-peek-button-or-nil
                   :_partial-row-actions-remove-mi-button-or-nil
                   :_partial-row-actions-add-mi-button-or-nil]}}
 
@@ -476,6 +496,7 @@
    :args {:items [:_partial-row-actions-ns-button
                   :_partial-row-actions-i-button
                   :_partial-row-actions-open-button-or-nil
+                  :_partial-row-actions-peek-button-or-nil
                   :_partial-row-actions-seq-up-button-or-nil
                   :_partial-row-actions-seq-down-button-or-nil
                   :_partial-row-actions-seq-insert-button-or-nil

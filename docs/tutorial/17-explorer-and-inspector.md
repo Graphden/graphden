@@ -75,6 +75,20 @@ instantly from what the editor already knows; all four tabs,
 Overview included, are fetched from the server when you open
 them, so they're always current.
 
+Two more reading affordances live outside the Inspector:
+
+- **Peek** — a named fn on the canvas is a closed card (names are
+  abstraction boundaries), and before peek the only way to read one
+  was to navigate to it and lose your place. Now its **⋯ → 👁 Peek
+  bindings** opens the same slot/binding table the Inspector's
+  Bindings tab shows, in a floating panel right where you are —
+  **Open** jumps, **Esc** or **×** closes and the canvas is
+  untouched.
+- **Recent** — the Explorer keeps your navigation trail: the last
+  few named fns you selected render as rows just above the tree.
+  Click one to go straight back. The list hides while the filter
+  is active (search owns that space).
+
 The Inspector is the "read" side of the editor: popovers are for
 *acting* (edit a binding, run, publish), the Inspector is for
 *understanding* what's in front of you.

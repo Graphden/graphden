@@ -217,6 +217,40 @@ const {
     await extendViaRowActions(page, 'tutorial-outer', 'str-upper');
     await waitTourTitle(page, 'Chain them', 150000);
     await bindFnRefPlaceholder(page, 'tutorial-inner');
+    await waitTourTitle(page, 'Peek inside without leaving', 150000);
+    // Open the ⋯ on the tutorial-inner NODE (not the root card) and peek.
+    await page.waitForFunction(() => {
+      return Array.from(document.querySelectorAll('.node-overlay')).some((ov) =>
+        ov.textContent.trim().startsWith('tutorial-inner')
+        && ov.querySelector('button.more-actions-trigger'));
+    }, null, {timeout: 60000, polling: 200});
+    await page.evaluate(() => {
+      const ov = Array.from(document.querySelectorAll('.node-overlay')).find((o) =>
+        o.textContent.trim().startsWith('tutorial-inner')
+        && o.querySelector('button.more-actions-trigger'));
+      ov.querySelector('button.more-actions-trigger')
+        .dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+    });
+    await page.waitForSelector('.row-actions-popover [data-action="peek-fn"]',
+      {timeout: 15000});
+    await page.evaluate(() => {
+      document.querySelector('.row-actions-popover [data-action="peek-fn"]')
+        .dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    });
+    await page.waitForSelector('.fn-peek-panel', {timeout: 15000});
+    const peek = await page.evaluate(() => ({
+      title: document.querySelector('.fn-peek-title')?.textContent,
+      hasBody: !!document.querySelector('.fn-peek-body'),
+    }));
+    assert(peek.title === 'tutorial-inner',
+      'peek panel names the peeked fn (got ' + peek.title + ')');
+    await waitTourTitle(page, 'Close the peek', 150000);
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('.fn-peek-panel'),
+      null, {timeout: 15000, polling: 100});
+    // Escape must have been CONSUMED by the panel — the tour survives.
+    const tourAlive = await page.evaluate(() => !!document.querySelector('#gd-tour-pop'));
+    assert(tourAlive, 'closing the peek with Escape does not end the tour');
     await waitTourTitle(page, 'Run it with a trace', 150000);
     // Run WITH the trace box ticked — that is what makes the path button
     // appear at all (an untraced run has no entries to draw).
@@ -237,9 +271,31 @@ const {
     await waitTourTitle(page, 'Draw the path', 150000);
     await page.waitForSelector('.execute-show-path-btn', {timeout: 60000});
     await page.evaluate(() => document.querySelector('.execute-show-path-btn').click());
+    await waitTourTitle(page, 'Your trail', 150000);
+    // The filter is still holding the last search — clear it for real,
+    // as the step instructs; the Recent list only shows outside search.
+    await page.evaluate(() => {
+      if (typeof clearSearch === 'function') clearSearch();
+    });
+    await page.waitForSelector('#gd-recent-fns:not([hidden]) .gd-recent-row',
+      {timeout: 15000});
+    const recents = await page.evaluate(() => ({
+      hidden: document.getElementById('gd-recent-fns')?.hidden,
+      rows: Array.from(document.querySelectorAll('.gd-recent-row'))
+        .map((r) => r.textContent),
+    }));
+    assert(recents.hidden === false && recents.rows.length > 0,
+      'Recent list is visible with rows (' + JSON.stringify(recents.rows) + ')');
+    // A recent row navigates — the trail is the way back.
+    const trailHash = await page.evaluate(() => location.hash);
+    await page.evaluate(() => document.querySelector('.gd-recent-row').click());
+    await page.waitForFunction((h) => location.hash !== h, trailHash,
+      {timeout: 30000, polling: 200});
+    console.log('  lesson 15: Recent row navigated to '
+      + await page.evaluate(() => location.hash));
     await waitTourTitle(page, "That's debugging in place", 150000);
     await finishAndDelete(page);
-    console.log('  lesson 15: walked + cleaned (path drawn on canvas)');
+    console.log('  lesson 15: walked + cleaned (path + peek + trail)');
 
     console.log('PASS');
   } catch (err) {

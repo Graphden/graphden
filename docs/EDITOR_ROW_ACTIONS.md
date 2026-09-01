@@ -16,9 +16,9 @@ were deliberately left in JS.
 
 | Context | Used by | Buttons |
 |---|---|---|
-| `col-header` | ancestor column header; read-only fall-through rows | ns / i / ↗ |
-| `cell` | MI cell; parent-edit row | ns / i / ↗ / × Remove-MI / + Add-MI (last two when `editable=true`) |
-| `use-site-arg` | argument at a use-site | ns / i / ↗ / × Remove-binding / ✎ Change-value (last two when `editable=true`) |
+| `col-header` | ancestor column header; read-only fall-through rows | ns / i / ↗ / 👁 Peek |
+| `cell` | MI cell; parent-edit row | ns / i / ↗ / 👁 Peek / × Remove-MI / + Add-MI (last two when `editable=true`) |
+| `use-site-arg` | argument at a use-site | ns / i / ↗ / 👁 Peek / × Remove-binding / ✎ Change-value (last two when `editable=true`) |
 | `root-row` | the selected fn's root row | ns / i / ↗ / ▶ Run / ⌛ History / ⚙ Service / ▣ Apps / ✎ Rename / + Extend / ✕ Delete |
 
 Disabled-with-reason: `edit-block-reason` is a client-passed query param; the

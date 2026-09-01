@@ -6304,6 +6304,65 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
 .gd-insp-runs { font-size: 0.75rem; }
 .gd-insp-runs-loading { padding: 8px 0; font-size: 0.75rem; color: var(--gd-ink-3); }
 
+/* ---- Fn peek (editor-fn-peek.js): a fn's bindings in a floating
+ *      read-only panel — reading a leaf ref without re-rooting. ---- */
+.fn-peek-panel {
+  position: fixed;
+  z-index: 10003;
+  width: 400px;
+  max-width: calc(100vw - 24px);
+  max-height: 60vh;
+  display: flex; flex-direction: column;
+  background: var(--card-bg); color: var(--fg);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-xl);
+}
+.fn-peek-head {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 10px 12px 6px;
+  border-bottom: 1px solid var(--card-border);
+}
+.fn-peek-title { font-family: var(--gd-mono); font-weight: 700; }
+.fn-peek-ns {
+  flex: 1; min-width: 0;
+  font-size: 0.6875rem; color: var(--gd-ink-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fn-peek-open {
+  border: 1px solid var(--card-border); border-radius: 6px;
+  background: transparent; color: var(--fg);
+  font-size: 0.75rem; padding: 2px 8px; cursor: pointer;
+}
+.fn-peek-open:hover { background: var(--hover-bg); }
+.fn-peek-close {
+  border: 0; background: transparent; color: var(--muted-fg);
+  font-size: 1rem; line-height: 1; padding: 2px 4px; cursor: pointer;
+}
+.fn-peek-close:hover { color: var(--fg); }
+.fn-peek-open:focus-visible,
+.fn-peek-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.fn-peek-body { overflow-y: auto; padding: 8px 12px 12px; font-size: 0.75rem; }
+
+/* ---- Recent fns (editor-sidebar.js): the navigation trail above
+ *      the tree — last selected named fns, rows navigate back. ---- */
+#gd-recent-fns { padding: 4px 8px 2px; }
+.gd-recent-cap {
+  font-size: 0.625rem; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--gd-ink-3);
+  padding: 2px 4px;
+}
+.gd-recent-row {
+  display: block; width: 100%;
+  border: 0; border-radius: 4px; margin: 0; padding: 2px 6px;
+  background: transparent; color: var(--fg);
+  text-align: left; cursor: pointer;
+  font-family: var(--gd-mono); font-size: 0.75rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gd-recent-row:hover { background: var(--hover-bg); }
+.gd-recent-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 /* ---- Inspector "Used by" (editor-fn-usages.js): who extends /
  *      references the selected fn, grouped by kind, rows navigate. ---- */
 .gd-insp-usages { margin-top: 18px; }

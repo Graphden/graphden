@@ -295,7 +295,11 @@ async function gdDiffModeFetch(otherBranch) {
       + (entryCount > 1 ? ' — ' + entryCount + ' changes' : '');
     const lk = gdDmLookups();
     const fn = lk?.fnMap?.get(g['fn-id']);
-    g.__nsPath = (fn && lk?.nsPathMap?.get(fn['namespace-id'])) || null;
+    // A fn that exists ONLY on the compared branch has no lookups row
+    // here — without the server-provided path its ghost and aggregate
+    // landed in the pseudo-root instead of its real namespace group.
+    g.__nsPath = (fn && lk?.nsPathMap?.get(fn['namespace-id']))
+      || g['ns-path'] || null;
     byFnId.set(g['fn-id'], g);
   }
   // Anchored review comments → per-fn counts for the tree's 💬 markers.

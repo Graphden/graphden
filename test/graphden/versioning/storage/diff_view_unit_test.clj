@@ -250,7 +250,29 @@
   "Protocol stub for `diff-branches-view`'s two `sp/read-entities`
    pre-reads. Everything else must not run."
   [tables]
-  (reify sp/StorageBatchCRUD
+  (reify
+    sp/StorageCRUD
+    (query-entities
+      [_ entity-name where]
+      (if (and (= :ns entity-name) (empty? where))
+        (vals (get tables :ns {}))
+        (throw (AssertionError. (str "query-entities " entity-name)))))
+
+    (create-entity [_ _ _] (throw (AssertionError. "create-entity")))
+
+    (read-entity [_ _ _] (throw (AssertionError. "read-entity")))
+
+    (update-entity [_ _ _ _] (throw (AssertionError. "update-entity")))
+
+    (delete-entity [_ _ _] (throw (AssertionError. "delete-entity")))
+
+    (query-latest-per-group
+      [_ _ _ _]
+      (throw (AssertionError. "query-latest-per-group")))
+
+
+    sp/StorageBatchCRUD
+
     (read-entities
       [_ entity-name ids]
       (select-keys (get tables entity-name) ids))
@@ -303,9 +325,15 @@
                 :change :added-in-source
                 :source-version {:path "/editor.css"}
                 :target-version nil}]
+        ns-web #uuid "0000000a-0000-4000-8000-0000000000aa"
+        ns-http #uuid "0000000b-0000-4000-8000-0000000000bb"
         storage (read-only-storage
                   {:binding {b1 {:id b1 :fn-id fn-a :slot-id s1}}
-                   :slot {s1 {:id s1 :name "port"}}})
+                   :slot {s1 {:id s1 :name "port"}}
+                   :fn {fn-a {:id fn-a :name "alpha" :namespace-id ns-http}
+                        fn-anon {:id fn-anon :name nil}}
+                   :ns {ns-web {:id ns-web :name "web" :parent-id nil}
+                        ns-http {:id ns-http :name "http" :parent-id ns-web}}})
         view (with-redefs [mrg/diff-branches
                            (fn [_ s t]
                              (is (= [src-b tgt-b] [s t]))
@@ -340,6 +368,11 @@
               anonymous (sort key name-presence / name / id)"
       (is (= 3 (count groups)))
       (is (= [(str fn-a) nil (str fn-anon)] (mapv :fn-id groups))))
+
+    (testing "the group carries its owning fn's namespace PATH — the
+              Explorer can't derive it for compared-branch-only fns"
+      (is (= "web.http" (:ns-path alpha-g)))
+      (is (nil? (:ns-path anon-g)) "no fn row → no path"))
 
     (testing "named owner group: label, own change, branch-local flag"
       (is (= "alpha" (:fn-name alpha-g)))

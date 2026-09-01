@@ -225,6 +225,24 @@
         name-ids (into ref-ids (keep ::owner rows))
         fn-names (resolve-fn-names base-storage name-ids
                                    source-branch-id target-branch-id)
+        ;; Namespace PATH per owning fn — the Explorer's compare-mode
+        ;; aggregates and ghost rows group by it, and the CLIENT can't
+        ;; derive it for a fn that exists only on the compared branch
+        ;; (its lookups hold the current branch only). `:ns` rows are
+        ;; identity-plane (unversioned), so one small read covers both
+        ;; sides.
+        owner-ids (vec (distinct (keep ::owner rows)))
+        owner-fns (if (seq owner-ids)
+                    (sp/read-entities base-storage :fn owner-ids)
+                    {})
+        ns-by-id (into {} (map (juxt :id identity))
+                       (sp/query-entities base-storage :ns {}))
+        ns-path (fn ns-path
+                  [nsid]
+                  (when-let [r (get ns-by-id nsid)]
+                    (if-let [p (:parent-id r)]
+                      (str (ns-path p) "." (:name r))
+                      (:name r))))
         groups
         (vec
           (sort-by (fn [g]
@@ -247,6 +265,8 @@
                                     (if (every? #(= :resource-override (:entity-name %)) rs)
                                       "(assets)"
                                       "(unowned)"))
+                        :ns-path (some-> (get owner-fns owner)
+                                         :namespace-id ns-path)
                         :change (if fn-row (:change fn-row) :modified)
                         :branch-local? (boolean
                                          (when owner

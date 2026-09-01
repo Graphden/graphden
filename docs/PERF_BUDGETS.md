@@ -3,6 +3,12 @@
 How this repo notices that something got slower — and why it counts events
 instead of timing them.
 
+> Counting note: `pg_catalog.pg_type` statements are excluded from every
+> scenario's count — they are the PgJDBC driver's once-per-connection
+> type-cache introspection, not application round trips, and which
+> scenario absorbed them used to depend on kaocha's random test order
+> (the `graph-layout :max 0` budget went red by seed).
+
 ## The argument
 
 Every performance regression this project has actually shipped a fix for was a

@@ -172,12 +172,12 @@
     ;; catch is covered by the three scenarios above; adding it here would
     ;; make the file unable to express a legitimate zero.
     (let [root-id (get (:all-name->id *graph*) :web-server)
+          request {:uri "/api/graph/layout"
+                   :request-method :post
+                   :body (str "{\"fn-id\":\"" root-id "\"}")
+                   :headers {"content-type" "application/json"}}
           {:keys [result]}
           (record! :sql/graph-layout
-                   #(setup/via-graph *graph* :_layout-api-handler
-                                     {:uri "/api/graph/layout"
-                                      :request-method :post
-                                      :body (str "{\"fn-id\":\"" root-id "\"}")
-                                      :headers {"content-type" "application/json"}}))]
+                   #(setup/via-graph *graph* :_layout-api-handler request))]
       (is (= 200 (:status result))
           "the layout must succeed, or its query count means nothing"))))

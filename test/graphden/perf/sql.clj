@@ -64,9 +64,15 @@
   ;; `:builder-fn rs/as-unqualified-maps` matches `storage/sql/pg.clj` — without
   ;; it next.jdbc qualifies every key by its table (`:pg_stat_statements/calls`),
   ;; `(:calls r)` reads nil, and the sum below NPEs.
+  ;; `pg_catalog` lookups are the PgJDBC driver's own once-per-connection
+  ;; type-cache introspection (`pg_type` joins), not application round
+  ;; trips. Which scenario absorbed them used to depend on kaocha's
+  ;; random order — the strictest budget (`graph-layout :max 0`) went
+  ;; red whenever this scenario's connection met an unseen type first.
   (->> (jdbc/execute! ds ["SELECT calls, rows, query FROM pg_stat_statements
                            WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
                              AND query NOT ILIKE '%pg_stat_statements%'
+                             AND query NOT ILIKE '%pg_catalog.pg_type%'
                            ORDER BY calls DESC"]
                       {:builder-fn rs/as-unqualified-maps})
        (mapv (fn [r] {:calls (:calls r) :rows (:rows r) :query (:query r)}))))

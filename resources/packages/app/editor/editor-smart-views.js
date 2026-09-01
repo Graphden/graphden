@@ -53,6 +53,12 @@ function gdApplySmartView(view) {
       if (d?.['truncated?'] && typeof gdToast === 'function') {
         gdToast('View "' + view.name + '" is truncated — narrow its rule');
       }
+      // The whole tree just changed under a screen reader with no focus
+      // move — say so (ACCESSIBILITY.md: state change → gdAnnounce).
+      if (typeof window.gdAnnounce === 'function') {
+        window.gdAnnounce('View ' + view.name + ' — '
+          + _smartViewResults.length + ' functions');
+      }
       if (typeof updateEntityList === 'function') updateEntityList(graphData);
     })
     .catch(() => {
@@ -66,6 +72,9 @@ function gdClearSmartView() {
   _activeSmartView = null;
   _smartViewResults = null;
   _syncSmartViewsBtn();
+  if (typeof window.gdAnnounce === 'function') {
+    window.gdAnnounce('Whole tree');
+  }
   if (typeof updateEntityList === 'function') updateEntityList(graphData);
 }
 
@@ -86,8 +95,12 @@ function gdSmartViewsPopVisible() { return !!_smartViewsPopEl; }
 
 function gdCloseSmartViewsPop() {
   if (_smartViewsPopEl) {
+    const hadFocus = _smartViewsPopEl.contains(document.activeElement);
     _smartViewsPopEl.remove();
     _smartViewsPopEl = null;
+    if (hadFocus && typeof returnFocusTo === 'function') {
+      returnFocusTo(_smartViewsPopAnchor);
+    }
   }
 }
 
@@ -204,6 +217,7 @@ installPopoverDismiss({
   getAnchor: () => _smartViewsPopAnchor,
   isVisible: gdSmartViewsPopVisible,
   onDismiss: gdCloseSmartViewsPop,
+  trapFocus: true,
   getReturnFocus: () => _smartViewsPopAnchor,
 });
 

@@ -78,6 +78,8 @@ const {
     await page.evaluate(() => document.querySelector('.gd-diff-chip-off').click());
     await page.waitForFunction(() => !document.getElementById('gd-diff-chip'),
       null, {timeout: 15000});
+    await waitTourTitle(page, 'When both sides touched the same thing', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 20 conflict-notes Next');
     await waitTourTitle(page, "That's branching", 150000);
     await finishAndDelete(page);
     // The cleanup must have removed the lesson's BRANCH too, not just the fn.

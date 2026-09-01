@@ -980,6 +980,11 @@
                :body "branch-demo carries a ± in the tree — that badge IS the whole difference between the branches. Exit compare mode with the chip's [[×]]. (Pressing [[⇢]] on the row would fold the branch into main; the tour leaves that unclicked — a merged branch becomes part of main's history and could no longer be cleaned up at the end. The row's ⋯ menu also holds 💬 Review & comments — the conversation dialog.)"
                :target ".gd-diff-chip-off"
                :check {:kind "dom-absent" :selector "#gd-diff-chip"}}
+              {:title "When both sides touched the same thing"
+               :body "This lesson's branch only ADDED, so a merge is clean. When two branches edit the SAME binding, merge stops and shows a conflict resolver — pick per row which side wins; nothing lands until every row is decided. And when a protected branch requires review, incoming proposals wait in the branch popover — the same [[Δ]] chip you used here reads a proposal's diff before you approve it. The written lesson 20 walks a real conflict end-to-end."
+               :target nil
+               :check {:kind "manual"}}
+
               {:title "That's branching"
                :body "Fork, edit in isolation, compare — and merge with [[⇢]] when a branch has earned it. The branch row also carries a review workflow: ✅ approve inline, with 📤 propose and ⚙ protection under the row's [[⋯]] menu — the NEXT tour lesson (21 · Review) walks that whole cycle, refusal included. The written lesson 20 adds protected branches and branch-local fns (runtime config that deliberately never merges). Click [[Finish]] to clean up (the branch goes too) or keep it."
                :target nil

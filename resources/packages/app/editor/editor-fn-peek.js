@@ -22,9 +22,16 @@ function fnPeekVisible() {
 
 function hideFnPeek() {
   if (fnPeekEl) {
+    // Focus return must cover EVERY close path (× button, Open), not
+    // only the Escape the dismiss handler sees — the contract in
+    // docs/ACCESSIBILITY.md.
+    const hadFocus = fnPeekEl.contains(document.activeElement);
     fnPeekEl.remove();
     fnPeekEl = null;
     fnPeekFnId = null;
+    if (hadFocus && typeof returnFocusTo === 'function') {
+      returnFocusTo(fnPeekAnchor);
+    }
   }
 }
 
@@ -110,6 +117,7 @@ installPopoverDismiss({
   getAnchor: () => fnPeekAnchor,
   isVisible: fnPeekVisible,
   onDismiss: hideFnPeek,
+  trapFocus: true,
   getReturnFocus: () => fnPeekAnchor,
 });
 

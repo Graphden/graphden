@@ -406,7 +406,10 @@ entity-name?, entity-id?}`, org-scoped like approvals, cascaded on branch
 delete). `POST|GET|DELETE /api/branches/:ref/comments` (`{body}` to add,
 optionally `{entity-name, entity-id}` to ANCHOR the comment to one diffed
 element — fn / fn-slot / binding / binding-list-item; a half-anchor or
-unknown kind is a 400; `{id}` to delete — the author's own only). The
+unknown kind is a 400. Two caps, both clean 400s: a body over 10 000
+chars (`:validation-error/comment-too-long`) and a branch thread over
+500 rows (`:validation-error/comment-limit` — comments carry no
+fairness quota and the client downloads the whole thread); `{id}` to delete — the author's own only). The
 editor renders anchored comments as inline threads on their element —
 in compare mode, under the inspector diff panel of the fn they anchor
 to (💬); unanchored ones (and orphans, with an `[on fn …]` chip) as

@@ -267,6 +267,61 @@
                       {:conflict-resolutions resolutions})))
 
 
+(defn- run-merge-post-commit!
+  "The post-commit thread's body — invalidate the TARGET ctx, re-check
+   the affected set into its registry slices, fan the invalidation out
+   cross-pod, restart the target's services, note the epoch bumps.
+   Everything thread-hostile (dynamic router / org / bump-log state)
+   is CAPTURED by the caller on the request thread and passed in."
+  [ctx router request-org merge-bumps source-branch-id target-branch-id]
+  (let [affected (mrg/merge-affected-fn-ids
+                   (branches/base-storage ctx) source-branch-id)]
+    (when (seq affected)
+      (let [target-ctx (if router
+                         (br/ctx-for router target-branch-id)
+                         ctx)]
+        (exec-ctx/invalidate-graph-cache! target-ctx affected)
+        ;; The target's rich-types SLICE learned nothing from the
+        ;; merged fns (their checks ran under the SOURCE's slice) —
+        ;; and the default branch's entry is pinned, so no rebuild
+        ;; will ever re-record them. Re-check the affected set into
+        ;; the target's own slice (async, bounded), under the tenant
+        ;; org captured on the request thread so the PER-ORG slice
+        ;; learns them too.
+        (tc/with-org request-org
+                     (br/recheck-ctx-types! target-ctx target-branch-id affected)))
+      ;; Cross-pod: the local invalidate + restart-services-on-branch!
+      ;; below fire only on THIS pod. A merge writes no per-fn NOTIFY of
+      ;; its own (registries heal cross-pod via the graph epoch), but a
+      ;; RUNNING cron/loop closure on a sibling pod never re-fetches —
+      ;; it keeps firing the pre-merge graph. Emit the same fn:invalidate
+      ;; event an edit emits, per affected fn on the target branch, so
+      ;; sibling pods invalidate AND restart their own singletons
+      ;; (init.services/on-notify). org-id rides along for the SSE relay's
+      ;; per-org fan-out, exactly as the edit path does.
+      (when-let [emit (:notify-emitter ctx)]
+        (let [branch-str (str target-branch-id)
+              org-id (:org-id (sp/read-entity (branches/base-storage ctx)
+                                              :branch target-branch-id))]
+          (doseq [fid affected]
+            (emit (cond-> {:kind :fn :op :invalidate :id (str fid)
+                           :branch-id branch-str}
+                    org-id (assoc :org-id org-id))))))))
+  (try
+    (recon/restart-services-on-branch! ctx recon/running target-branch-id)
+    (catch Exception e
+      ;; Restart is observability-grade — the merge already
+      ;; succeeded; surface the failure but don't fail the API.
+      (log/warn e "post-merge service restart failed"
+                {:target-branch-id target-branch-id})))
+  ;; Eager work done — mark this merge's bumps applied. `merge-bumps`
+  ;; was captured on the REQUEST thread: dynamic bindings don't convey
+  ;; to a raw Thread, so the 1-arity (request-log-draining) note would
+  ;; see nothing here.
+  (br/note-graph-epoch-validated!
+    (request/require-storage ctx) merge-bumps))
+
+
 (defbase merge-post-commit!
   "Post-commit finisher for a COMMITTED merge — delta-invalidate the
    TARGET branch's ctx (seeded by `mrg/merge-affected-fn-ids`, so just
@@ -297,52 +352,18 @@
         ;; instead of a cross-branch merge's TARGET ctx, leaving a merged
         ;; fn invisible on a NON-main target until an unrelated recompile.
         router (br/current-router)
+        ;; The finisher runs on a RAW thread — dynamic bindings do not
+        ;; convey. Capture the tenant org HERE (request thread) so the
+        ;; recheck below can re-record into the target's PER-ORG slice
+        ;; too; without it `record-rich-types-raw!` skips the per-org
+        ;; mirror (org-gated) and tenant reads on the target keep
+        ;; serving the fork-time entry (the slices are branch-scoped
+        ;; now — no shared global to paper over it).
+        request-org (tc/current-org)
         post-commit!
         (fn []
-          (let [affected (mrg/merge-affected-fn-ids
-                           (branches/base-storage ctx) source-branch-id)]
-            (when (seq affected)
-              (let [target-ctx (if router
-                                 (br/ctx-for router target-branch-id)
-                                 ctx)]
-                (exec-ctx/invalidate-graph-cache! target-ctx affected)
-                ;; The target's rich-types SLICE learned nothing from the
-                ;; merged fns (their checks ran under the SOURCE's slice) —
-                ;; and the default branch's entry is pinned, so no rebuild
-                ;; will ever re-record them. Re-check the affected set into
-                ;; the target's own slice (async, bounded).
-                (br/recheck-ctx-types! target-ctx target-branch-id affected))
-              ;; Cross-pod: the local invalidate + restart-services-on-branch!
-              ;; below fire only on THIS pod. A merge writes no per-fn NOTIFY of
-              ;; its own (registries heal cross-pod via the graph epoch), but a
-              ;; RUNNING cron/loop closure on a sibling pod never re-fetches —
-              ;; it keeps firing the pre-merge graph. Emit the same fn:invalidate
-              ;; event an edit emits, per affected fn on the target branch, so
-              ;; sibling pods invalidate AND restart their own singletons
-              ;; (init.services/on-notify). org-id rides along for the SSE relay's
-              ;; per-org fan-out, exactly as the edit path does.
-              (when-let [emit (:notify-emitter ctx)]
-                (let [branch-str (str target-branch-id)
-                      org-id (:org-id (sp/read-entity (branches/base-storage ctx)
-                                                      :branch target-branch-id))]
-                  (doseq [fid affected]
-                    (emit (cond-> {:kind :fn :op :invalidate :id (str fid)
-                                   :branch-id branch-str}
-                            org-id (assoc :org-id org-id))))))))
-          (try
-            (recon/restart-services-on-branch! ctx recon/running
-                                               target-branch-id)
-            (catch Exception e
-              ;; Restart is observability-grade — the merge already
-              ;; succeeded; surface the failure but don't fail the API.
-              (log/warn e "post-merge service restart failed"
-                        {:target-branch-id target-branch-id})))
-          ;; Eager work done — mark this merge's bumps applied.
-          ;; `merge-bumps` was captured on the REQUEST thread: dynamic
-          ;; bindings don't convey to a raw Thread, so the 1-arity
-          ;; (request-log-draining) note would see nothing here.
-          (br/note-graph-epoch-validated!
-            (request/require-storage ctx) merge-bumps))
+          (run-merge-post-commit! ctx router request-org merge-bumps
+                                  source-branch-id target-branch-id))
         t (Thread. ^Runnable post-commit! "merge-post-commit")]
     (Thread/.start t)
     (try

@@ -800,13 +800,13 @@
               ;; no surviving fn) dies with the set, so its type-ref must
               ;; not pin a retired type-row. Classify those slots as
               ;; IN-SET so the kept computation below sees through them.
+              slot-exposers (reduce (fn [m fs]
+                                      (update m (:slot-id fs)
+                                              (fnil conj #{}) (:fn-id fs)))
+                                    {}
+                                    (sp/query-entities base :fn-slot {}))
               in-set-slot-ids
-              (let [slot-exposers (reduce (fn [m fs]
-                                            (update m (:slot-id fs)
-                                                    (fnil conj #{}) (:fn-id fs)))
-                                          {}
-                                          (sp/query-entities base :fn-slot {}))
-                    slot-binders (into #{}
+              (let [slot-binders (into #{}
                                        (comp (remove #(contains? removal-ids (:fn-id %)))
                                              (map :slot-id))
                                        (concat (sp/query-entities base :binding {})
@@ -824,8 +824,17 @@
                                 (not (contains? removal-ids (:owner-fn-id ref)))))
               ;; An id is KEPT when any ref chain reaches it from
               ;; outside the removal set: seed with directly-externally-
-              ;; referenced ids, then propagate through in-set refs
-              ;; (a kept member's refs keep its targets too).
+              ;; referenced ids, then propagate through in-set refs —
+              ;; a kept member's refs keep its targets, INCLUDING refs
+              ;; that travel through a slot (a slot ref has no owning
+              ;; fn, so keptness flows from the slot's EXPOSERS: a
+              ;; type-row pinned only by a kept member's slot must
+              ;; survive, or that member's slot.type-fn-id dangles).
+              kept-ref? (fn [kept ref]
+                          (if (= :slot (:entity ref))
+                            (some #(contains? kept %)
+                                  (get slot-exposers (:id ref)))
+                            (contains? kept (:owner-fn-id ref))))
               kept (loop [kept (into #{}
                                      (keep (fn [[id refs]]
                                              (when (some external-ref? refs)
@@ -833,7 +842,7 @@
                                      refs-map)]
                      (let [kept' (into kept
                                        (keep (fn [[id refs]]
-                                               (when (some #(contains? kept (:owner-fn-id %))
+                                               (when (some #(kept-ref? kept %)
                                                            refs)
                                                  id)))
                                        refs-map)]

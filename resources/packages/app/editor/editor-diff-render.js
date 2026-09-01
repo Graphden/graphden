@@ -7,9 +7,8 @@
 // (editor-branch-diff.js) binds against. Loads BEFORE branch-diff and
 // diff-mode in _editor-script-paths.
 //
-// `opts` on the render fns:
-//   interactive: rows navigate on click (default true — the dialog
-//                passes false; navigation belongs to compare mode)
+// `opts` on the render fns (row CLICK behaviour is the caller's job —
+// the renderer only builds DOM):
 //   comments:    render 💬 anchors (default true; suggestion previews
 //                pass false)
 //   entriesOnly: skip the group head (the inspector panel — the fn is
@@ -106,8 +105,6 @@ function gdDiffCommentBtnEl(anchorName, anchorId) {
 }
 
 // One group → one `.branch-diff-row`. `opts`:
-//   interactive: rows navigate on click (default true — dialog passes
-//                false; navigation belongs to compare mode)
 //   comments:    render 💬 anchors (default true; suggestion previews
 //                pass false)
 //   entriesOnly: skip the group head (the inspector panel — the fn is

@@ -375,6 +375,49 @@
       (finally (sp/close storage)))))
 
 
+(deftest kept-members-slot-keeps-its-type-row
+  ;; F1 of the 2026-09-01 audit: a retired fn that stays KEPT (still
+  ;; referenced from live graph) exposes a slot typed by a retired
+  ;; type-row. Keptness must flow THROUGH the slot: purging the
+  ;; type-row would dangle the surviving fn's slot.type-fn-id, and the
+  ;; row is gone from EDN so nothing recreates it.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [pkgg (ns-row! storage "pkgg" nil)
+            m1 (ns-row! storage "pkgg.a" (:id pkgg))
+            type-id (records/fn-id "pkgg.a" :kept-type)
+            _ (sp/create-entity storage :fn
+                                {:id type-id :name "kept-type"
+                                 :namespace-id (:id m1) :parent-ids []})
+            user-id (records/fn-id "pkgg.a" :kept-user)
+            _ (sp/create-entity storage :fn
+                                {:id user-id :name "kept-user"
+                                 :namespace-id (:id m1) :parent-ids []})
+            slot (sp/create-entity storage :slot
+                                   {:id (random-uuid) :name "kv"
+                                    :type-fn-id type-id})
+            _ (sp/create-entity storage :fn-slot
+                                {:fn-id user-id :slot-id (:id slot) :position 0})
+            ;; a LIVE caller pins kept-user (→ it is kept, not purged)
+            base (setup/create-base-fn! storage "kept-caller-base")
+            cslot (setup/create-slot! storage "kc" :int)
+            _ (setup/attach-slot! storage (:id base) (:id cslot) 0)
+            caller (setup/create-composed-fn! storage "kept-caller" (:id base))
+            _ (sp/create-entity storage :binding
+                                {:fn-id (:id caller) :slot-id (:id cslot)
+                                 :ref-fn-id user-id})
+            n (pkg-sync/reconcile-moved-identities!
+                storage {:packages [{:name "pkgg"}]} [])]
+        (is (= 2 n) "both retired identities counted")
+        (is (some? (sp/read-entity storage :fn user-id))
+            "the still-referenced fn is kept")
+        (is (some? (sp/read-entity storage :fn type-id))
+            "…and the type-row its slot points at is kept THROUGH the slot")
+        (is (some? (sp/read-entity storage :slot (:id slot)))
+            "the kept fn's slot survives too"))
+      (finally (sp/close storage)))))
+
+
 (deftest leaves-ambiguous-move-alone
   ;; >1 same-name candidate in the synced set = a move we cannot resolve;
   ;; the leftover is counted, warned, and left untouched.

@@ -282,7 +282,7 @@ async function gdDiffModeFetch(otherBranch) {
     + '?against=' + encodeURIComponent(otherId || otherBranch);
   const r = await window.authFetch(url);
   const d = await r.json();
-  if (!d.ok) throw new Error(d.error || ('HTTP ' + r.status));
+  if (!d.ok) throw new Error(d.message || d.error || ('HTTP ' + r.status));
   const byFnId = new Map();
   for (const g of (d.groups || [])) {
     if (!g['fn-id']) continue;
@@ -315,6 +315,11 @@ async function gdDiffModeFetch(otherBranch) {
         && curRow0['base-branch-id'] === otherRow0.id) ? curRow0.id
       : (otherRow0?.['base-branch-id'] && curRow0
          && otherRow0['base-branch-id'] === curRow0.id) ? otherRow0.id
+      // same fallback chain as the cockpit's Review pick: any side
+      // WITH a base, else the compared branch — so the tree markers
+      // and the Review dialog always read the same thread.
+      : otherRow0?.['base-branch-id'] ? otherRow0.id
+      : curRow0?.['base-branch-id'] ? curRow0.id
       : (otherId || otherBranch);
     const cr = await window.authFetch(
       API.api_branches_ref_comments(proposalRef));
@@ -830,7 +835,11 @@ async function gdOpenDiffChipMenu(anchorBtn) {
   try {
     const r = await window.authFetch(API.api_branches);
     rows = (await r.json())?.branches || [];
-  } catch (_) { /* menu still renders; actions fall back to names */ }
+  } catch (_) {
+    /* menu still renders; MERGE falls back to names, while the Review
+       and Propose items need row data (base links) and stay hidden —
+       a failed /api/branches fetch means the data plane is down anyway. */
+  }
   const curRow = rows.find((b) => b.name === cur);
   const otherRow = rows.find((b) => b.name === other);
   const proposed = curRow?.['review-state'] === 'proposed';
@@ -895,7 +904,7 @@ async function gdOpenDiffChipMenu(anchorBtn) {
              });
            const d = await r.json().catch(() => ({}));
            if (!d.ok && typeof gdToast === 'function') {
-             gdToast(d.error || ('Could not change the proposal: HTTP ' + r.status));
+             gdToast(d.message || d.error || ('Could not change the proposal: HTTP ' + r.status));
            } else if (typeof gdToast === 'function') {
              gdToast(proposed ? 'Proposal withdrawn'
                               : '"' + cur + '" proposed for review');
@@ -996,11 +1005,16 @@ async function gdEnterDiffMode(otherBranch) {
       gdAnnounce('Compare mode on — differences vs ' + otherBranch + ' are marked');
     }
   } catch (err) {
-    if (typeof gdToast === 'function') {
-      gdToast('Could not load the diff vs "' + otherBranch + '": '
-              + (err?.message || 'error'));
+    // A STALE failure (user already exited or re-entered vs another
+    // branch) must not clobber the fresh mode — or toast about a
+    // comparison the user abandoned.
+    if (epoch === _gdDiffEnterEpoch) {
+      if (typeof gdToast === 'function') {
+        gdToast('Could not load the diff vs "' + otherBranch + '": '
+                + (err?.message || 'error'));
+      }
+      _gdDiffMode = null;
     }
-    _gdDiffMode = null;
   } finally {
     _gdDiffModeFetching = false;
   }
@@ -1026,6 +1040,11 @@ async function gdDiffModeRefresh() {
 }
 
 function gdExitDiffMode() {
+  // Invalidate any in-flight ENTER fetch: without this bump the epoch
+  // guard only caught enter→enter — an exit while a fetch was in
+  // flight let the landing result resurrect the dismissed mode (and
+  // re-persist it past reloads).
+  _gdDiffEnterEpoch += 1;
   gdCloseDiffChipMenu();
   document.getElementById('gd-diff-lens')?.remove();
   document.getElementById('gd-diff-insp')?.remove();

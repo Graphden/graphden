@@ -129,7 +129,7 @@ async function showReviewDialog(sourceName, sourceRef) {
     details.appendChild(listMount);
     body.appendChild(details);
     if (typeof gdDiffRenderGroups === 'function') {
-      gdDiffRenderGroups(listMount, view.groups || [], { interactive: false });
+      gdDiffRenderGroups(listMount, view.groups || []);
     }
     if (!view.ok) {
       summary.textContent = 'What changed — unavailable ('
@@ -280,7 +280,7 @@ function initDiffConversation(container, sourceName, sourceRef, opts) {
         });
         const d = await r.json().catch(() => ({}));
         if (d.ok) { await reload(); return; }
-        alert(d.error || ('Could not delete: HTTP ' + r.status));
+        alert(d.message || d.error || ('Could not delete: HTTP ' + r.status));
       } catch (e2) {
         alert('Could not delete comment: ' + (e2?.message || 'network error'));
       }
@@ -318,7 +318,7 @@ function initDiffConversation(container, sourceName, sourceRef, opts) {
         });
         const d = await r.json().catch(() => ({}));
         if (d.ok) { input.value = ''; await reload(); }
-        else alert(d.error || ('Could not post: HTTP ' + r.status));
+        else alert(d.message || d.error || ('Could not post: HTTP ' + r.status));
       } catch (e2) {
         alert('Could not post comment: ' + (e2?.message || 'network error'));
       }
@@ -521,7 +521,7 @@ async function renderDiffSuggestions(body, sourceName, sourceRef) {
         });
         const d = await r.json().catch(() => ({}));
         if (r.ok && d.ok !== false) { location.reload(); return; }
-        alert(d.error || (d.reason === 'merge-conflict'
+        alert(d.message || d.error || (d.reason === 'merge-conflict'
           ? 'The suggestion conflicts with the proposal — merge it from the branch popover to resolve.'
           : 'Could not apply: HTTP ' + r.status));
       } catch (_e) {
@@ -555,8 +555,7 @@ async function renderDiffSuggestions(body, sourceName, sourceRef) {
           + '?against=' + encodeURIComponent(sugg.id))).json();
         pv.textContent = '';
         if (typeof gdDiffRenderGroups === 'function') {
-          gdDiffRenderGroups(pv, v.groups || [], { interactive: false,
-                                                   comments: false });
+          gdDiffRenderGroups(pv, v.groups || [], { comments: false });
         }
         if (!(v.groups || []).length) pv.textContent = 'No differences.';
       } catch (_) { pv.textContent = 'Preview unavailable.'; }
@@ -591,7 +590,7 @@ async function renderDiffSuggestions(body, sourceName, sourceRef) {
         switchToBranch(name.trim());
         return;
       }
-      alert(d.error || ('Could not create the branch: HTTP ' + r.status));
+      alert(d.message || d.error || ('Could not create the branch: HTTP ' + r.status));
     } catch (e2) {
       alert('Could not create the branch: ' + (e2?.message || 'network error'));
     }

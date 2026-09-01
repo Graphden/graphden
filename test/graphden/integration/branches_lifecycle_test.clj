@@ -562,8 +562,6 @@
     (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
                                    :body {:name src :base-branch-id "main"}}))))
     ;; the impls ns is loader-loaded, not on the classpath — resolve
-    ;; the cap var at runtime (fixture has booted the packages).
-    ;; the impls ns is loader-loaded, not on the classpath — resolve
     ;; the cap var at runtime (the fixture has booted the packages).
     ;; NB the suite's dispatch sits BELOW wrap-error-boundary (it lives
     ;; on the real server's top chain), so author errors surface as the

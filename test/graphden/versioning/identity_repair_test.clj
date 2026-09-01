@@ -284,3 +284,25 @@
            (set (:t hits)))
         "a live fn's VERSION row pins the type; the type's own version row
          (owner == target) is excluded like every owned row")))
+
+
+(deftest purge-many-protects-slots-sourced-by-survivors
+  ;; F3 of the 2026-09-01 audit: a RENAME-VIEW slot outside the purge
+  ;; set points at a declaring slot inside it via `source-slot-id`.
+  ;; The orphan sweep must not delete the source out from under the
+  ;; surviving view (the rename-root walk would dangle).
+  (let [db (atom {:binding {}
+                  :binding-list-item {}
+                  :binding-version {}
+                  :binding-list-item-version {}
+                  :fn-version {}
+                  :fn-slot {:fsx {:id :fsx :fn-id :gone :slot-id :src :position 0}}
+                  :slot {:src {:id :src :name "orig"}
+                         :view {:id :view :name "renamed" :source-slot-id :src}}
+                  :fn {:gone {:id :gone :parent-ids []}}})]
+    (idr/purge-fn-subgraphs-many! (mem-storage db) #{:gone})
+    (is (nil? (get-in @db [:fn :gone])) "the fn itself is purged")
+    (is (nil? (get-in @db [:fn-slot :fsx])) "its fn-slot row is purged")
+    (is (some? (get-in @db [:slot :src]))
+        "the declaring slot SURVIVES — a live view slot still sources it")
+    (is (some? (get-in @db [:slot :view])) "the view slot is untouched")))

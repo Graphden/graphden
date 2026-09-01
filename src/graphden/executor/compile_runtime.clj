@@ -634,7 +634,7 @@
                 po-var (requiring-resolve
                          'graphden.executor.registry.core/*per-org-rich-override*)
                 rt (or (:rich-types-atom ctx) (some-> rt-var deref))
-                po (some-> po-var deref)
+                po (or (:per-org-rich-atom ctx) (some-> po-var deref))
                 run' (fn [] (with-bindings* {rt-var rt po-var po} run))
                 t (Thread. ^Runnable run' "registry-stale-revalidate")]
             (Thread/.setDaemon t true)

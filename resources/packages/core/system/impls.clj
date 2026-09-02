@@ -233,6 +233,16 @@
   @build-hashes-text)
 
 
+(defbase read-resource-bytes
+  "Classpath resource → byte array, nil when absent. The binary sibling
+   of `read-resource-or-nil`."
+  [path]
+  (cr/record-effect! :io)
+  (when-let [r (io/resource path)]
+    (with-open [in (io/input-stream r)]
+      (java.io.InputStream/.readAllBytes in))))
+
+
 (defbase read-resource-or-nil
   "Lookup + slurp a classpath resource. Returns the file contents as a
    string, or nil if the resource isn't on the classpath. `read-resource`
@@ -385,6 +395,7 @@
    :ex-info {:impl ex-info-fn :taint-propagate? true}
    :throw {:impl throw-fn :taint-propagate? true}
    :read-resource-or-nil read-resource-or-nil
+   :read-resource-bytes read-resource-bytes
    :build-hashes-raw build-hashes-raw
    :invoke {:impl invoke-fn :return-type-rule invoke-return-rule :taint-propagate? true}
    :call {:impl invoke-fn :taint-propagate? true}

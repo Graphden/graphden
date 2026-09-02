@@ -8,7 +8,8 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
-    [graphden.executor.test-setup :as setup]))
+    [graphden.executor.test-setup :as setup]
+    [graphden.system.deploy-config :as deploy-config]))
 
 
 (def ^:dynamic *bootstrap* nil)
@@ -40,6 +41,28 @@
         (is (= #{:db} (:allowed e)))))
     (testing "restricted ctx that DOES allow :env — runs"
       (is (nil? (run (assoc ctx :allowed-effects #{:env})))))))
+
+
+(deftest deploy-config-reads-under-any-gate
+  ;; The counterpart of `env-effect-gate`: a PUBLIC deployment setting is
+  ;; read from the boot snapshot with NO effect recorded, so the editor's
+  ;; own partials render for a tenant request that the gate keeps away
+  ;; from `:env`. Only declared keys exist — nothing else is reachable.
+  (let [{:keys [ctx all-name->id]} *bootstrap*
+        dc-id (get all-name->id :deploy-config)
+        run (fn [c k] (exec/execute-with-named-args c dc-id {:key k}))]
+    (try
+      (deploy-config/install! {:hub-url "https://hub.example"})
+      (testing "the strict request-level cloud set (no :env) still reads a declared key"
+        (is (= "https://hub.example"
+               (run (assoc ctx :allowed-effects cr/cloud-request-allowed-effects) :hub-url))))
+      (testing "the plan-level set (the tenant's own graph) reads it too"
+        (is (= "https://hub.example"
+               (run (assoc ctx :allowed-effects cr/default-cloud-allowed-effects) :hub-url))))
+      (testing "an undeclared key is nil, not an env read — under the same gate"
+        (is (nil? (run (assoc ctx :allowed-effects cr/default-cloud-allowed-effects)
+                       :GRAPHDEN_ALERT_TELEGRAM_TOKEN))))
+      (finally (deploy-config/clear!)))))
 
 
 (deftest raw-sql-effect-gate

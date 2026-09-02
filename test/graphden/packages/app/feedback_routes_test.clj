@@ -43,7 +43,7 @@
 
 (deftest intake-decision-ladder-posture
   (let [clauses (get-in @defs [:_fb-result :args :clauses])]
-    (testing "the env arm-gate is the FIRST clause — an unarmed instance touches nothing"
+    (testing "the arm-gate (a :deploy-config read) is the FIRST clause — an unarmed instance touches nothing"
       (is (= :_fb-intake-enabled?
              (get-in (first clauses) [:args :value])))
       (is (= "disabled" (get-in (second clauses) [:value :error]))))

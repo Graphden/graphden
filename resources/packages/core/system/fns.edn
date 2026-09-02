@@ -444,6 +444,24 @@
    ;; sticky-local so user-defined env adapters never cross-merge.
    :branch-local? true}
 
+  ;; The PUBLIC-settings counterpart of `:env`: reads the boot-time
+  ;; snapshot `graphden.system.deploy-config` (populated by the
+  ;; `:exec/deploy-config` init-key from the system config's declared
+  ;; `:settings` map). `:effects #{}` is load-bearing — the editor's own
+  ;; partials / APIs read hub + feedback + rescue-hatch settings through
+  ;; this, and on the cloud those requests run under the request-level
+  ;; effect gate, which excludes `:env` (the process environment holds
+  ;; secrets). A key the operator did not declare reads as nil, so this
+  ;; is not a side door to the environment.
+  {:name :deploy-config
+   :description "Read one PUBLIC deployment setting by key — a value the operator declared non-secret by listing it under `:exec/deploy-config` `:settings` in the system config (`:hub-url`, `:feedback-url`, `:feedback-intake`, `:disable-asset-overrides`). Snapshotted once at boot in the platform process, so this is a pure read (`:effects #{}`) that works under every effect gate; `:env` stays the gated primitive for everything else. Unset, blank, or undeclared ⇒ nil (`:nullable-text`)."
+   :args {:key {:type :keyword :description "Setting key as declared under `:exec/deploy-config` `:settings`, e.g. `:hub-url`."}}
+   :return-type :nullable-text
+   :effects #{}
+   ;; Runtime-config marker, same as `:env` — a deployment setting is
+   ;; per-instance by definition, so descendants never cross-merge.
+   :branch-local? true}
+
   ;; Construct an ExceptionInfo. Paired with :throw to raise from
   ;; graph code; also usable as a plain value if something wants a
   ;; ready-made exception without raising.
@@ -574,14 +592,22 @@
   ;; visually verify against what they have open in the editor).
   ;; ============================================================================
 
-  {:name :_build-hashes-raw
-   :parent :read-resource
-   :args {:path "graphden-build-hashes.json"}}
+  ;; The FIXED build artifact, read once per process and cached — no
+  ;; `:io` effect: unlike `:read-resource` (an arbitrary caller-chosen
+  ;; classpath path, rightly gated) this reads exactly one baked,
+  ;; non-secret, org-agnostic file. That keeps `/version` and the
+  ;; Settings → Build partial inside the cloud's request-level effect
+  ;; gate, where every tenant session runs.
+  {:name :build-hashes-raw
+   :description "The baked `graphden-build-hashes.json` resource as text — read once per process and cached. Pure (`:effects #{}`): a fixed build artifact, not a caller-chosen path. Throws `execution-error/resource-not-found` when the build never wrote it (a source checkout without `bb rebuild`)."
+   :args {}
+   :return-type :text
+   :effects #{}}
 
   {:name :build-hashes
    :description "Map `{\"frontend\" … \"backend\" … \"packages\" …}` — each value is the lower-case 64-char hex SHA-256 of that section of the deploy at build time. Keys stay strings (`:keywordize false`) so the `:get` lookups below match the JSON shape verbatim."
    :parent :parse-json
-   :args {:string :_build-hashes-raw
+   :args {:string :build-hashes-raw
           :keywordize false}}
 
   {:name :build-hash-frontend

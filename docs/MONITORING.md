@@ -91,7 +91,15 @@ every `ALERT_PERIOD_MS` (default 5 min) it evaluates:
   last hour is ≥ `error-ratio` (default 0.5) with ≥ `min-runs`
   (default 10) runs;
 - **process-wide 5xx burst** — `server-error` counter delta ≥
-  `server-error-min` (default 20) since the last check.
+  `server-error-min` (default 20) since the last check;
+- **new feedback reports** — the rows the intake (§ 4) stored since the
+  last tick, one line each (category + clipped text), on the instance
+  that carries the `feedback_reports` table. No cooldown: every report
+  is one event, the tick already batches them. This is the intake's
+  *only* notification path — the request handler must stay inside the
+  cloud's request-level effect gate (no `:network`), and the Telegram
+  token is a secret that lives here, in Clojure config, never in a
+  graph read.
 
 Delivery has two native channels (`graphden.monitoring.alerts/alert-request`
 picks one, Telegram winning if both are set):
@@ -151,9 +159,13 @@ Two env vars (see [DEPLOYMENT § Environment Variables](DEPLOYMENT.md#environmen
 
 The intake itself is pure graph (`app.feedback`, no new core entity
 type): reports land in a plain `feedback_reports` SQL table on the
-intake's own Postgres (created idempotently on first report), and each
-accepted report pings the operator through the alerter's Telegram pair
-(§ 3b) when configured. Abuse posture for an open write route: unarmed
+intake's own Postgres (created idempotently on first report); the
+built-in alerter (§ 3b) picks the new rows up on its next tick and pings
+the operator when a channel is configured. Both routes read their
+settings (`GRAPHDEN_FEEDBACK_URL`, `GRAPHDEN_FEEDBACK_INTAKE`) through
+`:deploy-config` — the boot snapshot, no `:env` effect — because on the
+cloud they are hit from signed-in and demo sessions, which run under the
+request-level effect gate. Abuse posture for an open write route: unarmed
 by default, hard size caps per stored field, a honeypot field (filled ⇒
 pretend success, store nothing), and fixed-window caps counted off the
 table itself (200/hour globally, 20/hour per client IP). Report text is

@@ -162,6 +162,22 @@
  {:context #ig/ref :exec/context
   :_compiled-registry #ig/ref :exec/compiled-registry}
 
+ ;; PUBLIC deployment settings — the values the editor's own partials /
+ ;; APIs need at request time, snapshotted ONCE at boot by
+ ;; `graphden.system.deploy-config` and read by the pure `:deploy-config`
+ ;; base-fn (`:effects #{}`). Listing a variable here is the operator's
+ ;; declaration that it is NOT secret: it becomes readable by any graph
+ ;; on this instance, under any effect gate. Secrets never go here (vault
+ ;; / Clojure-side config). Why: a tenant request on the cloud runs under
+ ;; the request-level effect gate, which excludes `:env` by design — a
+ ;; platform partial that read `:env` directly answered 500 for every
+ ;; tenant (docs/TENANCY_SEAM.md § Effect gate).
+ :exec/deploy-config
+ {:settings {:hub-url                 #env GRAPHDEN_HUB_URL
+             :feedback-url            #env GRAPHDEN_FEEDBACK_URL
+             :feedback-intake         #env GRAPHDEN_FEEDBACK_INTAKE
+             :disable-asset-overrides #env GRAPHDEN_DISABLE_ASSET_OVERRIDES}}
+
  ;; NOTE: the OPTIONAL packages `registry` / `mcp` are NOT wired as separate
  ;; route installers — the `:exec/branch-router` resolves their per-branch
  ;; handlers (`_registry-ring-response` / `_mcp-ring-response`) tolerantly and

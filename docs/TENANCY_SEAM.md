@@ -152,6 +152,26 @@ The runtime sandbox mechanism is entirely in core
 - Contract for new base-fns: any security-sensitive primitive MUST
   `record-effect!`, or it is a sandbox hole. A new sensitive category goes in
   both `types.core/known-effect-categories` and `cloud-forbidden-effects`.
+- **Contract for the platform's own request paths** (`/partials/*`,
+  `/api/*` in the `app` package): the handler's effect closure must stay
+  inside `cloud-request-allowed-effects`, because on the cloud it runs
+  under that set for every tenant session — a closure that reaches `:env`
+  or `:network` answers 403 for every tenant, exactly as the branch popover
+  (`GRAPHDEN_HUB_URL` via `:env`) and the feedback probe + intake did in
+  production, 2026-08-28 → 09-02. Two sanctioned shapes:
+  - a *deployment setting* the UI needs (hub URL, feedback URL / armed
+    flag, the asset-override rescue hatch) is DECLARED under
+    `:exec/deploy-config` in the system config and read through the
+    `:deploy-config` base-fn — a boot-time snapshot in the platform process,
+    `:effects #{}` ([CONFIGURATION § `:exec/deploy-config`](CONFIGURATION.md#execdeploy-config)).
+    Declaring a key is the operator's statement that the value is public;
+    a secret never goes there (vault / Clojure-side config), and nothing
+    outside the declared map exists in the snapshot.
+  - an *outbound notification* (the feedback ping) is the built-in
+    alerter's job on its tick, outside any request
+    ([MONITORING § 3b](MONITORING.md#3b-built-in-domain-alerter-opt-in--telegram-or-webhook)).
+  `tenant_effect_budget_test` pins every `app` route's closure against the
+  set, with an explicit ledger for the operator-only exceptions.
 
 ## Execute guard
 

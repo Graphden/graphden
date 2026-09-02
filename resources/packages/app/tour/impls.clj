@@ -51,7 +51,11 @@
   "Bump `:tour-<event>-<lesson>`. Returns the counter name, or nil when
    the input is not a lesson id + a known event."
   [lesson event]
-  (cr/record-effect! :io)
+  ;; `:state`, not `:io`: a bump of an in-process aggregate counter is the
+  ;; same effect class as `:swap` / `:reset` — and `:state` is inside the
+  ;; cloud's request-level gate, so the demo session (the population the
+  ;; funnel exists to measure) can actually record its progress.
+  (cr/record-effect! :state)
   (let [id (lesson-id lesson)
         ev (some-> event str)]
     (when (and id (contains? events ev))
@@ -71,7 +75,7 @@
    read off. Returns the counter name, or nil for a non-lesson / an
    index outside a lesson's possible length."
   [lesson step]
-  (cr/record-effect! :io)
+  (cr/record-effect! :state)
   (let [id (lesson-id lesson)
         n (some-> step str parse-long)]
     (when (and id n (<= 0 n 99))

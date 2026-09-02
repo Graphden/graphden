@@ -2,6 +2,7 @@
   "Pure policy tests for the built-in domain alerter (Phase C3). No IO — the
    scheduler shell (`system.init.alerter`) is a thin wrapper over `decide`."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.monitoring.alerts :as alerts]))
 
@@ -79,3 +80,24 @@
            (:url (alerts/alert-request {:webhook-url "https://hook.example/x"
                                         :telegram-token "123:ABC"} "hi"))))
     (is (nil? (alerts/alert-request {:telegram-token "123:ABC"} "hi")))))
+
+
+(deftest feedback-reports-fire-every-tick-without-cooldown
+  (let [inputs {:org-totals [] :server-error-delta 0
+                :feedback [{:category "bug" :body "the ▶ button does nothing on a type-row"}
+                           {:category "idea" :body (str/join (repeat 400 "x"))}]}
+        {:keys [fire state]} (alerts/decide inputs {} cfg 1000)]
+    (testing "one batched alert, one line per report, category + clipped text"
+      (is (= [:feedback] (map :kind fire)))
+      (is (= 2 (:count (first fire))))
+      (let [[l1 l2] (str/split-lines (:message (first fire)))]
+        (is (= "📮 Feedback (bug): the ▶ button does nothing on a type-row" l1))
+        (is (str/starts-with? l2 "📮 Feedback (idea): "))
+        (is (str/ends-with? l2 "…") "long body clipped")
+        (is (< (count l2) 400))))
+    (testing "feedback never enters the cooldown state — the next tick's batch still pages"
+      (is (= {} state))
+      (is (= 1 (count (:fire (alerts/decide inputs state cfg (+ 1000 60000)))))))
+    (testing "no reports ⇒ no feedback alert"
+      (is (empty? (:fire (alerts/decide (assoc inputs :feedback []) {} cfg 1000))))
+      (is (empty? (:fire (alerts/decide (dissoc inputs :feedback) {} cfg 1000)))))))

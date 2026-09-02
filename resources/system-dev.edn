@@ -88,6 +88,13 @@
  {:context #ig/ref :exec/context
   :_compiled-registry #ig/ref :exec/compiled-registry}
 
+ ;; Public deployment settings snapshot — see system-prod.edn.
+ :exec/deploy-config
+ {:settings {:hub-url                 #env GRAPHDEN_HUB_URL
+             :feedback-url            #env GRAPHDEN_FEEDBACK_URL
+             :feedback-intake         #env GRAPHDEN_FEEDBACK_INTAKE
+             :disable-asset-overrides #env GRAPHDEN_DISABLE_ASSET_OVERRIDES}}
+
  ;; OPTIONAL `registry` / `mcp` are served per-branch by `:exec/branch-router`
  ;; (see system-prod.edn) — no separate route installer.
 

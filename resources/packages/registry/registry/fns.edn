@@ -2638,9 +2638,9 @@
    :effects #{:network :env}}
 
   {:name :_sync-hub-url
-   :description "GRAPHDEN_HUB_URL from the server environment. Branch-local by :env descent — hub wiring is per-deployment runtime config."
-   :parent :env
-   :args {:name {:value "GRAPHDEN_HUB_URL"}}}
+   :description "GRAPHDEN_HUB_URL as snapshotted at boot (`:deploy-config :hub-url`) — a pure read, so the status probe answers under the cloud's request-level effect gate. Branch-local by descent — hub wiring is per-deployment runtime config."
+   :parent :deploy-config
+   :args {:key {:value :hub-url}}}
 
   {:name :_sync-configured?
    :parent :not

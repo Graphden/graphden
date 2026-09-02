@@ -56,6 +56,11 @@
    ;; authz
    :authz/forbidden 403
    :authz/branch-protected 403
+   ;; the effect sandbox refused a base-fn's side effect — the request is
+   ;; well-formed, the CONTEXT is not allowed to do that (was an unmapped
+   ;; 500, which read as a server fault and paged the 5xx alerter for a
+   ;; policy decision)
+   :execution/forbidden-effect 403
    ;; capacity / size
    :execution/over-capacity 429
    :quota/entity-limit 429

@@ -28,6 +28,8 @@
     (is (= 429 (errors/status-for :execution/over-capacity)))
     (is (= 429 (errors/status-for :quota/entity-limit)))
     (is (= 413 (errors/status-for :execution/args-too-large)))
+    (is (= 403 (errors/status-for :execution/forbidden-effect))
+        "the effect sandbox's refusal is a policy answer, not a 5xx")
     (is (= 503 (errors/status-for :vault/not-configured))))
   (testing "family fallbacks cover new members automatically"
     (is (= 400 (errors/status-for :packages/whatever-new)))

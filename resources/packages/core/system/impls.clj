@@ -15,6 +15,7 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.packages.records.ids :as ids]
+    [graphden.system.deploy-config :as deploy-config]
     [graphden.types.core :as types]
     [graphden.util.counters :as counters])
   (:import
@@ -190,6 +191,13 @@
   (System/getenv name))
 
 
+(defbase deploy-config-fn
+  "Pure read of the boot-time public-settings snapshot — no effect
+   recorded (see `graphden.system.deploy-config`)."
+  [key]
+  (deploy-config/read-setting key))
+
+
 (defbase ex-info-fn
   "Construct a clojure.lang.ExceptionInfo. Lets fn-graphs build
    exceptions compositionally without reaching into Clojure code."
@@ -202,6 +210,27 @@
    Throwable-producing fn) to express `raise` at graph level."
   [exception]
   (throw exception))
+
+
+(def ^:private build-hashes-resource "graphden-build-hashes.json")
+
+
+(def ^:private build-hashes-text
+  "The build artifact, slurped once — it cannot change while the process
+   runs (it ships inside the jar)."
+  (delay
+    (if-let [r (io/resource build-hashes-resource)]
+      (slurp r)
+      (throw (ex-info (str "Resource not found: " build-hashes-resource)
+                      {:type :execution-error/resource-not-found
+                       :path build-hashes-resource})))))
+
+
+(defbase build-hashes-raw
+  "The baked build-hashes JSON as text, cached per process. No effect
+   recorded — a fixed, non-secret build artifact (see fns.edn)."
+  []
+  @build-hashes-text)
 
 
 (defbase read-resource-or-nil
@@ -352,9 +381,11 @@
    :log-warn log-warn-fn
    :current-time-ms current-time-ms
    :env env-fn
+   :deploy-config deploy-config-fn
    :ex-info {:impl ex-info-fn :taint-propagate? true}
    :throw {:impl throw-fn :taint-propagate? true}
    :read-resource-or-nil read-resource-or-nil
+   :build-hashes-raw build-hashes-raw
    :invoke {:impl invoke-fn :return-type-rule invoke-return-rule :taint-propagate? true}
    :call {:impl invoke-fn :taint-propagate? true}
    :call-noargs {:impl call-noargs-fn :taint-propagate? true}

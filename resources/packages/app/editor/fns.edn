@@ -879,12 +879,14 @@
   ;; baseline (`:and` short-circuits, the override query never runs) →
   ;; revert the bad row from the panel → unset and restart. The save
   ;; path also syntax-checks JS client-side, so this is the belt behind
-  ;; that suspender.
+  ;; that suspender. Read through `:deploy-config` (boot snapshot, no
+  ;; `:env` effect) — this sits on EVERY asset read, including the
+  ;; tenant-gated ones.
   {:name :_ro-disabled?
    :parent :non-blank?
    :args {:string {:parent :coalesce
-                   :args {:value {:parent :env
-                                  :args {:name {:value "GRAPHDEN_DISABLE_ASSET_OVERRIDES"}}}
+                   :args {:value {:parent :deploy-config
+                                  :args {:key {:value :disable-asset-overrides}}}
                           :default {:value ""}}}}}
 
   {:name :_concat-overridable-list

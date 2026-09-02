@@ -19,6 +19,7 @@
     [graphden.system.api-url-drift :as api-url-drift]
     [graphden.system.branch-router :as br]
     [graphden.system.demo-branches :as demo]
+    [graphden.system.deploy-config :as deploy-config]
     [graphden.versioning.storage.core :as vs]
     [integrant.core :as ig]))
 
@@ -350,6 +351,31 @@
 
 (defmethod ig/halt-key! :exec/api-routes-js-cache [_ _]
   (api-routes-js/clear-cache!))
+
+
+;; =============================================================================
+;; Public deployment settings snapshot
+;; =============================================================================
+;;
+;; The PUBLIC deployment settings the platform UI reads at request time
+;; (hub URL, feedback intake URL / flag, the asset-override rescue
+;; hatch), resolved ONCE at boot from the system config's `:settings`
+;; map (Aero `#env`) and stored in `graphden.system.deploy-config`. The
+;; `:deploy-config` defbase reads the snapshot with `:effects #{}` — so
+;; a tenant request under the cloud's request-level effect gate never
+;; needs `:env` to render the editor's own partials. Declaring a key
+;; here is the operator's statement that the value is not secret.
+
+(defmethod ig/init-key :exec/deploy-config
+  [_ {:keys [settings]}]
+  (deploy-config/install! (or settings {}))
+  (log/info "Public deployment settings snapshotted:"
+            (vec (sort (deploy-config/declared-keys))))
+  :ok)
+
+
+(defmethod ig/halt-key! :exec/deploy-config [_ _]
+  (deploy-config/clear!))
 
 
 ;; =============================================================================

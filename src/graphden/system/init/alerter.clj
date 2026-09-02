@@ -3,8 +3,10 @@
    `graphden.monitoring.alerts/decide`.
 
    Every `period-ms` it reads the per-org usage totals (`stats/org-totals`,
-   counts only) + the process-wide server-error counter delta, runs the pure
-   policy, and POSTs any fired alerts through the channel `alerts/alert-request`
+   counts only) + the process-wide server-error counter delta + the feedback
+   intake's new `feedback_reports` rows (`feedback-since`, only where that
+   table exists — i.e. on an intake instance), runs the pure policy, and
+   POSTs any fired alerts through the channel `alerts/alert-request`
    selects — native Telegram (`GRAPHDEN_ALERT_TELEGRAM_TOKEN` +
    `GRAPHDEN_ALERT_TELEGRAM_CHAT` → Bot API `sendMessage`) or a generic
    `{text}` webhook (`GRAPHDEN_ALERT_WEBHOOK`; Slack / Mattermost). The
@@ -22,6 +24,8 @@
     [graphden.monitoring.alerts :as alerts]
     [graphden.util.counters :as counters]
     [integrant.core :as ig]
+    [next.jdbc :as jdbc]
+    [next.jdbc.result-set :as rs]
     [org.httpkit.client :as http]))
 
 
@@ -51,20 +55,59 @@
     true))
 
 
+(def ^:private feedback-batch 20)
+
+
+(defn db-now
+  "The database's clock — the feedback baseline is compared against
+   `feedback_reports.created_at` (`now()` at insert), so the baseline must
+   come from the same clock, not the JVM's."
+  [pool]
+  (when pool
+    (:now (jdbc/execute-one! pool ["SELECT now() AS now"]
+                             {:builder-fn rs/as-unqualified-lower-maps}))))
+
+
+(defn feedback-since
+  "New feedback reports after `since` (a DB timestamp), oldest first, at most
+   `feedback-batch` — `[{:category :body :created_at} …]`. Empty when the
+   intake table does not exist on this instance (only the armed intake
+   creates it) or `since` is nil. The rows are what the reporter typed for
+   the operator; body is clipped again in the message."
+  [pool since]
+  (when (and pool since)
+    (if (:ok (jdbc/execute-one!
+               pool ["SELECT to_regclass('feedback_reports') IS NOT NULL AS ok"]
+               {:builder-fn rs/as-unqualified-lower-maps}))
+      (jdbc/execute! pool
+                     [(str "SELECT category, body, created_at FROM feedback_reports"
+                           " WHERE created_at > ? ORDER BY created_at ASC LIMIT ?")
+                      since feedback-batch]
+                     {:builder-fn rs/as-unqualified-lower-maps})
+      [])))
+
+
 (defn run-once!
-  "One alerter tick. `state-atom` holds `{:fired {…} :error-base n}` across
-   ticks (cooldown + the server-error baseline). Pure decision delegated to
-   `alerts/decide`; this only does the reads, the diff, and the POST. Returns
-   the alerts it fired (for tests)."
+  "One alerter tick. `state-atom` holds `{:fired {…} :error-base n
+   :feedback-base ts}` across ticks (cooldown, the server-error baseline,
+   the feedback watermark). Pure decision delegated to `alerts/decide`; this
+   only does the reads, the diff, and the POST. Returns the alerts it fired
+   (for tests)."
   [pool channel cfg state-atom now-ms]
   (try
     (let [totals (stats/org-totals pool (:window-mins (merge alerts/default-config cfg)))
           err-now (get (counters/snapshot) :http/server-error 0)
-          {:keys [error-base]} @state-atom
+          {:keys [error-base feedback-base]} @state-atom
           err-delta (max 0 (- err-now (or error-base 0)))
+          feedback (feedback-since pool feedback-base)
+          ;; Watermark = the newest row we are about to report — no clock
+          ;; skew (DB stamps, DB compare), and a batch cut at the LIMIT
+          ;; simply continues next tick.
+          feedback-next (or (:created_at (last feedback)) feedback-base)
           prev-fired (:fired @state-atom)
           {:keys [fire state]} (alerts/decide
-                                 {:org-totals totals :server-error-delta err-delta}
+                                 {:org-totals totals :server-error-delta err-delta
+                                  :feedback feedback}
                                  prev-fired cfg now-ms)
           ;; Deliver BEFORE committing the cooldown. Advancing `:fired`
           ;; regardless of delivery (the old order) silenced a LOST
@@ -79,7 +122,9 @@
                        true)]
       (swap! state-atom assoc
              :error-base err-now
-             :fired (if delivered? state prev-fired))
+             :fired (if delivered? state prev-fired)
+             ;; Like the cooldown: an undelivered batch is re-read next tick.
+             :feedback-base (if delivered? feedback-next feedback-base))
       fire)
     (catch Exception e
       (log/warn e "alerter tick failed")
@@ -97,7 +142,12 @@
       (let [pool (:pool (:pg-storage context))
             period (or period-ms 300000)
             telegram? (contains? (:body (alerts/alert-request channel "")) :chat_id)
-            state (atom {:fired {} :error-base (get (counters/snapshot) :http/server-error 0)})
+            state (atom {:fired {}
+                         :error-base (get (counters/snapshot) :http/server-error 0)
+                         ;; Reports already stored before boot are the
+                         ;; operator's to triage from the table; the ping
+                         ;; is for what arrives from now on.
+                         :feedback-base (db-now pool)})
             scheduler (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
         (log/info "Starting domain alerter —"
                   (if telegram? "Telegram" "webhook") "channel, period" period "ms")

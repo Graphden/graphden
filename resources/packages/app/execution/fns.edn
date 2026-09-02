@@ -804,10 +804,10 @@
    :effects #{:db}}
 
   {:name :cancel-execution!
-   :description "Soft-cancel an in-flight execution by id. nil when id is nil or doesn't resolve. Side effects: `:db` (sets `:cancel-requested?` on the persisted row) + `:process` (interrupts the in-process future via `future-cancel`)."
+   :description "Soft-cancel an in-flight execution by id. nil when id is nil or doesn't resolve. Side effects: `:db` (sets `:cancel-requested?` on the persisted row) + `:state` (interrupts the in-process future via `future-cancel`)."
    :args {:id {:type :nullable-uuid :description "Target execution id."}}
    :return-type :nullable-keyword-map
-   :effects #{:db :process}}
+   :effects #{:db :state}}
 
   {:name :_get-exec-loaded
    :description "Load the persisted execution row by id; nil when not found. Reuses the `:get-execution` primitive."

@@ -44,7 +44,9 @@
     :_types-usages-apply :abs :add :all-rich-types :and :api-rich-types
     :assert :assert-eq :assert-some :assoc :assoc-in :atom :auth-active?
     :authenticate-request :blank? :branch-diagnostics-flat
-    :brotli-bytes :build-form :byte-count
+    :brotli-bytes :build-form
+    ;; Cached read of the fixed build artifact — no caller content.
+    :build-hashes-raw :byte-count
     :byte-len :cached-api-routes-js :call :call-noargs
     :cancel-execution! :case :cell :chain-has-process-effect?
     :classify-literal :closed-enum-of :coalesce :comp
@@ -58,6 +60,9 @@
     :cron-parse :current-branch-id :current-branch-router
     ;; /api/debug/catch — trap admin (runtime state, no caller content).
     :debug-catch-arm! :debug-catch-disarm! :debug-catch-status
+    ;; Boot-snapshot read of a declared PUBLIC deployment setting — no
+    ;; caller content passes through (like `:env`).
+    :deploy-config
     :current-org-id :current-slot-value :current-time-ms :declarable-effect-categories
     :decode-row :delete-branch! :delete-entity :deref
     :describe-type-mismatch :detect-conflicts :diff-branches

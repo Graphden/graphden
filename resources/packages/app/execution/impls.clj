@@ -99,7 +99,12 @@
    break the cancellation guarantee."
   [id]
   (cr/record-effect! :db)
-  (cr/record-effect! :process)
+  ;; `:state`, not `:process`: the future-cancel interrupts a thread the
+  ;; PLATFORM started for this very execution — a mutation of the
+  ;; in-process execution registry, not spawning or killing processes
+  ;; (`:future` / `:http-server` are `:process`). `:state` is inside the
+  ;; cloud's request-level gate, so a tenant can cancel its own run.
+  (cr/record-effect! :state)
   (when (some? id) (fn-exec/cancel-execution! ctx id)))
 
 

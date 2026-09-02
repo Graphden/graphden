@@ -43,6 +43,7 @@ below start in dependency order:
 :exec/branch-router       → Per-branch ExecutionContext + Ring dispatcher
 :exec/api-url-drift-check  → Boot-time backend↔frontend URL drift guard
 :exec/api-routes-js-cache  → Boot-cached `window.API` JS module
+:exec/deploy-config        → Boot snapshot of the PUBLIC deployment settings
 :exec/service-reconciler   → Seeds + supervises `:service` rows (runs the web server)
 :exec/cleanup-scheduler    → Hourly :fn-execution TTL sweep
 ```
@@ -350,6 +351,30 @@ router compiles. The editor addresses routes by name
 {:context #ig/ref :exec/context
  :_compiled-registry #ig/ref :exec/compiled-registry}
 ```
+
+### `:exec/deploy-config`
+
+Boot-time snapshot of the **public** deployment settings the platform's
+own UI reads at request time — resolved once from the environment (Aero
+`#env`) in the platform process and read by the pure `:deploy-config`
+base-fn (`:effects #{}`). Listing a variable here is the operator's
+declaration that it is *not* secret: any graph on the instance can read
+it, under any effect gate. Why it exists: on the cloud every tenant
+request runs under the request-level effect gate, which excludes `:env`
+by design, so a partial that read the environment directly answered 500
+for every tenant ([TENANCY_SEAM § Effect gate](TENANCY_SEAM.md#effect-gate)).
+Secrets never go here — the vault or Clojure-side config (the alerter's
+Telegram pair) hold those.
+
+```clojure
+:exec/deploy-config
+{:settings {:hub-url                 #env GRAPHDEN_HUB_URL
+            :feedback-url            #env GRAPHDEN_FEEDBACK_URL
+            :feedback-intake         #env GRAPHDEN_FEEDBACK_INTAKE
+            :disable-asset-overrides #env GRAPHDEN_DISABLE_ASSET_OVERRIDES}}
+```
+
+Blank values read as unset (nil); an undeclared key reads as nil too.
 
 ### `:exec/service-reconciler`
 

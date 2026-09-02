@@ -253,6 +253,9 @@ runtime half of the cloud effect gate
 `record-effect!` BEFORE the impl performs the effect. Only fires when the
 context restricts effects; an unrestricted context (`:allowed-effects`
 nil — self-hosted / mixed) never throws this.
+**HTTP status:** 403 — a policy refusal, not a server fault (a platform
+partial that needs a deployment setting under the gate reads it through
+`:deploy-config`, the boot snapshot, never `:env`).
 **Ex-data keys:**
 
 - `:effect` - The forbidden effect category (`:env` / `:io` / `:network` / …)

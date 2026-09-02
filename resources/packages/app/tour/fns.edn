@@ -1555,14 +1555,14 @@
    :args {:lesson {:type :any :description "Lesson id as the client sent it — untrusted JSON, coerced and matched against `\\d{2}`."}
           :event {:type :any :description "One of `started` / `step` / `finished`; anything else counts nothing."}}
    :return-type :nullable-text
-   :effects #{:io}}
+   :effects #{:state}}
 
   {:name :count-tour-step!
    :description "Bump `:tour-step-<lesson>-<n>` — the per-step bucket a drop-off is read off. nil for a non-lesson or an index outside 0..99."
    :args {:lesson {:type :any :description "Untrusted lesson id — same validation as `:count-tour-event!`."}
           :step {:type :any :description "Zero-based step index; parsed, and bounded to a lesson's possible length."}}
    :return-type :nullable-text
-   :effects #{:io}}
+   :effects #{:state}}
 
   {:name :_tour-progress-body
    :parent :parse-json-body}

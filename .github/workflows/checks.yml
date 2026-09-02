@@ -277,6 +277,10 @@ jobs:
 
       - name: Run coverage
         run: |
+          # pipefail, or `tee` reports success over a failing suite —
+          # this job IS the unit gate on GitHub CI, and exactly that
+          # masked a stable 39-problem cloverage run for days.
+          set -o pipefail
           bb coverage 2>&1 | tee coverage-output.txt
           # Extract form-coverage from the cloverage summary row.
           # The table is pipe-delimited and uses ANSI colour codes

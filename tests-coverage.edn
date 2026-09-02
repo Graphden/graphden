@@ -25,7 +25,15 @@
 {:tests
  [{:id :unit
    :test-paths ["test"]
-   :skip-meta [:integration]
+   ;; MIRRORS tests.edn's unit suite — keep :skip-meta IDENTICAL. This
+   ;; drifted once (only [:integration] here) and the coverage run
+   ;; quietly picked up what tests.edn had excluded: :container-e2e
+   ;; (needs the locally-built graphden-executor:latest — absent on a
+   ;; GitHub runner) and :perf (writes into the shared golden graph and
+   ;; process-global counters, racing the parallel crud tests). Result:
+   ;; a stable "4 errors, 35 failures" under cloverage that the
+   ;; workflow's un-pipefail'd `| tee` then swallowed for days.
+   :skip-meta [:integration :container-e2e :perf]
    :kaocha/parallelism 8}]
 
  :plugins [:kaocha.plugin/profiling

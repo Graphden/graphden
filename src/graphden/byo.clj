@@ -187,7 +187,10 @@
         refresh-pending (atom false)
         submit-refresh! (fn []
                           (when (compare-and-set! refresh-pending false true)
-                            (java.util.concurrent.ExecutorService/.submit
+                            ;; execute, not submit: fire-and-forget, and
+                            ;; execute(Runnable) is single-overload — no
+                            ;; hint for instrumentation to erase.
+                            (java.util.concurrent.ExecutorService/.execute
                               refresh-exec
                               ^Runnable (fn []
                                           (reset! refresh-pending false)

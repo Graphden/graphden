@@ -878,17 +878,27 @@
          ;; queue full) throws `RejectedExecutionException` HERE, on the
          ;; submitting thread, which `apply-execute*` maps to 503 + Retry-After.
          ;; The returned j.u.c.Future supports `.get`/`.cancel`/`.isDone`.
-         fut (java.util.concurrent.ExecutorService/.submit
-               (current-execution-pool)
-               ^Callable
-               (fn []
-                 (try
-                   (bf)
-                   (finally
-                     ;; @watchdog blocks only until the request thread delivers
-                     ;; it (microseconds after this future was created).
-                     (some-> @watchdog (java.util.concurrent.ScheduledFuture/.cancel false))
-                     (when release (release))))))]
+         ;; FutureTask + execute, NOT `.submit`: submit's Runnable/Callable
+         ;; overload pick rode on the ^Callable hint, which coverage
+         ;; instrumentation erases — the reflective submit(Runnable)'s
+         ;; Future.get() returns null by contract, nulling every executed
+         ;; result under `bb coverage` (same class as abort-shield/run!).
+         ;; RejectedExecutionException still throws HERE, on the
+         ;; submitting thread — execute shares submit's saturation
+         ;; behaviour on a bounded pool.
+         fut (let [ft (java.util.concurrent.FutureTask.
+                        ^Callable
+                        (fn []
+                          (try
+                            (bf)
+                            (finally
+                              ;; @watchdog blocks only until the request thread
+                              ;; delivers it (microseconds after creation).
+                              (some-> @watchdog (java.util.concurrent.ScheduledFuture/.cancel false))
+                              (when release (release))))))]
+               (java.util.concurrent.ExecutorService/.execute
+                 (current-execution-pool) ft)
+               ft)]
      (deliver watchdog (arm-deadline! *max-execution-wall-ms* cancel-flag fut))
      [fut trace path-trace])))
 

@@ -89,7 +89,20 @@
     ;; — without it the shield thread saw a nil *request-bump-log*,
     ;; bumps went unlogged, notes drained nothing, and EVERY shielded
     ;; write became a heal (run-9: 41 heals).
-    (let [^Future fut (ExecutorService/.submit pool ^Callable (bound-fn* f))
+    ;;
+    ;; FutureTask + execute, NOT `.submit`: submit is overloaded on
+    ;; Runnable vs Callable at the same arity, and the choice used to
+    ;; ride on the ^Callable hint — which coverage instrumentation
+    ;; (cloverage wraps every subform) erases, sending the reflective
+    ;; pick to submit(Runnable)… whose Future.get() returns null BY
+    ;; CONTRACT. The task ran, the value vanished: 35 unit tests failed
+    ;; only under `bb coverage` (create-entity → nil id cascade).
+    ;; FutureTask's 1-arg ctor and execute(Runnable) are each
+    ;; single-overload at their arity, so no hint can be lost.
+    (let [^Future fut (let [ft (java.util.concurrent.FutureTask.
+                                 ^Callable (bound-fn* f))]
+                        (ExecutorService/.execute pool ft)
+                        ft)
           timeout-ms *join-timeout-ms*
           ;; A single DEADLINE, not a per-attempt timeout: repeated
           ;; interrupts must not reset the clock, or a steadily-interrupted

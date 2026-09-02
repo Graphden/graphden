@@ -1389,9 +1389,17 @@
   ([timeout-ms thunk] (run-with-timeout timeout-ms thunk nil))
   ([timeout-ms thunk executor]
    (if executor
-     (if-let [fut (try (java.util.concurrent.ExecutorService/.submit
-                         ^java.util.concurrent.ExecutorService executor
-                         ^Callable thunk)
+     ;; FutureTask + execute, NOT `.submit`: submit is overloaded on
+     ;; Runnable vs Callable and the pick rode on the ^Callable hint —
+     ;; which coverage instrumentation erases, reflectively selecting
+     ;; submit(Runnable) whose Future.get() returns null by contract
+     ;; (same failure class as util.abort-shield/run!). FutureTask's
+     ;; 1-arg ctor and execute(Runnable) are single-overload per arity.
+     (if-let [fut (try (let [ft (java.util.concurrent.FutureTask.
+                                  ^Callable thunk)]
+                         (java.util.concurrent.ExecutorService/.execute
+                           ^java.util.concurrent.ExecutorService executor ft)
+                         ft)
                        (catch java.util.concurrent.RejectedExecutionException _ nil))]
        (let [result (try (java.util.concurrent.Future/.get
                            fut (long timeout-ms) java.util.concurrent.TimeUnit/MILLISECONDS)

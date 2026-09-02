@@ -15,7 +15,11 @@ in [TENANCY_SEAM.md](TENANCY_SEAM.md).)
 
 - The **platform operator** is trusted — runs the executor, owns the Postgres,
   holds the Vault / OpenBao root token. On the hosted cloud that is Graphden;
-  self-hosting, it is you.
+  self-hosting, it is you. The operator ORG's own apps (the graphden.dev
+  landing, served off the apex `:domain` row) are platform-owned graph and
+  run in the platform ctx — no plan effect gate — via the addon's
+  `:tenancy/app-router :operator-org`; every other org's app runs on its
+  plan's effects. Nothing a tenant authors ever runs under that org.
 - A **tenant** (an org authoring a graph on the shared cloud) is **untrusted**:
   its graph is arbitrary composition the platform must contain.
 - A **single-tenant self-host** has no untrusted tenant — the tenant-isolation

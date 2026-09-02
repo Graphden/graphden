@@ -194,7 +194,10 @@ Everything above is a socket. The plugs — `OrgScopedStorage` (own+public
 read / own write / org stamping / tenant-forbidden privileged entities),
 Postgres RLS policies, grants + roles + per-namespace authz, plans/tiers +
 quotas, users + sessions, the FaaS app-router (tenant apps = handler-fns, not
-owned services), domains + DNS verification, demo-org GC, operator bootstrap —
+owned services; the OPERATOR org's own apps run in the platform ctx —
+`:operator-org` — so the landing can, e.g., serve its own images through
+`:read-resource-bytes`), domains + DNS verification, demo-org GC, operator
+bootstrap —
 live in the private `graphden-tenancy` repo (see its `docs/PLATFORM_NOTES.md`
 for the design rationale) and reach production through the `graphden-cloud`
 build.

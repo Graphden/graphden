@@ -116,11 +116,11 @@ function compatibleMIParentInfo(targetFnId, currentParentIds) {
   if (!lookups?.fnMap) return { candidateIds: candidates, rejected };
   const existingBaseFns = new Set();
   for (const pid of currentParentIds) {
-    _baseFnsOf(pid).forEach(b => existingBaseFns.add(b));
+    _baseFnsOf(pid).forEach(b => { existingBaseFns.add(b); });
   }
   const existingSubstantiveSlots = new Set();
   for (const pid of currentParentIds) {
-    _substantiveBoundSlotIds(pid).forEach(s => existingSubstantiveSlots.add(s));
+    _substantiveBoundSlotIds(pid).forEach(s => { existingSubstantiveSlots.add(s); });
   }
   lookups.fnMap.forEach((_, fid) => {
     const r = _miCandidateRejectionReason(targetFnId, fid, currentParentIds,

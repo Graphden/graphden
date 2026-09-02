@@ -46,7 +46,7 @@ Two consequences:
 `:authed` inherits from `:base`, which inherits from `:const`.
 The **inheritance chain** of `:authed` is:
 
-```
+```text
 :authed → :base → :const
 ```
 
@@ -96,7 +96,7 @@ combined:
 `:json-ok-response` inherits slots from BOTH `:json-content-type`
 and `:ok-response`. The inheritance chain becomes a BFS closure:
 
-```
+```text
 :json-ok-response
    ↓ ↓
 :json-content-type  :ok-response

@@ -51,7 +51,7 @@ inherited slots." No runtime arg injection.
 
 **Example: an `add-10` that seeds the number list with `10`:**
 
-```
+```text
 fn add  (base-fn, parent-ids: [], return-type-fn-id: numeric)
 slot s-nums  (name: "nums", type-fn-id: [list numeric])
 fn-slot {fn-id: add, slot-id: s-nums, position: 0}
@@ -204,7 +204,7 @@ Storage-layer graph resolution caps walks via
 
 ## Part 4: Data Schema
 
-```
+```text
 +-----------------------------------------------------------+
 | fn                                                         |
 +-----------------------------------------------------------+
@@ -439,7 +439,7 @@ impl runs.
 To call the same base-fn with different inputs at different sites,
 create a composed fn per site:
 
-```
+```text
 fn add-10-20  (parent-ids: [add])
 binding {slot s-nums, list-append: true}
 binding-list-item {position 0, value 10}
@@ -594,7 +594,7 @@ To add a new backend: implement these protocols and run
 
 ## Appendix B: Module Dependency Graph
 
-```
+```text
        schema/fields
             │
    ┌────────┼────────┐

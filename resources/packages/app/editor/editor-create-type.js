@@ -392,7 +392,7 @@ function buildPrefillFromFn(fn, kind) {
   return base;
 }
 
-async function putTypeEdit(kind, fnId, name, payload) {
+async function putTypeEdit(_kind, fnId, name, payload) {
   // Records take a different path because slot add / remove / retype
   // is a multi-row delta — handled atomically by
   // PUT /api/types/record. Refinement / union / variant / list all
@@ -433,7 +433,7 @@ async function putTypeEdit(kind, fnId, name, payload) {
   return r;
 }
 
-async function postTypeCreate(kind, parentNsId, name, payload) {
+async function postTypeCreate(_kind, parentNsId, name, payload) {
   const desc = payload.description || '';
   if (payload.kind === 'record') {
     return postRecordOrList(API.api_types_record, name, parentNsId,

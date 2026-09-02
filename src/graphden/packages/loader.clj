@@ -511,8 +511,8 @@
    deps (legacy bare names) are skipped. Pure over its argument so it is
    unit-testable without classpath fixtures."
   [metas]
-  (doseq [[pkg meta] metas
-          dep (normalize-deps (:dependencies meta))
+  (doseq [[pkg pkg-meta] metas
+          dep (normalize-deps (:dependencies pkg-meta))
           :when (:constraint dep)
           :let [present (get-in metas [(:name dep) :version])]]
     (when-not (semver/satisfies-constraint? present (:constraint dep))

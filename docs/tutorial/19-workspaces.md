@@ -29,7 +29,7 @@ In the **Build** surface's context bar — alongside the *branch*
 and *packages* chips (Lessons 8 and 14) — sits the **workspace
 chip**, showing your current scope. Click it:
 
-```
+```text
 Workspace — choose what you see
   ◍ All functions                       ← the unscoped default
   ──────────────────────────────

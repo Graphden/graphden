@@ -55,7 +55,7 @@
     ;; seams): each `extensions`
     ;; entry is a `(builder → builder)` fn — the tenancy addon adds its
     ;; `:grant` entity here without editing core. Absent → core schema.
-    (ds/build (reduce (fn [b extend] (extend b)) base (or extensions [])))))
+    (ds/build (reduce (fn [b extension] (extension b)) base (or extensions [])))))
 
 
 ;; =============================================================================

@@ -97,7 +97,7 @@ the **Build** surface, not on an admin page. In the context bar
 (top of the Build surface, alongside the *workspace* and *branch*
 chips) click **packages**. A popover opens:
 
-```
+```text
 Packages
   Package        Version
   hello          1.0.0    [1.0.0 ↑] ×      ← installed pins on THIS branch

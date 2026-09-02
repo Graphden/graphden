@@ -1,0 +1,65 @@
+{
+	// biome config — every non-default setting below has a `// why:` line.
+	// Project policy: no rule silenced just to make the linter quiet.
+	"$schema": "https://biomejs.dev/schemas/2.5.0/schema.json",
+	"assist": {
+		"actions": {
+			"source": {
+				// why: the editor is ~70 classic scripts concatenated into one
+				// bundle — there are no ES imports to organise.
+				"organizeImports": "off"
+			}
+		}
+	},
+	"files": {
+		"includes": [
+			"**/resources/packages/app/editor/**/*.js",
+			"!**/node_modules/**",
+			"!**/tools/browser-test/**"
+		]
+	},
+	"javascript": {
+		// why: these three are defined outside the bundle — BUILD_HASH is
+		// substituted at build time, authFetch/isAuthenticated come from the
+		// standalone runtime script served ahead of the editor bundle.
+		"globals": ["BUILD_HASH", "authFetch", "isAuthenticated"],
+		"formatter": { "enabled": false }
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended",
+			"style": {
+				// why: 550+ sites — string concatenation is the bundle's idiom;
+				// a wholesale template-literal rewrite is churn with no gain.
+				"useTemplate": "off",
+				// why: style-only, not in the recommended preset; reassigning a
+				// parameter for defaulting/normalising is used deliberately.
+				"noParameterAssign": "off",
+				// why: not in the recommended preset but worth having — one
+				// declaration per statement, `Number.parseInt`, no `else`
+				// after an early return. All zero-violation once fixed.
+				"useSingleVarDeclarator": "error",
+				"useNumberNamespace": "error",
+				"noUselessElse": "error"
+			},
+			"complexity": {
+				// why: style-only; `.forEach` reads fine and is used ~130 times.
+				"noForEach": "off"
+			},
+			"suspicious": {
+				// why: the editor logs on purpose (user-visible diagnostics in
+				// the browser console — see the `console.warn` sites).
+				"noConsole": "off"
+			},
+			"correctness": {
+				// why: the bundle is concatenated classic scripts sharing ONE
+				// scope. A function declared in editor-a.js is called from
+				// editor-b.js or from an inline `onclick="…"` in fns.edn, so
+				// biome (per-file) reports ~160 live functions as unused; the
+				// signal-to-noise ratio makes the rule unusable here.
+				"noUnusedVariables": "off"
+			}
+		}
+	}
+}

@@ -1,4 +1,4 @@
-## Runtime slot-id-keyed refactor (#104)
+# Runtime slot-id-keyed refactor (#104)
 
 > **🔧 Internal engineering record — not user documentation.** A
 > contributor-facing design record, indexed from [CLAUDE.md](../CLAUDE.md) and
@@ -13,11 +13,11 @@
 
 Branch: `refactor/slot-id-keyed-runtime` (merged). Forked from `dca0e740`.
 
-### 1. Problem
+## 1. Problem
 
 `:body` and similar names collide in the runtime free-args map (`fa`) when two semantically distinct slots reachable from one fn-def happen to share an ext-name. Concrete repro from `app/page/fns.edn`:
 
-```
+```clojure
 ;; :html-page-handler :parent :html-ok-response
 ;;                    :args {:body :html-page-rendered}
 ;; (binds Ring HTTP body to rendered HTML string)
@@ -28,7 +28,7 @@ Branch: `refactor/slot-id-keyed-runtime` (merged). Forked from `dca0e740`.
 
 Both slots' ext-name is `:body`. Caller passes `{:body [:p "ok"]}`. Test fails:
 
-```
+```text
 expected: <body><p>ok</p></body>
 actual:   <body>&lt;html lang=&quot;en&quot;&gt;...&lt;title&gt;X&lt;/title&gt;...&lt;/html&gt;</body>
 ```
@@ -37,7 +37,7 @@ The `<body>` tag receives an HTML-escaped rendered page string instead of caller
 
 **Workaround today:** `:as :page-body` rename forces caller to pass `:page-body`; inner inline anon's slot exposes as `:page-body` (different ext-name), no collision. Inline comment in `app/page/fns.edn` documents the workaround.
 
-### 2. Root cause
+## 2. Root cause
 
 Storage and parser hold full slot-id identity (binding row stores `slot-id` UUID, `:body` resolved at sync time). **Runtime fa is name-keyed**, dropping identity. Two distinct slots with the same name collide.
 
@@ -53,15 +53,15 @@ Storage and parser hold full slot-id identity (binding row stores `slot-id` UUID
 | `build-ref-renames` | name → name translation |
 | HOF closure capture | by name |
 
-### 3. Architectural conclusion
+## 3. Architectural conclusion
 
 The name → ID resolution boundary belongs at **sync time** (parser writes binding rows with slot-id) and at the **public API boundary** (`execute-by-name` translates user's name-keyed args to slot-id-keyed fa). Everything past sync should be slot-id-keyed.
 
 This matches CLAUDE.md principle: *Slots are global identities (one-shot creation, immutable). Bindings overlay them per (fn, slot) pair.* Storage realizes this; runtime currently doesn't.
 
-### 4. Target architecture
+## 4. Target architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │ AUTHOR INPUT (fns.edn)              — name-keyed            │
 │   {:body :html-page-rendered}                                │
@@ -91,7 +91,7 @@ This matches CLAUDE.md principle: *Slots are global identities (one-shot creatio
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 5. Why incremental dual-key failed (old branch, 2026-06-24)
+## 5. Why incremental dual-key failed (old branch, 2026-06-24)
 
 The dropped `refactor/slot-id-runtime-fa` tried to write slot-id keys ALONGSIDE name keys, so old name readers and new slot-id readers could coexist during transition. Three problems killed it:
 
@@ -103,7 +103,7 @@ The dropped `refactor/slot-id-runtime-fa` tried to write slot-id keys ALONGSIDE 
 
 Conclusion: no incremental dual-key bridging works. The cutover must flip the whole runtime to slot-id-keyed at once.
 
-### 6. Implementation plan
+## 6. Implementation plan
 
 Multi-week, single branch. Each phase ends green for the full test suite — no half-states merged into popovers/develop.
 
@@ -204,7 +204,7 @@ Acceptance: `bb test` green; `app/page/fns.edn` `:as :page-body` removed (page w
   - `feedback_assoc_slot_named_map` — CLOSED at sync time by `slot-resolution`'s orphan-slot validator (`slot-resolution.clj:426` throws `:packages/orphan-slot-binding`). Not a workaround pattern.
   - `feedback_optional_slot_free_arg_leak` — STAYS. `:where {:value {}}` defensive pin on `:storage-query-identities` consumers is load-bearing. Attempted to sweep 11 sites in commit `c49f577c`; `bb test` + smoke green; `bb test-e2e` reproduced the original failure on `GET /partials/secrets-panel` (`Unknown field 'request-method' in where clause`). Pins restored. Phase 5 HOF translation only covers HOF-boundary slot routing — non-HOF env-binding closure-capture paths still leak named free args by closure default.
 
-### 7. What's shipped, what's not
+## 7. What's shipped, what's not
 
 The hybrid runtime fa described in § 4 + Phase 4 / 5 is the FINAL design, not a transitional state. Two key spaces (slot-id + name) serve different needs:
 
@@ -213,7 +213,7 @@ The hybrid runtime fa described in § 4 + Phase 4 / 5 is the FINAL design, not a
 
 An alternative was considered (env-builder slot-id-only + cross-fn rename slot-id translation + readers drop name fallback) and dropped. Two attempts failed at runtime; the marginal benefit (closing 2 remaining `:on-throw :const` workaround sites) didn't justify the multi-day risk.
 
-### 8. Out of scope
+## 8. Out of scope
 
 - Editor UI shows names only (no slot-id columns / chips)
 - fns.edn syntax unchanged
@@ -221,7 +221,7 @@ An alternative was considered (env-builder slot-id-only + cross-fn rename slot-i
 - Multi-rename slots, parser changes — none
 - Public API signature changes — none (callers continue to pass names; translation is internal)
 
-### 9. Addendum (2026-08-27) — inherited renames
+## 9. Addendum (2026-08-27) — inherited renames
 
 Two facts established while closing the lesson-13 `:wrap-custom-script`
 descendant-binding bug (a value bound as `:body` silently vanished):

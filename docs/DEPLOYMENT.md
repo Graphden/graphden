@@ -233,7 +233,7 @@ The open `accounts` addon gives a self-hosted instance real users
 (passwords, social login, sessions, 2FA) instead of the single token.
 Enable it via:
 
-```
+```bash
 GRAPHDEN_ADDON_CONFIGS=graphden/accounts/addon.edn
 ```
 

@@ -15,7 +15,6 @@ Also honor CLAUDE.md, docs/PHILOSOPHY.md, and docs/PACKAGE_DISTRIBUTION.md.
 
 ## Prime directives
 
-
 - **Property placement follows the fn-metadata rule.** A per-function property
   lives in the GRAPH by default (inherit a marker / a binding / a type — the
   `secret` = inherit `:secret-leaf` precedent); a DB column ONLY for
@@ -38,7 +37,6 @@ Also honor CLAUDE.md, docs/PHILOSOPHY.md, and docs/PACKAGE_DISTRIBUTION.md.
   release red. Chat in Russian, code/comments/commits in English.
 
 ## Current state (fold in before starting)
-
 
 - **Slice A1 is IMPLEMENTED and locally verified but NOT committed.** It relocated
   the packages panel off the Organization surface onto a Build-surface context-bar
@@ -212,7 +210,6 @@ sidebar baseline was refreshed — it was STALE from A2's ⬆ + Workspaces' ⊘
 ns-row buttons, which show persistently on tablet layouts only).
 
 ## Coherence guardrails (from the review — hold these)
-
 
 - Encapsulation (interface vs internals) is a GRAPH property (a visibility
   marker via inheritance, the `secret-leaf` precedent) — never a name/prefix and

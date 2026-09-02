@@ -66,7 +66,7 @@
 
 (deftest materialize-package-version-into-versioned-ns
   (testing "materialize syncs a published bundle under <ns-root>@<sanitized-version>"
-    (let [{:keys [ctx storage all-name->id]} *bootstrap*
+    (let [{:keys [ctx all-name->id] st :storage} *bootstrap*
           export-id (get all-name->id :export-namespace)
           publish-id (get all-name->id :publish-package)
           materialize-id (get all-name->id :materialize-package-version)
@@ -80,9 +80,9 @@
           (is (= "app.contact-demo@2-0-0" (:namespace r)))
           (is (pos? (:materialized r)))))
       (testing "the bundle's fns exist under the versioned namespace"
-        (let [vns (first (sp/query-entities storage :ns {:name "contact-demo@2-0-0"}))]
+        (let [vns (first (sp/query-entities st :ns {:name "contact-demo@2-0-0"}))]
           (is (some? vns) "leaf versioned ns created")
-          (is (seq (sp/query-entities storage :fn {:namespace-id (:id vns)}))
+          (is (seq (sp/query-entities st :fn {:namespace-id (:id vns)}))
               "bundle fns materialized under it")))
       (testing "materialize is idempotent (re-run stays ok)"
         (let [r (exec/execute-with-named-args ctx materialize-id
@@ -102,7 +102,7 @@
   ;; name) — the identity rows come back, the versions don't — and the batch
   ;; upsert used to classify that as an update, so `update-entities` threw
   ;; "Entities not found" and every later install of that package 404'd.
-  (let [{:keys [ctx storage all-name->id]} *bootstrap*
+  (let [{:keys [ctx all-name->id] st :storage} *bootstrap*
         export-id (get all-name->id :export-namespace)
         publish-id (get all-name->id :publish-package)
         materialize-id (get all-name->id :materialize-package-version)
@@ -112,16 +112,16 @@
                                    :bundle bundle})
     (exec/execute-with-named-args ctx materialize-id
                                   {:pkg-name "revive-demo" :pkg-version "1.0.0"})
-    (let [vns (first (sp/query-entities storage :ns {:name "contact-demo@1-0-0"}))
-          fns (sp/query-entities storage :fn {:namespace-id (:id vns)})]
+    (let [vns (first (sp/query-entities st :ns {:name "contact-demo@1-0-0"}))
+          fns (sp/query-entities st :fn {:namespace-id (:id vns)})]
       (is (seq fns) "precondition: the copy is there")
       ;; The USER-facing delete (what /api/entities/fn does) tombstones the
       ;; version and keeps the identity row — that asymmetry is the whole
       ;; bug: a hard delete would drop the identity and the re-sync would
       ;; simply create it again.
       (binding [vcore/*tombstone-delete?* true]
-        (doseq [f fns] (sp/delete-entity storage :fn (:id f))))
-      (is (empty? (sp/query-entities storage :fn {:namespace-id (:id vns)}))
+        (doseq [f fns] (sp/delete-entity st :fn (:id f))))
+      (is (empty? (sp/query-entities st :fn {:namespace-id (:id vns)}))
           "precondition: the copy is gone")
       (testing "re-materialising the same version succeeds instead of 404-ing"
         (let [r (exec/execute-with-named-args ctx materialize-id
@@ -129,7 +129,7 @@
           (is (true? (:ok r)))
           (is (pos? (:materialized r)))))
       (testing "and the fns are visible again"
-        (is (seq (sp/query-entities storage :fn {:namespace-id (:id vns)})))))))
+        (is (seq (sp/query-entities st :fn {:namespace-id (:id vns)})))))))
 
 
 (deftest version-qualified-ns-respects-dot-boundaries
@@ -761,25 +761,25 @@
 
 (deftest update-package-version-rewrites-project-refs-not-package-internal
   (testing "update repoints the project's OWN refs old→new, leaving package-internal refs alone"
-    (let [{:keys [ctx storage all-name->id]} *bootstrap*
+    (let [{:keys [ctx all-name->id] st :storage} *bootstrap*
           install-id (get all-name->id :install-package)
           update-id  (get all-name->id :update-package-version)
           fns [{:name :ubase :namespace "updemo" :parent :const :args {:value "b"}}
                {:name :uwrap :namespace "updemo" :parent :map
                 :args {:func :ubase :coll {:value []}}}]]
       (doseq [v ["1.0.0" "2.0.0"]]
-        (sp/create-entity storage :package-version
+        (sp/create-entity st :package-version
                           {:name "updemo" :version v :ns-root "updemo"
                            :fns fns :dependencies [:const :map] :content-hash (str "uh-" v)}))
       (exec/execute-with-named-args ctx install-id {:pkg-name "updemo" :pkg-version "1.0.0"})
       (let [old-ubase (ids/fn-id "updemo@1-0-0" :ubase)
             new-ubase (ids/fn-id "updemo@2-0-0" :ubase)
             ;; the package-INTERNAL ref uwrap@1 → ubase@1, created by materialize
-            internal (first (sp/query-entities storage :binding {:ref-fn-id old-ubase}))
+            internal (first (sp/query-entities st :binding {:ref-fn-id old-ubase}))
             ;; a USER fn (owner OUTSIDE the package) referencing ubase@1
-            user-ns (sp/create-entity storage :ns {:name "userland"})
-            consumer (sp/create-entity storage :fn {:name "up-consumer" :namespace-id (:id user-ns)})
-            user-binding (sp/create-entity storage :binding
+            user-ns (sp/create-entity st :ns {:name "userland"})
+            consumer (sp/create-entity st :fn {:name "up-consumer" :namespace-id (:id user-ns)})
+            user-binding (sp/create-entity st :binding
                                            {:fn-id (:id consumer) :slot-id (:slot-id internal)
                                             :ref-fn-id old-ubase})]
         (is (some? internal) "materialize created the package-internal uwrap→ubase ref")
@@ -790,11 +790,11 @@
             (is (= "2.0.0" (:to r)))
             (is (= 1 (:rewritten-refs r)) "the user ref only — NOT the package-internal one")))
         (testing "the user's ref now points at v2"
-          (is (= new-ubase (:ref-fn-id (sp/read-entity storage :binding (:id user-binding))))))
+          (is (= new-ubase (:ref-fn-id (sp/read-entity st :binding (:id user-binding))))))
         (testing "the package-internal ref still points at v1 (versions never mixed)"
-          (is (= old-ubase (:ref-fn-id (sp/read-entity storage :binding (:id internal))))))
+          (is (= old-ubase (:ref-fn-id (sp/read-entity st :binding (:id internal))))))
         (testing "the pin now records v2"
-          (is (= "2.0.0" (:version (first (sp/query-entities storage :package-install
+          (is (= "2.0.0" (:version (first (sp/query-entities st :package-install
                                                              {:package-name "updemo"}))))))))))
 
 

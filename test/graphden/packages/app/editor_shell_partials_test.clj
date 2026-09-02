@@ -159,9 +159,9 @@
       ;; Roster = the FULL canonical vocabulary — every recordable
       ;; category is declarable (the :state recordable-but-
       ;; undeclarable split is the bug this pins against).
-      (doseq [cat (sort (map name types/known-effect-categories))]
-        (is (str/includes? body (str "value=\"" cat "\""))
-            (str cat " offered")))
+      (doseq [category (sort (map name types/known-effect-categories))]
+        (is (str/includes? body (str "value=\"" category "\""))
+            (str category " offered")))
       (is (re-find #"checked=\"checked\"[^>]*value=\"none\"" body)
           "no-contract mode pre-selected (hiccup sorts attrs alphabetically)")
       (is (str/includes? body "disabled")

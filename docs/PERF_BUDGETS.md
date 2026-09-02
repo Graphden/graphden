@@ -55,7 +55,7 @@ host, this moment.
 
 ## What a failure means
 
-```
+```text
 ✗ :registry/delta-fell-back-to-rebuild     3 / max 0
     A caller named its changed fn-ids and STILL paid for a full graph
     recompile: delta-recompile! hit a cold reverse-deps index and silently
@@ -248,7 +248,7 @@ a guess, minutes after the fact.
 
 `run-edit-tests.sh` samples them around each e2e file and prints the delta:
 
-```
+```text
 [ 13s  executor=998.1MiB]  registry/delta-recompile=8
 ```
 
@@ -409,7 +409,7 @@ why it reports and the counts gate.
 `kaocha.plugin/perf` measures nothing itself. `:kaocha.plugin/profiling` already
 stamps a duration on every testable, so
 
-```
+```text
 ns-duration − Σ(child var durations) ≈ the :once fixture cost
 ```
 
@@ -439,7 +439,7 @@ namespaces all shared **one database**. `bootstrap-crud-graph-from-golden!`'s
 0-arity read `(ns-name *ns*)` inside the fixture body, which kaocha runs on a
 worker thread where `*ns*` is `user` — measured, not inferred:
 
-```
+```text
 at-load        = graphden.scratch.ns-probe-test
 at-fixture-run = user
 ```

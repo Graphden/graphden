@@ -183,7 +183,7 @@ self-install on first run; `npm install` once for the JS/CSS set. See
 
 Three layers, each depending only on the one below:
 
-```
+```text
 ┌────────────────────────────────────────────────────────────┐
 │  EXECUTOR      compile graph → in-memory registry of         │
 │                closures; execute; type-check; effect-track   │

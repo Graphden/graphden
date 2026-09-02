@@ -37,7 +37,7 @@ Open any fn's row-actions (`⋯`) and click **⌛**. The popover lists
 every version row for that fn, newest first, across **every branch** —
 not just the one you are on:
 
-```
+```text
 main    2026-08-22 09:48   restore   second
 main    2026-08-22 09:48   restore   first
 feat-x  2026-08-21 17:02   switch    restore
@@ -77,7 +77,7 @@ you picked, and it does not move a pointer backwards. It **appends** a
 new version carrying the old values. Right after restoring "first" over
 "second", the timeline reads:
 
-```
+```text
 main    09:48   first     ← the restore
 main    09:48   second
 main    09:48   first

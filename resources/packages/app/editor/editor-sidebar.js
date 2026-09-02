@@ -466,7 +466,7 @@ function buildNsTree(data) {
   // Pre-create tree nodes for every declared namespace, even ones that
   // have no fns yet — newly-created empty namespaces should show up in
   // the sidebar immediately, not only after their first fn is added.
-  nsByPath.forEach((ns, path) => {
+  nsByPath.forEach((_ns, path) => {
     const parts = path.split('.');
     let node = root;
     let cumulativePath = '';

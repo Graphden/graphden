@@ -164,8 +164,7 @@ h3 { font-size: 1.2rem; }
 
 .row {
   display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
+  flex-flow: row wrap;
   align-items: center;
   gap: 12px;
 }

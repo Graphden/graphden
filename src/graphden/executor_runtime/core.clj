@@ -178,8 +178,8 @@
     (start! :prod)
     (catch clojure.lang.ExceptionInfo e
       (log/error e "boot failed — halting the partial system and exiting")
-      (when-let [partial (:system (ex-data e))]
-        (try (ig/halt! partial)
+      (when-let [partial-system (:system (ex-data e))]
+        (try (ig/halt! partial-system)
              (catch Exception t (log/warn t "partial-system halt failed"))))
       (exit! 1))))
 

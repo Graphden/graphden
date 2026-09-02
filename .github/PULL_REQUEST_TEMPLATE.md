@@ -1,3 +1,5 @@
+<!-- A PR body fragment, not a document: GitHub renders it under the PR title, so `##` is its top level. -->
+<!-- markdownlint-disable-next-line MD041 -->
 ## Summary
 
 Describe what this change does.

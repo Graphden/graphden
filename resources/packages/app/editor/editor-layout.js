@@ -183,7 +183,7 @@ function metadataStripsHeight(nodeData) {
  */
 function typographyScale() {
   try {
-    const px = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    const px = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
     return Number.isFinite(px) && px > 0 ? px / 16 : 1;
   } catch (_) {
     return 1;
@@ -217,7 +217,7 @@ function calculateNodeSize(nodeData) {
       width: Math.round(Math.max(40, effectiveLen * 6 + 16 + chipBudget + triggerBudget) * argScale),
       height: Math.round((22 + DRAG_HANDLE_HEIGHT) * argScale)  // content (padding 4+4 + line 14) + drag handle
     };
-  } else {
+  }
     // Both fn and placeholder use fn-overlay rendering with potential MI rows.
     // Cap visible row width — names beyond this are truncated with an
     // ellipsis at render time and revealed in full via the hover popover.
@@ -262,7 +262,6 @@ function calculateNodeSize(nodeData) {
                             + stripsExtra);
     const fnScale = typographyScale();
     return { width: Math.round(width * fnScale), height: Math.round(height * fnScale) };
-  }
 }
 
 // ============================================================================

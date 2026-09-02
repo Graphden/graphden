@@ -349,7 +349,6 @@ function enterSecretBindingEditMode(arg, anchorEl) {
         }
         return { ok: false, error: await responseError(r) };
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.error('value save fetch threw', err);
         return { ok: false, error: 'Save failed — network error.' };
       }
@@ -420,7 +419,6 @@ async function writeBindingFields(arg, fields) {
                           (body ? '&' + body : ''));
     return r?.ok ? { ok: true } : { ok: false, error: await responseError(r) };
   } catch (err) {
-    // eslint-disable-next-line no-console
     console.error('binding save fetch threw', err);
     return { ok: false, error: 'Save failed — network error.' };
   }
@@ -439,7 +437,6 @@ async function putSequenceItemValue(itemId, value) {
     });
     return r?.ok ? { ok: true } : { ok: false, error: await responseError(r) };
   } catch (err) {
-    // eslint-disable-next-line no-console
     console.error('binding save fetch threw', err);
     return { ok: false, error: 'Save failed — network error.' };
   }
@@ -663,7 +660,6 @@ async function createTemplateInstanceAndAppend(fnId, template, name, position) {
     return appended ? { ok: true }
                     : { ok: false, error: 'Instance created, but appending the ref failed.' };
   } catch (err) {
-    // eslint-disable-next-line no-console
     console.error('template-instance create threw', err);
     return { ok: false, error: 'Create failed — network error.' };
   }

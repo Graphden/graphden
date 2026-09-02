@@ -63,8 +63,8 @@
 
 
 (deftest rate-caps-present
-  (let [vals (get-in @defs [:_fb-rate-limited? :args :values])
-        caps (set (map #(get-in % [:args :nums 1 :value]) vals))]
+  (let [limiter-vals (get-in @defs [:_fb-rate-limited? :args :values])
+        caps (set (map #(get-in % [:args :nums 1 :value]) limiter-vals))]
     (testing "both fixed-window caps are wired (global + per-IP)"
       (is (= #{200 20} caps)))))
 

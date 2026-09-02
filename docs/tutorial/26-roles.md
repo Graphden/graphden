@@ -37,7 +37,7 @@ to three people and remembering all three when it changes.
 Account menu → **Organization** → **Roles** (gated on `manage-roles`,
 so an org owner always sees it). One row per role:
 
-```
+```text
 support     manage-users, manage-grants     alice, bob     ×
 ```
 

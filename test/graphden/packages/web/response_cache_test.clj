@@ -44,26 +44,26 @@
 (deftest put-then-get-roundtrips-across-executes
   (testing "store under a key, then a SEPARATE execute reads it back (cell persists)"
     (let [put (eh/fn-id "response-cache-put-if!")
-          get (eh/fn-id "response-cache-get")
-          k   ["/rc-roundtrip" "get" ""]]
-      (is (nil? (exec/execute *context* get {:key k}))
+          get-id (eh/fn-id "response-cache-get")
+          k   ["/rc-roundtrip" "get-id" ""]]
+      (is (nil? (exec/execute *context* get-id {:key k}))
           "miss before anything is stored")
       (is (= a-response
              (exec/execute *context* put {:key k :value a-response :when? true}))
           "put-if! returns the value it stored")
-      (is (= a-response (exec/execute *context* get {:key k}))
+      (is (= a-response (exec/execute *context* get-id {:key k}))
           "a later execute hits the persisted cell"))))
 
 
 (deftest put-if-false-does-not-store-but-returns-value
   (testing "`:when? false` is a no-op but still passes the value through"
     (let [put (eh/fn-id "response-cache-put-if!")
-          get (eh/fn-id "response-cache-get")
-          k   ["/rc-noop" "get" ""]]
+          get-id (eh/fn-id "response-cache-get")
+          k   ["/rc-noop" "get-id" ""]]
       (is (= a-response
              (exec/execute *context* put {:key k :value a-response :when? false}))
           "returns value even when not storing")
-      (is (nil? (exec/execute *context* get {:key k}))
+      (is (nil? (exec/execute *context* get-id {:key k}))
           "nothing was stored → miss"))))
 
 

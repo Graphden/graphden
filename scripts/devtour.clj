@@ -123,8 +123,8 @@
   [^String src ^long i]
   (let [prev (loop [j (dec i)]
                (cond (neg? j) nil
-                     (Character/isWhitespace (.charAt src j)) (recur (dec j))
-                     :else (.charAt src j)))]
+                     (Character/isWhitespace (String/.charAt src j)) (recur (dec j))
+                     :else (String/.charAt src j)))]
     (or (nil? prev) (contains? (set "(,=:[!&|?{};+-*%^~<>") prev))))
 
 
@@ -135,12 +135,12 @@
    zero. Throws at EOF — a mis-scan fails the build rather than baking a
    truncated form."
   [^String src ^long start]
-  (let [n (.length src)]
+  (let [n (String/.length src)]
     (loop [i start, state :code, depth 0, opened? false]
       (when (>= i n)
         (throw (ex-info "JS anchor: unbalanced form (hit EOF)" {:start start})))
-      (let [c (.charAt src i)
-            nxt (when (< (inc i) n) (.charAt src (inc i)))]
+      (let [c (String/.charAt src i)
+            nxt (when (< (inc i) n) (String/.charAt src (inc i)))]
         (case state
           :line-comment (recur (inc i) (if (= c \newline) :code state) depth opened?)
           :block-comment (if (and (= c \*) (= nxt \/))
@@ -149,10 +149,11 @@
           (:sq :dq :tpl :regex)
           (cond
             (= c \\) (recur (+ i 2) state depth opened?)
-            (and (= state :sq) (= c \')) (recur (inc i) :code depth opened?)
-            (and (= state :dq) (= c \")) (recur (inc i) :code depth opened?)
-            (and (= state :tpl) (= c \`)) (recur (inc i) :code depth opened?)
-            (and (= state :regex) (= c \/)) (recur (inc i) :code depth opened?)
+            (or (and (= state :sq) (= c \'))
+                (and (= state :dq) (= c \"))
+                (and (= state :tpl) (= c \`))
+                (and (= state :regex) (= c \/)))
+            (recur (inc i) :code depth opened?)
             :else (recur (inc i) state depth opened?))
           :code
           (cond

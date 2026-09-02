@@ -18,7 +18,7 @@ The storage backend is **plain PostgreSQL** — graph traversal is done
 with recursive CTEs, not a graph-database extension. The components
 below start in dependency order:
 
-```
+```text
 :db/schema             → Schema builder (pure, no deps)
        ↓
 :db/postgres           → PostgreSQL storage (jdbc-url / pool / schema)
@@ -424,7 +424,7 @@ Enabled by naming the addon fragment in `GRAPHDEN_ADDON_CONFIGS`
 (comma-separated list, read in `system/config.clj`; each fragment
 deep-merges over `system-<profile>.edn`):
 
-```
+```bash
 GRAPHDEN_ADDON_CONFIGS=graphden/accounts/addon.edn
 ```
 

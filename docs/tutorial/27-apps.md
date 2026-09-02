@@ -73,7 +73,7 @@ a *different* fn, remove it here and add it on the other fn.
 
 The app is now served at:
 
-```
+```text
 https://<label>.graphden.app
 ```
 

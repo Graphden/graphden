@@ -16,6 +16,7 @@
    and the suite continues so the user always gets a result line."
   (:require
     [babashka.process :as p]
+    [ci-select]
     [clojure.string :as str])
   (:import
     (java.nio.channels
@@ -65,11 +66,9 @@
 ;; ===========================================================================
 
 ;; Selection core (registry read + validation + --groups/--since/--skip
-;; partitioning) lives in `scripts/ci_select.clj` so the `ci-selftest` check
-;; can load and test it WITHOUT running a CI pass.
-(load-file "scripts/ci_select.clj")
-
-
+;; partitioning) lives in `scripts/ci_select.clj` (required above — `scripts/`
+;; is on bb's :paths) so the `ci-selftest` check can load and test it WITHOUT
+;; running a CI pass.
 (def ^:private registry
   "The check registry — a vector of `{:name :bb :timeout :group :relevant}`,
    from `scripts/checks.edn`. `:bb` is the task that actually runs the check,
@@ -166,27 +165,28 @@
                                               [StandardOpenOption/CREATE
                                                StandardOpenOption/WRITE
                                                StandardOpenOption/READ]))
-        lock (or (.tryLock channel)
+        lock (or (FileChannel/.tryLock channel)
                  (do (println (str yellow "⏳ another bb ci holds the machine-wide lock"
                                    reset " (PID " (read-lockfile-pid path) ") — waiting our turn ..."))
                      (println (str "   (one CI at a time per host: concurrent runs time"
                                    " each other out, they do not go faster)"))
-                     (.lock channel)))]
-    (.truncate channel 0)
-    (let [pid (.pid (java.lang.ProcessHandle/current))
-          buf (java.nio.ByteBuffer/wrap (.getBytes (str pid "\n") "UTF-8"))]
-      (.write channel buf))
+                     (FileChannel/.lock channel)))]
+    (FileChannel/.truncate channel 0)
+    (let [pid (java.lang.ProcessHandle/.pid (java.lang.ProcessHandle/current))
+          buf (java.nio.ByteBuffer/wrap (String/.getBytes (str pid "\n") "UTF-8"))]
+      (FileChannel/.write channel buf))
     [channel lock]))
 
 
 (defn- release-lock!
-  "Release and close — but do NOT unlink the lockfile. A waiter already holds
-   an open channel on this inode; deleting it lets the next run CREATE a fresh
-   file and lock that instead, so two runs would believe they hold the lock.
-   The empty file is 0 bytes and costs nothing to keep."
-  [[channel lock]]
-  (try (.release lock) (catch Exception _ nil))
-  (try (.close channel) (catch Exception _ nil)))
+  "Close the channel — closing releases every lock held on it (JDK contract;
+   bb has no `FileLock` class to call `.release` on) — but do NOT unlink the
+   lockfile. A waiter already holds an open channel on this inode; deleting it
+   lets the next run CREATE a fresh file and lock that instead, so two runs
+   would believe they hold the lock. The empty file is 0 bytes and costs
+   nothing to keep."
+  [[channel _lock]]
+  (try (FileChannel/.close channel) (catch Exception _ nil)))
 
 
 ;; ===========================================================================
@@ -204,7 +204,7 @@
 (defn- kill-live-procs!
   []
   (doseq [proc @live-procs]
-    (try (.destroyForcibly (:proc proc)) (catch Exception _ nil))))
+    (try (Process/.destroyForcibly (:proc proc)) (catch Exception _ nil))))
 
 
 ;; ===========================================================================
@@ -230,7 +230,7 @@
     (swap! live-procs disj proc)
     (cond
       (= result ::timeout)
-      (do (try (.destroyForcibly (:proc proc)) (catch Exception _ nil))
+      (do (try (Process/.destroyForcibly (:proc proc)) (catch Exception _ nil))
           ;; Salvage what the child printed BEFORE the axe: kaocha's
           ;; dots-so-far name the namespace that was still running,
           ;; which is the whole diagnosis. Discarding it made a
@@ -467,7 +467,7 @@
         needs-lock? (some #(= :test (:group %)) checks)
         lock-handle (do (report-skips! scoped manual since)
                         (when needs-lock? (acquire-lock!)))]
-    (.addShutdownHook
+    (Runtime/.addShutdownHook
       (Runtime/getRuntime)
       (Thread.
         ^Runnable

@@ -153,19 +153,19 @@
 
 
 (defn- command-url
-  [executor-id port op root-fn-id]
-  (str "http://" executor-id ":" port path-prefix (name op) "/" root-fn-id))
+  [target-id port op root-fn-id]
+  (str "http://" target-id ":" port path-prefix (name op) "/" root-fn-id))
 
 
 (defn send-command
-  "POST a cell command to `executor-id`; true IFF it acked 200. A non-200
+  "POST a cell command to `target-id`; true IFF it acked 200. A non-200
    (incl. 409 not-in-shard, 401 unauthorized) or a transport error → false —
    the controller reads a false `load-on` as abort-before-flip, so a target that
    can't (or won't) load never gets the routing flipped to it."
-  [executor-id port token op root-fn-id]
+  [target-id port token op root-fn-id]
   (let [request-fn (or *request-fn-override* http/request)
         resp @(request-fn {:method :post
-                           :url (command-url executor-id port op root-fn-id)
+                           :url (command-url target-id port op root-fn-id)
                            :headers (cond-> {}
                                       token (assoc "Authorization" (str "Bearer " token)))
                            :timeout 30000
@@ -173,7 +173,7 @@
     (cond
       (:error resp)
       (do (log/warn (:error resp) "fleet command transport failed"
-                    {:executor-id executor-id :op op})
+                    {:executor-id target-id :op op})
           false)
 
       (= 200 (:status resp))
@@ -181,22 +181,22 @@
 
       :else
       (do (log/warn "fleet command rejected"
-                    {:executor-id executor-id :op op :status (:status resp)})
+                    {:executor-id target-id :op op :status (:status resp)})
           false))))
 
 
 (defn directed-load
   "`load-on` seam: POST a `:load` to the target, ACK-gated (true iff 200)."
   [port token]
-  (fn [executor-id root-fn-id]
-    (send-command executor-id port token :load root-fn-id)))
+  (fn [target-id root-fn-id]
+    (send-command target-id port token :load root-fn-id)))
 
 
 (defn directed-evict
   "`evict-on` seam: POST an `:evict` to the source. Best-effort (post-flip)."
   [port token]
-  (fn [executor-id root-fn-id]
-    (send-command executor-id port token :evict root-fn-id)))
+  (fn [target-id root-fn-id]
+    (send-command target-id port token :evict root-fn-id)))
 
 
 (defn fleet-port

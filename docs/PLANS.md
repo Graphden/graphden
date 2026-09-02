@@ -56,7 +56,7 @@ Notes:
 
 A landing visitor gets an anonymous org through the unauthenticated endpoint:
 
-```
+```text
 POST /api/demo/start   →   {"token": "<bearer>", "org": "demo-xxxxxxxx"}
 ```
 
@@ -83,7 +83,7 @@ clean up its own data.
 An operator sets any org's tier — to suspend, to restore, or to upgrade /
 downgrade — through the platform-only route:
 
-```
+```text
 POST /api/orgs/plan     (form-encoded: name=<org-slug>&plan=<tier>)
 ```
 

@@ -44,7 +44,6 @@ async function primeSecretLeafId() {
     }
     return _primedSecretLeafId;
   } catch (err) {
-    // eslint-disable-next-line no-console
     console.error('primeSecretLeafId failed', err);
     return null;
   }
@@ -93,7 +92,6 @@ async function loadSecrets() {
       // Other statuses indicate a real backend problem we should
       // surface in DevTools for triage.
       if (r.status !== 401) {
-        // eslint-disable-next-line no-console
         console.error('list-secrets HTTP', r.status, r.statusText);
       }
       _secretsList = [];
@@ -103,7 +101,6 @@ async function loadSecrets() {
     const data = await r.json();
     _secretsList = data.ok ? (data.secrets || []) : [];
   } catch (err) {
-    // eslint-disable-next-line no-console
     console.error('list-secrets fetch threw', err);
     _secretsList = [];
   }

@@ -66,7 +66,7 @@ When the author did NOT specify a name explicitly (anonymous fn-def via the
 UI "extract into helper" or a legacy-EDN import without a name), we generate
 it stably:
 
-```
+```text
 auto-name = "_" + <parent-fn-name> + "-" + <slot-name>
 namespace = <parent-fn-namespace>
 ```
@@ -262,7 +262,7 @@ render. The decision is per-render, not per-decl.
 
 ## 9. Quick decision flowchart
 
-```
+```text
 Want to add an fn-def?
   │
   ├─ Is it a data shape (record / value type)?

@@ -2,7 +2,10 @@
   // markdownlint-cli2 config — see https://github.com/DavidAnson/markdownlint-cli2.
   //
   // Every disabled rule below has a one-line `// why:` immediately
-  // preceding it; no rule silenced just to make the linter quiet.
+  // preceding it; no rule silenced just to make the linter quiet. A
+  // rule whose violations were all fixed is REMOVED from here, not kept
+  // "for safety" — the 2026-09-02 sweep dropped MD001/003/010/012/014/
+  // 025/026/040/041/045/046/059 that way.
 
   "globs": [
     "**/*.md"
@@ -34,9 +37,10 @@
     // table; both render identically.
     "MD060": { "style": "consistent" },
 
-    // why: many memory + skill files lead with frontmatter / a meta
-    // line, not an h1. Disable.
-    "MD041": false,
+    // note: every doc now opens with an h1 (MD041 is on). The one legitimate exception —
+    // .github/PULL_REQUEST_TEMPLATE.md, a PR-body fragment whose top level
+    // is `##` under GitHub's own PR title — carries an inline
+    // `markdownlint-disable-next-line MD041` with its reason.
 
     // why: bare URLs (`https://...`) inline in prose are clearer than
     // angle-wrapped; GitHub-flavoured markdown auto-links them.
@@ -53,53 +57,6 @@
 
     // why: `<sub>` / `<sup>` / `<details>` etc. are legitimate in
     // markdown that renders to HTML. Skill docs + arch notes use them.
-    "MD033": false,
-
-    // why: hard tabs inside code blocks are syntax-significant
-    // (Makefiles, Go). Allow there; flag elsewhere.
-    "MD010": { "code_blocks": false },
-
-    // why: single-h1-per-file collides with frontmatter-then-h1 +
-    // long docs that split into sub-essays.
-    "MD025": false,
-
-    // why: default cap of 1 blank line is too strict for long
-    // architectural docs. Allow up to 2.
-    "MD012": { "maximum": 2 },
-
-    // why: `$ bb test` is informative whether or not a sample output
-    // follows. The MD014 demand for output forces unnatural docs.
-    "MD014": false,
-
-    // why: `Note:` / `Phase 1:` headings are common, allow trailing
-    // punctuation.
-    "MD026": false,
-
-    // why: many code blocks are output samples / shell sessions /
-    // generic snippets that don't benefit from a language tag.
-    // Re-enable per-file if a syntax-highlight gain materialises.
-    "MD040": false,
-
-    // why: most images are schematic diagrams whose meaning lives
-    // in the surrounding paragraph; literal alt= would be redundant
-    // boilerplate. Focused a11y audit is a separate effort.
-    "MD045": false,
-
-    // why: repo uses fenced almost everywhere; the indented-code
-    // finds are inside list items where indented is idiomatic.
-    // `consistent` lets the file pick its style.
-    "MD046": { "style": "consistent" },
-
-    // why: both `# H1` and `H1` (setext underline) render fine;
-    // enforcing one project-wide is style policing without payoff.
-    "MD003": { "style": "consistent" },
-
-    // why: `[here](url)` is sometimes the cleanest phrasing in
-    // context. Mostly cosmetic.
-    "MD059": false,
-
-    // why: long arch docs sometimes jump h2 → h4 inside a section
-    // to mark a deep sub-point. Allow.
-    "MD001": false
+    "MD033": false
   }
 }

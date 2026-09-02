@@ -135,7 +135,7 @@ When you open the Run pane for a fn with EFFECTS, it shows
 a warning banner — `side effects:` followed by one chip per
 category — plus a confirm checkbox:
 
-```
+```text
 side effects: [network] [db]
 [ ] I understand this will produce side effects
 [Run]   ← disabled until the box is ticked

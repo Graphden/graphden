@@ -73,10 +73,10 @@
                         (if-not row
                           n
                           (let [owner (registry/rule-owner-of (:name row))
-                                alias (inherited-return-type-alias fns-by-id fn-id)
+                                rt-alias (inherited-return-type-alias fns-by-id fn-id)
                                 seed (branch-local/branch-local-seed fns-by-id fn-id)]
                             (cond-> n
-                              alias (assoc-in [:data :returnTypeAlias] alias)
+                              rt-alias (assoc-in [:data :returnTypeAlias] rt-alias)
                               owner (assoc-in [:data :ruleOwner] owner)
                               seed (assoc-in [:data :branchLocal]
                                              {:own (= (:id seed) fn-id)

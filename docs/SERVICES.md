@@ -150,7 +150,7 @@ branch-router for each branch's `ExecutionContext` (built lazily
 via `build-actual-entry!`), and starts the service against that
 ctx. A typical workflow:
 
-```
+```clojure
 ;; dev:  port 9001 (sticky-local, doesn't merge to main)
 {:name :dev-server  :parent :http-server
  :args {:handler :app-handler  :port 9001}}

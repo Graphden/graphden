@@ -1,4 +1,4 @@
-## Performance investigation notes — executor hot path
+# Performance investigation notes — executor hot path
 
 > **🔧 Internal engineering record — not user documentation.** A
 > contributor-facing investigation note, indexed from [CLAUDE.md](../CLAUDE.md)
@@ -123,7 +123,7 @@ optimising; this note exists because the last person didn't.
 Leaf-time top frames (collapsed) from a 63-second
 `exec/execute :probe-call` run over 2400-row dataset:
 
-```
+```text
 5500  PersistentHashMap$BitmapIndexedNode.assoc
 2942  PersistentHashMap$NodeSeq.kvreduce
 2111  StringLatin1.replace

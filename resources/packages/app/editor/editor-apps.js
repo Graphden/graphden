@@ -42,7 +42,6 @@ async function refreshAppRoutesCache() {
     const r = await authFetch(listUrl, { method: 'GET' });
     if (!r.ok) {
       if (r.status !== 401) {
-        // eslint-disable-next-line no-console
         console.error(listUrl + ' HTTP', r.status, r.statusText);
       }
       appRoutesCache = [];
@@ -51,7 +50,6 @@ async function refreshAppRoutesCache() {
     const body = await r.json();
     appRoutesCache = Array.isArray(body) ? body : [];
   } catch (err) {
-    // eslint-disable-next-line no-console
     console.error(listUrl + ' fetch threw', err);
     appRoutesCache = [];
   }

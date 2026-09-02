@@ -1,4 +1,4 @@
-## Graph Constraints Reference
+# Graph Constraints Reference
 
 This document describes the integrity constraints enforced by the
 graphden storage layer. The slot/fn-slot/binding model handles most
@@ -39,7 +39,7 @@ time.
 
 **Example:**
 
-```
+```text
 fn add-numbers
   binding {slot s-other, ref-fn-id multiply-numbers}
 

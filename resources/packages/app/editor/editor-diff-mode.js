@@ -207,10 +207,10 @@ function gdDiffEffectsTouched(g) {
   for (const e of (g.entries || [])) {
     const { there, here } = gdDiffEntryRefs(e);
     for (const n of there) {
-      if (!here.has(n)) gdDiffEffectsOfName(n).forEach((x) => plus.add(x));
+      if (!here.has(n)) gdDiffEffectsOfName(n).forEach((x) => { plus.add(x); });
     }
     for (const n of here) {
-      if (!there.has(n)) gdDiffEffectsOfName(n).forEach((x) => minus.add(x));
+      if (!there.has(n)) gdDiffEffectsOfName(n).forEach((x) => { minus.add(x); });
     }
   }
   if (!plus.size && !minus.size) return null;
@@ -421,7 +421,7 @@ function gdDiffModeDecorateSidebar() {
     // (expanded) namespace group; collapsed groups keep the aggregate
     // badge as their signal. Skipped while the filter box is active —
     // ghosts don't participate in server-side filtering.
-    list.querySelectorAll('.gd-diff-ghost').forEach((g) => g.remove());
+    list.querySelectorAll('.gd-diff-ghost').forEach((g) => { g.remove(); });
     const filterBox = document.getElementById('search-input');
     const filtering = !!filterBox?.value.trim();
     if (_gdDiffMode && !filtering) {
@@ -475,7 +475,7 @@ function gdDiffModeDecorateSidebar() {
     // Skipped while the server-side filter box is active, same as the
     // ghost injection above.
     list.querySelectorAll('.gd-diff-lens-hidden')
-      .forEach((el) => el.classList.remove('gd-diff-lens-hidden'));
+      .forEach((el) => { el.classList.remove('gd-diff-lens-hidden'); });
     if (_gdDiffMode && _gdDiffLens.changedOnly && !filtering) {
       list.querySelectorAll('.entity-item[data-fn-id]').forEach((item) => {
         if (!gdDiffVisibleGroup(item.dataset.fnId)) {
@@ -1066,8 +1066,8 @@ function gdExitDiffMode() {
   gdDiffModeDecorateSidebar();
   // Arg rings/badges.
   document.querySelectorAll('.arg-overlay-diff-focus')
-    .forEach((el) => el.classList.remove('arg-overlay-diff-focus'));
-  document.querySelectorAll('.arg-diff-badge').forEach((el) => el.remove());
+    .forEach((el) => { el.classList.remove('arg-overlay-diff-focus'); });
+  document.querySelectorAll('.arg-diff-badge').forEach((el) => { el.remove(); });
   // Card-level rings (fn-overlay-diff-*) + the titles the mode set.
   document.querySelectorAll('.fn-overlay-diff').forEach((el) => {
     el.classList.remove('fn-overlay-diff', 'fn-overlay-diff-added',

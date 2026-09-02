@@ -95,7 +95,7 @@ org-ids. `read-graph` filters the graph to `org-id ∈ predicate ∪ NULL`
 before compiling. `nil` (the default, and the only value a self-hosted
 deployment uses) compiles everything, exactly as before.
 
-```
+```bash
 # a pod serving two tenants plus the platform packages
 GRAPHDEN_EXECUTOR_ORGS=public,acme,beta
 ```

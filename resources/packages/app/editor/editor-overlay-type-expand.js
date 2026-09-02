@@ -249,7 +249,6 @@ function appendTypeUsagesSection(host, typeName) {
       }
     })
     .catch((err) => {
-      // eslint-disable-next-line no-console
       console.error(API.api_types_usages + ' fetch failed', err);
       // UI: leave the placeholder header (no usage data shown).
     });

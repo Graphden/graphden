@@ -25,10 +25,15 @@ window.BUILD_HASH = BUILD_HASH;
 // for the same reason); don't switch any of these to `const`
 // without first confirming no other file rebinds it.
 
+// biome-ignore lint/style/useConst: reassigned in editor-ui.js (one shared script scope)
 let selectedFnId = null;          // Currently selected function ID
+// biome-ignore lint/style/useConst: reassigned in editor-main.js (one shared script scope)
 let graphData = null;             // Raw graph data from API
+// biome-ignore lint/style/useConst: reassigned in editor-main.js, editor-edit-modes-fn.js, editor-tooltips.js (one shared script scope)
 let lookups = null;               // Lookup maps (fnMap, argMap, argsByFn)
+// biome-ignore lint/style/useConst: reassigned in editor-main.js (one shared script scope)
 let richTypes = {};               // {fn-name → {return, args, effects, …}} from /api/types (lean bulk — finding K; on-demand detail comes from server partials, not per-fn backfills)
+// biome-ignore lint/style/useConst: reassigned in editor-main.js (one shared script scope)
 let VALUE_KINDS = [];             // value_kind schema enum, from /api/value-kinds
 
 // Set of fn-ids reachable from `selectedFnId` via ref-id only — i.e.
@@ -81,21 +86,24 @@ function rebuildImplementationFnIds() {
 //                              (when partial covers all fns at L,
 //                              promote to fullDepth = L, partial empty)
 //   L > fullDepth + 1       → cascade: fullDepth = L - 1, partial = {fn}
-let expansionState = new Map();  // nodeId -> {fullDepth, partialFns}
-let previewState = new Map();    // nodeId -> {fullDepth, partialFns}
+const expansionState = new Map();  // nodeId -> {fullDepth, partialFns}
+const previewState = new Map();    // nodeId -> {fullDepth, partialFns}
+// biome-ignore lint/style/useConst: reassigned in editor-expansion.js, editor-overlay-fn-rows.js (one shared script scope)
 let anchorNodeId = null;          // graph node id (full, incl. expansion prefix) that should stay stationary during layout
 
 // UI state flags
+// biome-ignore lint/style/useConst: reassigned in editor-render.js (one shared script scope)
 let rebuildingOverlays = false;   // Prevents mouseleave during overlay rebuild
+// biome-ignore lint/style/useConst: reassigned in editor-drag.js (one shared script scope)
 let isGrabbing = false;           // True when any node is being dragged
 
 // User-moved nodes (won't be auto-positioned by layout)
-let userMovedNodes = new Set();
+const userMovedNodes = new Set();
 
 // Saved positions of user-moved nodes — preserved across preview renders
 // so that when a preview removes a node and restoring brings it back, the
 // user's manual position is retained. Cleared only on click (commit).
-let savedUserPositions = new Map();  // nodeId -> {x, y}
+const savedUserPositions = new Map();  // nodeId -> {x, y}
 
 // Hover-preview suppression after click. After a click commits a state
 // change, the overlay rebuilds and a synthetic mouseenter fires on the new

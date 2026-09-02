@@ -41,7 +41,7 @@ The `fn` row joins them all.
 
 What's actually in the DB after sync?
 
-```
+```text
 fn:           {id: add-10-id, name: "add-10", parent-ids: [add-id]}
 slot:         {id: add.nums-slot-id, name: "nums", type-fn-id: sequence}
 fn-slot:      {fn-id: add-id, slot-id: add.nums-slot-id, position: 0}

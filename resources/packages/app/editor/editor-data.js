@@ -124,10 +124,10 @@ function buildLookups(data) {
   const nsMap = new Map();
   const nsPathMap = new Map();
 
-  (data.fns || []).forEach(f => fnMap.set(f.id, f));
+  (data.fns || []).forEach(f => { fnMap.set(f.id, f); });
 
   // --- new model ---
-  (data.slots || []).forEach(s => slotMap.set(s.id, s));
+  (data.slots || []).forEach(s => { slotMap.set(s.id, s); });
   const sortedFnSlots = (data['fn-slots'] || []).slice()
     .sort((a, b) => (a.position || 0) - (b.position || 0));
   // Phase 6c — index renamed-view slots by (fn-id, source-slot-id)
@@ -174,7 +174,7 @@ function buildLookups(data) {
   });
 
   // Build namespace maps
-  (data.namespaces || []).forEach(ns => nsMap.set(ns.id, ns));
+  (data.namespaces || []).forEach(ns => { nsMap.set(ns.id, ns); });
   // Compute full paths for each ns (walk parent chain)
   nsMap.forEach((ns, id) => {
     const parts = [];
@@ -226,7 +226,7 @@ function buildLookups(data) {
     if (c['type-count']) nsTypeCounts.set(c['namespace-id'], c['type-count']);
     if (c['fn-count']) nsFnCounts.set(c['namespace-id'], c['fn-count']);
   });
-  (data.namespaces || []).forEach(ns => bump(nsHasChildNs, ns['parent-id']));
+  (data.namespaces || []).forEach(ns => { bump(nsHasChildNs, ns['parent-id']); });
 
   // Per-lookups cache for getInheritanceLevels — auto-invalidated
   // whenever buildLookups runs again (graph mutation refresh).

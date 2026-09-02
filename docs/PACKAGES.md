@@ -26,7 +26,7 @@ The packages system organizes base functions and fn-defs into modular, reusable 
 
 ### Package Hierarchy
 
-```
+```text
 resources/packages/
 ├── core/                # Core primitives (no dependencies)
 ├── storage/             # Storage primitives over graphden's own datasource
@@ -99,7 +99,7 @@ throws `:packages/version-conflict` on a mismatch. (Registry-driven version
 
 Each module is a directory containing:
 
-```
+```text
 {module-name}/
 ├── fns.edn      # Required: function definitions
 └── impls.clj    # Optional: Clojure implementations for base-fns

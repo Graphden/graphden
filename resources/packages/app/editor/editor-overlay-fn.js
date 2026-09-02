@@ -281,7 +281,7 @@ function createFnOverlay(node, container) {
     )) return;
     if (typeof window.gdInspectorRender !== 'function') return;
     document.querySelectorAll('.node-overlay.gd-node-active')
-      .forEach((n) => n.classList.remove('gd-node-active'));
+      .forEach((n) => { n.classList.remove('gd-node-active'); });
     overlay.classList.add('gd-node-active');
     window.gdInspectorRender(originalFnId);
   });

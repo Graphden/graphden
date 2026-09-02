@@ -40,7 +40,7 @@ On the **Organization** surface, expand **Members**. The body is a
 server-rendered partial (`GET /partials/users-admin` — the path
 is historical) — a table of your org's members:
 
-```
+```text
 Member               |       |
 owner@acme.com       | owner |
 dev@acme.com         |       |  ×

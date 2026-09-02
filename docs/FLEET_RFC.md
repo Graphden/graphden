@@ -240,7 +240,7 @@ holds. The base duplication *across* pods (cells overlap heavily on `web/*`,
 
 ## 6. Architecture
 
-```
+```text
                      ┌────────────────────────────────────────────┐
    request           │  Edge router (L7)                           │
   (org, path) ─────► │  reads the live routing map (org,entry)→pod │

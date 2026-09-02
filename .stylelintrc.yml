@@ -1,0 +1,80 @@
+# stylelint config — extends stylelint-config-standard.
+#
+# Every rule below that deviates from the standard preset has a one-line
+# `# why:` immediately preceding it; no rule silenced just to make the
+# linter quiet. Rules the preset enables and this file does NOT mention
+# are enforced as-is.
+
+extends:
+  - stylelint-config-standard
+
+plugins:
+  - stylelint-declaration-strict-value
+
+rules:
+  # why: design-token discipline — every colour / background / fill / stroke
+  # must come from a `var(--…)` token, never a literal. The listed keywords
+  # are the only non-token values that carry no colour of their own.
+  scale-unlimited/declaration-strict-value:
+    - - "/color$/"
+      - background
+      - background-color
+      - fill
+      - stroke
+    - ignoreValues:
+        - transparent
+        - inherit
+        - currentColor
+        - currentcolor
+        - none
+        - unset
+        - initial
+        - revert
+        - auto
+      disableFix: true
+
+  # why: satisfying it means reordering rules by specificity across the
+  # file — a cascade-risk rewrite of ~100 sites for no rendering gain.
+  no-descending-specificity: null
+
+  # why: naming policy. The editor uses `gd-` prefixes, BEM-ish class
+  # names, camelCase ids from the hiccup and keyframe / custom-property
+  # names chosen for readability — enforcing kebab-case is style policing.
+  selector-class-pattern: null
+  selector-id-pattern: null
+  keyframes-name-pattern: null
+  custom-property-pattern: null
+
+  # why: the preset already enables it; restated so a future preset change
+  # can't silently drop the one duplicate-selector guard the CSS relies on.
+  no-duplicate-selectors: true
+
+  # why: the preset default is `percentage`; the tokens file writes alpha
+  # as `0.5`, and mixing the two notations in one file reads worse.
+  alpha-value-notation: number
+
+  # why: keyword values are lowercased as the preset asks (`currentcolor`),
+  # but a font FAMILY name is a vendor identifier, not a CSS keyword —
+  # `BlinkMacSystemFont` / `Roboto` keep the casing their vendors document
+  # (matching is case-insensitive either way, so this is readability only).
+  value-keyword-case:
+    - lower
+    - ignoreProperties:
+        - font-family
+        - font
+        - "/^--.*(font|mono)$/"
+
+  # why: the editor CSS deliberately writes compact single-line rules
+  # (`.a { x: 1; y: 2; }`) — ~580 rules and ~320 declaration blocks would
+  # have to be re-wrapped, and the compact form is the file's house style.
+  rule-empty-line-before: null
+  declaration-block-single-line-max-declarations: null
+
+  # why: same house style — a `/* … */` section marker sits directly on top
+  # of the rule it labels (~180 sites); a forced blank line separates them.
+  comment-empty-line-before: null
+
+ignoreFiles:
+  - node_modules/**
+  - target/**
+  - .cpcache/**

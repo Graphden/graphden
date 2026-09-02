@@ -550,7 +550,7 @@ function _tourFloatingRects() {
     const cs = getComputedStyle(el);
     if (cs.position !== 'fixed' && cs.position !== 'absolute') continue;
     if (cs.display === 'none' || cs.visibility === 'hidden') continue;
-    if (!(parseInt(cs.zIndex, 10) >= 300)) continue;
+    if (!(Number.parseInt(cs.zIndex, 10) >= 300)) continue;
     const r = el.getBoundingClientRect();
     if (r.width < 40 || r.height < 24) continue;
     if (r.width > window.innerWidth * 0.9

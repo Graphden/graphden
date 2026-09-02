@@ -1,4 +1,4 @@
-## Lesson 07 — Composing pages from components
+# Lesson 07 — Composing pages from components
 
 **Goal**: by the end of this lesson you can build a working
 HTML page — header, form, submit button, response panel —
@@ -327,7 +327,7 @@ were built with `:dispatch-action` / `:dispatch-custom` /
 DSL, and the page templates into a working contact form.
 Visit `/demo/contact` in the running editor; the page is:
 
-```
+```text
 ┌──────────────────────────────────────────────────────┐
 │  Contact us                                          │
 │                                                      │

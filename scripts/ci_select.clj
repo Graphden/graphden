@@ -117,9 +117,10 @@
   [registry {:keys [wanted changed skip-set]}]
   (let [in-groups (filterv (fn [c] (or (nil? wanted) (contains? wanted (:group c))))
                            registry)
-        manual? (fn [c] (and skip-set
-                             (or (contains? skip-set (:name c))
-                                 (contains? skip-set (name (:group c))))))
+        manual? (fn [c]
+                  (and skip-set
+                       (or (contains? skip-set (:name c))
+                           (contains? skip-set (name (:group c))))))
         {manual true rest' false} (group-by (comp boolean manual?) in-groups)
         {run true scoped false} (group-by #(relevant? % changed) rest')
         tests-run? (boolean (some #(= :test (:group %)) run))

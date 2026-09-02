@@ -12,7 +12,7 @@ on :secret`.
 
 ## The ten effect categories
 
-```
+```text
 :db        Reads or writes graphden's storage
 :network   Outbound HTTP / TCP
 :io        Disk / filesystem

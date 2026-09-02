@@ -14,9 +14,9 @@
 [default.extend-words]
 # Clojure's data-notation file extension — appears in filenames
 # (`bb.edn`, `*.edn`) and code references ("see bb.edn", "*.edn
-# files"). 629 sites; not a typo.
+# files"). ~1200 sites; not a typo. A lowercase entry also covers
+# the `Edn` / `EDN` case variants — that holds for every entry here.
 edn = "edn"
-EDN = "EDN"
 
 # `vor` — the value-override test family's prefix (value-override-ref):
 # fn names like `vor-value-parent` / `vor-narrow-child` in
@@ -38,12 +38,11 @@ inh = "inh"
 # `Mis-shaped` / `mis-match` / `mis-typed` — English words with
 # the `mis-` prefix. typos otherwise tries to "fix" to `miss-shaped`.
 mis = "mis"
-Mis = "Mis"
 
 # `HashiCorp` (the company) appears in OpenBao / Vault context —
-# typos otherwise wants to truncate to `Hash`.
+# typos splits the camel-case into `Hashi` + `Corp` and wants to
+# truncate the first half to `Hash`.
 Hashi = "Hashi"
-HashiCorp = "HashiCorp"
 
 # `overlayed` is a valid past-tense of "overlay" in widespread
 # technical use (CSS overlay, Linux overlayfs, network overlay).
@@ -59,36 +58,23 @@ unparseable = "unparseable"
 # match the test-file naming convention).
 wrk = "wrk"
 
-# `eles` — Cytoscape.js animation-API parameter (`cy.animate({
-# center: {eles: nodeCollection} })`). Third-party API, can't
-# rename.
-eles = "eles"
-
 # `lage-fn` — abbreviated test-fixture for
 # `list-all-graph-entities` (the long fn under test); `LAGE` is
 # the same abbreviation in test docstrings.
 lage = "lage"
-LAGE = "LAGE"
 
 # Image / SQL plural truncations — typos splits the trailing `s`
-# off the noun and tries to "fix" the stub (`PNGs`→`PN`+`s` etc.).
-# The stub is what the linter actually flags, so the dict entries
-# must cover the STUB, not the full word.
+# off the noun and tries to "fix" the stub (`PNGs`→`PN`+`s`,
+# `INSERTs`→`INSER`+`Ts`, `DELETEs`→`DELET`+`Es`). The stub is what
+# the linter actually flags, so the dict entries cover the STUB.
 PN = "PN"
-PNG = "PNG"
-PNGs = "PNGs"
 INSER = "INSER"
-INSERT = "INSERT"
-INSERTs = "INSERTs"
-DELETE = "DELETE"
-DELETEs = "DELETEs"
 DELET = "DELET"
 
-# 3-character distinct test values used to differentiate equal /
+# 3-character distinct test value used to differentiate equal /
 # unequal map entries (`{:a (delay "abc") :b (delay "abd")}` —
 # both 3-char strings on purpose; renaming defeats the test's
-# point).
-abc = "abc"
+# point). Only `abd` is flagged (→ `and`).
 abd = "abd"
 
 # `"anc"` — short tag for "ancestor" used as a literal binding-

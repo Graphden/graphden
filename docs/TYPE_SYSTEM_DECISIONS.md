@@ -1,4 +1,4 @@
-## Type system — architecture decisions record
+# Type system — architecture decisions record
 
 Not a roadmap. The type system is at **sweep-at-zero** across
 all 2236 fn-defs (`allowed-type-check-failures` is `#{}`, Phase

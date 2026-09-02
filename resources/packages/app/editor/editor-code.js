@@ -54,7 +54,7 @@
     // from outside, so the styling/probe hook must live on OUR node.
     const wrap = document.createElement('div');
     wrap.className = 'gd-code-editor';
-    const rows = parseInt(ta.getAttribute('rows') || '8', 10);
+    const rows = Number.parseInt(ta.getAttribute('rows') || '8', 10);
     wrap.style.minHeight = Math.min(rows, 30) * 1.4 + 'em';
     wrap.appendChild(view.dom);
     ta.dataset.cmEnhanced = '1';

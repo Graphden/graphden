@@ -25,7 +25,7 @@ remaining client-built popover.
 
 ## Architecture
 
-```
+```text
         ┌────────────────────────────────────────────────────────┐
         │                  Editor page (HTML)                    │
         │   ┌───────────┐                                        │

@@ -30,7 +30,7 @@ is X's.
 per-branch contexts on demand, and the HTTP / editor surface that
 exercises it.
 
-```
+```text
 HTTP request
   │
   │ X-Graphden-Branch: feature-x        (or ?branch=feature-x, or absent)

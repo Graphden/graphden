@@ -34,15 +34,16 @@
    have src on its classpath)."
   []
   (let [f (io/file "resources/executor-packages.edn")]
-    (if (.exists f)
+    (if (File/.exists f)
       (into {}
             (keep (fn [e] (when (and (:lib e) (:coord e)) [(:lib e) (:coord e)])))
             (:packages (edn/read-string (slurp f))))
       {})))
 
 
-(def basis (b/create-basis {:project "deps.edn"
-                            :extra {:deps (manifest-extra-deps)}}))
+(def basis
+  (b/create-basis {:project "deps.edn"
+                   :extra {:deps (manifest-extra-deps)}}))
 
 
 (defn clean
@@ -68,7 +69,7 @@
 (defn- relative-path
   "Forward-slash relative path of `f` under `root`. Stable across OSes."
   [^Path root ^File f]
-  (-> (.relativize root (.toPath f))
+  (-> (Path/.relativize root (File/.toPath f))
       str
       (str/replace File/separator "/")))
 
@@ -105,21 +106,21 @@
 
 (defn- digest-hex
   [^MessageDigest md]
-  (apply str (map #(format "%02x" (bit-and ^byte % 0xff)) (.digest md))))
+  (str/join (map #(format "%02x" (bit-and ^byte % 0xff)) (MessageDigest/.digest md))))
 
 
 (defn- compute-section-hashes
-  "Walk `class-dir`, partition source files by section, and SHA-256
+  "Walk `dir`, partition source files by section, and SHA-256
    each section over `(rel-path | content | sep)*` with files sorted
    by relative path. Returns `{:frontend hex :packages hex :backend hex}`."
-  [class-dir]
-  (let [root      (.toPath (File. ^String class-dir))
+  [dir]
+  (let [root      (File/.toPath (File. ^String dir))
         sep       (byte-array 1 (byte 0))
         sections  (atom {:frontend (MessageDigest/getInstance "SHA-256")
                          :packages (MessageDigest/getInstance "SHA-256")
                          :backend  (MessageDigest/getInstance "SHA-256")})
-        files     (->> (file-seq (File. ^String class-dir))
-                       (filter (fn [^File f] (.isFile f)))
+        files     (->> (file-seq (File. ^String dir))
+                       (filter (fn [^File f] (File/.isFile f)))
                        (map (fn [^File f]
                               [(relative-path root f) f]))
                        (sort-by first))]
@@ -127,10 +128,10 @@
             :let [sec (section-of rel-path)]
             :when sec]
       (let [^MessageDigest md (get @sections sec)]
-        (.update md (.getBytes ^String rel-path "UTF-8"))
-        (.update md sep)
-        (.update md (Files/readAllBytes (.toPath f)))
-        (.update md sep)))
+        (MessageDigest/.update md (String/.getBytes rel-path "UTF-8"))
+        (MessageDigest/.update md sep)
+        (MessageDigest/.update md (Files/readAllBytes (File/.toPath f)))
+        (MessageDigest/.update md sep)))
     (into {} (map (fn [[k md]] [k (digest-hex md)]) @sections))))
 
 

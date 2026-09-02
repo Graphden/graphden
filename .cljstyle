@@ -3,7 +3,7 @@
 
  :files
  {:extensions #{"clj" "cljc" "cljs" "cljx" "edn"}
-  :ignore #{".git" ".clj-kondo" "target" "node_modules" ".aider*"}}
+  :ignore #{".git" ".clj-kondo" "target" "node_modules"}}
 
  :rules
  {;; Indentation

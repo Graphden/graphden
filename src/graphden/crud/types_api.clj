@@ -595,10 +595,10 @@
         fn-slot? (types/fn-type? expected)
         candidates
         (->> registry-snapshot
-             (keep (fn [[fn-name {:keys [return effects type-row?]}]]
+             (keep (fn [[fn-name {:keys [return effects] row? :type-row?}]]
                      (let [eff-set (or effects #{})
                            name-str (some-> fn-name name)]
-                       (when (and (not type-row?) ; type-rows aren't callable producers
+                       (when (and (not row?) ; type-rows aren't callable producers
                                   (if fn-slot?
                                     (when-let [sig (tcheck/assemble-fn-type fn-name)]
                                       (types/subtype? sig expected))

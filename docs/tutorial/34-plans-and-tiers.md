@@ -63,7 +63,7 @@ was registered, that's the fail-safe default telling you the org's
 `:org` is a tenant-forbidden entity (lesson 24), so tiers are an
 **operator** activity. One platform-only route sets any org's plan:
 
-```
+```text
 POST /api/orgs/plan   (form: name=<org>&plan=<tier>)
 ```
 

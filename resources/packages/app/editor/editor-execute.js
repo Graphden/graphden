@@ -207,7 +207,7 @@ function estimateTraceClosureSize(fnId) {
     if (!id || seen.has(id)) continue;
     seen.add(id);
     const fn = lookups?.fnMap?.get(id);
-    (fn?.['parent-ids'] || []).forEach((p) => stack.push(p));
+    (fn?.['parent-ids'] || []).forEach((p) => { stack.push(p); });
     (lookups?.bindingsByFn?.get(id) || []).forEach((b) => {
       if (b['ref-fn-id']) stack.push(b['ref-fn-id']);
       (lookups?.itemsByBinding?.get(b.id) || []).forEach((it) => {

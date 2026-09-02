@@ -1,4 +1,3 @@
-<!-- markdownlint-disable MD013 -->
 # Graphden — AI author context
 
 You are editing a **Graphden** graph through the MCP tools. This document

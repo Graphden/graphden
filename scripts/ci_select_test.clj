@@ -7,11 +7,9 @@
    Standalone bb script: exit 0 = PASS, 1 = FAIL."
   (:require
     [babashka.process :as p]
+    [ci-select]
     [clojure.string :as str]
     [clojure.test :refer [deftest is run-tests]]))
-
-
-(load-file "scripts/ci_select.clj")
 
 
 ;; ---------------------------------------------------------------------------

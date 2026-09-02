@@ -36,14 +36,14 @@ function _traceHighlightCanvas(fnId) {
   if (!fnId) return;
   document.querySelectorAll(
     '.node-overlay[data-original-fn-id="' + CSS.escape(fnId) + '"]',
-  ).forEach((el) => el.classList.add('path-highlighted'));
+  ).forEach((el) => { el.classList.add('path-highlighted'); });
 }
 
 
 function _traceSelectRow(row) {
   if (!_traceViewPanelEl || !row) return;
   _traceViewPanelEl.querySelectorAll('.trace-row.trace-row-selected')
-    .forEach((el) => el.classList.remove('trace-row-selected'));
+    .forEach((el) => { el.classList.remove('trace-row-selected'); });
   row.classList.add('trace-row-selected');
   row.scrollIntoView({ block: 'nearest' });
   _traceHighlightCanvas(row.dataset.fnId);

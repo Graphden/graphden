@@ -13,7 +13,9 @@
           ;; `development/` is on the :dev classpath (deps.edn :extra-paths) and
           ;; the GitHub workflow lints it — it must not be invisible to `bb ci`,
           ;; or local-green/CI-red is structural.
-          (def all-paths "src test development resources/packages")
+          ;; Every Clojure/EDN file a human edits — INCLUDING the bb scripts, build.clj
+          ;; and this file: the lint tooling is code and drifts like any other.
+          (def all-paths "src test development resources/packages scripts build.clj bb.edn")
           (def green "\u001b[32m")
           (def red "\u001b[31m")
           (def cyan "\u001b[36m")
@@ -54,9 +56,10 @@
             "True inside an agent worktree (git-dir is <common>/worktrees/<name>),
              false in the main checkout where the two paths coincide."
             []
-            (let [git-dir (fn [flag] (-> (p/shell {:out :string :err :string :continue true}
-                                                  "git" "rev-parse" flag)
-                                         :out str/trim))]
+            (let [git-dir (fn [flag]
+                            (-> (p/shell {:out :string :err :string :continue true}
+                                         "git" "rev-parse" flag)
+                                :out str/trim))]
               (not= (fs/canonicalize (git-dir "--git-dir"))
                     (fs/canonicalize (git-dir "--git-common-dir")))))
 
@@ -252,9 +255,9 @@
   {:doc "Lint every tracked .sh file (plus dev/wtq/wt) via Docker koalaman/shellcheck:v0.11.0. Globbed, not a hardcoded list - a NEW shell script is linted the moment it exists."
    :task (let [skip (re-pattern "(^|/)(node_modules|target|\\.tools|\\.git|\\.playwright-mcp)/")
                sh-files (->> (fs/glob "." "**/*.sh" {:hidden true})
-                        (map str)
-                        (remove (fn [f] (re-find skip f)))
-                        sort)]
+                             (map str)
+                             (remove (fn [f] (re-find skip f)))
+                             sort)]
            (apply p/shell "docker" "run" "--rm"
                   "-v" (str (System/getenv "PWD") ":/src")
                   "-w" "/src"
@@ -282,16 +285,17 @@
                   "--config" "/repo/.gitleaks.toml")}
 
   typos
-  {:doc "Spelling check over docs + src via crate-ci/typos. Downloads the binary to .tools/typos on first run (Linux x86_64). Config: _typos.toml at repo root."
-   :task (let [binary ".tools/typos"
-               version "v1.48.0"]
+  {:doc "Spelling check over docs + src via crate-ci/typos. Downloads the pinned binary to .tools/typos-<version> on first run (Linux x86_64) — the path carries the version, so a pin bump can never keep linting with a stale cached binary. Config: _typos.toml at repo root."
+   :task (let [version "v1.48.0"
+               binary (str ".tools/typos-" version)]
            (when-not (fs/exists? binary)
              (println "Downloading typos" version "…")
              (fs/create-dirs ".tools")
              (let [url (str "https://github.com/crate-ci/typos/releases/download/"
                             version "/typos-" version "-x86_64-unknown-linux-musl.tar.gz")]
                (p/shell "curl" "-sL" "-o" ".tools/typos.tar.gz" url)
-               (p/shell "tar" "xzf" ".tools/typos.tar.gz" "-C" ".tools/")
+               (p/shell "tar" "xzf" ".tools/typos.tar.gz" "-C" ".tools/" "./typos")
+               (fs/move ".tools/typos" binary {:replace-existing true})
                (fs/delete ".tools/typos.tar.gz")))
            (p/shell binary))}
 

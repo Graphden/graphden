@@ -15,7 +15,7 @@
 // the `let` survives. No own state.
 
 
-async function applyHistoryArgs(fnEntity, execId) {
+async function applyHistoryArgs(_fnEntity, execId) {
   try {
     const r = await authFetch(API.api_execute_id(execId),
                               { method: 'GET' });

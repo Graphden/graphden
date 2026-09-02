@@ -79,8 +79,8 @@ function parseRefinementValue(op, raw) {
 }
 
 function parseScalarPart(s) {
-  if (/^-?\d+$/.test(s)) return parseInt(s, 10);
-  if (/^-?\d+\.\d+$/.test(s)) return parseFloat(s);
+  if (/^-?\d+$/.test(s)) return Number.parseInt(s, 10);
+  if (/^-?\d+\.\d+$/.test(s)) return Number.parseFloat(s);
   if (s === 'true') return true;
   if (s === 'false') return false;
   if (s === 'null') return null;

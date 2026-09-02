@@ -35,7 +35,7 @@ function writePref(key, value) {
 
 function getStoredWidth() {
   const raw = readPref(PREFS_WIDTH_KEY, null);
-  const n = raw == null ? SIDEBAR_DEFAULT_WIDTH : parseInt(raw, 10);
+  const n = raw == null ? SIDEBAR_DEFAULT_WIDTH : Number.parseInt(raw, 10);
   if (!Number.isFinite(n)) return SIDEBAR_DEFAULT_WIDTH;
   return Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, n));
 }
@@ -56,7 +56,7 @@ function getNarrowBreakpointPx() {
   try {
     const raw = getComputedStyle(document.documentElement)
       .getPropertyValue('--sidebar-narrow-breakpoint').trim();
-    const n = parseInt(raw, 10);
+    const n = Number.parseInt(raw, 10);
     return Number.isFinite(n) ? n : 900;
   } catch (_) { return 900; }
 }

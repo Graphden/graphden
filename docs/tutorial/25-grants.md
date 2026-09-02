@@ -73,7 +73,7 @@ Expand **Grants** on the **Organization** surface (open it from the
 account menu; same gating as Users: signed in + tenancy addon). The partial (`GET /partials/grants-admin`)
 renders:
 
-```
+```text
 Subject | Capability | Namespace     |
 alice   | write      | acme.billing  |  ×
 bob     | execute    | acme          |  ×

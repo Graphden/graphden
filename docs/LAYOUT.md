@@ -32,7 +32,7 @@ when nothing is shared.
 
 ## Pipeline Stages
 
-```
+```text
 Request → Load Data → Build Graph Elements → Place Nodes → Validate → Response
 ```
 
@@ -111,7 +111,7 @@ in this model.
 
 Bindings are arg values that flow through inheritance:
 
-```
+```text
 add-10 (binds a=10)
   └── inherits from: add (has args: a, b)
 
@@ -132,7 +132,7 @@ When processing add-10:
 When a structural node has an arg that DEFINES its own ref (the source arg has no ref),
 that arg's ref-id takes precedence over any ancestor binding with a different ref-id.
 
-```
+```text
 Example: editor-routes → list-11 → list-10 → list-10-9
          (where list-11.coll → list-10, list-10.coll → list-10-9)
 
@@ -158,7 +158,7 @@ inherit from `conj-any`), the shared ancestor's args appear in BOTH chains. This
 ALL bindings whose source chains pass through the shared ancestor to be incorrectly
 filtered as "covered."
 
-```
+```text
 Example: editor-routes → list-11 → conj-any (expansion chain)
          list-10 → conj-any (ref-fn chain)
 
@@ -260,7 +260,7 @@ already filled by *earlier* branches.
 **Step 1 — Build the horizontal branch.** From SELECTED, follow the first
 sorted child repeatedly, assigning consecutive columns:
 
-```
+```text
 branch = [SELECTED@col]
 current = SELECTED
 while current has children:
@@ -294,7 +294,7 @@ sibling is started.
 
 #### 4.3 Column-aware compaction example
 
-```
+```text
 Graph:
   A
   ├── B
@@ -322,7 +322,7 @@ C shares no row with E because col 2 is taken at row 1; it drops to row 2.
 
 #### 4.4 Vertical-edge reservation example
 
-```
+```text
 Graph:
   A
   ├── B → C → D   (horizontal branch at row 0, cols 1-3)

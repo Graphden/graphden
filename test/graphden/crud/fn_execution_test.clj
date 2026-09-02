@@ -407,26 +407,26 @@
         {composed :composed} (make-pure-add-fn! storage "unres")
         c (assoc (setup/default-registry-ctx storage) :pg-storage @shared-storage)
         pool (:pool @shared-storage)
-        run! (fn [b]
-               (apply-and-await!
-                 c {:fn-id (:id composed) :args {:a 1 :b b}
-                    :timeout-ms 5000 :persist? true}))
+        run-b! (fn [b]
+                 (apply-and-await!
+                   c {:fn-id (:id composed) :args {:a 1 :b b}
+                      :timeout-ms 5000 :persist? true}))
         listed (fn [] (exec-errors/recent-unresolved-failures c pool nil 7 10))]
     (testing "a later succeeded run of the SAME version clears the failure"
-      (is (= :failed (:status (run! "boom"))))
+      (is (= :failed (:status (run-b! "boom"))))
       (is (= 1 (count (listed))))
-      (is (= :succeeded (:status (run! 2))))
+      (is (= :succeeded (:status (run-b! 2))))
       (is (empty? (listed)) "transient failure cleared by the clean re-run"))
 
     (testing "a new version of the fn clears the failure"
-      (is (= :failed (:status (run! "boom"))))
+      (is (= :failed (:status (run-b! "boom"))))
       (is (= 1 (count (listed))))
       (sp/update-entity storage :fn (:id composed)
                         {:description "fixed (new version)"})
       (is (empty? (listed)) "old-version failure no longer current"))
 
     (testing "explicit acknowledge clears the failure"
-      (is (= :failed (:status (run! "boom"))))
+      (is (= :failed (:status (run-b! "boom"))))
       (let [rows (listed)]
         (is (= 1 (count rows)))
         (is (true? (exec-errors/acknowledge! pool nil (:execution-id (first rows)))))

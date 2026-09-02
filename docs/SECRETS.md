@@ -60,7 +60,7 @@ KMS, feature flags) is now: write one base-fn, use it as `:resolver`
 `[:secret <inner>]` is a refinement-marker over any type. Subtype
 direction is asymmetric:
 
-```
+```text
 [:secret T] ⊆ [:secret T']  iff  T ⊆ T'   (covariant inside)
 [:secret T] ⊆ T             FALSE         (can't strip the taint)
 T          ⊆ [:secret T']   iff  T ⊆ T'   (auto-promote on entry —

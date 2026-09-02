@@ -466,7 +466,7 @@ This approach:
 
 #### Result Caching (via ref-fn-id)
 
-```
+```text
 fn report
   binding {slot s-sales,    ref-fn-id calculate-sales}  ← executes calculate-sales
   binding {slot s-snapshot, ref-fn-id calculate-sales}  ← same ref-fn-id, result cached
@@ -740,7 +740,7 @@ Hardwiring these features into the core has problems:
 
 Current storage implementations must satisfy a long protocol interface. The goal is to reduce this to a minimal set of generic operations:
 
-```
+```text
 Minimal Storage:
   put(entity-type, id, data)
   get(entity-type, id)
@@ -753,7 +753,7 @@ Extensions declare their needs through migrations (new fields, indexes, tables) 
 
 **Independent composability requirement**: Each feature module (caching, versioning, permissions, etc.) must be an independent component implementing the storage decorator pattern. Any combination of decorators must work correctly:
 
-```
+```text
 BaseStorage (minimal CRUD)
 
 Valid compositions (any combination):
@@ -773,7 +773,7 @@ When two features interact (e.g., cache invalidation on branch merge), a dedicat
 
 The system separates concerns into three distinct layers:
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                         EXECUTOR                                 │
 │  - Receives fn-id, executes function graph                     │

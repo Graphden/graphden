@@ -12,7 +12,7 @@ markers**, and the **Inspector** panel with its four tabs.
 
 Under the Explorer's search box sits a row of **kind chips**:
 
-```
+```text
 ◍ all   λ fn   T types   🔒 secrets   ⚙ services 2   ▣ apps 1   ✓ tests 3
 ```
 

@@ -473,7 +473,7 @@ translate `(child :parents [A B])` into natural language:
 automatically)**: let `own-slots(P)` be the set of slot-names that
 parent `P` CONTRIBUTES to its `:fn-slots` junction. MI is permissible iff:
 
-```
+```text
 own-slots(A) ∩ own-slots(B)  ⊆  {slots that child OVERRIDES via :args}
 ```
 

@@ -95,7 +95,7 @@ function focusItem(el) {
 }
 
 function levelOf(el) {
-  return parseInt(el.getAttribute('aria-level') || '1', 10);
+  return Number.parseInt(el.getAttribute('aria-level') || '1', 10);
 }
 
 function isExpandable(el) {

@@ -151,16 +151,16 @@
         ;; nil-safe ordering key — `:namespace` is nil for root-ns defs, and
         ;; a vector containing nil isn't Comparable, so stringify both parts.
         sort-key (fn [m] [(str (:namespace m)) (str (:name m))])
-        cur (into {} (map (juxt key-of identity)) current)
-        inc (into {} (map (juxt key-of identity)) incoming)
+        current-by-key (into {} (map (juxt key-of identity)) current)
+        incoming-by-key (into {} (map (juxt key-of identity)) incoming)
         body #(dissoc % :namespace :name)]
     ;; sort the fn-def MAPS by their [namespace name] key — a bare `sort`
     ;; tries to compare the maps themselves (not Comparable) and throws a
     ;; ClassCastException the moment there are ≥2 added or ≥2 removed defs.
-    {:added (vec (sort-by sort-key (map second (remove #(contains? cur (key %)) inc))))
-     :removed (vec (sort-by sort-key (map second (remove #(contains? inc (key %)) cur))))
-     :changed (vec (sort (for [[k v] inc
-                               :let [c (get cur k)]
+    {:added (vec (sort-by sort-key (map second (remove #(contains? current-by-key (key %)) incoming-by-key))))
+     :removed (vec (sort-by sort-key (map second (remove #(contains? incoming-by-key (key %)) current-by-key))))
+     :changed (vec (sort (for [[k v] incoming-by-key
+                               :let [c (get current-by-key k)]
                                :when (and c (not= (body c) (body v)))]
                            (:name v))))}))
 

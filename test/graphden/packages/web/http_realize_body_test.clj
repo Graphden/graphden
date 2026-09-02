@@ -118,21 +118,21 @@
                   :fields [{:name "title" :type "text"}
                            {:name "count" :type "int"}]})
           req (realize-body {:body (stream-of json)})
-          first (entities/parse-create-record-type req)
-          second (entities/parse-create-record-type req)]
-      (is (= "MyRecord" (:name first)))
-      (is (= 2 (count (:fields first))))
-      (is (= first second)
-          "without realize-body the second call returned `{:name nil :fields []}`
+          parsed-1 (entities/parse-create-record-type req)
+          parsed-2 (entities/parse-create-record-type req)]
+      (is (= "MyRecord" (:name parsed-1)))
+      (is (= 2 (count (:fields parsed-1))))
+      (is (= parsed-1 parsed-2)
+          "without realize-body the parsed-2 call returned `{:name nil :fields []}`
            and the apply persisted a row with `name:null` + zero slots")))
 
   (testing "without realize-body — INTENT-CAPTURE: the second call DOES lose data"
     (let [json (json/generate-string {:name "X" :fields [{:name "y" :type "int"}]})
           req {:body (stream-of json)}
-          first (entities/parse-create-record-type req)
-          second (entities/parse-create-record-type req)]
-      (is (= "X" (:name first)))
-      (is (= 1 (count (:fields first))))
-      (is (nil? (:name second))
+          parsed-1 (entities/parse-create-record-type req)
+          parsed-2 (entities/parse-create-record-type req)]
+      (is (= "X" (:name parsed-1)))
+      (is (= 1 (count (:fields parsed-1))))
+      (is (nil? (:name parsed-2))
           "documents the underlying call-cache miss that realize-body papers over")
-      (is (zero? (count (:fields second)))))))
+      (is (zero? (count (:fields parsed-2)))))))

@@ -503,7 +503,7 @@ be located without walking the inheritance chain.
 
 **UI Usage:**
 
-```
+```text
 Execute function: calculate-report
 ┌─────────────────────────────────────┐
 │ Sales Region: [_______________]     │  ← alias for arg

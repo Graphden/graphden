@@ -150,7 +150,6 @@ async function resolveFnByName(name) {
       const msg = '"' + bare + '" exists in several namespaces — picked '
                   + qual[0] + '. Qualify as ns.path/name to pin. '
                   + 'Candidates: ' + qual.join(', ');
-      // eslint-disable-next-line no-console
       console.warn('resolveFnByName: ' + msg);
       if (typeof window.showTransientWarning === 'function') {
         window.showTransientWarning('Ambiguous name: ' + msg, 8000);
@@ -271,7 +270,6 @@ async function initGraph() {
   lookups = buildLookups(graphData);
   if (typeResp?.ok) {
     try { richTypes = await typeResp.json(); } catch (err) {
-      // eslint-disable-next-line no-console
       console.error(API.api_types + ' JSON parse failed — type tooltips will be empty', err);
       richTypes = {};
     }
@@ -285,7 +283,6 @@ async function initGraph() {
   }
   if (vkResp?.ok) {
     try { VALUE_KINDS = await vkResp.json(); } catch (err) {
-      // eslint-disable-next-line no-console
       console.error(API.api_value_kinds + ' JSON parse failed — type-picker may be incomplete', err);
       VALUE_KINDS = [];
     }
@@ -346,12 +343,10 @@ async function loadGraphData() {
   } catch (err) {
     // Surface network drops in DevTools — caller (post-mutation
     // refresh) silently leaves stale state on the screen otherwise.
-    // eslint-disable-next-line no-console
     console.error('loadGraphData fetch threw', err);
     return;
   }
   if (!treeResp.ok) {
-    // eslint-disable-next-line no-console
     console.error('loadGraphData HTTP', treeResp.status, treeResp.statusText);
     return;
   }
@@ -374,7 +369,6 @@ async function loadGraphData() {
   if (prevRoot) {
     try { await ensureSubtreeFor(prevRoot); }
     catch (err) {
-      // eslint-disable-next-line no-console
       console.error('loadGraphData subtree refresh failed', err);
     }
   }
@@ -438,7 +432,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     // once the graph is loaded, since its step checks read graphData.
     if (typeof maybeStartTutorial === 'function') maybeStartTutorial();
   }).catch((err) => {
-    // eslint-disable-next-line no-console
     console.error('initGraph failed', err);
     const banner = document.createElement('div');
     banner.className = 'editor-fatal-banner';

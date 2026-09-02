@@ -115,7 +115,6 @@ fails — the public demo, a free-plan org, a self-hosted instance with no
 tenancy addon — the picker still lists the lesson, disabled, with the
 reason on the row.
 
-
 Lesson 22 is written **self-host-only** and its tour declares that
 (`:requires "assets"`): the Assets panel is hidden under the cloud
 tenancy addon and its writes are platform-only, because an editable

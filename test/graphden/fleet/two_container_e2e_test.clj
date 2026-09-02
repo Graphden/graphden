@@ -70,7 +70,7 @@
    alias, `GRAPHDEN_EXECUTOR_ID = alias` (enables the fleet-controller + the
    internal endpoint), explicit membership + shared internal token. Network alias
    = `alias` so a peer can dial it. Waits for /health (240s cold-boot budget)."
-  [^Network network alias peers]
+  [^Network network net-alias peers]
   (doto (GenericContainer. ^String (or (System/getenv "GD_IMAGE") "graphden-executor:latest"))
     (GenericContainer/.withEnv "PORT" "8080")
     (GenericContainer/.withEnv "GRAPHDEN_PORT" "8080")
@@ -78,14 +78,14 @@
     (GenericContainer/.withEnv "DB_USERNAME" "graphden")
     (GenericContainer/.withEnv "DB_PASSWORD" "graphden")
     (GenericContainer/.withEnv "AUTH_TOKEN" auth-token)
-    (GenericContainer/.withEnv "GRAPHDEN_EXECUTOR_ID" alias)
+    (GenericContainer/.withEnv "GRAPHDEN_EXECUTOR_ID" net-alias)
     (GenericContainer/.withEnv "GRAPHDEN_FLEET_EXECUTORS" peers)
     (GenericContainer/.withEnv "GRAPHDEN_INTERNAL_TOKEN" internal-token)
     (GenericContainer/.withEnv "GRAPHDEN_DEMO_BRANCHES_ENABLED" "")
     (GenericContainer/.withEnv "GRAPHDEN_NREPL_PORT" "")
     (GenericContainer/.withExposedPorts (into-array Integer [(Integer/valueOf 8080)]))
     (GenericContainer/.withNetwork network)
-    (GenericContainer/.withNetworkAliases (into-array String [alias]))
+    (GenericContainer/.withNetworkAliases (into-array String [net-alias]))
     (GenericContainer/.waitingFor
       (-> (Wait/forHttp "/health")
           (HttpWaitStrategy/.forStatusCode 200)

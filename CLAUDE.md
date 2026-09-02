@@ -119,7 +119,7 @@ slot in that closure is exposed once at the descendant; bindings overlay closer-
 
 **Base function (no parents, has impl):**
 
-```
+```text
 fn: add
   parent-ids: []
   return-type-fn-id: number   ; base-fn marker (always set; defaults to :any)
@@ -129,7 +129,7 @@ slot: {id: nums, name: "nums", type-fn-id: sequence}
 
 **Composed function (parent-ids set):**
 
-```
+```text
 fn: add-10
   parent-ids: [add]     ; inherits add's :nums slot
 binding: {fn-id: add-10, slot-id: nums, list-append: true}
@@ -373,7 +373,7 @@ Classical Clojure monorepo. Top namespace: `graphden`. Where a module exposes an
 
 ### Three-Layer Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                      EXECUTOR LAYER                          │
 │  executor + base-functions + fn-registry                    │
@@ -561,7 +561,7 @@ See [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) for detailed specifications.
 
 ## File Locations
 
-```
+```text
 src/graphden/<module>/interface.clj    # Public API (where present — not every module has one)
 test/graphden/<module>/                # Tests
 docs/                                  # Documentation
@@ -569,7 +569,7 @@ docs/                                  # Documentation
 
 ### Namespace Structure
 
-```
+```text
 src/graphden/
 ├── packages/           # Package loader + package→storage sync (loader.clj, sync.clj)
 ├── executor/           # Executor, registry, compile pipeline, composition

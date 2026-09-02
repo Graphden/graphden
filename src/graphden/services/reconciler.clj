@@ -470,9 +470,9 @@
           enabled-services (filterv #(service-in-shard? (:executor-orgs ctx) %)
                                     (sp/query-entities storage :service {:enabled? true}))
           enabled-by-id    (into {} (map (juxt :id identity)) enabled-services)
-          running          @running-atom
+          running-now          @running-atom
           {:keys [to-start to-stop]} (diff-desired (keys enabled-by-id)
-                                                   (keys running))
+                                                   (keys running-now))
           ;; Config drift: a service that is enabled AND already running
           ;; but whose running entry no longer matches the desired row —
           ;; its :fn-id / :branch-id / :restart-policy was edited via a
@@ -481,7 +481,7 @@
           ;; restart. Stop+restart them to pick it up. `map?` skips the
           ;; ::not-our-lock placeholder.
           drifted (filterv (fn [sid]
-                             (let [entry (get running sid)
+                             (let [entry (get running-now sid)
                                    svc (get enabled-by-id sid)]
                                (and (map? entry)
                                     (or (not= (:fn-id entry) (:fn-id svc))

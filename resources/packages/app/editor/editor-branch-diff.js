@@ -195,7 +195,7 @@ async function annotateDiffEffects(body, sourceName, targetName) {
     const minus = new Set();
     const grab = (set, text) => {
       const m = typeof text === 'string' && text.trim().match(/^:(\S+)$/);
-      if (m) gdDiffEffectsOfName(m[1]).forEach((x) => set.add(x));
+      if (m) gdDiffEffectsOfName(m[1]).forEach((x) => { set.add(x); });
     };
     row.querySelectorAll('.branch-diff-field').forEach((f) => {
       const name = f.querySelector('.branch-diff-field-name')?.textContent || '';
@@ -208,7 +208,7 @@ async function annotateDiffEffects(body, sourceName, targetName) {
       const m = prev.match(/(?:ref\s*)?→\s*:(\S+)/);
       if (!m) return;
       const set = e.classList.contains('bd-removed') ? minus : plus;
-      gdDiffEffectsOfName(m[1]).forEach((x) => set.add(x));
+      gdDiffEffectsOfName(m[1]).forEach((x) => { set.add(x); });
     });
     for (const x of [...plus]) {
       if (minus.has(x)) { plus.delete(x); minus.delete(x); }
@@ -333,7 +333,7 @@ function initDiffConversation(container, sourceName, sourceRef, opts) {
   const mountThread = (anchorEl, comments, withComposer) => {
     const thread = document.createElement('div');
     thread.className = 'branch-diff-anchor-thread';
-    comments.forEach((c) => thread.appendChild(commentRow(c)));
+    comments.forEach((c) => { thread.appendChild(commentRow(c)); });
     if (withComposer) {
       thread.appendChild(composer(anchorEl.getAttribute('data-anchor-name'),
                                   anchorEl.getAttribute('data-anchor-id')));
@@ -351,11 +351,11 @@ function initDiffConversation(container, sourceName, sourceRef, opts) {
     if (!container.isConnected) return;
     // Wipe the previous render (threads + general wrap + count badges).
     container.querySelectorAll('.branch-diff-anchor-thread, .branch-comments')
-      .forEach((n) => n.remove());
+      .forEach((n) => { n.remove(); });
     container.querySelectorAll('.branch-diff-comment-btn .bd-comment-count')
-      .forEach((n) => n.remove());
+      .forEach((n) => { n.remove(); });
     container.querySelectorAll('.branch-diff-comment-btn.has-comments')
-      .forEach((n) => n.classList.remove('has-comments'));
+      .forEach((n) => { n.classList.remove('has-comments'); });
 
     const anchored = new Map();   // "name:id" → [comments]
     const general = [];
@@ -401,10 +401,10 @@ function initDiffConversation(container, sourceName, sourceRef, opts) {
     for (const [k, cs] of orphans) {
       const kind = k.slice(0, k.indexOf(':'));
       const id = k.slice(k.indexOf(':') + 1);
-      cs.forEach((c) => list.appendChild(
-        commentRow(c, 'on ' + kind + ' ' + id.slice(0, 8))));
+      cs.forEach((c) => { list.appendChild(
+        commentRow(c, 'on ' + kind + ' ' + id.slice(0, 8))); });
     }
-    general.forEach((c) => list.appendChild(commentRow(c)));
+    general.forEach((c) => { list.appendChild(commentRow(c)); });
     if (!list.childElementCount) {
       const empty = document.createElement('div');
       empty.className = 'branch-comment-empty';

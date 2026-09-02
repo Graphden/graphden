@@ -255,11 +255,11 @@
    single statement goes out."
   [storage execution-id slot-id v]
   (let [ref? (ref-arg? v)
-        list? (sequential? v)]
+        list-arg? (sequential? v)]
     {:id (random-uuid)
      :execution-id execution-id
      :slot-id slot-id
-     :value (when-not (or ref? list?) v)
+     :value (when-not (or ref? list-arg?) v)
      :ref-fn-version-id (when ref? (resolve-ref-version-id storage v))}))
 
 
@@ -475,19 +475,19 @@
                              (keep (fn [e]
                                      (when (some? (:seq e)) [(:seq e) e])))
                              entries')
-                ancestors (loop [work poison-roots, acc #{}]
-                            (if-let [s (first work)]
-                              (let [p (:parent-seq (get by-seq s))]
-                                (recur (cond-> (disj work s)
-                                         (and (some? p) (not (contains? acc p)))
-                                         (conj p))
-                                       (if (contains? poison-roots s)
-                                         acc     ; roots themselves stay as classified
-                                         (conj acc s))))
-                              acc))]
+                poison-ancestors (loop [work poison-roots, acc #{}]
+                                   (if-let [s (first work)]
+                                     (let [p (:parent-seq (get by-seq s))]
+                                       (recur (cond-> (disj work s)
+                                                (and (some? p) (not (contains? acc p)))
+                                                (conj p))
+                                              (if (contains? poison-roots s)
+                                                acc     ; roots themselves stay as classified
+                                                (conj acc s))))
+                                     acc))]
             (assoc pt :entries
                    (mapv (fn [e]
-                           (if (and (contains? ancestors (:seq e))
+                           (if (and (contains? poison-ancestors (:seq e))
                                     (not (contains? e :hidden)))
                              (-> e
                                  (dissoc :value :value-truncated?)

@@ -112,7 +112,7 @@ function renderColumnBelowMiRow(line, levelInfo, miLevelAbove, ctx) {
   textOverlay.textContent = displayLabel(colFn.name);
   // Create invisible column divs for bg + vertical border
   const colDivs = [];
-  miLevelAbove.fns.forEach((miFn, i) => {
+  miLevelAbove.fns.forEach((miFn, _i) => {
     const col = document.createElement('div');
     col.style.flex = '1 1 0';
     col.style.minWidth = '0';

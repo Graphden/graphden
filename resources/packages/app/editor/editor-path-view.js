@@ -245,8 +245,8 @@ function clearExecutionPathView() {
   document.querySelectorAll('.node-overlay.path-highlighted').forEach((el) => {
     el.classList.remove('path-highlighted');
   });
-  document.querySelectorAll('.path-trace-badge').forEach((el) => el.remove());
-  document.querySelectorAll('.path-value-badge').forEach((el) => el.remove());
+  document.querySelectorAll('.path-trace-badge').forEach((el) => { el.remove(); });
+  document.querySelectorAll('.path-value-badge').forEach((el) => { el.remove(); });
   _hidePathValuePopover();
   if (_pathViewPanelEl) {
     _pathViewPanelEl.remove();

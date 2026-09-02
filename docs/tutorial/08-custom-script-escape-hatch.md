@@ -1,4 +1,4 @@
-## Lesson 08 — The `:custom-script` escape hatch
+# Lesson 08 — The `:custom-script` escape hatch
 
 **Goal**: by the end of this lesson you can express interactive
 behaviour the platform components don't cover — a custom hover
@@ -127,7 +127,7 @@ logs it to `console.error` — the click is a silent no-op,
 sibling buttons keep working. The point: a typo in one
 escape-hatch body doesn't take down the rest of your page.
 
-```
+```text
 custom handler: parse failed — Unexpected token '%'
 custom handler: runtime error — Cannot read properties of null
 ```

@@ -255,7 +255,7 @@ Worked example:
 Both `:http-server`, both branch-local (so they don't
 cross-merge — see lesson 20). Two `:service` rows:
 
-```
+```edn
 {:fn-id :prod-server  :branch-id main :enabled? true}
 {:fn-id :dev-server   :branch-id dev  :enabled? true}
 ```
@@ -300,7 +300,7 @@ in your dev derivative.
 
 ## Inspecting state
 
-```
+```text
 GET /api/services
 → {:ok true :services [{:id ... :fn-id ... :fn-name "web-server"
                          :enabled? true :restart-policy "always"

@@ -7,12 +7,18 @@
  ;; line (bb.edn `all-paths`), which override this key — it only matters
  ;; for a bare `splint` invocation. The stale "components"/"bases" entries
  ;; are polylith leftovers from before this repo became a classic monorepo.
- :paths ["src" "test" "development" "resources/packages"]
+ :paths ["src" "test" "development" "resources/packages" "scripts" "build.clj" "bb.edn"]
 
- ;; `dev` and the CRaC POC are single-file dev entry points loaded by hand
- ;; (`clojure -M:dev`, a POC main) — a second namespace segment would buy
- ;; nothing and break the invocation they exist for.
- naming/single-segment-namespace {:enabled false}
+ ;; Single-file entry points loaded by hand — `dev` (`clojure -M:dev`), the
+ ;; CRaC POC main, the bb scripts under `scripts/` (`load-file`d by bb.edn
+ ;; tasks) and `build.clj` (`clojure -T:build`) — a second namespace segment
+ ;; would buy nothing and break the invocation they exist for. Everything
+ ;; else must be multi-segment, so the rule stays ON and these are excluded
+ ;; by PATH, like `lint/fn-wrapper` below.
+ naming/single-segment-namespace {:excludes [#"development/src/dev\.clj"
+                                            #"development/crac/.*"
+                                            #"scripts/.*"
+                                            #"build\.clj"]}
 
  ;; `development/bench` measures CALL OVERHEAD: `(fn [n] (- n))` standing in
  ;; for a bound base-fn impl is the subject of the benchmark, and rewriting

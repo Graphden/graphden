@@ -161,8 +161,8 @@
    0 = relay up, nobody connected). A nil `org` counts the single-tenant
    (nil-org) subscribers."
   [org]
-  (when-let [subs @active-relay-subscribers]
-    (count (filter #(= org %) (vals @subs)))))
+  (when-let [subscribers @active-relay-subscribers]
+    (count (filter #(= org %) (vals @subscribers)))))
 
 
 (defn start-relay!

@@ -65,7 +65,7 @@ All three mechanisms use the same infrastructure — fn-defs, arg entities, `com
 
 ## Type Hierarchy
 
-```
+```text
 :any                           ← top type, accepts everything
 ├── :jsonb                     ← untyped structured data (escape hatch)
 ├── :numeric                   ← arbitrary-precision numeric supertype
@@ -159,7 +159,7 @@ Subtyping rules:
 
 Type checking happens **at fn-def save time** — when the user creates or modifies a fn-def through API or UI. Not at runtime.
 
-```
+```text
 User creates/modifies fn-def
          │
          ▼
@@ -334,7 +334,7 @@ In graphden, argument values are often **concrete literals stored in the DB**. W
 
 ### assoc
 
-```
+```text
 type-rule: if key is a literal, result = type(map) + {key: type(value)}
            if key is a ref-id, result = :jsonb (degradation)
 ```
@@ -356,7 +356,7 @@ Example:
 
 ### get
 
-```
+```text
 type-rule: if key is a literal and coll has record type,
            check field exists, return field type.
            if key is a ref-id, result = :jsonb (degradation)
@@ -377,7 +377,7 @@ Example:
 
 ### dissoc
 
-```
+```text
 slot:      :map  [:map a :any]   ; record ⊆ [:map :keyword :any] via subtype;
                                  ; [:list …] rejected at the type level.
 type-rule: if k is a literal, result = type(m) minus field k
@@ -392,13 +392,13 @@ value side to `:any` keeps `record-to-map` unification through
 
 ### merge
 
-```
+```text
 type-rule: result = type(a) ∪ type(b)
 ```
 
 ### zipmap / pairs->map — static field reconstruction
 
-```
+```text
 zipmap:     if every :keys item is a literal keyword/string,
             result = record {k1 T1 …} with Ti from :vals per-item types
 pairs->map: if EVERY :entries item is a statically-known 2-element pair
@@ -746,7 +746,7 @@ Any fn-def can declare an `:expects-effects #{…}` set. At sync time,
 the type-checker compares declared vs computed; categories that show
 up in the actual graph but weren't in the declaration log a `WARN`:
 
-```
+```text
 fn-def :health declared :expects-effects #{:time}
                 but computed effects include #{:db}
                 — drift in the call graph?
@@ -906,7 +906,7 @@ for `:list`, `fn.constraint` for predicates).
 
 ## Typed and Untyped Boundary
 
-```
+```text
 Untyped world                    Typed world
 (jsonb, any)                     (int, text, bool, records)
                                  
@@ -999,7 +999,7 @@ union / variant) plus pointer fields on entities:
 
 ### fn entity (type-related fields)
 
-```
+```text
 fn:
   ...
   return-type-fn-id   ref<fn>  -- author-declared return type
@@ -1011,7 +1011,7 @@ fn:
 
 ### slot entity (per-slot type)
 
-```
+```text
 slot:
   type-fn-id   ref<fn>  -- the slot's value type
   required     bool
@@ -1019,7 +1019,7 @@ slot:
 
 ### binding entity (per-fn override)
 
-```
+```text
 binding:
   type-override-fn-id  ref<fn>  -- override slot's type at this fn
 ```
@@ -1135,7 +1135,7 @@ The package loader uses `clojure.tools.reader` (instead of
 fn-def. The type-checker threads it via a dynamic var into every
 error message, so authors see exactly which EDN entry to open:
 
-```
+```text
   at packages/web/ring-adapter/fns.edn:188
 Type-check failed in fn-def :token-valid?
   arg :a ← fn-ref → :auth-token-from-env
@@ -1148,7 +1148,7 @@ Type-check failed in fn-def :token-valid?
 
 Effects-breakdown report for a running instance:
 
-```
+```text
 $ bb effects
 URL: http://localhost:9002/api/types
 ▶ effects breakdown  (effectful 94 of 452)
@@ -1369,7 +1369,7 @@ constraint; `:map`'s `:func` deliberately does NOT:
 Binding e.g. `:env-flag-pred` (effects `#{:env}`) into `:filter
 :pred` now fails sync with:
 
-```
+```text
 parent :filter expects: [:fn {:item a} :bool #{}]
 actual:                 [:fn {:item :any} :bool #{:env}]
 ```
@@ -1389,7 +1389,6 @@ always carries `:effects` — possibly `#{}` for pure fns — so
 unconditionally. The "absent key vs. empty set" ambiguity was
 retired; `compute-effects`-computed pure and explicit `#{}` are
 the same wire representation.
-
 
 ### Phase 9: Caller-context propagation (Phase α') ✅
 

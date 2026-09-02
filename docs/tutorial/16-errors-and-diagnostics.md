@@ -38,7 +38,7 @@ while the list stays open.
 The **Errors** tab lists the recent failed runs that are still
 **unresolved** on the branch you are on, newest first. Each row is:
 
-```
+```text
 ✕                                   ← dismiss this failure
 eprobe                              ← the fn, as a link
 2026-08-22 09:49:35                 ← when it finished
@@ -86,7 +86,7 @@ not sitting in this list waiting to be shown to a teammate.
 The **Type errors** tab lists the diagnostics recorded for the branch
 you are on. One row per diagnostic:
 
-```
+```text
 tprobe            ← the fn
 port              ← the arg
 Type-check failed in fn-def :tprobe

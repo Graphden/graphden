@@ -12,7 +12,7 @@ safe and useful without it.
 It is **off by default**. Turn it on by naming its config fragment in
 `GRAPHDEN_ADDON_CONFIGS`:
 
-```
+```bash
 GRAPHDEN_ADDON_CONFIGS=graphden/accounts/addon.edn
 ```
 

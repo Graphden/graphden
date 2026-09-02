@@ -10,7 +10,7 @@ rewritten.
 
 ## Architecture overview
 
-```
+```text
    POST /api/execute  (the :execute route — a graph fn-def)
         │
         ▼

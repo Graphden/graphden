@@ -43,7 +43,7 @@ and finding `:str-len` also points at a fn-row. One graph.
 
 14 baked-in primitives:
 
-```
+```text
 :null :uuid :text :int :bool :numeric
 :timestamptz :jsonb :bytes :any :fn
 :sequence :keyword :float

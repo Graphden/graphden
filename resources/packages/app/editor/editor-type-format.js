@@ -309,10 +309,6 @@ function refinementConstraintText(rich) {
   if (!Array.isArray(rich) || rich[0] !== 'refine') return null;
   const c = rich[2];
   if (!Array.isArray(c)) return null;
-  const fmtAtom = (v) => {
-    if (Array.isArray(v)) return refinementAtomText(v);
-    return String(v);
-  };
   // :in handled distinctly (different shape: c[1] is the member array).
   if (c[0] === 'in' && Array.isArray(c[1])) {
     const isKw = rich[1] === 'keyword';
@@ -359,7 +355,8 @@ function rangeFold(left, right) {
   const arg = (n) => Array.isArray(n) ? n[1] : null;
   const isLo = (n) => op(n) === '>=' || op(n) === '>';
   const isHi = (n) => op(n) === '<=' || op(n) === '<';
-  let lo, hi;
+  let lo;
+  let hi;
   if (isLo(left) && isHi(right)) { lo = left; hi = right; }
   else if (isLo(right) && isHi(left)) { lo = right; hi = left; }
   else return null;

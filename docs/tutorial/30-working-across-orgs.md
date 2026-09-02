@@ -19,7 +19,7 @@ in)](33-signing-up-and-in.md) — you have an account and an org.
 On a graphden cloud, your organization's editor lives at its own
 subdomain:
 
-```
+```text
 https://<org>.graphden.dev
 ```
 

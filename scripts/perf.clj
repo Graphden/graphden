@@ -127,18 +127,18 @@
    success case, and its counter is simply not in the map."
   [suite budget counters]
   {:suite suite
-   :rows (vec (for [[event {:keys [max why]}] (sort-by key budget)
+   :rows (vec (for [[event {:keys [why] cap :max}] (sort-by key budget)
                     :let [n (get counters event 0)]]
-                {:event event :n n :max max :ok? (<= n max) :why why}))})
+                {:event event :n n :max cap :ok? (<= n cap) :why why}))})
 
 
 (defn- print-suite!
   [{:keys [suite rows]} counters]
   (println (str "\n" bold (name suite) reset))
-  (doseq [{:keys [event n max ok? why]} rows]
+  (doseq [{:keys [event n ok? why] cap :max} rows]
     (println (str "  " (if ok? (str green "✓" reset) (str red "✗" reset))
                   " " (format "%-38s" (str event))
-                  (format "%4d" n) " / max " max))
+                  (format "%4d" n) " / max " cap))
     (when-not ok?
       (println (str "      " red why reset))))
   (let [budgeted (set (map :event rows))
@@ -203,7 +203,7 @@
         ;; The trend reference is refreshed silently: it is advisory, so a moved
         ;; number is not an accepted regression, it is just a newer reading off a
         ;; box that was never the same box twice.
-        updated (reduce (fn [acc [event spec]]
+        updated (reduce (fn [acc [event _spec]]
                           (if-let [now (get gauges event)]
                             (assoc-in acc [trend-key event :units] now)
                             acc))

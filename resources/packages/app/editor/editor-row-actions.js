@@ -402,7 +402,8 @@ function _applyAddMICompatibilityState(host) {
   const reasons = Object.values(info.rejected || {});
   const counts = {};
   for (const r of reasons) counts[r] = (counts[r] || 0) + 1;
-  let topReason = null, topCount = 0;
+  let topReason = null;
+  let topCount = 0;
   for (const [r, c] of Object.entries(counts)) {
     if (c > topCount) { topReason = r; topCount = c; }
   }
@@ -547,7 +548,7 @@ registerActionHandler('namespace-move', (btn, e) => {
 });
 
 
-registerActionHandler('description', (btn, e, host) => {
+registerActionHandler('description', (btn, e, _host) => {
   // Click toggles sticky — match the legacy badge behaviour.
   e.preventDefault();
   e.stopPropagation();
@@ -598,7 +599,7 @@ registerActionHandler('open', (btn, e) => {
 });
 
 
-registerActionHandler('remove-mi-parent', (btn, e, host) => {
+registerActionHandler('remove-mi-parent', (btn, e, _host) => {
   // Remove THIS cell's fn from the CARD-owning fn's parent-set.
   e.preventDefault();
   e.stopPropagation();
@@ -612,7 +613,7 @@ registerActionHandler('remove-mi-parent', (btn, e, host) => {
 });
 
 
-registerActionHandler('add-mi-parent', (btn, e, host) => {
+registerActionHandler('add-mi-parent', (btn, e, _host) => {
   // Open the MI picker for the CARD-owning fn. Compatibility
   // check (no candidates → disable + reason) stays in
   // `_applyAddMICompatibilityState` because `compatibleMIParentInfo`
@@ -628,7 +629,7 @@ registerActionHandler('add-mi-parent', (btn, e, host) => {
 });
 
 
-registerActionHandler('remove-use-site-binding', (btn, e, host) => {
+registerActionHandler('remove-use-site-binding', (btn, e, _host) => {
   // Look up the rich `useSiteArg` via the binding-id-keyed
   // registry the caller populated pre-fetch. The arg carries
   // `:type` / `:item-id` / etc. that `deleteUseSiteBinding`
@@ -644,7 +645,7 @@ registerActionHandler('remove-use-site-binding', (btn, e, host) => {
 });
 
 
-registerActionHandler('change-use-site-value', (btn, e, host) => {
+registerActionHandler('change-use-site-value', (btn, e, _host) => {
   // `enterFreeArgBindEditMode` dispatches on the arg's effective
   // type (fn-picker for `:fn` slots, literal form for the rest) —
   // same registry lookup pattern as above.
@@ -662,7 +663,7 @@ registerActionHandler('change-use-site-value', (btn, e, host) => {
 // Same binding-id-keyed registry lookup as × / ✎; the rich arg
 // carries the `item-id` and `position` the endpoints need.
 
-registerActionHandler('seq-move-item-up', (btn, e, host) => {
+registerActionHandler('seq-move-item-up', (btn, e, _host) => {
   e.preventDefault();
   e.stopPropagation();
   const bindingId = btn.closest('[data-binding-id]')?.dataset.bindingId;
@@ -673,7 +674,7 @@ registerActionHandler('seq-move-item-up', (btn, e, host) => {
 });
 
 
-registerActionHandler('seq-move-item-down', (btn, e, host) => {
+registerActionHandler('seq-move-item-down', (btn, e, _host) => {
   e.preventDefault();
   e.stopPropagation();
   const bindingId = btn.closest('[data-binding-id]')?.dataset.bindingId;
@@ -684,7 +685,7 @@ registerActionHandler('seq-move-item-down', (btn, e, host) => {
 });
 
 
-registerActionHandler('seq-insert-before', (btn, e, host) => {
+registerActionHandler('seq-insert-before', (btn, e, _host) => {
   // Reuses the append chooser (literal vs fn-ref) with the anchor
   // item's position — the backend shifts later items +1.
   e.preventDefault();
@@ -700,7 +701,7 @@ registerActionHandler('seq-insert-before', (btn, e, host) => {
 });
 
 
-registerActionHandler('run-fn', (btn, e, host) => {
+registerActionHandler('run-fn', (btn, e, _host) => {
   e.preventDefault();
   e.stopPropagation();
   const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
@@ -711,7 +712,7 @@ registerActionHandler('run-fn', (btn, e, host) => {
 });
 
 
-registerActionHandler('fn-versions', (btn, e, host) => {
+registerActionHandler('fn-versions', (btn, e, _host) => {
   e.preventDefault();
   e.stopPropagation();
   const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
@@ -722,7 +723,7 @@ registerActionHandler('fn-versions', (btn, e, host) => {
 });
 
 
-registerActionHandler('service-settings', (btn, e, host) => {
+registerActionHandler('service-settings', (btn, e, _host) => {
   e.preventDefault();
   e.stopPropagation();
   const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
@@ -733,7 +734,7 @@ registerActionHandler('service-settings', (btn, e, host) => {
 });
 
 
-registerActionHandler('apps', (btn, e, host) => {
+registerActionHandler('apps', (btn, e, _host) => {
   e.preventDefault();
   e.stopPropagation();
   const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
@@ -744,7 +745,7 @@ registerActionHandler('apps', (btn, e, host) => {
 });
 
 
-registerActionHandler('rename-fn', (btn, e, host) => {
+registerActionHandler('rename-fn', (btn, e, _host) => {
   e.preventDefault();
   e.stopPropagation();
   const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
@@ -755,7 +756,7 @@ registerActionHandler('rename-fn', (btn, e, host) => {
 });
 
 
-registerActionHandler('wrap-fn', (btn, e, host) => {
+registerActionHandler('wrap-fn', (btn, e, _host) => {
   e.preventDefault();
   e.stopPropagation();
   const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
@@ -766,7 +767,7 @@ registerActionHandler('wrap-fn', (btn, e, host) => {
 });
 
 
-registerActionHandler('extend-fn', (btn, e, host) => {
+registerActionHandler('extend-fn', (btn, e, _host) => {
   e.preventDefault();
   e.stopPropagation();
   const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
@@ -777,7 +778,7 @@ registerActionHandler('extend-fn', (btn, e, host) => {
 });
 
 
-registerActionHandler('delete-fn', (btn, e, host) => {
+registerActionHandler('delete-fn', (btn, e, _host) => {
   // Destructive — confirm + cascade + reload via initGraph,
   // mirroring the legacy in-card ✕ behaviour. `withBusy`
   // surfaces the deletion as a top-bar banner while it runs.

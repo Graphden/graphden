@@ -115,7 +115,7 @@ function gdDiffRenderGroup(g, opts) {
     e['entity-name'] !== 'fn' || e.fields?.length || e.preview);
   const entries = document.createElement('div');
   entries.className = 'branch-diff-entries';
-  keep.forEach((e) => entries.appendChild(gdDiffRenderEntry(e, opts)));
+  keep.forEach((e) => { entries.appendChild(gdDiffRenderEntry(e, opts)); });
   if (opts.entriesOnly) return entries;
 
   const row = document.createElement('div');
@@ -152,6 +152,6 @@ function gdDiffRenderGroup(g, opts) {
 
 function gdDiffRenderGroups(container, groups, opts) {
   const frag = document.createDocumentFragment();
-  (groups || []).forEach((g) => frag.appendChild(gdDiffRenderGroup(g, opts)));
+  (groups || []).forEach((g) => { frag.appendChild(gdDiffRenderGroup(g, opts)); });
   container.appendChild(frag);
 }

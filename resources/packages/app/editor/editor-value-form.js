@@ -180,7 +180,6 @@ async function fetchValueForm(arg) {
       body: JSON.stringify(body)
     });
     if (!r.ok) {
-      // eslint-disable-next-line no-console
       console.error('value-form fetch HTTP', r.status, r.statusText);
       return null;
     }
@@ -190,7 +189,6 @@ async function fetchValueForm(arg) {
     // CORS mishaps, JSON parse errors) — caller renders a generic
     // "Could not load the form" but DevTools had nothing. Surface
     // so a triage session can see the real cause without re-running.
-    // eslint-disable-next-line no-console
     console.error('value-form fetch threw', err);
     return null;
   }

@@ -46,7 +46,7 @@ function openNamespacePicker(opts) {
 
   // Build path strings for every namespace (walk parent-id chain).
   const nsById = new Map();
-  graphData.namespaces.forEach(ns => nsById.set(ns.id, ns));
+  graphData.namespaces.forEach(ns => { nsById.set(ns.id, ns); });
   const pathFor = (ns) => {
     const parts = [];
     let cur = ns;

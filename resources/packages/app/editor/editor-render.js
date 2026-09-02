@@ -103,7 +103,6 @@ async function renderGraph(shouldFit = true) {
   if (selectedFnId && typeof ensureSubtreeFor === 'function') {
     try { await ensureSubtreeFor(selectedFnId); }
     catch (err) {
-      // eslint-disable-next-line no-console
       console.error('renderGraph: subtree fetch failed', err);
       return;
     }

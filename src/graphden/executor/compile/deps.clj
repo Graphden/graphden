@@ -118,14 +118,14 @@
                                  (forward-deps-of (:id f) indexed)))
                         {}
                         (vals fns-map))
-        reverse (reduce-kv
-                  (fn [acc fid fwds]
-                    (reduce (fn [a dep] (update a dep (fnil conj #{}) fid))
-                            acc
-                            fwds))
-                  {}
-                  forward)]
-    {:forward-deps forward :reverse-deps reverse}))
+        reverse-deps (reduce-kv
+                       (fn [acc fid fwds]
+                         (reduce (fn [a dep] (update a dep (fnil conj #{}) fid))
+                                 acc
+                                 fwds))
+                       {}
+                       forward)]
+    {:forward-deps forward :reverse-deps reverse-deps}))
 
 
 (defn incremental-update

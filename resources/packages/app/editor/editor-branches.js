@@ -871,7 +871,7 @@ function openProtectionMenu(btn) {
   const branchName = btn.getAttribute('data-protect-branch');
   const branchRef = branchRefFrom(btn, branchName);
   const requireMerge = btn.getAttribute('data-require-merge') === '1';
-  const reqAppr = parseInt(btn.getAttribute('data-reqappr') || '0', 10) || 0;
+  const reqAppr = Number.parseInt(btn.getAttribute('data-reqappr') || '0', 10) || 0;
   // data-allow-self: "off" = explicitly disabled; "on"/"" = counted (default).
   const allowSelf = btn.getAttribute('data-allow-self') !== 'off';
   const rpUrl = API.api_branches_ref_review_policy(branchRef);

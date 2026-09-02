@@ -571,8 +571,6 @@ function buildCreateRow(indent) {
 // INLINE RENAME
 // =============================================================================
 
-const activeRename = null;  // { nsId, nsPath } | null
-
 function startNsRename(headerEl, nsId, nsPath) {
   // Replace label + actions with input row inline.
   const segments = nsPath.split('.');

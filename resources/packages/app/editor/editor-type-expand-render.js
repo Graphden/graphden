@@ -242,7 +242,7 @@ function refinementChain(rich) {
 // the editor). Constraint per step shown as a tooltip on the name's
 // chip so the cumulative narrowing is discoverable without bloating
 // the row width.
-function buildRefinementChainSection(chain, ctx) {
+function buildRefinementChainSection(chain, _ctx) {
   const wrap = document.createElement('div');
   wrap.className = 'type-inline-refinement-chain';
   const head = document.createElement('div');

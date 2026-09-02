@@ -108,7 +108,6 @@ async function fetchServices() {
     const r = await authFetch(listUrl, { method: 'GET' });
     if (!r.ok) {
       if (r.status !== 401) {
-        // eslint-disable-next-line no-console
         console.error(listUrl + ' HTTP', r.status, r.statusText);
       }
       return null;
@@ -119,7 +118,6 @@ async function fetchServices() {
     // expect `{services}`, so wrap the tenant array (no runtime `running`).
     return Array.isArray(body) ? { services: body } : body;
   } catch (err) {
-    // eslint-disable-next-line no-console
     console.error(listUrl + ' fetch threw', err);
     return null;
   }

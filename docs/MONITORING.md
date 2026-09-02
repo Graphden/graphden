@@ -28,7 +28,7 @@ The interactive tutorial posts three events per lesson to
 `finished` — which bump process counters and therefore ride out on
 `/metrics` and `/metrics/prometheus` with everything else:
 
-```
+```text
 graphden_counters_tour_started_01     # denominator
 graphden_counters_tour_step_01_3      # reached step 3
 graphden_counters_tour_finished_01    # numerator

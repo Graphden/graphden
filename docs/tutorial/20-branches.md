@@ -35,7 +35,7 @@ At the top of the Explorer there's a branch chip showing your
 current branch. Click it for the branch popover — a flat list of
 the org's branches (`main` and your current branch sort first).
 
-```
+```text
 Create              → type a name, click Create
                       (forks from the current branch)
 Advanced            → (cloud/tenancy only) pick who can write the
@@ -236,7 +236,7 @@ branch; compare mode and the Review dialog mark such rows with
 `📍 branch-local` (the inspector's diff panel carries it too), and
 the post-merge alert names exactly what didn't propagate:
 
-```
+```text
 2 branch-local fns did NOT propagate to main:
 :my-web-server, :my-vault-secret
 (Marked with 📍 in the diff.)

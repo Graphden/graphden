@@ -12,6 +12,7 @@
 // `let` because editor-expansion.js rebinds the timer; biome.json's
 // override turns off `useConst` for this file so the rule doesn't
 // fight the cross-file-mutated convention.
+// biome-ignore lint/style/useConst: reassigned in editor-expansion.js (one shared script scope)
 let previewDebounceTimer = null;
 const PREVIEW_DEBOUNCE_MS = 100;
 
@@ -124,7 +125,6 @@ async function selectFnByName(name, updateHistory = true) {
       const resolved = await resolveFnByName(name);
       if (resolved) fn = resolved;
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error('selectFnByName resolution failed', err);
     }
   }
@@ -169,7 +169,6 @@ async function selectFnByName(name, updateHistory = true) {
     if (typeof ensureSubtreeFor === 'function') {
       try { await ensureSubtreeFor(fn.id); }
       catch (err) {
-        // eslint-disable-next-line no-console
         console.error('selectFnByName subtree load failed', err);
       }
     }

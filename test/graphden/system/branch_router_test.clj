@@ -347,8 +347,8 @@
                     ;; simulate a concurrent delete landing mid-build
                     (br/invalidate! r bid)
                     {:handler :stub-h :last-used 1})]
-      (let [entry (#'br/build-and-cache! router gone-id)]
-        (is (= :stub-h (:handler entry))
+      (let [built (#'br/build-and-cache! router gone-id)]
+        (is (= :stub-h (:handler built))
             "the in-flight request is still served from the built entry")
         (is (not (contains? @handlers gone-id))
             "but the deleted branch is NOT installed into the cache")))))
@@ -494,15 +494,15 @@
 
 (deftest active-router-singleton-roundtrip-test
   (testing "set-active-router! → current-router → clear-active-router!"
-    (let [fake-router (br/->BranchRouter nil default-id (atom {}) :stub-fn-id)]
+    (let [fake (br/->BranchRouter nil default-id (atom {}) :stub-fn-id)]
       ;; Start clean (sibling tests in THIS NS may have left state —
       ;; the parallel plugin's `*active-router-override*` binding
       ;; isolates us from other NSes but not from same-NS carry-over).
       (br/clear-active-router!)
       (is (nil? (br/current-router)) "clean precondition")
 
-      (br/set-active-router! fake-router)
-      (is (identical? fake-router (br/current-router))
+      (br/set-active-router! fake)
+      (is (identical? fake (br/current-router))
           "current returns whatever was last set")
 
       (br/clear-active-router!)

@@ -124,10 +124,10 @@ function graphNodeIds() {
 /** Bounding box of every node, in graph coordinates. Empty graph → null. */
 function graphBoundingBox() {
   if (graph.nodes.size === 0) return null;
-  let x1 = Infinity;
-  let y1 = Infinity;
-  let x2 = -Infinity;
-  let y2 = -Infinity;
+  let x1 = Number.POSITIVE_INFINITY;
+  let y1 = Number.POSITIVE_INFINITY;
+  let x2 = Number.NEGATIVE_INFINITY;
+  let y2 = Number.NEGATIVE_INFINITY;
   for (const node of graph.nodes.values()) {
     const w = nodeWidth(node);
     const h = nodeHeight(node);

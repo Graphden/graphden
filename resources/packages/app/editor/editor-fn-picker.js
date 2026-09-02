@@ -465,7 +465,8 @@ function openFnPicker(opts) {
         return a.qualified.localeCompare(b.qualified);
       });
 
-    let compat, incompat;
+    let compat;
+    let incompat;
     if (expected) {
       compat = filtered.filter(c => c.compatible === true).slice(0, 50);
       incompat = filtered.filter(c => c.compatible === false).slice(0, 50);
@@ -519,7 +520,7 @@ function openFnPicker(opts) {
       visibleRows.push({ c, section: expected ? 'compat' : 'neutral' });
     });
     if (otherExpanded) {
-      incompat.forEach(c => visibleRows.push({ c, section: 'incompat' }));
+      incompat.forEach(c => { visibleRows.push({ c, section: 'incompat' }); });
     }
     visibleRows.forEach((entry, idx) => {
       const row = renderRow(entry.c, entry.section, idx);

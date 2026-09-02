@@ -13,7 +13,7 @@
 // `#@settings/account`, `#@organization`, `#@platform`. `@` can't start a fn
 // name (valid-identifier?), so the namespace never collides with the
 // `#<fn-name>` selection hashes; editor-main.js routes `@` hashes here.
-(function () {
+(() => {
   // Progressive disclosure (redesign 2026-08): cards start COMPACT — the dense
   // return-type + effects metadata strips are hidden by default (that data is
   // in the inspector for the selected fn). The nav-controls "Details" toggle
@@ -37,7 +37,7 @@
   // placeholder overlay is only a defensive fallback for an unknown name.
   // opts.pushHash=false suppresses the history write (used when the CALL
   // originates from hash routing — pushing again would double the entry).
-  function gdShellSurface(name, btn, opts) {
+  function gdShellSurface(name, _btn, opts) {
     // Whether the keyboard was inside the surface being left — decides if
     // returning to Build must re-home focus (hiding a section silently drops
     // focus to <body>, and the next Tab would restart from the page top).

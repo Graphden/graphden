@@ -45,18 +45,18 @@
   --hof-border: #b8c0e0;
   /* Description tooltip — high-contrast bubble that sits over both
      overlay rows and the cy canvas, so it must read against any bg. */
-  --tooltip-bg: rgba(0,0,0,0.88);
+  --tooltip-bg: rgb(0 0 0 / 0.88);
   --tooltip-fg: #fff;
   /* Shadow + scrim tokens — same alpha curves as Material Design's
      elevation set; centralised here so any new floating element picks
      consistent depth instead of inventing a new opacity. */
-  --shadow-sm: 0 2px 6px rgba(0,0,0,0.18);
-  --shadow-md: 0 2px 6px rgba(0,0,0,0.25);
-  --shadow-lg: 0 4px 12px rgba(0,0,0,0.25);
-  --shadow-xl: 0 4px 14px rgba(0,0,0,0.30);
-  --overlay-hover: rgba(0,0,0,0.08);
-  --overlay-pressed: rgba(127,127,127,0.20);
-  --modal-backdrop-bg: rgba(0,0,0,0.4);
+  --shadow-sm: 0 2px 6px rgb(0 0 0 / 0.18);
+  --shadow-md: 0 2px 6px rgb(0 0 0 / 0.25);
+  --shadow-lg: 0 4px 12px rgb(0 0 0 / 0.25);
+  --shadow-xl: 0 4px 14px rgb(0 0 0 / 0.30);
+  --overlay-hover: rgb(0 0 0 / 0.08);
+  --overlay-pressed: rgb(127 127 127 / 0.20);
+  --modal-backdrop-bg: rgb(0 0 0 / 0.4);
   --sidebar-width: 280px;
   /* Touch-target sizing — Apple HIG / WCAG 2.5.5. The visible glyph
      stays small on desktop (15px etc.); these tokens are the
@@ -162,8 +162,8 @@
   --gd-inspector-w: 344px;
   --gd-r: 9px;
   --gd-r-sm: 6px;
-  --gd-shadow: 0 1px 2px rgba(20, 30, 28, 0.06), 0 6px 18px rgba(20, 30, 28, 0.06);
-  --gd-shadow-pop: 0 8px 30px rgba(20, 30, 28, 0.16);
+  --gd-shadow: 0 1px 2px rgb(20 30 28 / 0.06), 0 6px 18px rgb(20 30 28 / 0.06);
+  --gd-shadow-pop: 0 8px 30px rgb(20 30 28 / 0.16);
 }
 body.theme-dark {
   /* Ink #0D1117 is the brand's dark ground. */
@@ -195,23 +195,23 @@ body.theme-dark {
   --hof-fg: #aab8e8;
   --hof-bg: #1e2030;
   --hof-border: #3a4070;
-  --tooltip-bg: rgba(232,232,232,0.92);
+  --tooltip-bg: rgb(232 232 232 / 0.92);
   --tooltip-fg: #1a1a1a;
   /* Dark theme — slightly stronger shadows since they're on a darker
      base, scrim flipped to white on dark. */
-  --shadow-sm: 0 2px 6px rgba(0,0,0,0.40);
-  --shadow-md: 0 2px 6px rgba(0,0,0,0.50);
-  --shadow-lg: 0 4px 12px rgba(0,0,0,0.50);
-  --shadow-xl: 0 4px 14px rgba(0,0,0,0.55);
-  --overlay-hover: rgba(255,255,255,0.08);
-  --overlay-pressed: rgba(255,255,255,0.16);
-  --modal-backdrop-bg: rgba(0,0,0,0.65);
+  --shadow-sm: 0 2px 6px rgb(0 0 0 / 0.40);
+  --shadow-md: 0 2px 6px rgb(0 0 0 / 0.50);
+  --shadow-lg: 0 4px 12px rgb(0 0 0 / 0.50);
+  --shadow-xl: 0 4px 14px rgb(0 0 0 / 0.55);
+  --overlay-hover: rgb(255 255 255 / 0.08);
+  --overlay-pressed: rgb(255 255 255 / 0.16);
+  --modal-backdrop-bg: rgb(0 0 0 / 0.65);
   /* Status colours — slight desaturation against the dark background
      so they don't vibrate. Hue still maps green=ok / red=error. */
   --success-fg: #5be08a;
-  --error-fg: #ff7777;
+  --error-fg: #f77;
   /* On the dark surface the base red already clears AA for text. */
-  --error-fg-strong: #ff7777;
+  --error-fg-strong: #f77;
   --warning-fg: #e0a94a;
   --on-accent: #fff;
   --danger-bg: #e5484d;
@@ -244,8 +244,8 @@ body.theme-dark {
   --gd-warn: #d9a84e;
   --gd-crit: #e8756b;
   --gd-crit-wash: #2e1a18;
-  --gd-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(0, 0, 0, 0.35);
-  --gd-shadow-pop: 0 10px 34px rgba(0, 0, 0, 0.55);
+  --gd-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 6px 20px rgb(0 0 0 / 0.35);
+  --gd-shadow-pop: 0 10px 34px rgb(0 0 0 / 0.55);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 
@@ -271,7 +271,7 @@ body.theme-dark {
   padding: 8px 14px;
   background: var(--accent); color: var(--on-accent);
   font-size: 0.8125rem; text-decoration: none;
-  border-radius: 0 0 4px 0;
+  border-radius: 0 0 4px;
 }
 .gd-skip-link:focus { transform: translateY(0); }
 
@@ -279,7 +279,7 @@ body.theme-dark {
    never draw a ring around the whole canvas for it. */
 #graph-container:focus { outline: none; }
 
-body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+body { font-family: 'SF Mono', Monaco, Inconsolata, monospace;
   background: var(--bg); color: var(--fg); }
 
 /* ID-based layout (matches editor-body hiccup structure).
@@ -649,7 +649,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   background: var(--header-fg); color: var(--header-bg);
 }
 .auth-avatar.auth-avatar-op {
-  background: var(--gd-flow, #0066cc); color: var(--gd-on-accent, #fff);
+  background: var(--gd-flow, #06c); color: var(--gd-on-accent, #fff);
   box-shadow: 0 0 0 1px var(--header-fg);
 }
 .auth-signin {
@@ -668,7 +668,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 .auth-menu-badge {
   font-size: 0.5625rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
   padding: 1px 6px; border-radius: 3px;
-  background: var(--gd-flow, #0066cc); color: var(--gd-on-accent, #fff);
+  background: var(--gd-flow, #06c); color: var(--gd-on-accent, #fff);
 }
 .auth-menu-item {
   text-align: left; background: transparent; border: none; cursor: pointer;
@@ -1583,11 +1583,11 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   margin-left: 0 !important;
 }
 .create-btn {
-  background: transparent; color: inherit; border: 1px solid currentColor;
+  background: transparent; color: inherit; border: 1px solid currentcolor;
   border-radius: 3px; cursor: pointer; padding: 0;
   display: inline-flex; align-items: center; justify-content: center;
 }
-.create-btn:hover { background: currentColor; }
+.create-btn:hover { background: currentcolor; }
 .create-btn:hover svg { color: var(--bg); }
 /* Match `applyActionIconBox` (description-badge `i`) so the row's
    icons line up: same 15×15 frame, same 1px border. The action
@@ -1796,7 +1796,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 .effects-chip {
   display: inline-block;
   padding: 0 5px;
-  font-family: SF Mono, Monaco, monospace;
+  font-family: "SF Mono", Monaco, monospace;
   font-size: 0.5312rem;
   line-height: 0.75rem;
   letter-spacing: 0.3px;
@@ -1841,7 +1841,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 .effects-chip-ghost {
   background: transparent !important;
   color: var(--muted-fg);
-  outline: 1px dashed currentColor;
+  outline: 1px dashed currentcolor;
   outline-offset: -1px;
 }
 
@@ -1911,7 +1911,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 }
 .namespace-badge:hover {
   opacity: 1;
-  background-color: color-mix(in srgb, currentColor 28%, transparent);
+  background-color: color-mix(in srgb, currentcolor 28%, transparent);
 }
 
 
@@ -2058,7 +2058,7 @@ body.gd-no-execute .execute-cancel-btn {
   box-shadow: var(--shadow-xl);
   padding: 8px;
   display: flex; flex-direction: column; gap: 6px;
-  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+  font-family: 'SF Mono', Monaco, Inconsolata, monospace;
 }
 .arg-value-edit-popover {
   min-width: 220px;
@@ -2315,7 +2315,7 @@ textarea.value-form-hiccup {
   display: inline-flex; align-items: center; justify-content: center;
   padding: 0 4px; margin-left: 4px;
   font-family: inherit; font-size: 0.5625rem; line-height: 0.875rem;
-  border: 1px solid currentColor; border-radius: 3px;
+  border: 1px solid currentcolor; border-radius: 3px;
   cursor: pointer; opacity: 0.7;
   pointer-events: auto;
 }
@@ -2357,7 +2357,7 @@ textarea.value-form-hiccup {
 .type-inline-effects-pure {
   font-size: 0.5625rem;
   padding: 0 6px;
-  border: 1px solid currentColor;
+  border: 1px solid currentcolor;
   border-radius: 8px;
   opacity: 0.85;
   color: var(--fg);
@@ -3042,8 +3042,8 @@ textarea.value-form-hiccup {
   padding: 0; margin-left: 4px;
   width: 14px; height: 14px;
   font-family: inherit; font-size: 0.6875rem; line-height: 1;
-  border: 1px solid currentColor; border-radius: 3px;
-  background: transparent; color: currentColor;
+  border: 1px solid currentcolor; border-radius: 3px;
+  background: transparent; color: currentcolor;
   cursor: pointer; opacity: 0.7;
   pointer-events: auto;
 }
@@ -3526,6 +3526,7 @@ textarea.value-form-hiccup {
 .ns-menu-btn:hover { background: var(--gd-flow-wash); }
 /* Flash the tree row that a "Reveal in Explorer" landed on. */
 .entity-item.gd-tree-flash { animation: gd-tree-flash 1.3s ease; }
+
 @keyframes gd-tree-flash {
   0%, 100% { background-color: transparent; }
   20% { background-color: var(--gd-flow-wash); }
@@ -3541,7 +3542,7 @@ textarea.value-form-hiccup {
 }
 .description-badge:hover, .open-in-new-tab:hover {
   opacity: 1;
-  background-color: color-mix(in srgb, currentColor 28%, transparent);
+  background-color: color-mix(in srgb, currentcolor 28%, transparent);
 }
 
 /* Navigation controls — single-row pill at the bottom-right:
@@ -3638,6 +3639,7 @@ textarea.value-form-hiccup {
   animation: editor-busy-spin 0.8s linear infinite;
   flex-shrink: 0;
 }
+
 @keyframes editor-busy-spin {
   to { transform: rotate(360deg); }
 }
@@ -4219,7 +4221,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
  * Independent of pointer kind: a narrow desktop window (rare) gets the
  * same layout treatment.
  * ========================================================================= */
-@media (max-width: 900px) {
+@media (width <= 900px) {
   /* Sidebar overlays the graph instead of taking 30 %+ of the screen. */
   #side-menu {
     box-shadow: var(--shadow-lg);
@@ -4632,6 +4634,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   color: var(--muted-fg);
   animation: service-badge-pulse 1.5s ease-in-out infinite;
 }
+
 @keyframes service-badge-pulse {
   0%, 100% { opacity: 0.45; }
   50%      { opacity: 1; }
@@ -5554,11 +5557,11 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   width: var(--icon-size);
   height: var(--icon-size);
   line-height: 1;
-  border: 1px solid currentColor;
+  border: 1px solid currentcolor;
   border-radius: 3px;
   font-size: var(--icon-font-size);
   background: transparent;
-  color: currentColor;
+  color: currentcolor;
   padding: 0;
   cursor: pointer;
   text-decoration: none;
@@ -5729,13 +5732,14 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 #app.gd-redesign {
   height: 100vh;
   display: grid;
-  grid-template-columns: 1fr;
-  /* FIXED-height row tracks (not `1fr`) so the tall explorer content can't
-     blow a track out past the viewport — `minmax(0,1fr)` resolved to the
-     content's max-content here. The top bar tops the single column;
-     descendants scroll within the main track. */
-  grid-template-rows: var(--gd-ctxbar-h) calc(100vh - var(--gd-ctxbar-h));
-  grid-template-areas: "bar" "main";
+  /* One column; FIXED-height row tracks (not `1fr`) so the tall explorer
+     content can't blow a track out past the viewport — `minmax(0,1fr)`
+     resolved to the content's max-content here. The top bar tops the
+     single column; descendants scroll within the main track. */
+  grid-template:
+    "bar" var(--gd-ctxbar-h)
+    "main" calc(100vh - var(--gd-ctxbar-h))
+    / 1fr;
 }
 
 /* ---- CONTEXT BAR ---- */
@@ -5876,7 +5880,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
    mount shrink + truncate so the bar, and the page, never overflow. The
    Build-context chips live in the Explorer, which is collapsed by default on
    narrow viewports. */
-@media (max-width: 640px) {
+@media (width <= 640px) {
   #gd-ctxbar { gap: 6px; padding: 0 8px; min-width: 0; }
   #gd-ctxbar #org-mount { min-width: 0; }
   #gd-ctxbar #org-mount > * {
@@ -5958,7 +5962,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 /* Workspace popover — section caption + the project checklist rows. */
 .gd-pop-cap {
-  margin: 4px 6px 4px;
+  margin: 4px 6px;
   font-size: 0.625rem;
   letter-spacing: 0.04em;
   color: var(--gd-ink-4);
@@ -6149,7 +6153,7 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
 /* Inline field+button rows, same fix as the Operate pane (the panels'
    original column styling was for the narrow rail). */
 #gd-diag-panels form {
-  display: flex; flex-direction: row; flex-wrap: wrap;
+  display: flex; flex-flow: row wrap;
   gap: 8px; align-items: center; margin-top: 10px;
 }
 #gd-diag-panels form input, #gd-diag-panels form select {
@@ -6690,7 +6694,7 @@ body.gd-tenancy .gd-solo-only { display: none; }
    for the NARROW rail; in the wide pane, override to a row. The id scope
    (1,0,1) beats those two-class column rules (0,2,0). */
 #gd-operate-panels form, #gd-platform-panels form {
-  display: flex; flex-direction: row; flex-wrap: wrap;
+  display: flex; flex-flow: row wrap;
   gap: 8px; align-items: center; margin-top: 14px;
 }
 #gd-operate-panels form input, #gd-operate-panels form select,
@@ -6894,7 +6898,7 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
 /* ---- Responsive: iPad / narrow — inspector becomes a bottom sheet.
  *      Below the sidebar breakpoint the explorer auto-collapses (handled
  *      by editor-prefs.js). ---- */
-@media (max-width: 1100px) {
+@media (width <= 1100px) {
   /* Two columns (explorer | canvas); the inspector leaves the grid and
      returns as a bottom sheet, revealed on selection (body.gd-insp-open). */
   #app.gd-redesign #main-container { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }
@@ -7147,10 +7151,7 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
    list reads as a cramped box on a phone and as a sheet everywhere else. */
 #gd-tour-pop.gd-tour-sheet,
 #gd-tour-pop.gd-tour-visible.gd-tour-sheet.gd-tour-centered {
-  left: 0;
-  right: 0;
-  top: auto;
-  bottom: 0;
+  inset: auto 0 0;
   width: 100%;
   max-width: 100%;
   max-height: 52vh;
@@ -7225,7 +7226,8 @@ body.gd-tour-sheet-open #side-menu {
      inside a 360px popover — clone repeats the keycap frame per fragment. */
   box-decoration-break: clone;
 }
-@media (max-width: 700px) {
+
+@media (width <= 700px) {
   .gd-tour-ui { white-space: normal; }
 }
 .gd-tour-copy {

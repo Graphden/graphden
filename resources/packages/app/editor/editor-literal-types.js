@@ -407,11 +407,10 @@ function refinementOK(v, constraint) {
       if (results.some(r => r === false)) return false;
       if (results.every(r => r === true)) return true;
       return 'unknown';
-    } else {
+    }
       if (results.some(r => r === true)) return true;
       if (results.every(r => r === false)) return false;
       return 'unknown';
-    }
   }
   if (constraint.length !== 2) return 'unknown';
   const [op, rhs] = constraint;

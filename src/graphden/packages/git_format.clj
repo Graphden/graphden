@@ -81,7 +81,7 @@
   [v]
   (cond
     (map? v) (str "{" (str/join " "
-                                (map (fn [[k val]] (str (pr-str k) " " (inline-str val)))
+                                (map (fn [[k child]] (str (pr-str k) " " (inline-str child)))
                                      (seq v)))
                   "}")
     (vector? v) (str "[" (str/join " " (map inline-str v)) "]")
@@ -107,9 +107,9 @@
           (map? v)
           (str "{"
                (str/join (str "\n" pad)
-                         (map (fn [[k val]]
+                         (map (fn [[k child]]
                                 (str (pr-str k) " "
-                                     (print-value val (+ indent 1 (count (pr-str k)) 1))))
+                                     (print-value child (+ indent 1 (count (pr-str k)) 1))))
                               (seq v)))
                "}")
           (vector? v)

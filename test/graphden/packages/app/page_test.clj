@@ -64,10 +64,10 @@
                                :body [:div "about"]
                                :head []
                                :scripts []})
-          [path methods] (vec entry)]
+          [path by-method] (vec entry)]
       (is (= "/about" path))
-      (is (contains? methods "get"))
-      (is (fn? (get-in methods ["get" "handler"]))))))
+      (is (contains? by-method "get"))
+      (is (fn? (get-in by-method ["get" "handler"]))))))
 
 
 ;; =============================================================================

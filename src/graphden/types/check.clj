@@ -993,7 +993,7 @@
       (let [override (some-> (:type b-form) types/resolve-alias)
             ;; ref-binding → check against ref's return.
             ;; value-binding → check against classified value type.
-            [actual-source actual]
+            [actual-src actual]
             (cond
               (contains? b-form :ref)
               [:ref-return
@@ -1015,7 +1015,7 @@
         ;; redaction (`persist/tainted-fn?`) no longer fires AND the value
         ;; satisfies a plain-typed sink (e.g. `:http-request/:headers`),
         ;; bypassing the `:auth-value` channel design.
-        (when (and actual override actual-source
+        (when (and actual override actual-src
                    (not (has-type-var? actual))
                    (not (has-type-var? override))
                    (types/contains-hide-result-marker? actual)
@@ -1026,7 +1026,7 @@
                         "\n  parent " (pr-str parent-name) (source-suffix parent-name)
                         "\n  reason: the `:type` override " (pr-str override)
                         " strips a hide-result marker (e.g. :secret) carried by"
-                        " the " (name actual-source) " " (pr-str actual)
+                        " the " (name actual-src) " " (pr-str actual)
                         ". A marked/tainted value cannot be reclassified to a"
                         " plain type — that would launder it out of the type"
                         " system (bypassing result-redaction and sink"
@@ -1036,12 +1036,12 @@
                            :parent-name parent-name
                            :arg-name arg-name
                            :binding b-form
-                           :actual-source actual-source
+                           :actual-source actual-src
                            :actual actual
                            :override override
                            :type :bindings/type-override-strips-marker}
                           *source-info*))))
-        (when (and actual override actual-source
+        (when (and actual override actual-src
                    (not (has-type-var? actual))
                    (not (has-type-var? override))
                    ;; Narrowing direction: override must be a SUBTYPE
@@ -1056,7 +1056,7 @@
                         "\n  parent " (pr-str parent-name) (source-suffix parent-name)
                         "\n  reason: the binding's `:type` override "
                         (pr-str override) " contradicts the "
-                        (name actual-source) " "
+                        (name actual-src) " "
                         (pr-str actual) ". The override is the author's"
                         " narrowed-contract claim (e.g. asserting non-nil"
                         " in a guarded path) — widening claims silently"
@@ -1065,7 +1065,7 @@
                            :parent-name parent-name
                            :arg-name arg-name
                            :binding b-form
-                           :actual-source actual-source
+                           :actual-source actual-src
                            :actual actual
                            :override override
                            :type :bindings/type-override-widens}

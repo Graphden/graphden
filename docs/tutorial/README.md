@@ -65,7 +65,7 @@ of order.
 | # | Lesson | Status |
 |---|---|---|
 | 17 | [Finding your way: the lens and the Inspector](17-explorer-and-inspector.md) | ✅ written · ▶ interactive |
-| 18 | [Working without the mouse — keyboard & accessibility](18-keyboard-and-accessibility.md) | ✅ written |
+| 18 | [Working without the mouse — keyboard & accessibility](18-keyboard-and-accessibility.md) | ✅ written · ▶ interactive |
 | 19 | [Workspaces — scope the editor to your projects](19-workspaces.md) | ✅ written · ▶ interactive |
 | 20 | [Branches — fork, edit, diff, merge](20-branches.md) | ✅ written · ▶ interactive |
 | 21 | [Review — propose, approve, protected merge](21-review.md) | ✅ written · ▶ interactive |

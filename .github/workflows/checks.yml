@@ -351,21 +351,16 @@ jobs:
           restore-keys: deps-
 
       - name: Run security scan
+        # `bb security` prefers GITHUB_TOKEN (GitHub Advisory DB — fast, no
+        # rate-limit trap) over NVD_API_KEY, and Actions mints GITHUB_TOKEN
+        # for every run — so the scan always has a key and GATES for real.
+        # The old no-key `|| echo ::warning` branch ran on every push
+        # (NVD_API_KEY was never set as a repo secret) and swallowed the
+        # scan entirely — the job was green in ~40s having scanned nothing.
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-        run: |
-          # Create properties file with API key if provided
-          if [ -n "$NVD_API_KEY" ]; then
-            echo "nvd.api-key=$NVD_API_KEY" > cljwatson.properties
-            bb security
-          else
-            # Without the key cljwatson runs the rate-limited path, which
-            # fails on NVD throttling rather than on a real CVE — a red that
-            # says nothing. Report, don't gate, until NVD_API_KEY is set as a
-            # repo secret (then this branch stops being taken).
-            echo "::warning::NVD_API_KEY not set — CVE scan runs unauthenticated and is advisory only"
-            bb security || echo "::warning::CVE scan did not complete (no NVD key)"
-          fi
+        run: bb security
 
   # Advisory, exactly like its `:info` group in scripts/checks.edn: antq exits
   # non-zero merely because an upgrade EXISTS, which is news, not a defect.

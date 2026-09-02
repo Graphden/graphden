@@ -119,3 +119,23 @@ a local fix.
   `compile-packages-test/response-cache-wrap-single-handler-invocation-test`
   (one request ⇒ exactly one handler run, encode applied to body AND
   headers together).
+
+## Consumer note 2026-09-02 — a long-lived render must CALL, not capture
+
+Once-thunks have one consumer-visible consequence that took nine days to
+surface: a callable that a base-fn keeps and invokes repeatedly (the SSE
+stream's `:render`, re-run on every tick) sees its CAPTURED args resolve
+exactly once — so a fragment passed as a hiccup VALUE renders its first
+tree forever, every tick hashes equal, and the stream pushes nothing after
+its first frame. The Tests panel and the demo clock were dead like that
+from 2026-08-24 until 2026-09-02; the tutorial's lesson-14 e2e still passed
+because the auto-run usually beat the panel's first fetch.
+
+The fix is graph-side and keeps the ADR's model: `:sse-fragment-handler`'s
+`:fragment` is a `[:fn {} :hiccup-node]` slot and `:_sse-fragment-rendered`
+CALLS it (`:call-noargs`) on every render — a callable's body runs per
+call (its own bindings are minted per run); only what the WRAPPER captured
+is once. Rule for any base-fn that re-invokes a callable over time: the
+thing that must be fresh has to be a fn it calls, never a value it was
+handed. `packages.app.sse-fragment-live-test` pins it against the real
+graph handler over a live socket.

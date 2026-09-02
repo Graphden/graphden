@@ -134,8 +134,9 @@
   ;; carrying `:sse-connect-attrs` (web.htmx) swaps each push in.
 
   ;; NOTE — no `:sse-fragment-route` one-liner: the renderer sits
-  ;; behind a `[:fn {} :text]` HOF wrap, so `:fragment` is a
-  ;; closure-capture seed that must bind on a HANDLER child, not
+  ;; behind a `[:fn {} :text]` HOF wrap, so `:fragment` (itself a
+  ;; `:fn`-typed slot — the fragment fn-def is CALLED per tick, see
+  ;; `:_sse-fragment-rendered`) must bind on a HANDLER child, not
   ;; through a route ref (same rule as request-reading fragments):
   ;;
   ;;   {:name :my-clock-handler
@@ -147,7 +148,7 @@
   ;;    :args {:path "/streams/clock" :handler :my-clock-handler}}
   {:name :sse-fragment-handler
    :lambda-params [:request]
-   :description "Ring handler opening an SSE stream that pushes the rendered `:fragment` whenever it changes. Declare a CHILD binding `:fragment` (+ optional `:interval-ms`, default 2000 / `:max-lifetime-ms`, default 5 min / `:wake-on-writes`, default false) with `:lambda-params [:request]`, and mount it with `:get-route` — see the comment above this fn-def. Pair with `:sse-connect-attrs` client-side."
+   :description "Ring handler opening an SSE stream that pushes the rendered `:fragment` whenever it changes — `:fragment` is a 0-arg fn-def returning hiccup, CALLED afresh on every tick. Declare a CHILD binding `:fragment` (+ optional `:interval-ms`, default 2000 / `:max-lifetime-ms`, default 5 min / `:wake-on-writes`, default false) with `:lambda-params [:request]`, and mount it with `:get-route` — see the comment above this fn-def. Pair with `:sse-connect-attrs` client-side."
    :parent :sse-stream
    :args {:request {:as :request}
           :render :_sse-fragment-rendered
@@ -197,10 +198,21 @@
   ;; The 0-arg renderer the stream re-executes — `:render-hiccup`
   ;; over the free `:fragment`. Named (not inline) so the `[:fn {} …]`
   ;; slot gets a clean hof-wrap target.
+  ;;
+  ;; `:fragment` is a FUNCTION (`[:fn {} :hiccup-node]`), CALLED on every
+  ;; render — not a hiccup VALUE. A value here would be a closure-capture
+  ;; seed: captured args resolve ONCE per wrap (once-thunks,
+  ;; docs/adr/ADR-thunk-once-and-cache-keys.md), so a long-lived stream
+  ;; would render the same tree forever — which is exactly what happened
+  ;; after 2026-08-24: the Tests panel's ping and the demo clock froze on
+  ;; their first value, every tick hashed equal, nothing was ever pushed.
+  ;; Calling the fragment fn per tick is what "re-executed as a fresh
+  ;; logical execution" means.
   {:name :_sse-fragment-rendered
    :parent :render-hiccup
-   :args {:hiccup {:as :fragment :type :hiccup-node
-                   :description "The fragment's hiccup tree — re-rendered every tick."}}}
+   :args {:hiccup {:parent :call-noargs
+                   :args {:func {:as :fragment :type [:fn {} :hiccup-node]
+                                 :description "The fragment fn — a 0-arg fn-def returning hiccup, called afresh on every tick."}}}}}
 
   ;; NOT `:with-cdn-script` over `:with-htmx`: the chained ref's
   ;; propagated free is ALSO named `:head` and gets shadowed by the

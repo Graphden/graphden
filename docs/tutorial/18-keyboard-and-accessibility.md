@@ -20,6 +20,11 @@ behind the **leader**: press `Space` and a menu appears listing what
 the next key does. You never have to memorise anything — press
 `Space` and read.
 
+> Prefer to be shown? This lesson exists as a guided in-editor tour:
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=18)
+> (no sign-up), or pick “Interactive tutorial” in the editor's
+> account menu.
+
 ## Try it: find a function without touching the mouse
 
 1. Press `/`. The Explorer's filter field takes focus.

@@ -135,6 +135,13 @@ maintained by hand. Views are personal (stored in your browser,
 like workspaces and lenses); the active view shows its name on the
 chip, and "× Show the whole tree" returns to the physical tree.
 
+Views can also be **published to the whole deployment**: create a fn
+named `smart-views` (parent `:const`) whose `:value` is a JSON list
+of `{"name": …, "rule": …}` objects — the ✦ popover shows them in a
+"Shared (from the graph)" section for every editor. Being an ordinary
+fn, the list is versioned, branch-scoped and reviewable like any
+other change.
+
 ## Next
 
 Lesson 17 — [Finding your way: the lens and the

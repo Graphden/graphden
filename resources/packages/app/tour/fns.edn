@@ -876,6 +876,42 @@
                :body "Lenses, tabs and the Used-by reverse index are how you keep a big graph readable — none of it is stored in the graph itself. The written lesson 17 covers the remaining chips and the Runs tab. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
+            {:id "18"
+             :chapter "The editor"
+             :title "Working without the mouse"
+             :steps
+             [{:title "Hands off the mouse"
+               :body "Everything you have done so far works from the keyboard: the Explorer is an ARIA tree, the canvas walks by edges, every dialog traps and returns focus. This lesson shows the three entry points; the written lesson 18 covers the full map, font scaling and screen readers."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "The cheatsheet"
+               :body "Press [[?]] (with focus outside any input). Every binding the editor has, rendered from the same registry the keys run from — nothing here can go stale."
+               :target nil
+               :check {:kind "dom" :selector "#gd-cheatsheet.visible"}}
+              {:title "Close it"
+               :body "Press [[Esc]] — the sheet closes and focus returns where it was."
+               :target "#gd-cheatsheet"
+               :check {:kind "dom-absent" :selector "#gd-cheatsheet.visible"}}
+              {:title "The leader"
+               :body "Press [[Space]]. This menu IS the shortcut system: each key leads to a group or an action, so you discover bindings by pressing, not by memorising."
+               :target nil
+               :check {:kind "dom" :selector ".gd-which-key"}}
+              {:title "Read it, then dismiss"
+               :body "Surfaces, navigation, canvas — every group a keystroke away. Press [[Esc]] to close the menu without running anything."
+               :target ".gd-which-key"
+               :check {:kind "dom-absent" :selector ".gd-which-key"}}
+              {:title "Jump to the filter"
+               :body "Press [[/]] — focus lands in the Explorer filter, ready to type a name. From there: arrows walk the tree, [[Enter]] opens a row."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "dom" :selector "#search-input:focus"}}
+              {:title "The canvas walks by edges"
+               :body "On the canvas, arrows (or hjkl) follow the graph itself: [[→]] moves to an argument, [[←]] to the consumer, [[Enter]] steps INTO a card's rows, [[Esc]] backs out, [[Shift]]+arrows move the node. Try it after the tour — with a fn selected, [[Tab]] into the canvas and walk."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "That's the keyboard"
+               :body "Leader menu for discovery, cheatsheet for the map, tree and canvas as first-class widgets. If the text is small — scale your browser font, the editor is sized in rem and grows with it. Click [[Finish]]."
+               :target nil
+               :check {:kind "manual"}}]}
             {:id "19"
              :chapter "The editor"
              :title "Workspaces"

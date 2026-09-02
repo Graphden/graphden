@@ -139,6 +139,66 @@ const {
       null, {timeout: 30000, polling: 200});
     console.log('  lesson 17: walked (nothing created)');
 
+    // ---------- lesson 18 — working without the mouse ----------
+    await page.goto(BASE + '/?tutorial=18');
+    await waitTourTitle(page, 'Hands off the mouse', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 18 Next');
+    await waitTourTitle(page, 'The cheatsheet');
+    // Focus must be OUTSIDE inputs for bare keys — blur whatever holds it.
+    await page.evaluate(() => document.activeElement?.blur?.());
+    await page.keyboard.press('?');
+    await page.waitForSelector('#gd-cheatsheet.visible', {timeout: 15000});
+    await waitTourTitle(page, 'Close it', 150000);
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('#gd-cheatsheet.visible'),
+      null, {timeout: 15000, polling: 100});
+    // Esc was consumed by the sheet — the tour must survive it.
+    assert(await page.evaluate(() => !!document.querySelector('#gd-tour-pop')),
+      'closing the cheatsheet with Escape does not end the tour');
+    await waitTourTitle(page, 'The leader', 150000);
+    await page.evaluate(() => document.activeElement?.blur?.());
+    await page.keyboard.press(' ');
+    // The which-key element is a hidden singleton — wait on MEASURED
+    // visibility, same predicate the tour's dom checks use.
+    const whichKeyVisible = () => {
+      const el = document.querySelector('.gd-which-key');
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    await page.waitForFunction(whichKeyVisible, null, {timeout: 15000, polling: 100});
+    await waitTourTitle(page, 'Read it, then dismiss', 150000);
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector('.gd-which-key');
+        if (!el) return true;
+        const r = el.getBoundingClientRect();
+        return !(r.width > 0 && r.height > 0);
+      }, null, {timeout: 15000, polling: 100});
+    await waitTourTitle(page, 'Jump to the filter', 150000);
+    // The step's check is FOCUS in the filter; the '/' BINDING itself is
+    // asserted separately below on a fresh page — inside the tour the
+    // keypress races the step re-render and flakes, and pinning the
+    // binding twice buys nothing.
+    await page.focus('#search-input');
+    await waitTourTitle(page, 'The canvas walks by edges', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 18 canvas Next');
+    await waitTourTitle(page, "That's the keyboard", 150000);
+    assert(await clickTourButton(page, 'Finish'), 'lesson 18 Finish');
+    await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
+      null, {timeout: 30000, polling: 200});
+    console.log('  lesson 18: walked (keyboard-only, nothing created)');
+
+    // The '/' binding proper — fresh page, no tour in the key path.
+    await page.goto(BASE + '/');
+    await page.waitForSelector('#search-input', {timeout: 30000});
+    await page.evaluate(() => document.activeElement?.blur?.());
+    await page.keyboard.press('/');
+    await page.waitForFunction(() => document.activeElement?.id === 'search-input',
+      null, {timeout: 15000, polling: 100});
+    console.log("  '/' shortcut focuses the Explorer filter");
+
     // ---------- lesson 19 — workspaces ----------
     await page.goto(BASE + '/?tutorial=19');
     await waitTourTitle(page, 'Your slice of a shared graph', 150000);

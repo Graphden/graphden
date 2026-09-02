@@ -142,7 +142,7 @@ function enterExtendEditMode(fn, anchorEl) {
 // global graphData (ensureSubtreeFor would re-root the canvas view).
 // Free slots (unbound anywhere in the closure) sort first — the seam a
 // wrapper normally fills.
-async function wrapSlotCandidates(parentFn) {
+async function wrapSlotCandidates(parentFn, wrappedFn) {
   const r = await fetch(API.api_graph_entities
     + '?scope=subtree&root-id=' + encodeURIComponent(parentFn.id));
   if (!r.ok) throw new Error('subtree HTTP ' + r.status);
@@ -167,9 +167,33 @@ async function wrapSlotCandidates(parentFn) {
     const slot = slotById.get(fs['slot-id']);
     if (!slot || seen.has(slot.id)) continue;
     seen.add(slot.id);
-    out.push({ id: slot.id, name: slot.name, free: !bound.has(slot.id) });
+    const typeName = slot['type-fn-id']
+      ? fnById.get(slot['type-fn-id'])?.name : null;
+    out.push({ id: slot.id, name: slot.name, free: !bound.has(slot.id),
+               typeName, compatible: null });
   }
-  out.sort((a, b) => (Number(b.free) - Number(a.free))
+  // Which slots can legally TAKE the wrapped fn's result? Same checker
+  // the picker's Compatible split uses — asked per slot, best-effort
+  // (an unanswered check just leaves the slot unmarked).
+  const ret = (typeof richTypes !== 'undefined')
+    ? richTypes?.[wrappedFn?.name]?.return : null;
+  if (ret && window.API?.api_types_compatible) {
+    await Promise.all(out.map(async (sl) => {
+      if (!sl.typeName) return;
+      try {
+        const cr = await fetch(API.api_types_compatible, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ expected: sl.typeName, candidate: ret }),
+        });
+        const cd = cr.ok ? await cr.json() : null;
+        if (cd && typeof cd.ok === 'boolean') sl.compatible = cd.ok;
+      } catch (_) { /* unmarked */ }
+    }));
+  }
+  // Compatible free slots first, then free, then the rest.
+  const rank = (sl) => (sl.free && sl.compatible ? 0 : sl.free ? 1 : 2);
+  out.sort((a, b) => (rank(a) - rank(b))
     || String(a.name).localeCompare(String(b.name)));
   return out;
 }
@@ -191,6 +215,8 @@ function promptWrapDetails(fn, parent, anchorEl) {
   let nsSelect = null;
   let slotSelect = null;
   let slotsReady = null;
+  let takeOverBox = null;
+  let nameInput = null;
   openInlineEditPopover({
     anchorEl,
     ariaLabel: 'Wrap ' + (fn.name || 'this fn') + ' in a new fn',
@@ -204,6 +230,36 @@ function promptWrapDetails(fn, parent, anchorEl) {
       input.type = 'text';
       input.className = 'arg-value-edit-input';
       input.placeholder = 'Wrapper fn name';
+      nameInput = input;
+      // "Take over the name": callers keep calling <name>; the old body
+      // becomes _<name>-impl. Only offered on a NAMED fn the user owns —
+      // the takeover renames it, which package fns refuse.
+      const canTakeOver = !!fn.name
+        && !(typeof isPackageOwnedFn === 'function' && isPackageOwnedFn(fn.id))
+        && ((typeof graphdenIsFnOwned !== 'function') || graphdenIsFnOwned(fn));
+      let takeRow = null;
+      if (canTakeOver) {
+        takeRow = document.createElement('label');
+        takeRow.className = 'extend-ns-row';
+        takeOverBox = document.createElement('input');
+        takeOverBox.type = 'checkbox';
+        takeOverBox.setAttribute('aria-label',
+          'Take over the name ' + fn.name + ' — the current fn becomes _'
+          + fn.name + '-impl');
+        const takeCap = document.createElement('span');
+        takeCap.className = 'extend-ns-cap';
+        takeCap.textContent = 'take over the name (this fn → _' + fn.name + '-impl)';
+        takeOverBox.addEventListener('change', () => {
+          if (takeOverBox.checked) {
+            input.value = fn.name;
+            input.disabled = true;
+          } else {
+            input.disabled = false;
+          }
+        });
+        takeRow.appendChild(takeOverBox);
+        takeRow.appendChild(takeCap);
+      }
       const nsRow = document.createElement('label');
       nsRow.className = 'extend-ns-row';
       const nsCap = document.createElement('span');
@@ -228,12 +284,15 @@ function promptWrapDetails(fn, parent, anchorEl) {
       slotSelect.appendChild(loading);
       slotRow.appendChild(slotCap);
       slotRow.appendChild(slotSelect);
-      slotsReady = wrapSlotCandidates(parent).then((slots) => {
+      slotsReady = wrapSlotCandidates(parent, fn).then((slots) => {
         slotSelect.replaceChildren();
         for (const sl of slots) {
           const opt = document.createElement('option');
           opt.value = sl.id;
-          opt.textContent = ':' + sl.name + (sl.free ? '' : ' (bound — will override)');
+          opt.textContent = ':' + sl.name
+            + (sl.compatible === true ? ' ✓' : '')
+            + (sl.compatible === false ? ' (type mismatch)' : '')
+            + (sl.free ? '' : ' (bound — will override)');
           slotSelect.appendChild(opt);
         }
         if (!slots.length) {
@@ -246,12 +305,14 @@ function promptWrapDetails(fn, parent, anchorEl) {
       }).catch(() => { slotSelect.replaceChildren(); return []; });
       root.insertBefore(slotRow, root.firstChild);
       root.insertBefore(nsRow, root.firstChild);
+      if (takeRow) root.insertBefore(takeRow, root.firstChild);
       root.insertBefore(input, root.firstChild);
       root.insertBefore(hint, root.firstChild);
       return input;
     },
     async doSave(input) {
-      const newName = (input.value || '').trim();
+      const takeOver = !!takeOverBox?.checked;
+      const newName = takeOver ? fn.name : (input.value || '').trim();
       if (!newName) return false;
       await slotsReady;
       const slotId = slotSelect ? slotSelect.value : '';
@@ -262,10 +323,31 @@ function promptWrapDetails(fn, parent, anchorEl) {
       const nsId = nsSelect ? nsSelect.value : '';
       const work = async () => {
         try {
+          if (takeOver) {
+            // Free the name FIRST: the current fn becomes _<name>-impl
+            // (the fn-design idiom for a demoted body). Rolled back if
+            // the wrapper's create then fails, so a half-takeover never
+            // strands the graph nameless.
+            const implName = '_' + fn.name + '-impl';
+            const rn = await authMutate('PUT',
+                                        API.api_entities_type_id('fn', fn.id),
+                                        { name: implName });
+            if (!rn?.ok) {
+              return { ok: false,
+                       error: 'Could not rename ' + fn.name + ' to ' + implName
+                         + ' — is that name taken?' };
+            }
+          }
           const r = await postEntity('fn', { name: newName,
                                              'parent-ids': parent.id,
                                              'namespace-id': nsId });
-          if (!(r && r.status >= 200 && r.status < 300)) return false;
+          if (!(r && r.status >= 200 && r.status < 300)) {
+            if (takeOver) {
+              await authMutate('PUT', API.api_entities_type_id('fn', fn.id),
+                               { name: fn.name }).catch(() => {});
+            }
+            return false;
+          }
           // The create endpoint answers HTML, not the new id — resolve it
           // by (name, ns) through the search scope, with retries for
           // read-after-write lag (same reality selectJustCreatedFn handles).
@@ -280,8 +362,14 @@ function promptWrapDetails(fn, parent, anchorEl) {
                 && String(f['namespace-id'] || '') === String(nsId || ''))?.id || null;
             } catch (_) { /* retry */ }
           }
-          if (!newId) return { ok: false, error: 'Created ' + newName
-            + ', but could not find it to bind — reload and bind by hand.' };
+          if (!newId) {
+            if (takeOver) {
+              await authMutate('PUT', API.api_entities_type_id('fn', fn.id),
+                               { name: fn.name }).catch(() => {});
+            }
+            return { ok: false, error: 'Created ' + newName
+              + ', but could not find it to bind — reload and bind by hand.' };
+          }
           const b = await authMutate('POST', API.api_entities_type('binding'),
                                      { 'fn-id': newId, 'slot-id': slotId,
                                        'ref-fn-id': fn.id });

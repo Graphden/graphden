@@ -86,8 +86,9 @@ Two more reading affordances live outside the Inspector:
   untouched.
 - **Recent** — the Explorer keeps your navigation trail: the last
   few named fns you selected render as rows just above the tree.
-  Click one to go straight back. The list hides while the filter
-  is active (search owns that space).
+  Click one to go straight back; the ☆ on a row **pins** it above
+  the trail permanently (★, until unpinned). The list hides while
+  the filter is active (search owns that space).
 
 The Inspector is the "read" side of the editor: popovers are for
 *acting* (edit a binding, run, publish), the Inspector is for

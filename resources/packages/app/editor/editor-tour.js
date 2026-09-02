@@ -947,6 +947,11 @@ function _tourTeardown() {
 // The list survives as a belt for surfaces that close WITHOUT a keydown
 // handler of their own (a menu that closes on blur, an inline input).
 const TOUR_ESCAPE_OWNERS = [
+  // The shortcuts overlays register their OWN keydown lazily (on first
+  // open) — AFTER the tour armed its listener, so their preventDefault
+  // fires too late in the document order to be seen here.
+  '#gd-cheatsheet.visible',
+  '.gd-which-key',
   '#gd-nspub-pop',
   '.fn-picker-popover',
   '.arg-value-edit-popover',

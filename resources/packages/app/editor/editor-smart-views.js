@@ -91,6 +91,28 @@ function _syncSmartViewsBtn() {
 // The popover: saved views (apply / delete) + the new-view mini-form.
 // ---------------------------------------------------------------------------
 
+// Shared views — graph-first: any fn named `smart-views` whose :value
+// binding holds [{name, rule} …] publishes views to EVERY editor on
+// this deployment. Creating one is ordinary graph authoring (:const +
+// a JSON literal), versioned and branch-scoped like everything else;
+// the popover just reads it. Local (browser) views stay separate.
+async function gdFetchSharedViews() {
+  try {
+    const sr = await fetch(API.api_graph_entities + '?scope=search&q=smart-views');
+    const sd = sr.ok ? await sr.json() : null;
+    const fnRow = (sd?.fns || []).find((f) => f.name === 'smart-views');
+    if (!fnRow) return [];
+    const sub = await fetch(API.api_graph_entities
+      + '?scope=subtree&root-id=' + encodeURIComponent(fnRow.id))
+      .then((r) => (r.ok ? r.json() : null));
+    const b = (sub?.bindings || []).find((x) => x['fn-id'] === fnRow.id
+      && x.value != null);
+    const list = Array.isArray(b?.value) ? b.value : [];
+    return list.filter((v) => v && typeof v.name === 'string'
+      && typeof v.rule === 'string');
+  } catch (_) { return []; }
+}
+
 function gdSmartViewsPopVisible() { return !!_smartViewsPopEl; }
 
 function gdCloseSmartViewsPop() {
@@ -178,6 +200,36 @@ function _renderSmartViewsPop(el) {
     list.appendChild(empty);
   }
   el.appendChild(list);
+
+  // Shared (graph-published) views load async; the section only
+  // appears when the deployment defines some.
+  const sharedHost = document.createElement('div');
+  sharedHost.className = 'gd-views-shared';
+  el.appendChild(sharedHost);
+  gdFetchSharedViews().then((shared) => {
+    if (_smartViewsPopEl !== el || !shared.length) return;
+    const cap = document.createElement('div');
+    cap.className = 'gd-views-pop-head';
+    cap.textContent = 'Shared (from the graph)';
+    sharedHost.appendChild(cap);
+    for (const v of shared) {
+      const row = document.createElement('div');
+      row.className = 'gd-views-row';
+      const apply = document.createElement('button');
+      apply.type = 'button';
+      apply.className = 'gd-views-apply';
+      apply.setAttribute('aria-label', 'Apply shared view ' + v.name);
+      const active = _activeSmartView && _activeSmartView.name === v.name;
+      apply.textContent = (active ? '● ' : '') + v.name;
+      apply.title = v.rule + ' — published by the smart-views fn; edit that fn to change it';
+      apply.addEventListener('click', () => {
+        gdApplySmartView({ name: v.name, rule: v.rule });
+        gdCloseSmartViewsPop();
+      });
+      row.appendChild(apply);
+      sharedHost.appendChild(row);
+    }
+  });
 
   // New-view mini-form: name + rule.
   const form = document.createElement('div');

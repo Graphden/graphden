@@ -6436,6 +6436,19 @@ body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
   font-family: var(--gd-mono); font-size: 0.75rem;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.gd-recent-line { display: flex; align-items: center; }
+.gd-recent-line .gd-recent-row { flex: 1; min-width: 0; }
+.gd-recent-pin {
+  flex: none;
+  border: 0; background: transparent; color: var(--muted-fg);
+  cursor: pointer; padding: 2px 6px; border-radius: 4px;
+  font-size: 0.75rem;
+  opacity: 0;
+}
+.gd-recent-line:hover .gd-recent-pin,
+.gd-recent-line:focus-within .gd-recent-pin { opacity: 1; }
+.gd-recent-pin:hover { color: var(--fg); background: var(--hover-bg); }
+.gd-recent-pin:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; opacity: 1; }
 .gd-recent-row:hover { background: var(--hover-bg); }
 .gd-recent-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 

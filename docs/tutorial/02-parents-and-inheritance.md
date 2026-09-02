@@ -178,7 +178,10 @@ In the editor, in a namespace of your choice:
    it — pick the wrapping parent (which fn should process this
    one's result, say `:to-str`), name the wrapper, choose the slot
    that receives the fn, and the editor creates the new fn with
-   the current one already bound in, then opens it. That is how
+   the current one already bound in, then opens it. Compatible free
+   slots sort first with a ✓; picking a slot marked "(bound — will
+   override)" is legal too — the wrapper's own binding wins over the
+   parent's (closest-fn-wins, Lesson 03). That is how
    you add a step on top of existing logic without re-assembling
    it by hand.
 3. Try writing a multiple-inheritance fn-def over the two real

@@ -52,6 +52,10 @@
        {:max 8,
         :why
         "GET /api/secrets — 6 round trips steady-state, INDEPENDENT of how big the graph is, and deliberately budgeted with headroom rather than tightly. This one number jitters by ±1 with branch-row caching (measured 5, 6 and 7 across runs on two machines), so a tight ceiling fails honestly-green runs and a loose one misses small regressions. The real guard is in the scenario itself: pg_stat_statements normalises a graph scan into one row with calls > 1, and the test asserts every statement runs exactly once. This budget is the coarse backstop for a change that adds whole new statements — cross 8 and something structural moved."},
+       :execute-popover-app-root
+       {:max 18,
+        :why
+        "GET /partials/execute-popover for `web-server` — the fn whose reachable closure is the whole application. Its free-arg walk loads that closure through the storage's own graph resolver (a constant handful of round trips) and walks it in memory with per-fn memoisation. Before 2026-09-02 the walk was a per-level BFS — four queries per level, dozens of levels — and the Run form for the app root took 30–50 s (the inspector's Runs tab looked hung). If this number grows with the DEPTH of the app graph, somebody put a query back inside the walk."},
        :graph-layout
        {:max 0,
         :why
@@ -72,6 +76,11 @@
           :band 2.0,
           :why
           "Five queries' worth of SQL against hundreds of round trips' worth of time — like create-fn, the cost is the graph read behind the handler, not the database. A jump here with the query count unmoved means the work moved into Clojure."},
+         :execute-popover-app-root
+         {:units 3442.42,
+          :band 2.0,
+          :why
+          "Eighteen queries against thousands of round trips' worth of time: the resolver's merge-on-read load of the whole closure (~5k fns) plus the in-memory free-arg walk. Baselined the day the walk went from 26 s to ~0.1 s (2026-09-02); a jump here with the query count unmoved means the walk lost its memo or the resolver its batch."},
          :graph-layout
          {:units 4.75,
           :band 2.0,

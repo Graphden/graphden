@@ -2229,24 +2229,30 @@
   ;; authz gate, which throws if the source is PROTECTED and the merger
   ;; isn't admitted by its write-policy (merge gates on the TARGET, so you
   ;; can merge a source you can't write). That throw must NOT fail an
-  ;; already-committed merge — wrap it in `:try` so a clear-failure logs and
-  ;; the merge still returns success (the proposal just keeps its marker).
+  ;; already-committed merge — wrap it in `:try`. The outcome is REPORTED,
+  ;; not logged: `:review-state-cleared` rides the merge envelope so the
+  ;; caller (and the review inbox) can see the proposal kept its marker.
+  ;; A `:log-warn` here would record `:io`, which sits outside the cloud's
+  ;; request-level effect gate — the failure arm itself would then 403 a
+  ;; merge that had already committed (tenant_effect_budget_test).
   {:name :_merge-clear-rs-attempt
-   :parent :set-review-state!
-   :args {:branch-id :_merge-source-id
-          :proposed? {:value nil}}}
-
-  {:name :_merge-clear-rs-on-throw
-   :parent :log-warn
-   :args {:message {:value "post-merge review-state clear failed (merge committed; proposal keeps its marker)"}
-          :data {:parent :zipmap
-                 :args {:keys [{:value :error}]
-                        :vals [{:parent :throwable-message :args {:ex {:as :exception}}}]}}}}
+   :description "Clear the merged source's review-state, answering true — the value `:_merge-clear-review-state` reports on success."
+   :parent :do
+   :args {:steps [{:parent :set-review-state!
+                   :args {:branch-id :_merge-source-id
+                          :proposed? {:value nil}}}
+                  {:value true}]}}
 
   {:name :_merge-clear-review-state
+   :description "true when the merged proposal's review-state was cleared, false when the clear was refused (protected source the merger may not write) — the merge itself is committed either way."
    :parent :try
    :args {:body :_merge-clear-rs-attempt
-          :on-throw :_merge-clear-rs-on-throw}}
+          ;; A callable that ignores the exception and answers false —
+          ;; `:constantly` with its ignored slot exposed as `:exception`,
+          ;; the shape `:try` hands its handler.
+          :on-throw {:parent :constantly
+                     :args {:value {:value false}
+                            :_item {:as :exception}}}}}
 
   {:name :_merge-skipped-rows
    :parent :merge-skipped-branch-local
@@ -2266,13 +2272,20 @@
           :key {:value :skipped}
           :value :_merge-skipped-map}}
 
+  {:name :_merge-record-with-review-state
+   :description "…plus `:review-state-cleared` — whether stage 2b cleared the merged proposal's marker (false ⇒ it stays in the review inbox until someone who may write the source withdraws it)."
+   :parent :assoc
+   :args {:map :_merge-record-with-skipped
+          :key {:value :review-state-cleared}
+          :value :_merge-clear-review-state}}
+
   {:name :_merge-apply-record
-   :description "The merge write sequence: commit (stage 1) → post-commit invalidate/restart (stage 2) → clear the merged proposal's review-state (stage 2b) → attach the :skipped audit. `:do` forces the steps in order and returns the last; `:_merge-record-committed` is result-cached, so the assoc re-reads the record without re-running the merge."
+   :description "The merge write sequence: commit (stage 1) → post-commit invalidate/restart (stage 2) → clear the merged proposal's review-state (stage 2b) → attach the :skipped audit + :review-state-cleared. `:do` forces the steps in order and returns the last; `:_merge-record-committed` is result-cached, so the assoc re-reads the record without re-running the merge."
    :parent :do
    :args {:steps [:_merge-record-committed
                   :_merge-post-commit
                   :_merge-clear-review-state
-                  :_merge-record-with-skipped]}}
+                  :_merge-record-with-review-state]}}
 
   {:name :_merge-apply-record-id
    :parent :get :args {:coll :_merge-apply-record :key {:value :id} :default nil}}
@@ -2308,11 +2321,16 @@
    :parent :get
    :args {:coll :_merge-apply-record :key {:value :skipped} :default nil}}
 
+  {:name :_merge-apply-review-state-cleared
+   :parent :get
+   :args {:coll :_merge-apply-record :key {:value :review-state-cleared} :default {:value true}}}
+
   {:name :_merge-apply-success-envelope
-   :description "Success envelope — `{:ok true :merge <record> :skipped {:branch-local […]}}` without the cache-invalidation side effect (which is sequenced by `:_merge-apply-success`)."
+   :description "Success envelope — `{:ok true :merge <record> :skipped {:branch-local […]} :review-state-cleared bool}` without the cache-invalidation side effect (which is sequenced by `:_merge-apply-success`)."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :merge} {:value :skipped}]
-          :vals [{:value true} :_merge-apply-record-shaped :_merge-apply-skipped]}}
+   :args {:keys [{:value :ok} {:value :merge} {:value :skipped} {:value :review-state-cleared}]
+          :vals [{:value true} :_merge-apply-record-shaped :_merge-apply-skipped
+                 :_merge-apply-review-state-cleared]}}
 
   {:name :_merge-apply-success
    :description "Success path — `:do` forces `:_merge-apply-record` (the commit → post-commit → audit sequence; the commit THROWS on `:merge-conflict`, so the outer `:try` catches it and nothing below runs), then returns `:_merge-apply-success-envelope`. The post-commit invalidation is a graph step now (`:_merge-post-commit`); its three guarantees are preserved by construction: (a) it runs only on success — sequenced after the commit in the `:do`, (b) it targets the merge's TARGET ctx, not the request's current ctx (inside `:merge-post-commit!`), and (c) it is a DELTA seeded by the touched fns, not a full registry clear. `:do` returns the last step."

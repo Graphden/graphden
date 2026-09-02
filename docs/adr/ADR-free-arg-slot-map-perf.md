@@ -147,3 +147,28 @@ green). Fix: move the cache to the `-cached` variant on the proven-safe
 hot path and add base-storage identity to the key. This is exactly the
 kind of multi-tenant/lifecycle correctness issue that only a live run
 surfaces — the reason the fix was written but not trusted until verified.
+
+## Update 2026-09-02 — the BFS itself is gone
+
+The memo above only helps the second call. The first call for the APP
+ROOT (`web-server`, `_app-error-bounded` — anything whose closure is the
+whole application) measured **32 s on production and 51 s on a 6.3k-fn
+dev graph**: the per-level BFS issued four `query-entities` per level,
+and that closure is dozens of levels deep, not the "1–3 iterations" a
+leaf converges in. The Run pane in the inspector (the
+`/partials/execute-popover` shell calls the pure `:free-arg-slot-map`
+base-fn, uncached by this ADR's own decision) therefore sat on
+"Loading runs…" for half a minute — the demo's Runs tab looked hung.
+
+`collect-reachable-graph` now loads the closure through the storage's
+own graph resolver, `sp/resolve-execution-graph` — the recursive-CTE /
+batch path the executor compiles every fn from (a constant handful of
+round trips) — and reshapes its `ExecutionGraphResult` into the map
+`free-args-via` walks. The resolver follows a superset of the BFS's
+edges; the extra rows are inert because `free-args-via` keys everything
+by the inheritance chain and its binding ids, and the slot type-fn rows
+the HOF call-site rule needs are topped up explicitly so the output is
+identical under either resolver variant. Alternative 1 above (the
+in-memory `deep-free-ext-entries` walker) remains the end-state if the
+resolver's round trips ever matter; the decision to keep the base-fn
+pure (always-fresh) stands.

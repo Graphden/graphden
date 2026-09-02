@@ -103,6 +103,28 @@
       (is (seq statements)))))
 
 
+(deftest ^:perf execute-popover-app-root-sql-cost
+  ;; The Run form's shell for the APP ROOT — the fn whose reachable closure
+  ;; is the whole application. Its `:free-arg-slot-map` used to BFS that
+  ;; closure with four queries per level (~30–50 s on a real graph — the
+  ;; inspector's Runs tab looked hung, 2026-09-02); now it rides the
+  ;; storage's own graph resolver, a constant handful of round trips. The
+  ;; count is what this scenario watches: a regression to per-level
+  ;; querying moves it first, long before anyone times the tab.
+  (testing "GET /partials/execute-popover for web-server"
+    (let [fn-id (get (:all-name->id *graph*) :web-server)
+          {:keys [queries result]}
+          (record! :sql/execute-popover-app-root
+                   #(setup/via-graph *graph* :_partial-xp-handler
+                                     {:request-method :get
+                                      :uri "/partials/execute-popover"
+                                      :query-params {"fn-id" (str fn-id)}}))]
+      (is (some? fn-id) "web-server resolved in the golden bootstrap")
+      (is (= 200 (:status result))
+          "the shell must render, or its query count means nothing")
+      (is (pos? queries)))))
+
+
 (deftest ^:perf fn-create-sql-cost
   (testing "creating one :fn — the write path that used to re-read the graph"
     (let [{:keys [queries result]}

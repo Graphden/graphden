@@ -184,6 +184,9 @@
           (is (true? (:ok merge-body))
               (str "merge response envelope reports :ok true (no conflict / no rejection); "
                    "body=" (pr-str merge-body)))
+          (is (true? (:review-state-cleared merge-body))
+              (str "stage 2b cleared the merged source's review-state and the envelope says so; "
+                   "body=" (pr-str merge-body)))
           (is (true? (:ok merge-body))
               (str "merge body :ok true; body=" (pr-str merge-body)))
           ;; The merge response carries the new `:branch-merge` row's

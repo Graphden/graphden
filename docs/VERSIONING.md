@@ -652,9 +652,19 @@ their origin branch:
     "branch-local": [
       {"entity-name": "fn", "entity-id": "uuid…", "fn-name": "my-server"}
     ]
-  }
+  },
+  "review-state-cleared": true
 }
 ```
+
+`review-state-cleared` reports stage 2b — whether the merged proposal's
+`review-state` marker was cleared. `false` means the clear was refused
+(the source is protected and the merger may not write it; the merge
+itself is committed regardless): the proposal stays in the review inbox
+until someone who may write the source withdraws it. It is reported in
+the envelope rather than logged because the merge handler runs inside
+the cloud's request-level effect gate, where a log line (`:io`) would
+itself fail the request.
 
 The shape is forward-compatible: new categories
 (`:conflict-deferred`, `:protected-by-trait`) can land alongside

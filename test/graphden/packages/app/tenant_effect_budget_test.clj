@@ -80,13 +80,7 @@
    ;; Raw vault ops.
    :api-secret-delete (update vault-ops :effects conj :io)
    :api-secret-inline-binding vault-ops
-   :api-secret-rotate-value vault-ops
-   ;; `:io` sits ONLY on the failure arm of the best-effort post-merge
-   ;; review-state clear (`:_merge-clear-rs-on-throw` → `:log-warn`); the
-   ;; merge itself stays inside the gate. Known gap: on the cloud that arm
-   ;; (protected source + a merger its write-policy does not admit) would
-   ;; answer 403 for a merge that already committed.
-   :api-branch-merge {:effects #{:io} :why "failure-arm log only (best-effort review-state clear)"}})
+   :api-secret-rotate-value vault-ops})
 
 
 (def ^:private app-routes

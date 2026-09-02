@@ -93,70 +93,57 @@
 
 
 (defn- collect-reachable-graph
-  "BFS from `fn-id` over parent-ids + ref-fn-id edges, loading only
-   the rows that are actually reachable. Pre-fix this loaded the
-   ENTIRE :slot / :binding / :binding-list-item / :fn-slot tables on
-   every /api/execute request — for a project with thousands of
-   unrelated fns under a single root, that's ~10000× the rows we
-   actually need.
+  "The reachable closure of `root-fn-id` — parent-ids + ref-fn-id edges —
+   in the shape `free-args-via` walks:
+   `{:fns-by-id :slots-by-id :all-bindings :all-list-items :all-fn-slots}`.
 
-   The BFS converges in 1–3 iterations for typical fns because most
-   fn-graphs reach only a small connected component."
+   Loaded through the storage's OWN graph resolver
+   (`sp/resolve-execution-graph` — the recursive-CTE / batch path the
+   executor compiles from), i.e. a constant handful of round trips.
+   This used to be a hand-rolled BFS issuing four `query-entities` per
+   level: fine for a leaf (1–3 levels), but the app root's closure is
+   dozens of levels deep, and the Run form for `web-server` took ~30–50 s
+   (2026-09-02 — the demo's Runs pane looked hung).
+
+   The resolver follows a SUPERSET of the BFS's edges (it also pulls
+   type / base / element fn rows); the extra rows are inert —
+   `free-args-via` keys everything by the inheritance chain and its
+   binding ids. Slot type-fn rows (the `[:fn {ARGS} RET]` constraint
+   `hof-slot-call-site-names` reads) are topped up explicitly, so the
+   output does not depend on which resolver variant the storage runs.
+   A root that does not resolve yields the empty closure, as before."
   [storage root-fn-id]
-  (loop [seen #{}
-         frontier #{root-fn-id}
-         fn-rows []
-         fn-slots []
-         bindings []
-         list-items []]
-    (if (empty? frontier)
-      ;; Closure complete — fetch the slot rows for everything we
-      ;; collected in one final batch.
-      (let [slot-ids (into #{} (map :slot-id) fn-slots)
-            slot-rows (if (empty? slot-ids)
-                        {}
-                        (sp/read-entities storage :slot (vec slot-ids)))
-            ;; Slot type-fn rows carry the `[:fn {ARGS} RET]` constraint
-            ;; that `hof-slot-call-site-names` reads to subtract a HOF
-            ;; slot's call-site args. The parent/ref BFS never reaches
-            ;; them (a slot's type is not a graph edge it follows), so
-            ;; pull them in the same final batch. Primitives come back
-            ;; with a nil constraint → inert.
-            type-fn-ids (into #{} (keep :type-fn-id) (vals slot-rows))
-            type-fn-rows (if (empty? type-fn-ids)
-                           {}
-                           (sp/read-entities storage :fn (vec type-fn-ids)))]
-        {:fns-by-id (merge (into {} (map (juxt :id identity)) fn-rows)
-                           type-fn-rows)
-         :slots-by-id (into {} (map (juxt :id identity)) (vals slot-rows))
-         :all-bindings bindings
-         :all-list-items list-items
-         :all-fn-slots fn-slots})
-      (let [front-vec (vec frontier)
-            ;; One round-trip per entity type, narrowed by frontier.
-            new-fns (sp/query-entities storage :fn {:id front-vec})
-            new-fn-slots (sp/query-entities storage :fn-slot {:fn-id front-vec})
-            new-bindings (sp/query-entities storage :binding {:fn-id front-vec})
-            new-binding-ids (mapv :id new-bindings)
-            new-list-items (if (empty? new-binding-ids)
-                             []
-                             (sp/query-entities storage :binding-list-item
-                                                {:binding-id new-binding-ids}))
-            seen' (into seen frontier)
-            ;; Fns reachable next level: ancestors + ref-targets.
-            next-fn-ids (into #{}
-                              (comp cat
-                                    (remove seen')
-                                    (remove nil?))
-                              [(mapcat :parent-ids new-fns)
-                               (keep :ref-fn-id new-bindings)
-                               (keep :ref-fn-id new-list-items)])]
-        (recur seen'
-               next-fn-ids
-               (into fn-rows new-fns)
-               (into fn-slots new-fn-slots)
-               (into bindings new-bindings)
-               (into list-items new-list-items))))))
+  (let [g (try
+            (sp/resolve-execution-graph storage root-fn-id)
+            (catch clojure.lang.ExceptionInfo e
+              (when-not (= :not-found (:type (ex-data e))) (throw e))))
+        fns-by-id (or (:fns g) {})
+        fn-slots (vec (:fn-slots g))
+        slot-ids (into #{} (map :slot-id) fn-slots)
+        slots-by-id (into {}
+                          (comp (filter #(slot-ids (:id %)))
+                                (map (juxt :id identity)))
+                          (:slots g))
+        type-fn-ids (into #{}
+                          (comp (keep :type-fn-id) (remove fns-by-id))
+                          (vals slots-by-id))
+        type-fn-rows (if (empty? type-fn-ids)
+                       {}
+                       (sp/read-entities storage :fn (vec type-fn-ids)))
+        bindings (vec (:bindings g))
+        list-items (vec (:list-items g))]
+    {:fns-by-id (merge fns-by-id type-fn-rows)
+     :slots-by-id slots-by-id
+     :all-bindings bindings
+     :all-list-items list-items
+     :all-fn-slots fn-slots
+     ;; Per-fn / per-binding indexes + a per-computation memo — see
+     ;; `free-args-via`: the closure of the app root is ~5k rows, and
+     ;; the walk visits thousands of fns.
+     :fn-slots-by-fn (group-by :fn-id fn-slots)
+     :bindings-by-fn (group-by :fn-id bindings)
+     :items-by-binding (group-by :binding-id list-items)
+     :memo (atom {})}))
 
 
 (defn- inheritance-chain-in-memory
@@ -262,18 +249,36 @@
      {}
      (let [{:keys [fns-by-id slots-by-id all-bindings all-list-items
                    all-fn-slots]} db
+           ;; Indexes: `collect-reachable-graph` supplies them; a caller
+           ;; that hands in the bare five-key shape gets them built once.
+           fn-slots-by-fn (or (:fn-slots-by-fn db) (group-by :fn-id all-fn-slots))
+           bindings-by-fn (or (:bindings-by-fn db) (group-by :fn-id all-bindings))
+           items-by-binding (or (:items-by-binding db)
+                                (group-by :binding-id all-list-items))
            visited' (conj visited fn-id)
            chain-vec (inheritance-chain-in-memory fn-id fns-by-id)
-           chain-fns (set chain-vec)
            ;; Level-order position: 0 = the fn itself, growing towards the
            ;; roots. Used to pick WHICH exposure of a slot identity names
            ;; the free arg (closest wins — rename-view contract).
            chain-pos (into {} (map-indexed (fn [i fid] [fid i])) chain-vec)
-           chain-fn-slots (filter #(chain-fns (:fn-id %)) all-fn-slots)
-           chain-bindings (filter #(chain-fns (:fn-id %)) all-bindings)
-           chain-binding-ids (set (map :id chain-bindings))
-           chain-list-items (filter #(chain-binding-ids (:binding-id %))
-                                    all-list-items)
+           chain-fn-slots (mapcat #(get fn-slots-by-fn %) chain-vec)
+           chain-bindings (mapcat #(get bindings-by-fn %) chain-vec)
+           chain-list-items (mapcat #(get items-by-binding (:id %)) chain-bindings)
+           ;; The lifted set of a referenced sub-graph does not depend on
+           ;; the path that reached it (the graph is a DAG — cycles are
+           ;; rejected at write time; `visited` is defence-in-depth), so
+           ;; one computation memoises it per fn-id. Without this the app
+           ;; root re-walked every shared sub-graph once per path:
+           ;; 26 s in-memory for `web-server` on a 5k-fn closure
+           ;; (2026-09-02), the Run pane's "Loading runs…" hang.
+           sub-frees (fn [rfid]
+                       (if-let [memo (:memo db)]
+                         (if (contains? @memo rfid)
+                           (get @memo rfid)
+                           (let [v (free-args-via rfid visited' db)]
+                             (swap! memo assoc rfid v)
+                             v))
+                         (free-args-via rfid visited' db)))
            ;; Bound bindings are tracked by ROOT slot-id (see
            ;; `root-source-slot-id`). All rename siblings collapse to
            ;; the same root, so the bound check is rename-insensitive.
@@ -335,7 +340,7 @@
                              (and drop-hof-refs?
                                   (fn-typed-slot? slot-id slots-by-id fns-by-id)))
                        acc
-                       (let [lifted (free-args-via ref-fn-id visited' db)
+                       (let [lifted (sub-frees ref-fn-id)
                              call-site (hof-slot-call-site-names
                                          slot-id slots-by-id fns-by-id)]
                          (merge acc (if (seq call-site)
@@ -345,7 +350,7 @@
                    chain-bindings)
            list-item-ref-frees
            (reduce (fn [acc rfid]
-                     (merge acc (free-args-via rfid visited' db)))
+                     (merge acc (sub-frees rfid)))
                    {}
                    (distinct (keep :ref-fn-id chain-list-items)))
            transitive (merge list-item-ref-frees binding-ref-frees)
@@ -396,12 +401,12 @@
    semantics. Subsequent commits layer wrap-time capture in
    `hof-callable` (3) and type-checker propagation (4) on top.
 
-   This function is PURE — it re-reads the graph every call. The BFS
-   below issues versioned-storage queries per level per entity type
-   (~1.3–1.9 s on a warm production graph). Callers on the hot
-   `/api/execute` path use `free-arg-slot-map-cached` instead; direct
-   callers (tests, the `:free-arg-slot-map` admin base-fn) keep the
-   exact, always-fresh behaviour."
+   This function is PURE — it re-reads the graph every call (a handful
+   of round trips through the storage's graph resolver — see
+   `collect-reachable-graph`). Callers on the hot `/api/execute` path
+   use `free-arg-slot-map-cached` instead; direct callers (tests, the
+   `:free-arg-slot-map` base-fn) keep the exact, always-fresh
+   behaviour."
   [ctx fn-id]
   (let [storage (request/require-storage ctx)]
     (free-args-via fn-id #{} (collect-reachable-graph storage fn-id))))

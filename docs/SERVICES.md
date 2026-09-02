@@ -106,7 +106,7 @@ admin mutates in place; the audit trail for what actually ran lives in
 | `:restart-policy` | `:restart-policy` | `:always` / `:on-failure` / `:never` — see § Supervisor below.    |
 | `:cardinality`    | `:cardinality`    | `:singleton` / `:per-pod` / `:pool` — how many pods run it at once; see § Cardinality. Nullable; nil ≡ `:singleton` (rows that pre-date the field). |
 | `:pool-size`      | `:int`            | Pod count for `:cardinality :pool` (ignored otherwise). Nullable — a `:pool` row with nil/non-positive size degrades to a singleton. |
-| `:branch-id`      | `:ref :branch`    | Per-branch scope. Reconciler routes the start through `branch-router/ctx-for branch-id`, so the same `:fn-id` can run with branch-specific bindings on dev + prod simultaneously. Nullable — nil is normalized to the router's default branch at reconcile time (`effective-branch-id`), so a legacy nil-branch row behaves exactly like an explicit default-branch row, including the post-merge `restart-services-on-branch!` pass. Without a router (tests) nil falls back to the reconciler's base ctx. The editor's ⚙ popover picker defaults to the editor's current branch on create. |
+| `:branch-id`      | `:ref :branch`    | Per-branch scope. Reconciler routes the start through `branch-router/ctx-for branch-id`, so the same `:fn-id` can run with branch-specific bindings on dev + prod simultaneously. Nullable — nil is normalized to the router's default branch at reconcile time (`effective-branch-id`), so a legacy nil-branch row behaves exactly like an explicit default-branch row, including the post-merge `restart-services-depending-on!` pass. Without a router (tests) nil falls back to the reconciler's base ctx. The editor's ⚙ popover picker defaults to the editor's current branch on create. |
 | `:org-id`         | `:text` (null)    | **Tenant owner; NULL ≡ platform.** Load-bearing for fleet sharding: the reconciler drops services whose org this pod doesn't serve (`service-in-shard?`), so a dedicated tenant's services run only on its own pod. Stamped by the tenant service-create endpoint (NOT `OrgScopedStorage` — `:service` is tenant-forbidden write-through). |
 
 ### `:restart-policy` enum
@@ -164,8 +164,9 @@ Two `:service` rows — `{:fn-id :dev-server  :branch-id dev}` and
 `{:fn-id :prod-server :branch-id main}` — both run.
 
 The merge's `:merge-post-commit!` step calls
-`recon/restart-services-on-branch!` on the
-target so cron loops pick up new fn-versions (HTTP servers re-
+`recon/restart-services-depending-on!` on the target, seeded by the
+merged fn-ids — only the services whose closure the merge touched
+restart — so cron loops pick up new fn-versions (HTTP servers re-
 read their registry lazily, cron closes over the fn-graph at
 spawn time). `delete-branch!` cascade-soft-disables services
 scoped to the deleted branch before the row goes away.

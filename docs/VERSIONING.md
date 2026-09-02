@@ -566,10 +566,14 @@ branch-specific bindings (dev port + prod port live side-by-side).
   branch picker (default = the editor's current branch). The
   reconciler picks up the row immediately and starts it inside
   the chosen branch's ctx.
-- A bug fix on branch X immediately re-rolls the X-scoped service
-  via `recon/restart-services-on-branch!` (wired into the merge's
-  `:merge-post-commit!` step as well, so post-merge cron loops pick
-  up the fresh closures).
+- A bug fix on branch X immediately re-rolls the X-scoped services
+  whose closure it touched (`recon/restart-services-depending-on!`);
+  a merge does the same for its target, seeded by the merged fn-ids
+  (`:merge-post-commit!`), so post-merge cron loops pick up the fresh
+  closures. The branch-WIDE `restart-services-on-branch!` is reserved
+  for branch delete — on the cloud every org's `main` is the shared
+  main, so a branch-wide restart on merge bounced the platform's own
+  `web-server` (2026-09-03).
 - Legacy rows without `:branch-id` fall back to the reconciler's
   base ctx (= main behavior), so the migration is transparent.
 

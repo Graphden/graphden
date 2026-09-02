@@ -25,6 +25,7 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
+    [graphden.services.reconciler :as recon]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
     [graphden.test-infra.shared-bootstrap :as sb]
@@ -174,10 +175,29 @@
               (str "diff includes an added-in-source :fn entry "
                    "(the feat-side probe); diffs=" (pr-str (take 5 (:diffs diff-body))))))
         ;; --- Phase 5: merge feat → main ------------------------
-        (let [merge-resp (dispatch {:method :post
-                                    :path "/api/branches/main/merge"
-                                    :body {:source feat-name}})
+        (let [restarts (atom [])
+              merge-resp (with-redefs [recon/restart-services-depending-on!
+                                       (fn [& args]
+                                         (swap! restarts conj [:depending-on (nth args 2) (nth args 3)])
+                                         {:started [] :stopped [] :not-our-lock []})
+                                       recon/restart-services-on-branch!
+                                       (fn [& _]
+                                         (swap! restarts conj [:on-branch])
+                                         {:started [] :stopped [] :not-our-lock []})]
+                           (dispatch {:method :post
+                                      :path "/api/branches/main/merge"
+                                      :body {:source feat-name}}))
               merge-body (parse-json merge-resp)]
+          (testing "post-merge restarts ONLY the services whose closure the merge touched"
+            ;; The branch-wide restart bounced the platform's own web-server on
+            ;; the cloud (every org's main is the shared main) — the merger got
+            ;; a 502. The delta walk is seeded by the merged fn-ids on the target.
+            (is (= [:depending-on] (mapv first @restarts))
+                (str "expected one delta restart, got " (pr-str @restarts)))
+            (let [[_ seeds target] (first @restarts)]
+              (is (contains? (set (map str seeds)) (str (:id (fn-by-name feat-name fn-name))))
+                  "seeded with the merged probe fn")
+              (is (uuid? target) "scoped to the target branch")))
           (is (= 200 (:status merge-resp))
               (str "POST /api/branches/main/merge returned 200; got status="
                    (:status merge-resp) " body=" (:body merge-resp)))

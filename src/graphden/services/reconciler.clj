@@ -641,9 +641,13 @@
    didn't change is pure churn. An entry restarts when the edited
    branch is on its branch CHAIN (itself or an ancestor); entries
    without a recorded branch and callers that can't name the edit
-   branch (3-arity) restart conservatively. Merge-driven visibility
-   changes are handled separately by `restart-services-on-branch!`
-   at the merge endpoint.
+   branch (3-arity) restart conservatively. A MERGE is the same
+   shape: the merge endpoint seeds this with `merge-affected-fn-ids`
+   and the target branch (`restart-services-on-branch!` — every
+   service on the branch — is for branch delete and the unseeded
+   cross-pod full-clear only; on the cloud every org's `main` is the
+   shared main, so a branch-wide restart on merge bounced the
+   platform's own web-server).
 
    Returns the `reconcile-once!` result (`:started :stopped
    :not-our-lock`) so the caller can log / observe. No-op when

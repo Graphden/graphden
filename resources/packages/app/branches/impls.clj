@@ -270,7 +270,7 @@
 (defn- run-merge-post-commit!
   "The post-commit thread's body — invalidate the TARGET ctx, re-check
    the affected set into its registry slices, fan the invalidation out
-   cross-pod, restart the target's services, note the epoch bumps.
+   cross-pod, restart the target's affected services, note the epoch bumps.
    Everything thread-hostile (dynamic router / org / bump-log state)
    is CAPTURED by the caller on the request thread and passed in."
   [ctx router request-org merge-bumps source-branch-id target-branch-id]
@@ -290,7 +290,7 @@
         ;; learns them too.
         (tc/with-org request-org
                      (br/recheck-ctx-types! target-ctx target-branch-id affected)))
-      ;; Cross-pod: the local invalidate + restart-services-on-branch!
+      ;; Cross-pod: the local invalidate + restart-services-depending-on!
       ;; below fire only on THIS pod. A merge writes no per-fn NOTIFY of
       ;; its own (registries heal cross-pod via the graph epoch), but a
       ;; RUNNING cron/loop closure on a sibling pod never re-fetches —
@@ -306,14 +306,23 @@
           (doseq [fid affected]
             (emit (cond-> {:kind :fn :op :invalidate :id (str fid)
                            :branch-id branch-str}
-                    org-id (assoc :org-id org-id))))))))
-  (try
-    (recon/restart-services-on-branch! ctx recon/running target-branch-id)
-    (catch Exception e
-      ;; Restart is observability-grade — the merge already
-      ;; succeeded; surface the failure but don't fail the API.
-      (log/warn e "post-merge service restart failed"
-                {:target-branch-id target-branch-id})))
+                    org-id (assoc :org-id org-id)))))))
+    (try
+      ;; ONLY the services whose closure the merge touched — the same delta
+      ;; the invalidation above used, the same walk the edit path and the
+      ;; cross-pod hook run. This used to restart EVERY running service on
+      ;; the target branch: on the cloud every org's `main` IS the shared
+      ;; main, so a tenant merging a probe fn restarted the platform's own
+      ;; `web-server` — the merger got a 502 (its socket died with the
+      ;; listener) and everybody else a blip (prod log, 2026-09-03).
+      (when (seq affected)
+        (recon/restart-services-depending-on! ctx recon/running (set affected)
+                                              target-branch-id))
+      (catch Exception e
+        ;; Restart is observability-grade — the merge already
+        ;; succeeded; surface the failure but don't fail the API.
+        (log/warn e "post-merge service restart failed"
+                  {:target-branch-id target-branch-id}))))
   ;; Eager work done — mark this merge's bumps applied. `merge-bumps`
   ;; was captured on the REQUEST thread: dynamic bindings don't convey
   ;; to a raw Thread, so the 1-arity (request-log-draining) note would
@@ -326,10 +335,11 @@
   "Post-commit finisher for a COMMITTED merge — delta-invalidate the
    TARGET branch's ctx (seeded by `mrg/merge-affected-fn-ids`, so just
    the touched fns + reverse-deps recompile, and a merged-in type-row
-   re-registers), then restart the target's services (cron loops hold
-   their fn-graph in a closed-over reference and would keep firing the
-   pre-merge graph forever; best-effort — no reconciler wired = no-op),
-   then note the epoch bumps.
+   re-registers), then restart the target's services WHOSE CLOSURE the
+   merge touched (cron loops hold their fn-graph in a closed-over
+   reference and would keep firing the pre-merge graph forever;
+   best-effort — no reconciler wired = no-op), then note the epoch
+   bumps.
 
    The three steps run on a DEDICATED thread the request thread joins:
    an aborted client interrupts the http-kit worker, and running them

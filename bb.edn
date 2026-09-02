@@ -276,13 +276,30 @@
                (p/check proc))))}
 
   gitleaks
-  {:doc "Scan working tree for committed secrets via Docker zricethezav/gitleaks."
-   :task (p/shell "docker" "run" "--rm"
-                  "-v" (str (System/getenv "PWD") ":/repo")
-                  "-w" "/repo"
-                  "zricethezav/gitleaks:v8.30.1"
-                  "detect" "--no-banner" "--no-git"
-                  "--config" "/repo/.gitleaks.toml")}
+  {:doc "Secret scan via Docker zricethezav/gitleaks, TWO passes: (1) the working tree (--no-git: sees git-ignored files too, e.g. a local .env), (2) the full git HISTORY — exactly what the GitHub job runs. Pass 2 is why a history-only match (a secret-shaped string in a since-deleted file) must be allowlisted in .gitleaks.toml even though the tree is clean: before it existed, dropping such an entry passed locally and reddened GitHub."
+   :task (let [pwd (System/getenv "PWD")
+               img "zricethezav/gitleaks:v8.30.1"
+               ;; From a worktree `.git` is a FILE pointing into the main
+               ;; checkout's .git by absolute host path, so both the tree and
+               ;; the common git dir are mounted at their own host paths for
+               ;; the history pass — git inside the container then resolves
+               ;; the pointer unchanged.
+               common (-> (p/sh "git" "rev-parse" "--path-format=absolute" "--git-common-dir")
+                          :out str/trim)]
+           (println "▶ gitleaks: working tree")
+           (p/shell "docker" "run" "--rm"
+                    "-v" (str pwd ":/repo")
+                    "-w" "/repo"
+                    img "detect" "--no-banner" "--no-git"
+                    "--config" "/repo/.gitleaks.toml")
+           (println "▶ gitleaks: git history")
+           (p/shell "docker" "run" "--rm"
+                    "-v" (str pwd ":" pwd)
+                    "-v" (str common ":" common)
+                    "-w" pwd
+                    img "git" "--no-banner"
+                    "--config" (str pwd "/.gitleaks.toml")
+                    "."))}
 
   typos
   {:doc "Spelling check over docs + src via crate-ci/typos. Downloads the pinned binary to .tools/typos-<version> on first run (Linux x86_64) — the path carries the version, so a pin bump can never keep linting with a stale cached binary. Config: _typos.toml at repo root."

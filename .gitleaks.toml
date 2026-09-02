@@ -36,6 +36,16 @@ tags = ["graphden", "credential", "fallback"]
 # ---------------------------------------------------------------------------
 [allowlist]
 description = "Known non-credential matches."
+regexes = [
+  # `generic-api-key` fires on a fn ROUTE UUID in two throwaway probe scripts
+  # (tools/browser-test/test_expand_both_routes.js, test_two_routes_direct.js).
+  # A graph entity id, not a credential. The scripts are DELETED from the
+  # tree, but the commit that added them (3cc4a88d) is in history, and both
+  # the GitHub job and `bb gitleaks`' second pass scan history — so the
+  # entry stays as long as that commit does. (Dropped once on 2026-09-02 on
+  # the strength of a working-tree-only local scan; GitHub caught it.)
+  '''21164217-585a-4335-8ade-da58f255c6ce''',
+]
 paths = [
   # The developer's LOCAL stack env file: git-ignored (can never be
   # committed), but the working-tree scan runs `--no-git` and therefore

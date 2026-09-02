@@ -102,7 +102,7 @@
     :pkg-delete-guard-reason
     :position-in :postwalk
     :pr-str :publish-package-apply :query-entities :query-param
-    :query-ref-many-owners :quot :range :re-find? :read-resource-or-nil
+    :query-ref-many-owners :quot :range :re-find? :read-resource-bytes :read-resource-or-nil
     :re-replace :realize-request-body :recent-failures :reduce
     ;; :request-capabilities reads the request-scope SEAM (server-derived
     ;; capability names), never caller content — no taint to propagate.

@@ -1,6 +1,6 @@
 // Re-records the landing's product imagery against a LIVE demo of the
 // current editor (default https://app.graphden.dev/?demo=1 — override
-// with GRAPHDEN_DEMO_URL for a worktree stack). Output, all under docs/:
+// with GRAPHDEN_DEMO_URL for a worktree stack). Output:
 //
 //   editor-demo.gif           hero loop: 4 keyframes, 1120x700 (select →
 //                             step into the handler → Bindings → Versions)
@@ -8,11 +8,14 @@
 //   landing-diff-canvas.png   compare mode on the canvas (chip, lens
 //                             bar, ringed card) @2x
 //
-// The landing (graphden-cloud resources/packages/landing/landing/fns.edn)
-// loads them from raw.githubusercontent — commit the regenerated files
-// on develop and the page follows. The demo sandbox is disposable, so
-// the fixture fns (notify / channel-webhook / …) are created fresh and
-// never cleaned up.
+// The files live in graphden-cloud's `resources/landing/` — the landing
+// package serves them from its own origin through fixed routes
+// (`:_landing-asset-*` in resources/packages/landing/landing/fns.edn),
+// versioned by the backend build hash. Point LANDING_ASSETS_DIR at that
+// directory (default: the sibling checkout ../../../graphden-cloud/
+// resources/landing), commit there, and the next release ships them.
+// The demo sandbox is disposable, so the fixture fns (notify /
+// render-message / …) are created fresh and never cleaned up.
 //
 //   cd tools/browser-test && node landing-shots.js
 const { chromium } = require('playwright');
@@ -20,7 +23,12 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const DEMO = process.env.GRAPHDEN_DEMO_URL || 'https://app.graphden.dev/?demo=1';
-const OUT = path.resolve(__dirname, '..', '..', 'docs');
+const OUT = process.env.LANDING_ASSETS_DIR
+  || path.resolve(__dirname, '..', '..', '..', 'graphden-cloud', 'resources', 'landing');
+if (!require('fs').existsSync(OUT)) {
+  console.error('LANDING_ASSETS_DIR does not exist: ' + OUT);
+  process.exit(2);
+}
 const BR = 'feature/urgency';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

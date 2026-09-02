@@ -12,10 +12,14 @@
   ;; how http-kit consumes the response map.
   ;; ---------------------------------------------------------------------
 
+  ;; `:body` is `:any`, not `:text`: Ring's body is text OR bytes (a
+  ;; served image / font — `:read-resource-bytes`), and the encode +
+  ;; cache wraps already handle both. `:ring-response` keeps its own
+  ;; `:body` free typed `:text`; `:ring-bytes-response` is the binary twin.
   {:name :ring-response-shape
    :type {:status :http-status
           :headers :text-map
-          :body :text}}
+          :body :any}}
 
   {:name :jvm-version-shape
    :type {:name :text
@@ -66,6 +70,14 @@
    :args {:map :_ring-response--w-headers
           :key {:value :body}
           :value {:as :body :type :text}}
+   :return-type :ring-response-shape}
+
+  {:name :ring-bytes-response
+   :description "`:ring-response` for a BINARY body — the same status + headers builder, `:body` typed `:any` so a byte array from `:read-resource-bytes` fits (the encode wrap skips non-compressible content-types; the immutable-response cache replays a byte array verbatim). Set `Content-Type` yourself."
+   :parent :assoc
+   :args {:map :_ring-response--w-headers
+          :key {:value :body}
+          :value {:as :body :type :any}}
    :return-type :ring-response-shape}
 
   ;; Ring-handler shape over `:constantly` — the result is a one-arg
@@ -486,6 +498,20 @@
    :description "Read a classpath resource as a string, or return nil if the path doesn't resolve. Building block for `:read-resource` (which throws on miss)."
    :args {:path {:type :text :description "Resource path relative to the classpath root."}}
    :return-type :nullable-text
+   :effects #{:io}}
+
+  ;; The BINARY sibling of `:read-resource-or-nil` — a classpath resource
+  ;; as a byte array, for serving a shipped image / font from a graph
+  ;; route. Same `:io` effect (the path is caller-chosen, so the cloud's
+  ;; request-level gate keeps a tenant from pulling config out of the
+  ;; jar); the operator's own apps (the graphden.dev landing) are what it
+  ;; is for. The graph has no bytes type — the value rides an `:any` slot
+  ;; into a Ring `:body`, where the encode wrap leaves non-compressible
+  ;; content-types alone and the immutable-response cache replays it.
+  {:name :read-resource-bytes
+   :description "Read a classpath resource as a byte array (`InputStream.readAllBytes`), or nil when the path doesn't resolve. For binary assets a graph route serves — images, fonts; `:read-resource-or-nil` is the text sibling. `:io`, like every classpath read."
+   :args {:path {:type :text :description "Resource path relative to the classpath root, e.g. `landing/editor-demo.gif`."}}
+   :return-type :any
    :effects #{:io}}
 
   ;; Read file from classpath resources, or throw with a clear message

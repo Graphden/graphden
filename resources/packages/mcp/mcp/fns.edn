@@ -532,9 +532,8 @@
    :args {:result :_mcp-resources-catalog}}
 
   {:name :_mcp-ai-context-text
-   :description "The AI-author guide (Block 9.3) — read from the classpath so the served resource IS docs/AI_CONTEXT.md, never a hand-kept copy of it (the .md at resources/packages/mcp/mcp/ai-context.md is that file, kept identical by mcp-ai-context-doc-in-sync-test). Static platform content, like the editor's CSS/JS assets, so the `:io` read rides the same unrestricted platform face."
-   :parent :read-resource
-   :return-type :text
+   :description "The AI-author guide (Block 9.3) — read from the classpath so the served resource IS docs/AI_CONTEXT.md, never a hand-kept copy of it (the .md at resources/packages/mcp/mcp/ai-context.md is that file, kept identical by mcp-ai-context-doc-in-sync-test). Static platform content, read through `:shipped-asset` (cached, no `:io`) so a tenant's MCP session under the cloud's request gate can fetch it."
+   :parent :shipped-asset
    :args {:path "packages/mcp/mcp/ai-context.md"}}
 
   {:name :_mcp-resource-uri

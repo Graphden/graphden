@@ -30,17 +30,16 @@
  [;; =====================================================================
   ;; Assets — CSS + behavior JS, one file each (diff-able, not EDN-escaped).
   ;; =====================================================================
+  ;; `:shipped-asset` (cached, no `:io`) — the sign-in page is served to
+  ;; anonymous and tenant sessions under the cloud's request gate.
   {:name :_auth-css
-   :parent :read-resource
-   :return-type :text
+   :parent :shipped-asset
    :args {:path "packages/app/auth-pages/auth.css"}}
   {:name :_auth-login-js
-   :parent :read-resource
-   :return-type :text
+   :parent :shipped-asset
    :args {:path "packages/app/auth-pages/login.js"}}
   {:name :_auth-reset-js
-   :parent :read-resource
-   :return-type :text
+   :parent :shipped-asset
    :args {:path "packages/app/auth-pages/reset.js"}}
 
   ;; =====================================================================

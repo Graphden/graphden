@@ -170,6 +170,15 @@ The runtime sandbox mechanism is entirely in core
   - an *outbound notification* (the feedback ping) is the built-in
     alerter's job on its tick, outside any request
     ([MONITORING § 3b](MONITORING.md#3b-built-in-domain-alerter-opt-in--telegram-or-webhook)).
+  - a *shipped frontend asset* (the editor's own JS/CSS, the sign-in
+    page's CSS/JS, the served AI-context .md) is read through
+    `:shipped-asset` — cached per process, allow-listed to asset kinds
+    under `packages/`, `:effects #{}` — so serving the editor needs no
+    `:io` and the addon has no per-path exception to maintain. A
+    CALLER-chosen classpath path (`/api/assets/baseline`,
+    `/partials/asset-edit`) stays on `:read-resource-or-nil` (`:io`):
+    operator-only by the gate, which is what keeps `cloud/prod.edn`
+    unreadable through it.
   `tenant_effect_budget_test` pins every `app` route's closure against the
   set, with an explicit ledger for the operator-only exceptions.
 

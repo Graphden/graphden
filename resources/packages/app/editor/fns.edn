@@ -853,7 +853,7 @@
   ;; trick as narrowing, without a refinement row.
   ;;
   ;; The `:asset-path` free surfaces at TWO slot sites (the `:_ro-where`
-  ;; zipmap value and the `:read-resource` rename), so it only binds
+  ;; zipmap value and the `:shipped-asset` rename), so it only binds
   ;; correctly through a NAMED call — the HOF per-item call below, or an
   ;; `exec` with named args. A parent PIN closes just one of the two
   ;; sites, which is why every consumer goes through the one-item /
@@ -864,13 +864,13 @@
   ;; caller's env (the original editor.css 500).
   {:name :read-resource-overridable
    :lambda-params [:asset-path]
-   :description "Read a frontend asset — the branch's `:resource-override` row when one exists, else the classpath baseline (`:read-resource`). The seam that makes the editor's own JS/CSS editable in place. Call it with a NAMED `:asset-path` (HOF per-item or exec) — see the slot-sites note above."
+   :description "Read a frontend asset — the branch's `:resource-override` row when one exists, else the shipped baseline (`:shipped-asset`: cached, allow-listed, no `:io` — so a tenant request under the cloud's effect gate serves the editor without any widening). The seam that makes the editor's own JS/CSS editable in place. Call it with a NAMED `:asset-path` (HOF per-item or exec) — see the slot-sites note above."
    :parent :if
    :args {:test {:parent :and
                  :args {:values [{:parent :not :args {:value :_ro-disabled?}}
                                  {:parent :some? :args {:value :_ro-content}}]}}
           :then {:parent :to-str :args {:value :_ro-content}}
-          :else {:parent :read-resource :args {:path {:as :asset-path}}}}}
+          :else {:parent :shipped-asset :args {:path {:as :asset-path}}}}}
 
   ;; RESCUE HATCH: a broken JS override can brick the editor (a syntax
   ;; error in one file kills the whole concatenated bundle, and the

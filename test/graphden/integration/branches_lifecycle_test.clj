@@ -176,28 +176,36 @@
                    "(the feat-side probe); diffs=" (pr-str (take 5 (:diffs diff-body))))))
         ;; --- Phase 5: merge feat → main ------------------------
         (let [restarts (atom [])
+              ;; `with-redefs` rebinds the var ROOT — under the parallel
+              ;; integration runner a sibling namespace's merge lands in this
+              ;; atom too, so every assertion below filters by OUR fn / OUR
+              ;; target branch instead of assuming the atom is ours alone.
               merge-resp (with-redefs [recon/restart-services-depending-on!
                                        (fn [& args]
-                                         (swap! restarts conj [:depending-on (nth args 2) (nth args 3)])
+                                         (swap! restarts conj [:depending-on (set (map str (nth args 2))) (str (nth args 3))])
                                          {:started [] :stopped [] :not-our-lock []})
                                        recon/restart-services-on-branch!
-                                       (fn [& _]
-                                         (swap! restarts conj [:on-branch])
+                                       (fn [& args]
+                                         (swap! restarts conj [:on-branch nil (str (nth args 2))])
                                          {:started [] :stopped [] :not-our-lock []})]
                            (dispatch {:method :post
                                       :path "/api/branches/main/merge"
                                       :body {:source feat-name}}))
-              merge-body (parse-json merge-resp)]
+              merge-body (parse-json merge-resp)
+              probe-id (str (:id (fn-by-name feat-name fn-name)))
+              target-id (str (get-in merge-body [:merge :target-branch-id]))]
           (testing "post-merge restarts ONLY the services whose closure the merge touched"
             ;; The branch-wide restart bounced the platform's own web-server on
             ;; the cloud (every org's main is the shared main) — the merger got
             ;; a 502. The delta walk is seeded by the merged fn-ids on the target.
-            (is (= [:depending-on] (mapv first @restarts))
-                (str "expected one delta restart, got " (pr-str @restarts)))
-            (let [[_ seeds target] (first @restarts)]
-              (is (contains? (set (map str seeds)) (str (:id (fn-by-name feat-name fn-name))))
-                  "seeded with the merged probe fn")
-              (is (uuid? target) "scoped to the target branch")))
+            (is (some (fn [[kind seeds target]]
+                        (and (= :depending-on kind) (contains? seeds probe-id) (= target-id target)))
+                      @restarts)
+                (str "expected a delta restart seeded with the probe fn on the target; got "
+                     (pr-str @restarts) " probe=" probe-id " target=" target-id))
+            (is (not-any? (fn [[kind _ target]] (and (= :on-branch kind) (= target-id target)))
+                          @restarts)
+                "no branch-wide restart of the target"))
           (is (= 200 (:status merge-resp))
               (str "POST /api/branches/main/merge returned 200; got status="
                    (:status merge-resp) " body=" (:body merge-resp)))

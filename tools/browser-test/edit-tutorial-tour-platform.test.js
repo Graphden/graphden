@@ -16,7 +16,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext} = require('./edit-test-helpers');
+const {assert, newContext, api} = require('./edit-test-helpers');
 const {
   hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
   extendViaRowActions, createRootNamespace, createFnInNamespace,
@@ -187,13 +187,39 @@ async function revertAssetViaApi(page, base) {
       if (!listed) await page.keyboard.press('Escape');
     }
     assert(listed, 'the published package is listed under "+ Install a package"');
+    // Diagnostics for the install swap (gate 18, 2026-09-03: the pin never
+    // showed after Install, 5/5 attempts, server idle): record what the
+    // panel-install response actually carried, and say so on failure.
+    const installResp = {};
+    const onInstallResp = async (r) => {
+      if (!r.url().includes('/api/packages/panel-install')) return;
+      try {
+        const t = await r.text();
+        Object.assign(installResp, {status: r.status(), len: t.length,
+          uninstall: t.includes('packages-uninstall'), empty: t.includes('No add-on packages')});
+      } catch (e) { installResp.err = String(e).slice(0, 120); }
+    };
+    page.on('response', onInstallResp);
     await page.evaluate(() => {
       const btn = Array.from(
         document.querySelectorAll('[data-packages-panel] .packages-install-btn'))
         .find((b) => (b.closest('tr, li, div')?.textContent || '').includes('mycorp-hello'));
       btn.click();
     });
-    await page.waitForSelector('[data-packages-panel] .packages-uninstall', {timeout: 30000});
+    try {
+      await page.waitForSelector('[data-packages-panel] .packages-uninstall', {timeout: 30000});
+    } catch (e) {
+      const panel = await page.evaluate(() => ({
+        panels: document.querySelectorAll('[data-packages-panel]').length,
+        text: (document.querySelector('[data-packages-panel]')?.innerText || '').replace(/\s+/g, ' ').slice(0, 240),
+      }));
+      const pins = await api(page, 'GET', '/api/packages/installed');
+      console.log('  INSTALL DIAG response=' + JSON.stringify(installResp)
+        + ' panel=' + JSON.stringify(panel) + ' pins=' + JSON.stringify(pins).slice(0, 200));
+      throw e;
+    } finally {
+      page.off('response', onInstallResp);
+    }
     await waitTourTitle(page, 'A pin, not a copy', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 29 pin Next');
     await waitTourTitle(page, 'Uninstall');

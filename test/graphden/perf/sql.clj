@@ -118,6 +118,9 @@
      :statements statements}))
 
 
+(declare record-measured!)
+
+
 (defn record!
   "Measure `f`; record its query count under `event` as a COUNT (gated by
    `perf/budgets.edn`) and its normalised duration as a GAUGE (reported only).
@@ -127,8 +130,16 @@
    trips' worth of TIME on this box today — useful to read, impossible to assert.
    They go to different places so they cannot be confused for each other."
   [event ds f]
-  (let [{:keys [queries elapsed-ns] :as m} (measure ds f)
-        db-ref (get (counters/gauges-snapshot) :calibration/db-ref-ns)]
+  (record-measured! event (measure ds f)))
+
+
+(defn record-measured!
+  "The recording half of `record!` — takes a `measure` result, so a
+   scenario that measured several attempts can record the one it
+   chose (counts ACCUMULATE per event; recording every attempt would
+   sum them)."
+  [event {:keys [queries elapsed-ns] :as m}]
+  (let [db-ref (get (counters/gauges-snapshot) :calibration/db-ref-ns)]
     (counters/count! event queries)
     (when-let [u (cal/units elapsed-ns db-ref)]
       (counters/observe! (keyword "trend" (name event)) u))

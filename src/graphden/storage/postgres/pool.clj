@@ -142,6 +142,28 @@
       (HikariDataSource. config))))
 
 
+(defn- hikari-of
+  "The `HikariDataSource` behind `pool`, which may be the pool itself or a
+   `DataSource` wrapped around it — the tenancy addon's `:datasource-wrap`
+   seam hands `:db/postgres` a `reify` that sets the RLS session variable
+   on every borrow, and that wrapper is what reaches `close-pool` at halt.
+   The JDBC `Wrapper` protocol is the contract: a wrap that delegates
+   `isWrapperFor` / `unwrap` (as Hikari itself does) closes through; one
+   that does not is left alone, with a warning, rather than cast — the
+   cast is what threw `ClassCastException` out of the shutdown hook and
+   aborted the rest of the halt (prod, 2026-09-03)."
+  ^HikariDataSource [pool]
+  (cond
+    (nil? pool) nil
+    (instance? HikariDataSource pool) pool
+    (and (instance? java.sql.Wrapper pool)
+         (java.sql.Wrapper/.isWrapperFor pool HikariDataSource))
+    (java.sql.Wrapper/.unwrap pool HikariDataSource)
+    :else (do (log/warn "close-pool: not a HikariDataSource and does not unwrap to one — leaving it open"
+                        {:type (type pool)})
+              nil)))
+
+
 (defn close-pool
   "Closes a HikariCP connection pool. Idempotent - safe to call multiple times.
    HikariDataSource.close() is itself thread-safe and idempotent.
@@ -156,15 +178,16 @@
 
    Returns true if pool was closed successfully, false if close failed.
    Exceptions are logged but not thrown to allow cleanup to continue."
-  [^HikariDataSource pool]
-  (if (and pool (not (HikariDataSource/.isClosed pool)))
-    (do
-      (log/info "Closing PostgreSQL connection pool")
-      (try
-        (HikariDataSource/.close pool)
-        (log/debug "PostgreSQL connection pool closed successfully")
-        true
-        (catch Exception e
-          (log/error e "Failed to close PostgreSQL connection pool gracefully")
-          false)))
-    true))
+  [pool]
+  (let [pool (hikari-of pool)]
+    (if (and pool (not (HikariDataSource/.isClosed pool)))
+      (do
+        (log/info "Closing PostgreSQL connection pool")
+        (try
+          (HikariDataSource/.close pool)
+          (log/debug "PostgreSQL connection pool closed successfully")
+          true
+          (catch Exception e
+            (log/error e "Failed to close PostgreSQL connection pool gracefully")
+            false)))
+      true)))

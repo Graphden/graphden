@@ -6,7 +6,8 @@
     [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.util.counters :as counters]))
 
 
 (use-fixtures :once (setup/create-container-fixture))
@@ -232,6 +233,45 @@
           (sp/close storage))))))
 
 
+(defn- blind-storage
+  "A runtime handle that can see NOTHING — the shape of the tenancy addon's
+   org-scoped `(:storage ctx)` for rows the request's org does not own. Any
+   read a cloud-shaped ctx must do through the privileged `:compile-storage`
+   handle answers empty here, so a test that keeps working against it has
+   proven the read went through the right handle."
+  []
+  (reify
+    sp/StorageCRUD
+    (create-entity [_ _ _] nil)
+
+    (read-entity [_ _ _] nil)
+
+    (update-entity [_ _ _ _] nil)
+
+    (delete-entity [_ _ _] nil)
+
+    (query-entities [_ _ _] [])
+
+    (query-entities [_ _ _ _] [])
+
+    (query-latest-per-group [_ _ _ _] [])
+
+
+    sp/StorageBatchCRUD
+
+    (create-entities [_ _ _] nil)
+
+    (read-entities [_ _ _] {})
+
+    (update-entities [_ _ _] nil)
+
+    (upsert-entities [_ _ _] nil)
+
+    (delete-entities [_ _ _] nil)
+
+    (query-ref-many-owners [_ _ _ _] [])))
+
+
 (deftest splice-reads-through-the-privileged-handle
   (testing "the graph cache holds the FULL org-agnostic graph (readers slice it per org), so the splice must re-read the changed fns through `:compile-storage` — the privileged handle — not `(:storage ctx)`. With an org-scoped runtime handle, a fn the request's org cannot see came back EMPTY and the splice (which drops the changed ids before re-adding what it read) ERASED it from the shared cache. Measured on a tenancy stack: write a binding, and `?scope=search` for the owning fn answered 0 hits for ~1-2s — which is what makes the editor toast “Function not found” for the fn you just edited."
     (let [storage (setup/create-test-storage)]
@@ -246,38 +286,7 @@
               ;; is swapped in for the invalidation, which is exactly the
               ;; asymmetry tenancy produces: privileged compile handle, scoped
               ;; runtime handle.
-              blind (reify
-                      sp/StorageCRUD
-                      (create-entity [_ _ _] nil)
-
-                      (read-entity [_ _ _] nil)
-
-                      (update-entity [_ _ _ _] nil)
-
-                      (delete-entity [_ _ _] nil)
-
-                      (query-entities [_ _ _] [])
-
-                      (query-entities [_ _ _ _] [])
-
-                      (query-latest-per-group [_ _ _ _] [])
-
-
-                      sp/StorageBatchCRUD
-
-                      (create-entities [_ _ _] nil)
-
-                      (read-entities [_ _ _] {})
-
-                      (update-entities [_ _ _] nil)
-
-                      (upsert-entities [_ _ _] nil)
-
-                      (delete-entities [_ _ _] nil)
-
-                      (query-ref-many-owners [_ _ _ _] []))
-              ;; `:compile-storage` is assoc'd onto the ctx by the wiring
-              ;; (system.init.exec / branch-router), not by `create-context`.
+              blind (blind-storage)
               c (assoc (exec/create-context {:storage storage})
                        :compile-storage storage)
               scoped (assoc c :storage blind)]
@@ -288,5 +297,32 @@
           (ctx/invalidate-graph-cache! scoped #{fn-id})
           (is (some #(= fn-id (:id %)) (:fns @(:graph-cache c)))
               "the fn survives the splice — it was re-read with the privileged handle"))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest delta-recompile-takes-the-cache-on-a-cloud-shaped-ctx
+  (testing "a delta recompile uses the primed `:graph-cache` instead of re-reading the whole graph — ALSO when `(:storage ctx)` is the addon's org-scoped handle and not the privileged `:compile-storage`. The cache is the full org-agnostic graph on every deployment (`splice-reads-through-the-privileged-handle`), so demanding the two handles be the same object only made every cloud write pay a full graph read: 1.7 s of a 1.85 s merge on production, 2026-09-03."
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [{:keys [composed-fn]} (setup/setup-add-function! storage)
+              composed-id (:id composed-fn)
+              c (assoc (exec/create-context {:storage storage})
+                       :compile-storage storage)
+              _ (exec/execute c composed-id {:a 1 :b 2})
+              before-closure (get @(:compiled-registry c) composed-id)
+              scoped (assoc c :storage (blind-storage))
+              before (counters/snapshot)]
+          (is (some? @(:graph-cache c)) "the compile primed the cache")
+          (ctx/invalidate-graph-cache! scoped #{composed-id})
+          (let [delta (counters/delta-since before)]
+            (is (= 1 (get delta :registry/delta-recompile 0)) "it WAS a delta")
+            (is (zero? (get delta :registry/delta-read-graph 0))
+                "and it did not read the graph out of storage")
+            (is (zero? (get delta :registry/delta-fell-back-to-rebuild 0))))
+          (is (not (identical? before-closure (get @(:compiled-registry c) composed-id)))
+              "the changed fn was recompiled from the cached graph")
+          (is (= 3 (exec/execute scoped composed-id {:a 1 :b 2}))
+              "and still runs"))
         (finally
           (sp/close storage))))))

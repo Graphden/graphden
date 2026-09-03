@@ -101,7 +101,10 @@ namespaces first. An addon fragment overrides indirection keys
   without editing core schemas.
 - **Datasource wrap** — the `:datasource-wrap` seam lets the addon wrap the
   `:db/postgres` pool to `set_config` the current org on every borrow (the
-  RLS session variable).
+  RLS session variable). The wrap MUST delegate the JDBC `Wrapper` methods
+  (`isWrapperFor` / `unwrap`): that is how halt reaches the Hikari pool
+  behind it (`pool/close-pool` unwraps instead of casting — the cast threw
+  out of the shutdown hook in production, 2026-09-03).
 - **The `org-id` column is core, not addon** (decision guard): it sits on the
   graph entities at the identity level (`NULL` ≡ public, not versioned) so
   core queries work in both modes. A tenant is a legitimate cross-cutting

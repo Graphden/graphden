@@ -27,7 +27,9 @@
     (com.zaxxer.hikari
       HikariDataSource)
     (java.sql
-      SQLException)))
+      SQLException)
+    (javax.sql
+      DataSource)))
 
 
 (use-fixtures :once (setup/container-fixture))
@@ -415,3 +417,62 @@
 
 ;; `with-query-timeout`'s binding semantics — including nesting and
 ;; restoration — are pinned by `protocol.config-test`, which owns the fn.
+
+
+(deftest close-pool-through-a-datasource-wrap-test
+  ;; The tenancy addon's `:datasource-wrap` seam hands `:db/postgres` a
+  ;; `reify DataSource` around the Hikari pool, and THAT is what halt passes
+  ;; to `close-pool`. The cast to HikariDataSource threw out of the shutdown
+  ;; hook in production (2026-09-03) and the pool was never closed. The
+  ;; contract is the JDBC `Wrapper` protocol, so a wrap that delegates it
+  ;; closes through; one that does not is left open (and warned about),
+  ;; never cast.
+  (let [delegating (fn [^DataSource ds]
+                     (reify DataSource
+                       (getConnection [_] (DataSource/.getConnection ds))
+
+                       (getConnection [_ u p] (DataSource/.getConnection ds u p))
+
+                       (getLoginTimeout [_] (DataSource/.getLoginTimeout ds))
+
+                       (setLoginTimeout [_ n] (DataSource/.setLoginTimeout ds n))
+
+                       (getLogWriter [_] (DataSource/.getLogWriter ds))
+
+                       (setLogWriter [_ w] (DataSource/.setLogWriter ds w))
+
+                       (getParentLogger [_] (DataSource/.getParentLogger ds))
+
+                       (unwrap [_ iface] (DataSource/.unwrap ds iface))
+
+                       (isWrapperFor [_ iface] (DataSource/.isWrapperFor ds iface))))
+        opaque (fn [^DataSource ds]
+                 (reify DataSource
+                   (getConnection [_] (DataSource/.getConnection ds))
+
+                   (getConnection [_ u p] (DataSource/.getConnection ds u p))
+
+                   (getLoginTimeout [_] 0)
+
+                   (setLoginTimeout [_ _] nil)
+
+                   (getLogWriter [_] nil)
+
+                   (setLogWriter [_ _] nil)
+
+                   (getParentLogger [_] nil)
+
+                   (unwrap [_ _] (throw (SQLException. "not a wrapper")))
+
+                   (isWrapperFor [_ _] false)))]
+    (testing "a wrap that delegates the JDBC Wrapper protocol closes the pool behind it"
+      (let [pool (pg/create-pool (merge (setup/get-container-config) {:pool-size 1 :min-idle 1}))]
+        (is (true? (pg/close-pool (delegating pool))))
+        (is (true? (HikariDataSource/.isClosed pool)))
+        (is (true? (pg/close-pool (delegating pool))) "still idempotent through the wrap")))
+    (testing "a wrap that does not unwrap is left alone — no cast, no throw"
+      (let [pool (pg/create-pool (merge (setup/get-container-config) {:pool-size 1 :min-idle 1}))]
+        (try
+          (is (true? (pg/close-pool (opaque pool))))
+          (is (false? (HikariDataSource/.isClosed pool)) "the real pool was not reached, and is still open")
+          (finally (pg/close-pool pool)))))))

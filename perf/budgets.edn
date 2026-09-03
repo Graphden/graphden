@@ -38,7 +38,11 @@
   :registry/delta-fell-back-to-rebuild
   {:max 0,
    :why
-   "A caller named its changed fn-ids and STILL paid for a full graph recompile: delta-recompile! hit a cold reverse-deps index and silently called rebuild!. Nothing in the return value says so and no timing distinguishes it from a cold cache — this counter is the only evidence. It is the exact failure 9d66adc0 and 0b74f1dc were about; measured at 4137 fns, the rebuild it hides costs 49.8 s."}},
+   "A caller named its changed fn-ids and STILL paid for a full graph recompile: delta-recompile! hit a cold reverse-deps index and silently called rebuild!. Nothing in the return value says so and no timing distinguishes it from a cold cache — this counter is the only evidence. It is the exact failure 9d66adc0 and 0b74f1dc were about; measured at 4137 fns, the rebuild it hides costs 49.8 s."},
+  :registry/delta-read-graph
+  {:max 26,
+   :why
+   "A delta recompile (or a type-registry refresh) that read the WHOLE graph out of Postgres instead of taking the primed :graph-cache. The cache is the full org-agnostic graph on every deployment, so only a cold cache or a sharded (:executor-orgs) pod should ever read here. On the cloud that read was 1.7 s of a 1.85 s merge and ran on EVERY write (2026-09-03) — a timing could not tell it from a slow database. 26 = the suite's cold-cache cases at the time the counter was added."}},
  :perf
  #:sql{:graph-entities-tree
        {:max 1,

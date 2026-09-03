@@ -839,7 +839,13 @@
            (`bb graph-lint`): duplicate definitions — exact, and after inlining
            `_`-private helpers — plus unreferenced privates and pure aliases.
            One engine over EDN-shape fn-defs, so the editor's per-branch graph
-           can be linted through `reconstruct-fn-def` too. docs/GRAPH_LINT.md."}]}
+           can be linted through `reconstruct-fn-def` too. docs/GRAPH_LINT.md."}
+    {:ns graphden.lint.graph :defn lint-branch
+     :say "The editor's side of the same engine: the per-ctx graph snapshot
+           (org-sliced, branch-resolved) is rebuilt into loader-shaped
+           fn-defs and linted, memoised while the snapshot object is
+           unchanged. The Lint drawer tab's base-fn is this one call; the
+           suppressions it subtracts live in the graph as a `:const`."}]}
 
   {:id :boot
    :title "Boot & lifecycle"

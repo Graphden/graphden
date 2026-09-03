@@ -58,7 +58,7 @@
                   "packages/app/editor/editor-prefs.js"
                   ;; Feedback ("Report a problem") — early so its uncaught-
                   ;; error ring buffer sees everything after boot; the shell
-                  ;; menu (editor-auth.js) and the Errors panel call its
+                  ;; menu (editor-auth.js) and the Failed runs panel call its
                   ;; window.openFeedbackForm at click time.
                   "packages/app/editor/editor-feedback.js"
                   "packages/app/editor/editor-auth.js"
@@ -149,6 +149,7 @@
                   "packages/app/editor/editor-stats.js"
                   "packages/app/editor/editor-errors.js"
                   "packages/app/editor/editor-type-errors.js"
+                  "packages/app/editor/editor-lint.js"
                   ;; Tests: status cache + Operate section shell + the
                   ;; isTestFn predicate editor-sidebar.js's lens reads.
                   "packages/app/editor/editor-tests.js"

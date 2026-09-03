@@ -5,7 +5,7 @@
 //      unhandledrejection) so a report can carry "what just broke".
 //   2. The report form popover — category / text / email + a transparent
 //      "what will be sent" checkbox list. Opened from the shell menu
-//      (editor-auth.js) and from the Errors panel (editor-errors.js).
+//      (editor-auth.js) and from the Failed runs panel (editor-errors.js).
 //   3. Delivery: POST to the intake URL announced by THIS instance's
 //      GET /api/feedback/config (env-controlled; empty string = feature
 //      hidden), falling back to a "download the report / open GitHub"

@@ -210,6 +210,21 @@
    :parent :get-auth-required
    :args {:path "/partials/type-errors" :handler :_partial-type-errors-handler}}
 
+  {:name :partial-lint
+   :description "GET /partials/lint — the current branch's graph-lint warnings (docs/GRAPH_LINT.md): duplicate definitions, differently-factored duplicates, unreferenced privates; each row suppressible. Auth-required; the editor's Lint drawer tab lazy-loads it."
+   :parent :get-auth-required
+   :args {:path "/partials/lint" :handler :_partial-lint-handler}}
+
+  {:name :partial-lint-suppress
+   :description "POST /partials/lint/suppress?rule=R&fn-ids=a,b — mark one finding as not-an-issue (stored in the branch's `lint-suppressions` const), responds with the refreshed panel body for the htmx swap. Auth-required."
+   :parent :post
+   :args {:path "/partials/lint/suppress" :handler :_partial-lint-suppress-handler}}
+
+  {:name :partial-lint-restore
+   :description "POST /partials/lint/restore?rule=R&fn-ids=a,b — un-hide a suppressed finding, responds with the refreshed panel body. Auth-required."
+   :parent :post
+   :args {:path "/partials/lint/restore" :handler :_partial-lint-restore-handler}}
+
   {:name :partial-merge-conflicts
    :description "POST /partials/merge-conflicts — body is the `{conflicts, source, target}` JSON the failed merge returned; renders the resolution card hiccup (header + help + batch toolbar + per-conflict source/target radios + version previews + Cancel/Apply). Renders the POSTed conflicts (no re-detection — mirrors `:partial-execute-result-inline`). JS in `editor-branches.js` owns the overlay chrome + radio/apply lifecycle."
    :parent :post

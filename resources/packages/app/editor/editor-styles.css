@@ -5064,6 +5064,33 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .type-errors-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 0.6875rem; }
 .type-errors-list { max-height: 320px; overflow-y: auto; }
 
+/* Lint diagnostics-drawer section — the graph lint's warnings on the
+   current branch. Same row grammar as the type-errors family above; the
+   rule chip + member links + message + "Not an issue" button are all
+   server-rendered. Hidden (suppressed) rows sit inside a <details>. */
+.lint-row { padding: 6px 8px; border-bottom: 1px dashed var(--light-border);
+  font-size: 0.6875rem; display: grid; grid-template-columns: auto 1fr auto;
+  grid-template-areas: "rule fns btn" "rule msg btn"; gap: 2px 8px;
+  align-items: start; }
+.lint-rule { grid-area: rule; color: var(--muted-fg); font-family: var(--mono, monospace);
+  white-space: nowrap; }
+.lint-fns { grid-area: fns; display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.lint-fn { color: var(--accent); }
+.lint-fn-ns { color: var(--muted-fg); margin-left: 4px; }
+.lint-fn-ns:empty { display: none; }
+.lint-msg { grid-area: msg; color: var(--light-fg); overflow-wrap: anywhere; }
+.lint-suppress, .lint-restore { grid-area: btn; font-size: 0.625rem; padding: 1px 6px;
+  color: var(--muted-fg); background: transparent; border: 1px solid var(--light-border);
+  border-radius: 3px; cursor: pointer; white-space: nowrap; }
+.lint-suppress:hover, .lint-restore:hover { color: var(--fg); border-color: var(--accent); }
+.lint-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 0.6875rem; }
+.lint-list { max-height: 320px; overflow-y: auto; }
+.lint-hidden { padding: 4px 8px; font-size: 0.6875rem; }
+.lint-hidden-summary { color: var(--muted-fg); cursor: pointer; }
+.lint-row-hidden { opacity: 0.7; }
+.gd-insp-lint-row .lint-fns { margin-bottom: 2px; }
+.gd-insp-lint-hint { color: var(--muted-fg); font-size: 0.6875rem; padding: 2px 0; }
+
 /* Tests ops section (Block 3.1) — summary + Run-all + per-test rows.
    Same row grammar as the error-log / type-errors families above. */
 .tests-panel-header { display: flex; align-items: center; gap: 8px;

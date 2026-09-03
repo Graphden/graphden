@@ -29,13 +29,21 @@
      fn-def references (parents, args, list items, type-row fields).
      (warning; exemptions come from the caller as `:roots` — the
      `tools/graph-reachability.edn` registry of by-name entry points.)
-   - `:private-alias` — a `_`-private fn-def that only renames its
-     single parent: no args, no return-type, no lambda-params, no
-     effects. (info — legitimate under the let-rule, listed so a
-     leftover alias is visible.)
 
-   A *finding* is `{:rule :severity :fns [[ns name] …] :weight
-   :message}`; `lint` returns them sorted most severe first."
+   A *finding* is `{:rule :severity :fns [[ns name] …] :fn-ids [uuid …]
+   :weight :message}` (`:fn-ids` when the fn-defs carry `:id` — the DB
+   world); `lint` returns them sorted most severe first.
+
+   Two things a caller layers on top:
+
+   - **suppression** — `:suppress`, a set of `finding-key`s the author
+     marked as not-an-issue. A suppressed finding is dropped, and a
+     group that later gains a member has a new key and comes back.
+   - **platform fn-defs** — `:platform-fn?`, a predicate over fn-defs
+     (package-synced rows in a live graph). They are never subjects of
+     `:unreferenced-private` (their by-name entry points live in the
+     CI registry, not in the graph), and a duplicate group made only
+     of them is the corpus gate's business, not the editor's."
   (:require
     [clojure.string :as str]))
 
@@ -322,14 +330,15 @@
 
 
 (defn- unreferenced-private-findings
-  [idx roots]
+  [idx roots platform-fn?]
   (let [refs (referrers idx)]
     (for [fd (:fn-defs idx)
           :let [k (fn-key fd)]
           :when (and (lintable? fd)
                      (private-name? (:name fd))
                      (empty? (get refs k))
-                     (not (contains? roots (:name fd))))]
+                     (not (contains? roots (:name fd)))
+                     (not (and platform-fn? (platform-fn? fd))))]
       {:rule :unreferenced-private
        :severity :warning
        :fns [k]
@@ -337,24 +346,30 @@
        :message (str (label k) " is private and nothing references it")})))
 
 
-(defn- private-alias-findings
-  [idx]
-  (for [fd (:fn-defs idx)
-        :let [k (fn-key fd)]
-        :when (and (lintable? fd)
-                   (private-name? (:name fd))
-                   (:parent fd)
-                   (empty? (:args fd))
-                   (not-any? fd [:return-type :lambda-params :effects :expects-effects]))]
-    {:rule :private-alias
-     :severity :info
-     :fns [k]
-     :weight 0
-     :message (str (label k) " only renames " (:parent fd))}))
-
-
 (def ^:private severity-rank
   {:warning 0 :info 1})
+
+
+(defn finding-key
+  "What a suppression names: the rule plus the sorted fn identities —
+   ids when the fn-defs carry them (the live graph), `[ns name]` keys
+   otherwise. Renaming a member keeps the key; adding one changes it."
+  [{:keys [rule fn-ids fns]}]
+  [rule (vec (sort (map str (or (seq fn-ids) fns))))])
+
+
+(defn- with-fn-ids
+  "Stamp `:fn-ids` on a finding when every member fn-def has an `:id`."
+  [idx finding]
+  (let [ids (map #(:id (get (:by-key idx) %)) (:fns finding))]
+    (cond-> finding
+      (every? some? ids) (assoc :fn-ids (vec (sort ids))))))
+
+
+(defn- all-platform?
+  [idx platform-fn? finding]
+  (and platform-fn?
+       (every? #(platform-fn? (get (:by-key idx) %)) (:fns finding))))
 
 
 (defn lint
@@ -363,17 +378,24 @@
    - `:base-fn-names` — names refs may resolve to as base-fns;
    - `:roots` — set of fn NAMES entered from outside the graph (the
      by-name entry-point registry + vocabulary), exempt from
-     `:unreferenced-private`.
+     `:unreferenced-private`;
+   - `:platform-fn?` — predicate over fn-defs: package-synced rows are
+     never `:unreferenced-private` subjects, and an all-platform
+     duplicate group is dropped;
+   - `:suppress` — set of `finding-key`s to drop.
 
    Returns findings sorted warnings first, then by rule and fns."
   ([fn-defs] (lint fn-defs {}))
-  ([fn-defs {:keys [base-fn-names roots]}]
+  ([fn-defs {:keys [base-fn-names roots platform-fn? suppress]}]
    (let [idx (build-index fn-defs base-fn-names)
-         memo (atom {})]
+         memo (atom {})
+         suppress (set suppress)]
      (->> (concat (duplicate-findings idx memo :shallow)
                   (duplicate-findings idx memo :deep)
-                  (unreferenced-private-findings idx (set roots))
-                  (private-alias-findings idx))
+                  (unreferenced-private-findings idx (set roots) platform-fn?))
+          (map #(with-fn-ids idx %))
+          (remove #(all-platform? idx platform-fn? %))
+          (remove #(contains? suppress (finding-key %)))
           (sort-by (juxt (comp severity-rank :severity) :rule :fns))
           vec))))
 

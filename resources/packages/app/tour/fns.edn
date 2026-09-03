@@ -800,8 +800,8 @@
              :chapter "Running it"
              :title "When something breaks"
              :steps
-             [{:title "Two kinds of wrong"
-               :body "A failed RUN and a failed type-check are different events, and they have different lists. Errors holds runs that threw; Type errors holds edits the checker objected to but let through. This lesson visits both."
+             [{:title "Three kinds of wrong"
+               :body "A failed RUN, a failed type-check and a duplicated definition are different events, and they have different lists. Failed runs holds runs that threw; Type errors holds edits the checker objected to but let through; Lint holds structure the graph already had. This lesson visits all three."
                :target nil
                :check {:kind "manual"}}
               {:title "Something that fails"
@@ -819,8 +819,8 @@
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
-              {:title "Open Errors"
-               :body "Click [[Errors]] in the diagnostics bar under the canvas — the drawer opens without leaving the editor. It lists this branch's UNRESOLVED failures from the last 7 days, newest first — the fn as a link, when it finished, and the message. A fn link selects it on the canvas while the list stays open."
+              {:title "Open Failed runs"
+               :body "Click [[Failed runs]] in the diagnostics bar under the canvas — the drawer opens without leaving the editor. It lists this branch's UNRESOLVED failures from the last 7 days, newest first — the fn as a link, when it finished, and the message. A fn link selects it on the canvas while the list stays open."
                :target "#gd-diag-nav button[data-section=\"errors\"]"
                :check {:kind "dom" :selector "#gd-diag-drawer[data-open=\"1\"] #gd-diag-panels > [data-section=\"errors\"]:not([hidden])"}}
               {:title "Read the row"
@@ -828,15 +828,23 @@
                :target ".error-log-list"
                :check {:kind "manual"}}
               {:title "Now a static mistake"
-               :body "Errors is about run time. The other panel is about WRITE time: bind a value the type-checker objects to and the write still lands, with a diagnostic attached. You saw one badge in lesson 05 — Type errors is the branch-wide list of them."
+               :body "Failed runs is about run time. The next panel is about WRITE time: bind a value the type-checker objects to and the write still lands, with a diagnostic attached. You saw one badge in lesson 05 — Type errors is the branch-wide list of them."
                :target nil
                :check {:kind "manual"}}
               {:title "Open Type errors"
                :body "Same bar: click [[Type errors]]. Empty means nothing on this branch is mistyped right now — which is the normal state, and the reason this is a worklist rather than a wall."
                :target "#gd-diag-nav button[data-section=\"type-errors\"]"
                :check {:kind "dom" :selector "#gd-diag-drawer[data-open=\"1\"] #gd-diag-panels > [data-section=\"type-errors\"]:not([hidden])"}}
+              {:title "And what already exists"
+               :body "The third list is about STRUCTURE. Click [[Lint]] in the same bar. It reads the branch the way the package loader reads fns.edn and reports fn-defs that duplicate one another — exactly, or once their private helpers are inlined — and private fn-defs nothing uses. Empty is the normal state here too."
+               :target "#gd-diag-nav button[data-section=\"lint\"]"
+               :check {:kind "dom" :selector "#gd-diag-drawer[data-open=\"1\"] #gd-diag-panels > [data-section=\"lint\"]:not([hidden])"}}
+              {:title "You get to disagree"
+               :body "A lint row is advice, not a verdict. Each one carries [[Not an issue]]: click it and the finding moves into the panel's hidden list, and the decision is written INTO THE GRAPH — a root fn named lint-suppressions, a :const whose value lists what you dismissed. It is versioned with the branch and you can open, edit or delete it like any fn. [[Restore]] in the hidden list brings a finding back. The written lesson's step 8 builds a duplicate pair to try this on."
+               :target nil
+               :check {:kind "manual"}}
               {:title "What each panel answers"
-               :body "Errors: what broke, and when. Type errors: what does not fit, right now, on this branch. Debug — the last tab in the bar — answers why (lesson 15), and Monitoring (account menu → [[Organization]]) answers how often. Click [[Finish]] — the tour offers to delete tutorial-bad-json."
+               :body "Failed runs: what broke, and when. Type errors: what does not fit, right now, on this branch. Lint: what the graph already has. Debug — the last tab in the bar — answers why (lesson 15), and Monitoring (account menu → [[Organization]]) answers how often. Click [[Finish]] — the tour offers to delete tutorial-bad-json."
                :target nil
                :check {:kind "manual"}}]}
             {:id "17"

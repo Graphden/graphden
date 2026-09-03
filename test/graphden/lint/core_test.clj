@@ -119,15 +119,43 @@
                                  (fd "a" :url :refine {:base :text :pred :a/_pred})]))))))
 
 
-(deftest private-alias-test
-  (testing "a private fn-def that only renames its parent is info"
-    (let [fs (findings-for :private-alias
-                           [(fd "a" :_now :parent :const)
-                            (fd "a" :use :parent :assoc :args {:map :a/_now :key {:value :k}})
-                            (fd "a" :_typed :parent :const :return-type :int)
-                            (fd "a" :use2 :parent :assoc :args {:map :a/_typed :key {:value :k}})])]
-      (is (= [[["a" :_now]]] (map :fns fs)))
-      (is (= [:info] (map :severity fs))))))
+(deftest finding-key-and-suppression-test
+  (let [dup-a (fd "a" :page :parent :assoc :args {:map {:value {:class "x"}} :key {:value :t} :value :a/title} :id "id-a")
+        dup-b (fd "b" :row :parent :assoc :args {:map {:value {:class "x"}} :key {:value :t} :value :a/title} :id "id-b")
+        title (fd "a" :title :parent :const :args {:value {:value "t"}} :id "id-t")
+        [f] (findings-for :duplicate-definition [dup-a dup-b title])]
+    (testing "fn-defs that carry :id stamp the finding with sorted :fn-ids"
+      (is (= ["id-a" "id-b"] (:fn-ids f))))
+    (testing "the key is the rule + the sorted ids"
+      (is (= [:duplicate-definition ["id-a" "id-b"]] (lint/finding-key f))))
+    (testing "a suppressed key drops the finding"
+      (is (empty? (findings-for :duplicate-definition [dup-a dup-b title]
+                                :suppress #{(lint/finding-key f)}))))
+    (testing "a group that gains a member has a new key — the suppression no longer matches"
+      (let [dup-c (fd "c" :cell :parent :assoc :args {:map {:value {:class "x"}} :key {:value :t} :value :a/title} :id "id-c")
+            fs (findings-for :duplicate-definition [dup-a dup-b dup-c title]
+                             :suppress #{(lint/finding-key f)})]
+        (is (= [["id-a" "id-b" "id-c"]] (map :fn-ids fs)))))
+    (testing "without ids the key falls back to [ns name] pairs"
+      (let [[g] (findings-for :duplicate-definition [(dissoc dup-a :id) (dissoc dup-b :id) title])]
+        (is (nil? (:fn-ids g)))
+        (is (= [:duplicate-definition ["[\"a\" :page]" "[\"b\" :row]"]] (lint/finding-key g)))))))
+
+
+(deftest platform-fn-test
+  (let [platform? #(= "platform" (:namespace %))
+        p1 (fd "platform" :_helper :parent :get :args {:key {:value :k}} :id "p1")
+        p2 (fd "platform" :_twin :parent :assoc :args {:map {:value {}} :key {:value :k} :value {:value 1}} :id "p2")
+        p3 (fd "platform" :_twin2 :parent :assoc :args {:map {:value {}} :key {:value :k} :value {:value 1}} :id "p3")
+        user (fd "mine" :_copy :parent :assoc :args {:map {:value {}} :key {:value :k} :value {:value 1}} :id "u1")]
+    (testing "an unreferenced platform private is not a finding"
+      (is (empty? (findings-for :unreferenced-private [p1] :platform-fn? platform?)))
+      (is (= 1 (count (findings-for :unreferenced-private [p1])))))
+    (testing "a duplicate group made only of platform fn-defs is dropped"
+      (is (empty? (findings-for :duplicate-definition [p2 p3] :platform-fn? platform?))))
+    (testing "a user fn-def duplicating a platform one IS a finding, naming both"
+      (let [[f] (findings-for :duplicate-definition [p2 user] :platform-fn? platform?)]
+        (is (= ["p2" "u1"] (:fn-ids f)))))))
 
 
 (deftest resolve-ref-test
@@ -144,8 +172,13 @@
 (deftest ordering-test
   (testing "warnings sort before info"
     (let [fs (lint/lint [(fd "a" :_dead :parent :get :args {:key {:value :k}})
-                         (fd "a" :_alias :parent :const)
-                         (fd "a" :use :parent :assoc :args {:map :a/_alias :key {:value :k}})]
+                         (fd "a" :_name :parent :get :args {:coll {:as :row} :key {:value :name}})
+                         (fd "b" :_name :parent :get :args {:coll {:as :row} :key {:value :name}})
+                         (fd "a" :use :parent :assoc :args {:map :a/_name :key {:value :k}})
+                         (fd "b" :use :parent :assoc :args {:map :b/_name :key {:value :k}})]
                         {:base-fn-names base-fns})]
-      (is (= [:warning :info] (map :severity fs)))
-      (is (= 1 (count (lint/warnings fs)))))))
+      ;; `_dead` is unreferenced (warning); a/use + b/use are the same
+      ;; graph once their private `_name` helpers expand (warning); the
+      ;; two `_name` accessors themselves are an info-tier duplicate.
+      (is (= [:warning :warning :info] (map :severity fs)))
+      (is (= 2 (count (lint/warnings fs)))))))

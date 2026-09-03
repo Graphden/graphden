@@ -12,7 +12,8 @@ rows — so one engine serves both authoring worlds.
 |-------|------|-------|
 | `src/graphden/lint/core.clj` | the pure engine — `lint` over a fn-def seq | 2026-09-03 |
 | `src/graphden/lint/corpus.clj` | `bb graph-lint` — the first-party fns.edn corpus, no DB, ~10 s | 2026-09-03 |
-| editor diagnostics drawer | per-branch lint over the live graph | planned, see § UI |
+| `src/graphden/lint/graph.clj` | the live branch — graph snapshot → fn-defs → `lint`, memoised per snapshot | 2026-09-03 |
+| editor diagnostics drawer, **Lint** tab | `GET /partials/lint`; "Not an issue" / "Restore" write the branch's `lint-suppressions` const | 2026-09-03 |
 
 ## Rules
 
@@ -21,7 +22,6 @@ rows — so one engine serves both authoring worlds.
 | `:duplicate-definition` | ≥ 2 named composed fn-defs have the same *shallow signature* — parents, canonical args (refs resolved to identities, literals as written), `:return-type`, `:lambda-params`, effects, `:branch-local?`. Names, namespaces and every `:description` are ignored. | warning at weight ≥ 3, info below |
 | `:duplicate-after-expansion` | the same, over the *deep signature* — every ref to a `_`-private fn-def is replaced by that fn-def's own signature. Catches the same graph factored through differently-named helpers, or spread over two namespaces. Groups already equal shallowly are not repeated. | same weighting |
 | `:unreferenced-private` | a `_`-private composed fn-def no fn-def references (parents, args, list items, type-row fields; string names count — the value-form / repr registries hand names out as strings). | warning |
-| `:private-alias` | a `_`-private fn-def that only renames its parent: no args, return-type, lambda-params or effects. | info |
 
 **Weight** is the number of bound values a shared structure carries:
 a ref or a non-nil literal counts one, an inline fn-def counts one
@@ -31,6 +31,12 @@ line between "a copied graph" and "two accessors that happen to read
 the same key" — `{:parent :get :args {:coll {:as :row} :key {:value
 :id} :default nil}}` written twice is the let-rule's separate child
 per code path, not copy-paste, and stays info.
+
+Only warnings reach the editor — the info tier is calibration
+output for the corpus gate, not a problem to put in front of an
+author. There is no `private-alias` rule: a private fn-def that only
+renames its parent is the let-rule's "separate child per code path",
+and listing it would be noise dressed as a finding.
 
 What the duplicate rules deliberately do **not** treat as findings:
 
@@ -112,27 +118,45 @@ which BFS-walks from the same registry.
   signatures), never persist. Cost per write is the size of F's
   referrer set, not the graph.
 
-## UI (proposed, not shipped)
+## The editor: the Lint tab
 
-The diagnostics drawer under the canvas has four tabs: **Errors**
-(failed runs still unresolved, dismissable), **Type errors** (recorded
-checker diagnostics for the branch), **Tests**, **Debug**. Lint
-findings are a third *static* kind — computed from the graph, no
-lifecycle beyond "edit until it goes away", never blocking. Proposal:
+The diagnostics drawer under the canvas has five tabs: **Failed
+runs** (failed executions still unresolved, dismissable), **Type
+errors** (recorded checker diagnostics), **Lint**, **Tests**, **Debug**.
+Lint findings are the third *static* kind — computed from the graph, no
+lifecycle beyond "edit until it goes away", never blocking — and the
+one list where the author may disagree.
 
-| Tab | Today | Proposed | Why |
-|-----|-------|----------|-----|
-| Errors | failed runs | **Failed runs** | says what it is; "Errors" next to "Type errors" and "Lint" reads as the generic bucket |
-| Type errors | checker diagnostics | unchanged | hard diagnostics with their own ⚠ card badge and refuse-to-execute semantics — keep them out of a softer list |
-| — | — | **Lint** (new) | rule · severity · fns (hash links) · message; info rows folded by default; a per-rule filter chip; badge = warning count |
-| Tests / Debug | | unchanged | |
+`GET /partials/lint` renders one row per warning: the rule, the member
+fns as `#hash` links (namespace dimmed), the engine's message, and a
+**Not an issue** button. The badge on the tab counts the rows. The
+Inspector's detail pane repeats the rows naming the selected fn under a
+**Lint** heading (read-only there — the swap target lives in the
+drawer).
 
-Not merging Type errors and Lint into one "Problems" pane: a hard
+**Suppression lives in the graph.** "Not an issue" POSTs the finding's
+key (`rule` + the sorted member fn-ids) to `/partials/lint/suppress`,
+which appends `{:rule :fn-ids}` to the value of the root fn
+`lint-suppressions` — a `:const` created on first use through the
+ordinary CRUD write unit, so it is versioned per branch, merges with
+the branch, and is visible and editable on the canvas like any fn. The
+key is the member *ids*: renaming a member keeps the suppression,
+adding a third copy is a new finding. The panel's collapsed hidden
+list shows what was dismissed with a **Restore** per entry
+(`/partials/lint/restore`). No new entity, no new table, no derived
+state persisted — only what the author explicitly said.
+
+Why not merge Type errors and Lint into one "Problems" pane: a hard
 "this fn refuses to execute" row must not be scrolled past among
-twenty "consider extracting a parent" hints. Renaming **Errors** is a
-prose sweep (lesson 16, the tour's lesson-16 steps, `EDITOR_MODULES.md`,
-`MONITORING.md`, the RU copies) and lands with the tab.
+twenty "this already exists as `x`" hints. **Errors** became **Failed
+runs** in the same landing — next to "Type errors" and "Lint" it read
+as the generic bucket, and lesson 16 already described it as "recent
+failed runs".
 
-Per-fn: the inspector's card gets a `⚐` chip when the fn is in a
-finding, opening the same rows filtered to it — the duplicate rules
-name the *other* members, which is the actionable part.
+The whole flow is graph composition (`app/editor-panels/fns.edn`,
+`_plint-*`) over one base-fn, `:branch-lint-warnings`, whose impl is a
+single `lint.graph/lint-branch` call. Rendering is parametrised by
+`:warnings` / `:suppressed` free args so the two POST handlers render
+from the list they just wrote — the store's own thunk was forced
+before the write (ADR-thunk-once), so re-reading it would show the
+pre-write list.

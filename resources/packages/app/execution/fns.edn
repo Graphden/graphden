@@ -718,7 +718,7 @@
    :effects #{:db}}
 
   {:name :failure-ack
-   :description "Dismiss ONE failed execution from the Errors panel — sets `:acknowledged-at` on the row (org-guarded; the audit row itself stays for its TTL). Returns true when a row was updated, false for an unknown/foreign/already-acked id."
+   :description "Dismiss ONE failed execution from the Failed runs panel — sets `:acknowledged-at` on the row (org-guarded; the audit row itself stays for its TTL). Returns true when a row was updated, false for an unknown/foreign/already-acked id."
    :args {:execution-id {:type :nullable-text :description "The `:execution-id` of the failure row to dismiss (uuid text; nil/malformed → false)."}}
    :return-type :bool
    :effects #{:db}}

@@ -41,6 +41,9 @@
                   :partial-assets-panel
                   :partial-asset-edit
                   :partial-type-errors
+                  :partial-lint
+                  :partial-lint-suppress
+                  :partial-lint-restore
                   :partial-tests
                   :partial-tests-stream
                   :partial-execute-trace

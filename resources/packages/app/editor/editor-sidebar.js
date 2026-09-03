@@ -65,7 +65,8 @@ const _adminNavBtns = new Map();
 const OP_SECTION_LABELS = {
   grants: 'Grants', users: 'Members', roles: 'Roles', orgs: 'Organizations',
   packages: 'Packages', stats: 'Monitoring',
-  errors: 'Errors', 'type-errors': 'Type errors', 'platform-access': 'Platform access',
+  errors: 'Failed runs', 'type-errors': 'Type errors', lint: 'Lint',
+  'platform-access': 'Platform access',
   assets: 'Assets', tests: 'Tests', debug: 'Debug', executors: 'Executor',
 };
 
@@ -159,6 +160,7 @@ window.reloadDynamicOpsSections = reloadDynamicOpsSections;
 function reloadDiagnosticsSections() {
   reloadLiveSections('gd-diag-panels', {
     'type-errors': typeof buildTypeErrorsSection === 'function' ? buildTypeErrorsSection : null,
+    lint: typeof buildLintSection === 'function' ? buildLintSection : null,
     errors: typeof buildErrorsSection === 'function' ? buildErrorsSection : null,
     tests: typeof buildTestsSection === 'function' ? buildTestsSection : null,
     debug: typeof buildDebugSection === 'function' ? buildDebugSection : null,
@@ -1328,7 +1330,7 @@ function revealFnInTree(fnId) {
 
 // Mount the Operate / Platform / Diagnostics panes: Grants, Members, Roles,
 // Organizations, Platform access, Packages, Monitoring, Apps, Assets, plus
-// the code diagnostics (Errors, Type errors, Tests, Debug). Each builder is
+// the code diagnostics (Failed runs, Type errors, Lint, Tests, Debug). Each builder is
 // a global from its own module and each returns null when it doesn't apply,
 // so a section opts out by being absent rather than by being listed
 // somewhere.
@@ -1354,7 +1356,7 @@ function mountOpsSections(fallbackList, searchMode) {
   const opsNavHost = opsPane ? opsNav : null;
   const platHost = platPane || opsHost;
   const platNavHost = platPane ? platNav : opsNavHost;
-  // Code diagnostics (errors / type-errors / tests / debug) → the Build
+  // Code diagnostics (errors / type-errors / lint / tests / debug) → the Build
   // drawer, so a fn link in a row navigates the canvas without a surface
   // switch; Operate keeps the admin panels.
   const diagHost = diagPane || opsHost;
@@ -1408,6 +1410,11 @@ function mountOpsSections(fallbackList, searchMode) {
   }
   if (typeof buildTypeErrorsSection === 'function') {
     mountAdminSection(diagHost, diagNavHost, 'type-errors', buildTypeErrorsSection);
+  }
+  if (typeof buildLintSection === 'function') {
+    // Graph lint — duplicates / dead privates on the current branch
+    // (editor-lint.js).
+    mountAdminSection(diagHost, diagNavHost, 'lint', buildLintSection);
   }
   if (typeof buildTestsSection === 'function') {
     mountAdminSection(diagHost, diagNavHost, 'tests', buildTestsSection);

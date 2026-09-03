@@ -282,7 +282,7 @@ is the point.
 
 ## Error log (`GET /partials/error-log`)
 
-The editor's **Errors** sidebar section lists the current branch view's
+The editor's **Failed runs** tab (diagnostics drawer) lists the current branch view's
 **unresolved** recent failures (newest first) straight off the `:fn-execution`
 audit rows — no new storage beyond two columns (`:branch-id` stamped at
 create, `:acknowledged-at` set by dismiss). Privacy holds because the write

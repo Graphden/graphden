@@ -452,12 +452,17 @@ function registerBuiltinShortcuts() {
   registerShortcut({
     id: 'diagnostics-tests', keys: 't', group: 'Diagnostics',
     description: 'Tests',
-    run: () => clickIfPresent('[data-diag-tab="tests"], .gd-diag-tab[data-tab="tests"]'),
+    run: () => clickIfPresent('#gd-diag-nav button[data-section="tests"], [data-diag-tab="tests"], .gd-diag-tab[data-tab="tests"]'),
   });
   registerShortcut({
     id: 'diagnostics-errors', keys: 'x', group: 'Diagnostics',
-    description: 'Errors',
-    run: () => clickIfPresent('[data-diag-tab="errors"], .gd-diag-tab[data-tab="errors"]'),
+    description: 'Failed runs',
+    run: () => clickIfPresent('#gd-diag-nav button[data-section="errors"], [data-diag-tab="errors"], .gd-diag-tab[data-tab="errors"]'),
+  });
+  registerShortcut({
+    id: 'diagnostics-lint', keys: 'w', group: 'Diagnostics',
+    description: 'Lint',
+    run: () => clickIfPresent('#gd-diag-nav button[data-section="lint"], [data-diag-tab="lint"], .gd-diag-tab[data-tab="lint"]'),
   });
   // Surfaces — the management destinations otherwise reachable only through
   // the account chip's menu (and, for Build, the brand button). Registered

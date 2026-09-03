@@ -383,6 +383,327 @@
    :args {:body :_pterr-html}}
 
   ;; ---------------------------------------------------------------------
+  ;; LINT partial — GET /partials/lint. The graph lint (docs/GRAPH_LINT.md)
+  ;; over the CURRENT branch: definitions that already exist elsewhere
+  ;; (exactly, or once private helpers are inlined) and private fn-defs
+  ;; nothing references. Warnings only. Every row carries a
+  ;; "Not an issue" button; the suppression it records lives IN THE GRAPH
+  ;; — the root fn `lint-suppressions` (a `:const` whose value is the
+  ;; list of `{:rule :fn-ids}` entries), created on first use, versioned
+  ;; per branch like any fn, visible and editable on the canvas. A
+  ;; finding is keyed by its member ids, so a group that later gains a
+  ;; member comes back on its own.
+  ;; ---------------------------------------------------------------------
+  {:name :branch-lint-warnings
+   :description "The graph lint's WARNINGS over the current branch (docs/GRAPH_LINT.md) as display rows — `[{:rule :message :weight :fn-ids :fn-ids-csv :fns [{:id :name :ns} …]} …]`, minus the findings listed in `:suppressed`. One `lint.graph/lint-branch` call over the request's graph snapshot; recomputed only when the snapshot or the suppression set changed."
+   :args {:suppressed {:type [:list :jsonb]
+                       :description "Findings marked as not-an-issue — the `lint-suppressions` const's value, `[{:rule <text> :fn-ids [<uuid-text> …]} …]`."}}
+   :return-type [:list :keyword-map]
+   :effects #{:db}}
+
+  ;; --- the suppression store: root fn `lint-suppressions` (:const) ------
+  {:name :_plint-supp-fn-id
+   :description "Id of the root `lint-suppressions` const; nil until the first \"Not an issue\" creates it."
+   :parent :fn-id-by-name
+   :args {:fn-name {:value "lint-suppressions"}}}
+
+  {:name :_plint-supp-fn-nil?
+   :parent :nil? :args {:value :_plint-supp-fn-id}}
+
+  {:name :_plint-supp-where
+   :parent :assoc
+   :args {:map {:value {}} :key {:value :fn-id} :value :_plint-supp-fn-id}}
+
+  {:name :_plint-supp-binding
+   :description "The const's `:value` binding row on this branch — the whole suppression list lives in its `:value`."
+   :parent :first
+   :args {:coll {:parent :query-entities
+                 :args {:entity-type {:value "binding"} :where :_plint-supp-where}}}}
+
+  {:name :_plint-supp-binding-id
+   :parent :get :args {:coll :_plint-supp-binding :key {:value :id} :default nil}}
+
+  {:name :_plint-supp-value
+   :parent :get :args {:coll :_plint-supp-binding :key {:value :value} :default {:value []}}}
+
+  {:name :_plint-suppressed
+   :description "The entries marked not-an-issue — `[]` while no `lint-suppressions` fn exists."
+   :parent :if
+   :args {:test :_plint-supp-fn-nil?
+          :then {:value []}
+          :else :_plint-supp-value}}
+
+  ;; --- rendering — parametrised by `:warnings` so the GET and the two
+  ;;     POSTs (which must render AFTER their write, from the list they
+  ;;     just wrote) share one chain without re-reading a thunk-once store.
+  {:name :_plint-f-rule
+   :parent :get :args {:coll {:as :item} :key {:value :rule} :default {:value ""}}}
+  {:name :_plint-f-msg
+   :parent :get :args {:coll {:as :item} :key {:value :message} :default {:value ""}}}
+  {:name :_plint-f-fns
+   :parent :get :args {:coll {:as :item} :key {:value :fns} :default {:value []}}}
+  {:name :_plint-f-csv
+   :parent :get :args {:coll {:as :item} :key {:value :fn-ids-csv} :default {:value ""}}}
+
+  {:name :_plint-fn-name
+   :parent :get :args {:coll {:as :item} :key {:value :name} :default {:value "?"}}}
+  {:name :_plint-fn-ns
+   :parent :get :args {:coll {:as :item} :key {:value :ns} :default {:value ""}}}
+  {:name :_plint-fn-link-attrs
+   :parent :assoc
+   :args {:map {:value {:class "lint-fn"}}
+          :key {:value :href}
+          :value {:parent :str :args {:parts [{:value "#"} :_plint-fn-name]}}}}
+  {:name :_plint-fn-link
+   :description "One member fn as a native #hash link, its namespace dimmed after it."
+   :parent :hiccup
+   :args {:tag {:value "a"}
+          :attrs :_plint-fn-link-attrs
+          :children [:_plint-fn-name
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "lint-fn-ns"}}
+                             :children [:_plint-fn-ns]}}]}}
+  {:name :_plint-f-links
+   :parent :map :args {:func :_plint-fn-link :coll :_plint-f-fns}}
+  {:name :_plint-f-links-div
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "lint-fns"}} :children [:_plint-f-links]}}
+
+  {:name :_plint-f-rule-chip
+   :parent :hiccup
+   :args {:tag {:value "span"} :attrs {:value {:class "lint-rule"}} :children [:_plint-f-rule]}}
+  {:name :_plint-f-msg-div
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "lint-msg"}} :children [:_plint-f-msg]}}
+
+  {:name :_plint-suppress-url
+   :parent :str
+   :args {:parts [{:value "/partials/lint/suppress?rule="} :_plint-f-rule {:value "&fn-ids="} :_plint-f-csv]}}
+  {:name :_plint-suppress-btn
+   :description "Per-row \"Not an issue\" — POSTs the finding's key to the suppress route and swaps the refreshed panel body back in."
+   :parent :hx-button
+   :args {:label {:value "Not an issue"}
+          :url :_plint-suppress-url
+          :target {:value "closest .lint-body"}
+          :swap {:value "outerHTML"}
+          :extras {:value {:class "lint-suppress"
+                           :title "Hide this finding; it stays hidden until the group changes or you restore it"}}}}
+
+  {:name :_plint-row
+   :description "One finding — rule chip, member fn links, the engine's message, the suppress button."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "lint-row"}}
+          :children [:_plint-f-rule-chip :_plint-f-links-div :_plint-f-msg-div :_plint-suppress-btn]}}
+
+  {:name :_plint-rendered-rows
+   :parent :map :args {:func :_plint-row :coll {:as :warnings}}}
+  {:name :_plint-empty?
+   :parent :empty? :args {:coll {:as :warnings}}}
+  {:name :_plint-empty-msg
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "lint-empty"}}
+          :children ["Nothing to report on this branch."]}}
+  {:name :_plint-list
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "lint-list"}} :children [:_plint-rendered-rows]}}
+  {:name :_plint-findings
+   :parent :if
+   :args {:test :_plint-empty? :then :_plint-empty-msg :else :_plint-list}}
+
+  ;; --- the hidden list: what was marked not-an-issue, each restorable ---
+  {:name :_plint-s-rule
+   :parent :get :args {:coll {:as :item} :key {:value :rule} :default {:value ""}}}
+  {:name :_plint-s-ids
+   :parent :get :args {:coll {:as :item} :key {:value :fn-ids} :default {:value []}}}
+  {:name :_plint-s-fn-row
+   :description "The suppressed member's fn row; nil when it was deleted since. Ids in the store were written by the suppress route, so the `:assert-some` narrowing never fires on a real entry."
+   :parent :get-entity
+   :args {:entity-type {:value "fn"}
+          :id {:parent :assert-some
+               :args {:value {:parent :parse-uuid :args {:string {:as :item}}}}}}}
+  {:name :_plint-s-fn-name
+   :description "A suppressed member by name — the id when the fn is gone (a deleted member is the usual reason the entry is stale)."
+   :parent :coalesce
+   :args {:value {:parent :get :args {:coll :_plint-s-fn-row :key {:value :name} :default nil}}
+          :default {:as :item}}}
+  {:name :_plint-s-fn-link
+   :parent :hiccup
+   :args {:tag {:value "a"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:class "lint-fn"}}
+                         :key {:value :href}
+                         :value {:parent :str :args {:parts [{:value "#"} :_plint-s-fn-name]}}}}
+          :children [:_plint-s-fn-name]}}
+  {:name :_plint-s-links
+   :parent :map :args {:func :_plint-s-fn-link :coll :_plint-s-ids}}
+  {:name :_plint-restore-url
+   :parent :str
+   :args {:parts [{:value "/partials/lint/restore?rule="} :_plint-s-rule {:value "&fn-ids="}
+                  {:parent :str-join :args {:coll :_plint-s-ids :separator {:value ","}}}]}}
+  {:name :_plint-restore-btn
+   :parent :hx-button
+   :args {:label {:value "Restore"}
+          :url :_plint-restore-url
+          :target {:value "closest .lint-body"}
+          :swap {:value "outerHTML"}
+          :extras {:value {:class "lint-restore" :title "Show this finding again"}}}}
+  {:name :_plint-s-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "lint-row lint-row-hidden"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "span"} :attrs {:value {:class "lint-rule"}} :children [:_plint-s-rule]}}
+                     {:parent :hiccup
+                      :args {:tag {:value "div"} :attrs {:value {:class "lint-fns"}} :children [:_plint-s-links]}}
+                     :_plint-restore-btn]}}
+  {:name :_plint-s-rows
+   :parent :map :args {:func :_plint-s-row :coll {:as :suppressed}}}
+  {:name :_plint-s-count
+   :parent :count :args {:coll {:as :suppressed}}}
+  {:name :_plint-s-summary
+   :parent :hiccup
+   :args {:tag {:value "summary"}
+          :attrs {:value {:class "lint-hidden-summary"}}
+          :children [{:parent :to-str :args {:value :_plint-s-count}} " marked not an issue"]}}
+  {:name :_plint-s-details
+   :parent :hiccup
+   :args {:tag {:value "details"}
+          :attrs {:value {:class "lint-hidden"}}
+          :children [:_plint-s-summary :_plint-s-rows]}}
+  {:name :_plint-s-any?
+   :parent :not :args {:value {:parent :empty? :args {:coll {:as :suppressed}}}}}
+  {:name :_plint-hidden
+   :parent :if
+   :args {:test :_plint-s-any? :then :_plint-s-details :else :hidden-span}}
+
+  {:name :_plint-body
+   :description "The swappable panel body — findings, then the collapsed list of hidden ones. Free args: `:warnings` (display rows), `:suppressed` (the store's entries)."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "lint-body"}}
+          :children [:_plint-findings :_plint-hidden]}}
+  {:name :_plint-render
+   :parent :render-hiccup
+   :args {:hiccup :_plint-body}}
+
+  ;; --- GET: warnings against the stored suppressions ---
+  {:name :_plint-html
+   :parent :_plint-render
+   :args {:warnings {:parent :branch-lint-warnings :args {:suppressed :_plint-suppressed}}
+          :suppressed :_plint-suppressed}}
+
+  {:name :_partial-lint-handler
+   :lambda-params []
+   :description "Ring handler for GET /partials/lint — the current branch's graph-lint warnings as text/html. Auth-required (route side)."
+   :parent :html-ok-response
+   :args {:body :_plint-html}}
+
+  ;; --- POST suppress / restore: apply the write, then render from the
+  ;;     list just written (the store's thunk was forced BEFORE the write). ---
+  {:name :_plint-q-rule
+   :parent :query-param :args {:param-name {:value "rule"}}}
+  {:name :_plint-q-ids
+   :description "`?fn-ids=a,b` split — `:query-param` is `:nullable-text`, the `:coalesce` keeps `:str-split`'s `:text` slot proven."
+   :parent :str-split
+   :args {:string {:parent :coalesce
+                   :args {:value {:parent :query-param :args {:param-name {:value "fn-ids"}}}
+                          :default {:value ""}}}
+          :separator {:value ","}}}
+  {:name :_plint-entry
+   :description "The finding's key as the store keeps it — `{:rule <text> :fn-ids [<uuid-text> …]}`."
+   :parent :zipmap
+   :args {:keys [{:value :rule} {:value :fn-ids}]
+          :vals [:_plint-q-rule :_plint-q-ids]}}
+
+  {:name :_plint-supp-appended
+   :parent :distinct
+   :args {:coll {:parent :conj :args {:coll :_plint-suppressed :item :_plint-entry}}}}
+  {:name :_plint-supp-update
+   :description "Store exists — rewrite the const's `:value` with the entry added."
+   :parent :update-entity
+   :args {:entity-type {:value "binding"}
+          :id :_plint-supp-binding-id
+          :data {:parent :zipmap :args {:keys [{:value :value}] :vals [:_plint-supp-appended]}}}}
+
+  {:name :_plint-const-id
+   :parent :fn-id-by-name
+   :args {:fn-name {:value "const"}}}
+  {:name :_plint-const-slot-id
+   :description "`:const`'s one slot (`value`) — the binding the store's list goes on."
+   :parent :get
+   :args {:coll {:parent :first
+                 :args {:coll {:parent :query-entities
+                               :args {:entity-type {:value "fn-slot"}
+                                      :where {:parent :assoc
+                                              :args {:map {:value {}} :key {:value :fn-id} :value :_plint-const-id}}}}}}
+          :key {:value :slot-id}
+          :default nil}}
+  {:name :_plint-supp-created-fn
+   :description "First suppression on this branch — create the root `lint-suppressions` const through the full CRUD write unit."
+   :parent :create-entity
+   :args {:entity-type {:value "fn"}
+          :data {:parent :zipmap
+                 :args {:keys [{:value :name} {:value :parent-ids} {:value :description}]
+                        :vals [{:value "lint-suppressions"}
+                               {:parent :vec :args {:coll [:_plint-const-id]}}
+                               {:value "Lint findings marked as not an issue — a list of {:rule :fn-ids}. The Lint panel adds and removes entries; edit or delete this fn to change them by hand."}]}}}}
+  {:name :_plint-supp-created-id
+   :parent :get :args {:coll :_plint-supp-created-fn :key {:value :id} :default nil}}
+  {:name :_plint-supp-create-binding
+   :parent :create-entity
+   :args {:entity-type {:value "binding"}
+          :data {:parent :zipmap
+                 :args {:keys [{:value :fn-id} {:value :slot-id} {:value :value}]
+                        :vals [:_plint-supp-created-id :_plint-const-slot-id
+                               {:parent :vec :args {:coll [:_plint-entry]}}]}}}}
+  {:name :_plint-suppress-applied
+   :parent :if
+   :args {:test :_plint-supp-fn-nil?
+          :then :_plint-supp-create-binding
+          :else :_plint-supp-update}}
+  {:name :_plint-after-suppress-html
+   :parent :_plint-render
+   :args {:warnings {:parent :branch-lint-warnings :args {:suppressed :_plint-supp-appended}}
+          :suppressed :_plint-supp-appended}}
+  {:name :_plint-suppress-then-html
+   :parent :do
+   :args {:steps [:_plint-suppress-applied :_plint-after-suppress-html]}}
+  {:name :_partial-lint-suppress-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /partials/lint/suppress?rule=R&fn-ids=a,b — record the finding as not-an-issue in the branch's `lint-suppressions` const (created on first use), respond with the refreshed panel body."
+   :parent :html-ok-response
+   :args {:body :_plint-suppress-then-html}}
+
+  {:name :_plint-not-entry?
+   :description "HOF pred — every stored entry except the one being restored."
+   :parent :not
+   :args {:value {:parent :equal? :args {:a {:as :item} :b :_plint-entry}}}}
+  {:name :_plint-supp-removed
+   :parent :vec
+   :args {:coll {:parent :filter :args {:pred :_plint-not-entry? :coll :_plint-suppressed}}}}
+  {:name :_plint-restore-applied
+   :parent :update-entity
+   :args {:entity-type {:value "binding"}
+          :id :_plint-supp-binding-id
+          :data {:parent :zipmap :args {:keys [{:value :value}] :vals [:_plint-supp-removed]}}}}
+  {:name :_plint-after-restore-html
+   :parent :_plint-render
+   :args {:warnings {:parent :branch-lint-warnings :args {:suppressed :_plint-supp-removed}}
+          :suppressed :_plint-supp-removed}}
+  {:name :_plint-restore-then-html
+   :description "The entry is read FIRST as its own step: inside the `:filter` predicate it is a captured closure arg, invisible to the handler's free-arg surface, and `:lambda-params [:request]` must name a real free arg (`:compile/invalid-lambda-params` otherwise)."
+   :parent :do
+   :args {:steps [:_plint-entry :_plint-restore-applied :_plint-after-restore-html]}}
+  {:name :_partial-lint-restore-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /partials/lint/restore?rule=R&fn-ids=a,b — drop the entry from `lint-suppressions`, respond with the refreshed panel body (the finding shows again if it still holds)."
+   :parent :html-ok-response
+   :args {:body :_plint-restore-then-html}}
+
+  ;; ---------------------------------------------------------------------
   ;; STATS partial (Phase C) — GET /partials/stats. The CURRENT org's run
   ;; statistics over a 7-day window: headline totals, a per-day trend
   ;; table, and a top-fns table. Every number comes from an org-scoped

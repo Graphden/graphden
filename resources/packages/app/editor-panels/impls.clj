@@ -4,9 +4,11 @@
    (`graphden.types.diagnostics`) with fn names from storage; all
    rendering is graph fn-defs in `fns.edn`."
   (:require
+    [clojure.string :as str]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
+    [graphden.lint.graph :as lint-graph]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
     [graphden.types.diagnostics :as diag]
@@ -65,6 +67,34 @@
     (zipmap caps (repeat true))))
 
 
+(defbase branch-lint-warnings
+  ;; The graph lint over the CURRENT branch — one `lint.graph/lint-branch`
+  ;; call over the request's graph snapshot, minus the entries the
+  ;; author marked as not-an-issue (`suppressed`: the `lint-suppressions`
+  ;; const's value, `[{:rule :fn-ids} …]` as the graph stores it). Each
+  ;; finding comes back as a display row: the rule + message, the member
+  ;; fns (id / name / namespace — anonymous rows get their `_anon-` label)
+  ;; and the ids joined for the suppress / restore URLs. Warnings only:
+  ;; the engine's info tier is calibration, not a problem to show.
+  [suppressed]
+  (cr/record-effect! :db)
+  (let [suppress (into #{}
+                       (map (fn [e]
+                              [(keyword (:rule e))
+                               (vec (sort (map str (:fn-ids e))))]))
+                       suppressed)]
+    (mapv (fn [{:keys [rule message weight fns fn-ids]}]
+            {:rule (name rule)
+             :message message
+             :weight weight
+             :fn-ids (mapv str fn-ids)
+             :fn-ids-csv (str/join "," (map str fn-ids))
+             :fns (mapv (fn [[nsp n] id] {:id (str id) :name (name n) :ns nsp})
+                        fns fn-ids)})
+          (lint-graph/lint-branch ctx suppress))))
+
+
 (def impls
   {:branch-diagnostics-flat branch-diagnostics-flat
+   :branch-lint-warnings branch-lint-warnings
    :request-capabilities request-capabilities})

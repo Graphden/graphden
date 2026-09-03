@@ -26,6 +26,9 @@
       Instant)))
 
 
+(declare untransferable-via-diff)
+
+
 (defn- now
   []
   (Instant/now))
@@ -105,19 +108,36 @@
 
 (defn- modified-entities-after
   "Returns set of entity ids that have been modified on a branch after the fork point.
-   Checks all versioned entity types (fn, slot, fn-slot, binding, list-item)."
-  [base-storage branch-id after-ts]
-  (reduce-kv
-    (fn [acc entity-name {:keys [version-entity version-id-field]}]
-      (let [all-versions (sp/query-entities base-storage version-entity
-                                            {:branch-id branch-id})
-            modified (filter #(pos? (compare (:created-at %) after-ts)) all-versions)]
-        (reduce (fn [m v]
-                  (update m entity-name (fnil conj #{}) (get v version-id-field)))
-                acc
-                modified)))
-    {}
-    res/entity-config))
+   Checks all versioned entity types (fn, slot, fn-slot, binding, list-item).
+
+   `only-ids` (optional `{entity-name #{entity-id …}}`) narrows each type's
+   query to those entity ids — `detect-conflicts` passes the SOURCE's
+   modified set when scanning the TARGET, because a conflict needs the id on
+   both sides: without it the target scan read every version row on `main`
+   (5.5k fns / 10k bindings on the golden graph) to intersect with a
+   handful. A type absent from `only-ids` contributes nothing."
+  ([base-storage branch-id after-ts]
+   (modified-entities-after base-storage branch-id after-ts nil))
+  ([base-storage branch-id after-ts only-ids]
+   (reduce-kv
+     (fn [acc entity-name {:keys [version-entity version-id-field]}]
+       (let [ids (when only-ids (get only-ids entity-name))
+             all-versions (cond
+                            (nil? only-ids)
+                            (sp/query-entities base-storage version-entity
+                                               {:branch-id branch-id})
+                            (seq ids)
+                            (sp/query-entities base-storage version-entity
+                                               {:branch-id branch-id
+                                                version-id-field (vec ids)})
+                            :else [])
+             modified (filter #(pos? (compare (:created-at %) after-ts)) all-versions)]
+         (reduce (fn [m v]
+                   (update m entity-name (fnil conj #{}) (get v version-id-field)))
+                 acc
+                 modified)))
+     {}
+     res/entity-config)))
 
 
 (defn batch-resolve
@@ -172,7 +192,10 @@
   [base-storage source-branch-id target-branch-id]
   (let [fp (fork-point base-storage source-branch-id target-branch-id)
         source-modified (modified-entities-after base-storage source-branch-id fp)
-        target-modified (modified-entities-after base-storage target-branch-id fp)
+        ;; Only the ids the source touched can conflict — scan the target for
+        ;; exactly those instead of every version row it carries.
+        target-modified (modified-entities-after base-storage target-branch-id fp
+                                                 source-modified)
         ;; Conflicting entity-ids per type — modified on BOTH branches.
         conflict-ids (reduce-kv
                        (fn [acc entity-name source-ids]
@@ -455,7 +478,28 @@
    Computed from the resolved-view `diff-branches` (which already accounts for
    ancestor + merge visibility): a diff entry the source contributes
    (`:source-version` present) whose entity the source does NOT own a version
-   row for is inherited — the record won't carry it."
+   row for is inherited — the record won't carry it.
+
+   FAST PATH first: the diff is a full resolved-view comparison of both
+   branches — O(every entity), 1.5 s of a 1.6 s merge on a 5k-fn graph and
+   ~6 s of the cloud demo's 7 s (2026-09-03) — yet its answer is provably
+   empty whenever every branch the SOURCE sees by inheritance is one the
+   TARGET sees too: an inherited entity then resolves from the same rows on
+   both sides (the target's view is at least as new), so nothing the source
+   shows can vanish. That is every fork off the target and every sibling.
+   Only when the source's visibility carries branches the target lacks —
+   the cross-base / stacked / chained merge — is the diff run."
+  [base-storage source-branch-id target-branch-id]
+  (let [source-sees (branch-visibility-ids base-storage source-branch-id)
+        target-sees (branch-visibility-ids base-storage target-branch-id)
+        inherited-only (disj (set/difference source-sees target-sees) source-branch-id)]
+    (if (empty? inherited-only)
+      []
+      (untransferable-via-diff base-storage source-branch-id target-branch-id))))
+
+
+(defn- untransferable-via-diff
+  "The general case of `untransferable-inherited-entities` — see there."
   [base-storage source-branch-id target-branch-id]
   (let [{:keys [diffs]} (diff-branches base-storage source-branch-id target-branch-id)
         source-owned (reduce-kv

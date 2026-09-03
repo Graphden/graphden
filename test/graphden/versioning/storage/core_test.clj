@@ -2054,6 +2054,39 @@
       (finally (sp/close base)))))
 
 
+(deftest merge-of-a-fork-skips-the-resolved-view-diff-test
+  ;; The untransferable-content guard used to run `diff-branches` — a full
+  ;; resolved-view comparison of both branches — on EVERY merge (1.5 s of a
+  ;; 1.6 s merge on the golden graph, ~6 s of the cloud demo's 7 s). For a
+  ;; branch forked off its target the answer is provably empty (the source
+  ;; sees nothing by inheritance the target does not), so the guard decides
+  ;; from the visibility sets and never diffs. The stacked case below still
+  ;; must (see `merge-refuses-to-silently-drop-inherited-content-test`).
+  ;; `with-redefs` rebinds the var root, so the capture is filtered by OUR
+  ;; branch ids — a sibling namespace's merge may land in it too.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)
+        diffed (atom [])]
+    (try
+      (let [f (sp/create-entity v :fn {:name "fork-fn" :parent-ids []})
+            main (vs/current-branch-id v)
+            fork (vs/create-branch! v "fork-off-main")
+            _ (sp/update-entity (vs/switch-branch v (:id fork)) :fn (:id f) {:description "on fork"})]
+        (with-redefs [mrg/diff-branches (let [orig mrg/diff-branches]
+                                          (fn [& args]
+                                            (swap! diffed conj [(nth args 1) (nth args 2)])
+                                            (apply orig args)))]
+          (testing "the guard answers empty for a fork without diffing"
+            (is (= [] (mrg/untransferable-inherited-entities base (:id fork) main)))
+            (is (not-any? #{[(:id fork) main]} @diffed)
+                "diff-branches must not run for a fork off its target"))
+          (testing "and the merge itself goes through"
+            (is (some? (vs/merge-branch! v (:id fork))))
+            (is (not-any? #{[(:id fork) main]} @diffed))
+            (is (= "on fork" (:description (sp/read-entity v :fn (:id f))))))))
+      (finally (sp/close base)))))
+
+
 (deftest merge-refuses-to-silently-drop-inherited-content-test
   ;; A by-reference merge carries only the source's OWN rows. A STACKED source
   ;; (S forked off R, where R — not S — edited X) shows X by inheritance but

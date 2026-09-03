@@ -52,6 +52,10 @@
        {:max 8,
         :why
         "GET /api/secrets — 6 round trips steady-state, INDEPENDENT of how big the graph is, and deliberately budgeted with headroom rather than tightly. This one number jitters by ±1 with branch-row caching (measured 5, 6 and 7 across runs on two machines), so a tight ceiling fails honestly-green runs and a loose one misses small regressions. The real guard is in the scenario itself: pg_stat_statements normalises a graph scan into one row with calls > 1, and the test asserts every statement runs exactly once. This budget is the coarse backstop for a change that adds whole new statements — cross 8 and something structural moved."},
+       :merge-fork
+       {:max 35,
+        :why
+        "POST /api/branches/main/merge for a branch forked off main carrying one new fn — lesson 20's flow, every review's last click. Before 2026-09-03 the merge ran a full resolved-view diff of both branches (`untransferable-inherited-entities`) and scanned EVERY version row on main for conflicts — thousands of round trips' worth of rows, 1.6 s here and ~7 s on the cloud. The fork case now decides from the two branches' visibility sets (a fork shows nothing the target can't see) and the conflict scan asks the target only about the ids the source touched. If this climbs by more than a handful, somebody put a whole-branch read back on the merge path."},
        :execute-popover-app-root
        {:max 18,
         :why
@@ -76,6 +80,11 @@
           :band 2.0,
           :why
           "Five queries' worth of SQL against hundreds of round trips' worth of time — like create-fn, the cost is the graph read behind the handler, not the database. A jump here with the query count unmoved means the work moved into Clojure."},
+         :merge-fork
+         {:units 151.62,
+          :band 2.0,
+          :why
+          "A fork merge is ~35 round trips of work and little compute: the merge record, the narrowed conflict scan, the uniqueness check on the source's fns, the branch locks. A jump here with the count unmoved means the merge grew a graph-sized Clojure walk again (the resolved-view diff it used to run)."},
          :execute-popover-app-root
          {:units 3442.42,
           :band 2.0,

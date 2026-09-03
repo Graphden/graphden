@@ -125,6 +125,42 @@
       (is (pos? queries)))))
 
 
+(deftest ^:perf merge-fork-sql-cost
+  ;; Merging a branch forked off `main` back into it — lesson 20's flow and
+  ;; every review's last click. Before 2026-09-03 the merge ran a full
+  ;; resolved-view diff of both branches (`untransferable-inherited-entities`)
+  ;; and scanned every version row on main for conflicts: 1.6 s on this
+  ;; graph, ~7 s on the cloud. Now the fork case decides from the branch
+  ;; visibility sets and the conflict scan is narrowed to the source's ids.
+  ;; The round-trip count is what this watches: a return to "read all of
+  ;; main" moves it by thousands.
+  (testing "POST /api/branches/main/merge for a fork carrying one new fn"
+    (let [feat (str "perf-merge-" (random-uuid))
+          created (setup/via-graph *graph* :create-branch-handler
+                                   {:request-method :post :uri "/api/branches"
+                                    :headers {"content-type" "application/json"}
+                                    :body (str "{\"name\":\"" feat "\"}")})
+          ident (get (:all-name->id *graph*) :identity)
+          probe (setup/via-graph *graph* :process-create-entity
+                                 {:uri "/api/entities/fn" :request-method :post
+                                  :headers {"content-type" "application/x-www-form-urlencoded"
+                                            "x-graphden-branch" feat}
+                                  :body (str "name=perf-merge-probe&parent-ids=" ident)})
+          {:keys [queries result]}
+          (record! :sql/merge-fork
+                   #(setup/via-graph *graph* :merge-branch-handler
+                                     {:request-method :post
+                                      :uri "/api/branches/main/merge"
+                                      :headers {"content-type" "application/json"}
+                                      :body (str "{\"source\":\"" feat "\"}")
+                                      :path-params {:ref "main"}}))]
+      (is (= 200 (:status created)) "the fork was created")
+      (is (= 200 (:status probe)) "the probe fn landed on the fork")
+      (is (= 200 (:status result))
+          "the merge must succeed, or its query count means nothing")
+      (is (pos? queries)))))
+
+
 (deftest ^:perf fn-create-sql-cost
   (testing "creating one :fn — the write path that used to re-read the graph"
     (let [{:keys [queries result]}

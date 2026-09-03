@@ -55,6 +55,14 @@ async function entities(page, branch) {
 
 async function openDemo(browser, viewport, dpr) {
   const ctx = await browser.newContext({ viewport, deviceScaleFactor: dpr });
+  // A worktree stack (GRAPHDEN_DEMO_URL=http://localhost:<port>/) has no
+  // demo session — sign in the way the e2e helpers do.
+  if (!/graphden\.dev/.test(DEMO)) {
+    const auth = process.env.AUTH_TOKEN || 'test123';
+    await ctx.addInitScript((a) => {
+      try { localStorage.setItem('graphden.auth.password', a); } catch (_) {}
+    }, auth);
+  }
   const page = await ctx.newPage();
   await page.goto(DEMO, { waitUntil: 'networkidle', timeout: 90000 });
   await page.waitForSelector('#branch-chip-btn', { timeout: 60000 });
@@ -72,27 +80,39 @@ async function seedDiff(page) {
   const valueSlot = slot('const', 'value');
   const urlSlot = slot('http-request', 'url');
   const bodySlot = slot('http-request', 'body');
+  // Idempotent: a worktree stack keeps its DB between runs, so a fixture
+  // that already exists is reused rather than 409'd.
   const mk = async (name, parent, branch) => {
+    ents = await entities(page, branch);
+    if (fn(name)) return fn(name).id;
     await form(page, 'POST', '/api/entities/fn', { name, 'parent-ids': fn(parent).id }, branch);
     ents = await entities(page, branch);
     return fn(name).id;
   };
+  const bind = async (fields, branch) => {
+    ents = await entities(page, branch);
+    const have = ents.bindings.find((b) => b['fn-id'] === fields['fn-id'] && b['slot-id'] === fields['slot-id']);
+    if (have) return;
+    await form(page, 'POST', '/api/entities/binding', fields, branch);
+  };
   const render = await mk('render-message', 'const');
-  await form(page, 'POST', '/api/entities/binding',
-    { 'fn-id': render, 'slot-id': valueSlot.id, value: JSON.stringify('New comment on your issue') });
+  await bind({ 'fn-id': render, 'slot-id': valueSlot.id, value: JSON.stringify('New comment on your issue') });
   const notify = await mk('notify', 'http-post');
-  await form(page, 'POST', '/api/entities/binding',
-    { 'fn-id': notify, 'slot-id': urlSlot.id, value: JSON.stringify('https://hooks.example.com/team') });
-  await form(page, 'POST', '/api/entities/binding',
-    { 'fn-id': notify, 'slot-id': bodySlot.id, 'ref-fn-id': render });
+  await bind({ 'fn-id': notify, 'slot-id': urlSlot.id, value: JSON.stringify('https://hooks.example.com/team') });
+  await bind({ 'fn-id': notify, 'slot-id': bodySlot.id, 'ref-fn-id': render });
+  // A dependant that the branch never touches: it inherits notify's
+  // bindings, so compare mode marks it "changed inside" (∿ via notify).
+  await mk('on-issue-comment', 'notify');
   await page.evaluate(async (name) => {
+    const have = ((await (await window.authFetch('/api/branches')).json()).branches || [])
+      .some((b) => b.name === name);
+    if (have) return;
     const r = await window.authFetch('/api/branches', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
     if (!(await r.json()).ok) throw new Error('branch create failed');
   }, BR);
   const urgent = await mk('urgent-message', 'const', BR);
-  await form(page, 'POST', '/api/entities/binding',
-    { 'fn-id': urgent, 'slot-id': valueSlot.id, value: JSON.stringify('🔴 On-call: new comment on your issue') }, BR);
+  await bind({ 'fn-id': urgent, 'slot-id': valueSlot.id, value: JSON.stringify('🔴 On-call: new comment on your issue') }, BR);
   ents = await entities(page);
   const urlB = ents.bindings.find((b) => b['fn-id'] === notify && b['slot-id'] === urlSlot.id);
   const bodyB = ents.bindings.find((b) => b['fn-id'] === notify && b['slot-id'] === bodySlot.id);
@@ -106,11 +126,47 @@ async function diffShots(browser) {
   await seedDiff(page);
   await page.evaluate((br) => gdEnterDiffMode(br), BR);
   await page.waitForSelector('#gd-diff-chip', { timeout: 30000 });
+  // The "only changed" lens: the tree shows just the three rows that matter
+  // (notify ±, urgent-message −, on-issue-comment ∿) with their digests.
+  await page.evaluate(() => gdDiffSetLens({ changedOnly: true }));
+  await sleep(1500);
+  await page.evaluate(() => gdDiffExpandChangedGroups());
+  await sleep(2500);
   await page.evaluate(() => selectFnByName('notify'));
   await sleep(4000);
-  // Canvas: the sidebar's Δ chip + lens bar and the ringed card with its args.
+  // Canvas: the sidebar's Δ chip + lens bar + per-row digests, the ringed
+  // card with its args — and (UX-v4) the compared branch's side of the
+  // replaced :body ref, drawn as a ghost subtree ABOVE :render-message.
+  // Wait for it, zoom out until everything drawn sits inside the canvas,
+  // then clip to what is drawn.
+  await page.waitForSelector('.gd-ghost-cluster', { timeout: 30000 });
+  await sleep(1000);
+  const drawnBox = () => page.evaluate(() => {
+    const canvas = document.getElementById('graph-container').getBoundingClientRect();
+    const els = document.querySelectorAll('.node-overlay, .gd-ghost-cluster, .edge-label-overlay');
+    let top = Infinity; let bottom = -Infinity; let right = -Infinity;
+    els.forEach((e) => {
+      const r = e.getBoundingClientRect();
+      if (!r.width || e.hidden) return;
+      top = Math.min(top, r.top); bottom = Math.max(bottom, r.bottom); right = Math.max(right, r.right);
+    });
+    return { top, bottom, right, canvasTop: canvas.top, canvasBottom: canvas.bottom };
+  });
+  for (let i = 0; i < 5; i++) {
+    const b = await drawnBox();
+    if (b.top >= b.canvasTop + 8 && b.bottom <= b.canvasBottom - 8 && b.right <= 1000) break;
+    await page.evaluate(() => {
+      gv.setZoom(gv.zoom() * 0.85, { x: gv.width() / 2, y: gv.height() / 2 });
+    });
+    await sleep(600);
+  }
+  const box = await drawnBox();
+  // From the Δ chip down to the lowest drawn thing.
+  const y = 120;
+  const h = Math.max(345, Math.min(900 - y, Math.ceil(box.bottom) + 16 - y));
+  console.log('canvas clip', JSON.stringify({ y, h, box }));
   await page.screenshot({ path: path.join(OUT, 'landing-diff-canvas.png'),
-    clip: { x: 0, y: 120, width: 1012, height: 345 } });
+    clip: { x: 0, y, width: 1012, height: h } });
   await page.evaluate((br) => showReviewDialog(br), BR);
   await page.waitForSelector('.branch-diff-modal .bd-review-changes', { timeout: 30000 });
   await page.addStyleTag({ content: '.branch-diff-modal{width:680px!important;max-width:680px!important}' });

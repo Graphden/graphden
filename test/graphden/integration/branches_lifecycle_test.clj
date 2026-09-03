@@ -794,6 +794,46 @@
           (is (= "added-in-source" (:change grp)))
           (is (= (str ":" probe) (:fn-label grp))))))
 
+    (testing "the payload names the fns that changed INSIDE — own rows equal, a dependency in the diff"
+      ;; base ← child on main; the branch retunes base's description.
+      ;; child's own rows never move, yet its behaviour rides on base:
+      ;; the compiler would recompile it, so the diff lists it as
+      ;; affected — via base, one hop away, with its namespace path.
+      (let [base-nm (str "dvep-base" run-id)
+            child-nm (str "dvep-child" run-id)
+            identity-fn (fn-by-name nil "identity")]
+        (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn"
+                                       :content-type "application/x-www-form-urlencoded"
+                                       :body (form-encode {:name base-nm
+                                                           :parent-ids (:id identity-fn)})}))))
+        (let [base-fn (fn-by-name nil base-nm)]
+          (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn"
+                                         :content-type "application/x-www-form-urlencoded"
+                                         :body (form-encode {:name child-nm
+                                                             :parent-ids (:id base-fn)})}))))
+          (is (= 200 (:status (dispatch {:method :put
+                                         :path (str "/api/entities/fn/" (:id base-fn))
+                                         :branch feat
+                                         :content-type "application/x-www-form-urlencoded"
+                                         :body (form-encode {:description "retuned on the branch"})}))))
+          (let [child-fn (fn-by-name nil child-nm)
+                body (parse-json (dispatch {:method :get
+                                            :path "/api/branches/main/diff-view"
+                                            :query (str "against=" feat)}))
+                affected (:affected body)
+                entry (get affected (keyword (str (:id child-fn))))]
+            (is (true? (:ok body)))
+            (is (some #(= base-nm (:fn-name %)) (:groups body))
+                "base is a changed group")
+            (is (not-any? #(= child-nm (:fn-name %)) (:groups body))
+                "child's own rows are equal — not a group")
+            (is (some? entry) (str "child is affected: " (pr-str (keys affected))))
+            (is (= (str (:id base-fn)) (:via entry)) "via its parent")
+            (is (= 1 (:depth entry)))
+            (is (contains? entry :ns-path))
+            (is (not (contains? affected (keyword (str (:id base-fn)))))
+                "a changed fn is never ALSO affected")))))
+
     (testing "missing ?against= → clean error envelope, not a 500"
       (let [body (parse-json (dispatch {:method :get
                                         :path "/api/branches/main/diff-view"}))]

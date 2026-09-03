@@ -67,6 +67,7 @@
                   "packages/app/editor/editor-diff-render.js"
                   "packages/app/editor/editor-branch-diff.js"
                   "packages/app/editor/editor-diff-mode.js"
+                  "packages/app/editor/editor-diff-ghost.js"
                   "packages/app/editor/editor-create.js"
                   ;; Per-kind field builders + prefill parsers — loaded before
                   ;; editor-create-type.js so the popover shell can call

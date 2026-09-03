@@ -686,6 +686,12 @@
    :return-type :keyword-map
    :effects #{:db}}
 
+  {:name :diff-affected
+   :description "Atomic library boundary over `dv/affected-view` — the fns that changed INSIDE (own rows equal, a dependency in the diff), `{fn-id-str {:via changed-fn-id-str :depth n :ns-path \"a.b\"}}`, walked over the compiler's reverse-dependency index of the branch on screen."
+   :args {:groups {:type :sequence :description "The `:groups` of `:diff-branches-view` — their `:fn-id`s seed the walk."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
   {:name :_diff-apply-raw
    :description "Stage 1 — run the diff. The `:source-branch` / `:target-branch` free args come from the parent `:cond` which threaded them through `:_diff-source-branch` / `:_target-branch`. The `:assert-some` wraps mirror the `:cond` guards (`:_diff-source-missing?` / `:_diff-target-missing?` reject nil branches upstream) — they bridge the type-checker's per-arm narrowing gap."
    :parent :diff-branches
@@ -794,15 +800,21 @@
                                                    :default nil}}}}}}
 
   {:name :_diff-view-apply
-   :description "Success branch — `{:ok true :target :source :count :groups}`. Group ids are already strings (display model), so no per-row reshape is needed."
+   :description "Success branch — `{:ok true :target :source :count :groups :affected}`. Group ids are already strings (display model), so no per-row reshape is needed; `:affected` is the changed-inside map over the same groups."
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :target} {:value :source}
-                 {:value :count} {:value :groups}]
+                 {:value :count} {:value :groups} {:value :affected}]
           :vals [{:value true}
                  :_diff-apply-target-shaped
                  :_diff-apply-source-shaped
                  {:parent :get :args {:coll :_diff-view-apply-raw :key {:value :count} :default {:value 0}}}
-                 {:parent :get :args {:coll :_diff-view-apply-raw :key {:value :groups} :default {:value []}}}]}}
+                 :_diff-view-groups
+                 {:parent :diff-affected :args {:groups :_diff-view-groups}}]}}
+
+  {:name :_diff-view-groups
+   :description "The grouped entries of the diff — served as `:groups` and seeding `:diff-affected`."
+   :parent :get
+   :args {:coll :_diff-view-apply-raw :key {:value :groups} :default {:value []}}}
 
   {:name :_diff-view-data
    :description "GET /api/branches/:ref/diff-view?against=<source> — the v1 guards, the v2 grouped payload."

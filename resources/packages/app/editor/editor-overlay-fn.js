@@ -261,6 +261,11 @@ function createFnOverlay(node, container) {
     if (dm) {
       overlay.classList.add('fn-overlay-diff', 'fn-overlay-diff-' + dm.kind);
       overlay.title = dm.title;
+      // "Changed inside" — the change lives in an ancestor / ref target;
+      // the ∿ badge reveals it in this card (or opens it).
+      if (dm.kind === 'inside' && typeof gdDiffInsideBadgeEl === 'function') {
+        overlay.appendChild(gdDiffInsideBadgeEl(nodeId, originalFnId, dm));
+      }
     }
   }
   overlay.style.cursor = 'default';
@@ -378,6 +383,9 @@ function createFnOverlay(node, container) {
   });
 
   appendDeepFreeArgsStrip(overlay, node.data('deepFreeArgs'));
+
+  // Compare mode: the fn's OWN row change (rename / description) as a strip.
+  if (typeof gdDiffAppendFnStrip === 'function') gdDiffAppendFnStrip(overlay, originalFnId);
 
   appendFnActionToolbar(overlay, originalFnId, isNavRoot);
 

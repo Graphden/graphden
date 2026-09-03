@@ -148,6 +148,9 @@
     (merge (get m nil) (get m public-org) (get m org))))
 
 
+(declare prime-graph-cache!)
+
+
 (defn- graph-in-hand
   "The graph a recompile / type refresh needs — from `:graph-cache` when it
    can be trusted, else one `read-graph` through `storage`.
@@ -177,8 +180,16 @@
   [ctx storage]
   (or (when (nil? (:executor-orgs ctx))
         (some-> (:graph-cache ctx) deref))
-      (do (counters/count! :registry/delta-read-graph)
-          (read-graph storage (:executor-orgs ctx)))))
+      (let [graph (do (counters/count! :registry/delta-read-graph)
+                      (read-graph storage (:executor-orgs ctx)))]
+        ;; The read IS the cache's fill (same handle, same shape): prime
+        ;; it, or a ctx nothing has compiled yet — a fresh pod, a cold
+        ;; branch — pays this read on EVERY write until something else
+        ;; fills the cache (prod after the 2026-09-03 deploy: 1.6 s per
+        ;; merge, cold path each time). Unsharded only — the cache
+        ;; contract is the full org-agnostic graph.
+        (when (nil? (:executor-orgs ctx)) (prime-graph-cache! ctx graph))
+        graph)))
 
 
 (defn register-type-aliases-from-db!
@@ -306,6 +317,27 @@
    is the follow-up. This merely WIDENS the pre-existing global-type registry."
   [ctx]
   (or (:compile-storage ctx) (:storage ctx)))
+
+
+(defn graph-snapshot
+  "The raw graph (`{:fns :slots :fn-slots :bindings :list-items}`) as a
+   reader outside the compiler sees it: the primed `:graph-cache` when it
+   can be trusted, else one read through the privileged compile handle —
+   the same rule `graph-in-hand` applies for a recompile. For callers that
+   need the whole graph once (the branch diff's dependency walk) without
+   touching the type registries."
+  [ctx]
+  (graph-in-hand ctx (compile-storage ctx)))
+
+
+(defn ctx-reverse-deps
+  "The compiler's `{fn-id → #{ids that depend on it}}` index for `ctx` —
+   the primed one when a compile has run, else built from `graph-snapshot`
+   (and NOT primed onto the ctx: priming is the compiler's job, from the
+   graph it compiled)."
+  [ctx]
+  (or (some-> (:compile-deps ctx) deref :reverse-deps)
+      (deps/build-reverse-deps (graph-snapshot ctx))))
 
 
 (defn refresh-type-registries-from-storage!

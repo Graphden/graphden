@@ -24,7 +24,7 @@ const GD_DIFF_MODE_KEY = 'graphden.diffAgainst';
 // affects behaviour) count at all. Persisted beside the branch choice.
 const GD_DIFF_LENS_KEY = 'graphden.diffLens';
 let _gdDiffLens = { added: true, missing: true, modified: true,
-                    substantiveOnly: false, effectsOnly: false,
+                    inside: true, substantiveOnly: false, effectsOnly: false,
                     changedOnly: false, notes: true };
 try {
   const raw = JSON.parse(localStorage.getItem(GD_DIFF_LENS_KEY) || 'null');
@@ -58,6 +58,7 @@ function gdDiffModeAnnounceLens() {
   gdAnnounce('Diff lens: '
     + [l.added ? 'added' : null, l.modified ? 'modified' : null,
        l.missing ? 'only-there' : null].filter(Boolean).join(', ')
+    + (l.inside ? '' : ', changed-inside marks off')
     + (l.changedOnly ? ', only changed rows' : '')
     + (l.substantiveOnly ? ', substantive only' : '')
     + (l.effectsOnly ? ', effects touched only' : '')
@@ -134,6 +135,142 @@ function gdDiffSlotsForFn(fnId) {
     slots[slot] = summary;
   }
   return Object.keys(slots).length ? slots : null;
+}
+
+// Changed INSIDE — this fn's own rows are equal on both branches, but
+// something it depends on (an ancestor, a ref target, a type) differs.
+// Lens-aware: off under the `inside` lens, and hidden when the change
+// it inherits is itself hidden (a cosmetic-only seed under `core`).
+function gdDiffAffectedInfo(fnId) {
+  if (!_gdDiffMode || !_gdDiffLens.inside || !fnId) return null;
+  if (gdDiffModeGroup(fnId)) return null;   // its own change wins
+  const a = _gdDiffMode.affected.get(fnId);
+  if (!a || !gdDiffVisibleGroup(a.via)) return null;
+  const lk = gdDmLookups();
+  const viaFn = lk?.fnMap?.get(a.via);
+  const viaLabel = viaFn?.name
+    ? (typeof getQualifiedFnName === 'function' ? getQualifiedFnName(viaFn) : viaFn.name)
+    : (_gdDiffMode.byFnId.get(a.via)?.['fn-label'] || a.via.slice(0, 8));
+  return {
+    via: a.via, depth: a.depth, viaLabel, nsPath: a['ns-path'] || null,
+    title: 'Changed inside — differs through ' + viaLabel
+      + (a.depth > 1 ? ' (' + a.depth + ' hops)' : '')
+      + ' vs "' + _gdDiffMode.branch + '". Open it to see the change in context.',
+  };
+}
+
+// Whether an entry shows under the current lens (the `core` lens hides
+// cosmetic-only edits).
+function gdDiffEntryVisible(e) {
+  return !(_gdDiffLens.substantiveOnly && gdDiffEntryCosmetic(e));
+}
+
+// Per-slot detail for one fn — what the canvas draws ON the arg (the
+// "there" line, the added ring) and what the ghost module needs (the
+// compared branch's ref id). `{slotName: {change, fields, sourceRef,
+// targetRef, preview, items}}`; `fields` are `{field, source, target}`
+// with source = THERE (the compared branch), target = HERE.
+function gdDiffSlotDetails(fnId) {
+  const g = gdDiffVisibleGroup(fnId);
+  if (!g) return null;
+  const out = Object.create(null);
+  for (const e of (g.entries || [])) {
+    const slot = e['slot-name'];
+    if (!slot || !gdDiffEntryVisible(e)) continue;
+    if (!out[slot]) {
+      out[slot] = { change: null, fields: [], sourceRef: null, targetRef: null,
+                    preview: null, items: 0, slotRow: null };
+    }
+    const d = out[slot];
+    const en = e['entity-name'];
+    if (en === 'binding') {
+      d.change = e.change;
+      d.sourceRef = e['source-ref'] || null;
+      d.targetRef = e['target-ref'] || null;
+      if (e.preview) d.preview = e.preview;
+      for (const f of (e.fields || [])) d.fields.push(f);
+    } else if (en === 'binding-list-item') {
+      d.items += 1;
+      if (!d.change) d.change = 'modified';
+      if (e['source-ref'] && e['source-ref'] !== (e['target-ref'] || null)
+          && !d.sourceRef) {
+        d.sourceRef = e['source-ref'];
+        d.targetRef = e['target-ref'] || null;
+        d.itemPosition = e.position;
+      }
+      for (const f of (e.fields || [])) {
+        d.fields.push(Object.assign({ position: e.position }, f));
+      }
+      if (!e.fields && e.preview) {
+        d.fields.push({ field: 'item', position: e.position,
+                        source: e.change === 'added-in-source' ? e.preview : '∅',
+                        target: e.change === 'added-in-target' ? e.preview : '∅' });
+      }
+    } else if (en === 'fn-slot') {
+      d.slotRow = e.change;
+    }
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+// The fn's OWN row change (rename, description, …), if any.
+function gdDiffFnOwnFields(fnId) {
+  const g = gdDiffVisibleGroup(fnId);
+  if (!g) return null;
+  const e = (g.entries || []).find((x) => x['entity-name'] === 'fn');
+  if (!e || !gdDiffEntryVisible(e)) return null;
+  return { change: e.change, fields: e.fields || [], preview: e.preview || null };
+}
+
+function gdDiffShort(v, n) {
+  const s = (v === null || v === undefined) ? '∅' : String(v);
+  const max = n || 24;
+  return s.length > max ? s.slice(0, max - 1) + '…' : s;
+}
+
+// One-line summary parts of a group — the Explorer's per-fn digest.
+// Wording is HERE (this branch) first, "there" = the compared one.
+function gdDiffSummaryParts(g) {
+  const parts = [];
+  for (const e of (g.entries || [])) {
+    if (!gdDiffEntryVisible(e)) continue;
+    const en = e['entity-name'];
+    const slot = e['slot-name'];
+    if (en === 'fn') {
+      if (e.change !== 'modified') continue;
+      for (const f of (e.fields || [])) {
+        if (f.field === 'name') {
+          parts.push('name ' + gdDiffShort(f.target) + ' (there ' + gdDiffShort(f.source) + ')');
+        } else if (f.field === 'description') {
+          parts.push('description ~');
+        } else {
+          parts.push(f.field + ' ~');
+        }
+      }
+      continue;
+    }
+    if (en === 'fn-slot') {
+      parts.push((e.change === 'added-in-target' ? '+slot '
+                  : e.change === 'added-in-source' ? '−slot ' : 'slot ') + (slot || '?'));
+      continue;
+    }
+    if (en === 'resource-override') { parts.push('asset ~'); continue; }
+    const label = (slot || '?')
+      + (en === 'binding-list-item' ? '[' + (e.position ?? '') + ']' : '');
+    if (e.change === 'modified') {
+      for (const f of (e.fields || [])) {
+        const isRef = f.field === 'ref-fn-id';
+        const fname = (f.field === 'value' || isRef) ? '' : f.field + ' ';
+        parts.push(label + (isRef ? ' → ' : ': ') + fname
+          + gdDiffShort(f.target) + ' (there ' + gdDiffShort(f.source) + ')');
+      }
+    } else if (e.change === 'added-in-target') {
+      parts.push('+' + label + (e.preview ? ' ' + gdDiffShort(e.preview) : ''));
+    } else {
+      parts.push(label + ': ∅ (there ' + gdDiffShort(e.preview || 'bound') + ')');
+    }
+  }
+  return parts;
 }
 
 // --- effect deltas ----------------------------------------------------------
@@ -258,8 +395,8 @@ function gdDiffModeKind(group) {
   return 'modified';
 }
 
-const GD_DIFF_GLYPH = { added: '+', missing: '−', modified: '±' };
-const GD_DIFF_CLS = { added: 'bd-added', missing: 'bd-removed', modified: 'bd-modified' };
+const GD_DIFF_GLYPH = { added: '+', missing: '−', modified: '±', inside: '∿' };
+const GD_DIFF_CLS = { added: 'bd-added', missing: 'bd-removed', modified: 'bd-modified', inside: 'bd-inside' };
 
 // --- data -------------------------------------------------------------------
 
@@ -346,8 +483,15 @@ async function gdDiffModeFetch(otherBranch) {
       }
     } catch (_) { /* markers just stay absent */ }
   }
+  // Changed INSIDE — own rows equal, a dependency in the diff. Server-
+  // walked over the compiler's reverse-deps index, so it is exactly the
+  // set the compiler would recompile for these changes.
+  const affected = new Map();
+  for (const [id, info] of Object.entries(d.affected || {})) {
+    if (!byFnId.has(id)) affected.set(id, info);
+  }
   return { branch: otherBranch, branchId: otherId, currentId: curId,
-           byFnId, noteCounts, proposalRef, fetchedAt: Date.now() };
+           byFnId, affected, noteCounts, proposalRef, fetchedAt: Date.now() };
 }
 
 // --- sidebar decoration -----------------------------------------------------
@@ -361,43 +505,74 @@ function gdDiffModeDecorateSidebar() {
   try {
     // ns counts under the CURRENT lens.
     const nsCounts = new Map();
+    const bump = (nsPath, kind) => {
+      const parts = nsPath ? nsPath.split('.') : null;
+      const keys = parts
+        ? parts.map((_, i) => parts.slice(0, i + 1).join('.'))
+        : ['__root__'];
+      for (const p of keys) {
+        const c = nsCounts.get(p) || { added: 0, missing: 0, modified: 0, inside: 0 };
+        c[kind] += 1;
+        nsCounts.set(p, c);
+      }
+    };
     if (_gdDiffMode) {
       for (const g of _gdDiffMode.byFnId.values()) {
         if (!gdDiffVisibleGroup(g['fn-id'])) continue;
-        // Root-level fns (no namespace) aggregate under the pseudo
-        // "(primitives)" header — without this, entering the mode
-        // shows NOTHING until the user happens to expand that group.
-        const parts = g.__nsPath ? g.__nsPath.split('.') : null;
-        const keys = parts
-          ? parts.map((_, i) => parts.slice(0, i + 1).join('.'))
-          : ['__root__'];
-        for (const p of keys) {
-          const c = nsCounts.get(p) || { added: 0, missing: 0, modified: 0 };
-          c[g.__kind] += 1;
-          nsCounts.set(p, c);
-        }
+        // A fn whose namespace is unknown to the tree (the tree loads
+        // lazily) aggregates onto the root pseudo-group — same as before.
+        bump(g.__nsPath, g.__kind);
+      }
+      for (const id of _gdDiffMode.affected.keys()) {
+        const a = gdDiffAffectedInfo(id);
+        if (a) bump(a.nsPath, 'inside');
       }
     }
     list.querySelectorAll('.entity-item[data-fn-id]').forEach((item) => {
       const g = _gdDiffMode ? gdDiffVisibleGroup(item.dataset.fnId) : null;
+      const aff = (!g && _gdDiffMode) ? gdDiffAffectedInfo(item.dataset.fnId) : null;
       let b = item.querySelector('.gd-diff-badge');
-      if (!g) {
+      if (!g && !aff) {
         if (b) b.remove();
         item.querySelector('.gd-diff-note-badge')?.remove();
-        item.classList.remove('gd-diff-changed');
+        item.querySelector('.gd-diff-summary')?.remove();
+        item.classList.remove('gd-diff-changed', 'gd-diff-inside');
         return;
       }
       item.classList.add('gd-diff-changed');
+      item.classList.toggle('gd-diff-inside', !!aff);
       if (!b) {
         b = document.createElement('span');
         b.className = 'gd-diff-badge';
         item.appendChild(b);
       }
-      const glyph = GD_DIFF_GLYPH[g.__kind];
+      const kind = g ? g.__kind : 'inside';
+      const glyph = GD_DIFF_GLYPH[kind];
       if (b.textContent !== glyph) b.textContent = glyph;
-      const cls = 'gd-diff-badge ' + GD_DIFF_CLS[g.__kind];
+      const cls = 'gd-diff-badge ' + GD_DIFF_CLS[kind];
       if (b.className !== cls) b.className = cls;
-      if (b.title !== g.__title) b.title = g.__title;
+      const btitle = g ? g.__title : aff.title;
+      if (b.title !== btitle) b.title = btitle;
+      // The per-fn digest under the row: what changed, in a line.
+      const parts = g ? gdDiffSummaryParts(g) : ['∿ via ' + aff.viaLabel];
+      let sm = item.querySelector('.gd-diff-summary');
+      if (!parts.length) {
+        if (sm) sm.remove();
+      } else {
+        if (!sm) {
+          sm = document.createElement('span');
+          sm.className = 'gd-diff-summary';
+          item.appendChild(sm);
+        }
+        const full = parts.join(' · ');
+        const text = gdDiffShort(full, 160);
+        if (sm.textContent !== text) sm.textContent = text;
+        if (sm.title !== full) sm.title = full;
+      }
+      if (!g) {
+        item.querySelector('.gd-diff-note-badge')?.remove();
+        return;
+      }
       // 💬 — anchored review comments live on this fn's changes.
       const notes = _gdDiffLens.notes
         ? (_gdDiffMode.noteCounts?.get(item.dataset.fnId) || 0) : 0;
@@ -478,7 +653,8 @@ function gdDiffModeDecorateSidebar() {
       .forEach((el) => { el.classList.remove('gd-diff-lens-hidden'); });
     if (_gdDiffMode && _gdDiffLens.changedOnly && !filtering) {
       list.querySelectorAll('.entity-item[data-fn-id]').forEach((item) => {
-        if (!gdDiffVisibleGroup(item.dataset.fnId)) {
+        if (!gdDiffVisibleGroup(item.dataset.fnId)
+            && !gdDiffAffectedInfo(item.dataset.fnId)) {
           item.classList.add('gd-diff-lens-hidden');
         }
       });
@@ -523,11 +699,13 @@ function gdDiffModeDecorateSidebar() {
       if (c.added) parts.push('+' + c.added);
       if (c.modified) parts.push('±' + c.modified);
       if (c.missing) parts.push('−' + c.missing);
+      if (c.inside) parts.push('∿' + c.inside);
       b.textContent = parts.join(' ');
       b.title = 'vs ' + _gdDiffMode.branch + ': '
         + [c.added ? c.added + ' added' : null,
            c.modified ? c.modified + ' modified' : null,
-           c.missing ? c.missing + ' only there' : null]
+           c.missing ? c.missing + ' only there' : null,
+           c.inside ? c.inside + ' changed inside' : null]
           .filter(Boolean).join(', ');
     });
   } finally {
@@ -556,6 +734,9 @@ const GD_DIFF_LENS_CHIPS = [
     title: 'Show modified fns' },
   { key: 'missing', glyph: '−', label: 'there', invertless: true,
     title: 'Show fns that exist only on the compared branch' },
+  { key: 'inside', glyph: '∿', label: 'inside',
+    title: 'Mark fns whose own rows are equal but whose behaviour differs — '
+      + 'an ancestor or a referenced fn is in the diff' },
   { key: 'substantiveOnly', glyph: 'Aa', label: 'core',
     title: 'Hide edits that touch nothing but names and descriptions' },
   { key: 'notes', glyph: '💬', label: 'notes',
@@ -731,8 +912,114 @@ function gdDiffRenderInspectorSection(inspectorEl, fnId) {
 // when the fn differs under the current lens.
 function gdDiffModeCardInfo(fnId) {
   const g = fnId ? gdDiffVisibleGroup(fnId) : null;
-  if (!g) return null;
-  return { kind: g.__kind, cls: GD_DIFF_CLS[g.__kind], title: g.__title };
+  if (g) return { kind: g.__kind, cls: GD_DIFF_CLS[g.__kind], title: g.__title };
+  const a = fnId ? gdDiffAffectedInfo(fnId) : null;
+  if (a) {
+    return { kind: 'inside', cls: GD_DIFF_CLS.inside, title: a.title,
+             via: a.via, viaLabel: a.viaLabel };
+  }
+  return null;
+}
+
+// Take the reader to the change a "changed inside" card inherits: an
+// ANCESTOR is revealed in place (the card expands to the level that
+// holds it, so its Δ rows show in this graph's context); anything else
+// (a ref target off-canvas) is opened as the root.
+function gdDiffRevealVia(nodeId, fnId, via) {
+  if (!via) return;
+  const levels = (typeof getInheritanceLevels === 'function')
+    ? getInheritanceLevels(fnId) : [];
+  const depth = levels.findIndex((lvl) => lvl.includes(via));
+  if (depth > 0 && typeof renderGraph === 'function'
+      && typeof expansionState !== 'undefined') {
+    const cur = expansionState.get(nodeId);
+    if (!cur || (cur.fullDepth || 0) < depth) {
+      expansionState.set(nodeId, { fullDepth: depth, partialFns: new Set() });
+      if (typeof savedUserPositions !== 'undefined') savedUserPositions.clear();
+      renderGraph(false);
+      return;
+    }
+  }
+  if (typeof selectFn === 'function') selectFn(via);
+}
+
+// The ∿ badge on a "changed inside" card.
+function gdDiffInsideBadgeEl(nodeId, fnId, dm) {
+  const badge = document.createElement('button');
+  badge.type = 'button';
+  badge.className = 'fn-diff-inside-badge';
+  badge.textContent = '∿';
+  badge.title = dm.title + ' — click to reveal ' + dm.viaLabel;
+  badge.setAttribute('aria-label', badge.title);
+  badge.addEventListener('mousedown', (e) => e.stopPropagation());
+  badge.addEventListener('click', (e) => {
+    e.stopPropagation();
+    gdDiffRevealVia(nodeId, fnId, dm.via);
+  });
+  return badge;
+}
+
+// The "there: …" block under an arg (or on an unbound placeholder) —
+// the node-level data change drawn ON the node: value, type, position,
+// description; a replaced ref says where it points there (the ghost
+// module draws that subtree beside the card).
+function gdDiffWasEl(d) {
+  if (!d) return null;
+  const lines = [];
+  if (d.change === 'added-in-target' && !d.fields.length) {
+    lines.push({ k: '', v: 'unbound there' });
+  } else if (d.change === 'added-in-source' && !d.fields.length) {
+    lines.push({ k: 'there', v: d.preview || 'bound' });
+  }
+  for (const f of d.fields) {
+    const pos = (f.position !== undefined && f.position !== null) ? '[' + f.position + '] ' : '';
+    if (f.field === 'ref-fn-id') lines.push({ k: pos + '→ there', v: f.source });
+    else if (f.field === 'value') lines.push({ k: pos + 'there', v: f.source });
+    else if (f.field === 'item') lines.push({ k: pos + 'there', v: f.source });
+    else if (f.field === 'type-override-fn-id') lines.push({ k: pos + 'type there', v: f.source });
+    else if (f.field === 'description') lines.push({ k: pos + 'description', v: '~' });
+    else lines.push({ k: pos + f.field + ' there', v: f.source });
+  }
+  if (d.slotRow === 'added-in-source') lines.push({ k: '', v: 'slot only there' });
+  if (d.slotRow === 'added-in-target') lines.push({ k: '', v: 'slot only here' });
+  if (!lines.length) return null;
+  const el = document.createElement('div');
+  el.className = 'arg-diff-was';
+  el.title = 'vs "' + (_gdDiffMode?.branch || '') + '"';
+  for (const ln of lines) {
+    const row = document.createElement('div');
+    row.className = 'arg-diff-was-line';
+    if (ln.k) {
+      const k = document.createElement('span');
+      k.className = 'arg-diff-was-k';
+      k.textContent = ln.k + ': ';
+      row.appendChild(k);
+    }
+    const v = document.createElement('s');
+    v.className = 'arg-diff-was-v';
+    v.textContent = gdDiffShort(ln.v, 60);
+    row.appendChild(v);
+    el.appendChild(row);
+  }
+  return el;
+}
+
+// The fn-card strip for the fn's OWN row change — a rename shows the
+// other name; a description edit says so.
+function gdDiffAppendFnStrip(overlay, fnId) {
+  const own = gdDiffFnOwnFields(fnId);
+  if (own?.change !== 'modified' || !own.fields.length) return;
+  const el = document.createElement('div');
+  el.className = 'fn-diff-was';
+  const parts = [];
+  for (const f of own.fields) {
+    if (f.field === 'name') parts.push('name there: ' + gdDiffShort(f.source, 40));
+    else if (f.field === 'description') parts.push('description differs there');
+    else parts.push(f.field + ' there: ' + gdDiffShort(f.source, 40));
+  }
+  el.textContent = parts.join(' · ');
+  el.title = 'vs "' + (_gdDiffMode?.branch || '') + '"';
+  overlay.appendChild(el);
 }
 
 // --- the "Δ vs <branch>" chip ----------------------------------------------
@@ -788,8 +1075,11 @@ function gdDiffModeRenderChip() {
   countEl.textContent = ' · ' + count;
   label.appendChild(countEl);
   chip.classList.toggle('gd-diff-chip-filtered', filtering);
+  let inside = 0;
+  for (const id of _gdDiffMode.affected.keys()) if (gdDiffAffectedInfo(id)) inside += 1;
   label.title = 'Compare mode — ' + total + ' changed fn'
-    + (total === 1 ? '' : 's') + ' vs "' + _gdDiffMode.branch
+    + (total === 1 ? '' : 's')
+    + (inside ? ' (+' + inside + ' changed inside)' : '') + ' vs "' + _gdDiffMode.branch
     + '", marked in the Explorer and on the canvas. Click for the '
     + 'review actions and the type lens.'
     + (filtering
@@ -1071,9 +1361,17 @@ function gdExitDiffMode() {
   // Card-level rings (fn-overlay-diff-*) + the titles the mode set.
   document.querySelectorAll('.fn-overlay-diff').forEach((el) => {
     el.classList.remove('fn-overlay-diff', 'fn-overlay-diff-added',
-                        'fn-overlay-diff-missing', 'fn-overlay-diff-modified');
+                        'fn-overlay-diff-missing', 'fn-overlay-diff-modified',
+                        'fn-overlay-diff-inside');
     el.removeAttribute('title');
   });
+  // UX-v4 marks: the there-values, the rename strip, the ∿ badges, the
+  // edge marks and the ghost subtrees.
+  document.querySelectorAll('.arg-diff-was, .fn-diff-was, .fn-diff-inside-badge')
+    .forEach((el) => { el.remove(); });
+  document.querySelectorAll('.arg-overlay-diff-added, .edge-label-diff')
+    .forEach((el) => { el.classList.remove('arg-overlay-diff-added', 'edge-label-diff'); });
+  if (typeof gdDiffGhostsClear === 'function') gdDiffGhostsClear();
   if (typeof gdAnnounce === 'function') gdAnnounce('Compare mode off');
 }
 
@@ -1109,6 +1407,9 @@ window.gdDiffModeBranch = gdDiffModeBranch;
 window.gdDiffModeGroup = gdDiffModeGroup;
 window.gdDiffSlotsForFn = gdDiffSlotsForFn;
 window.gdEnterDiffMode = gdEnterDiffMode;
+window.gdDiffAffectedInfo = gdDiffAffectedInfo;
+window.gdDiffSlotDetails = gdDiffSlotDetails;
+window.gdDiffSummaryParts = gdDiffSummaryParts;
 window.gdExitDiffMode = gdExitDiffMode;
 window.gdDiffVisibleGroup = gdDiffVisibleGroup;
 window.gdDiffModeCardInfo = gdDiffModeCardInfo;

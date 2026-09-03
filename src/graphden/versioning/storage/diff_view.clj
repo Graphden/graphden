@@ -149,6 +149,11 @@
              :entity-id (str entity-id)
              :change change}
       slot-id (assoc :slot-name (:name (get slots-by-id slot-id)))
+      ;; The RAW ref ids beside the labels: the editor's compare mode
+      ;; draws the compared branch's subtree for a replaced ref, and a
+      ;; label cannot be fetched.
+      (:ref-fn-id source-version) (assoc :source-ref (str (:ref-fn-id source-version)))
+      (:ref-fn-id target-version) (assoc :target-ref (str (:ref-fn-id target-version)))
       (= :binding-list-item entity-name)
       (assoc :position (:position (side-version diff)))
       (seq fields) (assoc :fields fields)
@@ -180,6 +185,19 @@
 
 (def ^:private entry-rank
   {:fn 0 :fn-slot 1 :binding 2 :binding-list-item 3 :resource-override 4})
+
+
+(defn- ns-path-fn
+  "A `namespace-id → \"a.b.c\"` resolver over one read of the ns table."
+  [base-storage]
+  (let [ns-by-id (into {} (map (juxt :id identity))
+                       (sp/query-entities base-storage :ns {}))]
+    (fn ns-path
+      [nsid]
+      (when-let [r (get ns-by-id nsid)]
+        (if-let [p (:parent-id r)]
+          (str (ns-path p) "." (:name r))
+          (:name r))))))
 
 
 (defn diff-branches-view
@@ -235,14 +253,7 @@
         owner-fns (if (seq owner-ids)
                     (sp/read-entities base-storage :fn owner-ids)
                     {})
-        ns-by-id (into {} (map (juxt :id identity))
-                       (sp/query-entities base-storage :ns {}))
-        ns-path (fn ns-path
-                  [nsid]
-                  (when-let [r (get ns-by-id nsid)]
-                    (if-let [p (:parent-id r)]
-                      (str (ns-path p) "." (:name r))
-                      (:name r))))
+        ns-path (ns-path-fn base-storage)
         groups
         (vec
           (sort-by (fn [g]
@@ -277,3 +288,56 @@
      :target-branch-id target-branch-id
      :count (count diffs)
      :groups groups}))
+
+
+(defn affected-fns
+  "Fns whose BEHAVIOUR may differ although none of their own rows did:
+   everything that transitively depends on a changed fn — through
+   `parent-ids`, ref bindings, type overrides, resolvers — under the
+   compiler's own reverse-dependency index (`deps/build-reverse-deps`),
+   so \"changed inside\" means exactly what the compiler would recompile.
+
+   Returns `{fn-id-str {:via changed-fn-id-str :depth n}}` for every
+   affected fn that is NOT itself in `changed-ids`: `:via` is the nearest
+   changed fn on the way (the breadth-first frontier that reached it
+   first; seeds are walked in sorted order so ties are stable), `:depth`
+   how many dependency hops away it sits. The editor rings such a card
+   dashed and offers the `:via` fn as the thing to open or expand."
+  [reverse-deps changed-ids]
+  (let [seeds (->> changed-ids (keep #(some-> % str parse-uuid)) distinct (sort-by str))
+        seed? (set seeds)]
+    (loop [frontier (mapv (fn [id] [id id 0]) seeds)
+           seen seed?
+           acc {}]
+      (if (empty? frontier)
+        acc
+        (let [[id via depth] (first frontier)
+              nexts (->> (get reverse-deps id)
+                         (remove seen)
+                         (sort-by str))
+              seen' (into seen nexts)
+              acc' (if (seed? id)
+                     acc
+                     (assoc acc (str id) {:via (str via) :depth depth}))]
+          (recur (into (subvec frontier 1)
+                       (map (fn [n] [n via (inc depth)])) nexts)
+                 seen'
+                 acc'))))))
+
+
+(defn affected-view
+  "`affected-fns` for the diff-view `groups`, each entry carrying the
+   fn's `:ns-path` (the Explorer aggregates the ∿ marks onto namespace
+   rows exactly like the +/±/− ones, and it cannot know the namespace
+   of a fn it has not loaded yet). One read of the affected fn rows +
+   one of the ns table."
+  [base-storage reverse-deps groups]
+  (let [affected (affected-fns reverse-deps (keep :fn-id groups))
+        ids (->> (keys affected) (keep parse-uuid) (vec))
+        fns (if (seq ids) (sp/read-entities base-storage :fn ids) {})
+        ns-path (if (seq ids) (ns-path-fn base-storage) (constantly nil))]
+    (into {}
+          (map (fn [[id info]]
+                 [id (assoc info :ns-path
+                            (some-> (get fns (parse-uuid id)) :namespace-id ns-path))]))
+          affected)))

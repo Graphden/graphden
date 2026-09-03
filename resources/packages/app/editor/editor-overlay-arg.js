@@ -111,6 +111,19 @@ function createArgOverlay(node, container) {
     const slots = gdDiffSlotsForFn(argLocal['fn-id']);
     if (!slots || slots[argLocal.name] === undefined) return;
     overlay.classList.add('arg-overlay-diff-focus');
+    // The node-level change drawn ON the node (UX-v4): a value / type /
+    // description that differs there is written under the value, struck
+    // through; an arg bound only here rings green. A replaced ref gets
+    // its "→ there" line here and its subtree beside the card (the ghost
+    // module).
+    const details = (typeof gdDiffSlotDetails === 'function')
+      ? gdDiffSlotDetails(argLocal['fn-id']) : null;
+    const d = details ? details[argLocal.name] : null;
+    if (d?.change === 'added-in-target') overlay.classList.add('arg-overlay-diff-added');
+    if (d && typeof gdDiffWasEl === 'function') {
+      const was = gdDiffWasEl(d);
+      if (was) overlay.appendChild(was);
+    }
     const badge = document.createElement('button');
     badge.type = 'button';
     badge.className = 'arg-diff-badge';

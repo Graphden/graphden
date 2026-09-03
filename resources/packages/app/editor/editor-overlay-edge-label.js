@@ -65,6 +65,14 @@ function createEdgeLabelOverlay(edge, container) {
   const editArg = (typeof argRowFromNode === 'function')
                   ? argRowFromNode(edge.data())
                   : null;
+  // Compare mode: a ref / list arg whose binding differs on the compared
+  // branch marks its edge label (the value nodes carry their own marks;
+  // a ref bound here has only this label and the ghost beside the card).
+  if (editArg?.['fn-id'] && editArg.name && typeof gdDiffSlotDetails === 'function'
+      && gdDiffSlotDetails(editArg['fn-id'])?.[editArg.name]) {
+    overlay.classList.add('edge-label-diff');
+    overlay.title = 'Differs vs the compared branch — see the digest in the Explorer';
+  }
   const argEditable = editArg&& implementationFnIds?.has(editArg['fn-id'])
                    && (typeof isAuthenticated === 'function' && isAuthenticated());
   // Sequence-item edges encode an element/container relationship:

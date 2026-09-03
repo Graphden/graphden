@@ -159,21 +159,27 @@ function createPlaceholderOverlay(node, container) {
   const inImpl = arg && implementationFnIds?.has(arg['fn-id']);
   const editable = inImpl
                 && (typeof isAuthenticated === 'function' && isAuthenticated());
-  if (!editable) return;
+  // Compare mode: an arg UNBOUND here but bound there shows what it is
+  // bound to there, right on the placeholder — even when the reader
+  // cannot bind it (signed out, package-owned).
+  const diffD = (arg?.name && typeof gdDiffSlotDetails === 'function')
+    ? gdDiffSlotDetails(arg['fn-id'])?.[arg.name] || null : null;
   // A package-synced fn's bindings are re-synced on every boot and the API
   // refuses the write with a 403 — so don't offer a "+" that cannot land.
   // Extend it into a child and the placeholder appears there instead.
-  if (typeof isPackageOwnedFn === 'function'
-      && isPackageOwnedFn(arg['fn-id'])) return;
+  let canBind = editable
+    && !(typeof isPackageOwnedFn === 'function' && isPackageOwnedFn(arg['fn-id']));
+  if (!canBind && !diffD) return;
 
   const isSeqAnchor = !!node.data('isSequenceAnchor');
   const seqFnId = node.data('sequenceFnId') || arg['fn-id'];
   // Nav-typed sequence (`:update-in` `:path`) whose structure can't be
   // navigated further → no first item is valid, so skip the `+`.
-  const appendT = (isSeqAnchor && typeof appendNavType === 'function')
+  const appendT = (canBind && isSeqAnchor && typeof appendNavType === 'function')
                   ? appendNavType(seqFnId, arg['slot-id'])
                   : undefined;
-  if (appendT === null) return;
+  if (appendT === null) canBind = false;
+  if (!canBind && !diffD) return;
 
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -214,7 +220,15 @@ function createPlaceholderOverlay(node, container) {
     overflow: 'visible'
   });
   btn.style.pointerEvents = 'auto';
-  wrap.appendChild(btn);
+  if (canBind) wrap.appendChild(btn);
+  if (diffD && typeof gdDiffWasEl === 'function') {
+    const was = gdDiffWasEl(diffD);
+    if (was) {
+      wrap.classList.add('placeholder-diff');
+      was.style.pointerEvents = 'auto';
+      wrap.appendChild(was);
+    }
+  }
   registerNodeOverlay(wrap);
   container.appendChild(wrap);
 }
@@ -276,6 +290,9 @@ function createNodeOverlays() {
   });
 
   updateOverlayPositions();
+  // Compare mode's ghost subtrees (the compared branch's side of a
+  // replaced ref) hang off the real overlays — drawn after them.
+  if (typeof gdDiffGhostsRender === 'function') gdDiffGhostsRender(container);
 }
 
 // Gap (graph units) between the taxi bend and the label's left edge, so a
@@ -328,6 +345,7 @@ function syncOverlayGeometry() {
     overlay.style.width = width + 'px';
     overlay.style.minHeight = height + 'px';
   }
+  if (typeof gdDiffGhostsSync === 'function') gdDiffGhostsSync();
 
   // Position edge label overlays. Anchor: right edge sits `TARGET_GAP` to the
   // left of the target's left edge, vertically centred on the target.

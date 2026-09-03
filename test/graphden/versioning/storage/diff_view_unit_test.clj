@@ -416,3 +416,56 @@
       (is (= "#99999999" (:fn-label anon-g)))
       (is (= :added-in-source (:change anon-g)))
       (is (false? (:branch-local? anon-g))))))
+
+
+(deftest affected-fns-walks-the-reverse-index-test
+  (let [a #uuid "aaaaaaaa-0000-4000-8000-000000000001"
+        b #uuid "bbbbbbbb-0000-4000-8000-000000000002"
+        c #uuid "cccccccc-0000-4000-8000-000000000003"
+        d #uuid "dddddddd-0000-4000-8000-000000000004"
+        e #uuid "eeeeeeee-0000-4000-8000-000000000005"
+        ;; a ← b ← c (b depends on a, c on b), a ← d, e depends on nothing
+        rdeps {a #{b d} b #{c}}]
+    (testing "every transitive dependant is affected, with the nearest changed fn and its hop count"
+      (is (= {(str b) {:via (str a) :depth 1}
+              (str c) {:via (str a) :depth 2}
+              (str d) {:via (str a) :depth 1}}
+             (dv/affected-fns rdeps [(str a)]))))
+    (testing "a changed fn is never listed as affected, even when another changed fn reaches it"
+      (is (= {(str c) {:via (str b) :depth 1}
+              (str d) {:via (str a) :depth 1}}
+             (dv/affected-fns rdeps [(str a) (str b)]))
+          "b is a seed: c is reached from b at depth 1, not from a at depth 2"))
+    (testing "ids arrive as strings or uuids, junk is ignored, and nothing changed means nothing affected"
+      (is (= {(str b) {:via (str a) :depth 1} (str c) {:via (str a) :depth 2}
+              (str d) {:via (str a) :depth 1}}
+             (dv/affected-fns rdeps [a nil "not-a-uuid"])))
+      (is (= {} (dv/affected-fns rdeps [])))
+      (is (= {} (dv/affected-fns rdeps [(str e)]))))))
+
+
+(deftest entry-carries-raw-ref-ids-test
+  (let [r1 #uuid "11111111-0000-4000-8000-000000000001"
+        r2 #uuid "22222222-0000-4000-8000-000000000002"
+        eid #uuid "33333333-0000-4000-8000-000000000003"
+        names {r1 "left" r2 "right"}]
+    (testing "a modified ref binding names both sides AND carries their ids"
+      (let [e (entry names {} {}
+                     {:entity-name :binding :entity-id eid :change :modified
+                      :source-version {:ref-fn-id r1 :fn-id eid}
+                      :target-version {:ref-fn-id r2 :fn-id eid}})]
+        (is (= (str r1) (:source-ref e)))
+        (is (= (str r2) (:target-ref e)))
+        (is (= [{:field "ref-fn-id" :source ":left" :target ":right"}] (:fields e)))))
+    (testing "a one-sided binding carries only the present side's id"
+      (let [e (entry names {} {}
+                     {:entity-name :binding :entity-id eid :change :added-in-source
+                      :source-version {:ref-fn-id r1 :fn-id eid}})]
+        (is (= (str r1) (:source-ref e)))
+        (is (not (contains? e :target-ref)))))
+    (testing "a value binding has no ref keys at all"
+      (is (not-any? #{:source-ref :target-ref}
+                    (keys (entry names {} {}
+                                 {:entity-name :binding :entity-id eid :change :modified
+                                  :source-version {:value 1 :fn-id eid}
+                                  :target-version {:value 2 :fn-id eid}})))))))

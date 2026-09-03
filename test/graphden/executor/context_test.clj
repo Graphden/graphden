@@ -326,3 +326,24 @@
               "and still runs"))
         (finally
           (sp/close storage))))))
+
+
+(deftest cold-ctx-type-refresh-primes-the-graph-cache
+  (testing "a full-clear invalidation on a ctx nothing has compiled reads the graph once for the type refresh — and that read primes `:graph-cache`, so the NEXT write takes the cache instead of reading again (a fresh pod paid the read on every merge, 2026-09-03)."
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [{:keys [composed-fn]} (setup/setup-add-function! storage)
+              c (assoc (exec/create-context {:storage storage})
+                       :compile-storage storage)
+              before (counters/snapshot)]
+          (is (nil? @(:graph-cache c)) "cold: nothing compiled, nothing cached")
+          (ctx/invalidate-graph-cache! c #{(:id composed-fn)})
+          (is (= 1 (get (counters/delta-since before) :registry/delta-read-graph 0))
+              "the cold path read the graph once")
+          (is (some? @(:graph-cache c)) "…and left it in the cache")
+          (let [mid (counters/snapshot)]
+            (ctx/invalidate-graph-cache! c #{(:id composed-fn)})
+            (is (zero? (get (counters/delta-since mid) :registry/delta-read-graph 0))
+                "the second write took the cache")))
+        (finally
+          (sp/close storage))))))

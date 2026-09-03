@@ -138,11 +138,33 @@ the author**.
 4. Open the branch popover, click `Δ` next to `feat-tutorial` —
    **the editor becomes the diff** (compare mode). Every changed fn
    is badged `+`/`±`/`−` in the Explorer (namespaces carry
-   `+n ±n −n` summaries), changed fn CARDS and their changed args
-   ring on the canvas, fns that exist only on the compared branch
-   show as dimmed ghost rows (click one to switch there), and
-   selecting a changed fn shows its exact `old → new` fields in the
-   **inspector's diff panel** — with 💬 anchors for line-comments.
+   `+n ±n −n ∿n` summaries) with a one-line digest under the row
+   (`value: 42 (there 41)`), changed fn CARDS and their changed args
+   ring on the canvas and the change is written ON the node: the
+   value the other branch holds sits under yours, struck through
+   (`there: 41`); a renamed fn shows its other name on the card; an
+   arg you bound here only rings green. Fns that exist only on the
+   compared branch show as dimmed ghost rows (click one to switch
+   there), and selecting a changed fn shows its exact `old → new`
+   fields in the **inspector's diff panel** — with 💬 anchors for
+   line-comments.
+
+   Two things make it a diff of the GRAPH rather than of rows:
+
+   - **Changed inside (`∿`).** A fn whose own rows are equal on both
+     branches but which INHERITS a change — its parent's binding was
+     retuned, a fn it references differs, a type it uses moved —
+     carries a dashed ring and a `∿` badge (the Explorer row says
+     `∿ via <fn>`). Click the badge: an ancestor is revealed inside
+     the card, at the level that holds it, so you see its `Δ` rows
+     in the context of THIS graph; a referenced fn opens as the root.
+     The `∿ inside` lens chip turns these marks off.
+   - **A replaced branch of the graph.** When an arg points at one
+     fn here and another there (`⋯-bind` it to a different fn on
+     your branch), the canvas shows both: your side is the real
+     card, and the compared branch's side hangs beside it as a
+     dashed, dimmed GHOST — that fn and what it composes, read-only,
+     joined to the arg by a dashed elbow. Click its head to fold it.
    A `Δ vs feat-tutorial · 3` chip appears by the branch chip —
    the number is how many fns differ; it survives reloads, so
    "always see my drift vs main" is one click.

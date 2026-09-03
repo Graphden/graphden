@@ -38,6 +38,13 @@ const EFF_FN = 'cmp-eff' + RUN_ID;
 // on main, so the canvas ring assertions have something to ring (the
 // eff probe's slot is unbound here → placeholder, no arg overlay).
 const VAL_FN = 'cmp-val' + RUN_ID;
+// UX-v4 — the diff as a GRAPH. INSIDE_FN is a CHILD of VAL_FN created on
+// main and never touched: its own rows are equal on both branches, but it
+// inherits VAL_FN's retuned value → "changed inside" (∿). REF_FN binds
+// :value to :identity on main and to :current-time-ms on feat → a
+// replaced ref, whose "there" side draws as a ghost subtree.
+const INSIDE_FN = 'cmp-inside' + RUN_ID;
+const REF_FN = 'cmp-ref' + RUN_ID;
 
 async function cleanup(page) {
   try {
@@ -46,7 +53,7 @@ async function cleanup(page) {
                                        {headers: {'X-Graphden-Branch': branch}});
       return r.ok ? r.json() : null;
     }, FEAT);
-    for (const nm of [EFF_FN, VAL_FN, 'cmp-sugg-fn' + RUN_ID]) {
+    for (const nm of [INSIDE_FN, REF_FN, EFF_FN, VAL_FN, 'cmp-sugg-fn' + RUN_ID]) {
       const f = (ents?.fns || []).find((x) => x.name === nm);
       if (f) {
         await page.evaluate(async (id) => {
@@ -241,6 +248,62 @@ async function cleanup(page) {
       return r.status;
     }, {id: valBindingId, branch: FEAT});
     assert(valEdit === 200, 'value retuned on feat: ' + valEdit);
+    // UX-v4 probes: the untouched child, and the replaced ref.
+    const insideCreated = await page.evaluate(async ({name, parentId}) => {
+      const body = new URLSearchParams();
+      body.set('name', name);
+      body.set('parent-ids', parentId);
+      const r = await window.authFetch('/api/entities/fn', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: body.toString(),
+      });
+      return await r.text();
+    }, {name: INSIDE_FN, parentId: valId});
+    assert(insideCreated.includes('created successfully'), 'inside probe (child of the value probe) created on main');
+    const refCreated = await page.evaluate(async ({name, parentId}) => {
+      const body = new URLSearchParams();
+      body.set('name', name);
+      body.set('parent-ids', parentId);
+      const r = await window.authFetch('/api/entities/fn', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: body.toString(),
+      });
+      return await r.text();
+    }, {name: REF_FN, parentId: coalesce.id});
+    assert(refCreated.includes('created successfully'), 'ref probe created');
+    const refId = ((await api(page, 'GET', '/api/graph/entities'))?.fns || [])
+      .find((f) => f.name === REF_FN)?.id;
+    const refBind = await page.evaluate(async ({fnId, slotId, refFnId}) => {
+      const body = new URLSearchParams();
+      body.set('fn-id', fnId);
+      body.set('slot-id', slotId);
+      body.set('ref-fn-id', refFnId);
+      const r = await window.authFetch('/api/entities/binding', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: body.toString(),
+      });
+      return r.status;
+    }, {fnId: refId, slotId: valueSlot.id, refFnId: identity.id});
+    assert(refBind === 200, 'ref probe bound to :identity on main: ' + refBind);
+    const refBindingId = ((await api(page, 'GET', '/api/graph/entities'))?.bindings || [])
+      .find((b) => b['fn-id'] === refId)?.id;
+    const refEdit = await page.evaluate(async ({id, refFnId, branch}) => {
+      const body = new URLSearchParams();
+      body.set('ref-fn-id', refFnId);
+      const r = await window.authFetch('/api/entities/binding/' + id, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-Graphden-Branch': branch,
+        },
+        body: body.toString(),
+      });
+      return r.status;
+    }, {id: refBindingId, refFnId: timeFn.id, branch: FEAT});
+    assert(refEdit === 200, 'ref probe re-pointed at :current-time-ms on feat: ' + refEdit);
     assert((await api(page, 'POST',
                       '/api/branches/' + encodeURIComponent(FEAT) + '/propose',
                       {proposed: true}))?.ok, 'feat proposed');
@@ -415,6 +478,80 @@ async function cleanup(page) {
     await page.waitForSelector('.arg-overlay-diff-focus', {timeout: 20000});
     assert(true, 'canvas rings the changed bound arg');
 
+    // --- UX-v4: the diff as a graph -------------------------------------
+    // (1) the node-level change is written ON the node: the value the
+    //     compared branch holds, under yours.
+    const wasText = await page.evaluate(
+      () => Array.from(document.querySelectorAll('.arg-diff-was')).map((e) => e.textContent).join(' | '));
+    assert(/there: 2/.test(wasText), 'the arg carries the there-value line: ' + JSON.stringify(wasText));
+    // (2) the Explorer row carries a one-line digest of the change.
+    await page.fill('#search-input', VAL_FN);
+    await page.waitForFunction((nm) => {
+      const row = Array.from(document.querySelectorAll('#entity-list .entity-item'))
+        .find((e) => e.querySelector('.name')?.textContent.trim() === nm);
+      return row && /\(there 2\)/.test(row.querySelector('.gd-diff-summary')?.textContent || '');
+    }, VAL_FN, {timeout: 20000});
+    assert(true, 'Explorer digest reads "value: 1 (there 2)"');
+    // (3) changed INSIDE: the untouched child is marked ∿ via its parent,
+    //     rings dashed on the canvas, and the badge reveals the parent's
+    //     Δ row inside the card.
+    await page.fill('#search-input', INSIDE_FN);
+    await page.waitForFunction((nm) => {
+      const row = Array.from(document.querySelectorAll('#entity-list .entity-item'))
+        .find((e) => e.querySelector('.name')?.textContent.trim() === nm);
+      return row && row.classList.contains('gd-diff-inside')
+        && row.querySelector('.gd-diff-badge')?.textContent === '∿'
+        && /^∿ via /.test(row.querySelector('.gd-diff-summary')?.textContent || '');
+    }, INSIDE_FN, {timeout: 20000});
+    assert(true, 'Explorer marks the untouched child ∿ via its parent');
+    const affectedApi = await page.evaluate(
+      (nm) => window.gdDiffAffectedInfo(
+        Array.from(document.querySelectorAll('#entity-list .entity-item'))
+          .find((e) => e.querySelector('.name')?.textContent.trim() === nm)?.dataset.fnId),
+      INSIDE_FN);
+    assert(affectedApi && affectedApi.depth === 1 && affectedApi.viaLabel.includes(VAL_FN),
+           'affected info: via the value probe, one hop: ' + JSON.stringify(affectedApi));
+    await page.evaluate(async (nm) => { await selectFnByName(nm); }, INSIDE_FN);
+    await page.waitForSelector('.fn-overlay-diff-inside .fn-diff-inside-badge', {timeout: 20000});
+    assert(true, 'canvas rings the changed-inside card dashed, with a ∿ badge');
+    await page.click('.fn-diff-inside-badge');
+    await page.waitForSelector('.arg-overlay-diff-focus', {timeout: 20000});
+    const revealed = await page.evaluate(() => ({
+      focus: document.querySelectorAll('.arg-overlay-diff-focus').length,
+      was: Array.from(document.querySelectorAll('.arg-diff-was')).map((e) => e.textContent).join(' | '),
+    }));
+    assert(revealed.focus >= 1 && /there: 2/.test(revealed.was),
+           '∿ click reveals the parent\'s Δ row inside the card: ' + JSON.stringify(revealed));
+    // (4) a replaced ref: the compared branch's side hangs beside the
+    //     card as a ghost subtree; the edge label marks the differing arg.
+    await page.evaluate(async (nm) => { await selectFnByName(nm); }, REF_FN);
+    await page.waitForSelector('.gd-ghost-cluster', {timeout: 20000});
+    const ghost = await page.evaluate(() => ({
+      head: document.querySelector('.gd-ghost-head')?.textContent || '',
+      cards: document.querySelectorAll('.gd-ghost-card').length,
+      links: document.querySelectorAll('.gd-ghost-link').length,
+      edge: document.querySelectorAll('.edge-label-diff').length,
+    }));
+    assert(/value there → :current-time-ms/.test(ghost.head) && ghost.cards >= 1 && ghost.links === 1,
+           'ghost subtree of the there-ref beside the card: ' + JSON.stringify(ghost));
+    assert(ghost.edge >= 1, 'the differing ref arg marks its edge label');
+    await page.evaluate(() => document.querySelector('.gd-ghost-head').click());
+    const folded = await page.evaluate(
+      () => document.querySelector('.gd-ghost-cluster')?.classList.contains('gd-ghost-folded'));
+    assert(folded === true, 'ghost head click folds the cluster');
+    // (5) the `inside` lens turns the ∿ marks off — and back on.
+    await page.evaluate(() => window.gdDiffSetLens({inside: false}));
+    await page.fill('#search-input', INSIDE_FN);
+    await page.waitForFunction((nm) => {
+      const row = Array.from(document.querySelectorAll('#entity-list .entity-item'))
+        .find((e) => e.querySelector('.name')?.textContent.trim() === nm);
+      return row && !row.classList.contains('gd-diff-changed');
+    }, INSIDE_FN, {timeout: 20000});
+    assert(true, 'inside lens off → no ∿ mark');
+    await page.evaluate(() => window.gdDiffSetLens({inside: true}));
+    await page.evaluate(async (nm) => { await selectFnByName(nm); }, VAL_FN);
+    await page.waitForSelector('.arg-overlay-diff-focus', {timeout: 20000});
+
     // Inspector: the selected changed fn carries the diff panel — the
     // old → new fields and a 💬 anchor right there.
     await page.waitForSelector('#gd-diff-insp', {timeout: 20000});
@@ -507,9 +644,14 @@ async function cleanup(page) {
     const ringsGone = await page.evaluate(() => ({
       cards: document.querySelectorAll('.fn-overlay-diff').length,
       args: document.querySelectorAll('.arg-overlay-diff-focus').length,
+      was: document.querySelectorAll('.arg-diff-was, .fn-diff-was').length,
+      badges: document.querySelectorAll('.fn-diff-inside-badge').length,
+      ghosts: document.querySelectorAll('.gd-ghost-cluster, .gd-ghost-link').length,
+      summaries: document.querySelectorAll('.gd-diff-summary').length,
     }));
-    assert(ringsGone.cards === 0 && ringsGone.args === 0,
-           'exit clears card AND arg rings: ' + JSON.stringify(ringsGone));
+    assert(Object.values(ringsGone).every((n) => n === 0),
+           'exit clears card AND arg rings, there-lines, ∿ badges, ghosts, digests: '
+           + JSON.stringify(ringsGone));
 
     // ---- tree DETAIL toggle (outside compare mode): fx marks fns
     // whose execution carries effects; off by default, per-part toggle.

@@ -73,6 +73,18 @@
                      target-branch-id))
 
 
+(defbase diff-affected
+  "Single library call over `dv/affected-view` for the diff-view groups:
+   the fns that changed INSIDE — their own rows are equal on both
+   branches, but something they depend on (an ancestor, a ref target, a
+   type) is in the diff — keyed by fn-id string with the nearest changed
+   fn (`:via`), the hop count and the fn's `:ns-path`. The dependency index is the compiler's
+   own (`cr/ctx-reverse-deps` on THIS branch's ctx)."
+  [groups]
+  (cr/record-effect! :db)
+  (dv/affected-view (branches/base-storage ctx) (cr/ctx-reverse-deps ctx) groups))
+
+
 (defbase diff-branches-view
   "Single library call over `dv/diff-branches-view` — the GROUPED
    display model the branch-diff partial renders: entries grouped
@@ -787,6 +799,7 @@
   {:resolve-branch-ref         resolve-branch-ref
    :diff-branches              diff-branches
    :diff-branches-view         diff-branches-view
+   :diff-affected              diff-affected
    :create-branch!             create-branch!
    :delete-branch!             delete-branch!
    :detect-conflicts           detect-conflicts

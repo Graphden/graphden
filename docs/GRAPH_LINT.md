@@ -127,6 +127,12 @@ Lint findings are the third *static* kind — computed from the graph, no
 lifecycle beyond "edit until it goes away", never blocking — and the
 one list where the author may disagree.
 
+The Explorer's **⚐ lint** lens shows the same findings as a tree
+focus: `GET /api/lint` is the JSON twin of the tab (same base-fn, same
+fresh read), cached client-side (`editor-problems.js`)
+and re-read per graph load; the chip counts findings, a namespace
+row counts its fns with findings, a fn row carries `⚐N`.
+
 `GET /partials/lint` renders one row per warning: the rule, the member
 fns as `#hash` links (namespace dimmed), the engine's message, and a
 **Not an issue** button. The badge on the tab counts the rows. The

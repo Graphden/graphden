@@ -189,6 +189,7 @@ document.addEventListener('click', (ev) => {
   authFetch(API.api_tests_run, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
     .catch(() => null)
     .then(() => loadTestStatuses())
+    .then(() => (typeof loadProblemCaches === 'function' ? loadProblemCaches() : null))
     .then(() => {
       // Fresh dots in the tree; the panel body lands via SSE.
       if (typeof repaintAfterPrime === 'function') repaintAfterPrime();

@@ -162,7 +162,7 @@
    (internals hidden) in the light scopes too; it is dropped from the wire
    when nil (single-tenant) by the `remove nil? val` projection."
   [:id :name :namespace-id :org-id :role :description :constraint
-   :parent-ids :return-type-fn-id :package-owned
+   :parent-ids :return-type-fn-id :package-owned :type-error-count
    :used-as-parent-count :used-as-ref-count])
 
 
@@ -241,30 +241,35 @@
   (let [base (types-api/cached-or-load-graph ctx)
         fn-slots-by-fn (group-by :fn-id (:fn-slots base))
         rich-snapshot (delay (registry/rich-types-snapshot))
+        ;; Per-fn diagnostic counts for the CURRENT branch (error-
+        ;; tolerance Phase 3) — a cheap in-memory map lookup. Stamped on
+        ;; every projected row (the type-errors lens's ⚠ N marker reads
+        ;; it off the light rows too, not only the subtree) and summed
+        ;; per namespace by the `:tree` scope.
+        diag-counts (delay (into {}
+                                 (map (fn [[fid ds]] [fid (count ds)]))
+                                 (diag/branch-errors (vcore/current-branch-id storage))))
         role-of (fn [f]
-                  (cond-> (assoc f :role
-                                 (types-api/compute-fn-role
-                                   f
-                                   (boolean (seq (get fn-slots-by-fn (:id f))))
-                                   @rich-snapshot))
-                    ;; Package-synced fns are API-read-only (package-guard
-                    ;; answers 403 on binding writes + deletes). The flag
-                    ;; rides out with the row so the editor can HIDE those
-                    ;; affordances instead of offering a click that fails.
-                    ;; Omitted when false — costs nothing on user fns.
-                    (owned/owned-fn-id? (:id f)) (assoc :package-owned true)))]
+                  (let [errs (get @diag-counts (:id f) 0)]
+                    (cond-> (assoc f :role
+                                   (types-api/compute-fn-role
+                                     f
+                                     (boolean (seq (get fn-slots-by-fn (:id f))))
+                                     @rich-snapshot))
+                      ;; Package-synced fns are API-read-only (package-guard
+                      ;; answers 403 on binding writes + deletes). The flag
+                      ;; rides out with the row so the editor can HIDE those
+                      ;; affordances instead of offering a click that fails.
+                      ;; Omitted when false — costs nothing on user fns.
+                      (owned/owned-fn-id? (:id f)) (assoc :package-owned true)
+                      (pos? errs) (assoc :type-error-count errs))))]
     {:base base
      :role-of role-of
      :roled-fns (delay (mapv role-of (:fns base)))
      ;; Whole-graph reverse-ref tallies — realised only for the scopes
      ;; that project fn rows (`:namespace` / `:search` / `:subtree`).
      :rev-index (delay (reverse-ref-index base))
-     ;; Per-fn diagnostic counts for the CURRENT branch (error-
-     ;; tolerance Phase 3) — a cheap in-memory map lookup; realised
-     ;; only by the `:tree` / `:subtree` scopes that surface them.
-     :diag-counts (delay (into {}
-                               (map (fn [[fid ds]] [fid (count ds)]))
-                               (diag/branch-errors (vcore/current-branch-id storage))))
+     :diag-counts diag-counts
      :namespaces (delay (vec (sp/query-entities storage :ns {})))}))
 
 

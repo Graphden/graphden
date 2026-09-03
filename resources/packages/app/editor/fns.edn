@@ -153,6 +153,10 @@
                   ;; Tests: status cache + Operate section shell + the
                   ;; isTestFn predicate editor-sidebar.js's lens reads.
                   "packages/app/editor/editor-tests.js"
+                  ;; Problem caches (failed runs / lint JSON) behind the
+                  ;; Explorer's problem lenses + markers; primed by
+                  ;; editor-sidebar.js per graph load.
+                  "packages/app/editor/editor-problems.js"
                   ;; Debug: «catch next request» Operate section
                   ;; (buildDebugSection read by editor-sidebar.js).
                   "packages/app/editor/editor-debug.js"
@@ -356,6 +360,29 @@
                          :title "Only tests (fns in a `tests` namespace)"}
                 [:span {:class "kind-glyph" :aria-hidden "true"} "✓"]
                 [:span {:class "kind-label"} "tests"]
+                [:span {:class "kind-count" :aria-hidden "true"}]]
+               ;; PROBLEM lenses — an overlay over the structural kinds
+               ;; (a failing fn is still a fn): focus the tree on what
+               ;; needs attention, with the same facts the diagnostics
+               ;; drawer lists. Counts: failed RUNS / type DIAGNOSTICS /
+               ;; lint FINDINGS (editor-problems.js).
+               [:button {:type "button" :class "kind-toggle kind-problem" :data-kind "failed"
+                         :aria-pressed "false" :onclick "toggleKind('failed')"
+                         :title "Only fns with unresolved failed runs (last 7 days)"}
+                [:span {:class "kind-glyph" :aria-hidden "true"} "✕"]
+                [:span {:class "kind-label"} "failed"]
+                [:span {:class "kind-count" :aria-hidden "true"}]]
+               [:button {:type "button" :class "kind-toggle kind-problem" :data-kind "type-errors"
+                         :aria-pressed "false" :onclick "toggleKind('type-errors')"
+                         :title "Only fns with recorded type errors on this branch"}
+                [:span {:class "kind-glyph" :aria-hidden "true"} "⚠"]
+                [:span {:class "kind-label"} "type errors"]
+                [:span {:class "kind-count" :aria-hidden "true"}]]
+               [:button {:type "button" :class "kind-toggle kind-problem" :data-kind "lint"
+                         :aria-pressed "false" :onclick "toggleKind('lint')"
+                         :title "Only fns the graph lint reports (duplicates, unreferenced privates)"}
+                [:span {:class "kind-glyph" :aria-hidden "true"} "⚐"]
+                [:span {:class "kind-label"} "lint"]
                 [:span {:class "kind-count" :aria-hidden "true"}]]
                ;; DETAIL toggle, not a lens: marks rows instead of
                ;; filtering them (fns whose execution carries effects

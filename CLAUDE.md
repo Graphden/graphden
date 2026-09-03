@@ -353,6 +353,10 @@ the 2026-08-22 audit. Frontend logic that needs no stack goes in
 # node vm; the type registry is a fixture, not the server's.
 node tools/runtime-test/type-helpers.test.js
 
+# The Explorer's problem-lens caches (failed runs / lint JSON reads):
+# per-fn / per-namespace / total counts, the prime-once-per-graph guard.
+node tools/runtime-test/problem-caches.test.js
+
 # appendResolutionSection — multi-override ✓/↳ markers + onNavigate
 # wiring, built against tools/runtime-test/mini-dom.js.
 node tools/runtime-test/type-resolution-section.test.js

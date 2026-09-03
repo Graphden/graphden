@@ -717,6 +717,22 @@
    :return-type [:list :keyword-map]
    :effects #{:db}}
 
+  {:name :unresolved-failure-counts
+   :description "Per-fn tally of the CURRENT branch view's UNRESOLVED failures over a trailing window — `[{:fn-id :fn-name :namespace-id :count} …]`, most failures first; the same four-part predicate as `:recent-failures`. The editor's failed-runs lens reads it once (GET /api/failures) and derives the chip / namespace / row counts client-side."
+   :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}}
+   :return-type [:list :keyword-map]
+   :effects #{:db}}
+
+  {:name :_api-failures-data
+   :parent :unresolved-failure-counts
+   :args {:days {:value 7}}}
+
+  {:name :api-failures-handler
+   :lambda-params []
+   :description "Ring handler for GET /api/failures — the failed-runs lens's per-fn counts as JSON."
+   :parent :json-handler
+   :args {:data :_api-failures-data}}
+
   {:name :failure-ack
    :description "Dismiss ONE failed execution from the Failed runs panel — sets `:acknowledged-at` on the row (org-guarded; the audit row itself stays for its TTL). Returns true when a row was updated, false for an unknown/foreign/already-acked id."
    :args {:execution-id {:type :nullable-text :description "The `:execution-id` of the failure row to dismiss (uuid text; nil/malformed → false)."}}

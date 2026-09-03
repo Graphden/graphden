@@ -82,7 +82,8 @@
       pool
       (into [(str "SELECT e.id, fv.fn_id, e.fn_version_id, e.branch_id,"
                   " e.finished_at, e.error,"
-                  " e.error_data::text AS error_data, f.name AS fn_name"
+                  " e.error_data::text AS error_data, f.name AS fn_name,"
+                  " f.namespace_id AS namespace_id"
                   " FROM \"fn_execution\" e"
                   " LEFT JOIN \"fn_version\" fv ON fv.id = e.fn_version_id"
                   " LEFT JOIN \"fn\" f ON f.id = fv.fn_id"
@@ -135,6 +136,32 @@
                           :error-data (:error_data r)}))
                   (take limit))
             (still-current-filter ctx rows)))))
+
+
+(defn unresolved-failure-counts
+  "Per-fn tally of the viewing branch's UNRESOLVED failures — the same
+   four-part predicate as `recent-unresolved-failures`, aggregated:
+   `[{:fn-id :fn-name :namespace-id :count} …]`, most failures first.
+   Feeds the editor's failed-runs lens (chip / namespace / row counts)
+   through one JSON read the client caches, so the sidebar's tree
+   payload stays at its one-SQL budget. `days` default 7; the
+   candidate fetch is capped at 2000 rows (an org with more unresolved
+   failures in a week has a bigger problem than a count)."
+  [ctx pool org days]
+  (when pool
+    (let [chain (viewing-branch-chain (:storage ctx))
+          rows (still-current-filter
+                 ctx (candidate-failures pool org days 2000 chain))]
+      (->> rows
+           (group-by :fn_id)
+           (map (fn [[fid rs]]
+                  (let [r (first rs)]
+                    {:fn-id fid
+                     :fn-name (or (:fn_name r) (str fid))
+                     :namespace-id (:namespace_id r)
+                     :count (count rs)})))
+           (sort-by (comp - :count))
+           vec))))
 
 
 ;; =============================================================================

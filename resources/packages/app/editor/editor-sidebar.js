@@ -158,6 +158,9 @@ window.reloadDynamicOpsSections = reloadDynamicOpsSections;
 // (editor-diagnostics.js). All four are live: diagnostics land as the user
 // edits, tests drift as runs/auto-runs land, the debug trap arms/fires/expires.
 function reloadDiagnosticsSections() {
+  // The problem lenses read the same facts the panels list — re-prime
+  // their caches on the same trigger (the drawer opening).
+  if (typeof refreshProblemCaches === 'function') refreshProblemCaches();
   reloadLiveSections('gd-diag-panels', {
     'type-errors': typeof buildTypeErrorsSection === 'function' ? buildTypeErrorsSection : null,
     lint: typeof buildLintSection === 'function' ? buildLintSection : null,
@@ -276,12 +279,26 @@ function fnKindSet(fn) {
 // Without this, deep-linking a service-fn — often the only leaf loaded in its
 // namespace, since the sibling non-service fns load lazily on expand — hid it
 // AND dropped the whole namespace via nodeShouldShow.
+// PROBLEM kinds — an overlay over the structural kinds above, never
+// exclusive with them: a fn that fails is still a plain fn for the fn
+// lens. Counts come from the row itself (`type-error-count`) and the
+// two primed caches (editor-problems.js).
+function fnProblemSet(fn) {
+  const kinds = new Set();
+  if (!fn) return kinds;
+  if ((fn['type-error-count'] || 0) > 0) kinds.add('type-errors');
+  if (typeof getFailureCountForFnId === 'function' && getFailureCountForFnId(fn.id) > 0) kinds.add('failed');
+  if (typeof getLintCountForFnId === 'function' && getLintCountForFnId(fn.id) > 0) kinds.add('lint');
+  return kinds;
+}
+
 function fnKindVisible(fn) {
   if (fn && typeof selectedFnId !== 'undefined' && fn.id === selectedFnId) return true;
   if (lensKinds.size === 0) return true;
   const kinds = fnKindSet(fn);
+  const problems = fnProblemSet(fn);
   for (const k of lensKinds) {
-    if (kinds.has(k)) return true;
+    if (kinds.has(k) || problems.has(k)) return true;
   }
   return false;
 }
@@ -313,6 +330,14 @@ function nsHoldsLensKind(kind, nsId, nsPath) {
       return typeof appRouteNsIds === 'function' && appRouteNsIds().has(nsId);
     case 'secrets':
       return typeof secretNsIds === 'function' && secretNsIds().has(nsId);
+    // Problem lenses — per-namespace signals: the tree payload's type-error
+    // sums, and the two primed caches (editor-problems.js).
+    case 'type-errors':
+      return (lookups?.nsTypeErrors?.get(nsId) || 0) > 0;
+    case 'failed':
+      return typeof failedNsIds === 'function' && failedNsIds().has(nsId);
+    case 'lint':
+      return typeof lintNsIds === 'function' && lintNsIds().has(nsId);
     default:
       return false;
   }
@@ -439,6 +464,11 @@ function primeTestStatusesOnce() {
   if (!(window.API && API.api_tests_status)) return;
   _testStatusesPrimedGraph = graphData;
   loadTestStatuses().then(repaintAfterPrime);
+}
+// The problem lenses' caches (failed runs / lint) — same per-graph-load
+// prime; the counts they feed are read sync'ly by the row markers.
+function primeProblemsOnce() {
+  if (typeof primeProblemCachesOnce === 'function') primeProblemCachesOnce();
 }
 let _secretsPrimedGraph = null;
 function primeSecretsOnce() {
@@ -612,6 +642,34 @@ function buildFnItem(fn, level = 1) {
     item.appendChild(m);
   }
 
+  // Problem markers — always on: a fn that fails, mistypes or duplicates
+  // says so where you work, not only in a drawer. Each carries its count.
+  const problems = fnProblemSet(fn);
+  if (problems.has('failed')) {
+    const n = getFailureCountForFnId(fn.id);
+    const m = document.createElement('span');
+    m.className = 'fn-kind-marker kind-marker-failed';
+    m.textContent = '✕' + n;
+    m.title = n + ' unresolved failed run' + (n === 1 ? '' : 's');
+    item.appendChild(m);
+  }
+  if (problems.has('type-errors')) {
+    const n = fn['type-error-count'];
+    const m = document.createElement('span');
+    m.className = 'fn-kind-marker kind-marker-type-error';
+    m.textContent = '⚠' + n;
+    m.title = n + ' type error' + (n === 1 ? '' : 's');
+    item.appendChild(m);
+  }
+  if (problems.has('lint')) {
+    const n = getLintCountForFnId(fn.id);
+    const m = document.createElement('span');
+    m.className = 'fn-kind-marker kind-marker-lint';
+    m.textContent = '⚐' + n;
+    m.title = n + ' lint finding' + (n === 1 ? '' : 's') + ' — see the Lint tab or the Inspector';
+    item.appendChild(m);
+  }
+
   // fx detail — the effect footprint, the strongest "what does running
   // this touch" signal the registry has. Off by default (most platform
   // web fns are effectful — a always-on marker would wallpaper the
@@ -740,8 +798,28 @@ function renderNsNode(container, name, node, path, searchMode) {
     chip.className = 'ns-type-error-chip';
     chip.textContent = '⚠ ' + nsTypeErrs;
     chip.title = nsTypeErrs + ' type error' + (nsTypeErrs === 1 ? '' : 's')
-      + ' in this namespace — see the Type errors panel';
+      + ' in this namespace';
     header.appendChild(chip);
+  }
+  // Failed-runs / lint chips — the same per-namespace idea over the two
+  // primed caches (editor-problems.js): fns with problems in this namespace.
+  if (node?.nsId !== undefined) {
+    const nsFailed = (typeof nsFailureCount === 'function') ? nsFailureCount(node.nsId) : 0;
+    if (nsFailed > 0) {
+      const chip = document.createElement('span');
+      chip.className = 'ns-problem-chip ns-failed-chip';
+      chip.textContent = '✕ ' + nsFailed;
+      chip.title = nsFailed + ' unresolved failed run' + (nsFailed === 1 ? '' : 's') + ' in this namespace';
+      header.appendChild(chip);
+    }
+    const nsLint = (typeof nsLintCount === 'function') ? nsLintCount(node.nsId) : 0;
+    if (nsLint > 0) {
+      const chip = document.createElement('span');
+      chip.className = 'ns-problem-chip ns-lint-chip';
+      chip.textContent = '⚐ ' + nsLint;
+      chip.title = nsLint + ' fn' + (nsLint === 1 ? '' : 's') + ' with lint findings in this namespace';
+      header.appendChild(chip);
+    }
   }
   // All three right-edge icons live in one group. Order:
   //   ✎ (rename, hover-only)  +  + (create-child, hover-only)  +  i (description, always)
@@ -1178,6 +1256,12 @@ function syncKindFilterBar() {
         n = getAppRouteCount();
       } else if (kind === 'tests' && typeof getTestStatusCount === 'function') {
         n = getTestStatusCount();
+      } else if (kind === 'failed' && typeof getFailureTotal === 'function') {
+        n = getFailureTotal();
+      } else if (kind === 'type-errors' && typeof getTypeErrorTotal === 'function') {
+        n = getTypeErrorTotal();
+      } else if (kind === 'lint' && typeof getLintTotal === 'function') {
+        n = getLintTotal();
       }
       countEl.textContent = (n === null || n === undefined) ? '' : String(n);
     }
@@ -1257,7 +1341,25 @@ function renderRootNode(list, rootFns, searchMode) {
     chip.className = 'ns-type-error-chip';
     chip.textContent = '⚠ ' + rootTypeErrs;
     chip.title = rootTypeErrs + ' type error' + (rootTypeErrs === 1 ? '' : 's')
-      + ' in this namespace — see the Type errors panel';
+      + ' in this namespace';
+    header.appendChild(chip);
+  }
+  // Failed-runs / lint chips for the null bucket — same caches as the
+  // namespace rows (editor-problems.js keys the root by null).
+  const rootFailed = (typeof nsFailureCount === 'function') ? nsFailureCount(null) : 0;
+  if (rootFailed > 0) {
+    const chip = document.createElement('span');
+    chip.className = 'ns-problem-chip ns-failed-chip';
+    chip.textContent = '✕ ' + rootFailed;
+    chip.title = rootFailed + ' unresolved failed run' + (rootFailed === 1 ? '' : 's') + ' in this namespace';
+    header.appendChild(chip);
+  }
+  const rootLint = (typeof nsLintCount === 'function') ? nsLintCount(null) : 0;
+  if (rootLint > 0) {
+    const chip = document.createElement('span');
+    chip.className = 'ns-problem-chip ns-lint-chip';
+    chip.textContent = '⚐ ' + rootLint;
+    chip.title = rootLint + ' fn' + (rootLint === 1 ? '' : 's') + ' with lint findings in this namespace';
     header.appendChild(chip);
   }
   header.onclick = (e) => {
@@ -1474,6 +1576,7 @@ function updateEntityList(data) {
   primeAppsCacheOnce();
   primeSecretsOnce();
   primeTestStatusesOnce();
+  primeProblemsOnce();
 
   // A smart view (editor-smart-views.js) renders through the same
   // force-expanded pipeline as search; a typed search takes precedence

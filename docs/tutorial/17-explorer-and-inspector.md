@@ -14,6 +14,7 @@ Under the Explorer's search box sits a row of **kind chips**:
 
 ```text
 ◍ all   λ fn   T types   🔒 secrets   ⚙ services 2   ▣ apps 1   ✓ tests 3
+✕ failed 1   ⚠ type errors 2   ⚐ lint 1
 ```
 
 Click a chip and the tree narrows to rows of that kind — services
@@ -43,6 +44,30 @@ Details worth knowing:
 - Your lens choice is a per-browser preference (like the workspace
   scope from Lesson 19); it survives reload and affects nobody
   else.
+
+### Problem lenses
+
+The second row of chips focuses on what needs attention rather than
+on what a row *is*: **✕ failed** (fns with unresolved failed runs in
+the last 7 days), **⚠ type errors** (fns with recorded type
+diagnostics on this branch), **⚐ lint** (fns the graph lint reports —
+Lesson 16). They are an overlay over the kind chips: a failing fn is
+still a fn, so the fn lens keeps it, and a problem lens keeps it too.
+
+The counts are the same facts three ways down the tree:
+
+- on the chip — the total (failed *runs*, type *diagnostics*, lint
+  *findings*);
+- on a namespace row — `✕ 3`, `⚠ 2`, `⚐ 1`: how much of it is in
+  there, so a collapsed namespace still tells you where to look;
+- on the fn's row — `✕1`, `⚠2`, `⚐1`: the fn's own share, always
+  shown, lens or not. The same marks sit on the card's title row on
+  the canvas.
+
+A problem lens narrows the tree to exactly the rows carrying that
+mark and keeps their namespaces open. Clear it with **◍ all**, or by
+fixing the problem — the counts re-read whenever the graph reloads,
+a run finishes, or the diagnostics drawer opens.
 
 The lens composes with the workspace (Lesson 19): the workspace
 picks *which projects* you see, the lens picks *which kind of
@@ -112,6 +137,11 @@ The Inspector is the "read" side of the editor: popovers are for
    section lists the crowd of fns that pin constants through it,
    "Extended by" first. Click a row — the editor jumps there.
 5. Reload the page — your lens choice sticks.
+6. Build Lesson 16's duplicate pair (`tutorial-page-attrs` /
+   `tutorial-row-attrs`) and click **⚐ lint**: the tree collapses to
+   the two rows, each with `⚐1`, their namespace row with `⚐ 2`, the
+   chip with `1` — one finding, two members. Delete one of the pair
+   and the chip reads nothing.
 
 ## Next
 

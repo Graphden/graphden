@@ -568,6 +568,15 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   color: var(--error-fg-strong);
   flex-shrink: 0;
 }
+/* Failed-runs / lint chips on namespace rows and the matching per-row
+   markers — the problem lenses' counts (editor-problems.js). */
+.ns-problem-chip { margin-left: 6px; font-size: 0.625rem; flex-shrink: 0; white-space: nowrap; }
+.ns-failed-chip { color: var(--error-fg-strong); }
+.ns-lint-chip { color: var(--muted-fg); }
+.kind-marker-failed { color: var(--error-fg-strong); }
+.kind-marker-type-error { color: var(--warning-fg); }
+.kind-marker-lint { color: var(--muted-fg); }
+
 .ns-header-pseudo .ns-label { font-style: italic; color: var(--muted-fg); }
 .ns-children { padding-left: 16px; }
 #entity-list .entity-item { padding: 2px 8px 2px 24px; cursor: pointer;
@@ -4744,6 +4753,19 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   user-select: none;
   z-index: 1;
 }
+/* Failed-runs / lint badges share the ⚠ slot's geometry, stacked leftward
+   so all three fit before the ⋯ trigger. */
+.failed-run-badge, .lint-badge {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.625rem; line-height: 1;
+  user-select: none;
+  z-index: 1;
+}
+.failed-run-badge { right: 44px; color: var(--error-fg-strong); }
+.lint-badge { right: 66px; color: var(--muted-fg); }
+
 
 .execute-popover-body {
   margin-bottom: 10px;

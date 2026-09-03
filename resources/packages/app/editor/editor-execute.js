@@ -293,6 +293,9 @@ async function submitExecution(fnEntity, args, persist, trace, captureValues,
     // signal to wait for.
     if (persist && status !== 'rejected') {
       document.body.dataset.gdPersistedRun = String(execId || 'yes');
+      // A persisted run can add (failed) or resolve (a later success)
+      // an unresolved failure — the failed lens's counts re-read.
+      if (typeof window.refreshProblemCaches === 'function') window.refreshProblemCaches();
     }
     if (status === 'rejected') {
       resultHostEl.appendChild(renderErrorPane(body.error, body['error-data']));

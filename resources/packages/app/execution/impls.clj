@@ -30,6 +30,14 @@
       (:pool (vs/unwrap (:storage ctx)))))
 
 
+(defbase unresolved-failure-counts
+  [days]
+  ;; The failed-runs LENS's data: the same unresolved predicate as
+  ;; `recent-failures`, tallied per fn — one read the editor caches.
+  (cr/record-effect! :db)
+  (exec-errors/unresolved-failure-counts ctx (stats-pool ctx) (tc/current-org) days))
+
+
 (defbase resolve-fn
   "Resolve a `parsed` request shape (with `:fn-id` UUID or `:fn-name`
    text) to the full `:fn` row, in a single storage round-trip.
@@ -305,7 +313,8 @@
 
 
 (def impls
-  {:resolve-fn                 resolve-fn
+  {:unresolved-failure-counts unresolved-failure-counts
+   :resolve-fn                 resolve-fn
    :execute-trace-rows         execute-trace-rows
    :debug-catch-arm!           debug-catch-arm!
    :debug-catch-disarm!        debug-catch-disarm!

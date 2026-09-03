@@ -394,9 +394,17 @@
             "display name joined from the fn row")
         (is (seq (str (:error row))) "carries the error text")
         (is (some? (:execution-id row)) "carries the row id (dismiss target)")))
+    (testing "the per-fn tally behind the failed-runs lens counts the same run"
+      (let [counts (exec-errors/unresolved-failure-counts c (:pool @shared-storage) nil 7)
+            row (first (filter #(= (:id composed) (:fn-id %)) counts))]
+        (is (= 1 (:count row)))
+        (is (str/includes? (str (:fn-name row)) "my-test-add-errlog"))
+        (is (contains? row :namespace-id) "carries the namespace for the per-ns chip")))
     (testing "another org's read sees nothing (explicit org filter)"
       (is (empty? (exec-errors/recent-unresolved-failures
-                    c (:pool @shared-storage) "acme" 7 10))))))
+                    c (:pool @shared-storage) "acme" 7 10)))
+      (is (empty? (exec-errors/unresolved-failure-counts
+                    c (:pool @shared-storage) "acme" 7))))))
 
 
 (deftest unresolved-failure-self-resolution-test

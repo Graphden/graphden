@@ -534,9 +534,29 @@ function renderSingleFnRow(line, levelInfo, ctx) {
     warn.className = 'type-error-badge';
     warn.textContent = '⚠';
     warn.title = n === 1
-      ? '1 type error on this fn — see the Type errors panel'
-      : n + ' type errors on this fn — see the Type errors panel';
+      ? '1 type error on this fn'
+      : n + ' type errors on this fn';
     line.appendChild(warn);
+  }
+  // Failed-runs / lint badges — same place, same root-row rule, over the
+  // primed problem caches (editor-problems.js).
+  if (lineIsRoot && lineFnEntity) {
+    const failed = (typeof getFailureCountForFnId === 'function') ? getFailureCountForFnId(lineFnEntity.id) : 0;
+    if (failed > 0) {
+      const b = document.createElement('span');
+      b.className = 'failed-run-badge';
+      b.textContent = '✕' + failed;
+      b.title = failed + ' unresolved failed run' + (failed === 1 ? '' : 's') + ' — see the Runs tab';
+      line.appendChild(b);
+    }
+    const lint = (typeof getLintCountForFnId === 'function') ? getLintCountForFnId(lineFnEntity.id) : 0;
+    if (lint > 0) {
+      const b = document.createElement('span');
+      b.className = 'lint-badge';
+      b.textContent = '⚐' + lint;
+      b.title = lint + ' lint finding' + (lint === 1 ? '' : 's') + ' — see the Inspector';
+      line.appendChild(b);
+    }
   }
   if (typeof createMoreActionsTrigger === 'function') {
     const trigger = createMoreActionsTrigger({

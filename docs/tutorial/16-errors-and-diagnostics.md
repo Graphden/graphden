@@ -31,6 +31,12 @@ the graph, and the diagnostic rides alongside it (lesson 05 — "a
 diagnostic, not a wall"). A failed run is the opposite: nothing was
 written, something was attempted and threw.
 
+All three are also **lenses** in the Explorer (Lesson 17): the
+**✕ failed** / **⚠ type errors** / **⚐ lint** chips narrow the tree to
+the fns involved, each namespace and each row carrying its count — so
+the drawer is where you read the details, the tree is where you see
+where they are.
+
 A lint finding is neither: nothing failed and nothing is mistyped —
 the graph simply already contains what you just built, or holds a
 private helper that no longer earns its place. It is advice, so it is

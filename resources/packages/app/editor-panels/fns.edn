@@ -597,6 +597,19 @@
    :args {:warnings {:parent :branch-lint-warnings :args {:fresh {:value true} :suppressed :_plint-suppressed}}
           :suppressed :_plint-suppressed}}
 
+  ;; --- JSON twin for the lint LENS: the same warnings the tab renders
+  ;;     (the client re-primes per graph load, after runs, on drawer open).
+  {:name :_api-lint-data
+   :description "Fresh read, like the tab: the lens caches are primed right after the writes that created the findings, exactly when the per-ctx snapshot may still lag."
+   :parent :branch-lint-warnings
+   :args {:fresh {:value true} :suppressed :_plint-suppressed}}
+
+  {:name :api-lint-handler
+   :lambda-params []
+   :description "Ring handler for GET /api/lint — the current branch's graph-lint warnings as JSON (`[{:rule :message :weight :fn-ids :fns [{:id :name :ns}]} …]`), for the editor's lint lens counts."
+   :parent :json-handler
+   :args {:data :_api-lint-data}}
+
   {:name :_partial-lint-handler
    :lambda-params []
    :description "Ring handler for GET /partials/lint — the current branch's graph-lint warnings as text/html. Auth-required (route side)."

@@ -44,6 +44,10 @@
     :_types-usages-apply :abs :add :all-rich-types :and :api-rich-types
     :assert :assert-eq :assert-some :assoc :assoc-in :atom :auth-active?
     :authenticate-request :blank? :branch-diagnostics-flat
+    ;; :branch-lint-warnings reads the branch's graph snapshot; its rows
+    ;; carry fn names / ids / the engine's message — server-derived, and
+    ;; the `suppressed` arg only FILTERS them, never flows through.
+    :branch-lint-warnings
     :brotli-bytes :build-form
     ;; Cached read of the fixed build artifact — no caller content.
     :build-hashes-raw :byte-count

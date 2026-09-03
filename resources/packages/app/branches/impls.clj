@@ -250,7 +250,9 @@
    `:skipped` audit) is graph composition (`:_merge-apply-record`)."
   [source-branch-id target-branch-id resolutions]
   (cr/record-effect! :db)
-  (let [storage (vs/switch-branch (request/require-storage ctx) target-branch-id)
+  (let [t0 (System/nanoTime)
+        ms-since (fn [t] (/ (- (System/nanoTime) t) 1e6))
+        storage (vs/switch-branch (request/require-storage ctx) target-branch-id)
         ;; Error-tolerance Phase 5 — when the TARGET branch row carries
         ;; `:forbid-invalid?`, refuse while recorded type diagnostics
         ;; exist on either side (throws :merge-protection-violation).
@@ -262,9 +264,18 @@
         ;; non-author-unless-allowed) approvals (throws
         ;; :branch/approval-required). Same atomic boundary + target
         ;; storage as the branch-policy gate above.
-        _ (merge-policy/validate-approval-policy! storage source-branch-id)]
-    (vs/merge-branch! storage source-branch-id
-                      {:conflict-resolutions resolutions})))
+        _ (merge-policy/validate-approval-policy! storage source-branch-id)
+        policy-ms (ms-since t0)
+        t1 (System/nanoTime)
+        record (vs/merge-branch! storage source-branch-id
+                                 {:conflict-resolutions resolutions})]
+    ;; Phase timings — the merge is the slowest write in the product
+    ;; (~2 s on a 5k-fn self-host graph, ~8 s on the cloud demo) and
+    ;; nothing said where the time went. Counts only, no tenant data.
+    (log/info "merge commit"
+              {:source source-branch-id :target target-branch-id
+               :policy-ms (long policy-ms) :merge-ms (long (ms-since t1))})
+    record))
 
 
 (defn- run-merge-post-commit!
@@ -274,13 +285,21 @@
    Everything thread-hostile (dynamic router / org / bump-log state)
    is CAPTURED by the caller on the request thread and passed in."
   [ctx router request-org merge-bumps source-branch-id target-branch-id]
-  (let [affected (mrg/merge-affected-fn-ids
-                   (branches/base-storage ctx) source-branch-id)]
+  (let [t0 (System/nanoTime)
+        timings (atom {})
+        lap! (fn [k t] (swap! timings assoc k (long (/ (- (System/nanoTime) t) 1e6))))
+        affected (mrg/merge-affected-fn-ids
+                   (branches/base-storage ctx) source-branch-id)
+        _ (lap! :affected-ms t0)]
     (when (seq affected)
-      (let [target-ctx (if router
+      (let [t-ctx (System/nanoTime)
+            target-ctx (if router
                          (br/ctx-for router target-branch-id)
-                         ctx)]
+                         ctx)
+            _ (lap! :ctx-for-ms t-ctx)
+            t-inv (System/nanoTime)]
         (exec-ctx/invalidate-graph-cache! target-ctx affected)
+        (lap! :invalidate-ms t-inv)
         ;; The target's rich-types SLICE learned nothing from the
         ;; merged fns (their checks ran under the SOURCE's slice) —
         ;; and the default branch's entry is pinned, so no rebuild
@@ -288,8 +307,10 @@
         ;; the target's own slice (async, bounded), under the tenant
         ;; org captured on the request thread so the PER-ORG slice
         ;; learns them too.
-        (tc/with-org request-org
-                     (br/recheck-ctx-types! target-ctx target-branch-id affected)))
+        (let [t-re (System/nanoTime)]
+          (tc/with-org request-org
+                       (br/recheck-ctx-types! target-ctx target-branch-id affected))
+          (lap! :recheck-ms t-re)))
       ;; Cross-pod: the local invalidate + restart-services-depending-on!
       ;; below fire only on THIS pod. A merge writes no per-fn NOTIFY of
       ;; its own (registries heal cross-pod via the graph epoch), but a
@@ -300,35 +321,46 @@
       ;; (init.services/on-notify). org-id rides along for the SSE relay's
       ;; per-org fan-out, exactly as the edit path does.
       (when-let [emit (:notify-emitter ctx)]
-        (let [branch-str (str target-branch-id)
+        (let [t-em (System/nanoTime)
+              branch-str (str target-branch-id)
               org-id (:org-id (sp/read-entity (branches/base-storage ctx)
                                               :branch target-branch-id))]
           (doseq [fid affected]
             (emit (cond-> {:kind :fn :op :invalidate :id (str fid)
                            :branch-id branch-str}
-                    org-id (assoc :org-id org-id)))))))
+                    org-id (assoc :org-id org-id))))
+          (lap! :notify-ms t-em))))
     (try
-      ;; ONLY the services whose closure the merge touched — the same delta
-      ;; the invalidation above used, the same walk the edit path and the
-      ;; cross-pod hook run. This used to restart EVERY running service on
-      ;; the target branch: on the cloud every org's `main` IS the shared
-      ;; main, so a tenant merging a probe fn restarted the platform's own
-      ;; `web-server` — the merger got a 502 (its socket died with the
-      ;; listener) and everybody else a blip (prod log, 2026-09-03).
-      (when (seq affected)
-        (recon/restart-services-depending-on! ctx recon/running (set affected)
-                                              target-branch-id))
+      (let [t-rs (System/nanoTime)]
+        ;; ONLY the services whose closure the merge touched — the same delta
+        ;; the invalidation above used, the same walk the edit path and the
+        ;; cross-pod hook run. This used to restart EVERY running service on
+        ;; the target branch: on the cloud every org's `main` IS the shared
+        ;; main, so a tenant merging a probe fn restarted the platform's own
+        ;; `web-server` — the merger got a 502 (its socket died with the
+        ;; listener) and everybody else a blip (prod log, 2026-09-03).
+        (when (seq affected)
+          (recon/restart-services-depending-on! ctx recon/running (set affected)
+                                                target-branch-id))
+        (lap! :restart-ms t-rs))
       (catch Exception e
         ;; Restart is observability-grade — the merge already
         ;; succeeded; surface the failure but don't fail the API.
         (log/warn e "post-merge service restart failed"
-                  {:target-branch-id target-branch-id}))))
-  ;; Eager work done — mark this merge's bumps applied. `merge-bumps`
-  ;; was captured on the REQUEST thread: dynamic bindings don't convey
-  ;; to a raw Thread, so the 1-arity (request-log-draining) note would
-  ;; see nothing here.
-  (br/note-graph-epoch-validated!
-    (request/require-storage ctx) merge-bumps))
+                  {:target-branch-id target-branch-id})))
+    ;; Eager work done — mark this merge's bumps applied. `merge-bumps`
+    ;; was captured on the REQUEST thread: dynamic bindings don't convey
+    ;; to a raw Thread, so the 1-arity (request-log-draining) note would
+    ;; see nothing here.
+    (let [t-note (System/nanoTime)]
+      (br/note-graph-epoch-validated!
+        (request/require-storage ctx) merge-bumps)
+      (lap! :note-epoch-ms t-note))
+    (log/info "merge post-commit"
+              (assoc @timings
+                     :target target-branch-id
+                     :affected (count affected)
+                     :total-ms (long (/ (- (System/nanoTime) t0) 1e6))))))
 
 
 (defbase merge-post-commit!

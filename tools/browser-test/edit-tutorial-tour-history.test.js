@@ -1,9 +1,9 @@
-// Lessons 22 and 16 — version history, and the two error panels.
+// Lessons 22 and 16 — version history, and the diagnostics bar's three panels.
 //
 // Both lessons are about surfaces that answer "what happened": the ⌛
 // popover (every version row of a fn, across branches, with restore) and
-// Operate → Errors / Type errors (runs that failed, edits that don't
-// type-check). They were the last two shipped user surfaces with no lesson
+// the diagnostics drawer's Failed runs / Type errors / Lint (runs that
+// failed, edits that don't type-check, definitions the graph already has). They were the last two shipped user surfaces with no lesson
 // at all, so they get a walk like every other lesson: the steps are
 // performed for real, and the tour's own checks decide whether each one
 // counted.
@@ -216,9 +216,9 @@ async function openVersionHistory(page) {
     await finishAndDelete(page);
     console.log('  lesson 23: walked — two edits, restore, and the extra row it wrote');
 
-    // ---------- Lesson 16 — the two error panels ----------
+    // ---------- Lesson 16 — the three diagnostics panels ----------
     await page.goto(BASE + '/?tutorial=16');
-    await waitTourTitle(page, 'Two kinds of wrong', 150000);
+    await waitTourTitle(page, 'Three kinds of wrong', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 16 opening Next');
 
     await waitTourTitle(page, 'Something that fails', 30000);
@@ -286,7 +286,7 @@ async function openVersionHistory(page) {
     assert(runReady.persisted,
       '“Save to history” is ticked — an unticked failure never reaches Errors');
     await page.click('.execute-popover.visible .execute-run-btn');
-    await waitTourTitle(page, 'Open Errors', 150000);
+    await waitTourTitle(page, 'Open Failed runs', 150000);
 
     await openOperateSection(page, 'errors');
     await waitTourTitle(page, 'Read the row', 60000);
@@ -320,9 +320,16 @@ async function openVersionHistory(page) {
     assert(await clickTourButton(page, 'Next'), 'lesson 16 static Next');
     await waitTourTitle(page, 'Open Type errors', 30000);
     await openOperateSection(page, 'type-errors');
+    await waitTourTitle(page, 'And what already exists', 60000);
+    // The Lint tab — the graph lint's warnings for the branch; the tour's
+    // dom check only asks that the section is open, empty is its normal
+    // state here (nothing in the tutorial fns duplicates anything).
+    await openOperateSection(page, 'lint');
+    await waitTourTitle(page, 'You get to disagree', 60000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 16 lint Next');
     await waitTourTitle(page, 'What each panel answers', 60000);
     await finishAndDelete(page);
-    console.log('  lesson 16: walked — a persisted failure in Errors, both panels opened');
+    console.log('  lesson 16: walked — a persisted failure in Failed runs, all three panels opened');
 
     console.log('PASS');
   } catch (err) {

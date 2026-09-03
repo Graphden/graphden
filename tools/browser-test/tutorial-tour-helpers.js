@@ -826,7 +826,7 @@ async function openAccountMenu(page) {
 // The code diagnostics live in the Build-surface drawer under the canvas
 // (#gd-diag-drawer), not on the Organization surface — route them there so
 // call sites can keep saying openOperateSection('tests') etc.
-const DIAG_SECTIONS = new Set(['errors', 'type-errors', 'tests', 'debug']);
+const DIAG_SECTIONS = new Set(['errors', 'type-errors', 'tests', 'debug', 'lint']);
 
 async function openDiagnosticsSection(page, section) {
   await page.waitForSelector('#gd-diag-nav button[data-section="' + section + '"]',

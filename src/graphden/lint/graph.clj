@@ -183,24 +183,45 @@
 
 
 (def ^:private memo
-  "One-entry memo: the last snapshot object linted and its result. The
-   snapshot is replaced (not mutated) on every graph write, so identity
-   is the freshness check; a different suppression set recomputes."
+  "One-entry memo for the CACHED path: the last snapshot object linted
+   and its result. The snapshot is replaced (not mutated) on every graph
+   write, so identity is the freshness check; a different suppression
+   set recomputes."
   (atom nil))
 
 
+(defn- ns-rows
+  [ctx]
+  (vec (sp/query-entities (request/require-storage ctx) :ns {})))
+
+
 (defn lint-branch
-  "The current branch's lint warnings, off the request's graph
-   snapshot. Recomputed only when the snapshot object or the
-   suppression set changed."
-  [ctx suppress]
-  (let [graph (types-api/cached-or-load-graph ctx)
-        suppress (set suppress)
-        hit @memo]
-    (if (and hit (identical? (:graph hit) graph) (= (:suppress hit) suppress))
-      (:findings hit)
-      (let [storage (request/require-storage ctx)
-            ns-rows (vec (sp/query-entities storage :ns {}))
-            findings (lint-graph graph ns-rows suppress)]
-        (reset! memo {:graph graph :suppress suppress :findings findings})
-        findings))))
+  "The current branch's lint warnings.
+
+   Two sources, one engine:
+
+   - `:fresh? true` — read the branch straight from the request's
+     storage (`load-graph-entities-uncached`: versioned, org-scoped),
+     no memo. The per-ctx graph cache is spliced AFTER a write's
+     response returns, so a panel opened right after an edit would
+     otherwise show the pre-edit graph; a fresh read costs a few
+     hundred ms and the drawer is opened deliberately. The Lint tab
+     uses this.
+   - `:fresh? false` (default) — the per-ctx graph snapshot
+     (`cached-or-load-graph`), recomputed only when the snapshot object
+     or the suppression set changed. Cheap enough for a per-selection
+     surface — the inspector's Lint section."
+  ([ctx suppress] (lint-branch ctx suppress {}))
+  ([ctx suppress {:keys [fresh?]}]
+   (let [suppress (set suppress)]
+     (if fresh?
+       (lint-graph (types-api/load-graph-entities-uncached (request/require-storage ctx))
+                   (ns-rows ctx)
+                   suppress)
+       (let [graph (types-api/cached-or-load-graph ctx)
+             hit @memo]
+         (if (and hit (identical? (:graph hit) graph) (= (:suppress hit) suppress))
+           (:findings hit)
+           (let [findings (lint-graph graph (ns-rows ctx) suppress)]
+             (reset! memo {:graph graph :suppress suppress :findings findings})
+             findings)))))))

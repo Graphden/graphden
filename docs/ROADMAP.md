@@ -90,6 +90,11 @@ Launch-order refinements agreed 2026-07-20:
    `:type-warnings` + the editor surfaces + execute refusal +
    `:forbid-invalid?` branch merge policy + the ctx-build recompute).
    See § Future Work → Error Tolerance.
+   **Graph lint** joined the same drawer 2026-09-03 — duplicate
+   definitions (exact, and after private-helper expansion) and
+   unreferenced privates over the live branch, `bb graph-lint` over the
+   package corpus in CI, "Not an issue" stored in the graph as the
+   `lint-suppressions` const. See [GRAPH_LINT.md](GRAPH_LINT.md).
 4. **Debug/observability** with the PHILOSOPHY § Debugging
    constraints (per-fn opt-in, sampling, `:secret` auto-skip,
    size/TTL limits) — **P1 shipped**: execution-path capture — the

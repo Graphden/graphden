@@ -397,7 +397,9 @@
   {:name :branch-lint-warnings
    :description "The graph lint's WARNINGS over the current branch (docs/GRAPH_LINT.md) as display rows — `[{:rule :message :weight :fn-ids :fn-ids-csv :fns [{:id :name :ns} …]} …]`, minus the findings listed in `:suppressed`. One `lint.graph/lint-branch` call over the request's graph snapshot; recomputed only when the snapshot or the suppression set changed."
    :args {:suppressed {:type [:list :jsonb]
-                       :description "Findings marked as not-an-issue — the `lint-suppressions` const's value, `[{:rule <text> :fn-ids [<uuid-text> …]} …]`."}}
+                       :description "Findings marked as not-an-issue — the `lint-suppressions` const's value, `[{:rule <text> :fn-ids [<uuid-text> …]} …]`."}
+          :fresh {:type :bool :required false
+                  :description "true — read the branch straight from storage (the drawer: the per-ctx snapshot is spliced only after a write's response, so it can lag the edit just made); false/absent — the memoised snapshot (the inspector, per selection)."}}
    :return-type [:list :keyword-map]
    :effects #{:db}}
 
@@ -592,7 +594,7 @@
   ;; --- GET: warnings against the stored suppressions ---
   {:name :_plint-html
    :parent :_plint-render
-   :args {:warnings {:parent :branch-lint-warnings :args {:suppressed :_plint-suppressed}}
+   :args {:warnings {:parent :branch-lint-warnings :args {:fresh {:value true} :suppressed :_plint-suppressed}}
           :suppressed :_plint-suppressed}}
 
   {:name :_partial-lint-handler
@@ -666,7 +668,7 @@
           :else :_plint-supp-update}}
   {:name :_plint-after-suppress-html
    :parent :_plint-render
-   :args {:warnings {:parent :branch-lint-warnings :args {:suppressed :_plint-supp-appended}}
+   :args {:warnings {:parent :branch-lint-warnings :args {:fresh {:value true} :suppressed :_plint-supp-appended}}
           :suppressed :_plint-supp-appended}}
   {:name :_plint-suppress-then-html
    :parent :do
@@ -691,7 +693,7 @@
           :data {:parent :zipmap :args {:keys [{:value :value}] :vals [:_plint-supp-removed]}}}}
   {:name :_plint-after-restore-html
    :parent :_plint-render
-   :args {:warnings {:parent :branch-lint-warnings :args {:suppressed :_plint-supp-removed}}
+   :args {:warnings {:parent :branch-lint-warnings :args {:fresh {:value true} :suppressed :_plint-supp-removed}}
           :suppressed :_plint-supp-removed}}
   {:name :_plint-restore-then-html
    :description "The entry is read FIRST as its own step: inside the `:filter` predicate it is a captured closure arg, invisible to the handler's free-arg surface, and `:lambda-params [:request]` must name a real free arg (`:compile/invalid-lambda-params` otherwise)."

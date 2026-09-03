@@ -155,7 +155,13 @@ failed runs".
 
 The whole flow is graph composition (`app/editor-panels/fns.edn`,
 `_plint-*`) over one base-fn, `:branch-lint-warnings`, whose impl is a
-single `lint.graph/lint-branch` call. Rendering is parametrised by
+single `lint.graph/lint-branch` call. The drawer asks for `:fresh
+true`: the per-ctx graph snapshot is spliced only after a write's
+response has returned, so a panel opened right after an edit would
+otherwise lint the pre-edit graph — the tab reads the branch straight
+from storage (a few hundred ms, and the drawer is opened
+deliberately). The inspector section, rendered on every selection,
+takes the memoised snapshot instead. Rendering is parametrised by
 `:warnings` / `:suppressed` free args so the two POST handlers render
 from the list they just wrote — the store's own thunk was forced
 before the write (ADR-thunk-once), so re-reading it would show the

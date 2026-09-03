@@ -78,6 +78,9 @@
         (is (= (sort [a b]) (:fn-ids f)))
         ;; root-namespace rows carry the empty namespace in the live graph
         (is (= #{["" :lint-probe-a] ["" :lint-probe-b]} (set (:fns f))))))
+    (testing "the fresh (storage) path and the cached (snapshot) path agree"
+      (is (= (map :fn-ids (lg/lint-branch ctx #{} {:fresh? true}))
+             (map :fn-ids (lg/lint-branch ctx #{})))))
     (testing "the platform's own fn-defs raise nothing (the corpus gate keeps them clean)"
       (is (empty? (remove (fn [f] (some #{a b} (:fn-ids f))) (lg/lint-branch ctx #{})))))
     (testing "the entry the Lint panel stores hides the finding"

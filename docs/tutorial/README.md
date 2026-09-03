@@ -58,7 +58,7 @@ of order.
 | 13 | [Effects and the `:secret` type-marker](13-effects-and-secrets.md) | ✅ written · ▶ interactive |
 | 14 | [Tests — the `tests` namespace](14-tests.md) | ✅ written · ▶ interactive |
 | 15 | [Debugging: traces, the call tree, and catching a request](15-debugging-traces.md) | ✅ written · ▶ interactive |
-| 16 | [When something breaks: the two error panels](16-errors-and-diagnostics.md) | ✅ written · ▶ interactive |
+| 16 | [When something breaks, and when it just repeats: the diagnostics bar](16-errors-and-diagnostics.md) | ✅ written · ▶ interactive |
 
 ### The editor
 

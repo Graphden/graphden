@@ -1401,7 +1401,8 @@
    :parent :vec
    :args {:coll {:parent :filter
                  :args {:pred :_insp-lint-names-me?
-                        :coll {:parent :branch-lint-warnings :args {:suppressed :_plint-suppressed}}}}}}
+                        :coll {:parent :branch-lint-warnings
+                               :args {:fresh {:value false} :suppressed :_plint-suppressed}}}}}}
   {:name :_insp-lint-row
    :parent :hiccup
    :args {:tag {:value "div"}

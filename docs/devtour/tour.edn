@@ -833,7 +833,13 @@
            git diff is a graph diff. Read the seq-order printer note — the
            parser derives slot POSITIONS from map iteration order, so the
            printer must not 'canonicalise' nested keys. `graphden.cli`
-           (export/import/push/pull) is the HTTP-only round-trip over this."}]}
+           (export/import/push/pull) is the HTTP-only round-trip over this."}
+    {:ns graphden.lint.core :defn lint
+     :say "The graph's own linter, run over the same loader output at CI time
+           (`bb graph-lint`): duplicate definitions — exact, and after inlining
+           `_`-private helpers — plus unreferenced privates and pure aliases.
+           One engine over EDN-shape fn-defs, so the editor's per-branch graph
+           can be linted through `reconstruct-fn-def` too. docs/GRAPH_LINT.md."}]}
 
   {:id :boot
    :title "Boot & lifecycle"

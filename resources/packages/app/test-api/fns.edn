@@ -151,22 +151,16 @@
    :args {:tag {:value "span"}
           :attrs :_ptst-dot-attrs
           :children ["●"]}}
-  {:name :_ptst-e-name
-   :parent :get
-   :args {:coll {:as :item} :key {:value :fn-name} :default {:value "?"}}}
-  {:name :_ptst-e-href
-   :parent :str
-   :args {:parts [{:value "#"} :_ptst-e-name]}}
   {:name :_ptst-link-attrs
    :parent :assoc
    :args {:map {:value {:class "tests-fn"}}
           :key {:value :href}
-          :value :_ptst-e-href}}
+          :value :item-fn-href}}
   {:name :_ptst-link
    :parent :hiccup
    :args {:tag {:value "a"}
           :attrs :_ptst-link-attrs
-          :children [:_ptst-e-name]}}
+          :children [:item-fn-name]}}
   {:name :_ptst-e-error
    :parent :get
    :args {:coll {:as :item} :key {:value :error} :default {:value ""}}}

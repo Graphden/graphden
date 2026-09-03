@@ -328,6 +328,10 @@
   {:doc "Regenerate the developer code-tour docs/devtour/index.html from docs/devtour/tour.edn. Anchors resolve by symbol (ns + defn); the anchored form's real source is baked in. Run after editing tour.edn or a toured form."
    :task (binding [*command-line-args* ["build"]] (load-file "scripts/devtour.clj"))}
 
+  graph-lint
+  {:doc "Graph linters over the first-party package corpus (no DB): duplicate definitions (exact and after private-helper expansion), unreferenced private fn-defs, private aliases. Warnings fail unless allowlisted in graphden.lint.corpus/allowed-warnings; a stale allowlist entry fails too. ~10s."
+   :task (clojure "-M:dev -m graphden.lint.corpus")}
+
   devtour-check
   {:doc "CI guard for the developer code-tour: every tour.edn anchor still resolves to a unique form AND docs/devtour/index.html matches a fresh regeneration (fails if source drifted from the baked tour). Fix with `bb devtour`."
    :task (binding [*command-line-args* ["check"]] (load-file "scripts/devtour.clj"))}

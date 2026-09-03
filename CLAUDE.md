@@ -161,6 +161,7 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/adr/AUDIT-name-vs-id-resolution.md](docs/adr/AUDIT-name-vs-id-resolution.md) | Closure audit of internal name-vs-id resolution + the `id_resolution_guard_test` CI guard | Before making an internal mechanism resolve/match/dispatch by NAME instead of id |
 | [docs/adr/ADR-parent-set-identity.md](docs/adr/ADR-parent-set-identity.md) | Why `:parent-ids` stays an UNVERSIONED identity junction (guarded by `reparent-cross-branch-rej`); the copy-on-write fork door | Before touching `reparent-cross-branch-rej` or proposing versioned parent-ids / branch-local inheritance |
 | [docs/adr/ADR-versioning-vs-offtheshelf.md](docs/adr/ADR-versioning-vs-offtheshelf.md) | Why the branch/versioning system stays bespoke on Postgres — not Dolt / Datomic / XTDB / temporal tables | Before proposing an off-the-shelf versioned DB or replacing `VersionedStorage` |
+| [docs/GRAPH_LINT.md](docs/GRAPH_LINT.md) | The graph linters — duplicate-definition (shallow + after helper expansion), unreferenced-private, private-alias; `bb graph-lint` gate, weighting, the planned per-branch editor surface | Before adding a fn-def that looks like an existing one, when `bb graph-lint` fails, or before touching `src/graphden/lint/` |
 | [docs/PERF_BUDGETS.md](docs/PERF_BUDGETS.md) | The perf regression gate — budgets structural COUNTS (full-clears, SQL round trips), not timings; `bb perf` / `perf/budgets.edn` | Before adding any perf assertion, or when `bb perf` fails |
 | [docs/PERF_NOTES.md](docs/PERF_NOTES.md) | Executor hot-path investigation — two failed point-fixes, real-fix sketch held in reserve | Before allocating perf work — re-benchmark first |
 | [docs/LAYOUT.md](docs/LAYOUT.md) | Graph-editor layout pipeline (Stages 1–7) | When touching layout impl or editor frontend |
@@ -235,6 +236,9 @@ bb visual-update # Refresh visual baselines after intentional UI changes
                 #   Baselines must be INSTANCE-INDEPENDENT — the landing gate runs
                 #   the same suite against a fresh isolated stack (`bb test-visual`),
                 #   so a snapshot of whatever data your box happens to hold reds it.
+bb graph-lint   # Graph linters over the fns.edn corpus (no DB, ~10s): duplicate
+                #   definitions (exact + after private-helper expansion), unreferenced
+                #   privates, pure aliases — docs/GRAPH_LINT.md. In bb ci.
 bb devtour      # Regenerate the developer code-tour docs/devtour/index.html from tour.edn
 bb devtour-check # (in bb ci) fail if a tour anchor broke or index.html drifted
 

@@ -94,6 +94,14 @@
   ;;   * `:_hiccup-normalize-node` — wrap the whole transform with
   ;;     custom pre/post-processing.
 
+  ;; The empty placeholder every conditional section collapses to —
+  ;; ONE definition so a `:children` vector keeps its shape (and its
+  ;; type) whichever partial is rendering.
+  {:name :hidden-span
+   :description "An empty `<span hidden=\"1\">` — the `:else` of a conditional section that renders nothing, keeping the surrounding children vector's shape stable."
+   :parent :hiccup
+   :args {:tag {:value "span"} :attrs {:value {:hidden "1"}} :children {:value []}}}
+
   {:name :hiccup-normalize
    :description "Walk a hiccup tree bottom-up; keywordize string tags + string attr-keys; wrap string children of `<script>`/`<style>` in `:h-raw` so render emits them verbatim. Pure graph composition over `:postwalk` + element-aware per-node transform."
    :parent :postwalk

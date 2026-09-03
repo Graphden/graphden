@@ -35,6 +35,7 @@ records — ADRs, RFCs, perf notes, migration ledgers.)
 | Topic | Doc |
 |---|---|
 | Writing base-fns & fn-defs | [PACKAGES.md](PACKAGES.md) |
+| Checking a composition against what the graph already defines (`bb graph-lint`) | [GRAPH_LINT.md](GRAPH_LINT.md) |
 | The type system | [TYPES.md](TYPES.md) |
 | Effects & secrets | [SECRETS.md](SECRETS.md) |
 | Branches, diff, merge | [VERSIONING.md](VERSIONING.md) |

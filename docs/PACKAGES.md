@@ -269,6 +269,11 @@ execution context:
 
 ### 1. Use Inheritance to Eliminate Duplication (DRY)
 
+> `bb graph-lint` mechanises this rule: it reports fn-defs whose structure
+> is already defined elsewhere — exactly, or once their `_`-private helpers
+> are inlined — and fails CI above a small weight. See
+> [GRAPH_LINT.md](GRAPH_LINT.md) for the rules and how to read a finding.
+
 When multiple fn-defs share structure, extract a common ancestor:
 
 **Problem — Duplication:**

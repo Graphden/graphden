@@ -80,6 +80,20 @@
                  :args {:string :_request-body :keywordize {:value true}}}
           :else nil}}
 
+  ;; The body fields every JSON-driven write handler reads, defined ONCE
+  ;; — fork / install / publish / update (registry), secret create,
+  ;; branch create all spell out `(str (:name body))` otherwise.
+  {:name :json-body-name
+   :description "Nil-safe `(str (:name body))` of the request's JSON body. Free arg: `:request`."
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll :parse-json-body :key {:value :name} :default nil}}}}
+
+  {:name :row-id-name-pair
+   :description "HOF callback per fn-row — `[(:id row) (:name row)]`, so `:into {}` over a row seq folds into an `{id → name}` index."
+   :parent :vec
+   :args {:coll [{:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+                 {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}]}}
+
   {:name :str-to-uuid
    :description "Coerce a string to `java.util.UUID`. Throws on malformed input."
    :args {:string {:type :text :description "UUID in canonical 8-4-4-4-12 form."}}
@@ -131,22 +145,6 @@
                                                :args {:coll {:as :form-data}
                                                       :key {:value :name}
                                                       :default nil}}}}]}}
-          :else {:value {}}}}
-
-  {:name :_parse-fn-form-parent-id-raw
-   :parent :get
-   :args {:coll {:as :form-data} :key {:value :parent-id} :default nil}}
-
-  {:name :_parse-fn-form-parent-id-fragment
-   :description "Assoc :parent-id ONLY when non-blank (no `contains?` check). Different from the ns parser."
-   :parent :if
-   :args {:test {:parent :not
-                 :args {:value {:parent :blank?
-                                :args {:string :_parse-fn-form-parent-id-raw}}}}
-          :then {:parent :zipmap
-                 :args {:keys [{:value :parent-id}]
-                        :vals [{:parent :parse-uuid
-                                :args {:string :_parse-fn-form-parent-id-raw}}]}}
           :else {:value {}}}}
 
   {:name :_parse-fn-form-namespace-id-raw
@@ -362,7 +360,7 @@
    :parent :merge
    :args {:maps [{:value {}}
                  :_form-name-fragment
-                 :_parse-fn-form-parent-id-fragment
+                 :_parse-form-parent-id-fragment
                  :_parse-fn-form-namespace-id-fragment
                  :_form-description-fragment
                  :_parse-fn-form-return-type-fragment
@@ -380,20 +378,20 @@
   ;; field, a custom `:slug`, …) edit the fragment list instead
   ;; of Clojure.
 
-  {:name :_parse-ns-form-parent-id-raw
+  {:name :_parse-form-parent-id-raw
    :parent :get
    :args {:coll {:as :form-data} :key {:value :parent-id} :default nil}}
 
-  {:name :_parse-ns-form-parent-id-fragment
-   :description "`{:parent-id <uuid>}` when form-data's `:parent-id` is non-blank; else `{}`. Empty-as-clear is OUT of band — the create/update path interprets a missing key as 'no change'."
+  {:name :_parse-form-parent-id-fragment
+   :description "`{:parent-id <uuid>}` when form-data's `:parent-id` is non-blank; else `{}` — shared by the fn and ns parsers. Empty-as-clear is OUT of band — the create/update path interprets a missing key as 'no change'."
    :parent :if
    :args {:test {:parent :not
                  :args {:value {:parent :blank?
-                                :args {:string :_parse-ns-form-parent-id-raw}}}}
+                                :args {:string :_parse-form-parent-id-raw}}}}
           :then {:parent :zipmap
                  :args {:keys [{:value :parent-id}]
                         :vals [{:parent :parse-uuid
-                                :args {:string :_parse-ns-form-parent-id-raw}}]}}
+                                :args {:string :_parse-form-parent-id-raw}}]}}
           :else {:value {}}}}
 
   {:name :parse-ns-from-form
@@ -401,7 +399,7 @@
    :parent :merge
    :args {:maps [{:value {}}
                  :_form-name-fragment
-                 :_parse-ns-form-parent-id-fragment
+                 :_parse-form-parent-id-fragment
                  :_form-description-fragment]
           :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
@@ -467,20 +465,7 @@
                                                        :default nil}}}}]}}
           :else {:value {}}}}
 
-  {:name :_parse-fn-slot-form-slot-id-fragment
-   :parent :if
-   :args {:test {:parent :contains?
-                 :args {:coll {:as :form-data} :key {:value :slot-id}}}
-          :then {:parent :zipmap
-                 :args {:keys [{:value :slot-id}]
-                        :vals [{:parent :parse-uuid
-                                :args {:string {:parent :get
-                                                :args {:coll {:as :form-data}
-                                                       :key {:value :slot-id}
-                                                       :default nil}}}}]}}
-          :else {:value {}}}}
-
-  {:name :_parse-fn-slot-form-position-fragment
+  {:name :_parse-form-position-fragment
    :description "`{:position (parse-int …)}` when form-data contains `:position`; else `{}`. `:parse-int` (Long/parseLong) throws NumberFormatException on non-numeric input — same semantics as `Integer/parseInt`; downstream catches reach the parse-error guard."
    :parent :if
    :args {:test {:parent :contains?
@@ -499,8 +484,8 @@
    :parent :merge
    :args {:maps [{:value {}}
                  :_form-fn-id-fragment
-                 :_parse-fn-slot-form-slot-id-fragment
-                 :_parse-fn-slot-form-position-fragment]
+                 :_parse-form-slot-id-fragment
+                 :_parse-form-position-fragment]
           :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
 
@@ -511,7 +496,7 @@
   ;; `:equal? "true"` for the three boolean flags, and a nullable
   ;; "true"-bool for `:required`.
 
-  {:name :_parse-bnd-form-slot-id-fragment
+  {:name :_parse-form-slot-id-fragment
    :parent :if
    :args {:test {:parent :contains?
                  :args {:coll {:as :form-data} :key {:value :slot-id}}}
@@ -524,41 +509,28 @@
                                                        :default nil}}}}]}}
           :else {:value {}}}}
 
-  {:name :_parse-bnd-form-value-raw
+  {:name :_parse-form-value-raw
    :parent :get
    :args {:coll {:as :form-data} :key {:value :value} :default nil}}
 
-  {:name :_parse-bnd-form-value-parsed
+  {:name :_parse-form-value-parsed
    :description "JSON-parse when non-blank; nil otherwise. Empty-as-clear."
    :parent :if
    :args {:test {:parent :not
                  :args {:value {:parent :blank?
-                                :args {:string :_parse-bnd-form-value-raw}}}}
+                                :args {:string :_parse-form-value-raw}}}}
           :then {:parent :parse-json
-                 :args {:string :_parse-bnd-form-value-raw
+                 :args {:string :_parse-form-value-raw
                         :keywordize {:value true}}}
           :else nil}}
 
-  {:name :_parse-bnd-form-value-fragment
+  {:name :_parse-form-value-fragment
    :parent :if
    :args {:test {:parent :contains?
                  :args {:coll {:as :form-data} :key {:value :value}}}
           :then {:parent :zipmap
                  :args {:keys [{:value :value}]
-                        :vals [:_parse-bnd-form-value-parsed]}}
-          :else {:value {}}}}
-
-  {:name :_parse-bnd-form-ref-fn-id-fragment
-   :parent :if
-   :args {:test {:parent :contains?
-                 :args {:coll {:as :form-data} :key {:value :ref-fn-id}}}
-          :then {:parent :zipmap
-                 :args {:keys [{:value :ref-fn-id}]
-                        :vals [{:parent :parse-uuid
-                                :args {:string {:parent :get
-                                                :args {:coll {:as :form-data}
-                                                       :key {:value :ref-fn-id}
-                                                       :default nil}}}}]}}
+                        :vals [:_parse-form-value-parsed]}}
           :else {:value {}}}}
 
   {:name :_parse-bnd-form-type-override-fn-id-fragment
@@ -631,9 +603,9 @@
    :parent :merge
    :args {:maps [{:value {}}
                  :_form-fn-id-fragment
-                 :_parse-bnd-form-slot-id-fragment
-                 :_parse-bnd-form-value-fragment
-                 :_parse-bnd-form-ref-fn-id-fragment
+                 :_parse-form-slot-id-fragment
+                 :_parse-form-value-fragment
+                 :_parse-form-ref-fn-id-fragment
                  :_parse-bnd-form-type-override-fn-id-fragment
                  :_form-description-fragment
                  :_parse-bnd-form-list-append-fragment
@@ -660,44 +632,7 @@
                                                        :default nil}}}}]}}
           :else {:value {}}}}
 
-  {:name :_parse-bli-form-position-fragment
-   :parent :if
-   :args {:test {:parent :contains?
-                 :args {:coll {:as :form-data} :key {:value :position}}}
-          :then {:parent :zipmap
-                 :args {:keys [{:value :position}]
-                        :vals [{:parent :parse-int
-                                :args {:s {:parent :get
-                                           :args {:coll {:as :form-data}
-                                                  :key {:value :position}
-                                                  :default nil}}}}]}}
-          :else {:value {}}}}
-
-  {:name :_parse-bli-form-value-raw
-   :parent :get
-   :args {:coll {:as :form-data} :key {:value :value} :default nil}}
-
-  {:name :_parse-bli-form-value-parsed
-   :description "JSON-parse the raw `:value` when non-blank; nil otherwise."
-   :parent :if
-   :args {:test {:parent :not
-                 :args {:value {:parent :blank?
-                                :args {:string :_parse-bli-form-value-raw}}}}
-          :then {:parent :parse-json
-                 :args {:string :_parse-bli-form-value-raw
-                        :keywordize {:value true}}}
-          :else nil}}
-
-  {:name :_parse-bli-form-value-fragment
-   :parent :if
-   :args {:test {:parent :contains?
-                 :args {:coll {:as :form-data} :key {:value :value}}}
-          :then {:parent :zipmap
-                 :args {:keys [{:value :value}]
-                        :vals [:_parse-bli-form-value-parsed]}}
-          :else {:value {}}}}
-
-  {:name :_parse-bli-form-ref-fn-id-fragment
+  {:name :_parse-form-ref-fn-id-fragment
    :parent :if
    :args {:test {:parent :contains?
                  :args {:coll {:as :form-data} :key {:value :ref-fn-id}}}
@@ -730,9 +665,9 @@
    :parent :merge
    :args {:maps [{:value {}}
                  :_parse-bli-form-binding-id-fragment
-                 :_parse-bli-form-position-fragment
-                 :_parse-bli-form-value-fragment
-                 :_parse-bli-form-ref-fn-id-fragment
+                 :_parse-form-position-fragment
+                 :_parse-form-value-fragment
+                 :_parse-form-ref-fn-id-fragment
                  :_parse-bli-form-literal-fragment]
           :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}

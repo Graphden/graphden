@@ -38,8 +38,8 @@
   ;; `:resolve-slot-effective-type` + `:current-slot-value` base-fns
   ;; expect. We only need `:binding-id` + `:item-id` from the URL —
   ;; the resolver looks up `:fn-id` / `:slot-id` off the binding row.
-  {:name :_partial-mismatch-parsed
-   :description "Synthesise the `:_value-form-parsed-shape` map for `:resolve-slot-effective-type` / `:current-slot-value` — `:fn-id` and `:slot-id` are derived off the binding row server-side."
+  {:name :_partial-binding-parsed
+   :description "Synthesise the `:_value-form-parsed-shape` map for `:resolve-slot-effective-type` / `:current-slot-value` — `:fn-id` and `:slot-id` are derived off the binding row server-side, `:item-id` propagated for list-item rows. Shared by the mismatch explainer and the standalone provenance popover (same URL params)."
    :parent :zipmap
    :args {:keys [{:value :binding-id} {:value :fn-id} {:value :slot-id} {:value :item-id}]
           :vals [:_partial-mismatch-binding-id
@@ -50,12 +50,12 @@
   {:name :_partial-mismatch-expected-type
    :description "Effective type at the slot edit site; nil when the binding-id doesn't resolve."
    :parent :resolve-slot-effective-type
-   :args {:parsed :_partial-mismatch-parsed}}
+   :args {:parsed :_partial-binding-parsed}}
 
   {:name :_partial-mismatch-current-value
    :description "The currently-bound value the mismatch is being reported against — read from `:binding.value` (or the item's `:value` when `:item-id` is set). Single source of truth: no JS payload."
    :parent :current-slot-value
-   :args {:parsed :_partial-mismatch-parsed}}
+   :args {:parsed :_partial-binding-parsed}}
 
   {:name :_partial-mismatch-candidate-type
    :description "Structural type expression of the bound value — `classify-literal` so `:subtype?` / `:describe-type-mismatch` can compare against `:_partial-mismatch-expected-type`."
@@ -186,7 +186,7 @@
                  :args {:tag {:value "div"}
                         :attrs {:value {:class "mismatch-explainer-leaf-more"}}
                         :children [:_partial-mismatch-diff-overflow-text]}}
-          :else :_hidden-span}}
+          :else :hidden-span}}
 
   ;; Per-leaf row — `:map` over the truncated leaf list. Each leaf is
   ;; `{:path :expected :actual}`. The `:as :leaf` rename gives the
@@ -251,7 +251,7 @@
                         :children [:_partial-mismatch-diff-leaves-head-div
                                    :_partial-mismatch-diff-leaf-rows
                                    :_partial-mismatch-diff-overflow-row]}}
-          :else :_hidden-span}}
+          :else :hidden-span}}
 
   ;; STEP 3 — provenance section. The 4-tier resolution chain
   ;; (override → unified → ref-return → slot) tells users WHERE the
@@ -401,7 +401,7 @@
    :parent :if
    :args {:test :_provenance-tier-applies?
           :then :_provenance-tier-row-built
-          :else :_hidden-span}}
+          :else :hidden-span}}
 
   {:name :_provenance-tier-rows
    :parent :map
@@ -466,7 +466,7 @@
                         :attrs {:value {:class "type-inline-resolution-inheritance"}}
                         :children [:_provenance-inh-head
                                    :_provenance-inh-rows]}}
-          :else :_hidden-span}}
+          :else :hidden-span}}
 
   {:name :_provenance-built
    :parent :hiccup
@@ -481,7 +481,7 @@
    :parent :if
    :args {:test :_provenance-some?
           :then :_provenance-built
-          :else :_hidden-span}}
+          :else :hidden-span}}
 
   ;; STEP 4 — Edit-action button. The partial route is `:get-auth-
   ;; required`, so reaching this partial means the user is signed in;
@@ -509,9 +509,10 @@
   ;; `:_provenance-section` chain. The prov chain reads `:parsed` as a
   ;; free-arg so other partials (e.g. `/partials/provenance`) can share
   ;; the same renderer with their own parsed-shape map.
-  {:name :_partial-mismatch-prov-section
+  {:name :_partial-binding-prov-section
+   :description "Binds `:parsed` for the generic `_provenance-section` chain — used by both the mismatch explainer and the standalone provenance popover."
    :parent :_provenance-section
-   :args {:parsed :_partial-mismatch-parsed}}
+   :args {:parsed :_partial-binding-parsed}}
 
   {:name :_partial-mismatch-fragment
    :description "Full popover hiccup — header + Expected + Got + Reason rows + diff-leaves + provenance section + Edit-action button, all server-rendered (steps 1-4 complete). JS post-swap binds click handlers on `[data-explainer-close]`, `[data-fn-id]` (provenance nav links), and `[data-edit-action]` (the Edit button → opens the inline value-edit popover)."
@@ -523,7 +524,7 @@
                      :_partial-mismatch-got-row
                      :_partial-mismatch-reason-row
                      :_partial-mismatch-diff-section
-                     :_partial-mismatch-prov-section
+                     :_partial-binding-prov-section
                      :_partial-mismatch-actions]}}
 
   {:name :_partial-mismatch-html
@@ -549,20 +550,6 @@
   ;; STEP 1 — header + Resolved-via section ONLY. Allowed-values
   ;; (closed-enum refinement) + slot-effect-bound (fn-type eff) are
   ;; step-2/3 of this migration.
-
-  {:name :_partial-provenance-parsed
-   :description "Same `:_value-form-parsed-shape` URL-param synth as `:_partial-mismatch-parsed` — `:fn-id` / `:slot-id` resolved server-side off the binding row, `:item-id` propagated for list-item rows."
-   :parent :zipmap
-   :args {:keys [{:value :binding-id} {:value :fn-id} {:value :slot-id} {:value :item-id}]
-          :vals [:_partial-mismatch-binding-id
-                 {:value nil}
-                 {:value nil}
-                 :_partial-mismatch-item-id]}}
-
-  {:name :_partial-provenance-prov-section
-   :description "Thin wrapper binding `:parsed` for the standalone provenance popover — shares the generic `_provenance-section` chain with `:_partial-mismatch-fragment`."
-   :parent :_provenance-section
-   :args {:parsed :_partial-provenance-parsed}}
 
   {:name :_partial-provenance-header
    :parent :const
@@ -655,14 +642,14 @@
    :parent :if
    :args {:test :_provenance-enum-some?
           :then :_provenance-enum-section-built
-          :else :_hidden-span}}
+          :else :hidden-span}}
 
   ;; Wrapper that binds `:parsed` for the new section — same pattern
-  ;; as `:_partial-provenance-prov-section`. Lets the fragment include
+  ;; as `:_partial-binding-prov-section`. Lets the fragment include
   ;; the section as a child without passing args at the hiccup level.
   {:name :_partial-provenance-enum-section
    :parent :_provenance-enum-section
-   :args {:parsed :_partial-provenance-parsed}}
+   :args {:parsed :_partial-binding-parsed}}
 
   ;; STEP 3 — Slot-effect-bound section. When the resolved slot type
   ;; is `[:fn args ret eff]` with a CONCRETE eff (not `:any`), surface
@@ -752,11 +739,11 @@
    :parent :if
    :args {:test :_provenance-eff-some?
           :then :_provenance-eff-section-built
-          :else :_hidden-span}}
+          :else :hidden-span}}
 
   {:name :_partial-provenance-eff-section
    :parent :_provenance-eff-section
-   :args {:parsed :_partial-provenance-parsed}}
+   :args {:parsed :_partial-binding-parsed}}
 
   {:name :_partial-provenance-fragment
    :description "Full provenance popover hiccup — header + Resolved-via section + Allowed-values section + Slot-effect-bound section. All server-rendered (steps 1-3 complete)."
@@ -764,7 +751,7 @@
    :args {:tag {:value "div"}
           :attrs {:value {:class "provenance-popover-content"}}
           :children [:_partial-provenance-header
-                     :_partial-provenance-prov-section
+                     :_partial-binding-prov-section
                      :_partial-provenance-enum-section
                      :_partial-provenance-eff-section]}}
 
@@ -921,7 +908,7 @@
                  :args {:tag {:value "div"}
                         :attrs {:value {:class "provenance-popover-narrative"}}
                         :children [:_rtr-narrative-text]}}
-          :else :_hidden-span}}
+          :else :hidden-span}}
 
   ;; --- owner nav-link ---------------------------------------------------
   ;; `a[data-fn-id]` — the same post-swap contract as the provenance
@@ -1055,7 +1042,7 @@
                         :attrs {:value {:class "provenance-popover-inputs"}}
                         :children [{:value [:div {:class "type-inline-resolution-head"} "Inputs"]}
                                    :_rtr-input-rows]}}
-          :else :_hidden-span}}
+          :else :hidden-span}}
 
   ;; --- assembly ---------------------------------------------------------
 
@@ -1079,7 +1066,7 @@
                         :children [:_rtr-intro
                                    :_rtr-narrative-div
                                    :_rtr-inputs-section]}}
-          :else :_hidden-span}}
+          :else :hidden-span}}
 
   {:name :_rtr-fragment
    :parent :hiccup
@@ -1434,13 +1421,10 @@
   ;; Shares the `:_insp-fn-id` / `:_insp-row` / `:_insp-entry` prefix.
   ;; =====================================================================
 
-  {:name :_iov-parent-ids
-   :parent :get
-   :args {:coll :_insp-row :key {:value :parent-ids} :default {:value []}}}
   {:name :_iov-has-parents?
    :parent :not
    :args {:value {:parent :empty?
-                  :args {:coll {:ref :_iov-parent-ids :type [:list :any]}}}}}
+                  :args {:coll {:ref :_insp-parent-ids :type [:list :any]}}}}}
 
   ;; --- first-NAMED-ancestor walk for an anonymous parent: the same
   ;;     depth-6 DFS the client ran, as a `:fix` worklist over
@@ -1544,7 +1528,7 @@
   {:name :_iov-parent-chips
    :parent :map
    :args {:func :_iov-parent-chip
-          :coll {:ref :_iov-parent-ids :type [:list :any]}}}
+          :coll {:ref :_insp-parent-ids :type [:list :any]}}}
 
   {:name :_iov-parents-row-shown
    :parent :hiccup
@@ -1563,10 +1547,8 @@
 
   ;; --- Returns: RAW type text; the client's formatServerTypeTexts
   ;;     prettifies `.gd-prov-mono` after the swap (raw kept in title).
-  {:name :_iov-return
-   :parent :get :args {:coll :_insp-entry :key {:value :return} :default nil}}
   {:name :_iov-return-some?
-   :parent :some? :args {:value :_iov-return}}
+   :parent :some? :args {:value :_insp-return}}
   {:name :_iov-returns-row-shown
    :parent :hiccup
    :args {:tag {:value "div"}
@@ -1578,7 +1560,7 @@
                              :children [{:parent :hiccup
                                          :args {:tag {:value "span"}
                                                 :attrs {:value {:class "gd-chip gd-chip-type gd-prov-mono"}}
-                                                :children [{:parent :pr-str :args {:value :_iov-return}}]}}]}}]}}
+                                                :children [{:parent :pr-str :args {:value :_insp-return}}]}}]}}]}}
   {:name :_iov-returns-row
    :parent :if
    :args {:test :_iov-return-some?

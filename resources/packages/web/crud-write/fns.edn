@@ -245,7 +245,8 @@
   ;; primitive). The DB reads are gated behind a lazy `:and` so that
   ;; non-fn-slot creates short-circuit before any storage hit.
 
-  {:name :_create-fn-slot-fn-id
+  {:name :_create-payload-fn-id
+   :description "`:fn-id` from the create payload — the owner fn for a fn-slot create, the target fn for a service create."
    :parent :get
    :args {:coll :_parsed-entity-data :key {:value :fn-id} :default nil}}
 
@@ -253,25 +254,25 @@
    :parent :get
    :args {:coll :_parsed-entity-data :key {:value :slot-id} :default nil}}
 
-  {:name :_create-fn-slot-fn-row
-   :description "Owner fn row (the fn being given a slot). Read lazily — `:_create-fn-slot-rename-fires?`'s outer `:and` short-circuits non-fn-slot creates before this evaluates."
+  {:name :_create-payload-fn-row
+   :description "The payload's fn row — the owner fn of a fn-slot create, the target fn of a service create (its name goes into the rejection message). Read lazily: the fn-slot side's `:_create-fn-slot-rename-fires?` `:and` and the service side's outer `:if` both short-circuit before this evaluates."
    :parent :get-entity
    :return-type :nullable-fn-row-shape
-   :args {:entity-type {:value "fn"} :id :_create-fn-slot-fn-id}}
+   :args {:entity-type {:value "fn"} :id :_create-payload-fn-id}}
 
   {:name :_create-fn-slot-slot-row
-   :description "Slot row being attached. Read lazily — see `:_create-fn-slot-fn-row`."
+   :description "Slot row being attached. Read lazily — see `:_create-payload-fn-row`."
    :parent :get-entity
    :return-type [:union :null :slot-row-shape]
    :args {:entity-type {:value "slot"} :id :_create-fn-slot-slot-id}}
 
-  {:name :_create-fn-slot-fn-row-name
+  {:name :_create-payload-fn-row-name
    :parent :get
-   :args {:coll :_create-fn-slot-fn-row :key {:value :name} :default nil}}
+   :args {:coll :_create-payload-fn-row :key {:value :name} :default nil}}
 
   {:name :_create-fn-slot-fn-row-parent-ids
    :parent :get
-   :args {:coll :_create-fn-slot-fn-row :key {:value :parent-ids} :default nil}}
+   :args {:coll :_create-payload-fn-row :key {:value :parent-ids} :default nil}}
 
   {:name :_create-fn-slot-slot-row-source-slot-id
    :parent :get
@@ -286,7 +287,7 @@
   {:name :_create-fn-slot-violation?
    :description "Both rows resolved AND the fn is composed AND the slot isn't a rename. Each clause is lazy via `:and`."
    :parent :and
-   :args {:values [{:parent :some? :args {:value :_create-fn-slot-fn-row}}
+   :args {:values [{:parent :some? :args {:value :_create-payload-fn-row}}
                    {:parent :some? :args {:value :_create-fn-slot-slot-row}}
                    {:parent :not :args {:value {:parent :empty? :args {:coll :_create-fn-slot-fn-row-parent-ids}}}}
                    {:parent :nil? :args {:value :_create-fn-slot-slot-row-source-slot-id}}]}}
@@ -300,7 +301,7 @@
    :description "`Composed fn \":foo\" can only own slots that rename an inherited slot ...`"
    :parent :str
    :args {:parts [{:value "Composed fn "}
-                  {:parent :pr-str :args {:value :_create-fn-slot-fn-row-name}}
+                  {:parent :pr-str :args {:value :_create-payload-fn-row-name}}
                   {:value " can only own slots that rename an inherited slot (set :source-slot-id). To add a new arg create a new fn-def with this one as parent."}]}}
 
   {:name :_create-fn-slot-rename-rej-data
@@ -329,22 +330,17 @@
    :parent :get
    :args {:coll {:as :parsed} :key {:value :entity-data} :default nil}}
 
-  {:name :_create-svc-fn-id
-   :description "`:fn-id` from the create payload (only meaningful for service creates)."
-   :parent :get
-   :args {:coll :_parsed-entity-data :key {:value :fn-id} :default nil}}
-
   {:name :_create-is-service-create?
    :description "True iff this request creates a `:service` row AND carries a target `:fn-id`."
    :parent :and
    :args {:values [{:parent :some? :args {:value :_parsed-entity-data}}
                    {:parent :equal? :args {:a :_parsed-type-str :b {:value "service"}}}
-                   {:parent :some? :args {:value :_create-svc-fn-id}}]}}
+                   {:parent :some? :args {:value :_create-payload-fn-id}}]}}
 
   {:name :_create-svc-free-args
    :description "`{name → slot-id}` of the target fn's free args that would BLOCK starting it as a service. Uses `:service-blocking-free-args` (not the full `:free-arg-slot-map`), so a listener/whole-app fn whose free args are all per-request callback args isn't falsely rejected, while a genuinely unstartable fn still is."
    :parent :service-blocking-free-args
-   :args {:fn-id :_create-svc-fn-id}}
+   :args {:fn-id :_create-payload-fn-id}}
 
   {:name :_create-svc-free-keys
    :parent :keys
@@ -400,7 +396,7 @@
   {:name :_create-svc-no-proc-has-process?
    :description "Lazy DB lookup; gated by the outer `:and` so it only fires for `:service` creates."
    :parent :chain-has-process-effect?
-   :args {:fn-id :_create-svc-fn-id}}
+   :args {:fn-id :_create-payload-fn-id}}
 
   {:name :_create-svc-no-proc-fires?
    :parent :and
@@ -408,21 +404,11 @@
                    {:parent :not :args {:value :_create-svc-no-proc-has-process?}}]}}
 
   ;; For the dynamic message we cite the fn's NAME, not the id.
-  {:name :_create-svc-fn-row
-   :description "Used solely for `(pr-str (:name fn-row))` in the rejection message; lazy via the outer `:if`'s short-circuit."
-   :parent :get-entity
-   :return-type :nullable-fn-row-shape
-   :args {:entity-type {:value "fn"} :id :_create-svc-fn-id}}
-
-  {:name :_create-svc-fn-row-name
-   :parent :get
-   :args {:coll :_create-svc-fn-row :key {:value :name} :default nil}}
-
   {:name :_create-svc-no-proc-reason
    :description "`Cannot make a :service for fn \":foo\" — neither it nor any ancestor declares the :process effect ...`"
    :parent :str
    :args {:parts [{:value "Cannot make a :service for fn "}
-                  {:parent :pr-str :args {:value :_create-svc-fn-row-name}}
+                  {:parent :pr-str :args {:value :_create-payload-fn-row-name}}
                   {:value " — neither it nor any ancestor declares the :process effect. :service is reserved for fns that spawn supervised background work (long-running listeners, scheduled loops, etc.). Either add `:effects #{:process …}` to the fn-def if it really does spawn a background process, or wrap a one-shot fn in :schedule to get cron-style execution."}]}}
 
   {:name :_create-service-no-process-rej-data
@@ -734,7 +720,7 @@
    :args {:keys [{:value :id}] :vals [:_update-parsed-id-uuid]}}
 
   {:name :_update-merged-data
-   :description "`(merge pre-existing entity-data {:id id-uuid})` — the post-write picture that write-time validators check."
+   :description "`(merge pre-existing entity-data {:id id-uuid})` — the post-write picture that write-time validators check, and that invalidate / notify receive after the write."
    :parent :merge
    :args {:maps [:_update-parsed-pre-existing
                  :_parsed-entity-data
@@ -777,18 +763,10 @@
    :description "Outcome of the atomic update unit. `{:updated <id>}` on success (plus `:type-warnings [<diagnostic> …]` when a binding-shaped write landed but the owning fn now fails the aggregate type-check), `{:error <msg>}` on write failure."
    :parent :try-apply-update
    :args {:entity-type :_apply-entity-type-str
-          :id-uuid :_update-apply-id-uuid
+          :id-uuid :_update-parsed-id-uuid
           :entity-data :_parsed-entity-data
           :type-str :_parsed-type-str
           :form-data :_parsed-form-data}}
-
-  {:name :_update-apply-id-uuid
-   :parent :get
-   :args {:coll {:as :parsed} :key {:value :id-uuid} :default nil}}
-
-  {:name :_update-apply-pre-existing
-   :parent :get
-   :args {:coll {:as :parsed} :key {:value :pre-existing} :default nil}}
 
   {:name :_update-apply-error?
    :parent :some?
@@ -805,30 +783,20 @@
                   :_update-apply-do-notify
                   :_update-apply-ok-response]}}
 
-  ;; Invalidate / notify payload: pre-existing row merged with entity-data
-  ;; merged with `{:id id-uuid}`, so seed-derivation sees both the
-  ;; pre-update FKs and any updated FKs.
-  {:name :_update-apply-success-payload
-   :parent :merge
-   :args {:maps [:_update-apply-pre-existing
-                 :_parsed-entity-data
-                 :_update-apply-success-id-only]}}
-
-  {:name :_update-apply-success-id-only
-   :parent :zipmap
-   :args {:keys [{:value :id}]
-          :vals [:_update-apply-id-uuid]}}
-
+  ;; Invalidate / notify payload = `:_update-merged-data`, the same
+  ;; merged view the validation stage checked (pre-existing row +
+  ;; entity-data + `{:id id-uuid}`), so seed-derivation sees both the
+  ;; pre-update FKs and any updated FKs — one computation, two readers.
   {:name :_update-apply-do-invalidate
    :parent :invalidate-after-write
    :args {:entity-type :_apply-entity-type-str
-          :entity-data :_update-apply-success-payload}}
+          :entity-data :_update-merged-data}}
 
   {:name :_update-apply-do-notify
    :parent :notify-after-write
    :args {:entity-type :_apply-entity-type-str
           :op {:value "write"}
-          :entity-data :_update-apply-success-payload}}
+          :entity-data :_update-merged-data}}
 
   ;; 200 response — same warning-aware split as the create side:
   ;; legacy HTML body when clean, JSON `{message, type-warnings}` when

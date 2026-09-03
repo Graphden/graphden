@@ -1162,16 +1162,10 @@
    :args {:entity-type {:value "fn"}
           :where {:value {}}}}
 
-  {:name :_list-services-fn-id-name-pair
-   :description "HOF callback per fn-row — emit a `[:id :name]` 2-vec so `:into {}` folds the sequence into a `{id → name}` index."
-   :parent :vec
-   :args {:coll [{:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
-                 {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}]}}
-
   {:name :_list-services-fn-id-name-pairs
    :description "Stage 2b — map the per-fn `[:id :name]` builder over every fn row."
    :parent :map
-   :args {:func :_list-services-fn-id-name-pair
+   :args {:func :row-id-name-pair
           :coll :_list-services-fn-rows}}
 
   {:name :_list-services-fn-names
@@ -1500,18 +1494,11 @@
           :attrs {:value {:class "execute-error-data"}}
           :children [:_er-error-data-json]}}
 
-  {:name :_er-hidden-placeholder
-   :description "Empty `<span hidden=\"1\">` placeholder reused as the empty `:else` branch wherever a conditional section collapses to nothing — keeps the children-vector shape uniform."
-   :parent :hiccup
-   :args {:tag {:value "span"}
-          :attrs {:value {:hidden "1"}}
-          :children {:value []}}}
-
   {:name :_er-error-data-pre
    :parent :if
    :args {:test :_er-error-data-some?
           :then :_er-error-data-pre-shown
-          :else :_er-hidden-placeholder}}
+          :else :hidden-span}}
 
   {:name :_er-error-pane
    :parent :hiccup
@@ -2099,7 +2086,7 @@
   {:name :_er-body
    :description "Full result body hiccup — exec → hiccup. Replaces `crud.fn-execution/render-execute-result-hiccup` per §3.3. nil exec → `<span hidden>`; tainted (touched-secret? OR `:error-data.reason == :tainted`) → `Result hidden` pane; status=succeeded → result-shape dispatch via `:_er-succeeded-body`; status=failed → error pane; other (pending/cancelled/unknown) → neutral status note."
    :parent :cond
-   :args {:clauses [:_er-exec-nil?           :_er-hidden-placeholder
+   :args {:clauses [:_er-exec-nil?           :hidden-span
                     :_er-tainted?            :_er-tainted-pane
                     :_er-status-succeeded?   :_er-succeeded-body
                     :_er-status-failed?      :_er-error-pane
@@ -2340,18 +2327,11 @@
           :attrs {:value {:class "service-popover-status"}}
           :children [:_sp-status-line]}}
 
-  {:name :_sp-hidden-placeholder
-   :description "Empty `<span hidden=\"1\">` placeholder reused as the `:else` branch wherever a conditional section collapses to nothing — keeps the children-vector shape uniform."
-   :parent :hiccup
-   :args {:tag {:value "span"}
-          :attrs {:value {:hidden "1"}}
-          :children {:value []}}}
-
   {:name :_sp-status-div
    :parent :if
    :args {:test :_sp-has-existing?
           :then :_sp-status-div-shown
-          :else :_sp-hidden-placeholder}}
+          :else :hidden-span}}
 
   ;; ---------------------------------------------------------------------
   ;; Sibling warning. Maps each sibling to "<branch-name> (<state>)",
@@ -2452,7 +2432,7 @@
    :parent :if
    :args {:test :_sp-has-siblings?
           :then :_sp-sibling-warn-shown
-          :else :_sp-hidden-placeholder}}
+          :else :hidden-span}}
 
   ;; ---------------------------------------------------------------------
   ;; Enabled checkbox. Default true for brand-new rows; existing rows
@@ -2871,7 +2851,7 @@
    :parent :if
    :args {:test :_sp-has-existing?
           :then :_sp-delete-btn-shown
-          :else :_sp-hidden-placeholder}}
+          :else :hidden-span}}
 
   {:name :_sp-actions-div
    :parent :hiccup

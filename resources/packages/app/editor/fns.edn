@@ -1139,10 +1139,6 @@
   ;; Collapse-to-nothing placeholder for `:if` branches that render no
   ;; section — hidden, so both the DOM and the JS probes that decide
   ;; "anything to show?" see nothing.
-  {:name :_hidden-span
-   :parent :const
-   :args {:value [:span {:hidden "1"}]}}
-
   ;; Shared HOF callback — text name of the current `:item` keyword.
   ;; Every partial chain that maps a keyword roster to text uses it
   ;; (effect chips, arg names, resolved-binding names, category

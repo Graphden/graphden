@@ -20,7 +20,12 @@
 {;; file → the literal fn-def names it hands to `execute-by-name`.
  :roots
  {"src/graphden/system/init/exec.clj"
-  [;; The application router — built at boot for the URL-drift check and
+  [;; The two OPTIONAL per-branch Ring handlers the branch router probes
+   ;; for (`:optional-handler-fn-names`) — served through `branch_router`
+   ;; when their package is loaded, silently absent otherwise.
+   :_registry-ring-response
+   :_mcp-ring-response
+   ;; The application router — built at boot for the URL-drift check and
    ;; for the `window.API` route-path cache. The two OPTIONAL routers
    ;; (`registry-router` / `mcp-router`) are named here too: they may be
    ;; absent from the loaded package set, and `optional-router-if-present`
@@ -60,6 +65,15 @@
 
   "src/graphden/crud/value_repr.clj"
   "registry-supplied repr names (`:_value-repr-registry`)"}
+
+ ;; The registry fn-defs those two files read BY NAME to get their
+ ;; dispatch tables — literal names in `value_form/registry-pairs` and
+ ;; `value_repr/registry-fn-name`. Listed so `bb graph-lint` does not
+ ;; report them as unreferenced privates; the names they supply are
+ ;; strings the lint (and the audit) follow as refs.
+ :registry-fns
+ {"src/graphden/crud/value_form.clj" [:_value-form-registry]
+  "src/graphden/crud/value_repr.clj" [:_value-repr-registry]}
 
  ;; The by-name API itself, plus pass-through wrappers and comments that
  ;; merely mention it — nothing is entered from these.

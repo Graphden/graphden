@@ -474,6 +474,19 @@
    ;; per-instance by definition, so descendants never cross-merge.
    :branch-local? true}
 
+  ;; The hub setting has ONE graph definition — the branches popover
+  ;; (push / pull) and the registry's sync-status probe both read it
+  ;; here rather than each spelling out the `:deploy-config` read.
+  {:name :deploy-hub-url
+   :description "GRAPHDEN_HUB_URL as snapshotted at boot (`:deploy-config :hub-url`) — a pure read, so hub-facing partials and probes answer under the cloud's request-level effect gate. Branch-local by descent (hub wiring is per-deployment runtime config). nil when no hub is configured."
+   :parent :deploy-config
+   :args {:key {:value :hub-url}}}
+
+  {:name :hub-configured?
+   :description "True when this instance is wired to a hub — `:deploy-hub-url` is non-empty."
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll :deploy-hub-url}}}}
+
   ;; Construct an ExceptionInfo. Paired with :throw to raise from
   ;; graph code; also usable as a plain value if something wants a
   ;; ready-made exception without raising.

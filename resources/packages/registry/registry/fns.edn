@@ -441,18 +441,6 @@
    :description "Parsed JSON body of POST /api/packages/publish — `{:name :version :ns-root}`."
    :parent :parse-json-body}
 
-  {:name :_publish-name-raw
-   :parent :get :args {:coll :_publish-body :key {:value :name} :default nil}}
-  {:name :_publish-name
-   :description "Nil-safe `(str (:name body))`."
-   :parent :to-str :args {:value :_publish-name-raw}}
-
-  {:name :_publish-version-raw
-   :parent :get :args {:coll :_publish-body :key {:value :version} :default nil}}
-  {:name :_publish-version
-   :description "Nil-safe `(str (:version body))`."
-   :parent :to-str :args {:value :_publish-version-raw}}
-
   {:name :_publish-ns-root-raw
    :parent :get :args {:coll :_publish-body :key {:value :ns-root} :default nil}}
   {:name :_publish-ns-root
@@ -470,8 +458,8 @@
   {:name :_publish-result
    :description "Publish the exported bundle under the requested name + version."
    :parent :publish-package
-   :args {:pkg-name :_publish-name
-          :pkg-version :_publish-version
+   :args {:pkg-name :json-body-name
+          :pkg-version :_body-version
           :bundle :_publish-bundle
           :pkg-public :_publish-public-raw}}
 
@@ -1178,16 +1166,6 @@
    :description "Parsed JSON body of POST /api/packages/install — `{:name :version :source?}` (source = remote registry base URL for cross-install pull)."
    :parent :parse-json-body}
 
-  {:name :_install-name-raw
-   :parent :get :args {:coll :_install-body :key {:value :name} :default nil}}
-  {:name :_install-name
-   :parent :to-str :args {:value :_install-name-raw}}
-
-  {:name :_install-version-raw
-   :parent :get :args {:coll :_install-body :key {:value :version} :default nil}}
-  {:name :_install-version
-   :parent :to-str :args {:value :_install-version-raw}}
-
   {:name :_install-source
    :description "Optional remote registry base URL — cross-install pull (PACKAGE_DISTRIBUTION § 13). nil = local-only install."
    :parent :get
@@ -1195,7 +1173,7 @@
 
   {:name :_install-result
    :parent :install-package
-   :args {:pkg-name :_install-name :pkg-version :_install-version
+   :args {:pkg-name :json-body-name :pkg-version :_body-version
           :source :_install-source}}
 
   {:name :install-package-handler
@@ -1337,12 +1315,6 @@
           :version {:ref :_pkgv-resolved :type :text}
           :fns {:ref :_pkgv-fns :type [:list :jsonb]}}}
 
-  {:name :_upd-mat-count
-   :parent :materialize-package-fns
-   :args {:ns-root {:ref :_pkgv-ns-root :type :text}
-          :version {:ref :_pkgv-resolved :type :text}
-          :fns {:ref :_pkgv-fns :type [:list :jsonb]}}}
-
   ;; idempotency: a target version already visible (incl. platform-
   ;; materialized under an OrgScoped read) is NOT re-synced and nothing
   ;; is invalidated — same skip reference-install performs.
@@ -1350,7 +1322,7 @@
    :parent :if
    :args {:test :_upd-materialized?
           :then {:value nil}
-          :else :_upd-mat-count}}
+          :else :_mat-count}}
 
   {:name :_upd-rewrite
    :description "Repoint the project's own refs old→new — the coupled write+invalidate core of update/rollback."
@@ -1394,23 +1366,9 @@
                     :_pkgv-missing-any? :_pkgv-err-missing
                     {:value true}       :_upd-ok]}}
 
-  {:name :_update-body
-   :description "Parsed JSON body of POST /api/packages/update — `{:name :version}`."
-   :parent :parse-json-body}
-
-  {:name :_update-name-raw
-   :parent :get :args {:coll :_update-body :key {:value :name} :default nil}}
-  {:name :_update-name
-   :parent :to-str :args {:value :_update-name-raw}}
-
-  {:name :_update-version-raw
-   :parent :get :args {:coll :_update-body :key {:value :version} :default nil}}
-  {:name :_update-version
-   :parent :to-str :args {:value :_update-version-raw}}
-
   {:name :_update-result
    :parent :update-package-version
-   :args {:pkg-name :_update-name :pkg-version :_update-version}}
+   :args {:pkg-name :json-body-name :pkg-version :_body-version}}
 
   {:name :update-package-handler
    :lambda-params [:request]
@@ -1451,23 +1409,14 @@
                  {:ok :bool :reason :text :missing [:list :keyword]}
                  {:ok :bool :reason :text :name :any :requested :any}]}
 
-  {:name :_fork-body
-   :description "Parsed JSON body of POST /api/packages/fork — `{:name :version}`."
-   :parent :parse-json-body}
-
-  {:name :_fork-name-raw
-   :parent :get :args {:coll :_fork-body :key {:value :name} :default nil}}
-  {:name :_fork-name
-   :parent :to-str :args {:value :_fork-name-raw}}
-
-  {:name :_fork-version-raw
-   :parent :get :args {:coll :_fork-body :key {:value :version} :default nil}}
-  {:name :_fork-version
-   :parent :to-str :args {:value :_fork-version-raw}}
+  {:name :_body-version
+   :description "Nil-safe `(str (:version body))` of the request's JSON body — shared by fork / install / publish / update."
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll :parse-json-body :key {:value :version} :default nil}}}}
 
   {:name :_fork-result
    :parent :fork-package
-   :args {:pkg-name :_fork-name :pkg-version :_fork-version}}
+   :args {:pkg-name :json-body-name :pkg-version :_body-version}}
 
   {:name :fork-package-handler
    :lambda-params [:request]
@@ -1641,22 +1590,13 @@
    :parent :hiccup :args {:tag {:value "thead"} :children [:_pkg-panel-thead-row]}}
 
   ;; body row — HOF over :item (each pin `{:package-name :version …}`)
-  {:name :_pkg-panel-name-val
-   :parent :get :args {:coll {:as :item} :key {:value :package-name} :default {:value ""}}}
-  {:name :_pkg-panel-version-val
-   :parent :get :args {:coll {:as :item} :key {:value :version} :default {:value ""}}}
-  {:name :_pkg-panel-td-name
-   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-panel-name-val]}}
-  {:name :_pkg-panel-td-version
-   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-panel-version-val]}}
-
   ;; per-row uninstall — hx-delete DELETE /api/packages/uninstall/:name, then
   ;; swap the REFRESHED panel back into [data-packages-panel] (outerHTML) so the
   ;; empty-state notice appears when the last pin goes. No client JS; the bearer
   ;; rides the htmx:configRequest bridge. Path built from the per-row name.
   {:name :_pkg-panel-uninstall-url
    :parent :str-join
-   :args {:coll [{:value "/api/packages/uninstall?name="} :_pkg-panel-name-val]
+   :args {:coll [{:value "/api/packages/uninstall?name="} :_item-package-name]
           :separator {:value ""}}}
   {:name :_pkg-panel-uninstall-attrs
    :parent :assoc
@@ -1682,14 +1622,14 @@
   {:name :_pkg-panel-update-name-attrs
    :parent :assoc
    :args {:map {:value {:type "hidden" :name "name"}}
-          :key {:value :value} :value :_pkg-panel-name-val}}
+          :key {:value :value} :value :_item-package-name}}
   {:name :_pkg-panel-update-name-input
    :parent :hiccup :args {:tag {:value "input"} :attrs :_pkg-panel-update-name-attrs}}
   {:name :_pkg-panel-update-version-attrs
    :parent :assoc
    :args {:map {:value {:type "text" :name "version" :class "packages-version-input"
                         :size "6" :title "Target version — exact, latest, or a constraint"}}
-          :key {:value :value} :value :_pkg-panel-version-val}}
+          :key {:value :value} :value :_item-version}}
   {:name :_pkg-panel-update-version-input
    :parent :hiccup :args {:tag {:value "input"} :attrs :_pkg-panel-update-version-attrs}}
   {:name :_pkg-panel-update-btn
@@ -1709,7 +1649,7 @@
    :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-panel-update-form :_pkg-panel-uninstall-btn]}}
 
   {:name :_pkg-panel-row
-   :parent :hiccup :args {:tag {:value "tr"} :children [:_pkg-panel-td-name :_pkg-panel-td-version :_pkg-panel-td-actions]}}
+   :parent :hiccup :args {:tag {:value "tr"} :children [:_td-package-name :_td-version :_pkg-panel-td-actions]}}
 
   {:name :_pkg-panel-rows
    :parent :map :args {:func :_pkg-panel-row :coll :list-installed-packages}}
@@ -1740,12 +1680,10 @@
   ;; the REFRESHED panel back into [data-packages-panel]. HOF over :item.
   {:name :_pkg-avail-name-val
    :parent :get :args {:coll {:as :item} :key {:value :name} :default {:value ""}}}
-  {:name :_pkg-avail-version-val
-   :parent :get :args {:coll {:as :item} :key {:value :version} :default {:value ""}}}
   {:name :_pkg-avail-install-url
    :parent :str-join
    :args {:coll [{:value "/api/packages/panel-install?name="} :_pkg-avail-name-val
-                 {:value "&version="} :_pkg-avail-version-val]
+                 {:value "&version="} :_item-version]
           :separator {:value ""}}}
   {:name :_pkg-avail-install-attrs
    :parent :assoc
@@ -1767,7 +1705,7 @@
   {:name :_pkg-avail-fork-url
    :parent :str-join
    :args {:coll [{:value "/api/packages/panel-fork?name="} :_pkg-avail-name-val
-                 {:value "&version="} :_pkg-avail-version-val]
+                 {:value "&version="} :_item-version]
           :separator {:value ""}}}
   {:name :_pkg-avail-fork-attrs
    :parent :assoc
@@ -1799,13 +1737,11 @@
    :args {:test :_pkg-avail-private? :then :_pkg-avail-private-badge :else {:value nil}}}
   {:name :_pkg-avail-td-name
    :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-avail-name-val :_pkg-avail-badge-maybe]}}
-  {:name :_pkg-avail-td-version
-   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-avail-version-val]}}
   {:name :_pkg-avail-td-action
    :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-avail-install-btn :_pkg-avail-fork-btn]}}
   {:name :_pkg-avail-row
    :parent :hiccup
-   :args {:tag {:value "tr"} :children [:_pkg-avail-td-name :_pkg-avail-td-version :_pkg-avail-td-action]}}
+   :args {:tag {:value "tr"} :children [:_pkg-avail-td-name :_td-version :_pkg-avail-td-action]}}
   {:name :_pkg-avail-rows
    :parent :map :args {:func :_pkg-avail-row :coll :list-package-versions}}
   {:name :_pkg-avail-tbody
@@ -1930,7 +1866,7 @@
 
   {:name :_gov-cat-name
    :parent :get :args {:coll {:as :item} :key {:value :name} :default {:value ""}}}
-  {:name :_gov-cat-version
+  {:name :_item-version
    :parent :get :args {:coll {:as :item} :key {:value :version} :default {:value ""}}}
   {:name :_gov-cat-public
    :parent :get :args {:coll {:as :item} :key {:value :public?} :default nil}}
@@ -1943,8 +1879,8 @@
    :args {:value {:parent :get :args {:coll {:as :item} :key {:value :published-at} :default {:value ""}}}}}
   {:name :_gov-cat-td-name
    :parent :hiccup :args {:tag {:value "td"} :children [:_gov-cat-name]}}
-  {:name :_gov-cat-td-version
-   :parent :hiccup :args {:tag {:value "td"} :children [:_gov-cat-version]}}
+  {:name :_td-version
+   :parent :hiccup :args {:tag {:value "td"} :children [:_item-version]}}
   {:name :_gov-cat-td-visibility
    :parent :hiccup :args {:tag {:value "td"} :children [:_gov-cat-visibility]}}
   {:name :_gov-cat-td-at
@@ -1952,7 +1888,7 @@
   {:name :_gov-cat-row
    :parent :hiccup
    :args {:tag {:value "tr"}
-          :children [:_gov-cat-td-name :_gov-cat-td-version :_gov-cat-td-visibility :_gov-cat-td-at]}}
+          :children [:_gov-cat-td-name :_td-version :_gov-cat-td-visibility :_gov-cat-td-at]}}
   {:name :_gov-cat-body-rows
    :parent :map :args {:func :_gov-cat-row :coll :_gov-catalog-rows}}
   {:name :_gov-cat-tbody
@@ -1998,10 +1934,8 @@
   {:name :_gov-pins
    :parent :query-entities
    :args {:entity-type {:value "package-install"} :where {:value {}}}}
-  {:name :_gov-pin-name
+  {:name :_item-package-name
    :parent :get :args {:coll {:as :item} :key {:value :package-name} :default {:value ""}}}
-  {:name :_gov-pin-version
-   :parent :get :args {:coll {:as :item} :key {:value :version} :default {:value ""}}}
   {:name :_gov-pin-branch-id
    :parent :get :args {:coll {:as :item} :key {:value :branch-id} :default nil}}
   {:name :_gov-pin-branch
@@ -2009,10 +1943,8 @@
   {:name :_gov-pin-at
    :parent :to-str
    :args {:value {:parent :get :args {:coll {:as :item} :key {:value :installed-at} :default {:value ""}}}}}
-  {:name :_gov-pin-td-name
-   :parent :hiccup :args {:tag {:value "td"} :children [:_gov-pin-name]}}
-  {:name :_gov-pin-td-version
-   :parent :hiccup :args {:tag {:value "td"} :children [:_gov-pin-version]}}
+  {:name :_td-package-name
+   :parent :hiccup :args {:tag {:value "td"} :children [:_item-package-name]}}
   {:name :_gov-pin-td-branch
    :parent :hiccup :args {:tag {:value "td"} :children [:_gov-pin-branch]}}
   {:name :_gov-pin-td-at
@@ -2020,7 +1952,7 @@
   {:name :_gov-pin-row
    :parent :hiccup
    :args {:tag {:value "tr"}
-          :children [:_gov-pin-td-name :_gov-pin-td-version :_gov-pin-td-branch :_gov-pin-td-at]}}
+          :children [:_td-package-name :_td-version :_gov-pin-td-branch :_gov-pin-td-at]}}
   {:name :_gov-pin-rows
    :parent :map :args {:func :_gov-pin-row :coll :_gov-pins}}
   {:name :_gov-pin-tbody
@@ -2228,14 +2160,8 @@
   ;; the pinned version to the target (symmetric — older = rollback), then
   ;; `:do` renders the refreshed panel. Auth-required.
   ;; ---------------------------------------------------------------------
-  {:name :_pkg-update-form
-   :parent :parse-form-body-kw}
-  {:name :_pkg-update-name
-   :parent :get :args {:coll :_pkg-update-form :key {:value :name} :default {:value ""}}}
-  {:name :_pkg-update-version
-   :parent :get :args {:coll :_pkg-update-form :key {:value :version} :default {:value ""}}}
   {:name :_pkg-update-do
-   :parent :update-package-version :args {:pkg-name :_pkg-update-name :pkg-version :_pkg-update-version}}
+   :parent :update-package-version :args {:pkg-name :_pkg-form-name :pkg-version :_pkg-form-version}}
   {:name :_pkg-update-then-panel
    :description "Update/rollback, THEN render the refreshed panel — `:do` forces order so the installed table shows the new version."
    :parent :do :args {:steps [:_pkg-update-do :_pkg-panel-html]}}
@@ -2350,14 +2276,14 @@
           :children [:_pkg-publish-summary :_pkg-publish-form-el]}}
 
   ;; --- handler: form {name, version, ns-root} → export → publish → panel ---
-  {:name :_pkg-publish-form-data
+  {:name :_pkg-form
    :parent :parse-form-body-kw}
-  {:name :_pkg-publish-name
-   :parent :get :args {:coll :_pkg-publish-form-data :key {:value :name} :default {:value ""}}}
-  {:name :_pkg-publish-version
-   :parent :get :args {:coll :_pkg-publish-form-data :key {:value :version} :default {:value ""}}}
+  {:name :_pkg-form-name
+   :parent :get :args {:coll :_pkg-form :key {:value :name} :default {:value ""}}}
+  {:name :_pkg-form-version
+   :parent :get :args {:coll :_pkg-form :key {:value :version} :default {:value ""}}}
   {:name :_pkg-publish-ns-root-raw
-   :parent :get :args {:coll :_pkg-publish-form-data :key {:value :ns-root} :default {:value ""}}}
+   :parent :get :args {:coll :_pkg-form :key {:value :ns-root} :default {:value ""}}}
   {:name :_pkg-publish-ns-root
    :description "Nil-safe `(str ns-root)` — mirrors the JSON publish handler's raw→to-str step so `:root` is always a plain String."
    :parent :to-str :args {:value :_pkg-publish-ns-root-raw}}
@@ -2365,7 +2291,7 @@
    :parent :export-namespace :args {:root :_pkg-publish-ns-root}}
   {:name :_pkg-publish-result
    :parent :publish-package
-   :args {:pkg-name :_pkg-publish-name :pkg-version :_pkg-publish-version
+   :args {:pkg-name :_pkg-form-name :pkg-version :_pkg-form-version
           :bundle :_pkg-publish-bundle
           ;; Pinned: the legacy panel form has no public checkbox — a panel
           ;; publish is always private-by-default (platform-tier publishes
@@ -2380,7 +2306,7 @@
   ;; the new version) are the confirmation.
   {:name :_pkg-publish-notice-text
    :parent :str-join
-   :args {:coll [{:value "Publishing "} :_pkg-publish-name {:value "@"} :_pkg-publish-version
+   :args {:coll [{:value "Publishing "} :_pkg-form-name {:value "@"} :_pkg-form-version
                  {:value " — if the namespace has fns, the new version appears in the browse list below."}]
           :separator {:value ""}}}
   {:name :_pkg-publish-notice
@@ -2395,10 +2321,10 @@
   ;; exporter stripped.
   {:name :_pkg-pub-secrets-resolved
    :parent :resolve-package-version
-   :args {:pkg-name :_pkg-publish-name :spec :_pkg-publish-version}}
+   :args {:pkg-name :_pkg-form-name :spec :_pkg-form-version}}
   {:name :_pkg-pub-secrets-row
    :parent :package-version-row
-   :args {:pkg-name :_pkg-publish-name :resolved :_pkg-pub-secrets-resolved}}
+   :args {:pkg-name :_pkg-form-name :resolved :_pkg-pub-secrets-resolved}}
   {:name :_pkg-pub-secrets
    :parent :get
    :args {:coll :_pkg-pub-secrets-row :key {:value :secrets} :default {:value []}}}
@@ -2530,17 +2456,10 @@
    :parent :not
    :args {:value {:parent :is-a? :args {:value :_import-fns :type {:value :vector}}}}}
 
-  {:name :_import-item-is-named-map?
-   :description "One fn-def is a map carrying a :name — anonymous top-level defs can't be addressed or reconciled."
-   :parent :and
-   :args {:values [{:parent :is-a? :args {:value {:as :item} :type {:value :map}}}
-                   {:parent :some?
-                    :args {:value {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}}}]}}
-
   {:name :_import-items-malformed?
    :parent :not
    :args {:value {:parent :every?
-                  :args {:pred :_import-item-is-named-map?
+                  :args {:pred :named-fn-def?
                          :coll :_import-fns}}}}
 
   {:name :_import-applied
@@ -2637,25 +2556,16 @@
    :return-type :keyword-map
    :effects #{:network :env}}
 
-  {:name :_sync-hub-url
-   :description "GRAPHDEN_HUB_URL as snapshotted at boot (`:deploy-config :hub-url`) — a pure read, so the status probe answers under the cloud's request-level effect gate. Branch-local by descent — hub wiring is per-deployment runtime config."
-   :parent :deploy-config
-   :args {:key {:value :hub-url}}}
-
-  {:name :_sync-configured?
-   :parent :not
-   :args {:value {:parent :empty? :args {:coll :_sync-hub-url}}}}
-
   {:name :_sync-not-configured?
    :parent :not
-   :args {:value :_sync-configured?}}
+   :args {:value :hub-configured?}}
 
   ;; GET /api/sync/status — the editor's reveal probe. Never surfaces the
   ;; token; nothing read off the request → :lambda-params [].
   {:name :_sync-status-body
    :parent :zipmap
    :args {:keys [{:value :configured} {:value :hub-url}]
-          :vals [:_sync-configured? :_sync-hub-url]}}
+          :vals [:hub-configured? :deploy-hub-url]}}
 
   {:name :_sync-status-handler
    :lambda-params []
@@ -2713,7 +2623,7 @@
   {:name :_sync-push-sent
    :description "The wire POST to the hub — referenced by both the failed? predicate and the ok envelope; the per-execution result cache makes that one POST, not two."
    :parent :hub-push-bundle!
-   :args {:hub-url :_sync-hub-url
+   :args {:hub-url :deploy-hub-url
           :target :_sync-push-target
           :bundle :_sync-push-bundle}}
 
@@ -2779,7 +2689,7 @@
   {:name :_sync-pull-fetched
    :description "The hub bundle — referenced by the failed? predicate, the error envelope and the apply core; one fetch via the per-execution result cache."
    :parent :hub-fetch-bundle
-   :args {:hub-url :_sync-hub-url :branch :_sync-pull-source}}
+   :args {:hub-url :deploy-hub-url :branch :_sync-pull-source}}
 
   {:name :_sync-pull-failed?
    :parent :some?

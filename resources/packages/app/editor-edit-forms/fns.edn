@@ -147,7 +147,7 @@
                                  {:parent :nil? :args {:value :_cto-current}}]}}
           :then {:value [:option {:value "" :disabled "disabled"}
                          "(no compatible types)"]}
-          :else :_hidden-span}}
+          :else :hidden-span}}
 
   {:name :_cto-fragment
    :description "Wrapper div — JS lifts the <option> nodes out of it into the live <select>."
@@ -327,16 +327,6 @@
   {:name :_partial-fpi-candidate-fn-id-text
    :parent :to-str :args {:value :_partial-fpi-candidate-fn-id}}
 
-  {:name :_partial-fpi-header
-   :parent :const
-   :args {:value
-          [:div {:class "mismatch-explainer-header"}
-           [:span {:class "mismatch-explainer-title"} "Type mismatch"]
-           [:button {:type "button"
-                     :class "mismatch-explainer-close"
-                     :data-explainer-close "1"
-                     :aria-label "Close mismatch explainer"} "×"]]}}
-
   {:name :_partial-fpi-expected-row
    :parent :hiccup
    :args {:tag {:value "div"}
@@ -392,7 +382,7 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "mismatch-explainer-content"}}
-          :children [:_partial-fpi-header
+          :children [:_partial-mismatch-header
                      :_partial-fpi-expected-row
                      :_partial-fpi-got-row
                      :_partial-fpi-reason-row

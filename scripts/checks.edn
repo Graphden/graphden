@@ -75,6 +75,11 @@
  ;; docs/AI_CONTEXT.md lands green locally and reddens develop on GitHub CI.
  {:name "ai-context-sync" :bb "ai-context-sync" :timeout 30000 :group :docs
   :relevant ["^docs/AI_CONTEXT\\.md$" "^resources/packages/mcp/mcp/ai-context\\.md$"]}
+ ;; The graph's own linter — structure of the fns.edn corpus, not Clojure.
+ ;; Registry + lint engine changes re-run it; so does any fns.edn edit.
+ {:name "graph-lint"    :bb "graph-lint"    :timeout 180000 :group :clj
+  :relevant ["fns\\.edn$" "^src/graphden/lint/" "^src/graphden/packages/loader\\.clj$"
+             "^tools/graph-reachability\\.edn$" "^bb\\.edn$"]}
  {:name "devtour"       :bb "devtour-check" :timeout  60000 :group :docs
   ;; `resources/packages/**/impls.clj` IS toured (~15 steps anchor on
   ;; base-fn impls like :add / :http-server / publish-package-apply), so

@@ -322,23 +322,9 @@
    :parent :get
    :args {:coll {:as :item} :key {:value :status} :default {:value "?"}}}
 
-  {:name :_partial-fnv-exec-started-at
-   :parent :get
-   :args {:coll {:as :item} :key {:value :started-at} :default {:value ""}}}
-
   ;; `:started-at` is a `java.sql.Timestamp` off the decoded row — must
   ;; stringify before `:subs`, or `count`-on-Timestamp 500s the handler.
-  ;; Mirror of `:_partial-eh-row-started-at-text`.
-  {:name :_partial-fnv-exec-started-at-text
-   :parent :to-str
-   :args {:value :_partial-fnv-exec-started-at}}
-
-  {:name :_partial-fnv-exec-ts-short
-   :parent :subs
-   :args {:string :_partial-fnv-exec-started-at-text
-          :start {:value 0}
-          :end {:value 16}}}
-
+  ;; Mirror of `:_exec-row-started-at-text`.
   ;; Status colour class is `fn-versions-execs-status-<status>` —
   ;; same shape the legacy JS produced (CSS keys on it).
   {:name :_partial-fnv-exec-status-class
@@ -363,7 +349,7 @@
    :parent :hiccup
    :args {:tag {:value "span"}
           :attrs {:value {:class "fn-versions-execs-ts"}}
-          :children [:_partial-fnv-exec-ts-short]}}
+          :children [:_exec-row-ts-short]}}
 
   {:name :_partial-fnv-exec-row
    :parent :hiccup
@@ -751,16 +737,11 @@
    :args {:tag {:value "div"} :attrs {:value {:class "merge-conflicts-batch"}}
           :children [:_partial-mc-batch-label :_partial-mc-batch-src-btn :_partial-mc-batch-tgt-btn]}}
 
-  {:name :_partial-mc-batch-hidden
-   :description "Empty (hidden) span when the modal has a single conflict — a batch toolbar would just be noise. Keeps the card children-vector shape uniform."
-   :parent :hiccup
-   :args {:tag {:value "span"} :attrs {:value {:hidden "1"}} :children {:value []}}}
-
   {:name :_partial-mc-batch
    :parent :if
    :args {:test :_partial-mc-batch-multi?
           :then :_partial-mc-batch-shown
-          :else :_partial-mc-batch-hidden}}
+          :else :hidden-span}}
 
   {:name :_partial-mc-error
    :description "Error slot — starts hidden; JS un-hides it + fills textContent when the re-submitted merge fails."

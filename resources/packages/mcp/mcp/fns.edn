@@ -378,17 +378,10 @@
    :parent :not
    :args {:value {:parent :is-a? :args {:value :_mcp-upsert-parsed :type {:value :vector}}}}}
 
-  {:name :_mcp-upsert-item-is-named-map?
-   :description "One fn-def is a map carrying a :name — anonymous defs can't be addressed by a later call."
-   :parent :and
-   :args {:values [{:parent :is-a? :args {:value {:as :item} :type {:value :map}}}
-                   {:parent :some?
-                    :args {:value {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}}}]}}
-
   {:name :_mcp-upsert-items-malformed?
    :parent :not
    :args {:value {:parent :every?
-                  :args {:pred :_mcp-upsert-item-is-named-map?
+                  :args {:pred :named-fn-def?
                          :coll :_mcp-upsert-parsed}}}}
 
   {:name :_mcp-upsert-branch-missing?

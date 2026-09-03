@@ -114,4 +114,13 @@
    :description "Full health-status payload — `{\"status\" \"healthy\" \"timestamp\" <ms-since-epoch>}`. Bound under `/health` via the `:_health-handler`."
    :parent :assoc-timestamp
    :args {:map :health-status-base
-          :timestamp :current-time-ms}}]}
+          :timestamp :current-time-ms}}
+
+  ;; --- Payload shape guards shared by the registry import and the MCP
+  ;; upsert — one definition of "a fn-def we can address".
+  {:name :named-fn-def?
+   :description "One fn-def of an upsert / import payload is a map carrying a `:name` — anonymous top-level defs cannot be addressed, so they are rejected before any write."
+   :parent :and
+   :args {:values [{:parent :is-a? :args {:value {:as :item} :type {:value :map}}}
+                   {:parent :some?
+                    :args {:value {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}}}]}}]}

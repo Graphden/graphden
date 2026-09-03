@@ -93,7 +93,7 @@
                         :attrs {:value {:class "execute-effects-warning"}}
                         :children [{:value [:span {:class "execute-effects-warning-label"} "side effects: "]}
                                    :_xp-eff-chips]}}
-          :else :_hidden-span}}
+          :else :hidden-span}}
 
   ;; --- free-arg scaffold ------------------------------------------------
 
@@ -145,7 +145,7 @@
                       :args {:test {:parent :empty? :args {:coll :_xp-free-names}}
                              :then {:value [:div {:class "execute-no-args-note"}
                                             "No free arguments — click Run to invoke."]}
-                             :else :_hidden-span}}
+                             :else :hidden-span}}
                      :_xp-arg-rows]}}
 
   ;; --- options + actions -----------------------------------------------
@@ -367,17 +367,17 @@
   ;; `:to-str` (Timestamp's `.toString` is the SQL shape
   ;; "YYYY-MM-DD HH:MM:SS.…", which fits the 16-char truncation
   ;; cleanly).
-  {:name :_partial-eh-row-started-at
+  {:name :_exec-row-started-at
    :parent :get
    :args {:coll {:as :item} :key {:value :started-at} :default {:value ""}}}
 
-  {:name :_partial-eh-row-started-at-text
+  {:name :_exec-row-started-at-text
    :parent :to-str
-   :args {:value :_partial-eh-row-started-at}}
+   :args {:value :_exec-row-started-at}}
 
-  {:name :_partial-eh-row-ts-short
+  {:name :_exec-row-ts-short
    :parent :subs
-   :args {:string :_partial-eh-row-started-at-text
+   :args {:string :_exec-row-started-at-text
           :start {:value 0}
           :end {:value 16}}}
 
@@ -385,7 +385,7 @@
    :parent :hiccup
    :args {:tag {:value "span"}
           :attrs {:value {:class "execute-history-ts"}}
-          :children [:_partial-eh-row-ts-short]}}
+          :children [:_exec-row-ts-short]}}
 
   ;; Repeat button — carries `data-execution-id` so the post-swap JS
   ;; handler can wire `applyHistoryArgs(fnEntity, id)` by selector.
@@ -430,7 +430,7 @@
    :parent :if
    :args {:test :_partial-eh-row-path-trace
           :then :_partial-eh-row-path-btn-el
-          :else :_hidden-span}}
+          :else :hidden-span}}
 
   ;; "tree" button — the step-through call-tree view of the same trace
   ;; (`/partials/execute-trace`; editor-trace-view.js owns the panel).
@@ -453,7 +453,7 @@
    :parent :if
    :args {:test :_partial-eh-row-path-trace
           :then :_partial-eh-row-tree-btn-el
-          :else :_hidden-span}}
+          :else :hidden-span}}
 
   ;; Preview text dispatch by status. JSON-stringifying the result
   ;; server-side keeps the format identical to what `shortPreview`
@@ -745,15 +745,11 @@
 
   ;; Hidden span (zero-width sentinel) when the chip should be skipped —
   ;; keeps the children-vec shape uniform across runs.
-  {:name :_partial-rfx-declared-chip-hidden
-   :parent :hiccup
-   :args {:tag {:value "span"} :attrs {:value {:hidden "1"}} :children {:value []}}}
-
   {:name :_partial-rfx-declared-chip
    :parent :if
    :args {:test :_partial-rfx-declared-show-unobserved?
           :then :_partial-rfx-declared-chip-shown
-          :else :_partial-rfx-declared-chip-hidden}}
+          :else :hidden-span}}
 
   {:name :_partial-rfx-declared-chips
    :parent :map

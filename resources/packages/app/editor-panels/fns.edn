@@ -15,25 +15,30 @@
    :parent :recent-failures
    :args {:days 7 :limit 50}}
 
-  {:name :_perr-item-name
+  ;; Rows that name a fn (`:fn-name`) and link to it — the Errors,
+  ;; Type errors, Stats and Tests panels all render the same cell, so
+  ;; the accessor + `#hash` href are public app.editor vocabulary.
+  {:name :item-fn-name
+   :description "`:fn-name` of the row in hand (`:item`), `\"?\"` when absent."
    :parent :get
    :args {:coll {:as :item} :key {:value :fn-name} :default {:value "?"}}}
 
-  {:name :_perr-item-href
+  {:name :item-fn-href
+   :description "`#<fn-name>` — the editor's native hash navigation to the row's fn."
    :parent :str
-   :args {:parts [{:value "#"} :_perr-item-name]}}
+   :args {:parts [{:value "#"} :item-fn-name]}}
 
   {:name :_perr-item-link-attrs
    :parent :assoc
    :args {:map {:value {:class "error-log-fn"}}
           :key {:value :href}
-          :value :_perr-item-href}}
+          :value :item-fn-href}}
 
   {:name :_perr-item-link
    :parent :hiccup
    :args {:tag {:value "a"}
           :attrs :_perr-item-link-attrs
-          :children [:_perr-item-name]}}
+          :children [:item-fn-name]}}
 
   {:name :_perr-item-time
    :parent :get
@@ -80,7 +85,7 @@
    :parent :if
    :args {:test :_perr-item-data?
           :then :_perr-item-details
-          :else :_hidden-span}}
+          :else :hidden-span}}
 
   {:name :_perr-item-exec-id
    :parent :get
@@ -302,25 +307,17 @@
   {:name :_pterr-rows
    :parent :type-diagnostics-list}
 
-  {:name :_pterr-item-name
-   :parent :get
-   :args {:coll {:as :item} :key {:value :fn-name} :default {:value "?"}}}
-
-  {:name :_pterr-item-href
-   :parent :str
-   :args {:parts [{:value "#"} :_pterr-item-name]}}
-
   {:name :_pterr-item-link-attrs
    :parent :assoc
    :args {:map {:value {:class "type-errors-fn"}}
           :key {:value :href}
-          :value :_pterr-item-href}}
+          :value :item-fn-href}}
 
   {:name :_pterr-item-link
    :parent :hiccup
    :args {:tag {:value "a"}
           :attrs :_pterr-item-link-attrs
-          :children [:_pterr-item-name]}}
+          :children [:item-fn-name]}}
 
   {:name :_pterr-item-arg
    :parent :get
@@ -509,69 +506,74 @@
 
   {:name :_pstats-day-label
    :parent :get :args {:coll {:as :item} :key {:value :day} :default {:value ""}}}
-  {:name :_pstats-day-runs
+  ;; --- Shared per-row cells ---------------------------------------------
+  ;; The day / top-fns / by-org tables carry the same usage columns
+  ;; (`:runs` / `:failed` / `:duration-ms-sum` / `:runs-pct`) on their
+  ;; row maps, so one `:item`-reading cell set serves all three `:map`
+  ;; callbacks; only the label cell is per-table.
+  {:name :_pstats-row-runs
    :parent :get :args {:coll {:as :item} :key {:value :runs} :default {:value 0}}}
-  {:name :_pstats-day-failed
+  {:name :_pstats-row-failed
    :parent :get :args {:coll {:as :item} :key {:value :failed} :default {:value 0}}}
-  {:name :_pstats-day-sum
+  {:name :_pstats-row-sum
    :parent :get :args {:coll {:as :item} :key {:value :duration-ms-sum} :default {:value 0}}}
-  {:name :_pstats-day-has-runs?
-   :parent :gt :args {:nums [:_pstats-day-runs {:value 0}]}}
-  {:name :_pstats-day-avg-raw
-   :parent :quot :args {:dividend :_pstats-day-sum :divisor :_pstats-day-runs}}
-  {:name :_pstats-day-avg
+  {:name :_pstats-row-has-runs?
+   :parent :gt :args {:nums [:_pstats-row-runs {:value 0}]}}
+  {:name :_pstats-row-avg-raw
+   :parent :quot :args {:dividend :_pstats-row-sum :divisor :_pstats-row-runs}}
+  {:name :_pstats-row-avg
    :parent :if
-   :args {:test :_pstats-day-has-runs?
-          :then :_pstats-day-avg-raw
+   :args {:test :_pstats-row-has-runs?
+          :then :_pstats-row-avg-raw
           :else {:value 0}}}
 
   {:name :_pstats-day-label-cell
    :parent :hiccup
    :args {:tag {:value "td"} :attrs {:value {:class "stats-day"}}
           :children [:_pstats-day-label]}}
-  {:name :_pstats-day-runs-cell
+  {:name :_pstats-row-runs-cell
    :parent :hiccup
    :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
-          :children [:_pstats-day-runs]}}
-  {:name :_pstats-day-failed-cell
+          :children [:_pstats-row-runs]}}
+  {:name :_pstats-row-failed-cell
    :parent :hiccup
    :args {:tag {:value "td"} :attrs {:value {:class "stats-num stats-failed"}}
-          :children [:_pstats-day-failed]}}
-  {:name :_pstats-day-avg-cell
+          :children [:_pstats-row-failed]}}
+  {:name :_pstats-row-avg-cell
    :parent :hiccup
    :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
-          :children [{:parent :to-str :args {:value :_pstats-day-avg}}]}}
+          :children [{:parent :to-str :args {:value :_pstats-row-avg}}]}}
 
   ;; CSS bar — width % comes server-computed (`:runs-pct`, share of the
   ;; window max) so the graph does no cross-row arithmetic.
-  {:name :_pstats-day-pct
+  {:name :_pstats-row-pct
    :parent :get :args {:coll {:as :item} :key {:value :runs-pct} :default {:value 0}}}
-  {:name :_pstats-day-bar-style
-   :parent :str :args {:parts [{:value "width:"} :_pstats-day-pct {:value "%"}]}}
-  {:name :_pstats-day-bar-attrs
+  {:name :_pstats-row-bar-style
+   :parent :str :args {:parts [{:value "width:"} :_pstats-row-pct {:value "%"}]}}
+  {:name :_pstats-row-bar-attrs
    :parent :assoc
    :args {:map {:value {:class "stats-bar-fill"}}
-          :key {:value :style} :value :_pstats-day-bar-style}}
-  {:name :_pstats-day-bar-fill
+          :key {:value :style} :value :_pstats-row-bar-style}}
+  {:name :_pstats-row-bar-fill
    :parent :hiccup
-   :args {:tag {:value "div"} :attrs :_pstats-day-bar-attrs :children []}}
-  {:name :_pstats-day-bar
+   :args {:tag {:value "div"} :attrs :_pstats-row-bar-attrs :children []}}
+  {:name :_pstats-row-bar
    :parent :hiccup
    :args {:tag {:value "div"} :attrs {:value {:class "stats-bar"}}
-          :children [:_pstats-day-bar-fill]}}
-  {:name :_pstats-day-bar-cell
+          :children [:_pstats-row-bar-fill]}}
+  {:name :_pstats-row-bar-cell
    :parent :hiccup
    :args {:tag {:value "td"} :attrs {:value {:class "stats-bar-cell"}}
-          :children [:_pstats-day-bar]}}
+          :children [:_pstats-row-bar]}}
 
   {:name :_pstats-day-row
    :description "One trend row — `[:tr [:td day] [:td bar] [:td runs] [:td failed] [:td avg]]`."
    :parent :hiccup
    :args {:tag {:value "tr"}
           :attrs {:value {:class "stats-row"}}
-          :children [:_pstats-day-label-cell :_pstats-day-bar-cell
-                     :_pstats-day-runs-cell
-                     :_pstats-day-failed-cell :_pstats-day-avg-cell]}}
+          :children [:_pstats-day-label-cell :_pstats-row-bar-cell
+                     :_pstats-row-runs-cell
+                     :_pstats-row-failed-cell :_pstats-row-avg-cell]}}
 
   {:name :_pstats-day-rows
    :parent :map :args {:func :_pstats-day-row :coll :_pstats-daily}}
@@ -597,78 +599,25 @@
    :parent :usage-org-fn-stats
    :args {:days :_pstats-window-days :limit {:value 20}}}
 
-  {:name :_pstats-fn-name
-   :parent :get :args {:coll {:as :item} :key {:value :fn-name} :default {:value "?"}}}
-  {:name :_pstats-fn-runs
-   :parent :get :args {:coll {:as :item} :key {:value :runs} :default {:value 0}}}
-  {:name :_pstats-fn-failed
-   :parent :get :args {:coll {:as :item} :key {:value :failed} :default {:value 0}}}
-  {:name :_pstats-fn-sum
-   :parent :get :args {:coll {:as :item} :key {:value :duration-ms-sum} :default {:value 0}}}
-  {:name :_pstats-fn-has-runs?
-   :parent :gt :args {:nums [:_pstats-fn-runs {:value 0}]}}
-  {:name :_pstats-fn-avg-raw
-   :parent :quot :args {:dividend :_pstats-fn-sum :divisor :_pstats-fn-runs}}
-  {:name :_pstats-fn-avg
-   :parent :if
-   :args {:test :_pstats-fn-has-runs?
-          :then :_pstats-fn-avg-raw
-          :else {:value 0}}}
-
-  {:name :_pstats-fn-href
-   :parent :str :args {:parts [{:value "#"} :_pstats-fn-name]}}
   {:name :_pstats-fn-link-attrs
    :parent :assoc
-   :args {:map {:value {:class "stats-fn"}} :key {:value :href} :value :_pstats-fn-href}}
+   :args {:map {:value {:class "stats-fn"}} :key {:value :href} :value :item-fn-href}}
   {:name :_pstats-fn-link
    :parent :hiccup
-   :args {:tag {:value "a"} :attrs :_pstats-fn-link-attrs :children [:_pstats-fn-name]}}
+   :args {:tag {:value "a"} :attrs :_pstats-fn-link-attrs :children [:item-fn-name]}}
   {:name :_pstats-fn-name-cell
    :parent :hiccup
    :args {:tag {:value "td"} :attrs {:value {:class "stats-fn-cell"}}
           :children [:_pstats-fn-link]}}
-
-  {:name :_pstats-fn-runs-cell
-   :parent :hiccup
-   :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
-          :children [:_pstats-fn-runs]}}
-  {:name :_pstats-fn-failed-cell
-   :parent :hiccup
-   :args {:tag {:value "td"} :attrs {:value {:class "stats-num stats-failed"}}
-          :children [:_pstats-fn-failed]}}
-  {:name :_pstats-fn-avg-cell
-   :parent :hiccup
-   :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
-          :children [{:parent :to-str :args {:value :_pstats-fn-avg}}]}}
-
-  {:name :_pstats-fn-pct
-   :parent :get :args {:coll {:as :item} :key {:value :runs-pct} :default {:value 0}}}
-  {:name :_pstats-fn-bar-style
-   :parent :str :args {:parts [{:value "width:"} :_pstats-fn-pct {:value "%"}]}}
-  {:name :_pstats-fn-bar-attrs
-   :parent :assoc
-   :args {:map {:value {:class "stats-bar-fill"}}
-          :key {:value :style} :value :_pstats-fn-bar-style}}
-  {:name :_pstats-fn-bar-fill
-   :parent :hiccup
-   :args {:tag {:value "div"} :attrs :_pstats-fn-bar-attrs :children []}}
-  {:name :_pstats-fn-bar
-   :parent :hiccup
-   :args {:tag {:value "div"} :attrs {:value {:class "stats-bar"}}
-          :children [:_pstats-fn-bar-fill]}}
-  {:name :_pstats-fn-bar-cell
-   :parent :hiccup
-   :args {:tag {:value "td"} :attrs {:value {:class "stats-bar-cell"}}
-          :children [:_pstats-fn-bar]}}
 
   {:name :_pstats-fn-row
    :description "One top-fns row — fn link (native #hash nav), bar, runs, failed, avg — each in its own `[:td]`."
    :parent :hiccup
    :args {:tag {:value "tr"}
           :attrs {:value {:class "stats-row"}}
-          :children [:_pstats-fn-name-cell :_pstats-fn-bar-cell
-                     :_pstats-fn-runs-cell
-                     :_pstats-fn-failed-cell :_pstats-fn-avg-cell]}}
+          :children [:_pstats-fn-name-cell :_pstats-row-bar-cell
+                     :_pstats-row-runs-cell
+                     :_pstats-row-failed-cell :_pstats-row-avg-cell]}}
 
   {:name :_pstats-fn-rows
    :parent :map :args {:func :_pstats-fn-row :coll :_pstats-top-fns}}
@@ -697,65 +646,17 @@
 
   {:name :_pstats-org-name
    :parent :get :args {:coll {:as :item} :key {:value :org} :default {:value "?"}}}
-  {:name :_pstats-org-runs
-   :parent :get :args {:coll {:as :item} :key {:value :runs} :default {:value 0}}}
-  {:name :_pstats-org-failed
-   :parent :get :args {:coll {:as :item} :key {:value :failed} :default {:value 0}}}
-  {:name :_pstats-org-sum
-   :parent :get :args {:coll {:as :item} :key {:value :duration-ms-sum} :default {:value 0}}}
-  {:name :_pstats-org-has-runs?
-   :parent :gt :args {:nums [:_pstats-org-runs {:value 0}]}}
-  {:name :_pstats-org-avg-raw
-   :parent :quot :args {:dividend :_pstats-org-sum :divisor :_pstats-org-runs}}
-  {:name :_pstats-org-avg
-   :parent :if
-   :args {:test :_pstats-org-has-runs?
-          :then :_pstats-org-avg-raw
-          :else {:value 0}}}
-  {:name :_pstats-org-pct
-   :parent :get :args {:coll {:as :item} :key {:value :runs-pct} :default {:value 0}}}
-
   {:name :_pstats-org-name-cell
    :parent :hiccup
    :args {:tag {:value "td"} :attrs {:value {:class "stats-fn-cell"}}
           :children [:_pstats-org-name]}}
-  {:name :_pstats-org-bar-style
-   :parent :str :args {:parts [{:value "width:"} :_pstats-org-pct {:value "%"}]}}
-  {:name :_pstats-org-bar-attrs
-   :parent :assoc
-   :args {:map {:value {:class "stats-bar-fill"}}
-          :key {:value :style} :value :_pstats-org-bar-style}}
-  {:name :_pstats-org-bar-fill
-   :parent :hiccup
-   :args {:tag {:value "div"} :attrs :_pstats-org-bar-attrs :children []}}
-  {:name :_pstats-org-bar
-   :parent :hiccup
-   :args {:tag {:value "div"} :attrs {:value {:class "stats-bar"}}
-          :children [:_pstats-org-bar-fill]}}
-  {:name :_pstats-org-bar-cell
-   :parent :hiccup
-   :args {:tag {:value "td"} :attrs {:value {:class "stats-bar-cell"}}
-          :children [:_pstats-org-bar]}}
-  {:name :_pstats-org-runs-cell
-   :parent :hiccup
-   :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
-          :children [:_pstats-org-runs]}}
-  {:name :_pstats-org-failed-cell
-   :parent :hiccup
-   :args {:tag {:value "td"} :attrs {:value {:class "stats-num stats-failed"}}
-          :children [:_pstats-org-failed]}}
-  {:name :_pstats-org-avg-cell
-   :parent :hiccup
-   :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
-          :children [{:parent :to-str :args {:value :_pstats-org-avg}}]}}
-
   {:name :_pstats-org-row
    :parent :hiccup
    :args {:tag {:value "tr"}
           :attrs {:value {:class "stats-row"}}
-          :children [:_pstats-org-name-cell :_pstats-org-bar-cell
-                     :_pstats-org-runs-cell
-                     :_pstats-org-failed-cell :_pstats-org-avg-cell]}}
+          :children [:_pstats-org-name-cell :_pstats-row-bar-cell
+                     :_pstats-row-runs-cell
+                     :_pstats-row-failed-cell :_pstats-row-avg-cell]}}
 
   {:name :_pstats-org-rows
    :parent :map :args {:func :_pstats-org-row :coll :_pstats-orgs}}
@@ -779,7 +680,7 @@
   {:name :_pstats-org-section
    :parent :if
    :args {:test :_pstats-orgs-empty?
-          :then :_hidden-span
+          :then :hidden-span
           :else :_pstats-org-block}}
 
   ;; --- Assembly ---------------------------------------------------------
@@ -1042,10 +943,10 @@
    :parent :html-ok-response
    :args {:body :_passets-html}}
 
-  ;; --- GET /partials/asset-edit?path=… — the editor slot's content ----
+  ;; --- `?path=` — shared by asset-edit / baseline / revert -------------
   ;; `:query-param` computes `:nullable-text`; the `:coalesce` strips the
   ;; `:null` so downstream `:text`-typed path slots prove.
-  {:name :_pedit-path
+  {:name :_asset-path
    :parent :coalesce
    :args {:value {:parent :query-param
                   :args {:param-name {:value "path"}}}
@@ -1053,22 +954,22 @@
 
   {:name :_pedit-override-content
    :parent :_ro-content
-   :args {:asset-path :_pedit-path}}
+   :args {:asset-path :_asset-path}}
 
   ;; The classpath fallback reads ONLY a known bundle path — a caller
   ;; must not turn `?path=` into an arbitrary classpath read (the edit
   ;; partial is auth-required, but that gate is weaker than "one shipped
   ;; asset"; a tenant principal could otherwise slurp private source).
-  {:name :_pedit-known?
+  {:name :_asset-known?
    :parent :contains?
-   :args {:coll :_passets-known-map :key :_pedit-path}}
+   :args {:coll :_passets-known-map :key :_asset-path}}
 
-  {:name :_pedit-baseline
+  {:name :_asset-baseline
    :parent :if
-   :args {:test :_pedit-known?
+   :args {:test :_asset-known?
           :then {:parent :coalesce
                  :args {:value {:parent :read-resource-or-nil
-                                :args {:path :_pedit-path}}
+                                :args {:path :_asset-path}}
                         :default {:value ""}}}
           :else {:value ""}}}
 
@@ -1078,12 +979,12 @@
   {:name :_pedit-content
    :parent :coalesce
    :args {:value :_pedit-override-content
-          :default :_pedit-baseline}}
+          :default :_asset-baseline}}
 
   {:name :_pedit-path-input-attrs
    :parent :assoc
    :args {:map {:value {:type "hidden" :name "path"}}
-          :key {:value :value} :value :_pedit-path}}
+          :key {:value :value} :value :_asset-path}}
 
   {:name :_pedit-path-input
    :parent :hiccup
@@ -1097,9 +998,9 @@
   {:name :_pedit-lang
    :description "CodeMirror language for the asset — `css` / `json` / `js` by extension, else `text` (plain, ungated)."
    :parent :cond
-   :args {:clauses [{:parent :str-contains? :args {:string :_pedit-path :substring {:value ".css"}}} {:value "css"}
-                    {:parent :str-contains? :args {:string :_pedit-path :substring {:value ".json"}}} {:value "json"}
-                    {:parent :str-contains? :args {:string :_pedit-path :substring {:value ".js"}}} {:value "js"}
+   :args {:clauses [{:parent :str-contains? :args {:string :_asset-path :substring {:value ".css"}}} {:value "css"}
+                    {:parent :str-contains? :args {:string :_asset-path :substring {:value ".json"}}} {:value "json"}
+                    {:parent :str-contains? :args {:string :_asset-path :substring {:value ".js"}}} {:value "js"}
                     {:value true} {:value "text"}]}}
 
   {:name :_pedit-textarea-attrs
@@ -1134,7 +1035,7 @@
                         :hx-delete "/api/assets/revert"
                         :hx-target "closest [data-assets-panel]" :hx-swap "outerHTML"
                         :hx-confirm "Remove the override and return to the shipped baseline?"}}
-          :key {:value :value} :value :_pedit-path}}
+          :key {:value :value} :value :_asset-path}}
 
   {:name :_pedit-revert-btn
    :parent :hiccup
@@ -1145,7 +1046,7 @@
    :parent :if
    :args {:test {:parent :some? :args {:value :_pedit-override-content}}
           :then :_pedit-revert-btn
-          :else :_hidden-span}}
+          :else :hidden-span}}
 
   ;; Diff toggle — sits OUTSIDE the form (htmx must not serialize it);
   ;; editor-assets.js opens a read-only MergeView of baseline vs the
@@ -1156,7 +1057,7 @@
           :attrs {:parent :assoc
                   :args {:map {:value {:type "button" :class "gd-asset-diff-btn"}}
                          :key {:value :data-path}
-                         :value :_pedit-path}}
+                         :value :_asset-path}}
           :children [{:value "Diff vs baseline"}]}}
 
   {:name :_pedit-body
@@ -1166,7 +1067,7 @@
           :children [{:parent :hiccup
                       :args {:tag {:value "code"}
                              :attrs {:value {:class "gd-asset-path"}}
-                             :children [:_pedit-path]}}
+                             :children [:_asset-path]}}
                      :_pedit-form :_pedit-diff-btn :_pedit-revert-opt]}}
 
   {:name :_pedit-html
@@ -1236,45 +1137,16 @@
    :args {:body :_asave-then-panel}}
 
   ;; --- GET /api/assets/baseline?path=… — shipped file body (diff) ---
-  {:name :_abase-path
-   :parent :coalesce
-   :args {:value {:parent :query-param
-                  :args {:param-name {:value "path"}}}
-          :default {:value ""}}}
-
-  ;; Allowlisted: only a KNOWN bundle path is read from the classpath —
-  ;; `?path=` must not become an arbitrary classpath read (see
-  ;; `:_pedit-known?`).
-  {:name :_abase-known?
-   :parent :contains?
-   :args {:coll :_passets-known-map :key :_abase-path}}
-
-  {:name :_abase-text
-   :description "The classpath baseline for one KNOWN asset path — empty string for an unknown path (rejected) or one that doesn't resolve (an orphan override has no baseline)."
-   :parent :if
-   :args {:test :_abase-known?
-          :then {:parent :coalesce
-                 :args {:value {:parent :read-resource-or-nil
-                                :args {:path :_abase-path}}
-                        :default {:value ""}}}
-          :else {:value ""}}}
-
   {:name :_abase-handler
    :lambda-params [:request]
    :description "Ring handler for GET /api/assets/baseline?path=… — the SHIPPED body of one asset as text/plain, for the panel's diff view (override vs baseline). Auth-required (route side)."
    :parent :text-ok-response
-   :args {:body :_abase-text}}
+   :args {:body :_asset-baseline}}
 
   ;; --- DELETE /api/assets/revert?path=… — drop override, re-render ---
-  {:name :_arev-path
-   :parent :coalesce
-   :args {:value {:parent :query-param
-                  :args {:param-name {:value "path"}}}
-          :default {:value ""}}}
-
   {:name :_arev-id
    :parent :get
-   :args {:coll {:parent :_ro-row :args {:asset-path :_arev-path}}
+   :args {:coll {:parent :_ro-row :args {:asset-path :_asset-path}}
           :key {:value :id} :default nil}}
 
   {:name :_arev-delete

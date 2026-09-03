@@ -102,11 +102,15 @@ async function cleanup(page) {
       return !!(await rowSel(NAME_A));
     }, 30000);
     assert(rowSeen, 'Lint tab lists the duplicate pair');
-    const badge = await page.evaluate(() => {
+    // The badge recounts on every swap that settles in the drawer, and a
+    // refetch from the poll above may still be landing — poll the badge
+    // too rather than read it once.
+    const badgeText = () => page.evaluate(() => {
       const b = document.querySelector('#gd-diag-nav button[data-section="lint"] .gd-diag-badge');
       return b && !b.hidden ? b.textContent : null;
     });
-    assert(badge && parseInt(badge, 10) >= 1, 'Lint tab badge counts the warning: ' + badge);
+    const badgeSeen = await waitFor(async () => parseInt((await badgeText()) || '0', 10) >= 1, 15000);
+    assert(badgeSeen, 'Lint tab badge counts the warning: ' + await badgeText());
 
     // === Not an issue → row gone, hidden list counts one, graph holds it ===
     await page.evaluate((n) => {

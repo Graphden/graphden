@@ -1094,10 +1094,10 @@
   ;; ---------------------------------------------------------------------
 
   {:name :_reconcile-services-apply
-   :description "Stage 1 — single recon-library call producing the reconcile summary (`{:started [ids] :stopped [ids]}`). Wrapped into `{:ok true :reconcile …}` by the fn-def below."
+   :description "Stage 1 — single recon-library call producing the reconcile summary (`{:started [ids] :stopped [ids]}`). Wrapped into `{:ok true :reconcile …}` by the fn-def below. `:process` — it starts / stops supervised service threads (the same category `:future` / `:http-server` record); an operator surface on the cloud, where no request-level set carries `:process`."
    :args {:request {:type :ring-request-shape}}
    :return-type {:started [:list :uuid] :stopped [:list :uuid]}
-   :effects #{:db :io}}
+   :effects #{:db :process}}
 
   {:name :_reconcile-services
    :description "Wrap the recon summary into the public response shape. Admins can extend the response by adding keys here without touching impls."

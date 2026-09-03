@@ -38,16 +38,6 @@
 ;; the route will 403 for every cloud tenant, so the entry must say why
 ;; that is acceptable (operator-only surface, or served under the addon's
 ;; exact-path widening for the platform UI shell).
-(def ^:private ui-shell
-  "The platform UI shell — the editor page + its fixed asset bundles read
-   the classpath (`:io`). The tenancy addon widens the request set by
-   exactly `:io` for these EXACT GET paths (`platform-ui-shell-paths`); a
-   caller-chosen classpath path (`/assets/baseline`, `/partials/asset-edit`)
-   stays gated — that is what keeps a tenant from pulling `cloud/prod.edn`
-   through them."
-  {:effects #{:io} :why "UI shell — the addon widens :io for this exact GET path"})
-
-
 (def ^:private operator-only
   {:effects #{:io} :why "operator surface — a tenant session is refused (403) by design"})
 
@@ -61,22 +51,16 @@
   {;; Operator scrape endpoints — JVM info (hostname / user via env).
    :metrics {:effects #{:io :env} :why "operator scrape (JVM / env info)"}
    :metrics-prometheus {:effects #{:io :env} :why "operator scrape (JVM / env info)"}
-   ;; UI shell (see `ui-shell`). The editor PAGE itself is not here: its
-   ;; only classpath read was the build-hashes resource, now a cached
-   ;; effect-free read.
-   :editor-js-asset ui-shell
-   :editor-css-asset ui-shell
-   :codemirror-js-asset ui-shell
-   :htmx-js-asset ui-shell
-   :htmx-sse-js-asset ui-shell
-   :graphden-runtime-js-asset ui-shell
-   :graphden-components-css-asset ui-shell
-   ;; Operate → Assets (system-only on the cloud — a stored-XSS surface).
+   ;; The UI shell (editor page + its asset bundles) is NOT here any more:
+   ;; the shipped baseline is a cached, allow-listed `:shipped-asset` read
+   ;; and the override lookup is `:db` — no request path needs `:io`.
+   ;; Operate → Assets (system-only on the cloud — a stored-XSS surface):
+   ;; these read a CALLER-CHOSEN classpath path, which stays `:io`.
    :api-assets-baseline operator-only
    :partial-asset-edit operator-only
    ;; Services are a dedicated-pod / self-host feature; the reconcile
-   ;; endpoint drives the supervisor.
-   :api-services-reconcile operator-only
+   ;; endpoint starts / stops supervised threads.
+   :api-services-reconcile {:effects #{:process} :why "operator surface — starts/stops supervised service threads; no request-level set carries :process"}
    ;; Raw vault ops.
    :api-secret-delete (update vault-ops :effects conj :io)
    :api-secret-inline-binding vault-ops

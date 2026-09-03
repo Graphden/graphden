@@ -120,6 +120,8 @@
     :select-keys
     :service-blocking-free-args :set-branch-policy!
     :set-branch-require-merge! :set-review-state!
+    ;; Cached, allow-listed read of a shipped frontend asset — no caller content.
+    :shipped-asset
     :set-branch-review-policy! :approve-proposal! :dismiss-my-approval!
     :proposal-approval-status :add-branch-comment! :list-branch-comments
     :delete-branch-comment! :sleep :sleep-until-ms

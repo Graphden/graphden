@@ -142,7 +142,9 @@
 (defbase _reconcile-services-apply
   [_request]
   (cr/record-effect! :db)
-  (cr/record-effect! :io)
+  ;; Starting / stopping supervised service threads is `:process` (what
+  ;; `:future` and `:http-server` record), not a file/classpath read.
+  (cr/record-effect! :process)
   (recon/reconcile-once! ctx recon/running))
 
 

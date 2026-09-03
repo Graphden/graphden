@@ -233,6 +233,42 @@
   @build-hashes-text)
 
 
+(def ^:private shipped-asset-kinds #{"js" "css" "svg" "html" "md"})
+
+
+(defn- shipped-asset-path?
+  "The allow-list: under `packages/`, no parent-dir segment, one of the
+   asset extensions."
+  [path]
+  (and (string? path)
+       (str/starts-with? path "packages/")
+       (not (str/includes? path ".."))
+       (contains? shipped-asset-kinds (last (str/split path #"\.")))))
+
+
+(def ^:private shipped-assets
+  "Per-process cache `{path text}` — a shipped file cannot change while
+   the process runs."
+  (atom {}))
+
+
+(defbase shipped-asset
+  "A shipped frontend asset, read once and cached. No effect recorded —
+   public bytes, allow-listed path (see fns.edn)."
+  [path]
+  (when-not (shipped-asset-path? path)
+    (throw (ex-info (str "Not a shipped asset path: " (pr-str path)
+                         " — packages/… ending in one of " (sort shipped-asset-kinds))
+                    {:type :validation-error/shipped-asset-path :path path})))
+  (or (get @shipped-assets path)
+      (if-let [r (io/resource path)]
+        (let [text (slurp r)]
+          (swap! shipped-assets assoc path text)
+          text)
+        (throw (ex-info (str "Resource not found: " path)
+                        {:type :execution-error/resource-not-found :path path})))))
+
+
 (defbase read-resource-bytes
   "Classpath resource → byte array, nil when absent. The binary sibling
    of `read-resource-or-nil`."
@@ -396,6 +432,7 @@
    :throw {:impl throw-fn :taint-propagate? true}
    :read-resource-or-nil read-resource-or-nil
    :read-resource-bytes read-resource-bytes
+   :shipped-asset shipped-asset
    :build-hashes-raw build-hashes-raw
    :invoke {:impl invoke-fn :return-type-rule invoke-return-rule :taint-propagate? true}
    :call {:impl invoke-fn :taint-propagate? true}

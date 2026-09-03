@@ -48,6 +48,9 @@
     ;; carry fn names / ids / the engine's message — server-derived, and
     ;; the `suppressed` arg only FILTERS them, never flows through.
     :branch-lint-warnings
+    ;; :unresolved-failure-counts tallies audit rows per fn — fn ids /
+    ;; names / counts, all server-derived; `days` is a window, not content.
+    :unresolved-failure-counts
     :brotli-bytes :build-form
     ;; Cached read of the fixed build artifact — no caller content.
     :build-hashes-raw :byte-count

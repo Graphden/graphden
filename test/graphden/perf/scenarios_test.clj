@@ -100,7 +100,14 @@
       ;; which is the one failure mode this file cannot self-detect later.
       (is (pos? queries)
           "measured no SQL at all — pg_stat_statements is not seeing this DB")
-      (is (seq statements)))))
+      (is (seq statements))
+      ;; The budget is 1. When something else lands in the window (gate 19,
+      ;; 2026-09-03: 2 / max 1, green on the seven gates before it), the
+      ;; budget report cannot say WHAT fired — this can.
+      (when (> queries 1)
+        (println "perf: scope=tree fired" queries "statements:")
+        (doseq [{:keys [calls query]} statements]
+          (println "  " calls "×" (subs (str query) 0 (min 160 (count (str query))))))))))
 
 
 (deftest ^:perf execute-popover-app-root-sql-cost

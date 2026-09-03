@@ -38,6 +38,10 @@ exclude = [
   # A personal host used as a deploy EXAMPLE in deploy/kind/README.md. Its
   # uptime is not a property of this repository.
   '^https?://izpa\.xyz',
+  # x.com answers automated link checkers with 503 (the develop CI went red
+  # on README's @graphdendev link, 2026-09-03). A social profile's uptime is
+  # not a property of this repository either.
+  '^https?://(x|twitter)\.com/',
 
   # Localhost references in docs — not real URLs to validate.
   '^https?://localhost(:\d+)?($|/)',

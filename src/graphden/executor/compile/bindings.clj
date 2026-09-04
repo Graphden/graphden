@@ -69,18 +69,32 @@
    `:list-append true` on a binding, items come AFTER the parent's
    effective items. Without append, the binding REPLACES (no parent
    items inherited). Stops at the first non-append binding (the parent
-   list is its replacement)."
-  [fn-id slot-id {:keys [binding-by-fn-slot items-by-binding] :as lookups}]
+   list is its replacement).
+
+   `rename-slot-id` (nil when the slot is not renamed on the chain) is
+   the rename-view slot over `slot-id` that `effective-binding` found
+   the override on: a descendant of the renamer writes its list on
+   THAT slot (`{:steps {:as :migrations}}`, then `:migrations [...]`),
+   so each chain member is read through either id. Before this the
+   walk consulted only the source slot, saw the renamer's empty
+   rename row as a replacement, and the descendant's items silently
+   vanished — the renamed `:do` ran with no steps. The empty rename
+   row itself (no items, no append) is transparent."
+  [fn-id slot-id rename-slot-id
+   {:keys [binding-by-fn-slot items-by-binding] :as lookups}]
   (let [chain (l/inheritance-chain* fn-id lookups)
         ;; Walk from root (farthest) to F (closest), accumulating
         ;; items. Reverse the chain so root is first.
         farthest-first (reverse chain)
         result (reduce (fn [acc fid]
-                         (if-let [b (get binding-by-fn-slot [fid slot-id])]
+                         (if-let [b (or (get binding-by-fn-slot [fid slot-id])
+                                        (when rename-slot-id
+                                          (get binding-by-fn-slot [fid rename-slot-id])))]
                            (let [own (vec (get items-by-binding (:id b) []))]
-                             (if (true? (:list-append b))
-                               (into acc own)
-                               own))                ; replace
+                             (cond
+                               (true? (:list-append b)) (into acc own)
+                               (seq own) own            ; replace
+                               :else acc))              ; pure rename row
                            acc))
                        []
                        farthest-first)]
@@ -244,7 +258,9 @@
        ;; runtime needs this fn-id (not the iterating fn-id, which
        ;; may be a descendant that just inherits the binding).
        :binder-fn-id (:fn-id b)
-       :items (list-items-for fn-id slot-id lookups)
+       :items (list-items-for fn-id slot-id
+                              (when (not= (:slot-id b) slot-id) (:slot-id b))
+                              lookups)
        :lazy-seq? (contains? (or lazy-seq-args #{}) base-name)}
 
       :else
@@ -327,11 +343,35 @@
                 env-name (some-> (:name slot) keyword)]
             (when (and env-name
                        (not (contains? root-slot-ids slot-id))
-                       (or (value-binding? b) (ref-binding? b)))
+                       (or (value-binding? b) (ref-binding? b) (list-binding? b)))
               (cond
                 (value-binding? b)
                 [env-name {:kind :value :env-name env-name
                            :slot-id slot-id :value (:value b)}]
+
+                ;; A LIST binding on a non-root slot — F fills a
+                ;; renamed sequence slot deep in its ref tree
+                ;; (`:migrate`'s `:migrations [:m-001 :m-002]` over
+                ;; `:do`'s `:steps` behind the `:pg-tx :body` wrap).
+                ;; Delivered like the root `:seq` kind: items become
+                ;; delays when the OWNING root declares the source
+                ;; slot lazy, so a `:do` behind a HOF boundary still
+                ;; forces them in order, inside its own body. Before
+                ;; this the row was dropped and the renamed `:do` ran
+                ;; with no steps.
+                (list-binding? b)
+                (let [src-slot (or (some->> (:source-slot-id slot) (get slot-map))
+                                   slot)
+                      owner (own-fn-of-slot slot-id lookups)
+                      lazy? (boolean
+                              (and owner
+                                   (contains? (or (lazy-seq-arg-names owner lookups) #{})
+                                              (keyword (:name src-slot)))))]
+                  [env-name {:kind :seq :env-name env-name
+                             :slot-id slot-id
+                             :binder-fn-id (:fn-id b)
+                             :items (list-items-for fn-id slot-id nil lookups)
+                             :lazy-seq? lazy?}])
                 (ref-binding? b)
                 [env-name {:kind :ref :env-name env-name
                            ;; `:slot-id` + `:type-override-fn-id` carry

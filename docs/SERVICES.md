@@ -90,6 +90,56 @@ This is the canonical template for adding more long-running patterns
 (queue consumer, websocket listener, file watcher): compose over the
 existing concurrency primitives, return a stopper, declare `:process`.
 
+### Startup steps — schema migrations
+
+A service fn is any no-arg fn, so "do X before the listener comes up"
+is plain sequencing — `:do` — not a field on the `:service` row. The
+`storage/pg` package ships the Flyway shape as two fn-def templates,
+`:migration` and `:migrate` (composition only, no new base-fn — the
+same role `:schedule` plays for cron):
+
+```edn
+{:name :m-001 :parent :migration
+ :args {:id "001-users"
+        :ddl {:value {:create-table [:users :if-not-exists]
+                      :with-columns [[:id :bigserial [:primary-key]]
+                                     [:email :text]]}}}}
+
+{:name :m-002 :parent :migration
+ :args {:id "002-users-created-at"
+        :ddl {:value {:alter-table :users :add-column [:created_at :timestamptz]}}}}
+
+{:name :app-migrate :parent :migrate :args {:migrations [:m-001 :m-002]}}
+
+;; The service fn: migrate, then start the listener whose stopper
+;; `:do` returns (it also inherits the listener's `:process` effect).
+{:name :app-service :parent :do :args {:steps [:app-migrate :web-server]}}
+```
+
+| | |
+|---|---|
+| **One migration** | `:migration` — inside a transaction, when the `schema_migrations` journal has no marker for `:id`, run `:ddl` (a HoneySQL map) and insert the marker (returns 1); otherwise a no-op (nil). |
+| **The run** | `:migrate` — ONE transaction under `pg_advisory_xact_lock`: ensures the journal table, then runs `:migrations` in order. N pods starting at once serialise and the late ones find nothing pending; a throwing migration rolls the whole run back, markers included. |
+| **Adding one** | Append to the list — `{:migrations {:append [:m-003]}}` on a derived fn-def, or edit the vector. The write hook restarts every service whose closure contains the list (`invalidation.clj`), the `:do` runs the migrator again, only the new id is pending. |
+| **Merging** | `:merge-post-commit!` restarts the same set on the target branch, so migrations added on a feature branch apply on `main`'s next start. |
+| **Ids** | Stable, append-only, sortable strings (`"001-users"`). A duplicate id in one run fails the journal insert's primary key and rolls the run back — loudly, by design. |
+
+Each migration is a graph node, not a row of data: the editor shows the
+journal as the `:migrations` chain, and the type-checker sees every
+`:ddl`. `graphden.packages.storage.migrations-test` pins the contract.
+
+**Branches version the graph, not Postgres.** `:migration` runs
+against graphden's OWN datasource, so a service on a feature branch
+migrates the same physical database `main`'s service uses, and the
+journal table is shared. Keep platform-table migrations on the branch
+that owns the deployment; for a user database of your own, put the
+DSN in a `branch-local?` `:env` fn-def and compose over `web/sql`
+(`:sql-exec` / `:sql-query`) instead — then each branch can point at
+its own database. Both templates record the `:raw-sql` effect, which
+the cloud effect gate forbids to tenant graphs
+([SECURITY_MODEL.md](SECURITY_MODEL.md)) — on the cloud they are a
+platform / self-host affordance, not a tenant one.
+
 ## Storage schema
 
 One non-versioned entity + two enums (`:restart-policy`, `:cardinality`;
@@ -385,6 +435,7 @@ all loaded packages.
 | Done | Multi-pod: per-pod reconcilers, PG advisory-lock ownership for `:singleton` services, `:cardinality` so `:per-pod` listeners run everywhere, `service:*` NOTIFY so siblings reconcile within ~1s, lock auto-release on pod crash. No `:owner-pod-id` column — ownership is implicit in who holds the lock. |
 | Done | Periodic reconcile tick (`:exec/service-reconciler`, ~15s) — level-triggered convergence: re-takes a `:singleton` lock after the holder crashes (no NOTIFY is emitted), picks up out-of-band DB edits, reconverges transient start failures. Retry-free under `reconcile-monitor` so a failing start never blocks the listener. The tick actually heals a crash because the reconciler now drops `::not-our-lock` placeholders at the top of every pass (they were sticky before, so an idle pod never re-attempted the freed lock). |
 | Done | `:pool` cardinality (`:pool-size N`) — a service runs on up to N pods, coordinated by N advisory-lock slots (generalises `:singleton` = slot 0). Fixed `:pool-size` only; load-driven autoscaling of N is out of scope (the request path scales via cells + HPA). |
+| Done | Startup steps — `:migration` / `:migrate` templates in `storage/pg` (§ Startup steps): journaled, advisory-locked, one-transaction schema migrations sequenced ahead of the listener with `:do`. |
 | Next | `:service-schedule` 1-to-many for cron/interval triggers; UI Services panel (row-actions "Make service" + sidebar "Only services" filter) |
 | Done | Advisory-lock connection-drop reconnect + re-acquire. The lock connection is held behind a reconnecting holder; every reconcile pass runs `advisory-lock/ensure-live!`, and on a reconnect `reassert-lock-ownership!` re-takes each `:singleton` this pod was running (stopping any a sibling stole during the outage). Closes the "two pods double-run one service until the next reconcile" window. |
 | Done | Cross-pod cancel routing for `:fn-execution` — `execution:cancel:<id>` NOTIFY fan-out; see [EXECUTION.md](EXECUTION.md). |

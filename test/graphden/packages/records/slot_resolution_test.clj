@@ -51,6 +51,31 @@
       (is (nil? (sr/slot-type-of :missing :x defs))))))
 
 
+(deftest rename-source-type-test
+  (let [defs {:do        {:args {:steps {:type [:list :any]}}}
+              :run       {:parent :do :args {:steps {:as :migrations}}}
+              :pinned    {:parent :do :args {:steps {:as :items :type :sequence}}}
+              :deep-run  {:parent :run}
+              :route     {:parent :do :args {:steps [{:as :path} :const]}}}]
+    (testing "a pure `{:as X}` rename over a list slot reads its source's list
+              type — a descendant's bare vector binds as list ITEMS, not a literal"
+      (is (= [:list :any] (sr/rename-source-type :run :migrations defs))))
+
+    (testing "`slot-type-of` itself stays nil for the pure rename — the owner
+              resolver's type disambiguation must not see rename slots as typed"
+      (is (nil? (sr/slot-type-of :run :migrations defs))))
+
+    (testing "a pinned `:type` on the rename is `slot-type-of`'s business"
+      (is (= :sequence (sr/slot-type-of :pinned :items defs))))
+
+    (testing "the source slot's type is read through the rename owner only —
+              a descendant of the renamer is not itself the rename owner"
+      (is (nil? (sr/rename-source-type :deep-run :migrations defs))))
+
+    (testing "a POSITIONAL rename names one item, not the list — no list type"
+      (is (nil? (sr/rename-source-type :route :path defs))))))
+
+
 ;; ============================================================================
 ;; rename-target
 ;; ============================================================================

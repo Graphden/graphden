@@ -668,7 +668,12 @@
         owner-fn-id (resolve-owner-fn-id owner-name name->id defs-by-name)
         slot (ids/slot-id owner-fn-id owner-arg)
         bid (ids/binding-id own-id slot)
-        slot-type (slot-res/slot-type-of owner-name owner-arg defs-by-name)
+        ;; A pure `{:as X}` rename slot has no type of its own — read
+        ;; its source's, so a descendant's bare vector on the renamed
+        ;; name (`:migrations [:m1 :m2]` over `:do`'s `:steps`) binds
+        ;; as list ITEMS, not a JSON literal.
+        slot-type (or (slot-res/slot-type-of owner-name owner-arg defs-by-name)
+                      (slot-res/rename-source-type owner-name owner-arg defs-by-name))
         ;; A slot holds a list either via the `:sequence` primitive or
         ;; a structural `[:list T]` declaration — both make bare-vector
         ;; bindings sequence content. Mirrors `types.check/sequence-slot?`

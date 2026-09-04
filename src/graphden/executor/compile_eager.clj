@@ -1151,6 +1151,21 @@
   (case (:kind env-bnd)
     :value (let [v (:value env-bnd)] (fn [_fa-ref _ctx] v))
 
+    ;; List binding on a deep (renamed) sequence slot — same item
+    ;; builders as the root `:seq` kind, reading the shared env at
+    ;; force time. Lazy when the owning root declared the slot so
+    ;; (`:do`'s `:steps`): the consumer forces the delays in order.
+    :seq
+    (let [{:keys [items lazy-seq? binder-fn-id]} env-bnd
+          item-builders (mapv #(seq-item-builder % child-callables lookups
+                                                 (or binder-fn-id fn-id))
+                              items)]
+      (if lazy-seq?
+        (fn [fa-ref ctx]
+          (map (fn [b] (delay (b @fa-ref ctx))) item-builders))
+        (fn [fa-ref ctx]
+          (lazy-seq-of-values item-builders @fa-ref ctx))))
+
     :ref
     (let [{:keys [ref-id is-fn produces-callable? slot-id]} env-bnd
           child (or (get child-callables ref-id)

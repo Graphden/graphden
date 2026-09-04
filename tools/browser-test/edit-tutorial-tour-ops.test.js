@@ -546,7 +546,12 @@ const {
     // 05, below). Drop it first, and click the chip only once the tree
     // exists (a pre-graph toggle has nothing to flip).
     await page.goto(BASE + '/');
-    await page.evaluate(() => { localStorage.removeItem('graphden.tour'); });
+    await page.evaluate(() => {
+      localStorage.removeItem('graphden.tour');
+      // Lesson 14's walk switched the ✓ tests lens on and it persists; with
+      // the lesson's tests namespace cleaned up, that lens hides EVERY row.
+      localStorage.removeItem('graphden.sidebarLens');
+    });
     await page.goto(BASE + '/');
     await page.waitForSelector('.kind-toggle', {timeout: 60000});
     await page.waitForSelector('#entity-list .ns-header', {timeout: 60000});

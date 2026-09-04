@@ -34,17 +34,20 @@ async function setDescription(page, text) {
   // a half-open tooltip left by the previous attempt is exactly what makes
   // the save fire against a null entity id ("Save failed — check that
   // you're signed in", on a session that is signed in).
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 4; attempt++) {
     // Reset: close whatever is open, unpin, drop the row-actions popover.
-    await page.keyboard.press('Escape').catch(() => {});
+    // The pinned/editing flags are module-scope `let`s in
+    // editor-tooltips.js — not window properties, so poking
+    // `window.descriptionTooltipSticky` never touched them: after the
+    // FIRST save the tooltip stayed pinned, the next ⋯ → i UNPINNED it
+    // (the action toggles), no Edit button grew, and all three attempts
+    // fell through in seconds. The tooltip's own × button is the one
+    // public path that resets both flags — use it.
     await page.evaluate(() => {
-      document.querySelectorAll('.description-tooltip').forEach((el) => {
-        el.style.display = 'none';
-      });
-      if (typeof window.descriptionTooltipSticky !== 'undefined') {
-        window.descriptionTooltipSticky = false;
-      }
+      const close = document.querySelector('.description-tooltip-close');
+      if (close) close.click();
     });
+    await page.keyboard.press('Escape').catch(() => {});
     // KEEP THE SLEEP. Escape is asynchronous in its EFFECT — the editor's
     // keydown handler unpins and closes on a later tick — and there is no
     // single observable that says "Escape has been processed": waiting for
@@ -66,7 +69,10 @@ async function setDescription(page, text) {
       () => Array.from(document.querySelectorAll('.description-tooltip-btn'))
         .some((b) => /Edit/.test(b.textContent)),
       null, {timeout: 10000, polling: 200}).then(() => true).catch(() => false);
-    if (!opened) continue;
+    if (!opened) {
+      console.log('  attempt ' + (attempt + 1) + ': the pinned tooltip never grew its Edit button');
+      continue;
+    }
 
     await page.evaluate(() => {
       Array.from(document.querySelectorAll('.description-tooltip-btn'))
@@ -75,7 +81,10 @@ async function setDescription(page, text) {
     const editing = await page.waitForSelector('.description-tooltip-textarea',
                                                {timeout: 10000})
       .then(() => true).catch(() => false);
-    if (!editing) continue;
+    if (!editing) {
+      console.log('  attempt ' + (attempt + 1) + ': Edit did not open the textarea');
+      continue;
+    }
 
     await page.evaluate((v) => {
       const ta = document.querySelector('.description-tooltip-textarea');
@@ -95,7 +104,21 @@ async function setDescription(page, text) {
       return (j.fns || []).some((f) => f.name === 'tutorial-versioned'
                                     && f.description === v);
     }, text, {timeout: 20000, polling: 500}).then(() => true).catch(() => false);
-    if (landed) return;
+    if (landed) {
+      // The server has the value; the CLIENT leaves edit mode when its own
+      // save request returns (the textarea gives way to read mode). Wait
+      // for that — showDescriptionTooltip is a no-op while editing, so the
+      // next call's ⋯ → i would otherwise open nothing.
+      await page.waitForFunction(
+        () => !document.querySelector('.description-tooltip-textarea'),
+        null, {timeout: 10000, polling: 100}).catch(() => {});
+      // Leave the tooltip closed and unpinned for the next call.
+      await page.evaluate(() => {
+        const close = document.querySelector('.description-tooltip-close');
+        if (close) close.click();
+      });
+      return;
+    }
     // Why it did not land. The editor puts the reason in the tooltip's
     // error line — a refusal the server explained, a missing id, a real
     // auth problem. Before this, three silent retries and a bare "did not

@@ -30,6 +30,7 @@
                   :editor-css-asset
                   :graphden-components-css-asset
                   :partial-effect
+                  :partial-branch-verification
                   :partial-auth-form
                   :partial-fn-versions
                   :partial-fn-version-executions

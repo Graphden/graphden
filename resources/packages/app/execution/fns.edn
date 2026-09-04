@@ -717,6 +717,12 @@
    :return-type [:list :keyword-map]
    :effects #{:db}}
 
+  {:name :recent-executions
+   :description "The newest `:limit` runs that happened ON the current branch (this branch only — what was verified HERE, not on its ancestors), every status, newest first — `[{:execution-id :fn-id :fn-name :namespace-id :status :started-at :finished-at :traced?} …]`. `:traced?` marks a run that captured its call tree. Backs the review dialog's \"Verified on this branch\" digest. Empty when nothing ran."
+   :args {:limit {:type :int :description "Row cap (1–200)."}}
+   :return-type [:list :keyword-map]
+   :effects #{:db}}
+
   {:name :unresolved-failure-counts
    :description "Per-fn tally of the CURRENT branch view's UNRESOLVED failures over a trailing window — `[{:fn-id :fn-name :namespace-id :count} …]`, most failures first; the same four-part predicate as `:recent-failures`. The editor's failed-runs lens reads it once (GET /api/failures) and derives the chip / namespace / row counts client-side."
    :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}}

@@ -190,6 +190,14 @@
   (exec-errors/recent-unresolved-failures ctx (stats-pool ctx) (tc/current-org) days limit))
 
 
+(defbase recent-executions
+  [limit]
+  ;; Branch-scoped run audit (this branch only, every status) — the
+  ;; review dialog's "Verified on this branch" digest.
+  (cr/record-effect! :db)
+  (exec-errors/recent-executions ctx (stats-pool ctx) (tc/current-org) limit))
+
+
 (defbase failure-ack
   [execution-id]
   ;; Explicit dismiss of one failure row (org-guarded UPDATE).
@@ -331,5 +339,6 @@
    :usage-org-fn-stats usage-org-fn-stats
    :usage-all-org-stats usage-all-org-stats
    :recent-failures recent-failures
+   :recent-executions          recent-executions
    :failure-ack failure-ack
    :failure-ack-all failure-ack-all})

@@ -132,6 +132,11 @@
    :args {:path "/partials/effect" :handler :_partial-effect-handler}
    :expects-effects #{}}                      ; pure lookup over a literal map
 
+  {:name :partial-branch-verification
+   :description "GET /partials/branch-verification — the review dialog's \"Verified on this branch\" digest (test statuses + newest runs of the branch the request rides via `?branch=`), `text/html`. Auth-required like the other review surfaces."
+   :parent :get-auth-required
+   :args {:path "/partials/branch-verification" :handler :_partial-branch-verification-handler}}
+
   {:name :partial-auth-form
    :description "GET /partials/auth-form — the login/signup popover fields as text/html. UNAUTHENTICATED (it IS the login form). editor-auth.js mounts it into #auth-popover on first open + owns the interactive lifecycle."
    :parent :get-route

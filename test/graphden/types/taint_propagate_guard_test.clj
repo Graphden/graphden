@@ -108,7 +108,7 @@
     ;; owned registry) — the reason string carries no caller content.
     :pkg-delete-guard-reason
     :position-in :postwalk
-    :pprint-str :pr-str :publish-package-apply :query-entities :query-param
+    :pprint-str :pr-str :publish-package-apply :query-entities :query-param :recent-executions
     :query-ref-many-owners :quot :range :re-find? :read-resource-bytes :read-resource-or-nil
     :re-replace :realize-request-body :recent-failures :reduce
     ;; :request-capabilities reads the request-scope SEAM (server-derived

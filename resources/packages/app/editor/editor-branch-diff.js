@@ -136,6 +136,12 @@ async function showReviewDialog(sourceName, sourceRef) {
         + (view.error || 'error') + ')';
     }
 
+    // --- "Verified on this branch" — what the proposal's author actually
+    // ran: the branch's test statuses + its newest executions, server-
+    // rendered ON the source branch (`?branch=`). The reviewer sees
+    // evidence, not a claim.
+    renderBranchVerification(body, sourceName);
+
     // Effect-set chips on the rendered rows (base vs source).
     annotateDiffEffects(body, sourceName, baseName);
     // Anchored threads on the rendered rows + the general thread below.
@@ -146,6 +152,38 @@ async function showReviewDialog(sourceName, sourceRef) {
     body.classList.remove('branch-diff-loading');
     body.innerHTML = '<div class="branch-diff-error">Failed: '
       + escapeText(err?.message || 'network error') + '</div>';
+  }
+}
+
+// ============================================================================
+// Verification digest — "what did the author actually run on this branch"
+// ============================================================================
+
+// A collapsible section under "What changed": the branch's tests
+// (passed / failed / never ran) and its newest executions, fetched as a
+// server-rendered partial on the SOURCE branch. Failure is a one-line
+// note, never a broken dialog.
+async function renderBranchVerification(body, sourceName) {
+  const details = document.createElement('details');
+  details.className = 'bd-review-verification';
+  details.open = true;
+  const summary = document.createElement('summary');
+  summary.textContent = 'Verified on ' + sourceName + ' — loading…';
+  details.appendChild(summary);
+  const mount = document.createElement('div');
+  details.appendChild(mount);
+  body.appendChild(details);
+  try {
+    const resp = await window.authFetch(
+      '/partials/branch-verification?branch=' + encodeURIComponent(sourceName));
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    mount.innerHTML = await resp.text();
+    const runs = mount.querySelectorAll('.bd-verif-run').length;
+    summary.textContent = 'Verified on ' + sourceName + ' — '
+      + runs + ' run(s) · ' + (mount.querySelector('.bd-verif-tests')?.textContent || '');
+  } catch (err) {
+    summary.textContent = 'Verified on ' + sourceName + ' — unavailable';
+    mount.textContent = err?.message || 'network error';
   }
 }
 

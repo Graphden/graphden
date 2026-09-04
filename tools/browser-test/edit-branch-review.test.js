@@ -128,6 +128,17 @@ async function readRow(page, name) {
     await page.click('.branch-row[data-branch-name="' + SRC + '"] .branch-row-more');
     await page.click('.branch-row-more-menu.open .branch-row-review');
     await page.waitForSelector('.branch-comments', {timeout: 45000});
+    // "Verified on this branch" — the digest renders on the SOURCE branch
+    // (tests line always present; the runs list or its empty note).
+    const verif = await waitFor(async () => {
+      return page.evaluate(() => {
+        const d = document.querySelector('.bd-review-verification');
+        const tests = d?.querySelector('.bd-verif-tests')?.textContent || '';
+        const runsOrEmpty = !!(d?.querySelector('.bd-verif-runs') || d?.querySelector('.bd-verif-empty'));
+        return tests.startsWith('Tests:') && runsOrEmpty ? tests : null;
+      });
+    }, 20000);
+    assert(verif, 'review dialog shows the Verified-on-branch digest: ' + verif);
     const XSS = 'looks good <b>NOPE</b>';
     await page.fill('.branch-comment-input', XSS);
     await page.click('.branch-comment-send');

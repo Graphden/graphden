@@ -296,6 +296,41 @@
           (is (contains? #{:succeeded :pending} (:status out))))))))
 
 
+(deftest recent-executions-are-branch-scoped-test
+  ;; The review dialog's "Verified on this branch" digest: the runs that
+  ;; happened ON the branch, newest first, every status, fn names joined.
+  (let [storage (create-full-storage)
+        {composed :composed} (make-pure-add-fn! storage "recent")
+        c (setup/default-registry-ctx storage)
+        pool (:pool (vs/unwrap storage))]
+    (testing "nothing ran yet → empty"
+      (is (= [] (exec-errors/recent-executions c pool nil 20))))
+    (testing "a persisted run on this branch shows up with its fn name and status"
+      (apply-and-await! c {:fn-id (:id composed) :args {:a 1 :b 2}
+                           :timeout-ms 5000 :persist? true})
+      (let [rows (exec-errors/recent-executions c pool nil 20)]
+        (is (= 1 (count rows)))
+        (is (= "my-test-add-recent" (:fn-name (first rows))))
+        (is (contains? #{"succeeded" "pending"} (:status (first rows))))
+        (is (false? (:traced? (first rows))) "a plain run captured no call tree")))
+    (testing "an unpersisted run leaves no row; the limit caps the list"
+      (apply-and-await! c {:fn-id (:id composed) :args {:a 1 :b 2}
+                           :timeout-ms 5000 :persist? false})
+      (is (= 1 (count (exec-errors/recent-executions c pool nil 20))))
+      (apply-and-await! c {:fn-id (:id composed) :args {:a 2 :b 2}
+                           :timeout-ms 5000 :persist? true})
+      (is (= 1 (count (exec-errors/recent-executions c pool nil 1)))
+          "limit 1 → the newest only")
+      (is (= 2 (count (exec-errors/recent-executions c pool nil 20)))))
+    (testing "another branch sees none of them — this branch only, not the chain"
+      (let [other (sp/create-entity (vs/unwrap storage) :branch
+                                    {:name "recent-other"
+                                     :base-branch-id (vs/current-branch-id storage)
+                                     :created-at (java.time.Instant/now)})
+            c2 (setup/default-registry-ctx (vs/->VersionedStorage (vs/unwrap storage) (:id other)))]
+        (is (= [] (exec-errors/recent-executions c2 pool nil 20)))))))
+
+
 (deftest usage-rollup-bump-and-read-roundtrip-test
   ;; Phase C1: the pre-aggregated :usage-stat counters. bump! upserts one row
   ;; per (hour, org, fn, status) and increments in place; fn-stats aggregates

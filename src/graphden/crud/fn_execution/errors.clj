@@ -211,3 +211,43 @@
                   branch-params))
           :next.jdbc/update-count
           (or 0)))))
+
+
+(defn recent-executions
+  "The newest `limit` `:fn-execution` rows that ran ON the current branch
+   (this branch only — not its ancestors: the question is \"what was
+   verified HERE\"), every status, newest first —
+   `[{:execution-id :fn-id :fn-name :namespace-id :status :started-at
+      :finished-at :traced?} …]`. `:traced?` marks a run that captured
+   its call tree (a `trace: true` run over /mcp, the Debug trap). Backs
+   the review dialog's \"Verified on this branch\" digest. Empty when no
+   pool / no branch / nothing ran."
+  [ctx pool org limit]
+  (let [storage (:storage ctx)
+        branch-id (when (and storage (vs/versioned-storage? storage))
+                    (vs/current-branch-id storage))]
+    (if-not (and pool branch-id)
+      []
+      (mapv (fn [r]
+              {:execution-id (str (:id r))
+               :fn-id (some-> (:fn_id r) str)
+               :fn-name (:fn_name r)
+               :namespace-id (some-> (:namespace_id r) str)
+               :status (some-> (:status r) str)
+               :started-at (some-> (:started_at r) str)
+               :finished-at (some-> (:finished_at r) str)
+               :traced? (boolean (:traced r))})
+            (jdbc/execute!
+              pool
+              [(str "SELECT e.id, fv.fn_id, e.status, e.started_at, e.finished_at,"
+                    " (e.path_trace IS NOT NULL) AS traced,"
+                    " f.name AS fn_name, f.namespace_id AS namespace_id"
+                    " FROM \"fn_execution\" e"
+                    " LEFT JOIN \"fn_version\" fv ON fv.id = e.fn_version_id"
+                    " LEFT JOIN \"fn\" f ON f.id = fv.fn_id"
+                    " WHERE coalesce(e.org_id, 'public') = ?"
+                    " AND e.branch_id = ?"
+                    " ORDER BY e.started_at DESC"
+                    " LIMIT ?")
+               (or org "public") branch-id (int (max 1 (min 200 (or limit 20))))]
+              {:builder-fn rs/as-unqualified-lower-maps})))))

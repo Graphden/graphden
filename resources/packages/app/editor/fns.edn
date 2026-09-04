@@ -1349,6 +1349,127 @@
    :parent :render-hiccup
    :args {:hiccup :_auth-form-fields}}
 
+  ;; ---------------------------------------------------------------------
+  ;; GET /partials/branch-verification — the review dialog's "Verified on
+  ;; this branch" digest. The request rides `?branch=<source>` (the
+  ;; branch router serves it on that branch), so `:_tests-status-apply`
+  ;; and `:recent-executions` read the PROPOSAL's own tests and runs —
+  ;; what its author actually exercised before proposing.
+  ;; ---------------------------------------------------------------------
+  {:name :_partial-verif-tests
+   :description "Every test on the branch with its newest status (`:status` nil = never ran since its last edit)."
+   :parent :_tests-status-apply
+   :args {:request {:as :request}}}
+
+  ;; One status reader for both row kinds — a test row and a run row
+  ;; carry `:status` the same way (string or keyword → text).
+  {:name :_partial-verif-status
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :status} :default {:value ""}}}}}
+
+  {:name :_partial-verif-test-passed?
+   :parent :equal?
+   :args {:a :_partial-verif-status :b {:value "succeeded"}}}
+
+  {:name :_partial-verif-test-failed?
+   :parent :equal?
+   :args {:a :_partial-verif-status :b {:value "failed"}}}
+
+  {:name :_partial-verif-tests-passed
+   :parent :count
+   :args {:coll {:parent :filter :args {:pred :_partial-verif-test-passed? :coll :_partial-verif-tests}}}}
+
+  {:name :_partial-verif-tests-failed
+   :parent :count
+   :args {:coll {:parent :filter :args {:pred :_partial-verif-test-failed? :coll :_partial-verif-tests}}}}
+
+  {:name :_partial-verif-tests-total
+   :parent :count
+   :args {:coll :_partial-verif-tests}}
+
+  {:name :_partial-verif-tests-line
+   :description "`Tests: N on this branch — P passed, F failed, U never ran` (U = never run since the test's last edit)."
+   :parent :str
+   :args {:parts ["Tests: " :_partial-verif-tests-total " on this branch — "
+                  :_partial-verif-tests-passed " passed, "
+                  :_partial-verif-tests-failed " failed, "
+                  {:parent :sub :args {:nums [:_partial-verif-tests-total
+                                              {:parent :add :args {:nums [:_partial-verif-tests-passed :_partial-verif-tests-failed]}}]}}
+                  " never ran"]}}
+
+  {:name :_partial-verif-tests-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "bd-verif-tests"}}
+          :children [:_partial-verif-tests-line]}}
+
+  {:name :_partial-verif-runs
+   :description "The newest 20 runs on this branch, every status."
+   :parent :recent-executions
+   :args {:limit {:value 20}}}
+
+  {:name :_partial-verif-run-glyph
+   :description "✓ succeeded · ✗ failed · … anything else (pending / cancelled)."
+   :parent :cond
+   :args {:clauses [{:parent :equal? :args {:a :_partial-verif-status :b {:value "succeeded"}}} {:value "✓"}
+                    {:parent :equal? :args {:a :_partial-verif-status :b {:value "failed"}}} {:value "✗"}
+                    {:value true} {:value "…"}]}}
+
+  {:name :_partial-verif-run-name
+   :parent :coalesce
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :fn-name} :default nil}}
+          :default {:value "(deleted fn)"}}}
+
+  {:name :_partial-verif-run-when
+   :parent :coalesce
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :finished-at} :default nil}}
+          :default {:value "running"}}}
+
+  {:name :_partial-verif-run-traced
+   :parent :if
+   :args {:test {:parent :get :args {:coll {:as :item} :key {:value :traced?} :default {:value false}}}
+          :then {:value " · traced"}
+          :else {:value ""}}}
+
+  {:name :_partial-verif-run-row
+   :description "One run: `<li class=\"bd-verif-run\" data-status=…>✓ fn-name · finished-at [· traced]</li>`."
+   :parent :hiccup
+   :args {:tag {:value "li"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :class} {:value :data-status}]
+                         :vals [{:value "bd-verif-run"} :_partial-verif-status]}}
+          :children [:_partial-verif-run-glyph " " :_partial-verif-run-name " · " :_partial-verif-run-when :_partial-verif-run-traced]}}
+
+  {:name :_partial-verif-run-rows
+   :parent :map
+   :args {:func :_partial-verif-run-row :coll :_partial-verif-runs}}
+
+  {:name :_partial-verif-runs-list
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_partial-verif-runs}}
+          :then {:value [:div {:class "bd-verif-empty"}
+                         "No runs on this branch — nothing was executed here before proposing."]}
+          :else {:parent :hiccup
+                 :args {:tag {:value "ul"}
+                        :attrs {:value {:class "bd-verif-runs"}}
+                        :children :_partial-verif-run-rows}}}}
+
+  {:name :_partial-verif-fragment
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "bd-verif"}}
+          :children [:_partial-verif-tests-div :_partial-verif-runs-list]}}
+
+  {:name :_partial-verif-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-verif-fragment}}
+
+  {:name :_partial-branch-verification-handler
+   :lambda-params [:request]
+   :description "Ring handler for `GET /partials/branch-verification` — the branch's test statuses and newest runs as `text/html`, read on the branch the request rides (`?branch=<source>`)."
+   :parent :html-ok-response
+   :args {:body :_partial-verif-html}}
+
   {:name :_partial-auth-form-handler
    ;; [] — the popover fields are STATIC markup; the old [:children] param
    ;; (a leaked free from the unpinned inputs) made the 1-arg shape-callable

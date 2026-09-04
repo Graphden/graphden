@@ -987,6 +987,11 @@ body.gd-tenancy.gd-no-write .branch-row-more-menu .branch-row-policy { display: 
   user-select: none;
 }
 .bd-review-changes[open] > summary { color: var(--fg); font-weight: 600; }
+.bd-review-verification > summary { cursor: pointer; color: var(--fg-muted); }
+.bd-review-verification[open] > summary { color: var(--fg); font-weight: 600; }
+.bd-verif-runs { margin: 4px 0 0; padding-left: 1.2em; }
+.bd-verif-run[data-status="failed"] { color: var(--danger); }
+.bd-verif-empty, .bd-verif-tests { color: var(--fg-muted); }
 .bd-sugg-preview { margin: 0 0 6px 12px; }
 .bd-sugg-preview .branch-diff-row { margin-bottom: 4px; }
 

@@ -12,7 +12,9 @@
      `:service-blocking-free-args` (regression guard);
    - `/partials/compatible-type-options` — one subtype? sweep
      (replaced the per-name /api/types/compatible fan-out);
-   - `/partials/expects-effects-form` — canonical category roster."
+   - `/partials/expects-effects-form` — canonical category roster;
+   - `/partials/branch-verification` — the review dialog's
+     \"Verified on this branch\" digest (tests line + runs list)."
   (:require
     [clojure.edn :as edn]
     [clojure.java.io :as io]
@@ -225,3 +227,12 @@
     (doseq [marker ["execute-popover-close" "execute-history-toggle"
                     "execute-history-host"]]
       (is (not (str/includes? body marker)) (str marker " retired")))))
+
+
+(deftest branch-verification-digest
+  (testing "the digest renders on a branch with nothing run: tests line + the empty-runs note"
+    (let [body (body-of :_partial-branch-verification-handler {})]
+      (is (str/includes? body "class=\"bd-verif\""))
+      (is (re-find #"Tests: \d+ on this branch — \d+ passed, \d+ failed, \d+ never ran" body))
+      (is (or (str/includes? body "bd-verif-runs") (str/includes? body "bd-verif-empty"))
+          "either the runs list or its empty note"))))

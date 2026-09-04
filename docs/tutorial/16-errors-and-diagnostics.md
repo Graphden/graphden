@@ -167,14 +167,15 @@ branch, merges with it, and you can open it on the canvas and edit or
 delete it like any other fn. Nothing in graphden's diagnostics is
 stored state except what you explicitly said.
 
-## The two panels next door
+## The lens next door, and the trap
 
-The diagnostics bar under the canvas keeps two panels you have met:
-
-- **Tests** — the `tests` namespace's runner and live results
-  (lesson 14); a test is also the **✓ tests** lens.
-- **Debug** — the «catch next request» trap and the last captured
-  trace (lesson 15).
+Tests are the fourth lens: **✓ tests** (lesson 14) focuses the tree
+on the `tests` namespaces with a status dot per test, reveals
+**▶ Run all**, and the Inspector's **Test** section runs one. The
+«catch next request» trap and the last captured trace (lesson 15)
+live on the **Runs** tab of the fn that runs as a service. Nothing
+sits under the canvas: every diagnostic is a lens in the Explorer
+and a section in the Inspector.
 
 And **Monitoring** — usage rollups: runs, failures and average
 duration per fn (lesson 34 reads the same numbers for the plan's

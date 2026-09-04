@@ -64,12 +64,14 @@ Now the surfaces:
 - In the Explorer's filter bar click the **✓ tests** chip — the tree
   focuses on your tests, each with a status dot: **green** passed,
   **red** failed, **grey** not run since its last edit.
-- Click **Tests** in the diagnostics bar under the canvas — the
-  drawer opens with the same list, a summary line and a
-  **Run all tests** button, while the editor stays on screen. The
-  panel is live: it re-renders on its own as runs land — no refresh
-  needed. Clicking a test's name selects it on the canvas; the
-  drawer stays open.
+- With the lens on, the chip row shows **▶ Run all** — every test
+  on the branch runs, and the dots update one by one as each run
+  lands (the lens keeps a live signal open, so nothing needs a
+  refresh). The chip's number is how many tests the branch has.
+- Select a test and open the Inspector's **Bindings** tab: a
+  **Test** section shows the same status with the assertion's
+  message on a failure, and **Run this test** runs just this one —
+  the section re-renders from the run itself.
 
 Break the test on purpose (change `:expected`) and watch the dot:
 right after the edit it turns grey — the status is keyed to the

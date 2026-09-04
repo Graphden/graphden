@@ -5091,26 +5091,20 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .execute-history-failure-time { color: var(--muted-fg); white-space: nowrap; }
 .execute-history-failure-msg { color: var(--error-fg-strong); overflow-wrap: anywhere; }
 
-/* Tests ops section (Block 3.1) — summary + Run-all + per-test rows.
-   Same row grammar as the error-log / type-errors families above. */
-.tests-panel-header { display: flex; align-items: center; gap: 8px;
-  padding: 6px 8px; }
-.tests-panel-summary { color: var(--muted-fg); font-size: 0.6875rem; flex: 1 1 auto; }
-.tests-run-all { font-size: 0.6875rem; padding: 2px 10px; cursor: pointer;
-  color: var(--fg); background: var(--card-bg);
-  border: 1px solid var(--input-border); border-radius: 4px; }
-.tests-run-all:hover { background: var(--hover-bg); }
-.tests-run-all:disabled { color: var(--muted-fg); cursor: default; }
-.tests-row { padding: 6px 8px; border-bottom: 1px dashed var(--light-border);
-  font-size: 0.6875rem; }
-.tests-row .test-dot { margin-right: 6px; user-select: none; }
+/* Tests (Block 3.1) — the Inspector's Test section (app/editor-provenance
+   `_insp-test-*`): status dot + label, the assertion's message, [Run this
+   test]. The Explorer's dots are .kind-marker-test below. */
 .test-dot.test-passed { color: var(--success-fg); }
 .test-dot.test-failed { color: var(--error-fg); }
 .test-dot.test-stale  { color: var(--muted-fg); opacity: 0.65; }
-.tests-fn { color: var(--accent); }
 .tests-err { color: var(--error-fg); overflow-wrap: anywhere; margin-top: 2px; }
-.tests-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 0.6875rem; }
-.tests-list { max-height: 320px; overflow-y: auto; }
+.gd-insp-test-row .gd-prov-k { user-select: none; }
+.gd-insp-test-status { font-size: 0.75rem; }
+.gd-insp-test-row .tests-run-one { display: block; font-size: 0.625rem; padding: 1px 6px; margin-top: 4px;
+  cursor: pointer; color: var(--muted-fg); background: transparent;
+  border: 1px solid var(--light-border); border-radius: 3px; }
+.gd-insp-test-row .tests-run-one:hover { color: var(--fg); border-color: var(--accent); }
+.gd-insp-test-row .tests-run-one:disabled, .gd-insp-test-row .tests-run-one.htmx-request { color: var(--muted-fg); cursor: default; }
 
 /* UI Step 1 — Assets ops section: frontend-asset override panel. */
 .gd-asset-hint { padding: 4px 8px; color: var(--muted-fg); font-size: 0.6875rem; }
@@ -6143,7 +6137,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--gd-inspector-w);
   /* Row 2 is the diagnostics drawer under the canvas; explorer and
      inspector span both rows and keep their full height. */
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
 }
 body.sidebar-collapsed #app.gd-redesign #main-container {
   grid-template-columns: 0 minmax(0, 1fr) var(--gd-inspector-w);
@@ -6187,97 +6181,6 @@ body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
   background-position: -1px -1px;
 }
 
-/* ---- DIAGNOSTICS DRAWER — bottom strip under the canvas (Build) ----
-   Hosts the live code-facing lists (Errors / Type errors / Tests / Debug).
-   Collapsed = the tab bar only; open = one section pane below the bar.
-   The sections are the same .gd-op-card panes editor-sidebar.js mounts —
-   the bar is a horizontal, compact variant of the Operate section nav. */
-#gd-diag-drawer {
-  grid-column: 2;
-  grid-row: 2;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  font-family: var(--gd-ui-font);
-  background: var(--gd-panel);
-  border-top: 1px solid var(--gd-line);
-}
-/* Build-surface chrome only: the management surfaces are full overlays
-   above it, but hide it anyway so it can't leak into them. */
-body:not([data-surface="build"]) #gd-diag-drawer { display: none; }
-.gd-diag-bar {
-  display: flex; align-items: center; gap: 2px;
-  flex: 0 0 auto;
-  height: 34px;
-  padding: 0 8px;
-}
-#gd-diag-nav {
-  display: flex; align-items: center; gap: 2px;
-  min-width: 0;
-  overflow-x: auto;
-}
-#gd-diag-nav .gd-op-nav-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 10px;
-  border-radius: 7px;
-  font-size: 0.7812rem;
-  white-space: nowrap;
-}
-/* Active-tab highlight only while the drawer is OPEN — a collapsed bar
-   has no visible pane for the highlight to point at. */
-#gd-diag-drawer[data-open="0"] #gd-diag-nav .gd-op-nav-btn[aria-current="page"] {
-  background: transparent;
-  color: var(--gd-ink-2);
-  font-weight: 400;
-}
-#gd-diag-drawer[data-open="0"] #gd-diag-nav .gd-op-nav-btn[aria-current="page"]:hover {
-  background: var(--gd-paper-2);
-  color: var(--gd-ink);
-}
-/* Badge counts on the bar tabs (editor-diagnostics.js keeps them fresh). */
-.gd-diag-badge {
-  font-size: 0.6875rem; font-weight: 600; line-height: 1.4;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--gd-paper-2);
-  color: var(--gd-ink-2);
-}
-.gd-diag-badge.diag-bad { color: var(--error-fg); }
-.gd-diag-badge.diag-ok { color: var(--success-fg); }
-.gd-diag-badge[hidden] { display: none; }
-.gd-diag-toggle {
-  appearance: none;
-  margin-left: auto;
-  font: inherit; font-size: 0.6875rem; line-height: 1;
-  color: var(--gd-ink-2);
-  background: transparent;
-  border: 0; border-radius: 7px;
-  padding: 6px 9px;
-  cursor: pointer;
-}
-.gd-diag-toggle:hover { background: var(--gd-paper-2); color: var(--gd-ink); }
-#gd-diag-drawer[data-open="1"] .gd-diag-toggle { transform: rotate(180deg); }
-.gd-diag-pane {
-  overflow: auto;
-  height: 34vh;
-  min-height: 160px;
-  padding: 12px 16px 16px;
-  border-top: 1px solid var(--gd-line);
-}
-.gd-diag-pane[hidden] { display: none; }
-/* The bar already names the active section — drop the pane's own title so
-   the strip stays shallow. */
-#gd-diag-panels .gd-op-card-title { display: none; }
-/* Inline field+button rows, same fix as the Operate pane (the panels'
-   original column styling was for the narrow rail). */
-#gd-diag-panels form {
-  display: flex; flex-flow: row wrap;
-  gap: 8px; align-items: center; margin-top: 10px;
-}
-#gd-diag-panels form input, #gd-diag-panels form select {
-  flex: 1 1 150px; min-width: 120px; width: auto;
-}
-#gd-diag-panels form button { flex: 0 0 auto; }
 
 /* ---- RIGHT INSPECTOR ---- */
 #gd-inspector {
@@ -7149,6 +7052,7 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
    (/partials/debug-catch; editor-debug.js owns arm/cancel/refresh).
    ========================================================================= */
 
+.gd-run-trap { padding: 6px 8px 8px; margin-bottom: 6px; border-bottom: 1px dashed var(--light-border); }
 .debug-panel { display: flex; flex-direction: column; gap: 10px; font-size: 0.75rem; }
 .debug-help { color: var(--muted-fg); font-size: 0.6875rem; }
 .debug-arm-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

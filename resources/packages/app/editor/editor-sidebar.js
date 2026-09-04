@@ -113,7 +113,7 @@ function mountAdminSection(pane, nav, key, build) {
   if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(section);
 }
 
-// The LIVE-diagnostics panels — type-errors + runtime errors + tests + debug —
+// LIVE panels (today: Operate's Assets; the code diagnostics used to be)
 // show state that changes as the user edits, but their mounted node is cached
 // (built once, re-attached; htmx does NOT re-fire `hx-trigger="load"` on an
 // already-processed node). So a diagnostic recorded AFTER the panel's first
@@ -144,28 +144,14 @@ function reloadLiveSections(hostId, builders) {
 }
 
 // Operate's only live panel left is Assets (override rows change as the user
-// saves) — the code diagnostics live in the Build drawer now. Exposed for
-// editor-shell.js's gdRenderOperate.
+// saves) — the code diagnostics are Explorer lenses + Inspector sections.
+// Exposed for editor-shell.js's gdRenderOperate.
 function reloadDynamicOpsSections() {
   reloadLiveSections('gd-operate-panels', {
     assets: typeof buildAssetsSection === 'function' ? buildAssetsSection : null,
   });
 }
 window.reloadDynamicOpsSections = reloadDynamicOpsSections;
-
-// The diagnostics-drawer sections — re-fetched each time the drawer OPENS
-// (editor-diagnostics.js). All four are live: diagnostics land as the user
-// edits, tests drift as runs/auto-runs land, the debug trap arms/fires/expires.
-function reloadDiagnosticsSections() {
-  // The problem lenses read the same facts the panels list — re-prime
-  // their caches on the same trigger (the drawer opening).
-  if (typeof refreshProblemCaches === 'function') refreshProblemCaches();
-  reloadLiveSections('gd-diag-panels', {
-    tests: typeof buildTestsSection === 'function' ? buildTestsSection : null,
-    debug: typeof buildDebugSection === 'function' ? buildDebugSection : null,
-  });
-}
-window.reloadDiagnosticsSections = reloadDiagnosticsSections;
 
 // Packages GOVERNANCE (packages spec §4) — the Organization surface's
 // read-mostly view: who may publish (a static capability note; the holders
@@ -1061,6 +1047,10 @@ function toggleKind(kind) {
   // paths decide visibility with the same nodeShouldShow / fnKindVisible. A
   // search box is active → fall back to a rebuild (the search tree is a
   // different, server-fed structure, not a lens overlay).
+  // Before the first graph load there is no tree to flip: the lens is
+  // saved and the chips are synced; the boot's own render applies it.
+  // (A click here used to throw on `null.namespaces` from buildNsTree.)
+  if (!graphData) return;
   if (searchFilter) updateEntityList(graphData);
   else applyLensVisibility();
   announceLens(lensKinds.size === 0
@@ -1278,6 +1268,15 @@ function syncKindFilterBar() {
     const any = typeof getFailureTotal === 'function' && (getFailureTotal() || 0) > 0;
     ackAll.hidden = !(authed && lensKinds.has('failed') && any);
   }
+  // "▶ Run all" — the tests lens's action; the lens also keeps the
+  // live status stream open while active (editor-tests.js).
+  const runAll = document.getElementById('tests-run-all-btn');
+  if (runAll) {
+    const authed = typeof isAuthenticated === 'function' && isAuthenticated();
+    const any = typeof getTestStatusCount === 'function' && (getTestStatusCount() || 0) > 0;
+    runAll.hidden = !(authed && lensKinds.has('tests') && any);
+  }
+  if (typeof ensureTestsStream === 'function') ensureTestsStream();
 }
 
 // Collapsible "(primitives)" node for namespace-less entities — the
@@ -1433,9 +1432,8 @@ function revealFnInTree(fnId) {
   }
 }
 
-// Mount the Operate / Platform / Diagnostics panes: Grants, Members, Roles,
-// Organizations, Platform access, Packages, Monitoring, Apps, Assets, plus
-// the code diagnostics (Tests, Debug — the problem lists became lenses). Each builder is
+// Mount the Operate / Platform panes: Grants, Members, Roles, Organizations,
+// Platform access, Packages, Monitoring, Assets. Each builder is
 // a global from its own module and each returns null when it doesn't apply,
 // so a section opts out by being absent rather than by being listed
 // somewhere.
@@ -1443,9 +1441,9 @@ function revealFnInTree(fnId) {
 // Redesign 2026-08: these mount into surfaces, not the explorer, so the
 // sidebar stays a clean namespace browser — `fallbackList` is used only when
 // the operate pane isn't on the page. Cross-org / platform panels go to the
-// PLATFORM surface; the code diagnostics go to the Build-surface DIAGNOSTICS
-// drawer (#gd-diag-panels — so a fn link keeps the editor on screen);
-// everything else (org RBAC + the org's operational panels) to Organization.
+// PLATFORM surface; everything else (org RBAC + the org's operational
+// panels) to Organization. (Code diagnostics are Explorer lenses + Inspector
+// sections; the diagnostics drawer under the canvas was retired 2026-09-04.)
 //
 // Lifted out of `updateEntityList`, which had ninety lines of this in the
 // middle of building the namespace tree — two surfaces, one function.
@@ -1455,17 +1453,10 @@ function mountOpsSections(fallbackList, searchMode) {
   const opsNav = document.getElementById('gd-operate-nav');
   const platPane = document.getElementById('gd-platform-panels');
   const platNav = document.getElementById('gd-platform-nav');
-  const diagPane = document.getElementById('gd-diag-panels');
-  const diagNav = document.getElementById('gd-diag-nav');
   const opsHost = opsPane || fallbackList;
   const opsNavHost = opsPane ? opsNav : null;
   const platHost = platPane || opsHost;
   const platNavHost = platPane ? platNav : opsNavHost;
-  // Code diagnostics (tests / debug) → the Build
-  // drawer, so a fn link in a row navigates the canvas without a surface
-  // switch; Operate keeps the admin panels.
-  const diagHost = diagPane || opsHost;
-  const diagNavHost = diagPane ? diagNav : opsNavHost;
   if (opsHost !== fallbackList) {
     opsPane.innerHTML = '';
     if (opsNavHost) opsNavHost.innerHTML = '';
@@ -1473,10 +1464,6 @@ function mountOpsSections(fallbackList, searchMode) {
   if (platHost !== opsHost && platHost !== fallbackList) {
     platPane.innerHTML = '';
     if (platNavHost && platNavHost !== opsNavHost) platNavHost.innerHTML = '';
-  }
-  if (diagHost !== opsHost && diagHost !== fallbackList) {
-    diagPane.innerHTML = '';
-    if (diagNavHost && diagNavHost !== opsNavHost) diagNavHost.innerHTML = '';
   }
   if (typeof buildGrantsAdminSection === 'function') {
     mountAdminSection(opsHost, opsNavHost, 'grants', buildGrantsAdminSection);
@@ -1510,13 +1497,6 @@ function mountOpsSections(fallbackList, searchMode) {
   // (No Apps section: publishing a fn as an app is the ▣ row action on the
   // fn itself — editor-apps.js showFnAppsPopover; the apps LENS is the
   // org-wide overview. The Organization panel was retired 2026-08-30.)
-  if (typeof buildTestsSection === 'function') {
-    mountAdminSection(diagHost, diagNavHost, 'tests', buildTestsSection);
-  }
-  if (typeof buildDebugSection === 'function') {
-    // «Catch next request» trap + last-captured trace (editor-debug.js).
-    mountAdminSection(diagHost, diagNavHost, 'debug', buildDebugSection);
-  }
   if (typeof buildAssetsSection === 'function') {
     // Frontend-asset overrides — self-host only (the builder returns null
     // under an active tenancy addon; writes there are system-only).
@@ -1527,8 +1507,8 @@ function mountOpsSections(fallbackList, searchMode) {
   // mount re-runs on every graph refresh (updateEntityList), and defaulting
   // unconditionally to the first section flipped an open panel back to
   // Packages under the reader whenever background state landed — a test
-  // auto-run finishing was enough (caught by the lesson-26 tour: its
-  // green-dot check never saw the Tests panel it had just opened).
+  // auto-run finishing was enough (caught by a tour whose green-dot check
+  // never saw the then-drawer Tests panel it had just opened).
   const activeOrFirst = (nav, pane) => {
     const cur = [...nav.children]
       .find((b) => b.getAttribute('aria-current') === 'page')?.dataset.section;
@@ -1540,11 +1520,6 @@ function mountOpsSections(fallbackList, searchMode) {
   }
   if (platNavHost && platNavHost !== opsNavHost && platNavHost.firstElementChild) {
     activateOpSection(platNavHost, platHost, activeOrFirst(platNavHost, platHost));
-  }
-  if (diagNavHost && diagNavHost !== opsNavHost && diagNavHost.firstElementChild) {
-    activateOpSection(diagNavHost, diagHost, activeOrFirst(diagNavHost, diagHost));
-    // Bar badges read the mounted panels — refresh after every (re)mount.
-    if (typeof window.gdDiagUpdateBadges === 'function') window.gdDiagUpdateBadges();
   }
 }
 

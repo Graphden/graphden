@@ -29,7 +29,7 @@
                   "graphden.crud.lint-graph-test"
                   ["core" "web" "app"])]
       (binding [*graph* graph]
-        (try (f) (finally (sp/close (:storage graph))))))))
+        (try (f) (finally (setup/close-graph! graph)))))))
 
 
 (defn- fn-id-by-name

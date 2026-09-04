@@ -72,8 +72,8 @@ next to the fn.
 
 A problem lens narrows the tree to exactly the rows carrying that
 mark and keeps their namespaces open. Clear it with **◍ all**, or by
-fixing the problem — the counts re-read whenever the graph reloads,
-a run finishes, or the diagnostics drawer opens.
+fixing the problem — the counts re-read whenever the graph reloads
+or a run finishes.
 
 The lens composes with the workspace (Lesson 19): the workspace
 picks *which projects* you see, the lens picks *which kind of

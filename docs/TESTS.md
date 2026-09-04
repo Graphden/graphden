@@ -78,24 +78,35 @@ per-branch routing) and auth-required. Core:
 
 ## Editor surfaces
 
-- **Sidebar `tests` lens chip** (✓) — filters the tree to tests; test
-  namespaces stay visible even before their leaves lazy-load. Each
-  test row carries a status dot: green passed, red failed, grey
-  stale/not-run (primed from `/api/tests/status`).
-- **Diagnostics-drawer Tests panel** (the bar under the canvas) —
-  summary line, Run-all button, per-test
-  rows with status + error. LIVE via SSE ping + re-fetch:
-  `GET /partials/tests-stream` pushes a server-time PING on write
-  wakes and a 30 s keepalive (`run-tests!` emits a `test:updated`
-  NOTIFY after every batch — immediately and again after a 2 s
-  settle, covering the async terminal-row write); on each ping the
-  editor re-fetches the always-fresh one-shot `GET /partials/tests`.
-  The stream deliberately does NOT carry the panel body: a
+- **Explorer `tests` lens** (the ✓ chip, shortcut `t`) — filters the
+  tree to tests; test namespaces stay visible even before their
+  leaves lazy-load. The chip counts the branch's tests; each test row
+  carries a status dot: green passed, red failed, grey stale/not-run
+  (primed from `/api/tests/status`). With the lens active the chip
+  row reveals **▶ Run all** (`POST /api/tests/run`), and the editor
+  keeps a LIVE signal open: `GET /partials/tests-stream` pushes a
+  server-time PING on write wakes and a 30 s keepalive (`run-tests!`
+  emits a `test:updated` NOTIFY after EVERY test — so a long suite's
+  dots move one by one — and once more after a 2 s settle, covering
+  the async terminal-row write); each ping re-primes the status
+  cache. The stream deliberately carries a ping, not data: a
   long-lived stream's captured render freezes data-dependent
   fragments (a `:time`-effect ping re-renders every tick by
   construction). The editor subscribes over fetch-streaming, not
   EventSource — the Authorization + X-Graphden-Branch headers ride
   the editor's patched fetch (`editor-tests.js`).
+- **Inspector › Test** (Bindings tab, for a fn that IS a test on the
+  branch) — the status dot + label, the assertion's message on a
+  failure, and **Run this test**: an htmx `POST
+  /partials/inspector-test/run?fn-id=…` that runs the fn through
+  `run-tests!` and renders the section back from the run's own
+  result (the status join's terminal row lands asynchronously, so a
+  re-read right after the run could still show the previous status).
+  Graph-composed in `app/editor-provenance/fns.edn` (`_insp-test-*`)
+  over the same two boundary base-fns as the JSON API.
+- Retired 2026-09-04: the diagnostics-drawer Tests panel
+  (`GET /partials/tests`) — the lens + Inspector are the surface (and
+  the drawer under the canvas itself went the same day).
 
 ## Auto-run on writes (phase 2)
 

@@ -449,13 +449,13 @@ function registerBuiltinShortcuts() {
     run: () => clickIfPresent('[data-insp-tab="overview"]'),
     when: () => !!document.querySelector('[data-insp-tab="overview"]'),
   });
-  registerShortcut({
-    id: 'diagnostics-tests', keys: 't', group: 'Diagnostics',
-    description: 'Tests',
-    run: () => clickIfPresent('#gd-diag-nav button[data-section="tests"], [data-diag-tab="tests"], .gd-diag-tab[data-tab="tests"]'),
-  });
-  // The problem LENSES — the Explorer focus that replaced the Failed runs /
+  // The LENSES — the Explorer focus that replaced the Tests / Failed runs /
   // Type errors / Lint drawer tabs.
+  registerShortcut({
+    id: 'lens-tests', keys: 't', group: 'Diagnostics',
+    description: 'Tests lens',
+    run: () => clickIfPresent('#kind-filters .kind-toggle[data-kind="tests"]'),
+  });
   registerShortcut({
     id: 'lens-failed', keys: 'x', group: 'Diagnostics',
     description: 'Failed-runs lens',

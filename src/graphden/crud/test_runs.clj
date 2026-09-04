@@ -180,27 +180,28 @@
   (let [wanted (coerce-fn-ids fn-ids)
         rows (cond->> (test-fn-rows ctx)
                wanted (filter (comp wanted :id)))
+        ;; Nudge SSE listeners (the ✓ tests lens re-primes its status
+        ;; cache on each ping) — best-effort, from EVERY run path (button,
+        ;; API, auto-run). After EACH test, so a long suite's dots move
+        ;; one by one; and once more after a settle delay — the terminal
+        ;; execution row lands via the async `record-completion!` tail,
+        ;; so a re-prime on the immediate ping can still read the previous
+        ;; status (the 30 s keepalive tick remains the backstop).
+        nudge! (when-let [emit (:notify-emitter ctx)]
+                 (let [ev {:kind :test :op :updated :id ""
+                           :branch-id (some-> (vs/current-branch-id
+                                                (request/require-storage ctx))
+                                              str)}]
+                   (fn [] (try (emit ev) (catch Exception _ nil)))))
         results (mapv (fn [row]
-                        (merge {:fn-id (str (:id row)) :fn-name (:name row)}
-                               (run-one! ctx row (or timeout-ms default-test-timeout-ms))))
+                        (let [r (merge {:fn-id (str (:id row)) :fn-name (:name row)}
+                                       (run-one! ctx row (or timeout-ms default-test-timeout-ms)))]
+                          (when nudge! (nudge!))
+                          r))
                       rows)
         by-status (frequencies (map :status results))]
-    ;; Nudge SSE listeners (the live Tests panel) — best-effort, from
-    ;; EVERY run path (button, API, auto-run). TWICE: once now, once
-    ;; after a settle delay — the terminal execution row lands via the
-    ;; async `record-completion!` tail, so the immediate wake's render
-    ;; can still read the previous status and dedupe away; the delayed
-    ;; wake re-renders after the write has landed (the 30 s keepalive
-    ;; tick remains the backstop for pathological lag).
-    (when (seq results)
-      (when-let [emit (:notify-emitter ctx)]
-        (let [ev {:kind :test :op :updated :id ""
-                  :branch-id (some-> (vs/current-branch-id
-                                       (request/require-storage ctx))
-                                     str)}]
-          (try (emit ev) (catch Exception _ nil))
-          (future (Thread/sleep 2000)
-                  (try (emit ev) (catch Exception _ nil))))))
+    (when (and nudge! (seq results))
+      (future (Thread/sleep 2000) (nudge!)))
     {:total (count results)
      :passed (get by-status :succeeded 0)
      :failed (get by-status :failed 0)

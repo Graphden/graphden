@@ -9,9 +9,9 @@
 //            GET /api/tests/status reports `succeeded`.
 //   Phase B: editor UI — the ✓ tests lens chip exists; under the
 //            lens the probe row renders with a green status dot.
-//   Phase C: Operate → Tests panel renders the summary + the probe
-//            row; the Run-all button completes its POST → refresh
-//            cycle.
+//   Phase C: the lens's [Run all] action completes its POST → re-prime
+//            cycle; the Inspector's Test section shows the probe's
+//            status and [Run this test] re-renders it from a run.
 //   Phase D: auto-run — a metadata edit on the probe rolls its
 //            version (status → null), then the write-triggered
 //            auto-run re-runs it in the background (status back to
@@ -78,7 +78,7 @@ async function cleanup(page) {
 (async () => {
   const {browser, page} = await newContext(chromium);
   page.on('dialog', (d) => d.accept());
-  console.log('edit-tests-suite — tests namespace / runner / dots / panel / auto-run');
+  console.log('edit-tests-suite — tests namespace / runner / dots / run-all / inspector / auto-run');
 
   try {
     // ====================================================================
@@ -166,44 +166,54 @@ async function cleanup(page) {
            'probe row carries the green test dot (' + dot.marker + ')');
 
     // ====================================================================
-    // Phase C: Operate → Tests panel + Run all cycle.
+    // Phase C: the lens's [Run all] + the Inspector's Test section.
     // ====================================================================
-    const panel = await page.evaluate(() => {
-      location.hash = '#@operate';
-      return new Promise((res) => setTimeout(() => {
-        const btn = [...document.querySelectorAll('.gd-op-nav-btn')]
-          .find((b) => b.dataset.section === 'tests');
-        if (!btn) return res({err: 'no tests nav button'});
-        btn.click();
-        setTimeout(() => {
-          const sec = document.querySelector('section[data-section="tests"]');
-          res({
-            summary: sec?.querySelector('.tests-panel-summary')?.textContent || '',
-            hasRow: !![...(sec?.querySelectorAll('.tests-row .tests-fn') || [])]
-              .find((a) => a.textContent === 'e2e-sum-is-four'),
-            hasRunBtn: !!sec?.querySelector('#gd-tests-run-all'),
-            live: sec?.querySelector('.ns-children')?.dataset?.testsLive || null,
-          });
-        }, 4000);
-      }, 1000));
-    });
-    assert(!panel.err && panel.hasRow,
-           'Operate → Tests panel lists the probe (' + JSON.stringify(panel) + ')');
-    assert(/\d+ tests · \d+ passed/.test(panel.summary),
-           'panel summary renders counts (' + panel.summary + ')');
-    assert(panel.hasRunBtn, 'Run-all button present');
-    assert(panel.live === '1',
-           'panel content arrived over the live SSE stream');
+    // The lens is on (Phase B) → its action is revealed next to the chips.
+    await page.waitForFunction(
+      () => { const b = document.getElementById('tests-run-all-btn'); return !!b && !b.hidden; },
+      null, {timeout: 30000, polling: 200});
     const runCycle = await page.evaluate(() => {
-      document.querySelector('#gd-tests-run-all').click();
+      const btn = document.getElementById('tests-run-all-btn');
+      btn.click();
       return new Promise((res) => setTimeout(() => {
-        const btn = document.querySelector('#gd-tests-run-all');
-        res({disabled: btn?.disabled, text: btn?.textContent});
+        res({disabled: btn.disabled, text: btn.querySelector('.kind-label')?.textContent});
       }, 8000));
     });
-    assert(runCycle.disabled === false && runCycle.text === 'Run all tests',
-           'Run-all completed its POST → refresh cycle ('
+    assert(runCycle.disabled === false && runCycle.text === 'Run all',
+           '[Run all] completed its POST → re-prime cycle ('
            + JSON.stringify(runCycle) + ')');
+
+    // Select the probe → Inspector › Bindings carries the Test section.
+    await page.goto(BASE + '/#' + PROBE_FN);
+    await page.reload();
+    await page.waitForFunction(
+      () => graphReady() && !!document.querySelector('button.more-actions-trigger') && !graph.animating,
+      null, {timeout: 30000, polling: 100});
+    await page.waitForSelector('[data-insp-tab="bindings"]', {timeout: 15000});
+    await page.evaluate(() => document.querySelector('[data-insp-tab="bindings"]').click());
+    await page.waitForSelector('#gd-insp-detail .gd-insp-test:not([hidden]) .test-dot',
+                               {timeout: 30000});
+    const section = await page.evaluate(() => {
+      const s = document.querySelector('#gd-insp-detail .gd-insp-test');
+      return {
+        dot: s.querySelector('.test-dot')?.className || '',
+        label: s.querySelector('.gd-insp-test-status')?.textContent || '',
+        hasRun: !!s.querySelector('button.tests-run-one'),
+      };
+    });
+    assert(section.dot.includes('test-passed') && section.label === 'passed',
+           'Inspector › Test shows the probe passed (' + JSON.stringify(section) + ')');
+    assert(section.hasRun, '[Run this test] present');
+    // [Run this test] — the htmx POST renders the section from the run's
+    // own result; wait for the swapped-in section to carry a dot again.
+    await page.evaluate(() => document.querySelector('#gd-insp-detail .gd-insp-test button.tests-run-one').click());
+    await page.waitForFunction(
+      () => { const s = document.querySelector('#gd-insp-detail .gd-insp-test'); return !!s && !s.querySelector('.htmx-request') && !!s.querySelector('.test-dot.test-passed'); },
+      null, {timeout: 30000, polling: 200});
+    const afterRun = await page.evaluate(() => ({
+      label: document.querySelector('#gd-insp-detail .gd-insp-test .gd-insp-test-status')?.textContent || '',
+    }));
+    assert(afterRun.label === 'passed', '[Run this test] re-rendered the section from the run (' + afterRun.label + ')');
 
     // ====================================================================
     // Phase D: auto-run — edit rolls the version, background re-run

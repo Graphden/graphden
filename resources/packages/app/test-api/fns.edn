@@ -6,10 +6,13 @@
 ;; the sequential runner and the latest-status join live in
 ;; `graphden.crud.test-runs`; this module is the HTTP face — request
 ;; parsing as graph composition (the `:_execute-parsed` pattern) over
-;; two thin boundary base-fns.
+;; two thin boundary base-fns. The editor's surfaces (the ✓ tests lens
+;; with its Run-all action, the Inspector's Test section with its
+;; Run-this-test action) are composed over the same two base-fns —
+;; `app/editor-provenance/fns.edn` `_insp-test-*`.
 
 {:namespace "app.test-api"
- :description "Tests API: POST /api/tests/run (run the branch's tests through the execute pipeline) + GET /api/tests/status (per-test latest status of the current version)."
+ :description "Tests API: POST /api/tests/run (run the branch's tests through the execute pipeline), GET /api/tests/status (per-test latest status of the current version) and the SSE ping stream the editor's ✓ tests lens re-primes on."
  :fns
  [;; ---------------------------------------------------------------------
   ;; POST /api/tests/run — body `{fn-ids?: [uuid-str …], timeout-ms?: int}`
@@ -67,178 +70,19 @@
    :args {:data :_tests-status-apply}}
 
   ;; ---------------------------------------------------------------------
-  ;; TESTS panel partial — GET /partials/tests. The Operate → Tests
-  ;; section: summary line (total / passed / failed), the Run-all
-  ;; button (`editor-tests.js` owns its POST → refresh lifecycle),
-  ;; one row per test: status dot, fn name (#hash link), error text.
-  ;; Mirrors the type-errors partial family in `app/editor-panels`.
+  ;; LIVE signal — GET /partials/tests-stream. A PING (server time) over
+  ;; SSE: `:wake-on-writes` fires on any graphden_events event (graph
+  ;; writes AND the `test:updated` nudge run-tests! emits after every
+  ;; test), ~200 ms debounce; `:interval-ms` is the keepalive ceiling.
+  ;; The editor keeps this stream open while the ✓ tests lens is active
+  ;; and re-primes `/api/tests/status` on each ping, so the Explorer's
+  ;; status dots move as runs land (editor-tests.js).
+  ;;
+  ;; A ping, deliberately not data: a long-lived stream's captured render
+  ;; freezes data-dependent fragments (observed live — a body pushed on
+  ;; every tick re-rendered stale), whereas a `:time`-effect fragment
+  ;; re-renders every tick by construction (cacheability excludes :time).
   ;; ---------------------------------------------------------------------
-
-  {:name :_ptst-rows
-   :parent :_tests-status-apply}
-
-  ;; per-row status classification (also reused as filter predicates
-  ;; for the summary counts — pure, so it satisfies `:filter`'s `#{}`
-  ;; effect-constrained predicate slot)
-  {:name :_ptst-e-status-raw
-   :parent :get
-   :args {:coll {:as :item} :key {:value :status} :default nil}}
-  {:name :_ptst-e-status
-   :parent :coalesce
-   :args {:value :_ptst-e-status-raw :default {:value "stale"}}}
-  {:name :_ptst-passed?
-   :parent :equal?
-   :args {:a :_ptst-e-status :b {:value "succeeded"}}}
-  {:name :_ptst-failed?
-   :parent :equal?
-   :args {:a :_ptst-e-status :b {:value "failed"}}}
-
-  ;; summary counts
-  {:name :_ptst-total
-   :parent :count
-   :args {:coll {:ref :_ptst-rows :type [:list :keyword-map]}}}
-  {:name :_ptst-passed-rows
-   :parent :filter
-   :args {:pred :_ptst-passed?
-          :coll {:ref :_ptst-rows :type [:list :keyword-map]}}}
-  {:name :_ptst-passed-n
-   :parent :count
-   :args {:coll {:ref :_ptst-passed-rows :type [:list :keyword-map]}}}
-  {:name :_ptst-failed-rows
-   :parent :filter
-   :args {:pred :_ptst-failed?
-          :coll {:ref :_ptst-rows :type [:list :keyword-map]}}}
-  {:name :_ptst-failed-n
-   :parent :count
-   :args {:coll {:ref :_ptst-failed-rows :type [:list :keyword-map]}}}
-
-  {:name :_ptst-summary
-   :parent :str
-   :args {:parts [{:parent :to-str :args {:value :_ptst-total}}
-                  {:value " tests · "}
-                  {:parent :to-str :args {:value :_ptst-passed-n}}
-                  {:value " passed · "}
-                  {:parent :to-str :args {:value :_ptst-failed-n}}
-                  {:value " failed"}]}}
-  {:name :_ptst-summary-div
-   :parent :hiccup
-   :args {:tag {:value "div"}
-          :attrs {:value {:class "tests-panel-summary"}}
-          :children [:_ptst-summary]}}
-  {:name :_ptst-run-btn
-   :parent :hiccup
-   :args {:tag {:value "button"}
-          :attrs {:value {:id "gd-tests-run-all" :type "button"
-                          :class "tests-run-all"}}
-          :children ["Run all tests"]}}
-  {:name :_ptst-header
-   :parent :hiccup
-   :args {:tag {:value "div"}
-          :attrs {:value {:class "tests-panel-header"}}
-          :children [:_ptst-summary-div :_ptst-run-btn]}}
-
-  ;; one row per test
-  {:name :_ptst-dot-cls
-   :parent :cond
-   :args {:clauses [:_ptst-passed? {:value "test-dot test-passed"}
-                    :_ptst-failed? {:value "test-dot test-failed"}
-                    {:value true} {:value "test-dot test-stale"}]}}
-  {:name :_ptst-dot-attrs
-   :parent :zipmap
-   :args {:keys [{:value :class}] :vals [:_ptst-dot-cls]}}
-  {:name :_ptst-dot
-   :parent :hiccup
-   :args {:tag {:value "span"}
-          :attrs :_ptst-dot-attrs
-          :children ["●"]}}
-  {:name :_ptst-link-attrs
-   :parent :assoc
-   :args {:map {:value {:class "tests-fn"}}
-          :key {:value :href}
-          :value :item-fn-href}}
-  {:name :_ptst-link
-   :parent :hiccup
-   :args {:tag {:value "a"}
-          :attrs :_ptst-link-attrs
-          :children [:item-fn-name]}}
-  {:name :_ptst-e-error
-   :parent :get
-   :args {:coll {:as :item} :key {:value :error} :default {:value ""}}}
-  {:name :_ptst-err-div
-   :parent :hiccup
-   :args {:tag {:value "div"}
-          :attrs {:value {:class "tests-err"}}
-          :children [:_ptst-e-error]}}
-  {:name :_ptst-row-err
-   :description "Error line only on a failed row — nil child renders nothing."
-   :parent :if
-   :args {:test :_ptst-failed?
-          :then :_ptst-err-div
-          :else {:value nil}}}
-  {:name :_ptst-row
-   :parent :hiccup
-   :args {:tag {:value "div"}
-          :attrs {:value {:class "tests-row"}}
-          :children [:_ptst-dot :_ptst-link :_ptst-row-err]}}
-  {:name :_ptst-rendered-rows
-   :parent :map
-   :args {:func :_ptst-row
-          :coll {:ref :_ptst-rows :type [:list :keyword-map]}}}
-
-  {:name :_ptst-empty?
-   :parent :empty?
-   :args {:coll {:ref :_ptst-rows :type [:list :keyword-map]}}}
-  {:name :_ptst-empty-msg
-   :parent :hiccup
-   :args {:tag {:value "div"}
-          :attrs {:value {:class "tests-empty"}}
-          :children ["No tests yet — a test is a fn in a namespace containing the `tests` segment (e.g. `myproj.tests`). Compose it over `assert` / `assert-eq`; it passes when it runs without a throw."]}}
-  {:name :_ptst-list
-   :parent :hiccup
-   :args {:tag {:value "div"}
-          :attrs {:value {:class "tests-list"}}
-          :children [:_ptst-rendered-rows]}}
-  {:name :_ptst-list-or-empty
-   :parent :if
-   :args {:test :_ptst-empty?
-          :then :_ptst-empty-msg
-          :else :_ptst-list}}
-  {:name :_ptst-body
-   :parent :hiccup
-   :args {:tag {:value "div"}
-          :attrs {:value {:class "tests-panel"}}
-          :children [:_ptst-header :_ptst-list-or-empty]}}
-  {:name :_ptst-html
-   :parent :render-hiccup
-   :args {:hiccup :_ptst-body}}
-
-  {:name :_partial-tests-handler
-   :lambda-params [:request]
-   :description "Ring handler for GET /partials/tests — the Operate → Tests panel as text/html. Auth-required (route side). The one-shot sibling of the LIVE stream below (kept for clients without SSE and as the JS fallback)."
-   :parent :html-ok-response
-   :args {:body :_ptst-html}}
-
-  ;; ---------------------------------------------------------------------
-  ;; LIVE panel stream — GET /partials/tests-stream. The same panel
-  ;; body pushed over SSE: `:wake-on-writes` re-renders on any
-  ;; graphden_events event (graph writes AND the `test:updated` nudge
-  ;; run-tests! emits after every batch), changed-only, ~200 ms
-  ;; debounce; `:interval-ms` is just the keepalive ceiling. The
-  ;; editor's Tests section subscribes via `hx-ext="sse"` attrs
-  ;; (editor-tests.js builds the shell; the htmx SSE extension rides
-  ;; the editor head).
-  ;; ---------------------------------------------------------------------
-
-  ;; The stream deliberately pushes a PING (server time), not the
-  ;; panel body: a long-lived stream's captured render freezes
-  ;; data-dependent fragments (observed live — the panel body
-  ;; re-rendered stale on every tick while a fresh request saw new
-  ;; data), whereas a `:time`-effect fragment re-renders every tick
-  ;; by construction (cacheability excludes :time). The client
-  ;; treats each ping as "something changed" and re-fetches the
-  ;; one-shot `/partials/tests`, which is always fresh. Write-wakes
-  ;; (~200 ms) + the `test:updated` NOTIFY run-tests! emits after
-  ;; each batch make runs land promptly; 30 s keepalive bounds drift.
   {:name :_tests-ping
    :parent :hiccup
    :args {:tag {:value "span"}
@@ -247,7 +91,7 @@
 
   {:name :_tests-stream-handler
    :lambda-params [:request]
-   :description "SSE ping stream for the Operate → Tests panel — write-wakes + 30 s keepalive; each pushed ping tells the client to re-fetch `/partials/tests`."
+   :description "SSE ping stream for the ✓ tests lens — write-wakes + 30 s keepalive; each pushed ping tells the editor to re-prime `/api/tests/status`."
    :parent :sse-fragment-handler
    :args {:fragment :_tests-ping
           :interval-ms 30000

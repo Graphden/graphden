@@ -1,20 +1,25 @@
-// Editor — diagnostics drawer → Debug: the «catch next request» trap
-// (crud.debug-capture; POST /api/debug/catch family).
+// Editor — the «catch next request» trap (crud.debug-capture; POST
+// /api/debug/catch family), on the Inspector's Runs tab of a SERVICE fn.
 //
-// Server owns the panel markup (`GET /partials/debug-catch`: status
-// line / arm form shell / «open last captured trace»). This module
-// owns the section shell + the action lifecycle:
-//   * Arm — read the form inputs, POST /api/debug/catch, refresh;
+// Server owns the block markup (`GET /partials/debug-catch`: status
+// line / arm form shell / «open last captured trace»), composed into
+// the Runs-tab history partial as `.gd-run-trap` for a fn that is a
+// service on the branch (app/editor-execute `_peh-trap-block`). This
+// module owns the action lifecycle:
+//   * Arm — read the form inputs, POST /api/debug/catch, refresh the block;
 //   * Cancel — POST /api/debug/catch/cancel, refresh;
 //   * open last captured trace — delegate to openTraceView
 //     (editor-trace-view.js);
-//   * a light status poll while the section is visible AND a trap is
-//     armed, so the panel flips to «last captured» soon after the
-//     request fires (no SSE stream — the trap is short-lived by
-//     design, polling every few seconds for its TTL is cheaper than
-//     a stream).
+//   * a light status poll while the block is visible AND a trap is
+//     armed, so it flips to «last captured» soon after the request
+//     fires — and the Runs history re-mounts then, so the captured
+//     request shows up as a run with its tree (no SSE stream — the
+//     trap is short-lived by design, polling every few seconds for
+//     its TTL is cheaper than a stream).
+// (The drawer's Debug panel this module used to host was retired
+// 2026-09-04 with the drawer.)
 //
-// Globals consumed: isAuthenticated, authFetch, htmx, openTraceView.
+// Globals consumed: authFetch, openTraceView.
 
 let _debugRefreshInFlight = false;
 let _debugRefreshQueued = false;
@@ -22,7 +27,7 @@ let _debugPollTimer = null;
 
 
 function _debugPanelEl() {
-  return document.querySelector('section[data-section="debug"] .ns-children');
+  return document.querySelector('#gd-insp-runs .gd-run-trap');
 }
 
 
@@ -31,17 +36,23 @@ function refreshDebugPanel() {
   if (!el) return;
   if (_debugRefreshInFlight) {
     // Don't DROP a refresh that races an in-flight one (e.g. the arm
-    // POST completing while the section-activation refresh is still
-    // loading) — queue one trailing re-fetch so the panel always ends
-    // on current state.
+    // POST completing while a poll is still loading) — queue one
+    // trailing re-fetch so the block always ends on current state.
     _debugRefreshQueued = true;
     return;
   }
   _debugRefreshInFlight = true;
+  const wasArmed = !!el.querySelector('.debug-armed-line');
   authFetch('/partials/debug-catch')
     .then((r) => (r.ok ? r.text() : null))
     .then((html) => {
       if (html && el.isConnected) el.innerHTML = html;
+      // Armed → captured: the request landed as a run — re-mount the
+      // history so its row (with the tree button) is on the tab.
+      if (wasArmed && el.isConnected && !el.querySelector('.debug-armed-line')
+          && el.querySelector('.debug-last-capture')) {
+        document.getElementById('gd-insp-runs')?.dispatchEvent(new Event('gd-refresh-runs'));
+      }
     })
     .catch(() => null)
     .then(() => {
@@ -56,7 +67,7 @@ function refreshDebugPanel() {
 }
 
 
-// Poll only while: section visible + a trap is armed (the panel body
+// Poll only while: block visible + a trap is armed (the block body
 // carries the armed line). Stops by itself once disarmed/captured.
 function _debugSchedulePoll() {
   if (_debugPollTimer) { clearTimeout(_debugPollTimer); _debugPollTimer = null; }
@@ -67,29 +78,17 @@ function _debugSchedulePoll() {
 }
 
 
-function buildDebugSection() {
-  if (!isAuthenticated()) return null;
-  const wrap = document.createElement('div');
-  wrap.className = 'sidebar-debug';
-  const el = document.createElement('div');
-  el.className = 'ns-children';
-  el.innerHTML = '<div class="loading">Loading…</div>';
-  wrap.appendChild(el);
-  setTimeout(() => {
-    const live = _debugPanelEl();
-    if (live?.isConnected) refreshDebugPanel();
-  }, 0);
-  return wrap;
+// The Runs tab just mounted its history panel — if it carries the trap
+// block and a trap is armed, start polling (editor-execute-history.js).
+function gdDebugTrapMounted() {
+  setTimeout(_debugSchedulePoll, 0);
 }
+window.gdDebugTrapMounted = gdDebugTrapMounted;
 
 
-// Delegated actions — the panel body is re-swapped on every refresh,
+// Delegated actions — the block body is re-swapped on every refresh,
 // so handlers bind at the document level by id.
 document.addEventListener('click', (ev) => {
-  if (ev.target.closest('.gd-op-nav-btn[data-section="debug"]')) {
-    setTimeout(refreshDebugPanel, 0);
-    return;
-  }
   const armBtn = ev.target.closest('#gd-debug-arm');
   if (armBtn && !armBtn.disabled) {
     armBtn.disabled = true;

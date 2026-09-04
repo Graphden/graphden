@@ -40,7 +40,7 @@
                   :partial-inspector-lint-suppress
                   :partial-inspector-lint-restore
                   :partial-execute-history-ack
-                  :partial-tests
+                  :partial-inspector-test-run
                   :partial-tests-stream
                   :partial-execute-trace
                   :partial-debug-catch

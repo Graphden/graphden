@@ -823,43 +823,7 @@ async function openAccountMenu(page) {
 }
 
 
-// The code diagnostics live in the Build-surface drawer under the canvas
-// (#gd-diag-drawer), not on the Organization surface — route them there so
-// call sites can keep saying openOperateSection('tests') etc.
-const DIAG_SECTIONS = new Set(['errors', 'type-errors', 'tests', 'debug', 'lint']);
-
-async function openDiagnosticsSection(page, section) {
-  await page.waitForSelector('#gd-diag-nav button[data-section="' + section + '"]',
-                             {timeout: 30000});
-  const up = () => page.evaluate((s) => {
-    const drawer = document.getElementById('gd-diag-drawer');
-    if (!drawer || drawer.getAttribute('data-open') !== '1') return false;
-    const el = document.querySelector('#gd-diag-panels > [data-section="' + s + '"]');
-    if (!el || el.hasAttribute('hidden')) return false;
-    const r = el.getBoundingClientRect();
-    return r.width > 0 && r.height > 0;
-  }, section);
-  for (let i = 0; i < 10 && !(await up()); i++) {
-    await page.evaluate((s) => {
-      document.querySelector('#gd-diag-nav button[data-section="' + s + '"]')?.click();
-    }, section);
-    await waitUntil(page, (s) => {
-      const drawer = document.getElementById('gd-diag-drawer');
-      if (!drawer || drawer.getAttribute('data-open') !== '1') return false;
-      const el = document.querySelector('#gd-diag-panels > [data-section="' + s + '"]');
-      if (!el || el.hasAttribute('hidden')) return false;
-      const r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0;
-    }, section, 1000);
-  }
-  if (!await up()) {
-    throw new Error('Diagnostics → ' + section + ' did not open');
-  }
-}
-
-
 async function openOperateSection(page, section) {
-  if (DIAG_SECTIONS.has(section)) return openDiagnosticsSection(page, section);
   await openAccountMenu(page);
   await page.evaluate(() => {
     const item = Array.from(document.querySelectorAll('.auth-menu-item'))

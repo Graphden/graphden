@@ -480,7 +480,7 @@ the **call tree**.
   entry was truncated away (byte cap, 10k entry cap) surface as
   roots instead of vanishing.
 - The editor opens it from a history row's **tree** button or the
-  Debug panel's «open last captured trace»; `editor-trace-view.js`
+  trap block's «open last captured trace»; `editor-trace-view.js`
   owns row-click / ◀ ▶ / arrow-key stepping with canvas highlight.
 
 Secret handling is capture-time AND read-time:
@@ -528,11 +528,14 @@ doctrine — no stored field; restart disarms). Org-keyed sharding
 routes an org's requests to its own pod, so arming editor and
 captured request meet on one process by construction.
 
-Editor surface: the diagnostics drawer's **Debug** tab
-(`/partials/debug-catch` +
-`editor-debug.js`) — arm form (path prefix, capture-values behind
-the explicit confirm), armed status with Cancel, «open last captured
-trace».
+Editor surface: the **Runs** tab of a fn that is a service on the
+branch (the ⚙ lens) opens with the trap block (`/partials/debug-catch`
+composed into the history partial + `editor-debug.js`) — arm form
+(path prefix, capture-values behind the explicit confirm), armed
+status with Cancel, «open last captured trace»; when the capture
+lands the tab re-mounts, so the request is a run row with its tree.
+(Until 2026-09-04 this was the diagnostics drawer's Debug tab; the
+drawer under the canvas is gone.)
 
 ## Runtime effect tracing
 

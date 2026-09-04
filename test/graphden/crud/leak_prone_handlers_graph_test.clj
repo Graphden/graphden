@@ -369,3 +369,35 @@
       (is (no-where-clause-leak? response)
           "if 500 with `Unknown field 'request-method'`, one of the two
            pins on the ref-cleanup cascade was removed"))))
+
+
+(deftest runs-tab-carries-the-trap-block-for-a-service-fn-test
+  ;; The «catch next request» trap moved from the (retired) diagnostics
+  ;; drawer to the Runs tab of a fn that is a SERVICE on the branch
+  ;; (2026-09-04): the history partial composes `:_peh-trap-block` —
+  ;; the block for such a fn, nothing for any other. The block fn-def is
+  ;; exercised directly (the whole history partial also reads the usage
+  ;; rollup table, which this harness does not carry).
+  (let [storage (:storage *graph*)
+        target (first (sp/query-entities storage :fn {:name "add"}))
+        block (fn []
+                (pr-str (gh/via :_peh-trap-block
+                                {:uri "/partials/execute-history"
+                                 :query-string (str "fn-id=" (:id target))
+                                 :query-params {"fn-id" (str (:id target))}
+                                 :request-method :get
+                                 :headers {}})))]
+    (is (some? target))
+    (testing "a fn without a service has no trap block"
+      (is (not (str/includes? (block) "gd-run-trap"))))
+    (testing "the same fn as a (disabled) service carries the block with its arm form"
+      (let [svc (sp/create-entity storage :service {:fn-id (:id target)
+                                                    :enabled? false
+                                                    :restart-policy :always
+                                                    :cardinality :singleton})]
+        (try
+          (let [body (block)]
+            (is (str/includes? body "gd-run-trap"))
+            (is (str/includes? body "gd-debug-arm"))
+            (is (str/includes? body "Catch next request")))
+          (finally (sp/delete-entity storage :service (:id svc))))))))

@@ -51,11 +51,13 @@ session state (every call is standalone).
 
 ## Branch scoping
 
-Reads (`read-fn`, `search-fns`, `execute-fn`, `run-tests`) run against the
-branch the REQUEST rides: `X-Graphden-Branch: <name>` or `?branch=`.
-Mutations name their branch explicitly (`upsert-fn-defs` takes `branch`)
-and never fall back to main. Static client configs can't vary headers
-per call, so branch-scoped reads from a plain client go through `curl`:
+Reads (`read-fn`, `describe-fn`, `search-fns`, `execute-fn`,
+`list-namespaces`) run against the branch the REQUEST rides:
+`X-Graphden-Branch: <name>` or `?branch=` — or, per call, the optional
+`branch` tool argument, which re-dispatches that one call to the named
+branch (so a static client config never needs a header). Mutations
+name their branch explicitly (`upsert-fn-defs` takes `branch`) and
+never fall back to main. The header form is still what `curl` uses:
 
 ```bash
 curl -s http://localhost:<port>/mcp \
@@ -88,6 +90,8 @@ The intended loop for AI-assisted fn-def work on this repo:
 | Real execution semantics (same pipeline as `/api/execute`) | `packages.owned` registration, `:branch-local?` seeds |
 | Test results (`run-tests` = the standard runner) | Frontend assets, resource overrides |
 | A fn's computed contract on the branch (`describe-fn`: free args, the start-blocking subset, effects, return type, service-eligibility) | — |
+| What a run actually walked (`execute-fn` with `trace: true` — the call tree, one row per fn invoked; a step that never appears ran nothing) | — |
+| The subtree as fns.edn (`read-fn` — the same syntax `upsert-fn-defs` takes; `format: "rows"` for the raw rows) | — |
 
 Not for the MCP cycle: `impls.clj` edits (a new `defbase` needs a rebuild —
 fast-check hypotheses over nREPL instead, see the `graphden-repl` skill),

@@ -79,6 +79,11 @@
    :args {:value {:type a :description "Value to print."}}
    :return-type :text}
 
+  {:name :pprint-str
+   :description "Pretty-printed, readable string form of a value (`clojure.pprint/pprint`) — multi-line EDN a human or an AI reads comfortably; `:pr-str` is the one-line form."
+   :args {:value {:type a :description "Value to print."}}
+   :return-type :text}
+
   {:name :to-str
    :description "Plain string form of a value (Clojure's `str`). No quoting; nil renders as empty string."
    :args {:value {:type a :description "Value to stringify."}}

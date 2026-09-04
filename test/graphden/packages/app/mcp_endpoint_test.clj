@@ -5,6 +5,7 @@
    driven through `:_mcp-dispatch` exactly as POST /mcp would."
   (:require
     [cheshire.core :as json]
+    [clojure.edn :as edn]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.test-infra.golden-app :as ga]))
 
@@ -74,6 +75,14 @@
       (is (seq (:namespaces data)) "tree scope returns namespaces"))))
 
 
+(deftest tool-search-fns-by-description
+  (testing "a concept phrase that appears only in a description still finds the fn"
+    (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 14 :method "tools/call"
+                               :params {:name "search-fns" :arguments {:q "pooled Postgres datasource"}}})
+          names (set (map :name (:fns (tool-text rpc))))]
+      (is (contains? names "postgres-storage-impl")))))
+
+
 (deftest tool-search-fns
   (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 4 :method "tools/call"
                              :params {:name "search-fns" :arguments {:q "web-server"}}})
@@ -82,9 +91,29 @@
 
 
 (deftest tool-read-fn
-  (testing "known fn → subtree with the fn itself"
+  (testing "known fn → fns.edn EDN text of its subtree, the fn itself included"
     (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 5 :method "tools/call"
                                :params {:name "read-fn" :arguments {:name "web-server"}}})
+          text (-> rpc :result :content first :text)
+          defs (edn/read-string text)]
+      (is (vector? defs))
+      (is (some #(= :web-server (:name %)) defs) "the root fn-def is in the bundle")
+      (is (some #(= :http-server (:name %)) defs) "its parent base-fn rides along")
+      (is (every? #(and (map? %) (keyword? (:name %))) defs) "every entry is a fn-def map")
+      (is (re-find #"\n" text) "pretty-printed — one def per lines, not one line")))
+  (testing "format rows → the raw subtree rows, JSON"
+    (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 15 :method "tools/call"
+                               :params {:name "read-fn" :arguments {:name "web-server" :format "rows"}}})
+          data (tool-text rpc)]
+      (is (some #(= "web-server" (:name %)) (:fns data)))))
+  (testing "an unknown branch name is a -32602, router or not"
+    (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 17 :method "tools/call"
+                               :params {:name "read-fn" :arguments {:name "web-server" :branch "no/such-branch"}}})]
+      (is (= -32602 (get-in rpc [:error :code])))
+      (is (re-find #"no/such-branch" (get-in rpc [:error :message])))))
+  (testing "a branch argument with no router installed is ignored — same answer"
+    (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 16 :method "tools/call"
+                               :params {:name "read-fn" :arguments {:name "web-server" :branch "main" :format "rows"}}})
           data (tool-text rpc)]
       (is (some #(= "web-server" (:name %)) (:fns data)))))
   (testing "unknown fn → -32602 with the name in the message"
@@ -127,6 +156,26 @@
         data (tool-text rpc)]
     (is (= "succeeded" (:status data)))
     (is (= 6 (:result data)))))
+
+
+(deftest tool-execute-fn-trace
+  (testing "trace true → the run is persisted and answers with its call tree"
+    (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 18 :method "tools/call"
+                               :params {:name "execute-fn"
+                                        :arguments {:name "current-branch-chain" :args {} :trace true}}})
+          data (tool-text rpc)]
+      (is (= "succeeded" (:status data)))
+      (is (string? (:execution-id data)) "a traced run leaves an execution row")
+      (is (map? (:trace data)))
+      (is (true? (get-in data [:trace :found?])) "the call tree was captured")
+      (is (every? #(string? (:fn-name %)) (get-in data [:trace :rows])) "rows carry joined fn names")
+      (is (not (contains? data :path-trace)) "the raw id-keyed path-trace is replaced by the joined tree")))
+  (testing "without trace the answer is as before — no trace key, no row"
+    (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 19 :method "tools/call"
+                               :params {:name "execute-fn" :arguments {:name "add" :args {:nums [1 2]}}}})
+          data (tool-text rpc)]
+      (is (= 3 (:result data)))
+      (is (not (contains? data :trace))))))
 
 
 (deftest tool-unknown-name

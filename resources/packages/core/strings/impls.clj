@@ -10,6 +10,7 @@
    taints the result. The propagator only changes type-level
    metadata; impl bodies are unchanged."
   (:require
+    [clojure.pprint :as pp]
     [clojure.string :as str]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.storage.protocol.core :as sp]
@@ -181,6 +182,12 @@
   (pr-str value))
 
 
+(defbase pprint-str-fn
+  "Pretty-printed (multi-line) readable form of value."
+  [value]
+  (with-out-str (pp/pprint value)))
+
+
 (defbase to-str-fn
   "Converts any value to string using str."
   [value]
@@ -310,6 +317,7 @@
    :str-to-keyword     {:impl str-to-keyword-fn     :return-type-rule str-to-keyword-return-rule :taint-propagate? true}
    :keyword-to-str     {:impl keyword-to-str-fn     :taint-propagate? true}
    :pr-str             {:impl pr-str-fn             :taint-propagate? true}
+   :pprint-str         {:impl pprint-str-fn         :taint-propagate? true}
    :to-str             {:impl to-str-fn             :taint-propagate? true}
    :name               {:impl name-fn               :return-type-rule name-return-rule :taint-propagate? true}
    :blank?             {:impl blank?-fn             :taint-propagate? true}

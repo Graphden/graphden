@@ -457,6 +457,22 @@
         (is (= #{a1 a2}
                (into #{} (map :id)
                      (:fns (entities/list-all-graph-entities c :search nil nil "ALPHA"))))))
+      (testing "scope :search-text adds description matches, ranked after name hits"
+        (let [desc (java.util.UUID/randomUUID)]
+          (sp/create-entity storage :fn {:id desc :name "opaque-name"
+                                         :description "Frobnicates a widget quietly"})
+          (ctx/invalidate-graph-cache! c)
+          (is (not (contains? (into #{} (map :id)
+                                    (:fns (entities/list-all-graph-entities c :search nil nil "widget")))
+                              desc))
+              "the name-only :search scope (sidebar filter) does not match descriptions")
+          (let [dump (entities/list-all-graph-entities c :search-text nil nil "widget")]
+            (is (contains? (into #{} (map :id) (:fns dump)) desc)
+                "a description-only match is found")
+            (is (= desc (:id (last (:fns dump))))
+                "…but ranked after every name match"))
+          (sp/delete-entity storage :fn desc)
+          (ctx/invalidate-graph-cache! c)))
       (testing "scope :search with blank / nil q — no matches, not truncated"
         (let [dump (entities/list-all-graph-entities c :search nil nil "   ")]
           (is (empty? (:fns dump)))

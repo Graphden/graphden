@@ -122,13 +122,17 @@ shows the free-arg list; an unexpected `else` there is this.
 
 1. **`list-namespaces`** — see the shape of the graph.
 2. **`search-fns`** / **`read-fn`** / **`describe-fn`** — learn the
-   vocabulary. Before you compose on `:parent :foo`, `read-fn` "foo" to
-   see its slots and their types. **Compose on what exists; don't invent
-   parents.** After you compose, `describe-fn` your fn: it returns the
-   COMPUTED contract — free args (what `execute-fn` will accept), the
-   start-blocking subset, effects, return type, and whether the fn is
-   service-eligible — so a leaked slot or a missing effect shows up
-   before you run anything.
+   vocabulary. `search-fns` matches names first and descriptions last,
+   so a concept you can describe but not name still lands. Before you
+   compose on `:parent :foo`, `read-fn` "foo": it returns the fn and
+   everything it reaches AS fns.edn — the same EDN you write back, so
+   read it as a worked example of the slots and their bindings
+   (`format: "rows"` gives the raw storage rows instead). **Compose on
+   what exists; don't invent parents.** After you compose, `describe-fn`
+   your fn: it returns the COMPUTED contract — free args (what
+   `execute-fn` will accept), the start-blocking subset, effects, return
+   type, and whether the fn is service-eligible — so a leaked slot or a
+   missing effect shows up before you run anything.
 3. **`create-branch`** — ALWAYS, before any mutation. Name it for the
    task, e.g. `ai/add-order-total`. `main` is the human's; you work on a
    branch and never touch main.
@@ -137,7 +141,13 @@ shows the free-arg list; an unexpected `else` there is this.
    cycles, unique names, type-check), so a rejection is precise feedback
    — read it, fix the proposal, try again. Platform fn-defs (the ones the
    package sync owns) are refused — build under your own namespace.
-5. **`execute-fn`** — run what you built and check the result.
+5. **`execute-fn`** — run what you built and check the result. When
+   the result is not what you expected — especially a silent `nil` —
+   run it again with `trace: true`: the answer then carries the call
+   tree the run actually walked, one row per fn invoked. A step of your
+   composition that never appears there ran nothing; that is where to
+   look. Every read tool takes an optional `branch`, so you never need
+   to switch headers to look at your own branch.
 6. **`run-tests`** — after writing tests (§10), run the branch's test set
    and read `{total passed failed}` — the write→verify loop, closed.
 7. **`diff-branch`** — this is what the human reviews: added / modified /

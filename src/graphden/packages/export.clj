@@ -634,29 +634,82 @@
      :list-items (vec (sp/query-entities storage :binding-list-item {}))}))
 
 
+(defn- rows->records
+  "Tag the five raw-row tables into the flat record shape and reverse
+   each fn-row's `namespace-id` to its dotted path via `ns-path`."
+  [{:keys [fns slots fn-slots bindings list-items]} ns-path]
+  (vec
+    (concat
+      (map (fn [f]
+             (assoc f :kind :fn
+                    :namespace-id (get ns-path (:namespace-id f)))) fns)
+      (map #(assoc % :kind :slot) slots)
+      (map #(assoc % :kind :fn-slot) fn-slots)
+      (map #(assoc % :kind :binding) bindings)
+      (map #(assoc % :kind :binding-list-item) list-items))))
+
+
 (defn graph->records
   "Read the live graph from `storage` into the flat, `:kind`-tagged
    record shape `records->fn-defs` consumes. Reverses each fn-row's
    `namespace-id` UUID to its dotted path so re-parse re-derives the same
    deterministic fn-ids."
   [storage]
-  (let [{:keys [fns slots fn-slots bindings list-items]} (read-graph storage)
-        ns-path (ns-id->path-map storage)]
-    (vec
-      (concat
-        (map (fn [f]
-               (assoc f :kind :fn
-                      :namespace-id (get ns-path (:namespace-id f)))) fns)
-        (map #(assoc % :kind :slot) slots)
-        (map #(assoc % :kind :fn-slot) fn-slots)
-        (map #(assoc % :kind :binding) bindings)
-        (map #(assoc % :kind :binding-list-item) list-items)))))
+  (rows->records (read-graph storage) (ns-id->path-map storage)))
 
 
 (defn export-graph
   "Export the entire stored graph as a vector of fns.edn fn-def maps."
   [storage]
   (records->fn-defs (graph->records storage)))
+
+
+(defn subtree-fn-ids
+  "fn-ids transitively reachable from `root-id` over the composition
+   edges a fn needs to render or run — the same rules as
+   `crud.entities.list/subtree-fn-id-closure` (which lives a layer up
+   and reads the cached graph): `parent-ids`, the fn's own base /
+   return-type / element type-fns, binding refs + type-overrides,
+   list-item refs, and the type-fns of its slots. Pure over the raw
+   five-table rows."
+  [{:keys [fns slots fn-slots bindings list-items]} root-id]
+  (let [fns-by-id (into {} (map (juxt :id identity)) fns)
+        fn-slots-by-fn (group-by :fn-id fn-slots)
+        slots-by-id (into {} (map (juxt :id identity)) slots)
+        bindings-by-fn (group-by :fn-id bindings)
+        items-by-binding (group-by :binding-id list-items)
+        edges (fn [fid]
+                (let [f (get fns-by-id fid)]
+                  (concat (:parent-ids f)
+                          [(:base-fn-id f) (:return-type-fn-id f) (:element-fn-id f)]
+                          (mapcat (fn [b]
+                                    (concat [(:ref-fn-id b) (:type-override-fn-id b)]
+                                            (map :ref-fn-id (get items-by-binding (:id b)))))
+                                  (get bindings-by-fn fid))
+                          (keep #(:type-fn-id (get slots-by-id (:slot-id %)))
+                                (get fn-slots-by-fn fid)))))]
+    (loop [seen #{} stack (if root-id [root-id] [])]
+      (if-let [fid (peek stack)]
+        (let [stack (pop stack)]
+          (if (contains? seen fid)
+            (recur seen stack)
+            (recur (conj seen fid) (into stack (remove nil?) (edges fid)))))
+        seen))))
+
+
+(defn export-subtree
+  "`export-graph` restricted to the closure reachable from `root-id` —
+   the fn-defs an AI author reads back for ONE fn, in the syntax it
+   writes. `[]` when `root-id` is nil or names no row."
+  [storage root-id]
+  (let [graph (read-graph storage)
+        ids (subtree-fn-ids graph root-id)]
+    (if (empty? ids)
+      []
+      (records->fn-defs
+        (rows->records (update graph :fns
+                               (fn [fs] (filterv #(contains? ids (:id %)) fs)))
+                       (ns-id->path-map storage))))))
 
 
 ;; =============================================================================

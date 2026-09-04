@@ -25,7 +25,15 @@
   ;; (effect-sets are idempotent over union, so double-recording is
   ;; harmless if the handler also tags :network).
   (cr/record-effect! :network)
-  (br/dispatch router request))
+  ;; A dispatch is a NEW logical execution of the branch's handler, so it
+  ;; memoises in its own per-request call cache. The outer scope's cache
+  ;; keys project only a ref's DECLARED free args, and the request itself
+  ;; reaches most handler fns by name-fallback rather than as a declared
+  ;; free — a nested dispatch (the MCP `branch` argument re-dispatching a
+  ;; call to another branch) sharing the outer map answered the INNER
+  ;; request from the outer request's memo and recursed until the stack
+  ;; overflowed.
+  (cr/with-fresh-call-cache #(br/dispatch router request)))
 
 
 (def impls

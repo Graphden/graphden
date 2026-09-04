@@ -359,13 +359,18 @@
   "Server-side filter: case-insensitive substring on each fn's QUALIFIED
    dotted name (`core.logic.assert-eq`; a root fn is its bare name), so
    a bare-name, a namespace-prefixed, and a namespace-only needle all
-   match. `/` in the needle normalizes to `.` — the canonical
+   match; with `descriptions?` (the `:search-text` scope) also — ranked
+   last — on the fn's `:description`, so a caller who knows the CONCEPT
+   but not the name (an AI over `search-fns`) still lands. The editor's
+   sidebar filter keeps the name-only `:search` scope: its rows must all
+   visibly carry the needle. `/` in the needle normalizes to `.` — the canonical
    `ns.path/name` spelling the rest of the product prints is accepted
-   verbatim. Capped at `*default-search-limit*`. Replaces the
-   client-side scan over the (former) full-fns mirror in the sidebar
-   filter box, the fn / namespace / MI-reparent pickers, and name→id
-   resolution."
-  [{:keys [base rev-index role-of namespaces]} q]
+   verbatim. Capped at `*default-search-limit*` (light rows already
+   carry `:description`, so a description hit shows WHY it matched).
+   Replaces the client-side scan over the (former) full-fns mirror in
+   the sidebar filter box, the fn / namespace / MI-reparent pickers,
+   and name→id resolution."
+  [{:keys [base rev-index role-of namespaces]} q descriptions?]
   (let [needle (some-> q str/lower-case str/trim not-empty
                        (str/replace "/" "."))
         paths (when needle (ns-path/path-map @namespaces))
@@ -380,7 +385,9 @@
                  (cond
                    (= n needle) 0
                    (str/includes? n needle) 1
-                   (str/includes? (str/lower-case (qualified f)) needle) 2)))
+                   (str/includes? (str/lower-case (qualified f)) needle) 2
+                   (and descriptions?
+                        (str/includes? (str/lower-case (or (:description f) "")) needle)) 3)))
         matches (when needle
                   (->> (:fns base)
                        (keep #(when (:name %)
@@ -586,7 +593,9 @@
      ~4.5 MB on a 3000-fn graph; the editor's initial load.
    - `:tree` — `{:namespaces :counts}` only (O(namespaces) sidebar init).
    - `:namespace` with `namespace-id` — one namespace's light rows.
-   - `:search` with `q` — capped light rows by substring.
+   - `:search` with `q` — capped light rows by name substring.
+   - `:search-text` with `q` — as `:search`, plus description matches
+     ranked last (the MCP `search-fns` tool).
    - `:view` with `q` — smart-view rules (`uses:` / `effect:` /
      `name:` tokens, AND-combined) — the Explorer's saved views.
    - `:index` — `{:fns :namespaces}`, nil fields dropped (CLI/batch).
@@ -601,7 +610,8 @@
      (cond
        (= scope :tree)               (list-scope-tree env)
        (= scope :namespace)          (list-scope-namespace env namespace-id)
-       (= scope :search)             (list-scope-search env q)
+       (= scope :search)             (list-scope-search env q false)
+       (= scope :search-text)        (list-scope-search env q true)
        (= scope :view)               (list-scope-view env q)
        (= scope :index)              (list-scope-index env)
        (and (= scope :subtree) root-id) (list-scope-subtree env root-id)

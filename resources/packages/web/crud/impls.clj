@@ -15,6 +15,7 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.executor.registry.core :as registry]
+    [graphden.packages.export :as export]
     [graphden.schema.graph.schema :as graph-schema]
     [graphden.storage.protocol.core :as sp]))
 
@@ -86,6 +87,14 @@
   (if (some? fn-id)
     (fn-exec-lookup/service-blocking-free-args ctx fn-id)
     {}))
+
+
+(defbase graph-fn-defs-subtree
+  [root-id]
+  (cr/record-effect! :db)
+  (if (some? root-id)
+    (export/export-subtree (request/require-storage ctx) root-id)
+    []))
 
 
 (defbase list-all-graph-entities
@@ -292,6 +301,7 @@
    :free-arg-slot-map free-arg-slot-map
    :service-blocking-free-args service-blocking-free-args
    :list-all-graph-entities list-all-graph-entities
+   :graph-fn-defs-subtree   graph-fn-defs-subtree
    :strip-hidden-impl strip-hidden-impl
    :all-rich-types all-rich-types
    :api-rich-types api-rich-types

@@ -93,7 +93,7 @@
     :http-request :http-server :http-stop :hub-fetch-bundle :hub-push-bundle! :if :into
     :invalidate-after-write :invalidate-graph-cache :invoke :is-a?
     :json-to-type :jvm-uptime-ms :keys
-    :keyword-to-str :list :list-all-graph-entities :log-warn
+    :keyword-to-str :list :list-all-graph-entities :graph-fn-defs-subtree :log-warn
     :loop-until-interrupted :lt :lte :map :map-xf
     :materialize-package-fns :max-memory :merge :merge-branch!
     :merge-post-commit! :merge-skipped-branch-local
@@ -108,7 +108,7 @@
     ;; owned registry) — the reason string carries no caller content.
     :pkg-delete-guard-reason
     :position-in :postwalk
-    :pr-str :publish-package-apply :query-entities :query-param
+    :pprint-str :pr-str :publish-package-apply :query-entities :query-param
     :query-ref-many-owners :quot :range :re-find? :read-resource-bytes :read-resource-or-nil
     :re-replace :realize-request-body :recent-failures :reduce
     ;; :request-capabilities reads the request-scope SEAM (server-derived
@@ -175,7 +175,7 @@
     :map :map-xf :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
     :import-bundle! :list-branch-comments :parse-edn :parse-graph-edn
     :parse-int :parse-json :parse-uuid :platform-owned-def-names
-    :position-in :postwalk :pr-str
+    :position-in :postwalk :pprint-str :pr-str
     :quot :range
     :re-find? :re-replace :reduce :render-hiccup :render-value-repr :repeat :reset :rest :reverse :select-keys :digest-hex
     :slurp :some :some? :sort :sort-by :str :str-clip :str-contains? :str-join :str-len :str-lower

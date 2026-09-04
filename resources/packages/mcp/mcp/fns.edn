@@ -152,27 +152,35 @@
           {:tools
            [{:name "list-namespaces"
              :description "Overview of the graph: every namespace with its fn counts. Start here to orient."
-             :inputSchema {:type "object" :properties {} :required []}}
-            {:name "search-fns"
-             :description "Search fns by name substring. Returns light rows (name, id, namespace, kind)."
              :inputSchema {:type "object"
-                           :properties {:q {:type "string" :description "Name substring to search for."}}
+                           :properties {:branch {:type "string" :description "Optional branch name to read on (else the request's branch)."}}
+                           :required []}}
+            {:name "search-fns"
+             :description "Search fns by substring — on the name (exact name first, then name, then namespace-qualified name) and, ranked last, on the DESCRIPTION, so a concept you know but cannot name still lands. Returns light rows (name, id, namespace, kind, description)."
+             :inputSchema {:type "object"
+                           :properties {:q {:type "string" :description "Substring to search for — matched against names, then descriptions."}
+                                        :branch {:type "string" :description "Optional branch name to search on (else the request's branch)."}}
                            :required ["q"]}}
             {:name "read-fn"
-             :description "Read one fn-def and everything reachable from it (parents, slots, bindings, types, effects) — the full subgraph, JSON."
+             :description "Read one fn and everything it reaches (parents, refs, the types it uses) as fns.edn — the SAME syntax upsert-fn-defs takes, pretty-printed EDN text: `[{:name … :parent … :args {…}} …]`. Pass format \"rows\" for the raw storage rows (fns / slots / bindings / list-items, JSON) instead. `branch` (optional, a branch name) reads that branch instead of the request's."
              :inputSchema {:type "object"
-                           :properties {:name {:type "string" :description "Global fn name, without the leading colon."}}
+                           :properties {:name {:type "string" :description "Global fn name, without the leading colon."}
+                                        :format {:type "string" :enum ["edn" "rows"] :description "\"edn\" (default) — fns.edn fn-def maps, EDN text. \"rows\" — the raw row dump, JSON."}
+                                        :branch {:type "string" :description "Optional branch name to read on (else the request's branch)."}}
                            :required ["name"]}}
             {:name "describe-fn"
              :description "The CONTRACT of one fn on this branch, computed (not read off rows): free args (what execute-fn accepts), the start-blocking subset (what a :service must have bound), computed effects + call-time effects, return type, typed args, and whether it is service-eligible. Cheaper and more honest than read-fn when the question is 'what does it need and what does it do'; read-fn is for the subgraph."
              :inputSchema {:type "object"
-                           :properties {:name {:type "string" :description "Global fn name, without the leading colon."}}
+                           :properties {:name {:type "string" :description "Global fn name, without the leading colon."}
+                                        :branch {:type "string" :description "Optional branch name to read on (else the request's branch)."}}
                            :required ["name"]}}
             {:name "execute-fn"
-             :description "Execute a fn by name with an args object. Returns {status result} inline, or {status pending execution-id} for slow/effectful runs."
+             :description "Execute a fn by name with an args object. Returns {status result} inline, or {status pending execution-id} for slow/effectful runs. `trace` true adds `trace` — the call tree the run actually walked, one row per fn invoked (fn-name, depth, duration-ms, cache-hit?), the fastest way to see WHICH part of a composition ran (a step that never appears ran nothing); a traced run is persisted as an execution row. `branch` (optional) runs on that branch."
              :inputSchema {:type "object"
                            :properties {:name {:type "string" :description "Global fn name."}
-                                        :args {:type "object" :description "Arg-name -> value map (free args of the fn)."}}
+                                        :args {:type "object" :description "Arg-name -> value map (free args of the fn)."}
+                                        :trace {:type "boolean" :description "Capture the execution path — the call tree of every fn the run invoked. Persists the run."}
+                                        :branch {:type "string" :description "Optional branch name to run on (else the request's branch)."}}
                            :required ["name"]}}
             {:name "create-branch"
              :description "Create a branch to work in. ALWAYS do this before any mutation: main is the human's; your proposal lives on its own branch and is reviewed as a graph-diff."
@@ -229,7 +237,7 @@
    :parent :_mcp-tool-ok
    :args {:text {:parent :to-json-string
                  :args {:data {:parent :list-all-graph-entities
-                               :args {:scope {:value :search}
+                               :args {:scope {:value :search-text}
                                       :root-id nil
                                       :namespace-id nil
                                       :q :_mcp-search-q}}}}}}
@@ -250,7 +258,8 @@
           :message {:parent :str
                     :args {:parts ["No fn named '" :_mcp-read-fn-name "' on this branch."]}}}}
 
-  {:name :_mcp-tool-read-fn-found
+  {:name :_mcp-tool-read-fn-rows
+   :description "read-fn `format` \"rows\" — the raw subtree row dump (fns / slots / bindings / list-items), JSON."
    :parent :_mcp-tool-ok
    :args {:text {:parent :to-json-string
                  :args {:data {:parent :list-all-graph-entities
@@ -258,6 +267,32 @@
                                       :root-id :_mcp-read-fn-id
                                       :namespace-id nil
                                       :q nil}}}}}}
+
+  ;; The default read is the fns.edn form — the AI reads exactly the
+  ;; syntax it writes back through upsert-fn-defs. Pretty-printed so a
+  ;; subtree of a few dozen defs stays readable.
+  {:name :_mcp-read-fn-format
+   :parent :get
+   :args {:coll :_mcp-tool-args :key {:value :format} :default {:value "edn"}}}
+
+  {:name :_mcp-read-fn-rows?
+   :parent :equal?
+   :args {:a :_mcp-read-fn-format :b {:value "rows"}}}
+
+  {:name :_mcp-read-fn-defs
+   :description "fns.edn fn-def maps of the subtree reachable from the named fn."
+   :parent :graph-fn-defs-subtree
+   :args {:root-id :_mcp-read-fn-id}}
+
+  {:name :_mcp-tool-read-fn-edn
+   :parent :_mcp-tool-ok
+   :args {:text {:parent :pprint-str :args {:value :_mcp-read-fn-defs}}}}
+
+  {:name :_mcp-tool-read-fn-found
+   :parent :if
+   :args {:test :_mcp-read-fn-rows?
+          :then :_mcp-tool-read-fn-rows
+          :else :_mcp-tool-read-fn-edn}}
 
   {:name :_mcp-tool-read-fn
    :parent :if
@@ -326,19 +361,26 @@
    :parent :get
    :args {:coll :_mcp-tool-args :key {:value :args} :default {:value {}}}}
 
+  ;; `trace: true` — Debug-P1 path capture. The run is PERSISTED (an
+  ;; execution row is where the path-trace lives) so the joined call
+  ;; tree can be read back through `:execute-trace-rows` below. Value
+  ;; capture (debug P3) stays off — the tree of WHAT ran is the
+  ;; question an author asks; values come from `execute-fn` itself.
+  {:name :_mcp-exec-trace?
+   :parent :equal?
+   :args {:a {:parent :get :args {:coll :_mcp-tool-args :key {:value :trace} :default {:value false}}}
+          :b {:value true}}}
+
   {:name :_mcp-exec-parsed
-   :description "The execute pipeline's parsed-request shape, built from tool arguments instead of an HTTP body. Overriding :execute's :parsed slot (closer-fn-wins) skips its own body parse — re-entering the Ring handler with a synthesized request would collide with the OUTER :request free arg the MCP dispatch itself reads."
+   :description "The execute pipeline's parsed-request shape, built from tool arguments instead of an HTTP body. Overriding :execute's :parsed slot (closer-fn-wins) skips its own body parse — re-entering the Ring handler with a synthesized request would collide with the OUTER :request free arg the MCP dispatch itself reads. `:persist?` and `:trace?` follow the tool's `trace` flag."
    :parent :zipmap
-   ;; :trace? and :capture-values? are carried as false — the MCP tool
-   ;; doesn't expose path tracing / value capture (debug P1+P3); the
-   ;; parsed record must still satisfy the execute pipeline's shape.
    :args {:keys [{:value :fn-id} {:value :fn-name} {:value :args}
                  {:value :timeout-ms} {:value :persist?} {:value :trace?}
                  {:value :capture-values?}]
           :vals [{:parent :parse-uuid :args {:string nil}}
                  {:parent :to-str :args {:value :_mcp-read-fn-name}}
                  {:parent :coalesce :args {:value :_mcp-exec-args :default {}}}
-                 {:value 10000} {:value false} {:value false} {:value false}]}}
+                 {:value 10000} :_mcp-exec-trace? :_mcp-exec-trace? {:value false}]}}
 
   {:name :_mcp-exec-validation
    :description "The execute pipeline's stage-2 guard cond, fed my parsed map — :_execute-validation binds :parsed at itself (closer-fn-wins), so overriding :execute from outside can't reach it; this child rebinds it directly."
@@ -360,11 +402,36 @@
                         :fn-row {:parent :_execute-fn-row
                                  :args {:parsed :_mcp-exec-parsed}}}}}}
 
+  {:name :_mcp-exec-execution-id
+   :description "The persisted run's id (a traced run always has one); nil for an inline unpersisted run."
+   :parent :parse-uuid
+   :args {:string {:parent :get :args {:coll :_mcp-exec-run :key {:value :execution-id} :default nil}}}}
+
+  {:name :_mcp-exec-trace-rows
+   :description "The call tree the traced run walked — `{:found? :rows [{fn-name depth duration-ms cache-hit? …}]}`, names joined on this branch."
+   :parent :execute-trace-rows
+   :args {:id :_mcp-exec-execution-id}}
+
+  ;; The joined tree replaces the raw `:path-trace` (fn-ids, no names)
+  ;; the persisted outcome carries — one representation, readable.
+  {:name :_mcp-exec-run-traced
+   :parent :assoc
+   :args {:map {:parent :dissoc :args {:map :_mcp-exec-run :key {:value :path-trace}}}
+          :key {:value :trace}
+          :value :_mcp-exec-trace-rows}}
+
+  {:name :_mcp-exec-result
+   :description "The run's outcome, plus its call tree under `:trace` when the tool asked for one."
+   :parent :if
+   :args {:test :_mcp-exec-trace?
+          :then :_mcp-exec-run-traced
+          :else :_mcp-exec-run}}
+
   {:name :_mcp-tool-execute
    :description "execute-fn tool — the shared execute pipeline fed from tool arguments."
    :parent :_mcp-tool-ok
    :args {:text {:parent :to-json-string
-                 :args {:data :_mcp-exec-run}}}}
+                 :args {:data :_mcp-exec-result}}}}
 
   ;; ==========================================================================
   ;; Mutation tools (Phase B) — always branch-scoped: the AI proposes on its
@@ -618,9 +685,113 @@
   ;; ==========================================================================
   ;; Method dispatch + route
   ;; ==========================================================================
+  ;; --- `branch` tool argument -------------------------------------------
+  ;; Static MCP clients cannot vary the X-Graphden-Branch header per call,
+  ;; so a tool may name its branch in `arguments.branch`. When it names a
+  ;; branch OTHER than the one this request already rides, the whole
+  ;; JSON-RPC request is re-dispatched through the branch router with the
+  ;; header set — the target branch's own /mcp handler answers, so every
+  ;; tool sees exactly that branch's graph and registry. The re-dispatched
+  ;; request carries the header equal to the argument, so it dispatches in
+  ;; place (no loop). Without a router (tests, single-branch boot) the
+  ;; argument is ignored. Mutation tools name their target explicitly
+  ;; (`upsert-fn-defs branch`) and are unaffected.
+  {:name :_mcp-arg-branch
+   :parent :coalesce
+   :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :branch} :default nil}}
+          :default {:value ""}}}
+
+  ;; The decision is by BRANCH ID, not by header text: the named branch
+  ;; resolves to a row, and the call re-dispatches only when that row is
+  ;; not the branch this request already runs on (`:current-branch-id`).
+  ;; That makes the loop impossible by construction — the re-dispatched
+  ;; request runs on the target branch, where the two ids are equal.
+  {:name :_mcp-arg-branch-row
+   :description "The named branch's row — nil for a blank argument or an unknown name."
+   :parent :resolve-branch-ref
+   :args {:ref :_mcp-arg-branch}}
+
+  {:name :_mcp-arg-branch-id
+   :parent :get
+   :args {:coll :_mcp-arg-branch-row :key {:value :id} :default nil}}
+
+  {:name :_mcp-branch-unknown?
+   :description "A read tool named a branch that does not exist."
+   :parent :and
+   :args {:values [:_mcp-branch-routable-tool?
+                   {:parent :non-blank? :args {:string :_mcp-arg-branch}}
+                   {:parent :nil? :args {:value :_mcp-arg-branch-id}}]}}
+
+  {:name :_mcp-err-branch-unknown
+   :parent :_mcp-err
+   :args {:code {:value -32602}
+          :message {:parent :str
+                    :args {:parts ["No branch named '" :_mcp-arg-branch "'. Create it first with create-branch."]}}}}
+
+  ;; Only the READ tools route by `branch`: for the mutation tools the
+  ;; argument is their own target (`upsert-fn-defs`, `diff-branch`) and
+  ;; they resolve it themselves — re-dispatching them would strip the
+  ;; very argument they act on.
+  {:name :_mcp-branch-routable-tool?
+   :description "True for the read tools whose `branch` argument means \"run me there\"."
+   :parent :some?
+   :args {:value {:parent :position-in
+                  :args {:coll {:value ["list-namespaces" "search-fns" "read-fn" "describe-fn" "execute-fn" "run-tests"]}
+                         :value :_mcp-tool-name}}}}
+
+  {:name :_mcp-rebranch?
+   :description "A read tool names an existing branch other than the one this request runs on, and a router is installed to route it."
+   :parent :and
+   :args {:values [:_mcp-branch-routable-tool?
+                   :_branch-router-installed?
+                   {:parent :some? :args {:value :_mcp-arg-branch-id}}
+                   {:parent :not :args {:value {:parent :equal? :args {:a :_mcp-arg-branch-id :b :current-branch-id}}}}]}}
+
+  ;; The re-dispatched call carries the branch as the HEADER and drops
+  ;; `arguments.branch` from its body, so the target branch's dispatch
+  ;; sees a plain call and answers in place. (Deciding "am I already on
+  ;; the branch?" inside the re-dispatched run would read `:current-
+  ;; branch-id` through the OUTER run's call cache — a no-free-arg
+  ;; `:db` node is cached per execute — and loop.)
+  {:name :_mcp-rebranched-body
+   :description "The JSON-RPC body with `params.arguments.branch` cleared, re-encoded."
+   :parent :to-json-string
+   :args {:data {:parent :assoc-in
+                 :args {:m :_mcp-body
+                        :path [{:value :params} {:value :arguments} {:value :branch}]
+                        :v nil}}}}
+
+  {:name :_mcp-rebranched-request-headed
+   :description "This request with `X-Graphden-Branch` set to the tool's `branch` argument."
+   :parent :assoc-in
+   :args {:m {:as :request}
+          :path [{:value :headers} {:value "x-graphden-branch"}]
+          :v :_mcp-arg-branch}}
+
+  ;; `:assoc-in` (not `:assoc`) so the computed return stays `:any` and
+  ;; the `:ring-request-shape` pin at the dispatch site is a narrowing,
+  ;; not a contradiction of an inferred `{:body :text}` record.
+  {:name :_mcp-rebranched-request
+   :parent :assoc-in
+   :args {:m :_mcp-rebranched-request-headed
+          :path [{:value :body}]
+          :v :_mcp-rebranched-body}}
+
+  {:name :_mcp-dispatch-rebranched
+   :parent :dispatch-to-branch
+   :args {:router :current-branch-router
+          :request {:ref :_mcp-rebranched-request :type :ring-request-shape}}}
+
   {:name :_mcp-dispatch
    :lambda-params [:request :storage-query]
-   :description "JSON-RPC method dispatch for POST /mcp."
+   :description "POST /mcp — an unknown `arguments.branch` is a -32602; a known one other than the request's own re-dispatches the call to that branch; else dispatch the JSON-RPC method here."
+   :parent :cond
+   :args {:clauses [:_mcp-branch-unknown? :_mcp-err-branch-unknown
+                    :_mcp-rebranch? :_mcp-dispatch-rebranched
+                    {:value true} :_mcp-dispatch-here]}}
+
+  {:name :_mcp-dispatch-here
+   :description "JSON-RPC method dispatch for POST /mcp on the request's branch."
    :parent :cond
    :args {:clauses [{:parent :equal? :args {:a :_mcp-method :b {:value "initialize"}}}
                     :_mcp-initialize

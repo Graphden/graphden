@@ -272,7 +272,7 @@
    :description "Dump every fn, arg, and namespace currently in storage — the payload behind `/api/graph/entities`. `scope :tree` returns `{:namespaces :counts}` (O(namespaces) sidebar init). `scope :namespace` + `namespace-id` returns one namespace's light fn rows (lazy expand). `scope :search` + `q` returns capped name-substring matches (filter box / pickers / name resolution). `scope :index` returns `{:fns :namespaces}` (legacy full-fns pull). `scope :subtree` + `root-id` returns only the transitive closure reachable from `root-id` via parent-ids + binding-refs + type-overrides + list-item-refs + own-slot type-fn-ids (~98% smaller — typical per-fn editor view)."
    :args {:scope {:type :nullable-keyword
                   :value nil
-                  :description "`:tree` → `{:namespaces :counts}` only (sidebar init). `:namespace` (+ `namespace-id`) → one namespace's light fns. `:search` (+ `q`) → capped name matches. `:index` → `{:fns :namespaces}` full pull. `:subtree` (+ `root-id`) → subgraph reachable from it. `nil` / `:full` (default) → complete dump."}
+                  :description "`:tree` → `{:namespaces :counts}` only (sidebar init). `:namespace` (+ `namespace-id`) → one namespace's light fns. `:search` (+ `q`) → capped name matches; `:search-text` adds description matches ranked last. `:index` → `{:fns :namespaces}` full pull. `:subtree` (+ `root-id`) → subgraph reachable from it. `nil` / `:full` (default) → complete dump."}
           :root-id {:type :nullable-uuid
                     :value nil
                     :description "Required when `:scope :subtree`. Ignored otherwise. Anchor for the BFS closure."}
@@ -283,6 +283,12 @@
               :value nil
               :description "Required when `:scope :search`. Ignored otherwise. Case-insensitive substring matched against each fn's raw name."}}
    :return-type :keyword-map
+   :effects #{:db}}
+
+  {:name :graph-fn-defs-subtree
+   :description "The fn-defs (fns.edn maps) of the subtree reachable from `root-id` — the same closure `:list-all-graph-entities` `:scope :subtree` walks, emitted through the records→EDN codec (`packages.export/export-subtree`). `[]` for nil / unknown root. What an AI author reads back through `read-fn`: the exact syntax it writes."
+   :args {:root-id {:type :nullable-uuid :description "Anchor fn-id; nil → `[]`."}}
+   :return-type [:list :keyword-map]
    :effects #{:db}}
 
   {:name :strip-hidden-impl

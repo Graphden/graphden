@@ -588,6 +588,20 @@
             false))))))
 
 
+(defn- log-shadowed-bindings!
+  "One WARN per named fn whose env-bindings are shadowed
+   (`renames/shadowed-env-bindings`) — a value the author wrote that
+   the run silently ignores. Same author-misled class as type drift,
+   same soft channel: the boot log, never a failed boot."
+  [lookups]
+  (doseq [[fid f] (:fn-map lookups)
+          :when (:name f)
+          :let [dead (r/shadowed-env-bindings fid lookups)]
+          :when (seq dead)]
+    (log/warnf "unread binding: fn %s binds %s, but every reader of the slot already binds it closer — the value is silently ignored (rebind it on the fn that reads the slot). describe-fn reports this as :unread-bindings."
+               (:name f) (pr-str (vec (sort dead))))))
+
+
 (defn rebuild!
   "Rebuild the compiled registry in `ctx` from whatever the slot/
    binding tables currently hold. Also primes `:graph-cache` and
@@ -618,8 +632,10 @@
                     (let [{:keys [graph lookups]}
                           (prep-compile-inputs
                             ctx (read-graph (compile-storage ctx)
-                                            (:executor-orgs ctx)))]
-                      {:graph graph :compiled (ce/compile-all lookups)})))]
+                                            (:executor-orgs ctx)))
+                          compiled (ce/compile-all lookups)]
+                      (log-shadowed-bindings! lookups)
+                      {:graph graph :compiled compiled})))]
             ;; The denominator for `:registry/delta-recompiled-fns`. Without it
             ;; "we recompiled 8000 fns via deltas" has no scale: it could be
             ;; most of the compile work or a rounding error next to the
@@ -959,6 +975,15 @@
                   (read-graph (compile-storage ctx) (:executor-orgs ctx)))]
     (assoc (l/cached-build-lookups graph)
            :base-fns (:base-fns ctx))))
+
+
+(defn unread-bindings
+  "Sorted names of the bindings `fn-id` carries whose every reader is
+   already bound closer (`compile.renames/shadowed-env-bindings`) — the
+   silent no-op class: a value written, ignored at run time, no error.
+   Read by the `:fn-unread-bindings` base-fn behind `describe-fn`."
+  [ctx fn-id]
+  (vec (sort (r/shadowed-env-bindings fn-id (lookups-for-ctx ctx)))))
 
 
 (defn surface-entries

@@ -285,6 +285,12 @@
    :return-type :keyword-map
    :effects #{:db}}
 
+  {:name :fn-unread-bindings
+   :description "Names of the bindings `fn-id` carries that no reader can see: every fn in its tree that owns the slot already binds it closer, so the value the author wrote is silently ignored. Reported only when the readers were found and all are bound (precise, not complete). `[]` for nil / unknown fn-id or nothing shadowed. What `describe-fn` reports as `unread-bindings`."
+   :args {:fn-id {:type :nullable-uuid :description "Target fn-id; nil → `[]`."}}
+   :return-type [:list :keyword]
+   :effects #{:db}}
+
   {:name :graph-fn-defs-subtree
    :description "The fn-defs (fns.edn maps) of the subtree reachable from `root-id` — the same closure `:list-all-graph-entities` `:scope :subtree` walks, emitted through the records→EDN codec (`packages.export/export-subtree`). `[]` for nil / unknown root. What an AI author reads back through `read-fn`: the exact syntax it writes."
    :args {:root-id {:type :nullable-uuid :description "Anchor fn-id; nil → `[]`."}}

@@ -141,7 +141,8 @@
       (is (= ["nums"] (:start-blocking-free-args data)))
       (is (empty? (:effects data)))
       (is (contains? (:arg-types data) :nums))
-      (is (false? (:service-eligible? data)))))
+      (is (false? (:service-eligible? data)))
+      (is (= [] (:unread-bindings data)) "nothing bound, nothing unread")))
   (testing "unknown fn → -32602 with the name in the message"
     (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 52 :method "tools/call"
                                :params {:name "describe-fn" :arguments {:name "no-such-fn-xyz"}}})]

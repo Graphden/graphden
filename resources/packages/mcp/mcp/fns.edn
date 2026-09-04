@@ -169,7 +169,7 @@
                                         :branch {:type "string" :description "Optional branch name to read on (else the request's branch)."}}
                            :required ["name"]}}
             {:name "describe-fn"
-             :description "The CONTRACT of one fn on this branch, computed (not read off rows): free args (what execute-fn accepts), the start-blocking subset (what a :service must have bound), computed effects + call-time effects, return type, typed args, and whether it is service-eligible. Cheaper and more honest than read-fn when the question is 'what does it need and what does it do'; read-fn is for the subgraph."
+             :description "The CONTRACT of one fn on this branch, computed (not read off rows): free args (what execute-fn accepts), the start-blocking subset (what a :service must have bound), computed effects + call-time effects, return type, typed args, whether it is service-eligible, and unread-bindings — bindings you wrote that nothing in the fn's tree reads (a silent no-op: fix or remove them). Cheaper and more honest than read-fn when the question is 'what does it need and what does it do'; read-fn is for the subgraph."
              :inputSchema {:type "object"
                            :properties {:name {:type "string" :description "Global fn name, without the leading colon."}
                                         :branch {:type "string" :description "Optional branch name to read on (else the request's branch)."}}
@@ -319,6 +319,11 @@
    :parent :rich-type-of-name
    :args {:fn-name :_mcp-read-fn-name}}
 
+  {:name :_mcp-describe-unread
+   :description "Bindings this fn carries that nothing in its tree reads — silent no-ops the author should fix or remove."
+   :parent :fn-unread-bindings
+   :args {:fn-id :_mcp-read-fn-id}}
+
   {:name :_mcp-describe-has-process?
    :parent :chain-has-process-effect?
    :args {:fn-id :_mcp-read-fn-id}}
@@ -335,7 +340,7 @@
                  {:value :free-args} {:value :start-blocking-free-args}
                  {:value :effects} {:value :call-time-effects}
                  {:value :return-type} {:value :arg-types}
-                 {:value :service-eligible?}]
+                 {:value :service-eligible?} {:value :unread-bindings}]
           :vals [:_mcp-read-fn-name :_mcp-read-fn-id
                  {:parent :vec :args {:coll {:parent :keys :args {:map :_mcp-describe-free-args}}}}
                  {:parent :vec :args {:coll {:parent :keys :args {:map :_mcp-describe-blocking-free-args}}}}
@@ -343,7 +348,8 @@
                  {:parent :vec :args {:coll {:parent :get :args {:coll :_mcp-describe-rich :key {:value :call-time-effects} :default {:value []}}}}}
                  {:parent :get :args {:coll :_mcp-describe-rich :key {:value :return} :default nil}}
                  {:parent :get :args {:coll :_mcp-describe-rich :key {:value :args} :default {:value {}}}}
-                 :_mcp-describe-service-eligible?]}}
+                 :_mcp-describe-service-eligible?
+                 :_mcp-describe-unread]}}
 
   {:name :_mcp-tool-describe-fn-found
    :parent :_mcp-tool-ok

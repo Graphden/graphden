@@ -89,7 +89,7 @@ The intended loop for AI-assisted fn-def work on this repo:
 | Name collisions, cycles within the bundle | `:packages/ambiguous-ref` across package boundaries |
 | Real execution semantics (same pipeline as `/api/execute`) | `packages.owned` registration, `:branch-local?` seeds |
 | Test results (`run-tests` = the standard runner) | Frontend assets, resource overrides |
-| A fn's computed contract on the branch (`describe-fn`: free args, the start-blocking subset, effects, return type, service-eligibility) | — |
+| A fn's computed contract on the branch (`describe-fn`: free args, the start-blocking subset, effects, return type, service-eligibility, `unread-bindings` — bindings whose every reader is already bound closer, i.e. silent no-ops) | — |
 | What a run actually walked (`execute-fn` with `trace: true` — the call tree, one row per fn invoked; a step that never appears ran nothing) | — |
 | The subtree as fns.edn (`read-fn` — the same syntax `upsert-fn-defs` takes; `format: "rows"` for the raw rows) | — |
 

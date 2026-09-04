@@ -131,8 +131,11 @@ shows the free-arg list; an unexpected `else` there is this.
    what exists; don't invent parents.** After you compose, `describe-fn`
    your fn: it returns the COMPUTED contract — free args (what
    `execute-fn` will accept), the start-blocking subset, effects, return
-   type, and whether the fn is service-eligible — so a leaked slot or a
-   missing effect shows up before you run anything.
+   type, whether the fn is service-eligible, and `unread-bindings` — a
+   binding you wrote on a slot that every reader already binds closer
+   (closer-fn-wins), so your value is silently ignored: rebind it on the
+   fn that actually reads the slot, or drop it. A leaked slot, a missing
+   effect or an unread binding all show up before you run anything.
 3. **`create-branch`** — ALWAYS, before any mutation. Name it for the
    task, e.g. `ai/add-order-total`. `main` is the human's; you work on a
    branch and never touch main.

@@ -93,7 +93,7 @@
     :http-request :http-server :http-stop :hub-fetch-bundle :hub-push-bundle! :if :into
     :invalidate-after-write :invalidate-graph-cache :invoke :is-a?
     :json-to-type :jvm-uptime-ms :keys
-    :keyword-to-str :list :list-all-graph-entities :graph-fn-defs-subtree :log-warn
+    :keyword-to-str :list :list-all-graph-entities :graph-fn-defs-subtree :fn-unread-bindings :log-warn
     :loop-until-interrupted :lt :lte :map :map-xf
     :materialize-package-fns :max-memory :merge :merge-branch!
     :merge-post-commit! :merge-skipped-branch-local

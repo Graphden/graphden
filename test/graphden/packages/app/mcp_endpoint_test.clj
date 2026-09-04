@@ -57,7 +57,7 @@
 
 (deftest tools-list-catalog
   (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 2 :method "tools/list"})]
-    (is (= #{"list-namespaces" "search-fns" "read-fn" "execute-fn"
+    (is (= #{"list-namespaces" "search-fns" "read-fn" "describe-fn" "execute-fn"
              "create-branch" "upsert-fn-defs" "run-tests" "list-branches"
              "diff-branch"}
            (into #{} (map :name) (get-in rpc [:result :tools]))))
@@ -90,6 +90,32 @@
   (testing "unknown fn → -32602 with the name in the message"
     (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 6 :method "tools/call"
                                :params {:name "read-fn" :arguments {:name "no-such-fn-xyz"}}})]
+      (is (= -32602 (get-in rpc [:error :code])))
+      (is (re-find #"no-such-fn-xyz" (get-in rpc [:error :message]))))))
+
+
+(deftest tool-describe-fn
+  (testing "a listener: handler-time free args are not start-blocking; :process makes it service-eligible"
+    (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 50 :method "tools/call"
+                               :params {:name "describe-fn" :arguments {:name "web-server"}}})
+          data (tool-text rpc)]
+      (is (= "web-server" (:name data)))
+      (is (string? (:id data)))
+      (is (empty? (:start-blocking-free-args data)))
+      (is (some #{"process"} (:effects data)))
+      (is (true? (:service-eligible? data)))))
+  (testing "a pure base-fn: its slot is a free arg, no effects, not service-eligible"
+    (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 51 :method "tools/call"
+                               :params {:name "describe-fn" :arguments {:name "add"}}})
+          data (tool-text rpc)]
+      (is (= ["nums"] (:free-args data)))
+      (is (= ["nums"] (:start-blocking-free-args data)))
+      (is (empty? (:effects data)))
+      (is (contains? (:arg-types data) :nums))
+      (is (false? (:service-eligible? data)))))
+  (testing "unknown fn → -32602 with the name in the message"
+    (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 52 :method "tools/call"
+                               :params {:name "describe-fn" :arguments {:name "no-such-fn-xyz"}}})]
       (is (= -32602 (get-in rpc [:error :code])))
       (is (re-find #"no-such-fn-xyz" (get-in rpc [:error :message]))))))
 
@@ -187,7 +213,7 @@
 
   (testing "tools/list advertises the mutation + verification tools"
     (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 100 :method "tools/list"})]
-      (is (= #{"list-namespaces" "search-fns" "read-fn" "execute-fn"
+      (is (= #{"list-namespaces" "search-fns" "read-fn" "describe-fn" "execute-fn"
                "create-branch" "upsert-fn-defs" "run-tests" "list-branches"
                "diff-branch"}
              (into #{} (map :name) (get-in rpc [:result :tools])))))))

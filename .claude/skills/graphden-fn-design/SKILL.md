@@ -289,6 +289,19 @@ Planning to decompose a large fn?
 
 ## 10. Anti-patterns
 
+- **`:if` / `:cond` without a bound `:else`.** An unbound `:else` is a
+  free slot, and it surfaces as a free arg named `else` on the fn-def AND
+  on everything composed over it — a service-shaped `:do` over such a fn
+  is refused by the create-service guard for "free args". Write
+  `:else nil` explicitly when the branch is meant to yield nothing
+  (`web/crud-write`'s guards and `storage/pg`'s `:_migration-guarded` are
+  the precedent). Check with `describe-fn` over `/mcp`, or
+  `execute-fn` with a bogus arg — the error lists the known free args.
+- **A `{:as}` rename on an inline anonymous fn.** The rename lifts only to
+  the fn-def that CARRIES it; `{:coll {:parent :conj :args {:item {:as
+  :id}}}}` inside a value position does not surface `:id` any further.
+  Give the renaming step a `_`-private name (`:_cron-parsed` in
+  `core/concurrency` is the canonical example).
 - **`_`-prefix on a public-API fn.** If someone references it from another
   package — it is no longer private.
 - **A public name without reuse.** "Let's name it just in case" — it needlessly

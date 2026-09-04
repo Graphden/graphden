@@ -14,9 +14,9 @@ call carries exactly that user's rights (on the cloud: org scoping, RLS,
 grants, effect gate; on a bare self-host: the single `AUTH_TOKEN`). The
 `mcp` package is optional: absent from `:package-names` ⇒ `/mcp` 404s.
 
-Tools: `list-namespaces`, `search-fns`, `read-fn`, `execute-fn`,
-`create-branch`, `upsert-fn-defs`, `run-tests`, `list-branches`,
-`diff-branch`. Resource: `graphden://ai-context` (the authoring guide —
+Tools: `list-namespaces`, `search-fns`, `read-fn`, `describe-fn`,
+`execute-fn`, `create-branch`, `upsert-fn-defs`, `run-tests`,
+`list-branches`, `diff-branch`. Resource: `graphden://ai-context` (the authoring guide —
 tell your agent to read it first).
 
 ## Claude Code
@@ -87,6 +87,7 @@ The intended loop for AI-assisted fn-def work on this repo:
 | Name collisions, cycles within the bundle | `:packages/ambiguous-ref` across package boundaries |
 | Real execution semantics (same pipeline as `/api/execute`) | `packages.owned` registration, `:branch-local?` seeds |
 | Test results (`run-tests` = the standard runner) | Frontend assets, resource overrides |
+| A fn's computed contract on the branch (`describe-fn`: free args, the start-blocking subset, effects, return type, service-eligibility) | — |
 
 Not for the MCP cycle: `impls.clj` edits (a new `defbase` needs a rebuild —
 fast-check hypotheses over nREPL instead, see the `graphden-repl` skill),

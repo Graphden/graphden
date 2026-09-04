@@ -73,6 +73,12 @@ literal keyword `:active` as data, you must write `{:value :active}`.
 JSON cannot express this difference — that is exactly why the
 `upsert-fn-defs` tool takes EDN text.
 
+**A rename needs a NAMED fn-def.** `{:x {:as :price}}` lifts the new
+name to the fn-def that carries it; an inline anonymous map
+(`{:parent :foo :args {:x {:as :price}}}` in a value position) does not
+lift it any further. When a slot must surface under a new name, give
+that step a `:name` (a `_`-private one is fine).
+
 ## 5. Slots, inheritance, free args
 
 - A composed fn **inherits every slot of its parent(s)**, transitively.
@@ -106,12 +112,23 @@ slots:
 they are base-fns whose slots you fill. Wrapping a literal value so it
 can be referenced is `:const` (`{:parent :const :args {:value …}}`).
 
+**Bind `:else` even when it is nothing** — `:else nil`. An unbound
+`:else` is an unbound slot, so it surfaces as a free arg named `else`
+on your fn and on everything that composes it (a `:do` you meant to run
+as a service would be refused for having a free arg). `describe-fn`
+shows the free-arg list; an unexpected `else` there is this.
+
 ## 7. Your workflow (the tools)
 
 1. **`list-namespaces`** — see the shape of the graph.
-2. **`search-fns`** / **`read-fn`** — learn the vocabulary. Before you
-   compose on `:parent :foo`, `read-fn` "foo" to see its slots and their
-   types. **Compose on what exists; don't invent parents.**
+2. **`search-fns`** / **`read-fn`** / **`describe-fn`** — learn the
+   vocabulary. Before you compose on `:parent :foo`, `read-fn` "foo" to
+   see its slots and their types. **Compose on what exists; don't invent
+   parents.** After you compose, `describe-fn` your fn: it returns the
+   COMPUTED contract — free args (what `execute-fn` will accept), the
+   start-blocking subset, effects, return type, and whether the fn is
+   service-eligible — so a leaked slot or a missing effect shows up
+   before you run anything.
 3. **`create-branch`** — ALWAYS, before any mutation. Name it for the
    task, e.g. `ai/add-order-total`. `main` is the human's; you work on a
    branch and never touch main.

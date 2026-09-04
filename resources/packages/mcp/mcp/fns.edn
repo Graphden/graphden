@@ -163,6 +163,11 @@
              :inputSchema {:type "object"
                            :properties {:name {:type "string" :description "Global fn name, without the leading colon."}}
                            :required ["name"]}}
+            {:name "describe-fn"
+             :description "The CONTRACT of one fn on this branch, computed (not read off rows): free args (what execute-fn accepts), the start-blocking subset (what a :service must have bound), computed effects + call-time effects, return type, typed args, and whether it is service-eligible. Cheaper and more honest than read-fn when the question is 'what does it need and what does it do'; read-fn is for the subgraph."
+             :inputSchema {:type "object"
+                           :properties {:name {:type "string" :description "Global fn name, without the leading colon."}}
+                           :required ["name"]}}
             {:name "execute-fn"
              :description "Execute a fn by name with an args object. Returns {status result} inline, or {status pending execution-id} for slow/effectful runs."
              :inputSchema {:type "object"
@@ -259,6 +264,61 @@
    :args {:test {:parent :nil? :args {:value :_mcp-read-fn-id}}
           :then :_mcp-read-fn-missing
           :else :_mcp-tool-read-fn-found}}
+
+  ;; describe-fn → the fn's COMPUTED contract: free args (`:free-arg-slot-map`,
+  ;; the same map execute-fn validates against), the start-blocking subset
+  ;; (`:service-blocking-free-args`, what the create-service guard reads),
+  ;; the rich-types entry (effects / return / typed args) and the
+  ;; `:process` walk. One tool answers "what does it need, what does it
+  ;; do, can it be a service" — questions read-fn's row dump only implies.
+  {:name :_mcp-describe-free-args
+   :parent :free-arg-slot-map
+   :args {:fn-id :_mcp-read-fn-id}}
+
+  {:name :_mcp-describe-blocking-free-args
+   :parent :service-blocking-free-args
+   :args {:fn-id :_mcp-read-fn-id}}
+
+  {:name :_mcp-describe-rich
+   :description "Registry entry of the named fn — nil for an unregistered name (a type-row, a primitive)."
+   :parent :rich-type-of-name
+   :args {:fn-name :_mcp-read-fn-name}}
+
+  {:name :_mcp-describe-has-process?
+   :parent :chain-has-process-effect?
+   :args {:fn-id :_mcp-read-fn-id}}
+
+  {:name :_mcp-describe-service-eligible?
+   :description "Service-eligible = declares `:process` (itself or an ancestor) AND no start-blocking free arg — the two create-service guards, as one boolean."
+   :parent :and
+   :args {:values [:_mcp-describe-has-process?
+                   {:parent :empty? :args {:coll :_mcp-describe-blocking-free-args}}]}}
+
+  {:name :_mcp-describe-data
+   :parent :zipmap
+   :args {:keys [{:value :name} {:value :id}
+                 {:value :free-args} {:value :start-blocking-free-args}
+                 {:value :effects} {:value :call-time-effects}
+                 {:value :return-type} {:value :arg-types}
+                 {:value :service-eligible?}]
+          :vals [:_mcp-read-fn-name :_mcp-read-fn-id
+                 {:parent :vec :args {:coll {:parent :keys :args {:map :_mcp-describe-free-args}}}}
+                 {:parent :vec :args {:coll {:parent :keys :args {:map :_mcp-describe-blocking-free-args}}}}
+                 {:parent :vec :args {:coll {:parent :get :args {:coll :_mcp-describe-rich :key {:value :effects} :default {:value []}}}}}
+                 {:parent :vec :args {:coll {:parent :get :args {:coll :_mcp-describe-rich :key {:value :call-time-effects} :default {:value []}}}}}
+                 {:parent :get :args {:coll :_mcp-describe-rich :key {:value :return} :default nil}}
+                 {:parent :get :args {:coll :_mcp-describe-rich :key {:value :args} :default {:value {}}}}
+                 :_mcp-describe-service-eligible?]}}
+
+  {:name :_mcp-tool-describe-fn-found
+   :parent :_mcp-tool-ok
+   :args {:text {:parent :to-json-string :args {:data :_mcp-describe-data}}}}
+
+  {:name :_mcp-tool-describe-fn
+   :parent :if
+   :args {:test {:parent :nil? :args {:value :_mcp-read-fn-id}}
+          :then :_mcp-read-fn-missing
+          :else :_mcp-tool-describe-fn-found}}
 
   ;; execute-fn → synthesize a Ring request for the EXISTING :execute-handler
   ;; (same admission path: caps, quotas, effect gate, persisted history).
@@ -492,6 +552,8 @@
                     :_mcp-tool-search-fns
                     {:parent :equal? :args {:a :_mcp-tool-name :b {:value "read-fn"}}}
                     :_mcp-tool-read-fn
+                    {:parent :equal? :args {:a :_mcp-tool-name :b {:value "describe-fn"}}}
+                    :_mcp-tool-describe-fn
                     {:parent :equal? :args {:a :_mcp-tool-name :b {:value "execute-fn"}}}
                     :_mcp-tool-execute
                     {:parent :equal? :args {:a :_mcp-tool-name :b {:value "create-branch"}}}

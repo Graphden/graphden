@@ -191,6 +191,7 @@ async function revertAssetViaApi(page, base) {
     // showed after Install, 5/5 attempts, server idle): record what the
     // panel-install response actually carried, and say so on failure.
     const installResp = {};
+    const pkgRequests = [];
     const onInstallResp = async (r) => {
       if (!r.url().includes('/api/packages/panel-install')) return;
       try {
@@ -199,13 +200,38 @@ async function revertAssetViaApi(page, base) {
           uninstall: t.includes('packages-uninstall'), empty: t.includes('No add-on packages')});
       } catch (e) { installResp.err = String(e).slice(0, 120); }
     };
+    const onPkgRequest = (rq) => {
+      if (rq.url().includes('/api/packages/')) pkgRequests.push(rq.method() + ' ' + rq.url().replace(/^https?:\/\/[^/]+/, ''));
+    };
     page.on('response', onInstallResp);
-    await page.evaluate(() => {
-      const btn = Array.from(
-        document.querySelectorAll('[data-packages-panel] .packages-install-btn'))
-        .find((b) => (b.closest('tr, li, div')?.textContent || '').includes('mycorp-hello'));
-      btn.click();
+    page.on('request', onPkgRequest);
+    // Diagnostics: WHICH button the selector picked, and whether htmx owns it.
+    const clicked = await page.evaluate(() => {
+      const all = Array.from(
+        document.querySelectorAll('[data-packages-panel] .packages-install-btn'));
+      const btn = all.find((b) => (b.closest('tr')?.textContent || '').includes('mycorp-hello'));
+      const where = (el) => {
+        const ids = [];
+        for (let e = el; e; e = e.parentElement) {
+          if (e.id) ids.push('#' + e.id);
+          else if (e.dataset && e.dataset.section) ids.push('[section=' + e.dataset.section + ']');
+        }
+        return ids.join(' < ');
+      };
+      const info = {
+        candidates: all.length,
+        panels: Array.from(document.querySelectorAll('[data-packages-panel]')).map(where),
+        picked: btn ? btn.outerHTML.slice(0, 120) : null,
+        pickedIn: btn ? where(btn) : null,
+        popOpen: !!document.getElementById('gd-pkg-pop'),
+        htmxOwned: !!(btn && btn['htmx-internal-data']),
+        inClosedDetails: !!(btn && btn.closest('details:not([open])')),
+        hidden: !!(btn && btn.closest('[hidden]')),
+      };
+      if (btn) btn.click();
+      return info;
     });
+    console.log('  install click diag: ' + JSON.stringify(clicked));
     try {
       await page.waitForSelector('[data-packages-panel] .packages-uninstall', {timeout: 30000});
     } catch (e) {
@@ -215,10 +241,13 @@ async function revertAssetViaApi(page, base) {
       }));
       const pins = await api(page, 'GET', '/api/packages/installed');
       console.log('  INSTALL DIAG response=' + JSON.stringify(installResp)
+        + ' clicked=' + JSON.stringify(clicked)
+        + ' requests=' + JSON.stringify(pkgRequests)
         + ' panel=' + JSON.stringify(panel) + ' pins=' + JSON.stringify(pins).slice(0, 200));
       throw e;
     } finally {
       page.off('response', onInstallResp);
+      page.off('request', onPkgRequest);
     }
     await waitTourTitle(page, 'A pin, not a copy', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 29 pin Next');

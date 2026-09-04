@@ -804,6 +804,15 @@
     const p = document.getElementById('gd-pkg-pop'); if (p) p.remove();
     const s = document.getElementById('gd-pkg-scrim'); if (s) s.remove();
   }
+  // The panel is fetched EXPLICITLY and processed synchronously after the
+  // swap — not via `hx-trigger="load"`. htmx fires a load trigger on a
+  // timer, and a second open (the tutorial re-targets the chip, a user
+  // double-clicks) in that window re-created the popover while the first
+  // load was still landing: the panel showed up, but the buttons inside it
+  // were never processed by htmx, so Install did nothing (lesson 29's
+  // "server idle" flake — 2/5 runs, htmx-internal-data absent on the
+  // button). One sequence counter: only the newest open's response lands.
+  let _pkgPopSeq = 0;
   function gdOpenPkgPop() {
     gdClosePkgPop();
     const chip = document.getElementById('gd-pkg-chip');
@@ -817,13 +826,27 @@
     pop.id = 'gd-pkg-pop';
     pop.className = 'gd-pop';
     pop.innerHTML = '<h5>Packages</h5>'
-      + '<div class="ns-children" hx-get="/partials/packages-panel" hx-trigger="load" hx-swap="innerHTML">'
-      +   '<div class="loading">Loading…</div></div>';
+      + '<div class="ns-children"><div class="loading">Loading…</div></div>';
     const r = chip.getBoundingClientRect();
     pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 468)) + 'px';
     pop.style.top = (r.bottom + 6) + 'px';
     document.body.appendChild(pop);
-    if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(pop);
+    const mount = pop.querySelector('.ns-children');
+    const seq = ++_pkgPopSeq;
+    const fetcher = typeof window.authFetch === 'function' ? window.authFetch : fetch;
+    fetcher('/partials/packages-panel')
+      .then((resp) => resp.text())
+      .then((html) => {
+        // A newer open replaced this popover, or it was closed meanwhile.
+        if (seq !== _pkgPopSeq || !mount.isConnected) return;
+        mount.innerHTML = html;
+        if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(mount);
+      })
+      .catch(() => {
+        if (seq === _pkgPopSeq && mount.isConnected) {
+          mount.innerHTML = '<div class="loading">Failed to load the packages panel</div>';
+        }
+      });
   }
   const pkgChip = document.getElementById('gd-pkg-chip');
   if (pkgChip) pkgChip.addEventListener('click', gdOpenPkgPop);

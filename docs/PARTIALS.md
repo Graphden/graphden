@@ -510,3 +510,19 @@ an unpinned `:children` free re-derives and re-breaks the handler shape.
 
 Guarded by `route-handler-shape-guard-test` (unit) + the
 `*-over-the-wire` integration tests — extend those when adding public routes.
+
+### 13. A popover that may be re-opened must not rely on `hx-trigger="load"`
+
+`hx-trigger="load"` fires from a timer after `htmx.process`, and the swap
+it eventually performs is not tied to the popover that asked for it. A
+popover that is torn down and re-created inside that window (the
+tutorial re-targets the packages chip; a user double-clicks) ends up
+showing a panel whose buttons htmx never processed — the HTML is there,
+`hx-post` is on the button, and a click does nothing (lesson 29's
+"Install → server idle" flake, 2 runs in 5; `btn['htmx-internal-data']`
+was absent). For anything the user can re-open, fetch the partial
+explicitly, swap it, then call `htmx.process(mount)` synchronously, and
+drop responses of a superseded open with a sequence counter —
+`gdOpenPkgPop` in `editor-shell.js` is the pattern. Sections that mount
+ONCE (the Operate panes in `editor-sidebar.js`) can keep the declarative
+load.

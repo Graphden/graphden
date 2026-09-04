@@ -164,17 +164,12 @@
    :args {:path "/partials/execute-trace" :handler :_partial-execute-trace-handler}}
 
   {:name :partial-debug-catch
-   :description "GET /partials/debug-catch — the Operate → Debug panel: trap status, arm form shell, «open last captured trace». `editor-debug.js` owns arm/cancel POSTs + refresh. Auth-required."
+   :description "GET /partials/debug-catch — the «catch next request» trap block a service fn's Runs tab composes in: trap status, arm form shell, «open last captured trace». `editor-debug.js` owns arm/cancel POSTs + refresh. Auth-required."
    :parent :get-auth-required
    :args {:path "/partials/debug-catch" :handler :_partial-debug-catch-handler}}
 
-  {:name :partial-tests
-   :description "GET /partials/tests — the Operate → Tests panel (summary + Run-all button + per-test latest status of the current version) as text/html. Auth-required; `editor-tests.js` owns the Run-all POST → refresh lifecycle."
-   :parent :get-auth-required
-   :args {:path "/partials/tests" :handler :_partial-tests-handler}}
-
   {:name :partial-tests-stream
-   :description "GET /partials/tests-stream — SSE stream of the Operate → Tests panel body (write-wakes + 30 s keepalive, changed-only pushes). Auth-required; the editor's Tests section subscribes via the htmx SSE extension."
+   :description "GET /partials/tests-stream — SSE ping stream for the ✓ tests lens (write-wakes + 30 s keepalive). Auth-required; the editor keeps it open while the lens is active and re-primes `/api/tests/status` on each ping."
    :parent :get-auth-required
    :args {:path "/partials/tests-stream" :handler :_tests-stream-handler}}
 
@@ -194,6 +189,11 @@
    :description "POST /partials/inspector-lint/suppress?fn-id=F&rule=R&fn-ids=a,b — the Inspector's Not-an-issue: same `lint-suppressions` store as the drawer, responds with the fn's refreshed Lint section. Auth-required."
    :parent :post
    :args {:path "/partials/inspector-lint/suppress" :handler :_partial-inspector-lint-suppress-handler}}
+
+  {:name :partial-inspector-test-run
+   :description "POST /partials/inspector-test/run?fn-id=F — the Inspector's Run-this-test: one `run-tests!` over the fn through the standard execute pipeline, responds with the fn's refreshed Test section rendered from the run's own result. Auth-required."
+   :parent :post
+   :args {:path "/partials/inspector-test/run" :handler :_partial-inspector-test-run-handler}}
 
   {:name :partial-inspector-lint-restore
    :description "POST /partials/inspector-lint/restore?fn-id=F&rule=R&fn-ids=a,b — un-hide from the Inspector, responds with the refreshed Lint section. Auth-required."

@@ -237,37 +237,24 @@ const {
     await bindFirstPlaceholder(page, '4');
     // The write itself triggers the auto-run — that IS the lesson's claim.
     await waitTourTitle(page, 'See it pass', 150000);
-    // The step completes on the panel's green dot, so open the panel the
-    // way the lesson tells the reader to: the diagnostics bar's Tests tab
-    // (the drawer under the canvas). Matching a button whose text is
-    // "tests" hit the sidebar's NAMESPACE row instead, and the step passed
-    // anyway only because the mounted-but-hidden panel still matched a
-    // `dom` check — until `dom` started meaning VISIBLE, which is what the
-    // reader experiences.
-    await page.waitForSelector('#gd-diag-nav button[data-section="tests"]',
+    // The step completes on the Explorer's green dot under the ✓ tests
+    // lens, so do what the lesson tells the reader to: click the chip.
+    // (`dom` checks mean VISIBLE — the row must be on screen, which the
+    // lens guarantees for the namespace the reader just built in.)
+    await page.waitForSelector('#kind-filters .kind-toggle[data-kind="tests"]',
                                {timeout: 30000});
-    const testsPanelUp = () => page.evaluate(() => {
-      const drawer = document.getElementById('gd-diag-drawer');
-      if (!drawer || drawer.getAttribute('data-open') !== '1') return false;
-      const el = document.querySelector('#gd-diag-panels > [data-section="tests"]');
-      if (!el || el.hasAttribute('hidden')) return false;
-      const r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0;
-    });
-    for (let attempt = 0; attempt < 10 && !(await testsPanelUp()); attempt++) {
+    const testsLensOn = () => page.evaluate(() =>
+      document.querySelector('#kind-filters .kind-toggle[data-kind="tests"]')
+        ?.getAttribute('aria-pressed') === 'true');
+    for (let attempt = 0; attempt < 5 && !(await testsLensOn()); attempt++) {
       await page.evaluate(() => {
-        document.querySelector('#gd-diag-nav button[data-section="tests"]')?.click();
+        document.querySelector('#kind-filters .kind-toggle[data-kind="tests"]')?.click();
       });
-      await waitUntil(page, () => {
-        const drawer = document.getElementById('gd-diag-drawer');
-        if (!drawer || drawer.getAttribute('data-open') !== '1') return false;
-        const el = document.querySelector('#gd-diag-panels > [data-section="tests"]');
-        if (!el || el.hasAttribute('hidden')) return false;
-        const r = el.getBoundingClientRect();
-        return r.width > 0 && r.height > 0;
-      }, null, 1000);
+      await waitUntil(page, () =>
+        document.querySelector('#kind-filters .kind-toggle[data-kind="tests"]')
+          ?.getAttribute('aria-pressed') === 'true', null, 1000);
     }
-    assert(await testsPanelUp(), 'diagnostics drawer → Tests opened');
+    assert(await testsLensOn(), '✓ tests lens switched on');
     // Auto-run is asynchronous (the write returns first) — poll rather than
     // read once.
     // `pending` is a status too — poll until the run REACHES a terminal
@@ -553,8 +540,16 @@ const {
     // automatically when done". Same trap the collapsed-Explorer arm
     // already handles, and only discoverable by walking it as a person —
     // a guard clicks rows by selector, hidden or not.
+    // The sections above leave a lesson resumable in localStorage; on a
+    // plain `/` it would resume and clear the very lens this probe sets
+    // (that clearing IS the behaviour under test — but only for lesson
+    // 05, below). Drop it first, and click the chip only once the tree
+    // exists (a pre-graph toggle has nothing to flip).
+    await page.goto(BASE + '/');
+    await page.evaluate(() => { localStorage.removeItem('graphden.tour'); });
     await page.goto(BASE + '/');
     await page.waitForSelector('.kind-toggle', {timeout: 60000});
+    await page.waitForSelector('#entity-list .ns-header', {timeout: 60000});
     await page.evaluate(() => {
       const tests = Array.from(document.querySelectorAll('.kind-toggle'))
         .find((c) => /tests/.test(c.textContent));

@@ -686,7 +686,9 @@
            is a fn in a `tests`-segment namespace, executed through
            `apply-execute` with `{}` args (pass = no throw), its status the
            newest execution of its CURRENT version — so an edited test reads
-           `stale` by construction, no bookkeeping."}
+           `stale` by construction, no bookkeeping. After EACH test it nudges
+           the `test:updated` NOTIFY, which is what moves the Explorer's
+           dots one by one under the ✓ tests lens (its SSE ping stream)."}
     {:ns graphden.crud.test-autorun :defn schedule-affected!
      :say "Auto-run on writes: from `invalidate!`'s seeds, walk the
            compile-deps REVERSE closure (the service-restart blast walk),

@@ -154,8 +154,9 @@
                   ;; Explorer's problem lenses + markers; primed by
                   ;; editor-sidebar.js per graph load.
                   "packages/app/editor/editor-problems.js"
-                  ;; Debug: «catch next request» Operate section
-                  ;; (buildDebugSection read by editor-sidebar.js).
+                  ;; The «catch next request» trap block on a service fn's
+                  ;; Runs tab — arm / cancel / poll (the history partial
+                  ;; composes the block; editor-execute-history.js hooks it).
                   "packages/app/editor/editor-debug.js"
                   "packages/app/editor/editor-apps.js"
                   "packages/app/editor/editor-assets.js"
@@ -163,10 +164,6 @@
                   ;; Keyboard navigation over the rows editor-sidebar.js
                   ;; builds — delegated, so it survives the rebuilds.
                   "packages/app/editor/editor-tree-keys.js"
-                  ;; Diagnostics drawer (Build) — open/collapse lifecycle +
-                  ;; badge counts for the errors/type-errors/tests/debug
-                  ;; sections editor-sidebar.js mounts into it.
-                  "packages/app/editor/editor-diagnostics.js"
                   "packages/app/editor/editor-expansion.js"
                   "packages/app/editor/editor-ui.js"
                   "packages/app/editor/editor-render.js"
@@ -413,6 +410,15 @@
                        :onclick "gdAckAllFailures(this)"}
               [:span {:class "kind-glyph" :aria-hidden "true"} "✕"]
               [:span {:class "kind-label"} "Dismiss all"]]
+             ;; "▶ Run all" — the tests lens's action, the old Tests panel's
+             ;; Run-all: revealed only with the `tests` lens active
+             ;; (editor-tests.js gdRunAllTests); per-test pings move the dots.
+             [:button {:id "tests-run-all-btn" :type "button" :class "gd-secret-add"
+                       :hidden "hidden" :title "Run every test on this branch; the dots update as each one lands"
+                       :aria-label "Run all tests"
+                       :onclick "gdRunAllTests(this)"}
+              [:span {:class "kind-glyph" :aria-hidden "true"} "▶"]
+              [:span {:class "kind-label"} "Run all"]]
              ;; Smart views — saved virtual groupings (editor-smart-views.js).
              ;; NOT a kind lens, so it sits outside the kind-filters group,
              ;; next to the secret-add action.
@@ -481,24 +487,6 @@
             [:aside {:id "gd-inspector" :aria-label "Inspector"}
              [:div {:class "gd-insp-empty"}
               "Select a node to inspect its bindings, types, effects, and this function\u2019s own run history."]]
-            ;; DIAGNOSTICS DRAWER \u2014 the code-facing live lists (Errors /
-            ;; Type errors / Tests / Debug) as a collapsible strip under the
-            ;; canvas. They used to live on the Organization surface, which
-            ;; hid the editor while you read them; here a fn link in a row
-            ;; navigates the canvas and the list STAYS open. The admin panels
-            ;; (grants, members, packages, monitoring, \u2026) remain on
-            ;; Organization. editor-sidebar.js mounts the section panes into
-            ;; #gd-diag-panels; editor-diagnostics.js owns open/collapse +
-            ;; the badge counts on the bar.
-            [:section {:id "gd-diag-drawer" :data-open "0" :aria-label "Diagnostics"}
-             [:div {:class "gd-diag-bar"}
-              [:nav {:id "gd-diag-nav" :aria-label "Diagnostics sections"}]
-              [:button {:id "gd-diag-toggle" :type "button" :class "gd-diag-toggle"
-                        :onclick "gdDiagToggle()"
-                        :aria-expanded "false" :aria-controls "gd-diag-panels"
-                        :aria-label "Toggle diagnostics drawer"
-                        :title "Toggle diagnostics drawer"} "\u25b4"]]
-             [:div {:id "gd-diag-panels" :class "gd-diag-pane" :hidden "hidden"}]]
             ;; Placeholder overlay for surfaces not yet rebuilt (Run / Review /
             ;; Operate / Workspaces / Settings). Hidden on the Build surface.
             [:div {:id "gd-surface-overlay" :hidden "hidden"}
@@ -522,8 +510,8 @@
               ;; permissions) only holds when the tenancy addon is active. A
               ;; single-tenant self-hosted instance has no members/roles, so it
               ;; gets the operational-only wording — no over-promise.
-              [:p {:class "gd-solo-only"} "This instance's operations — packages, monitoring, apps and assets. Live code diagnostics (errors, tests) sit in the drawer under the canvas."]
-              [:p {:class "gd-tenancy-only"} "Your organization — members, roles and permissions, plus its packages, monitoring and apps. Live code diagnostics (errors, tests) sit in the drawer under the canvas."]]
+              [:p {:class "gd-solo-only"} "This instance's operations — packages, monitoring, apps and assets. Live code diagnostics are Explorer lenses (failed, type errors, lint, tests) with details and actions in the Inspector; the «catch next request» trap sits on a service fn's Runs tab."]
+              [:p {:class "gd-tenancy-only"} "Your organization — members, roles and permissions, plus its packages, monitoring and apps. Live code diagnostics are Explorer lenses (failed, type errors, lint, tests) with details and actions in the Inspector; the «catch next request» trap sits on a service fn's Runs tab."]]
              [:div {:class "gd-op-body"}
               [:nav {:id "gd-operate-nav" :class "gd-op-nav" :aria-label "Organization sections"}]
               [:div {:id "gd-operate-panels" :class "gd-op-pane"}]]]

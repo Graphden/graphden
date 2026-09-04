@@ -166,6 +166,11 @@ async function buildHistoryPanel(fnEntity, resultHostEl) {
     wrap.innerHTML = await r.text();
     if (window.htmx?.process) window.htmx.process(wrap);
     bindHistoryActions(wrap, fnEntity, resultHostEl);
+    // A service fn's panel carries the «catch next request» block —
+    // editor-debug.js polls it while a trap is armed.
+    if (wrap.querySelector('.gd-run-trap') && typeof gdDebugTrapMounted === 'function') {
+      gdDebugTrapMounted();
+    }
   } catch (e) {
     const err = document.createElement('div');
     err.className = 'execute-history-error';

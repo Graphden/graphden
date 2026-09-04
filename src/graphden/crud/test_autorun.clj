@@ -126,6 +126,9 @@
   (try
     (loop []
       (Thread/sleep debounce-ms)
+      ;; `cancel-all!` interrupts a runner between passes; leave quietly,
+      ;; the claim is already dropped.
+      (when (Thread/interrupted) (throw (InterruptedException.)))
       (let [seeds (drain! key)
             reverse-deps (some-> (:compile-deps ctx) deref :reverse-deps)
             affected (when (seq seeds)
@@ -145,9 +148,23 @@
                                 {:fn-ids capped})))
       (when-not (try-release! key)
         (recur)))
+    (catch InterruptedException _
+      (swap! pending dissoc key))
     (catch Exception e
       (swap! pending dissoc key)
       (log/warn e "test auto-run pass failed" {:key key}))))
+
+
+(defn cancel-all!
+  "Interrupt every debounced runner and forget its queue — the shutdown
+   hook, and what a test fixture calls BEFORE closing the storage a
+   runner would otherwise wake up to (a closed pool mid-pass logs as a
+   failed auto-run). Returns the number of runners cancelled."
+  []
+  (let [[old _] (swap-vals! pending (constantly {}))]
+    (count (keep (fn [[_ {:keys [runner]}]]
+                   (when runner (future-cancel runner) runner))
+                 old))))
 
 
 (defn schedule-affected!
@@ -171,5 +188,9 @@
                                     (update-in [key :seeds] (fnil into #{}) seeds)
                                     (assoc-in [key :runner?] true))))]
       (when-not (get-in old [key :runner?])
-        (future (run-pending! ctx key)))
+        (let [runner (future (run-pending! ctx key))]
+          ;; Keep the handle so `cancel-all!` can interrupt it; the claim
+          ;; may already be released (a fast pass) — then there is
+          ;; nothing to record.
+          (swap! pending (fn [m] (if (contains? m key) (assoc-in m [key :runner] runner) m)))))
       (count seeds))))

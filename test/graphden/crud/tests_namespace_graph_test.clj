@@ -39,7 +39,7 @@
                   "graphden.crud.tests-namespace-graph-test"
                   ["core" "web" "app" "examples"])]
       (binding [*graph* graph]
-        (try (f) (finally (sp/close (:storage graph))))))))
+        (try (f) (finally (setup/close-graph! graph)))))))
 
 
 (defn- results-by-name
@@ -108,3 +108,51 @@
       (is (some? data) "a failed assertion records its operands")
       (is (= 5 (:actual data)) (str "actual operand: " (pr-str data)))
       (is (= 6 (:expected data)) (str "expected operand: " (pr-str data))))))
+
+
+(defn- inspector-request
+  [handler path method fn-id]
+  (setup/via-graph *graph* handler
+                   {:uri path
+                    :query-string (str "fn-id=" fn-id)
+                    :query-params {"fn-id" (str fn-id)}
+                    :request-method method
+                    :headers {}}))
+
+
+(deftest inspector-test-section-renders-and-runs-test
+  ;; The Inspector's Test section (2026-09-04, the drawer's Tests panel
+  ;; retired): a test fn's detail carries the section with [Run this
+  ;; test]; the inspector-side run route renders it back from the run's
+  ;; own result — deterministic, where a re-read of the status join
+  ;; right after the run could still see the previous status.
+  (let [{:keys [ctx storage]} *graph*
+        failing (first (filter #(= "intentionally-failing-example" (:name %))
+                               (test-runs/test-fn-rows ctx)))
+        add-id (:id (first (sp/query-entities storage :fn {:name "add"})))]
+    (is (some? failing) "examples.tests has the intentionally failing test")
+    (testing "a test fn's Bindings detail carries the Test section with its action"
+      (let [response (inspector-request :_partial-inspector-detail-handler
+                                        "/partials/inspector-detail" :get (:id failing))
+            body (str (:body response))]
+        (is (= 200 (:status response)))
+        (is (str/includes? body "gd-insp-sec gd-insp-test"))
+        (is (str/includes? body "tests-run-one"))
+        ;; stale before any run, failed after a sibling test ran the suite
+        ;; (test order is randomised) — never passed
+        (is (or (str/includes? body "test-stale") (str/includes? body "test-failed")))
+        (is (not (str/includes? body "test-passed")))))
+    (testing "POST /partials/inspector-test/run renders the section from the run — failed, with the assertion"
+      (let [response (inspector-request :_partial-inspector-test-run-handler
+                                        "/partials/inspector-test/run" :post (:id failing))
+            body (str (:body response))]
+        (is (= 200 (:status response)))
+        (is (str/includes? body "test-dot test-failed"))
+        (is (str/includes? body "gd-insp-test-status\">failed<"))
+        (is (str/includes? (str/lower-case body) "assert")
+            (str "the assertion's message renders in the section: " body))))
+    (testing "a fn that is not a test gets only the hidden swap target"
+      (let [body (str (:body (inspector-request :_partial-inspector-detail-handler
+                                                "/partials/inspector-detail" :get add-id)))]
+        (is (str/includes? body "gd-insp-test"))
+        (is (not (str/includes? body "tests-run-one")))))))

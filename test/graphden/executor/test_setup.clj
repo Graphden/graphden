@@ -8,6 +8,7 @@
     [cheshire.core :as cheshire]
     [clojure.java.io :as io]
     [clojure.string :as str]
+    [graphden.crud.test-autorun :as test-autorun]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.context :as exec-ctx]
@@ -684,3 +685,13 @@
   [t]
   (alter-var-root #'br/*epoch-heal-sync?* (constantly true))
   (t))
+
+
+(defn close-graph!
+  "Close a bootstrapped graph's storage — after cancelling the
+   write-triggered test auto-run, whose debounced runner would
+   otherwise wake up to a closed pool and log a failed pass. Every
+   fixture that closes a golden graph goes through here."
+  [graph]
+  (test-autorun/cancel-all!)
+  (sp/close (:storage graph)))

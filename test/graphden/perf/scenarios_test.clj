@@ -28,8 +28,7 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.perf.calibrate :as cal]
-    [graphden.perf.sql :as psql]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.perf.sql :as psql]))
 
 
 (def ^:dynamic *graph* nil)
@@ -49,7 +48,7 @@
            ;; moment would normalise against a machine this run never saw.
            (cal/record! (datasource-of (:storage graph)))
            (t))
-         (finally (sp/close (:storage graph)))))))
+         (finally (setup/close-graph! graph))))))
 
 
 (use-fixtures :once

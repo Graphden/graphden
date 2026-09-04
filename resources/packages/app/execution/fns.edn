@@ -3271,9 +3271,13 @@
    :args {:body :_ptrace-html}}
 
   ;; ---------------------------------------------------------------------
-  ;; GET /partials/debug-catch — the Operate → Debug panel: trap status,
-  ;; the arm form shell, and the «open last captured trace» affordance.
-  ;; editor-debug.js owns arm/cancel POSTs + the refresh cycle.
+  ;; GET /partials/debug-catch — the «catch next request» trap block:
+  ;; status, the arm form shell, and the «open last captured trace»
+  ;; affordance. Composed into a service fn's Runs tab
+  ;; (`app.editor-execute/_peh-trap-block`); editor-debug.js owns
+  ;; arm/cancel POSTs + the refresh cycle, re-fetching this partial into
+  ;; the block. (Was the diagnostics drawer's Debug panel until
+  ;; 2026-09-04, when the drawer was retired.)
   ;; ---------------------------------------------------------------------
 
   {:name :_pdbg-status
@@ -3281,11 +3285,16 @@
   {:name :_pdbg-armed?
    :parent :get
    :args {:coll :_pdbg-status :key {:value :armed} :default {:value false}}}
+  ;; `:coalesce`, not `:get`'s default: an armed trap without a prefix
+  ;; carries `:path-prefix nil` (the key is present), and `:get` only
+  ;; defaults an ABSENT key — the line used to read "(…request ())".
   {:name :_pdbg-trap-prefix
-   :parent :get
-   :args {:coll {:parent :get
-                 :args {:coll :_pdbg-status :key {:value :trap} :default {:value {}}}}
-          :key {:value :path-prefix}
+   :parent :coalesce
+   :args {:value {:parent :get
+                  :args {:coll {:parent :get
+                                :args {:coll :_pdbg-status :key {:value :trap} :default {:value {}}}}
+                         :key {:value :path-prefix}
+                         :default nil}}
           :default {:value "any app path"}}}
   {:name :_pdbg-armed-line
    :parent :hiccup
@@ -3355,7 +3364,7 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "debug-help"}}
-          :children ["Catch the next HTTP request served by this branch's web handler: it runs with the path trace on and lands in run history like a traced run. One-shot; expires after 10 min. Credential headers are never stored."]}}
+          :children ["Catch the next HTTP request served by this branch's web handler: it runs with the path trace on and lands in the handler's run history like a traced run. One-shot; expires after 10 min. Credential headers are never stored."]}}
   {:name :_pdbg-body
    :parent :hiccup
    :args {:tag {:value "div"}
@@ -3371,6 +3380,6 @@
    :args {:hiccup :_pdbg-body}}
   {:name :_partial-debug-catch-handler
    :lambda-params [:request]
-   :description "Ring handler for GET /partials/debug-catch — the Operate → Debug panel body as text/html."
+   :description "Ring handler for GET /partials/debug-catch — the trap block (a service fn's Runs tab) as text/html."
    :parent :html-ok-response
    :args {:body :_pdbg-html}}]}

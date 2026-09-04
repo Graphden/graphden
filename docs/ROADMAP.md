@@ -74,8 +74,12 @@ Launch-order refinements agreed 2026-07-20:
    `:assert` / `:assert-eq` base-fns, the sequential runner + per-
    current-version statuses over ordinary `:fn-execution` rows
    (`/api/tests/run` + `/api/tests/status`), the sidebar `tests` lens
-   chip with per-test status dots, the diagnostics-drawer Tests panel with
-   Run-all, AND write-triggered auto-run of affected PURE tests
+   chip with per-test status dots (its **▶ Run all** action and a live
+   per-test signal while the lens is active; 2026-09-04 — the Inspector's
+   **Test** section with **Run this test** replaced the drawer's Tests
+   panel; the same day the trap moved to a service fn's Runs tab and the
+   drawer under the canvas was removed — every diagnostic is a lens +
+   an Inspector section now), AND write-triggered auto-run of affected PURE tests
    (reverse compile-deps closure ∩ tests, effect-closure gate +
    `:allowed-effects #{}` backstop, debounced per org×branch). See
    [TESTS.md](TESTS.md).
@@ -137,7 +141,8 @@ Launch-order refinements agreed 2026-07-20:
    stored trace reassembles into the call TREE — server-rendered
    `GET /partials/execute-trace` + `editor-trace-view.js` stepping
    (history "tree" button); the «catch next request» trap
-   (`crud.debug-capture`, diagnostics drawer → Debug) runs the next matching
+   (`crud.debug-capture`, the trap block on a service fn's Runs tab —
+   2026-09-04; the diagnostics drawer it lived in is retired) runs the next matching
    HTTP request through the same machinery into a standard
    `:fn-execution` row; secret hardening: fail-closed classification
    (`:unknown-type`), ancestor poisoning (`:value-hidden

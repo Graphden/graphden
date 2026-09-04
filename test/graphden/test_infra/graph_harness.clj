@@ -10,8 +10,7 @@
   (:require
     [cheshire.core :as cheshire]
     [graphden.executor.interface :as exec]
-    [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.executor.test-setup :as setup]))
 
 
 (def ^:dynamic *graph* nil)
@@ -33,12 +32,11 @@
   (fn [t]
     (exec/with-clean-registry
       #(let [graph (setup/bootstrap-crud-graph-from-golden!*
-                     ns-ident ["core" "web" "app"])
-             storage (:storage graph)]
+                     ns-ident ["core" "web" "app"])]
          (try
            (binding [*graph* graph]
              (t))
-           (finally (sp/close storage)))))))
+           (finally (setup/close-graph! graph)))))))
 
 
 (defn uniq

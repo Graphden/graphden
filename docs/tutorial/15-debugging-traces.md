@@ -7,7 +7,7 @@ to your app the same way.
 
 **Concepts introduced**: the path trace (`Trace path` /
 `+ capture values`), the **path** canvas highlight, the **tree**
-step-through view, the diagnostics bar's Debug «catch next request»
+step-through view, the Runs tab's «catch next request»
 trap,
 secret redaction in traces.
 
@@ -79,19 +79,20 @@ Traces of manual runs cover fns you can call from the Run pane.
 For a **web handler** you usually want the real thing: the actual
 HTTP request, with its params and headers. That's the trap:
 
-1. Open **Debug** — the last tab in the diagnostics bar under the
-   canvas.
+1. Select your web server — the fn that runs as a service (the
+   **⚙ services** lens finds it) — and open the Inspector's **Runs**
+   tab. It opens with the trap block above the run history.
 2. Optionally type a path prefix (e.g. `/shop`) — empty catches the
    next request to any app path (the editor's own `/api/…` and
    `/partials/…` traffic is excluded so it can't eat the trap).
-3. Click **Catch next request**. The panel shows an armed dot; the
+3. Click **Catch next request**. The block shows an armed dot; the
    trap is one-shot and expires after 10 minutes.
 4. Hit your app — open its page, or `curl` the route.
-5. The panel flips to **Last captured request: open call tree** —
-   the request ran with the trace on and landed in run history like
-   any traced run: the (credential-stripped) request as its
-   argument, the response as its result, the full call tree behind
-   the button.
+5. The block flips to **Last captured request: open call tree** and
+   the tab re-reads its history — the request ran with the trace on
+   and landed as a run like any traced one: the (credential-stripped)
+   request as its argument, the response as its result, the full
+   call tree behind the button (and the row's **tree**).
 
 Cookies, `Authorization` headers and `Set-Cookie` are stripped
 before anything is stored — a captured run never becomes a

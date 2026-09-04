@@ -531,6 +531,9 @@ async function gdMountRunPane(fnId) {
     runsHost.appendChild(panel);
   }
   mountHistory();
+  // A captured request landed (editor-debug.js): re-mount so its row is
+  // on the tab.
+  runsHost?.addEventListener('gd-refresh-runs', () => { mountHistory(); });
 
   runBtn.addEventListener('click', async (e) => {
     e.stopPropagation();

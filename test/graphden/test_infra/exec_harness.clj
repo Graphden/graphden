@@ -31,7 +31,7 @@
             (binding [*context* (:ctx graph)
                       *storage* (:storage graph)]
               (t))
-            (finally (sp/close (:storage graph)))))))))
+            (finally (setup/close-graph! graph))))))))
 
 
 (defn fn-id

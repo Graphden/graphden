@@ -121,9 +121,9 @@ which BFS-walks from the same registry.
 ## The editor: lens + Inspector
 
 Findings reach the author as an Explorer **lens** and an Inspector
-**section**; the drawer under the canvas keeps only Tests and Debug
-(the Lint tab shipped 2026-09-03 and was retired the next day, once
-the lenses landed).
+**section** (the Lint tab shipped 2026-09-03 in a drawer under the
+canvas and was retired the next day, once the lenses landed; the Tests
+and Debug panels followed the same day and the drawer is gone).
 
 - **⚐ lint lens** — `GET /api/lint` is the JSON read (same base-fn as
   the section), cached client-side (`editor-problems.js`)

@@ -1538,12 +1538,134 @@
    :parent :html-ok-response
    :args {:body :_insp-lint-restore-then-html}}
 
+  ;; --- Test section: the `tests` namespace convention (docs/TESTS.md) --
+  ;; Present only when the selected fn IS a test on this branch (it has a
+  ;; `/api/tests/status` row): its status dot + label, the assertion's
+  ;; error on a failure, and [Run this test] — a POST to the inspector's
+  ;; own route that runs the fn through `run-tests!` and renders THIS
+  ;; section back from the run's result (swap target `.gd-insp-test`).
+  ;; Parametrised by `:row` so both readers (the status join on a fresh
+  ;; detail, the run's own result after the POST — the terminal
+  ;; execution row lands asynchronously, so re-reading the join right
+  ;; after the run could still show the previous status) render the same
+  ;; markup. `:status` arrives as text from the join and as a keyword
+  ;; from the runner — `:name` reads both.
+  {:name :_insp-test-row
+   :description "The selected fn's `/api/tests/status` row (`_insp-diag-of-this-fn?` — the same `:fn-id`-names-me pred the diagnostics use), or nil when the fn is not a test on this branch."
+   :parent :first
+   :args {:coll {:parent :filter :args {:pred :_insp-diag-of-this-fn? :coll :_tests-status-apply}}}}
+  ;; `:row` is pinned where it enters: `:first` hands back
+  ;; `[:union :null :keyword-map]`, and without the pin the `{}`
+  ;; default below would narrow the free arg to `:empty-map`.
+  {:name :_insp-test-row-map
+   :parent :coalesce
+   :args {:value {:as :row :type [:union :null :keyword-map]} :default {:value {}}}}
+  {:name :_insp-test-status-raw
+   :parent :get
+   :args {:coll :_insp-test-row-map :key {:value :status} :default nil}}
+  {:name :_insp-test-status
+   :description "`succeeded` / `failed` / another runner status / `stale` (no run of the current version) — as bare text whichever reader supplied the row."
+   :parent :name
+   :args {:value {:parent :coalesce :args {:value :_insp-test-status-raw :default {:value "stale"}}}}}
+  {:name :_insp-test-passed?
+   :parent :equal? :args {:a :_insp-test-status :b {:value "succeeded"}}}
+  {:name :_insp-test-failed?
+   :parent :equal? :args {:a :_insp-test-status :b {:value "failed"}}}
+  {:name :_insp-test-stale?
+   :parent :equal? :args {:a :_insp-test-status :b {:value "stale"}}}
+  {:name :_insp-test-dot-cls
+   :parent :cond
+   :args {:clauses [:_insp-test-passed? {:value "test-dot test-passed"}
+                    :_insp-test-failed? {:value "test-dot test-failed"}
+                    {:value true} {:value "test-dot test-stale"}]}}
+  {:name :_insp-test-dot
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:parent :zipmap :args {:keys [{:value :class}] :vals [:_insp-test-dot-cls]}}
+          :children ["●"]}}
+  {:name :_insp-test-label
+   :parent :cond
+   :args {:clauses [:_insp-test-passed? {:value "passed"}
+                    :_insp-test-failed? {:value "failed"}
+                    :_insp-test-stale? {:value "not run for the current version"}
+                    {:value true} :_insp-test-status]}}
+  {:name :_insp-test-label-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "gd-insp-test-status"}}
+          :children [:_insp-test-label]}}
+  {:name :_insp-test-error
+   :parent :get
+   :args {:coll :_insp-test-row-map :key {:value :error} :default {:value ""}}}
+  {:name :_insp-test-err-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "tests-err"}}
+          :children [{:parent :to-str :args {:value :_insp-test-error}}]}}
+  {:name :_insp-test-row-err
+   :description "The assertion's message, on a failed row only — nil child renders nothing."
+   :parent :if
+   :args {:test :_insp-test-failed?
+          :then :_insp-test-err-div
+          :else {:value nil}}}
+  {:name :_insp-test-run-url
+   :parent :str
+   :args {:parts [{:value "/partials/inspector-test/run?fn-id="} :_insp-lint-id-str]}}
+  {:name :_insp-test-run-btn
+   :parent :hx-button
+   :args {:label {:value "Run this test"}
+          :url :_insp-test-run-url
+          :target {:value "closest .gd-insp-test"}
+          :swap {:value "outerHTML"}
+          :extras {:value {:class "tests-run-one"
+                           :title "Run this test now through the standard execute pipeline; the status updates here and on the Explorer's dot"}}}}
+  {:name :_insp-test-section
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-insp-sec gd-insp-test"}}
+          :children [{:value [:div {:class "gd-insp-sec-head"} "Test"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "div"}
+                             :attrs {:value {:class "gd-prov-row gd-insp-test-row"}}
+                             :children [{:parent :hiccup
+                                         :args {:tag {:value "span"} :attrs {:value {:class "gd-prov-k"}}
+                                                :children [:_insp-test-dot]}}
+                                        {:parent :hiccup
+                                         :args {:tag {:value "span"} :attrs {:value {:class "gd-prov-v"}}
+                                                :children [:_insp-test-label-span :_insp-test-row-err :_insp-test-run-btn]}}]}}]}}
+  {:name :_insp-test-opt
+   :description "The section for a test fn; a hidden span carrying the swap-target class otherwise."
+   :parent :if
+   :args {:test {:parent :nil? :args {:value {:as :row :type [:union :null :keyword-map]}}}
+          :then {:value [:span {:class "gd-insp-test" :hidden "1"}]}
+          :else :_insp-test-section}}
+
+  ;; --- the inspector-side run route ------------------------------------
+  {:name :_insp-test-run-applied
+   :description "One `run-tests!` over the selected fn (nil timeout = the runner's default)."
+   :parent :_tests-run-apply
+   :args {:fn-ids {:parent :vec :args {:coll [:_insp-lint-id-str]}}
+          :timeout-ms {:value nil}}}
+  {:name :_insp-test-run-result-row
+   :description "The run's own result for the fn — `{:fn-id :fn-name :status :error …}`, status as a keyword."
+   :parent :first
+   :args {:coll {:parent :get :args {:coll :_insp-test-run-applied :key {:value :results} :default {:value []}}}}}
+  {:name :_insp-test-html-after-run
+   :parent :render-hiccup
+   :args {:hiccup {:parent :_insp-test-opt :args {:row :_insp-test-run-result-row}}}}
+  {:name :_partial-inspector-test-run-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /partials/inspector-test/run?fn-id=F — run the selected test, respond with its refreshed Test section rendered from the run's result."
+   :parent :html-ok-response
+   :args {:body :_insp-test-html-after-run}}
+
   ;; --- Assembly + handler ---------------------------------------------
   {:name :_insp-detail-full
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "gd-insp-detail"}}
           :children [:_insp-args-section :_insp-prov-section
+                     {:parent :_insp-test-opt :args {:row :_insp-test-row}}
                      {:parent :_insp-lint-opt :args {:suppressed :_plint-suppressed}}]}}
 
   {:name :_insp-detail-body

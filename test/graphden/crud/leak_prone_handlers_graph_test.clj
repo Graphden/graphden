@@ -118,55 +118,59 @@
       (is (str/includes? body "data-act=\"submit\"")))))
 
 
-(deftest partial-error-log-handler-renders-test
-  ;; Phase C2 — the error-log partial renders end-to-end (fresh DB → the
-  ;; empty state; the row rendering is covered by the fn-execution roundtrip).
-  (testing "GET /partials/error-log renders (empty state on a fresh DB)"
-    (let [response (gh/via :_partial-error-log-handler
-                           {:uri "/partials/error-log"
+(deftest api-failures-handler-renders-test
+  ;; The failed-runs LENS's read (the Failed runs panel's successor,
+  ;; 2026-09-04): renders end-to-end through the production graph chain
+  ;; — an empty JSON list on a fresh DB (the row tally is covered by the
+  ;; fn-execution roundtrip).
+  (testing "GET /api/failures renders (empty on a fresh DB)"
+    (let [response (gh/via :api-failures-handler
+                           {:uri "/api/failures"
                             :request-method :get
                             :headers {}})
           body (str (:body response))]
       (is (= 200 (:status response)))
-      (is (str/includes? body "No unresolved failures")))))
+      (is (= "[]" (str/trim body))))))
 
 
-(deftest partial-type-errors-handler-renders-test
-  ;; Error-tolerance Phase 3 — the type-errors partial renders
-  ;; end-to-end through the production graph chain: empty state on a
-  ;; clean store, then a recorded diagnostic renders a row with the
-  ;; fn's #hash link + arg + message. Records into the (per-NS-thread
-  ;; isolated) diagnostics store directly — the record→render seam is
-  ;; what this covers; the recording write-paths are covered in
-  ;; `entities_test`.
-  (testing "GET /partials/type-errors renders the empty state on a clean store"
-    (let [response (gh/via :_partial-type-errors-handler
-                           {:uri "/partials/type-errors"
-                            :request-method :get
-                            :headers {}})
-          body (str (:body response))]
-      (is (= 200 (:status response)))
-      (is (str/includes? body "No type errors"))))
-  (testing "a recorded diagnostic renders a row (fn link + arg + message)"
-    (let [storage (:storage *graph*)
-          ;; The golden graph's storage is versioned — record under ITS
-          ;; current branch (the same id the handler's impl derives).
-          branch-id (vs/current-branch-id storage)
-          target (first (sp/query-entities storage :fn {:name "web-server"}))]
-      (is (some? target) "golden graph has a web-server fn to point at")
+(deftest inspector-detail-renders-arg-diagnostic-test
+  ;; Error-tolerance Phase 3 → the Inspector (2026-09-04): a recorded
+  ;; diagnostic renders UNDER the argument it objects to in the fn's
+  ;; Bindings detail, through the production graph chain. Records into
+  ;; the (per-NS-thread isolated) diagnostics store directly — the
+  ;; record→render seam is what this covers; the recording write-paths
+  ;; are covered in `entities_test`.
+  (let [storage (:storage *graph*)
+        ;; The golden graph's storage is versioned — record under ITS
+        ;; current branch (the same id the handler's impl derives).
+        branch-id (vs/current-branch-id storage)
+        ;; A base-fn: its rich-types entry (the arg rows' source) is
+        ;; registered at boot in the harness, where composed fns' entries
+        ;; are not — the seam under test is the same.
+        target (first (sp/query-entities storage :fn {:name "add"}))
+        detail (fn []
+                 (gh/via :_partial-inspector-detail-handler
+                         {:uri "/partials/inspector-detail"
+                          :query-string (str "fn-id=" (:id target))
+                          :query-params {"fn-id" (str (:id target))}
+                          :request-method :get
+                          :headers {}}))]
+    (is (some? target) "golden graph has an add fn to point at")
+    (testing "a clean store renders the arg rows with no diagnostic line"
+      (let [response (detail)
+            body (str (:body response))]
+        (is (= 200 (:status response)))
+        (is (str/includes? body "gd-bind-name"))
+        (is (not (str/includes? body "gd-bind-diag")))))
+    (testing "a recorded diagnostic renders under its argument"
       (try
         (diag/record! branch-id (:id target)
                       [{:message "expected :int, got :text"
-                        :arg-name :port}])
-        (let [response (gh/via :_partial-type-errors-handler
-                               {:uri "/partials/type-errors"
-                                :request-method :get
-                                :headers {}})
+                        :arg-name :nums}])
+        (let [response (detail)
               body (str (:body response))]
           (is (= 200 (:status response)))
-          (is (str/includes? body "href=\"#web-server\"")
-              "fn name is a native #hash link")
-          (is (str/includes? body "port"))
+          (is (str/includes? body "gd-bind-diag"))
           (is (str/includes? body "expected :int, got :text")))
         (finally (diag/clear-fn! branch-id (:id target)))))))
 

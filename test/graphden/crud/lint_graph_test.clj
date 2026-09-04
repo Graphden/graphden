@@ -76,7 +76,9 @@
       (let [[f :as fs] (findings-naming ctx a #{})]
         (is (= 1 (count fs)))
         (is (= :duplicate-definition (:rule f)))
-        (is (= (sort [a b]) (:fn-ids f)))
+        ;; ids ride in :fns order (name-sorted), not uuid-sorted — the editor
+        ;; zips the two
+        (is (= [a b] (:fn-ids f)))
         ;; root-namespace rows carry the empty namespace in the live graph
         (is (= #{["" :lint-probe-a] ["" :lint-probe-b]} (set (:fns f))))))
     (testing "the per-ctx snapshot the lint reads agrees with a storage read"
@@ -94,7 +96,7 @@
           (let [c (make-assoc-child! ctx storage "lint-probe-c" "title" title)
                 [g] (findings-naming ctx a #{key})]
             (is (some? g))
-            (is (= (sort [a b c]) (:fn-ids g)))))))))
+            (is (= [a b c] (:fn-ids g)))))))))
 
 
 (deftest unreferenced-private-through-storage-test

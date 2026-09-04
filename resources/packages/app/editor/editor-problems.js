@@ -9,7 +9,7 @@
 //
 //   GET /api/failures  →  [{fn-id, fn-name, namespace-id, count} …]
 //                         the branch view's UNRESOLVED failures per fn
-//                         (same predicate as the Failed runs panel)
+//                         (same predicate as the Inspector's Runs tab)
 //   GET /api/lint      →  [{rule, message, fn-ids, fns:[{id,name,ns}]} …]
 //                         the branch's graph-lint warnings (docs/GRAPH_LINT.md)
 //
@@ -162,6 +162,19 @@ function primeProblemCachesOnce() {
     if (typeof repaintAfterPrime === 'function') repaintAfterPrime();
   });
 }
+
+// "✕ Dismiss all" under the failed lens — dismiss every unresolved failure
+// the branch view lists, next to the lens that shows them: POST /api/failures/ack-all, then
+// re-prime (the counts drop to nothing).
+function gdAckAllFailures(btn) {
+  if (!(window.API && API.api_failures_ack_all)) return;
+  if (btn) btn.disabled = true;
+  authFetch(API.api_failures_ack_all, { method: 'POST' })
+    .catch(() => null)
+    .then(() => refreshProblemCaches())
+    .then(() => { if (btn) btn.disabled = false; });
+}
+window.gdAckAllFailures = gdAckAllFailures;
 
 // A run just finished (or the drawer re-fetched): failures may have
 // changed without a graph write.

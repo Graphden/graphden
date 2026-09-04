@@ -11,7 +11,7 @@
 //
 // Shown to authenticated users (the partial route is auth-required). NOT
 // tenancy-gated — stats exist in single-tenant too. Mirrors
-// editor-errors.js; the caller (editor-sidebar.js mountAdminSection) runs
+// editor-tests.js; the caller (editor-sidebar.js mountAdminSection) runs
 // htmx.process after appending, so the hx-get on a CONNECTED node fires.
 //
 // Globals consumed: isAuthenticated, htmx.

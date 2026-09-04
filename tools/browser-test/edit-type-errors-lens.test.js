@@ -1,25 +1,28 @@
-// Type-errors editor surfaces (Error Tolerance, Phase 3):
+// Type-errors editor surfaces (Error Tolerance, Phase 3 → lenses):
 //
 // 1. A type-breaking binding write (tolerated + recorded since Phase 2)
-//    makes GET /partials/type-errors list the fn.
-// 2. The editor shows it: the Type-errors sidebar section renders the
-//    server partial with the fn's row, and the fn-card root row carries
-//    the ⚠ type-error badge (server-computed `:type-error-count` on the
-//    subtree payload).
-// 3. Fixing the binding clears the diagnostic — the partial empties.
+//    makes the fn's row carry `:type-error-count` — the ⚠ lens's fact.
+// 2. The editor shows it: the fn-card root row carries the ⚠ badge, the
+//    Explorer's ⚠ type errors chip counts it, the fn's row carries ⚠1 and
+//    the ⚠ lens keeps it.
+// 3. Fixing the binding clears the diagnostic — chip, marker and badge go.
 //
-// Run from this directory:  node edit-type-errors-panel.test.js
+// Run from this directory:  node edit-type-errors-lens.test.js
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
 const {assert, newContext, api, getEntities, synthArgs, nodeApi,
        deleteFnByName, waitFor} = require('./edit-test-helpers');
 
-const TEST_NAME = 'test-type-errors-panel';
+const TEST_NAME = 'test-type-errors-lens';
 
-async function typeErrorsPartial() {
-  const r = await nodeApi('GET', '/partials/type-errors');
-  return r.text();
+// The per-fn count the lens reads, off the light row the tree scopes
+// project (`:type-error-count`, omitted when zero).
+async function typeErrorCount() {
+  const r = await nodeApi('GET', '/api/graph/entities?scope=search&q=' + TEST_NAME);
+  const j = await r.json();
+  const f = (j.fns || []).find(x => x.name === TEST_NAME);
+  return f ? (f['type-error-count'] || 0) : 0;
 }
 
 (async () => {
@@ -52,15 +55,15 @@ async function typeErrorsPartial() {
            'type-breaking binding saved WITH warnings: '
            + JSON.stringify(bindResp).slice(0, 200));
 
-    // === Server partial lists the fn ===
-    const listed = await waitFor(async () => {
-      const body = await typeErrorsPartial();
-      return body.includes('#' + TEST_NAME);
-    }, 10000);
-    assert(listed, '/partials/type-errors lists ' + TEST_NAME);
+    // === The row carries the count ===
+    const listed = await waitFor(async () => (await typeErrorCount()) >= 1, 10000);
+    assert(listed, 'the fn row carries :type-error-count after the tolerated write');
 
     // === Editor surfaces ===
+    // Reload: the context's page booted before the diagnostic existed, and a
+    // hash-only goto keeps that document (and its tree counts).
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002') + '/#' + TEST_NAME);
+    await page.reload();
     await page.waitForFunction(
       () => graphReady()
             && !!document.querySelector('button.more-actions-trigger')
@@ -75,24 +78,31 @@ async function typeErrorsPartial() {
       15000);
     assert(badgeSeen, 'type-error badge visible on the fn card root row');
 
-    // The Type-errors panel lives in the Build diagnostics drawer. Open its
-    // tab the way a reader does — opening the drawer is also what re-fetches
-    // the live panels (reloadDiagnosticsSections), so the row's presence is
-    // deterministic rather than riding the boot-mount fetch.
-    await page.waitForSelector('#gd-diag-nav button[data-section="type-errors"]',
-      {timeout: 15000});
-    await page.evaluate(() => {
-      document.querySelector('#gd-diag-nav button[data-section="type-errors"]').click();
+    // The ⚠ lens: chip count, row marker, focus.
+    const chipCount = () => page.evaluate(() => {
+      const c = document.querySelector('#kind-filters .kind-toggle[data-kind="type-errors"] .kind-count');
+      return c ? parseInt(c.textContent || '0', 10) : NaN;
     });
-    const panelRow = await waitFor(
-      () => page.evaluate((name) => {
-        const section = document.querySelector('.sidebar-type-errors');
-        if (!section) return false;
-        const row = section.querySelector('.type-errors-row .type-errors-fn');
-        return !!row && row.textContent.includes(name);
-      }, TEST_NAME),
-      20000);
-    assert(panelRow, 'Type errors sidebar panel lists the fn');
+    const chipSeen = await waitFor(async () => (await chipCount()) >= 1, 15000);
+    assert(chipSeen, '⚠ type errors chip counts the diagnostic: ' + await chipCount());
+    await page.evaluate(() => {
+      const label = [...document.querySelectorAll('#entity-list .ns-label')].find(el => el.textContent === '(primitives)');
+      const header = label?.parentElement;
+      if (header && header.getAttribute('aria-expanded') !== 'true') header.click();
+    });
+    const rowMarker = () => page.evaluate((n) => {
+      const row = [...document.querySelectorAll('#entity-list .entity-item[data-fn-id]')]
+        .find(el => el.querySelector('.name')?.textContent === n);
+      return row?.querySelector('.kind-marker-type-error')?.textContent || null;
+    }, TEST_NAME);
+    const markerSeen = await waitFor(async () => (await rowMarker()) === '⚠1', 20000);
+    assert(markerSeen, 'the fn row carries the ⚠1 marker: ' + await rowMarker());
+    await page.evaluate(() => toggleKind('type-errors'));
+    const focused = await waitFor(() => page.evaluate((n) =>
+      [...document.querySelectorAll('#entity-list .entity-item[data-fn-id]')]
+        .some(el => el.querySelector('.name')?.textContent === n && !el.hidden), TEST_NAME), 10000);
+    assert(focused, 'the ⚠ lens keeps the mistyped fn');
+    await page.evaluate(() => toggleKind('all'));
 
     // === Fix → the diagnostic clears, the panel empties ===
     const port = synthArgs(await getEntities(page, fn.id))
@@ -104,11 +114,8 @@ async function typeErrorsPartial() {
     assert(!fixResp.status || fixResp.status === 200,
            'fix write accepted: ' + JSON.stringify(fixResp).slice(0, 120));
 
-    const cleared = await waitFor(async () => {
-      const body = await typeErrorsPartial();
-      return !body.includes('#' + TEST_NAME);
-    }, 10000);
-    assert(cleared, 'fixed fn no longer listed in /partials/type-errors');
+    const cleared = await waitFor(async () => (await typeErrorCount()) === 0, 10000);
+    assert(cleared, 'fixed fn no longer carries a type-error count');
 
     console.log('PASS');
     process.exitCode = 0;

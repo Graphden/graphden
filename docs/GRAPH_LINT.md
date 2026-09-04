@@ -118,58 +118,42 @@ which BFS-walks from the same registry.
   signatures), never persist. Cost per write is the size of F's
   referrer set, not the graph.
 
-## The editor: the Lint tab
+## The editor: lens + Inspector
 
-The diagnostics drawer under the canvas has five tabs: **Failed
-runs** (failed executions still unresolved, dismissable), **Type
-errors** (recorded checker diagnostics), **Lint**, **Tests**, **Debug**.
-Lint findings are the third *static* kind — computed from the graph, no
-lifecycle beyond "edit until it goes away", never blocking — and the
-one list where the author may disagree.
+Findings reach the author as an Explorer **lens** and an Inspector
+**section**; the drawer under the canvas keeps only Tests and Debug
+(the Lint tab shipped 2026-09-03 and was retired the next day, once
+the lenses landed).
 
-The Explorer's **⚐ lint** lens shows the same findings as a tree
-focus: `GET /api/lint` is the JSON twin of the tab (same base-fn, same
-fresh read), cached client-side (`editor-problems.js`)
-and re-read per graph load; the chip counts findings, a namespace
-row counts its fns with findings, a fn row carries `⚐N`.
-
-`GET /partials/lint` renders one row per warning: the rule, the member
-fns as `#hash` links (namespace dimmed), the engine's message, and a
-**Not an issue** button. The badge on the tab counts the rows. The
-Inspector's detail pane repeats the rows naming the selected fn under a
-**Lint** heading with the same **Not an issue** / **Restore**, POSTing
-to `/partials/inspector-lint/{suppress,restore}` which render the
-section back; the hidden entries naming the fn are listed there too.
+- **⚐ lint lens** — `GET /api/lint` is the JSON read (same base-fn as
+  the section, fresh path), cached client-side (`editor-problems.js`)
+  and re-primed per graph load, after runs and after an Inspector
+  action; the chip counts findings, a namespace row counts its fns
+  with findings, a fn row and its card carry `⚐N`.
+- **Inspector › Lint** — the rows naming the selected fn: rule, member
+  fns as `#hash` links, the engine's message, **Not an issue**; the
+  branch's hidden entries naming the fn with **Restore**. The two
+  actions POST to `/partials/inspector-lint/{suppress,restore}` which
+  render the section back.
 
 **Suppression lives in the graph.** "Not an issue" POSTs the finding's
-key (`rule` + the sorted member fn-ids) to `/partials/lint/suppress`,
-which appends `{:rule :fn-ids}` to the value of the root fn
-`lint-suppressions` — a `:const` created on first use through the
-ordinary CRUD write unit, so it is versioned per branch, merges with
-the branch, and is visible and editable on the canvas like any fn. The
-key is the member *ids*: renaming a member keeps the suppression,
-adding a third copy is a new finding. The panel's collapsed hidden
-list shows what was dismissed with a **Restore** per entry
-(`/partials/lint/restore`). No new entity, no new table, no derived
-state persisted — only what the author explicitly said.
+key (`rule` + the sorted member fn-ids); the handler appends
+`{:rule :fn-ids}` to the value of the root fn `lint-suppressions` — a
+`:const` created on first use through the ordinary CRUD write unit, so
+it is versioned per branch, merges with the branch, and is visible and
+editable on the canvas like any fn. The key is the member *ids*:
+renaming a member keeps the suppression, adding a third copy is a new
+finding. No new entity, no new table, no derived state persisted —
+only what the author explicitly said.
 
-Why not merge Type errors and Lint into one "Problems" pane: a hard
-"this fn refuses to execute" row must not be scrolled past among
-twenty "this already exists as `x`" hints. **Errors** became **Failed
-runs** in the same landing — next to "Type errors" and "Lint" it read
-as the generic bucket, and lesson 16 already described it as "recent
-failed runs".
-
-The whole flow is graph composition (`app/editor-panels/fns.edn`,
-`_plint-*`) over one base-fn, `:branch-lint-warnings`, whose impl is a
-single `lint.graph/lint-branch` call. The drawer asks for `:fresh
-true`: the per-ctx graph snapshot is spliced only after a write's
-response has returned, so a panel opened right after an edit would
-otherwise lint the pre-edit graph — the tab reads the branch straight
-from storage (a few hundred ms, and the drawer is opened
-deliberately). The inspector section, rendered on every selection,
-takes the memoised snapshot instead. Rendering is parametrised by
-`:warnings` / `:suppressed` free args so the two POST handlers render
-from the list they just wrote — the store's own thunk was forced
-before the write (ADR-thunk-once), so re-reading it would show the
-pre-write list.
+The flow is graph composition (`app/editor-panels/fns.edn` `_plint-*`
+for the store and the entry, `app/editor-provenance/fns.edn`
+`_insp-lint-*` for the section) over one base-fn,
+`:branch-lint-warnings`, whose impl is a single
+`lint.graph/lint-branch` call. The section is parametrised by
+`:suppressed` so the POST handlers render from the list they just
+wrote — the store's own thunk was forced before the write
+(ADR-thunk-once). `:fresh` picks the storage read over the per-ctx
+snapshot: the snapshot is spliced only after a write's response has
+returned, so a read right after an edit would otherwise lint the
+pre-edit graph.

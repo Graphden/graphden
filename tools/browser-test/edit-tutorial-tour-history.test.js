@@ -2,8 +2,8 @@
 //
 // Both lessons are about surfaces that answer "what happened": the ⌛
 // popover (every version row of a fn, across branches, with restore) and
-// the diagnostics drawer's Failed runs / Type errors / Lint (runs that
-// failed, edits that don't type-check, definitions the graph already has). They were the last two shipped user surfaces with no lesson
+// the Explorer's problem lenses + the Inspector (runs that failed, edits
+// that don't type-check, definitions the graph already has). They were the last two shipped user surfaces with no lesson
 // at all, so they get a walk like every other lesson: the steps are
 // performed for real, and the tour's own checks decide whether each one
 // counted.
@@ -286,50 +286,42 @@ async function openVersionHistory(page) {
     assert(runReady.persisted,
       '“Save to history” is ticked — an unticked failure never reaches Errors');
     await page.click('.execute-popover.visible .execute-run-btn');
-    await waitTourTitle(page, 'Open Failed runs', 150000);
-
-    await openOperateSection(page, 'errors');
-    await waitTourTitle(page, 'Read the row', 60000);
-    // The audit row is written as the run finishes; the panel fetched when
-    // the section opened. Re-open until the row is there rather than reading
-    // a snapshot taken a beat too early.
-    let errText = '';
+    await waitTourTitle(page, 'Find it in the tree', 150000);
+    // The failed lens — the chip toggles the focus; the tour's check is the
+    // pressed state.
+    await page.evaluate(() => toggleKind('failed'));
+    await waitTourTitle(page, 'Read the failure', 60000);
+    // The Runs tab of the (still selected) fn lists the unresolved failure.
+    // The cache behind the failed lens re-primes after the run; the tab's
+    // partial reads storage directly, so it shows the row as soon as the
+    // audit row landed — re-open until it does.
+    await page.waitForSelector('[data-insp-tab="stats"]', {timeout: 15000});
+    let failText = '';
     for (let i = 0; i < 10; i++) {
-      errText = await page.evaluate(() =>
-        document.querySelector('#gd-diag-panels > [data-section="errors"]')?.textContent || '');
-      if (/tutorial-bad-json/.test(errText)) break;
-      // Collapse + re-open the drawer: opening is what re-fetches the
-      // live diagnostics panels (reloadDiagnosticsSections).
-      await page.evaluate(() => {
-        document.querySelector('#gd-diag-nav button[data-section="errors"]')?.click();
-        document.querySelector('#gd-diag-nav button[data-section="errors"]')?.click();
-      });
-      // A poll INTERVAL, not a settle (no Escape in this loop): exit as
-      // soon as the panel shows the row instead of always paying 1.5s.
-      await waitUntil(page, () => /tutorial-bad-json/.test(
-        document.querySelector('#gd-diag-panels > [data-section="errors"]')?.textContent || ''),
-      null, 1500);
+      await page.evaluate(() => document.querySelector('[data-insp-tab="stats"]').click());
+      await waitUntil(page, () => /Malformed JSON/i.test(
+        document.querySelector('#gd-insp-runs .execute-history-failures')?.textContent || ''),
+      null, 2000);
+      failText = await page.evaluate(() =>
+        document.querySelector('#gd-insp-runs .execute-history-failures')?.textContent || '');
+      if (/Malformed JSON/i.test(failText)) break;
+      await page.evaluate(() => document.querySelector('[data-insp-tab="overview"]')?.click());
+      await page.waitForTimeout(500);
     }
-    assert(/tutorial-bad-json/.test(errText),
-      'the failed run is listed by fn name (got: ' + errText.slice(0, 160) + ')');
-    assert(/Malformed JSON/i.test(errText),
-      '…with the error message it failed on');
-    assert(await clickTourButton(page, 'Next'), 'lesson 16 error-row Next');
-
-    await waitTourTitle(page, 'Now a static mistake', 30000);
+    assert(/Malformed JSON/i.test(failText),
+      'the Runs tab lists the unresolved failure with its message (got: ' + failText.slice(0, 160) + ')');
+    await waitTourTitle(page, 'Now a static mistake', 60000);
     assert(await clickTourButton(page, 'Next'), 'lesson 16 static Next');
-    await waitTourTitle(page, 'Open Type errors', 30000);
-    await openOperateSection(page, 'type-errors');
+    await waitTourTitle(page, 'Focus on type errors', 30000);
+    await page.evaluate(() => toggleKind('type-errors'));
     await waitTourTitle(page, 'And what already exists', 60000);
-    // The Lint tab — the graph lint's warnings for the branch; the tour's
-    // dom check only asks that the section is open, empty is its normal
-    // state here (nothing in the tutorial fns duplicates anything).
-    await openOperateSection(page, 'lint');
+    await page.evaluate(() => toggleKind('lint'));
     await waitTourTitle(page, 'You get to disagree', 60000);
     assert(await clickTourButton(page, 'Next'), 'lesson 16 lint Next');
-    await waitTourTitle(page, 'What each panel answers', 60000);
+    await waitTourTitle(page, 'What each surface answers', 60000);
+    await page.evaluate(() => toggleKind('all'));
     await finishAndDelete(page);
-    console.log('  lesson 16: walked — a persisted failure in Failed runs, all three panels opened');
+    console.log('  lesson 16: walked — a persisted failure under the ✕ lens + Runs tab, the ⚠ and ⚐ lenses');
 
     console.log('PASS');
   } catch (err) {

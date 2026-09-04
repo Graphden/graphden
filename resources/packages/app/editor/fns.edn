@@ -147,9 +147,6 @@
                   "packages/app/editor/editor-platform-access.js"
                   "packages/app/editor/editor-quota.js"
                   "packages/app/editor/editor-stats.js"
-                  "packages/app/editor/editor-errors.js"
-                  "packages/app/editor/editor-type-errors.js"
-                  "packages/app/editor/editor-lint.js"
                   ;; Tests: status cache + Operate section shell + the
                   ;; isTestFn predicate editor-sidebar.js's lens reads.
                   "packages/app/editor/editor-tests.js"
@@ -407,6 +404,15 @@
                        :onclick "openCreateSecretForm(this)"}
               [:span {:class "kind-glyph" :aria-hidden "true"} "🔒"]
               [:span {:class "kind-label"} "New secret"]]
+             ;; Dismiss-all-failures action — the failed lens's counterpart of
+             ;; the old Failed-runs panel's "Dismiss all": revealed only with
+             ;; the `failed` lens active (editor-problems.js gdAckAllFailures).
+             [:button {:id "failed-ack-all-btn" :type "button" :class "gd-secret-add"
+                       :hidden "hidden" :title "Dismiss every unresolved failure this branch view lists"
+                       :aria-label "Dismiss all failures"
+                       :onclick "gdAckAllFailures(this)"}
+              [:span {:class "kind-glyph" :aria-hidden "true"} "✕"]
+              [:span {:class "kind-label"} "Dismiss all"]]
              ;; Smart views — saved virtual groupings (editor-smart-views.js).
              ;; NOT a kind lens, so it sits outside the kind-filters group,
              ;; next to the secret-add action.

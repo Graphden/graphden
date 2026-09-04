@@ -143,6 +143,22 @@ async function cleanup(page) {
     assert(focused, 'lint lens shows the pair and hides the (non-lint) failing fn');
     await page.evaluate(() => toggleKind('all'));
 
+    // ✕ Dismiss all — appears under the chips with the failed lens on,
+    // acknowledges every unresolved failure, the count drops to nothing.
+    await page.evaluate(() => toggleKind('failed'));
+    const ackBtnSeen = await waitFor(() => page.evaluate(() => {
+      const b = document.getElementById('failed-ack-all-btn');
+      return !!b && !b.hidden;
+    }), 10000);
+    assert(ackBtnSeen, 'Dismiss all appears under the failed lens');
+    await page.evaluate(() => document.getElementById('failed-ack-all-btn').click());
+    const ackedAll = await waitFor(async () => {
+      const n = await chipCount('failed');
+      return Number.isNaN(n) || n === 0;
+    }, 15000);
+    assert(ackedAll, 'Dismiss all clears the failed count: ' + await chipCount('failed'));
+    await page.evaluate(() => toggleKind('all'));
+
     console.log('PASS');
     process.exitCode = 0;
   } catch (e) {

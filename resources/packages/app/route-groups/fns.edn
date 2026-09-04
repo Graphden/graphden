@@ -35,15 +35,8 @@
                   :partial-fn-version-executions
                   :partial-execute-history
                   :partial-stats
-                  :partial-error-log
-                  :partial-error-log-ack
-                  :partial-error-log-ack-all
                   :partial-assets-panel
                   :partial-asset-edit
-                  :partial-type-errors
-                  :partial-lint
-                  :partial-lint-suppress
-                  :partial-lint-restore
                   :partial-inspector-lint-suppress
                   :partial-inspector-lint-restore
                   :partial-execute-history-ack

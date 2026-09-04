@@ -454,15 +454,22 @@ function registerBuiltinShortcuts() {
     description: 'Tests',
     run: () => clickIfPresent('#gd-diag-nav button[data-section="tests"], [data-diag-tab="tests"], .gd-diag-tab[data-tab="tests"]'),
   });
+  // The problem LENSES — the Explorer focus that replaced the Failed runs /
+  // Type errors / Lint drawer tabs.
   registerShortcut({
-    id: 'diagnostics-errors', keys: 'x', group: 'Diagnostics',
-    description: 'Failed runs',
-    run: () => clickIfPresent('#gd-diag-nav button[data-section="errors"], [data-diag-tab="errors"], .gd-diag-tab[data-tab="errors"]'),
+    id: 'lens-failed', keys: 'x', group: 'Diagnostics',
+    description: 'Failed-runs lens',
+    run: () => clickIfPresent('#kind-filters .kind-toggle[data-kind="failed"]'),
   });
   registerShortcut({
-    id: 'diagnostics-lint', keys: 'w', group: 'Diagnostics',
-    description: 'Lint',
-    run: () => clickIfPresent('#gd-diag-nav button[data-section="lint"], [data-diag-tab="lint"], .gd-diag-tab[data-tab="lint"]'),
+    id: 'lens-type-errors', keys: 'y', group: 'Diagnostics',
+    description: 'Type-errors lens',
+    run: () => clickIfPresent('#kind-filters .kind-toggle[data-kind="type-errors"]'),
+  });
+  registerShortcut({
+    id: 'lens-lint', keys: 'w', group: 'Diagnostics',
+    description: 'Lint lens',
+    run: () => clickIfPresent('#kind-filters .kind-toggle[data-kind="lint"]'),
   });
   // Surfaces — the management destinations otherwise reachable only through
   // the account chip's menu (and, for Build, the brand button). Registered

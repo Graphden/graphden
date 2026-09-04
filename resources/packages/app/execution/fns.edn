@@ -733,6 +733,18 @@
    :parent :json-handler
    :args {:data :_api-failures-data}}
 
+  {:name :_api-failures-ack-all-data
+   :description "`{:acknowledged n}` — dismiss every unresolved failure the current branch view lists (7-day window)."
+   :parent :zipmap
+   :args {:keys [{:value :acknowledged}]
+          :vals [{:parent :failure-ack-all :args {:days 7}}]}}
+
+  {:name :api-failures-ack-all-handler
+   :lambda-params []
+   :description "Ring handler for POST /api/failures/ack-all — the failed lens's Dismiss all."
+   :parent :json-handler
+   :args {:data :_api-failures-ack-all-data}}
+
   {:name :failure-ack
    :description "Dismiss ONE failed execution from the Failed runs panel — sets `:acknowledged-at` on the row (org-guarded; the audit row itself stays for its TTL). Returns true when a row was updated, false for an unknown/foreign/already-acked id."
    :args {:execution-id {:type :nullable-text :description "The `:execution-id` of the failure row to dismiss (uuid text; nil/malformed → false)."}}

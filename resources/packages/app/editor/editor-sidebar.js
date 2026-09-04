@@ -65,7 +65,6 @@ const _adminNavBtns = new Map();
 const OP_SECTION_LABELS = {
   grants: 'Grants', users: 'Members', roles: 'Roles', orgs: 'Organizations',
   packages: 'Packages', stats: 'Monitoring',
-  errors: 'Failed runs', 'type-errors': 'Type errors', lint: 'Lint',
   'platform-access': 'Platform access',
   assets: 'Assets', tests: 'Tests', debug: 'Debug', executors: 'Executor',
 };
@@ -162,9 +161,6 @@ function reloadDiagnosticsSections() {
   // their caches on the same trigger (the drawer opening).
   if (typeof refreshProblemCaches === 'function') refreshProblemCaches();
   reloadLiveSections('gd-diag-panels', {
-    'type-errors': typeof buildTypeErrorsSection === 'function' ? buildTypeErrorsSection : null,
-    lint: typeof buildLintSection === 'function' ? buildLintSection : null,
-    errors: typeof buildErrorsSection === 'function' ? buildErrorsSection : null,
     tests: typeof buildTestsSection === 'function' ? buildTestsSection : null,
     debug: typeof buildDebugSection === 'function' ? buildDebugSection : null,
   });
@@ -1275,6 +1271,13 @@ function syncKindFilterBar() {
     const authed = typeof isAuthenticated === 'function' && isAuthenticated();
     addBtn.hidden = !(authed && lensKinds.has('secrets'));
   }
+  // "✕ Dismiss all" — the failed lens's action, same contextual rule.
+  const ackAll = document.getElementById('failed-ack-all-btn');
+  if (ackAll) {
+    const authed = typeof isAuthenticated === 'function' && isAuthenticated();
+    const any = typeof getFailureTotal === 'function' && (getFailureTotal() || 0) > 0;
+    ackAll.hidden = !(authed && lensKinds.has('failed') && any);
+  }
 }
 
 // Collapsible "(primitives)" node for namespace-less entities — the
@@ -1432,7 +1435,7 @@ function revealFnInTree(fnId) {
 
 // Mount the Operate / Platform / Diagnostics panes: Grants, Members, Roles,
 // Organizations, Platform access, Packages, Monitoring, Apps, Assets, plus
-// the code diagnostics (Failed runs, Type errors, Lint, Tests, Debug). Each builder is
+// the code diagnostics (Tests, Debug — the problem lists became lenses). Each builder is
 // a global from its own module and each returns null when it doesn't apply,
 // so a section opts out by being absent rather than by being listed
 // somewhere.
@@ -1458,7 +1461,7 @@ function mountOpsSections(fallbackList, searchMode) {
   const opsNavHost = opsPane ? opsNav : null;
   const platHost = platPane || opsHost;
   const platNavHost = platPane ? platNav : opsNavHost;
-  // Code diagnostics (errors / type-errors / lint / tests / debug) → the Build
+  // Code diagnostics (tests / debug) → the Build
   // drawer, so a fn link in a row navigates the canvas without a surface
   // switch; Operate keeps the admin panels.
   const diagHost = diagPane || opsHost;
@@ -1507,17 +1510,6 @@ function mountOpsSections(fallbackList, searchMode) {
   // (No Apps section: publishing a fn as an app is the ▣ row action on the
   // fn itself — editor-apps.js showFnAppsPopover; the apps LENS is the
   // org-wide overview. The Organization panel was retired 2026-08-30.)
-  if (typeof buildErrorsSection === 'function') {
-    mountAdminSection(diagHost, diagNavHost, 'errors', buildErrorsSection);
-  }
-  if (typeof buildTypeErrorsSection === 'function') {
-    mountAdminSection(diagHost, diagNavHost, 'type-errors', buildTypeErrorsSection);
-  }
-  if (typeof buildLintSection === 'function') {
-    // Graph lint — duplicates / dead privates on the current branch
-    // (editor-lint.js).
-    mountAdminSection(diagHost, diagNavHost, 'lint', buildLintSection);
-  }
   if (typeof buildTestsSection === 'function') {
     mountAdminSection(diagHost, diagNavHost, 'tests', buildTestsSection);
   }

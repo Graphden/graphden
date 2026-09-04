@@ -49,7 +49,7 @@ memory-growth vector).
 
 ## 2. Error log — unresolved failures viewer (always on)
 
-The editor's **Failed runs** tab (diagnostics drawer) lists the current branch view's
+The editor's **✕ failed** lens (Explorer) focuses on, and the Inspector's **Runs** tab lists, the current branch view's
 UNRESOLVED failures (`:recent-failures` → `GET /partials/error-log`),
 reading the already-scrubbed `:error`/`:error-data` off the audit rows.
 A failure clears when the fn ships a new version, when the same version
@@ -133,7 +133,7 @@ don't fit your traffic.
 ## 4. User feedback intake
 
 The editor carries a **Report a problem** form (shell menu, plus a
-footer button on the Failed runs panel that pre-checks the error-log
+"Report a problem" entry in the account menu that pre-checks the error-log
 attachment). It is how a user on ANY instance — local, self-hosted,
 cloud — files a bug/idea/question without needing an account anywhere.
 

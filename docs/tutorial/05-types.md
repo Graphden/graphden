@@ -325,9 +325,9 @@ real names instead of trusting your memory.
 **4. Warnings on save, not blocked saves.** A write whose
 aggregate type-check fails still lands; the failure is recorded
 as a per-branch diagnostic. You see it as: the ⚠ badge on the
-fn-card's root row, the per-branch **Type errors** section on the
-**Organization** surface (open it from the account menu) listing every
-flagged fn (click-through to the fn), per-namespace
+fn-card's root row, the Explorer's **⚠ type errors** lens marking every
+flagged fn (with the message under the argument in the Inspector's
+Bindings tab), per-namespace
 ⚠ counts on the explorer tree rows, and a REFUSAL when you try to
 execute the fn (clear message naming the fn and the first error).
 Fixing the offending binding clears all of it. Structural and

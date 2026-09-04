@@ -801,7 +801,7 @@
              :title "When something breaks"
              :steps
              [{:title "Three kinds of wrong"
-               :body "A failed RUN, a failed type-check and a duplicated definition are different events, and they have different lists. Failed runs holds runs that threw; Type errors holds edits the checker objected to but let through; Lint holds structure the graph already had. This lesson visits all three."
+               :body "A failed RUN, a failed type-check and a duplicated definition are different events. Each is a LENS in the Explorer — ✕ failed, ⚠ type errors, ⚐ lint — with counts on the chip, on every namespace and on every fn, and each has its detail in the Inspector. This lesson visits all three."
                :target nil
                :check {:kind "manual"}}
               {:title "Something that fails"
@@ -815,37 +815,37 @@
                :check {:kind "fn-parent" :name "tutorial-bad-json" :parent "parse-json"}
                :creates {:type "fn" :name "tutorial-bad-json"}}
               {:title "Break it on purpose"
-               :body "Click [[⋯]] → [[▶ Run]]. Type `not json at all` into the string field, TICK [[Save to history]], and [[Run]]. The result pane reads “Malformed JSON.” — an unticked run leaves no audit row, so ticking is what puts this failure on the list you are about to open."
+               :body "Click [[⋯]] → [[▶ Run]]. Type `not json at all` into the string field, TICK [[Save to history]], and [[Run]]. The result pane reads “Malformed JSON.” — an unticked run leaves no audit row, so ticking is what makes this failure count."
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
-              {:title "Open Failed runs"
-               :body "Click [[Failed runs]] in the diagnostics bar under the canvas — the drawer opens without leaving the editor. It lists this branch's UNRESOLVED failures from the last 7 days, newest first — the fn as a link, when it finished, and the message. A fn link selects it on the canvas while the list stays open."
-               :target "#gd-diag-nav button[data-section=\"errors\"]"
-               :check {:kind "dom" :selector "#gd-diag-drawer[data-open=\"1\"] #gd-diag-panels > [data-section=\"errors\"]:not([hidden])"}}
-              {:title "Read the row"
-               :body "Your run is at the top. Expand [[details]] — the error DATA is there too, carrying the typed :validation-error/malformed-json a client would have received. Both were scrubbed when the row was written, not when it was shown, so nothing secret is waiting here. And the row is no permanent scar: it clears on its own when you fix the fn or a clean re-run succeeds — or right now, via its [[✕]] (Dismiss)."
-               :target ".error-log-list"
-               :check {:kind "manual"}}
+              {:title "Find it in the tree"
+               :body "Click the [[✕ failed]] chip under the Explorer's filter. The tree narrows to fns with UNRESOLVED failures from the last 7 days — yours, with a ✕1 on its row, its namespace counting it, the chip counting the runs. A failure clears when you fix the fn, when the same version later succeeds, or when you dismiss it."
+               :target "#kind-filters .kind-toggle[data-kind=\"failed\"]"
+               :check {:kind "dom" :selector "#kind-filters .kind-toggle[data-kind=\"failed\"][aria-pressed=\"true\"]"}}
+              {:title "Read the failure"
+               :body "With tutorial-bad-json selected, open the Inspector's [[Runs]] tab. Its unresolved failures sit at the top — the message, and ✕ to dismiss. The error DATA was scrubbed when the row was written, not when it is shown, so nothing secret-tainted is waiting here for a teammate."
+               :target "[data-insp-tab=\"stats\"]"
+               :check {:kind "dom" :selector "#gd-insp-runs .execute-history-failures:not([hidden])"}}
               {:title "Now a static mistake"
-               :body "Failed runs is about run time. The next panel is about WRITE time: bind a value the type-checker objects to and the write still lands, with a diagnostic attached. You saw one badge in lesson 05 — Type errors is the branch-wide list of them."
+               :body "Failures are about run time. The next lens is about WRITE time: bind a value the type-checker objects to and the write still lands, with a diagnostic attached. You saw one badge in lesson 05 — the ⚠ lens is the branch-wide view of them, and the Inspector's Bindings tab prints the message under the argument."
                :target nil
                :check {:kind "manual"}}
-              {:title "Open Type errors"
-               :body "Same bar: click [[Type errors]]. Empty means nothing on this branch is mistyped right now — which is the normal state, and the reason this is a worklist rather than a wall."
-               :target "#gd-diag-nav button[data-section=\"type-errors\"]"
-               :check {:kind "dom" :selector "#gd-diag-drawer[data-open=\"1\"] #gd-diag-panels > [data-section=\"type-errors\"]:not([hidden])"}}
+              {:title "Focus on type errors"
+               :body "Click the [[⚠ type errors]] chip. Empty means nothing on this branch is mistyped right now — the normal state, and why this is a lens rather than a wall."
+               :target "#kind-filters .kind-toggle[data-kind=\"type-errors\"]"
+               :check {:kind "dom" :selector "#kind-filters .kind-toggle[data-kind=\"type-errors\"][aria-pressed=\"true\"]"}}
               {:title "And what already exists"
-               :body "The third list is about STRUCTURE. Click [[Lint]] in the same bar. It reads the branch the way the package loader reads fns.edn and reports fn-defs that duplicate one another — exactly, or once their private helpers are inlined — and private fn-defs nothing uses. Empty is the normal state here too."
-               :target "#gd-diag-nav button[data-section=\"lint\"]"
-               :check {:kind "dom" :selector "#gd-diag-drawer[data-open=\"1\"] #gd-diag-panels > [data-section=\"lint\"]:not([hidden])"}}
+               :body "The third lens is about STRUCTURE. Click [[⚐ lint]]. It reads the branch the way the package loader reads fns.edn and reports fn-defs that duplicate one another — exactly, or once their private helpers are inlined — and private fn-defs nothing uses. Empty is the normal state here too."
+               :target "#kind-filters .kind-toggle[data-kind=\"lint\"]"
+               :check {:kind "dom" :selector "#kind-filters .kind-toggle[data-kind=\"lint\"][aria-pressed=\"true\"]"}}
               {:title "You get to disagree"
-               :body "A lint row is advice, not a verdict. Each one carries [[Not an issue]]: click it and the finding moves into the panel's hidden list, and the decision is written INTO THE GRAPH — a root fn named lint-suppressions, a :const whose value lists what you dismissed. It is versioned with the branch and you can open, edit or delete it like any fn. [[Restore]] in the hidden list brings a finding back. The written lesson's step 8 builds a duplicate pair to try this on."
+               :body "A lint finding is advice, not a verdict. Select a flagged fn and the Inspector's Lint section carries it with [[Not an issue]]: the decision is written INTO THE GRAPH — a root fn named lint-suppressions, a :const whose value lists what you dismissed, versioned with the branch. [[Restore]] brings a finding back. The written lesson's step 8 builds a duplicate pair to try this on."
                :target nil
                :check {:kind "manual"}}
-              {:title "What each panel answers"
-               :body "Failed runs: what broke, and when. Type errors: what does not fit, right now, on this branch. Lint: what the graph already has. Debug — the last tab in the bar — answers why (lesson 15), and Monitoring (account menu → [[Organization]]) answers how often. Click [[Finish]] — the tour offers to delete tutorial-bad-json."
-               :target nil
+              {:title "What each surface answers"
+               :body "The lenses answer WHERE: which fns, which namespaces, how many. The Inspector answers WHAT: the failure's message and ✕, the diagnostic under its argument, the finding with your say. Debug — in the bar under the canvas — answers why (lesson 15), and Monitoring (account menu → [[Organization]]) answers how often. Click [[◍ all]] to clear the lens, then [[Finish]] — the tour offers to delete tutorial-bad-json."
+               :target "#kind-filters .kind-toggle[data-kind=\"all\"]"
                :check {:kind "manual"}}]}
             {:id "17"
              :chapter "The editor"

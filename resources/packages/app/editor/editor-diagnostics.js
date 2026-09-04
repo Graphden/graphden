@@ -1,6 +1,6 @@
 // Editor — Diagnostics drawer (Build surface): the collapsible strip under
-// the canvas hosting the live code-facing lists (Failed runs / Type errors /
-// Lint / Tests / Debug). These used to sit on the Organization surface, which hid
+// the canvas hosting the live code-facing lists (Tests / Debug — the
+// problem lists became Explorer lenses + Inspector sections). These used to sit on the Organization surface, which hid
 // the editor while you read them; in the drawer a fn link in a row navigates
 // the canvas and the list stays open. editor-sidebar.js mounts the section
 // panes + bar tabs (mountOpsSections → #gd-diag-nav / #gd-diag-panels); this
@@ -43,12 +43,12 @@ function _diagSetOpen(open) {
 function gdDiagToggle() { _diagSetOpen(!gdDiagIsOpen()); }
 window.gdDiagToggle = gdDiagToggle;
 
-// Badge counts on the bar tabs. Sources:
-//   errors / type-errors / lint — row counts of the loaded panel partials (they
-//     lazy-load at mount, so the counts appear shortly after boot);
-//   tests — the /api/tests/status cache (a failed COUNT beats a row count:
-//     it also reflects auto-runs that landed while the panel was stale).
-// Debug carries no badge — the trap is short-lived state with its own panel.
+// Badge counts on the bar tabs. The problem lists (failed runs / type
+// errors / lint) moved to the Explorer's lenses and the Inspector, so the
+// only badge left is tests — the /api/tests/status cache (a failed COUNT
+// beats a row count: it also reflects auto-runs that landed while the
+// panel was stale). Debug carries no badge — the trap is short-lived
+// state with its own panel.
 function gdDiagUpdateBadges() {
   const nav = document.getElementById('gd-diag-nav');
   if (!nav) return;
@@ -67,15 +67,6 @@ function gdDiagUpdateBadges() {
     badge.textContent = text;
     if (cls) badge.classList.add(cls);
   };
-  const rowCount = (key, sel) => document.querySelectorAll(
-    '#gd-diag-panels section[data-section="' + key + '"] ' + sel).length;
-  const errs = rowCount('errors', '.error-log-row');
-  setBadge('errors', errs > 0 ? String(errs) : null, 'diag-bad');
-  const terrs = rowCount('type-errors', '.type-errors-row');
-  setBadge('type-errors', terrs > 0 ? String(terrs) : null, 'diag-bad');
-  // Lint: warnings only (hidden rows are inside <details>, not counted).
-  const lint = rowCount('lint', '.lint-list > .lint-row');
-  setBadge('lint', lint > 0 ? String(lint) : null, 'diag-bad');
   const tst = typeof gdTestStatusSummary === 'function' ? gdTestStatusSummary() : null;
   if (tst && tst.total > 0) {
     setBadge('tests',

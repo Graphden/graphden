@@ -5057,43 +5057,14 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border-radius: 2px;
 }
 /* Phase C2 error-log sidebar section. */
-.error-log-row { position: relative; padding: 6px 24px 6px 8px;
-  border-bottom: 1px dashed var(--light-border); font-size: 0.6875rem; }
 .error-log-ack { position: absolute; top: 4px; right: 4px;
   background: none; border: 0; padding: 0 4px; cursor: pointer;
   font-size: 0.6875rem; color: var(--muted-fg); }
 .error-log-ack:hover { color: var(--fg); }
-.error-log-toolbar { display: flex; justify-content: flex-end; padding: 2px 8px; }
-.error-log-ack-all { background: none; border: 0; padding: 0; cursor: pointer;
-  font-size: 0.625rem; color: var(--muted-fg); }
-.error-log-ack-all:hover { color: var(--fg); }
-.error-log-fn { color: var(--accent); display: block; }
-.error-log-time { color: var(--light-fg); }
-.error-log-msg { color: var(--error-fg); overflow-wrap: anywhere; }
-.error-log-data { font-size: 0.625rem; white-space: pre-wrap; word-break: break-all;
-  color: var(--muted-fg); margin: 2px 0 0; }
-.error-log-details summary { cursor: pointer; color: var(--muted-fg); font-size: 0.625rem; }
-.error-log-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 0.6875rem; }
 
-/* Phase 3 type-errors sidebar section — the current branch's recorded
-   type diagnostics. Same row grammar as the error-log above. */
-.type-errors-row { padding: 6px 8px; border-bottom: 1px dashed var(--light-border);
-  font-size: 0.6875rem; }
-.type-errors-fn { color: var(--accent); display: block; }
-.type-errors-arg { color: var(--light-fg); }
-.type-errors-arg:empty { display: none; }
-.type-errors-msg { color: var(--error-fg-strong); overflow-wrap: anywhere; }
-.type-errors-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 0.6875rem; }
-.type-errors-list { max-height: 320px; overflow-y: auto; }
 
-/* Lint diagnostics-drawer section — the graph lint's warnings on the
-   current branch. Same row grammar as the type-errors family above; the
-   rule chip + member links + message + "Not an issue" button are all
-   server-rendered. Hidden (suppressed) rows sit inside a <details>. */
-.lint-row { padding: 6px 8px; border-bottom: 1px dashed var(--light-border);
-  font-size: 0.6875rem; display: grid; grid-template-columns: auto 1fr auto;
-  grid-template-areas: "rule fns btn" "rule msg btn"; gap: 2px 8px;
-  align-items: start; }
+/* Lint rows — the Inspector's Lint section (rule chip + member links +
+   message + "Not an issue" / "Restore", all server-rendered). */
 .lint-rule { grid-area: rule; color: var(--muted-fg); font-family: var(--mono, monospace);
   white-space: nowrap; }
 .lint-fns { grid-area: fns; display: flex; flex-wrap: wrap; gap: 2px 10px; }
@@ -5105,11 +5076,8 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   color: var(--muted-fg); background: transparent; border: 1px solid var(--light-border);
   border-radius: 3px; cursor: pointer; white-space: nowrap; }
 .lint-suppress:hover, .lint-restore:hover { color: var(--fg); border-color: var(--accent); }
-.lint-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 0.6875rem; }
-.lint-list { max-height: 320px; overflow-y: auto; }
-.lint-hidden { padding: 4px 8px; font-size: 0.6875rem; }
-.lint-hidden-summary { color: var(--muted-fg); cursor: pointer; }
 .lint-row-hidden { opacity: 0.7; }
+.execute-history-failure .error-log-ack { position: static; }
 .gd-insp-lint-row .lint-fns { margin-bottom: 2px; }
 .gd-insp-lint-hint { color: var(--muted-fg); font-size: 0.6875rem; padding: 2px 0; }
 .gd-insp-lint-row .lint-suppress, .gd-insp-lint-row .lint-restore { position: static; margin-top: 2px; }

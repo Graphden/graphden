@@ -76,6 +76,17 @@
            the *same* `fn-id` run in two contexts can resolve to different
            code — this is where that happens."}
 
+    {:ns graphden.executor.context :defn fill-graph-cache!
+     :say "How the graph cache is FILLED on a miss — and why the install is
+           guarded. A write that commits while a loader is reading storage
+           finds an empty cache (nothing to splice) and primes the post-write
+           graph through its delta path; an unguarded loader would then put
+           its pre-write read back over it, and readers would miss the fn
+           they just created until the next write. So a loader takes the
+           ctx's invalidation epoch BEFORE reading and installs under the
+           invalidation lock only while that epoch still holds — a stale
+           read is discarded, never published."}
+
     {:ns graphden.executor.compile-runtime :defn registry
      :say "Returns the `{fn-id -> closure}` map from the context holder. A warm
            holder is served straight back; if a full clear flagged it stale it

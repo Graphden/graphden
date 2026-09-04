@@ -27,6 +27,8 @@ const {
 // Set a fn's description through the ⋯ → i inline editor — the edit lesson
 // 28 asks for twice, and the cheapest write that cuts a new `:fn-version`
 // (a binding write would NOT: it versions the binding, not the fn).
+let _lessonFnId = null;
+
 async function setDescription(page, text) {
   // ⋯ → i TOGGLES a pinned description tooltip, and only a pinned one grows
   // the ✎ Edit button — so this is a sequence with state, not three
@@ -44,6 +46,11 @@ async function setDescription(page, text) {
     // fell through in seconds. The tooltip's own × button is the one
     // public path that resets both flags — use it.
     await page.evaluate(() => {
+      // Edit mode renders no × — leave it through Cancel first (clears the
+      // editing flag and re-renders read mode, × included), then unpin.
+      const cancel = Array.from(document.querySelectorAll('.description-tooltip-btn'))
+        .find((b) => b.textContent.trim() === 'Cancel');
+      if (cancel) cancel.click();
       const close = document.querySelector('.description-tooltip-close');
       if (close) close.click();
     });
@@ -98,20 +105,42 @@ async function setDescription(page, text) {
     // state is a script-scope binding the modules share, and what a page
     // evaluate sees under `window.graphData` is not reliably the same object
     // the description patch wrote into.
-    const landed = await page.waitForFunction(async (v) => {
+    // Pin the check to THE fn this lesson created: a same-named leftover
+    // from an earlier run (cleanup is best-effort) once satisfied a
+    // name-only match while this fn's own save was still out, and the
+    // helper moved on with one version fewer than the lesson expects.
+    if (!_lessonFnId) {
+      _lessonFnId = await page.evaluate(async () => {
+        const r = await fetch('/api/graph/entities?scope=search&q=tutorial-versioned');
+        const j = await r.json();
+        const mine = (j.fns || []).filter((f) => f.name === 'tutorial-versioned');
+        // the fresh one carries no description yet
+        return (mine.find((f) => !f.description) || mine[0])?.id || null;
+      });
+    }
+    const landed = await page.waitForFunction(async ([v, id]) => {
       const r = await fetch('/api/graph/entities?scope=search&q=tutorial-versioned');
       const j = await r.json();
-      return (j.fns || []).some((f) => f.name === 'tutorial-versioned'
-                                    && f.description === v);
-    }, text, {timeout: 20000, polling: 500}).then(() => true).catch(() => false);
+      return (j.fns || []).some((f) => f.id === id && f.description === v);
+    }, [text, _lessonFnId], {timeout: 20000, polling: 500}).then(() => true).catch(() => false);
     if (landed) {
       // The server has the value; the CLIENT leaves edit mode when its own
       // save request returns (the textarea gives way to read mode). Wait
       // for that — showDescriptionTooltip is a no-op while editing, so the
       // next call's ⋯ → i would otherwise open nothing.
-      await page.waitForFunction(
+      const left = await page.waitForFunction(
         () => !document.querySelector('.description-tooltip-textarea'),
-        null, {timeout: 10000, polling: 100}).catch(() => {});
+        null, {timeout: 30000, polling: 100}).then(() => true).catch(() => false);
+      if (!left) {
+        // The value is on the server; the client's own save round-trip is
+        // still out under load — Cancel clears the editing flag without
+        // touching what landed.
+        console.log('  save landed but the tooltip is still in edit mode — cancelling the stale editor');
+        await page.evaluate(() => {
+          Array.from(document.querySelectorAll('.description-tooltip-btn'))
+            .find((b) => b.textContent.trim() === 'Cancel')?.click();
+        });
+      }
       // Leave the tooltip closed and unpinned for the next call.
       await page.evaluate(() => {
         const close = document.querySelector('.description-tooltip-close');

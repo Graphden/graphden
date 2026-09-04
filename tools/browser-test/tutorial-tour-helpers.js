@@ -250,24 +250,35 @@ async function filterAndSelect(page, filterText, fnName) {
 // the FIRST ⋯ can hit the previous card: in lesson 03 that silently
 // extended tutorial-a instead of str-upper, and the step's fn-parent
 // check (correctly) never passed.
+// Open the ⋯ of the card whose text starts with `ownerName` — not "the first
+// ⋯ in the document", which is whatever the layout placed first: a parent
+// row, an execute-result host, the card that was selected BEFORE the create
+// the step just made. Lesson 23's description edit once fired against
+// `const`'s ⋯ that way (the canvas had not re-rendered with the new child
+// yet) — a PUT on the package-owned parent, 400, and a version that never
+// existed. The canvas may take a while to grow the card under load, hence
+// the long wait.
+async function openRowActionsFor(page, ownerName, timeoutMs) {
+  await page.waitForFunction(
+    (name) => Array.from(document.querySelectorAll('.node-overlay')).some((ov) =>
+      ov.textContent.trim().startsWith(name)
+      && ov.querySelector('button.more-actions-trigger')),
+    ownerName, {timeout: timeoutMs || 90000, polling: 200});
+  await page.evaluate((name) => {
+    const ov = Array.from(document.querySelectorAll('.node-overlay')).find((o) =>
+      o.textContent.trim().startsWith(name)
+      && o.querySelector('button.more-actions-trigger'));
+    ov.querySelector('button.more-actions-trigger')
+      .dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+  }, ownerName);
+  await page.waitForSelector('.row-actions-popover', {timeout: 15000});
+}
+
+
 async function extendViaRowActions(page, childName, expectOwner) {
   await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
   if (expectOwner) {
-    // Wait for the owner's card, then open ITS ⋯ — not "the first overlay",
-    // which is whatever the layout happened to place first (a parent row, an
-    // execute-result host, the previously selected card).
-    await page.waitForFunction((name) => {
-      return Array.from(document.querySelectorAll('.node-overlay')).some((ov) =>
-        ov.textContent.trim().startsWith(name)
-        && ov.querySelector('button.more-actions-trigger'));
-    }, expectOwner, {timeout: 90000, polling: 200});
-    await page.evaluate((name) => {
-      const ov = Array.from(document.querySelectorAll('.node-overlay')).find((o) =>
-        o.textContent.trim().startsWith(name)
-        && o.querySelector('button.more-actions-trigger'));
-      ov.querySelector('button.more-actions-trigger')
-        .dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
-    }, expectOwner);
+    await openRowActionsFor(page, expectOwner);
   } else {
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
   }
@@ -925,7 +936,7 @@ module.exports = {
   NS_NAME, FN_NAME,
   retryingDelete, hardCleanup, tourTitle, waitTourTitle, clickTourButton,
   waitUntil, tourProgress, clickTourAdvance,
-  filterAndSelect, extendViaRowActions, bindFirstPlaceholder,
+  filterAndSelect, openRowActionsFor, extendViaRowActions, bindFirstPlaceholder,
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding, waitClickable,
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
   createRootNamespace, createFnInNamespace, setParentViaStrip,

@@ -22,7 +22,7 @@ const {
   extendViaRowActions, createRootNamespace, createFnInNamespace,
   setParentViaStrip, finishAndDelete, tourTitle, bindFirstPlaceholder,
   bindFnRefPlaceholder,
-  openOperateSection,
+  openOperateSection, waitUntil,
 } = require('./tutorial-tour-helpers');
 
 const ASSET_PATH = 'packages/app/editor/editor-styles.css';
@@ -129,10 +129,12 @@ async function revertAssetViaApi(page, base) {
     });
     await page.waitForSelector('.service-popover-delete-btn', {timeout: 20000});
     await page.evaluate(() => document.querySelector('.service-popover-delete-btn').click());
-    await page.waitForFunction(async () => {
+    // `waitUntil`, not `waitForFunction`: Playwright does not await an async
+    // predicate — the pending Promise is truthy and the wait returns at once.
+    assert(await waitUntil(page, async () => {
       const d = await (await window.authFetch('/api/services')).json();
       return !(d.services || []).some((s) => s['fn-name'] === 'tutorial-daemon');
-    }, null, {timeout: 20000, polling: 500});
+    }, null, 20000), 'the :service row is gone after Delete');
     assert(await clickTourButton(page, 'Next'), 'lesson 32 removed Next');
     await waitTourTitle(page, "That's supervision", 150000);
     await finishAndDelete(page);

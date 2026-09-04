@@ -52,6 +52,17 @@ if [ -z "$FILES" ]; then
   exit 2
 fi
 
+# Playwright does NOT await an async `waitForFunction` predicate: the pending
+# Promise is truthy, the wait returns on its first tick, and the "wait" is
+# decorative. Three such waits sat in this suite until 2026-09-05 — lesson 23's
+# "did the description land" check among them, which is how a PUT that 400'd
+# passed as landed. Poll server state from Node instead (`waitUntil` in
+# tutorial-tour-helpers.js, `waitFor` in edit-test-helpers.js).
+if grep -nE 'waitForFunction\(\s*async' ./*.js; then
+  echo "async waitForFunction predicate — Playwright returns on the Promise, not its value; use waitUntil/waitFor" >&2
+  exit 2
+fi
+
 SWEEP_DELAY="${SWEEP_DELAY:-2}"
 URL="${GRAPHDEN_URL:-http://localhost:9002}"
 

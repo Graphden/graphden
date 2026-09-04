@@ -20,7 +20,8 @@ const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {
   hardCleanup, waitTourTitle, clickTourButton, tourTitle, filterAndSelect,
-  extendViaRowActions, finishAndDelete, openOperateSection, waitUntil,
+  extendViaRowActions, openRowActionsFor, finishAndDelete, openOperateSection,
+  waitUntil,
 } = require('./tutorial-tour-helpers');
 
 
@@ -63,8 +64,11 @@ async function setDescription(page, text) {
     // that state, this is a settle by measurement, not by hope.
     await page.waitForTimeout(400);
 
-    await page.waitForSelector('button.more-actions-trigger', {timeout: 30000});
-    await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
+    // THIS fn's ⋯, not the first in the document: right after the extend the
+    // canvas can still be the parent's card alone, and its ⋯ → i → Save is a
+    // PUT on package-owned `const` — 400, and a "first draft" that never
+    // existed (one 2026-09-05 gate).
+    await openRowActionsFor(page, 'tutorial-versioned', 30000);
     await page.waitForSelector('.row-actions-popover [data-action="description"]',
                                {timeout: 15000});
     await page.evaluate(() => {
@@ -118,11 +122,16 @@ async function setDescription(page, text) {
         return (mine.find((f) => !f.description) || mine[0])?.id || null;
       });
     }
-    const landed = await page.waitForFunction(async ([v, id]) => {
+    // `waitUntil` (a Node-side poll over `page.evaluate`), NOT
+    // `waitForFunction` with an async predicate: Playwright does not await
+    // the predicate's Promise, and a pending Promise is truthy — so the old
+    // form returned on its first tick, "landed" was always true, and the
+    // check above this comment was decorative for as long as it existed.
+    const landed = await waitUntil(page, async ([v, id]) => {
       const r = await fetch('/api/graph/entities?scope=search&q=tutorial-versioned');
       const j = await r.json();
       return (j.fns || []).some((f) => f.id === id && f.description === v);
-    }, [text, _lessonFnId], {timeout: 20000, polling: 500}).then(() => true).catch(() => false);
+    }, [text, _lessonFnId], 20000);
     if (landed) {
       // The server has the value; the CLIENT leaves edit mode when its own
       // save request returns (the textarea gives way to read mode). Wait
@@ -168,8 +177,9 @@ async function setDescription(page, text) {
 
 
 async function openVersionHistory(page) {
-  await page.waitForSelector('button.more-actions-trigger', {timeout: 30000});
-  await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
+  // The lesson fn's ⋯ — `const`'s history has rows enough to satisfy the
+  // ">= 3 rows" check below for the wrong fn.
+  await openRowActionsFor(page, 'tutorial-versioned', 30000);
   await page.waitForSelector('.row-actions-popover [data-action="fn-versions"]',
                              {timeout: 15000});
   await page.evaluate(() => {
@@ -232,12 +242,11 @@ async function openVersionHistory(page) {
         .find((r) => /first draft/.test(r.textContent) && !/second draft/.test(r.textContent));
       row.querySelector('.fn-versions-restore').click();
     });
-    await page.waitForFunction(async () => {
+    assert(await waitUntil(page, async (id) => {
       const r = await fetch('/api/graph/entities?scope=search&q=tutorial-versioned');
       const j = await r.json();
-      return (j.fns || []).some((f) => f.name === 'tutorial-versioned'
-                                    && f.description === 'first draft');
-    }, null, {timeout: 60000, polling: 500});
+      return (j.fns || []).some((f) => f.id === id && f.description === 'first draft');
+    }, _lessonFnId, 60000), 'restore put "first draft" back on the fn');
     assert(await clickTourButton(page, 'Next'), 'lesson 23 restored Next');
 
     await waitTourTitle(page, 'History is append-only', 30000);

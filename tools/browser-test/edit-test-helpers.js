@@ -163,14 +163,22 @@ async function newContext(chromium) {
     if (/\/api\/(packages|branches|entities)/.test(req.url())
         && req.method() !== 'GET') started.set(req, Date.now());
   });
-  page.on('response', (res) => {
+  page.on('response', async (res) => {
     const req = res.request();
     const t0 = started.get(req);
     if (t0 === undefined) return;
     started.delete(req);
-    console.log('  [op] ' + req.method() + ' '
-                + res.url().replace(/^https?:\/\/[^/]+/, '')
-                + ' → ' + res.status() + ' in ' + (Date.now() - t0) + 'ms');
+    const line = '  [op] ' + req.method() + ' '
+                 + res.url().replace(/^https?:\/\/[^/]+/, '')
+                 + ' → ' + res.status() + ' in ' + (Date.now() - t0) + 'ms';
+    if (res.ok()) { console.log(line); return; }
+    // A refusal's WHY is in the body ("package-owned fn — extend it into a
+    // child", a constraint name) and the status alone sent one gate's
+    // diagnosis to the wrong place: a 400 on a PUT read as a stale id when
+    // the id was `const`'s — the test had opened the parent's ⋯.
+    const said = await res.text().then((t) => t.replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ').trim().slice(0, 200)).catch(() => '');
+    console.log(line + (said ? ' — ' + said : ''));
   });
   // Block until /health is 200 BEFORE the initial goto. Without
   // this, a test that starts during a JVM OOM-restart window has

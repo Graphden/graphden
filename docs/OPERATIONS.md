@@ -83,6 +83,17 @@ time — see [FLEET_RFC.md](FLEET_RFC.md) §5.1).
   blocks, then sees the migrated schema and no-ops. A rolling upgrade is safe.
 - After deploying a new image, run `bb verify <base-url>` to confirm the
   frontend / packages / backend sections all match the shipped build.
+- The package sync on boot is **declarative for package identities**: a fn
+  a bundled package no longer declares (deterministic `uuid-v5(ns, name)`
+  id, `_anon-*` shapes included) is purged **only** when nothing the
+  current graph still follows references it — the newest version of each
+  row on a live branch, never a create-time identity row or a superseded
+  version (`identity-repair/inbound-refs-many` `:live-only?`). A retired fn
+  a user fn still references stays, with one aggregated boot warning, and
+  shows in the editor's ⚐ lint lens as a duplicate. Editor-created rows
+  (random ids) are never touched. Preview before an upgrade from a REPL:
+  `(packages.sync/reconcile-moved-identities! storage packages {} {:preexisting-fn-ids …
+  :dry-run? true})` returns `{:moves :purgeable :kept}` and writes nothing.
 
 ## Health & readiness
 

@@ -133,6 +133,49 @@
     @hits))
 
 
+(defn- newest-live-ids
+  "Of `rows` (one version plane), the ids of the newest row per
+   `[key-field branch-id]` — dropped when that newest row is a
+   tombstone or its branch is gone."
+  [rows key-field branches]
+  (into #{}
+        (keep (fn [[_ vs]]
+                (let [r (apply max-key #(java.util.Date/.getTime (:created-at %)) vs)]
+                  (when (and (nil? (:deleted-at r))
+                             (contains? branches (:branch-id r)))
+                    (:id r)))))
+        (group-by (juxt key-field :branch-id) rows)))
+
+
+(defn- live-version-index
+  "What `:live-only?` reads: the live version ids of the three
+   versioned ref planes, plus which identity rows have versions at all."
+  [base]
+  (let [branches (into #{} (map :id) (sp/query-entities base :branch {}))
+        bv (sp/query-entities base :binding-version {})
+        liv (sp/query-entities base :binding-list-item-version {})
+        fv (sp/query-entities base :fn-version {})]
+    {:live-binding-versions (newest-live-ids bv :binding-id branches)
+     :live-item-versions (newest-live-ids liv :item-id branches)
+     :live-fn-versions (newest-live-ids fv :fn-id branches)
+     :versioned-bindings (into #{} (map :binding-id) bv)
+     :versioned-items (into #{} (map :item-id) liv)
+     :versioned-fns (into #{} (map :fn-id) fv)}))
+
+
+(defn- live-row?
+  "Under `:live-only?`: is this row one the current graph follows?"
+  [live entity row]
+  (case entity
+    :binding-version (contains? (:live-binding-versions live) (:id row))
+    :binding-list-item-version (contains? (:live-item-versions live) (:id row))
+    :fn-version (contains? (:live-fn-versions live) (:id row))
+    :binding (not (contains? (:versioned-bindings live) (:id row)))
+    :binding-list-item (not (contains? (:versioned-items live) (:id row)))
+    :fn (not (contains? (:versioned-fns live) (:id row)))
+    true))
+
+
 (defn inbound-refs-many
   "Batch `inbound-refs` for a SET of fn-ids in ONE pass over the ref
    surface. Returns `{fn-id → [{:entity :id :field :owner-fn-id}]}`
@@ -146,46 +189,63 @@
    call: a boot that reconciles N removed package fns paid N full
    scans (~1 s each against a remote managed PG), which blew the
    deploy health window when a large fn-def section was retired
-   (2026-08-31). Same conservative surface as `inbound-refs`."
-  [storage fn-ids]
-  (let [base (base-of storage)
-        targets (set fn-ids)
-        ;; binding-id → owning fn-id. Both list-item planes key on the
-        ;; IDENTITY binding's id (version rows carry :binding-id of the
-        ;; identity row), so one :binding scan is the whole map.
-        binding-owner (into {}
-                            (map (juxt :id :fn-id))
-                            (sp/query-entities base :binding {}))
-        hits (volatile! {})
-        hit! (fn [target m] (vswap! hits update target (fnil conj []) m))
-        owner-of (fn [entity row]
-                   (case entity
-                     (:binding :binding-version :fn-version) (:fn-id row)
-                     (:binding-list-item :binding-list-item-version)
-                     (get binding-owner (:binding-id row))
-                     :slot nil))]
-    (doseq [[entity fields] ref-fields
-            row (sp/query-entities base entity {})
-            :let [owner (owner-of entity row)]
-            field fields
-            :let [target (get row field)]
-            :when (and (contains? targets target)
-                       ;; the target's own rows vanish with its purge —
-                       ;; not real inbound refs (same rule as inbound-refs)
-                       (not= owner target))]
-      (hit! target {:entity entity :id (:id row) :field field
-                    :owner-fn-id owner}))
-    (doseq [f (sp/query-entities base :fn {})]
-      (doseq [field [:base-fn-id :element-fn-id :return-type-fn-id]
-              :let [target (get f field)]
-              :when (and (contains? targets target) (not= (:id f) target))]
-        (hit! target {:entity :fn :id (:id f) :field field
-                      :owner-fn-id (:id f)}))
-      (doseq [target (distinct (:parent-ids f))
-              :when (and (contains? targets target) (not= (:id f) target))]
-        (hit! target {:entity :fn :id (:id f) :field :parent-ids
-                      :owner-fn-id (:id f)})))
-    @hits))
+   (2026-08-31). Same conservative surface as `inbound-refs`.
+
+   `opts` `:live-only?` — count only refs the CURRENT graph can still
+   follow: for the versioned planes, the newest non-deleted version of
+   each (row, branch) on a branch that still exists; the identity rows
+   of `:binding` / `:binding-list-item` and the fn type-FKs only when
+   the row has NO version rows at all (a versionless storage — tests).
+   Identity rows are create-time values (a re-sync writes a new version
+   and leaves them), and superseded versions are history: both kept
+   every retired package fn a live fn had EVER referenced alive, so the
+   boot reconciler's removal set stayed pinned for good (the 2026-09-04
+   lint sweep: 472 retired identities on a two-month-old instance, 175
+   of them «referenced» only through such rows). `:parent-ids` (an
+   unversioned junction) and `:slot` type refs always count."
+  ([storage fn-ids] (inbound-refs-many storage fn-ids nil))
+  ([storage fn-ids {:keys [live-only?]}]
+   (let [base (base-of storage)
+         targets (set fn-ids)
+         live (when live-only? (live-version-index base))
+         ;; binding-id → owning fn-id. Both list-item planes key on the
+         ;; IDENTITY binding's id (version rows carry :binding-id of the
+         ;; identity row), so one :binding scan is the whole map.
+         binding-owner (into {}
+                             (map (juxt :id :fn-id))
+                             (sp/query-entities base :binding {}))
+         hits (volatile! {})
+         hit! (fn [target m] (vswap! hits update target (fnil conj []) m))
+         owner-of (fn [entity row]
+                    (case entity
+                      (:binding :binding-version :fn-version) (:fn-id row)
+                      (:binding-list-item :binding-list-item-version)
+                      (get binding-owner (:binding-id row))
+                      :slot nil))]
+     (doseq [[entity fields] ref-fields
+             row (sp/query-entities base entity {})
+             :when (or (nil? live) (live-row? live entity row))
+             :let [owner (owner-of entity row)]
+             field fields
+             :let [target (get row field)]
+             :when (and (contains? targets target)
+                        ;; the target's own rows vanish with its purge —
+                        ;; not real inbound refs (same rule as inbound-refs)
+                        (not= owner target))]
+       (hit! target {:entity entity :id (:id row) :field field
+                     :owner-fn-id owner}))
+     (doseq [f (sp/query-entities base :fn {})]
+       (when (or (nil? live) (live-row? live :fn f))
+         (doseq [field [:base-fn-id :element-fn-id :return-type-fn-id]
+                 :let [target (get f field)]
+                 :when (and (contains? targets target) (not= (:id f) target))]
+           (hit! target {:entity :fn :id (:id f) :field field
+                         :owner-fn-id (:id f)})))
+       (doseq [target (distinct (:parent-ids f))
+               :when (and (contains? targets target) (not= (:id f) target))]
+         (hit! target {:entity :fn :id (:id f) :field :parent-ids
+                       :owner-fn-id (:id f)})))
+     @hits)))
 
 
 (defn purge-fn-subgraphs-many!

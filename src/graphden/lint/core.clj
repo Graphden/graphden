@@ -359,11 +359,15 @@
 
 
 (defn- with-fn-ids
-  "Stamp `:fn-ids` on a finding when every member fn-def has an `:id`."
+  "Stamp `:fn-ids` on a finding when every member fn-def has an `:id` —
+   in the ORDER of `:fns`, so a consumer may zip the two (the editor's
+   rows pair each name with its id and link `#id`). `finding-key` sorts
+   for itself; a sorted `:fn-ids` here used to pair the names with the
+   wrong ids."
   [idx finding]
   (let [ids (map #(:id (get (:by-key idx) %)) (:fns finding))]
     (cond-> finding
-      (every? some? ids) (assoc :fn-ids (vec (sort ids))))))
+      (every? some? ids) (assoc :fn-ids (vec ids)))))
 
 
 (defn- all-platform?

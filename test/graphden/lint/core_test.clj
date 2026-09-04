@@ -155,7 +155,10 @@
       (is (empty? (findings-for :duplicate-definition [p2 p3] :platform-fn? platform?))))
     (testing "a user fn-def duplicating a platform one IS a finding, naming both"
       (let [[f] (findings-for :duplicate-definition [p2 user] :platform-fn? platform?)]
-        (is (= ["p2" "u1"] (:fn-ids f)))))))
+        (is (= #{"p2" "u1"} (set (:fn-ids f))))
+        (is (= (map (fn [[_ n]] (get {:_twin "p2" :_copy "u1"} n)) (:fns f))
+               (:fn-ids f))
+            "ids ride in the order of :fns so the two zip")))))
 
 
 (deftest resolve-ref-test

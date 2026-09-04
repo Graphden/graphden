@@ -14,7 +14,8 @@
     [graphden.packages.records :as records]
     [graphden.packages.sync :as pkg-sync]
     [graphden.storage.protocol.core :as sp]
-    [graphden.versioning.identity-repair :as ir])
+    [graphden.versioning.identity-repair :as ir]
+    [graphden.versioning.storage.core :as vs])
   (:import
     (java.time
       Instant)))
@@ -472,3 +473,112 @@
         (testing "the VERSION-plane ref is repointed too (the audited gap)"
           (is (= new-id (:ref-fn-id (sp/read-entity storage :binding-version (:id ver-plane)))))))
       (finally (sp/close storage)))))
+
+
+;; --- removal liveness: identity rows and superseded versions are history ---
+
+(defn- versioned-storage
+  "A per-test VersionedStorage over a fresh raw storage, on its main
+   branch — the shape the boot sync writes through in production."
+  [raw]
+  (vs/wrap-with-versioning raw "main"))
+
+
+(deftest a-removal-referenced-only-by-history-is-purged
+  ;; The 2026-09-04 lint sweep: a two-month-old instance carried 472
+  ;; retired package identities; 175 were "referenced" — through the
+  ;; create-time identity row of a binding a re-sync had since repointed,
+  ;; or through a superseded version. Neither is a ref the current graph
+  ;; follows, so neither may keep a removal alive.
+  (let [raw (setup/create-test-storage)]
+    (try
+      (let [storage (versioned-storage raw)
+            pkga (ns-row! raw "pkga" nil)
+            retired-id (records/fn-id "pkga" :retired-helper)
+            _ (sp/create-entity storage :fn {:id retired-id :name "retired-helper"
+                                             :namespace-id (:id pkga) :parent-ids []})
+            keeper-id (records/fn-id "pkga" :keeper)
+            _ (sp/create-entity storage :fn {:id keeper-id :name "keeper"
+                                             :namespace-id (:id pkga) :parent-ids []})
+            base (setup/create-base-fn! storage "rl-caller-base")
+            slot (setup/create-slot! storage "f" :int)
+            _ (setup/attach-slot! storage (:id base) (:id slot) 0)
+            caller (setup/create-composed-fn! storage "rl-caller" (:id base))
+            ;; created pointing at the retired helper (the identity row keeps
+            ;; that value for good) …
+            bind (sp/create-entity storage :binding {:fn-id (:id caller) :slot-id (:id slot)
+                                                     :ref-fn-id retired-id})
+            ;; … then repointed by a later sync: the newest version names keeper
+            _ (sp/update-entity storage :binding (:id bind) {:ref-fn-id keeper-id})
+            plan (pkg-sync/reconcile-moved-identities!
+                   storage {:packages [{:name "pkga"}]} {:keeper keeper-id}
+                   {:preexisting-fn-ids #{keeper-id retired-id} :dry-run? true})]
+        (testing "the create-time identity row still names the retired helper"
+          (is (= retired-id (:ref-fn-id (sp/read-entity raw :binding (:id bind))))))
+        (testing "the dry run plans the purge and touches nothing"
+          (is (= ["retired-helper"] (:purgeable plan)))
+          (is (= [] (:kept plan)))
+          (is (some? (sp/read-entity raw :fn retired-id))))
+        (testing "the real run purges it"
+          (pkg-sync/reconcile-moved-identities!
+            storage {:packages [{:name "pkga"}]} {:keeper keeper-id}
+            {:preexisting-fn-ids #{keeper-id retired-id}})
+          (is (nil? (sp/read-entity raw :fn retired-id)))
+          (is (some? (sp/read-entity raw :fn keeper-id)))
+          (is (= keeper-id (:ref-fn-id (sp/read-entity storage :binding (:id bind)))))))
+      (finally (sp/close raw)))))
+
+
+(deftest a-removal-the-newest-version-still-references-is-kept
+  (let [raw (setup/create-test-storage)]
+    (try
+      (let [storage (versioned-storage raw)
+            pkga (ns-row! raw "pkga" nil)
+            retired-id (records/fn-id "pkga" :still-used)
+            _ (sp/create-entity storage :fn {:id retired-id :name "still-used"
+                                             :namespace-id (:id pkga) :parent-ids []})
+            base (setup/create-base-fn! storage "rk-caller-base")
+            slot (setup/create-slot! storage "f" :int)
+            _ (setup/attach-slot! storage (:id base) (:id slot) 0)
+            caller (setup/create-composed-fn! storage "rk-caller" (:id base))
+            _ (sp/create-entity storage :binding {:fn-id (:id caller) :slot-id (:id slot)
+                                                  :ref-fn-id retired-id})
+            plan (pkg-sync/reconcile-moved-identities!
+                   storage {:packages [{:name "pkga"}]} {}
+                   {:preexisting-fn-ids #{retired-id} :dry-run? true})]
+        (is (= ["still-used"] (:kept plan)))
+        (is (= [] (:purgeable plan)))
+        (pkg-sync/reconcile-moved-identities!
+          storage {:packages [{:name "pkga"}]} {} {:preexisting-fn-ids #{retired-id}})
+        (is (some? (sp/read-entity raw :fn retired-id)) "a live ref keeps the removal, loudly"))
+      (finally (sp/close raw)))))
+
+
+(deftest a-stale-anon-row-goes-with-the-chain-it-pinned
+  ;; An inline def the parser lifted under a shape-hash name is a package
+  ;; row like any other; once its shape is gone it must not keep the
+  ;; retired helper it references alive.
+  (let [raw (setup/create-test-storage)]
+    (try
+      (let [storage (versioned-storage raw)
+            pkga (ns-row! raw "pkga" nil)
+            helper-id (records/fn-id "pkga" :_old-helper)
+            _ (sp/create-entity storage :fn {:id helper-id :name "_old-helper"
+                                             :namespace-id (:id pkga) :parent-ids []})
+            anon-id (records/fn-id "pkga" :_anon-0123456789abcdef)
+            base (setup/create-base-fn! storage "an-base")
+            slot (setup/create-slot! storage "f" :int)
+            _ (setup/attach-slot! storage (:id base) (:id slot) 0)
+            _ (sp/create-entity storage :fn {:id anon-id :name "_anon-0123456789abcdef"
+                                             :namespace-id (:id pkga) :parent-ids [(:id base)]})
+            _ (sp/create-entity storage :binding {:fn-id anon-id :slot-id (:id slot)
+                                                  :ref-fn-id helper-id})
+            plan (pkg-sync/reconcile-moved-identities!
+                   storage {:packages [{:name "pkga"}]} {}
+                   {:preexisting-fn-ids #{helper-id anon-id} :dry-run? true})]
+        (is (= #{"_old-helper" "_anon-0123456789abcdef"} (set (:purgeable plan))))
+        (pkg-sync/reconcile-moved-identities!
+          storage {:packages [{:name "pkga"}]} {} {:preexisting-fn-ids #{helper-id anon-id}})
+        (is (nil? (sp/read-entity raw :fn helper-id)))
+        (is (nil? (sp/read-entity raw :fn anon-id))))
+      (finally (sp/close raw)))))

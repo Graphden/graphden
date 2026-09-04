@@ -651,6 +651,21 @@
    toward DB resets). Deterministic ids make an over-eager purge
    self-healing on the next full sync.
 
+   Removal liveness is judged by `idrepair/inbound-refs-many`'s
+   `:live-only?` view — the newest version of each row on a live branch,
+   never a create-time identity row or a superseded version (those kept
+   every retired chain a live fn had ever referenced pinned forever, the
+   2026-09-04 lint sweep's 472 leftovers). Synthetic `_anon-*` rows
+   (inline defs lifted by the parser under a shape-hash name) join the
+   removal set when their shape is gone from the packages — they are
+   never a MOVE (the name embeds the shape) and, left behind, their own
+   refs kept whole retired chains alive; they are counted, not named, in
+   the log.
+
+   `opts` `:dry-run?` — compute and log the plan, write nothing, and
+   return `{:moves [names] :purgeable [names] :kept [names]}` (an
+   operator's preview — call from a REPL against the DB).
+
    Runs BEFORE the compiled-registry build, so there is nothing stale to
    invalidate."
   ([storage packages synced-fn-rows]
@@ -674,6 +689,8 @@
   [storage packages synced-fn-rows opts]
   (let [base (idrepair/base-of storage)
         preexisting (:preexisting-fn-ids opts)
+        dry-run? (boolean (:dry-run? opts))
+        anon-name? (fn [row] (str/starts-with? (str (:name row)) "_anon-"))
         ;; `write-records!` (the production caller) returns a
         ;; `{fn-name-keyword → fn-id}` MAP, not rows. The old body ran
         ;; `(group-by :name synced-fn-rows)` / `(keep :id …)` over it —
@@ -714,14 +731,15 @@
         leftovers
         (for [row (sp/query-entities base :fn {})
               :when (and (:name row)
-                         ;; Synthetic anon rows can never be an authored
-                         ;; MOVE: their name embeds a shape+use-site hash,
-                         ;; so a vanished shape has 0 same-name candidates
-                         ;; by construction — scanning them only floods
-                         ;; the leftover log (hundreds per reduced-set
-                         ;; test bootstrap).
+                         ;; Synthetic `_anon-*` rows (name = shape hash)
+                         ;; are leftovers like any other when their shape
+                         ;; is gone — they only ever fall into the REMOVAL
+                         ;; branch (a vanished shape has no move target by
+                         ;; construction) and are summarised, not named,
+                         ;; in the log. Hash-keyed anonymous rows (no
+                         ;; name) stay out: nothing but type rows point at
+                         ;; them.
                          (nil? (:anonymous-hash row))
-                         (not (str/starts-with? (:name row) "_anon-"))
                          (not (contains? expected-ids (:id row))))
               :let [path (some-> (:namespace-id row) ns-path)
                     root (some-> path (str/split #"\.") first)]
@@ -729,147 +747,163 @@
                          (contains? package-roots root)
                          (= (:id row)
                             (records/fn-id path (keyword (:name row)))))]
-          row)]
-    (let [not-a-move? (fn [row]
-                        (let [cs (get synced-by-name (:name row))]
-                          (or (empty? cs)
-                              (and (= 1 (count cs)) (some? preexisting)
-                                   (contains? preexisting (:id (first cs)))))))
-          removals (filterv not-a-move? leftovers)]
-      ;; MOVES are batched: one repoint pass over the ref surface with
-      ;; the whole old→new map + one table-scan purge cascade — a bulk
-      ;; namespace relocation used to pay a full repoint scan PER moved
-      ;; fn (the same N-scans shape as the 2026-08-31 removal blowup).
-      (let [move-row? (fn [row]
-                        (let [cs (get synced-by-name (:name row))]
-                          (and (= 1 (count cs))
-                               (or (nil? preexisting)
-                                   (not (contains? preexisting
-                                                   (:id (first cs))))))))
-            moves (filterv move-row? leftovers)]
-        (when (seq moves)
-          (let [old->new (into {}
-                               (map (fn [row]
-                                      [(:id row)
-                                       (:id (first (get synced-by-name (:name row))))]))
-                               moves)]
-            (log/info "reconciling moved package identities"
-                      {:count (count moves)
-                       :names (mapv :name moves)})
+          row)
+        not-a-move? (fn [row]
+                      (let [cs (get synced-by-name (:name row))]
+                        (or (anon-name? row)
+                            (empty? cs)
+                            (and (= 1 (count cs)) (some? preexisting)
+                                 (contains? preexisting (:id (first cs)))))))
+        removals (filterv not-a-move? leftovers)
+        plan (volatile! {:moves [] :purgeable [] :kept []})]
+    ;; MOVES are batched: one repoint pass over the ref surface with
+    ;; the whole old→new map + one table-scan purge cascade — a bulk
+    ;; namespace relocation used to pay a full repoint scan PER moved
+    ;; fn (the same N-scans shape as the 2026-08-31 removal blowup).
+    (let [move-row? (fn [row]
+                      (let [cs (get synced-by-name (:name row))]
+                        (and (not (anon-name? row))
+                             (= 1 (count cs))
+                             (or (nil? preexisting)
+                                 (not (contains? preexisting
+                                                 (:id (first cs))))))))
+          moves (filterv move-row? leftovers)]
+      (when (seq moves)
+        (let [old->new (into {}
+                             (map (fn [row]
+                                    [(:id row)
+                                     (:id (first (get synced-by-name (:name row))))]))
+                             moves)]
+          (log/info (if dry-run?
+                      "DRY RUN — would reconcile moved package identities"
+                      "reconciling moved package identities")
+                    {:count (count moves)
+                     :names (mapv :name moves)})
+          (vswap! plan assoc :moves (mapv :name moves))
+          (when-not dry-run?
             (idrepair/repoint-refs! storage old->new)
             (idrepair/purge-fn-subgraphs-many! storage (keys old->new))
             (doseq [row moves]
               (registry-core/unregister-rich-type! (keyword (:name row))
-                                                   (:id row)))))
-        (doseq [row leftovers
-                :when (not (move-row? row))]
-          (let [candidates (get synced-by-name (:name row))]
-            ;; >1 same-name candidates — a move we cannot resolve
-            ;; safely. THE signal this reconciler exists for. A
-            ;; 1-candidate row whose candidate PRE-DATES this sync is
-            ;; not warned here — it falls into the removal set below.
-            (when (> (count candidates) 1)
-              (log/warn "package identity leftover NOT auto-reconciled"
-                        {:name (:name row) :id (:id row)
-                         :reason :ambiguous-move-target
-                         :candidates (count candidates)})))))
-      ;; 0-candidate leftovers are genuine REMOVALS (their package is
-      ;; being synced — the `package-roots` guard above — but no fn of
-      ;; that name remains). Left in the DB they stay name/id-resolvable
-      ;; AND load into every compiled context, so a stale def whose deps
-      ;; changed incompatibly can fail the whole-graph `compile-all` (a
-      ;; boot crash) — and they accumulate forever, which is what pushed
-      ;; operators toward a DB reset. Purge — but ONLY what nothing
-      ;; OUTSIDE the removal set references; a removal still referenced
-      ;; from live graph must stay LOUD, not be silently deleted out
-      ;; from under its referrer. Refs BETWEEN removals (a retired
-      ;; fn-def chain referencing itself) resolve by purging referrers
-      ;; before referees — that is why this runs as a SET: the per-row
-      ;; `inbound-refs` loop paid a full ref-surface scan per fn
-      ;; (~1 s × N against a managed PG — the 2026-08-31 deploy-health
-      ;; blowup) and still left whole retired chains behind as
-      ;; "referenced" by their own siblings.
-      ;; Safe against a false positive: package fns carry a
-      ;; deterministic `uuid-v5(ns,name)` id, so the next full sync
-      ;; re-creates an over-eagerly-purged leaf identically.
-      (when (seq removals)
-        (let [removal-ids (into #{} (map :id) removals)
-              refs-map (idrepair/inbound-refs-many storage removal-ids)
-              ;; A `:slot` ref has no owning fn (owner-fn-id nil) — but a
-              ;; slot exposed ONLY by removal-set members (and bound by
-              ;; no surviving fn) dies with the set, so its type-ref must
-              ;; not pin a retired type-row. Classify those slots as
-              ;; IN-SET so the kept computation below sees through them.
-              slot-exposers (reduce (fn [m fs]
-                                      (update m (:slot-id fs)
-                                              (fnil conj #{}) (:fn-id fs)))
-                                    {}
-                                    (sp/query-entities base :fn-slot {}))
-              in-set-slot-ids
-              (let [slot-binders (into #{}
-                                       (comp (remove #(contains? removal-ids (:fn-id %)))
-                                             (map :slot-id))
-                                       (concat (sp/query-entities base :binding {})
-                                               (sp/query-entities base :binding-version {})))]
-                (into #{}
-                      (keep (fn [[slot-id exposers]]
-                              (when (and (seq exposers)
-                                         (every? removal-ids exposers)
-                                         (not (contains? slot-binders slot-id)))
-                                slot-id)))
-                      slot-exposers))
-              external-ref? (fn [ref]
-                              (if (= :slot (:entity ref))
-                                (not (contains? in-set-slot-ids (:id ref)))
-                                (not (contains? removal-ids (:owner-fn-id ref)))))
-              ;; An id is KEPT when any ref chain reaches it from
-              ;; outside the removal set: seed with directly-externally-
-              ;; referenced ids, then propagate through in-set refs —
-              ;; a kept member's refs keep its targets, INCLUDING refs
-              ;; that travel through a slot (a slot ref has no owning
-              ;; fn, so keptness flows from the slot's EXPOSERS: a
-              ;; type-row pinned only by a kept member's slot must
-              ;; survive, or that member's slot.type-fn-id dangles).
-              kept-ref? (fn [kept ref]
-                          (if (= :slot (:entity ref))
-                            (some #(contains? kept %)
-                                  (get slot-exposers (:id ref)))
-                            (contains? kept (:owner-fn-id ref))))
-              kept (loop [kept (into #{}
+                                                   (:id row))))))
+      (doseq [row leftovers
+              :when (not (move-row? row))]
+        (let [candidates (get synced-by-name (:name row))]
+          ;; >1 same-name candidates — a move we cannot resolve
+          ;; safely. THE signal this reconciler exists for. A
+          ;; 1-candidate row whose candidate PRE-DATES this sync is
+          ;; not warned here — it falls into the removal set below.
+          (when (> (count candidates) 1)
+            (log/warn "package identity leftover NOT auto-reconciled"
+                      {:name (:name row) :id (:id row)
+                       :reason :ambiguous-move-target
+                       :candidates (count candidates)})))))
+    ;; 0-candidate leftovers are genuine REMOVALS (their package is
+    ;; being synced — the `package-roots` guard above — but no fn of
+    ;; that name remains). Left in the DB they stay name/id-resolvable
+    ;; AND load into every compiled context, so a stale def whose deps
+    ;; changed incompatibly can fail the whole-graph `compile-all` (a
+    ;; boot crash) — and they accumulate forever, which is what pushed
+    ;; operators toward a DB reset. Purge — but ONLY what nothing
+    ;; OUTSIDE the removal set references; a removal still referenced
+    ;; from live graph must stay LOUD, not be silently deleted out
+    ;; from under its referrer. Refs BETWEEN removals (a retired
+    ;; fn-def chain referencing itself) resolve by purging referrers
+    ;; before referees — that is why this runs as a SET: the per-row
+    ;; `inbound-refs` loop paid a full ref-surface scan per fn
+    ;; (~1 s × N against a managed PG — the 2026-08-31 deploy-health
+    ;; blowup) and still left whole retired chains behind as
+    ;; "referenced" by their own siblings.
+    ;; Safe against a false positive: package fns carry a
+    ;; deterministic `uuid-v5(ns,name)` id, so the next full sync
+    ;; re-creates an over-eagerly-purged leaf identically.
+    (when (seq removals)
+      (let [removal-ids (into #{} (map :id) removals)
+            refs-map (idrepair/inbound-refs-many storage removal-ids {:live-only? true})
+            ;; A `:slot` ref has no owning fn (owner-fn-id nil) — but a
+            ;; slot exposed ONLY by removal-set members (and bound by
+            ;; no surviving fn) dies with the set, so its type-ref must
+            ;; not pin a retired type-row. Classify those slots as
+            ;; IN-SET so the kept computation below sees through them.
+            slot-exposers (reduce (fn [m fs]
+                                    (update m (:slot-id fs)
+                                            (fnil conj #{}) (:fn-id fs)))
+                                  {}
+                                  (sp/query-entities base :fn-slot {}))
+            in-set-slot-ids
+            (let [slot-binders (into #{}
+                                     (comp (remove #(contains? removal-ids (:fn-id %)))
+                                           (map :slot-id))
+                                     (concat (sp/query-entities base :binding {})
+                                             (sp/query-entities base :binding-version {})))]
+              (into #{}
+                    (keep (fn [[slot-id exposers]]
+                            (when (and (seq exposers)
+                                       (every? removal-ids exposers)
+                                       (not (contains? slot-binders slot-id)))
+                              slot-id)))
+                    slot-exposers))
+            external-ref? (fn [ref]
+                            (if (= :slot (:entity ref))
+                              (not (contains? in-set-slot-ids (:id ref)))
+                              (not (contains? removal-ids (:owner-fn-id ref)))))
+            ;; An id is KEPT when any ref chain reaches it from
+            ;; outside the removal set: seed with directly-externally-
+            ;; referenced ids, then propagate through in-set refs —
+            ;; a kept member's refs keep its targets, INCLUDING refs
+            ;; that travel through a slot (a slot ref has no owning
+            ;; fn, so keptness flows from the slot's EXPOSERS: a
+            ;; type-row pinned only by a kept member's slot must
+            ;; survive, or that member's slot.type-fn-id dangles).
+            kept-ref? (fn [kept ref]
+                        (if (= :slot (:entity ref))
+                          (some #(contains? kept %)
+                                (get slot-exposers (:id ref)))
+                          (contains? kept (:owner-fn-id ref))))
+            kept (loop [kept (into #{}
+                                   (keep (fn [[id refs]]
+                                           (when (some external-ref? refs)
+                                             id)))
+                                   refs-map)]
+                   (let [kept' (into kept
                                      (keep (fn [[id refs]]
-                                             (when (some external-ref? refs)
+                                             (when (some #(kept-ref? kept %)
+                                                         refs)
                                                id)))
                                      refs-map)]
-                     (let [kept' (into kept
-                                       (keep (fn [[id refs]]
-                                               (when (some #(kept-ref? kept %)
-                                                           refs)
-                                                 id)))
-                                       refs-map)]
-                       (if (= kept' kept) kept (recur kept'))))
-              purgeable (into [] (remove #(contains? kept (:id %))) removals)]
-          ;; Every ref INTO a purgeable row is owned by another purgeable
-          ;; row (what the `kept` propagation proved) and refs carry no
-          ;; FK — one batched cascade (a scan per TABLE, not per fn)
-          ;; removes the whole set, orphaned slots included.
-          (when (seq purgeable)
-            (log/info "purging removed package identities (unreferenced dead code)"
+                     (if (= kept' kept) kept (recur kept'))))
+            purgeable (into [] (remove #(contains? kept (:id %))) removals)]
+        ;; Every ref INTO a purgeable row is owned by another purgeable
+        ;; row (what the `kept` propagation proved) and refs carry no
+        ;; FK — one batched cascade (a scan per TABLE, not per fn)
+        ;; removes the whole set, orphaned slots included.
+        (when (seq purgeable)
+          (let [{anons true named false} (group-by anon-name? purgeable)]
+            (log/info (if dry-run?
+                        "DRY RUN — would purge removed package identities (unreferenced dead code)"
+                        "purging removed package identities (unreferenced dead code)")
                       {:count (count purgeable)
-                       :names (mapv :name purgeable)})
+                       :names (mapv :name named)
+                       :anon-shapes (count anons)}))
+          (vswap! plan assoc :purgeable (mapv :name purgeable))
+          (when-not dry-run?
             (idrepair/purge-fn-subgraphs-many! storage (map :id purgeable))
             (doseq [row purgeable]
               (registry-core/unregister-rich-type! (keyword (:name row))
-                                                   (:id row))))
-          ;; ONE aggregated warn, not one per row — a large retirement
-          ;; pinned by live version rows is a permanent state, and the
-          ;; per-row form printed hundreds of lines on every boot.
-          (let [left (filterv #(contains? kept (:id %)) removals)]
-            (when (seq left)
-              (log/warn "package identities removed from EDN but STILL REFERENCED — left in place"
-                        {:reason :removed-but-referenced
-                         :count (count left)
-                         :names (mapv :name left)}))))))
-    (count leftovers)))
+                                                   (:id row)))))
+        ;; ONE aggregated warn, not one per row — a retirement still
+        ;; referenced from the live graph is a state the author must
+        ;; resolve (the ⚐ lint lens shows it as a duplicate), and the
+        ;; per-row form printed hundreds of lines on every boot.
+        (let [left (filterv #(contains? kept (:id %)) removals)]
+          (vswap! plan assoc :kept (mapv :name left))
+          (when (seq left)
+            (log/warn "package identities removed from EDN but STILL REFERENCED — left in place"
+                      {:reason :removed-but-referenced
+                       :count (count left)
+                       :names (mapv :name (remove anon-name? left))
+                       :anon-shapes (count (filter anon-name? left))})))))
+    (if dry-run? @plan (count leftovers))))
 
 
 (defn sync-fn-entities-from-packages!

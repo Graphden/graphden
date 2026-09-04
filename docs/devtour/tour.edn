@@ -392,7 +392,12 @@
            below then removes the abandoned subgraph. The sync-time
            reconciler (`packages.sync/reconcile-moved-identities!`) runs them
            after every package sync, and the operator tool
-           `graphden.dev.integrity` delegates to the same two."}
+           `graphden.dev.integrity` delegates to the same two. Its REMOVAL
+           side asks `inbound-refs-many` with `:live-only?` — only the newest
+           version of a row on a live branch counts as a ref, never the
+           create-time identity row or a superseded version — because those
+           two kept every retired chain a live fn had ever referenced pinned
+           forever (472 leftovers on a two-month-old instance, 2026-09-04)."}
     {:ns graphden.versioning.storage.merge :defn diff-branches
      :say "The branch-symmetric resolved-view diff: gather every entity touched
            on either side's visibility set, resolve both, and report
@@ -766,8 +771,10 @@
 
     {:ns graphden.packages.sync :defn sync-fn-entities-from-packages!
      :say "The other half of every boot, and the one the loader hands off to:
-           sync composed fn-defs to storage, heal namespace-moved identities,
-           seed each fn-def's rich-type, then run the topological type-check
+           sync composed fn-defs to storage, heal namespace-moved identities
+           and reap retired ones nothing live references (`_anon-*` shapes
+           included; `{:dry-run? true}` previews the plan from a REPL), seed
+           each fn-def's rich-type, then run the topological type-check
            sweep. Read the two long comments — the batch-size binding (a
            fresh-DB boot writes >10k fn rows past the guard meant for USER
            writes) and `:skip-type-check?` (~15s of sweep the test bootstrap

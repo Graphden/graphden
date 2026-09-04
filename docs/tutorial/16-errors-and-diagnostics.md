@@ -88,7 +88,9 @@ persist by themselves; pure ones are yours to keep.
 
 **The fn name is a link.** Clicking it selects that fn on the canvas,
 which is usually the next thing you want: read the bindings that
-produced the failure.
+produced the failure. The Inspector's **Runs** tab then lists the same
+unresolved failures for that fn at the top — message and ✕ — so the
+dismissal can happen where you read the fn.
 
 **The message is already safe to read.** Error text and data are
 redacted and scrubbed when the audit row is written, not when it is
@@ -124,6 +126,10 @@ is expected to be non-empty while you are mid-change.
 Rows leave the list when the mismatch is fixed. Nothing to acknowledge,
 no state to clear: the next write re-checks the fn and the diagnostic
 either re-records or does not.
+
+The same message sits under the offending argument in the Inspector's
+**Bindings** tab — select the fn and the row for `port` carries the
+checker's text, so the fix happens where the binding is.
 
 ## Lint — what the graph already has
 
@@ -167,8 +173,9 @@ delete it like any other fn. Nothing in graphden's diagnostics is
 stored state except what you explicitly said.
 
 The Inspector shows the same rows for the selected fn under a **Lint**
-heading, so you see "this already exists as `x`" while you are still
-looking at the fn.
+heading, with the same **Not an issue** / **Restore** — so you see
+"this already exists as `x`" and decide about it while you are still
+looking at the fn, without a trip to the drawer.
 
 ## The two panels next door
 

@@ -64,6 +64,12 @@ The counts are the same facts three ways down the tree:
   shown, lens or not. The same marks sit on the card's title row on
   the canvas.
 
+Each mark leads to its detail in the Inspector: **Bindings** shows a
+type diagnostic under the argument it objects to, **Runs** lists the
+fn's unresolved failures with ✕, and the **Lint** section carries the
+finding with **Not an issue** / **Restore** — the drawer's actions,
+next to the fn.
+
 A problem lens narrows the tree to exactly the rows carrying that
 mark and keeps their namespaces open. Clear it with **◍ all**, or by
 fixing the problem — the counts re-read whenever the graph reloads,

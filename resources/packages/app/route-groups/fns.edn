@@ -44,6 +44,9 @@
                   :partial-lint
                   :partial-lint-suppress
                   :partial-lint-restore
+                  :partial-inspector-lint-suppress
+                  :partial-inspector-lint-restore
+                  :partial-execute-history-ack
                   :partial-tests
                   :partial-tests-stream
                   :partial-execute-trace

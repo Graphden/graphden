@@ -1244,11 +1244,40 @@
           :attrs {:value {:class "gd-bind-type"}}
           :children [:_insp-r-type-text]}}
 
+  ;; The recorded type diagnostics for the selected fn, grouped by arg
+  ;; name ONCE outside the row callback (the same rows the Type errors
+  ;; tab lists) — a nested filter inside the row would read `:item` as
+  ;; the diagnostic, not the arg. Each row then picks its bucket and
+  ;; prints the checker's message right under the binding it objects to.
+  {:name :_insp-diag-of-this-fn?
+   :description "HOF pred over diagnostic rows — this fn's."
+   :parent :equal?
+   :args {:a {:parent :get :args {:coll {:as :item} :key {:value :fn-id} :default {:value ""}}}
+          :b :_insp-lint-id-str}}
+  {:name :_insp-diag-arg-of
+   :description "HOF key-fn — the diagnostic's arg name."
+   :parent :get :args {:coll {:as :item} :key {:value :arg} :default {:value ""}}}
+  {:name :_insp-diag-by-arg
+   :parent :group-by
+   :args {:key-fn :_insp-diag-arg-of
+          :coll {:parent :filter :args {:pred :_insp-diag-of-this-fn? :coll :type-diagnostics-list}}}}
+  {:name :_insp-r-arg-str
+   :parent :keyword-to-str :args {:keyword {:as :item}}}
+  {:name :_insp-r-diags
+   :parent :get :args {:coll :_insp-diag-by-arg :key :_insp-r-arg-str :default {:value []}}}
+  {:name :_insp-r-diag-line
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-bind-diag"}}
+          :children [{:parent :get :args {:coll {:as :item} :key {:value :message} :default {:value ""}}}]}}
+  {:name :_insp-r-diag-lines
+   :parent :map :args {:func :_insp-r-diag-line :coll :_insp-r-diags}}
+
   {:name :_insp-arg-row
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "gd-bind-row"}}
-          :children [:_insp-r-name-span :_insp-r-chip :_insp-r-type-span]}}
+          :children [:_insp-r-name-span :_insp-r-chip :_insp-r-type-span :_insp-r-diag-lines]}}
 
   {:name :_insp-arg-rows
    :parent :map
@@ -1387,12 +1416,16 @@
   ;; --- Lint section: the graph-lint warnings this fn is part of ---------
   ;; Same rows the Lint drawer tab shows (`:branch-lint-warnings`, minus
   ;; the branch's `lint-suppressions`), filtered to findings naming the
-  ;; selected fn. Read-only here — suppressing happens in the drawer,
-  ;; where the swap target lives. Absent (hidden span) when clean.
+  ;; selected fn — with the same "Not an issue" / "Restore" actions,
+  ;; POSTing to the inspector's own routes that render THIS section back
+  ;; (swap target `.gd-insp-lint`). Parametrised by `:suppressed` so the
+  ;; POST handlers render from the list they just wrote (thunk-once).
+  ;; Absent (hidden span) when the fn has neither findings nor hidden
+  ;; entries.
   {:name :_insp-lint-id-str
    :parent :to-str :args {:value :_insp-fn-id}}
   {:name :_insp-lint-names-me?
-   :description "HOF pred over lint rows — does the row's `:fn-ids` contain the selected fn?"
+   :description "HOF pred over lint rows AND suppression entries (both carry `:fn-ids`) — does it name the selected fn?"
    :parent :contains?
    :args {:coll {:parent :to-set
                  :args {:coll {:parent :get :args {:coll {:as :item} :key {:value :fn-ids} :default {:value []}}}}}
@@ -1402,7 +1435,19 @@
    :args {:coll {:parent :filter
                  :args {:pred :_insp-lint-names-me?
                         :coll {:parent :branch-lint-warnings
-                               :args {:fresh {:value false} :suppressed :_plint-suppressed}}}}}}
+                               :args {:fresh {:value false} :suppressed {:as :suppressed}}}}}}}
+  {:name :_insp-lint-suppress-url
+   :parent :str
+   :args {:parts [{:value "/partials/inspector-lint/suppress?fn-id="} :_insp-lint-id-str
+                  {:value "&rule="} :_plint-f-rule {:value "&fn-ids="} :_plint-f-csv]}}
+  {:name :_insp-lint-suppress-btn
+   :parent :hx-button
+   :args {:label {:value "Not an issue"}
+          :url :_insp-lint-suppress-url
+          :target {:value "closest .gd-insp-lint"}
+          :swap {:value "outerHTML"}
+          :extras {:value {:class "lint-suppress"
+                           :title "Hide this finding; it stays hidden until the group changes or you restore it"}}}}
   {:name :_insp-lint-row
    :parent :hiccup
    :args {:tag {:value "div"}
@@ -1412,28 +1457,94 @@
                              :children [:_plint-f-rule]}}
                      {:parent :hiccup
                       :args {:tag {:value "span"} :attrs {:value {:class "gd-prov-v"}}
-                             :children [:_plint-f-links-div :_plint-f-msg-div]}}]}}
+                             :children [:_plint-f-links-div :_plint-f-msg-div :_insp-lint-suppress-btn]}}]}}
   {:name :_insp-lint-rendered
    :parent :map :args {:func :_insp-lint-row :coll :_insp-lint-rows}}
+
+  ;; hidden entries naming this fn — restorable here too (same shape as
+  ;; a finding: `:fn-ids`, so the same pred selects them)
+  {:name :_insp-lint-hidden-rows
+   :parent :vec
+   :args {:coll {:parent :filter :args {:pred :_insp-lint-names-me? :coll {:as :suppressed}}}}}
+  {:name :_insp-lint-restore-url
+   :parent :str
+   :args {:parts [{:value "/partials/inspector-lint/restore?fn-id="} :_insp-lint-id-str
+                  {:value "&rule="} :_plint-s-rule {:value "&fn-ids="}
+                  {:parent :str-join :args {:coll :_plint-s-ids :separator {:value ","}}}]}}
+  {:name :_insp-lint-restore-btn
+   :parent :hx-button
+   :args {:label {:value "Restore"}
+          :url :_insp-lint-restore-url
+          :target {:value "closest .gd-insp-lint"}
+          :swap {:value "outerHTML"}
+          :extras {:value {:class "lint-restore" :title "Show this finding again"}}}}
+  {:name :_insp-lint-hidden-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-prov-row gd-insp-lint-row lint-row-hidden"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "span"} :attrs {:value {:class "gd-prov-k"}}
+                             :children [:_plint-s-rule]}}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"} :attrs {:value {:class "gd-prov-v"}}
+                             :children [{:parent :hiccup
+                                         :args {:tag {:value "div"} :attrs {:value {:class "lint-fns"}}
+                                                :children [:_plint-s-links]}}
+                                        {:value [:div {:class "gd-insp-lint-hint"} "Marked not an issue"]}
+                                        :_insp-lint-restore-btn]}}]}}
+  {:name :_insp-lint-hidden-rendered
+   :parent :map :args {:func :_insp-lint-hidden-row :coll :_insp-lint-hidden-rows}}
+
   {:name :_insp-lint-section
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "gd-insp-sec gd-insp-lint"}}
           :children [{:value [:div {:class "gd-insp-sec-head"} "Lint"]}
                      :_insp-lint-rendered
-                     {:value [:div {:class "gd-insp-lint-hint"} "Open the Lint tab under the canvas to mark a finding as not an issue."]}]}}
+                     :_insp-lint-hidden-rendered]}}
   {:name :_insp-lint-any?
-   :parent :not :args {:value {:parent :empty? :args {:coll :_insp-lint-rows}}}}
+   :parent :not
+   :args {:value {:parent :and
+                  :args {:values [{:parent :empty? :args {:coll :_insp-lint-rows}}
+                                  {:parent :empty? :args {:coll :_insp-lint-hidden-rows}}]}}}}
   {:name :_insp-lint-opt
+   :description "The section, or a hidden span carrying the swap-target class so a later restore has somewhere to land."
    :parent :if
-   :args {:test :_insp-lint-any? :then :_insp-lint-section :else :hidden-span}}
+   :args {:test :_insp-lint-any?
+          :then :_insp-lint-section
+          :else {:value [:span {:class "gd-insp-lint" :hidden "1"}]}}}
+
+  ;; --- the inspector-side suppress / restore routes ---------------------
+  {:name :_insp-lint-html-after-suppress
+   :parent :render-hiccup
+   :args {:hiccup {:parent :_insp-lint-opt :args {:suppressed :_plint-supp-appended}}}}
+  {:name :_insp-lint-suppress-then-html
+   :parent :do
+   :args {:steps [:_plint-entry :_plint-suppress-applied :_insp-lint-html-after-suppress]}}
+  {:name :_partial-inspector-lint-suppress-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /partials/inspector-lint/suppress?fn-id=F&rule=R&fn-ids=a,b — record the finding as not-an-issue (same store as the drawer), respond with the selected fn's refreshed Lint section."
+   :parent :html-ok-response
+   :args {:body :_insp-lint-suppress-then-html}}
+  {:name :_insp-lint-html-after-restore
+   :parent :render-hiccup
+   :args {:hiccup {:parent :_insp-lint-opt :args {:suppressed :_plint-supp-removed}}}}
+  {:name :_insp-lint-restore-then-html
+   :parent :do
+   :args {:steps [:_plint-entry :_plint-restore-applied :_insp-lint-html-after-restore]}}
+  {:name :_partial-inspector-lint-restore-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /partials/inspector-lint/restore?fn-id=F&rule=R&fn-ids=a,b — drop the entry, respond with the refreshed Lint section."
+   :parent :html-ok-response
+   :args {:body :_insp-lint-restore-then-html}}
 
   ;; --- Assembly + handler ---------------------------------------------
   {:name :_insp-detail-full
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "gd-insp-detail"}}
-          :children [:_insp-args-section :_insp-prov-section :_insp-lint-opt]}}
+          :children [:_insp-args-section :_insp-prov-section
+                     {:parent :_insp-lint-opt :args {:suppressed :_plint-suppressed}}]}}
 
   {:name :_insp-detail-body
    :description "Empty span for a nil id (keeps `:get-entity`/`:assert-some` off the nil path); the full detail otherwise."

@@ -593,6 +593,9 @@
           if (typeof formatServerTypeTexts === 'function') {
             formatServerTypeTexts(host);
           }
+          // The Lint section's Not-an-issue / Restore are hx-post
+          // buttons — process the swapped-in fragment so they fire.
+          if (typeof htmx !== 'undefined' && htmx.process) htmx.process(host);
         }
       })
       .catch(() => {

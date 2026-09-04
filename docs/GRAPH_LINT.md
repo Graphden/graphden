@@ -137,8 +137,9 @@ row counts its fns with findings, a fn row carries `⚐N`.
 fns as `#hash` links (namespace dimmed), the engine's message, and a
 **Not an issue** button. The badge on the tab counts the rows. The
 Inspector's detail pane repeats the rows naming the selected fn under a
-**Lint** heading (read-only there — the swap target lives in the
-drawer).
+**Lint** heading with the same **Not an issue** / **Restore**, POSTing
+to `/partials/inspector-lint/{suppress,restore}` which render the
+section back; the hidden entries naming the fn are listed there too.
 
 **Suppression lives in the graph.** "Not an issue" POSTs the finding's
 key (`rule` + the sorted member fn-ids) to `/partials/lint/suppress`,

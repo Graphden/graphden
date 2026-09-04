@@ -225,6 +225,21 @@
    :parent :post
    :args {:path "/partials/lint/restore" :handler :_partial-lint-restore-handler}}
 
+  {:name :partial-inspector-lint-suppress
+   :description "POST /partials/inspector-lint/suppress?fn-id=F&rule=R&fn-ids=a,b — the Inspector's Not-an-issue: same `lint-suppressions` store as the drawer, responds with the fn's refreshed Lint section. Auth-required."
+   :parent :post
+   :args {:path "/partials/inspector-lint/suppress" :handler :_partial-inspector-lint-suppress-handler}}
+
+  {:name :partial-inspector-lint-restore
+   :description "POST /partials/inspector-lint/restore?fn-id=F&rule=R&fn-ids=a,b — un-hide from the Inspector, responds with the refreshed Lint section. Auth-required."
+   :parent :post
+   :args {:path "/partials/inspector-lint/restore" :handler :_partial-inspector-lint-restore-handler}}
+
+  {:name :partial-execute-history-ack
+   :description "POST /partials/execute-history/ack?fn-id=F&id=X — dismiss one unresolved failure from the Runs tab (sets :acknowledged-at; org-guarded), responds with the fn's refreshed failures block. Auth-required."
+   :parent :post
+   :args {:path "/partials/execute-history/ack" :handler :_partial-execute-history-ack-handler}}
+
   {:name :partial-merge-conflicts
    :description "POST /partials/merge-conflicts — body is the `{conflicts, source, target}` JSON the failed merge returned; renders the resolution card hiccup (header + help + batch toolbar + per-conflict source/target radios + version previews + Cancel/Apply). Renders the POSTed conflicts (no re-detection — mirrors `:partial-execute-result-inline`). JS in `editor-branches.js` owns the overlay chrome + radio/apply lifecycle."
    :parent :post

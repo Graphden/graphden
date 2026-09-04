@@ -5112,6 +5112,16 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .lint-row-hidden { opacity: 0.7; }
 .gd-insp-lint-row .lint-fns { margin-bottom: 2px; }
 .gd-insp-lint-hint { color: var(--muted-fg); font-size: 0.6875rem; padding: 2px 0; }
+.gd-insp-lint-row .lint-suppress, .gd-insp-lint-row .lint-restore { position: static; margin-top: 2px; }
+.gd-bind-diag { flex-basis: 100%; color: var(--error-fg-strong); font-size: 0.6875rem;
+  white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 4px; }
+/* Runs tab — the fn's unresolved failures above its history. */
+.execute-history-failures { border-bottom: 1px dashed var(--light-border); margin-bottom: 4px; }
+.execute-history-failures-head { font-size: 0.6875rem; color: var(--error-fg-strong); padding: 4px 8px 2px; }
+.execute-history-failure { display: grid; grid-template-columns: auto auto 1fr; column-gap: 8px;
+  align-items: baseline; padding: 2px 8px; font-size: 0.6875rem; }
+.execute-history-failure-time { color: var(--muted-fg); white-space: nowrap; }
+.execute-history-failure-msg { color: var(--error-fg-strong); overflow-wrap: anywhere; }
 
 /* Tests ops section (Block 3.1) — summary + Run-all + per-test rows.
    Same row grammar as the error-log / type-errors families above. */

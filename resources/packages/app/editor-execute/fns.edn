@@ -568,12 +568,69 @@
           :attrs {:value {:class "execute-history-stats"}}
           :children [:_peh-stats-text]}}
 
+  ;; --- unresolved failures (the Failed runs panel's rows, this fn only) —
+  ;;     message + ✕ dismiss, above the history. The ✕ POSTs to the
+  ;;     inspector's own ack route, which renders this block back
+  ;;     (swap target `.execute-history-failures`).
+  {:name :_peh-fail-fn-id-str
+   :parent :to-str :args {:value :fn-id-param}}
+  {:name :_peh-fail-mine?
+   :description "HOF pred over failure rows — this fn's."
+   :parent :equal?
+   :args {:a {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :fn-id} :default {:value ""}}}}}
+          :b :_peh-fail-fn-id-str}}
+  {:name :_peh-failures
+   :parent :vec
+   :args {:coll {:parent :filter
+                 :args {:pred :_peh-fail-mine?
+                        :coll {:parent :recent-failures :args {:days 7 :limit 50}}}}}}
+  {:name :_peh-fail-exec-id
+   :parent :get :args {:coll {:as :item} :key {:value :execution-id} :default {:value ""}}}
+  {:name :_peh-fail-ack-url
+   :parent :str
+   :args {:parts [{:value "/partials/execute-history/ack?fn-id="} :_peh-fail-fn-id-str
+                  {:value "&id="} :_peh-fail-exec-id]}}
+  {:name :_peh-fail-ack-btn
+   :parent :hx-button
+   :args {:label {:value "✕"}
+          :url :_peh-fail-ack-url
+          :target {:value "closest .execute-history-failures"}
+          :swap {:value "outerHTML"}
+          :extras {:value {:class "error-log-ack"
+                           :title "Dismiss this failure"
+                           :aria-label "Dismiss this failure"}}}}
+  {:name :_peh-fail-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-history-failure"}}
+          :children [:_peh-fail-ack-btn
+                     {:parent :hiccup
+                      :args {:tag {:value "span"} :attrs {:value {:class "execute-history-failure-time"}}
+                             :children [{:parent :get :args {:coll {:as :item} :key {:value :finished-at} :default {:value ""}}}]}}
+                     {:parent :hiccup
+                      :args {:tag {:value "div"} :attrs {:value {:class "execute-history-failure-msg"}}
+                             :children [{:parent :get :args {:coll {:as :item} :key {:value :error} :default {:value ""}}}]}}]}}
+  {:name :_peh-fail-rows
+   :parent :map :args {:func :_peh-fail-row :coll :_peh-failures}}
+  {:name :_peh-failures-list
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-history-failures"}}
+          :children [{:value [:div {:class "execute-history-failures-head"} "Unresolved failures"]}
+                     :_peh-fail-rows]}}
+  {:name :_peh-failures-block
+   :description "The block, or an empty carrier of the swap-target class when nothing is unresolved."
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_peh-failures}}
+          :then {:value [:span {:class "execute-history-failures" :hidden "1"}]}
+          :else :_peh-failures-list}}
+
   {:name :_partial-eh-fragment
-   :description "Full execute-history panel hiccup — the 7-day usage strip, then empty-state OR the list of rows."
+   :description "Full execute-history panel hiccup — the unresolved-failures block, the 7-day usage strip, then empty-state OR the list of rows."
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "execute-history-panel"}}
-          :children [:_peh-stats-line :_partial-eh-body]}}
+          :children [:_peh-failures-block :_peh-stats-line :_partial-eh-body]}}
 
   {:name :_partial-eh-html
    :parent :render-hiccup
@@ -584,6 +641,19 @@
    :description "Ring handler for `GET /partials/execute-history?fn-id=X` — returns the history panel hiccup as `text/html`. JS in `editor-execute.js` swaps the response into the panel host and binds Repeat / row-expand handlers post-swap."
    :parent :html-ok-response
    :args {:body :_partial-eh-html}}
+
+  ;; --- dismiss from the Runs tab: ack, then render the block back ------
+  {:name :_peh-ack-applied
+   :parent :failure-ack
+   :args {:execution-id {:parent :query-param :args {:param-name {:value "id"}}}}}
+  {:name :_peh-ack-then-html
+   :parent :do
+   :args {:steps [:_peh-ack-applied {:parent :render-hiccup :args {:hiccup :_peh-failures-block}}]}}
+  {:name :_partial-execute-history-ack-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /partials/execute-history/ack?fn-id=F&id=X — dismiss one failure from the Runs tab, respond with the fn's refreshed unresolved-failures block."
+   :parent :html-ok-response
+   :args {:body :_peh-ack-then-html}}
 
   ;; ---------------------------------------------------------------------
   ;; Runtime-effects strip — chips for {runtime, declared} effect sets

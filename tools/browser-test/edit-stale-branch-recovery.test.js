@@ -17,7 +17,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext} = require('./edit-test-helpers');
+const {assert, newContext, nodeApi} = require('./edit-test-helpers');
 
 const BRANCH = 'stale-recovery-probe';
 
@@ -46,15 +46,20 @@ const BRANCH = 'stale-recovery-probe';
     await page.waitForFunction(
       () => window.API && typeof authFetch === 'function',
       null, {timeout: 120000, polling: 300});
-    await page.evaluate(async (name) => {
-      // Delete it from the DEFAULT branch's context, the way another tab
-      // (or the tour's cleanup) would.
-      await authFetch(API.api_branches_ref(name),
-        {method: 'DELETE', headers: {'X-Graphden-Branch': 'main'}});
-    }, BRANCH);
+    // Delete it from the DEFAULT branch's context, the way another tab (or
+    // the tour's cleanup) would — and from NODE, not from the page: the
+    // editor's own background loaders (services, secrets, partials) hit 400
+    // "Unknown branch" the moment the row is gone and the recovery under test
+    // fires `location.replace`. An in-page evaluate still running at that
+    // instant dies with "Execution context was destroyed" — the behaviour
+    // being verified, arriving before the test had let go of the page (one
+    // 2026-09-05 gate). The probe below is the explicit trigger for a quiet
+    // tab; a recovery that already happened just makes it a no-op.
+    await nodeApi('DELETE', '/api/branches/' + BRANCH, undefined,
+                  {'X-Graphden-Branch': 'main'});
     await page.evaluate(() => {
       fetch('/api/graph/entities?scope=tree').catch(() => {}); // api-url-drift-allow: probing the wrapper, not a UI path
-    });
+    }).catch(() => { /* context destroyed = the recovery already navigated */ });
     await page.waitForFunction(() => {
       const onDefault = !new URLSearchParams(location.search).get('branch');
       let stored = 'x';
@@ -94,10 +99,8 @@ const BRANCH = 'stale-recovery-probe';
     console.error('FAIL:', err.message);
   } finally {
     try {
-      await page.evaluate(async (name) => {
-        await authFetch(API.api_branches_ref(name),
-          {method: 'DELETE', headers: {'X-Graphden-Branch': 'main'}});
-      }, BRANCH);
+      await nodeApi('DELETE', '/api/branches/' + BRANCH, undefined,
+                    {'X-Graphden-Branch': 'main'});
     } catch (_) { /* already gone */ }
     await browser.close();
   }

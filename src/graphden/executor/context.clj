@@ -282,6 +282,10 @@
    O(slots) on a vector, against a full clear that cost the next request a rebuild
    of every fn in the graph."
   [ctx slot-id]
+  ;; Bump the epoch: a loader that started before this slot landed must
+  ;; not install its snapshot over the spliced one (see
+  ;; `fill-graph-cache!`).
+  (when-let [ic (:invalidation-count ctx)] (swap! ic inc))
   (when-let [c (:graph-cache ctx)]
     (when-let [cached @c]
       (when-let [storage (:storage ctx)]
@@ -299,12 +303,42 @@
   (some-> (:graph-cache ctx) deref))
 
 
+(defn invalidation-epoch
+  "The ctx's `:invalidation-count` right now (0 for a stripped test ctx)
+   — a loader takes it BEFORE reading the graph and hands it back to
+   `fill-graph-cache!`, which installs the snapshot only if no
+   invalidation landed in between."
+  [ctx]
+  (or (some-> (:invalidation-count ctx) deref) 0))
+
+
 (defn fill-graph-cache!
   "Populate the graph-cache atom with `data`. No-op when `:graph-cache`
-   isn't present (test contexts that skip the cache atom)."
-  [ctx data]
-  (when-let [c (:graph-cache ctx)]
-    (reset! c data)))
+   isn't present (test contexts that skip the cache atom).
+
+   The 3-arity is the one a load-on-miss must use: `epoch` is the
+   `invalidation-epoch` the loader read before it started, and the
+   install happens under the invalidation lock and only while the
+   epoch is still current. Otherwise a write that committed DURING the
+   load has already run its splice against an EMPTY cache (a no-op),
+   and installing the loader's snapshot would publish the pre-write
+   graph as the truth — the reader then misses the fn it just created
+   until some later write splices it back in. Returns true when the
+   snapshot was installed, false when the loader must read again."
+  ([ctx data]
+   (when-let [c (:graph-cache ctx)]
+     (reset! c data)
+     true))
+  ([ctx data epoch]
+   (if-let [c (:graph-cache ctx)]
+     (let [install! (fn []
+                      (if (= epoch (invalidation-epoch ctx))
+                        (do (reset! c data) true)
+                        false))]
+       (if (:invalidation-lock ctx)
+         (cr/call-with-invalidation-lock ctx install!)
+         (install!)))
+     false)))
 
 
 ;; === Context Validation ===

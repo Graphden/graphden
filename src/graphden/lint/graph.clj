@@ -196,32 +196,18 @@
 
 
 (defn lint-branch
-  "The current branch's lint warnings.
-
-   Two sources, one engine:
-
-   - `:fresh? true` — read the branch straight from the request's
-     storage (`load-graph-entities-uncached`: versioned, org-scoped),
-     no memo. The per-ctx graph cache is spliced AFTER a write's
-     response returns, so a panel opened right after an edit would
-     otherwise show the pre-edit graph; a fresh read costs a few
-     hundred ms and the drawer is opened deliberately. The Lint tab
-     uses this.
-   - `:fresh? false` (default) — the per-ctx graph snapshot
-     (`cached-or-load-graph`), recomputed only when the snapshot object
-     or the suppression set changed. Cheap enough for a per-selection
-     surface — the inspector's Lint section."
-  ([ctx suppress] (lint-branch ctx suppress {}))
-  ([ctx suppress {:keys [fresh?]}]
-   (let [suppress (set suppress)]
-     (if fresh?
-       (lint-graph (types-api/load-graph-entities-uncached (request/require-storage ctx))
-                   (ns-rows ctx)
-                   suppress)
-       (let [graph (types-api/cached-or-load-graph ctx)
-             hit @memo]
-         (if (and hit (identical? (:graph hit) graph) (= (:suppress hit) suppress))
-           (:findings hit)
-           (let [findings (lint-graph graph (ns-rows ctx) suppress)]
-             (reset! memo {:graph graph :suppress suppress :findings findings})
-             findings)))))))
+  "The current branch's lint warnings over the per-ctx graph snapshot
+   (`cached-or-load-graph`), recomputed only when the snapshot object or
+   the suppression set changed. The snapshot is what every reader sees:
+   writes splice it inline and a load-on-miss that a write outran is
+   discarded (`executor.context/fill-graph-cache!`), so a read right after
+   an edit is the post-edit graph — no storage bypass needed."
+  [ctx suppress]
+  (let [suppress (set suppress)
+        graph (types-api/cached-or-load-graph ctx)
+        hit @memo]
+    (if (and hit (identical? (:graph hit) graph) (= (:suppress hit) suppress))
+      (:findings hit)
+      (let [findings (lint-graph graph (ns-rows ctx) suppress)]
+        (reset! memo {:graph graph :suppress suppress :findings findings})
+        findings))))

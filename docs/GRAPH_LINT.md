@@ -126,7 +126,7 @@ Findings reach the author as an Explorer **lens** and an Inspector
 the lenses landed).
 
 - **⚐ lint lens** — `GET /api/lint` is the JSON read (same base-fn as
-  the section, fresh path), cached client-side (`editor-problems.js`)
+  the section), cached client-side (`editor-problems.js`)
   and re-primed per graph load, after runs and after an Inspector
   action; the chip counts findings, a namespace row counts its fns
   with findings, a fn row and its card carry `⚐N`.
@@ -153,7 +153,8 @@ for the store and the entry, `app/editor-provenance/fns.edn`
 `lint.graph/lint-branch` call. The section is parametrised by
 `:suppressed` so the POST handlers render from the list they just
 wrote — the store's own thunk was forced before the write
-(ADR-thunk-once). `:fresh` picks the storage read over the per-ctx
-snapshot: the snapshot is spliced only after a write's response has
-returned, so a read right after an edit would otherwise lint the
-pre-edit graph.
+(ADR-thunk-once). Every reader lints the per-ctx graph snapshot: a
+write splices it inline before its response returns, and a load-on-miss
+that a write outran is discarded rather than installed
+(`executor.context/fill-graph-cache!`, epoch-guarded), so a read right
+after an edit is the post-edit graph.

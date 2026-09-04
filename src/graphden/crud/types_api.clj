@@ -77,10 +77,23 @@
   [ctx]
   (org-visible-slice
     (or (exec-ctx/cached-graph ctx)
-        (let [data (load-graph-entities-uncached
-                     (or (:compile-storage ctx) (request/require-storage ctx)))]
-          (exec-ctx/fill-graph-cache! ctx data)
-          data))))
+        ;; Load-on-miss races the write path: a write that commits while
+        ;; the load runs finds an EMPTY cache (nothing to splice) and the
+        ;; loaded snapshot is already behind it. Take the invalidation
+        ;; epoch first and install only if it did not move. On a move,
+        ;; serve what the write itself left in the cache (its delta path
+        ;; primes the post-write graph), else read again — bounded, so a
+        ;; write storm ends with an uncached read rather than a stale
+        ;; snapshot published as the truth.
+        (loop [attempt 1]
+          (let [epoch (exec-ctx/invalidation-epoch ctx)
+                data (load-graph-entities-uncached
+                       (or (:compile-storage ctx) (request/require-storage ctx)))]
+            (cond
+              (exec-ctx/fill-graph-cache! ctx data epoch) data
+              (exec-ctx/cached-graph ctx) (exec-ctx/cached-graph ctx)
+              (>= attempt 3) data
+              :else (recur (inc attempt))))))))
 
 
 (defn org-visible-rich-snapshot

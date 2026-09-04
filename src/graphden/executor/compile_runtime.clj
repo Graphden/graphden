@@ -148,7 +148,7 @@
     (merge (get m nil) (get m public-org) (get m org))))
 
 
-(declare prime-graph-cache!)
+(declare prime-graph-cache! call-with-invalidation-lock)
 
 
 (defn- graph-in-hand
@@ -363,6 +363,21 @@
   (when-let [graph-cache (:graph-cache ctx)]
     (reset! graph-cache (select-keys graph [:fns :slots :fn-slots
                                             :bindings :list-items]))))
+
+
+(defn- prime-graph-cache-if-current!
+  "`prime-graph-cache!` for a graph read OUTSIDE the invalidation lock:
+   `epoch` is the ctx's `:invalidation-count` taken before the read, and
+   the install happens under the lock only while it still holds — a write
+   that landed mid-read has already spliced or primed the post-write
+   graph, and this read would put the pre-write one back over it."
+  [ctx graph epoch]
+  (call-with-invalidation-lock
+    ctx
+    (fn []
+      (when (= epoch (some-> (:invalidation-count ctx) deref))
+        (prime-graph-cache! ctx graph)
+        true))))
 
 
 (defn- prime-compile-deps!
@@ -811,6 +826,7 @@
     (f ctx root-fn-id)
     (let [holder (:compiled-registry ctx)
           storage (compile-storage ctx)
+          epoch (some-> (:invalidation-count ctx) deref)
           {:keys [graph fns-map lookups]}
           (prep-compile-inputs
             ctx (read-graph storage (:executor-orgs ctx)))
@@ -820,7 +836,7 @@
                      (deps/forward-closure forward-deps [root-fn-id]))]
       (when (seq cell)
         (swap! holder (fn [current] (ce/compile-subset lookups (or current {}) cell)))
-        (prime-graph-cache! ctx graph)
+        (prime-graph-cache-if-current! ctx graph epoch)
         (prime-compile-deps! ctx graph (vec cell))
         ;; Record the root so `evict-cell!` can reference-count shared fns.
         (when-let [roots (:loaded-roots ctx)]

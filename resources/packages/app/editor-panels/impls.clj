@@ -76,10 +76,7 @@
   ;; fns (id / name / namespace — anonymous rows get their `_anon-` label)
   ;; and the ids joined for the suppress / restore URLs. Warnings only:
   ;; the engine's info tier is calibration, not a problem to show.
-  ;; `fresh` — read the branch straight from storage (the drawer, opened
-  ;; right after an edit) instead of the per-ctx snapshot (the inspector,
-  ;; on every selection); see `lint.graph/lint-branch`.
-  [suppressed fresh]
+  [suppressed]
   (cr/record-effect! :db)
   (let [suppress (into #{}
                        (map (fn [e]
@@ -94,7 +91,7 @@
              :fn-ids-csv (str/join "," (map str fn-ids))
              :fns (mapv (fn [[nsp n] id] {:id (str id) :name (name n) :ns nsp})
                         fns fn-ids)})
-          (lint-graph/lint-branch ctx suppress {:fresh? (boolean fresh)}))))
+          (lint-graph/lint-branch ctx suppress))))
 
 
 (def impls

@@ -1154,3 +1154,75 @@
                 acc))
             free-args
             aliases)))
+
+
+(defn shadowed-env-bindings
+  "Names of `fn-id`'s env-bindings — bindings it carries on slots BELOW
+   its root, deep in its ref tree — that are SHADOWED: every fn in the
+   tree that owns the slot as a root slot already binds it on its own
+   chain (closer-fn-wins), so F's value never reaches a reader. Such a
+   binding is a silent no-op: the author wrote a value, the run ignored
+   it, nothing errored (`_mcp-exec-run`'s `:fn-row` re-bind is the
+   documented instance).
+
+   Precise by construction, not complete: a binding is reported only
+   when the tree holds EXACTLY ONE fn rooted on that slot and that fn
+   is bound closer. Slot identity is per base-fn — every `:assoc`
+   derivative shares `assoc.value` — so with two or more such readers
+   the author's intended one is not structurally decidable (the parser
+   disambiguates by type at write time), and a slot the walk cannot
+   pin to a root-slot reader at all (rename views, positional anchors,
+   HOF-captured names) is likewise not judged: the runtime resolves
+   those by name fallback and alias copies. For the same reason a
+   binding whose NAME some other free root slot in the tree carries is
+   not reported either — the runtime's name fallback delivers the value
+   there (the parser's owner pick may differ from the reader, and the
+   name still lands). Empty for a fn without env-bindings, answered
+   without a walk."
+  [fn-id lookups]
+  (let [env-bnds (b/collect-env-bindings fn-id lookups)]
+    (if (empty? env-bnds)
+      #{}
+      (let [tree (loop [seen #{} queue [fn-id]]
+                   (if-let [fid (peek queue)]
+                     (let [queue (pop queue)]
+                       (if (contains? seen fid)
+                         (recur seen queue)
+                         (let [refs (concat
+                                      (mapcat (fn [bnd]
+                                                (case (:kind bnd)
+                                                  :ref [(:ref-id bnd)]
+                                                  :seq (keep :ref-fn-id (:items bnd))
+                                                  nil))
+                                              (b/collect-bindings fid lookups))
+                                      (keep #(when (= :ref (:kind %)) (:ref-id %))
+                                            (b/collect-env-bindings fid lookups)))]
+                           (recur (conj seen fid) (into queue (remove nil?) refs)))))
+                     seen))
+            ;; The readers of slot S: tree fns whose ROOT slots include S.
+            readers (fn [slot-id]
+                      (filter (fn [g] (some #(= slot-id (:id %)) (l/root-slots g lookups)))
+                              (disj tree fn-id)))
+            bound-at? (fn [g slot-id]
+                        (let [bnd (l/closest-binding-for-slot g slot-id lookups)]
+                          (boolean (and bnd (or (b/value-binding? bnd)
+                                                (b/ref-binding? bnd)
+                                                (b/list-binding? bnd))))))
+            ;; A free root slot anywhere in the tree exposed under NAME —
+            ;; the runtime's name fallback would feed it F's value.
+            ;; F itself included: when the parser anchored F's binding on
+            ;; a ref-tree slot, F's OWN root slot of that name is the
+            ;; free reader the fallback feeds.
+            free-by-name? (fn [nm]
+                            (some (fn [g]
+                                    (some #(and (= :free (:kind %)) (= nm (:ext-name %)))
+                                          (b/collect-bindings g lookups)))
+                                  tree))]
+        (into #{}
+              (keep (fn [{:keys [slot-id env-name]}]
+                      (let [rs (readers slot-id)]
+                        (when (and (= 1 (count rs))
+                                   (bound-at? (first rs) slot-id)
+                                   (not (free-by-name? env-name)))
+                          env-name))))
+              env-bnds)))))

@@ -297,6 +297,13 @@ Planning to decompose a large fn?
   (`web/crud-write`'s guards and `storage/pg`'s `:_migration-guarded` are
   the precedent). Check with `describe-fn` over `/mcp`, or
   `execute-fn` with a bogus arg — the error lists the known free args.
+- **A binding on a slot its reader already binds.** `{:parent :outer
+  :args {:x 1}}` where `:x` lives on a fn deeper in the tree that binds
+  `:x` itself is a silent no-op — closer-fn-wins, your value never
+  arrives, nothing errors (`_mcp-exec-run` re-binding `:fn-row` next to
+  `:parsed` is the documented instance). Rebind on the fn that reads the
+  slot, or extend THAT fn. `describe-fn` lists such bindings as
+  `unread-bindings`; the boot compile logs the same as a WARN.
 - **A `{:as}` rename on an inline anonymous fn.** The rename lifts only to
   the fn-def that CARRIES it; `{:coll {:parent :conj :args {:item {:as
   :id}}}}` inside a value position does not surface `:id` any further.

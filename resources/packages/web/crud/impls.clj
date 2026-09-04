@@ -89,6 +89,12 @@
     {}))
 
 
+(defbase fn-unread-bindings
+  [fn-id]
+  (cr/record-effect! :db)
+  (if (some? fn-id) (cr/unread-bindings ctx fn-id) []))
+
+
 (defbase graph-fn-defs-subtree
   [root-id]
   (cr/record-effect! :db)
@@ -302,6 +308,7 @@
    :service-blocking-free-args service-blocking-free-args
    :list-all-graph-entities list-all-graph-entities
    :graph-fn-defs-subtree   graph-fn-defs-subtree
+   :fn-unread-bindings      fn-unread-bindings
    :strip-hidden-impl strip-hidden-impl
    :all-rich-types all-rich-types
    :api-rich-types api-rich-types

@@ -1242,6 +1242,13 @@ function syncKindFilterBar() {
         n = getAppRouteCount();
       } else if (kind === 'tests' && typeof getTestStatusCount === 'function') {
         n = getTestStatusCount();
+        // The failed half rides the same span, in red — the old Tests
+        // panel's "N tests · F failed" line, without the panel.
+        const failed = typeof getTestFailedCount === 'function' ? getTestFailedCount() : 0;
+        countEl.classList.toggle('kind-count-bad', (failed || 0) > 0);
+        countEl.dataset.failed = failed ? String(failed) : '';
+        btn.title = 'Only tests (fns in a `tests` namespace)'
+          + (failed ? ' — ' + failed + ' failed' : '');
       } else if (kind === 'failed' && typeof getFailureTotal === 'function') {
         n = getFailureTotal();
       } else if (kind === 'type-errors' && typeof getTypeErrorTotal === 'function') {
@@ -1249,7 +1256,8 @@ function syncKindFilterBar() {
       } else if (kind === 'lint' && typeof getLintTotal === 'function') {
         n = getLintTotal();
       }
-      countEl.textContent = (n === null || n === undefined) ? '' : String(n);
+      countEl.textContent = (n === null || n === undefined) ? '' : String(n)
+        + (countEl.dataset.failed ? ' · ' + countEl.dataset.failed + '✗' : '');
     }
   });
   // "+ New secret" — a create action, not a filter. Shown only when the user is

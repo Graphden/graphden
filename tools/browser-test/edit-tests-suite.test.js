@@ -28,6 +28,7 @@ const {assert, newContext, api, getEntities} = require('./edit-test-helpers');
 const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 const ROOT_NS = 'e2eprobe';
 const PROBE_FN = 'e2e-sum-is-four';
+const FAIL_FN = 'e2e-sum-is-five';
 
 
 async function findNs(page, name, parentId) {
@@ -62,9 +63,11 @@ async function waitForStatus(page, want, deadlineMs) {
 
 async function cleanup(page) {
   try {
-    const ents = await getEntities(page, PROBE_FN);
-    const probe = (ents.fns || []).find((f) => f.name === PROBE_FN);
-    if (probe) await api(page, 'DELETE', '/api/entities/fn/' + probe.id);
+    for (const nm of [PROBE_FN, FAIL_FN]) {
+      const ents = await getEntities(page, nm);
+      const probe = (ents.fns || []).find((f) => f.name === nm);
+      if (probe) await api(page, 'DELETE', '/api/entities/fn/' + probe.id);
+    }
   } catch (_) {}
   try {
     const root = await findNs(page, ROOT_NS, null);
@@ -117,6 +120,17 @@ async function cleanup(page) {
               'fn-id=' + probe.id + '&slot-id=' + actualSlot.id + '&value=4');
     await api(page, 'POST', '/api/entities/binding',
               'fn-id=' + probe.id + '&slot-id=' + expectedSlot.id + '&value=4');
+    // A failing sibling (4 ≠ 5): the chip's red half and the ✗ dot.
+    await api(page, 'POST', '/api/entities/fn',
+              'name=' + FAIL_FN + '&parent-ids=' + assertEq.id
+              + '&namespace-id=' + testsNs.id);
+    const failEnts = await getEntities(page, FAIL_FN);
+    const failProbe = (failEnts.fns || []).find((f) => f.name === FAIL_FN);
+    assert(failProbe, 'failing probe created');
+    await api(page, 'POST', '/api/entities/binding',
+              'fn-id=' + failProbe.id + '&slot-id=' + actualSlot.id + '&value=4');
+    await api(page, 'POST', '/api/entities/binding',
+              'fn-id=' + failProbe.id + '&slot-id=' + expectedSlot.id + '&value=5');
 
     // ====================================================================
     // Phase A: run via API, read status.
@@ -127,6 +141,9 @@ async function cleanup(page) {
     const probeResult = (run.results || []).find((r) => r['fn-name'] === PROBE_FN);
     assert(probeResult && probeResult.status === 'succeeded',
            'probe passed via the runner (' + JSON.stringify(probeResult) + ')');
+    const failResult = (run.results || []).find((r) => r['fn-name'] === FAIL_FN);
+    assert(failResult && failResult.status === 'failed',
+           'the 4 ≠ 5 probe failed via the runner (' + JSON.stringify(failResult) + ')');
     const st = await waitForStatus(page, 'succeeded', 30000);
     assert(st === 'succeeded',
            'GET /api/tests/status reports succeeded (got ' + st + ')');
@@ -164,6 +181,12 @@ async function cleanup(page) {
     assert(!dot.err, 'tests lens shows the probe (' + (dot.err || 'ok') + ')');
     assert(dot.marker.includes('test-passed'),
            'probe row carries the green test dot (' + dot.marker + ')');
+    const chip = await page.evaluate(() => {
+      const c = document.querySelector('#kind-filters .kind-toggle[data-kind="tests"] .kind-count');
+      return c ? {text: c.textContent, bad: c.classList.contains('kind-count-bad')} : null;
+    });
+    assert(chip && /^2 · 1✗$/.test(chip.text) && chip.bad,
+           'the ✓ chip reads "2 · 1✗" in red — total and failed (' + JSON.stringify(chip) + ')');
 
     // ====================================================================
     // Phase C: the lens's [Run all] + the Inspector's Test section.

@@ -330,3 +330,49 @@
     (is (some? (get-in @db [:slot :s]))
         "…and its source survives too (fixpoint, not single pass)")
     (is (some? (get-in @db [:slot :v2])) "the untouched leaf is untouched")))
+
+
+(deftest inbound-refs-many-live-only-follows-the-current-graph
+  ;; `:live-only?` — the reconciler's removal view (2026-09-04): a ref counts
+  ;; from the newest non-deleted version of its row on a branch that still
+  ;; exists; a create-time identity row counts only while the row has no
+  ;; versions at all; superseded versions, tombstoned newest versions and
+  ;; versions on a vanished branch are history.
+  (let [t (fn [ms] (java.util.Date. (long ms)))
+        db (atom {:branch {:main {:id :main} :feat {:id :feat}}
+                  ;; identity rows: :b1 has versions (create-time value :a is
+                  ;; NOT a live ref); :b2 has none (its identity ref IS live)
+                  :binding {:b1 {:id :b1 :fn-id :owner :ref-fn-id :a}
+                            :b2 {:id :b2 :fn-id :owner :ref-fn-id :c}}
+                  :binding-version
+                  {;; main: repointed :a → :b — only the newest counts
+                   :v-old {:id :v-old :binding-id :b1 :branch-id :main :fn-id :owner :ref-fn-id :a :created-at (t 1000)}
+                   :v-new {:id :v-new :binding-id :b1 :branch-id :main :fn-id :owner :ref-fn-id :b :created-at (t 2000)}
+                   ;; feat: newest is a tombstone — nothing live there
+                   :v-feat {:id :v-feat :binding-id :b1 :branch-id :feat :fn-id :owner :ref-fn-id :d :created-at (t 1500)}
+                   :v-feat-dead {:id :v-feat-dead :binding-id :b1 :branch-id :feat :fn-id :owner :ref-fn-id :d :created-at (t 2500) :deleted-at (t 2500)}
+                   ;; a branch whose row is gone — its versions are garbage
+                   :v-gone {:id :v-gone :binding-id :b1 :branch-id :gone :fn-id :owner :ref-fn-id :e :created-at (t 3000)}}
+                  :fn {:owner {:id :owner :parent-ids []}
+                       :a {:id :a :parent-ids []} :b {:id :b :parent-ids []}
+                       :c {:id :c :parent-ids []} :d {:id :d :parent-ids []}
+                       :e {:id :e :parent-ids []}
+                       ;; parent-ids are an unversioned junction — always live
+                       :child {:id :child :parent-ids [:e]}}})
+        storage (mem-storage db)
+        targets #{:a :b :c :d :e}
+        all (idr/inbound-refs-many storage targets)
+        live (idr/inbound-refs-many storage targets {:live-only? true})]
+    (testing "the default view still reports every plane (history included)"
+      (is (= #{:a :b :c :d :e} (set (keys all)))))
+    (testing "live-only: the repointed-away target and the tombstoned/vanished-branch targets drop out"
+      (is (= #{:b :c :e} (set (keys live))))
+      (is (= [{:entity :binding-version :id :v-new :field :ref-fn-id :owner-fn-id :owner}]
+             (:b live))
+          "the newest main version is the one live ref to :b")
+      (is (= [{:entity :binding :id :b2 :field :ref-fn-id :owner-fn-id :owner}]
+             (:c live))
+          "a versionless identity row is live")
+      (is (= [{:entity :fn :id :child :field :parent-ids :owner-fn-id :child}]
+             (:e live))
+          "the vanished-branch version is gone, the parent junction stays"))))

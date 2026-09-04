@@ -80,7 +80,8 @@ per-branch routing) and auth-required. Core:
 
 - **Explorer `tests` lens** (the ✓ chip, shortcut `t`) — filters the
   tree to tests; test namespaces stay visible even before their
-  leaves lazy-load. The chip counts the branch's tests; each test row
+  leaves lazy-load. The chip counts the branch's tests (and, in red,
+  the failed ones); each test row
   carries a status dot: green passed, red failed, grey stale/not-run
   (primed from `/api/tests/status`). With the lens active the chip
   row reveals **▶ Run all** (`POST /api/tests/run`), and the editor

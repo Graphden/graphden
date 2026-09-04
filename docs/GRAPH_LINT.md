@@ -13,7 +13,7 @@ rows — so one engine serves both authoring worlds.
 | `src/graphden/lint/core.clj` | the pure engine — `lint` over a fn-def seq | 2026-09-03 |
 | `src/graphden/lint/corpus.clj` | `bb graph-lint` — the first-party fns.edn corpus, no DB, ~10 s | 2026-09-03 |
 | `src/graphden/lint/graph.clj` | the live branch — graph snapshot → fn-defs → `lint`, memoised per snapshot | 2026-09-03 |
-| editor diagnostics drawer, **Lint** tab | `GET /partials/lint`; "Not an issue" / "Restore" write the branch's `lint-suppressions` const | 2026-09-03 |
+| editor **⚐ lint** lens + Inspector **Lint** section | `GET /api/lint` primes the lens; `POST /partials/inspector-lint/{suppress,restore}` — "Not an issue" / "Restore" write the branch's `lint-suppressions` const | 2026-09-04 |
 
 ## Rules
 

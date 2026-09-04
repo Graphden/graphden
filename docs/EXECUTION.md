@@ -280,17 +280,20 @@ operator tooling. Retention: the cleanup scheduler sweeps buckets older than
 90 days (`sweep-stats!`) — trends outlive the raw `:fn-execution` TTLs, which
 is the point.
 
-## Error log (`GET /partials/error-log`)
+## Unresolved failures (`GET /api/failures`, the ✕ lens)
 
-The editor's **✕ failed** lens (Explorer) focuses on, and the Inspector's **Runs** tab lists, the current branch view's
-**unresolved** recent failures (newest first) straight off the `:fn-execution`
-audit rows — no new storage beyond two columns (`:branch-id` stamped at
-create, `:acknowledged-at` set by dismiss). Privacy holds because the write
-path already sanitised each row: `redact-outcome` hides secret-tainted
-bodies, `scrub-outcome` replaces internal error types with an opaque `ref:`
-on the cloud. Rows render a ✕ dismiss button, the fn name as a native `#hash`
-link (the editor's hashchange navigation), the finish time, the error text,
-and a collapsible ex-data block; the list header carries **Dismiss all**.
+The editor's **✕ failed** lens (Explorer) focuses on, and the Inspector's
+**Runs** tab lists, the current branch view's **unresolved** recent
+failures (newest first) straight off the `:fn-execution` audit rows — no
+new storage beyond two columns (`:branch-id` stamped at create,
+`:acknowledged-at` set by dismiss). `GET /api/failures` returns the per-fn
+counts the lens, the namespace rows and the fn cards read
+(`editor-problems.js`); the Runs tab's block renders the rows. Privacy
+holds because the write path already sanitised each row: `redact-outcome`
+hides secret-tainted bodies, `scrub-outcome` replaces internal error types
+with an opaque `ref:` on the cloud. A row carries a ✕ dismiss button, the
+finish time, the error text and a collapsible ex-data block; the lens's
+chip row carries **Dismiss all**.
 
 A failure counts as unresolved only while ALL of these hold (the panel is a
 worklist — every red counter has an action that clears it):
@@ -302,9 +305,10 @@ worklist — every red counter has an action that clears it):
   shipping a fix, a branch-local override, or deleting the fn clears it;
 - no later `succeeded` run of the same version exists — a clean re-run
   clears a transient failure;
-- the row wasn't dismissed (`POST /partials/error-log/ack?id=X` /
-  `/partials/error-log/ack-all`, both auth-required; they respond with the
-  refreshed body for the htmx swap).
+- the row wasn't dismissed (`POST /partials/execute-history/ack?fn-id=F&id=X`
+  responds with the fn's refreshed block for the htmx swap;
+  `POST /api/failures/ack-all` dismisses every failure the branch view lists;
+  both auth-required).
 
 Backed by the `:recent-failures` / `:failure-ack` / `:failure-ack-all`
 base-fns (`graphden.crud.fn-execution.errors`) — raw SQL with an explicit

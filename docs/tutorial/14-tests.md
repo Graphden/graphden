@@ -7,7 +7,8 @@ them for you automatically.
 
 **Concepts introduced**: the `tests` namespace segment, `:assert`,
 `:assert-eq`, test statuses ("stale by construction"), the `tests`
-lens, the diagnostics bar's Tests panel, auto-run on writes.
+lens with its **▶ Run all** action, the Inspector's **Test** section,
+auto-run on writes.
 
 ## What a test is
 
@@ -67,7 +68,8 @@ Now the surfaces:
 - With the lens on, the chip row shows **▶ Run all** — every test
   on the branch runs, and the dots update one by one as each run
   lands (the lens keeps a live signal open, so nothing needs a
-  refresh). The chip's number is how many tests the branch has.
+  refresh). The chip's number is how many tests the branch has — and,
+  in red, how many of them failed.
 - Select a test and open the Inspector's **Bindings** tab: a
   **Test** section shows the same status with the assertion's
   message on a failure, and **Run this test** runs just this one —

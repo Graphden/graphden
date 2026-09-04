@@ -42,6 +42,15 @@ function getTestStatusCount() {
   return _testStatuses ? _testStatuses.size : null;
 }
 
+// How many of the primed tests currently read `failed` — the red half of
+// the ✓ chip's count, the old panel's summary line in two characters.
+function getTestFailedCount() {
+  if (!_testStatuses) return null;
+  let failed = 0;
+  _testStatuses.forEach((row) => { if (row.status === 'failed') failed += 1; });
+  return failed;
+}
+
 function loadTestStatuses() {
   if (!(window.API && API.api_tests_status)) return Promise.resolve(null);
   return authFetch(API.api_tests_status)

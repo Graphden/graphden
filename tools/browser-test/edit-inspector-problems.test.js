@@ -102,6 +102,17 @@ const chipCount = (page, kind) => page.evaluate((k) => {
       return s && !s.hidden && /duplicate-definition/.test(s.text) && s.hasSuppress;
     }, 20000);
     assert(lintSeen, 'Inspector Lint section shows the finding with Not an issue: ' + JSON.stringify(await lintSection()));
+    // Each member link navigates to the fn it names (the editor's `#name`
+    // hash navigation) and that fn exists on the branch.
+    const links = await page.evaluate(() => Array.from(
+      document.querySelectorAll('#gd-insp-detail .gd-insp-lint a[href^="#"]'))
+      .map((a) => ({text: a.textContent.trim(), target: a.getAttribute('href').slice(1)})));
+    assert(links.length >= 2, 'the finding lists its member fns as links (' + links.length + ')');
+    for (const l of links) {
+      const ents = await getEntities(page, l.text);
+      const byName = (ents.fns || []).find((f) => f.name === l.text);
+      assert(byName && l.target === l.text, 'link "' + l.text + '" navigates to that fn (#' + l.target + ')');
+    }
     await page.evaluate(() => document.querySelector('#gd-insp-detail .gd-insp-lint button.lint-suppress').click());
     const suppressed = await waitFor(async () => {
       const s = await lintSection();

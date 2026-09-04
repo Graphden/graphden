@@ -485,6 +485,8 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 .kind-label { user-select: none; }
 .kind-count { font-size: 0.625rem; opacity: 0.85; user-select: none; }
 .kind-count:empty { display: none; }
+/* the ✓ tests chip carries "N · F✗" while any test fails */
+.kind-count.kind-count-bad { color: var(--error-fg); opacity: 1; }
 /* Active chip — this kind IS the applied lens (or "All" with an empty lens).
    A distinct ACCENT treatment (accent text + border + tint + weight) so the
    applied lens is unmistakable at a glance, and never collides with :hover. */

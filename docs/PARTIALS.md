@@ -417,9 +417,10 @@ panels. 32 partials as of 2026-08-18, by consumer surface:
 | `:partial-fn-versions`               | GET /partials/fn-versions?fn-id= (auth)                   | editor-fn-versions.js |
 | `:partial-fn-version-executions`     | GET /partials/fn-version-executions?fn-version-id= (auth) | per-row htmx load |
 | `:partial-execute-history`           | GET /partials/execute-history?fn-id= (auth)               | editor-execute-history.js + inspector Runs tab (editor-shell.js) |
+| `:partial-execute-history-ack`       | POST /partials/execute-history/ack?fn-id=&id= (auth)      | inspector Runs tab — ✕ on an unresolved failure; responds with the fn's refreshed failures block |
+| `:partial-inspector-test-run`        | POST /partials/inspector-test/run?fn-id= (auth)           | inspector Test section — [Run this test]; responds with the section rendered from the run's own result |
+| `:partial-inspector-lint-suppress` / `-restore` | POST /partials/inspector-lint/{suppress,restore}?fn-id=&rule=&fn-ids= (auth) | inspector Lint section — Not an issue / Restore; respond with the fn's refreshed Lint section |
 | `:partial-stats`                     | GET /partials/stats (auth)                                | editor-stats.js — the org's 7-day run rollups (headline totals, per-day trend, top-fns) |
-| `:partial-error-log`                 | GET /partials/error-log (auth)                            | editor-errors.js — the org's recent failed executions, scrubbed |
-| `:partial-type-errors`               | GET /partials/type-errors (auth)                          | editor-type-errors.js — the current branch's recorded type diagnostics |
 | `:partial-assets-panel`              | GET /partials/assets-panel (auth)                         | editor-assets.js — every frontend bundle file + its override status |
 | `:partial-asset-edit`                | GET /partials/asset-edit?path= (auth)                     | editor-assets.js — the override editor (CodeMirror) for one asset |
 | `:partial-execute-result`            | GET /partials/execute-result?id= (auth)                   | execute orchestrator + history |

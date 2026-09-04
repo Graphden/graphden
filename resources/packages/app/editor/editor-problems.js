@@ -176,10 +176,12 @@ window.refreshProblemCaches = refreshProblemCaches;
 // An action inside the Inspector (Not an issue / Restore in the Lint
 // section, ✕ on a Runs-tab failure) or the drawer changes the facts the
 // lenses count — re-prime after the swap settles.
-document.addEventListener('htmx:afterSettle', (ev) => {
-  const t = ev.target;
-  if (!t || typeof t.closest !== 'function') return;
-  if (t.closest('.gd-insp-lint, .execute-history-failures, .lint-body, .error-log-body')) {
-    refreshProblemCaches();
-  }
-});
+if (typeof document !== 'undefined') {
+  document.addEventListener('htmx:afterSettle', (ev) => {
+    const t = ev.target;
+    if (!t || typeof t.closest !== 'function') return;
+    if (t.closest('.gd-insp-lint, .execute-history-failures, .lint-body, .error-log-body')) {
+      refreshProblemCaches();
+    }
+  });
+}

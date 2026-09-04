@@ -185,6 +185,144 @@
    :effects #{:db}}
 
   ;; ---------------------------------------------------------------------
+  ;; Schema migrations — `:migration` + `:migrate`.
+  ;;
+  ;; The Flyway / Rails-migrations shape as two fn-def TEMPLATES (no
+  ;; new base-fn — the same role `:schedule` plays for cron services):
+  ;;
+  ;;   {:name :m-001 :parent :migration
+  ;;    :args {:id "001-users" :ddl {:value {:create-table :users …}}}}
+  ;;   {:name :m-002 :parent :migration
+  ;;    :args {:id "002-users-email" :ddl {:value {:alter-table :users …}}}}
+  ;;   {:name :app-migrate :parent :migrate :args {:migrations [:m-001 :m-002]}}
+  ;;   {:name :app-service :parent :do :args {:steps [:app-migrate :web-server]}}
+  ;;
+  ;; `:app-service` is the service fn: `:do` runs the migrator, then
+  ;; the listener whose stopper it returns (inheriting `:process`).
+  ;; The migration LIST is graph structure, not data — each migration
+  ;; is a node, the journal only ever grows (`{:append [...]}` on a
+  ;; derived fn-def extends it without touching the parent), and the
+  ;; write hook / merge restart the service so a newly added migration
+  ;; applies on the next start. Concurrency is Flyway's: the run is ONE
+  ;; transaction under `pg_advisory_xact_lock`, so N pods starting at
+  ;; once serialise and the late ones find nothing pending; a failing
+  ;; migration rolls the whole run back, markers included.
+  ;;
+  ;; These run against graphden's OWN datasource — a service on a
+  ;; branch migrates the same physical database main uses (branches
+  ;; version the graph, not Postgres). For a user database reach for
+  ;; the branch-local `:env` DSN + `web/sql` instead.
+  ;; ---------------------------------------------------------------------
+  {:name :migration
+   :description "One guarded schema migration — runs `:ddl` once, keyed by `:id` in the `schema_migrations` journal. In a transaction: when no marker row for `:id` exists, execute `:ddl` and insert the marker (returns 1); otherwise a no-op (returns nil). Derivatives bind `:id` (stable, append-only naming like \"001-users\") and `:ddl` (a HoneySQL map) and are listed in a `:migrate` derivative's `:migrations`."
+   :parent :pg-tx
+   :args {:body :_migration-guarded}}
+
+  ;; `:else nil` is explicit so `:if`'s `:else` slot does not surface as
+  ;; a free arg of every migration (and of the service `:do` above it,
+  ;; which the create-service guard would refuse) — same as the guards
+  ;; in web/crud-write.
+  {:name :_migration-guarded
+   :description "Transaction body of `:migration` — apply only when the journal has no marker for `:id`; nil when already applied."
+   :parent :if
+   :args {:test :_migration-pending?
+          :then :_migration-applied
+          :else nil}}
+
+  {:name :_migration-pending?
+   :description "True when `schema_migrations` holds no row for the captured `:id`."
+   :parent :empty?
+   :args {:coll :_migration-marker-rows}}
+
+  {:name :_migration-marker-rows
+   :description "Marker rows for the captured `:id` — `[]` or `[{:id …}]`."
+   :parent :pg-query
+   :args {:hsql :_migration-marker-select}}
+
+  {:name :_migration-marker-select
+   :description "`{:select [:id] :from :schema_migrations :where [:= :id <id>]}` assembled around the captured `:id`."
+   :parent :assoc
+   :args {:map {:value {:select [:id] :from :schema_migrations}}
+          :key {:value :where}
+          :value :_migration-id-eq}}
+
+  ;; Named (not inline) so the `{:as :id}` rename lifts to the outer
+  ;; fn-def — see `:_cron-parsed` in core/concurrency for the same rule.
+  {:name :_migration-id-eq
+   :description "`[:= :id <id>]` — the journal lookup predicate over the captured `:id`."
+   :parent :conj
+   :args {:coll {:value [:= :id]}
+          :item {:as :id}}}
+
+  {:name :_migration-applied
+   :description "Apply step: run the captured `:ddl`, then insert the journal marker. Returns the marker insert count (1)."
+   :parent :do
+   :args {:steps [:_migration-ddl-run :_migration-marker-insert]}}
+
+  {:name :_migration-ddl-run
+   :description "Execute the captured `:ddl` HoneySQL map on the transaction's connection."
+   :parent :pg-execute
+   :args {:hsql {:as :ddl}}}
+
+  {:name :_migration-marker-insert
+   :description "Insert the `schema_migrations` marker row for the captured `:id`."
+   :parent :pg-execute
+   :args {:hsql :_migration-marker-insert-hsql}}
+
+  {:name :_migration-marker-insert-hsql
+   :description "`{:insert-into :schema_migrations :columns [:id] :values [[<id>]]}` assembled around the captured `:id`."
+   :parent :assoc
+   :args {:map {:value {:insert-into :schema_migrations :columns [:id]}}
+          :key {:value :values}
+          :value :_migration-id-rows}}
+
+  {:name :_migration-id-rows
+   :description "`[[<id>]]` — the single-row `:values` of the marker insert."
+   :parent :conj
+   :args {:coll {:value []}
+          :item :_migration-id-row}}
+
+  {:name :_migration-id-row
+   :description "`[<id>]` — the marker row's column values."
+   :parent :conj
+   :args {:coll {:value []}
+          :item {:as :id}}}
+
+  {:name :migrate
+   :description "Run `:migrations` (a vector of `:migration` derivatives, in order) once, as ONE transaction under `pg_advisory_xact_lock` — concurrent starts (N pods) serialise and the late ones find nothing pending; a throw rolls the whole run back. Ensures the `schema_migrations` journal table first. Returns the last migration's result. Derivatives bind `:migrations` (extend with `{:append [...]}`) and go first in the service's `:do`."
+   :parent :pg-tx
+   :args {:body :_migrate-body}}
+
+  {:name :_migrate-body
+   :description "Transaction body of `:migrate`: take the advisory lock, ensure the journal table, run the captured `:migrations`."
+   :parent :do
+   :args {:steps [:_migrations-locked :_migrations-table-ensured :_migrations-run]}}
+
+  ;; Fixed key: every graphden deployment shares one migrator lock —
+  ;; the journal table is one per database anyway. `:inline` keeps the
+  ;; literal in the SQL text so the bigint overload is chosen.
+  {:name :_migrations-locked
+   :description "`SELECT pg_advisory_xact_lock(7441)` — held until the surrounding `:migrate` transaction commits or rolls back."
+   :parent :pg-query
+   :args {:hsql {:value {:select [[[:pg_advisory_xact_lock [:inline 7441]] :locked]]}}}}
+
+  {:name :_migrations-table-ensured
+   :description "`CREATE TABLE IF NOT EXISTS schema_migrations (id text primary key, applied_at timestamptz not null default now())`."
+   :parent :pg-execute
+   :args {:hsql {:value {:create-table [:schema_migrations :if-not-exists]
+                         :with-columns [[:id :text [:primary-key]]
+                                        [:applied_at :timestamptz [:not nil] [:default [:raw "now()"]]]]}}}}
+
+  ;; `:steps` renamed to `:migrations` — the descendant's bare vector of
+  ;; `:migration` refs binds through the rename as list ITEMS (loader
+  ;; `slot-type-of` types a pure rename from its source; the runtime
+  ;; list-chain reader picks the items up from the rename slot).
+  {:name :_migrations-run
+   :description "Run the captured `:migrations` in declaration order (`:do` semantics — left-to-right, last result returned)."
+   :parent :do
+   :args {:steps {:as :migrations}}}
+
+  ;; ---------------------------------------------------------------------
   ;; :postgres-storage-impl — first concrete realisation of :Storage.
   ;;
   ;; Parents to the type-row `:Storage` from storage.protocol; each

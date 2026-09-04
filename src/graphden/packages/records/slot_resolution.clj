@@ -107,6 +107,42 @@
     (:args fd)))
 
 
+(declare ^:private scalar-rename-source)
+(declare resolve-slot-owner-strict)
+(declare slot-type-of)
+
+
+(defn rename-source-type
+  "Type of a pure SCALAR rename slot — `{X {:as owner-arg}}` with no
+   `:type` pinned — which is its SOURCE slot's declared type: resolve
+   `X` from `owner-name`'s own chain (the source is declared on an
+   ancestor or reached through a ref) and read that slot's type.
+
+   Consumed by the parser's list-vs-literal decision ONLY (`parse/
+   build-binding-and-items`), NOT folded into `slot-type-of`: the
+   owner resolver's type-based disambiguation compares candidate slot
+   types against a bound value's return type, and typing every rename
+   slot there flipped `:_upd-pin :pkg-version` from its parent's own
+   slot to a same-typed rename in the ref tree (an NPE at run time).
+   Without this a pure rename over a list slot (`:steps {:as
+   :migrations}` over `:do`'s `[:list :any]`) read as nil, so a
+   descendant's bare vector `:migrations [:m1 :m2]` was stored as a
+   JSON literal instead of list-item refs — the refs never ran.
+
+   POSITIONAL renames (`:items [{:as :path} …]`) are deliberately
+   excluded: they rename ONE item of the list, a scalar, so the
+   list's own type must not leak onto them (a descendant's bare
+   vector on `:path` is that item's literal value, not list content)."
+  [owner-name owner-arg defs-by-name]
+  (let [fd (get defs-by-name owner-name)]
+    (when-let [src (scalar-rename-source fd owner-arg)]
+      (when-let [[src-owner src-arg]
+                 (resolve-slot-owner-strict owner-name src defs-by-name
+                                            #{[owner-name owner-arg]})]
+        (when-not (= [src-owner src-arg] [owner-name owner-arg])
+          (slot-type-of src-owner src-arg defs-by-name))))))
+
+
 (defn slot-type-of
   "Find the declared type of `[owner-name owner-arg]`. Inspects the
    owner's type-row / base-fn / record / refinement / list shape.
@@ -117,7 +153,9 @@
    list-item), returns T. Without this, rename slots like
    `:ring-response :body` (from `{:value {:as :body :type :text}}`)
    would resolve to nil because `(:args fd)` is keyed by the source
-   arg-name (`:value`), not the rename target."
+   arg-name (`:value`), not the rename target. A rename with NO type
+   pinned stays nil here — `rename-source-type` answers that for the
+   parser's list-vs-literal decision alone."
   [owner-name owner-arg defs-by-name]
   (let [fd (get defs-by-name owner-name)]
     (cond
@@ -273,7 +311,6 @@
           (:args fn-def))))
 
 
-(declare resolve-slot-owner-strict)
 (declare ^:private resolve-slot-owner-strict-inheritance)
 
 

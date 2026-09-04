@@ -382,6 +382,49 @@ editor badge reads *configured* / *disabled*, not *running* / *failed*, for now.
 Operators provisioning a dedicated tenant (the pod set, the shard, the limits):
 see [docs/FLEET_DEPLOY.md § Dedicated tenant shard](../FLEET_DEPLOY.md).
 
+## A startup step: schema migrations
+
+Because a service is just a no-arg fn, "run this before the listener
+starts" is `:do` — sequencing, not a service setting. `storage/pg`
+ships the classic migration shape as two templates you derive from:
+
+```edn
+{:name :m-001 :parent :migration
+ :args {:id "001-notes"
+        :ddl {:value {:create-table [:notes :if-not-exists]
+                      :with-columns [[:id :bigserial [:primary-key]]
+                                     [:body :text]]}}}}
+
+{:name :m-002 :parent :migration
+ :args {:id "002-notes-created-at"
+        :ddl {:value {:alter-table :notes :add-column [:created_at :timestamptz]}}}}
+
+{:name :notes-migrate :parent :migrate :args {:migrations [:m-001 :m-002]}}
+```
+
+Run `:notes-migrate` from the Run pane: the first run creates the
+`schema_migrations` journal and the `notes` table, returns `1`, and
+the second run returns nothing — both ids are journaled, so nothing is
+pending. Add a third migration later with
+`{:migrations {:append [:m-003]}}` on a derived fn-def: only the new id
+runs.
+
+Put the migrator first in the service's steps and the listener last —
+`:do` returns the listener's stopper, and the fn inherits its
+`:process` effect, so it is service-eligible:
+
+```edn
+{:name :notes-service :parent :do :args {:steps [:notes-migrate :web-server]}}
+```
+
+Editing the migration list restarts the service (its closure changed),
+and a merge does the same on the target branch, so a migration added on
+a feature branch applies when `main`'s service next starts. Mind that
+branches version the graph, not the database: the journal table lives
+in the one Postgres graphden itself uses. The full contract, including
+the advisory lock that lets several pods start at once, is in
+[docs/SERVICES.md § Startup steps](../SERVICES.md#startup-steps--schema-migrations).
+
 ## What we glossed over
 
 - The rest of the multi-pod story — how a fn edit on one pod

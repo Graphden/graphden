@@ -55,7 +55,7 @@
     ;; no rule, no vars — `rule-owner-of` returns nil, the popover
     ;; never opens, so a narrative would be dead prose.
     :map :filter :reduce :find-first :group-by :sort-by
-    :constantly :transduce :call :call-noargs :try
+    :constantly :transduce :call :call-noargs :call-with :try
     ;; audit-3 guard additions (every-rule-owner-has-a-narrative):
     :vec :to-set :flatten :zipmap :select-keys
     :update-keys :update-vals :assert-some :assert :assert-eq :name :str-to-keyword

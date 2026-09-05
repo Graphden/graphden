@@ -865,6 +865,7 @@
            :constantly "Declared signature — always returns the captured value: a → a."
            :transduce "Declared signature — result follows the reducing fn's accumulator: a."
            :call "Declared signature — the bound callable's return: b."
+           :call-with "Declared signature — the bound map-taking callable's return: b."
            :call-noargs "Declared signature — the bound thunk's return: a."
            :try "Declared signature — body's type unioned with the handler's: [:union a b]."
            :vec "Declared signature — container changes, element type preserved: [:list a] → [:list a]."

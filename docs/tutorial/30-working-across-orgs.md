@@ -54,25 +54,34 @@ org's data through your browser, even if you're a member of both.
 The trade-off is that belonging to two orgs means signing in on two
 subdomains — which is exactly what the switcher is for.
 
-## The org switcher
+## The org chip
 
-If your account is a member of **more than one** organization, the
-editor's top bar shows an **org chip** with the current org's name.
-Open it and you'll see your other orgs. Picking one **navigates**
-to that org's `<org>.graphden.dev` — its own origin, where you sign
-in (or already have a session). It doesn't try to carry your
-current session across; per-origin isolation means each org gets
-its own sign-in.
+The editor's top bar shows an **org chip** with the current org's
+name — always, even when you belong to just one. The org is the
+outermost context you write into (org → branch → workspace), so it
+stays readable at a glance. Open the chip and you'll see every org
+you belong to, each with an **owner** badge where you own it and
+its plan. Picking another one **navigates** to that org's
+`<org>.graphden.dev` — its own origin, where you sign in (or
+already have a session). It doesn't try to carry your current
+session across; per-origin isolation means each org gets its own
+sign-in.
 
-A single-org member sees no chip — there's nothing to switch
-between.
-
-> How do you *become* a member of a second org? Not by signing up
-> again (signup only ever makes a *new* org — Lesson 33). Someone
-> in the other org grants your account a capability in it
-> ([lesson 25 — Grants](25-grants.md)); membership is exactly
-> "holds a grant in that org," so the moment you're granted
-> something there, it appears in your switcher.
+> How do you *get* a second org? Two ways.
+>
+> - Someone in another org grants your account a capability in it
+>   ([lesson 25 — Grants](25-grants.md)); membership is exactly
+>   "holds a grant in that org," so the moment you're granted
+>   something there, it appears in the chip.
+> - You make one: **New organization…** at the bottom of the chip's
+>   list takes a name — lowercase letters, digits and hyphens, 3–40
+>   characters; it becomes the org's editor address — and makes you
+>   its owner and admin. The new org starts on the free plan. A
+>   verified email is required, and an account may own a handful of
+>   orgs (the operator sets the cap).
+>
+> Signing up again is *not* a way: signup only ever makes another
+> account ([Lesson 33](33-signing-up-and-in.md)).
 
 ## Where each thing lives — the whole map
 
@@ -94,9 +103,9 @@ app never needs any DNS change on graphden's side.
   sign-in.
 - Each org's editor is its own origin with its own session
   (Slack-workspace isolation).
-- The **org switcher** appears when you belong to 2+ orgs and
-  navigates you to another org's subdomain; you gain membership by
-  being *granted* something in that org, not by signing up again.
+- The **org chip** always names where you are and navigates you to
+  another org's subdomain; you gain membership by being *granted*
+  something in that org, or you create one yourself from the chip.
 - Editors on `graphden.dev`, apps on `graphden.app` — kept apart on
   purpose.
 

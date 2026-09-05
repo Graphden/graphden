@@ -867,6 +867,8 @@
            :call "Declared signature — the bound callable's return: b."
            :call-with "Declared signature — the bound map-taking callable's return: b."
            :call-noargs "Declared signature — the bound thunk's return: a."
+           :call-traced "Declared signature — the bound callable's return: b (the trace hop persists the call, the value is the callee's)."
+           :with-heartbeat "Declared signature — the body's return: a (the beat's value is discarded)."
            :try "Declared signature — body's type unioned with the handler's: [:union a b]."
            :vec "Declared signature — container changes, element type preserved: [:list a] → [:list a]."
            :to-set "Declared signature — duplicates dropped, element type preserved: [:list a] → [:list a]."

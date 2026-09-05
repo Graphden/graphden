@@ -42,7 +42,11 @@
         (is (= :_service-url-join (get-in info [:resolved-bindings :url :bound-ref]))
             "url is bound (with a :type pin) in the parent — the Bindings tab shows the ref, not 'free'")))
     (testing "an editor extension of a Ring wrap fits the listener's handler slot once its base-handler is bound"
-      (let [handler-slot [:fn {:request :ring-request-shape} :ring-response-shape]
+      ;; Structural (not the `:ring-*-shape` aliases): alias registration
+      ;; is per compile-ctx, and this ns shares a JVM with suites that may
+      ;; not have registered it — the shapes are what the slot means.
+      (let [handler-slot [:fn {:request :any}
+                          {:status :int :headers [:map :text :text] :body :any}]
             ring (extend! "tce-ring" :encode-stringify-wrap)]
         (is (contains? (:args ring) :base-handler))
         (is (not (types/subtype? (tcheck/assemble-fn-type :tce-ring) handler-slot))

@@ -227,13 +227,14 @@ A template's holes often live deeper than the root card's slot
 surface: an extension of `:service-get` has `service` / `path` free,
 but both belong to fns reached through the parent's ref-bound `url`
 (`:_service-url-join` → `:service-endpoint`), which the collapsed card
-does not render; a Ring wrap's `base-handler` sits inside a HOF slot.
-After the walkers, `builder-helpers/emit-root-deep-frees!` runs once
-for a composed / base-fn root: every entry of
-`compile.renames/deep-free-entries-with-captures` (the surface walk
-plus the closure captures of HOF targets — the same hole set the Run
-form asks for) whose slot has no placeholder yet becomes an unset node
-with an edge from the root, flagged `:deepArg`. The node names the ROOT fn
+does not render; a Ring wrap's `base-handler` is a free fn-typed slot
+one ref down. After the walkers, `builder-helpers/emit-root-deep-frees!`
+runs once for a composed / base-fn root: every entry of
+`compile.renames/deep-free-ext-entries` (the SURFACE walk — it stops at
+HOF boundaries, so a HOF target's closure captures stay inside the HOF;
+the editor's own listener would otherwise sprout every optional knob of
+the app it serves) whose slot has no placeholder yet becomes an unset
+node with an edge from the root, flagged `:deepArg`. The node names the ROOT fn
 (`fnId`) keyed by the inner slot, so the `+` binder writes a binding on
 this fn — closure capture, what a fn-def `:args {:service …}` on the
 same fn stores. Type-row roots skip the pass (their only slot is the

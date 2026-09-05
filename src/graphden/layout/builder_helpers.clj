@@ -931,19 +931,23 @@
 
 (defn emit-root-deep-frees!
   "The holes of the ROOT card that live deeper than its visible slot
-   surface — a template's free args reached through ancestor-bound refs
-   (`service-get`'s `service` / `path` on an extension of it) and the
-   closure captures of its HOF targets — rendered as placeholders on the
-   root card itself, so the reader binds them where the Run form lists
-   them instead of expanding into the composition to find each one.
+   surface — a template's free args reached through ancestor-bound
+   (non-HOF) refs: `service-get`'s `service` / `path` / `headers` on an
+   extension of it, a Ring wrap's `base-handler` — rendered as
+   placeholders on the root card itself, so the reader binds them where
+   the Run form lists them instead of expanding into the composition to
+   find each one.
 
-   Runs once after the walkers: every `deep-free-entries-with-captures`
-   entry whose slot has no placeholder on the canvas yet gets an unset
-   node + edge from the root, flagged `:deepArg`. The node names the
-   ROOT fn (`fnId`), so the `+` binder writes the binding on THIS fn
-   keyed by the inner slot — closure capture, exactly what a fn-def
-   `:args {:service …}` on the same fn stores. The type chip / `i` come
-   from the inner slot's own arg row (`edge-*-fields`)."
+   Runs once after the walkers: every `deep-free-ext-entries` entry (the
+   SURFACE walk — it stops at HOF boundaries, so a HOF target's closure
+   captures stay inside the HOF: the editor's listener would otherwise
+   sprout every optional knob of the app it serves) whose slot has no
+   placeholder on the canvas yet gets an unset node + edge from the
+   root, flagged `:deepArg`. The node names the ROOT fn (`fnId`), so the
+   `+` binder writes the binding on THIS fn keyed by the inner slot —
+   closure capture, exactly what a fn-def `:args {:service …}` on the
+   same fn stores. The type chip / `i` come from the inner slot's own
+   arg row (`edge-*-fields`)."
   [state lookups root-fn-id root-node-id]
   (let [arg-map (:arg-map lookups)
         args-by-slot (group-by (comp :slot-id val) arg-map)
@@ -952,7 +956,7 @@
                             (when (get-in n [:data :isPlaceholder])
                               (get-in n [:data :slotId]))))
                     (:nodes @state))]
-    (doseq [{:keys [ext-name slot-id]} (renames/deep-free-entries-with-captures root-fn-id lookups)
+    (doseq [{:keys [ext-name slot-id]} (renames/deep-free-ext-entries root-fn-id lookups)
             :when (and slot-id (not (contains? shown (str slot-id))))
             :let [[arg-id arg-rec] (first (get args-by-slot slot-id))]
             :when arg-rec]

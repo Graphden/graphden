@@ -86,6 +86,13 @@
           (is (some #(= (str ws) (:originalFnId (:data %))) (:nodes result))
               "the root is always present"))))
 
+    (testing "a listener's card does not sprout its app's knobs as deep holes"
+      ;; The root deep-free pass is the SURFACE walk: `handler` is a HOF
+      ;; slot, so everything the router's closure captures stays inside
+      ;; it — a collapsed web-server card shows its own slots only.
+      (is (empty? (filter #(and (:isUnset (:data %)) (:deepArg (:data %)))
+                          (:edges (layout ws {}))))))
+
     (testing "expanding deeper never produces fewer fn-cards"
       (let [d1 (fn-node-count (layout ws {(str "fn-" ws)
                                           {:full-depth 1 :partial-fns #{}}}))

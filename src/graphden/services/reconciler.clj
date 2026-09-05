@@ -319,8 +319,8 @@
    fn create paid a round trip for nothing (`perf/budgets.edn`
    `:sql/create-fn`)."
   [running-atom now-ms]
-  (let [last (::last-reap-ms (meta running-atom))]
-    (when (or (nil? last) (>= (- now-ms last) svc-schema/default-stale-after-ms))
+  (let [last-ms (::last-reap-ms (meta running-atom))]
+    (when (or (nil? last-ms) (>= (- now-ms last-ms) svc-schema/default-stale-after-ms))
       (alter-meta! running-atom assoc ::last-reap-ms now-ms)
       true)))
 

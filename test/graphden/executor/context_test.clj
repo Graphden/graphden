@@ -1,6 +1,11 @@
-(ns graphden.executor.context-test
+(ns ^:serial graphden.executor.context-test
   "Tests for `graphden.executor.context/create-context` — validation,
    defaults, and `current-time-ms`."
+  ;; `^:serial`: `delta-recompile-takes-the-cache-on-a-cloud-shaped-ctx` and
+  ;; `cold-ctx-type-refresh-primes-the-graph-cache` assert DELTAS of the
+  ;; process-global `:registry/*` counters (`counters/snapshot`). Under the
+  ;; parallel runner any concurrent test's recompile bumps the same counters
+  ;; — the gate saw `delta-recompile` 2 for an expected 1 (2026-09-05).
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.context :as ctx]

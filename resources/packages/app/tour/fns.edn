@@ -1215,19 +1215,23 @@
                :target "#gd-operate-nav button[data-section=\"users\"]"
                :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"users\"]:not([hidden])"}}
               {:title "Invite someone"
-               :body "In the field at the bottom type any address you can receive mail at — a plus-alias of your own works (you+teammate@…) — and click [[Invite]]. The row appears immediately, marked invited."
+               :body "In the field under the table type any address you can receive mail at — a plus-alias of your own works (you+teammate@…) — and click [[Invite]]. Nobody has that account yet, so an INVITE appears in the Invites list below, pinned to that email."
                :target "[data-users-panel] form[hx-post=\"/api/org-members\"]"
-               :check {:kind "dom" :selector "[data-users-panel] .grant-role-badge[title^=\"Invited\"]"}}
-              {:title "What an invite actually is"
-               :body "No invite entity was created. The row is a GRANT keyed by the email instead of an account id, dormant until that person first signs in — at which point it is rewritten into a real membership. One table, two states, nothing to expire or garbage-collect."
-               :target "[data-users-panel]"
+               :check {:kind "dom" :selector "[data-users-panel] [data-invite-row]"}}
+              {:title "What an invite is"
+               :body "A row that carries what you decided now: who (that email — or nobody in particular, for a link anyone may use), what to call them, their department, and a role on top of org-wide write. When that person signs in with the pinned email, the rights are written and the invite is spent. It expires on its own; the reaper deletes what expired."
+               :target "[data-invites-section]"
+               :check {:kind "manual"}}
+              {:title "The other way in: a link"
+               :body "The [[Create invite]] form is the full version: leave the email blank and you get a link to paste into chat; pick a role; choose how long it lives and how many people may use it. The link is shown ONCE, on top of the panel — copy it then. Try it or skip it."
+               :target "[data-users-panel] [data-invite-form]"
                :check {:kind "manual"}}
               {:title "Take it back"
-               :body "Click the [[×]] on the invited row and confirm. Removing a member deletes their grants in THIS org only — their account, and any other org they belong to, are untouched."
-               :target "[data-users-panel] .grant-role-badge[title^=\"Invited\"]"
-               :check {:kind "dom-absent" :selector "[data-users-panel] .grant-role-badge[title^=\"Invited\"]"}}
+               :body "Click the [[×]] on the invite row and confirm. Revoking an invite stops its link; removing a MEMBER (the × on a member row) deletes their grants in THIS org only — their account, and any other org they belong to, are untouched."
+               :target "[data-users-panel] [data-invite-row] .grant-delete"
+               :check {:kind "dom-absent" :selector "[data-users-panel] [data-invite-row]"}}
               {:title "That's membership"
-               :body "Invite by email, remove by row, transfer ownership when you hand the org over. What a member may DO is the next lesson: capabilities are granted per namespace, not per person. The written lesson 24 covers roles and the owner-only actions."
+               :body "Invite by email or by link, remove by row, transfer ownership when you hand the org over. What a member may DO is the next lesson: capabilities are granted per namespace, not per person. The written lesson 24 covers roles and the owner-only actions."
                :target nil
                :check {:kind "manual"}}]}
             {:id "25"

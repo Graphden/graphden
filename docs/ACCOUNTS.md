@@ -171,6 +171,32 @@ org's subdomain origin; on a single-host dev instance it falls back to
 `POST /api/switch-org` (the `gd_org` selector cookie) — sessions are
 org-agnostic, no re-mint involved.
 
+## Org invites (tenancy addon)
+
+Under the tenancy addon an org's Members panel mints **invites**
+(`:invite` rows, `graphden.tenancy.invites`): by email or as a bare
+link, pinned to one address or open to anyone, carrying the rights the
+inviter chose (org-wide `write` by default, plus a role), a prefilled
+name / department, an expiry (7 days by default, 90 at most) and a use
+count. The raw token lives only in the link (`/join/<token>`; the row
+keeps a SHA-256), shown once at creation; a pinned invite is also
+emailed through the accounts mailer on the trusted `GRAPHDEN_APP_ORIGIN`
+— the same origin rule as verification links.
+
+`GET /join/<token>` (tenancy auth-routes) is the whole redemption
+surface: signed out → a page naming the org and the inviter with
+**Create account** / **Sign in** buttons, both `/login?next=/join/…`;
+signed in → grants + roles written, the account's display name filled
+in when it had none, `303` into `<org>.<base-domain>` with the `gd_org`
+selector set. A pinned invite requires the account's verified primary
+email to match. First login with a pinned email redeems the invite
+without the link (`accounts-bridge/claim-email-invites!`). Expired
+invites are swept by the demo-gc reaper.
+
+`/login` honours `?next=<same-origin path>` after sign-in / signup (any
+scheme or host is ignored) and `?signup=1` opens the Create-account
+tab.
+
 ## Sequencing (this module vs tenancy)
 
 `accounts` is authoritative for identity/credentials/sessions. The

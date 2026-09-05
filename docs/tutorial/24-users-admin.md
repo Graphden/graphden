@@ -8,7 +8,8 @@ simply isn't there.
 
 **Concepts introduced**: the tenancy addon's capability header,
 grant-derived membership, the `:account` entity, tenant-forbidden
-entities, the owner's special position, ownership transfer.
+entities, invites (by email or link, rights decided up front), the
+owner's special position, ownership transfer.
 
 ## Membership is grants
 
@@ -54,12 +55,38 @@ the browser.
 
 ## Add a member — by email
 
-Under the table: one email field and **+ Add member**. The person
-must already have an account with that *verified* email (they
-sign up themselves at `/login` — [Lesson 33](33-signing-up-and-in.md));
-submitting grants them `write` in your org. Refine what they may
+Under the table: one email field and **Invite**. If an account
+with that *verified* email already exists, submitting grants it
+`write` in your org at once. If not, an **invite** pinned to that
+email is created (and emailed, when the deployment can send
+mail); the moment that person signs in with the address, the
+rights are written and the invite is spent. Refine what they may
 actually do in the **Grants** panel (next lesson) — membership
 gets them in the door, grants decide the rooms.
+
+## Invites
+
+Below the members table sits **Invites**: the org's open invites
+and the form that makes one. An invite is a row carrying what you
+decide *now*, so the joiner lands with everything in place:
+
+| Field | What it does |
+|---|---|
+| email | pins the invite to one person — only an account with that verified email can redeem it. Leave it blank for a **link** anyone may use |
+| name, department | prefilled into the joiner's profile |
+| role | a role of your org they are added to, on top of org-wide `write` |
+| expires in | 1, 7 or 30 days; an expired invite no longer redeems and the reaper deletes it |
+| one person / team link | how many accounts may redeem it |
+
+**Create invite** answers with the link on top of the panel — the
+one and only time it is shown (the server keeps just a hash), so
+copy it then. The link opens `/join/<token>`: a signed-out visitor
+sees who invited them where and chooses **Create account** or
+**Sign in**; either brings them straight back and the invitation is
+applied. A pinned invite opened with the wrong account explains the
+mismatch instead of joining.
+
+The row's `×` revokes the invite; its link stops working.
 
 ## Remove a member
 
@@ -91,7 +118,8 @@ affordances are just UX — the enforcement is in storage.
 2. Have a second account sign up at `/login` (and verify its
    email).
 3. Add it by email — the row appears. Check **Grants**: a `write`
-   grant materialized.
+   grant materialized. Then make a link invite with a role and
+   open it in a private window: the join page, then the org.
 4. Remove it (`×`, confirm) — the row and its grants go; the
    person's account is unaffected.
 

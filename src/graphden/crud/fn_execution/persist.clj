@@ -812,6 +812,38 @@
       (long ms) java.util.concurrent.TimeUnit/MILLISECONDS)))
 
 
+(defn- execution-thunk
+  "The body `run-future` hands to the pool: `(cr/execute …)` under the
+   per-run dynamic bindings — cancel-check off `cancel-flag`, the
+   effect-trace atom, the run's identity for cross-service tracing
+   (`cr/*execution*`), and the path-trace state when the run is traced
+   (explicit submit → the trace-all sentinel; ambient sample → the
+   selective set keeps gating). `bound-fn*` carries the submitting
+   thread's frame (tools.logging MDC, tenancy context) onto the worker."
+  [ctx fn-id args {:keys [cancel-flag trace execution path-trace explicit?]}]
+  (bound-fn*
+    (fn []
+      (binding [cr/*cancel-check*
+                #(when @cancel-flag
+                   (throw (InterruptedException. "execution cancelled")))
+                cr/*effect-trace* trace
+                cr/*execution* execution]
+        (cond
+          ;; Explicit trace?/capture-values? submit — the run's own
+          ;; traversal is the selected subtree (trace-all sentinel).
+          (and path-trace explicit?)
+          (binding [cr/*path-trace* path-trace
+                    ce/*traced-fn-ids* (atom ce/trace-all)]
+            (cr/execute ctx fn-id args))
+          ;; Ambient-sampled — the selective set keeps gating which
+          ;; frames record; only the per-execution var binds.
+          path-trace
+          (binding [cr/*path-trace* path-trace]
+            (cr/execute ctx fn-id args))
+          :else
+          (cr/execute ctx fn-id args))))))
+
+
 (defn run-future
   "Submit `(executor/execute …)` to a future bound to a cancel-flag
    AND a fresh effect-trace atom. The executor's `*cancel-check*`
@@ -863,27 +895,10 @@
                                   {:capture-values? (true? capture-values?)})
                       (ce/ambient-sample? fn-id) (ce/new-path-trace))
          watchdog (promise)
-         bf (bound-fn* ; capture clojure.tools.logging MDC etc.
-             (fn []
-               (binding [cr/*cancel-check*
-                         #(when @cancel-flag
-                            (throw (InterruptedException. "execution cancelled")))
-                         cr/*effect-trace* trace
-                         cr/*execution* execution]
-                 (cond
-                   ;; Explicit trace?/capture-values? submit — the run's own
-                   ;; traversal is the selected subtree (trace-all sentinel).
-                   (and path-trace explicit?)
-                   (binding [cr/*path-trace* path-trace
-                             ce/*traced-fn-ids* (atom ce/trace-all)]
-                     (cr/execute ctx fn-id args))
-                   ;; Ambient-sampled — the selective set keeps gating which
-                   ;; frames record; only the per-execution var binds.
-                   path-trace
-                   (binding [cr/*path-trace* path-trace]
-                     (cr/execute ctx fn-id args))
-                   :else
-                   (cr/execute ctx fn-id args)))))
+         bf (execution-thunk ctx fn-id args
+                             {:cancel-flag cancel-flag :trace trace
+                              :execution execution :path-trace path-trace
+                              :explicit? explicit?})
          ;; Submit to the BOUNDED execution pool (P1.2) — not Clojure's
          ;; unbounded soloExecutor. A saturated pool (all workers busy AND the
          ;; queue full) throws `RejectedExecutionException` HERE, on the

@@ -9,6 +9,7 @@ simply isn't there.
 **Concepts introduced**: the tenancy addon's capability header,
 grant-derived membership, the `:account` entity, tenant-forbidden
 entities, invites (by email or link, rights decided up front), the
+org's directory entry (name and department per member), the
 owner's special position, ownership transfer.
 
 ## Membership is grants
@@ -42,16 +43,21 @@ server-rendered partial (`GET /partials/users-admin` — the path
 is historical) — a table of your org's members:
 
 ```text
-Member               |       |
-owner@acme.com       | owner |
-dev@acme.com         |       |  ×
+Member               | Name · department       |       |
+owner@acme.com       | [Ada      ] [Board    ] | owner |
+dev@acme.com         | [Dev Two  ] [Platform ] |       |  ×
 ```
 
 Each row is an account, shown by its **verified email**; the
 owner is badged and carries no remove button (transfer ownership
-first). Nothing secret is in the panel — password hashes and
-session tokens live in the accounts tables, which never reach
-the browser.
+first). The **Name · department** cell is the org's own
+**directory entry** for the person — what *this org* calls them
+and where they sit, kept apart from the account (the same person
+is a different member in each org). It is filled from the invite
+they joined through, and editable in place: change either field
+and press **Save**. Blank name falls back to the account's own.
+Nothing secret is in the panel — password hashes and session
+tokens live in the accounts tables, which never reach the browser.
 
 ## Add a member — by email
 

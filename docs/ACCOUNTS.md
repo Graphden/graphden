@@ -201,6 +201,15 @@ email to match. First login with a pinned email redeems the invite
 without the link (`accounts-bridge/claim-email-invites!`). Expired
 invites are swept by the demo-gc reaper.
 
+Alongside membership the org keeps a **directory entry** per member
+(`:member`, `graphden.tenancy.members`): the org-local display name,
+`profile` (department, …), when and through which invite they joined.
+Written at every way in (first-login personal org, self-serve org,
+add-by-email, invite redeemed — the invite's name / profile seed it),
+edited from the Members panel (`POST /api/org-members/profile`,
+`manage-users`), deleted with the membership. Membership itself stays
+grant-derived; the entry is what the org knows beyond the account.
+
 `/login` honours `?next=<same-origin path>` after sign-in / signup (any
 scheme or host is ignored) and `?signup=1` opens the Create-account
 tab.

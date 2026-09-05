@@ -161,6 +161,14 @@
     (create-entity-impl entity-type data ctx)))
 
 
+(def ^:private owner-identity-fields
+  "Per entity, the immutable fields that name the row's OWNER for the
+   write-time guards — filled from the stored row on update so a
+   partial payload is checked like a full one."
+  {:binding [:fn-id :slot-id]
+   :binding-list-item [:binding-id]})
+
+
 (defn update-entity
   [entity-type id data ctx]
   ;; Abort-shielded: the whole bump->write->invalidate->note pipeline
@@ -171,15 +179,15 @@
     (fn []
       (let [storage (request/require-storage ctx)
             et (keyword entity-type)
-            ;; A binding PUT carries only the changed fields — a bare
-            ;; `ref-fn-id` re-point used to reach the cycle check with
-            ;; no owner (`fn-id`) and pass unchecked. The row's identity
-            ;; pair is immutable, so fill it from the stored row.
-            check-data (cond-> (assoc data :id id)
-                         (= et :binding)
-                         (as-> d (merge (select-keys (sp/read-entity storage :binding id)
-                                                     [:fn-id :slot-id])
-                                        d)))]
+            ;; A PUT carries only the changed fields — a bare `ref-fn-id`
+            ;; re-point used to reach the cycle check with no owner (a
+            ;; binding's `fn-id`, an item's `binding-id`) and pass
+            ;; unchecked. Those identity fields are immutable, so fill
+            ;; them from the stored row.
+            check-data (if-let [ks (owner-identity-fields et)]
+                         (merge (select-keys (sp/read-entity storage et id) ks)
+                                (assoc data :id id))
+                         (assoc data :id id))]
         ;; Capability gate on the UPDATE path too (F2): the create path
         ;; already runs secret-leaf-capability-rej, but a tenant could
         ;; create a plain fn then PUT :parent-ids pointing at an

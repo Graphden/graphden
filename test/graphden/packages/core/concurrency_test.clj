@@ -411,3 +411,33 @@
       (Thread/sleep 100)
       (is (= :failed @(:exit (meta stop))))
       (is (false? ((:alive? (meta stop))))))))
+
+
+(deftest with-heartbeat-beats-while-the-body-runs-test
+  (testing "the beat fires every period until the body returns; the body's value comes back"
+    (let [beats (atom 0)
+          result ((impls/impl-of :with-heartbeat)
+                  {:body (fn [] (Thread/sleep 350) :done)
+                   :beat (fn [] (swap! beats inc))
+                   :every-ms (delay 100)}
+                  nil)
+          seen @beats]
+      (is (= :done result))
+      (is (<= 2 seen 4) (str "≈3 beats over 350 ms at 100 ms, saw " seen))
+      (Thread/sleep 250)
+      (is (= seen @beats) "no beat after the body returned")))
+
+  (testing "a throwing beat is logged and skipped; a throwing body still stops the beat"
+    (let [beats (atom 0)]
+      (is (= :ok ((impls/impl-of :with-heartbeat)
+                  {:body (fn [] (Thread/sleep 250) :ok)
+                   :beat (fn [] (swap! beats inc) (throw (ex-info "beat failed" {})))
+                   :every-ms (delay 60)}
+                  nil)))
+      (is (<= 2 @beats))
+      (is (thrown? clojure.lang.ExceptionInfo
+            ((impls/impl-of :with-heartbeat)
+             {:body (fn [] (throw (ex-info "body failed" {})))
+              :beat (fn [] nil)
+              :every-ms (delay 60)}
+             nil))))))

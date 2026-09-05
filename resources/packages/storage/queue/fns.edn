@@ -33,7 +33,9 @@
    :type {:id :uuid
           :queue :text
           :payload :jsonb
-          :attempts :int}}
+          :attempts :int
+          :trace-id :nullable-uuid
+          :parent-execution-id :nullable-uuid}}
 
   ;; --- The Postgres primitives ---------------------------------------
   {:name :queue-publish
@@ -68,9 +70,22 @@
    :return-type :keyword
    :effects #{:db}}
 
+  {:name :queue-extend
+   :description "Renew the visibility lock on a claimed message for another `:visibility-ms` — the lease heartbeat of a handler that outlives its claim (the consumer template beats it every `:lease-every-ms` while `:handler` runs). True when the row was still pending."
+   :args {:message-id {:type :uuid}
+          :visibility-ms {:type :positive-int :description "The renewed lock length."}}
+   :return-type :bool
+   :effects #{:db}}
+
+  {:name :queue-requeue
+   :description "Put a dead-lettered message back on its queue: pending, attempts reset, takeable now, error cleared, consumers woken. True when the row was dead (Operate → Queues uses it)."
+   :args {:message-id {:type :uuid}}
+   :return-type :bool
+   :effects #{:db}}
+
   ;; --- The consumer template (backend-agnostic) ----------------------
   {:name :queue-consumer
-   :description "A service that takes messages and runs `:handler` on each, acking on return and nacking on a throw. Backend-agnostic: bind `:take` (0-arg → messages), `:ack` (message-id) and `:nack` (message-id, error) to a backend's primitives — `:pg-queue-consumer` does it for Postgres. Inherits `:process` from `:future`; service-eligible once `:queue` / `:handler` are bound."
+   :description "A service that takes messages and runs `:handler` on each, acking on return and nacking on a throw; while the handler runs, `:extend` (message-id) is called every `:lease-every-ms` so a long handler keeps its claim. The handler runs as a traced hop: with the trace ids `:queue-publish` stamped on the message, its execution is persisted as a child of the publisher's (Run pane → Downstream calls). Backend-agnostic: bind `:take` (0-arg → messages), `:ack` (message-id), `:nack` (message-id, error), `:extend` (message-id) and `:lease-every-ms` to a backend's primitives — `:pg-queue-consumer` does it for Postgres. Inherits `:process` from `:future`; service-eligible once `:queue` / `:handler` are bound."
    :parent :future
    :args {:body :_queue-loop}}
 
@@ -105,13 +120,38 @@
 
   {:name :_queue-handle-body
    :parent :do
-   :args {:steps [:_queue-run-handler :_queue-ack-item]}}
+   :args {:steps [:_queue-run-handler-leased :_queue-ack-item]}}
 
-  ;; `:handler` sees the message under `message`.
-  {:name :_queue-run-handler
+  ;; The handler runs under a lease heartbeat: `:extend` renews the
+  ;; claim every `:lease-every-ms` until the handler returns, so a
+  ;; handler slower than the visibility timeout is not re-delivered.
+  {:name :_queue-run-handler-leased
+   :parent :with-heartbeat
+   :args {:body :_queue-run-handler
+          :beat :_queue-extend-item
+          :every-ms {:as :lease-every-ms}}}
+
+  {:name :_queue-extend-item
    :parent :call
+   :args {:func {:as :extend :type [:fn {:message-id :uuid} :any]}
+          :arg :_queue-item-id}}
+
+  ;; `:handler` sees the message under `message`, and runs as a hop of
+  ;; the publisher's trace when the message carries one.
+  {:name :_queue-run-handler
+   :parent :call-traced
    :args {:func {:as :handler :type [:fn {:message :queue-message-shape} :any]}
-          :arg {:as :item}}}
+          :arg {:as :item}
+          :trace-id :_queue-item-trace-id
+          :parent-execution-id :_queue-item-parent-execution-id}}
+
+  {:name :_queue-item-trace-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :trace-id} :default nil}}
+
+  {:name :_queue-item-parent-execution-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :parent-execution-id} :default nil}}
 
   {:name :_queue-item-id
    :parent :get
@@ -152,9 +192,16 @@
    :parent :queue-nack
    :args {:retry-ms 5000 :max-attempts 5}}
 
+  {:name :_pg-queue-extend
+   :description "`:queue-extend` renewing the claim for the default 30 s visibility; the consumer beats it every 10 s. `:message-id` stays free."
+   :parent :queue-extend
+   :args {:visibility-ms 30000}}
+
   {:name :pg-queue-consumer
    :description "`:queue-consumer` over the Postgres primitives. Derive it and bind `:queue` (the name) and `:handler` (a fn with a `message` free arg) — then make it a service. Free: `:queue`, `:handler`."
    :parent :queue-consumer
    :args {:take :_pg-queue-take
           :ack :queue-ack
-          :nack :_pg-queue-nack}}]}
+          :nack :_pg-queue-nack
+          :extend :_pg-queue-extend
+          :lease-every-ms 10000}}]}

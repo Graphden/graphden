@@ -66,36 +66,49 @@
   (parse-header (get-in request [:headers header-name])))
 
 
+(defn run-traced-with!
+  "Run `thunk` as one hop of the trace `link` names
+   (`{:trace-id :parent-execution-id}`) on behalf of `fn-id`: mint this
+   hop's execution id, bind `cr/*execution*` to it (so the hop's own
+   outbound calls and publishes name it), run under a path-trace, persist
+   the outcome as an execution row of `fn-id` linked to the caller
+   (`capture/persist-captured!` — `args` is the persisted arg snapshot,
+   e.g. `{:request …}` for a listener, `{:message …}` for a queue
+   consumer), and return the result (or rethrow) exactly as the
+   untraced path would. Transport-agnostic: `run-traced!` is the HTTP
+   case, `:call-traced` the queue's."
+  [ctx fn-id {:keys [trace-id parent-execution-id]} args thunk]
+  (let [id (random-uuid)
+        t0 (System/currentTimeMillis)
+        trace (ce/new-path-trace)
+        effect-trace (atom #{})
+        branch-id (some-> (:storage ctx) vs/current-branch-id)]
+    (binding [cr/*execution* {:id id :trace-id trace-id}
+              cr/*path-trace* trace
+              cr/*effect-trace* effect-trace
+              ce/*traced-fn-ids* (atom ce/trace-all)]
+      (let [outcome (try {:status :succeeded :result (thunk)}
+                         (catch Exception t {:status :failed :throwable t}))]
+        (capture/persist-captured! branch-id ctx fn-id nil
+                                   trace effect-trace outcome t0
+                                   {:id id
+                                    :trace-id trace-id
+                                    :parent-execution-id parent-execution-id
+                                    :args args})
+        (if (= :succeeded (:status outcome))
+          (:result outcome)
+          (throw (:throwable outcome)))))))
+
+
 (defn run-traced!
   "Handle `request` through `thunk`. With a trace header present (and a
-   known `handler-fn-id`): mint this hop's execution id, bind
-   `cr/*execution*` to it (so the handler's own `:service-get` names it),
-   run under a path-trace, persist the outcome as an execution row linked
-   to the caller (`capture/persist-captured!`), and return the response
-   (or rethrow) exactly as the untraced path would. Without a header:
-   just `(thunk)`."
+   known `handler-fn-id`): `run-traced-with!` — this hop is persisted as
+   an execution of the handler linked to the caller, with the sanitized
+   request as its argument. Without a header: just `(thunk)`."
   [ctx handler-fn-id request thunk]
-  (if-let [{:keys [trace-id parent-execution-id]}
-           (and handler-fn-id (incoming-trace request))]
-    (let [id (random-uuid)
-          t0 (System/currentTimeMillis)
-          trace (ce/new-path-trace)
-          effect-trace (atom #{})
-          branch-id (some-> (:storage ctx) vs/current-branch-id)]
-      (binding [cr/*execution* {:id id :trace-id trace-id}
-                cr/*path-trace* trace
-                cr/*effect-trace* effect-trace
-                ce/*traced-fn-ids* (atom ce/trace-all)]
-        (let [outcome (try {:status :succeeded :result (thunk)}
-                           (catch Exception t {:status :failed :throwable t}))]
-          (capture/persist-captured! branch-id ctx handler-fn-id request
-                                     trace effect-trace outcome t0
-                                     {:id id
-                                      :trace-id trace-id
-                                      :parent-execution-id parent-execution-id})
-          (if (= :succeeded (:status outcome))
-            (:result outcome)
-            (throw (:throwable outcome))))))
+  (if-let [link (and handler-fn-id (incoming-trace request))]
+    (run-traced-with! ctx handler-fn-id link
+                      {:request (capture/sanitize-request request)} thunk)
     (do
       (when (and (nil? handler-fn-id) (incoming-trace request))
         (log/debug "trace header received but the handler carries no fn identity — not persisted"))

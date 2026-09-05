@@ -88,6 +88,16 @@
   ;; InterruptedException from inside the body breaks the loop. Catches
   ;; the exception so unwinding is clean.
   ;; ---------------------------------------------------------------------
+  {:name :with-heartbeat
+   :description "Run `:body` on this thread while a daemon thread calls `:beat` every `:every-ms` — a lease renewal, a liveness ping — and stop the beat when the body returns or throws. Returns the body's value. A beat that throws is logged and skipped; the body is never interrupted by it."
+   :args {:body {:type [:fn {} a]
+                 :description "Zero-arg callable — the work."}
+          :beat {:type [:fn {} :any]
+                 :description "Zero-arg callable run every `:every-ms` while the body runs."}
+          :every-ms {:type :positive-int :description "Beat period in milliseconds — shorter than whatever lease the beat renews."}}
+   :return-type a
+   :effects #{:process}}
+
   {:name :loop-until-interrupted
    :description "Run `:body` repeatedly while `(Thread/isInterrupted)` is false. Exits cleanly when the parent :future's stopper interrupts the thread — either at the next loop boundary or via InterruptedException thrown from inside the body (e.g. by `:sleep`). Catches the exception so shutdown is clean."
    :args {:body {:type [:fn {} :any]

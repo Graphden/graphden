@@ -5,6 +5,10 @@
    nacking the one it throws on — retry counted, error kept."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.crud.fn-execution :as fn-exec]
+    [graphden.crud.fn-execution.lookup :as lookup]
+    [graphden.crud.fn-execution.persist :as persist]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records :as records]
     [graphden.services.reconciler :as recon]
@@ -67,8 +71,77 @@
             (is (= "dead" (:state row)))
             (is (= 2 (:attempts row)))
             (is (some? (:error row))))
-          (is (= [bad] (mapv :id (rows))) "only the dead letter remains")))
+          (is (= [bad] (mapv :id (rows))) "only the dead letter remains"))
+        (testing "a message published under a persisted run is handled as a traced hop:
+                  the handler's execution is a child of the publisher's"
+          (let [parent (persist/create-pending-row!
+                         storage (lookup/resolve-fn-version-id ctx worker-id) [] nil nil)
+                parent-id (:id parent)
+                traced (binding [cr/*execution* {:id parent-id :trace-id parent-id}]
+                         (publish! "{\"order\":42}"))]
+            (wait/wait-for 10000 #(nil? (sp/read-entity storage :queue-message traced)))
+            (wait/wait-for 10000 #(seq (:children (fn-exec/get-execution ctx parent-id))))
+            (let [children (:children (fn-exec/get-execution ctx parent-id))
+                  child-row (some->> children first :id (sp/read-entity storage :fn-execution))]
+              (is (= 1 (count children)))
+              (is (= "qe-handle" (:fn-name (first children))) "the consumer's handler fn")
+              (is (= :succeeded (:status (first children))))
+              (is (= parent-id (:trace-id child-row)))
+              (is (= parent-id (:parent-execution-id child-row)))
+              (is (= {:order 42} (:result child-row)))
+              (let [args (:args (fn-exec/get-execution ctx (:id child-row)))]
+                (is (= 1 (count args)) "one persisted arg — the handler's `message`")
+                (is (= (str traced) (str (get-in (first args) [:value :id])))
+                    "the message is the persisted argument"))))
+          (testing "an untraced publish persists nothing"
+            (let [n (count (sp/query-entities storage :fn-execution {}))
+                  id (publish! "{\"order\":43}")]
+              (wait/wait-for 10000 #(nil? (sp/read-entity storage :queue-message id)))
+              (is (= n (count (sp/query-entities storage :fn-execution {}))))))))
       (finally
         (recon/stop-all! running ctx)
         (doseq [r (rows)] (sp/delete-entity storage :queue-message (:id r)))
+        (sp/delete-entity storage :service (:id svc))))))
+
+
+(deftest slow-handler-keeps-its-claim-test
+  ;; A handler slower than the visibility timeout used to be re-delivered
+  ;; to another taker mid-flight (at-least-once, but twice for nothing).
+  ;; The consumer now renews the claim every `:lease-every-ms` while the
+  ;; handler runs, so the message is handled once and acked.
+  (let [{:keys [ctx storage]} *bootstrap*
+        _ (setup/sync-and-invalidate!
+            ctx storage
+            [{:name :_qs-payload :parent :get
+              :args {:coll {:as :message} :key {:value :payload} :default nil}}
+             {:name :_qs-report :parent :queue-publish
+              :args {:queue "qs-done" :payload :_qs-payload}}
+             ;; 1.5 s of work against a 600 ms claim.
+             {:name :qs-slow-handle :parent :do
+              :args {:steps [{:parent :sleep :args {:ms 1500}} :_qs-report]}}
+             {:name :_qs-take :parent :queue-take
+              :args {:batch 1 :visibility-ms 600 :wait-ms 200}}
+             {:name :_qs-extend :parent :queue-extend
+              :args {:visibility-ms 600}}
+             {:name :qs-worker :parent :pg-queue-consumer
+              :args {:queue "qs-orders" :handler :qs-slow-handle
+                     :take :_qs-take :extend :_qs-extend :lease-every-ms 200}}])
+        worker-id (records/fn-id nil :qs-worker)
+        svc (sp/create-entity storage :service
+                              {:fn-id worker-id :enabled? true
+                               :restart-policy :always :cardinality :singleton})
+        running (atom {})
+        done (fn [] (sp/query-entities storage :queue-message {:queue "qs-done"}))]
+    (try
+      (let [id ((impls/impl-of :queue-publish)
+                {:queue "qs-orders" :payload {:n 1} :delay-ms 0} ctx)]
+        (recon/reconcile-once! ctx running)
+        (wait/wait-for 15000 #(nil? (sp/read-entity storage :queue-message id)))
+        (Thread/sleep 1500)
+        (is (nil? (sp/read-entity storage :queue-message id)) "handled and acked")
+        (is (= 1 (count (done))) "handled exactly once — the lease outlived the claim"))
+      (finally
+        (recon/stop-all! running ctx)
+        (doseq [r (concat (done) (sp/query-entities storage :queue-message {:queue "qs-orders"}))]
+          (sp/delete-entity storage :queue-message (:id r)))
         (sp/delete-entity storage :service (:id svc))))))

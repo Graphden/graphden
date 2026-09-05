@@ -12,6 +12,7 @@
     [clojure.java.io :as io]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.crud.fn-execution.trace :as trace]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.packages.records.ids :as ids]
@@ -305,6 +306,24 @@
   (func args))
 
 
+(defbase call-traced-fn
+  "`(func arg)` as a persisted hop of a cross-service trace when
+   `trace-id` is set — the callee's identity and its per-call arg name
+   ride on the callable's metadata (`hof-wrap`), so the row is an
+   execution of THAT fn with the arg under its own name. No trace id →
+   a plain call, nothing persisted."
+  [func arg trace-id parent-execution-id]
+  (if (and trace-id (:graphden.executor/fn-id (meta func)))
+    (let [m (meta func)
+          arg-name (or (first (:graphden.executor/lambda-params m)) :arg)]
+      (cr/record-effect! :db)
+      (trace/run-traced-with! ctx (:graphden.executor/fn-id m)
+                              {:trace-id trace-id :parent-execution-id parent-execution-id}
+                              {arg-name arg}
+                              #(func arg)))
+    (func arg)))
+
+
 (defbase call-noargs-fn
   "Invoke a 0-arg callable. `:func`'s structural type `[:fn {} a]`
    makes the binding-site hof-wrap; the wrap produces a variadic-
@@ -444,6 +463,7 @@
    :invoke {:impl invoke-fn :return-type-rule invoke-return-rule :taint-propagate? true}
    :call {:impl invoke-fn :taint-propagate? true}
    :call-with {:impl call-with-fn :taint-propagate? true}
+   :call-traced {:impl call-traced-fn :taint-propagate? true}
    :call-noargs {:impl call-noargs-fn :taint-propagate? true}
    :try {:impl try-fn :taint-propagate? true}
    :slurp {:impl slurp-fn :taint-propagate? true}

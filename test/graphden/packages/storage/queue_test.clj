@@ -7,6 +7,7 @@
   (:require
     [clojure.set :as set]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.postgres.notify :as pg-notify]
     [graphden.storage.protocol.core :as sp]
@@ -146,3 +147,60 @@
       (finally
         (pg-notify/close-listener! listener)
         (sp/close storage)))))
+
+
+(deftest publish-stamps-the-publisher-trace-test
+  (let [storage (setup/create-branch-versioned-test-storage)
+        ctx (ctx-for storage)]
+    (try
+      (testing "outside a persisted run a message carries no trace"
+        (let [row (sp/read-entity storage :queue-message (publish! ctx "q-trace" {:n 0}))]
+          (is (nil? (:trace-id row)))
+          (is (nil? (:parent-execution-id row)))))
+      (testing "under `cr/*execution*` the message names the publisher's trace and execution"
+        (let [ex-id (random-uuid) trace-id (random-uuid)
+              id (binding [cr/*execution* {:id ex-id :trace-id trace-id}]
+                   (publish! ctx "q-trace" {:n 1}))
+              row (sp/read-entity storage :queue-message id)]
+          (is (= trace-id (:trace-id row)))
+          (is (= ex-id (:parent-execution-id row)))
+          (is (= trace-id (:trace-id (some #(when (= id (:id %)) %)
+                                           (take! ctx "q-trace" 10))))
+              "the claimed message carries them too")))
+      (testing "a trace root (no trace-id yet) uses its own execution id as the trace"
+        (let [ex-id (random-uuid)
+              id (binding [cr/*execution* {:id ex-id}]
+                   (publish! ctx "q-trace-root" {:n 2}))]
+          (is (= ex-id (:trace-id (sp/read-entity storage :queue-message id))))))
+      (finally (sp/close storage)))))
+
+
+(deftest extend-renews-the-claim-and-requeue-revives-a-dead-letter-test
+  (let [storage (setup/create-branch-versioned-test-storage)
+        ctx (ctx-for storage)]
+    (try
+      (let [id (publish! ctx "q-lease" {:n 1})
+            _ (take! ctx "q-lease" 1 500 0)
+            before (:locked-until (sp/read-entity storage :queue-message id))]
+        (testing "extend pushes locked-until out for the renewed visibility"
+          (is (true? ((impls/impl-of :queue-extend) {:message-id id :visibility-ms 60000} ctx)))
+          (let [after (:locked-until (sp/read-entity storage :queue-message id))]
+            (is (pos? (compare after before)))
+            (is (< 30000 (- (inst-ms after) (System/currentTimeMillis))))))
+        (testing "an extended claim is not takeable by another consumer"
+          (is (empty? (take! ctx "q-lease" 10))))
+        (testing "extend on a dead / acked message is false"
+          ((impls/impl-of :queue-nack) {:message-id id :error "x" :retry-ms 0 :max-attempts 1} ctx)
+          (is (= "dead" (:state (sp/read-entity storage :queue-message id))))
+          (is (false? ((impls/impl-of :queue-extend) {:message-id id :visibility-ms 1000} ctx))))
+        (testing "requeue puts a dead letter back: pending, attempts 0, error cleared, takeable now"
+          (is (true? ((impls/impl-of :queue-requeue) {:message-id id} ctx)))
+          (let [row (sp/read-entity storage :queue-message id)]
+            (is (= "pending" (:state row)))
+            (is (= 0 (:attempts row)))
+            (is (nil? (:error row)))
+            (is (nil? (:locked-until row))))
+          (is (= id (:id (first (take! ctx "q-lease" 1)))))
+          (is (false? ((impls/impl-of :queue-requeue) {:message-id id} ctx))
+              "only a dead letter is requeued")))
+      (finally (sp/close storage)))))

@@ -78,13 +78,18 @@
   (cr/record-effect! :db)
   (let [storage (request/require-storage ctx)
         t (now)
+        ;; The publisher's execution, when it runs under one: the
+        ;; consumer's handler becomes its child in the trace.
+        ex cr/*execution*
         row (sp/create-entity storage :queue-message
-                              {:queue (str queue)
-                               :payload payload
-                               :state "pending"
-                               :attempts 0
-                               :available-at (plus-ms t delay-ms)
-                               :created-at t})]
+                              (cond-> {:queue (str queue)
+                                       :payload payload
+                                       :state "pending"
+                                       :attempts 0
+                                       :available-at (plus-ms t delay-ms)
+                                       :created-at t}
+                                (:id ex) (assoc :trace-id (or (:trace-id ex) (:id ex))
+                                                :parent-execution-id (:id ex))))]
     (when-let [emit (:notify-emitter ctx)]
       (emit {:kind :queue :op :publish :id (str queue)}))
     (:id row)))
@@ -134,8 +139,43 @@
             :retry)))))
 
 
+(defbase queue-extend
+  "Renew the visibility lock on a claimed message for another
+   `visibility-ms` — the lease heartbeat of a handler that outlives the
+   claim. True when the row was still pending (a reclaimed or acked
+   message is not extended)."
+  [message-id visibility-ms]
+  (cr/record-effect! :db)
+  (let [storage (request/require-storage ctx)]
+    (boolean
+      (when-let [row (sp/read-entity storage :queue-message message-id)]
+        (when (= "pending" (:state row))
+          (sp/update-entity storage :queue-message message-id
+                            {:locked-until (plus-ms (now) visibility-ms)})
+          true)))))
+
+
+(defbase queue-requeue
+  "Put a dead-lettered message back on its queue: pending, attempts
+   reset, takeable now, error cleared. True when the row was dead."
+  [message-id]
+  (cr/record-effect! :db)
+  (let [storage (request/require-storage ctx)]
+    (boolean
+      (when-let [row (sp/read-entity storage :queue-message message-id)]
+        (when (= "dead" (:state row))
+          (sp/update-entity storage :queue-message message-id
+                            {:state "pending" :attempts 0 :locked-until nil
+                             :available-at (now) :error nil})
+          (when-let [emit (:notify-emitter ctx)]
+            (emit {:kind :queue :op :publish :id (str (:queue row))}))
+          true)))))
+
+
 (def impls
   {:queue-publish queue-publish
    :queue-take queue-take
    :queue-ack queue-ack
-   :queue-nack queue-nack})
+   :queue-nack queue-nack
+   :queue-extend queue-extend
+   :queue-requeue queue-requeue})

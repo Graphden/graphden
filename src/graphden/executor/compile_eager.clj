@@ -940,7 +940,11 @@
   ;; (`:graphden.executor/fn-id`): an adapter that receives a callable
   ;; (`:http-server`'s handler) can name the fn it runs — the traced
   ;; listener persists the request as an execution of THAT fn.
-  (let [tag {:graphden.executor/fn-id ref-id}]
+  (let [tag {:graphden.executor/fn-id ref-id
+             ;; …and the names it takes per call, so a traced adapter
+             ;; (`:call-traced`) can persist the argument under the
+             ;; callee's own free-arg name.
+             :graphden.executor/lambda-params (vec lambda-params)}]
     (if (empty? translation)
       (fn [fa ctx]
         (with-meta
@@ -1211,7 +1215,8 @@
                     (child (if lambda-args (merge fa* lambda-args) fa*)
                            ctx))))
               ;; Same identity tag as the root-slot `hof-wrap`.
-              {:graphden.executor/fn-id ref-id})))
+              {:graphden.executor/fn-id ref-id
+               :graphden.executor/lambda-params (vec lambda-params)})))
 
         ;; Target evaluates to a callable (`:_router` → reitit
         ;; ring-handler). Same as the regular `arg-builder` :ref

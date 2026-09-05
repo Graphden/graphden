@@ -168,7 +168,7 @@
     "x-graphden-token"})
 
 
-(defn- sanitize-request
+(defn sanitize-request
   "The persisted arg snapshot of a captured request: method / uri /
    query / non-credential headers / string body (char-capped). Never
    the raw Ring map — it carries the socket, the auth headers and
@@ -222,7 +222,9 @@
        (let [storage (:storage branch-ctx)
              row (persist/create-pending-row!
                    storage fn-version-id
-                   (persist/declared-effects-of handler-fn-id) nil branch-id extra)
+                   (persist/declared-effects-of handler-fn-id) nil branch-id
+                   ;; `:args` is the arg SNAPSHOT (below), not a row field.
+                   (dissoc extra :args))
              free-slots (lookup/free-arg-slot-map-cached branch-ctx handler-fn-id)]
          ;; The row is created AFTER the run (a failed persist can't leak
          ;; a zombie pending row), so correct :started-at back to the
@@ -230,7 +232,11 @@
          (sp/update-entity storage :fn-execution (:id row)
                            {:started-at (java.time.Instant/ofEpochMilli started-at-ms)})
          (persist/persist-args! storage (:id row)
-                                {:request (sanitize-request request)}
+                                ;; A trace hop names its own arg snapshot
+                                ;; (`{:message …}` for a queue consumer);
+                                ;; a captured HTTP request is the default.
+                                (or (:args extra)
+                                    {:request (sanitize-request request)})
                                 free-slots)
          (persist/write-finished!
            storage (:id row)
@@ -252,6 +258,7 @@
          (log/info "debug-capture: captured request persisted"
                    {:execution-id (:id row)
                     :uri (:uri request)
+                    :args (some-> extra :args keys)
                     :traced? (some? extra)
                     :duration-ms (- (now-ms) started-at-ms)})
          (:id row)))

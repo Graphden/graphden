@@ -287,6 +287,33 @@
                  (:ref-fn-id (sp/read-entity storage :binding (:id a-bind))))
               "the re-point did not land")))
 
+      (testing "update-entity on a list item runs the cycle check with the STORED owner"
+        ;; Same hole one level down: `PUT {ref-fn-id}` on a
+        ;; `:binding-list-item` carried no `binding-id`, so the owner
+        ;; could not be resolved and the re-point passed unchecked.
+        (let [base   (setup/create-base-fn! storage "upd-icyc-base")
+              slot-x (setup/create-slot! storage "x" (:id base))
+              slot-l (setup/create-slot! storage "l" :sequence)
+              _      (setup/attach-slot! storage (:id base) (:id slot-x) 0)
+              _      (setup/attach-slot! storage (:id base) (:id slot-l) 1)
+              a      (setup/create-composed-fn! storage "upd-icyc-a" (:id base))
+              b      (setup/create-composed-fn! storage "upd-icyc-b" (:id base))
+              c2     (setup/create-composed-fn! storage "upd-icyc-c" (:id base))
+              other  (setup/create-base-fn! storage "upd-icyc-other")
+              _      (setup/bind-ref! storage (:id b) (:id slot-x) (:id c2))
+              _      (setup/bind-ref! storage (:id c2) (:id slot-x) (:id a))
+              lb     (sp/create-entity storage :binding
+                                       {:fn-id (:id a) :slot-id (:id slot-l) :list-append true})
+              item   (sp/create-entity storage :binding-list-item
+                                       {:binding-id (:id lb) :position 0 :ref-fn-id (:id other)})
+              ex (try (entities/update-entity "binding-list-item" (:id item)
+                                              {:ref-fn-id (:id b)} c)
+                      (catch clojure.lang.ExceptionInfo e e))]
+          (is (instance? clojure.lang.ExceptionInfo ex))
+          (is (= :constraint-violation/dependency-cycle (:type (ex-data ex))))
+          (is (= (:id other)
+                 (:ref-fn-id (sp/read-entity storage :binding-list-item (:id item)))))))
+
       (testing "delete-entity :fn pre-reads to capture name for rich-type unregister"
         ;; The `:fn` arm of delete-entity now pre-reads the row so we
         ;; can drop the rich-types-registry entry by name; the read

@@ -63,6 +63,14 @@
   #uuid "9b4d7f2a-6e1c-4a58-b7f3-3c8e5a0d2f16")
 
 
+(def ^:private qm-trace-id-field-uuid
+  #uuid "5a2e8c4f-7b1d-4e93-a6c2-3f8d0b7e1a49")
+
+
+(def ^:private qm-parent-execution-id-field-uuid
+  #uuid "e7c3a9d1-2f6b-4d58-9a1e-8b4f2c6d0a73")
+
+
 (defn extend-builder
   "Extend a schema builder with the `:queue-message` entity. Chain after
    the graph schema (no graph refs — a message names its queue by text).
@@ -92,4 +100,16 @@
                           :type :text
                           :nullable? true}
                   :created-at {:uuid qm-created-at-field-uuid
-                               :type :timestamptz}}))
+                               :type :timestamptz}
+                  ;; The trace the publisher ran under (`cr/*execution*`
+                  ;; at publish time) — the consumer's handler runs as a
+                  ;; child of that execution (docs/EXECUTION.md § Tracing
+                  ;; across services), so a call tree that crosses the
+                  ;; queue stays one tree. NULL when published outside a
+                  ;; persisted run.
+                  :trace-id {:uuid qm-trace-id-field-uuid
+                             :type :uuid
+                             :nullable? true}
+                  :parent-execution-id {:uuid qm-parent-execution-id-field-uuid
+                                        :type :uuid
+                                        :nullable? true}}))

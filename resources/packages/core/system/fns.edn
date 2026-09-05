@@ -707,6 +707,15 @@
           :args {:type :keyword-map :description "The named arguments, keyed by the slot's arg names."}}
    :return-type a}
 
+  {:name :call-traced
+   :description "`:call` as one hop of a cross-service TRACE: invoke `:func` with `:arg` and, when `:trace-id` is set, persist the call as an execution of the callee linked to `:parent-execution-id` (same tree the Run pane's Downstream calls shows), with `cr/*execution*` bound so the callee's own outbound calls and publishes name this hop. Without a trace id it is a plain `:call`. Transport-agnostic — the queue consumer runs its handler through it with the ids `:queue-publish` stamped on the message; a listener does the same for the `X-Graphden-Trace` header."
+   :args {:func {:type [:fn {:arg a} b] :description "Fn-graph to wrap into a callable — the callee, persisted under its own identity."}
+          :arg {:type a :description "The argument; persisted under the callee's free-arg name."}
+          :trace-id {:type :nullable-uuid :description "The trace this call belongs to — nil: not traced, plain call."}
+          :parent-execution-id {:type :nullable-uuid :description "The execution that caused this call (the publisher's, the caller's)."}}
+   :return-type b
+   :effects #{:db}}
+
   {:name :call
    :description "Invoke a fn-graph (hof-wrap'd into a Clojure callable) with one argument. Use when `:func` IS a callable; for already-built Clojure fns use `:invoke`."
    :args {:func {:type [:fn {:arg a} b] :description "Fn-graph to wrap into a callable. Single-arg slot; positional unify (the callee's leftover free-arg name is alpha-equivalent)."}

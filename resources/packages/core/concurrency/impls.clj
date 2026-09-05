@@ -269,6 +269,36 @@
   (deref a))
 
 
+(defbase with-heartbeat-fn
+  "Run `body` while a daemon thread calls `beat` every `every-ms`;
+   the beat thread is interrupted when the body ends. The beat runs
+   under the spawning thread's conveyed bindings (effect gate, org,
+   the execution being traced), like `:future`'s body."
+  [body beat every-ms]
+  (cr/record-effect! :process)
+  (let [conveyed (cr/capture-conveyed-bindings)
+        period (long every-ms)
+        thread (Thread.
+                 ^Runnable
+                 (fn []
+                   (with-bindings conveyed
+                     (try
+                       (loop []
+                         (Thread/sleep period)
+                         (try (beat)
+                              (catch InterruptedException e (throw e))
+                              (catch Exception e (log/warn e "heartbeat beat threw")))
+                         (recur))
+                       (catch InterruptedException _ nil))))
+                 "graphden-heartbeat")]
+    (Thread/.setDaemon thread true)
+    (Thread/.start thread)
+    (try
+      (body)
+      (finally
+        (Thread/.interrupt thread)))))
+
+
 (def impls
   ;; `:taint-propagate? true` (2026-08-17 security fix): `:do` returns
   ;; its last step's value — a content-passing `:any`-slot fn. Without
@@ -288,6 +318,7 @@
    :sleep-until-ms sleep-until-ms-fn
    :future future-fn
    :loop-until-interrupted loop-until-interrupted-fn
+   :with-heartbeat {:impl with-heartbeat-fn :taint-propagate? true}
    :cron-parse cron-parse-fn
    :cron-fire-after cron-fire-after-fn
    ;; Cell taint (2026-08-17): a secret stored in an atom/cell must stay

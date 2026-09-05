@@ -769,3 +769,44 @@
             n2 {:data {:id "arg-2" :type "arg" :label "5"}}
             {:keys [nodes]} (#'lg/dedup-overlays [n1 n2] [] arg-map)]
         (is (= 2 (count nodes)))))))
+
+
+(deftest layout-root-deep-free-placeholders-test
+  (testing "a template's deeper holes surface as placeholders on the ROOT card:
+            an extension of T (which binds x → F, F leaving svc free) shows
+            svc as a deep placeholder that binds on the extension itself"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [b1   (setup/create-base-fn! storage "lg-deep-b1")
+              x    (setup/create-slot! storage "x" :any)
+              _    (setup/attach-slot! storage (:id b1) (:id x) 0)
+              b2   (setup/create-base-fn! storage "lg-deep-b2")
+              svc  (setup/create-slot! storage "svc" :text)
+              _    (setup/attach-slot! storage (:id b2) (:id svc) 0)
+              f    (setup/create-composed-fn! storage "lg-deep-f" (:id b2))
+              t    (setup/create-composed-fn! storage "lg-deep-t" (:id b1))
+              _    (setup/bind-ref! storage (:id t) (:id x) (:id f))
+              r    (setup/create-composed-fn! storage "lg-deep-r" (:id t))
+              result (layout storage (:id r))
+              root-id (str "fn-" (:id r))
+              edge (some (fn [e]
+                           (let [d (:data e)]
+                             (when (and (:isUnset d) (= "svc" (:argName d))) d)))
+                         (:edges result))
+              node (when edge
+                     (some (fn [n] (when (= (:target edge) (:id (:data n))) (:data n)))
+                           (:nodes result)))]
+          (is edge "svc — F's free arg reached through T's binding — is an unset edge of the root")
+          (is (= root-id (:source edge)) "…from the root card")
+          (is (:deepArg edge) "flagged deep: the hole lives below the visible slot surface")
+          (is (:isPlaceholder node))
+          (is (:deepArg node))
+          (is (= (str (:id r)) (:fnId node))
+              "the + binder writes the binding on the ROOT fn (closure capture)…")
+          (is (= (str (:id svc)) (:slotId node)) "…keyed by the inner slot")
+          (testing "once bound on the root, the placeholder is gone"
+            (setup/bind-value! storage (:id r) (:id svc) "orders")
+            (let [again (layout storage (:id r))]
+              (is (not-any? (fn [e] (and (:isUnset (:data e)) (= "svc" (:argName (:data e)))))
+                            (:edges again))))))
+        (finally (sp/close storage))))))

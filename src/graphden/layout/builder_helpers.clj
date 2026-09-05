@@ -25,6 +25,7 @@
   (:require
     [clojure.string :as str]
     [graphden.executor.compile.bindings :as cb]
+    [graphden.executor.compile.renames :as renames]
     [graphden.layout.bindings :as bnd]
     [graphden.layout.data :as data]
     [graphden.packages.records.types :as record-types]))
@@ -926,6 +927,62 @@
                                (edge-source-fields lookups arg-id)
                                (edge-description-fields lookups arg-id)
                                (edge-narrowing-fields lookups arg-id expanded-fns))}))))))
+
+
+(defn emit-root-deep-frees!
+  "The holes of the ROOT card that live deeper than its visible slot
+   surface — a template's free args reached through ancestor-bound refs
+   (`service-get`'s `service` / `path` on an extension of it) and the
+   closure captures of its HOF targets — rendered as placeholders on the
+   root card itself, so the reader binds them where the Run form lists
+   them instead of expanding into the composition to find each one.
+
+   Runs once after the walkers: every `deep-free-entries-with-captures`
+   entry whose slot has no placeholder on the canvas yet gets an unset
+   node + edge from the root, flagged `:deepArg`. The node names the
+   ROOT fn (`fnId`), so the `+` binder writes the binding on THIS fn
+   keyed by the inner slot — closure capture, exactly what a fn-def
+   `:args {:service …}` on the same fn stores. The type chip / `i` come
+   from the inner slot's own arg row (`edge-*-fields`)."
+  [state lookups root-fn-id root-node-id]
+  (let [arg-map (:arg-map lookups)
+        args-by-slot (group-by (comp :slot-id val) arg-map)
+        shown (into #{}
+                    (keep (fn [n]
+                            (when (get-in n [:data :isPlaceholder])
+                              (get-in n [:data :slotId]))))
+                    (:nodes @state))]
+    (doseq [{:keys [ext-name slot-id]} (renames/deep-free-entries-with-captures root-fn-id lookups)
+            :when (and slot-id (not (contains? shown (str slot-id))))
+            :let [[arg-id arg-rec] (first (get args-by-slot slot-id))]
+            :when arg-rec]
+      (let [node-id (str "unset-" root-node-id "-deep-" slot-id)
+            edge-id (str "e-" node-id)
+            arg-type (:type arg-rec)
+            flag-fields (cond-> {:deepArg true}
+                          (arg-is-optional? arg-map arg-rec) (assoc :optionalArg true))]
+        (when-not (contains? (:added-node-ids @state) node-id)
+          (swap! state update :added-node-ids conj node-id)
+          (swap! state update :nodes conj
+                 {:data (cond-> (merge {:id node-id
+                                        :label (if arg-type (name arg-type) "any")
+                                        :type "fn"
+                                        :isPlaceholder true
+                                        :argId (str arg-id)}
+                                       flag-fields
+                                       (arg-row->node-id-fields (assoc arg-rec :fn-id root-fn-id)))
+                          arg-type (assoc :argType (name arg-type)))})
+          (swap! state update :edges conj
+                 {:data (merge {:id edge-id
+                                :source root-node-id
+                                :target node-id
+                                :sourceArgId arg-id
+                                :argName (name ext-name)
+                                :isUnset true}
+                               flag-fields
+                               (edge-source-fields lookups arg-id)
+                               (edge-description-fields lookups arg-id)
+                               (edge-narrowing-fields lookups arg-id #{root-fn-id}))}))))))
 
 
 (defn target-interface-names

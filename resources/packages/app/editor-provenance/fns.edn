@@ -1152,9 +1152,13 @@
    :parent :get
    :args {:coll {:as :bound} :key {:as :item} :default nil}}
 
+  ;; The bound fn: `:ref`, or `:bound-ref` when the binding pins a `:type`
+  ;; over the ref (`{:ref … :type :url}` — the checker omits `:ref` there so
+  ;; its rule does not re-fire; the slot is bound all the same).
   {:name :_insp-r-ref
-   :parent :get
-   :args {:coll :_insp-r-rb :key {:value :ref} :default nil}}
+   :parent :coalesce
+   :args {:value {:parent :get :args {:coll :_insp-r-rb :key {:value :ref} :default nil}}
+          :default {:parent :get :args {:coll :_insp-r-rb :key {:value :bound-ref} :default nil}}}}
 
   {:name :_insp-r-vp
    :parent :get

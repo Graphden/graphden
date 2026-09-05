@@ -144,7 +144,59 @@
     (deep-free-ext-entries* fn-id lookups)))
 
 
-(declare cache-projection-frees)
+(declare cache-projection-frees deep-free-entries-with-captures)
+
+
+(defn- hof-capture-entries
+  "Slot-id-keyed sibling of `hof-closure-captures`: the `{:ext-name
+   :slot-id}` entries a HOF target under `fn-id` reads from the CALLER's
+   fa beyond its lambda params — closure-captured args
+   (docs/CLOSURE_CAPTURE.md). Same walk as `hof-closure-captures`; at
+   every `:is-fn` ref the target's own full entry set minus its
+   lambda-param names contributes."
+  [fn-id lookups]
+  (let [captures (atom [])
+        visited (atom #{})]
+    (letfn [(walk
+              [fid]
+              (when-not (contains? @visited fid)
+                (swap! visited conj fid)
+                (doseq [bnd (b/collect-bindings fid lookups)]
+                  (case (:kind bnd)
+                    :ref (if (:is-fn bnd)
+                           (let [target (:ref-id bnd)
+                                 inner (deep-free-entries-with-captures target lookups)
+                                 lambda-params (set (hof-lambda-params
+                                                      target (:slot-id bnd)
+                                                      bnd fid lookups))]
+                             (doseq [e inner]
+                               (when-not (contains? lambda-params (keyword (:ext-name e)))
+                                 (swap! captures conj e))))
+                           (walk (:ref-id bnd)))
+                    :seq (doseq [item (:items bnd)]
+                           (when-let [r (:ref-fn-id item)] (walk r)))
+                    nil))))]
+      (walk fn-id))
+    @captures))
+
+
+(defn deep-free-entries-with-captures
+  "`deep-free-ext-entries` plus the closure-captured entries of every HOF
+   target in the tree (`hof-capture-entries`) — the FULL caller-facing
+   hole surface of `fn-id`, slot-id keyed: what the Run form asks for,
+   and what the collapsed card's deep-free placeholders bind (a closure
+   capture lands on the root fn, keyed by the inner slot). Deduped by
+   slot-id, surface entries first."
+  [fn-id lookups]
+  (let [seen (volatile! #{})]
+    (into []
+          (remove (fn [{:keys [slot-id]}]
+                    (or (nil? slot-id)
+                        (let [dup? (contains? @seen slot-id)]
+                          (vswap! seen conj slot-id)
+                          dup?))))
+          (concat (deep-free-ext-entries fn-id lookups)
+                  (hof-capture-entries fn-id lookups)))))
 
 
 (defn- hof-closure-captures

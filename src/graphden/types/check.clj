@@ -648,11 +648,14 @@
   [infos]
   (let [actual-binding? (fn [binding]
                           (or (contains? binding :ref)
+                              (contains? binding :bound-ref)
                               (true? (:value-present binding))))
         rbs-by-slot
         (reduce (fn [acc info]
                   (reduce-kv (fn [a slot binding]
-                               (let [pin (select-keys binding [:value :ref])]
+                               (let [pin (cond-> (select-keys binding [:value :ref])
+                                           (and (not (:ref binding)) (:bound-ref binding))
+                                           (assoc :ref (:bound-ref binding)))]
                                  (if (and (actual-binding? binding)
                                           (not (contains? (a slot) pin)))
                                    (update a slot (fnil conj #{}) pin)
@@ -1858,7 +1861,12 @@
     (cond-> {:type (or (some-> (:type b-form) types/resolve-alias)
                        (ref-return-narrowed (:ref b-form))
                        :any)
-             :value nil}
+             :value nil
+             ;; The bound fn, for READERS of the entry (the inspector's
+             ;; Bindings tab, MI conflict detection) — `:ref` itself is
+             ;; omitted under a `:type` pin (below), and without this
+             ;; the slot read as free.
+             :bound-ref (:ref b-form)}
       (not (contains? b-form :type))
       (assoc :ref (:ref b-form)))
 
@@ -2445,8 +2453,17 @@
                                   (if (types/record-type? resolved)
                                     (merge acc resolved)
                                     acc)))
-                              (let [ret (:return parent-info)]
-                                (if (types/record-type? ret) ret {}))
+                              ;; Every parent in the list — the primary included —
+                              ;; contributes its fields through `resolve-alias`
+                              ;; above, so nothing seeds from `(:return
+                              ;; parent-info)`: a base-fn / composed parent that
+                              ;; merely RETURNS a record (`:http-request` →
+                              ;; `{:status :headers :body}`) must not turn its
+                              ;; result fields into slots. It did — every
+                              ;; descendant of `:standard-http-request` carried a
+                              ;; phantom `status` free arg that the Run form, the
+                              ;; Bindings tab and the fn picker's signature read.
+                              {}
                               parent-list)
             parent-args (merge type-row-fields (:args parent-info))]
         (check-effect-categories! fn-def)

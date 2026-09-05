@@ -878,7 +878,16 @@
       ;; an empty card. Surface their referenced types as synthetic
       ;; outgoing edges so the user sees the type's composition in
       ;; the canvas instead of buried inside a chip's title.
-      (bh/emit-type-row-internals! state lookups root-fn-id (str "fn-" root-fn-id)))
+      (bh/emit-type-row-internals! state lookups root-fn-id (str "fn-" root-fn-id))
+
+      ;; The root's deeper holes — template frees behind ancestor-bound
+      ;; refs, HOF closure captures — as placeholders on the root card.
+      ;; Not for a type-row root: its only slot is the synthetic one the
+      ;; walker above hides on purpose.
+      (when (contains? #{:composed :base-fn}
+                       (bh/type-row-role (get fn-map root-fn-id)
+                                         (boolean (seq (get fn-slots-by-fn root-fn-id)))))
+        (bh/emit-root-deep-frees! state lookups root-fn-id (str "fn-" root-fn-id))))
 
     ;; Post-process: annotate optional/HOF metadata, migrate captured
     ;; HOF edges to their inside-consumer source, dedup duplicate

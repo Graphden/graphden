@@ -310,12 +310,28 @@
         (log/warn e "service instance heartbeat failed" {:instance-id instance-id})))))
 
 
+(defn- reap-due?
+  "Gate the stale-row reap to once per stale window PER RECONCILER (the
+   clock rides on `running-atom`'s metadata, so every reconciler — and
+   every test's fresh atom — reaps on its first pass). Reconcile also
+   runs on every graph write (the delta restart), and staleness is
+   measured in tens of seconds: scanning `service-instance` on each
+   fn create paid a round trip for nothing (`perf/budgets.edn`
+   `:sql/create-fn`)."
+  [running-atom now-ms]
+  (let [last (::last-reap-ms (meta running-atom))]
+    (when (or (nil? last) (>= (- now-ms last) svc-schema/default-stale-after-ms))
+      (alter-meta! running-atom assoc ::last-reap-ms now-ms)
+      true)))
+
+
 (defn- reap-stale-instances!
   "Delete instance rows nobody has heartbeat for ten stale windows —
    the copies of a pod that crashed. Level-triggered, any pod; the rows
-   were already ignored by `resolve-endpoint` after one window."
-  [storage]
-  (when storage
+   were already ignored by `resolve-endpoint` after one window. Runs at
+   most once per stale window per reconciler (`reap-due?`)."
+  [running-atom storage]
+  (when (and storage (reap-due? running-atom (System/currentTimeMillis)))
     (try
       (let [cutoff-ms (- (System/currentTimeMillis)
                          (* 10 svc-schema/default-stale-after-ms))]
@@ -636,7 +652,7 @@
           ;; a copy that died in place is restarted (or parked) this pass;
           ;; then the level-triggered reap of rows a crashed pod left.
           _ (check-liveness! running-atom lock-conn storage)
-          _ (reap-stale-instances! storage)
+          _ (reap-stale-instances! running-atom storage)
           ;; Shard filter (task #6): drop tenant services whose org this pod
           ;; doesn't serve, so a dedicated tenant's services run only on its
           ;; own cgroup-limited pod, never on a shared compile-all pod.

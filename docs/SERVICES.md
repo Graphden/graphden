@@ -427,7 +427,8 @@ services want that address. The service fn IS the value:
    with a ctx at halt / CRaC). A `:pool` or `:per-pod` service has one
    row per copy. A crashed pod never deletes its row: the heartbeat goes
    stale, consumers stop picking it after one window (45 s), and any pod
-   reaps it after ten (§ Liveness).
+   reaps it after ten — a scan each reconciler runs at most once per
+   window, not on every graph write (§ Liveness).
 3. A consumer names the producer through a **`:fn-ref` slot** —
    `:service-endpoint :service :orders-service`. `:fn-ref` is the
    identity primitive ([TYPES.md](TYPES.md#structural-types-records)):
@@ -489,7 +490,9 @@ quiet; toggling the row (`enabled?` off → on) runs it again. A handle
 without `:alive?` (a nil stopper, a fire-and-forget) is trusted as
 running, as before. Stale instance rows of a pod that CRASHED (no pass
 ever ran there) are ignored by consumers after one window and deleted
-by whichever pod ticks next after ten.
+by whichever pod ticks next after ten (each reconciler scans for
+them at most once per window — reconcile also runs on every graph
+write, and that path must not pay for the scan).
 
 ## Queues — asynchronous work between services
 

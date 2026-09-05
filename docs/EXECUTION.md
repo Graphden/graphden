@@ -58,6 +58,8 @@ Three non-versioned entities + one enum live in
 | `:started-at`      | `:timestamptz`  | When the future was submitted.                                              |
 | `:finished-at`     | `:timestamptz` (null until resolved) | Duration computed at read-time (`finished - started`). No denorm. |
 | `:status`          | `:execution-status` enum | `:pending` `:succeeded` `:failed` `:cancelled`.                |
+| `:trace-id`        | `:uuid` (null, indexed) | Cross-service tracing: the top-level execution's id, shared by every hop (§ Tracing across services). nil ≡ untraced / a top-level run. |
+| `:parent-execution-id` | `:uuid` (null, indexed) | The execution that called INTO this one over the wire (a `:service-get` from another service). |
 | `:result`          | `:jsonb` (null) | Capped at 5 MB. Oversize → `:result nil` + `:result-truncated? true`.       |
 | `:result-truncated?` | `:bool` (null) | Set when the 5 MB cap fires.                                                |
 | `:error`           | `:text` (null)  | Exception message, truncated to 4 KB.                                       |
@@ -614,11 +616,43 @@ that want to participate cooperatively:
 `(cr/check-cancel!)` is a no-op outside the execution context, so
 impls can call it unconditionally.
 
+## Tracing across services
+
+The path trace above stops at the socket: a `:service-get` to another
+service is one frame here and, on the other side, a request nobody
+records. Tracing continues the tree across the wire:
+
+1. A **persisted** run binds `cr/*execution*` (`{:id :trace-id}`) for
+   its thread (`persist/run-future`); a top-level run is its own trace
+   root. Effectful fns are always persisted, so a consumer that calls a
+   service always has an identity.
+2. `:service-get` / `:service-post` merge `:trace-headers` into the
+   request — `X-Graphden-Trace: <trace-id>;<execution-id>` — `{}` when
+   the run is not persisted.
+3. `:http-server` receives its handler as a callable tagged with the fn
+   it wraps (`hof-wrap` metadata); a request carrying the header runs
+   through `fn-execution.trace/run-traced!`: a fresh execution id is
+   bound as `*execution*` (so the handler's own outbound calls link to
+   it), the handler runs under a path trace, and the outcome is
+   persisted as an execution of the handler fn with the caller's
+   `:trace-id` and `:parent-execution-id` (`debug-capture/
+   persist-captured!`, the same writer the Debug trap uses — request
+   sanitised, response minus `Set-Cookie`). A request without the header
+   is not persisted; ordinary traffic pays a header lookup.
+4. `GET /api/execute/:id` returns `:children` — the runs this one called
+   into, each with its fn name and status — and the Run pane's result
+   partial renders them as *Downstream calls* under the result. Open a
+   child and the tree continues on the other service's side.
+
+Rows of a whole trace: `GET /api/entities/fn-execution?trace-id=…` (or
+query the column). Tutorial: [lesson 35](tutorial/35-services-talking-to-services.md).
+
 ## Tests
 
 | File                                                      | Coverage                                      |
 |-----------------------------------------------------------|-----------------------------------------------|
 | `test/graphden/crud/fn_execution_test.clj`                | parse / validate (rejection reasons) / apply (inline + persisted + args rows) / get / cancel (flag + real interrupt) / list (branch-scoped + per-version + `?limit` clamp) / bounded-pool queue-full → 503 / per-org over-capacity / TTL sweep (incl. `as-instant` Date regression) / failed-path / args-too-large / result-truncation / exec-stats rollups |
 | `tools/browser-test/edit-execute.test.js`                 | E2E: ▶ Run pane, fill args, Run, inline result, history row reveal |
+| `test/graphden/crud/fn_execution/trace_test.clj`, `test/graphden/services/service_endpoint_e2e_test.clj` | Trace header wire format; a traced hop persisted on the listener side and listed as a child |
 
 Total: ~59 deftests / ~267 assertions backend, 8 assertions browser.

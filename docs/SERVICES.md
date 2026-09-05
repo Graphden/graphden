@@ -447,7 +447,10 @@ services want that address. The service fn IS the value:
    `:service-post` (`:http-get` / `:http-post` with `:url` = origin +
    `:path`) → `:service-get-json` / `:service-post-json` (body parsed).
    Free args: `:service`, `:path`, plus http-client's `:headers` /
-   `:auth-value` / `:timeout-ms` (and `:body` on POST).
+   `:auth-value` / `:timeout-ms` (and `:body` on POST). The caller's
+   trace header rides along, so the producer records the request as an
+   execution linked to the caller
+   ([EXECUTION.md § Tracing across services](EXECUTION.md#tracing-across-services)).
 
 The **contract** between two services lives in the graph too: a shared
 namespace (`svc-a.api`) holds the path constants and the request /

@@ -140,6 +140,24 @@ grant's subject, so the team is one row).
   name `svc-a`. The `:fn-ref` edge is an identity, not a dependency,
   so the cycle rule (lesson 10) does not fire.
 
+## Following a call across services
+
+Trace (lesson 15) shows the call tree of one execution, and in step 4
+it ended at `:http-get` — the producer's side was a separate world.
+It isn't any more. Run `:fetch-orders` from the Run pane once again
+and open the run's result: under it, a **Downstream calls** list names
+`:orders-ring`, the producer's handler, with its status. Open the
+producer's Runs tab: the request `:fetch-orders` made is a run of its
+own there, and its details show the same trace id as the caller.
+
+The mechanics: a persisted run knows its id; `:service-get` sends it
+along as `X-Graphden-Trace`; `:http-server` sees the header and
+records the request it handles as an execution linked to the caller
+(a request without the header is not recorded — normal traffic pays
+nothing). Every hop shares the top-level run's trace id, so a chain
+`A → B → C` is one tree you can walk from A
+([docs/EXECUTION.md § Tracing across services](../EXECUTION.md#tracing-across-services)).
+
 ## What we glossed over
 
 - Why `:fn-ref` is its own type and not the HOF `:fn` slot — the HOF
@@ -151,8 +169,8 @@ grant's subject, so the team is one row).
   `restart-policy`; a pod that crashes leaves a row whose heartbeat
   goes stale, so consumers stop picking it within 45 seconds
   ([docs/SERVICES.md § Liveness](../SERVICES.md#liveness--a-copy-that-died-in-place)).
-- Queues, tracing across services, async messaging — not built;
-  `:schedule` and HTTP are the two shapes today.
+- Asynchronous work between services is the next lesson
+  ([36 — Queues](36-queues.md)).
 
 ## Next
 

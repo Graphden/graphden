@@ -1305,6 +1305,14 @@
            `resolver` (a cloud app-route's public origin), else an honest
            `:service/not-running`. The web/service templates (`:service-get`)
            compose it with http-client; nothing here dials."}
+    {:ns graphden.crud.fn-execution.trace :defn run-traced!
+     :say "A call across the wire stays one tree: a persisted run's
+           `:service-get` sends `X-Graphden-Trace` (trace id + its own execution
+           id), and the listener runs the request through this — a fresh
+           execution id bound for the handler's own outbound calls, a path
+           trace, and the outcome persisted as an execution of the handler fn
+           linked to the caller. No header, no row: ordinary traffic pays
+           nothing. `get-execution` then lists a run's `:children`."}
     {:ns graphden.schema.queue.schema :defn extend-builder
      :say "The other way two services talk: a queue. One Postgres table with
            the standard job-queue shape — `pending`/`dead`, attempts, a due time,

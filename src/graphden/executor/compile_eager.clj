@@ -935,19 +935,28 @@
    into R's slot-id namespace — required for cross-fn rename cascades
    (e.g. `:method-map :handler` rename slot → `:assoc-handler :handler`
    rename slot have different ids) to survive the wrap."
-  [child lambda-params translation]
-  (if (empty? translation)
-    (fn [fa ctx]
-      (make-shape-callable lambda-params
-                           (fn [lambda-args]
-                             (child (if lambda-args (merge fa lambda-args) fa)
-                                    ctx))))
-    (fn [fa ctx]
-      (let [fa* (apply-hof-translation fa translation)]
-        (make-shape-callable lambda-params
-                             (fn [lambda-args]
-                               (child (if lambda-args (merge fa* lambda-args) fa*)
-                                      ctx)))))))
+  [child lambda-params translation ref-id]
+  ;; The callable carries the wrapped fn's IDENTITY as metadata
+  ;; (`:graphden.executor/fn-id`): an adapter that receives a callable
+  ;; (`:http-server`'s handler) can name the fn it runs — the traced
+  ;; listener persists the request as an execution of THAT fn.
+  (let [tag {:graphden.executor/fn-id ref-id}]
+    (if (empty? translation)
+      (fn [fa ctx]
+        (with-meta
+          (make-shape-callable lambda-params
+                               (fn [lambda-args]
+                                 (child (if lambda-args (merge fa lambda-args) fa)
+                                        ctx)))
+          tag))
+      (fn [fa ctx]
+        (let [fa* (apply-hof-translation fa translation)]
+          (with-meta
+            (make-shape-callable lambda-params
+                                 (fn [lambda-args]
+                                   (child (if lambda-args (merge fa* lambda-args) fa*)
+                                          ctx)))
+            tag))))))
 
 
 (def ^:private rich-type-of-id-or-stale-name-fn
@@ -1101,7 +1110,7 @@
         (and is-fn (not produces-callable?))
         (let [lambda-params (r/hof-lambda-params ref-id slot-id bnd fn-id lookups)
               translation (r/build-hof-translation ref-id lambda-params lookups)]
-          (hof-wrap child lambda-params translation))
+          (hof-wrap child lambda-params translation ref-id))
 
         ;; Two collapse into one — both want "invoke child with the
         ;; caller's env, wrap in a thunk for short-circuit":
@@ -1194,12 +1203,15 @@
         (let [lambda-params (r/hof-lambda-params ref-id slot-id env-bnd fn-id lookups)
               translation (r/build-hof-translation ref-id lambda-params lookups)]
           (fn [fa-ref ctx]
-            (make-shape-callable
-              lambda-params
-              (fn [lambda-args]
-                (let [fa* (apply-hof-translation @fa-ref translation)]
-                  (child (if lambda-args (merge fa* lambda-args) fa*)
-                         ctx))))))
+            (with-meta
+              (make-shape-callable
+                lambda-params
+                (fn [lambda-args]
+                  (let [fa* (apply-hof-translation @fa-ref translation)]
+                    (child (if lambda-args (merge fa* lambda-args) fa*)
+                           ctx))))
+              ;; Same identity tag as the root-slot `hof-wrap`.
+              {:graphden.executor/fn-id ref-id})))
 
         ;; Target evaluates to a callable (`:_router` → reitit
         ;; ring-handler). Same as the regular `arg-builder` :ref

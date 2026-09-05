@@ -2128,6 +2128,73 @@
           :exec {:type :nullable-keyword-map
                  :description "Decoded execution row from `:get-execution` OR the inline-Run JSON body. Both call sites bind via `:_partial-execute-result-fragment` / `:_partial-execute-result-inline-fragment` wrappers in `app/editor/fns.edn`."}}}
 
+  ;; --- Downstream calls — cross-service tracing ---------------------
+  ;; A run's `:children` (executions it called INTO over the wire, each
+  ;; persisted by the listener that answered — docs/EXECUTION.md §
+  ;; Tracing across services) render under the result as a list; a run
+  ;; without children renders nothing.
+
+  {:name :_er-children
+   :parent :get
+   :args {:coll {:as :exec} :key {:value :children} :default {:value []}}}
+
+  {:name :_er-children-empty?
+   :parent :empty?
+   :args {:coll :_er-children}}
+
+  {:name :_er-child-fn-name
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-name} :default {:value "?"}}}
+
+  ;; `:name`, not `:to-str`: the status is a keyword, and the badge should
+  ;; read `succeeded`, not `:succeeded`.
+  {:name :_er-child-status
+   :parent :name
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :status} :default {:value ""}}}}}
+
+  {:name :_er-child-status-badge
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "execute-downstream-status"}}
+          :children [:_er-child-status]}}
+
+  {:name :_er-child-row
+   :parent :hiccup
+   :args {:tag {:value "li"}
+          :attrs {:value {:class "execute-downstream-row"}}
+          :children [{:parent :hiccup :args {:tag {:value "code"} :children [:_er-child-fn-name]}}
+                     {:value " "}
+                     :_er-child-status-badge]}}
+
+  {:name :_er-child-rows
+   :parent :map
+   :args {:func :_er-child-row :coll :_er-children}}
+
+  {:name :_er-downstream-title
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-downstream-title"}}
+          :children [{:value "Downstream calls"}]}}
+
+  {:name :_er-downstream-list
+   :parent :hiccup
+   :args {:tag {:value "ul"}
+          :attrs {:value {:class "execute-downstream"}}
+          :children :_er-child-rows}}
+
+  {:name :_er-downstream-pane
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-result-pane execute-downstream-pane"}}
+          :children [:_er-downstream-title :_er-downstream-list]}}
+
+  {:name :_er-downstream
+   :description "The run's cross-service children as a pane under the result, or nothing. Free: `:exec` (the decoded execution row)."
+   :parent :if
+   :args {:test :_er-children-empty?
+          :then :hidden-span
+          :else :_er-downstream-pane}}
+
   ;; =====================================================================
 
   {:name :_sp-svc-row-fn-id

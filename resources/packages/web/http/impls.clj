@@ -20,6 +20,7 @@
    self-contained RFC-negotiation parse (`:pick-encoding`)."
   (:require
     [clojure.java.io :as io]
+    [graphden.crud.fn-execution.trace :as trace]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.storage.postgres.graph-epoch :as epoch]
@@ -255,7 +256,11 @@
   ;; consumer fn can resolve the service to an address
   ;; (`:service-endpoint`, web/service). Metadata keeps the handle's
   ;; contract — a 0-arg stopper — unchanged for `:http-stop` / `:do`.
-  (let [stopper
+  (let [;; The handler callable carries the fn it wraps (`hof-wrap` tags it);
+        ;; a request that arrives with a trace header is persisted as an
+        ;; execution of THAT fn, linked to the caller (fn-execution.trace).
+        handler-fn-id (:graphden.executor/fn-id (meta handler))
+        stopper
         (http-kit/run-server
           (fn [req]
             ;; Each request is a NEW logical execution: run the build-captured
@@ -267,7 +272,7 @@
             (cr/with-fresh-call-cache
               (fn []
                 (binding [epoch/*request-bump-log* (atom [])]
-                  (handler req)))))
+                  (trace/run-traced! ctx handler-fn-id req #(handler req))))))
           (assoc (http-server-tuning) :port port))]
     ;; `:alive?` — the liveness probe the reconciler runs each tick:
     ;; http-kit's own status of the listener object (`:running` while it

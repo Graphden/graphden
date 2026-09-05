@@ -321,13 +321,19 @@
   ([storage fn-version-id declared-effects user-id]
    (create-pending-row! storage fn-version-id declared-effects user-id nil))
   ([storage fn-version-id declared-effects user-id branch-id]
+   (create-pending-row! storage fn-version-id declared-effects user-id branch-id nil))
+  ([storage fn-version-id declared-effects user-id branch-id extra]
+   ;; `extra` (6-arity) — fields a caller stamps up front: an explicit
+   ;; `:id` (a traced listener binds the id BEFORE the row exists),
+   ;; `:trace-id` / `:parent-execution-id` (cross-service tracing).
    (sp/create-entity storage :fn-execution
-                     {:fn-version-id fn-version-id
-                      :started-at (java.time.Instant/now)
-                      :status :pending
-                      :declared-effects declared-effects
-                      :user-id user-id
-                      :branch-id branch-id})))
+                     (merge {:fn-version-id fn-version-id
+                             :started-at (java.time.Instant/now)
+                             :status :pending
+                             :declared-effects declared-effects
+                             :user-id user-id
+                             :branch-id branch-id}
+                            extra))))
 
 
 (defn create-pending-with-args!
@@ -845,8 +851,12 @@
    (`path-trace-atom` nil unless traced or sampled)."
   ([ctx fn-id args cancel-flag release]
    (run-future ctx fn-id args cancel-flag release nil))
-  ([ctx fn-id args cancel-flag release {:keys [trace? capture-values?]}]
+  ([ctx fn-id args cancel-flag release {:keys [trace? capture-values? execution-id trace-id]}]
    (let [trace (atom #{})
+         ;; The run's identity for cross-service tracing: a persisted run
+         ;; is its own trace root unless it was itself called into.
+         execution (when execution-id
+                     {:id execution-id :trace-id (or trace-id execution-id)})
          explicit? (or (true? trace?) (true? capture-values?))
          path-trace (cond
                       explicit? (ce/new-path-trace
@@ -858,7 +868,8 @@
                (binding [cr/*cancel-check*
                          #(when @cancel-flag
                             (throw (InterruptedException. "execution cancelled")))
-                         cr/*effect-trace* trace]
+                         cr/*effect-trace* trace
+                         cr/*execution* execution]
                  (cond
                    ;; Explicit trace?/capture-values? submit — the run's own
                    ;; traversal is the selected subtree (trace-all sentinel).

@@ -235,7 +235,11 @@
         (let [[fut trace path-trace]
               (persist/run-future exec-ctx fn-id executor-args cancel-flag release
                                   {:trace? (:trace? parsed)
-                                   :capture-values? (:capture-values? parsed)})]
+                                   :capture-values? (:capture-values? parsed)
+                                   ;; A persisted run knows its id up front —
+                                   ;; that is what an outbound `:service-get`
+                                   ;; names as the caller.
+                                   :execution-id (:id row)})]
           {:row row :fut fut :trace trace :path-trace path-trace})
         (catch java.util.concurrent.RejectedExecutionException _
           ;; The bounded execution QUEUE is full (P1.2) — park is
@@ -378,6 +382,27 @@
           arg-rows)))
 
 
+(defn child-executions
+  "The executions `execution-id` called into over the wire
+   (`:parent-execution-id` = the run), oldest first, each with the fn
+   it ran: `{:id :fn-id :fn-name :status :started-at :finished-at
+   :error}`."
+  [storage execution-id]
+  (->> (sp/query-entities storage :fn-execution {:parent-execution-id execution-id})
+       (sort-by #(some-> (:started-at %) inst-ms))
+       (mapv (fn [row]
+               (let [fn-id (some->> (:fn-version-id row)
+                                    (sp/read-entity storage :fn-version)
+                                    :fn-id)]
+                 {:id (:id row)
+                  :fn-id fn-id
+                  :fn-name (some->> fn-id (sp/read-entity storage :fn) :name)
+                  :status (:status row)
+                  :started-at (:started-at row)
+                  :finished-at (:finished-at row)
+                  :error (:error row)})))))
+
+
 (defn get-execution
   "Public handler for GET /api/execute/:id — returns the row + nested
    args list. nil when not found."
@@ -397,7 +422,11 @@
           ;; row itself stays version-pinned.
           (assoc :fn-id (some->> (:fn-version-id row)
                                  (sp/read-entity storage :fn-version)
-                                 :fn-id))))))
+                                 :fn-id))
+          ;; Cross-service tracing: the executions this run called INTO
+          ;; over the wire (a listener persisted each as a row linked
+          ;; back here) — the call tree continues past the socket.
+          (assoc :children (child-executions storage execution-id))))))
 
 
 ;; =============================================================================

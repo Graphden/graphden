@@ -7,6 +7,10 @@
    service is not running."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.crud.fn-execution :as fn-exec]
+    [graphden.crud.fn-execution.lookup :as lookup]
+    [graphden.crud.fn-execution.persist :as persist]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records :as records]
@@ -72,6 +76,25 @@
                      (sp/query-entities storage :service-instance {:service-id (:id svc)})))))
       (testing "the consumer resolves the producer by naming it and gets its JSON"
         (is (= {:orders [1 2 3]} (exec/execute ctx fetch-id {}))))
+      (testing "a persisted run's call is traced across the wire: the producer
+                persists the request it handled as an execution linked back"
+        (let [parent (persist/create-pending-row!
+                       storage (lookup/resolve-fn-version-id ctx fetch-id) [] nil nil)
+              parent-id (:id parent)]
+          (binding [cr/*execution* {:id parent-id :trace-id parent-id}]
+            (is (= {:orders [1 2 3]} (exec/execute ctx fetch-id {}))))
+          (let [children (:children (fn-exec/get-execution ctx parent-id))
+                child-row (some->> children first :id (sp/read-entity storage :fn-execution))]
+            (is (= 1 (count children)))
+            (is (= "_e2e-orders-ring" (:fn-name (first children))) "the listener's handler fn")
+            (is (= :succeeded (:status (first children))))
+            (is (= parent-id (:trace-id child-row)))
+            (is (= parent-id (:parent-execution-id child-row)))
+            (is (= 200 (get-in child-row [:result :status]))))
+          (testing "an untraced call persists nothing"
+            (let [before (count (sp/query-entities storage :fn-execution {:trace-id parent-id}))]
+              (exec/execute ctx fetch-id {})
+              (is (= before (count (sp/query-entities storage :fn-execution {:trace-id parent-id}))))))))
       (recon/stop-all! running ctx)
       (testing "after the producer stops, the instance is gone and the consumer says so"
         (is (empty? (sp/query-entities storage :service-instance {:service-id (:id svc)})))

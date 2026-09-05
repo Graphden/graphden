@@ -205,50 +205,60 @@
     response))
 
 
-(defn- persist-captured!
-  "Write the captured run as a standard `:fn-execution` row (against
-   the branch ctx's storage — org-stamped by the tenancy decorator
-   like any request-path write). Best-effort: a persist failure logs
-   and the response still returns."
-  [branch-id branch-ctx handler-fn-id request trace effect-trace outcome started-at-ms]
-  (try
-    (when-let [fn-version-id (lookup/resolve-fn-version-id branch-ctx handler-fn-id)]
-      (let [storage (:storage branch-ctx)
-            row (persist/create-pending-row!
-                  storage fn-version-id
-                  (persist/declared-effects-of handler-fn-id) nil branch-id)
-            free-slots (lookup/free-arg-slot-map-cached branch-ctx handler-fn-id)]
-        ;; The row is created AFTER the run (a failed persist can't leak
-        ;; a zombie pending row), so correct :started-at back to the
-        ;; handler-entry time for an honest duration.
-        (sp/update-entity storage :fn-execution (:id row)
-                          {:started-at (java.time.Instant/ofEpochMilli started-at-ms)})
-        (persist/persist-args! storage (:id row)
-                               {:request (sanitize-request request)}
-                               free-slots)
-        (persist/write-finished!
-          storage (:id row)
-          (->> (case (:status outcome)
-                 :succeeded {:status :succeeded
-                             :result (sanitize-response (:result outcome))}
-                 :failed (let [^Exception t (:throwable outcome)]
-                           {:status :failed
-                            :error (or (ex-message t) (str (class t)))
-                            :error-data (ex-data t)}))
-               (merge {:runtime-effects (persist/snapshot-runtime-effects effect-trace)
-                       :path-trace (persist/snapshot-path-trace trace)})
-               (persist/redact-outcome handler-fn-id)
-               (persist/stamp-touched-secret handler-fn-id)))
-        (swap! last-captures assoc [(tc/current-org) branch-id] (:id row))
-        (log/info "debug-capture: captured request persisted"
-                  {:execution-id (:id row)
-                   :uri (:uri request)
-                   :duration-ms (- (now-ms) started-at-ms)})
-        (:id row)))
-    (catch Exception e
-      (log/warn e "debug-capture: persist failed — response unaffected"
-                {:uri (:uri request)})
-      nil)))
+(defn persist-captured!
+  "Write a captured request run as a standard `:fn-execution` row
+   (against the branch ctx's storage — org-stamped by the tenancy
+   decorator like any request-path write). Best-effort: a persist
+   failure logs and the response still returns. Shared by the Debug
+   trap (`run-captured!`) and the cross-service trace
+   (`fn-execution.trace/run-traced!`), which passes `extra` — the
+   pre-bound `:id` plus `:trace-id` / `:parent-execution-id`."
+  ([branch-id branch-ctx handler-fn-id request trace effect-trace outcome started-at-ms]
+   (persist-captured! branch-id branch-ctx handler-fn-id request trace effect-trace
+                      outcome started-at-ms nil))
+  ([branch-id branch-ctx handler-fn-id request trace effect-trace outcome started-at-ms extra]
+   (try
+     (when-let [fn-version-id (lookup/resolve-fn-version-id branch-ctx handler-fn-id)]
+       (let [storage (:storage branch-ctx)
+             row (persist/create-pending-row!
+                   storage fn-version-id
+                   (persist/declared-effects-of handler-fn-id) nil branch-id extra)
+             free-slots (lookup/free-arg-slot-map-cached branch-ctx handler-fn-id)]
+         ;; The row is created AFTER the run (a failed persist can't leak
+         ;; a zombie pending row), so correct :started-at back to the
+         ;; handler-entry time for an honest duration.
+         (sp/update-entity storage :fn-execution (:id row)
+                           {:started-at (java.time.Instant/ofEpochMilli started-at-ms)})
+         (persist/persist-args! storage (:id row)
+                                {:request (sanitize-request request)}
+                                free-slots)
+         (persist/write-finished!
+           storage (:id row)
+           (->> (case (:status outcome)
+                  :succeeded {:status :succeeded
+                              :result (sanitize-response (:result outcome))}
+                  :failed (let [^Exception t (:throwable outcome)]
+                            {:status :failed
+                             :error (or (ex-message t) (str (class t)))
+                             :error-data (ex-data t)}))
+                (merge {:runtime-effects (persist/snapshot-runtime-effects effect-trace)
+                        :path-trace (persist/snapshot-path-trace trace)})
+                (persist/redact-outcome handler-fn-id)
+                (persist/stamp-touched-secret handler-fn-id)))
+         ;; Only a Debug TRAP capture becomes "the last capture" the panel
+         ;; jumps to; a trace hop is an ordinary linked execution.
+         (when-not extra
+           (swap! last-captures assoc [(tc/current-org) branch-id] (:id row)))
+         (log/info "debug-capture: captured request persisted"
+                   {:execution-id (:id row)
+                    :uri (:uri request)
+                    :traced? (some? extra)
+                    :duration-ms (- (now-ms) started-at-ms)})
+         (:id row)))
+     (catch Exception e
+       (log/warn e "debug-capture: persist failed — response unaffected"
+                 {:uri (:uri request)})
+       nil))))
 
 
 (defn run-captured!

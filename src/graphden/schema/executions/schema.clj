@@ -82,6 +82,19 @@
   #uuid "270a0b22-77eb-4c29-a1ee-6b50c75640a1")
 
 
+;; Cross-service tracing (docs/EXECUTION.md § Tracing across services):
+;; an outbound `:service-get` carries the caller's trace id + execution
+;; id in a header; a listener that receives it persists the request it
+;; handles as an execution row linked to the caller. A trace is the
+;; top-level execution's id; every hop shares it.
+(def ^:private fn-execution-trace-id-field-uuid
+  #uuid "5e2a7c9d-1f4b-4d68-a3c7-8b0e6d2f4a91")
+
+
+(def ^:private fn-execution-parent-execution-id-field-uuid
+  #uuid "b7f1d3a5-9c2e-4b74-8e6a-2d5c0f8b1e63")
+
+
 (def ^:private fn-execution-finished-at-field-uuid
   #uuid "56a12b66-a6cc-4502-8107-35015050938c")
 
@@ -347,7 +360,19 @@
                       ;; NULL ≡ not acknowledged.
                       :acknowledged-at {:uuid fn-execution-acknowledged-at-field-uuid
                                         :type :timestamptz
-                                        :nullable? true}})
+                                        :nullable? true}
+                      ;; The trace this run belongs to (= the top-level
+                      ;; execution's id) and the execution that called INTO
+                      ;; this one over the wire (a `:service-get` from
+                      ;; another service). nil ≡ a top-level run / untraced.
+                      :trace-id {:uuid fn-execution-trace-id-field-uuid
+                                 :type :uuid
+                                 :nullable? true
+                                 :indexed? true}
+                      :parent-execution-id {:uuid fn-execution-parent-execution-id-field-uuid
+                                            :type :uuid
+                                            :nullable? true
+                                            :indexed? true}})
 
       ;; -----------------------------------------------------------------
       ;; :fn-execution-arg — one row per free-arg the executor was

@@ -253,10 +253,19 @@
    :parent :get-execution
    :args {:id :_partial-execute-result-id}}
 
-  {:name :_partial-execute-result-fragment
-   :description "Execute-result body hiccup for a persisted exec-id. Reparents `:_er-body` (the pure-graph walker chain in `app/execution/fns.edn`)."
+  {:name :_partial-execute-result-body
    :parent :_er-body
    :args {:exec :_partial-execute-result-exec}}
+
+  {:name :_partial-execute-result-downstream
+   :parent :_er-downstream
+   :args {:exec :_partial-execute-result-exec}}
+
+  {:name :_partial-execute-result-fragment
+   :description "Execute-result body hiccup for a persisted exec-id: `:_er-body` (the pure-graph walker chain in `app/execution/fns.edn`) followed by the run's downstream calls (cross-service tracing), each over the same `:get-execution` read."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :children [:_partial-execute-result-body :_partial-execute-result-downstream]}}
 
   {:name :_partial-execute-result-html
    :parent :render-hiccup

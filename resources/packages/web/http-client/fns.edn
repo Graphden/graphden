@@ -43,6 +43,11 @@
           :headers :text-map
           :body :text}}
 
+  {:name :trace-headers
+   :description "The cross-service trace header for an outbound call — `{\"X-Graphden-Trace\" \"<trace-id>;<execution-id>\"}` when this run is a persisted execution, `{}` otherwise. `:service-get` / `:service-post` merge it in, so the service that answers records the request as an execution linked to this one (docs/EXECUTION.md § Tracing across services)."
+   :args {}
+   :return-type :text-map}
+
   {:name :http-request
    :description "Universal outbound HTTP request — method carried as DATA (`:http-method-token`, any RFC 9110 token). Returns `{:status :headers :body}` — body slurped to text, headers stringified; non-2xx responses are returned with their actual status so callers can branch. Throws `http-client/request-failed` on transport errors. Prefer the per-method presets (`:http-get`, `:http-post`, …) — a preset node states its intent in the graph; use this root directly only when the method itself is dynamic or non-standard."
    :args {:method {:type :text

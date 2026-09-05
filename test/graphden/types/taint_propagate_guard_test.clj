@@ -124,7 +124,7 @@
     :rich-type-of-name :ring-create-default-handler :ring-handler
     :ring-route-paths :ring-router :routes->js-bundle
     :rule-owner-of-name :running-entry :secret-leaf :secret-path-args :service-endpoint
-    :queue-publish :queue-take :queue-ack :queue-nack :call-with
+    :queue-publish :queue-take :queue-ack :queue-nack :call-with :trace-headers
     :select-keys
     :service-blocking-free-args :set-branch-policy!
     :set-branch-require-merge! :set-review-state!

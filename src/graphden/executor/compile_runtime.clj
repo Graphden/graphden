@@ -1416,6 +1416,16 @@
     (thunk)))
 
 
+(def ^:dynamic *execution*
+  "The persisted execution THIS thread is running, `{:id :trace-id}` —
+   bound by `persist/run-future` around a persisted run and by a traced
+   listener around the request it handles (docs/EXECUTION.md § Tracing
+   across services). nil for an unpersisted / anonymous run. Read by
+   `:trace-headers` so an outbound `:service-get` names its caller, and
+   conveyed into futures like every other execution binding."
+  nil)
+
+
 (def ^:dynamic *scrub-internal-errors?*
   "When true (bound by `tenancy.addon` for org≠public requests, alongside
    `*allowed-effects*`), failed-execution outcomes surfaced to the client —
@@ -1644,8 +1654,11 @@
           closure (or (get reg fn-id) (throw-fn-not-found! fn-id))
           lookups (lookups-for-ctx ctx)
           free-names (vec (r/deep-free-ext-names fn-id lookups))]
-      (ce/make-shape-callable free-names
-                              (fn [args]
-                                (closure (translate-named-args
-                                           fn-id (or args {}) lookups)
-                                         ctx))))))
+      (with-meta
+        (ce/make-shape-callable free-names
+                                (fn [args]
+                                  (closure (translate-named-args
+                                             fn-id (or args {}) lookups)
+                                           ctx)))
+        ;; Same identity tag `compile-eager/hof-wrap` puts on its callables.
+        {:graphden.executor/fn-id fn-id}))))

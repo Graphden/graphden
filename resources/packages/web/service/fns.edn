@@ -59,15 +59,25 @@
   ;; `:url` is pinned to the joined origin+path; the `:type :url`
   ;; override narrows `:str`'s `:text` back to the slot's refinement —
   ;; the origin always carries a scheme, so the pin is truthful.
+  ;; The caller's trace rides along: the request headers are the user's
+  ;; `:headers` (still free, defaulting to none) merged with
+  ;; `:trace-headers`, so the service that answers links the request it
+  ;; handles to this execution (docs/EXECUTION.md § Tracing).
+  {:name :_service-headers
+   :parent :merge
+   :args {:maps [{:as :headers :type :text-map} :trace-headers]}}
+
   {:name :service-get
-   :description "HTTP GET against a service: `:http-get` with `:url` = the service's origin + `:path`. Free: `:service` (the service fn), `:path` (e.g. `\"/orders\"`), `:headers`, `:auth-value`, `:timeout-ms`. Returns `{:status :headers :body}`."
+   :description "HTTP GET against a service: `:http-get` with `:url` = the service's origin + `:path`, and the caller's trace header merged into `:headers`. Free: `:service` (the service fn), `:path` (e.g. `\"/orders\"`), `:headers`, `:auth-value`, `:timeout-ms`. Returns `{:status :headers :body}`."
    :parent :http-get
-   :args {:url {:ref :_service-url-join :type :url}}}
+   :args {:url {:ref :_service-url-join :type :url}
+          :headers :_service-headers}}
 
   {:name :service-post
-   :description "HTTP POST against a service: `:http-post` with `:url` = the service's origin + `:path`. Free: `:service`, `:path`, `:body` (text — JSON-encode upstream via `:to-json-string`), `:headers`, `:auth-value`, `:timeout-ms`."
+   :description "HTTP POST against a service: `:http-post` with `:url` = the service's origin + `:path`, and the caller's trace header merged into `:headers`. Free: `:service`, `:path`, `:body` (text — JSON-encode upstream via `:to-json-string`), `:headers`, `:auth-value`, `:timeout-ms`."
    :parent :http-post
-   :args {:url {:ref :_service-url-join :type :url}}}
+   :args {:url {:ref :_service-url-join :type :url}
+          :headers :_service-headers}}
 
   ;; --- Decoded rungs: the response body parsed as JSON --------------
   ;; Narrow the result to the contract's response type-row on the

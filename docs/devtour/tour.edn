@@ -1092,6 +1092,13 @@
            through the post-processing transforms (optional/HOF badges,
            captured-edge migration, overlay dedup, strip facts). Produces
            the node/edge element lists the client draws verbatim."}
+    {:ns graphden.layout.builder-helpers :defn emit-root-deep-frees!
+     :say "After the walkers: the root card's DEEPER holes — a template's
+           frees behind ancestor-bound refs, the closure captures of HOF
+           targets — as `:deepArg` placeholders on the root itself, keyed by
+           the inner slot but naming the root fn, so the `+` binder writes a
+           closure-capture binding where the Run form lists the hole. The
+           entry set is `compile.renames/deep-free-entries-with-captures`."}
     {:ns graphden.layout.core :defn compute-layout-matrix
      :say "Stages 3+ — grid placement: roots at column zero, dependents
            right of their sources, rows packed to avoid overlap, plus the
@@ -1288,6 +1295,14 @@
            `:service-instance` row — host, port, and a heartbeat it refreshes
            every tick. Read this next because it is the write side of
            service-to-service — the fact every consumer resolves."}
+    {:ns graphden.storage.protocol.generic-constraints :defn dependency-closure
+     :say "The write-time cycle check's closure, since a consumer named the
+           editor's own listener: the ref's execution graph is loaded through
+           `sp/resolve-execution-graph` (one recursive CTE) and walked in
+           memory — the edges `forward-deps-of` follows, identity edges
+           skipped, constraint-vector type names resolved per round. No
+           per-fn queries, no visit cap; the old walk took seconds and then
+           refused as `chain-too-deep`."}
     {:ns graphden.services.reconciler :defn check-liveness!
      :say "The per-tick liveness pass: a handle may also carry `:alive?` and
            `:exit` (http-kit's listener status; a `:future`'s thread state and

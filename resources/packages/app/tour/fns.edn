@@ -1564,7 +1564,7 @@
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
                :check {:kind "manual"}}
               {:title "From address to call"
-               :body "The templates above this primitive join a path onto that url: :service-get and :service-post are :http-get / :http-post whose :url is the service's origin plus a free :path, with the caller's trace header merged in. Their :service and :path live deeper in the composition, so on a collapsed card you bind them by expanding into it — or, as the written lesson 35 does, by writing the fn-def with both args. Disable the service and the same call answers `service/not-running` instead of guessing."
+               :body "The templates above this primitive join a path onto that url: :service-get and :service-post are :http-get / :http-post whose :url is the service's origin plus a free :path, with the caller's trace header merged in. Extend one and its card shows :service and :path as dashed placeholders — holes that live deeper in the template, bound on your fn all the same. Disable the service and the same call answers `service/not-running` instead of guessing."
                :target nil
                :check {:kind "manual"}}
               {:title "That's naming a service"

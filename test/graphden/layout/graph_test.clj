@@ -809,4 +809,42 @@
             (let [again (layout storage (:id r))]
               (is (not-any? (fn [e] (and (:isUnset (:data e)) (= "svc" (:argName (:data e)))))
                             (:edges again))))))
+        (finally (sp/close storage)))))
+
+  (testing "a positional rename inside the template (`:parts [{:as :path}]`) is a deep hole too"
+    ;; `service-get`'s `path` lives on `:_service-url-join`'s `:parts` list
+    ;; item — the walker resolves the rename slot through
+    ;; `[fn-id slot-name]`, which the layout lookups must carry.
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [b1   (setup/create-base-fn! storage "lg-ren-b1")
+              x    (setup/create-slot! storage "x" :any)
+              _    (setup/attach-slot! storage (:id b1) (:id x) 0)
+              join (setup/create-base-fn! storage "lg-ren-join")
+              parts (setup/create-slot! storage "parts" :sequence)
+              _    (setup/attach-slot! storage (:id join) (:id parts) 0)
+              f    (setup/create-composed-fn! storage "lg-ren-f" (:id join))
+              ;; f: parts [{:as :path}] — a rename-view slot `path` on f
+              ;; whose source is `parts`, plus the list item naming it.
+              path (sp/create-entity storage :slot {:name "path" :type-fn-id (get setup/primitive-fn-ids :text)
+                                                    :source-slot-id (:id parts)})
+              _    (setup/attach-slot! storage (:id f) (:id path) 0)
+              lb   (sp/create-entity storage :binding {:fn-id (:id f) :slot-id (:id parts) :list-append true})
+              _    (sp/create-entity storage :binding-list-item
+                                     {:binding-id (:id lb) :position 0 :value {:as "path"}})
+              t    (setup/create-composed-fn! storage "lg-ren-t" (:id b1))
+              _    (setup/bind-ref! storage (:id t) (:id x) (:id f))
+              r    (setup/create-composed-fn! storage "lg-ren-r" (:id t))
+              result (layout storage (:id r))
+              edge (some (fn [e]
+                           (let [d (:data e)]
+                             (when (and (:isUnset d) (= "path" (:argName d))) d)))
+                         (:edges result))
+              node (when edge
+                     (some (fn [n] (when (= (:target edge) (:id (:data n))) (:data n)))
+                           (:nodes result)))]
+          (is edge "path — a positional rename two refs down — is a deep placeholder of the root")
+          (is (:deepArg edge))
+          (is (= (str (:id r)) (:fnId node)))
+          (is (= (str (:id path)) (:slotId node)) "keyed by the rename-view slot"))
         (finally (sp/close storage))))))

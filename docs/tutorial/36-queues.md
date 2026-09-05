@@ -94,17 +94,31 @@ its own messages like any other row.
    climbs by one every five seconds (the default retry delay) and
    `error` carries the parser's message; after the fifth attempt
    `state` is `dead` and the worker leaves it alone. Fix the handler,
-   set the row back to `pending` (`PUT /api/entities/queue-message/<id>`
-   with `{"state": "pending", "attempts": 0}`) and it is handled.
+   then open **Operate → Queues**: every queue with its pending / dead
+   counts, and the dead letter with its error — *Requeue* puts it back
+   (`:queue-requeue`: pending, attempts 0, error cleared) and it is
+   handled; *Delete* drops it.
 
-6. Delete both services and the queue rows when you are done.
+6. **Follow a message across the queue.** Run `:order-placed` from the
+   Run pane (a persisted run has an identity — lesson 35) and open the
+   run: under *Downstream calls* sits the worker's handling of that
+   very message — a child execution of your run, with the message as
+   its argument. `:queue-publish` stamps the publisher's trace on the
+   row, and the consumer runs its handler through `:call-traced`, so
+   the call tree continues past the queue exactly as it does past a
+   socket.
+
+7. Delete both services and the queue rows when you are done.
 
 ## The knobs, and the backend
 
-The defaults live on two private fn-defs: `:_pg-queue-take` (batches
-of 10, a 30 s visibility timeout, a 5 s wait on an empty queue) and
-`:_pg-queue-nack` (retry after 5 s, dead after 5 attempts). To change
-them, derive your own and bind them on your consumer:
+The defaults live on three private fn-defs: `:_pg-queue-take` (batches
+of 10, a 30 s visibility timeout, a 5 s wait on an empty queue),
+`:_pg-queue-nack` (retry after 5 s, dead after 5 attempts) and
+`:_pg-queue-extend` (renews the 30 s claim; the consumer beats it every
+`:lease-every-ms` = 10 s while your handler runs, so a slow handler
+keeps its message). To change them, derive your own and bind them on
+your consumer:
 
 ```edn
 {:name :_fast-nack :parent :queue-nack :args {:retry-ms 500 :max-attempts 3}}
@@ -113,11 +127,12 @@ them, derive your own and bind them on your consumer:
  :args {:queue "orders" :handler :ship-order :nack :_fast-nack}}
 ```
 
-That works because `:take`, `:ack` and `:nack` are *fn-typed slots* of
-`:queue-consumer` — the loop, the try/ack/nack and the handler call
-are graph composition that does not know what a queue is. A broker
-package (Kafka, NATS) would bind its own primitives to the same three
-slots; your consumers, handlers and contracts would not change.
+That works because `:take`, `:ack`, `:nack` and `:extend` are
+*fn-typed slots* of `:queue-consumer` — the loop, the try/ack/nack,
+the lease heartbeat and the handler call are graph composition that
+does not know what a queue is. A broker package (Kafka, NATS) would
+bind its own primitives to the same slots; your consumers, handlers
+and contracts would not change.
 
 ## The contract lives in the graph
 
@@ -147,10 +162,11 @@ longer fits at write time.
   retried message goes to the back of its delay. Strict ordering per
   key is not a promise.
 - At-least-once: a worker that dies between handling and acking sees
-  the message again after the visibility timeout. Make handlers
+  the message again after the visibility timeout (a live worker keeps
+  renewing its claim, so only a dead one loses it). Make handlers
   idempotent, or key the side effect on the message id.
-- Dead letters stay until you delete or resurrect them; there is no
-  automatic sweep yet.
+- Dead letters stay until you requeue or delete them (Operate →
+  Queues); there is no automatic sweep.
 
 ## Next
 

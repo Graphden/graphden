@@ -402,6 +402,16 @@
         ;; a fn-slot junction row for it). One owner per slot — slot
         ;; identities are derived from `(owner-fn-id, slot-name)`.
         slot-owner (into {} (map (fn [fs] [(:slot-id fs) (:fn-id fs)])) fn-slots)
+        ;; `[fn-id slot-name] → slot` — the executor's `compile.lookups`
+        ;; index the deep-free walkers (`compile.renames`) resolve a
+        ;; positional `{:as :name}` rename through. Without it the root's
+        ;; deep-free pass (`emit-root-deep-frees!`) lost every renamed
+        ;; hole (`path`, `headers`) while keeping the plain slots.
+        slot-by-fn-name (into {}
+                              (keep (fn [fs]
+                                      (when-let [s (get slot-map (:slot-id fs))]
+                                        [[(:fn-id fs) (keyword (:name s))] s])))
+                              fn-slots)
         ;; name (keyword) → fn-row. Lets type-row internals resolve
         ;; `:int` / `:null` / `:text` etc. in `:constraint` payloads
         ;; without having to walk `fn-map` linearly.
@@ -420,6 +430,7 @@
      :bindings-by-fn bindings-by-fn
      :items-by-binding items-by-binding
      :slot-owner slot-owner
+     :slot-by-fn-name slot-by-fn-name
      ;; Per-request inheritance-chain memo. `build-graph-elements`
      ;; hits get-inheritance-chain dozens of times for the same
      ;; fn-ids; cache the BFS walk for the lifetime of one layout

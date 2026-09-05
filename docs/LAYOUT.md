@@ -221,6 +221,24 @@ This split is the load-bearing assumption pinned by the
 `graphden.tools.browser-test/edit-inheritance-regression.test.js`
 e2e test — parent layout exposes items, child layout doesn't.
 
+#### 2.x Root deep-free placeholders
+
+A template's holes often live deeper than the root card's slot
+surface: an extension of `:service-get` has `service` / `path` free,
+but both belong to fns reached through the parent's ref-bound `url`
+(`:_service-url-join` → `:service-endpoint`), which the collapsed card
+does not render; a Ring wrap's `base-handler` sits inside a HOF slot.
+After the walkers, `builder-helpers/emit-root-deep-frees!` runs once
+for a composed / base-fn root: every entry of
+`compile.renames/deep-free-entries-with-captures` (the surface walk
+plus the closure captures of HOF targets — the same hole set the Run
+form asks for) whose slot has no placeholder yet becomes an unset node
+with an edge from the root, flagged `:deepArg`. The node names the ROOT fn
+(`fnId`) keyed by the inner slot, so the `+` binder writes a binding on
+this fn — closure capture, what a fn-def `:args {:service …}` on the
+same fn stores. Type-row roots skip the pass (their only slot is the
+synthetic one hidden above).
+
 ### Stage 3: Sort Children Lists
 
 Placement walks each node's children in a fixed order. Under the

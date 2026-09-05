@@ -58,10 +58,11 @@ calls it, and watch the address appear and disappear.
 
 2. **Make it a service.** Click `⚙` on `:orders-service` → "Make
    service" → *Create & reconcile* (lesson 32). The reconciler starts
-   it within a second. List the running copies —
-   `GET /api/entities/service-instance` — and there is one row for it:
-   `"host": "127.0.0.1", "port": 9101`, an `executor-id` of `local`,
-   and a `seen-at` that moves every fifteen seconds. That is the
+   it within a second. Open the `⚙` popover again: under the status
+   line, *Running copies* lists the copy — `127.0.0.1:9101 · local ·
+   seen <time>` — and the time moves every fifteen seconds. The same
+   rows are `GET /api/entities/service-instance?service-id=<id>` (on
+   the cloud you see your org's). That is the
    reconciler talking: `:http-server` returned its handle with the
    bound port as metadata, the pod that started it added its own host,
    and it heartbeats the row every tick.
@@ -78,14 +79,11 @@ calls it, and watch the address appear and disappear.
    free args are `headers`, `auth-value`, `timeout-ms` (from
    `:http-get`); `service` and `path` are bound.
 
-   Had you extended `:service-get-json` from the editor instead, the
-   collapsed card would show no `+` for `service` or `path`: both live
-   deeper in the template (on `:service-endpoint` and the URL join),
-   and a card lists only the holes of the fns it is showing — expand
-   into the composition to reach them (the Run pane lists every free
-   arg either way). The interactive tour for this lesson sidesteps that
-   by extending `:service-endpoint` itself, where `service` is a
-   direct slot.
+   Extending `:service-get-json` from the editor works the same way:
+   the card shows `service` and `path` as dashed placeholders even
+   though both live deeper in the template (on `:service-endpoint` and
+   the URL join) — a card lists every hole of its composition, the
+   same set the Run pane asks for — and the `+` binds them on your fn.
 
 4. **Run it.** ▶ on `:fetch-orders` — the Run pane shows
    `{:orders [1 2 3]}`. Trace (lesson 15) shows the chain:

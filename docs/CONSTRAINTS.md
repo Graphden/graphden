@@ -74,13 +74,24 @@ GC and cross-org rejection.
 The write-time guard (`crud.validation/cycle-check-rej`) applies the
 same rule to the edge being *written*: a `ref-fn-id` into a `:fn-ref`
 slot (or under a binding-level `type-override` to `:fn-ref`) runs no
-walk at all. That is a cost rule as much as a correctness one — the
-walk is bounded by `default-max-dependency-chain-depth` (1000 visited
-fns, `:constraint-violation/chain-too-deep`), and naming the editor's
-own listener from a consumer would otherwise walk the whole app
-package into that cap. On a binding *update* the guard keys the walk
-off the stored row's `fn-id` / `slot-id` (a `PUT {ref-fn-id}` alone
-carries neither), so re-pointing a ref is checked like creating one.
+walk at all. On a binding or list-item *update* the guard keys the walk
+off the stored row's owner fields (a `PUT {ref-fn-id}` alone carries
+neither `fn-id` nor `binding-id`), so re-pointing a ref is checked like
+creating one.
+
+**How the walk runs.** `generic-constraints/dependency-closure` loads
+the ref's execution graph through `sp/resolve-execution-graph` — the
+same recursive-CTE resolver the executor compiles from, O(1) round trips
+whatever the closure's size — and walks it in memory over exactly the
+edges `forward-deps-of` follows, skipping identity edges; constraint-
+vector type NAMES (`[:union :a :b]`, keywords the resolver does not
+chase) are resolved in one batched query per round. There is no visit
+cap on this path: binding a fn with a large closure (the editor's own
+router) is a normal write. The per-fn generic walker
+(`constraints/collect-dependency-chain-impl`, four queries per visited
+fn, capped at `default-max-dependency-chain-depth` →
+`:constraint-violation/chain-too-deep`) remains for a backend without
+a graph resolver.
 
 **Error:** `:constraint-violation/dependency-cycle`
 

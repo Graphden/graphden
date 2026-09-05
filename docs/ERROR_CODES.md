@@ -167,11 +167,13 @@ named, never evaluated) and does not count — see
 ### `:constraint-violation/chain-too-deep`
 
 **Component:** storage-protocol (GraphConstraints)
-**Description:** The dependency walk behind the cycle check visited more
-than `default-max-dependency-chain-depth` (1000) fns before finishing —
-the DoS bound on a write that names a fn with a very large closure.
-Identity edges (`:fn-ref` slots) run no walk, so naming a big listener
-as a *service* never hits this.
+**Description:** The GENERIC per-fn dependency walk
+(`constraints/collect-dependency-chain-impl`) visited more than
+`default-max-dependency-chain-depth` (1000) fns before finishing — its
+DoS bound. The Postgres path does not raise it: `dependency-closure`
+loads the closure through the recursive-CTE resolver and walks it in
+memory, uncapped (CONSTRAINTS.md § How the walk runs). Identity edges
+(`:fn-ref` slots) run no walk at all.
 **Ex-data keys:**
 
 - `:fn-id` - The fn whose closure was being walked

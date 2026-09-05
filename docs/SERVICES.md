@@ -174,6 +174,7 @@ copy, deleted on every stop path, heartbeat every reconcile tick.
 | `:port`        | `:int` (null)   | The port the listener bound (from the handle's `:endpoint` metadata); nil ≡ not a listener (a cron loop still has a row — it heartbeats). |
 | `:started-at`  | `:timestamptz`  |                                                                       |
 | `:seen-at`     | `:timestamptz`  | Heartbeat. Older than `default-stale-after-ms` (45 s, three ticks) ⇒ presumed dead: consumers ignore it, and after ten windows any pod deletes it. |
+| `:org-id`      | `:text` (null)  | The service's tenant, copied from its `:service` row when the copy starts (the reconciler writes with the platform handle). Org-scoped on the cloud: a tenant reads ITS running copies — the ⚙ popover's *Running copies* — while the `:service` row stays platform-only. |
 
 ### `:restart-policy` enum
 
@@ -521,6 +522,7 @@ Non-versioned work rows (schema `graphden.schema.queue.schema`):
 | `:available-at` | `:timestamptz` | Due time (publish delay / retry delay). |
 | `:locked-until` | `:timestamptz` (null) | The visibility lock of the current claim. |
 | `:error` | `:text` (null) | The last handler's message, kept on retry and on dead. |
+| `:trace-id`, `:parent-execution-id` | `:uuid` (null) | The publisher's trace and execution (`cr/*execution*` at publish time); the consumer's handler runs as a child of that execution (§ Tracing across services in [EXECUTION.md](EXECUTION.md#tracing-across-services)). NULL when published outside a persisted run. |
 
 ### The primitives (`storage/queue`)
 
@@ -530,16 +532,26 @@ Non-versioned work rows (schema `graphden.schema.queue.schema`):
 | `:queue-take` `queue batch visibility-ms wait-ms` | claim up to `batch` due messages (`SKIP LOCKED`, `attempts+1`, lock for `visibility-ms`); when none is due, wait up to `wait-ms` for a publish and try once more |
 | `:queue-ack` `message-id` | delete |
 | `:queue-nack` `message-id error retry-ms max-attempts` | release for retry after `retry-ms`, or `dead` once `attempts ≥ max-attempts` |
+| `:queue-extend` `message-id visibility-ms` | renew the claim's lock — the lease heartbeat of a handler that outlives its claim (true while the row is still pending) |
+| `:queue-requeue` `message-id` | a dead letter back to `pending` (attempts 0, error cleared, consumers woken) — what Operate → Queues' *Requeue* calls |
 
 ### The consumer template
 
 `:queue-consumer` is a service like any other (`:future` → a loop →
 take a batch → run `:handler` on each → ack on return, nack on a
-throw). Its `:take` / `:ack` / `:nack` are **fn-typed slots**, so the
-backend is a binding: `:pg-queue-consumer` binds the Postgres
-primitives above (batches of 10, 30 s visibility, 5 s wait; retry
-after 5 s, dead after 5 attempts); a broker package would bind its
-own primitives to the same template. A consumer is two bindings away:
+throw). While the handler runs, `:extend` is called every
+`:lease-every-ms` under `:with-heartbeat`, so a handler slower than
+the visibility timeout keeps its claim instead of being re-delivered
+mid-flight. The handler itself runs through `:call-traced`: with the
+trace ids the publisher stamped on the message, its execution is
+persisted as a child of the publisher's — the Run pane's *Downstream
+calls* continue across the queue exactly as across HTTP. Its `:take` /
+`:ack` / `:nack` / `:extend` / `:lease-every-ms` are **fn-typed slots**
+(and one knob), so the backend is a binding: `:pg-queue-consumer` binds
+the Postgres primitives above (batches of 10, 30 s visibility renewed
+every 10 s, 5 s wait; retry after 5 s, dead after 5 attempts); a broker
+package would bind its own primitives to the same template. A consumer
+is two bindings away:
 
 ```edn
 {:name :orders-worker :parent :pg-queue-consumer
@@ -554,7 +566,12 @@ own take / nack (`{:parent :queue-take :args {…}}`) and bind them to
 workers — a claim is exclusive either way). The **contract** is the
 message's type-row, referenced by the publisher's payload and the
 handler's `message` narrowing, exactly like the HTTP contract.
-Tutorial: [lesson 36](tutorial/36-queues.md).
+
+**Operate → Queues** (`GET /partials/queues-panel`, `editor-queues.js`)
+lists every queue with its pending / dead counts and the dead letters
+with *Requeue* (`:queue-requeue`) and *Delete* — org-scoped on the
+cloud, so a tenant sees its own queues. Tutorial:
+[lesson 36](tutorial/36-queues.md).
 
 ## Packages-based seeding
 

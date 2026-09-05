@@ -644,8 +644,21 @@ records. Tracing continues the tree across the wire:
    partial renders them as *Downstream calls* under the result. Open a
    child and the tree continues on the other service's side.
 
+5. The **queue** is a hop too. `:queue-publish` stamps the publisher's
+   `:trace-id` / `:parent-execution-id` on the message row; the
+   consumer template runs its handler through `:call-traced` (core/
+   system — `:call` as a trace hop: with a trace id it persists the
+   call as an execution of the callee, linked to the parent, with
+   `*execution*` bound for the handler's own calls and publishes; nil
+   → a plain call). Both HTTP and the queue go through one seam,
+   `fn-execution.trace/run-traced-with!`; `run-traced!` is its HTTP
+   case. The callable's `hof-wrap` metadata carries the callee's
+   identity AND its lambda-param names, so the persisted argument sits
+   under the handler's own name (`message`).
+
 Rows of a whole trace: `GET /api/entities/fn-execution?trace-id=…` (or
-query the column). Tutorial: [lesson 35](tutorial/35-services-talking-to-services.md).
+query the column). Tutorial: [lesson 35](tutorial/35-services-talking-to-services.md)
+and [lesson 36](tutorial/36-queues.md).
 
 ## Tests
 

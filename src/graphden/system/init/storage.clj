@@ -11,6 +11,7 @@
     [graphden.schema.packages.schema :as pkgs]
     [graphden.schema.placement.schema :as placement]
     [graphden.schema.protocol.protocol :as ds]
+    [graphden.schema.queue.schema :as queue-schema]
     [graphden.schema.services.schema :as svcs]
     [graphden.schema.stats.schema :as stats]
     [graphden.schema.traits.schema :as vts]
@@ -39,6 +40,9 @@
                  ;; admin desired-state mutates in place; per-version trail is
                  ;; carried by the :fn-execution rows services SPAWN.
                  (svcs/extend-builder)
+                 ;; The Postgres-backed message queue (SKIP LOCKED + NOTIFY).
+                 ;; Non-versioned work rows, like :service.
+                 (queue-schema/extend-builder)
                  ;; Registry artifacts — immutable published package snapshots.
                  ;; Non-versioned (immutable by contract), refs nothing graph-side.
                  (pkgs/extend-builder)

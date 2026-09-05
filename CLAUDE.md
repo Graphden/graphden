@@ -110,6 +110,10 @@ Graphden is a visual functional programming environment where functions and thei
   where it answers (host + bound port), and a heartbeat. Written/deleted by
   the reconciler; `:service-endpoint` resolves a service fn to a live copy.
   NOT versioned. See [docs/SERVICES.md § Endpoints](docs/SERVICES.md).
+- `queue-message` — one row per queued message (queue, payload, attempts,
+  due time, visibility lock, `pending` / `dead`). The Postgres queue behind
+  `:queue-publish` / `:queue-take` and the `:queue-consumer` template. NOT
+  versioned. See [docs/SERVICES.md § Queues](docs/SERVICES.md).
 - `resource-override` — versioned `path → content` row shadowing a shipped
   frontend asset (the editor's own JS/CSS), served through
   `:read-resource-overridable`; every save rolls the effective `?v=` asset

@@ -6,4 +6,6 @@
  ;; registered before `:postgres-storage-impl` declares it as parent.
  ;; `branches` loads after `pg` — its graph composition uses
  ;; `:pg-query` + `:decode-row` for the branch-chain walk.
- :modules ["protocol" "pg" "branches" "versioned"]}
+ ;; `queue` — the Postgres message queue (SKIP LOCKED + NOTIFY) and the
+ ;; graph-level consumer template; after `pg` (raw SQL) like `branches`.
+ :modules ["protocol" "pg" "branches" "versioned" "queue"]}

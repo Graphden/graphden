@@ -1305,6 +1305,14 @@
            `resolver` (a cloud app-route's public origin), else an honest
            `:service/not-running`. The web/service templates (`:service-get`)
            compose it with http-client; nothing here dials."}
+    {:ns graphden.schema.queue.schema :defn extend-builder
+     :say "The other way two services talk: a queue. One Postgres table with
+           the standard job-queue shape — `pending`/`dead`, attempts, a due time,
+           a visibility lock — that `storage/queue`'s four primitives drive
+           (`FOR UPDATE SKIP LOCKED` for the claim, NOTIFY to wake a waiting
+           taker). The consumer LOOP is graph composition in that module's
+           fns.edn, with the backend as fn-typed slots — read this to see why
+           a broker was not needed."}
     {:ns graphden.fleet.placement :defn placement-for
      :say "Opens the fleet half with its shared source of truth: the
            `:placement` row mapping `(org, entry-fn-id)` → the executor holding

@@ -14,6 +14,7 @@
     [graphden.schema.malli.core :as mds]
     [graphden.schema.packages.schema :as pkgs]
     [graphden.schema.protocol.protocol :as ds]
+    [graphden.schema.queue.schema :as queue-schema]
     [graphden.schema.services.schema :as svcs]
     [graphden.schema.stats.schema :as stats]
     [graphden.schema.traits.schema :as vts]
@@ -36,6 +37,7 @@
        (vds/extend-builder)
        (es/extend-builder)
        (svcs/extend-builder)
+       (queue-schema/extend-builder)
        (cond-> packages? (pkgs/extend-builder))
        (cond-> stats? (stats/extend-builder))
        (ds/build))))

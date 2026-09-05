@@ -298,6 +298,13 @@
   (func arg))
 
 
+(defbase call-with-fn
+  "Invoke a callable with a MAP of named arguments — the shape
+   `make-shape-callable` builds for a slot whose fn-type names 2+ args."
+  [func args]
+  (func args))
+
+
 (defbase call-noargs-fn
   "Invoke a 0-arg callable. `:func`'s structural type `[:fn {} a]`
    makes the binding-site hof-wrap; the wrap produces a variadic-
@@ -436,6 +443,7 @@
    :build-hashes-raw build-hashes-raw
    :invoke {:impl invoke-fn :return-type-rule invoke-return-rule :taint-propagate? true}
    :call {:impl invoke-fn :taint-propagate? true}
+   :call-with {:impl call-with-fn :taint-propagate? true}
    :call-noargs {:impl call-noargs-fn :taint-propagate? true}
    :try {:impl try-fn :taint-propagate? true}
    :slurp {:impl slurp-fn :taint-propagate? true}

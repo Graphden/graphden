@@ -1,0 +1,141 @@
+(ns graphden.packages.storage.queue.impls
+  "Implementations for the storage/queue base functions — the Postgres
+   backend of the graph-level queue (docs/SERVICES.md § Queues): one
+   `queue_message` table, `FOR UPDATE SKIP LOCKED` for the take, a
+   visibility timeout while a consumer holds a message, bounded retries
+   with a delay, a dead-letter state, and a NOTIFY (`queue:publish:<name>`)
+   that wakes a waiting taker. Each defbase is one statement; the
+   consumer LOOP is graph composition in fns.edn."
+  (:require
+    [graphden.crud.request :as request]
+    [graphden.executor.compile-runtime :as cr]
+    [graphden.executor.defbase :refer [defbase]]
+    [graphden.storage.postgres.codec :as codec]
+    [graphden.storage.postgres.notify :as pg-notify]
+    [graphden.storage.protocol.core :as sp]
+    [graphden.storage.sql.pg :as pg]))
+
+
+(defn- now
+  []
+  (java.time.Instant/now))
+
+
+(defn- plus-ms
+  [^java.time.Instant t ms]
+  (java.time.Instant/.plusMillis t (long (or ms 0))))
+
+
+(defn- take-hsql
+  "UPDATE … RETURNING over the oldest `batch` takeable messages of `queue`:
+   pending, due, and not held by a live lock — claimed with
+   `FOR UPDATE SKIP LOCKED` so concurrent takers never share a row. The
+   claim sets the visibility lock and counts the attempt."
+  [queue batch visibility-ms]
+  {:update :queue-message
+   :set {:locked-until [:+ [:now] [:raw (str "interval '" (long visibility-ms) " milliseconds'")]]
+         :attempts [:+ :attempts [:inline 1]]}
+   :where [:in :id {:select [:id]
+                    :from [:queue-message]
+                    :where [:and [:= :queue (str queue)]
+                            [:= :state "pending"]
+                            [:<= :available-at [:now]]
+                            [:or [:= :locked-until nil] [:< :locked-until [:now]]]]
+                    :order-by [:available-at :created-at]
+                    :limit (long batch)
+                    :for [:update :skip-locked]}]
+   :returning [:*]})
+
+
+(defn- decode-rows
+  [ctx rows]
+  (let [storage (request/require-storage ctx)
+        field-specs (sp/current-fields storage :queue-message)]
+    (mapv #(codec/row->entity % field-specs) rows)))
+
+
+(defn- await-publish!
+  "Block up to `wait-ms` for a `queue:publish:<queue>` NOTIFY (or return
+   at once when the ctx has no listener — tests, a BYO pod). Honors
+   Thread.interrupt: the consumer's stopper cuts the wait short."
+  [ctx queue wait-ms]
+  (if-let [listener (:notify-listener ctx)]
+    (let [p (promise)
+          cb (pg-notify/register! listener
+                                  (fn [ev]
+                                    (when (and (= :queue (:kind ev)) (= (str queue) (:id ev)))
+                                      (deliver p :woken))))]
+      (try
+        (deref p (long wait-ms) :timeout)
+        (finally (pg-notify/unregister! listener cb))))
+    (Thread/sleep (long wait-ms))))
+
+
+(defbase queue-publish
+  "Enqueue `payload` on `queue`, visible after `delay-ms`. Returns the
+   message id. Wakes waiting takers through the NOTIFY bus."
+  [queue payload delay-ms]
+  (cr/record-effect! :db)
+  (let [storage (request/require-storage ctx)
+        t (now)
+        row (sp/create-entity storage :queue-message
+                              {:queue (str queue)
+                               :payload payload
+                               :state "pending"
+                               :attempts 0
+                               :available-at (plus-ms t delay-ms)
+                               :created-at t})]
+    (when-let [emit (:notify-emitter ctx)]
+      (emit {:kind :queue :op :publish :id (str queue)}))
+    (:id row)))
+
+
+(defbase queue-take
+  "Claim up to `batch` due messages of `queue` for `visibility-ms` (the
+   attempt counts). When none is due, wait up to `wait-ms` for a publish
+   and try once more — so an idle consumer blocks on the NOTIFY bus
+   instead of polling hot. Returns the claimed messages (possibly none)."
+  [queue batch visibility-ms wait-ms]
+  (cr/record-effect! :db)
+  (let [claim (fn [] (decode-rows ctx (pg/pg-query ctx (take-hsql queue batch visibility-ms))))
+        first-try (claim)]
+    (if (or (seq first-try) (not (pos? (long (or wait-ms 0)))))
+      first-try
+      (do (await-publish! ctx queue wait-ms)
+          (claim)))))
+
+
+(defbase queue-ack
+  "The message was handled — delete it. Returns true when a row was
+   deleted (false: already acked, or reclaimed by another taker after
+   the visibility timeout and finished there)."
+  [message-id]
+  (cr/record-effect! :db)
+  (let [storage (request/require-storage ctx)]
+    (boolean (sp/delete-entity storage :queue-message message-id))))
+
+
+(defbase queue-nack
+  "The handler threw — release the message: retry after `retry-ms` while
+   `attempts` < `max-attempts`, else mark it `dead` (kept for inspection,
+   with `error`). Returns `:retry` or `:dead` (nil when the row is gone)."
+  [message-id error retry-ms max-attempts]
+  (cr/record-effect! :db)
+  (let [storage (request/require-storage ctx)]
+    (when-let [row (sp/read-entity storage :queue-message message-id)]
+      (if (>= (long (:attempts row)) (long max-attempts))
+        (do (sp/update-entity storage :queue-message message-id
+                              {:state "dead" :locked-until nil :error (some-> error str)})
+            :dead)
+        (do (sp/update-entity storage :queue-message message-id
+                              {:locked-until nil
+                               :available-at (plus-ms (now) retry-ms)
+                               :error (some-> error str)})
+            :retry)))))
+
+
+(def impls
+  {:queue-publish queue-publish
+   :queue-take queue-take
+   :queue-ack queue-ack
+   :queue-nack queue-nack})

@@ -701,6 +701,12 @@
   ;; receives :arg). Use this when :func is a fn-graph that IS a
   ;; callable (Ring-handler-shaped: has `:request` or similar free arg,
   ;; returns a response).
+  {:name :call-with
+   :description "Invoke a fn-graph (hof-wrap'd into a callable) with a MAP of named arguments — the multi-arg counterpart of `:call`. The slot's fn-type names the arguments (pin it at the binding site: `{:as :nack :type [:fn {:message-id :uuid :error :text} :any]}`); `:args` carries them under those names."
+   :args {:func {:type [:fn {} a] :description "Fn-graph to wrap into a callable. Pin a structural type with 2+ named args at the binding site; the wrap becomes a map-callable."}
+          :args {:type :keyword-map :description "The named arguments, keyed by the slot's arg names."}}
+   :return-type a}
+
   {:name :call
    :description "Invoke a fn-graph (hof-wrap'd into a Clojure callable) with one argument. Use when `:func` IS a callable; for already-built Clojure fns use `:invoke`."
    :args {:func {:type [:fn {:arg a} b] :description "Fn-graph to wrap into a callable. Single-arg slot; positional unify (the callee's leftover free-arg name is alpha-equivalent)."}

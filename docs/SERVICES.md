@@ -488,6 +488,68 @@ running, as before. Stale instance rows of a pod that CRASHED (no pass
 ever ran there) are ignored by consumers after one window and deleted
 by whichever pod ticks next after ten.
 
+## Queues — asynchronous work between services
+
+HTTP (§ Endpoints) is synchronous: the consumer waits, and a slow or
+absent producer is the consumer's problem. A queue decouples them. It
+is Postgres-backed — one table, the standard shape every PG job queue
+uses (Oban, graphile-worker, River, pgmq): `FOR UPDATE SKIP LOCKED`
+for the claim, a visibility timeout while a consumer holds a message,
+bounded retries with a delay, a dead-letter state, and a `NOTIFY`
+(`queue:publish:<name>`) that wakes a waiting consumer so it never
+polls hot. No extension, no second service to run; RLS / org-scoping
+apply as to any row. A broker (Kafka, NATS) stays possible as an
+external package: the graph contract below doesn't name the backend.
+
+### `:queue-message`
+
+Non-versioned work rows (schema `graphden.schema.queue.schema`):
+
+| Field | Type | Notes |
+|---|---|---|
+| `:queue` | `:text` (indexed) | The channel name. |
+| `:payload` | `:jsonb` | Whatever was published — narrow it to the contract's type-row on both sides. |
+| `:org-id` | `:text` (null) | Tenant owner (stamped by the org-scoped decorator on the cloud). |
+| `:state` | `:text` | `pending` (takeable) or `dead` (retries exhausted, kept for inspection). A successful ack DELETES the row — the table holds work, not history. |
+| `:attempts` | `:int` | Claims so far. |
+| `:available-at` | `:timestamptz` | Due time (publish delay / retry delay). |
+| `:locked-until` | `:timestamptz` (null) | The visibility lock of the current claim. |
+| `:error` | `:text` (null) | The last handler's message, kept on retry and on dead. |
+
+### The primitives (`storage/queue`)
+
+| Base-fn | Does |
+|---|---|
+| `:queue-publish` `queue payload delay-ms` | insert + `NOTIFY`; returns the id |
+| `:queue-take` `queue batch visibility-ms wait-ms` | claim up to `batch` due messages (`SKIP LOCKED`, `attempts+1`, lock for `visibility-ms`); when none is due, wait up to `wait-ms` for a publish and try once more |
+| `:queue-ack` `message-id` | delete |
+| `:queue-nack` `message-id error retry-ms max-attempts` | release for retry after `retry-ms`, or `dead` once `attempts ≥ max-attempts` |
+
+### The consumer template
+
+`:queue-consumer` is a service like any other (`:future` → a loop →
+take a batch → run `:handler` on each → ack on return, nack on a
+throw). Its `:take` / `:ack` / `:nack` are **fn-typed slots**, so the
+backend is a binding: `:pg-queue-consumer` binds the Postgres
+primitives above (batches of 10, 30 s visibility, 5 s wait; retry
+after 5 s, dead after 5 attempts); a broker package would bind its
+own primitives to the same template. A consumer is two bindings away:
+
+```edn
+{:name :orders-worker :parent :pg-queue-consumer
+ :args {:queue "orders" :handler :handle-order}}
+```
+
+`:handle-order` sees the message under `message`
+(`{id, queue, payload, attempts}`). To change the knobs, derive your
+own take / nack (`{:parent :queue-take :args {…}}`) and bind them to
+`:take` / `:nack` on the consumer. Make the worker a `:service`
+(`:singleton` for a strict in-order-ish drain, `:pool` for parallel
+workers — a claim is exclusive either way). The **contract** is the
+message's type-row, referenced by the publisher's payload and the
+handler's `message` narrowing, exactly like the HTTP contract.
+Tutorial: [lesson 36](tutorial/36-queues.md).
+
 ## Packages-based seeding
 
 Packages contribute baseline `:service` rows through a
@@ -536,6 +598,7 @@ all loaded packages.
 | Done | Cross-pod cancel routing for `:fn-execution` — `execution:cancel:<id>` NOTIFY fan-out; see [EXECUTION.md](EXECUTION.md). |
 | Done | Endpoints — one `:service-instance` row per running copy (host + bound port from the handle's `:endpoint` metadata, heartbeat each tick), deleted on stop; `:service-endpoint` (web/service) resolves a service fn named through a `:fn-ref` slot to a LIVE copy, with the addon `resolver` seam for cloud app-routes (§ Endpoints). |
 | Done | Liveness — handles carry `:alive?` / `:exit`; the per-tick pass restarts a copy that died in place per `:restart-policy` (`:always` any exit, `:on-failure` a throw, `:never` parks), heartbeats live copies and reaps the rows a crashed pod left (§ Liveness). |
+| Done | Queues — `:queue-message` (Postgres, `SKIP LOCKED` + `NOTIFY` wake), the four primitives, and the backend-swappable `:queue-consumer` / `:pg-queue-consumer` templates (§ Queues). |
 | Future | Pluggable supervisor strategies |
 
 ## Code locations
@@ -543,6 +606,7 @@ all loaded packages.
 - Schema: `src/graphden/schema/services/schema.clj`
 - Reconciler: `src/graphden/services/reconciler.clj`
 - Endpoint resolution: `src/graphden/services/endpoint.clj` (+ the `:service-endpoint` base-fn and call templates in `resources/packages/web/service/`)
+- Queue: `src/graphden/schema/queue/schema.clj`, `resources/packages/storage/queue/` (primitives + the consumer templates)
 - Integrant: `src/graphden/system/core.clj` → `:exec/service-reconciler`
 - Form parser: graph-native — `resources/packages/app/execution/fns.edn`
 - Create-service guards: `resources/packages/web/crud/fns.edn` → `:_create-service-free-args-rej` (fn has start-blocking free args) and `:_create-service-no-process-rej` (fn doesn't declare the `:process` effect)
@@ -552,6 +616,7 @@ all loaded packages.
 - Tests: `test/graphden/services/reconciler_test.clj`,
          `test/graphden/services/service_endpoint_e2e_test.clj` (two services over a real socket),
          `test/graphden/packages/web/service_test.clj`, `test/graphden/executor/fn_ref_test.clj`,
+         `test/graphden/packages/storage/queue_test.clj`, `test/graphden/services/queue_consumer_e2e_test.clj`,
          `test/graphden/packages/app/execution_routes_test.clj`,
          `test/graphden/crud/fn_execution_test.clj` (already-running cases),
          `test/graphden/crud/entities_test.clj` (parser cases)

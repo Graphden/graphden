@@ -1,0 +1,160 @@
+;; The message queue — asynchronous work between services, with the
+;; CONSUMER as a graph template whose backend is swappable.
+;;
+;;   :queue-consumer                    (parent :future — a service like any other)
+;;     └─ :_queue-loop                  loop-until-interrupted
+;;          └─ :_queue-step             take a batch, handle each
+;;               ├─ :_queue-batch       ← the `:take` slot   [:fn {} [:list message]]
+;;               └─ :_queue-drain       :map over the batch
+;;                    └─ :_queue-handle-one    :try
+;;                         ├─ body:  handler(message) then `:ack`(message-id)
+;;                         └─ throw: `:nack`(message-id, error)
+;;
+;; `:take` / `:ack` / `:nack` / `:handler` are fn-typed slots. The
+;; Postgres backend (`:pg-queue-consumer`) binds the first three to the
+;; base-fns below; another backend (a broker package) binds its own
+;; primitives to the SAME template — the graph contract, the loop and the
+;; handler don't change. A consumer derives from a backend template and
+;; binds `:queue` + `:handler`:
+;;
+;;   {:name :orders-worker :parent :pg-queue-consumer
+;;    :args {:queue "orders" :handler :handle-order}}
+;;
+;; The publisher side is one base-fn: `:queue-publish`. The CONTRACT
+;; between them is the message's type-row, referenced by both the
+;; publisher's payload and the handler's `:message` narrowing — the same
+;; idea as the HTTP contract (docs/SERVICES.md § Endpoints).
+
+{:namespace "storage.queue"
+ :description "Postgres-backed message queue (SKIP LOCKED + NOTIFY wake) and the backend-swappable :queue-consumer service template."
+ :fns
+ [{:name :queue-message-shape
+   :description "A claimed message — `{id, queue, payload, attempts}`. `attempts` counts this claim; `payload` is whatever was published (narrow it to your contract's type-row in the handler)."
+   :type {:id :uuid
+          :queue :text
+          :payload :jsonb
+          :attempts :int}}
+
+  ;; --- The Postgres primitives ---------------------------------------
+  {:name :queue-publish
+   :description "Enqueue `:payload` on `:queue`, visible after `:delay-ms` (0 = now). Returns the message id and wakes waiting consumers through the NOTIFY bus. At-least-once: a consumer that dies mid-handling sees the message again after the visibility timeout."
+   :args {:queue {:type :non-blank-text :description "Queue name — the channel a consumer takes from."}
+          :payload {:type :jsonb :description "The message body (JSON-shaped). Reference your contract's type-row on the publisher's slot."}
+          :delay-ms {:type :non-negative-int :value 0 :description "Delay before the message becomes takeable, in ms."}}
+   :return-type :uuid
+   :effects #{:db}}
+
+  {:name :queue-take
+   :description "Claim up to `:batch` due messages of `:queue` for `:visibility-ms` (`FOR UPDATE SKIP LOCKED` — concurrent takers never share a row; each claim counts an attempt). When none is due, block up to `:wait-ms` for a publish and try once more. Returns the claimed messages, possibly none."
+   :args {:queue {:type :non-blank-text}
+          :batch {:type :positive-int :description "Batch size."}
+          :visibility-ms {:type :positive-int :description "How long a claim holds the message before it becomes takeable again (a crashed consumer's lock expires)."}
+          :wait-ms {:type :non-negative-int :description "How long to wait for a publish when the queue is empty; 0 = return at once."}}
+   :return-type [:list :queue-message-shape]
+   :effects #{:db :time}}
+
+  {:name :queue-ack
+   :description "The message was handled — delete it. True when a row was deleted."
+   :args {:message-id {:type :uuid}}
+   :return-type :bool
+   :effects #{:db}}
+
+  {:name :queue-nack
+   :description "The handler threw — release the message: retry after `:retry-ms` while `attempts` < `:max-attempts`, else mark it `dead` (kept with `:error` for inspection). Returns `:retry` / `:dead`."
+   :args {:message-id {:type :uuid}
+          :error {:type :nullable-text :description "Why it failed — stored on the row."}
+          :retry-ms {:type :non-negative-int :description "Delay before the next attempt."}
+          :max-attempts {:type :positive-int :description "Attempts after which the message is dead."}}
+   :return-type :keyword
+   :effects #{:db}}
+
+  ;; --- The consumer template (backend-agnostic) ----------------------
+  {:name :queue-consumer
+   :description "A service that takes messages and runs `:handler` on each, acking on return and nacking on a throw. Backend-agnostic: bind `:take` (0-arg → messages), `:ack` (message-id) and `:nack` (message-id, error) to a backend's primitives — `:pg-queue-consumer` does it for Postgres. Inherits `:process` from `:future`; service-eligible once `:queue` / `:handler` are bound."
+   :parent :future
+   :args {:body :_queue-loop}}
+
+  {:name :_queue-loop
+   :parent :loop-until-interrupted
+   :args {:body :_queue-step}}
+
+  {:name :_queue-step
+   :parent :map
+   :args {:func :_queue-handle-one :coll :_queue-batch}}
+
+  ;; `:take` — a 0-arg callable returning a batch; the backend's take
+  ;; fn-def captures `:queue` and its knobs from the consumer's chain.
+  {:name :_queue-batch
+   :parent :call-noargs
+   :args {:func {:as :take :type [:fn {} [:list :queue-message-shape]]}}}
+
+  ;; The message is `:map`'s per-call argument (`item`), but every use of
+  ;; it sits inside the `:try` body / on-throw — HOF slots, where the
+  ;; free-arg walker does not look, so `item` would not surface as a free
+  ;; of a bare `:try` and the wrap would bind nothing. The first `:do`
+  ;; step names it directly (a positional rename, no value): `item` is now
+  ;; a visible free, `:map` binds it per call, and the `:try` below reads
+  ;; it from the captured env.
+  {:name :_queue-handle-one
+   :parent :do
+   :args {:steps [{:as :item} :_queue-try]}}
+
+  {:name :_queue-try
+   :parent :try
+   :args {:body :_queue-handle-body :on-throw :_queue-on-throw}}
+
+  {:name :_queue-handle-body
+   :parent :do
+   :args {:steps [:_queue-run-handler :_queue-ack-item]}}
+
+  ;; `:handler` sees the message under `message`.
+  {:name :_queue-run-handler
+   :parent :call
+   :args {:func {:as :handler :type [:fn {:message :queue-message-shape} :any]}
+          :arg {:as :item}}}
+
+  {:name :_queue-item-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :id} :default nil}}
+
+  {:name :_queue-ack-item
+   :parent :call
+   :args {:func {:as :ack :type [:fn {:message-id :uuid} :any]}
+          :arg :_queue-item-id}}
+
+  ;; On a throw: nack with the message id and the exception's message.
+  {:name :_queue-error-text
+   :parent :throwable-message
+   :args {:ex {:as :exception}}}
+
+  {:name :_queue-nack-args
+   :parent :assoc
+   :args {:map {:parent :assoc-empty :args {:key {:value :message-id} :value :_queue-item-id}}
+          :key {:value :error}
+          :value :_queue-error-text}}
+
+  {:name :_queue-on-throw
+   :parent :call-with
+   :args {:func {:as :nack :type [:fn {:message-id :uuid :error :nullable-text} :any]}
+          :args :_queue-nack-args}}
+
+  ;; --- The Postgres-backed consumer ---------------------------------
+  ;; Knobs live on these two fn-defs; to change them, derive your own
+  ;; (`{:parent :queue-take :args {...}}`) and bind it to `:take` /
+  ;; `:nack` on your consumer.
+  {:name :_pg-queue-take
+   :description "`:queue-take` with the default knobs — batches of 10, a 30 s visibility timeout, a 5 s wait on an empty queue. `:queue` stays free (captured from the consumer)."
+   :parent :queue-take
+   :args {:batch 10 :visibility-ms 30000 :wait-ms 5000}}
+
+  {:name :_pg-queue-nack
+   :description "`:queue-nack` with the default knobs — retry after 5 s, dead after 5 attempts. `:message-id` / `:error` stay free (the template supplies them per message)."
+   :parent :queue-nack
+   :args {:retry-ms 5000 :max-attempts 5}}
+
+  {:name :pg-queue-consumer
+   :description "`:queue-consumer` over the Postgres primitives. Derive it and bind `:queue` (the name) and `:handler` (a fn with a `message` free arg) — then make it a service. Free: `:queue`, `:handler`."
+   :parent :queue-consumer
+   :args {:take :_pg-queue-take
+          :ack :queue-ack
+          :nack :_pg-queue-nack}}]}

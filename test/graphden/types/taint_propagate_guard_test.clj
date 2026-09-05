@@ -124,6 +124,7 @@
     :rich-type-of-name :ring-create-default-handler :ring-handler
     :ring-route-paths :ring-router :routes->js-bundle
     :rule-owner-of-name :running-entry :secret-leaf :secret-path-args :service-endpoint
+    :queue-publish :queue-take :queue-ack :queue-nack :call-with
     :select-keys
     :service-blocking-free-args :set-branch-policy!
     :set-branch-require-merge! :set-review-state!
@@ -165,7 +166,7 @@
    SECRETS.md § T3 set. Before changing this, for each ADDED name ask \"does it
    pass/transform caller content? then it needs `:taint-propagate?`\"; for each
    REMOVED name confirm it genuinely no longer handles content."
-  #{:abs :add :and :assert :assert-eq :assert-some :assoc :assoc-in :atom :blank? :byte-len :call
+  #{:abs :add :and :assert :assert-eq :assert-some :assoc :assoc-in :atom :blank? :byte-len :call-with :call
     :call-noargs :case :cell :coalesce :comp :concat :cond :conj :cons :const
     :constant-time-equal? :constantly :contains? :count :deref :dissoc :distinct :div :do :drop
     :empty? :eq :equal? :every? :ex-data :ex-info :filter :filter-xf :find-first

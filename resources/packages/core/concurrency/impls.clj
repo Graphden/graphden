@@ -129,7 +129,13 @@
   [body]
   (try
     (while (not (Thread/.isInterrupted (Thread/currentThread)))
-      (body))
+      ;; Each iteration is a NEW logical execution: run the body under a
+      ;; fresh per-request call-cache, exactly as `:http-server` does per
+      ;; request. Without this the loop shares ONE memo for its whole
+      ;; lifetime, so a step's ref (a queue take, a fetch) is computed on
+      ;; the first pass and served from cache on every later one — a loop
+      ;; that only appears to repeat.
+      (cr/with-fresh-call-cache body))
     (catch InterruptedException _ nil))
   nil)
 

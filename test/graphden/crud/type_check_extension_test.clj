@@ -1,5 +1,9 @@
-(ns graphden.crud.type-check-extension-test
-  "The rich-types entry of a fn EXTENDED FROM THE EDITOR (a bare
+(ns ^:integration graphden.crud.type-check-extension-test
+  "`^:integration`: rides `golden-app/fixture` — the production-shaped
+   (swept) registry, ~40 s once per JVM, which the unit suite's perf
+   budget forbids (`:fixture/type-check-sweep 0`).
+
+   The rich-types entry of a fn EXTENDED FROM THE EDITOR (a bare
    `POST /api/entities/fn` with a parent, no bindings) — what the
    inspector's Bindings tab and the fn picker's signature check read.
    It must agree with the free-arg surface the Run form lists: the

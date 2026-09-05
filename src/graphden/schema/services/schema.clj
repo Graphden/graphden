@@ -240,6 +240,10 @@
   #uuid "b2e6f1a4-3c7d-4e58-9a1b-6f0c2d8e4b73")
 
 
+(def ^:private service-endpoint-field-uuid
+  #uuid "7d4c2e91-5a3b-4f68-9c07-2e8b1f6a3d54")
+
+
 ;; =============================================================================
 ;; Schema
 ;; =============================================================================
@@ -287,4 +291,15 @@
                       ;; field-uuid comment above).
                       :org-id {:uuid service-org-id-field-uuid
                                :type :text
-                               :nullable? true}})))
+                               :nullable? true}
+                      ;; Where the running service ANSWERS — `{:host :port}`,
+                      ;; written by the reconciler on the pod that started it
+                      ;; (from the `:endpoint` metadata the service fn's
+                      ;; handle carries — `:http-server` sets it), cleared
+                      ;; on stop. The runtime fact next to the desired-state
+                      ;; row; `:service-endpoint` (web/service) reads it so a
+                      ;; consumer fn resolves a service to an address. nil ≡
+                      ;; not running / the service has no listener.
+                      :endpoint {:uuid service-endpoint-field-uuid
+                                 :type :jsonb
+                                 :nullable? true}})))

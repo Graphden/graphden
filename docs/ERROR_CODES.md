@@ -160,6 +160,10 @@ would create a dependency cycle through fn references.
 - `:target-fn-id` - Target function being referenced via ref-fn-id
 - `:cycle-path` - Path showing the cycle
 
+A ref into a `:fn-ref`-typed slot is an IDENTITY edge (the target is
+named, never evaluated) and does not count — see
+[CONSTRAINTS.md](CONSTRAINTS.md#1-no-dependency-cycle).
+
 ### `:constraint-violation/fn-name-collision`
 
 **Component:** versioning (VersionedStorage)
@@ -330,6 +334,21 @@ execute pipeline's standard redaction/scrub chain). See
 - `:iterations` - Number of iterations performed
 - `:max-iterations` - Maximum allowed (configurable via `*max-graph-iterations*`)
 
+### `:service/not-running`
+
+**Component:** services (`graphden.services.endpoint`, the
+`:service-endpoint` base-fn)
+**Description:** A consumer named a service fn (`:service-get`,
+`:service-endpoint`) but no address is known for it: no enabled
+`:service` row on this branch, the row exists but the listener hasn't
+started (or isn't a listener), and no addon resolver (cloud app-route)
+answers. Wrap the call in `:try` / a retry — the reconciler brings the
+producer back on its own.
+**Ex-data keys:**
+
+- `:fn-id` - The named service fn
+- `:service-rows` - How many enabled rows exist for it on this branch (0 ⇒ not declared)
+
 ## Validation Errors
 
 ### `:validation-error/required-field-missing`
@@ -381,6 +400,13 @@ actual frees.
 A bare type-alias name is declared by 2+ type-rows in different
 namespaces. Reference the qualified form (`:other.ns/name`) in the
 `:type` position; the error lists the qualified candidates.
+
+### `:types/fn-ref-slot-needs-ref`
+
+A `:fn-ref`-typed slot (a fn IDENTITY — `:service-endpoint :service`)
+was bound to a literal. Bind a fn-ref (`:my-service`) instead; the
+slot receives that fn's id, never a value. Ex-data: `:fn-name`,
+`:arg-name`, `:binding`, `:expected :fn-ref`.
 
 ### `:packages/ambiguous-ref`
 

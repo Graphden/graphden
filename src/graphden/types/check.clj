@@ -1362,6 +1362,28 @@
                     *source-info*)))))
 
 
+(defn- throw-fn-ref-slot-needs-ref!
+  "A `:fn-ref` slot takes a fn's IDENTITY, so its binding must be a
+   fn-ref (`:my-service` / `{:ref :my-service}`) — a literal has no
+   identity to pass. Caught at sync time with the fix spelled out."
+  [primary-parent fn-name arg-name b-form]
+  (throw (ex-info
+           (str "Type-check failed in fn-def " (pr-str fn-name)
+                "\n  arg "    (pr-str arg-name) " ← " (describe-binding b-form)
+                "\n  parent " (pr-str primary-parent)
+                (source-suffix primary-parent)
+                " expects a fn IDENTITY (:fn-ref)"
+                "\n  hint: bind a fn-ref (`:my-service`); the slot receives"
+                " that fn's id, never a value.")
+           (merge {:fn-name fn-name
+                   :parent-name primary-parent
+                   :arg-name arg-name
+                   :binding b-form
+                   :expected :fn-ref
+                   :type :types/fn-ref-slot-needs-ref}
+                  *source-info*))))
+
+
 (defn- check-one-binding
   [primary-parent fn-name parent-args subst arg-name b-form]
   (let [expected (get parent-args arg-name)]
@@ -1371,6 +1393,16 @@
       ;; shape to compare against — defer to the runtime).
       (or (nil? expected) (= :fn expected))
       subst
+
+      ;; `:fn-ref` slot — the slot takes the bound fn's IDENTITY, so
+      ;; the ref's return type is irrelevant (it is never evaluated
+      ;; through this edge) and any fn-ref is well-typed. A rename
+      ;; (`{:as …}`) keeps the slot free for the caller. A literal
+      ;; cannot name a fn — reject with the fix spelled out.
+      (= :fn-ref expected)
+      (if (or (any-ref-binding? b-form) (deferred-binding? b-form))
+        subst
+        (throw-fn-ref-slot-needs-ref! primary-parent fn-name arg-name b-form))
 
       ;; STRUCTURAL fn-type slot, fn-ref binding. Assemble the ref's
       ;; own structural shape and unify positionally — catches HOF

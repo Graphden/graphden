@@ -280,7 +280,7 @@
 
 
 (defmethod ig/halt-key! :exec/service-reconciler
-  [_ {:keys [running notify-listener notify-callback ticker stop-all-fn]}]
+  [_ {:keys [running context notify-listener notify-callback ticker stop-all-fn]}]
   (log/info "Stopping service reconciler...")
   (when ticker
     (java.util.concurrent.ExecutorService/.shutdown ^java.util.concurrent.ExecutorService ticker)
@@ -289,10 +289,12 @@
          (catch InterruptedException _ nil)))
   (when (and notify-listener notify-callback)
     (pg-notify/unregister! notify-listener notify-callback))
-  (when running ((or stop-all-fn recon/stop-all!) running))
+  ;; `context` lets the drain clear the endpoints this pod recorded —
+  ;; a clean shutdown leaves no stale address behind.
+  (when running ((or stop-all-fn recon/stop-all!) running context))
   (log/info "Service reconciler stopped"))
 
 
-(defmethod ig/suspend-key! :exec/service-reconciler [_ {:keys [running stop-all-fn]}]
+(defmethod ig/suspend-key! :exec/service-reconciler [_ {:keys [running context stop-all-fn]}]
   ;; Same as halt — services don't have a suspend state distinct from stop.
-  (when running ((or stop-all-fn recon/stop-all!) running)))
+  (when running ((or stop-all-fn recon/stop-all!) running context)))

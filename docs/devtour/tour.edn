@@ -1280,6 +1280,22 @@
            times per the row's `:restart-policy`, stamping `:start-failed-at` when
            exhausted so reconcile will not busy-loop. The `how a service stays up`
            answer that closes out the services half."}
+    {:ns graphden.services.reconciler :defn endpoint-of
+     :say "A service that listens somewhere ANSWERS somewhere: the handle
+           `:http-server` returns carries `{:endpoint {:port p}}` as metadata,
+           and the pod that started it completes that with its own dialable host
+           (the fleet `:executor-id`, or loopback) before writing it to the row's
+           `:endpoint`. Read this next because it is the write side of
+           service-to-service — the fact every consumer resolves."}
+    {:ns graphden.services.endpoint :defn resolve-endpoint
+     :say "The read side: a consumer names a service through a `:fn-ref` slot
+           (`:service-endpoint :service :orders-service` — the fn's identity,
+           never evaluated, not a dependency, so two services may name each
+           other) and this turns the id into `{:host :port :url}` — the row's
+           recorded endpoint for the caller's branch, else the addon-installed
+           `resolver` (a cloud app-route's public origin), else an honest
+           `:service/not-running`. The web/service templates (`:service-get`)
+           compose it with http-client; nothing here dials."}
     {:ns graphden.fleet.placement :defn placement-for
      :say "Opens the fleet half with its shared source of truth: the
            `:placement` row mapping `(org, entry-fn-id)` → the executor holding

@@ -99,7 +99,7 @@
   (testing "suspend-key! invokes stop-all! on running"
     (let [stop-all-called? (atom false)
           component {:running (atom {}) :context {}
-                     :stop-all-fn (fn [_] (reset! stop-all-called? true))}]
+                     :stop-all-fn (fn [_ & _] (reset! stop-all-called? true))}]
       (ig/suspend-key! :exec/service-reconciler component)
       (is @stop-all-called? "suspend invokes stop-all! on running"))))
 

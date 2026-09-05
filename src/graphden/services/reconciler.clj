@@ -216,6 +216,48 @@
              (recur (inc attempt)))))))))
 
 
+;; --- Endpoints ---------------------------------------------------------------
+;;
+;; A service that listens somewhere ANSWERS somewhere. The fn's returned
+;; handle carries that fact as metadata (`{:endpoint {:port p}}` —
+;; `:http-server` sets it); the pod that started the service completes it
+;; with its own dialable host and writes it to the row's `:endpoint`
+;; field, then clears it on stop. `:service-endpoint` (web/service) reads
+;; the field, so a consumer fn resolves a service to an address by naming
+;; the service fn. A crashed pod never clears — the next holder overwrites,
+;; and until then a consumer sees a refused connection, which is the
+;; honest answer.
+
+(defn- self-host
+  "The host other pods reach THIS pod by: its fleet `:executor-id` (a
+   pod-FQDN in k8s), or loopback on a single pod."
+  [ctx]
+  (or (:executor-id ctx) "127.0.0.1"))
+
+
+(defn endpoint-of
+  "The `{:host :port}` a just-started service answers on, read off its
+   handle's `:endpoint` metadata and completed with this pod's host —
+   nil when the handle carries none (a cron loop, a fire-and-forget)."
+  [ctx stopper]
+  (when-let [ep (and (instance? clojure.lang.IObj stopper)
+                     (:endpoint (meta stopper)))]
+    (assoc ep :host (self-host ctx))))
+
+
+(defn- write-endpoint!
+  "Record (or, with nil, clear) a service row's `:endpoint`. Best-effort:
+   a failed write is logged, never fatal — the service itself is running
+   (or stopped) regardless."
+  [storage service-id endpoint]
+  (when storage
+    (try
+      (sp/update-entity storage :service service-id {:endpoint endpoint})
+      (catch Exception e
+        (log/warn e "service endpoint write failed"
+                  {:service-id service-id :endpoint endpoint})))))
+
+
 (defn stop-service!
   "Best-effort stop: call the stopper if it's a fn (http-kit and
    similar return a callable). Other return values are logged and
@@ -256,6 +298,9 @@
     (:service-locks-connection ctx)))
 
 
+(declare ^:private reassert-lock-ownership!*)
+
+
 (defn- reassert-lock-ownership!
   "Called after the lock connection reconnected: the new Postgres session
    holds NONE of the locks this pod took, so re-take them. For each running
@@ -271,7 +316,13 @@
    entry re-takes the SAME slot it held (`:pool-slot`); if a sibling grabbed
    that slot during the outage it stops locally, and the diff below re-fills
    any now-free slot on a fresh acquire."
-  [lock-conn running-atom]
+  ([lock-conn running-atom] (reassert-lock-ownership! lock-conn running-atom nil))
+  ([lock-conn running-atom storage]
+   (reassert-lock-ownership!* lock-conn running-atom storage)))
+
+
+(defn- reassert-lock-ownership!*
+  [lock-conn running-atom storage]
   (doseq [[sid entry] @running-atom
           :when (and (map? entry) (:locked? entry))]
     (let [slot (:pool-slot entry 0)
@@ -284,6 +335,7 @@
         (log/warn "lost service ownership during lock-conn outage — stopping local copy"
                   {:service-id sid})
         (stop-service! sid entry)
+        (when (:endpoint entry) (write-endpoint! storage sid nil))
         (swap! running-atom dissoc sid)))))
 
 
@@ -295,11 +347,12 @@
    `:per-pod` service stops.
 
    `::not-our-lock` placeholders have nothing to stop and no lock to
-   release."
-  [lock-conn running-atom sid]
+   release. An entry that recorded an `:endpoint` clears it on the row."
+  [lock-conn running-atom sid storage]
   (let [entry (get @running-atom sid)]
     (when (map? entry)
       (stop-service! sid entry)
+      (when (:endpoint entry) (write-endpoint! storage sid nil))
       (when (and lock-conn (:locked? entry))
         (try (pg-lock/release-slot! lock-conn sid (:pool-slot entry 0))
              (catch Exception e
@@ -454,7 +507,7 @@
     ;; re-assert ownership BEFORE the diff below trusts `:locked?` entries.
     (when-let [holder (:service-locks-holder ctx)]
       (when (pg-lock/ensure-live! holder)
-        (reassert-lock-ownership! (pg-lock/holder-conn holder) running-atom)))
+        (reassert-lock-ownership! (pg-lock/holder-conn holder) running-atom (:storage ctx))))
     ;; Drop stale ::not-our-lock placeholders so every lock-gated service
     ;; we don't currently own is RE-ATTEMPTED this pass. This is what makes
     ;; the periodic reconcile tick heal a crashed owner: the crash released
@@ -501,7 +554,7 @@
           to-start (vec (concat to-start drifted))
           not-our-lock (atom [])]
       (doseq [sid to-stop]
-        (stop-and-forget! lock-conn running-atom sid))
+        (stop-and-forget! lock-conn running-atom sid storage))
       (doseq [sid to-start]
         (let [svc (get enabled-by-id sid)
               svc-ctx (ctx-for-service ctx svc)
@@ -558,13 +611,18 @@
                 ;; holds a slot; :pool-slot = which one (for release +
                 ;; reassert).
                 (let [eff-branch (effective-branch-id svc)
+                      ;; Where the service answers (nil for a non-listener).
+                      ;; Kept on the entry so stop knows to clear the row.
+                      endpoint (endpoint-of ctx (:stopper entry))
                       entry' (cond-> (assoc entry
                                             :cardinality (svc-schema/service-cardinality svc)
                                             :pool-size pool-size
                                             :locked? (some? slot)
                                             :pool-slot slot)
-                               eff-branch (assoc :branch-id eff-branch))]
-                  (swap! running-atom assoc sid entry'))))
+                               eff-branch (assoc :branch-id eff-branch)
+                               endpoint (assoc :endpoint endpoint))]
+                  (swap! running-atom assoc sid entry')
+                  (when endpoint (write-endpoint! storage sid endpoint)))))
 
             :else
             (do (swap! not-our-lock conj sid)
@@ -609,7 +667,7 @@
                                          (= target-branch-id (:branch-id entry)))))
                           (mapv first))]
       (doseq [sid to-restart]
-        (stop-and-forget! lock-conn running-atom sid))
+        (stop-and-forget! lock-conn running-atom sid (:storage ctx)))
       (when (seq to-restart)
         (log/info "Stopping" (count to-restart) "services on branch for restart"
                   {:branch-id target-branch-id :service-ids to-restart}))
@@ -684,7 +742,7 @@
                                               (sees-edit? (:branch-id entry)))))
                                (mapv first))]
            (doseq [sid to-restart]
-             (stop-and-forget! lock-conn running-atom sid))
+             (stop-and-forget! lock-conn running-atom sid (:storage ctx)))
            (when (seq to-restart)
              (log/info "Stopping" (count to-restart)
                        "services whose closure depends on edited fn"
@@ -695,7 +753,9 @@
 
 (defn stop-all!
   "Shutdown helper — drains `running-atom` by calling every stopper,
-   clears the atom. Called from the integrant `halt-key!`.
+   clears the atom. Called from the integrant `halt-key!`. With `ctx`
+   (its `:storage`), also clears the endpoints this pod recorded, so a
+   clean shutdown leaves no stale address on the rows.
 
    `not-our-lock` placeholder entries are skipped (no stopper to
    call). Advisory locks held by THIS pod are released by closing
@@ -710,9 +770,12 @@
    `reset!` — a leaked running service nothing would ever stop. Taking the
    monitor makes us observe a quiesced running map. Reentrant +
    process-local, so no deadlock with a caller that already holds it."
-  [running-atom]
-  (locking reconcile-monitor
-    (doseq [[sid entry] @running-atom]
-      (when (not= ::not-our-lock entry)
-        (stop-service! sid entry)))
-    (reset! running-atom {})))
+  ([running-atom] (stop-all! running-atom nil))
+  ([running-atom ctx]
+   (locking reconcile-monitor
+     (doseq [[sid entry] @running-atom]
+       (when (not= ::not-our-lock entry)
+         (stop-service! sid entry)
+         (when (and (map? entry) (:endpoint entry))
+           (write-endpoint! (:storage ctx) sid nil))))
+     (reset! running-atom {}))))

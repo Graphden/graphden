@@ -12,4 +12,7 @@
            ;; load determinism, not for reference resolution.
            "crud" "crud-types" "crud-write" "crud-delete" "crud-seq"
            "crud-parse" "crud-routes"
-           "ring-adapter" "branch-router" "runtime" "components" "htmx" "sse" "response" "errors"]}
+           "ring-adapter" "branch-router" "runtime" "components" "htmx" "sse" "response" "errors"
+           ;; Service-to-service: a service fn as a VALUE (`:service-endpoint`
+           ;; over a `:fn-ref` slot) + the call templates over http-client.
+           "service"]}

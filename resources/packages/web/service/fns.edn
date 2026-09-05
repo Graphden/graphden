@@ -1,0 +1,99 @@
+;; Service-to-service calls — the SERVICE FN IS THE VALUE.
+;;
+;; A consumer names the service it talks to by binding the service fn
+;; itself into `:service-endpoint`'s `:service` slot. That slot is
+;; `:fn-ref`-typed: the fn's IDENTITY, never evaluated — binding
+;; `:web-server` here does not start a second listener, and the edge is
+;; not a dependency (two services may name each other). The reconciler
+;; records where a started service answers (`:service.endpoint`, from
+;; the `:endpoint` metadata on the handle `:http-server` returns);
+;; `:service-endpoint` reads it back, and on the cloud an addon-installed
+;; resolver answers for app-routes behind a public domain.
+;;
+;; The contract between two services lives in the graph too — a shared
+;; namespace holding the path constants and the request/response
+;; type-rows that BOTH sides reference (the producer's route + handler
+;; return type, the consumer's `:service-get` + decode). One edit moves
+;; both sides; the type-checker catches a drift at write time.
+;;
+;;   :service-endpoint            {:host :port :url}     (base-fn, :db)
+;;     └─ :service-url            the `:url` field
+;;          └─ :_service-url-join url + path
+;;               ├─ :service-get       GET  <service>/<path>
+;;               │    └─ :service-get-json   … → parsed body
+;;               └─ :service-post      POST <service>/<path> with a body
+;;                    └─ :service-post-json  … → parsed body
+;;
+;; Free args of every template: `:service` (the service fn), `:path`,
+;; plus http-client's `:headers` / `:auth-value` / `:timeout-ms` (and
+;; `:body` on the POST rung).
+
+{:namespace "web.service"
+ :description "Service-to-service: resolve a service fn to the address it answers on (the fn IS the value) and call it over HTTP; the contract is fn-defs both sides share."
+ :fns
+ [{:name :service-endpoint-shape
+   :description "Where a running service answers — `{host, port, url}`. `url` is the origin (`http://host:port`, or the public origin an addon resolves); join a path onto it."
+   :type {:host :text
+          :port :port
+          :url :url}}
+
+  {:name :service-endpoint
+   :description "The address the service named by `:service` currently answers on. Reads the `:endpoint` the reconciler recorded on the service's row for this branch (or, on the cloud, the app-route domain the addon resolves). Throws `service/not-running` when the service has no enabled row on this branch, hasn't started, or isn't a listener — an honest failure a caller wraps in `:try` / a retry."
+   :args {:service {:type :fn-ref
+                    :description "The service fn — a `:fn-ref` slot: the fn's identity is passed, the fn is never evaluated (binding a listener here does not start it)."}}
+   :return-type :service-endpoint-shape
+   :effects #{:db}}
+
+  {:name :service-url
+   :description "The origin URL a service answers on — `:service-endpoint`'s `url` field. Free: `:service`."
+   :parent :get
+   :args {:coll :service-endpoint
+          :key {:value :url}
+          :default nil}}
+
+  {:name :_service-url-join
+   :parent :str
+   :args {:parts [:service-url {:as :path}]}}
+
+  ;; --- Call templates over web/http-client -------------------------
+  ;; `:url` is pinned to the joined origin+path; the `:type :url`
+  ;; override narrows `:str`'s `:text` back to the slot's refinement —
+  ;; the origin always carries a scheme, so the pin is truthful.
+  {:name :service-get
+   :description "HTTP GET against a service: `:http-get` with `:url` = the service's origin + `:path`. Free: `:service` (the service fn), `:path` (e.g. `\"/orders\"`), `:headers`, `:auth-value`, `:timeout-ms`. Returns `{:status :headers :body}`."
+   :parent :http-get
+   :args {:url {:ref :_service-url-join :type :url}}}
+
+  {:name :service-post
+   :description "HTTP POST against a service: `:http-post` with `:url` = the service's origin + `:path`. Free: `:service`, `:path`, `:body` (text — JSON-encode upstream via `:to-json-string`), `:headers`, `:auth-value`, `:timeout-ms`."
+   :parent :http-post
+   :args {:url {:ref :_service-url-join :type :url}}}
+
+  ;; --- Decoded rungs: the response body parsed as JSON --------------
+  ;; Narrow the result to the contract's response type-row on the
+  ;; consumer side (`{:ref :orders-fetch :type :orders-shape}`) —
+  ;; the same type-row the producer's handler returns.
+  {:name :_service-get-body
+   :parent :get
+   :args {:coll :service-get
+          :key {:value :body}
+          :default nil}}
+
+  ;; `:keywordize` is PINNED — a base-fn spec's `:value` is a default for
+  ;; the editor, not a binding, so an unpinned slot would surface free
+  ;; and read nil (string keys).
+  {:name :service-get-json
+   :description "`:service-get` with the response body parsed as JSON (keywordized). Free: `:service`, `:path`, `:headers`, `:auth-value`, `:timeout-ms`."
+   :parent :parse-json
+   :args {:string :_service-get-body :keywordize true}}
+
+  {:name :_service-post-body
+   :parent :get
+   :args {:coll :service-post
+          :key {:value :body}
+          :default nil}}
+
+  {:name :service-post-json
+   :description "`:service-post` with the response body parsed as JSON (keywordized). Free: `:service`, `:path`, `:body`, `:headers`, `:auth-value`, `:timeout-ms`."
+   :parent :parse-json
+   :args {:string :_service-post-body :keywordize true}}]}

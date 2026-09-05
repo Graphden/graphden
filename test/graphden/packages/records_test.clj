@@ -30,7 +30,7 @@
 
 (deftest boot-primitives-shape
   (let [recs (r/boot-primitive-records)]
-    (is (= 14 (count recs)))
+    (is (= 15 (count recs)))
     (is (every? #(= :fn (:kind %)) recs))
     (is (every? #(empty? (:parent-ids %)) recs))
     (is (every? #(nil? (:base-fn-id %)) recs))
@@ -41,7 +41,8 @@
   (let [m1 (r/primitive-fn-ids)
         m2 (r/primitive-fn-ids)]
     (is (= m1 m2))
-    (is (= 14 (count m1)))
+    (is (= 15 (count m1)))
+    (is (contains? m1 :fn-ref))
     (is (contains? m1 :int))
     (is (contains? m1 :text))
     (is (contains? m1 :jsonb))))

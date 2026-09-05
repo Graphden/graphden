@@ -384,6 +384,29 @@ blip) triggers `reassert-lock-ownership!` — the pod re-takes every
 `:singleton` it was running and stops any a sibling grabbed during the outage.
 See SERVICES.md § Roadmap.
 
+## Service-to-service
+
+A service that wants another service's address names it — the service fn
+is the value (`:service-endpoint :service :orders-service`, a `:fn-ref`
+slot), and the reconciler has recorded where that fn answers
+([SERVICES.md § Endpoints](SERVICES.md#endpoints--where-a-service-answers)).
+What the address IS depends on the deployment, and that is the whole
+distribution story for services:
+
+| Deployment | Producer | Address the consumer gets |
+|---|---|---|
+| Single pod | `:http-server` service | `127.0.0.1:<port>` |
+| Multi-pod fleet | `:singleton` / `:pool` holder | `<executor-id>:<port>` — the holder's pod-FQDN, the same name the forward-hop dials |
+| Multi-pod fleet | `:per-pod` listener | the last pod to record it (any pod serves) |
+| Cloud tenant | an `:app-route` | `https://<label>.<apps-domain>` via the addon `resolver` seam — the public origin, so the call is an ordinary egress-guarded outbound request and no internal address is ever handed out |
+
+Cross-pod calls are explicit HTTP in the graph, never a transparent RPC
+inside a lazy call chain: the request body is a typed slot, the cost is
+visible, and the closure-capture / cycle rules stay exactly what they are
+(a `:fn-ref` edge is an identity, not a dependency — a pair of services may
+name each other). "Which executor runs what" stays the org/cell model above;
+this section only answers "and how does one reach the other".
+
 ## Still open
 
 Nothing about CORRECTNESS. (The 2026-08 audit found — and fixed — one real

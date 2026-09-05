@@ -438,4 +438,8 @@ the advisory lock that lets several pods start at once, is in
 
 ## Next
 
-Lesson 28 — Packages ([already written](28-packages.md))
+Lesson 35 — Services talking to services
+([35-services-talking-to-services.md](35-services-talking-to-services.md)):
+one service names another and calls it over HTTP, with the contract
+shared in the graph. Or Lesson 28 — Packages
+([already written](28-packages.md)).

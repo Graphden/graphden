@@ -79,10 +79,10 @@ alice   | write      | acme.billing  |  ×
 bob     | execute    | acme          |  ×
 ```
 
-Below it, the add form: a `subject` email input (with type-ahead
-over the org's members), a capability
-`<select>` (the six pickable values — every capability except
-`view-impl`), a `namespace` input, and **+ Add grant**
+Below it, the add form: a `subject` input (a member's email, or a
+**role name** — see below; with type-ahead over the org's members),
+a capability `<select>` (the six pickable values — every capability
+except `view-impl`), a `namespace` input, and **+ Add grant**
 (`POST /api/grants`).
 
 One subtlety worth knowing: the form takes an *email*, but
@@ -91,6 +91,18 @@ resolves the email to that id at write time and stores only the
 id (the email is re-joined from the account row for display).
 Typo the email and you get a "dead" grant that matches no one —
 its subject cell renders the raw id — but it doesn't throw.
+
+**A team as the subject.** Type the name of one of the org's roles
+([Lesson 26](26-roles.md)) instead of an email and the grant is
+stored with subject-kind `role`: everyone who is a member of that
+role holds it, and adding someone to the role (or removing them) is
+the only thing you edit later. That is how two teams sharing one
+org keep their namespaces apart — `backend` gets `admin` on
+`svc-a`, `frontend` gets `admin` on `svc-b`, and the contract
+namespace both read stays under whichever team owns it. The row
+shows the role's name in the subject cell. Resolution order for a
+typed subject: a known member's email → a role name → a pending
+email (a dormant grant, claimed on first sign-in).
 
 One special capability rides the same rows: `require-2fa`.
 Granted to a user (or, with subject-kind `org`, to a whole org)

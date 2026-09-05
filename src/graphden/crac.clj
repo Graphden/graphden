@@ -137,7 +137,7 @@
   ;; resume! restarts them via a reconcile pass.
   (when-let [reconciler (:exec/service-reconciler system)]
     (try
-      (recon/stop-all! (:running reconciler))
+      (recon/stop-all! (:running reconciler) (:context reconciler))
       (catch Exception e (log/warn e "CRaC: stopping services failed"))))
   (when-let [pool (pool-of system)]
     (try

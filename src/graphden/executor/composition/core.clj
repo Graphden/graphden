@@ -18,6 +18,7 @@
     [graphden.executor.composition.validation :as validation]
     [graphden.packages.export :as export]
     [graphden.packages.records :as records]
+    [graphden.packages.records.slot-resolution :as slot-res]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -308,6 +309,11 @@
                          (existing-defs-by-name storage)))
   ([storage fn-defs ns-id-map extra-name->id extra-defs-by-name]
    (validation/validate-all-defs! fn-defs)
-   (let [sorted (deps/topological-sort fn-defs)
+   (let [;; Identity edges (`:fn-ref` slots) don't order the sync — two
+         ;; services may name each other. The slot type resolves across
+         ;; this module + the already-synced defs.
+         defs-by-name (merge extra-defs-by-name (slot-res/build-defs-by-name fn-defs))
+         identity-arg? (fn [fd arg] (slot-res/fn-ref-arg? fd arg defs-by-name))
+         sorted (deps/topological-sort fn-defs identity-arg?)
          records (records/parse-module sorted extra-name->id extra-defs-by-name)]
      (write-records! storage records ns-id-map))))

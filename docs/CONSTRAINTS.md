@@ -60,6 +60,17 @@ empirical demonstration, and [RECURSION.md](RECURSION.md) for the
 `:fix`-based recursion path (shipped) that adds recursion without a
 graph cycle.
 
+**Identity edges are not dependencies.** A ref bound into a
+`:fn-ref`-typed slot (`ids/identity-edge?`) names its target without
+evaluating it — the compiled closure bakes the target's *id*, nothing
+is called through the edge. So the cycle walk skips it at every layer
+(the per-binding constraint above, the sync-time `topological-sort`
+via `slot-res/fn-ref-arg?`, and `compile-eager`'s ref-DAG), and two
+services that each name the other (`:service-endpoint :service …`,
+[SERVICES.md § Endpoints](SERVICES.md#endpoints--where-a-service-answers))
+are legal. The edge is still a real inbound reference for Used-by,
+GC and cross-org rejection.
+
 **Error:** `:constraint-violation/dependency-cycle`
 
 ### 2. Schema-level uniqueness

@@ -14,6 +14,7 @@
      under the new name."
   (:require
     [graphden.executor.compile.lookups :as l]
+    [graphden.packages.records.ids :as ids]
     [graphden.types.core :as types]))
 
 
@@ -101,23 +102,34 @@
     result))
 
 
+(defn- effective-slot-type-id
+  "The type-fn-id a slot resolves to for `fn-id`: the binding's own
+   `:type-override-fn-id` first, then any type-override on the same
+   slot along the inheritance chain (this is how `:assoc-fn`'s no-op
+   rename `{:value {:as :value :type :fn}}` propagates HOF-ness to
+   descendants), else the slot's declared `:type-fn-id`."
+  [slot b-row fn-id {:keys [binding-by-fn-slot] :as lookups}]
+  (or (:type-override-fn-id b-row)
+      (some (fn [fid]
+              (when-let [b (get binding-by-fn-slot [fid (:id slot)])]
+                (:type-override-fn-id b)))
+            (l/inheritance-chain* fn-id lookups))
+      (:type-fn-id slot)))
+
+
 (defn- fn-typed-slot?
-  "True iff the slot's effective type resolves to the `:fn` primitive.
-   Checks the binding's `:type-override-fn-id` first, then walks the
-   inheritance chain looking for any binding on the same slot with a
-   type-override that pins :fn (this is how `:assoc-fn`'s no-op rename
-   `{:value {:as :value :type :fn}}` propagates HOF-ness to
-   descendants). Falls back to the slot's own `:type-fn-id`."
-  [slot b-row fn-typed-fn-ids fn-id
-   {:keys [binding-by-fn-slot] :as lookups}]
-  (let [override (or (:type-override-fn-id b-row)
-                     (some (fn [fid]
-                             (when-let [b (get binding-by-fn-slot
-                                               [fid (:id slot)])]
-                               (:type-override-fn-id b)))
-                           (l/inheritance-chain* fn-id lookups)))
-        t-id (or override (:type-fn-id slot))]
+  "True iff the slot's effective type resolves to the `:fn` primitive
+   (see `effective-slot-type-id`)."
+  [slot b-row fn-typed-fn-ids fn-id lookups]
+  (let [t-id (effective-slot-type-id slot b-row fn-id lookups)]
     (boolean (and t-id (contains? fn-typed-fn-ids t-id)))))
+
+
+(defn- fn-ref-slot?
+  "True iff the slot's effective type is the `:fn-ref` primitive — the
+   slot takes the bound fn's IDENTITY (its id), never its value."
+  [slot b-row fn-id lookups]
+  (= ids/fn-ref-type-id (effective-slot-type-id slot b-row fn-id lookups)))
 
 
 (defn- find-rename-slot
@@ -220,6 +232,10 @@
      {:kind :value :base-name K :ext-name K :slot-id UUID :value V}
      {:kind :ref   :base-name K :ext-name K :slot-id UUID :ref-id UUID
                    :is-fn BOOL :produces-callable? BOOL}
+     {:kind :fn-ref :base-name K :ext-name K :slot-id UUID :ref-id UUID}
+                   — a ref into a `:fn-ref` slot: the value IS the
+                   target's id; not an evaluation edge (walkers stop,
+                   compile bakes the id, ref-deps skip it)
      {:kind :seq   :base-name K :ext-name K :slot-id UUID :items […]
                    :lazy-seq? BOOL}
      {:kind :free  :base-name K :ext-name K :slot-id UUID :required true}"
@@ -242,6 +258,10 @@
       (value-binding? b)
       {:kind :value :base-name base-name :ext-name ext-name :slot-id slot-id
        :value (:value b)}
+
+      (and (ref-binding? b) (fn-ref-slot? slot b fn-id lookups))
+      {:kind :fn-ref :base-name base-name :ext-name ext-name :slot-id slot-id
+       :ref-id (:ref-fn-id b)}
 
       (ref-binding? b)
       {:kind :ref :base-name base-name :ext-name ext-name :slot-id slot-id
@@ -372,6 +392,17 @@
                              :binder-fn-id (:fn-id b)
                              :items (list-items-for fn-id slot-id nil lookups)
                              :lazy-seq? lazy?}])
+                ;; Identity edge (`:fn-ref` slot) — the env value IS the
+                ;; target's id. Resolved on the slot's OWN type (or the
+                ;; binding's override): an identity slot is declared
+                ;; where it lives, never pinned by a downstream alias.
+                (and (ref-binding? b)
+                     (= ids/fn-ref-type-id
+                        (or (:type-override-fn-id b) (:type-fn-id slot))))
+                [env-name {:kind :fn-ref :env-name env-name
+                           :slot-id slot-id
+                           :ref-id (:ref-fn-id b)}]
+
                 (ref-binding? b)
                 [env-name {:kind :ref :env-name env-name
                            ;; `:slot-id` + `:type-override-fn-id` carry

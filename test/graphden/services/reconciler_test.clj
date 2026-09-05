@@ -1390,3 +1390,92 @@
         (is (= [] @stops-sib))
         (is (= 1 (count @calls-sib)) "initial only"))
       (finally (br/clear-active-router!) (sp/close storage)))))
+
+
+;; ---------------------------------------------------------------------------
+;; Endpoints — where a started listener answers
+;; ---------------------------------------------------------------------------
+
+(defn- make-listener-fn!
+  "Like `make-trackable-fn!`, but the stopper carries the `:endpoint`
+   metadata a real `:http-server` handle does."
+  [storage suffix port stops]
+  (let [base-name (str "test-listener-" suffix)
+        composed-name (str "my-test-listener-" suffix)
+        impl-fn (fn [_args _ctx]
+                  (with-meta (fn [] (swap! stops conj {:suffix suffix}))
+                    {:endpoint {:port port}}))]
+    (exec/register-base-fn! (keyword base-name) impl-fn)
+    (let [base (setup/create-base-fn! storage base-name :any)]
+      {:base base
+       :composed (setup/create-composed-fn! storage composed-name (:id base))})))
+
+
+(defn- row-endpoint
+  [storage svc-id]
+  (:endpoint (first (sp/query-entities storage :service {:id svc-id}))))
+
+
+(deftest reconcile-records-and-clears-the-listener-endpoint-test
+  (let [storage (setup/create-branch-versioned-test-storage)
+        stops (atom [])
+        {composed :composed} (make-listener-fn! storage "ep" 43210 stops)
+        svc (make-service-row! storage (:id composed) true)
+        c (setup/default-registry-ctx storage)
+        running (atom {})]
+    (try
+      (recon/reconcile-once! c running)
+      (testing "the row records host+port; loopback on a single pod"
+        (is (= {:host "127.0.0.1" :port 43210} (row-endpoint storage (:id svc))))
+        (is (= {:host "127.0.0.1" :port 43210} (:endpoint (get @running (:id svc))))))
+      (testing "disabling the row stops the service and clears the endpoint"
+        (sp/update-entity storage :service (:id svc) {:enabled? false})
+        (recon/reconcile-once! c running)
+        (is (= [{:suffix "ep"}] @stops))
+        (is (nil? (row-endpoint storage (:id svc)))))
+      (finally (sp/close storage)))))
+
+
+(deftest reconcile-endpoint-host-is-the-pod-executor-id-test
+  (let [storage (setup/create-branch-versioned-test-storage)
+        stops (atom [])
+        {composed :composed} (make-listener-fn! storage "ep-host" 43211 stops)
+        svc (make-service-row! storage (:id composed) true)
+        c (assoc (setup/default-registry-ctx storage) :executor-id "graphden-1.graphden-headless")
+        running (atom {})]
+    (try
+      (recon/reconcile-once! c running)
+      (is (= {:host "graphden-1.graphden-headless" :port 43211}
+             (row-endpoint storage (:id svc))))
+      (finally (sp/close storage)))))
+
+
+(deftest reconcile-non-listener-records-no-endpoint-test
+  (let [storage (setup/create-branch-versioned-test-storage)
+        calls (atom [])
+        stops (atom [])
+        {composed :composed} (make-trackable-fn! storage "no-ep" calls stops)
+        svc (make-service-row! storage (:id composed) true)
+        c (setup/default-registry-ctx storage)
+        running (atom {})]
+    (try
+      (recon/reconcile-once! c running)
+      (is (nil? (row-endpoint storage (:id svc))))
+      (is (not (contains? (get @running (:id svc)) :endpoint)))
+      (finally (sp/close storage)))))
+
+
+(deftest stop-all-with-ctx-clears-endpoints-test
+  (let [storage (setup/create-branch-versioned-test-storage)
+        stops (atom [])
+        {composed :composed} (make-listener-fn! storage "ep-drain" 43212 stops)
+        svc (make-service-row! storage (:id composed) true)
+        c (setup/default-registry-ctx storage)
+        running (atom {})]
+    (try
+      (recon/reconcile-once! c running)
+      (is (some? (row-endpoint storage (:id svc))))
+      (recon/stop-all! running c)
+      (is (zero? (count @running)))
+      (is (nil? (row-endpoint storage (:id svc))))
+      (finally (sp/close storage)))))

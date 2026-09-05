@@ -133,14 +133,23 @@
 ;; =============================================================================
 
 (def primitive-names
-  "14 primitive types pre-seeded as fn-rows on startup. Each becomes a
-   leaf in the type tree — slots reference these via `slot.type-fn-id`."
+  "15 primitive types pre-seeded as fn-rows on startup. Each becomes a
+   leaf in the type tree — slots reference these via `slot.type-fn-id`.
+
+   `:fn-ref` is the IDENTITY primitive: a slot typed `:fn-ref` receives
+   the id of the fn bound to it — never its value, never a callable.
+   The binding is an ordinary `ref-fn-id` row (an explicit graph edge,
+   visible in Used-by, protected from GC), but it is not an EVALUATION
+   edge: the compiler bakes the id, the free-arg walkers stop at it,
+   and the cycle checks ignore it — so two services may each hold the
+   other's identity. `:service-endpoint` (web/service) is the first
+   consumer."
   [:null :uuid :text :int :bool :numeric :timestamptz :jsonb :bytes
-   :any :fn :sequence :keyword :float])
+   :any :fn :sequence :keyword :float :fn-ref])
 
 
 (defn primitive-fn-id
-  "Deterministic fn-id for one of the 14 primitive types. Public so
+  "Deterministic fn-id for one of the 15 primitive types. Public so
    callers (loader, system/core for `:fn-type` aliases) can resolve
    a primitive keyword to the fn-id without going through the full
    `name->id` map."
@@ -150,7 +159,7 @@
 
 
 (defn primitive-fn-ids
-  "Map `{primitive-keyword → fn-id}` for the 14 base primitives."
+  "Map `{primitive-keyword → fn-id}` for the 15 base primitives."
   []
   (into {}
         (map (fn [p] [p (primitive-fn-id p)]))
@@ -158,7 +167,7 @@
 
 
 (defn boot-primitive-records
-  "Records to upsert at startup for the 14 primitive types. Each is a
+  "Records to upsert at startup for the 15 primitive types. Each is a
    bare fn-row — name only, no slots/parents/impl/constraint."
   []
   (mapv (fn [p]
@@ -174,3 +183,30 @@
            :constraint nil
            :description (str "Primitive type :" (name p) ".")})
         primitive-names))
+
+
+;; =============================================================================
+;; Identity edges (`:fn-ref`)
+;; =============================================================================
+
+(def fn-ref-type-id
+  "The `:fn-ref` primitive's fn-id — the type a slot carries when it
+   takes a fn's IDENTITY rather than its value. Public so the layers
+   that classify graph edges (compile deps, the cycle constraint) can
+   recognise an identity edge by type id, never by slot or fn name."
+  (primitive-fn-id :fn-ref))
+
+
+(defn identity-edge?
+  "Is `binding` (a `:binding` row) on `slot` (its `:slot` row) an
+   IDENTITY edge — a ref bound into a `:fn-ref`-typed slot? Such an
+   edge names a fn without evaluating it, so it is excluded from
+   evaluation-dependency walks (compile order, invalidation closure,
+   cycle detection) while staying a real inbound reference for
+   Used-by and GC. The binding's own `:type-override-fn-id` wins over
+   the slot's declared type, mirroring the executor's effective-type
+   rule."
+  [binding slot]
+  (boolean (and (:ref-fn-id binding)
+                (= fn-ref-type-id
+                   (or (:type-override-fn-id binding) (:type-fn-id slot))))))

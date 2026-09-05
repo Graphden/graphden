@@ -81,3 +81,26 @@
                   (catch clojure.lang.ExceptionInfo e e))]
       (is (= :fn-composition/circular-dependency (:type (ex-data ex))))
       (is (= #{:a :b} (:remaining (ex-data ex)))))))
+
+
+;; ============================================================================
+;; identity edges (`:fn-ref` slots)
+;; ============================================================================
+
+(deftest topological-sort-identity-edges-are-not-dependencies-test
+  (let [defs [{:name :consumer :args {:service {:type :fn-ref}} :return-type :any}
+              {:name :svc-a :parent :consumer :args {:service :svc-b}}
+              {:name :svc-b :parent :consumer :args {:service :svc-a}}]
+        identity-arg? (fn [_fd arg] (= :service arg))]
+    (testing "without the predicate the mutual refs read as a cycle"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Circular"
+            (deps/topological-sort defs))))
+    (testing "with it, both sort after their parent and each other's order is free"
+      (let [o (mapv :name (deps/topological-sort defs identity-arg?))]
+        (is (= 3 (count o)))
+        (is (before? o :consumer :svc-a))
+        (is (before? o :consumer :svc-b))))
+    (testing "a non-identity arg is still a dependency"
+      (let [defs' (conj defs {:name :user :parent :consumer :args {:other :svc-a}})
+            o (mapv :name (deps/topological-sort defs' identity-arg?))]
+        (is (before? o :svc-a :user))))))

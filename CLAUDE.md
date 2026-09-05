@@ -426,11 +426,18 @@ for sequence elements).
 the executor passes the fn-id directly instead of executing it. There is no
 separate flag; effective slot type drives the dispatch.
 
+A slot typed **`:fn-ref`** is the IDENTITY marker: the impl receives the bound
+fn's id, the fn is never evaluated, its free args don't surface, and the edge is
+not a dependency (cycle checks, compile order and invalidation skip it — two
+services may name each other). `:service-endpoint :service <svc>` is the
+canonical use ([docs/SERVICES.md § Endpoints](docs/SERVICES.md#endpoints--where-a-service-answers)).
+
 ### Base Function Arg Types
 
 | Type | Behavior |
 |------|----------|
 | `:fn` | Expects fn-id, auto-wrapped for HOF |
+| `:fn-ref` | Receives the bound fn's id as a plain uuid — identity, never evaluated |
 | `:any` | No processing (use for already-executed Clojure fns) |
 | Others (`:int`, `:text`, `:jsonb`) | Auto-deref from delay |
 
@@ -587,7 +594,7 @@ src/graphden/
 ├── storage/            # Protocol, postgres, remote (RemoteStorage + SSE source — BYO)
 ├── versioning/         # Storage decorator, merge protection
 ├── layout/             # Graph-editor layout pipeline (docs/LAYOUT.md)
-├── services/           # Service registry — reconciler + supervisor (docs/SERVICES.md)
+├── services/           # Service registry — reconciler + supervisor + endpoint resolution (docs/SERVICES.md)
 ├── fleet/              # Dynamic fleet — placement, rebalance, control loop (docs/FLEET_RFC.md)
 ├── tenancy/            # ONLY context.clj — the seam core reads (docs/TENANCY_SEAM.md);
 │                       #   the multi-tenant POLICY lives in the private graphden-tenancy

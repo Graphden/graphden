@@ -123,7 +123,7 @@
     :rewrite-refs-to-version
     :rich-type-of-name :ring-create-default-handler :ring-handler
     :ring-route-paths :ring-router :routes->js-bundle
-    :rule-owner-of-name :running-entry :secret-leaf :secret-path-args
+    :rule-owner-of-name :running-entry :secret-leaf :secret-path-args :service-endpoint
     :select-keys
     :service-blocking-free-args :set-branch-policy!
     :set-branch-require-merge! :set-review-state!

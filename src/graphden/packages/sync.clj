@@ -30,6 +30,7 @@
     [graphden.packages.owned :as owned]
     [graphden.packages.records :as records]
     [graphden.packages.records.parse :as records-parse]
+    [graphden.packages.records.slot-resolution :as slot-res]
     [graphden.services.port-check :as port-check]
     [graphden.storage.protocol.config :as sp-config]
     [graphden.storage.protocol.core :as sp]
@@ -546,8 +547,15 @@
      tolerance is for user CRUD, our corpus stays at zero.
      `skip-allowlist-gate?` opts a test bootstrap out — useful when
      loading a SUBSET of production packages."
-  [expanded-fn-defs skip-allowlist-gate? branch-id]
-  (let [sorted (deps/topological-sort expanded-fn-defs)
+  [expanded-fn-defs extra-defs skip-allowlist-gate? branch-id]
+  (let [;; Identity edges (`:fn-ref` slots) are not ordering
+        ;; dependencies — a pair of services naming each other must
+        ;; not read as a cycle here (nor at write time, nor in compile).
+        ;; `extra-defs` (the base-fn defs) are where `:fn-ref` slots are
+        ;; declared, so the owner lookup needs them alongside the fn-defs.
+        defs-by-name (merge extra-defs (slot-res/build-defs-by-name expanded-fn-defs))
+        identity-arg? (fn [fd arg] (slot-res/fn-ref-arg? fd arg defs-by-name))
+        sorted (deps/topological-sort expanded-fn-defs identity-arg?)
         fd-fn-id (fn [fd]
                    (when (and (:name fd) (:namespace fd))
                      (records/fn-id (:namespace fd) (:name fd))))
@@ -1045,7 +1053,7 @@
          ;; The sweep records its final failure set into the per-branch
          ;; diagnostics store — key it by the branch this sync ran on
          ;; (nil for an unversioned/base storage = default branch).
-         (run-type-check-sweep! expanded-fn-defs skip-allowlist-gate?
+         (run-type-check-sweep! expanded-fn-defs extra-defs skip-allowlist-gate?
                                 (vs/current-branch-id storage))
          ;; Port-collision scan — runs against the expanded fn-def
          ;; set so synthetic anons that bind `:port` get inspected

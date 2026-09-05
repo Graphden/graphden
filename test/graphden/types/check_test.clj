@@ -2107,3 +2107,30 @@
     ;; declared return) stands; the var itself never leaks as a
     ;; concrete narrowing.
     (is (some? (:return (registry/rich-type-of :sig-head-free))))))
+
+
+(deftest fn-ref-slot-accepts-any-ref-and-rejects-a-literal
+  (registry/record-rich-types! :fr-endpoint
+                               {:args {:service :fn-ref} :return-type :jsonb})
+  (registry/record-rich-types! :fr-some-listener
+                               {:args {} :return-type [:fn {} :null]})
+  (testing "a fn-ref — of any return type, even a callable-producer — is well-typed"
+    (is (some? (check/check-fn-def! {:name :fr-ok
+                                     :parent :fr-endpoint
+                                     :args {:service :fr-some-listener}})))
+    (is (some? (check/check-fn-def! {:name :fr-ok-map
+                                     :parent :fr-endpoint
+                                     :args {:service {:ref :fr-some-listener}}}))))
+  (testing "a rename keeps the slot free for the caller"
+    (is (some? (check/check-fn-def! {:name :fr-renamed
+                                     :parent :fr-endpoint
+                                     :args {:service {:as :target}}}))))
+  (testing "a literal has no identity to pass"
+    (try
+      (check/check-fn-def! {:name :fr-bad
+                            :parent :fr-endpoint
+                            :args {:service {:value 42}}})
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :types/fn-ref-slot-needs-ref (:type (ex-data e))))
+        (is (= :service (:arg-name (ex-data e))))))))

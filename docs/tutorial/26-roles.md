@@ -67,11 +67,14 @@ once, and let the places that need it point at the name.
 
 ## What a role does not do
 
-- **It does not grant namespace access.** A `support` role with
-  `manage-users` lets alice invite people; it does not let her read
-  `acme.billing`. That is a grant (Lesson 25), and it stays separate on
-  purpose — administering an org and reading its code are different
-  powers, and plenty of people should have exactly one of them.
+- **It does not grant namespace access by itself.** A `support` role
+  with `manage-users` lets alice invite people; it does not let her
+  read `acme.billing`. That is a grant (Lesson 25), and it stays
+  separate on purpose — administering an org and reading its code are
+  different powers, and plenty of people should have exactly one of
+  them. A role can, however, be the *subject* of such a grant: type
+  the role's name in the grants form and every member holds that
+  namespace grant — the team is the unit, membership is edited here.
 - **It does not nest.** A role holds capabilities, not other roles.
 - **It is org-scoped.** A role in `acme` means nothing in `globex`,
   even for the same account (lesson 30).

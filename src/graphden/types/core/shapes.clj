@@ -44,11 +44,19 @@
    data, so it's type-system-only too. `type->storage-kind` degrades
    it to `:any`.
 
+   `:fn-ref` is a fn IDENTITY: a slot typed `:fn-ref` is bound by an
+   ordinary fn-ref binding but receives the bound fn's ID (a uuid) at
+   run time — never a callable, never the fn's value. It is the one
+   graph edge that is NOT an evaluation dependency (the compiler bakes
+   the id; the cycle checks skip it), so a value can name a service
+   that in turn names it. Type-system-only — a `:fn-ref` slot is never
+   bound to a literal, so it never reaches `value_kind`.
+
    `:decimal` is arbitrary-precision rational (Clojure's `BigDecimal`
    / Java `java.math.BigDecimal`). Subtype of `:numeric` alongside
    `:int` and `:float`."
   #{:null :uuid :text :int :bool :numeric :timestamptz :jsonb :bytes
-    :any :fn :float :keyword :sequence :never :input-stream :decimal})
+    :any :fn :fn-ref :float :keyword :sequence :never :input-stream :decimal})
 
 
 (defn primitive?
@@ -76,6 +84,8 @@
 ;; - `:any` is TOP; every value matches → always true.
 ;; - `:fn` matches Clojure callables (subset of values; in
 ;;   structural fn-types the type-system is richer).
+;; - `:fn-ref` is a fn IDENTITY — at runtime the value is the bound
+;;   fn's id (a UUID), never a callable.
 ;; - `:jsonb` is "JSON-encodable shape" — map / vector / scalar.
 ;; - `:input-stream` is the transient `java.io.InputStream` carrier.
 (def runtime-predicates
@@ -93,6 +103,7 @@
            :bytes        bytes?
            :timestamptz  inst?
            :fn           fn?
+           :fn-ref       uuid?
            :any          (constantly true)
            :never        (constantly false)
            :input-stream (fn [v] (instance? java.io.InputStream v))

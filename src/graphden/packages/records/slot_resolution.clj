@@ -720,3 +720,24 @@
              :slot-id sid
              :position (+ pos-offset idx)}]))
        exposed-names))))
+
+
+(defn fn-ref-arg?
+  "Is `arg-name` of `fn-def` bound into a `:fn-ref`-typed slot — an
+   IDENTITY edge that names its target without evaluating it? Resolves
+   the slot's owner through `resolve-slot-owner` (inheritance first,
+   then the ref tree) and reads the owner's declared type. False when
+   the owner can't be found in `defs-by-name` — an unknown edge stays a
+   dependency, the conservative reading. Used by the sync-time
+   topological sort so two services may each name the other."
+  [fn-def arg-name defs-by-name]
+  (boolean
+    (when-let [fn-name (:name fn-def)]
+      ;; The STRICT resolver: nil (not a throw) when no concrete
+      ;; inheritance / ref hit exists — this runs over partial def
+      ;; sets, where an orphan-looking binding is a lookup gap, not an
+      ;; authoring error (the parser reports those).
+      (let [[owner owner-arg] (resolve-slot-owner-strict fn-name arg-name
+                                                         defs-by-name #{})]
+        (and owner
+             (= :fn-ref (slot-type-of owner owner-arg defs-by-name)))))))

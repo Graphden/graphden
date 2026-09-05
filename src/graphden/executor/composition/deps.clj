@@ -61,16 +61,32 @@
     :else         #{}))
 
 
+(declare ^:private extract-dependencies* build-dependency-graph*)
+
+
 (defn- extract-dependencies
   "Extracts fn names that this fn-def depends on (parents, arg refs,
    type-row references, return-type). Returns set of keywords filtered
-   to only those that name an in-module fn."
-  [fn-def fn-names-in-set]
+   to only those that name an in-module fn.
+
+   `identity-arg?` — `(fn [fn-def arg-name] → bool)`: true for an arg
+   whose slot is `:fn-ref`-typed. Such a binding names its target
+   without evaluating it, so it is NOT an ordering dependency (a pair
+   of services may name each other)."
+  ([fn-def fn-names-in-set]
+   (extract-dependencies fn-def fn-names-in-set (constantly false)))
+  ([fn-def fn-names-in-set identity-arg?]
+   (extract-dependencies* fn-def fn-names-in-set identity-arg?)))
+
+
+(defn- extract-dependencies*
+  [fn-def fn-names-in-set identity-arg?]
   (let [args (:args fn-def {})
         parent-names (concat (when-let [p (:parent fn-def)] [p])
                              (:parents fn-def))
-        arg-deps (->> (vals args)
-                      (mapcat arg-value-fn-refs)
+        arg-deps (->> args
+                      (remove (fn [[arg-name _]] (identity-arg? fn-def arg-name)))
+                      (mapcat (comp arg-value-fn-refs val))
                       (filter fn-names-in-set)
                       set)
         parent-deps (into #{} (filter fn-names-in-set) parent-names)
@@ -82,25 +98,37 @@
                     (:list fn-def)        (into (type-ref-deps (:list fn-def)))
                     (:return-type fn-def) (into (type-ref-deps (:return-type fn-def)))
                     ;; Base-fn `:args` shape — values may be `{:type T}` maps
-                    ;; or bare type keywords; collect those too.
-                    true                  (into (mapcat (fn [v]
+                    ;; or bare type keywords; collect those too. An identity
+                    ;; arg's bare keyword is the NAMED fn, not a type — skip
+                    ;; it here as well.
+                    true                  (into (mapcat (fn [[arg-name v]]
                                                           (cond
+                                                            (identity-arg? fn-def arg-name) nil
                                                             (keyword? v) [v]
                                                             (and (map? v) (:type v)) (type-ref-deps (:type v))
                                                             :else nil))
-                                                        (vals args))))]
+                                                        args)))]
     (into arg-deps (concat parent-deps (filter fn-names-in-set type-deps)))))
 
 
 (defn- build-dependency-graph
   "Builds dependency graph from fn-defs.
    Returns map of {fn-name -> #{dependency-names}}."
-  [fn-defs]
+  ([fn-defs] (build-dependency-graph fn-defs (constantly false)))
+  ([fn-defs identity-arg?]
+   (build-dependency-graph* fn-defs identity-arg?)))
+
+
+(defn- build-dependency-graph*
+  [fn-defs identity-arg?]
   (let [fn-names (into #{} (map :name) fn-defs)]
     (into {}
           (map (fn [fd]
-                 [(:name fd) (extract-dependencies fd fn-names)])
+                 [(:name fd) (extract-dependencies fd fn-names identity-arg?)])
                fn-defs))))
+
+
+(declare ^:private topological-sort*)
 
 
 (defn topological-sort
@@ -108,12 +136,25 @@
    Returns sorted vector of fn-defs.
    Throws on cycles.
 
+   `identity-arg?` (optional, default: nothing is an identity arg) —
+   `(fn [fn-def arg-name] → bool)` marking args whose slot is
+   `:fn-ref`-typed; those refs are skipped as dependencies (see
+   `extract-dependencies`). The caller resolves slot types, since only
+   it holds the cross-module def index.
+
    Uses Kahn's algorithm with O(V+E) complexity:
    - Tracks in-degree (unvisited deps count) for each node
    - Maintains ready-set of nodes with zero in-degree
    - Each node enters/exits ready-set exactly once"
-  [fn-defs]
-  (let [dep-graph (build-dependency-graph fn-defs)
+  ([fn-defs]
+   (topological-sort fn-defs (constantly false)))
+  ([fn-defs identity-arg?]
+   (topological-sort* fn-defs identity-arg?)))
+
+
+(defn- topological-sort*
+  [fn-defs identity-arg?]
+  (let [dep-graph (build-dependency-graph fn-defs identity-arg?)
         fn-def-map (into {} (map (juxt :name identity) fn-defs))
         all-names (into #{} (map :name) fn-defs)
         ;; Build reverse dependency map: {fn-name -> #{fns-that-depend-on-it}}

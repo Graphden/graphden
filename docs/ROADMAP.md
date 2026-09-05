@@ -221,6 +221,21 @@ the periodic reconcile tick, and the external / BYO executor
 (`graphden.byo` + `RemoteStorage` + SSE relay/source) all landed — see
 [SCALING.md](SCALING.md) and SERVICES.md § Roadmap.
 
+Sub-block C — **Service-to-service** — DONE (2026-09-05). A service
+names another by binding the service fn into `:service-endpoint`'s
+`:fn-ref` slot (the identity primitive: never evaluated, not a
+dependency, so a pair may name each other); the reconciler records
+where each listener answers (`:service.endpoint` — host = the fleet
+`:executor-id`, loopback on one pod) and the `web/service` templates
+(`:service-get` / `:service-post` + JSON rungs) make the call explicit
+HTTP in the graph. On the cloud the tenancy addon resolves an
+`:app-route` to its public origin through the `endpoint/resolver`
+seam. The contract (paths, shapes) is a shared namespace both sides
+reference — [SERVICES.md § Endpoints](SERVICES.md#endpoints--where-a-service-answers),
+[SCALING.md § Service-to-service](SCALING.md#service-to-service),
+tutorial lesson 35. Transparent cross-pod RPC inside a lazy call
+chain stays [not planned](#not-planned).
+
 **Remaining**: optionally an LB rule that routes by subdomain so the 421
 stays a backstop rather than a hot path, and a real BYO executor on a
 second physical machine end-to-end (proven in one JVM today — see

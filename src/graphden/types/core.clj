@@ -654,6 +654,9 @@
       ;; `:empty-map` — classifier sentinel for the `{}` literal;
       ;; jsonb-shaped at rest like every map value.
       (= t' :empty-map)    :jsonb
+      ;; `:fn-ref` — the bound fn's identity; a ref-only slot, so no
+      ;; literal is ever stored under it. The id is a uuid on the wire.
+      (= t' :fn-ref)       :uuid
       (or (= t' :never) (= t' :input-stream)) :any
       (= t' :decimal)      :numeric
       (primitive? t')   t'

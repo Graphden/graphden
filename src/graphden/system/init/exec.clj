@@ -181,6 +181,11 @@
                    (assoc :byo-executor? (if (string? byo-executor?)
                                            (contains? #{"true" "1" "yes"} byo-executor?)
                                            (boolean byo-executor?)))
+                   ;; This pod's fleet identity — the dialable host every other
+                   ;; pod reaches it by (a pod-FQDN in k8s). The service
+                   ;; reconciler records it as the `:host` of the endpoints it
+                   ;; starts; absent ⇒ single pod, loopback.
+                   (seq executor-id) (assoc :executor-id executor-id)
                    ;; Fleet forward-hop seam — only present when this pod has a
                    ;; fleet identity (see the let above).
                    fleet-forward (assoc :fleet-forward fleet-forward)

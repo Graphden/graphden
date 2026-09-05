@@ -248,19 +248,28 @@
   ;; aborted request unwinds the binding, its bumps age un-noted, and
   ;; the router's grace-expiry heal covers them — a reused pool thread
   ;; can never note a dead request's bumps.
-  (http-kit/run-server
-    (fn [req]
-      ;; Each request is a NEW logical execution: run the build-captured
-      ;; handler under a fresh per-request call-cache. Without this every
-      ;; concurrent request reuses the ONE HashMap the handler captured at
-      ;; build time — a ConcurrentModificationException under load (eviction
-      ;; racing a concurrent put) plus a cross-request memo leak. See
-      ;; compile-eager/*request-call-cache*.
-      (cr/with-fresh-call-cache
-        (fn []
-          (binding [epoch/*request-bump-log* (atom [])]
-            (handler req)))))
-    (assoc (http-server-tuning) :port port)))
+  ;; The stopper carries the listener's ENDPOINT as metadata
+  ;; (`{:endpoint {:port p}}` — the port actually bound, so `:port 0`
+  ;; reports the OS-picked one): the service reconciler reads it off the
+  ;; returned handle and records where this service answers, so a
+  ;; consumer fn can resolve the service to an address
+  ;; (`:service-endpoint`, web/service). Metadata keeps the handle's
+  ;; contract — a 0-arg stopper — unchanged for `:http-stop` / `:do`.
+  (let [stopper
+        (http-kit/run-server
+          (fn [req]
+            ;; Each request is a NEW logical execution: run the build-captured
+            ;; handler under a fresh per-request call-cache. Without this every
+            ;; concurrent request reuses the ONE HashMap the handler captured at
+            ;; build time — a ConcurrentModificationException under load (eviction
+            ;; racing a concurrent put) plus a cross-request memo leak. See
+            ;; compile-eager/*request-call-cache*.
+            (cr/with-fresh-call-cache
+              (fn []
+                (binding [epoch/*request-bump-log* (atom [])]
+                  (handler req)))))
+          (assoc (http-server-tuning) :port port))]
+    (vary-meta stopper assoc :endpoint {:port (or (:local-port (meta stopper)) port)})))
 
 
 (defbase http-stop

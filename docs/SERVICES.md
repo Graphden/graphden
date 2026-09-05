@@ -158,6 +158,7 @@ admin mutates in place; the audit trail for what actually ran lives in
 | `:pool-size`      | `:int`            | Pod count for `:cardinality :pool` (ignored otherwise). Nullable — a `:pool` row with nil/non-positive size degrades to a singleton. |
 | `:branch-id`      | `:ref :branch`    | Per-branch scope. Reconciler routes the start through `branch-router/ctx-for branch-id`, so the same `:fn-id` can run with branch-specific bindings on dev + prod simultaneously. Nullable — nil is normalized to the router's default branch at reconcile time (`effective-branch-id`), so a legacy nil-branch row behaves exactly like an explicit default-branch row, including the post-merge `restart-services-depending-on!` pass. Without a router (tests) nil falls back to the reconciler's base ctx. The editor's ⚙ popover picker defaults to the editor's current branch on create. |
 | `:org-id`         | `:text` (null)    | **Tenant owner; NULL ≡ platform.** Load-bearing for fleet sharding: the reconciler drops services whose org this pod doesn't serve (`service-in-shard?`), so a dedicated tenant's services run only on its own pod. Stamped by the tenant service-create endpoint (NOT `OrgScopedStorage` — `:service` is tenant-forbidden write-through). |
+| `:endpoint`       | `:jsonb` (null)   | **Where the running service answers** — `{:host :port}`, written by the pod that started it and cleared on stop (§ Endpoints). The one runtime fact on the desired-state row; nil ≡ not running, or not a listener. |
 
 ### `:restart-policy` enum
 
@@ -260,6 +261,9 @@ Lives in `graphden.services.reconciler`. Diff-driven, idempotent.
                                           router's default for nil-branch rows;
                                           absent only when no router is active)
                  :stopper          (fn []) | nil
+                 :endpoint         {:host :port} (only when the stopper carried one —
+                                                   the row's `:endpoint` mirror, so
+                                                   stop knows to clear it)
                  :started-at       Instant
                  :start-attempts   Int
                  :start-failed-at  Instant (set only when retries exhausted)}}
@@ -393,6 +397,50 @@ upfront with `:status :rejected`:
 Prevents the foot-gun where clicking ▶ on `:web-server` in the editor
 tries to re-bind its port.
 
+## Endpoints — where a service answers
+
+A service that listens somewhere *answers* somewhere, and the other
+services want that address. The service fn IS the value:
+
+1. `:http-server` returns its stopper with `{:endpoint {:port p}}`
+   metadata — the port actually bound (so `:port 0` reports the
+   OS-picked one). The handle's contract (a 0-arg stopper) is unchanged.
+2. The reconciler, on the pod that started the service, completes it
+   with its own dialable host — the fleet `:executor-id` (a pod-FQDN
+   in k8s), loopback on a single pod — and writes `{:host :port}` to
+   the row's `:endpoint`; every stop path clears it (`stop-and-forget!`,
+   the lost-lock stop, `stop-all!` with a ctx at halt / CRaC). A crashed
+   pod never clears — the next holder overwrites, and until then a
+   consumer sees a refused connection, which is the honest answer. For
+   a `:pool` any holder is a fine target; the row keeps the last one to
+   start. A non-listener (a cron loop) carries no endpoint.
+3. A consumer names the producer through a **`:fn-ref` slot** —
+   `:service-endpoint :service :orders-service`. `:fn-ref` is the
+   identity primitive ([TYPES.md](TYPES.md#structural-types-records)):
+   the impl receives the fn's *id*, the fn is never evaluated (binding a
+   listener does not start a second one), its free args don't surface,
+   and the edge is not a dependency — so two services may name each
+   other ([CONSTRAINTS.md](CONSTRAINTS.md#1-no-dependency-cycle)).
+   `graphden.services.endpoint/resolve-endpoint` reads the row for the
+   caller's branch (a nil-branch row — package-seeded — serves every
+   branch), else asks the addon-installed `resolver` seam (on the cloud
+   an `:app-route`'s public origin — service-to-service traffic goes
+   through the public domain like any outbound call, SSRF-guarded, no
+   internal address to exempt), else throws `:service/not-running`.
+4. `web/service` composes the call: `:service-url` → `:service-get` /
+   `:service-post` (`:http-get` / `:http-post` with `:url` = origin +
+   `:path`) → `:service-get-json` / `:service-post-json` (body parsed).
+   Free args: `:service`, `:path`, plus http-client's `:headers` /
+   `:auth-value` / `:timeout-ms` (and `:body` on POST).
+
+The **contract** between two services lives in the graph too: a shared
+namespace (`svc-a.api`) holds the path constants and the request /
+response type-rows that BOTH sides reference — the producer's
+`:get-route` + handler return type, the consumer's `:service-get` +
+decoded result narrowed to the same shape. One edit moves both sides;
+the type-checker catches a drift at write time. Tutorial:
+[lesson 35](tutorial/35-services-talking-to-services.md).
+
 ## Packages-based seeding
 
 Packages contribute baseline `:service` rows through a
@@ -439,12 +487,14 @@ all loaded packages.
 | Next | `:service-schedule` 1-to-many for cron/interval triggers; UI Services panel (row-actions "Make service" + sidebar "Only services" filter) |
 | Done | Advisory-lock connection-drop reconnect + re-acquire. The lock connection is held behind a reconnecting holder; every reconcile pass runs `advisory-lock/ensure-live!`, and on a reconnect `reassert-lock-ownership!` re-takes each `:singleton` this pod was running (stopping any a sibling stole during the outage). Closes the "two pods double-run one service until the next reconcile" window. |
 | Done | Cross-pod cancel routing for `:fn-execution` — `execution:cancel:<id>` NOTIFY fan-out; see [EXECUTION.md](EXECUTION.md). |
+| Done | Endpoints — the reconciler records `{:host :port}` on the row from the handle's `:endpoint` metadata (`:http-server`), clears it on stop; `:service-endpoint` (web/service) resolves a service fn named through a `:fn-ref` slot to its address, with the addon `resolver` seam for cloud app-routes (§ Endpoints). |
 | Future | Healthcheck-based runtime crash detection (lets `:always` honor "restart on clean exit"); pluggable supervisor strategies |
 
 ## Code locations
 
 - Schema: `src/graphden/schema/services/schema.clj`
 - Reconciler: `src/graphden/services/reconciler.clj`
+- Endpoint resolution: `src/graphden/services/endpoint.clj` (+ the `:service-endpoint` base-fn and call templates in `resources/packages/web/service/`)
 - Integrant: `src/graphden/system/core.clj` → `:exec/service-reconciler`
 - Form parser: graph-native — `resources/packages/app/execution/fns.edn`
 - Create-service guards: `resources/packages/web/crud/fns.edn` → `:_create-service-free-args-rej` (fn has start-blocking free args) and `:_create-service-no-process-rej` (fn doesn't declare the `:process` effect)
@@ -452,6 +502,8 @@ all loaded packages.
 - HTTP endpoint: `resources/packages/app/execution/{fns.edn,impls.clj}` → `:_reconcile-services`
 - Route: `resources/packages/app/routes/fns.edn` → `:api-services-reconcile`
 - Tests: `test/graphden/services/reconciler_test.clj`,
+         `test/graphden/services/service_endpoint_e2e_test.clj` (two services over a real socket),
+         `test/graphden/packages/web/service_test.clj`, `test/graphden/executor/fn_ref_test.clj`,
          `test/graphden/packages/app/execution_routes_test.clj`,
          `test/graphden/crud/fn_execution_test.clj` (already-running cases),
          `test/graphden/crud/entities_test.clj` (parser cases)

@@ -15,6 +15,7 @@
      (gc/validate-no-dependency-cycle! this owner-fn-id ref-fn-id))
    ```"
   (:require
+    [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.constraints :as constraints]
     [graphden.storage.protocol.core :as sp]))
 
@@ -72,6 +73,16 @@
       (fn [current-id]
         (let [fn-rec (sp/read-entity storage :fn current-id)
               bindings (sp/query-entities storage :binding {:fn-id current-id})
+              ;; Slot rows of the ref bindings — needed to tell an
+              ;; IDENTITY edge (a ref into a `:fn-ref` slot: the
+              ;; target is named, never evaluated) from a call edge.
+              ;; Identity edges are not dependencies, so a cycle that
+              ;; closes only through them is legal: two services may
+              ;; each hold the other's identity.
+              ref-slot-ids (into [] (comp (filter :ref-fn-id) (map :slot-id)) bindings)
+              slots-by-id (if (empty? ref-slot-ids)
+                            {}
+                            (sp/read-entities storage :slot ref-slot-ids))
               binding-refs (into #{}
                                  ;; ALL edges per binding -- the old
                                  ;; (or ref override) dropped the
@@ -80,9 +91,12 @@
                                  ;; dependent cycle false-negative);
                                  ;; resolver edges are part of the
                                  ;; closure since the fleet-cell fix.
-                                 (comp (mapcat (juxt :ref-fn-id
-                                                     :type-override-fn-id
-                                                     :resolver-fn-id))
+                                 (comp (mapcat (fn [b]
+                                                 [(when-not (ids/identity-edge?
+                                                              b (get slots-by-id (:slot-id b)))
+                                                    (:ref-fn-id b))
+                                                  (:type-override-fn-id b)
+                                                  (:resolver-fn-id b)]))
                                        (filter some?))
                                  bindings)
               ;; Single batched query for ALL list-items belonging to

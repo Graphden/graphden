@@ -10,7 +10,13 @@
    in O(degree). `transitive-blast` is the closure walk over those
    reverse-deps; `forward-closure` is the same walk over the FORWARD
    deps — 'what does X transitively depend on?' — which is the content
-   of a fleet CELL (docs/FLEET_RFC.md §3).")
+   of a fleet CELL (docs/FLEET_RFC.md §3).
+
+   A ref into a `:fn-ref` slot (an IDENTITY edge — `ids/identity-edge?`)
+   is deliberately NOT a forward dep: the closure bakes the target's
+   id and never evaluates it."
+  (:require
+    [graphden.packages.records.ids :as ids]))
 
 
 (defn- index-bindings-by-fn
@@ -47,7 +53,7 @@
    `list-items` collections did an O(N) filter per call; on a
    3000-fn graph that turned `build-reverse-deps` into a
    billion-operation rebuild on every CRUD write."
-  [fn-id {:keys [fns bindings-by-fn items-by-binding]}]
+  [fn-id {:keys [fns bindings-by-fn items-by-binding slots-by-id]}]
   (let [f (get fns fn-id)
         bs (get bindings-by-fn fn-id [])
         items (mapcat #(get items-by-binding (:id %) []) bs)]
@@ -55,7 +61,14 @@
           (comp cat (filter some?))
           [(:parent-ids f)
            (keep f [:base-fn-id :element-fn-id :return-type-fn-id])
-           (keep :ref-fn-id bs)
+           ;; A ref into a `:fn-ref` slot is an IDENTITY edge — the
+           ;; closure bakes the target's id and never evaluates it, so
+           ;; editing the target must not invalidate this fn and a
+           ;; fleet cell's closure needn't carry it.
+           (keep (fn [b]
+                   (when-not (ids/identity-edge? b (get slots-by-id (:slot-id b)))
+                     (:ref-fn-id b)))
+                 bs)
            (keep :type-override-fn-id bs)
            ;; Resolver-backed value bindings (vault secrets): the
            ;; resolver graph-fn runs at arg-resolution time, so it IS
@@ -76,10 +89,11 @@
    Accepts either a `fns`-collection map (raw `read-graph` shape) or
    one whose `:fns` is already a `{fn-id → fn}` map — the indexes
    end up identical either way."
-  [{:keys [fns bindings list-items] :as graph}]
+  [{:keys [fns slots bindings list-items] :as graph}]
   (let [fns-map (if (map? fns) fns (into {} (map (juxt :id identity)) fns))]
     (assoc graph
            :fns fns-map
+           :slots-by-id (if (map? slots) slots (into {} (map (juxt :id identity)) slots))
            :bindings-by-fn (index-bindings-by-fn bindings)
            :items-by-binding (index-items-by-binding list-items))))
 

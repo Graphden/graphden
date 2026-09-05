@@ -763,7 +763,7 @@
   [fn-id lookups]
   (every? (fn [bnd]
             (case (:kind bnd)
-              (:value :free :seq :ref :resolved-value) true
+              (:value :free :seq :ref :fn-ref :resolved-value) true
               false))
           (b/collect-bindings fn-id lookups)))
 
@@ -1041,6 +1041,13 @@
    lookups]
   (case kind
     :value (constantly value)
+    ;; Identity edge: a ref into a `:fn-ref` slot. The impl receives
+    ;; the target's id — a plain value, never a thunk, so nothing here
+    ;; can evaluate the target (`:service-endpoint :service :svc-a`
+    ;; must not start svc-a's listener). No child callable is needed;
+    ;; the target may even be compiled AFTER this fn (`ref-deps` skips
+    ;; identity edges — a service pair may name each other).
+    :fn-ref (constantly ref-id)
     ;; Phase 4 — slot-id reader with name fallback.
     ;;
     ;; The rename-aware reader id (`l/effective-reader-slot-id`) is
@@ -1149,6 +1156,10 @@
    return the literal — no closure needed."
   [fn-id env-bnd child-callables lookups]
   (case (:kind env-bnd)
+    ;; Identity edge through an env-binding — same as the root-slot
+    ;; case: the value is the target's id, no child, no thunk.
+    :fn-ref (let [ref-id (:ref-id env-bnd)]
+              (fn [_fa-ref _ctx] ref-id))
     :value (let [v (:value env-bnd)] (fn [_fa-ref _ctx] v))
 
     ;; List binding on a deep (renamed) sequence slot — same item

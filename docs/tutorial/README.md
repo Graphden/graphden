@@ -87,6 +87,7 @@ of order.
 | 32 | [Services — long-running fns supervised by graphden](32-services.md) | ✅ written · ▶ interactive |
 | 33 | [Signing up & signing in: your account](33-signing-up-and-in.md) | ✅ written · ▶ interactive |
 | 34 | [Plans & tiers — what the cloud grants each account](34-plans-and-tiers.md) | ✅ written · ▶ interactive |
+| 35 | [Services talking to services — the contract lives in the graph](35-services-talking-to-services.md) | ✅ written |
 
 ▶ interactive — the lesson also exists as a guided in-editor tour:
 open the editor with `?tutorial=NN` (the landing demo link does this for

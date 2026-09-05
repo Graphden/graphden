@@ -79,6 +79,9 @@ All three mechanisms use the same infrastructure — fn-defs, arg entities, `com
 ├── :uuid / :timestamptz / :bytes
 ├── :input-stream              ← transient java.io.InputStream
 │                                (type-system-only; storage-kind = :any)
+├── :fn-ref                    ← a fn's IDENTITY: the slot receives the
+│                                bound fn's id, never its value or a
+│                                callable (ref-only; storage-kind = :uuid)
 ├── [:list :a]                 ← parameterized list (homogeneous, any length)
 ├── [:map :k :v]               ← homogeneous map (every key :k, every value :v)
 ├── [:tuple :a :b]             ← fixed-length heterogeneous tuple
@@ -91,7 +94,21 @@ All three mechanisms use the same infrastructure — fn-defs, arg entities, `com
 Storage-kind degradation (`type->storage-kind`): `:int`/`:float` stay
 as themselves; `:decimal` degrades to `:numeric` (the value_kind enum
 has no `:decimal` entry); `:input-stream` and `:never` degrade to
-`:any` (transient / phantom — never persisted as data).
+`:any` (transient / phantom — never persisted as data); `:fn-ref`
+degrades to `:uuid` (though a `:fn-ref` slot is only ever bound by a
+fn-ref, so no literal reaches the column).
+
+**`:fn` vs `:fn-ref`.** A `:fn` slot means *give me something I can
+call*: the executor hof-wraps the bound fn into a callable (or, when
+the bound fn itself returns a callable, thunks it and hands over the
+result — `:http-server`'s handle, `:_router`'s ring handler). A
+`:fn-ref` slot means *give me WHO this is*: the impl receives the bound
+fn's id, the fn is never evaluated, its free args never surface, and
+the edge is not a dependency — so `:service-endpoint :service
+:web-server` names the listener without starting it, and two services
+may name each other. The checker accepts any fn-ref (whatever its
+return type) on a `:fn-ref` slot and rejects a literal
+(`:types/fn-ref-slot-needs-ref`).
 
 ### When to use `:any` vs `:jsonb` vs a type variable
 

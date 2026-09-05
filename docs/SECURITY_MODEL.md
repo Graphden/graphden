@@ -33,7 +33,8 @@ so a gap in one does not by itself cross tenants:
 1. **Application-layer scoping** — `OrgScopedStorage` stamps and filters every
    entity by the caller's org; a tenant reads and writes only its own rows
    (plus the shared, read-only public library). Within an org, per-namespace
-   grants gate WHO edits WHAT, and a branch's `write-policy` (protected
+   grants — to a user, to a role (a team: its members hold the grant), or to
+   the whole org — gate WHO edits WHAT, and a branch's `write-policy` (protected
    branches — owner / org admins) gates writes and merges per branch
    ([VERSIONING.md § Protected branches](VERSIONING.md#protected-branches-stage-1-2026-08-15)).
    The same owner/admin gate covers ALL of a branch's protection knobs —

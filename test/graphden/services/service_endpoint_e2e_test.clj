@@ -6,6 +6,7 @@
    Then the producer stops and the consumer is told, honestly, that the
    service is not running."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.fn-execution :as fn-exec]
     [graphden.crud.fn-execution.lookup :as lookup]
@@ -88,6 +89,14 @@
         (is (= [{:host "127.0.0.1" :port port}]
                (mapv #(select-keys % [:host :port])
                      (sp/query-entities storage :service-instance {:service-id (:id svc)})))))
+      (testing "the ⚙ popover lists the running copy under Running copies"
+        (let [html (:body (setup/via-graph *bootstrap* :_partial-service-popover-handler
+                                           {:uri (str "/partials/service-popover?fn-id=" svc-fn-id)
+                                            :request-method :get
+                                            :query-params {"fn-id" (str svc-fn-id)}}))]
+          (is (str/includes? html "Running copies"))
+          (is (str/includes? html (str "127.0.0.1:" port)))
+          (is (str/includes? html "local") "the pod's executor id")))
       (testing "the consumer resolves the producer by naming it and gets its JSON"
         (is (= {:orders [1 2 3]} (exec/execute ctx fetch-id {}))))
       (testing "a persisted run's call is traced across the wire: the producer

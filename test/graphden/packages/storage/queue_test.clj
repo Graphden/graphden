@@ -197,7 +197,7 @@
           (is (true? ((impls/impl-of :queue-requeue) {:message-id id} ctx)))
           (let [row (sp/read-entity storage :queue-message id)]
             (is (= "pending" (:state row)))
-            (is (= 0 (:attempts row)))
+            (is (zero? (:attempts row)))
             (is (nil? (:error row)))
             (is (nil? (:locked-until row))))
           (is (= id (:id (first (take! ctx "q-lease" 1)))))

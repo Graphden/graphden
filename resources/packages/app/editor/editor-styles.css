@@ -5161,6 +5161,17 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 /* UI Step 1 — Assets ops section: frontend-asset override panel. */
 .gd-asset-hint { padding: 4px 8px; color: var(--muted-fg); font-size: 0.6875rem; }
 .gd-asset-list { max-height: 260px; overflow-y: auto; }
+
+/* Operate → Queues */
+.gd-queues-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.gd-queues-table th { text-align: left; font-weight: 600; padding: 4px 6px; }
+.gd-queues-table td { padding: 4px 6px; vertical-align: top; }
+.gd-queues-name { font-family: var(--mono); }
+.gd-queues-error { font-family: var(--mono); max-width: 320px; overflow-wrap: anywhere; }
+.gd-queues-actions { white-space: nowrap; }
+.gd-queues-btn { margin-right: 4px; }
+.gd-queues-subtitle { margin: 10px 0 4px; font-weight: 600; }
+.gd-queues-empty { padding: 6px; opacity: 0.8; }
 .gd-asset-row { display: flex; align-items: center; gap: 6px; padding: 3px 8px;
   border-bottom: 1px dashed var(--light-border); font-size: 0.6875rem; }
 .gd-asset-path { color: var(--fg); overflow-wrap: anywhere; flex: 1; }

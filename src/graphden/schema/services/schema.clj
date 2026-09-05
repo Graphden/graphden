@@ -280,6 +280,10 @@
   #uuid "1e5c8b3f-9d4a-4c72-8f6b-4a2e7d1c9b58")
 
 
+(def ^:private service-instance-org-id-field-uuid
+  #uuid "a7d3f1c9-6e2b-4b58-9c4a-1f8e5d2b7a36")
+
+
 (def default-stale-after-ms
   "How old an instance's `seen-at` may be before the copy is presumed
    dead — three reconcile ticks (15 s each). `resolve-endpoint` ignores
@@ -362,4 +366,12 @@
                       ;; that holds the copy. Older than `default-stale-after-ms`
                       ;; ⇒ presumed dead (a crashed pod never deletes its row).
                       :seen-at {:uuid service-instance-seen-at-field-uuid
-                                :type :timestamptz}})))
+                                :type :timestamptz}
+                      ;; The service's tenant, copied from its `:service` row when
+                      ;; the copy starts (the reconciler writes with the platform
+                      ;; handle, so the org-scoped decorator cannot stamp it) —
+                      ;; NULL ≡ platform. What lets an org read ITS copies on the
+                      ;; cloud (the ⚙ popover's "Running copies", lesson 35).
+                      :org-id {:uuid service-instance-org-id-field-uuid
+                               :type :text
+                               :nullable? true}})))

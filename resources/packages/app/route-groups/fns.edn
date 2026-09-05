@@ -38,6 +38,9 @@
                   :partial-stats
                   :partial-assets-panel
                   :partial-asset-edit
+                  :partial-queues-panel
+                  :partial-queues-requeue
+                  :partial-queues-delete
                   :partial-inspector-lint-suppress
                   :partial-inspector-lint-restore
                   :partial-execute-history-ack

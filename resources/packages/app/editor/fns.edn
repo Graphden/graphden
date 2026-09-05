@@ -160,6 +160,7 @@
                   "packages/app/editor/editor-debug.js"
                   "packages/app/editor/editor-apps.js"
                   "packages/app/editor/editor-assets.js"
+                  "packages/app/editor/editor-queues.js"
                   "packages/app/editor/editor-sidebar.js"
                   ;; Keyboard navigation over the rows editor-sidebar.js
                   ;; builds — delegated, so it survives the rebuilds.

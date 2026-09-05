@@ -66,7 +66,7 @@ const OP_SECTION_LABELS = {
   grants: 'Grants', users: 'Members', roles: 'Roles', orgs: 'Organizations',
   packages: 'Packages', stats: 'Monitoring',
   'platform-access': 'Platform access',
-  assets: 'Assets', tests: 'Tests', debug: 'Debug', executors: 'Executor',
+  assets: 'Assets', queues: 'Queues', tests: 'Tests', debug: 'Debug', executors: 'Executor',
 };
 
 // Show one section's pane on a surface and mark its nav item; hide the rest.
@@ -1509,6 +1509,10 @@ function mountOpsSections(fallbackList, searchMode) {
     // Frontend-asset overrides — self-host only (the builder returns null
     // under an active tenancy addon; writes there are system-only).
     mountAdminSection(opsHost, opsNavHost, 'assets', buildAssetsSection);
+  }
+  if (typeof buildQueuesSection === 'function') {
+    // The message queue: per-queue counts + dead letters (requeue / delete).
+    mountAdminSection(opsHost, opsNavHost, 'queues', buildQueuesSection);
   }
   // Select a section on each surface so a pane is always showing — the one
   // the user is ALREADY on when there is one, the first otherwise. This

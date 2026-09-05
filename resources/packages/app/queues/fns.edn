@@ -1,0 +1,204 @@
+;; Operate → Queues — the message queue's control panel (docs/SERVICES.md
+;; § Queues): every queue with its pending / dead counts, and the dead
+;; letters with Requeue / Delete. Server-rendered partial; the buttons
+;; are hx-posts that act and answer with the refreshed panel, so the
+;; JS module (`editor-queues.js`) only mounts the shell.
+;;
+;; Reads go through `:query-entities` — org-scoped on the cloud, so a
+;; tenant sees its own queues and only those.
+
+{:namespace "app.queues"
+ :description "Operate → Queues: per-queue counts and the dead letters (requeue / delete), as a server-rendered partial."
+ :fns
+ [{:name :_pq-rows
+   :description "Every `:queue-message` row the caller may see (org-scoped on the cloud)."
+   :parent :query-entities
+   :args {:entity-type "queue-message"}}
+
+  {:name :_pq-state
+   :parent :get :args {:coll {:as :item} :key {:value :state} :default nil}}
+
+  {:name :_pq-pending?
+   :parent :eq :args {:values [:_pq-state {:value "pending"}]}}
+
+  {:name :_pq-dead?
+   :parent :eq :args {:values [:_pq-state {:value "dead"}]}}
+
+  {:name :_pq-pending
+   :parent :filter :args {:pred :_pq-pending? :coll :_pq-rows}}
+
+  {:name :_pq-dead
+   :parent :filter :args {:pred :_pq-dead? :coll :_pq-rows}}
+
+  {:name :_pq-queue-of
+   :parent :get :args {:coll {:as :item} :key {:value :queue} :default nil}}
+
+  {:name :_pq-pending-by-queue
+   :parent :group-by :args {:key-fn :_pq-queue-of :coll :_pq-pending}}
+
+  {:name :_pq-dead-by-queue
+   :parent :group-by :args {:key-fn :_pq-queue-of :coll :_pq-dead}}
+
+  {:name :_pq-names
+   :description "The queue names, sorted — every queue that holds at least one message."
+   :parent :sort
+   :args {:coll {:parent :distinct
+                 :args {:coll {:parent :map :args {:func :_pq-queue-of :coll :_pq-rows}}}}}}
+
+  ;; --- one summary row per queue (`item` = the queue name) ---
+  {:name :_pq-pending-n
+   :parent :count
+   :args {:coll {:parent :get :args {:coll :_pq-pending-by-queue :key {:as :item} :default []}}}}
+
+  {:name :_pq-dead-n
+   :parent :count
+   :args {:coll {:parent :get :args {:coll :_pq-dead-by-queue :key {:as :item} :default []}}}}
+
+  {:name :_pq-td-name
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "gd-queues-name"}} :children [{:as :item}]}}
+
+  {:name :_pq-td-pending
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {}} :children [{:parent :to-str :args {:value :_pq-pending-n}}]}}
+
+  {:name :_pq-td-dead
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {}} :children [{:parent :to-str :args {:value :_pq-dead-n}}]}}
+
+  {:name :_pq-queue-tr
+   :parent :hiccup
+   :args {:tag {:value "tr"} :attrs {:value {}}
+          :children [:_pq-td-name :_pq-td-pending :_pq-td-dead]}}
+
+  {:name :_pq-queue-trs
+   :parent :map :args {:func :_pq-queue-tr :coll :_pq-names}}
+
+  {:name :_pq-summary-table
+   :parent :hiccup
+   :args {:tag {:value "table"} :attrs {:value {:class "gd-queues-table"}}
+          :children [{:value [:thead [:tr [:th "Queue"] [:th "Pending"] [:th "Dead"]]]}
+                     {:parent :hiccup :args {:tag {:value "tbody"} :attrs {:value {}} :children [:_pq-queue-trs]}}]}}
+
+  ;; --- one row per dead letter (`item` = the message row) ---
+  {:name :_pq-dead-id-str
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}}}
+
+  {:name :_pq-dead-attempts-str
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :attempts} :default nil}}}}
+
+  {:name :_pq-dead-error-str
+   :parent :to-str
+   :args {:value {:parent :coalesce
+                  :args {:value {:parent :get :args {:coll {:as :item} :key {:value :error} :default nil}}
+                         :default {:value ""}}}}}
+
+  {:name :_pq-action-attrs
+   :description "The htmx attributes every dead-letter button shares: act, then swap the refreshed panel in place."
+   :parent :const
+   ;; Wrapped in `{:value …}`: a bare map with a `:type` key reads as an
+   ;; arg spec at load time.
+   :args {:value {:value {:type "button"
+                          :class "gd-queues-btn"
+                          :hx-target "closest .gd-queues-panel"
+                          :hx-swap "outerHTML"}}}}
+
+  {:name :_pq-requeue-attrs
+   :parent :assoc
+   :args {:map :_pq-action-attrs
+          :key {:value :hx-post}
+          :value {:parent :str :args {:parts ["/partials/queues/requeue?message-id=" :_pq-dead-id-str]}}}}
+
+  {:name :_pq-delete-attrs
+   :parent :assoc
+   :args {:map :_pq-action-attrs
+          :key {:value :hx-post}
+          :value {:parent :str :args {:parts ["/partials/queues/delete?message-id=" :_pq-dead-id-str]}}}}
+
+  {:name :_pq-requeue-btn
+   :parent :hiccup
+   :args {:tag {:value "button"} :attrs :_pq-requeue-attrs :children {:value ["Requeue"]}}}
+
+  {:name :_pq-delete-btn
+   :parent :hiccup
+   :args {:tag {:value "button"} :attrs :_pq-delete-attrs :children {:value ["Delete"]}}}
+
+  {:name :_pq-dead-tr
+   :parent :hiccup
+   :args {:tag {:value "tr"} :attrs {:value {:class "gd-queues-dead-row"}}
+          :children [{:parent :hiccup :args {:tag {:value "td"} :attrs {:value {:class "gd-queues-name"}} :children [:_pq-queue-of]}}
+                     {:parent :hiccup :args {:tag {:value "td"} :attrs {:value {}} :children [:_pq-dead-attempts-str]}}
+                     {:parent :hiccup :args {:tag {:value "td"} :attrs {:value {:class "gd-queues-error"}} :children [:_pq-dead-error-str]}}
+                     {:parent :hiccup :args {:tag {:value "td"} :attrs {:value {:class "gd-queues-actions"}} :children [:_pq-requeue-btn :_pq-delete-btn]}}]}}
+
+  {:name :_pq-dead-trs
+   :parent :map :args {:func :_pq-dead-tr :coll :_pq-dead}}
+
+  {:name :_pq-dead-table
+   :parent :hiccup
+   :args {:tag {:value "table"} :attrs {:value {:class "gd-queues-table"}}
+          :children [{:value [:thead [:tr [:th "Queue"] [:th "Attempts"] [:th "Error"] [:th ""]]]}
+                     {:parent :hiccup :args {:tag {:value "tbody"} :attrs {:value {}} :children [:_pq-dead-trs]}}]}}
+
+  {:name :_pq-dead-block
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_pq-dead}}
+          :then {:value [:div {:class "gd-queues-empty"} "No dead letters."]}
+          :else :_pq-dead-table}}
+
+  {:name :_pq-body
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_pq-rows}}
+          :then {:value [:div {:class "gd-queues-empty"} "No messages — nothing has been published yet."]}
+          :else {:parent :hiccup
+                 :args {:tag {:value "div"} :attrs {:value {}}
+                        :children [:_pq-summary-table
+                                   {:value [:div {:class "gd-queues-subtitle"} "Dead letters"]}
+                                   :_pq-dead-block]}}}}
+
+  {:name :_pq-root
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "gd-queues-panel"}}
+          :children [:_pq-body]}}
+
+  {:name :_pq-html
+   :parent :render-hiccup
+   :args {:hiccup :_pq-root}}
+
+  {:name :_partial-queues-panel-handler
+   :lambda-params []
+   :description "Ring handler for GET /partials/queues-panel — the queues panel as text/html."
+   :parent :html-ok-response
+   :args {:body :_pq-html}}
+
+  ;; --- the two actions: act on `?message-id=`, answer with the panel ---
+  {:name :_pq-param-id
+   :description "`?message-id=` as a uuid — required, so a malformed id is a 500 rather than a silent no-op."
+   :parent :assert-some
+   :return-type :uuid
+   :args {:value {:parent :parse-uuid
+                  :args {:string {:parent :query-param :args {:param-name {:value "message-id"}}}}}}}
+
+  {:name :_pq-requeue-then-html
+   :parent :do
+   :args {:steps [{:parent :queue-requeue :args {:message-id :_pq-param-id}}
+                  :_pq-html]}}
+
+  {:name :_partial-queues-requeue-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /partials/queues/requeue?message-id=X — put a dead letter back on its queue, answer with the refreshed panel."
+   :parent :html-ok-response
+   :args {:body :_pq-requeue-then-html}}
+
+  {:name :_pq-delete-then-html
+   :parent :do
+   :args {:steps [{:parent :delete-entity :args {:entity-type "queue-message" :id :_pq-param-id}}
+                  :_pq-html]}}
+
+  {:name :_partial-queues-delete-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /partials/queues/delete?message-id=X — drop a dead letter, answer with the refreshed panel."
+   :parent :html-ok-response
+   :args {:body :_pq-delete-then-html}}]}

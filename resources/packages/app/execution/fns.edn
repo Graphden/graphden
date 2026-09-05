@@ -2434,6 +2434,78 @@
           :then :_sp-status-div-shown
           :else :hidden-span}}
 
+  ;; --- Running copies — the `:service-instance` rows of the picked
+  ;; service (docs/SERVICES.md § `:service-instance`): where each copy
+  ;; answers, which pod runs it, when it last heartbeat. Org-scoped on
+  ;; the cloud, so a tenant sees its own copies here (lesson 35).
+  {:name :_sp-instance-rows
+   :parent :if
+   :args {:test :_sp-has-existing?
+          :then {:parent :query-entities
+                 :args {:entity-type "service-instance"
+                        :where {:parent :assoc-empty
+                                :args {:key {:value :service-id} :value :_sp-existing-id}}}}
+          :else {:value []}}}
+
+  {:name :_sp-instance-field-host
+   :parent :get :args {:coll {:as :item} :key {:value :host} :default nil}}
+
+  {:name :_sp-instance-field-port
+   :parent :get :args {:coll {:as :item} :key {:value :port} :default nil}}
+
+  {:name :_sp-instance-field-executor
+   :parent :get :args {:coll {:as :item} :key {:value :executor-id} :default nil}}
+
+  {:name :_sp-instance-field-seen
+   :parent :get :args {:coll {:as :item} :key {:value :seen-at} :default nil}}
+
+  {:name :_sp-instance-text
+   :parent :str
+   :args {:parts [:_sp-instance-field-host ":" :_sp-instance-field-port
+                  " · " :_sp-instance-field-executor
+                  " · seen " :_sp-instance-field-seen]}}
+
+  {:name :_sp-instance-li
+   :parent :hiccup
+   :args {:tag {:value "li"}
+          :attrs {:value {:class "service-popover-instance"}}
+          :children [:_sp-instance-text]}}
+
+  {:name :_sp-instance-lis
+   :parent :map
+   :args {:func :_sp-instance-li :coll :_sp-instance-rows}}
+
+  {:name :_sp-instances-ul
+   :parent :hiccup
+   :args {:tag {:value "ul"}
+          :attrs {:value {:class "service-popover-instance-list"}}
+          :children [:_sp-instance-lis]}}
+
+  {:name :_sp-instances-empty
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "service-popover-instance-none"}}
+          :children {:value ["No running copy — not started yet, or every heartbeat is stale."]}}}
+
+  {:name :_sp-instances-body
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_sp-instance-rows}}
+          :then :_sp-instances-empty
+          :else :_sp-instances-ul}}
+
+  {:name :_sp-instances-div-shown
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "service-popover-instances"}}
+          :children [{:value [:div {:class "service-popover-instances-title"} "Running copies"]}
+                     :_sp-instances-body]}}
+
+  {:name :_sp-instances-div
+   :parent :if
+   :args {:test :_sp-has-existing?
+          :then :_sp-instances-div-shown
+          :else :hidden-span}}
+
   ;; ---------------------------------------------------------------------
   ;; Sibling warning. Maps each sibling to "<branch-name> (<state>)",
   ;; joins with ", ", prepends pluralized header.
@@ -2969,7 +3041,8 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {}}
-          :children [:_sp-header-div :_sp-status-div :_sp-sibling-warn-div
+          :children [:_sp-header-div :_sp-status-div :_sp-instances-div
+                     :_sp-sibling-warn-div
                      :_sp-enabled-label :_sp-branch-wrap :_sp-policy-wrap
                      :_sp-card-wrap :_sp-actions-div]
           :fn-id :_partial-service-popover-fn-id

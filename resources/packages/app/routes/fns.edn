@@ -184,6 +184,22 @@
    :args {:path "/partials/assets-panel" :handler :_partial-assets-panel-handler}
    :expects-effects #{:db}}
 
+  {:name :partial-queues-panel
+   :description "GET /partials/queues-panel — Operate → Queues: per-queue pending / dead counts and the dead letters with Requeue / Delete. Auth-required; reads are org-scoped on the cloud."
+   :parent :get-auth-required
+   :args {:path "/partials/queues-panel" :handler :_partial-queues-panel-handler}
+   :expects-effects #{:db}}
+
+  {:name :partial-queues-requeue
+   :description "POST /partials/queues/requeue?message-id=X — requeue a dead letter (`:queue-requeue`), answer with the refreshed panel. Auth-required."
+   :parent :post
+   :args {:path "/partials/queues/requeue" :handler :_partial-queues-requeue-handler}}
+
+  {:name :partial-queues-delete
+   :description "POST /partials/queues/delete?message-id=X — delete a dead letter, answer with the refreshed panel. Auth-required."
+   :parent :post
+   :args {:path "/partials/queues/delete" :handler :_partial-queues-delete-handler}}
+
   {:name :partial-asset-edit
    :description "GET /partials/asset-edit?path=… — the override editor form for one asset. Auth-required."
    :parent :get-auth-required

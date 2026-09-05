@@ -275,14 +275,18 @@
   (when storage
     (try
       (let [now (java.time.Instant/now)
-            ep (endpoint-of ctx stopper)]
+            ep (endpoint-of ctx stopper)
+            ;; The tenant is the service row's — the reconciler writes with
+            ;; the platform handle, so the org-scoped decorator cannot stamp it.
+            org-id (:org-id (sp/read-entity storage :service service-id))]
         (:id (sp/create-entity storage :service-instance
-                               {:service-id service-id
-                                :executor-id (self-executor-id ctx)
-                                :host (self-host ctx)
-                                :port (:port ep)
-                                :started-at now
-                                :seen-at now})))
+                               (cond-> {:service-id service-id
+                                        :executor-id (self-executor-id ctx)
+                                        :host (self-host ctx)
+                                        :port (:port ep)
+                                        :started-at now
+                                        :seen-at now}
+                                 org-id (assoc :org-id org-id)))))
       (catch Exception e
         (log/warn e "service instance write failed" {:service-id service-id})
         nil))))

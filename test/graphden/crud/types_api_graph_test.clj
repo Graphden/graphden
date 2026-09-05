@@ -151,3 +151,27 @@
                            {:expected "int" :candidate "text"})]
       (is (false? (:ok result)))
       (is (some? (:reason result))))))
+
+
+(deftest types-candidates-fn-ref-slot-admits-every-fn-test
+  ;; A `:fn-ref` slot takes a fn's IDENTITY — the bound fn is never run, so
+  ;; its return type is no filter. The Clojure helper grew an `identity-slot?`
+  ;; arm and its unit test went green while the GRAPH composition the editor
+  ;; actually serves kept comparing `return ⊆ :fn-ref` and answered zero:
+  ;; the lesson-35 picker showed "Compatible · 0" for a slot every fn fits.
+  ;; This pins the graph path.
+  (testing "expected 'fn-ref' enumerates the same set 'any' does"
+    (let [any-result (post-via :types-candidates-handler {:expected "any"})
+          ref-result (post-via :types-candidates-handler {:expected "fn-ref"})]
+      (is (true? (:ok ref-result)))
+      (is (pos? (:count ref-result)))
+      (is (= (set (map :name (:candidates any-result)))
+             (set (map :name (:candidates ref-result))))
+          "no return-type filter for an identity slot")))
+
+  (testing "the other filters still apply to an identity slot"
+    (let [prefixed (post-via :types-candidates-handler
+                             {:expected "fn-ref" :name-prefix "str-"})]
+      (is (pos? (:count prefixed)))
+      (is (every? #(str/starts-with? (name (:name %)) "str-")
+                  (:candidates prefixed))))))

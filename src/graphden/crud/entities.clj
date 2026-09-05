@@ -171,7 +171,15 @@
     (fn []
       (let [storage (request/require-storage ctx)
             et (keyword entity-type)
-            check-data (assoc data :id id)]
+            ;; A binding PUT carries only the changed fields — a bare
+            ;; `ref-fn-id` re-point used to reach the cycle check with
+            ;; no owner (`fn-id`) and pass unchecked. The row's identity
+            ;; pair is immutable, so fill it from the stored row.
+            check-data (cond-> (assoc data :id id)
+                         (= et :binding)
+                         (as-> d (merge (select-keys (sp/read-entity storage :binding id)
+                                                     [:fn-id :slot-id])
+                                        d)))]
         ;; Capability gate on the UPDATE path too (F2): the create path
         ;; already runs secret-leaf-capability-rej, but a tenant could
         ;; create a plain fn then PUT :parent-ids pointing at an

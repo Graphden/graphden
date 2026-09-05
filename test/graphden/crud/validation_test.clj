@@ -406,6 +406,33 @@
           ;; b→b self-ref, and an unrelated edge, are fine.
           (is (nil? (v/cycle-check-rej storage :binding
                                        {:fn-id b :ref-fn-id b}))))
+        (finally (sp/close storage)))))
+
+  (testing "a ref into a :fn-ref slot is an IDENTITY edge — no cycle, no walk"
+    ;; The same a→b edge that closes a→b→c→a through a call slot is
+    ;; legal through a `:fn-ref` slot: the target is named, never
+    ;; evaluated. Before the skip, naming the editor's own listener
+    ;; from a lesson-35 fn walked the whole app closure and answered
+    ;; `chain-too-deep`.
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [{:keys [a b slot-x]} (cyclic-ref-graph! storage)
+              slot-s (setup/create-slot! storage "s" :fn-ref)]
+          (is (some? (v/cycle-check-rej storage :binding
+                                        {:fn-id a :slot-id slot-x :ref-fn-id b}))
+              "through the call slot the edge still closes the cycle")
+          (is (nil? (v/cycle-check-rej storage :binding
+                                       {:fn-id a :slot-id (:id slot-s) :ref-fn-id b}))
+              "through the identity slot it is not a dependency")
+          (is (nil? (v/cycle-check-rej storage :binding
+                                       {:fn-id a :slot-id slot-x :ref-fn-id b
+                                        :type-override-fn-id (:type-fn-id slot-s)}))
+              "a binding-level override to :fn-ref makes the edge identity too")
+          (is (some? (v/cycle-check-rej storage :binding
+                                        {:fn-id a :slot-id (:id slot-s) :ref-fn-id b
+                                         :type-override-fn-id (:type-fn-id
+                                                                (sp/read-entity storage :slot slot-x))}))
+              "and an override away from :fn-ref makes it a call edge again"))
         (finally (sp/close storage))))))
 
 

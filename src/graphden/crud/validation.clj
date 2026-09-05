@@ -10,6 +10,7 @@
   (:require
     [graphden.executor.compile.lookups :as l]
     [graphden.executor.registry.core :as registry]
+    [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.generic-constraints :as gc]
     [graphden.types.check.literals :as types-lit]
@@ -374,8 +375,18 @@
           (some #(cycle-check-pair storage own-id %) constraint-refs)))
 
     :binding
-    (let [own-id (:fn-id entity-data)]
-      (or (cycle-check-pair storage own-id (:ref-fn-id entity-data))
+    (let [own-id (:fn-id entity-data)
+          ;; A ref into a `:fn-ref` slot is an IDENTITY edge: the target
+          ;; is named, never evaluated, so it is no dependency and the
+          ;; walk over the target's closure has nothing to find (two
+          ;; services may name each other). Skipping it also matters
+          ;; for cost: naming the editor's own listener would otherwise
+          ;; walk the whole app package and trip `chain-too-deep`.
+          slot (when (and (:ref-fn-id entity-data) (:slot-id entity-data))
+                 (sp/read-entity storage :slot (:slot-id entity-data)))
+          identity? (ids/identity-edge? entity-data slot)]
+      (or (when-not identity?
+            (cycle-check-pair storage own-id (:ref-fn-id entity-data)))
           (cycle-check-pair storage own-id (:type-override-fn-id entity-data))
           ;; Resolver graph-fns run at the owner's arg-resolution time
           ;; -- a (owner -> resolver) cycle is unbounded runtime

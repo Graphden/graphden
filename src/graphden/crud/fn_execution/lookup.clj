@@ -5,6 +5,7 @@
   (:require
     [graphden.crud.fn-execution.free-arg-cache :as fac]
     [graphden.crud.request :as request]
+    [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.core :as types]
     [graphden.versioning.storage.core :as vs]
@@ -330,13 +331,18 @@
            ;; List-item refs are list elements, not callbacks — no
            ;; call-site notion, so they recurse unmodified.
            binding-ref-frees
-           (reduce (fn [acc {:keys [ref-fn-id slot-id]}]
-                     ;; Skip a ref with no target, AND — under the service-
+           (reduce (fn [acc {:keys [ref-fn-id slot-id] :as b}]
+                     ;; Skip a ref with no target, an IDENTITY edge (a ref
+                     ;; into a `:fn-ref` slot — the target is named, never
+                     ;; evaluated, so none of its frees are this fn's: a
+                     ;; consumer naming `:web-server` must not inherit
+                     ;; every free of the app), AND — under the service-
                      ;; ability projection (top level only) — a ref in a
                      ;; callback slot: it's invoked by the deferred invoker, so
                      ;; its whole free-arg subtree is per-invocation, not
                      ;; start-blocking.
                      (if (or (nil? ref-fn-id)
+                             (ids/identity-edge? b (get slots-by-id slot-id))
                              (and drop-hof-refs?
                                   (fn-typed-slot? slot-id slots-by-id fns-by-id)))
                        acc

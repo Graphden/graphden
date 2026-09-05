@@ -164,6 +164,20 @@ A ref into a `:fn-ref`-typed slot is an IDENTITY edge (the target is
 named, never evaluated) and does not count — see
 [CONSTRAINTS.md](CONSTRAINTS.md#1-no-dependency-cycle).
 
+### `:constraint-violation/chain-too-deep`
+
+**Component:** storage-protocol (GraphConstraints)
+**Description:** The dependency walk behind the cycle check visited more
+than `default-max-dependency-chain-depth` (1000) fns before finishing —
+the DoS bound on a write that names a fn with a very large closure.
+Identity edges (`:fn-ref` slots) run no walk, so naming a big listener
+as a *service* never hits this.
+**Ex-data keys:**
+
+- `:fn-id` - The fn whose closure was being walked
+- `:max-depth` - The bound
+- `:chain-type` - `:dependency`
+
 ### `:constraint-violation/fn-name-collision`
 
 **Component:** versioning (VersionedStorage)

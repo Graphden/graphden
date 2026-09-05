@@ -263,6 +263,30 @@
           (is (= :constraint-violation/constraint-shape (:type (ex-data ex))))
           (is (= (:id created) (:id (ex-data ex))))))
 
+      (testing "update-entity on a binding runs the cycle check with the STORED owner"
+        ;; The editor re-points a ref with `PUT {ref-fn-id}` alone. The
+        ;; cycle check keyed the owner off the payload, found none, and
+        ;; passed — so a re-point that closed a→b→c→a landed. The
+        ;; identity pair is immutable; it is filled from the stored row.
+        (let [base   (setup/create-base-fn! storage "upd-cyc-base")
+              slot-x (setup/create-slot! storage "x" (:id base))
+              _      (setup/attach-slot! storage (:id base) (:id slot-x) 0)
+              a      (setup/create-composed-fn! storage "upd-cyc-a" (:id base))
+              b      (setup/create-composed-fn! storage "upd-cyc-b" (:id base))
+              c2     (setup/create-composed-fn! storage "upd-cyc-c" (:id base))
+              other  (setup/create-base-fn! storage "upd-cyc-other")
+              _      (setup/bind-ref! storage (:id b) (:id slot-x) (:id c2))
+              _      (setup/bind-ref! storage (:id c2) (:id slot-x) (:id a))
+              a-bind (setup/bind-ref! storage (:id a) (:id slot-x) (:id other))
+              ex (try (entities/update-entity "binding" (:id a-bind)
+                                              {:ref-fn-id (:id b)} c)
+                      (catch clojure.lang.ExceptionInfo e e))]
+          (is (instance? clojure.lang.ExceptionInfo ex))
+          (is (= :constraint-violation/dependency-cycle (:type (ex-data ex))))
+          (is (= (:id other)
+                 (:ref-fn-id (sp/read-entity storage :binding (:id a-bind))))
+              "the re-point did not land")))
+
       (testing "delete-entity :fn pre-reads to capture name for rich-type unregister"
         ;; The `:fn` arm of delete-entity now pre-reads the row so we
         ;; can drop the rich-types-registry entry by name; the read

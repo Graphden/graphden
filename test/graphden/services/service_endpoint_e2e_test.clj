@@ -12,6 +12,7 @@
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
+    [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records :as records]
     [graphden.services.reconciler :as recon]
@@ -54,7 +55,14 @@
               :args {:handler :_e2e-orders-ring :port port}}
              ;; Consumer: names the producer, calls its /orders, parses the body.
              {:name :e2e-fetch-orders :parent :service-get-json
-              :args {:service :e2e-orders-service :path "/orders"}}])
+              :args {:service :e2e-orders-service :path "/orders"}}
+             ;; A listener with a free arg of its own (`:listen-port`) and
+             ;; a consumer that only NAMES it — the identity edge must not
+             ;; lift the listener's free arg or its `:process` effect.
+             {:name :e2e-needy-listener :parent :http-server
+              :args {:handler :_e2e-orders-ring :port {:as :listen-port}}}
+             {:name :e2e-peek :parent :service-endpoint
+              :args {:service :e2e-needy-listener}}])
         ;; Namespace-less test defs get the deterministic root id.
         svc-fn-id (records/fn-id nil :e2e-orders-service)
         fetch-id (records/fn-id nil :e2e-fetch-orders)
@@ -63,6 +71,12 @@
                                :restart-policy :always :cardinality :per-pod})
         running (atom {})]
     (try
+      (testing "naming a service lifts neither its free args nor its effects"
+        (let [peek-id (records/fn-id nil :e2e-peek)]
+          (is (= {} (lookup/free-arg-slot-map ctx peek-id))
+              "the listener's :listen-port is not the consumer's free arg")
+          (is (= #{:db} (:effects (registry/rich-type-of-id peek-id)))
+              "the consumer declares its own :db read, not the listener's :process")))
       (testing "before the reconciler starts the producer, the consumer is told so"
         (try
           (exec/execute ctx fetch-id {})

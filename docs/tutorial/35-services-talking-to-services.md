@@ -78,6 +78,15 @@ calls it, and watch the address appear and disappear.
    free args are `headers`, `auth-value`, `timeout-ms` (from
    `:http-get`); `service` and `path` are bound.
 
+   Had you extended `:service-get-json` from the editor instead, the
+   collapsed card would show no `+` for `service` or `path`: both live
+   deeper in the template (on `:service-endpoint` and the URL join),
+   and a card lists only the holes of the fns it is showing — expand
+   into the composition to reach them (the Run pane lists every free
+   arg either way). The interactive tour for this lesson sidesteps that
+   by extending `:service-endpoint` itself, where `service` is a
+   direct slot.
+
 4. **Run it.** ▶ on `:fetch-orders` — the Run pane shows
    `{:orders [1 2 3]}`. Trace (lesson 15) shows the chain:
    `:service-endpoint` (a `:db` read of the row) → `:service-url` →

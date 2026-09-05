@@ -1567,6 +1567,18 @@
     (set (keys (or (types/fn-args t) {})))))
 
 
+(defn- identity-slot-form?
+  "Is the binding at `arg-name` an IDENTITY edge — a ref into a
+   `:fn-ref` slot (declared on the parent, or forced by a binding-
+   level `{:ref … :type :fn-ref}` override)? The target is named, never
+   evaluated through the edge, so neither its free args nor its
+   effects belong to this fn-def (`docs/CONSTRAINTS.md § Identity
+   edges`). Mirrors `ids/identity-edge?` on the row side."
+  [parent-args arg-name b-form]
+  (or (= :fn-ref (get parent-args arg-name))
+      (and (map? b-form) (= :fn-ref (:type b-form)))))
+
+
 (defn- ref-free-args
   "Per-ref freshening: each fn-ref binding brings its own scope of
    type-vars into the fn-def's surface. Without freshening, two refs
@@ -1590,6 +1602,10 @@
                           ref-args))]
     (reduce-kv (fn [acc arg-name b-form]
                  (cond
+                   ;; Identity edge: nothing of the target lifts.
+                   (identity-slot-form? parent-args arg-name b-form)
+                   acc
+
                    (keyword? b-form)
                    (merge acc (lift-for-slot arg-name (or (fresh b-form) {})))
 
@@ -1920,14 +1936,19 @@
    strip at fn-type binding sites subtracts these when an arg is
    wrap-time-only — its effects belong to the OUTER scope's effect
    computation, not to the per-invocation callable contract."
-  [args]
+  [args parent-args]
   (into {}
         (map (fn [[arg-name b-form]]
                [arg-name
-                (reduce (fn [a r]
-                          (into a (or (:effects (registry/rich-type-of r)) #{})))
-                        #{}
-                        (ref-targets b-form))]))
+                ;; An identity edge names its target without running
+                ;; it — the target's effects are the TARGET's (a
+                ;; consumer of `:web-server` does not itself listen).
+                (if (identity-slot-form? parent-args arg-name b-form)
+                  #{}
+                  (reduce (fn [a r]
+                            (into a (or (:effects (registry/rich-type-of r)) #{})))
+                          #{}
+                          (ref-targets b-form)))]))
         args))
 
 
@@ -1937,7 +1958,8 @@
    the fn-def — caching / parallelism / docs all read this single
    source of truth."
   [args parent-info]
-  (let [ref-effects (reduce into #{} (vals (compute-per-arg-effects args)))]
+  (let [ref-effects (reduce into #{} (vals (compute-per-arg-effects
+                                             args (:args parent-info))))]
     (into ref-effects (or (:effects parent-info) #{}))))
 
 
@@ -1961,7 +1983,7 @@
    are everything else under `(:args fn-def)`."
   [args parent-info free-arg-names]
   (let [free-keys (set free-arg-names)
-        per-arg (compute-per-arg-effects args)
+        per-arg (compute-per-arg-effects args (:args parent-info))
         call-site-arg-effects (reduce into #{}
                                       (vals (select-keys per-arg free-keys)))
         parent-call-time (or (:call-time-effects parent-info)
@@ -2040,7 +2062,7 @@
    computed-return effects own-resolved slot-types nav-types drift]
   (let [expected (some-> fn-def :expects-effects set)
         resolved (merge (:resolved-bindings parent-info {}) own-resolved)
-        arg-effects (compute-per-arg-effects (:args fn-def))
+        arg-effects (compute-per-arg-effects (:args fn-def) (:args parent-info))
         call-time-effects (compute-call-time-effects (:args fn-def)
                                                      parent-info
                                                      (keys free-args))]

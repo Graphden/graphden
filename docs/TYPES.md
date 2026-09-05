@@ -103,12 +103,15 @@ call*: the executor hof-wraps the bound fn into a callable (or, when
 the bound fn itself returns a callable, thunks it and hands over the
 result — `:http-server`'s handle, `:_router`'s ring handler). A
 `:fn-ref` slot means *give me WHO this is*: the impl receives the bound
-fn's id, the fn is never evaluated, its free args never surface, and
-the edge is not a dependency — so `:service-endpoint :service
-:web-server` names the listener without starting it, and two services
-may name each other. The checker accepts any fn-ref (whatever its
+fn's id, the fn is never evaluated, its free args never surface, its
+effects are not the consumer's (`compute-effects` skips the edge, so
+naming a `:process` listener leaves the consumer `:db`), and the edge
+is not a dependency — so `:service-endpoint :service :web-server`
+names the listener without starting it, and two services may name
+each other. The checker accepts any fn-ref (whatever its
 return type) on a `:fn-ref` slot and rejects a literal
-(`:types/fn-ref-slot-needs-ref`).
+(`:types/fn-ref-slot-needs-ref`); the editor's fn picker offers every
+fn for such a slot (`/api/types/candidates` with `expected` `fn-ref`).
 
 ### When to use `:any` vs `:jsonb` vs a type variable
 

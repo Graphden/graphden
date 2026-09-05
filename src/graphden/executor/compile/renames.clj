@@ -503,7 +503,14 @@
                       ;; vault secrets) — covered slot, caller doesn't
                       ;; supply it. Keep this case in sync with
                       ;; `classify-slot` (compile/bindings.clj).
-                      :resolved-value nil))
+                      :resolved-value nil
+                      ;; Identity edge (a ref into a `:fn-ref` slot):
+                      ;; the slot is covered by the target's id and the
+                      ;; target is never evaluated through it, so none
+                      ;; of ITS free args surface here — naming the
+                      ;; editor's listener as a service must not turn
+                      ;; every free of the app into the consumer's.
+                      :fn-ref nil))
                   ;; Env-bindings are synthetic shared computations
                   ;; (`:cond` / `:if` patterns like `:args {:test … :parsed :_…}`
                   ;; where `:parsed` isn't a parent's slot). Their ref-targets
@@ -668,7 +675,10 @@
                       :value nil
                       ;; Resolver-backed value — same coverage rule as
                       ;; `:value`; see the name-keyed walker above.
-                      :resolved-value nil))
+                      :resolved-value nil
+                      ;; Identity edge — covered, not walked (see the
+                      ;; name-keyed walker above).
+                      :fn-ref nil))
                   ;; Env-binding ref-walk mirrors
                   ;; `deep-free-ext-names*` — synthetic shared
                   ;; computations still propagate free args of their

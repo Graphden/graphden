@@ -1537,6 +1537,39 @@
               {:title "Reading your own tier"
                :body "The plan travels with every response: /api/orgs/quota answers with the slug and the two counted ceilings, which is what the badge and this lesson both read. The written lesson 34 has the full table — anonymous, free, network, dedicated, suspended — and what each grants. Click [[Finish]]."
                :target nil
+               :check {:kind "manual"}}]}
+            {:id "35"
+             :chapter "Your organization"
+             :requires "services"
+             :title "Services talking to services"
+             :steps
+             [{:title "Two services, one graph"
+               :body "In lesson 32 a service just ran. Here a fn will find a running service by NAMING it — no address typed anywhere. The reconciler records where every listener answers; a consumer asks for that address by pointing at the service fn itself. The service you will name is the one you are looking at: the editor's own web-server."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "The address slot"
+               :body "Type `service-endpoint` in the Explorer filter, click the [[service-endpoint]] row, then [[⋯]] → [[Extend]] and name it `tutorial-endpoint` — [[Save]]. :service-endpoint is the primitive every service-to-service template is built on: given a service fn it answers the host, port and origin URL that service currently listens on."
+               :target "input[placeholder=\"Filter...\"]"
+               :targets ["input[placeholder=\"Filter...\"]" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "fn-parent" :name "tutorial-endpoint" :parent "service-endpoint"}
+               :creates {:type "fn" :name "tutorial-endpoint"}}
+              {:title "Which service"
+               :body "On the tutorial-endpoint card click the [[+]] on the :service slot, choose [[Bind fn-ref]] and pick [[web-server]]. Look at the slot's type badge: fn-ref — the fn's IDENTITY. Every fn is Compatible here, whatever it returns, because the bound fn is never run: binding the listener does not start a second one; the consumer receives its id and asks the reconciler where it answers."
+               :target ".placeholder-binder"
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"web-server\"]"]
+               :check {:kind "bindings-count" :name "tutorial-endpoint" :count 1}}
+              {:title "Ask it"
+               :body "Click [[⋯]] → [[▶]], tick the effects box and [[Run]]. The result is a map — host, port and url — the address the editor you are using answers on. Nothing named a host or a port: the reconciler recorded the listener's instance when it started it, and :service-endpoint read the row back."
+               :target "button.more-actions-trigger"
+               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
+               :check {:kind "manual"}}
+              {:title "From address to call"
+               :body "The templates above this primitive join a path onto that url: :service-get and :service-post are :http-get / :http-post whose :url is the service's origin plus a free :path, with the caller's trace header merged in. Their :service and :path live deeper in the composition, so on a collapsed card you bind them by expanding into it — or, as the written lesson 35 does, by writing the fn-def with both args. Disable the service and the same call answers `service/not-running` instead of guessing."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "That's naming a service"
+               :body "The service fn is the value; the address is a fact the platform records; the call is explicit HTTP in the graph. Click [[Finish]] to clean up."
+               :target nil
                :check {:kind "manual"}}]}]}}}
 
   {:name :_tour-json

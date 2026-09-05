@@ -398,6 +398,30 @@
           ;; effects=[] → only pure (no-effect) producers survive
           (is (every? #(empty? (:effects %)) (:candidates res)))))
 
+      ;; A `:fn-ref` slot takes a fn's IDENTITY, so the return type is no
+      ;; filter at all: a `:text` producer, an `:int` producer and a
+      ;; callable-returning fn are all candidates — the same rule
+      ;; `check-one-binding`'s `:fn-ref` arm applies on write. Before the
+      ;; fix the picker compared `return ⊆ :fn-ref` and answered zero.
+      (binding [registry/*rich-types-override* (atom {})]
+        (registry/record-rich-types-raw! :tick     {:return :text :args {} :effects #{}})
+        (registry/record-rich-types-raw! :counter  {:return :int  :args {} :effects #{}})
+        (registry/record-rich-types-raw! :producer {:return [:fn {} :text] :args {} :effects #{}})
+        (testing "a :fn-ref slot takes a fn's identity — every fn is a candidate, whatever it returns"
+          (let [any-res (types-candidates {:body {:expected "any"}} c)
+                ref-res (types-candidates {:body {:expected "fn-ref"}} c)]
+            (is (true? (:ok ref-res)))
+            (is (= #{:tick :counter :producer}
+                   (set (map :name (:candidates ref-res)))))
+            (is (= (set (map :name (:candidates any-res)))
+                   (set (map :name (:candidates ref-res))))
+                "the same set :any enumerates — no return-type filter for an identity slot")))
+
+        (testing "the name-prefix filter still applies to an identity slot"
+          (let [res (types-candidates
+                      {:body {:expected "fn-ref" :name-prefix "tic"}} c)]
+            (is (= [:tick] (mapv :name (:candidates res)))))))
+
       (testing "the name-prefix filter restricts by fn-name"
         (let [res (types-candidates
                     {:body {:expected "any" :name-prefix "zzz-no-such"}} c)]

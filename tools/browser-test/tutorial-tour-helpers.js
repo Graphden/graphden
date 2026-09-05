@@ -62,7 +62,9 @@ async function hardCleanup(page) {
                      'tutorial-tick', 'review-demo',
                      // lesson 15's chain — a crash between its create and
                      // finishAndDelete 409s the next run's create.
-                     'tutorial-outer', 'tutorial-inner'];
+                     'tutorial-outer', 'tutorial-inner',
+                     // lesson 35's consumer.
+                     'tutorial-endpoint'];
   // Per-browser view-state the lessons exercise (smart views, recents,
   // last-used ns) — a leftover active view renders the next lesson's
   // Explorer as somebody else's virtual tree.
@@ -932,6 +934,94 @@ async function createRecordType(page, nsPath, typeName, fields) {
 }
 
 
+
+// Bind the placeholder of a NAMED arg on the selected card — the binder
+// nearest the edge label that carries `argName` (the label overlay sits
+// just left of its target node, vertically centred on it; the binder is
+// the target). `kind` is 'literal' (then `text` is typed) or 'fn-ref'
+// (then `text` is the fn to pick). Use this when a card exposes several
+// placeholders and the lesson names one: `bindFirstPlaceholder` takes
+// whatever the canvas put first, which is not the lesson's choice.
+async function bindNamedPlaceholder(page, argName, kind, text) {
+  // A callable slot's label carries a leading λ (`λbase-handler`); match
+  // the bare name either way.
+  await page.waitForFunction((name) => {
+    return Array.from(document.querySelectorAll('.edge-label-overlay span'))
+      .some((sp) => sp.textContent.trim().replace(/^λ/, '') === name)
+      && document.querySelector('.placeholder-binder');
+  }, argName, {timeout: 30000, polling: 150});
+  const found = await page.evaluate((name) => {
+    const label = Array.from(document.querySelectorAll('.edge-label-overlay span'))
+      .find((sp) => sp.textContent.trim().replace(/^λ/, '') === name);
+    const lr = label.getBoundingClientRect();
+    const ly = lr.top + lr.height / 2;
+    let best = null;
+    let bestD = Infinity;
+    for (const b of document.querySelectorAll('.placeholder-binder')) {
+      const r = b.getBoundingClientRect();
+      if (r.left < lr.left) continue;
+      const d = Math.abs((r.top + r.height / 2) - ly) + (r.left - lr.right) / 50;
+      if (d < bestD) { bestD = d; best = b; }
+    }
+    if (!best) return false;
+    best.click();
+    return true;
+  }, argName);
+  assert(found, 'a placeholder binder next to the "' + argName + '" label');
+  if (kind === 'fn-ref') {
+    await page.waitForFunction(() => {
+      return !!document.querySelector('.fn-picker-popover')
+        || Array.from(document.querySelectorAll('button'))
+          .some((b) => b.textContent.trim() === 'Bind fn-ref');
+    }, null, {timeout: 15000, polling: 100});
+    await page.evaluate(() => {
+      if (document.querySelector('.fn-picker-popover')) return;
+      Array.from(document.querySelectorAll('button'))
+        .find((b) => b.textContent.trim() === 'Bind fn-ref').click();
+    });
+    await page.waitForSelector('.fn-picker-popover', {timeout: 15000});
+    await page.fill('.fn-picker-popover input', text);
+    await page.waitForFunction((n) => {
+      return Array.from(document.querySelectorAll('.fn-picker-row')).some((r) =>
+        (r.querySelector('.fn-picker-row-main')?.textContent || '').includes(n));
+    }, text, {timeout: 30000, polling: 150});
+    await page.evaluate((n) => {
+      Array.from(document.querySelectorAll('.fn-picker-row')).find((r) =>
+        (r.querySelector('.fn-picker-row-main')?.textContent || '').includes(n)).click();
+    }, text);
+    await page.waitForFunction(() => !document.querySelector('.fn-picker-popover'),
+      null, {timeout: 30000, polling: 150});
+    return;
+  }
+  await page.waitForFunction(() => {
+    return Array.from(document.querySelectorAll('button'))
+      .some((b) => /^(Bind|Append) literal$/.test((b.textContent || '').trim()));
+  }, null, {timeout: 8000, polling: 100});
+  await page.evaluate(() => {
+    Array.from(document.querySelectorAll('button'))
+      .find((b) => /^(Bind|Append) literal$/.test((b.textContent || '').trim())).click();
+  });
+  await page.waitForFunction(() => {
+    const pops = document.querySelectorAll('.arg-value-edit-popover');
+    const pop = pops[pops.length - 1];
+    return pop && (pop.querySelector('.arg-value-edit-input')
+      || pop.querySelector('[data-form-field]'));
+  }, null, {timeout: 10000, polling: 100});
+  await page.evaluate((t) => {
+    const pops = document.querySelectorAll('.arg-value-edit-popover');
+    const pop = pops[pops.length - 1];
+    const field = pop.querySelector('.arg-value-edit-input')
+      || pop.querySelector('[data-form-field]');
+    field.value = t;
+    field.dispatchEvent(new Event('input', {bubbles: true}));
+    field.dispatchEvent(new Event('change', {bubbles: true}));
+    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
+      .find((b) => b.textContent.trim() === 'Save').click();
+  }, text);
+  await page.waitForFunction(() => !document.querySelector('.arg-value-edit-popover'),
+    null, {timeout: 30000, polling: 150}).catch(() => {});
+}
+
 module.exports = {
   NS_NAME, FN_NAME,
   retryingDelete, hardCleanup, tourTitle, waitTourTitle, clickTourButton,
@@ -940,7 +1030,7 @@ module.exports = {
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding, waitClickable,
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
-  runWithEffectAck, finishAndDelete, bindFnRefPlaceholder,
+  runWithEffectAck, finishAndDelete, bindFnRefPlaceholder, bindNamedPlaceholder,
   bindOptionalArgChip, appendFnRefViaChip, renameArgViaEdgeLabel,
   createRecordType, openOperateSection, openAccountSettings, openAccountMenu,
 };

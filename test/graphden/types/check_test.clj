@@ -1124,6 +1124,60 @@
 
 
 ;; -----------------------------------------------------------------------------
+;; Identity edges — a ref into a `:fn-ref` slot names its target without
+;; evaluating it, so NEITHER the target's free args NOR its effects belong
+;; to the fn-def. Before this, naming the editor's own listener from a
+;; lesson-35 consumer made the Run form list every free arg of the app and
+;; declared the consumer `:process` + `:io` + … (the effect gate would then
+;; have demanded a producer's effects from its consumer).
+
+(deftest identity-edge-lifts-nothing
+  (registry/record-rich-types! :ie-listener
+                               {:args {:port {:type :int}}
+                                :return-type :any
+                                :effects #{:process :io}})
+  (registry/record-rich-types! :ie-endpoint-of
+                               {:args {:service {:type :fn-ref}}
+                                :return-type :text
+                                :effects #{:db}})
+  (registry/record-rich-types! :ie-call-any
+                               {:args {:f {:type :any}}
+                                :return-type :any})
+
+  (testing "a ref into a declared :fn-ref slot lifts no free args and no effects"
+    (check/check-fn-def!
+      {:name :ie-consumer
+       :parent :ie-endpoint-of
+       :args {:service :ie-listener}})
+    (let [info (registry/rich-type-of :ie-consumer)]
+      (is (not (contains? (:args info) :port))
+          "the listener's :port is the listener's, not the consumer's")
+      (is (= #{:db} (:effects info))
+          "only the consumer's own effect remains")))
+
+  (testing "a binding-level {:type :fn-ref} override makes the edge identity too"
+    (check/check-fn-def!
+      {:name :ie-holder
+       :parent :ie-call-any
+       :args {:f {:ref :ie-listener :type :fn-ref}}})
+    (let [info (registry/rich-type-of :ie-holder)]
+      (is (not (contains? (:args info) :port)))
+      (is (= #{} (or (:effects info) #{})))))
+
+  (testing "the same ref through a call slot still lifts both (the control)"
+    (registry/record-rich-types! :ie-call-listener
+                                 {:args {:f {:type :any}}
+                                  :return-type :any})
+    (check/check-fn-def!
+      {:name :ie-caller
+       :parent :ie-call-listener
+       :args {:f :ie-listener}})
+    (let [info (registry/rich-type-of :ie-caller)]
+      (is (contains? (:args info) :port))
+      (is (= #{:process :io} (:effects info))))))
+
+
+;; -----------------------------------------------------------------------------
 ;; Refinement on a literal that satisfies the BASE but FAILS the constraint.
 ;; This is a different code path from :base-not-ok (which throws when the
 ;; classified literal type isn't a subtype of the refinement's base).

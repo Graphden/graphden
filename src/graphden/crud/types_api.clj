@@ -606,16 +606,21 @@
         ;; every ordinary fn — the picker hid legal binds behind "Other" and
         ;; made the reader override its own diagnostic to make one.
         fn-slot? (types/fn-type? expected)
+        ;; A `:fn-ref` slot takes a fn's IDENTITY — any fn is a candidate,
+        ;; whatever it returns (the same rule the write-time checker
+        ;; applies: `check-one-binding`'s `:fn-ref` arm).
+        identity-slot? (= :fn-ref expected)
         candidates
         (->> registry-snapshot
              (keep (fn [[fn-name {:keys [return effects] row? :type-row?}]]
                      (let [eff-set (or effects #{})
                            name-str (some-> fn-name name)]
                        (when (and (not row?) ; type-rows aren't callable producers
-                                  (if fn-slot?
-                                    (when-let [sig (tcheck/assemble-fn-type fn-name)]
-                                      (types/subtype? sig expected))
-                                    (types/subtype? return expected))
+                                  (cond
+                                    identity-slot? true
+                                    fn-slot? (when-let [sig (tcheck/assemble-fn-type fn-name)]
+                                               (types/subtype? sig expected))
+                                    :else (types/subtype? return expected))
                                   (or (nil? allowed-effects)
                                       (every? allowed-effects eff-set))
                                   (or (nil? name-prefix)

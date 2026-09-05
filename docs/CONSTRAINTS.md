@@ -71,6 +71,17 @@ services that each name the other (`:service-endpoint :service …`,
 are legal. The edge is still a real inbound reference for Used-by,
 GC and cross-org rejection.
 
+The write-time guard (`crud.validation/cycle-check-rej`) applies the
+same rule to the edge being *written*: a `ref-fn-id` into a `:fn-ref`
+slot (or under a binding-level `type-override` to `:fn-ref`) runs no
+walk at all. That is a cost rule as much as a correctness one — the
+walk is bounded by `default-max-dependency-chain-depth` (1000 visited
+fns, `:constraint-violation/chain-too-deep`), and naming the editor's
+own listener from a consumer would otherwise walk the whole app
+package into that cap. On a binding *update* the guard keys the walk
+off the stored row's `fn-id` / `slot-id` (a `PUT {ref-fn-id}` alone
+carries neither), so re-pointing a ref is checked like creating one.
+
 **Error:** `:constraint-violation/dependency-cycle`
 
 ### 2. Schema-level uniqueness

@@ -358,15 +358,26 @@
    :parent :coalesce
    :args {:value :_types-candidates-signature :default {:value :any :literal? true}}}
 
+  ;; A `:fn-ref` slot takes a fn's IDENTITY — the bound fn is never run,
+  ;; so its return type is no filter at all. Every non-type-row fn is a
+  ;; candidate, the rule `check-one-binding`'s `:fn-ref` arm applies on
+  ;; write. Mirrors `identity-slot?` in `types-api/apply-types-candidates`.
+  {:name :_types-candidates-expected-identity?
+   :parent :eq
+   :args {:values [{:as :expected} {:value :fn-ref :literal? true}]}}
+
   {:name :_types-candidates-subtype-ok?
-   :parent :if
-   :args {:test :_types-candidates-expected-callable?
-          :then {:parent :subtype?
-                 :args {:expected {:as :expected}
-                        :candidate :_types-candidates-signature-or-any}}
-          :else {:parent :subtype?
-                 :args {:expected {:as :expected}
-                        :candidate :_types-candidates-return}}}}
+   :parent :cond
+   :args {:clauses [:_types-candidates-expected-identity?
+                    {:value true}
+                    :_types-candidates-expected-callable?
+                    {:parent :subtype?
+                     :args {:expected {:as :expected}
+                            :candidate :_types-candidates-signature-or-any}}
+                    {:value true}
+                    {:parent :subtype?
+                     :args {:expected {:as :expected}
+                            :candidate :_types-candidates-return}}]}}
 
   {:name :_types-candidates-effects-ok?
    :description "True iff allowed-effects is nil (no filter) OR every effect on the row is in allowed-effects."

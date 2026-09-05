@@ -163,11 +163,19 @@ renders, and the sidebar re-paints once the cookie session resolves (it
 boots before the async probe). The probe result is published as the
 `window.gdAccountsReady` promise so accounts-only UI can wait on it.
 
-`editor-org-switcher.js` (multi-org, tenancy addon present): fetches
+`editor-org-switcher.js` (tenancy addon present): fetches
 `GET /api/memberships` (tenancy auth-routes; the session cookie
-authenticates) and, when the account belongs to **more than one** org,
-mounts a top-bar chip with a dropdown. Picking an org navigates to that
-org's subdomain origin; on a single-host dev instance it falls back to
+authenticates; `:orgs` carries `{name owner? plan}` per row) and mounts
+the top-bar **org chip** for every member — single-org accounts too, the
+org being the outermost write-context. The chip's popover lists the
+account's orgs (owner badge, plan) and ends with **New organization…**:
+`POST /api/my-orgs {name}` creates the org with the caller as owner +
+`admin` (verified email required, per-account ownership cap
+`GRAPHDEN_MAX_ORGS_PER_ACCOUNT`, default 5; refusals answer
+`{ok:false, error, message}` — `org/invalid-name` / `org/reserved` 400,
+`org/name-taken` 409, `org/limit` / `org/email-unverified` 403; never
+reachable with an API token). Picking an org navigates to that org's
+subdomain origin; on a single-host dev instance it falls back to
 `POST /api/switch-org` (the `gd_org` selector cookie) — sessions are
 org-agnostic, no re-mint involved.
 

@@ -1407,13 +1407,15 @@
                :body "Because each org's editor is its own origin, it carries its own login. Belonging to two orgs means signing in on two addresses — no session travels between them, so a tab open on one org can never read the other's data."
                :target nil
                :check {:kind "manual"}}
-              {:title "The switcher — if you have one"
-               :body "Look at the bar above the canvas. If your account belongs to more than one organization, a chip there names the current one and lists the others; picking one navigates to that org's address, where its own session takes over. If you see no such chip, that IS the answer: you belong to exactly one org, so there is nothing to switch between."
-               :target "#gd-ctxbar"
+              {:title "The org chip"
+               :body "Look at the bar above the canvas: the [[org]] chip names the organization you are in — the outermost thing you write into, so it is always there, even with a single org. Open it: every org you belong to is listed, with an owner badge and its plan; picking another navigates to that org's address, where its own session takes over."
+               :target "#org-chip-btn"
+               :targets ["#org-chip-btn" "#org-popover"]
                :check {:kind "manual"}}
-              {:title "How you join a second one"
-               :body "Not by signing up again — signup only ever makes a NEW org. Someone in the other org grants your account a capability there (lesson 25); membership is exactly “holds a grant in that org”, so the moment they do, that org appears for you."
-               :target nil
+              {:title "How you get a second one"
+               :body "Two ways. Someone in another org grants your account a capability there (lesson 25) — membership is exactly “holds a grant in that org”, so it appears in the chip the moment they do. Or you make one: [[New organization…]] at the bottom of the chip's list takes a name (it becomes the editor address) and makes you its owner and admin. Signing up again is NOT a way — that only ever makes another account."
+               :target "#org-chip-btn"
+               :targets ["#org-chip-btn" "#org-popover"]
                :check {:kind "manual"}}
               {:title "That's the map"
                :body "Editors on one domain, one subdomain per org; apps on another, one subdomain per app; your own domain on top of an app when you want it. Nothing nested, nothing to configure. The written lesson 30 walks the same map from the landing inwards. Click [[Finish]]."

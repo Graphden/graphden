@@ -805,36 +805,81 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 }
 .branch-popover-error.hidden { display: none; }
 
-/* Org-switcher chip (Track B — multi-org). Mirrors the branch chip; shown
-   only when the user belongs to >1 org. */
+/* Org chip (Track B — multi-org). Mirrors the branch chip; shown for every
+   member (the org is the outermost write-context, readable at a glance). */
 .org-chip-btn {
-  display: inline-flex; align-items: center; gap: 4px;
+  display: inline-flex; align-items: center; gap: 6px;
   background: transparent; color: var(--header-fg);
   border: 1px solid var(--header-fg); border-radius: 3px;
   padding: 3px 8px; height: 26px; cursor: pointer;
   font: inherit; font-size: 0.6875rem; line-height: 1;
-  max-width: 140px;
+  max-width: 200px;
 }
-.org-chip-btn span {
+.org-chip-btn b {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-weight: 600;
 }
+.org-chip-k {
+  font-size: 0.6rem; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; opacity: 0.75;
+}
+.org-chip-btn:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
 .org-chip-btn:hover { background: var(--header-fg); color: var(--header-bg); }
 .org-popover {
-  position: absolute; z-index: 300;
+  /* Anchored under the chip, growing LEFT from the mount's right edge — the
+     mount sits at the right end of the bar, so a left-anchored box would run
+     off-screen. */
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 300;
   background: var(--bg); color: var(--fg);
   border: 1px solid var(--fg); border-radius: 3px;
-  padding: 6px; min-width: 160px; max-width: 260px;
+  padding: 6px; min-width: 240px; max-width: 320px;
   box-shadow: var(--shadow-md);
   display: flex; flex-direction: column; gap: 2px;
 }
 .org-popover.hidden { display: none; }
+/* The rows carry their own `display`, which beats the UA's [hidden] rule —
+   say it explicitly so `el.hidden = true` actually hides. */
+.org-popover [hidden] { display: none; }
 .org-popover-item {
+  display: flex; align-items: center; gap: 6px;
   text-align: left; background: transparent; color: var(--fg);
   border: none; border-radius: 3px; padding: 4px 8px; cursor: pointer;
   font: inherit; font-size: 0.75rem;
 }
 .org-popover-item:hover:not(:disabled) { background: var(--hover-bg); }
+.org-popover-item:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: -2px; }
 .org-popover-item-current { color: var(--muted-fg); cursor: default; }
+.org-popover-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.org-popover-head {
+  font-size: 0.625rem; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--muted-fg); padding: 2px 8px 4px;
+}
+.org-popover-list { display: flex; flex-direction: column; gap: 2px; }
+.org-popover-badge {
+  font-size: 0.5625rem; font-weight: 600; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--gd-flow);
+  border: 1px solid var(--gd-flow); border-radius: 3px; padding: 0 4px;
+}
+.org-popover-plan { font-size: 0.625rem; color: var(--muted-fg); }
+.org-popover-new { margin-top: 4px; border-top: 1px solid var(--gd-line-2); border-radius: 0; padding-top: 6px; }
+.org-popover-form { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px 2px; border-top: 1px solid var(--gd-line-2); margin-top: 4px; }
+.org-popover-form-label { font-size: 0.6875rem; color: var(--fg); }
+.org-popover-input {
+  font: inherit; font-size: 0.75rem; padding: 4px 6px;
+  border: 1px solid var(--gd-line-2); border-radius: 3px;
+  background: var(--bg); color: var(--fg); min-width: 0;
+}
+.org-popover-input:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 1px; }
+.org-popover-hint { font-size: 0.625rem; color: var(--muted-fg); }
+.org-popover-error { font-size: 0.6875rem; color: var(--error-fg-strong); }
+.org-popover-form-row { display: flex; justify-content: flex-end; gap: 6px; margin-top: 2px; }
+.org-popover-btn {
+  font: inherit; font-size: 0.6875rem; padding: 3px 10px; cursor: pointer;
+  border: 1px solid var(--gd-flow); border-radius: 3px;
+  background: var(--gd-flow); color: var(--bg);
+}
+.org-popover-btn:disabled { opacity: 0.6; cursor: default; }
+.org-popover-btn-secondary { background: transparent; color: var(--fg); border-color: var(--gd-line-2); }
 
 .branch-popover-list {
   display: flex; flex-direction: column;
@@ -5995,6 +6040,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 /* The org/auth mounts flow inline on the bar's right side. */
 #gd-ctxbar #org-mount,
 #gd-ctxbar #auth-mount { display: flex; align-items: center; gap: 6px; }
+#gd-ctxbar #org-mount { position: relative; }
 /* Narrow / phone: the bar holds only brand + org + account now; let the org
    mount shrink + truncate so the bar, and the page, never overflow. The
    Build-context chips live in the Explorer, which is collapsed by default on

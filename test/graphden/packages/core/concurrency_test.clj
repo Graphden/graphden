@@ -393,3 +393,21 @@
       ((impls/impl-of :future) {:body (delay body-fn)} nil)
       (is (= :allowed (deref result 2000 :timeout))
           "no restriction in scope → worker runs :network freely"))))
+
+
+(deftest future-handle-carries-liveness-test
+  (testing "the stopper's metadata tells the reconciler whether the thread runs and how it ended"
+    (let [gate (promise)
+          stop ((impls/impl-of :future) {:body (fn [] @gate)} nil)
+          {:keys [alive? exit]} (meta stop)]
+      (is (true? (alive?)))
+      (is (nil? @exit))
+      (deliver gate :go)
+      (Thread/sleep 100)
+      (is (false? (alive?)))
+      (is (= :done @exit))))
+  (testing "an uncaught throw is recorded as :failed"
+    (let [stop ((impls/impl-of :future) {:body (fn [] (throw (ex-info "boom" {})))} nil)]
+      (Thread/sleep 100)
+      (is (= :failed @(:exit (meta stop))))
+      (is (false? ((:alive? (meta stop))))))))

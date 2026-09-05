@@ -37,6 +37,7 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.compile.deps :as compile-deps]
     [graphden.schema.services.schema :as svc-schema]
+    [graphden.services.endpoint :as endpoint]
     [graphden.storage.postgres.advisory-lock :as pg-lock]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
@@ -216,17 +217,31 @@
              (recur (inc attempt)))))))))
 
 
-;; --- Endpoints ---------------------------------------------------------------
+;; --- Instances: where a copy runs, and whether it is still alive ------------
 ;;
-;; A service that listens somewhere ANSWERS somewhere. The fn's returned
-;; handle carries that fact as metadata (`{:endpoint {:port p}}` —
-;; `:http-server` sets it); the pod that started the service completes it
-;; with its own dialable host and writes it to the row's `:endpoint`
-;; field, then clears it on stop. `:service-endpoint` (web/service) reads
-;; the field, so a consumer fn resolves a service to an address by naming
-;; the service fn. A crashed pod never clears — the next holder overwrites,
-;; and until then a consumer sees a refused connection, which is the
-;; honest answer.
+;; The `:service` row is desired state; a `:service-instance` row is one
+;; RUNNING copy — which pod, where it answers (`:host` / `:port`, from the
+;; `:endpoint` metadata a listener's handle carries — `:http-server` sets
+;; it), and `:seen-at`, the heartbeat this pod refreshes every tick. The
+;; row is created on start and deleted on every stop path; a crashed pod's
+;; row goes stale instead (`svc-schema/default-stale-after-ms`), and the
+;; reconciler on any pod eventually deletes it. `:service-endpoint`
+;; (web/service) resolves a service fn to a LIVE instance, so a consumer
+;; names the service and gets an address that is actually answering.
+;;
+;; Liveness: a handle may also carry `:alive?` (`http-kit`'s listener
+;; status; a `:future`'s thread state) and `:exit` (an atom — `:done` /
+;; `:failed`). The pass checks every copy each tick and, when one has died
+;; in place, applies the row's `:restart-policy` for real: `:always`
+;; restarts any exit, `:on-failure` only a throw, `:never` leaves it
+;; stopped (`::exited` placeholder) until the row is toggled.
+
+(defn- self-executor-id
+  "This pod's identity in instance rows — its fleet `:executor-id`, or
+   \"local\" on a single pod."
+  [ctx]
+  (or (:executor-id ctx) "local"))
+
 
 (defn- self-host
   "The host other pods reach THIS pod by: its fleet `:executor-id` (a
@@ -235,27 +250,127 @@
   (or (:executor-id ctx) "127.0.0.1"))
 
 
+(defn- handle-meta
+  "The metadata a service handle carries (`:endpoint` / `:alive?` /
+   `:exit`), or nil for a handle that isn't an `IObj`."
+  [stopper]
+  (when (instance? clojure.lang.IObj stopper) (meta stopper)))
+
+
 (defn endpoint-of
   "The `{:host :port}` a just-started service answers on, read off its
    handle's `:endpoint` metadata and completed with this pod's host —
-   nil when the handle carries none (a cron loop, a fire-and-forget)."
+   nil when the handle carries none (a cron loop, a fire-and-forget).
+   The port half of the instance row."
   [ctx stopper]
-  (when-let [ep (and (instance? clojure.lang.IObj stopper)
-                     (:endpoint (meta stopper)))]
+  (when-let [ep (:endpoint (handle-meta stopper))]
     (assoc ep :host (self-host ctx))))
 
 
-(defn- write-endpoint!
-  "Record (or, with nil, clear) a service row's `:endpoint`. Best-effort:
-   a failed write is logged, never fatal — the service itself is running
-   (or stopped) regardless."
-  [storage service-id endpoint]
+(defn- create-instance!
+  "Write this pod's `:service-instance` row for a just-started copy.
+   Returns the row id, or nil when the write failed (logged) — the copy
+   runs regardless; it just cannot be resolved by consumers."
+  [ctx storage service-id stopper]
   (when storage
     (try
-      (sp/update-entity storage :service service-id {:endpoint endpoint})
+      (let [now (java.time.Instant/now)
+            ep (endpoint-of ctx stopper)]
+        (:id (sp/create-entity storage :service-instance
+                               {:service-id service-id
+                                :executor-id (self-executor-id ctx)
+                                :host (self-host ctx)
+                                :port (:port ep)
+                                :started-at now
+                                :seen-at now})))
       (catch Exception e
-        (log/warn e "service endpoint write failed"
-                  {:service-id service-id :endpoint endpoint})))))
+        (log/warn e "service instance write failed" {:service-id service-id})
+        nil))))
+
+
+(defn- delete-instance!
+  "Best-effort delete of a copy's instance row on stop."
+  [storage instance-id]
+  (when (and storage instance-id)
+    (try
+      (sp/delete-entity storage :service-instance instance-id)
+      (catch Exception e
+        (log/warn e "service instance delete failed" {:instance-id instance-id})))))
+
+
+(defn- heartbeat-instance!
+  "Refresh a copy's `:seen-at` — the fact consumers and the stale-row GC
+   read."
+  [storage instance-id]
+  (when (and storage instance-id)
+    (try
+      (sp/update-entity storage :service-instance instance-id
+                        {:seen-at (java.time.Instant/now)})
+      (catch Exception e
+        (log/warn e "service instance heartbeat failed" {:instance-id instance-id})))))
+
+
+(defn- reap-stale-instances!
+  "Delete instance rows nobody has heartbeat for ten stale windows —
+   the copies of a pod that crashed. Level-triggered, any pod; the rows
+   were already ignored by `resolve-endpoint` after one window."
+  [storage]
+  (when storage
+    (try
+      (let [cutoff-ms (- (System/currentTimeMillis)
+                         (* 10 svc-schema/default-stale-after-ms))]
+        (doseq [row (sp/query-entities storage :service-instance {})
+                :when (some-> (endpoint/seen-at-ms row) (< cutoff-ms))]
+          (log/info "reaping stale service instance"
+                    {:instance-id (:id row) :executor-id (:executor-id row)})
+          (delete-instance! storage (:id row))))
+      (catch Exception e
+        (log/warn e "stale service-instance reap failed")))))
+
+
+(defn- copy-exited?
+  "Did a running copy die in place? True when its handle carries an
+   `:alive?` probe that now answers false. Handles without a probe (a
+   nil stopper, a fire-and-forget) are trusted as running."
+  [entry]
+  (when-let [alive? (:alive? (handle-meta (:stopper entry)))]
+    (not (try (alive?) (catch Exception _ false)))))
+
+
+(defn- restart-after-exit?
+  "Does the row's `:restart-policy` want a copy that exited restarted?
+   `:always` — any exit; `:on-failure` — only when the handle's `:exit`
+   records a throw; `:never` — no."
+  [entry]
+  (case (:restart-policy entry)
+    :always true
+    :on-failure (= :failed (some-> (:exit (handle-meta (:stopper entry))) deref))
+    false))
+
+
+(declare ^:private stop-and-forget!)
+
+
+(defn- check-liveness!
+  "The per-tick liveness pass over this pod's running copies: heartbeat
+   every live instance row; for a copy that died in place, release its
+   lock + row and either drop it from `running-atom` (so the diff below
+   restarts it this pass) or park it as `::exited` per `restart-after-
+   exit?`. Called under `reconcile-monitor`."
+  [running-atom lock-conn storage]
+  (doseq [[sid entry] @running-atom
+          :when (and (map? entry) (some? (:stopper entry)))]
+    (if (copy-exited? entry)
+      (let [restart? (restart-after-exit? entry)]
+        (log/warn "service copy exited in place"
+                  {:service-id sid :fn-id (:fn-id entry)
+                   :exit (some-> (:exit (handle-meta (:stopper entry))) deref)
+                   :restart-policy (:restart-policy entry)
+                   :restart? restart?})
+        (stop-and-forget! lock-conn running-atom sid storage)
+        (when-not restart?
+          (swap! running-atom assoc sid ::exited)))
+      (heartbeat-instance! storage (:instance-id entry)))))
 
 
 (defn stop-service!
@@ -335,7 +450,7 @@
         (log/warn "lost service ownership during lock-conn outage — stopping local copy"
                   {:service-id sid})
         (stop-service! sid entry)
-        (when (:endpoint entry) (write-endpoint! storage sid nil))
+        (delete-instance! storage (:instance-id entry))
         (swap! running-atom dissoc sid)))))
 
 
@@ -346,13 +461,13 @@
    Postgres to unlock a key the session never held every time a
    `:per-pod` service stops.
 
-   `::not-our-lock` placeholders have nothing to stop and no lock to
-   release. An entry that recorded an `:endpoint` clears it on the row."
+   `::not-our-lock` / `::exited` placeholders have nothing to stop and no
+   lock to release. A running entry deletes its instance row."
   [lock-conn running-atom sid storage]
   (let [entry (get @running-atom sid)]
     (when (map? entry)
       (stop-service! sid entry)
-      (when (:endpoint entry) (write-endpoint! storage sid nil))
+      (delete-instance! storage (:instance-id entry))
       (when (and lock-conn (:locked? entry))
         (try (pg-lock/release-slot! lock-conn sid (:pool-slot entry 0))
              (catch Exception e
@@ -517,6 +632,11 @@
     (swap! running-atom (fn [m] (into {} (remove (fn [[_ v]] (contains? #{::not-our-lock ::start-failed} v))) m)))
     (let [storage (:storage ctx)
           lock-conn (lock-conn-from-ctx ctx)
+          ;; Liveness + heartbeat over this pod's copies BEFORE the diff, so
+          ;; a copy that died in place is restarted (or parked) this pass;
+          ;; then the level-triggered reap of rows a crashed pod left.
+          _ (check-liveness! running-atom lock-conn storage)
+          _ (reap-stale-instances! storage)
           ;; Shard filter (task #6): drop tenant services whose org this pod
           ;; doesn't serve, so a dedicated tenant's services run only on its
           ;; own cgroup-limited pod, never on a shared compile-all pod.
@@ -611,18 +731,17 @@
                 ;; holds a slot; :pool-slot = which one (for release +
                 ;; reassert).
                 (let [eff-branch (effective-branch-id svc)
-                      ;; Where the service answers (nil for a non-listener).
-                      ;; Kept on the entry so stop knows to clear the row.
-                      endpoint (endpoint-of ctx (:stopper entry))
+                      ;; This copy's instance row (where it answers + its
+                      ;; heartbeat). Kept on the entry so stop deletes it.
+                      instance-id (create-instance! ctx storage sid (:stopper entry))
                       entry' (cond-> (assoc entry
                                             :cardinality (svc-schema/service-cardinality svc)
                                             :pool-size pool-size
                                             :locked? (some? slot)
                                             :pool-slot slot)
                                eff-branch (assoc :branch-id eff-branch)
-                               endpoint (assoc :endpoint endpoint))]
-                  (swap! running-atom assoc sid entry')
-                  (when endpoint (write-endpoint! storage sid endpoint)))))
+                               instance-id (assoc :instance-id instance-id))]
+                  (swap! running-atom assoc sid entry'))))
 
             :else
             (do (swap! not-our-lock conj sid)
@@ -773,9 +892,8 @@
   ([running-atom] (stop-all! running-atom nil))
   ([running-atom ctx]
    (locking reconcile-monitor
-     (doseq [[sid entry] @running-atom]
-       (when (not= ::not-our-lock entry)
-         (stop-service! sid entry)
-         (when (and (map? entry) (:endpoint entry))
-           (write-endpoint! (:storage ctx) sid nil))))
+     (doseq [[sid entry] @running-atom
+             :when (map? entry)]
+       (stop-service! sid entry)
+       (delete-instance! (:storage ctx) (:instance-id entry)))
      (reset! running-atom {}))))

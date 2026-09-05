@@ -7,7 +7,7 @@ place that both sides reference, so a change moves both and the
 type-checker catches a drift.
 
 **Concepts introduced**: `:service-endpoint`, the `:fn-ref` slot type
-(a fn's *identity*), `:service.endpoint`, `:service-get` /
+(a fn's *identity*), `:service-instance`, `:service-get` /
 `:service-get-json`, the contract namespace, `service/not-running`.
 
 **You need**: lesson 32 (a service is a no-arg fn the reconciler keeps
@@ -18,9 +18,9 @@ section for what changes there).
 ## The idea in one paragraph
 
 A service that listens somewhere *answers* somewhere. When the
-reconciler starts an `:http-server` service it records where —
-`{:host :port}` on the service row (`:service.endpoint`) — and clears
-it when the service stops. Another fn can then ask for that address by
+reconciler starts an `:http-server` service it records where — a
+`:service-instance` row with the host, the bound port and a heartbeat
+— and deletes it when the service stops. Another fn can then ask for that address by
 naming the service fn itself: `:service-endpoint :service
 :orders-service`. That slot is typed `:fn-ref`, which means *the fn's
 identity*: the consumer receives the producer's id, never runs it
@@ -58,12 +58,13 @@ calls it, and watch the address appear and disappear.
 
 2. **Make it a service.** Click `⚙` on `:orders-service` → "Make
    service" → *Create & reconcile* (lesson 32). The reconciler starts
-   it within a second. Read the service row back —
-   `GET /api/entities/service` lists them — and its `endpoint` field
-   now reads `{"host": "127.0.0.1", "port": 9101}`. That is the
+   it within a second. List the running copies —
+   `GET /api/entities/service-instance` — and there is one row for it:
+   `"host": "127.0.0.1", "port": 9101`, an `executor-id` of `local`,
+   and a `seen-at` that moves every fifteen seconds. That is the
    reconciler talking: `:http-server` returned its handle with the
-   bound port as metadata, and the pod that started it added its own
-   host.
+   bound port as metadata, the pod that started it added its own host,
+   and it heartbeats the row every tick.
 
 3. **The consumer.** Add:
 
@@ -84,15 +85,15 @@ calls it, and watch the address appear and disappear.
 
 5. **Stop the producer.** Disable the service (`⚙` popover, or
    `PUT /api/entities/service/<id>` with `{"enabled?": false}`). The
-   row's `endpoint` is cleared. ▶ on `:fetch-orders`
-   again: `service/not-running` — *no endpoint recorded for fn …
-   (the service row exists but has not started, or is not a
+   instance row is deleted. ▶ on `:fetch-orders`
+   again: `service/not-running` — *no live instance for fn …
+   (the service row exists but no copy is alive, or it is not a
    listener)*. Nothing guessed, nothing cached: the consumer is told
    the truth, and a real consumer wraps the call in `:try` / a retry
    (the reconciler brings the producer back on its own; lesson 32's
    restart policy).
 
-6. **Enable it again.** The endpoint is back, the call works again.
+6. **Enable it again.** The instance is back, the call works again.
    Delete the service and the three fn-defs when you are done.
 
 ## The contract lives in the graph
@@ -145,10 +146,11 @@ grant's subject, so the team is one row).
   slot hands the impl something to *call*, and for a fn that returns
   a callable (every listener does) that means evaluating it. See
   [docs/TYPES.md](../TYPES.md#structural-types-records).
-- Health: a crashed pod never clears its endpoint; the next holder
-  overwrites it, and until then the consumer sees a refused
-  connection. Healthcheck-based detection is on the services roadmap
-  ([docs/SERVICES.md](../SERVICES.md#roadmap)).
+- Liveness: a copy that dies in place (the listener stops, a daemon
+  thread ends) is noticed on the next tick and restarted per the row's
+  `restart-policy`; a pod that crashes leaves a row whose heartbeat
+  goes stale, so consumers stop picking it within 45 seconds
+  ([docs/SERVICES.md § Liveness](../SERVICES.md#liveness--a-copy-that-died-in-place)).
 - Queues, tracing across services, async messaging — not built;
   `:schedule` and HTTP are the two shapes today.
 

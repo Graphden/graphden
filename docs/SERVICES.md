@@ -158,7 +158,22 @@ admin mutates in place; the audit trail for what actually ran lives in
 | `:pool-size`      | `:int`            | Pod count for `:cardinality :pool` (ignored otherwise). Nullable — a `:pool` row with nil/non-positive size degrades to a singleton. |
 | `:branch-id`      | `:ref :branch`    | Per-branch scope. Reconciler routes the start through `branch-router/ctx-for branch-id`, so the same `:fn-id` can run with branch-specific bindings on dev + prod simultaneously. Nullable — nil is normalized to the router's default branch at reconcile time (`effective-branch-id`), so a legacy nil-branch row behaves exactly like an explicit default-branch row, including the post-merge `restart-services-depending-on!` pass. Without a router (tests) nil falls back to the reconciler's base ctx. The editor's ⚙ popover picker defaults to the editor's current branch on create. |
 | `:org-id`         | `:text` (null)    | **Tenant owner; NULL ≡ platform.** Load-bearing for fleet sharding: the reconciler drops services whose org this pod doesn't serve (`service-in-shard?`), so a dedicated tenant's services run only on its own pod. Stamped by the tenant service-create endpoint (NOT `OrgScopedStorage` — `:service` is tenant-forbidden write-through). |
-| `:endpoint`       | `:jsonb` (null)   | **Where the running service answers** — `{:host :port}`, written by the pod that started it and cleared on stop (§ Endpoints). The one runtime fact on the desired-state row; nil ≡ not running, or not a listener. |
+
+### `:service-instance`
+
+One row per RUNNING copy (§ Endpoints, § Liveness) — the desired-state
+row says *keep it running*, an instance row says *this pod runs it,
+here, and was alive at `seen-at`*. Written by the pod that starts the
+copy, deleted on every stop path, heartbeat every reconcile tick.
+
+| Field          | Type            | Notes                                                                 |
+|----------------|-----------------|-----------------------------------------------------------------------|
+| `:service-id`  | `:ref :service` | The desired-state row this copy belongs to.                           |
+| `:executor-id` | `:text`         | The pod — its fleet `:executor-id`, `"local"` on a single pod.        |
+| `:host`        | `:text`         | Where the copy answers — the executor-id, loopback on a single pod.   |
+| `:port`        | `:int` (null)   | The port the listener bound (from the handle's `:endpoint` metadata); nil ≡ not a listener (a cron loop still has a row — it heartbeats). |
+| `:started-at`  | `:timestamptz`  |                                                                       |
+| `:seen-at`     | `:timestamptz`  | Heartbeat. Older than `default-stale-after-ms` (45 s, three ticks) ⇒ presumed dead: consumers ignore it, and after ten windows any pod deletes it. |
 
 ### `:restart-policy` enum
 
@@ -261,9 +276,8 @@ Lives in `graphden.services.reconciler`. Diff-driven, idempotent.
                                           router's default for nil-branch rows;
                                           absent only when no router is active)
                  :stopper          (fn []) | nil
-                 :endpoint         {:host :port} (only when the stopper carried one —
-                                                   the row's `:endpoint` mirror, so
-                                                   stop knows to clear it)
+                 :instance-id      :uuid (this copy's `:service-instance` row —
+                                          heartbeat each tick, deleted on stop)
                  :started-at       Instant
                  :start-attempts   Int
                  :start-failed-at  Instant (set only when retries exhausted)}}
@@ -405,15 +419,15 @@ services want that address. The service fn IS the value:
 1. `:http-server` returns its stopper with `{:endpoint {:port p}}`
    metadata — the port actually bound (so `:port 0` reports the
    OS-picked one). The handle's contract (a 0-arg stopper) is unchanged.
-2. The reconciler, on the pod that started the service, completes it
-   with its own dialable host — the fleet `:executor-id` (a pod-FQDN
-   in k8s), loopback on a single pod — and writes `{:host :port}` to
-   the row's `:endpoint`; every stop path clears it (`stop-and-forget!`,
-   the lost-lock stop, `stop-all!` with a ctx at halt / CRaC). A crashed
-   pod never clears — the next holder overwrites, and until then a
-   consumer sees a refused connection, which is the honest answer. For
-   a `:pool` any holder is a fine target; the row keeps the last one to
-   start. A non-listener (a cron loop) carries no endpoint.
+2. The reconciler, on the pod that started the copy, writes a
+   `:service-instance` row — its own dialable host (the fleet
+   `:executor-id`, a pod-FQDN in k8s; loopback on a single pod), the
+   port, and a heartbeat it refreshes every tick — and deletes it on
+   every stop path (`stop-and-forget!`, the lost-lock stop, `stop-all!`
+   with a ctx at halt / CRaC). A `:pool` or `:per-pod` service has one
+   row per copy. A crashed pod never deletes its row: the heartbeat goes
+   stale, consumers stop picking it after one window (45 s), and any pod
+   reaps it after ten (§ Liveness).
 3. A consumer names the producer through a **`:fn-ref` slot** —
    `:service-endpoint :service :orders-service`. `:fn-ref` is the
    identity primitive ([TYPES.md](TYPES.md#structural-types-records)):
@@ -421,9 +435,11 @@ services want that address. The service fn IS the value:
    listener does not start a second one), its free args don't surface,
    and the edge is not a dependency — so two services may name each
    other ([CONSTRAINTS.md](CONSTRAINTS.md#1-no-dependency-cycle)).
-   `graphden.services.endpoint/resolve-endpoint` reads the row for the
-   caller's branch (a nil-branch row — package-seeded — serves every
-   branch), else asks the addon-installed `resolver` seam (on the cloud
+   `graphden.services.endpoint/resolve-endpoint` picks a LIVE listener
+   instance of the fn's enabled row on the caller's branch (a nil-branch
+   row — package-seeded — serves every branch), this pod's own copy
+   first (loopback beats a hop), then the freshest heartbeat; else it
+   asks the addon-installed `resolver` seam (on the cloud
    an `:app-route`'s public origin — service-to-service traffic goes
    through the public domain like any outbound call, SSRF-guarded, no
    internal address to exempt), else throws `:service/not-running`.
@@ -440,6 +456,37 @@ response type-rows that BOTH sides reference — the producer's
 decoded result narrowed to the same shape. One edit moves both sides;
 the type-checker catches a drift at write time. Tutorial:
 [lesson 35](tutorial/35-services-talking-to-services.md).
+
+## Liveness — a copy that died in place
+
+Start-time failures were always caught (port in use, a throw in the
+constructor). A copy that started and THEN died — the listener object
+stopped, the daemon thread ended — used to sit in `running` as alive
+forever. Now a handle may carry two more metadata keys, and the
+reconciler's per-tick pass reads them:
+
+| Key       | Set by                                   | Meaning                                             |
+|-----------|------------------------------------------|-----------------------------------------------------|
+| `:alive?` | `:http-server` (http-kit's listener status), `:future` (thread state) | 0-arg probe: is the copy still running? |
+| `:exit`   | `:future`                                | atom — nil while running, `:done` after a clean return / interrupt, `:failed` after an uncaught throw |
+
+Each `reconcile-once!` pass, before the diff, `check-liveness!` walks
+this pod's running copies: a live one gets its heartbeat; a dead one is
+stopped (lock released, instance row deleted) and then the row's
+`:restart-policy` finally means what it says —
+
+| Policy        | On a copy that died in place                                                  |
+|---------------|-------------------------------------------------------------------------------|
+| `:always`     | restarted in the same pass                                                    |
+| `:on-failure` | restarted only when `:exit` is `:failed`; a clean exit is parked              |
+| `:never`      | parked                                                                        |
+
+*Parked* = an `::exited` placeholder in `running` that keeps the diff
+quiet; toggling the row (`enabled?` off → on) runs it again. A handle
+without `:alive?` (a nil stopper, a fire-and-forget) is trusted as
+running, as before. Stale instance rows of a pod that CRASHED (no pass
+ever ran there) are ignored by consumers after one window and deleted
+by whichever pod ticks next after ten.
 
 ## Packages-based seeding
 
@@ -487,8 +534,9 @@ all loaded packages.
 | Next | `:service-schedule` 1-to-many for cron/interval triggers; UI Services panel (row-actions "Make service" + sidebar "Only services" filter) |
 | Done | Advisory-lock connection-drop reconnect + re-acquire. The lock connection is held behind a reconnecting holder; every reconcile pass runs `advisory-lock/ensure-live!`, and on a reconnect `reassert-lock-ownership!` re-takes each `:singleton` this pod was running (stopping any a sibling stole during the outage). Closes the "two pods double-run one service until the next reconcile" window. |
 | Done | Cross-pod cancel routing for `:fn-execution` — `execution:cancel:<id>` NOTIFY fan-out; see [EXECUTION.md](EXECUTION.md). |
-| Done | Endpoints — the reconciler records `{:host :port}` on the row from the handle's `:endpoint` metadata (`:http-server`), clears it on stop; `:service-endpoint` (web/service) resolves a service fn named through a `:fn-ref` slot to its address, with the addon `resolver` seam for cloud app-routes (§ Endpoints). |
-| Future | Healthcheck-based runtime crash detection (lets `:always` honor "restart on clean exit"); pluggable supervisor strategies |
+| Done | Endpoints — one `:service-instance` row per running copy (host + bound port from the handle's `:endpoint` metadata, heartbeat each tick), deleted on stop; `:service-endpoint` (web/service) resolves a service fn named through a `:fn-ref` slot to a LIVE copy, with the addon `resolver` seam for cloud app-routes (§ Endpoints). |
+| Done | Liveness — handles carry `:alive?` / `:exit`; the per-tick pass restarts a copy that died in place per `:restart-policy` (`:always` any exit, `:on-failure` a throw, `:never` parks), heartbeats live copies and reaps the rows a crashed pod left (§ Liveness). |
+| Future | Pluggable supervisor strategies |
 
 ## Code locations
 

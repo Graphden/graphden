@@ -21,19 +21,23 @@
   @(requiring-resolve 'graphden.services.endpoint/resolver))
 
 
-(deftest service-endpoint-reads-the-recorded-row-test
+(defn- instance!
+  [storage svc-id executor-id host port seen-at]
+  (sp/create-entity storage :service-instance
+                    {:service-id svc-id :executor-id executor-id :host host :port port
+                     :started-at seen-at :seen-at seen-at}))
+
+
+(deftest service-endpoint-reads-a-live-instance-test
   (let [storage (setup/create-branch-versioned-test-storage)
-        f (impls/impl-of :service-endpoint)]
+        f (impls/impl-of :service-endpoint)
+        now (java.time.Instant/now)]
     (try
       (let [svc-fn (setup/create-base-fn! storage "se-listener" :any)
-            other-fn (setup/create-base-fn! storage "se-other" :any)]
-        (sp/create-entity storage :service
-                          {:fn-id (:id svc-fn) :enabled? true :restart-policy :always
-                           :cardinality :per-pod
-                           :endpoint {:host "graphden-2.svc" :port 9001}})
-        (testing "host + port + a joined origin url"
-          (is (= {:host "graphden-2.svc" :port 9001 :url "http://graphden-2.svc:9001"}
-                 (f {:service (:id svc-fn)} {:storage storage}))))
+            other-fn (setup/create-base-fn! storage "se-other" :any)
+            svc (sp/create-entity storage :service
+                                  {:fn-id (:id svc-fn) :enabled? true :restart-policy :always
+                                   :cardinality :per-pod})]
         (testing "a fn with no service row is not running"
           (try
             (f {:service (:id other-fn)} {:storage storage})
@@ -41,16 +45,30 @@
             (catch clojure.lang.ExceptionInfo e
               (is (= :service/not-running (:type (ex-data e))))
               (is (zero? (:service-rows (ex-data e)))))))
-        (testing "a row without a recorded endpoint (not started / not a listener) is not running either"
-          (sp/update-entity storage :service
-                            (:id (first (sp/query-entities storage :service {:fn-id (:id svc-fn)})))
-                            {:endpoint nil})
+        (testing "a row with no live instance is not running either"
           (try
             (f {:service (:id svc-fn)} {:storage storage})
             (is false "should have thrown")
             (catch clojure.lang.ExceptionInfo e
               (is (= :service/not-running (:type (ex-data e))))
-              (is (= 1 (:service-rows (ex-data e))))))))
+              (is (= 1 (:service-rows (ex-data e)))))))
+        (let [remote (instance! storage (:id svc) "graphden-2.svc" "graphden-2.svc" 9001 now)]
+          (testing "a live remote copy → host + port + a joined origin url"
+            (is (= {:host "graphden-2.svc" :port 9001 :url "http://graphden-2.svc:9001"}
+                   (f {:service (:id svc-fn)} {:storage storage}))))
+          (testing "this pod's own copy wins over a remote one"
+            (instance! storage (:id svc) "local" "127.0.0.1" 9001 now)
+            (is (= "http://127.0.0.1:9001" (:url (f {:service (:id svc-fn)} {:storage storage})))))
+          (testing "a stale heartbeat is not a live copy"
+            (doseq [row (sp/query-entities storage :service-instance {:service-id (:id svc)})]
+              (sp/update-entity storage :service-instance (:id row)
+                                {:seen-at (java.time.Instant/.minusMillis now 120000)}))
+            (try
+              (f {:service (:id svc-fn)} {:storage storage})
+              (is false "should have thrown")
+              (catch clojure.lang.ExceptionInfo e
+                (is (= :service/not-running (:type (ex-data e)))))))
+          (sp/delete-entity storage :service-instance (:id remote))))
       (finally (sp/close storage)))))
 
 

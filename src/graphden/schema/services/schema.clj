@@ -244,6 +244,49 @@
   #uuid "7d4c2e91-5a3b-4f68-9c07-2e8b1f6a3d54")
 
 
+;; --- :service-instance — one row per RUNNING copy -------------------------
+;; The desired-state row says "keep this fn running"; an instance row says
+;; "this pod is running it, here, and was alive at `seen-at`". Written by
+;; the pod that started the copy, heartbeat every reconcile tick, deleted on
+;; stop. Replaces the short-lived `:service.endpoint` jsonb (retired below):
+;; a `:pool` / `:per-pod` service has several copies, each with its own row
+;; and its own heartbeat — no shared column, no lost update, and a crashed
+;; pod's row simply goes stale (`seen-at`) instead of lying forever.
+(def ^:private service-instance-entity-uuid
+  #uuid "3b9e6c1d-8f24-4a7b-b5e0-1c6d9f2a7e83")
+
+
+(def ^:private service-instance-service-id-field-uuid
+  #uuid "9a1f4d7c-2e6b-4c58-8d3f-7b0e5a9c1f26")
+
+
+(def ^:private service-instance-executor-id-field-uuid
+  #uuid "5c7d2f9e-1b4a-4e83-9f6c-3d8a0b7e4c15")
+
+
+(def ^:private service-instance-host-field-uuid
+  #uuid "e2b8c4a6-7d1f-4593-a0e7-9c4b2d6f8a31")
+
+
+(def ^:private service-instance-port-field-uuid
+  #uuid "6f3a9d2b-4c8e-4b17-8e5d-2a7f1c9b3e64")
+
+
+(def ^:private service-instance-started-at-field-uuid
+  #uuid "b4d7e1f9-3a2c-4f68-9b1e-5c8d2a6f0e47")
+
+
+(def ^:private service-instance-seen-at-field-uuid
+  #uuid "1e5c8b3f-9d4a-4c72-8f6b-4a2e7d1c9b58")
+
+
+(def default-stale-after-ms
+  "How old an instance's `seen-at` may be before the copy is presumed
+   dead — three reconcile ticks (15 s each). `resolve-endpoint` ignores
+   staler rows; the reconciler deletes rows past ten ticks."
+  45000)
+
+
 ;; =============================================================================
 ;; Schema
 ;; =============================================================================
@@ -291,15 +334,32 @@
                       ;; field-uuid comment above).
                       :org-id {:uuid service-org-id-field-uuid
                                :type :text
-                               :nullable? true}
-                      ;; Where the running service ANSWERS — `{:host :port}`,
-                      ;; written by the reconciler on the pod that started it
-                      ;; (from the `:endpoint` metadata the service fn's
-                      ;; handle carries — `:http-server` sets it), cleared
-                      ;; on stop. The runtime fact next to the desired-state
-                      ;; row; `:service-endpoint` (web/service) reads it so a
-                      ;; consumer fn resolves a service to an address. nil ≡
-                      ;; not running / the service has no listener.
-                      :endpoint {:uuid service-endpoint-field-uuid
-                                 :type :jsonb
-                                 :nullable? true}})))
+                               :nullable? true}})
+      ;; `:endpoint` lived one release (72ad4710) as a jsonb on the service
+      ;; row; superseded by `:service-instance` (one row per running copy).
+      (ds/retire-field :service :endpoint service-endpoint-field-uuid)
+      (ds/add-entity :service-instance service-instance-entity-uuid
+                     {:service-id {:uuid service-instance-service-id-field-uuid
+                                   :type :ref
+                                   :ref-entity :service
+                                   :indexed? true}
+                      ;; The pod running this copy — its fleet `:executor-id`,
+                      ;; or "local" on a single pod. One row per (service, pod).
+                      :executor-id {:uuid service-instance-executor-id-field-uuid
+                                    :type :text}
+                      ;; Where the copy ANSWERS — the host other pods dial
+                      ;; (the executor-id, loopback on a single pod) and the
+                      ;; port the listener bound. Port nil ⇒ not a listener
+                      ;; (a cron loop still has an instance row: it heartbeats).
+                      :host {:uuid service-instance-host-field-uuid
+                             :type :text}
+                      :port {:uuid service-instance-port-field-uuid
+                             :type :int
+                             :nullable? true}
+                      :started-at {:uuid service-instance-started-at-field-uuid
+                                   :type :timestamptz}
+                      ;; Heartbeat — refreshed every reconcile tick by the pod
+                      ;; that holds the copy. Older than `default-stale-after-ms`
+                      ;; ⇒ presumed dead (a crashed pod never deletes its row).
+                      :seen-at {:uuid service-instance-seen-at-field-uuid
+                                :type :timestamptz}})))

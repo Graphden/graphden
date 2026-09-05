@@ -67,13 +67,14 @@
             (is (= :service/not-running (:type (ex-data e)))))))
       (recon/reconcile-once! ctx running)
       (testing "the reconciler recorded where the producer answers"
-        (is (= {:host "127.0.0.1" :port port}
-               (:endpoint (first (sp/query-entities storage :service {:id (:id svc)}))))))
+        (is (= [{:host "127.0.0.1" :port port}]
+               (mapv #(select-keys % [:host :port])
+                     (sp/query-entities storage :service-instance {:service-id (:id svc)})))))
       (testing "the consumer resolves the producer by naming it and gets its JSON"
         (is (= {:orders [1 2 3]} (exec/execute ctx fetch-id {}))))
       (recon/stop-all! running ctx)
-      (testing "after the producer stops, the endpoint is gone and the consumer says so"
-        (is (nil? (:endpoint (first (sp/query-entities storage :service {:id (:id svc)})))))
+      (testing "after the producer stops, the instance is gone and the consumer says so"
+        (is (empty? (sp/query-entities storage :service-instance {:service-id (:id svc)})))
         (try
           (exec/execute ctx fetch-id {})
           (is false "should have thrown")

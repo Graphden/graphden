@@ -77,6 +77,10 @@
   ;; fresh thread (task #6). A platform future captures nil → unrestricted, as
   ;; before.
   (let [conveyed (cr/capture-conveyed-bindings)
+        ;; Exit record for the reconciler's liveness pass: nil while the
+        ;; body runs, `:done` after a clean return, `:failed` after an
+        ;; uncaught throw (interrupt = a stop, recorded as `:done`).
+        exit (atom nil)
         thread (Thread.
                  ^Runnable
                  (fn []
@@ -89,15 +93,23 @@
                      ;; not conveyed, so bind a fresh one here.
                      (with-bindings conveyed
                        (cr/with-fresh-call-cache body))
-                     (catch InterruptedException _ nil)
+                     (reset! exit :done)
+                     (catch InterruptedException _ (reset! exit :done))
                      (catch Exception e
+                       (reset! exit :failed)
                        (log/warn e "future body threw"))))
                  "graphden-future")]
     (Thread/.setDaemon thread true)
     (Thread/.start thread)
-    (fn stopper
-      []
-      (Thread/.interrupt thread))))
+    ;; The stopper carries the daemon's liveness for the service reconciler:
+    ;; `:alive?` (is the thread still running) and `:exit` (how it ended), so
+    ;; `:restart-policy :always` restarts a clean exit and `:on-failure` only
+    ;; a throw — the distinction the policy always promised.
+    (with-meta (fn stopper
+                 []
+                 (Thread/.interrupt thread))
+      {:alive? (fn [] (Thread/.isAlive thread))
+       :exit exit})))
 
 
 ;; =============================================================================

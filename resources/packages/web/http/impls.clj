@@ -269,7 +269,13 @@
                 (binding [epoch/*request-bump-log* (atom [])]
                   (handler req)))))
           (assoc (http-server-tuning) :port port))]
-    (vary-meta stopper assoc :endpoint {:port (or (:local-port (meta stopper)) port)})))
+    ;; `:alive?` — the liveness probe the reconciler runs each tick:
+    ;; http-kit's own status of the listener object (`:running` while it
+    ;; accepts connections). A listener that died in place gets restarted
+    ;; per the service's `:restart-policy` instead of lying as "running".
+    (vary-meta stopper assoc
+               :endpoint {:port (or (:local-port (meta stopper)) port)}
+               :alive? (fn [] (= :running (http-kit/server-status (:server (meta stopper))))))))
 
 
 (defbase http-stop

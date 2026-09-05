@@ -106,6 +106,10 @@ Graphden is a visual functional programming environment where functions and thei
 - `service` — desired-state row "keep THIS fn running". `branch-id` scopes
   it to a per-branch `ExecutionContext` so the same fn can run on dev +
   prod simultaneously. NOT versioned. See [docs/SERVICES.md](docs/SERVICES.md).
+- `service-instance` — one row per RUNNING copy of a service: which pod,
+  where it answers (host + bound port), and a heartbeat. Written/deleted by
+  the reconciler; `:service-endpoint` resolves a service fn to a live copy.
+  NOT versioned. See [docs/SERVICES.md § Endpoints](docs/SERVICES.md).
 - `resource-override` — versioned `path → content` row shadowing a shipped
   frontend asset (the editor's own JS/CSS), served through
   `:read-resource-overridable`; every save rolls the effective `?v=` asset

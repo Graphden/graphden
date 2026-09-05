@@ -1393,89 +1393,213 @@
 
 
 ;; ---------------------------------------------------------------------------
-;; Endpoints — where a started listener answers
+;; Instances — where a copy runs, its heartbeat, and liveness
 ;; ---------------------------------------------------------------------------
 
 (defn- make-listener-fn!
-  "Like `make-trackable-fn!`, but the stopper carries the `:endpoint`
-   metadata a real `:http-server` handle does."
-  [storage suffix port stops]
+  "Like `make-trackable-fn!`, but the stopper carries the `:endpoint` /
+   `:alive?` / `:exit` metadata a real `:http-server` / `:future` handle
+   does. `alive` is an atom the test flips to simulate a copy dying in
+   place; `exit` records how (`:done` / `:failed`)."
+  [storage suffix port calls stops alive exit]
   (let [base-name (str "test-listener-" suffix)
         composed-name (str "my-test-listener-" suffix)
         impl-fn (fn [_args _ctx]
+                  (swap! calls conj {:suffix suffix})
                   (with-meta (fn [] (swap! stops conj {:suffix suffix}))
-                    {:endpoint {:port port}}))]
+                    (cond-> {:alive? (fn [] @alive) :exit exit}
+                      port (assoc :endpoint {:port port}))))]
     (exec/register-base-fn! (keyword base-name) impl-fn)
     (let [base (setup/create-base-fn! storage base-name :any)]
       {:base base
        :composed (setup/create-composed-fn! storage composed-name (:id base))})))
 
 
-(defn- row-endpoint
+(defn- instances-of
   [storage svc-id]
-  (:endpoint (first (sp/query-entities storage :service {:id svc-id}))))
+  (sp/query-entities storage :service-instance {:service-id svc-id}))
 
 
-(deftest reconcile-records-and-clears-the-listener-endpoint-test
+(defn- service-row-with-policy!
+  [storage fn-id policy]
+  (sp/create-entity storage :service
+                    {:fn-id fn-id :enabled? true :restart-policy policy
+                     :cardinality :per-pod}))
+
+
+(deftest reconcile-records-and-deletes-the-instance-row-test
   (let [storage (setup/create-branch-versioned-test-storage)
-        stops (atom [])
-        {composed :composed} (make-listener-fn! storage "ep" 43210 stops)
+        calls (atom []) stops (atom []) alive (atom true) exit (atom nil)
+        {composed :composed} (make-listener-fn! storage "inst" 43210 calls stops alive exit)
         svc (make-service-row! storage (:id composed) true)
         c (setup/default-registry-ctx storage)
         running (atom {})]
     (try
       (recon/reconcile-once! c running)
-      (testing "the row records host+port; loopback on a single pod"
-        (is (= {:host "127.0.0.1" :port 43210} (row-endpoint storage (:id svc))))
-        (is (= {:host "127.0.0.1" :port 43210} (:endpoint (get @running (:id svc))))))
-      (testing "disabling the row stops the service and clears the endpoint"
+      (testing "one instance row: this pod, loopback, the bound port, a fresh heartbeat"
+        (let [[row :as rows] (instances-of storage (:id svc))]
+          (is (= 1 (count rows)))
+          (is (= {:executor-id "local" :host "127.0.0.1" :port 43210}
+                 (select-keys row [:executor-id :host :port])))
+          (is (inst? (:seen-at row)))
+          (is (= (:id row) (:instance-id (get @running (:id svc)))))))
+      (testing "a second pass heartbeats the row"
+        (let [before (:seen-at (first (instances-of storage (:id svc))))]
+          (Thread/sleep 5)
+          (recon/reconcile-once! c running)
+          (let [after (:seen-at (first (instances-of storage (:id svc))))]
+            (is (> (inst-ms after) (inst-ms before))))))
+      (testing "disabling the row stops the copy and deletes its instance"
         (sp/update-entity storage :service (:id svc) {:enabled? false})
         (recon/reconcile-once! c running)
-        (is (= [{:suffix "ep"}] @stops))
-        (is (nil? (row-endpoint storage (:id svc)))))
+        (is (= [{:suffix "inst"}] @stops))
+        (is (empty? (instances-of storage (:id svc)))))
       (finally (sp/close storage)))))
 
 
-(deftest reconcile-endpoint-host-is-the-pod-executor-id-test
+(deftest reconcile-instance-host-is-the-pod-executor-id-test
   (let [storage (setup/create-branch-versioned-test-storage)
-        stops (atom [])
-        {composed :composed} (make-listener-fn! storage "ep-host" 43211 stops)
+        calls (atom []) stops (atom []) alive (atom true) exit (atom nil)
+        {composed :composed} (make-listener-fn! storage "inst-host" 43211 calls stops alive exit)
         svc (make-service-row! storage (:id composed) true)
         c (assoc (setup/default-registry-ctx storage) :executor-id "graphden-1.graphden-headless")
         running (atom {})]
     (try
       (recon/reconcile-once! c running)
-      (is (= {:host "graphden-1.graphden-headless" :port 43211}
-             (row-endpoint storage (:id svc))))
+      (is (= {:executor-id "graphden-1.graphden-headless"
+              :host "graphden-1.graphden-headless" :port 43211}
+             (select-keys (first (instances-of storage (:id svc))) [:executor-id :host :port])))
       (finally (sp/close storage)))))
 
 
-(deftest reconcile-non-listener-records-no-endpoint-test
+(deftest reconcile-non-listener-instance-has-no-port-test
   (let [storage (setup/create-branch-versioned-test-storage)
-        calls (atom [])
-        stops (atom [])
-        {composed :composed} (make-trackable-fn! storage "no-ep" calls stops)
+        calls (atom []) stops (atom [])
+        {composed :composed} (make-trackable-fn! storage "no-port" calls stops)
         svc (make-service-row! storage (:id composed) true)
         c (setup/default-registry-ctx storage)
         running (atom {})]
     (try
       (recon/reconcile-once! c running)
-      (is (nil? (row-endpoint storage (:id svc))))
-      (is (not (contains? (get @running (:id svc)) :endpoint)))
+      (let [[row :as rows] (instances-of storage (:id svc))]
+        (is (= 1 (count rows)) "a cron-shaped copy still has a row — it heartbeats")
+        (is (nil? (:port row))))
       (finally (sp/close storage)))))
 
 
-(deftest stop-all-with-ctx-clears-endpoints-test
+(deftest stop-all-with-ctx-deletes-instances-test
   (let [storage (setup/create-branch-versioned-test-storage)
-        stops (atom [])
-        {composed :composed} (make-listener-fn! storage "ep-drain" 43212 stops)
+        calls (atom []) stops (atom []) alive (atom true) exit (atom nil)
+        {composed :composed} (make-listener-fn! storage "inst-drain" 43212 calls stops alive exit)
         svc (make-service-row! storage (:id composed) true)
         c (setup/default-registry-ctx storage)
         running (atom {})]
     (try
       (recon/reconcile-once! c running)
-      (is (some? (row-endpoint storage (:id svc))))
+      (is (= 1 (count (instances-of storage (:id svc)))))
       (recon/stop-all! running c)
       (is (zero? (count @running)))
-      (is (nil? (row-endpoint storage (:id svc))))
+      (is (empty? (instances-of storage (:id svc))))
+      (finally (sp/close storage)))))
+
+
+(deftest liveness-always-restarts-a-copy-that-died-in-place-test
+  (let [storage (setup/create-branch-versioned-test-storage)
+        calls (atom []) stops (atom []) alive (atom true) exit (atom nil)
+        {composed :composed} (make-listener-fn! storage "live-always" 43213 calls stops alive exit)
+        svc (service-row-with-policy! storage (:id composed) :always)
+        c (setup/default-registry-ctx storage)
+        running (atom {})]
+    (try
+      (recon/reconcile-once! c running)
+      (let [first-instance (:id (first (instances-of storage (:id svc))))]
+        (reset! alive false)
+        (reset! exit :done)
+        (recon/reconcile-once! c running)
+        (testing "the dead copy's row is gone and a fresh copy runs with a new row"
+          (is (= 2 (count @calls)))
+          (let [[row :as rows] (instances-of storage (:id svc))]
+            (is (= 1 (count rows)))
+            (is (not= first-instance (:id row))))
+          (is (map? (get @running (:id svc))))))
+      (finally (sp/close storage)))))
+
+
+(deftest liveness-never-parks-a-copy-that-exited-test
+  (let [storage (setup/create-branch-versioned-test-storage)
+        calls (atom []) stops (atom []) alive (atom true) exit (atom nil)
+        {composed :composed} (make-listener-fn! storage "live-never" 43214 calls stops alive exit)
+        svc (service-row-with-policy! storage (:id composed) :never)
+        c (setup/default-registry-ctx storage)
+        running (atom {})]
+    (try
+      (recon/reconcile-once! c running)
+      (reset! alive false)
+      (reset! exit :done)
+      (recon/reconcile-once! c running)
+      (testing "parked: not restarted, row deleted, placeholder keeps the diff quiet"
+        (is (= 1 (count @calls)))
+        (is (empty? (instances-of storage (:id svc))))
+        (is (not (map? (get @running (:id svc)))))
+        (recon/reconcile-once! c running)
+        (is (= 1 (count @calls)) "a further pass does not restart it"))
+      (testing "toggling the row runs it again"
+        (sp/update-entity storage :service (:id svc) {:enabled? false})
+        (recon/reconcile-once! c running)
+        (is (nil? (get @running (:id svc))))
+        (reset! alive true)
+        (sp/update-entity storage :service (:id svc) {:enabled? true})
+        (recon/reconcile-once! c running)
+        (is (= 2 (count @calls))))
+      (finally (sp/close storage)))))
+
+
+(deftest liveness-on-failure-restarts-only-a-throw-test
+  (let [storage (setup/create-branch-versioned-test-storage)
+        calls (atom []) stops (atom []) alive (atom true) exit (atom nil)
+        {composed :composed} (make-listener-fn! storage "live-onfail" 43215 calls stops alive exit)
+        svc (service-row-with-policy! storage (:id composed) :on-failure)
+        c (setup/default-registry-ctx storage)
+        running (atom {})]
+    (try
+      (recon/reconcile-once! c running)
+      (testing "a clean exit is parked"
+        (reset! alive false)
+        (reset! exit :done)
+        (recon/reconcile-once! c running)
+        (is (= 1 (count @calls)))
+        (is (not (map? (get @running (:id svc))))))
+      (testing "after a toggle, a throw is restarted"
+        (sp/update-entity storage :service (:id svc) {:enabled? false})
+        (recon/reconcile-once! c running)
+        (reset! alive true)
+        (reset! exit nil)
+        (sp/update-entity storage :service (:id svc) {:enabled? true})
+        (recon/reconcile-once! c running)
+        (is (= 2 (count @calls)))
+        (reset! alive false)
+        (reset! exit :failed)
+        (recon/reconcile-once! c running)
+        (is (= 3 (count @calls)))
+        (is (map? (get @running (:id svc)))))
+      (finally (sp/close storage)))))
+
+
+(deftest reconcile-reaps-instances-a-crashed-pod-left-test
+  (let [storage (setup/create-branch-versioned-test-storage)
+        calls (atom []) stops (atom [])
+        {composed :composed} (make-trackable-fn! storage "reap" calls stops)
+        svc (make-service-row! storage (:id composed) true)
+        c (setup/default-registry-ctx storage)
+        running (atom {})
+        long-ago (java.time.Instant/.minusMillis (java.time.Instant/now)
+                                                 (* 20 svcs/default-stale-after-ms))
+        ghost (sp/create-entity storage :service-instance
+                                {:service-id (:id svc) :executor-id "pod-gone"
+                                 :host "pod-gone" :port 9999
+                                 :started-at long-ago :seen-at long-ago})]
+    (try
+      (recon/reconcile-once! c running)
+      (is (nil? (sp/read-entity storage :service-instance (:id ghost))))
+      (is (= 1 (count (instances-of storage (:id svc)))) "only this pod's live row remains")
       (finally (sp/close storage)))))

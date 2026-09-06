@@ -47,7 +47,11 @@ substrate instead of surrounding machinery:
 - **Hot-reload is native.** Edit a fn and the compiled registry
   delta-recompiles the affected closures — no redeploy.
 - **Multi-tenant by construction.** The org is the isolation boundary,
-  enforced in storage (RLS) and in the executor shard.
+  enforced in storage (RLS) and in the executor shard. The open core ships
+  the *seams* for this; the tenant-isolation *policy* that fills them is an
+  optional addon (`graphden-tenancy`, proprietary — see
+  [TENANCY_SEAM.md](docs/TENANCY_SEAM.md)). Without it a self-hosted
+  instance is single-org.
 
 **Why now:** free-form text is a poor target for *machine-authored*
 software — a model easily emits structurally- or semantically-invalid

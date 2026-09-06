@@ -94,10 +94,18 @@ function makeRowExpander(resultHostEl) {
 }
 
 
-// The "Secret flows" chip's state, remembered for the page's life: an
-// auditor stepping through fns keeps the narrowed view instead of
-// re-clicking the chip on every card.
-let historySecretsOnly = false;
+// The "Secret flows" chip's state, remembered for the tab's life
+// (sessionStorage — survives a reload and a hash navigation, not a new
+// tab): an auditor stepping through fns keeps the narrowed view instead
+// of re-clicking the chip on every card. The accessor tolerates a
+// blocked storage (private window, thumbnail capture).
+const HISTORY_SECRETS_KEY = 'gd-history-secrets-only';
+function historySecretsOnly() {
+  try { return sessionStorage.getItem(HISTORY_SECRETS_KEY) === '1'; } catch (_) { return false; }
+}
+function setHistorySecretsOnly(on) {
+  try { sessionStorage.setItem(HISTORY_SECRETS_KEY, on ? '1' : '0'); } catch (_) {}
+}
 
 
 // Post-swap action wiring — both selectors point at markers the
@@ -154,7 +162,7 @@ function bindHistoryActions(panel, fnEntity, resultHostEl) {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const secrets = btn.getAttribute('data-secrets') !== '1';
-      historySecretsOnly = secrets;
+      setHistorySecretsOnly(secrets);
       const fresh = await buildHistoryPanel(fnEntity, resultHostEl, { secrets });
       panel.replaceWith(fresh);
     });
@@ -169,7 +177,7 @@ function bindHistoryActions(panel, fnEntity, resultHostEl) {
 async function buildHistoryPanel(fnEntity, resultHostEl, opts) {
   const wrap = document.createElement('div');
   wrap.className = 'execute-history-host-wrap';
-  const secrets = opts?.secrets ?? historySecretsOnly;
+  const secrets = opts?.secrets ?? historySecretsOnly();
   try {
     const r = await authFetch('/partials/execute-history?fn-id='
                               + encodeURIComponent(fnEntity.id)

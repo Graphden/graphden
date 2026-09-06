@@ -198,6 +198,31 @@
           primary)))))
 
 
+(defn- effective-return-type
+  "The registered `:return` of `ref-fn-id` — or, when that reads `:any`
+   and the fn is composed, the nearest ancestor's non-`:any` registered
+   return (BFS over `:parent-ids`). A composed fn-def without its own
+   `:return-type` returns whatever its parent returns; the registry's
+   seed records only the OWN declaration and says `:any` until the
+   type-check sweep writes the inherited type back. Deciding \"produces
+   a callable\" from that seed compiled the ref as a HOF wrap — a
+   `_router` extension answered a Ring request with a FUNCTION (the
+   perf fixture without the sweep, 2026-09-06; an editor-authored fn
+   between its write and its post-write check is the same window)."
+  [ref-fn-id lookups]
+  (let [fn-map (:fn-map lookups)]
+    (loop [queue [ref-fn-id] seen #{}]
+      (when-let [fid (first queue)]
+        (if (contains? seen fid)
+          (recur (subvec queue 1) seen)
+          (let [row (get fn-map fid)
+                ret (:return (@rich-type-of-id-or-stale-name-fn fid (:name row)))]
+            (if (and (some? ret) (not= :any ret))
+              ret
+              (recur (into (subvec queue 1) (:parent-ids row))
+                     (conj seen fid)))))))))
+
+
 (defn- ref-produces-callable?
   "True iff the bound ref-fn's `:return-type` is itself a fn-type —
    i.e. evaluating the fn-graph produces a callable VALUE rather than
@@ -206,13 +231,12 @@
    callable) instead of `hof-wrap`'ping (which would double-wrap).
 
    Decision is keyed on the registered return-type via the rich-types
-   registry — purely type-driven, never on fn name. Any fn-def whose
-   computed `:return` is a `[:fn …]` type takes this branch."
+   registry — purely type-driven, never on fn name; an undeclared
+   return inherits along the parent chain (`effective-return-type`).
+   Any fn-def whose computed `:return` is a `[:fn …]` type takes this
+   branch."
   [ref-fn-id lookups]
-  (when-let [info (@rich-type-of-id-or-stale-name-fn
-                   ref-fn-id
-                   (:name (get (:fn-map lookups) ref-fn-id)))]
-    (types/fn-type? (:return info))))
+  (types/fn-type? (effective-return-type ref-fn-id lookups)))
 
 
 (defn- lazy-seq-arg-names

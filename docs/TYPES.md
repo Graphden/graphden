@@ -1311,7 +1311,13 @@ ref-binding (`compile/bindings.clj` consults the bound fn's
 `:return-type` from the rich-types registry — when it's itself
 a fn-type, the fn-graph PRODUCES a callable so `make-ref-entry`
 thunks instead of `hof-wrap`-ping). No `:hof-wrap` slot
-annotation; the dispatch is type-derived.
+annotation; the dispatch is type-derived. The registry's seed
+records only a fn-def's OWN declaration, so a composed fn-def
+without one reads `:any` until the type-check sweep writes the
+inherited type back; `effective-return-type` therefore walks the
+parent chain to the nearest non-`:any` return before deciding —
+an extension of `:ring-handler` produces a callable whether or
+not the sweep has run (`router_without_sweep_test`).
 
 **`record ↔ :jsonb` unification.** `subtype?` already accepted
 records as ⊆ `:jsonb` (records are jsonb-shaped on the wire);

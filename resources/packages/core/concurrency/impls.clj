@@ -270,14 +270,23 @@
 
 
 (defbase with-heartbeat-fn
-  "Run `body` while a daemon thread calls `beat` every `every-ms`;
-   the beat thread is interrupted when the body ends. The beat runs
-   under the spawning thread's conveyed bindings (effect gate, org,
-   the execution being traced), like `:future`'s body."
+  "Run `body` while a daemon thread calls `beat` every `every-ms`; no
+   beat lands after the body ends. The beat runs under the spawning
+   thread's conveyed bindings (effect gate, org, the execution being
+   traced), like `:future`'s body.
+
+   Stopping is a flag + interrupt + bounded join, not the interrupt
+   alone: an interrupt only wakes the sleep, so a beat already past it
+   fired AFTER the body had returned (the lease of a message the
+   consumer had just acked was extended once more; a flaky
+   `no beat after the body returned` on a loaded CI host). The flag is
+   read after every sleep, and the join waits out a beat in flight —
+   capped, so a beat stuck in I/O cannot hold the caller."
   [body beat every-ms]
   (cr/record-effect! :process)
   (let [conveyed (cr/capture-conveyed-bindings)
         period (long every-ms)
+        stop? (volatile! false)
         thread (Thread.
                  ^Runnable
                  (fn []
@@ -285,10 +294,11 @@
                      (try
                        (loop []
                          (Thread/sleep period)
-                         (try (beat)
-                              (catch InterruptedException e (throw e))
-                              (catch Exception e (log/warn e "heartbeat beat threw")))
-                         (recur))
+                         (when-not @stop?
+                           (try (beat)
+                                (catch InterruptedException e (throw e))
+                                (catch Exception e (log/warn e "heartbeat beat threw")))
+                           (recur)))
                        (catch InterruptedException _ nil))))
                  "graphden-heartbeat")]
     (Thread/.setDaemon thread true)
@@ -296,7 +306,9 @@
     (try
       (body)
       (finally
-        (Thread/.interrupt thread)))))
+        (vreset! stop? true)
+        (Thread/.interrupt thread)
+        (Thread/.join thread 5000)))))
 
 
 (def impls

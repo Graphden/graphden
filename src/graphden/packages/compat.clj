@@ -25,16 +25,25 @@
    | `:arg-unbound`         | a composed fn-def's binding is gone → a new free arg   |
    | `:arg-renamed`         | an `{:as …}` public name changed                       |
    | `:return-widened`      | the return type is not a subtype of the old one        |
+   | `:effect-added`        | a base-fn declares an effect it did not before         |
    | `:type-changed`        | a refine / list / union / … type-row's shape differs   |
+   | `:dependency-incompatible` | a package dependency left its previous caret range (`incompatible-dependency-bumps`) |
 
    Private fn-defs (`_`-prefixed) are implementation and never count.
    Additions — a new fn-def, a new OPTIONAL slot, a binding that fills a
    formerly free arg, a WIDER arg type, a NARROWER return type — are
    compatible. Subtyping is `types/subtype?`; a type the checker cannot
    compare (an alias the registry does not know) falls back to
-   structural equality, which errs on the side of reporting."
+   structural equality, which errs on the side of reporting.
+
+   What this cannot see: a change in a fn-def OUTSIDE the bundle (another
+   package's, the platform's) that flows into a composed fn-def's free
+   args. The bundle records which PACKAGE versions those come from, and a
+   dependency that jumped outside its previous caret range is reported
+   (`incompatible-dependency-bumps`); a platform upgrade is not."
   (:require
     [clojure.string :as str]
+    [graphden.packages.semver :as semver]
     [graphden.types.core :as types]))
 
 
@@ -93,7 +102,8 @@
     (contains? d :return-type)
     {:role :base-fn
      :slots (declared-slots (:args d))
-     :return (:return-type d)}
+     :return (:return-type d)
+     :effects (set (:effects d))}
 
     (contains? d :type)
     {:role :record
@@ -152,6 +162,10 @@
       (when (and (= :base-fn (:role old))
                  (not (subtype?* (:return new) (:return old))))
         [(change :return-widened fn-name :old (:return old) :new (:return new))])
+      (when (and (= :base-fn (:role old))
+                 (seq (remove (:effects old) (:effects new))))
+        [(change :effect-added fn-name
+                 :old (vec (sort (:effects old))) :new (vec (sort (:effects new))))])
       (when (and (= :type (:role old)) (not= (:shape old) (:shape new)))
         [(change :type-changed fn-name :old (:shape old) :new (:shape new))]))))
 
@@ -176,3 +190,21 @@
                   (fn-changes (:name d) (signature d) (signature n))
                   [(change :fn-removed (:name d))]))
               (sort-by (comp str first) old)))))
+
+
+(defn incompatible-dependency-bumps
+  "Package dependencies (`[{:name … :version …} …]`, a bundle's
+   `:package-dependencies`) whose new version is outside the old one's
+   caret range — the consumer's own pin on the upstream may no longer
+   resolve, and the upstream may have broken what this bundle re-exports.
+   A dependency added or dropped is not a break by itself."
+  [old-deps new-deps]
+  (let [version-of (fn [deps] (into {} (map (juxt #(str (:name %)) #(str (:version %)))) deps))
+        old (version-of old-deps)
+        new (version-of new-deps)]
+    (vec
+      (for [[n old-v] (sort-by key old)
+            :let [new-v (get new n)]
+            :when (and new-v (not= old-v new-v)
+                       (not (semver/satisfies-constraint? new-v (str "^" old-v))))]
+        {:kind :dependency-incompatible :name n :old old-v :new new-v}))))

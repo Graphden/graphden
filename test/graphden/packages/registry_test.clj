@@ -718,14 +718,40 @@
                                  :headers {"content-type" "application/x-www-form-urlencoded"}})]
       (is (= 200 (:status resp)))
       (is (re-find #"data-packages-panel" (:body resp)) "wrapped in the panel root for the swap")
-      (is (re-find #"Publishing paneltest\.pub@1\.0\.0" (:body resp)) "confirmation notice")
+      (is (re-find #"packages-fork-ok" (:body resp)))
+      (is (re-find #"Published paneltest\.pub@1\.0\.0 — \d+ fn" (:body resp))
+          "the notice reads the publish OUTCOME, not the form")
       (let [rows (sp/query-entities (storage) :package-version {:name "paneltest.pub"})]
         (is (= 1 (count rows)) "exactly one :package-version row written")
         ;; The non-empty :fns is the real assertion: export-namespace's
         ;; full-graph read must run in the handler ctx (via :do), NOT lazily
         ;; inside the hiccup render — the latter exports 0 fns.
         (is (seq (:fns (first rows)))
-            "the published bundle carries the exported fns (export ran in the :do step, not empty)")))))
+            "the published bundle carries the exported fns (export ran in the :do step, not empty)"))))
+  (testing "a refusal is shown as one — the same version again"
+    (let [resp (setup/via-graph *bootstrap* :_pkg-publish-panel-handler
+                                {:request-method :post
+                                 :body "name=paneltest.pub&version=1.0.0&ns-root=app.contact-demo"
+                                 :headers {"content-type" "application/x-www-form-urlencoded"}})]
+      (is (= 200 (:status resp)))
+      (is (re-find #"packages-fork-err" (:body resp)))
+      (is (re-find #"paneltest\.pub@1\.0\.0 already exists" (:body resp)))
+      (is (= 1 (count (sp/query-entities (storage) :package-version {:name "paneltest.pub"})))
+          "still one row — the notice did not re-run the publish")))
+  (testing "a breaking change is spelled out"
+    ;; 1.1.0 of the same package from a namespace that has none of 1.0.0's
+    ;; fns — every public fn-def of 1.0.0 is gone.
+    (sp/create-entity (storage) :package-version
+                      {:name "paneltest.brk" :version "1.0.0" :ns-root "brk"
+                       :fns [{:name :brk-greeting :namespace "brk" :parent :const :args {:value "hi"}}]
+                       :dependencies [] :package-dependencies [] :content-hash "brk1"})
+    (let [resp (setup/via-graph *bootstrap* :_pkg-publish-panel-handler
+                                {:request-method :post
+                                 :body "name=paneltest.brk&version=1.1.0&ns-root=app.contact-demo"
+                                 :headers {"content-type" "application/x-www-form-urlencoded"}})]
+      (is (re-find #"packages-fork-err" (:body resp)))
+      (is (re-find #"paneltest\.brk@1\.1\.0 breaks 1\.0\.0: fn-removed brk-greeting" (:body resp)))
+      (is (empty? (sp/query-entities (storage) :package-version {:name "paneltest.brk" :version "1.1.0"}))))))
 
 
 (deftest recursive-install-pulls-package-dependencies

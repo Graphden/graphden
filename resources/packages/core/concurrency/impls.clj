@@ -282,6 +282,14 @@
   (cr/record-effect! :process)
   (let [stoppers (mapv force triggers)
         child-meta (fn [k] (keep #(get (meta %) k) stoppers))]
+    ;; The same trigger listed twice is ONE started loop (the executor
+    ;; runs a list item once per top-level call and hands back the same
+    ;; stopper), not two — silently folding it would hide a mis-edit, so
+    ;; refuse it like a duplicate list position.
+    (when (not= (count stoppers) (count (into #{} (map #(System/identityHashCode %)) stoppers)))
+      (doseq [stop stoppers] (try (stop) (catch Exception _ nil)))
+      (throw (ex-info "`:start-all` lists the same trigger twice — a trigger starts once; derive a second fn-def to run it twice"
+                      {:type :start-all/duplicate-trigger :count (count stoppers)})))
     (with-meta (fn stop-all
                  []
                  (doseq [stop stoppers]

@@ -265,15 +265,22 @@ as `:namespace` on each fn-def, reconstructed on install).
   `publish-package` diffs the bundle against the newest published version
   BELOW the candidate (`graphden.packages.compat/breaking-changes` — removed
   public fn-defs, removed / narrowed / newly-required args, dropped bindings,
-  changed renames or parents, widened returns, reshaped type-rows; `_`-private
-  fn-defs never count). A break is refused with
+  changed renames or parents, widened returns, added base-fn effects,
+  reshaped type-rows; `_`-private fn-defs never count) and diffs the two
+  bundles' `:package-dependencies` (`incompatible-dependency-bumps` — a
+  dependency that left its previous caret range is `:dependency-incompatible`,
+  the one upstream change the fn-def diff cannot see; a platform upgrade
+  stays invisible to it). A break is refused with
   `{:ok false :reason "breaking-change" :previous "1.1.0" :changes [{:kind :arg-removed
   :fn :shape :arg :nick :old :text} …]}` unless the candidate leaves the previous
   version's caret range (`^1.1.0` → a major bump; below 1.0 a minor bump) — the
   range a `^` / `~>` consumer auto-advances into. Additions, optional slots,
   wider args and narrower returns are compatible. The guard is graph
   (`:_pub-breaking?` in `registry/registry/fns.edn`) over two pure base-fns,
-  `:breaking-changes-between` and `:semver-compatible?`.
+  `:breaking-changes-between`, `:incompatible-dependency-bumps` and
+  `:semver-compatible?`. The editor's panel publish shows the same
+  outcome — the notice is rendered from the envelope (`Published …`,
+  `already exists`, `breaks 1.1.0: fn-removed wave`), not from the form.
 - **Making a version available in cloud (new — Task 3)**: a publish (or an
   admin "release" step) **materialises** the bundle once into
   `public` org under `<ns-root>@<version>`, syncing its fn-defs with

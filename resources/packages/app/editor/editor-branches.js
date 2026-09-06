@@ -1231,6 +1231,56 @@ async function mergeBranchInto(sourceName, targetName, conflictResolutions, targ
 }
 
 
+// Merge `sources` into the target one after another — a merge plan's
+// steps and then the branch itself. One confirm up front; each step is a
+// plain POST. A severed response (the target restarting its services
+// after committing — merging into main) is waited out and the run goes
+// on; a refusal stops the run and re-enters `mergeBranchInto` for that
+// step, whose modal (conflicts, a nested plan) then shows. When every
+// step landed the page reloads onto the new resolved view.
+async function mergePlanInOrder(sources, targetName, targetRef) {
+  targetRef = targetRef || targetName;
+  if (!confirm('Merge ' + sources.map((s) => '"' + s + '"').join(', ')
+               + ' — in this order — INTO "' + targetName + '"?'
+               + (targetName === DEFAULT_BRANCH
+                  ? ' This affects main — every viewer will see these changes.'
+                  : ''))) {
+    return;
+  }
+  const errBox = document.getElementById('branch-popover-error');
+  const setError = (msg) => {
+    if (errBox) { errBox.textContent = msg; errBox.classList.remove('hidden'); }
+  };
+  for (const source of sources) {
+    let resp;
+    try {
+      resp = await window.authFetch(
+        API.api_branches_ref_merge(targetRef),
+        { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source }) });
+    } catch (_netErr) {
+      // Committed; the target is restarting. Wait it out, then continue.
+      setError('"' + source + '" merged — ' + targetName + ' is restarting…');
+      if (!(await waitForServerBack(30000))) {
+        setError('"' + source + '" merged, but ' + targetName + ' has not come back yet — reload in a moment.');
+        return;
+      }
+      continue;
+    }
+    if (resp.status === 401) { setError('Sign in to merge'); return; }
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok || body?.ok === false) {
+      // This step needs a decision (conflicts, its own plan) or failed —
+      // the ordinary path shows the right modal for it.
+      await mergeBranchInto(source, targetName, [], targetRef);
+      return;
+    }
+  }
+  closeBranchPopover();
+  location.reload();
+}
+
+
 // Poll /health until it answers OK or the deadline passes. Used after a
 // merge whose response was severed by the target's post-commit service
 // restart — the merge already committed; this just waits out the rebind.
@@ -1421,6 +1471,19 @@ function showMergePlanModal(body, sourceName, targetName, targetRef) {
 
   const actions = document.createElement('div');
   actions.className = 'merge-conflicts-actions';
+  // The whole plan in one go: every step in order, then the source itself.
+  // Stops at the first step that does not land and hands THAT step to the
+  // ordinary merge path, so its conflicts / its own plan get their modal.
+  const all = document.createElement('button');
+  all.type = 'button';
+  all.id = 'merge-plan-all';
+  all.className = 'branch-popover-btn merge-plan-all-btn';
+  all.textContent = 'Merge all in order (' + (body.plan.length + 1) + ' merges)';
+  all.addEventListener('click', () => {
+    closeConflictsModal();
+    mergePlanInOrder(body.plan.map((s) => s.name).concat([sourceName]), targetName, targetRef);
+  });
+  actions.appendChild(all);
   const cancel = document.createElement('button');
   cancel.type = 'button';
   cancel.id = 'merge-plan-cancel';

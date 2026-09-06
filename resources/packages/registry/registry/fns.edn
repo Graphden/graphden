@@ -407,11 +407,33 @@
    :parent :get
    :args {:coll :_pub-prev-row :key {:value :fns} :default {:value []}}}
 
-  {:name :_pub-changes
-   :description "The breaking changes from the previous version's bundle to this one — `[]` when compatible (or when there is no previous version)."
+  {:name :_pub-fn-changes
+   :description "The breaking changes from the previous version's fn-defs to this one's."
    :parent :breaking-changes-between
    :args {:old-fns {:ref :_pub-prev-fns :type [:list :keyword-map]}
           :new-fns :_pub-fns}}
+
+  ;; A PACKAGE dependency that jumped outside its previous caret range is
+  ;; the one upstream change the bundle diff cannot see (the upstream's
+  ;; fn-defs are not in this bundle) — it is reported as
+  ;; `:dependency-incompatible`.
+  {:name :_pub-prev-deps
+   :parent :get
+   :args {:coll :_pub-prev-row :key {:value :package-dependencies} :default {:value []}}}
+
+  {:name :_pub-new-deps
+   :parent :get
+   :args {:coll {:as :bundle :type :package-bundle-shape} :key {:value :package-dependencies} :default {:value []}}}
+
+  {:name :_pub-dep-changes
+   :parent :incompatible-dependency-bumps
+   :args {:old-deps {:ref :_pub-prev-deps :type [:list :package-dependency-shape]}
+          :new-deps :_pub-new-deps}}
+
+  {:name :_pub-changes
+   :description "Every breaking change from the previous version to this one — fn-def contract changes, then incompatible package-dependency bumps. `[]` when compatible (or when there is no previous version)."
+   :parent :vec
+   :args {:coll {:parent :concat :args {:colls [:_pub-fn-changes :_pub-dep-changes]}}}}
 
   {:name :_pub-prev-some?
    :parent :some?
@@ -469,9 +491,15 @@
    :effects #{:db}}
 
   {:name :breaking-changes-between
-   :description "Consumer-visible incompatibilities from one bundle's fn-defs to another's — removed public fn-defs, removed / narrowed / newly-required args, unbound bindings, changed renames or parents, widened returns, reshaped type-rows (`graphden.packages.compat`). `[]` = a compatible successor. Pure."
+   :description "Consumer-visible incompatibilities from one bundle's fn-defs to another's — removed public fn-defs, removed / narrowed / newly-required args, unbound bindings, changed renames or parents, widened returns, added base-fn effects, reshaped type-rows (`graphden.packages.compat`). `[]` = a compatible successor. Pure."
    :args {:old-fns {:type [:list :keyword-map] :description "The previous version's fn-defs."}
           :new-fns {:type [:list :keyword-map] :description "The candidate version's fn-defs."}}
+   :return-type [:list :keyword-map]}
+
+  {:name :incompatible-dependency-bumps
+   :description "Package dependencies (`{:name :version}` lists, a bundle's `:package-dependencies`) whose new version left the old one's caret range — `[{:kind :dependency-incompatible :name … :old … :new …}]`; a dependency added or dropped is not a break. Pure."
+   :args {:old-deps {:type [:list :package-dependency-shape] :description "The previous version's package dependencies."}
+          :new-deps {:type [:list :package-dependency-shape] :description "The candidate version's package dependencies."}}
    :return-type [:list :keyword-map]}
 
   {:name :semver-compatible?
@@ -2375,21 +2403,72 @@
           ;; normalise to public in the apply core). Pinning also keeps the
           ;; free arg from leaking into the panel's handler chain.
           :pkg-public {:value false}}}
-  ;; The notice reads the FORM's name+version, NOT the effectful publish
-  ;; result: publish-package has :db/:time effects so it is NOT memoised —
-  ;; referencing its result from the notice too would run the publish a SECOND
-  ;; time and report `version-exists` against its own first write. So `:do`
-  ;; runs the publish exactly once; the notice + the browse list (now showing
-  ;; the new version) are the confirmation.
-  {:name :_pkg-publish-notice-text
+  ;; The notice reads the publish OUTCOME (the `outcome` lambda-param of
+  ;; `:_pkg-publish-outcome-panel`) — `{:ok true …}` or one of the three
+  ;; refusals `:publish-package` answers with (`empty-bundle`,
+  ;; `version-exists`, `breaking-change` with its `:changes`).
+  {:name :_pkg-pub-outcome-get
+   :parent :get
+   :args {:coll {:as :outcome :type :keyword-map} :default nil}}
+  {:name :_pkg-pub-ok?
+   :parent :_pkg-pub-outcome-get :args {:key {:value :ok}}}
+  {:name :_pkg-pub-reason
+   :parent :_pkg-pub-outcome-get :args {:key {:value :reason}}}
+  {:name :_pkg-pub-fn-count
+   :parent :_pkg-pub-outcome-get :args {:key {:value :fn-count}}}
+  {:name :_pkg-pub-previous
+   :parent :_pkg-pub-outcome-get :args {:key {:value :previous}}}
+  {:name :_pkg-pub-changes
+   :parent :vec
+   :args {:coll {:parent :get :args {:coll {:as :outcome :type :keyword-map}
+                                     :key {:value :changes} :default {:value []}}}}}
+  {:name :_pkg-pub-name-version
+   :parent :str
+   :args {:parts [:_pkg-form-name {:value "@"} :_pkg-form-version]}}
+  ;; One change → "arg-removed shape.nick" / "fn-removed wave".
+  {:name :_pkg-pub-change-arg
+   :parent :get :args {:coll {:as :item} :key {:value :arg} :default nil}}
+  {:name :_pkg-pub-change-text
+   :parent :str
+   :args {:parts [{:parent :name :args {:value {:parent :get :args {:coll {:as :item} :key {:value :kind} :default {:value :change}}}}}
+                  {:value " "}
+                  {:parent :name :args {:value {:parent :get :args {:coll {:as :item} :key {:value :fn} :default {:value :?}}}}}
+                  {:parent :if
+                   :args {:test {:parent :nil? :args {:value :_pkg-pub-change-arg}}
+                          :then {:value ""}
+                          :else {:parent :str :args {:parts [{:value "."} {:parent :name :args {:value :_pkg-pub-change-arg}}]}}}}]}}
+  {:name :_pkg-pub-changes-text
    :parent :str-join
-   :args {:coll [{:value "Publishing "} :_pkg-form-name {:value "@"} :_pkg-form-version
-                 {:value " — if the namespace has fns, the new version appears in the browse list below."}]
-          :separator {:value ""}}}
+   :args {:coll {:parent :map :args {:func :_pkg-pub-change-text :coll :_pkg-pub-changes}}
+          :separator {:value ", "}}}
+  {:name :_pkg-pub-reason-is?
+   :description "HOF-free reason test — bind `:b` to the reason string."
+   :parent :equal?
+   :args {:a :_pkg-pub-reason}}
+  {:name :_pkg-publish-notice-text
+   :parent :cond
+   :args {:clauses [:_pkg-pub-ok?
+                    {:parent :str :args {:parts [{:value "Published "} :_pkg-pub-name-version {:value " — "}
+                                                 :_pkg-pub-fn-count {:value " fn(s); it is in the browse list below."}]}}
+                    {:parent :_pkg-pub-reason-is? :args {:b {:value "version-exists"}}}
+                    {:parent :str :args {:parts [:_pkg-pub-name-version {:value " already exists — versions are immutable; publish under a new version."}]}}
+                    {:parent :_pkg-pub-reason-is? :args {:b {:value "breaking-change"}}}
+                    {:parent :str :args {:parts [:_pkg-pub-name-version {:value " breaks "} :_pkg-pub-previous {:value ": "}
+                                                 :_pkg-pub-changes-text
+                                                 {:value ". Nothing was written — bump the major (or restore the contract) and publish again."}]}}
+                    {:parent :_pkg-pub-reason-is? :args {:b {:value "empty-bundle"}}}
+                    {:parent :str :args {:parts [{:value "Nothing to publish — the namespace of "} :_pkg-pub-name-version {:value " has no fns."}]}}
+                    {:value true}
+                    {:parent :str :args {:parts [{:value "Publish of "} :_pkg-pub-name-version {:value " failed: "} :_pkg-pub-reason]}}]}}
+  {:name :_pkg-publish-notice-class
+   :parent :if
+   :args {:test :_pkg-pub-ok?
+          :then {:value "packages-fork-note packages-fork-ok"}
+          :else {:value "packages-fork-note packages-fork-err"}}}
   {:name :_pkg-publish-notice
    :parent :hiccup
    :args {:tag {:value "div"}
-          :attrs {:value {:class "packages-fork-note packages-fork-ok"}}
+          :attrs {:parent :assoc-empty :args {:key {:value :class} :value :_pkg-publish-notice-class}}
           :children [:_pkg-publish-notice-text]}}
   ;; Stripped-secrets warning — the PUBLISHER's half of the "never
   ;; silently" contract. Same pure row re-read pattern as the install
@@ -2432,14 +2511,20 @@
           :attrs {:value {:data-packages-panel "1"}}
           :children [:_pkg-publish-notice :_pkg-pub-secrets-notice-maybe
                      :_pkg-panel-body :_pkg-avail-details :_pkg-publish-details]}}
-  {:name :_pkg-publish-panel-html
+  ;; The panel is a 1-arg CALLEE over the publish OUTCOME: `:call` runs the
+  ;; export+publish ONCE (as its `:arg`, in the handler ctx — the full-graph
+  ;; read in export-namespace returns empty when forced lazily from INSIDE
+  ;; the hiccup render) and hands the envelope to the render under the
+  ;; `outcome` lambda-param, so the notice can say what happened without
+  ;; re-referencing the effectful publish (which would run it a second
+  ;; time and report `version-exists` against its own first write).
+  ;; `request` stays a closure capture.
+  {:name :_pkg-publish-outcome-panel
+   :lambda-params [:outcome]
+   :description "The refreshed panel for one publish outcome (`{:ok …}` / `{:ok false :reason …}`) — the notice reads the envelope; the rest of the panel re-reads storage."
    :parent :render-hiccup :args {:hiccup :_pkg-publish-panel-root}}
-  ;; Force export+publish as an explicit FIRST `:do` step, THEN render — the
-  ;; full-graph read in export-namespace returns empty when forced lazily from
-  ;; INSIDE the hiccup render, but works from the direct handler ctx (same
-  ;; shape as install/update's `:do [mutate, render]`).
   {:name :_pkg-publish-then-panel
-   :parent :do :args {:steps [:_pkg-publish-result :_pkg-publish-panel-html]}}
+   :parent :call :args {:func :_pkg-publish-outcome-panel :arg :_pkg-publish-result}}
   {:name :_pkg-publish-panel-handler
    :lambda-params [:request]
    :description "Ring handler for POST /api/packages/panel-publish — exports + publishes the named namespace, returns the refreshed Packages panel (new version now in browse) as text/html."

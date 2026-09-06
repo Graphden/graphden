@@ -482,6 +482,15 @@
       (stop)
       (Thread/sleep 100)
       (is (false? ((:alive? (meta stop)))) "the one stopper interrupted the survivor")))
+  (testing "the same trigger listed twice is refused, and the started copies are stopped"
+    (let [gate (promise)
+          stop ((impls/impl-of :future) {:body (fn [] @gate)} nil)
+          ex (try ((impls/impl-of :start-all) {:triggers [(delay stop) (delay stop)]} nil)
+                  nil
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (is (= :start-all/duplicate-trigger (:type (ex-data ex))))
+      (Thread/sleep 100)
+      (is (false? ((:alive? (meta stop)))) "the duplicate's loop was interrupted, not leaked")))
   (testing "an empty trigger list is a no-op service: not alive, no exit"
     (let [stop ((impls/impl-of :start-all) {:triggers []} nil)]
       (is (false? ((:alive? (meta stop)))))
@@ -500,4 +509,7 @@
       (is (= {:as :every-ms} (get-in (by-name :_interval-sleep) [:args :ms]))
           "the period is public under :every-ms")
       (is (contains? (set (:effects (get (:base-fn-defs pkg) :start-all))) :process)
-          ":start-all declares :process — a trigger list is a service"))))
+          ":start-all declares :process — a trigger list is a service")
+      (is (= :future (:parent (by-name :interval-now))))
+      (is (= [:_fire-target :_interval-loop] (get-in (by-name :_interval-now-body) [:args :steps]))
+          ":interval-now fires once at start, then runs the same loop"))))

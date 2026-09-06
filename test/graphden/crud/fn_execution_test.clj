@@ -763,7 +763,11 @@
         (is (= 41 (:result r)))
         (is (not= (:graph-hash first-row) (:graph-hash edited-row)))
         (is (= (:fn-version-id first-row) (:fn-version-id edited-row))
-            "the root's own version is untouched by a binding edit — that is the gap the hash closes")))))
+            "the root's own version is untouched by a binding edit — that is the gap the hash closes")
+        (testing "a description edit is prose, not code — the anchor stays (the version id moves)"
+          (sp/update-entity storage :fn (:id composed) {:description "documented"})
+          ((requiring-resolve 'graphden.executor.context/invalidate-graph-cache!) c)
+          (is (= (:graph-hash edited-row) (lookup/graph-hash c (:id composed)))))))))
 
 
 (deftest apply-persists-args-rows-test

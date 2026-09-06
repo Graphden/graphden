@@ -10,13 +10,23 @@ const {assert, newContext, api, getEntities, deleteFnByName,
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
 const FN_NAME = 'merge-plan-probe' + RUN_ID;
+// The merge-all stack edits THREE fns — one per branch — so each branch's
+// change is inherited (not superseded) below it and the plan has two steps.
+const FN2_NAME = 'merge-all-probe2' + RUN_ID;
+const FN3_NAME = 'merge-all-probe3' + RUN_ID;
 const R_BRANCH = 'merge-plan-r' + RUN_ID;
 const S_BRANCH = 'merge-plan-s' + RUN_ID;
+// Second scenario — a 3-deep stack merged with "Merge all in order".
+const A_BRANCH = 'merge-all-a' + RUN_ID;
+const B_BRANCH = 'merge-all-b' + RUN_ID;
+const C_BRANCH = 'merge-all-c' + RUN_ID;
 const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 
 async function cleanup(page) {
-  try { await deleteFnByName(page, FN_NAME); } catch (_) {}
-  for (const b of [S_BRANCH, R_BRANCH]) {
+  for (const n of [FN_NAME, FN2_NAME, FN3_NAME]) {
+    try { await deleteFnByName(page, n); } catch (_) {}
+  }
+  for (const b of [S_BRANCH, R_BRANCH, C_BRANCH, B_BRANCH, A_BRANCH]) {
     try { await api(page, 'DELETE', '/api/branches/' + encodeURIComponent(b)); } catch (_) {}
   }
 }
@@ -74,6 +84,42 @@ async function putDescriptionOn(page, fnId, branch, desc) {
     await page.waitForSelector('#branch-chip-btn', {timeout: 15000});
     const onMain = (await getEntities(page, FN_NAME)).fns.find((f) => f.name === FN_NAME);
     assert(onMain?.description === 'R-edit', 'R landed on main via the plan step (got ' + onMain?.description + ')');
+
+    // --- "Merge all in order": A ← B ← C, each editing its OWN fn (an
+    // edit of the same fn on C would supersede A's and B's and nothing
+    // would be inherited); from main, merge C → the plan is [A, B]; one
+    // click lands all three.
+    await api(page, 'POST', '/api/entities/fn', 'name=' + FN2_NAME + '&parent-ids=' + identity.id + '&description=seed');
+    await api(page, 'POST', '/api/entities/fn', 'name=' + FN3_NAME + '&parent-ids=' + identity.id + '&description=seed');
+    const fn2Id = (await getEntities(page, FN2_NAME)).fns.find((f) => f.name === FN2_NAME)?.id;
+    const fn3Id = (await getEntities(page, FN3_NAME)).fns.find((f) => f.name === FN3_NAME)?.id;
+    assert(fn2Id && fn3Id, 'two more seed fns on main');
+    assert((await api(page, 'POST', '/api/branches', {name: A_BRANCH}))?.ok, 'A created');
+    assert((await putDescriptionOn(page, fnId, A_BRANCH, 'A-edit')).status === 200, 'edit on A');
+    assert((await api(page, 'POST', '/api/branches', {name: B_BRANCH, 'base-branch-id': A_BRANCH}))?.ok, 'B stacked on A');
+    assert((await putDescriptionOn(page, fn2Id, B_BRANCH, 'B-edit')).status === 200, 'edit on B');
+    assert((await api(page, 'POST', '/api/branches', {name: C_BRANCH, 'base-branch-id': B_BRANCH}))?.ok, 'C stacked on B');
+    assert((await putDescriptionOn(page, fn3Id, C_BRANCH, 'C-edit')).status === 200, 'edit on C');
+    await page.reload();
+    await page.waitForSelector('#branch-chip-btn', {timeout: 10000});
+    assert(await openBranchPopover(page), 'branch popover opens again');
+    await page.click('.branch-row[data-branch-name="' + C_BRANCH + '"] .branch-row-merge');
+    await page.waitForSelector('.merge-conflicts-modal:not(.hidden) #merge-plan-all', {timeout: 15000});
+    const plan2 = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('.merge-plan-step')).map((r) => r.getAttribute('data-plan-name')));
+    assert(plan2.length === 2 && plan2[0] === A_BRANCH && plan2[1] === B_BRANCH,
+           'the plan is [A, B] in order (got ' + JSON.stringify(plan2) + ')');
+    await Promise.all([
+      page.waitForNavigation({waitUntil: 'load', timeout: 60000}).catch(() => null),
+      page.click('#merge-plan-all'),
+    ]);
+    await page.waitForSelector('#branch-chip-btn', {timeout: 15000});
+    const descs = {};
+    for (const [n, id] of [[FN_NAME, fnId], [FN2_NAME, fn2Id], [FN3_NAME, fn3Id]]) {
+      descs[n] = (await getEntities(page, n)).fns.find((f) => f.id === id)?.description;
+    }
+    assert(descs[FN_NAME] === 'A-edit' && descs[FN2_NAME] === 'B-edit' && descs[FN3_NAME] === 'C-edit',
+           'A, B and C all landed on main in order (got ' + JSON.stringify(descs) + ')');
     console.log('  PASS');
   } catch (e) {
     console.log('FAIL: ' + (e && e.stack || e));

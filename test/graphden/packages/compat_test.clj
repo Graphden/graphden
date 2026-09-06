@@ -83,3 +83,22 @@
               [{:name :greet :namespace "pkg" :args {:who :text} :return-type :text}]
               [{:name :greet :namespace "pkg" :args {:who :keyword} :return-type :text}])]
     (is (= {:kind :arg-narrowed :fn :greet :arg :who :old :text :new :keyword} c))))
+
+
+(deftest added-effects-and-incompatible-dependency-bumps-are-breaking
+  (testing "a base-fn that starts declaring an effect breaks a restricted-tier consumer; dropping one does not"
+    (is (= [[:effect-added :fetch nil]]
+           (kinds [{:name :fetch :namespace "pkg" :args {:u :text} :return-type :text :effects #{:network}}]
+                  [{:name :fetch :namespace "pkg" :args {:u :text} :return-type :text :effects #{:network :db}}])))
+    (is (= [] (compat/breaking-changes
+                [{:name :fetch :namespace "pkg" :args {:u :text} :return-type :text :effects #{:network :db}}]
+                [{:name :fetch :namespace "pkg" :args {:u :text} :return-type :text :effects #{:network}}]))))
+  (testing "a package dependency outside its previous caret range"
+    (is (= [{:kind :dependency-incompatible :name "lib" :old "1.2.0" :new "2.0.0"}]
+           (compat/incompatible-dependency-bumps
+             [{:name "lib" :version "1.2.0"} {:name "util" :version "0.3.1"} {:name "gone" :version "1.0.0"}]
+             [{:name "lib" :version "2.0.0"} {:name "util" :version "0.3.9"} {:name "added" :version "1.0.0"}])))
+    (is (= [{:kind :dependency-incompatible :name "util" :old "0.3.1" :new "0.4.0"}]
+           (compat/incompatible-dependency-bumps [{:name "util" :version "0.3.1"}] [{:name "util" :version "0.4.0"}]))
+        "below 1.0 the minor is the compatibility line")
+    (is (= [] (compat/incompatible-dependency-bumps [{:name "lib" :version "1.2.0"}] [{:name "lib" :version "1.9.3"}])))))

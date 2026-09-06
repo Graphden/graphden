@@ -438,8 +438,10 @@ bundle breaks the newest published version below the candidate and the
 candidate stays inside that version's caret range (same major; below
 1.0 the same minor). Each change carries `kind` (`fn-removed`,
 `arg-removed`, `arg-required-added`, `arg-narrowed`, `arg-unbound`,
-`arg-renamed`, `parents-changed`, `return-widened`, `type-changed`,
-`role-changed`), `fn`, and where relevant `arg` / `old` / `new`. Bump
+`arg-renamed`, `parents-changed`, `return-widened`, `effect-added`,
+`type-changed`, `role-changed`, or `dependency-incompatible` with `name`
+for a package dependency that left its previous caret range), `fn`, and
+where relevant `arg` / `old` / `new`. Bump
 the major (or restore the contract) and publish again — nothing was
 written. See PACKAGE_DISTRIBUTION.md § 4.2.
 

@@ -82,7 +82,7 @@ graphden today:
 |---------|--------|-------|---------|
 | **Long-lived listener** | `:http-server` (Ring/http-kit) | bind a port + a handler fn → returns a stopper that releases the port | `:web-server` in `packages/app/server` |
 | **Cron-driven loop** | `:schedule` (composed over `:future` + `:loop-until-interrupted` + `:sleep-until-ms` + `:cron-next-after` + `:call-noargs`) | bind `:cron` (Quartz cron-6 string) + `:fn` (any 0-arg callable) → returns a stopper that interrupts the daemon thread | `:ex-cron-heartbeat` in `packages/examples/schedule-cron` |
-| **Fixed-period loop** | `:interval` (composed over `:future` + `:loop-until-interrupted` + `:sleep` + `:call-noargs`) | bind `:every-ms` (period) + `:fn` (any 0-arg callable) → same stopper shape as `:schedule` | `{:name :poll :parent :interval :args {:every-ms 300000 :fn :poll-inbox}}` |
+| **Fixed-period loop** | `:interval` (composed over `:future` + `:loop-until-interrupted` + `:sleep` + `:call-noargs`); `:interval-now` fires once at start as well | bind `:every-ms` (period) + `:fn` (any 0-arg callable) → same stopper shape as `:schedule` | `{:name :poll :parent :interval :args {:every-ms 300000 :fn :poll-inbox}}` |
 | **Many triggers, one service** | `:start-all` (base-fn) | bind `:triggers` to a LIST of `:schedule` / `:interval` derivatives → every trigger starts in its own daemon thread; the ONE returned stopper stops them all, liveness is the children's combined (alive while any runs, `:failed` once any threw) | `{:name :jobs :parent :start-all :args {:triggers [:_nightly :_poll]}}` |
 
 `:schedule` is itself a pure fn-def composition — no monolithic
@@ -102,7 +102,14 @@ with no schema, no CRUD surface and no second reconciler loop. A
 trigger whose target should show up on the Runs tab wraps it in
 `:traced-call` (`core/system`): every fire then lands as an
 `:fn-execution` row of the target with a fresh trace id, exactly like a
-queue consumer's `:call-traced` hop.
+queue consumer's `:call-traced` hop. Listing the same trigger twice is
+refused (`:start-all/duplicate-trigger`): the executor runs a list item
+once per start, so the second entry would be the same loop, not a
+second one — derive a second fn-def to run a job twice. A trigger whose
+thread dies makes the whole set `:failed`; the restart policy then
+restarts every trigger, because the service handle is one thing (per-
+trigger supervision would need the executor to hand `:start-all` the
+triggers as re-invocable callables, which a list of refs is not).
 
 ### Startup steps — schema migrations
 

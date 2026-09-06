@@ -266,10 +266,12 @@
 ;; =============================================================================
 
 (def ^:private volatile-row-keys
-  "Bookkeeping a resolved row may carry that says WHEN / WHERE it was
-   written, not WHAT it is. Stripped before hashing so the same content
-   on two branches (a merge copies version rows) hashes the same."
-  [:created-at :updated-at :deleted-at :deleted? :org-id])
+  "What a resolved row may carry that is not WHAT RUNS: bookkeeping
+   that says when / where it was written (so the same content on two
+   branches — a merge copies version rows — hashes the same), and
+   documentation (`:description` on a fn, slot or binding) — an edit to
+   prose must not split a fn's run history into two anchors."
+  [:created-at :updated-at :deleted-at :deleted? :org-id :description])
 
 
 (defn graph-hash

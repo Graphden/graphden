@@ -241,7 +241,8 @@ that: a trigger list is a graph list, exactly like the migrations list
 above.
 
 `:interval` is the fixed-period sibling of `:schedule` (bind
-`:every-ms` and `:fn`), and `:start-all` takes a list of either:
+`:every-ms` and `:fn`; `:interval-now` is the same loop that also fires
+once at start), and `:start-all` takes a list of either:
 
 ```edn
 {:name :_nightly :parent :schedule :args {:cron "0 0 3 * * ?" :fn :rebuild-index}}
@@ -259,7 +260,9 @@ throw, the whole set counts as failed for the restart policy: under
 handle is one thing.
 
 Adding a third trigger is an edit to the list, which restarts the
-service like any other closure change — no row to create. To see each
+service like any other closure change — no row to create. Listing the
+same trigger twice is refused; a job that should run on two cadences
+gets two derived fn-defs. To see each
 fire on the target's **Runs** tab, point the trigger at a
 `:traced-call` wrapper instead of the target itself:
 

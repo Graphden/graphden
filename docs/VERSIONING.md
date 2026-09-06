@@ -537,9 +537,9 @@ The forensic answer to "what exactly was running when this row was
 produced" is the row's second anchor, **`:graph-hash`**: a SHA-256
 over the RESOLVED execution graph at submit time — every fn, slot,
 fn-slot, binding and list item the run could reach, as the branch
-saw them (`crud.fn-execution.lookup/graph-hash`; content only, no
-version ids or timestamps, so the same graph on two branches hashes
-the same). A binding edit anywhere below the root changes it while
+saw them (`crud.fn-execution.lookup/graph-hash`; content only — no
+version ids, timestamps or descriptions — so the same graph on two
+branches hashes the same and a prose edit does not split a history). A binding edit anywhere below the root changes it while
 `:fn-version-id` stays put. It is stamped on every persisted run
 (submitted, traced, captured), cached per graph epoch like the
 free-arg map, and indexed: `GET /api/executions?fn-id=X&graph-hash=H`
@@ -710,8 +710,10 @@ panel keeps its inline 📍 badge on the same rows.
   would be dropped, and the merge refuses — with the remedy in the payload:
   `:plan`, the ORDERED `[{:id :name} …]` of the branches `T` must take in first
   (`inherited-merge-plan`, base-chain order, root-most first), which the editor
-  renders as one "Merge R first" button per step. **So the workaround is a
-  click, not a sentence: merge `R` into `T`, then `S`.** The common cases never trip it —
+  renders as one "Merge R first" button per step plus "Merge all in order",
+  which runs the steps and then `S` itself, stopping at the first step that
+  needs a decision. **So the workaround is a click, not a sentence: merge `R`
+  into `T`, then `S`.** The common cases never trip it —
   a branch forked off `T`, or a sibling of `T` off a shared ancestor, shares all
   its inherited content with `T`, so nothing is dropped. Making merge
   *transitive* (walk the source's own ancestor/merge closure during resolution +

@@ -239,6 +239,20 @@
    :parent :sleep
    :args {:ms {:as :every-ms}}}
 
+  ;; :interval fires after the FIRST period; :interval-now fires at start
+  ;; and then every period — the shape for a poll whose first result is
+  ;; wanted immediately. Same free args (`:every-ms`, `:fn`).
+  {:name :interval-now
+   :description "`:interval` that also fires `:fn` once at start (fire, then sleep `:every-ms` and fire, repeat). Free: `:every-ms`, `:fn`; service-eligible like `:interval`."
+   :parent :future
+   :args {:body :_interval-now-body}
+   :branch-local? true}
+
+  {:name :_interval-now-body
+   :description "Fire once, then the ordinary interval loop."
+   :parent :do
+   :args {:steps [:_fire-target :_interval-loop]}}
+
   ;; ---------------------------------------------------------------------
   ;; :start-all — one service, many triggers.
   ;;

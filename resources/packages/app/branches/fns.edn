@@ -2391,22 +2391,24 @@
                  {:parent :get :args {:coll :_branch-apply-ex-data :key {:value :have} :default nil}}]}}
 
   {:name :_merge-apply-err-inherited
-   :description "Inherited-content envelope — `{:ok false :reason :inherited-content-not-transferable :http-status 409 :error \"…\" :entities [{:entity-name :entity-id} …]}`. Thrown by `merge.core` (via `merge/untransferable-inherited-entities`) when a by-reference merge would silently drop content the source shows by inheritance from a branch the target does not share."
+   :description "Inherited-content envelope — `{:ok false :reason :inherited-content-not-transferable :http-status 409 :error \"…\" :entities [{:entity-name :entity-id} …] :plan [{:id :name} …]}`. Thrown by `merge.core` (via `merge/untransferable-inherited-entities`) when a by-reference merge would silently drop content the source shows by inheritance from a branch the target does not share; `:plan` is the ORDERED list of branches to merge into the target first (`merge/inherited-merge-plan`) — the editor offers one click per step."
    :parent :zipmap
    :return-type {:ok :bool
                  :reason :keyword
                  :http-status :int
                  :error :text
-                 :entities :any}
+                 :entities :any
+                 :plan [:list {:id :text :name :text}]}
    :args {:keys [{:value :ok} {:value :reason} {:value :http-status :literal? true}
-                 {:value :error} {:value :entities}]
+                 {:value :error} {:value :entities} {:value :plan}]
           :vals [{:value false}
                  {:value :inherited-content-not-transferable}
                  {:value 409}
                  {:parent :coalesce
                   :args {:value {:parent :throwable-message :args {:ex {:as :exception}}}
                          :default "Merge blocked: inherited content would be lost"}}
-                 {:parent :get :args {:coll :_branch-apply-ex-data :key {:value :entities} :default []}}]}}
+                 {:parent :get :args {:coll :_branch-apply-ex-data :key {:value :entities} :default []}}
+                 {:parent :get :args {:coll :_branch-apply-ex-data :key {:value :plan} :default []}}]}}
 
   {:name :_branch-apply-err-generic-msg
    :description "Fallback message — `(or (.getMessage e) \"Unknown error\")`."

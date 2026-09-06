@@ -214,7 +214,10 @@
    ;; `(org-id, parent-id, name) NULLS NOT DISTINCT` (see the comment at the
    ;; constraint in schema/graph/schema.clj); `ensure-unique-indexes!`
    ;; lands the new key on a migrated DB.
-   "idx_ns_parent_id_name_unique"])
+   "idx_ns_parent_id_name_unique"
+   ;; Retired 2026-09-06: anonymous fn rows dedupe per ORG —
+   ;; `(org-id, anonymous-hash) NULLS NOT DISTINCT`.
+   "idx_fn_anonymous_hash_unique"])
 
 
 (defn- drop-retired-indexes!

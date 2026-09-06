@@ -581,6 +581,43 @@
             "the persisted row must carry :touched-secret? true")))))
 
 
+(deftest apply-hides-the-error-of-a-failed-run-that-touched-a-secret-test
+  ;; The return type is plain `:int`, so `tainted-fn?` is false and the
+  ;; RESULT redaction never fires — but the impl throws with the secret
+  ;; in the message. The audit flag is the signal: a failed run that
+  ;; consumed a secret has its error text withheld.
+  (let [storage (create-full-storage)
+        base-name "leaky-sink"
+        composed-name "leaky-composed"
+        _ (exec/register-base-fn! (keyword base-name)
+                                  (fn [_args _ctx]
+                                    (graphden.executor.compile-runtime/record-effect! :io)
+                                    (throw (ex-info "upstream said: token hunter2-plain" {}))))
+        _ (registry/record-rich-types! (keyword base-name)
+                                       {:args {:secret-arg {:type [:secret :text]}}
+                                        :return-type :int
+                                        :effects #{:io}})
+        base (setup/create-base-fn! storage base-name :int)
+        composed (setup/create-composed-fn! storage composed-name (:id base))
+        _ (registry/record-rich-types! (keyword composed-name)
+                                       {:args {:secret-arg {:type [:secret :text]}}
+                                        :return-type :int
+                                        :effects #{:io}})
+        c (setup/default-registry-ctx storage)
+        r (apply-and-await!
+            c {:fn-id (:id composed)
+               :args {:secret-arg "hunter2-plain"}
+               :timeout-ms 5000 :persist? true})
+        row (sp/read-entity storage :fn-execution
+                            (java.util.UUID/fromString (:execution-id r)))]
+    (is (= :failed (:status r)))
+    (is (true? (:touched-secret? r)))
+    (testing "the message is withheld on the inline response and the persisted row"
+      (is (not (str/includes? (str (:error r)) "hunter2")))
+      (is (not (str/includes? (str (:error row)) "hunter2")))
+      (is (= :secret-touched (some-> (:error-data row) :reason keyword))))))
+
+
 (deftest apply-leaves-touched-secret-nil-for-non-secret-fns-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "no-secret")

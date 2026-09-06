@@ -701,8 +701,11 @@ panel keeps its inline 📍 badge on the same rows.
   carried. Rather than lose it silently, the merge is **blocked** with
   `:merge/inherited-content-not-transferable` (409): `untransferable-inherited-
   entities` (built on the resolved-view `diff-branches`) lists the entities that
-  would be dropped, and the merge refuses. **Workaround: merge the intermediate
-  branch (`R`) into `T` first, then merge `S`.** The common cases never trip it —
+  would be dropped, and the merge refuses — with the remedy in the payload:
+  `:plan`, the ORDERED `[{:id :name} …]` of the branches `T` must take in first
+  (`inherited-merge-plan`, base-chain order, root-most first), which the editor
+  renders as one "Merge R first" button per step. **So the workaround is a
+  click, not a sentence: merge `R` into `T`, then `S`.** The common cases never trip it —
   a branch forked off `T`, or a sibling of `T` off a shared ancestor, shares all
   its inherited content with `T`, so nothing is dropped. Making merge
   *transitive* (walk the source's own ancestor/merge closure during resolution +

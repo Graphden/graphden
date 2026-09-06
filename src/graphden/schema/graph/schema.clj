@@ -708,7 +708,16 @@
       ;; against the live branch view (`check-fn-name-collision!`), advisory-
       ;; lock-serialized; the raw index is dropped via `retired-indexes` in
       ;; storage/postgres/migration.clj.
-      (ds/add-constraint :fn {:type :unique :fields [:anonymous-hash]})
+      ;; Per ORG (2026-09-06): a tenant's anonymous rows are org-scoped, and
+      ;; the deterministic id mixes the org in (`records.ids/anonymous-fn-id`),
+      ;; so two orgs holding the same inline shape are two rows. NULL org
+      ;; (the platform's package anons) stays unique by hash alone. The old
+      ;; hash-only index is `retired-indexes`; `ensure-unique-indexes!`
+      ;; lands this one on a migrated DB.
+      ;; PARTIAL: named fns carry a NULL hash and must never collide on it.
+      (ds/add-constraint :fn {:type :unique :fields [:org-id :anonymous-hash]
+                              :nulls-not-distinct? true
+                              :where "anonymous_hash IS NOT NULL"})
 
       ;; -----------------------------------------------------------------
       ;; slot: an atomic (name, type) pair.

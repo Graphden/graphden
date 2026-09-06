@@ -1196,6 +1196,14 @@ async function mergeBranchInto(sourceName, targetName, conflictResolutions, targ
     showMergeConflictsModal(body, sourceName, targetName, targetRef);
     return;
   }
+  if (body?.ok === false && body?.reason === 'inherited-content-not-transferable'
+      && Array.isArray(body.plan) && body.plan.length) {
+    // The refusal carries the remedy — the branches to merge first, in
+    // order. Offer it as clicks instead of a sentence.
+    closeBranchPopover();
+    showMergePlanModal(body, sourceName, targetName, targetRef);
+    return;
+  }
   if (!resp.ok || body?.ok === false) {
     setError(body?.error || ('HTTP ' + resp.status));
     return;
@@ -1356,6 +1364,79 @@ async function showMergeConflictsModal(body, sourceName, targetName, targetRef) 
 // Read each rendered row's `data-entity-*` + checked radio into the
 // `:conflict-resolutions` payload. The server owns the row markup, so the
 // JS↔partial contract is the two data-attrs + the radio `value`.
+// The inherited-content refusal's plan — "merge R first, then R2, then
+// yours". Client-rendered (createElement + textContent only: branch
+// names are user text) inside the conflicts modal's chrome; each step
+// is one click that runs the ordinary merge for that branch, and the
+// last step re-runs the merge the user asked for.
+function showMergePlanModal(body, sourceName, targetName, targetRef) {
+  const modal = ensureConflictsModal();
+  _conflictsTrigger = document.activeElement;
+  modal.setAttribute('aria-label', 'Merge these first');
+  modal.innerHTML = '';
+  const overlay = document.createElement('div');
+  overlay.className = 'merge-conflicts-overlay';
+  overlay.addEventListener('click', closeConflictsModal);
+  modal.appendChild(overlay);
+
+  const card = document.createElement('div');
+  card.className = 'merge-conflicts-card merge-plan-card';
+  const header = document.createElement('div');
+  header.className = 'merge-conflicts-header';
+  header.textContent = 'Merge these into "' + targetName + '" first';
+  card.appendChild(header);
+  const help = document.createElement('div');
+  help.className = 'merge-conflicts-help';
+  help.textContent = '"' + sourceName + '" shows changes it inherited from '
+    + (body.plan.length === 1 ? 'a branch' : body.plan.length + ' branches')
+    + ' the target does not share; a merge carries only a branch\'s own changes. '
+    + 'Merge the steps below in order, then "' + sourceName + '" itself.';
+  card.appendChild(help);
+
+  const steps = document.createElement('div');
+  steps.className = 'merge-conflicts-rows merge-plan-steps';
+  body.plan.forEach((step, i) => {
+    const row = document.createElement('div');
+    row.className = 'merge-plan-step';
+    row.setAttribute('data-plan-id', step.id);
+    row.setAttribute('data-plan-name', step.name);
+    const num = document.createElement('span');
+    num.className = 'merge-plan-step-num';
+    num.textContent = String(i + 1) + '.';
+    const name = document.createElement('span');
+    name.className = 'merge-plan-step-name';
+    name.textContent = step.name;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'branch-popover-btn merge-plan-step-btn';
+    btn.textContent = 'Merge "' + step.name + '" first';
+    btn.addEventListener('click', () => {
+      closeConflictsModal();
+      mergeBranchInto(step.name, targetName, null, targetRef);
+    });
+    row.appendChild(num); row.appendChild(name); row.appendChild(btn);
+    steps.appendChild(row);
+  });
+  card.appendChild(steps);
+
+  const actions = document.createElement('div');
+  actions.className = 'merge-conflicts-actions';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.id = 'merge-plan-cancel';
+  cancel.className = 'branch-popover-btn merge-conflicts-cancel';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', closeConflictsModal);
+  actions.appendChild(cancel);
+  card.appendChild(actions);
+  modal.appendChild(card);
+
+  modal.classList.remove('hidden');
+  setSiblingsInert(modal, true);
+  focusIntoDialog(modal);
+}
+
+
 async function submitConflictResolutions(sourceName, targetName, targetRef) {
   targetRef = targetRef || targetName;
   const rows = Array.from(document.querySelectorAll(

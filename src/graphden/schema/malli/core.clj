@@ -196,7 +196,16 @@
                  (not (boolean? (:nulls-not-distinct? constraint))))
         (throw (ex-info "Constraint :nulls-not-distinct? must be a boolean"
                         {:entity entity-name :constraint constraint})))
-      (let [extra-keys (set/difference (set (keys constraint)) #{:type :fields :nulls-not-distinct?})]
+      ;; `:where` — a PARTIAL unique index predicate (raw SQL, a compile-time
+      ;; constant from the schema file, never input): the key applies to the
+      ;; rows it selects only — `fn (org-id, anonymous-hash) WHERE
+      ;; anonymous_hash IS NOT NULL`, since NULLS NOT DISTINCT would otherwise
+      ;; make every named fn's (NULL, NULL) collide.
+      (when (and (contains? constraint :where)
+                 (not (and (string? (:where constraint)) (seq (:where constraint)))))
+        (throw (ex-info "Constraint :where must be a non-empty SQL predicate string"
+                        {:entity entity-name :constraint constraint})))
+      (let [extra-keys (set/difference (set (keys constraint)) #{:type :fields :nulls-not-distinct? :where})]
         (when (seq extra-keys)
           (throw (ex-info "Constraint has unsupported attributes"
                           {:entity entity-name

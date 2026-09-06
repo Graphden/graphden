@@ -3,7 +3,8 @@
    primitive boot-data. Leaf namespace — depends on nothing else under
    `graphden.packages.records`."
   (:require
-    [clojure.string :as str])
+    [clojure.string :as str]
+    [graphden.tenancy.context :as tc])
   (:import
     (java.nio.charset
       StandardCharsets)
@@ -53,12 +54,26 @@
   (uuid-v5 records-namespace-uuid (str "fn:" (or ns-path "") "/" (name fn-name))))
 
 
+(defn- anon-org-scope
+  "The org segment of an anonymous fn's identity: empty on the platform
+   tier (package sync, boot, single-tenant — the ids every deployment
+   has always had), the org's name for a tenant. A tenant's anonymous
+   rows are org-scoped rows (stamped, RLS-filtered), so the SAME shape in
+   two orgs must be two rows: with one shape-keyed id, org B's create
+   collided with org A's invisible row (the `:ns` class of cross-org
+   oracle, 2026-09-06)."
+  []
+  (let [org (tc/current-org)]
+    (if (tc/platform-tier? org) "" (str org "/"))))
+
+
 (defn anonymous-fn-id
   "Deterministic UUID for an anonymous (composite) fn keyed by the
-   shape-hash. Anonymous types with the same shape collapse to one
-   row via `fn.anonymous_hash` UNIQUE."
+   shape-hash — per org on a tenant path (`anon-org-scope`). Anonymous
+   types with the same shape collapse to one row per org via
+   `fn (org_id, anonymous_hash)` UNIQUE."
   ^UUID [shape-hash]
-  (uuid-v5 records-namespace-uuid (str "anon-fn:" shape-hash)))
+  (uuid-v5 records-namespace-uuid (str "anon-fn:" (anon-org-scope) shape-hash)))
 
 
 (defn seeded-service-id

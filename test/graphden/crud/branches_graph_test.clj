@@ -555,6 +555,28 @@
       (is (string? (-> body :merge :created-at))))))
 
 
+(deftest merge-branch-inherited-content-refused-with-a-plan
+  ;; A stacked branch (S.base = R, R edited) merged into R's base is
+  ;; refused with the ORDERED remedy in the body: merge R first. The
+  ;; HTTP-level twin of core_test's
+  ;; `merge-refuses-to-silently-drop-inherited-content-test`.
+  (let [fn-name (uniq "stack")
+        fn-id (mk-fn! fn-name)
+        target (mk-branch! (uniq "tgt"))
+        r (mk-branch! (uniq "r") (:name target))
+        on-r (vs/switch-branch *storage* (java.util.UUID/fromString (:id r)))
+        _ (sp/update-entity on-r :fn fn-id {:name fn-name :description "edited on R"})
+        s (mk-branch! (uniq "s") (:name r))
+        resp (gh/via :merge-branch-handler
+                     (json-req (str "/api/branches/" (:name target) "/merge")
+                               {:source (:name s)}))
+        body (json-body resp)]
+    (is (= 409 (:status resp)))
+    (is (= "inherited-content-not-transferable" (:reason body)))
+    (is (= [(:name r)] (mapv :name (:plan body))) "merge R first")
+    (is (= [(:id r)] (mapv :id (:plan body))) "each step carries the id-safe ref")))
+
+
 (deftest merge-branch-bad-resolutions-silently-dropped
   ;; Unknown choice / non-UUID id / unknown entity-name are silently
   ;; skipped (mirrors merge.clj's `case` matcher). The merge still

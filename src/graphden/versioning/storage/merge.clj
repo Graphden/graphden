@@ -503,6 +503,32 @@
       (untransferable-via-diff base-storage source-branch-id target-branch-id))))
 
 
+(defn inherited-merge-plan
+  "The ORDERED `[{:id :name} …]` of the branches the target must take in
+   before `source-branch-id` can be merged — what the inherited-content
+   refusal hands back so the editor can offer \"merge X first\" per step
+   instead of a bare 409. Base-chain order (root-most first): the
+   source's own ancestors the target does not see, walked from the
+   base upward; branches that reached the source's view through a
+   merge rather than descent (`branch-visibility-ids`' merge sources)
+   follow, oldest first."
+  [base-storage source-branch-id target-branch-id]
+  (let [source-sees (branch-visibility-ids base-storage source-branch-id)
+        target-sees (branch-visibility-ids base-storage target-branch-id)
+        inherited-only (disj (set/difference source-sees target-sees) source-branch-id)
+        chain (res/collect-branch-chain base-storage source-branch-id)
+        on-chain (reverse (filter inherited-only chain))
+        off-chain (->> (remove (set chain) inherited-only)
+                       (map #(sp/read-entity base-storage :branch %))
+                       (remove nil?)
+                       (sort-by (comp str :created-at))
+                       (map :id))]
+    (mapv (fn [bid]
+            (let [b (sp/read-entity base-storage :branch bid)]
+              {:id (str bid) :name (or (:name b) (str bid))}))
+          (concat on-chain off-chain))))
+
+
 (defn- untransferable-via-diff
   "The general case of `untransferable-inherited-entities` — see there."
   [base-storage source-branch-id target-branch-id]
@@ -710,16 +736,20 @@
              (let [dropped (untransferable-inherited-entities storage source-branch-id
                                                               target-branch-id)]
                (when (seq dropped)
-                 (throw (ex-info
-                          (str "Merge blocked: this branch shows " (count dropped)
-                               " change(s) inherited from a branch the target does not "
-                               "share. A merge transfers only this branch's own changes, "
-                               "so that content would be lost. Merge the intermediate "
-                               "branch into the target first, then merge this one.")
-                          {:type :merge/inherited-content-not-transferable
-                           :entities dropped
-                           :source-branch-id source-branch-id
-                           :target-branch-id target-branch-id}))))
+                 (let [plan (inherited-merge-plan storage source-branch-id target-branch-id)]
+                   (throw (ex-info
+                            (str "Merge blocked: this branch shows " (count dropped)
+                                 " change(s) inherited from a branch the target does not "
+                                 "share. A merge transfers only this branch's own changes, "
+                                 "so that content would be lost. Merge "
+                                 (if-let [n (:name (first plan))] (str "\"" n "\"") "the intermediate branch")
+                                 " into the target first, then merge this one.")
+                            {:type :merge/inherited-content-not-transferable
+                             :entities dropped
+                             ;; The ordered remedy — see `inherited-merge-plan`.
+                             :plan plan
+                             :source-branch-id source-branch-id
+                             :target-branch-id target-branch-id})))))
              (let [merge-record (create-merge-record! storage source-branch-id
                                                       target-branch-id merge-ts)]
                (apply-resolutions! storage conflicts conflict-resolutions

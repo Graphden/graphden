@@ -102,7 +102,7 @@ protocol:
 
 | Entity | Unique key | Note |
 |---|---|---|
-| `fn` | `(anonymous-hash)` | anonymous fn dedup |
+| `fn` | `(org-id, anonymous-hash)` NULLS NOT DISTINCT | anonymous fn dedup, per org — a tenant's inline shape is its own row (`records.ids/anonymous-fn-id` mixes the org into the id); the platform's package anons stay unique by hash |
 | `fn-slot` | `(fn-id, slot-id)` | a slot is exposed at most once per fn |
 | `binding` | `(fn-id, slot-id)` | one binding per `(fn, slot)` |
 | `ns` | `(org-id, parent-id, name)` NULLS NOT DISTINCT | per org, like `branch`: two orgs may both hold `packages/team`; a root namespace (NULL parent) is unique too |

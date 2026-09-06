@@ -315,9 +315,12 @@
                                       ;; `:nulls-not-distinct?` (PG 15+) treats NULL = NULL for uniqueness —
                                       ;; lets a composite key like `(org-id, name)` stay unique when org-id is
                                       ;; NULL (single-tenant), while still allowing distinct orgs the same name.
-                                      nulls-sql (if (:nulls-not-distinct? constraint) " NULLS NOT DISTINCT" "")]
+                                      nulls-sql (if (:nulls-not-distinct? constraint) " NULLS NOT DISTINCT" "")
+                                      ;; `:where` — a partial index; the predicate is a schema-file
+                                      ;; constant (validated non-empty by the schema builder).
+                                      where-sql (if-let [w (:where constraint)] (str " WHERE " w) "")]
                                   (util/exec! ds [(str "CREATE UNIQUE INDEX \"" index-name "\" ON " table-name
-                                                       " (" columns-sql ")" nulls-sql)] {}))))
+                                                       " (" columns-sql ")" nulls-sql where-sql)] {}))))
 
 
 (defn create-entity-constraints!
@@ -345,9 +348,10 @@
               fields (ds/entity-fields schema entity-name)
               columns-sql (str/join ", " (map (fn [f] (constraint-column-sql f (get fields f)))
                                               (:fields constraint)))
-              nulls-sql (if (:nulls-not-distinct? constraint) " NULLS NOT DISTINCT" "")]
+              nulls-sql (if (:nulls-not-distinct? constraint) " NULLS NOT DISTINCT" "")
+              where-sql (if-let [w (:where constraint)] (str " WHERE " w) "")]
           (util/exec! ds [(str "CREATE UNIQUE INDEX IF NOT EXISTS \"" index-name "\" ON " table-name
-                               " (" columns-sql ")" nulls-sql)] {}))
+                               " (" columns-sql ")" nulls-sql where-sql)] {}))
         (catch Exception e
           (log/warn e "unique index NOT created — existing rows violate the key; clean them up, the next migration pass lands it"
                     {:index index-name :entity entity-name :fields (:fields constraint)}))))))

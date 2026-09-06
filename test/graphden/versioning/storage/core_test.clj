@@ -2112,7 +2112,17 @@
             (is (= :merge/inherited-content-not-transferable (:type (ex-data ex))))
             (is (some #(= (:id b) (:entity-id %)) (:entities (ex-data ex)))
                 "the dropped binding is named in the error")
+            (is (= [{:id (str (:id r)) :name "inh-R"}] (:plan (ex-data ex)))
+                "the remedy is handed back: merge R first")
             (is (= "v0" (bmain)) "main is unchanged — the merge did not commit")))
+        (testing "a two-level stack names the plan in base-chain order"
+          (let [r2 (vs/create-branch! (vs/switch-branch v (:id r)) "inh-R2")
+                _  (sp/update-entity (vs/switch-branch v (:id r2)) :binding (:id b) {:value "vR2"})
+                s2 (vs/create-branch! (vs/switch-branch v (:id r2)) "inh-S2")
+                ex (try (vs/merge-branch! (vs/switch-branch v main) (:id s2))
+                        (catch clojure.lang.ExceptionInfo e e))]
+            (is (= ["inh-R" "inh-R2"] (mapv :name (:plan (ex-data ex))))
+                "root-most first: R lands before R2, then S2 itself")))
         (testing "merging the intermediate R first, then S, succeeds and carries the change"
           (vs/merge-branch! (vs/switch-branch v main) (:id r))            ; R → main
           (is (= "vR" (bmain)))

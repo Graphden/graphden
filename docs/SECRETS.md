@@ -390,13 +390,16 @@ layered redaction:
    propagator on `:str` lifts the result to `[:secret :text]`; the
    `:exception :any` slot accepts it (escape hatch). At runtime
    the exception fires; the exception MESSAGE embeds the secret.
-   `/api/execute` redacts the error string ONLY when the fn-def's
-   recorded return-type carries `:secret` (T4) — a fn whose return
-   is plain `:int` but which throws-with-secret internally would
-   leak the message. The audit trail (below) detects this case at
-   runtime by inspecting whether the execution touched a secret-
-   typed binding transitively; tighter mitigation (rewrite the
-   error message conditionally) is reserved for a later pass.
+   `/api/execute` redacts the RESULT only when the fn-def's recorded
+   return-type carries `:secret` (T4); the error MESSAGE of a failed
+   run is withheld whenever the run's audit flag is set — the
+   execution consumed a secret-typed binding and produced an effect
+   (`redact-outcome`, `:error-data {:reason :secret-touched}`) — so a
+   fn whose return is plain `:int` but which throws-with-secret
+   internally no longer leaks the message
+   (`apply-hides-the-error-of-a-failed-run-that-touched-a-secret-test`).
+   A succeeded run's result is left alone: its type says what it
+   carries.
 
 3. **`:any`-typed slots** are the documented escape hatch. A
    `[:secret :text]` value flows into an `:any` slot and the marker

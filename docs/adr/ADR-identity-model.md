@@ -74,6 +74,15 @@ Stage 1 (this branch): registry re-key (above). Remaining, in order:
   entries. Synthetic anon names (and their derived ids) changed once
   as a consequence — old anon rows in long-lived dev DBs become
   unreferenced (harmless; clean deploys unaffected).
+- **Stage 3b — anonymous identity per org: DONE (2026-09-06).**
+  `records.ids/anonymous-fn-id` mixes the CURRENT ORG into the
+  shape-keyed id on a tenant path (empty segment on the platform
+  tier, so package-sync ids are unchanged), and `fn` is
+  `UNIQUE (org-id, anonymous-hash) NULLS NOT DISTINCT`: a tenant's
+  anonymous rows are org-scoped rows, and one shape-only id let org
+  B's create collide with org A's invisible row (a cross-org
+  existence oracle). Same shape, two orgs → two rows; within one org
+  the dedup is unchanged.
 - **Stage 4 — qualified refs in fns.edn: DONE (syntax + validation).**
   `:ns.path/name`-qualified reference keywords are accepted in every
   reference position (parents, arg refs, `{:ref …}`, sequence items,

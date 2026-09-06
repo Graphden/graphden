@@ -404,7 +404,8 @@
    Cancelled outcomes pass through (no value attached). Non-tainted
    outcomes pass through unchanged."
   [fn-id outcome]
-  (if (tainted-fn? fn-id)
+  (cond
+    (tainted-fn? fn-id)
     (case (:status outcome)
       :succeeded (-> outcome
                      (assoc :result nil :tainted? true)
@@ -414,7 +415,19 @@
                             :error "Result hidden: fn return-type carries :secret marker.")
                      (assoc :error-data {:reason :tainted}))
       outcome)
-    outcome))
+
+    ;; A FAILED run that consumed a secret (the audit flag, stamped just
+    ;; before this): the exception's message is the one channel a secret
+    ;; can still leak through when the fn's own return type is plain —
+    ;; `(:throw (:str "token " <secret>))` under an `:int` return
+    ;; (SECRETS.md § Flow protection, 2). The result of a SUCCEEDED run
+    ;; is left alone: its type said what it carries.
+    (and (= :failed (:status outcome)) (:touched-secret? outcome))
+    (assoc outcome
+           :error "Error hidden: this run consumed a secret; the message is withheld (audit trail)."
+           :error-data {:reason :secret-touched})
+
+    :else outcome))
 
 
 (def ^:private poisoning-capture-classes

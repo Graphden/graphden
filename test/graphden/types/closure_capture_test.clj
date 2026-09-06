@@ -160,9 +160,15 @@
         hof-base (setup/create-base-fn! storage "test-hof-base2" :any)
         direct-base (setup/create-base-fn! storage "test-direct-base" :any)
         captured-slot (setup/create-slot! storage "captured2" :int)
+        ;; The callback's per-call parameter under the slot's own name —
+        ;; with a lone `captured2` the executor's alpha-equivalence would
+        ;; make THAT the `item` (a 1-arg slot binds a single own free
+        ;; positionally), and nothing would be captured.
+        item-slot (setup/create-slot! storage "item" :any)
         func-slot (setup/create-slot! storage "func2" [:fn {:item :any} :any])
         operand-slot (setup/create-slot! storage "operand" :int)
-        _ (setup/attach-slot! storage (:id cb-base) (:id captured-slot) 0)
+        _ (setup/attach-slot! storage (:id cb-base) (:id item-slot) 0)
+        _ (setup/attach-slot! storage (:id cb-base) (:id captured-slot) 1)
         _ (setup/attach-slot! storage (:id hof-base) (:id func-slot) 0)
         _ (setup/attach-slot! storage (:id direct-base) (:id operand-slot) 0)
         callback (setup/create-composed-fn! storage "test-sbfa-callback" (:id cb-base))

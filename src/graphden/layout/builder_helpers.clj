@@ -25,7 +25,7 @@
   (:require
     [clojure.string :as str]
     [graphden.executor.compile.bindings :as cb]
-    [graphden.executor.compile.renames :as renames]
+    [graphden.executor.compile.surface :as surface]
     [graphden.layout.bindings :as bnd]
     [graphden.layout.data :as data]
     [graphden.packages.records.types :as record-types]))
@@ -938,33 +938,57 @@
    the Run form lists them instead of expanding into the composition to
    find each one.
 
-   Runs once after the walkers: every `deep-free-ext-entries` entry (the
-   SURFACE walk — it stops at HOF boundaries, so a HOF target's closure
-   captures stay inside the HOF: the editor's listener would otherwise
-   sprout every optional knob of the app it serves) whose slot has no
-   placeholder on the canvas yet gets an unset node + edge from the
-   root, flagged `:deepArg`. The node names the ROOT fn (`fnId`), so the
+   Runs once after the walkers: every `surface/public-free-entries` entry —
+   the executor's public surface (what the Run form lists) plus the
+   REQUIRED closure captures of HOF targets (an optional capture is the
+   target's knob, not this card's hole) — whose slot has no placeholder
+   on the canvas yet gets an unset node + edge from the root, flagged
+   `:deepArg`. The node names the ROOT fn (`fnId`), so the
    `+` binder writes the binding on THIS fn keyed by the inner slot —
    closure capture, exactly what a fn-def `:args {:service …}` on the
    same fn stores. The type chip / `i` come from the inner slot's own
    arg row (`edge-*-fields`)."
   [state lookups root-fn-id root-node-id]
   (let [arg-map (:arg-map lookups)
+        slot-map (:slot-map lookups)
         args-by-slot (group-by (comp :slot-id val) arg-map)
+        ;; One hole per slot IDENTITY: a rename-view slot and its source
+        ;; share a root (`:source-slot-id` chain) — a binding on either
+        ;; closes both, and a placeholder for either shows the one hole.
+        root-of (fn [sid]
+                  (loop [sid sid seen #{}]
+                    (let [src (some-> (get slot-map sid) :source-slot-id)]
+                      (if (and src (not (seen src)))
+                        (recur src (conj seen sid))
+                        sid))))
         shown (into #{}
                     (keep (fn [n]
                             (when (get-in n [:data :isPlaceholder])
-                              (get-in n [:data :slotId]))))
-                    (:nodes @state))]
-    (doseq [{:keys [ext-name slot-id]} (renames/deep-free-ext-entries root-fn-id lookups)
-            :when (and slot-id (not (contains? shown (str slot-id))))
-            :let [[arg-id arg-rec] (first (get args-by-slot slot-id))]
-            :when arg-rec]
+                              (some-> (get-in n [:data :slotId]) parse-uuid root-of))))
+                    (:nodes @state))
+        chain-bound (into #{}
+                          (comp (mapcat #(get (:bindings-by-fn lookups) %))
+                                (filter #(or (true? (:value-present %))
+                                             (some? (:ref-fn-id %))
+                                             (true? (:list-append %))))
+                                (map (comp root-of :slot-id)))
+                          (data/get-inheritance-chain* root-fn-id lookups))]
+    (doseq [{:keys [ext-name slot-id captured?]} (surface/public-free-entries root-fn-id lookups)
+            :when (and slot-id
+                       (not (contains? shown (root-of slot-id)))
+                       (not (contains? chain-bound (root-of slot-id))))
+            :let [[arg-id arg-rec] (first (get args-by-slot slot-id))
+                  optional? (and arg-rec (arg-is-optional? arg-map arg-rec))]
+            ;; A closure capture that is OPTIONAL is a knob of the HOF
+            ;; target, not a hole of this card — the Run form lists it,
+            ;; the card does not (a listener would sprout every optional
+            ;; knob of the app it serves).
+            :when (and arg-rec (not (and captured? optional?)))]
       (let [node-id (str "unset-" root-node-id "-deep-" slot-id)
             edge-id (str "e-" node-id)
             arg-type (:type arg-rec)
             flag-fields (cond-> {:deepArg true}
-                          (arg-is-optional? arg-map arg-rec) (assoc :optionalArg true))]
+                          optional? (assoc :optionalArg true))]
         (when-not (contains? (:added-node-ids @state) node-id)
           (swap! state update :added-node-ids conj node-id)
           (swap! state update :nodes conj

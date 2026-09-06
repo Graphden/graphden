@@ -1559,7 +1559,7 @@
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"web-server\"]"]
                :check {:kind "bindings-count" :name "tutorial-fetch" :count 1}}
               {:title "Which path"
-               :body "Click the [[+]] on the :path placeholder, choose [[Bind literal]] and type `\"/version\"` — with the quotes — then [[Save]]. That is the contract's other half; between your own services the path is a shared constant both sides reference."
+               :body "Click the [[+]] on the :path placeholder, choose [[Bind literal]] and type `/version` — the slot is text, no quotes — then [[Save]]. That is the contract's other half; between your own services the path is a shared constant both sides reference."
                :target ".placeholder-binder"
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "bindings-count" :name "tutorial-fetch" :count 2}}

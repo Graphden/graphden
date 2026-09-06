@@ -45,7 +45,8 @@ const {
     await bindNamedPlaceholder(page, 'service', 'fn-ref', 'web-server');
 
     await waitTourTitle(page, 'Which path', 150000);
-    await bindNamedPlaceholder(page, 'path', 'literal', '"/version"');
+    // The slot is :text now — the literal editor takes the raw text.
+    await bindNamedPlaceholder(page, 'path', 'literal', '/version');
 
     await waitTourTitle(page, 'Ask it', 150000);
     await runWithEffectAck(page);

@@ -76,8 +76,9 @@ calls it, and watch the address appear and disappear.
 
    Look at `:fetch-orders` on the canvas: an edge to `:orders-service`
    into the `service` slot — the slot's type badge says `fn-ref`. Its
-   free args are `headers`, `auth-value`, `timeout-ms` (from
-   `:http-get`); `service` and `path` are bound.
+   free args are `headers`, `body`, `auth-value`, `timeout-ms` (from
+   `:http-get` — optional knobs, so the Run form folds them under
+   "4 optional"); `service` and `path` are bound.
 
    Extending `:service-get-json` from the editor works the same way:
    the card shows `service` and `path` as dashed placeholders even

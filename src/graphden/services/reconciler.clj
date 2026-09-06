@@ -276,8 +276,11 @@
     (try
       (let [now (java.time.Instant/now)
             ep (endpoint-of ctx stopper)
-            ;; The tenant is the service row's — the reconciler writes with
-            ;; the platform handle, so the org-scoped decorator cannot stamp it.
+            ;; The tenant is the service row's. The reconciler is the
+            ;; trusted system path (public org, no principal), and the
+            ;; tenancy decorator keeps an EXPLICIT `:org-id` for that path
+            ;; instead of stamping `public` over it — a public-stamped copy
+            ;; was readable by every org (2026-09-06).
             org-id (:org-id (sp/read-entity storage :service service-id))]
         (:id (sp/create-entity storage :service-instance
                                (cond-> {:service-id service-id

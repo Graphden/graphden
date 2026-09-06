@@ -145,12 +145,20 @@
   ;; querying moves it first, long before anyone times the tab.
   (testing "GET /partials/execute-popover for web-server"
     (let [fn-id (get (:all-name->id *graph*) :web-server)
-          {:keys [queries result]}
+          {:keys [queries result statements]}
           (record! :sql/execute-popover-app-root
                    #(setup/via-graph *graph* :_partial-xp-handler
                                      {:request-method :get
                                       :uri "/partials/execute-popover"
                                       :query-params {"fn-id" (str fn-id)}}))]
+      ;; The statement list goes to stderr (the gate log keeps it; kaocha
+      ;; swallows stdout of a green test) so a budget breach names the
+      ;; query that moved instead of leaving a bare count (2026-09-06:
+      ;; 22 / max 18 with nothing to read back).
+      (binding [*out* *err*]
+        (println "perf: execute-popover-app-root fired" queries "statements:")
+        (doseq [{:keys [calls query]} statements]
+          (println "  " calls "×" (subs (str query) 0 (min 160 (count (str query)))))))
       (is (some? fn-id) "web-server resolved in the golden bootstrap")
       (is (= 200 (:status result))
           "the shell must render, or its query count means nothing")

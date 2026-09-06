@@ -104,8 +104,19 @@
    is then the SAME walk the compiler runs (`surface/public-free-entries`),
    so the Run form, the service create-guard and the layout's deep-free
    placeholders agree by construction. A root that does not resolve
-   yields empty lookups."
-  [storage root-fn-id]
+   yields empty lookups.
+
+   The top-up reads the ctx's `:graph-cache` first — the snapshot the
+   compiler primes (`prime-graph-cache!`) and every CRUD write splices —
+   and hits storage only for ids that snapshot lacks (a cold ctx, a
+   test ctx without the atom). Type rows are identity-level structure,
+   so the snapshot is as truthful as a fresh read; going to storage for
+   them costs four round trips (fn, fn_version, fn_parent_ids, the
+   branch chain) on top of the resolver's constant handful — the
+   `:sql/execute-popover-app-root` budget is what noticed (22 / 18,
+   2026-09-06). Read directly off the atom: `executor.context` requires
+   `compile-runtime`, which requires this ns."
+  [ctx storage root-fn-id]
   (let [g (try
             (sp/resolve-execution-graph storage root-fn-id)
             (catch clojure.lang.ExceptionInfo e
@@ -114,9 +125,19 @@
         type-fn-ids (into #{}
                           (comp (keep :type-fn-id) (remove fns-by-id))
                           (:slots g))
-        type-fn-rows (if (empty? type-fn-ids)
-                       {}
-                       (sp/read-entities storage :fn (vec type-fn-ids)))]
+        cached-fns (some-> (:graph-cache ctx) deref :fns)
+        cached-by-id (cond
+                       (empty? type-fn-ids) {}
+                       (map? cached-fns) (select-keys cached-fns type-fn-ids)
+                       :else (into {}
+                                   (comp (filter (comp type-fn-ids :id))
+                                         (map (juxt :id identity)))
+                                   cached-fns))
+        missing-ids (remove cached-by-id type-fn-ids)
+        type-fn-rows (if (empty? missing-ids)
+                       cached-by-id
+                       (merge cached-by-id
+                              (sp/read-entities storage :fn (vec missing-ids))))]
     (l/build-lookups {:fns (vec (vals (merge fns-by-id type-fn-rows)))
                       :slots (vec (:slots g))
                       :fn-slots (vec (:fn-slots g))
@@ -164,7 +185,7 @@
   [ctx fn-id]
   (let [storage (request/require-storage ctx)]
     (entries->slot-map
-      (surface/public-free-entries fn-id (executor-lookups storage fn-id)))))
+      (surface/public-free-entries fn-id (executor-lookups ctx storage fn-id)))))
 
 
 (defn service-blocking-free-args
@@ -185,7 +206,7 @@
   [ctx fn-id]
   (let [storage (request/require-storage ctx)]
     (entries->slot-map
-      (surface/public-free-entries fn-id (executor-lookups storage fn-id)
+      (surface/public-free-entries fn-id (executor-lookups ctx storage fn-id)
                                    {:skip-root-hofs? true}))))
 
 

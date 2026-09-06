@@ -257,6 +257,11 @@
                       :target-timestamp ts
                       :created-at ts}]
     (sp/create-entity base-storage :branch-merge merge-record)
+    ;; The request's memoised merge rows for the target chain are stale
+    ;; the moment this row exists — the post-merge reads of this same
+    ;; request (delta service restart, the response's resolved view)
+    ;; must see it.
+    (res/forget-merges-memo!)
     merge-record))
 
 

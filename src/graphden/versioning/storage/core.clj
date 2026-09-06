@@ -1514,6 +1514,7 @@
     ;; ancestor — globals survive across CRUD calls and would
     ;; otherwise still hand back the pre-delete chain.
     (res/invalidate-chain-cache! branch-id)
+    (res/forget-merges-memo!)
     ;; The diagnostics store is per-branch and derived — a deleted
     ;; branch's entries can never be recomputed, so drop them here.
     (diag/clear-branch! branch-id)

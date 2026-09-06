@@ -1395,9 +1395,13 @@
                                :body (json/generate-string
                                        {:ok false
                                         :error (str "Unknown branch: " branch-ref)})})))))]
-          (if request-scope
-            (request-scope base-ctx request run)
-            (run))))))
+          ;; One merge-record memo per request: every resolved read in the
+          ;; request shares the chain's `branch-merge` rows (`vres/*merges-memo*`).
+          (vres/call-with-merges-memo
+            (fn []
+              (if request-scope
+                (request-scope base-ctx request run)
+                (run))))))))
 
 
 ;; =============================================================================

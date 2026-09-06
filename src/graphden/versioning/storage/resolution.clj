@@ -56,6 +56,55 @@
   nil)
 
 
+
+;; === Merge-record memo (request-scoped) ===
+;;
+;; Unlike a chain, the `branch-merge` rows landing on a chain are
+;; MUTABLE for the branch's life — every merge adds one — so they get no
+;; process-wide cache. They do get a REQUEST-scoped memo: within one HTTP
+;; request (bound by the branch router) or one `resolve-execution-graph`
+;; (four entity types over the same chain) the rows cannot change
+;; underneath a reader except through `merge-branch!` / `delete-branch!`,
+;; and both of those drop the memo. Before this, the app root's Run form
+;; issued the identical `branch_merge` query six times per request.
+
+(def ^:dynamic *merges-memo*
+  "When bound to an atom, `load-merge-aware-cache` memoises the
+   `branch-merge` rows per branch-id in it. nil outside a scope."
+  nil)
+
+
+(defn call-with-merges-memo
+  "Run `f` under a merge-record memo — a fresh one, or the enclosing
+   scope's when already bound (so a request-scoped memo is not
+   shadowed by the resolver's own batch scope)."
+  [f]
+  (if *merges-memo*
+    (f)
+    (binding [*merges-memo* (atom {})]
+      (f))))
+
+
+(defn forget-merges-memo!
+  "Drop the current scope's memoised merge rows — after a merge record
+   lands or a branch goes away, mid-scope."
+  []
+  (some-> *merges-memo* (reset! {}))
+  nil)
+
+
+(defn- merges-for-chain
+  [base-storage branch-id branch-chain]
+  (let [load (fn [] (sp/query-entities base-storage :branch-merge
+                                       {:target-branch-id (vec branch-chain)}))]
+    (if-let [memo *merges-memo*]
+      (or (get @memo branch-id)
+          (let [rows (load)]
+            (swap! memo assoc branch-id rows)
+            rows))
+      (load))))
+
+
 (defn invalidate-chain-cache!
   "Drop cached chains for a branch (or all branches when called with
    no args). Call after `delete-branch!` to clear stale entries that
@@ -471,8 +520,7 @@
    longer multiplied by version history depth."
   [base-storage version-entity version-id-field entity-ids branch-id]
   (let [branch-chain (collect-branch-chain base-storage branch-id)
-        all-merges (sp/query-entities base-storage :branch-merge
-                                      {:target-branch-id (vec branch-chain)})
+        all-merges (merges-for-chain base-storage branch-id branch-chain)
         source-branch-ids (into #{} (map :source-branch-id) all-merges)
         entity-where (when (seq entity-ids)
                        {version-id-field (vec entity-ids)})
@@ -710,6 +758,9 @@
           coll))
 
 
+(declare resolve-execution-graph-batch*)
+
+
 (defn resolve-execution-graph-batch
   "Batch resolves execution graph using in-memory BFS over the
    slot/fn-slot/binding model. Loads fn / fn-slot / binding /
@@ -723,6 +774,14 @@
       :fn-slots   [fn-slot-row …]         — junctions for visited fns
       :bindings   [binding-row …]         — bindings for visited fns
       :list-items [item-row …]            — items of visited bindings}"
+  [base-storage fn-id branch-id]
+  (call-with-merges-memo #(resolve-execution-graph-batch* base-storage fn-id branch-id)))
+
+
+(defn- resolve-execution-graph-batch*
+  "The body of `resolve-execution-graph-batch`, under one merge-record
+   memo: the four `load-all-resolved` calls share the chain's
+   `branch-merge` rows instead of each fetching them."
   [base-storage fn-id branch-id]
   (let [all-fns        (load-all-resolved base-storage :fn branch-id)
         all-fn-slots   (load-all-resolved base-storage :fn-slot branch-id)

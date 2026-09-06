@@ -93,11 +93,16 @@
                 (is (= 1 (count args)) "one persisted arg — the handler's `message`")
                 (is (= (str traced) (str (get-in (first args) [:value :id])))
                     "the message is the persisted argument"))))
-          (testing "an untraced publish persists nothing"
-            (let [n (count (sp/query-entities storage :fn-execution {}))
-                  id (publish! "{\"order\":43}")]
+          (testing "a publish outside a run opens its own trace: the handling is persisted under it, parentless"
+            (let [id (publish! "{\"order\":43}")
+                  trace-id (:trace-id (sp/read-entity storage :queue-message id))]
+              (is (uuid? trace-id))
               (wait/wait-for 10000 #(nil? (sp/read-entity storage :queue-message id)))
-              (is (= n (count (sp/query-entities storage :fn-execution {}))))))))
+              (wait/wait-for 10000 #(seq (sp/query-entities storage :fn-execution {:trace-id trace-id})))
+              (let [[row :as rows] (sp/query-entities storage :fn-execution {:trace-id trace-id})]
+                (is (= 1 (count rows)))
+                (is (nil? (:parent-execution-id row)))
+                (is (= :succeeded (:status row))))))))
       (finally
         (recon/stop-all! running ctx)
         (doseq [r (rows)] (sp/delete-entity storage :queue-message (:id r)))

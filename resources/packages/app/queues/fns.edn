@@ -4,80 +4,59 @@
 ;; are hx-posts that act and answer with the refreshed panel, so the
 ;; JS module (`editor-queues.js`) only mounts the shell.
 ;;
-;; Reads go through `:query-entities` — org-scoped on the cloud, so a
-;; tenant sees its own queues and only those.
+;; Reads are two org-scoped queries — one aggregate for the counts, one
+;; bounded list for the dead letters — so the panel costs the same on a
+;; queue of a million rows as on ten (`:queue-stats`, `:queue-dead-letters`).
 
 {:namespace "app.queues"
  :description "Operate → Queues: per-queue counts and the dead letters (requeue / delete), as a server-rendered partial."
  :fns
- [{:name :_pq-rows
-   :description "Every `:queue-message` row the caller may see (org-scoped on the cloud)."
-   :parent :query-entities
-   :args {:entity-type "queue-message"}}
-
-  {:name :_pq-state
-   :parent :get :args {:coll {:as :item} :key {:value :state} :default nil}}
-
-  {:name :_pq-pending?
-   :parent :eq :args {:values [:_pq-state {:value "pending"}]}}
-
-  {:name :_pq-dead?
-   :parent :eq :args {:values [:_pq-state {:value "dead"}]}}
-
-  {:name :_pq-pending
-   :parent :filter :args {:pred :_pq-pending? :coll :_pq-rows}}
+ [{:name :_pq-stats
+   :description "One row per queue with its pending / in-flight / dead counts — one aggregate query, org-scoped (`:queue-stats`)."
+   :parent :queue-stats}
 
   {:name :_pq-dead
-   :parent :filter :args {:pred :_pq-dead? :coll :_pq-rows}}
+   :description "The dead letters the panel lists — the newest 200, org-scoped (`:queue-dead-letters`)."
+   :parent :queue-dead-letters
+   :args {:limit 200}}
 
   {:name :_pq-queue-of
    :parent :get :args {:coll {:as :item} :key {:value :queue} :default nil}}
 
-  {:name :_pq-pending-by-queue
-   :parent :group-by :args {:key-fn :_pq-queue-of :coll :_pq-pending}}
-
-  {:name :_pq-dead-by-queue
-   :parent :group-by :args {:key-fn :_pq-queue-of :coll :_pq-dead}}
-
-  {:name :_pq-names
-   :description "The queue names, sorted — every queue that holds at least one message."
-   :parent :sort
-   :args {:coll {:parent :distinct
-                 :args {:coll {:parent :map :args {:func :_pq-queue-of :coll :_pq-rows}}}}}}
-
-  ;; --- one summary row per queue (`item` = the queue name) ---
-  {:name :_pq-pending-n
-   :parent :count
-   :args {:coll {:parent :get :args {:coll :_pq-pending-by-queue :key {:as :item} :default []}}}}
-
-  {:name :_pq-dead-n
-   :parent :count
-   :args {:coll {:parent :get :args {:coll :_pq-dead-by-queue :key {:as :item} :default []}}}}
+  ;; --- one summary row per queue (`item` = the stats row) ---
+  {:name :_pq-stat-str
+   :description "A count column as text — `:key` names which."
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:as :key} :default 0}}}}
 
   {:name :_pq-td-name
    :parent :hiccup
-   :args {:tag {:value "td"} :attrs {:value {:class "gd-queues-name"}} :children [{:as :item}]}}
+   :args {:tag {:value "td"} :attrs {:value {:class "gd-queues-name"}} :children [:_pq-queue-of]}}
 
   {:name :_pq-td-pending
    :parent :hiccup
-   :args {:tag {:value "td"} :attrs {:value {}} :children [{:parent :to-str :args {:value :_pq-pending-n}}]}}
+   :args {:tag {:value "td"} :attrs {:value {}} :children [{:parent :_pq-stat-str :args {:key {:value :pending}}}]}}
+
+  {:name :_pq-td-in-flight
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {}} :children [{:parent :_pq-stat-str :args {:key {:value :in-flight}}}]}}
 
   {:name :_pq-td-dead
    :parent :hiccup
-   :args {:tag {:value "td"} :attrs {:value {}} :children [{:parent :to-str :args {:value :_pq-dead-n}}]}}
+   :args {:tag {:value "td"} :attrs {:value {}} :children [{:parent :_pq-stat-str :args {:key {:value :dead}}}]}}
 
   {:name :_pq-queue-tr
    :parent :hiccup
    :args {:tag {:value "tr"} :attrs {:value {}}
-          :children [:_pq-td-name :_pq-td-pending :_pq-td-dead]}}
+          :children [:_pq-td-name :_pq-td-pending :_pq-td-in-flight :_pq-td-dead]}}
 
   {:name :_pq-queue-trs
-   :parent :map :args {:func :_pq-queue-tr :coll :_pq-names}}
+   :parent :map :args {:func :_pq-queue-tr :coll :_pq-stats}}
 
   {:name :_pq-summary-table
    :parent :hiccup
    :args {:tag {:value "table"} :attrs {:value {:class "gd-queues-table"}}
-          :children [{:value [:thead [:tr [:th "Queue"] [:th "Pending"] [:th "Dead"]]]}
+          :children [{:value [:thead [:tr [:th "Queue"] [:th "Pending"] [:th "In flight"] [:th "Dead"]]]}
                      {:parent :hiccup :args {:tag {:value "tbody"} :attrs {:value {}} :children [:_pq-queue-trs]}}]}}
 
   ;; --- one row per dead letter (`item` = the message row) ---
@@ -150,7 +129,7 @@
 
   {:name :_pq-body
    :parent :if
-   :args {:test {:parent :empty? :args {:coll :_pq-rows}}
+   :args {:test {:parent :empty? :args {:coll :_pq-stats}}
           :then {:value [:div {:class "gd-queues-empty"} "No messages — nothing has been published yet."]}
           :else {:parent :hiccup
                  :args {:tag {:value "div"} :attrs {:value {}}

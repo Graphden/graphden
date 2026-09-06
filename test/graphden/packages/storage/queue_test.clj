@@ -153,9 +153,9 @@
   (let [storage (setup/create-branch-versioned-test-storage)
         ctx (ctx-for storage)]
     (try
-      (testing "outside a persisted run a message carries no trace"
+      (testing "outside a persisted run a message opens a trace of its own — no parent hop"
         (let [row (sp/read-entity storage :queue-message (publish! ctx "q-trace" {:n 0}))]
-          (is (nil? (:trace-id row)))
+          (is (uuid? (:trace-id row)))
           (is (nil? (:parent-execution-id row)))))
       (testing "under `cr/*execution*` the message names the publisher's trace and execution"
         (let [ex-id (random-uuid) trace-id (random-uuid)
@@ -203,4 +203,31 @@
           (is (= id (:id (first (take! ctx "q-lease" 1)))))
           (is (false? ((impls/impl-of :queue-requeue) {:message-id id} ctx))
               "only a dead letter is requeued")))
+      (finally (sp/close storage)))))
+
+
+(deftest stats-and-dead-letters-test
+  (let [storage (setup/create-branch-versioned-test-storage)
+        ctx (ctx-for storage)
+        stats (fn [] (into {} (map (juxt :queue identity)) ((impls/impl-of :queue-stats) {} ctx)))]
+    (try
+      (let [a (publish! ctx "q-stats-a" {:n 1})
+            _ (publish! ctx "q-stats-a" {:n 2})
+            b (publish! ctx "q-stats-b" {:n 3})]
+        (testing "pending counts per queue"
+          (is (= {:queue "q-stats-a" :pending 2 :in-flight 0 :dead 0} (get (stats) "q-stats-a")))
+          (is (= 1 (:pending (get (stats) "q-stats-b")))))
+        (testing "a claimed message is in flight, a dead one dead"
+          (take! ctx "q-stats-a" 1 60000 0)
+          ;; A nack dead-letters once `attempts ≥ max-attempts` — claim b first.
+          (take! ctx "q-stats-b" 1 60000 0)
+          ((impls/impl-of :queue-nack) {:message-id b :error "x" :retry-ms 0 :max-attempts 1} ctx)
+          (is (= {:pending 1 :in-flight 1 :dead 0} (select-keys (get (stats) "q-stats-a") [:pending :in-flight :dead])))
+          (is (= {:pending 0 :in-flight 0 :dead 1} (select-keys (get (stats) "q-stats-b") [:pending :in-flight :dead]))))
+        (testing "dead letters: newest first, bounded"
+          (let [rows ((impls/impl-of :queue-dead-letters) {:limit 10} ctx)]
+            (is (= [b] (mapv :id rows)))
+            (is (= "x" (:error (first rows)))))
+          (is (= 1 (count ((impls/impl-of :queue-dead-letters) {:limit 1} ctx))))
+          (is (uuid? a))))
       (finally (sp/close storage)))))

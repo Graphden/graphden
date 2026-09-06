@@ -76,8 +76,6 @@
   "one unit: mutually recursive with process-any-fn / process-fn over one shared `state` atom"
   "graphden.layout.graph/process-any-fn"
   "one unit: the dispatch half of that same mutual recursion"
-  "graphden.crud.fn-execution.lookup/free-args-via"
-  "one unit: a fixpoint over the inheritance + ref closure with its own seen-set"
   "graphden.system.branch-router/dispatch*"
   "one unit: one request's routing decision — the arms share the resolved branch, ctx and generation snapshot"
 

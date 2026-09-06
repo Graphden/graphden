@@ -26,7 +26,7 @@ independently converged on it:
 | Layer | Implementation | Notes |
 |---|---|---|
 | Editor canvas | layout pipeline edge naming | shows `?body` on descendants |
-| Run form / services guard / test runner | `crud.fn-execution.lookup/free-args-via` | "closest chain fn, rename slot first on a tie", root-slot-id bound-tracking, cross-level collapse |
+| Run form / services guard / test runner | `compile.surface/public-free-entries` (since 2026-09-06; was `crud.fn-execution.lookup/free-args-via`) | the executor's public surface: name-walker membership + `surface-entries` renames, one hole per slot identity (a binding on either end of a rename, env-bindings included, closes it), plus HOF closure captures |
 | fn-def parser | `records.slot-resolution/scalar-over-positional-hit` | bindings by the renamed name land on the anchor slot the editor writes |
 | Executor boundary | `l/rename-for-slot` for ROOT slots only | positional/env-deep emissions kept the SOURCE name |
 

@@ -94,8 +94,8 @@ its own messages like any other row.
    climbs by one every five seconds (the default retry delay) and
    `error` carries the parser's message; after the fifth attempt
    `state` is `dead` and the worker leaves it alone. Fix the handler,
-   then open **Operate → Queues**: every queue with its pending / dead
-   counts, and the dead letter with its error — *Requeue* puts it back
+   then open **Operate → Queues**: every queue with its pending /
+   in-flight / dead counts, and the dead letter with its error — *Requeue* puts it back
    (`:queue-requeue`: pending, attempts 0, error cleared) and it is
    handled; *Delete* drops it.
 

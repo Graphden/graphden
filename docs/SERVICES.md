@@ -522,7 +522,7 @@ Non-versioned work rows (schema `graphden.schema.queue.schema`):
 | `:available-at` | `:timestamptz` | Due time (publish delay / retry delay). |
 | `:locked-until` | `:timestamptz` (null) | The visibility lock of the current claim. |
 | `:error` | `:text` (null) | The last handler's message, kept on retry and on dead. |
-| `:trace-id`, `:parent-execution-id` | `:uuid` (null) | The publisher's trace and execution (`cr/*execution*` at publish time); the consumer's handler runs as a child of that execution (§ Tracing across services in [EXECUTION.md](EXECUTION.md#tracing-across-services)). NULL when published outside a persisted run. |
+| `:trace-id`, `:parent-execution-id` | `:uuid` (null) | The publisher's trace and execution (`cr/*execution*` at publish time); the consumer's handler runs as a child of that execution (§ Tracing across services in [EXECUTION.md](EXECUTION.md#tracing-across-services)). Published outside a persisted run, the message opens a trace of its own (`:trace-id` fresh, no parent) — the handling is persisted either way. |
 
 ### The primitives (`storage/queue`)
 
@@ -534,6 +534,8 @@ Non-versioned work rows (schema `graphden.schema.queue.schema`):
 | `:queue-nack` `message-id error retry-ms max-attempts` | release for retry after `retry-ms`, or `dead` once `attempts ≥ max-attempts` |
 | `:queue-extend` `message-id visibility-ms` | renew the claim's lock — the lease heartbeat of a handler that outlives its claim (true while the row is still pending) |
 | `:queue-requeue` `message-id` | a dead letter back to `pending` (attempts 0, error cleared, consumers woken) — what Operate → Queues' *Requeue* calls |
+| `:queue-stats` | one row per queue — `{:queue :pending :in-flight :dead}` — from ONE aggregate query, org-scoped like the entity read |
+| `:queue-dead-letters` `limit` | the newest `limit` dead letters, org-scoped |
 
 ### The consumer template
 
@@ -546,11 +548,13 @@ mid-flight. The handler itself runs through `:call-traced`: with the
 trace ids the publisher stamped on the message, its execution is
 persisted as a child of the publisher's — the Run pane's *Downstream
 calls* continue across the queue exactly as across HTTP. Its `:take` /
-`:ack` / `:nack` / `:extend` / `:lease-every-ms` are **fn-typed slots**
-(and one knob), so the backend is a binding: `:pg-queue-consumer` binds
-the Postgres primitives above (batches of 10, 30 s visibility renewed
-every 10 s, 5 s wait; retry after 5 s, dead after 5 attempts); a broker
-package would bind its own primitives to the same template. A consumer
+`:ack` / `:nack` / `:extend` are **fn-typed slots** (`:lease-every-ms`
+a knob), so the backend is a binding: `:pg-queue-consumer` binds the
+Postgres primitives above (batches of 10, 30 s visibility renewed every
+10 s, 5 s wait; retry after 5 s, dead after 5 attempts); a broker
+package binds its own `:take` / `:ack` / `:nack` to the same template
+and keeps the template's no-op `:extend` (`:_queue-no-extend`) when it
+has no leases. A consumer
 is two bindings away:
 
 ```edn
@@ -568,9 +572,11 @@ message's type-row, referenced by the publisher's payload and the
 handler's `message` narrowing, exactly like the HTTP contract.
 
 **Operate → Queues** (`GET /partials/queues-panel`, `editor-queues.js`)
-lists every queue with its pending / dead counts and the dead letters
-with *Requeue* (`:queue-requeue`) and *Delete* — org-scoped on the
-cloud, so a tenant sees its own queues. Tutorial:
+lists every queue with its pending / in-flight / dead counts
+(`:queue-stats` — one aggregate query) and the newest 200 dead letters
+(`:queue-dead-letters`) with *Requeue* (`:queue-requeue`) and *Delete* —
+org-scoped on the cloud, so a tenant sees its own queues, and the same
+cost on a queue of a million rows as on ten. Tutorial:
 [lesson 36](tutorial/36-queues.md).
 
 ## Packages-based seeding

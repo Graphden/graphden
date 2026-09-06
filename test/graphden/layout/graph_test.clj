@@ -824,14 +824,13 @@
               parts (setup/create-slot! storage "parts" :sequence)
               _    (setup/attach-slot! storage (:id join) (:id parts) 0)
               f    (setup/create-composed-fn! storage "lg-ren-f" (:id join))
-              ;; f: parts [{:as :path}] — a rename-view slot `path` on f
-              ;; whose source is `parts`, plus the list item naming it.
-              path (sp/create-entity storage :slot {:name "path" :type-fn-id (get setup/primitive-fn-ids :text)
-                                                    :source-slot-id (:id parts)})
+              ;; f: parts [{:as :path}] — as the parser stores it: an own
+              ;; slot `path` on f (no source) plus the list item naming it.
+              path (sp/create-entity storage :slot {:name "path" :type-fn-id (get setup/primitive-fn-ids :text)})
               _    (setup/attach-slot! storage (:id f) (:id path) 0)
               lb   (sp/create-entity storage :binding {:fn-id (:id f) :slot-id (:id parts) :list-append true})
               _    (sp/create-entity storage :binding-list-item
-                                     {:binding-id (:id lb) :position 0 :value {:as "path"}})
+                                     {:binding-id (:id lb) :position 0 :value {:as :path}})
               t    (setup/create-composed-fn! storage "lg-ren-t" (:id b1))
               _    (setup/bind-ref! storage (:id t) (:id x) (:id f))
               r    (setup/create-composed-fn! storage "lg-ren-r" (:id t))

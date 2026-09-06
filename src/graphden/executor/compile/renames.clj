@@ -71,6 +71,8 @@
 (declare ^:private deep-free-ext-names*)
 (declare ^:private deep-free-ext-entries*)
 (declare ^:private hof-lambda-params)
+(declare ^:private declared-lambda-params)
+(declare ^:private slot-structural-call-site-args)
 
 
 (defn deep-free-ext-names
@@ -142,6 +144,25 @@
           (swap! cache assoc fn-id r)
           r))
     (deep-free-ext-entries* fn-id lookups)))
+
+
+(defn deep-free-entries-with-captures
+  "The FULL caller-facing hole surface of `fn-id`, slot-id keyed —
+   `deep-free-ext-entries` plus the closure captures of every HOF
+   target in the tree: what a target reads from the caller's fa beyond
+   its lambda params (docs/CLOSURE_CAPTURE.md), minus every name an
+   enclosing scope provides (env-bindings, an outer HOF's lambda
+   params) or already exposes. Captured entries carry `:captured?
+   true`. Not memoised (the surface walk underneath is).
+
+   `:skip-root-hofs?` — the service-ability projection: the ROOT's own
+   callback slots (`:http-server :handler`, `:schedule :body`) are
+   invoked by the deferred invoker, so their subtrees do not block a
+   start; nested HOFs deeper in a one-shot computation still do."
+  ([fn-id lookups] (deep-free-entries-with-captures fn-id lookups nil))
+  ([fn-id lookups {:keys [skip-root-hofs?]}]
+   (deep-free-ext-entries* fn-id lookups {:into-hofs? true
+                                          :skip-root-hofs? skip-root-hofs?})))
 
 
 (declare cache-projection-frees)
@@ -560,138 +581,191 @@
    once. Different slot-ids with the same ext-name → multiple
    entries; that's the #104 case the new architecture is built to
    express."
-  [fn-id lookups]
-  (let [result (atom [])
-        seen-slots (atom #{})
-        visited-fns (atom #{})
-        emit! (fn [entry]
-                (let [sid (:slot-id entry)]
-                  (when (and sid (not (contains? @seen-slots sid)))
-                    (swap! seen-slots conj sid)
-                    (swap! result conj entry))))]
-    (letfn [(rename-name-for
-              [bnd-slot-id outer-renames fid]
-              ;; Same priority chain as `deep-free-ext-names*`'s
-              ;; `translate`: prefer fid's own rename slot-id, else
-              ;; the binding's raw slot-id. Returns the outer rename
-              ;; name when one applies; nil otherwise.
-              (let [own-rename-slot (get (:slot-by-fn-source-slot lookups)
-                                         [fid bnd-slot-id])
-                    lookup-id (or (:id own-rename-slot) bnd-slot-id)]
-                (get outer-renames lookup-id)))
-            (walk
-              [fid covered-slots outer-renames]
-              (when-not (contains? @visited-fns fid)
-                (swap! visited-fns conj fid)
-                (let [bindings (b/collect-bindings fid lookups)
-                      env-bindings (b/collect-env-bindings fid lookups)
-                      ;; Cover by slot-id, mirroring
-                      ;; `deep-free-ext-names*`'s own-primaries logic
-                      ;; but slot-id-keyed:
-                      ;;   - `:value`, `:resolved-value`, `:seq`,
-                      ;;     `:is-fn :ref` cover their root slot.
-                      ;;   - `:ref :is-fn false` does NOT cover —
-                      ;;     the ref-target reads names from the same
-                      ;;     fa the caller passes (see the long
-                      ;;     comment in `deep-free-ext-names*`).
-                      own-primary-slots
-                      (into #{}
-                            (comp
-                              (remove #(or (= :free (:kind %))
-                                           (and (= :ref (:kind %))
-                                                (not (:is-fn %)))))
-                              (map :slot-id))
-                            bindings)
-                      env-slot-ids (into #{} (map :slot-id) env-bindings)
-                      next-covered (-> covered-slots
-                                       (into own-primary-slots)
-                                       (into env-slot-ids))
-                      ;; Outer renames win — only add fid's own
-                      ;; renames for keys the outer doesn't already
-                      ;; carry. Same priority as the name-keyed
-                      ;; walker.
-                      next-renames (merge-keep-outer
-                                     outer-renames
-                                     (own-rename-chain-map fid lookups))]
-                  (doseq [bnd bindings]
-                    (case (:kind bnd)
-                      :free (let [chain-leaf (:slot-id bnd)
-                                  ;; Phase 4 — rename-aware reader
-                                  ;; slot-id. Two inline-anons of the
-                                  ;; same base-fn each with their own
-                                  ;; `{:as :X}` rename have the SAME
-                                  ;; chain-leaf (`bnd.slot-id`) but
-                                  ;; DIFFERENT rename slot ids on the
-                                  ;; renaming fns. The reader needs to
-                                  ;; index `fa` by the rename slot id
-                                  ;; — not the chain-leaf — so each
-                                  ;; anon's caller value lands in its
-                                  ;; own cell.
-                                  sid (l/effective-reader-slot-id
-                                        fid chain-leaf lookups)]
-                              (when-not (next-covered sid)
-                                (emit! {:ext-name (or (rename-name-for
-                                                        chain-leaf next-renames fid)
-                                                      (:ext-name bnd))
-                                        :slot-id sid})))
-                      :ref  (when-not (:is-fn bnd)
-                              (walk (:ref-id bnd) next-covered next-renames))
-                      :seq  (doseq [item (:items bnd)]
-                              (cond
-                                (:ref-fn-id item)
-                                (walk (:ref-fn-id item) next-covered next-renames)
+  ([fn-id lookups] (deep-free-ext-entries* fn-id lookups nil))
+  ([fn-id lookups {:keys [into-hofs? skip-root-hofs?]}]
+   (let [result (atom [])
+         seen-slots (atom #{})
+         seen-names (atom #{})
+         visited-fns (atom #{})
+         ;; Surface entries dedupe by slot-id (two distinct slots sharing a
+         ;; name are two holes — #104). A CAPTURE (an entry emitted from
+         ;; inside a HOF target, `into-hofs?`) is keyed by NAME: at runtime
+         ;; the target reads the caller's `fa` by name, so a name any
+         ;; enclosing scope already exposes, provides or emitted is the
+         ;; same cell — never a second hole.
+         emit! (fn [entry covered-names]
+                 (let [sid (:slot-id entry)
+                       nm (keyword (:ext-name entry))]
+                   (when (and sid
+                              (not (contains? @seen-slots sid))
+                              (or (not (:captured? entry))
+                                  (not (or (contains? covered-names nm)
+                                           (contains? @seen-names nm)))))
+                     (swap! seen-slots conj sid)
+                     (swap! seen-names conj nm)
+                     (swap! result conj entry))))]
+     (letfn [(rename-name-for
+               [bnd-slot-id outer-renames fid]
+               ;; Same priority chain as `deep-free-ext-names*`'s
+               ;; `translate`: prefer fid's own rename slot-id, else
+               ;; the binding's raw slot-id. Returns the outer rename
+               ;; name when one applies; nil otherwise.
+               (let [own-rename-slot (get (:slot-by-fn-source-slot lookups)
+                                          [fid bnd-slot-id])
+                     lookup-id (or (:id own-rename-slot) bnd-slot-id)]
+                 (get outer-renames lookup-id)))
+             (walk
+               [fid covered-slots outer-renames covered-names hof-depth]
+               (when-not (contains? @visited-fns fid)
+                 (swap! visited-fns conj fid)
+                 (let [bindings (b/collect-bindings fid lookups)
+                       env-bindings (b/collect-env-bindings fid lookups)
+                       captured? (pos? hof-depth)
+                       ;; Env-bindings write `fa[env-name]` — inside a HOF
+                       ;; target the name reads from that same fa.
+                       next-covered-names (into covered-names
+                                                (keep #(some-> (:env-name %) keyword))
+                                                env-bindings)
+                       emit-entry! (fn [e]
+                                     (emit! (cond-> e captured? (assoc :captured? true))
+                                            next-covered-names))
+                       ;; Cover by slot-id, mirroring
+                       ;; `deep-free-ext-names*`'s own-primaries logic
+                       ;; but slot-id-keyed:
+                       ;;   - `:value`, `:resolved-value`, `:seq`,
+                       ;;     `:is-fn :ref` cover their root slot.
+                       ;;   - `:ref :is-fn false` does NOT cover —
+                       ;;     the ref-target reads names from the same
+                       ;;     fa the caller passes (see the long
+                       ;;     comment in `deep-free-ext-names*`).
+                       own-primary-slots
+                       (into #{}
+                             (comp
+                               (remove #(or (= :free (:kind %))
+                                            (and (= :ref (:kind %))
+                                                 (not (:is-fn %)))))
+                               (map :slot-id))
+                             bindings)
+                       env-slot-ids (into #{} (map :slot-id) env-bindings)
+                       next-covered (-> covered-slots
+                                        (into own-primary-slots)
+                                        (into env-slot-ids))
+                       ;; Outer renames win — only add fid's own
+                       ;; renames for keys the outer doesn't already
+                       ;; carry. Same priority as the name-keyed
+                       ;; walker.
+                       next-renames (merge-keep-outer
+                                      outer-renames
+                                      (own-rename-chain-map fid lookups))]
+                   (doseq [bnd bindings]
+                     (case (:kind bnd)
+                       :free (let [chain-leaf (:slot-id bnd)
+                                   ;; Phase 4 — rename-aware reader
+                                   ;; slot-id. Two inline-anons of the
+                                   ;; same base-fn each with their own
+                                   ;; `{:as :X}` rename have the SAME
+                                   ;; chain-leaf (`bnd.slot-id`) but
+                                   ;; DIFFERENT rename slot ids on the
+                                   ;; renaming fns. The reader needs to
+                                   ;; index `fa` by the rename slot id
+                                   ;; — not the chain-leaf — so each
+                                   ;; anon's caller value lands in its
+                                   ;; own cell.
+                                   sid (l/effective-reader-slot-id
+                                         fid chain-leaf lookups)]
+                               (when-not (next-covered sid)
+                                 (emit-entry! {:ext-name (or (rename-name-for
+                                                               chain-leaf next-renames fid)
+                                                             (:ext-name bnd))
+                                               :slot-id sid})))
+                       :ref  (if (:is-fn bnd)
+                               ;; A HOF target: with `into-hofs?`, descend —
+                               ;; its lambda params are supplied per call
+                               ;; (covered by name; alpha-equivalence and all
+                               ;; via `hof-lambda-params`); what it reads
+                               ;; beyond them from the caller's fa is a
+                               ;; closure capture. Slot coverage and outer
+                               ;; renames do not cross the boundary (another
+                               ;; fn's slots); name coverage does. An
+                               ;; ambiguous lambda resolution skips the target.
+                               (when (and into-hofs?
+                                          (not (and skip-root-hofs? (= fid fn-id))))
+                                 (when-let [lambda (try (or (declared-lambda-params (:ref-id bnd) lookups)
+                                                            ;; A bare `:fn` slot has no call-site
+                                                            ;; shape: every free of the target is
+                                                            ;; a capture (the crud / type-checker
+                                                            ;; rule) — the runtime's alpha guess
+                                                            ;; for such a slot is a test surface.
+                                                            (if (nil? (slot-structural-call-site-args
+                                                                        (:slot-id bnd) bnd fid lookups))
+                                                              []
+                                                              (hof-lambda-params
+                                                                (:ref-id bnd) (:slot-id bnd)
+                                                                bnd fid lookups)))
+                                                        (catch clojure.lang.ExceptionInfo _ nil))]
+                                   (walk (:ref-id bnd) #{} {}
+                                         (into next-covered-names (map keyword) lambda)
+                                         (inc hof-depth))))
+                               (walk (:ref-id bnd) next-covered next-renames
+                                     next-covered-names hof-depth))
+                       :seq  (doseq [item (:items bnd)]
+                               (cond
+                                 (:ref-fn-id item)
+                                 (walk (:ref-fn-id item) next-covered next-renames
+                                       next-covered-names hof-depth)
 
-                                (and (map? (:value item))
-                                     (:as (:value item))
-                                     (not (:literal item)))
-                                ;; The rename slot for a positional
-                                ;; `{:as :n}` item is owned by the fn
-                                ;; whose binding carries the item —
-                                ;; which, when the walk sits at a
-                                ;; DESCENDANT, is an ancestor. Resolve
-                                ;; along the inheritance chain
-                                ;; (closest junction wins; fid-first
-                                ;; keeps the direct case identical),
-                                ;; else a descendant's positional free
-                                ;; had NO slot-id entry at all — no
-                                ;; boundary slot routing, no rename
-                                ;; surface (ADR-inherited-rename-
-                                ;; surface).
-                                (let [n (some-> (:as (:value item)) keyword)
-                                      slot (when n
-                                             (some #(get (:slot-by-fn-name
-                                                           lookups)
-                                                         [% n])
-                                                   (l/inheritance-chain*
-                                                     fid lookups)))
-                                      sid (:id slot)
-                                      ext (or (when slot
-                                                (get next-renames sid))
-                                              n)]
-                                  (when (and sid
-                                             ext
-                                             (not (next-covered sid)))
-                                    (emit! {:ext-name ext :slot-id sid})))))
-                      :value nil
-                      ;; Resolver-backed value — same coverage rule as
-                      ;; `:value`; see the name-keyed walker above.
-                      :resolved-value nil
-                      ;; Identity edge — covered, not walked (see the
-                      ;; name-keyed walker above).
-                      :fn-ref nil))
-                  ;; Env-binding ref-walk mirrors
-                  ;; `deep-free-ext-names*` — synthetic shared
-                  ;; computations still propagate free args of their
-                  ;; ref-targets, except where a same-named direct
-                  ;; HOF binding already consumes the slot.
-                  (doseq [env-bnd env-bindings]
-                    (when (and (= :ref (:kind env-bnd))
-                               (not (:is-fn env-bnd))
-                               (:ref-id env-bnd)
-                               (not (own-primary-slots (:slot-id env-bnd))))
-                      (walk (:ref-id env-bnd) next-covered next-renames))))))]
-      (walk fn-id #{} {}))
-    @result))
+                                 (and (map? (:value item))
+                                      (:as (:value item))
+                                      (not (:literal item)))
+                                 ;; The rename slot for a positional
+                                 ;; `{:as :n}` item is owned by the fn
+                                 ;; whose binding carries the item —
+                                 ;; which, when the walk sits at a
+                                 ;; DESCENDANT, is an ancestor. Resolve
+                                 ;; along the inheritance chain
+                                 ;; (closest junction wins; fid-first
+                                 ;; keeps the direct case identical),
+                                 ;; else a descendant's positional free
+                                 ;; had NO slot-id entry at all — no
+                                 ;; boundary slot routing, no rename
+                                 ;; surface (ADR-inherited-rename-
+                                 ;; surface).
+                                 (let [n (some-> (:as (:value item)) keyword)
+                                       slot (when n
+                                              (some #(get (:slot-by-fn-name
+                                                            lookups)
+                                                          [% n])
+                                                    (l/inheritance-chain*
+                                                      fid lookups)))
+                                       sid (:id slot)
+                                       ext (or (when slot
+                                                 (get next-renames sid))
+                                               n)]
+                                   (when (and sid
+                                              ext
+                                              (not (next-covered sid)))
+                                     (emit-entry! {:ext-name ext :slot-id sid})))))
+                       :value nil
+                       ;; Resolver-backed value — same coverage rule as
+                       ;; `:value`; see the name-keyed walker above.
+                       :resolved-value nil
+                       ;; Identity edge — covered, not walked (see the
+                       ;; name-keyed walker above).
+                       :fn-ref nil))
+                   ;; Env-binding ref-walk mirrors
+                   ;; `deep-free-ext-names*` — synthetic shared
+                   ;; computations still propagate free args of their
+                   ;; ref-targets, except where a same-named direct
+                   ;; HOF binding already consumes the slot.
+                   (doseq [env-bnd env-bindings]
+                     (when (and (= :ref (:kind env-bnd))
+                                (not (:is-fn env-bnd))
+                                (:ref-id env-bnd)
+                                (not (own-primary-slots (:slot-id env-bnd))))
+                       (walk (:ref-id env-bnd) next-covered next-renames
+                             next-covered-names hof-depth))))))]
+       (walk fn-id #{} {} #{} 0))
+     @result)))
 
 
 (defn- find-slot-id-in-tree

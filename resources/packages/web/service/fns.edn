@@ -53,7 +53,7 @@
 
   {:name :_service-url-join
    :parent :str
-   :args {:parts [:service-url {:as :path}]}}
+   :args {:parts [:service-url {:as :path :type :text}]}}
 
   ;; --- Call templates over web/http-client -------------------------
   ;; `:url` is pinned to the joined origin+path; the `:type :url`

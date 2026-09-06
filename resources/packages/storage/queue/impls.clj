@@ -13,7 +13,8 @@
     [graphden.storage.postgres.codec :as codec]
     [graphden.storage.postgres.notify :as pg-notify]
     [graphden.storage.protocol.core :as sp]
-    [graphden.storage.sql.pg :as pg]))
+    [graphden.storage.sql.pg :as pg]
+    [graphden.tenancy.context :as tc]))
 
 
 (defn- now
@@ -79,7 +80,10 @@
   (let [storage (request/require-storage ctx)
         t (now)
         ;; The publisher's execution, when it runs under one: the
-        ;; consumer's handler becomes its child in the trace.
+        ;; consumer's handler becomes its child in the trace. Outside a
+        ;; persisted run the message opens a trace of its own — the
+        ;; handling is still persisted and findable by trace id, it
+        ;; just has no parent hop.
         ex cr/*execution*
         row (sp/create-entity storage :queue-message
                               (cond-> {:queue (str queue)
@@ -87,9 +91,9 @@
                                        :state "pending"
                                        :attempts 0
                                        :available-at (plus-ms t delay-ms)
-                                       :created-at t}
-                                (:id ex) (assoc :trace-id (or (:trace-id ex) (:id ex))
-                                                :parent-execution-id (:id ex))))]
+                                       :created-at t
+                                       :trace-id (or (:trace-id ex) (:id ex) (random-uuid))}
+                                (:id ex) (assoc :parent-execution-id (:id ex))))]
     (when-let [emit (:notify-emitter ctx)]
       (emit {:kind :queue :op :publish :id (str queue)}))
     (:id row)))
@@ -172,8 +176,61 @@
           true)))))
 
 
+(defn- org-filter
+  "The org-scoped read's WHERE (own + public), for the aggregate paths
+   that cannot go through the decorated entity read: under the tenancy
+   addon a tenant sees its own rows plus the platform's (NULL org), the
+   public org the platform's only; single-tenant self-host sees all."
+  []
+  (when (tc/tenancy-addon-active?)
+    (let [org (tc/current-org)]
+      (if (or (nil? org) (= org tc/public-org))
+        [:= :org-id nil]
+        [:or [:= :org-id org] [:= :org-id nil]]))))
+
+
+(defbase queue-stats
+  "One row per queue — `{:queue :pending :in-flight :dead}` — from a
+   single aggregate query (no rows loaded), org-scoped like the entity
+   read. `:in-flight` counts claims still under their visibility lock."
+  []
+  (cr/record-effect! :db)
+  (let [pending-due [:and [:= :state "pending"]
+                     [:or [:= :locked-until nil] [:< :locked-until [:now]]]]
+        in-flight [:and [:= :state "pending"] [:> :locked-until [:now]]]
+        cnt (fn [pred] [:count [:case pred 1 :else nil]])]
+    (mapv (fn [r]
+            {:queue (:queue r)
+             :pending (long (or (:pending r) 0))
+             :in-flight (long (or (:in_flight r) 0))
+             :dead (long (or (:dead r) 0))})
+          (pg/pg-query ctx (cond-> {:select [:queue
+                                             [(cnt pending-due) :pending]
+                                             [(cnt in-flight) :in_flight]
+                                             [(cnt [:= :state "dead"]) :dead]]
+                                    :from [:queue-message]
+                                    :group-by [:queue]
+                                    :order-by [:queue]}
+                             (org-filter) (assoc :where (org-filter)))))))
+
+
+(defbase queue-dead-letters
+  "The newest `limit` dead letters (org-scoped like the entity read),
+   as decoded message rows — what Operate → Queues lists."
+  [limit]
+  (cr/record-effect! :db)
+  (decode-rows ctx (pg/pg-query ctx (cond-> {:select [:*]
+                                             :from [:queue-message]
+                                             :where [:= :state "dead"]
+                                             :order-by [[:created-at :desc]]
+                                             :limit (long limit)}
+                                      (org-filter) (update :where (fn [w] [:and w (org-filter)]))))))
+
+
 (def impls
   {:queue-publish queue-publish
+   :queue-stats queue-stats
+   :queue-dead-letters queue-dead-letters
    :queue-take queue-take
    :queue-ack queue-ack
    :queue-nack queue-nack

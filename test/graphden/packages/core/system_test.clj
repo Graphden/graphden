@@ -127,3 +127,11 @@
     (is (some? fd) ":sha256-hex exists as a composed fn-def")
     (is (= :digest-hex (:parent fd)))
     (is (= "SHA-256" (get-in fd [:args :algorithm])))))
+
+
+(deftest call-noargs-traced-calls-an-identity-less-callable-untraced-test
+  (testing "a bare Clojure fn carries no graph identity → plain call, nothing persisted"
+    (let [impl (impls/impl-of :call-noargs-traced)
+          calls (atom 0)]
+      (is (= :ok (impl {:func (delay (fn [] (swap! calls inc) :ok))} nil)))
+      (is (= 1 @calls)))))

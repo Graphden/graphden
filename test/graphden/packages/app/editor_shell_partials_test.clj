@@ -110,6 +110,36 @@
                               "gd-insp-captured"))))))
 
 
+(deftest execute-history-graph-anchor-filter
+  ;; `?graph-hash=H` narrows the API's SQL to one resolved graph and
+  ;; renders the strip's active ⌗ chip; absent → the always-true clause
+  ;; and no chip.
+  (let [{:keys [ctx storage]} ga/*bootstrap*
+        run (fn [fn-name request]
+              (setup/exec-with-storage ctx storage (ga/fn-id fn-name)
+                                       {:request request
+                                        :parsed (setup/exec-with-storage ctx storage (ga/fn-id :_list-exec-parsed)
+                                                                         {:request request})
+                                        :fn-id (ga/fn-id :add)}))
+        plain-req {:query-params {"fn-id" (str (ga/fn-id :add))}}
+        anchor (str/join (repeat 4 "abcdef0123456789"))
+        anchored-req {:query-params {"fn-id" (str (ga/fn-id :add)) "graph-hash" anchor}}
+        junk-req {:query-params {"fn-id" (str (ga/fn-id :add)) "graph-hash" "abc"}}]
+    (is (= [:= 1 1] (run :_list-exec-graph-hash-clause plain-req)))
+    (is (= [:= 1 1] (run :_list-exec-graph-hash-clause junk-req))
+        "a value that is not a full SHA-256 hex is ignored, not queried (and cannot trip the chip's substring)")
+    (is (= [:= :graph-hash anchor] (run :_list-exec-graph-hash-clause anchored-req)))
+    (is (str/includes? (str (hiccup/html (run :_peh-hash-filter-chip plain-req))) "hidden"))
+    (let [chip (str (hiccup/html (run :_peh-hash-filter-chip anchored-req)))]
+      (is (str/includes? chip "execute-history-hash-active"))
+      (is (str/includes? chip "⌗abcdef01")))
+    (testing "the whole panel honours the param"
+      (let [body (body-of :_partial-execute-history-handler
+                          {"fn-id" (str (ga/fn-id :add)) "graph-hash" anchor})]
+        (is (str/includes? body "execute-history-panel"))
+        (is (str/includes? body "execute-history-hash-active"))))))
+
+
 (deftest execute-history-secret-flows-chip
   ;; The rollup strip's chip and the row filter, executed as fn-defs
   ;; (the whole panel also reads the usage rollups, which the golden

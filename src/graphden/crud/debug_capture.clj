@@ -205,6 +205,17 @@
     response))
 
 
+(defn- graph-hash-or-nil
+  "The run's graph anchor, or nil when the ctx cannot resolve one (no
+   storage on a stripped ctx, a resolve error): the anchor annotates
+   the row, it must never cost the capture itself."
+  [branch-ctx handler-fn-id]
+  (try (lookup/graph-hash-cached branch-ctx handler-fn-id)
+       (catch Exception e
+         (log/debug e "debug-capture: graph hash unavailable for the captured run")
+         nil)))
+
+
 (defn persist-captured!
   "Write a captured request run as a standard `:fn-execution` row
    (against the branch ctx's storage — org-stamped by the tenancy
@@ -224,7 +235,10 @@
                    storage fn-version-id
                    (persist/declared-effects-of handler-fn-id) nil branch-id
                    ;; `:args` is the arg SNAPSHOT (below), not a row field.
-                   (dissoc extra :args))
+                   ;; A captured / traced run anchors on its graph like a
+                   ;; submitted one.
+                   (assoc (dissoc extra :args)
+                          :graph-hash (graph-hash-or-nil branch-ctx handler-fn-id)))
              free-slots (lookup/free-arg-slot-map-cached branch-ctx handler-fn-id)]
          ;; The row is created AFTER the run (a failed persist can't leak
          ;; a zombie pending row), so correct :started-at back to the

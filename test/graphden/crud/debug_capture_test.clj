@@ -113,6 +113,7 @@
         row-id (random-uuid)
         writes (atom nil)
         args-written (atom nil)
+        row-extra (atom nil)
         response {:status 200
                   :headers {"Content-Type" "text/html"
                             "Set-Cookie" "session=hunter2"}
@@ -127,7 +128,8 @@
                       :body "payload"})]
     (with-redefs [lookup/resolve-fn-version-id (fn [_ _] (random-uuid))
                   lookup/free-arg-slot-map-cached (fn [_ _] {:request (random-uuid)})
-                  persist/create-pending-row! (fn [& _] {:id row-id})
+                  lookup/graph-hash-cached (fn [_ _] "cafe0000")
+                  persist/create-pending-row! (fn [& more] (reset! row-extra (last more)) {:id row-id})
                   persist/persist-args! (fn [_ _ args _] (reset! args-written args))
                   persist/write-finished! (fn [_ id outcome] (reset! writes [id outcome]))
                   sp/update-entity (fn [& _] nil)]
@@ -147,6 +149,8 @@
             (is (= {"accept" "text/html"} (:headers captured)))
             (is (= "post" (:request-method captured)))
             (is (= "payload" (:body captured))))))
+      (testing "the captured run is anchored on its graph like a submitted one"
+        (is (= "cafe0000" (:graph-hash @row-extra))))
       (testing "the last-captured id is recorded for the panel"
         (is (= row-id (dbg/last-captured-execution-id branch-id))))
       (testing "a throwing handler rethrows AND persists the failure"

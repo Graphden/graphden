@@ -324,6 +324,20 @@
     (func arg)))
 
 
+(defbase call-noargs-traced-fn
+  "`(func)` persisted as an execution of the callee — the trigger-fire
+   twin of `:call-traced`: a cron / interval tick has no caller, so each
+   fire opens a trace of its own (a fresh trace id, no parent) and lands
+   as an `:fn-execution` row of the target under its own identity, the
+   way the Runs tab shows every other run. A callable without a graph
+   identity (a bare Clojure fn) is called untraced."
+  [func]
+  (if-let [fn-id (:graphden.executor/fn-id (meta func))]
+    (do (cr/record-effect! :db)
+        (trace/run-traced-with! ctx fn-id {:trace-id (random-uuid)} {} func))
+    (func)))
+
+
 (defbase call-noargs-fn
   "Invoke a 0-arg callable. `:func`'s structural type `[:fn {} a]`
    makes the binding-site hof-wrap; the wrap produces a variadic-
@@ -465,6 +479,7 @@
    :call-with {:impl call-with-fn :taint-propagate? true}
    :call-traced {:impl call-traced-fn :taint-propagate? true}
    :call-noargs {:impl call-noargs-fn :taint-propagate? true}
+   :call-noargs-traced {:impl call-noargs-traced-fn :taint-propagate? true}
    :try {:impl try-fn :taint-propagate? true}
    :slurp {:impl slurp-fn :taint-propagate? true}
    :parse-int {:impl parse-int :taint-propagate? true}

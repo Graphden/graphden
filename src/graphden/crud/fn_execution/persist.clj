@@ -325,7 +325,8 @@
   ([storage fn-version-id declared-effects user-id branch-id extra]
    ;; `extra` (6-arity) — fields a caller stamps up front: an explicit
    ;; `:id` (a traced listener binds the id BEFORE the row exists),
-   ;; `:trace-id` / `:parent-execution-id` (cross-service tracing).
+   ;; `:trace-id` / `:parent-execution-id` (cross-service tracing),
+   ;; `:graph-hash` (the resolved graph's content anchor).
    (sp/create-entity storage :fn-execution
                      (merge {:fn-version-id fn-version-id
                              :started-at (java.time.Instant/now)
@@ -344,7 +345,11 @@
   ([storage fn-version-id declared-effects user-id args free-slots]
    (create-pending-with-args! storage fn-version-id declared-effects user-id args free-slots nil))
   ([storage fn-version-id declared-effects user-id args free-slots branch-id]
-   (let [r (create-pending-row! storage fn-version-id declared-effects user-id branch-id)]
+   (create-pending-with-args! storage fn-version-id declared-effects user-id args free-slots branch-id nil))
+  ([storage fn-version-id declared-effects user-id args free-slots branch-id extra]
+   ;; `extra` — up-front row fields (`:graph-hash`, the run's content
+   ;; anchor), same contract as `create-pending-row!`'s 6-arity.
+   (let [r (create-pending-row! storage fn-version-id declared-effects user-id branch-id extra)]
      (persist-args! storage (:id r) args free-slots)
      r)))
 

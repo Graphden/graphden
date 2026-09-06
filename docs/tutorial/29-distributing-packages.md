@@ -54,6 +54,19 @@ how the registry indexes it. Bump a fn in `mycorp.hello`,
 `bb rebuild`, and publish again as `1.1.0` — now the registry
 holds **both** versions. `GET /api/packages` lists the index.
 
+The version number is checked, not just recorded. Before writing the
+row, publish diffs the bundle against the newest version already
+below the one you named: a public fn-def that disappeared, an arg
+that is gone or newly required or narrower, a binding you dropped
+(so callers must now supply that arg), a wider return type. If the
+bundle breaks `1.1.0` and you called it `1.2.0`, the answer is
+`{"ok":false,"reason":"breaking-change","previous":"1.1.0","changes":[…]}`
+with each change spelled out (`kind`, `fn`, `arg`, `old`, `new`), and
+nothing is written. Call it `2.0.0` and it publishes — a break has to
+leave the previous version's `^` range, so a consumer pinned with
+`^1.1` never auto-advances into it. Adding fn-defs, optional args or
+wider types is compatible and publishes under any higher version.
+
 You can also publish **from the editor** — and because publishing
 is an authoring act on a namespace, it lives *on the namespace*.
 In the Explorer, hover a namespace row and click its **⬆** button

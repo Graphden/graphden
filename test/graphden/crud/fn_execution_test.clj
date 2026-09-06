@@ -730,6 +730,42 @@
       (finally nil))))
 
 
+(deftest apply-stamps-the-graph-hash-on-the-row-test
+  ;; The run's content anchor: a SHA-256 of the RESOLVED graph, stamped
+  ;; beside :fn-version-id. Stable across runs of the same graph; a
+  ;; binding edit below the root changes it while the root's version
+  ;; id does not.
+  (let [storage (create-full-storage)
+        {composed :composed slot-b :slot-b} (make-pure-add-fn! storage "ghash")
+        c (setup/default-registry-ctx storage)
+        run-once! (fn []
+                    (apply-and-await! c {:fn-id (:id composed) :args {:a 1 :b 2}
+                                         :timeout-ms 5000 :persist? true}))
+        row-of (fn [r]
+                 (sp/read-entity storage :fn-execution
+                                 (java.util.UUID/fromString (:execution-id r))))
+        first-row (row-of (run-once!))
+        second-row (row-of (run-once!))]
+    (testing "a 64-hex anchor, equal for two runs of the same graph"
+      (is (re-matches #"[0-9a-f]{64}" (str (:graph-hash first-row))))
+      (is (= (:graph-hash first-row) (:graph-hash second-row)))
+      (is (= (lookup/graph-hash c (:id composed)) (:graph-hash first-row))
+          "the pure function agrees with the cached stamp"))
+    (testing "a binding edit below the root moves the anchor but not the version id"
+      (setup/bind-value! storage (:id composed) (:id slot-b) 40)
+      ;; A bare test ctx has no background revalidation gate — invalidate
+      ;; (drops the free-arg / graph-hash memo) and recompile synchronously.
+      ((requiring-resolve 'graphden.executor.context/invalidate-graph-cache!) c)
+      ((requiring-resolve 'graphden.executor.compile-runtime/rebuild!) c)
+      (let [r (apply-and-await! c {:fn-id (:id composed) :args {:a 1}
+                                   :timeout-ms 5000 :persist? true})
+            edited-row (row-of r)]
+        (is (= 41 (:result r)))
+        (is (not= (:graph-hash first-row) (:graph-hash edited-row)))
+        (is (= (:fn-version-id first-row) (:fn-version-id edited-row))
+            "the root's own version is untouched by a binding edit — that is the gap the hash closes")))))
+
+
 (deftest apply-persists-args-rows-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "args")

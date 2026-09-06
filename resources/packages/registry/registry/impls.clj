@@ -12,6 +12,7 @@
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.executor.registry.core :as registry-core]
+    [graphden.packages.compat :as compat]
     [graphden.packages.export :as export]
     [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
@@ -156,6 +157,21 @@
                          :org-id (tc/current-org)
                          :public? (boolean (or pkg-public (tc/current-platform-tier?)))
                          :published-at (java.time.Instant/now)}))))
+
+
+(defbase breaking-changes-between
+  "Consumer-visible incompatibilities from `old-fns` to `new-fns` (two
+   bundles' fn-def lists) — `compat/breaking-changes`, pure."
+  [old-fns new-fns]
+  (compat/breaking-changes old-fns new-fns))
+
+
+(defbase semver-compatible?
+  "Is `to` inside `from`'s caret range (`^from`: same major, or same
+   minor below 1.0) — the range a consumer pinned with a constraint
+   would auto-advance into?"
+  [from to]
+  (boolean (semver/satisfies-constraint? to (str "^" from))))
 
 
 (defbase withdraw-package-apply
@@ -771,6 +787,8 @@
    :tenancy-active? tenancy-active?
    :graph-rows graph-rows
    :publish-package-apply publish-package-apply
+   :breaking-changes-between breaking-changes-between
+   :semver-compatible? semver-compatible?
    :withdraw-package-apply withdraw-package-apply
    :resolve-package-version resolve-package-version
    :resolve-remote-version resolve-remote-version

@@ -441,3 +441,63 @@
               :beat (fn [] nil)
               :every-ms (delay 60)}
              nil))))))
+
+
+;; ============================================================================
+;; :start-all — one service, many triggers: the N handles fold into one
+;; ============================================================================
+
+(deftest start-all-folds-the-trigger-handles-into-one-test
+  (testing "forcing the items starts the triggers in order; the one stopper stops them all"
+    (let [order (atom [])
+          gate-a (promise)
+          gate-b (promise)
+          spawn (fn [tag gate]
+                  (delay (swap! order conj tag)
+                         ((impls/impl-of :future) {:body (fn [] @gate)} nil)))
+          stop ((impls/impl-of :start-all)
+                {:triggers [(spawn :a gate-a) (spawn :b gate-b)]} nil)
+          {:keys [alive? exit]} (meta stop)]
+      (is (= [:a :b] @order) "triggers start left-to-right")
+      (is (true? (alive?)) "alive while the children run")
+      (is (nil? @exit))
+      (deliver gate-a :go)
+      (Thread/sleep 100)
+      (is (true? (alive?)) "still alive while ANY child runs")
+      (is (nil? @exit) "not :done until every child is")
+      (deliver gate-b :go)
+      (Thread/sleep 100)
+      (is (false? (alive?)))
+      (is (= :done @exit))
+      (is (nil? (stop)) "stopping an already-finished set is harmless")))
+  (testing "a child that threw makes the whole set :failed — the restart policy sees the crash"
+    (let [gate (promise)
+          stop ((impls/impl-of :start-all)
+                {:triggers [(delay ((impls/impl-of :future) {:body (fn [] @gate)} nil))
+                            (delay ((impls/impl-of :future) {:body (fn [] (throw (ex-info "boom" {})))} nil))]}
+                nil)]
+      (Thread/sleep 100)
+      (is (= :failed @(:exit (meta stop))))
+      (is (true? ((:alive? (meta stop)))) "the healthy sibling is still running")
+      (stop)
+      (Thread/sleep 100)
+      (is (false? ((:alive? (meta stop)))) "the one stopper interrupted the survivor")))
+  (testing "an empty trigger list is a no-op service: not alive, no exit"
+    (let [stop ((impls/impl-of :start-all) {:triggers []} nil)]
+      (is (false? ((:alive? (meta stop)))))
+      (is (nil? @(:exit (meta stop)))))))
+
+
+(deftest interval-inherits-process-effect-from-future-test
+  (testing ":interval parents from :future like :schedule — a `{:parent :interval}` fn-def is service-eligible"
+    (let [pkg ((requiring-resolve 'graphden.packages.loader/load-packages) ["core"])
+          composed (:fn-defs pkg)
+          by-name (fn [n] (first (filter #(= n (:name %)) composed)))]
+      (is (= :future (:parent (by-name :interval))))
+      (is (= :_interval-loop (get-in (by-name :interval) [:args :body])))
+      (is (= [:_interval-sleep :_fire-target] (get-in (by-name :_interval-step) [:args :steps]))
+          "sleep one period, then fire the SAME captured :fn as the cron loop")
+      (is (= {:as :every-ms} (get-in (by-name :_interval-sleep) [:args :ms]))
+          "the period is public under :every-ms")
+      (is (contains? (set (:effects (get (:base-fn-defs pkg) :start-all))) :process)
+          ":start-all declares :process — a trigger list is a service"))))

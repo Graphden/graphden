@@ -261,6 +261,19 @@ as `:namespace` on each fn-def, reconstructed on install).
   inserts the `:package-version` row. Already shipped.
 - **Self-hosted, registry-independent**: the same `export-namespace` returns the
   bundle; the user writes it to their git repo as `fns.edn`. Registry optional.
+- **Semver is verified, not trusted (shipped)**: before the row is written,
+  `publish-package` diffs the bundle against the newest published version
+  BELOW the candidate (`graphden.packages.compat/breaking-changes` — removed
+  public fn-defs, removed / narrowed / newly-required args, dropped bindings,
+  changed renames or parents, widened returns, reshaped type-rows; `_`-private
+  fn-defs never count). A break is refused with
+  `{:ok false :reason "breaking-change" :previous "1.1.0" :changes [{:kind :arg-removed
+  :fn :shape :arg :nick :old :text} …]}` unless the candidate leaves the previous
+  version's caret range (`^1.1.0` → a major bump; below 1.0 a minor bump) — the
+  range a `^` / `~>` consumer auto-advances into. Additions, optional slots,
+  wider args and narrower returns are compatible. The guard is graph
+  (`:_pub-breaking?` in `registry/registry/fns.edn`) over two pure base-fns,
+  `:breaking-changes-between` and `:semver-compatible?`.
 - **Making a version available in cloud (new — Task 3)**: a publish (or an
   admin "release" step) **materialises** the bundle once into
   `public` org under `<ns-root>@<version>`, syncing its fn-defs with
@@ -297,6 +310,10 @@ as `:namespace` on each fn-def, reconstructed on install).
   legacy bare names (bare ≡ any). The loader validates the classpath version
   against every constraint at boot (`graphden.packages.semver` +
   `validate-dep-constraints!`), throwing `:packages/version-conflict` early.
+- **Publish-time breaking-change check (shipped):** a version that breaks the
+  newest published one below it must leave that version's caret range — see
+  § 4.2. Consumers pinned with `^` / `~>` therefore never auto-advance into a
+  break the registry could see.
 - **Install-time version selection (shipped, 3d-4):** `install` / `fork` /
   `materialize` accept an exact version, a semver constraint (`>=1.1`, `~>1.2`,
   `*`), or `latest`; `resolve-version` picks the highest published match and

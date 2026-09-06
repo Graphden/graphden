@@ -955,14 +955,31 @@
    :args {:a {:parent :query-param :args {:request {:as :request} :param-name {:value "secrets"}}}
           :b {:value "1"}}}
 
+  ;; `?graph-hash=<hex>` — only the runs of ONE resolved graph (the
+  ;; content anchor stamped on every row, EXECUTION.md § Storage schema):
+  ;; the Runs tab's per-row ⌗ chip. Absent / blank → every run of the
+  ;; version.
+  {:name :_list-exec-graph-hash-raw
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "graph-hash"}}}
+
+  {:name :_list-exec-graph-hash
+   :description "The requested anchor, or nil when the param is absent or not a full SHA-256 hex (junk never reaches the SQL, and the ⌗ chip's 8-char prefix is always there to take)."
+   :parent :if
+   :args {:test {:parent :re-find? :args {:string :_list-exec-graph-hash-raw
+                                          :pattern {:value "^[0-9a-f]{64}$"}}}
+          :then :_list-exec-graph-hash-raw
+          :else nil}}
+
   {:name :_list-exec-parsed
-   :description "Parse `GET /api/executions` query-string into `{:fn-id :version-id :limit :secrets?}`."
+   :description "Parse `GET /api/executions` query-string into `{:fn-id :version-id :limit :secrets? :graph-hash}`."
    :parent :zipmap
-   :args {:keys [{:value :fn-id} {:value :version-id} {:value :limit} {:value :secrets?}]
+   :args {:keys [{:value :fn-id} {:value :version-id} {:value :limit} {:value :secrets?} {:value :graph-hash}]
           :vals [:fn-id-param
                  {:parent :parse-uuid :args {:string :_list-exec-version-id-raw}}
                  :_list-exec-limit
-                 :_list-exec-secrets?]}}
+                 :_list-exec-secrets?
+                 :_list-exec-graph-hash]}}
 
   {:name :_list-exec-no-anchor?
    :description "Guard — neither `?fn-id` nor `?fn-version-id` was supplied. `:and [nil? (get parsed :version-id)] [nil? (get parsed :fn-id)]`."
@@ -1018,15 +1035,31 @@
           :key {:value :where}
           :value :_list-exec-by-version-hsql-where}}
 
+  ;; `[:and <version> <secrets> <anchor>]` — each optional narrowing is
+  ;; its clause or the always-true `[:= 1 1]`, so the WHERE keeps one
+  ;; shape however the two filters combine.
   {:name :_list-exec-by-version-hsql-where
+   :parent :vec
+   :args {:coll [{:value :and}
+                 {:parent :vec :args {:coll [{:value :=} {:value :fn-version-id} :_list-exec-version-id]}}
+                 :_list-exec-secrets-clause
+                 :_list-exec-graph-hash-clause]}}
+
+  {:name :_list-exec-secrets-clause
    :parent :if
    :args {:test {:parent :get :args {:coll {:as :parsed} :key {:value :secrets?} :default false}}
-          :then {:parent :vec
-                 :args {:coll [{:value :and}
-                               {:parent :vec :args {:coll [{:value :=} {:value :fn-version-id} :_list-exec-version-id]}}
-                               {:value [:= :touched-secret? true]}]}}
+          :then {:value [:= :touched-secret? true]}
+          :else {:value [:= 1 1]}}}
+
+  {:name :_list-exec-graph-hash-param
+   :parent :get :args {:coll {:as :parsed} :key {:value :graph-hash} :default nil}}
+
+  {:name :_list-exec-graph-hash-clause
+   :parent :if
+   :args {:test {:parent :nil? :args {:value :_list-exec-graph-hash-param}}
+          :then {:value [:= 1 1]}
           :else {:parent :vec
-                 :args {:coll [{:value :=} {:value :fn-version-id} :_list-exec-version-id]}}}}
+                 :args {:coll [{:value :=} {:value :graph-hash} :_list-exec-graph-hash-param]}}}}
 
   {:name :_list-exec-version-id
    :parent :get :args {:coll {:as :parsed} :key {:value :version-id} :default nil}}
@@ -1092,7 +1125,11 @@
           :outer-secrets {:parent :get
                           :args {:coll {:as :parsed}
                                  :key {:value :secrets?}
-                                 :default false}}}}
+                                 :default false}}
+          :outer-graph-hash {:parent :get
+                             :args {:coll {:as :parsed}
+                                    :key {:value :graph-hash}
+                                    :default nil}}}}
 
   {:name :_list-exec-by-fn-version-id
    :parent :resolve-fn-version-id
@@ -1113,10 +1150,11 @@
    :description "Carry the resolved version-id + the OUTER limit into the by-version graph composition. The limit comes via `:outer-limit` from `:_list-exec-apply-by-fn` (NOT a re-read of `:as :parsed`) — at this level `:parsed` is BEING REDEFINED to point at this same fn, so re-reading it would loop. The structural shape mirrors `:_list-exec-by-version`'s declared `:parsed` (fn-id + version-id + limit) so the by-version's typed downstream chain doesn't fail open-record subtype against the missing `:fn-id`."
    :parent :assoc
    :args {:map {:parent :zipmap
-                :args {:keys [{:value :limit} {:value :fn-id} {:value :secrets?}]
+                :args {:keys [{:value :limit} {:value :fn-id} {:value :secrets?} {:value :graph-hash}]
                        :vals [{:as :outer-limit :type :nullable-int}
                               {:as :fn-id :type :nullable-uuid}
-                              {:as :outer-secrets :type :bool}]}}
+                              {:as :outer-secrets :type :bool}
+                              {:as :outer-graph-hash :type :nullable-text}]}}
           :key {:value :version-id}
           :value {:as :version-id}}}
 

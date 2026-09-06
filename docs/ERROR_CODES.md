@@ -430,6 +430,19 @@ A bare fn reference resolves to several same-named fns across
 namespaces and none is the referencing module's own. Qualify the
 reference (`:other.ns/name`).
 
+### publish rejection `breaking-change`
+
+`POST /api/packages/publish` answers `{"ok": false, "reason":
+"breaking-change", "previous": "<version>", "changes": [...]}` when the
+bundle breaks the newest published version below the candidate and the
+candidate stays inside that version's caret range (same major; below
+1.0 the same minor). Each change carries `kind` (`fn-removed`,
+`arg-removed`, `arg-required-added`, `arg-narrowed`, `arg-unbound`,
+`arg-renamed`, `parents-changed`, `return-widened`, `type-changed`,
+`role-changed`), `fn`, and where relevant `arg` / `old` / `new`. Bump
+the major (or restore the contract) and publish again — nothing was
+written. See PACKAGE_DISTRIBUTION.md § 4.2.
+
 ### `:secrets/vault-get-missing`
 
 A secret binding is being created but the `:vault-get` resolver

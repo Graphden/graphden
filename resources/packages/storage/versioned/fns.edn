@@ -92,7 +92,8 @@
           :runtime-effects :nullable-jsonb
           :user-id :nullable-uuid
           :cancel-requested? :nullable-bool
-          :touched-secret? :nullable-bool}}
+          :touched-secret? :nullable-bool
+          :graph-hash :nullable-text}}
 
   {:name :service-row-shape
    :description "Decoded `:service` storage row — the per-branch desired-state registry entry. Not versioned."

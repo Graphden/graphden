@@ -50,9 +50,10 @@
    intent and is intentionally absent from
    `versioning.storage.resolution/entity-config`.
 
-   Future evolution:
-   - `:service-schedule` — 1-to-many child for cron / interval triggers.
-     Service without schedule rows = continuous (default).
+   Triggers are NOT a child entity: a service with N cron / interval
+   triggers is a `:start-all` fn-def over a LIST of `:schedule` /
+   `:interval` derivatives (core/concurrency) — versioned graph, not a
+   `:service-schedule` row. A service row stays «keep THIS fn running».
 
    Restart-policy semantics:
    - `:always` — restart on any exit (crash OR normal return).

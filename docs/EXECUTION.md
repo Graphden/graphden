@@ -60,6 +60,7 @@ Three non-versioned entities + one enum live in
 | `:status`          | `:execution-status` enum | `:pending` `:succeeded` `:failed` `:cancelled`.                |
 | `:trace-id`        | `:uuid` (null, indexed) | Cross-service tracing: the top-level execution's id, shared by every hop (§ Tracing across services). nil ≡ untraced / a top-level run. |
 | `:parent-execution-id` | `:uuid` (null, indexed) | The execution that called INTO this one over the wire (a `:service-get` from another service). |
+| `:graph-hash`      | `:text` (null, indexed) | SHA-256 of the RESOLVED graph the run executed — every reachable fn / slot / binding / list item as the branch saw them at submit time (`lookup/graph-hash`). The content anchor: a binding edit below the root changes it while `:fn-version-id` does not (VERSIONING.md § Execution anchoring). nil on pre-field rows. |
 | `:result`          | `:jsonb` (null) | Capped at 5 MB. Oversize → `:result nil` + `:result-truncated? true`.       |
 | `:result-truncated?` | `:bool` (null) | Set when the 5 MB cap fires.                                                |
 | `:error`           | `:text` (null)  | Exception message, truncated to 4 KB.                                       |
@@ -201,7 +202,12 @@ version), or **`?fn-version-id=V`** to list runs of one specific version
 (the `⌛` history panel's per-version expand uses this; it wins when both
 params are present). Ordered `:started-at` desc. **`?limit`** is clamped
 to `1–100`, defaulting to `20` when absent or non-numeric. Summary shape
-(no nested args). Editor's History panel calls this.
+(no nested args). Editor's History panel calls this. Two optional
+narrowings ride on the same query, applied in the SQL (so the page is
+the last N matching runs, not the matches among the last N):
+**`?secrets=1`** keeps only audit-trail rows (`touched-secret?`), and
+**`?graph-hash=H`** keeps only the runs of one exact resolved graph
+(the row's `:graph-hash` anchor).
 
 ## Concurrency caps
 
@@ -328,7 +334,10 @@ run history below. In the history, a row whose run consumed a secret
 and produced an effect carries a 🔒 (SECRETS.md § Audit trail), and
 the **Secret flows** chip narrows the list to those rows — in the
 API's SQL (`GET /api/executions?fn-id=X&secrets=1`), so the page is the
-last N secret flows, not the secret flows among the last N:
+last N secret flows, not the secret flows among the last N. Each row
+also carries a ⌗ chip with the first 8 hex of its `:graph-hash`;
+clicking it narrows the list to runs of that exact graph
+(`&graph-hash=H`), and the active chip in the strip clears the filter:
 
 - One type-aware form per free-arg, loaded via `/api/value-form` —
   same widgets that drive binding edits. Required holes are rows;

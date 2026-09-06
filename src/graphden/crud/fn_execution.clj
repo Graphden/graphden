@@ -176,6 +176,10 @@
                  (assoc :allowed-effects (cr/cloud-allowed-effects-for org)))
      :fn-id fn-id
      :fn-version-id (lookup/resolve-fn-version-id ctx fn-id)
+     ;; The run's content anchor — the hash of everything it can reach,
+     ;; stamped on the row beside the root's version id. Cached per
+     ;; graph epoch like `free-slots`.
+     :graph-hash (lookup/graph-hash-cached ctx fn-id)
      :free-slots free-slots
      :declared-eff declared-eff
      :org org
@@ -224,13 +228,14 @@
    `release` is idempotent, so the future's finally re-calling it is a
    no-op."
   [{:keys [storage exec-ctx fn-id fn-version-id free-slots declared-eff
-           executor-args cancel-flag persist? branch-id]}
+           executor-args cancel-flag persist? branch-id graph-hash]}
    parsed release]
   (try
     (let [row (when persist?
                 (persist/create-pending-with-args!
                   storage fn-version-id declared-eff
-                  (:user-id parsed) (:args parsed) free-slots branch-id))]
+                  (:user-id parsed) (:args parsed) free-slots branch-id
+                  {:graph-hash graph-hash}))]
       (try
         (let [[fut trace path-trace]
               (persist/run-future exec-ctx fn-id executor-args cancel-flag release
@@ -271,7 +276,7 @@
    terminal state SYNCHRONOUSLY so a GET by id right after is already
    consistent."
   [{:keys [storage fn-id declared-eff stats-ctx fn-version-id free-slots
-           persist? cancel-flag branch-id]}
+           persist? cancel-flag branch-id graph-hash]}
    parsed {:keys [row fut trace path-trace]}]
   (let [result (try (java.util.concurrent.Future/.get
                       fut (long (:timeout-ms parsed))
@@ -302,7 +307,8 @@
       (and (= ::pending result) (not persist?))
       (let [r (persist/create-pending-with-args!
                 storage fn-version-id declared-eff
-                (:user-id parsed) (:args parsed) free-slots branch-id)]
+                (:user-id parsed) (:args parsed) free-slots branch-id
+                {:graph-hash graph-hash})]
         (persist/register-future! (:id r) fut cancel-flag)
         (persist/record-completion! storage (:id r) fn-id fut trace declared-eff stats-ctx path-trace)
         {:status :pending :execution-id (str (:id r))})

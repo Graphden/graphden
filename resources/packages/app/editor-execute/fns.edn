@@ -417,6 +417,57 @@
                          "🔒"]}
           :else :hidden-span}}
 
+  ;; --- Graph anchor — the ⌗ chip ---------------------------------------
+  ;; Every row carries `:graph-hash`, the content hash of the resolved
+  ;; graph it ran (VERSIONING.md § Execution anchoring). The chip shows
+  ;; its first 8 hex; clicking it re-fetches the panel narrowed to that
+  ;; anchor (`?graph-hash=`), the SAME narrowing `/api/executions` does
+  ;; in SQL. A row from before the field is chip-less.
+  ;; The active anchor filter is `app.execution/_list-exec-graph-hash` —
+  ;; the API's own parse of `?graph-hash` (nil when absent / blank), so
+  ;; the partial and the JSON route read the param identically.
+  {:name :_peh-row-graph-hash
+   :parent :get
+   :args {:coll {:as :item} :key {:value :graph-hash} :default nil}}
+
+  {:name :_peh-row-graph-hash-short
+   :parent :subs
+   :args {:string {:ref :_peh-row-graph-hash :type :text} :start {:value 0} :end {:value 8}}}
+
+  {:name :_peh-row-hash-attrs
+   :parent :zipmap
+   :args {:keys [{:value :type} {:value :class} {:value :data-graph-hash} {:value :title}]
+          :vals [{:value "button"}
+                 {:value "execute-history-hash"}
+                 :_peh-row-graph-hash
+                 {:value "Graph anchor — the content hash of everything this run could reach; click to show only runs of this exact graph"}]}}
+
+  {:name :_partial-eh-row-hash
+   :parent :if
+   :args {:test {:parent :nil? :args {:value :_peh-row-graph-hash}}
+          :then :hidden-span
+          :else {:parent :hiccup
+                 :args {:tag {:value "button"}
+                        :attrs :_peh-row-hash-attrs
+                        :children [{:value "⌗"} :_peh-row-graph-hash-short]}}}}
+
+  ;; The active filter's chip in the rollup strip — clears on click.
+  {:name :_peh-hash-filter-short
+   :parent :subs
+   :args {:string {:ref :_list-exec-graph-hash :type :text} :start {:value 0} :end {:value 8}}}
+
+  {:name :_peh-hash-filter-chip
+   :parent :if
+   :args {:test {:parent :nil? :args {:value :_list-exec-graph-hash}}
+          :then :hidden-span
+          :else {:parent :hiccup
+                 :args {:tag {:value "button"}
+                        :attrs {:value {:type "button"
+                                        :class "execute-history-hash execute-history-hash-active"
+                                        :data-graph-hash ""
+                                        :title "Showing only runs of this graph — click to show every run"}}
+                        :children [{:value "⌗"} :_peh-hash-filter-short {:value " ×"}]}}}}
+
   {:name :_peh-secrets-toggle-class
    :parent :if
    :args {:test :_peh-secrets-only?
@@ -614,6 +665,7 @@
           :children [:_partial-eh-row-status-span
                      :_partial-eh-row-lock
                      :_partial-eh-row-ts-span
+                     :_partial-eh-row-hash
                      :_partial-eh-row-repeat-btn
                      :_partial-eh-row-path-btn
                      :_partial-eh-row-tree-btn]}}
@@ -682,7 +734,7 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "execute-history-stats"}}
-          :children [:_peh-stats-text :_peh-secrets-toggle]}}
+          :children [:_peh-stats-text :_peh-hash-filter-chip :_peh-secrets-toggle]}}
 
   ;; --- unresolved failures (the Failed runs panel's rows, this fn only) —
   ;;     message + ✕ dismiss, above the history. The ✕ POSTs to the

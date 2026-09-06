@@ -211,6 +211,60 @@
    :args {:func {:as :fn}}}
 
   ;; ---------------------------------------------------------------------
+  ;; :interval — the fixed-period sibling of :schedule.
+  ;;
+  ;; Free args: :every-ms (period) and :fn (0-arg target) — the same
+  ;; closure-capture shape as :schedule (:_fire-target is shared).
+  ;;   {:name :my-poll :parent :interval :args {:every-ms 300000 :fn :poll-inbox}}
+  ;; ---------------------------------------------------------------------
+  {:name :interval
+   :description "Run `:fn` every `:every-ms` milliseconds (sleep, then fire, repeat) in a daemon thread — the fixed-period sibling of `:schedule`. Derivatives that bind `:every-ms` and `:fn` are service-eligible (inherit `:process` via `:future`)."
+   :parent :future
+   :args {:body :_interval-loop}
+   ;; A period is per-environment config, like a cron string.
+   :branch-local? true}
+
+  {:name :_interval-loop
+   :description "Interval-driven cooperative loop body — sleeps `:every-ms` then invokes the captured `:fn`, repeating until interrupted."
+   :parent :loop-until-interrupted
+   :args {:body :_interval-step}}
+
+  {:name :_interval-step
+   :description "One iteration of the interval loop: sleep `:every-ms`, then invoke `:fn`. Steps fire left-to-right (:do's :lazy-seq-args semantics)."
+   :parent :do
+   :args {:steps [:_interval-sleep :_fire-target]}}
+
+  {:name :_interval-sleep
+   :description "Sleep one period — `:sleep` under the public name `:every-ms`. Honors Thread.interrupt so the parent :future's stopper cuts the sleep short."
+   :parent :sleep
+   :args {:ms {:as :every-ms}}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :start-all — one service, many triggers.
+  ;;
+  ;; The 1-to-many trigger shape lives in the GRAPH, not in a schema
+  ;; column or a `:service-schedule` child entity: `:triggers` is a list
+  ;; of `:schedule` / `:interval` derivatives. Each list item is
+  ;; EXECUTED when forced (that is what starts a trigger — `:future`
+  ;; spawns and returns its stopper) and `:start-all` folds the N
+  ;; stoppers into one handle. Same reasoning as `:migrate`'s list of
+  ;; `:migrations` and `:do`'s `:steps`: versioned, type-checked,
+  ;; diffable, and an edit to the list restarts the service through
+  ;; the ordinary fn-graph path.
+  ;;   {:name :_nightly :parent :schedule :args {:cron "0 0 3 * * ?" :fn :rebuild-index}}
+  ;;   {:name :_poll    :parent :interval :args {:every-ms 300000 :fn :poll-inbox}}
+  ;;   {:name :my-jobs  :parent :start-all :args {:triggers [:_nightly :_poll]}}
+  ;; `:my-jobs` has no free args and declares `:process` — make it a
+  ;; `:singleton` service.
+  ;; ---------------------------------------------------------------------
+  {:name :start-all
+   :description "A service with N triggers: start each of `:triggers` (`:schedule` / `:interval` derivatives, each spawning its own daemon thread when run) and return ONE stopper that stops them all; liveness is the children's combined (alive while any is, `:failed` once any failed)."
+   :args {:triggers {:type [:list [:fn {} :null]]
+                     :description "The triggers — service-shaped fn-defs, in start order; each yields its stopper when run."}}
+   :return-type [:fn {} :null]
+   :effects #{:process}}
+
+  ;; ---------------------------------------------------------------------
   ;; Mutable-state primitives — `clojure.core` atom + swap + deref.
   ;; Two lifetimes (see impls.clj header):
   ;;   :atom — fresh per top-level `execute` (result-cache-scoped) —

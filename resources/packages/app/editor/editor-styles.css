@@ -5140,7 +5140,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 
 /* Lint rows — the Inspector's Lint section (rule chip + member links +
    message + "Not an issue" / "Restore", all server-rendered). */
-.lint-rule { grid-area: rule; color: var(--muted-fg); font-family: var(--mono, monospace);
+.lint-rule { grid-area: rule; color: var(--muted-fg); font-family: var(--mono);
   white-space: nowrap; }
 .lint-fns { grid-area: fns; display: flex; flex-wrap: wrap; gap: 2px 10px; }
 .lint-fn { color: var(--accent); }
@@ -5276,6 +5276,21 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border-color: var(--fg);
 }
 .execute-history-lock { font-size: 0.75rem; margin-right: 4px; }
+.execute-history-hash {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  padding: 0 5px;
+  border: 1px solid var(--light-border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted-fg);
+  cursor: pointer;
+}
+.execute-history-hash-active {
+  background: var(--card-row-highlight);
+  color: var(--fg);
+  border-color: var(--fg);
+}
 .execute-history-empty {
   font-size: 0.6875rem;
   font-style: italic;

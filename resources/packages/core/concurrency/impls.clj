@@ -269,6 +269,35 @@
   (deref a))
 
 
+(defbase start-all-fn
+  "Combine the handles of N already-started triggers into ONE service
+   handle. `:triggers` is `:lazy-seq-args`: each item is a delay whose
+   forcing EXECUTES the trigger fn-def (a `:schedule` / `:interval`
+   derivative spawns its daemon thread and returns its stopper), so
+   forcing them here starts them left-to-right. The combined stopper
+   stops every child; the liveness the reconciler reads is the
+   children's combined — alive while any child is, `:failed` once any
+   child failed, `:done` once every child is done."
+  [triggers]
+  (cr/record-effect! :process)
+  (let [stoppers (mapv force triggers)
+        child-meta (fn [k] (keep #(get (meta %) k) stoppers))]
+    (with-meta (fn stop-all
+                 []
+                 (doseq [stop stoppers]
+                   (try (stop) (catch Exception e (log/warn e "trigger stop threw")))))
+      {:alive? (fn []
+                 (boolean (some #(try (%) (catch Exception _ false))
+                                (child-meta :alive?))))
+       :exit (reify clojure.lang.IDeref
+               (deref
+                 [_]
+                 (let [exits (map deref (child-meta :exit))]
+                   (cond (some #{:failed} exits) :failed
+                         (and (seq exits) (every? #{:done} exits)) :done
+                         :else nil))))})))
+
+
 (defbase with-heartbeat-fn
   "Run `body` while a daemon thread calls `beat` every `every-ms`; no
    beat lands after the body ends. The beat runs under the spawning
@@ -331,6 +360,7 @@
    :future future-fn
    :loop-until-interrupted loop-until-interrupted-fn
    :with-heartbeat {:impl with-heartbeat-fn :taint-propagate? true}
+   :start-all {:impl start-all-fn :lazy-seq-args #{:triggers}}
    :cron-parse cron-parse-fn
    :cron-fire-after cron-fire-after-fn
    ;; Cell taint (2026-08-17): a secret stored in an atom/cell must stay

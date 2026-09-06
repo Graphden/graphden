@@ -350,6 +350,46 @@
    :headers {"content-type" "application/json"}})
 
 
+(deftest publish-refuses-a-breaking-change-inside-the-caret-range
+  ;; Semver is verified: the bundle is diffed against the newest published
+  ;; version below the candidate (`graphden.packages.compat`), and a
+  ;; consumer-visible break is refused unless the version leaves that
+  ;; version's caret range.
+  (let [{:keys [ctx all-name->id]} *bootstrap*
+        bundle (fn [fns]
+                 {:namespace "compat" :namespaces ["compat"] :fns fns
+                  :dependencies [] :package-dependencies []
+                  :secrets [] :secret-paths-included? false})
+        publish (fn [version fns]
+                  (exec/execute-with-named-args
+                    ctx (get all-name->id :publish-package)
+                    {:pkg-name "compat.pkg" :pkg-version version :bundle (bundle fns)}))
+        v1 [{:name :greet :namespace "compat" :parent :str :args {:parts {:value ["hi"]}}}
+            {:name :shape :namespace "compat" :type {:id :uuid :nick :text}}]]
+    (testing "the first version has nothing to break"
+      (is (true? (:ok (publish "1.0.0" v1)))))
+    (testing "a compatible successor publishes"
+      (is (true? (:ok (publish "1.1.0" (conj v1 {:name :wave :namespace "compat" :parent :str
+                                                 :args {:parts {:value ["o/"]}}}))))))
+    (testing "a break inside ^1.1.0 is refused with the change list"
+      (let [res (publish "1.2.0" [{:name :greet :namespace "compat" :parent :str
+                                   :args {:parts {:value ["hi"]}}}
+                                  {:name :shape :namespace "compat" :type {:id :uuid}}])]
+        (is (false? (:ok res)))
+        (is (= "breaking-change" (:reason res)))
+        (is (= "1.1.0" (:previous res)) "diffed against the newest version below the candidate")
+        (is (= [{:kind :arg-removed :fn :shape :arg :nick :old :text}
+                {:kind :fn-removed :fn :wave}]
+               (:changes res)))
+        (is (empty? (sp/query-entities (storage) :package-version
+                                       {:name "compat.pkg" :version "1.2.0"}))
+            "nothing written")))
+    (testing "the same bundle as a major bump publishes"
+      (is (true? (:ok (publish "2.0.0" [{:name :greet :namespace "compat" :parent :str
+                                         :args {:parts {:value ["hi"]}}}
+                                        {:name :shape :namespace "compat" :type {:id :uuid}}])))))))
+
+
 (deftest publish-public-flag-normalisation
   ;; Spec §5: `:public?` is normalised AT WRITE time — a platform-tier
   ;; publish (single-tenant / operator) is always platform-visible; a

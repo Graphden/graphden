@@ -232,6 +232,45 @@ curl -X PUT "$BASE/api/entities/service/$SERVICE_ID" \
   --data "fn-id=$FN_ID&enabled?=true&restart-policy=always&cardinality=singleton"
 ```
 
+## Many triggers, one service
+
+A cron loop is one trigger. A real job set usually has several — a
+nightly rebuild and a five-minute poll — and they belong to ONE service
+row, started and stopped together. There is no "schedules" table for
+that: a trigger list is a graph list, exactly like the migrations list
+above.
+
+`:interval` is the fixed-period sibling of `:schedule` (bind
+`:every-ms` and `:fn`), and `:start-all` takes a list of either:
+
+```edn
+{:name :_nightly :parent :schedule :args {:cron "0 0 3 * * ?" :fn :rebuild-index}}
+{:name :_poll    :parent :interval :args {:every-ms 300000 :fn :poll-inbox}}
+{:name :jobs     :parent :start-all :args {:triggers [:_nightly :_poll]}}
+```
+
+`:jobs` has no free args and carries the `:process` effect, so it is
+service-eligible — make it a `:singleton` service the way you did with
+`:web-server`. Each trigger runs in its own daemon thread; the one
+stopper the reconciler holds stops them all, and the service reads as
+alive while any trigger runs. If one trigger's thread dies with a
+throw, the whole set counts as failed for the restart policy: under
+`:on-failure` the reconciler restarts every trigger, since a service
+handle is one thing.
+
+Adding a third trigger is an edit to the list, which restarts the
+service like any other closure change — no row to create. To see each
+fire on the target's **Runs** tab, point the trigger at a
+`:traced-call` wrapper instead of the target itself:
+
+```edn
+{:name :_poll-traced :parent :traced-call :args {:fn :poll-inbox}}
+{:name :_poll :parent :interval :args {:every-ms 300000 :fn :_poll-traced}}
+```
+
+Every fire then lands as an execution of `:poll-inbox` with its own
+trace id, the same way a queue consumer's handling does.
+
 ## Per-branch services
 
 `:service.branch-id` is a ref to a branch row. The reconciler

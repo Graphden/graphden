@@ -95,7 +95,7 @@ Graphden is a visual functional programming environment where functions and thei
     semantics — web-server port, vault path, cron schedule).
     Sync-time guard rejects descendant `:branch-local? false` when an
     ancestor is true. Seeds: `:http-server`, `:secret-leaf`, `:schedule`,
-    `:env`. See [docs/VERSIONING.md § branch-local](docs/VERSIONING.md).
+    `:interval`, `:env`. See [docs/VERSIONING.md § branch-local](docs/VERSIONING.md).
 - `slot` — atomic `(name, type-fn-id)` pair, immutable post-create. Shared across fns through `fn-slot`.
 - `fn-slot` — junction `(fn-id, slot-id, position)`. "Which slots does this fn expose, in what order."
 - `binding` — per-`(fn-id, slot-id)` customization: `value`, `ref-fn-id`,

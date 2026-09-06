@@ -7,6 +7,7 @@
     [graphden.crud.request :as request]
     [graphden.executor.compile.lookups :as l]
     [graphden.executor.compile.surface :as surface]
+    [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.resolution :as res]))
@@ -258,3 +259,47 @@
     (fac/get-or-compute
       k
       (fn [] (free-arg-slot-map ctx fn-id)))))
+
+
+;; =============================================================================
+;; Graph hash — the run's content anchor
+;; =============================================================================
+
+(def ^:private volatile-row-keys
+  "Bookkeeping a resolved row may carry that says WHEN / WHERE it was
+   written, not WHAT it is. Stripped before hashing so the same content
+   on two branches (a merge copies version rows) hashes the same."
+  [:created-at :updated-at :deleted-at :deleted? :org-id])
+
+
+(defn graph-hash
+  "SHA-256 over the RESOLVED execution graph of `fn-id` on the ctx's
+   branch — every fn, slot, fn-slot, binding and list item the run can
+   reach, as the branch sees them now. Two runs with the same hash ran
+   the same code; a binding edit anywhere below the root changes it
+   (the root's `:fn-version-id` alone does not). Pure function of the
+   graph state — content only, no version ids, no timestamps."
+  [ctx fn-id]
+  (let [storage (request/require-storage ctx)
+        g (sp/resolve-execution-graph storage fn-id)
+        rows (concat (vals (:fns g)) (:slots g) (:fn-slots g)
+                     (:bindings g) (:list-items g))
+        canon (->> rows
+                   (map #(into (sorted-map) (apply dissoc % volatile-row-keys)))
+                   (sort-by (comp str :id))
+                   pr-str)]
+    (ids/digest-hex "SHA-256" canon)))
+
+
+(defn graph-hash-cached
+  "`graph-hash` memoised the way `free-arg-slot-map-cached` is — same
+   key, same cache, same wholesale drop on every graph mutation — so
+   the resolve is paid once per (branch, fn) per graph epoch, not once
+   per run."
+  [ctx fn-id]
+  (let [storage (request/require-storage ctx)
+        base (if (vs/versioned-storage? storage) (vs/unwrap storage) storage)
+        branch-id (when (vs/versioned-storage? storage)
+                    (vs/current-branch-id storage))
+        k [::graph-hash (System/identityHashCode base) branch-id fn-id]]
+    (fac/get-or-compute k (fn [] (graph-hash ctx fn-id)))))

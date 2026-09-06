@@ -82,6 +82,8 @@ graphden today:
 |---------|--------|-------|---------|
 | **Long-lived listener** | `:http-server` (Ring/http-kit) | bind a port + a handler fn → returns a stopper that releases the port | `:web-server` in `packages/app/server` |
 | **Cron-driven loop** | `:schedule` (composed over `:future` + `:loop-until-interrupted` + `:sleep-until-ms` + `:cron-next-after` + `:call-noargs`) | bind `:cron` (Quartz cron-6 string) + `:fn` (any 0-arg callable) → returns a stopper that interrupts the daemon thread | `:ex-cron-heartbeat` in `packages/examples/schedule-cron` |
+| **Fixed-period loop** | `:interval` (composed over `:future` + `:loop-until-interrupted` + `:sleep` + `:call-noargs`) | bind `:every-ms` (period) + `:fn` (any 0-arg callable) → same stopper shape as `:schedule` | `{:name :poll :parent :interval :args {:every-ms 300000 :fn :poll-inbox}}` |
+| **Many triggers, one service** | `:start-all` (base-fn) | bind `:triggers` to a LIST of `:schedule` / `:interval` derivatives → every trigger starts in its own daemon thread; the ONE returned stopper stops them all, liveness is the children's combined (alive while any runs, `:failed` once any threw) | `{:name :jobs :parent :start-all :args {:triggers [:_nightly :_poll]}}` |
 
 `:schedule` is itself a pure fn-def composition — no monolithic
 base-fn. The two captured args `:cron` and `:fn` propagate through
@@ -89,6 +91,18 @@ three HOF boundaries via closure-capture (docs/CLOSURE_CAPTURE.md).
 This is the canonical template for adding more long-running patterns
 (queue consumer, websocket listener, file watcher): compose over the
 existing concurrency primitives, return a stopper, declare `:process`.
+
+**1-to-many triggers are a graph list, not a child entity.** The
+roadmap once sketched a `:service-schedule` row (N cron/interval rows
+per service). It ships instead as `:start-all` over a list — the same
+reasoning as `:migrate`'s `:migrations` and `:do`'s `:steps`: the list
+is versioned, type-checked (`[:list [:fn {} :null]]`), diffable, and
+editing it restarts the service through the ordinary fn-graph path,
+with no schema, no CRUD surface and no second reconciler loop. A
+trigger whose target should show up on the Runs tab wraps it in
+`:traced-call` (`core/system`): every fire then lands as an
+`:fn-execution` row of the target with a fresh trace id, exactly like a
+queue consumer's `:call-traced` hop.
 
 ### Startup steps — schema migrations
 
@@ -622,7 +636,7 @@ all loaded packages.
 | Done | Periodic reconcile tick (`:exec/service-reconciler`, ~15s) — level-triggered convergence: re-takes a `:singleton` lock after the holder crashes (no NOTIFY is emitted), picks up out-of-band DB edits, reconverges transient start failures. Retry-free under `reconcile-monitor` so a failing start never blocks the listener. The tick actually heals a crash because the reconciler now drops `::not-our-lock` placeholders at the top of every pass (they were sticky before, so an idle pod never re-attempted the freed lock). |
 | Done | `:pool` cardinality (`:pool-size N`) — a service runs on up to N pods, coordinated by N advisory-lock slots (generalises `:singleton` = slot 0). Fixed `:pool-size` only; load-driven autoscaling of N is out of scope (the request path scales via cells + HPA). |
 | Done | Startup steps — `:migration` / `:migrate` templates in `storage/pg` (§ Startup steps): journaled, advisory-locked, one-transaction schema migrations sequenced ahead of the listener with `:do`. |
-| Next | `:service-schedule` 1-to-many for cron/interval triggers; UI Services panel (row-actions "Make service" + sidebar "Only services" filter) |
+| Done | Many triggers per service — `:start-all` over a list of `:schedule` / `:interval` derivatives (§ Service shapes); `:interval` for fixed periods; `:traced-call` to persist each fire as a run. Replaces the planned `:service-schedule` child entity. UI: row-actions "Make service" + sidebar "Only services" filter. |
 | Done | Advisory-lock connection-drop reconnect + re-acquire. The lock connection is held behind a reconnecting holder; every reconcile pass runs `advisory-lock/ensure-live!`, and on a reconnect `reassert-lock-ownership!` re-takes each `:singleton` this pod was running (stopping any a sibling stole during the outage). Closes the "two pods double-run one service until the next reconcile" window. |
 | Done | Cross-pod cancel routing for `:fn-execution` — `execution:cancel:<id>` NOTIFY fan-out; see [EXECUTION.md](EXECUTION.md). |
 | Done | Endpoints — one `:service-instance` row per running copy (host + bound port from the handle's `:endpoint` metadata, heartbeat each tick), deleted on stop; `:service-endpoint` (web/service) resolves a service fn named through a `:fn-ref` slot to a LIVE copy, with the addon `resolver` seam for cloud app-routes (§ Endpoints). |

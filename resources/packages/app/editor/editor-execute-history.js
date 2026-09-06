@@ -100,6 +100,16 @@ function makeRowExpander(resultHostEl) {
 // of re-clicking the chip on every card. The accessor tolerates a
 // blocked storage (private window, thumbnail capture).
 const HISTORY_SECRETS_KEY = 'gd-history-secrets-only';
+// The graph-anchor filter (`?graph-hash=`), remembered like the
+// secrets chip; '' ≡ every run.
+function historyGraphHash() {
+  try { return window.__gdHistoryGraphHash || ''; } catch (_e) { return ''; }
+}
+function setHistoryGraphHash(h) {
+  try { window.__gdHistoryGraphHash = h || ''; } catch (_e) { /* ignore */ }
+}
+
+
 function historySecretsOnly() {
   try { return sessionStorage.getItem(HISTORY_SECRETS_KEY) === '1'; } catch (_) { return false; }
 }
@@ -155,6 +165,17 @@ function bindHistoryActions(panel, fnEntity, resultHostEl) {
       onExpand(row.getAttribute('data-execution-id'));
     });
   });
+  // ⌗ graph-anchor chips — a row's chip narrows the panel to runs of
+  // that exact graph; the strip's active chip (empty hash) clears it.
+  panel.querySelectorAll('.execute-history-hash[data-graph-hash]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const hash = btn.getAttribute('data-graph-hash') || '';
+      setHistoryGraphHash(hash);
+      const fresh = await buildHistoryPanel(fnEntity, resultHostEl, { graphHash: hash });
+      panel.replaceWith(fresh);
+    });
+  });
   // "Secret flows" chip — re-fetch the panel narrowed to (or widened
   // from) the audit-trail rows and swap it in place; a fresh fetch
   // re-binds everything above, so no htmx swap can strand a handler.
@@ -178,10 +199,12 @@ async function buildHistoryPanel(fnEntity, resultHostEl, opts) {
   const wrap = document.createElement('div');
   wrap.className = 'execute-history-host-wrap';
   const secrets = opts?.secrets ?? historySecretsOnly();
+  const graphHash = opts?.graphHash ?? historyGraphHash();
   try {
     const r = await authFetch('/partials/execute-history?fn-id='
                               + encodeURIComponent(fnEntity.id)
-                              + (secrets ? '&secrets=1' : ''));
+                              + (secrets ? '&secrets=1' : '')
+                              + (graphHash ? '&graph-hash=' + encodeURIComponent(graphHash) : ''));
     if (!r.ok) {
       const err = document.createElement('div');
       err.className = 'execute-history-error';

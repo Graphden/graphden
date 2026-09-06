@@ -95,6 +95,10 @@
   #uuid "b7f1d3a5-9c2e-4b74-8e6a-2d5c0f8b1e63")
 
 
+(def ^:private fn-execution-graph-hash-field-uuid
+  #uuid "04750aa9-63c9-4ce6-ada6-4c160694f0d2")
+
+
 (def ^:private fn-execution-finished-at-field-uuid
   #uuid "56a12b66-a6cc-4502-8107-35015050938c")
 
@@ -372,7 +376,19 @@
                       :parent-execution-id {:uuid fn-execution-parent-execution-id-field-uuid
                                             :type :uuid
                                             :nullable? true
-                                            :indexed? true}})
+                                            :indexed? true}
+                      ;; Content hash of the RESOLVED graph the run
+                      ;; executed — every fn / slot / binding / list
+                      ;; item reachable from the fn, as the branch saw
+                      ;; them at submit time (`lookup/graph-hash`).
+                      ;; Finer than `:fn-version-id`, which only names
+                      ;; the root fn's own version: a binding edit
+                      ;; anywhere below changes this and not that.
+                      ;; nil on rows written before the field existed.
+                      :graph-hash {:uuid fn-execution-graph-hash-field-uuid
+                                   :type :text
+                                   :nullable? true
+                                   :indexed? true}})
 
       ;; -----------------------------------------------------------------
       ;; :fn-execution-arg — one row per free-arg the executor was

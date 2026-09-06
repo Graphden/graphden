@@ -383,12 +383,77 @@
           :then :_pub-err-exists
           :else :_pub-ok}}
 
+  ;; --- breaking-change guard (PACKAGE_DISTRIBUTION § 4.2) ------------
+  ;; Semver is VERIFIED, not trusted: the bundle is diffed against the
+  ;; highest already-published version below it, and a consumer-visible
+  ;; incompatibility (`compat/breaking-changes`) is refused unless the
+  ;; new version leaves that version's caret range (a major bump; below
+  ;; 1.0 a minor bump). Read-only against the registry — the pure diff
+  ;; is `:breaking-changes-between`, the range test `:semver-compatible?`.
+  {:name :_pub-prev-spec
+   :description "`<`-constraint for the version being published — resolves to the newest version already below it."
+   :parent :str
+   :args {:parts [{:value "<"} {:as :pkg-version}]}}
+
+  {:name :_pub-prev-version
+   :parent :resolve-package-version
+   :args {:pkg-name {:as :pkg-name} :spec :_pub-prev-spec}}
+
+  {:name :_pub-prev-row
+   :parent :package-version-row
+   :args {:pkg-name {:as :pkg-name} :resolved :_pub-prev-version}}
+
+  {:name :_pub-prev-fns
+   :parent :get
+   :args {:coll :_pub-prev-row :key {:value :fns} :default {:value []}}}
+
+  {:name :_pub-changes
+   :description "The breaking changes from the previous version's bundle to this one — `[]` when compatible (or when there is no previous version)."
+   :parent :breaking-changes-between
+   :args {:old-fns {:ref :_pub-prev-fns :type [:list :keyword-map]}
+          :new-fns :_pub-fns}}
+
+  {:name :_pub-prev-some?
+   :parent :some?
+   :args {:value :_pub-prev-version}}
+
+  {:name :_pub-in-prev-range?
+   :description "Does the new version stay inside the previous one's caret range? Then a breaking change is a lie to every `^`/`~>` consumer."
+   :parent :semver-compatible?
+   :args {:from {:ref :_pub-prev-version :type :text} :to {:as :pkg-version}}}
+
+  {:name :_pub-changes-empty?
+   :parent :empty?
+   :args {:coll :_pub-changes}}
+
+  {:name :_pub-has-changes?
+   :parent :not
+   :args {:value :_pub-changes-empty?}}
+
+  {:name :_pub-breaking?
+   :description "Refuse when a previous version exists, the new one is a compatible bump of it, and the bundle breaks it. `:and` short-circuits, so the diff runs only when there IS a previous version in range."
+   :parent :and
+   :args {:values [:_pub-prev-some? :_pub-in-prev-range? :_pub-has-changes?]}}
+
+  {:name :_pub-err-breaking
+   :description "`{:ok false :reason \"breaking-change\" :previous <version> :changes [...]}` — every change carries `:kind` / `:fn` / (`:arg`) / `:old` / `:new`; bump the major to publish it."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :version} {:value :previous} {:value :changes}]
+          :vals [{:value false} {:value "breaking-change"} {:as :pkg-name} {:as :pkg-version}
+                 :_pub-prev-version :_pub-changes]}}
+
+  {:name :_pub-compat-checked
+   :parent :if
+   :args {:test :_pub-breaking?
+          :then :_pub-err-breaking
+          :else :_pub-result}}
+
   {:name :publish-package
-   :description "Publish a bundle as an immutable :package-version row. Graph `:if` — rejects an empty bundle up front (`:reason \"empty-bundle\"`), else the atomic `:publish-package-apply` core writes the row and BOTH result envelopes (`:ok` / `:reason \"version-exists\"`) assemble in the graph from the row-or-nil."
+   :description "Publish a bundle as an immutable :package-version row. Graph `:if` chain — rejects an empty bundle up front (`:reason \"empty-bundle\"`), then a bundle that BREAKS the newest published version below this one without leaving its caret range (`:reason \"breaking-change\"`, with the `:changes`), else the atomic `:publish-package-apply` core writes the row and BOTH result envelopes (`:ok` / `:reason \"version-exists\"`) assemble in the graph from the row-or-nil."
    :parent :if
    :args {:test :_pub-fns-empty?
           :then :_pub-err-empty
-          :else :_pub-result}
+          :else :_pub-compat-checked}
    :return-type :keyword-map}
 
   ;; ---------------------------------------------------------------------
@@ -402,6 +467,18 @@
           :spec {:type :nullable-text :description "Exact version, a semver constraint (`>=1.1`, `~>1.2`), `latest`, or nil (any)."}}
    :return-type :nullable-text
    :effects #{:db}}
+
+  {:name :breaking-changes-between
+   :description "Consumer-visible incompatibilities from one bundle's fn-defs to another's — removed public fn-defs, removed / narrowed / newly-required args, unbound bindings, changed renames or parents, widened returns, reshaped type-rows (`graphden.packages.compat`). `[]` = a compatible successor. Pure."
+   :args {:old-fns {:type [:list :keyword-map] :description "The previous version's fn-defs."}
+          :new-fns {:type [:list :keyword-map] :description "The candidate version's fn-defs."}}
+   :return-type [:list :keyword-map]}
+
+  {:name :semver-compatible?
+   :description "Is `:to` inside `:from`'s caret range (`^from` — same major; below 1.0 the same minor)? The range a `^` / `~>` consumer would auto-advance into, so a breaking change must leave it."
+   :args {:from {:type :text :description "Published version."}
+          :to {:type :text :description "Candidate version."}}
+   :return-type :bool}
 
   {:name :missing-package-dependencies
    :description "The declared dependency names NOT present as fns in storage — ONE batched IN-query + set diff (the batch shape, no N+1, is why this stays a single storage predicate). Empty vector = all satisfied."

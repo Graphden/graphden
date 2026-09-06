@@ -51,10 +51,10 @@
     ;; :unresolved-failure-counts tallies audit rows per fn — fn ids /
     ;; names / counts, all server-derived; `days` is a window, not content.
     :unresolved-failure-counts
-    :brotli-bytes :build-form
+    :breaking-changes-between :brotli-bytes :build-form
     ;; Cached read of the fixed build artifact — no caller content.
     :build-hashes-raw :byte-count
-    :byte-len :cached-api-routes-js :call :call-noargs
+    :byte-len :cached-api-routes-js :call :call-noargs :call-noargs-traced
     :cancel-execution! :case :cell :chain-has-process-effect?
     :classify-literal :closed-enum-of :coalesce :comp
     :compatible-type-names :concat :cond :conj :cons :const
@@ -123,7 +123,7 @@
     :rewrite-refs-to-version
     :rich-type-of-name :ring-create-default-handler :ring-handler
     :ring-route-paths :ring-router :routes->js-bundle
-    :rule-owner-of-name :running-entry :secret-leaf :secret-path-args :service-endpoint
+    :rule-owner-of-name :running-entry :secret-leaf :secret-path-args :semver-compatible? :service-endpoint
     :queue-publish :queue-take :queue-ack :queue-nack :queue-extend :queue-requeue
     :queue-stats :queue-dead-letters
     :call-with :call-traced :with-heartbeat :trace-headers
@@ -140,7 +140,7 @@
     ;; render callable's output goes to the WIRE, never into the
     ;; return value — no taint to propagate (same as :http-server).
     :sse-stream
-    :sql-query :storage-query-identities :str :str-contains? :str-join
+    :sql-query :start-all :storage-query-identities :str :str-contains? :str-join
     :str-clip :str-len :str-lower :str-replace :str-split :str-starts-with?
     :str-to-keyword :str-to-uuid :str-trim :str-upper
     :stringify-response-headers :strip-hidden-impl :strip-secret-paths
@@ -169,7 +169,7 @@
    pass/transform caller content? then it needs `:taint-propagate?`\"; for each
    REMOVED name confirm it genuinely no longer handles content."
   #{:abs :add :and :assert :assert-eq :assert-some :assoc :assoc-in :atom :blank? :byte-len :call-with :call :call-traced :with-heartbeat
-    :call-noargs :case :cell :coalesce :comp :concat :cond :conj :cons :const
+    :call-noargs :call-noargs-traced :case :cell :coalesce :comp :concat :cond :conj :cons :const
     :constant-time-equal? :constantly :contains? :count :deref :dissoc :distinct :div :do :drop
     :empty? :eq :equal? :every? :ex-data :ex-info :filter :filter-xf :find-first
     :first :flatten :fn-signature :fn-type? :form-decode :get :get-in :gt

@@ -533,13 +533,19 @@ current version") groups by `:fn-version-id`, so binding-only
 edits don't visually split the timeline — they all share one
 bucket.
 
-This is an intentional MVP trade-off: a per-execution hash over
-`{fn-version, all binding-versions, all list-item-versions}` would
-make the timeline more accurate but adds significant schema +
-compute cost. If a tight forensic answer to "what exactly was
-running when this row was produced" becomes critical, expand the
-anchor scope; for now, the resolved-view on the run's branch at
-the run's timestamp is the closest the system gets.
+The forensic answer to "what exactly was running when this row was
+produced" is the row's second anchor, **`:graph-hash`**: a SHA-256
+over the RESOLVED execution graph at submit time — every fn, slot,
+fn-slot, binding and list item the run could reach, as the branch
+saw them (`crud.fn-execution.lookup/graph-hash`; content only, no
+version ids or timestamps, so the same graph on two branches hashes
+the same). A binding edit anywhere below the root changes it while
+`:fn-version-id` stays put. It is stamped on every persisted run
+(submitted, traced, captured), cached per graph epoch like the
+free-arg map, and indexed: `GET /api/executions?fn-id=X&graph-hash=H`
+narrows the history to the runs of one exact graph, and the Runs
+tab's ⌗ chip on each row does the same click-wise. Rows written
+before the field carry nil and no chip.
 
 ### Asset overrides are branch-scoped (`:resource-override`)
 
@@ -621,7 +627,7 @@ descendant `:branch-local? false` when an ancestor is true (mirror
 of the `:required` widening guard).
 
 Seeded defaults: `:http-server`, `:secret-leaf`, `:schedule`,
-`:env`. NOT seeded: `:pg-query` (admins may want portable
+`:interval`, `:env`. NOT seeded: `:pg-query` (admins may want portable
 queries), `:future` (transitively reaches `:schedule`).
 
 Implementation:

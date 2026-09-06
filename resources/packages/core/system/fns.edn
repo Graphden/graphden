@@ -734,6 +734,17 @@
    :args {:func {:type [:fn {} a] :description "Fn-graph wrapped as a 0-arg callable. Captured args resolve from the calling fn's binding-chain at wrap time."}}
    :return-type a}
 
+  {:name :call-noargs-traced
+   :description "`:call-noargs` as a persisted run: invoke the 0-arg `:func` and land the fire as an execution of the callee (a fresh trace per fire — a cron or interval tick has no caller), so a trigger's every fire shows on its target's Runs tab. A callable without a graph identity is called untraced."
+   :args {:func {:type [:fn {} a] :description "Zero-arg fn-graph callable — the trigger's target, persisted under its own identity."}}
+   :return-type a
+   :effects #{:db}}
+
+  {:name :traced-call
+   :description "Wrap a 0-arg target so every fire of it is a persisted run: bind `:fn` to the target and point a `:schedule` / `:interval` at THIS fn-def instead (`:fn :my-tick-traced`). Free: `:fn`."
+   :parent :call-noargs-traced
+   :args {:func {:as :fn}}}
+
   ;; Graph-level try/catch. Pair with `:atom` + `:swap-conj` (from
   ;; `core.concurrency`) to express journalled-write transactions: the
   ;; body's phases conj rollback-entries into a shared atom, and

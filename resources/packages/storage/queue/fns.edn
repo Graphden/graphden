@@ -39,7 +39,7 @@
 
   ;; --- The Postgres primitives ---------------------------------------
   {:name :queue-publish
-   :description "Enqueue `:payload` on `:queue`, visible after `:delay-ms` (0 = now). Returns the message id and wakes waiting consumers through the NOTIFY bus. At-least-once: a consumer that dies mid-handling sees the message again after the visibility timeout."
+   :description "Enqueue `:payload` on `:queue`, visible after `:delay-ms` (0 = now). Returns the message id and wakes waiting consumers through the NOTIFY bus. At-least-once: a consumer that dies mid-handling sees the message again after the visibility timeout. The message carries the publisher's trace (`cr/*execution*`) — or opens a trace of its own when published outside a persisted run — so the consumer's handling is persisted as a linked execution either way."
    :args {:queue {:type :non-blank-text :description "Queue name — the channel a consumer takes from."}
           :payload {:type :jsonb :description "The message body (JSON-shaped). Reference your contract's type-row on the publisher's slot."}
           :delay-ms {:type :non-negative-int :value 0 :description "Delay before the message becomes takeable, in ms."}}
@@ -77,6 +77,18 @@
    :return-type :bool
    :effects #{:db}}
 
+  {:name :queue-stats
+   :description "One row per queue — `{:queue :pending :in-flight :dead}` — from a single aggregate query, org-scoped like the entity read (a tenant sees its own queues and the platform's). `:in-flight` counts claims still under their visibility lock; `:pending` the takeable ones. Operate → Queues reads it."
+   :args {}
+   :return-type [:list {:queue :text :pending :int :in-flight :int :dead :int}]
+   :effects #{:db}}
+
+  {:name :queue-dead-letters
+   :description "The newest `:limit` dead letters, org-scoped like the entity read — the rows Operate → Queues offers Requeue / Delete on."
+   :args {:limit {:type :positive-int :description "How many, newest first."}}
+   :return-type [:list :queue-message-shape]
+   :effects #{:db}}
+
   {:name :queue-requeue
    :description "Put a dead-lettered message back on its queue: pending, attempts reset, takeable now, error cleared, consumers woken. True when the row was dead (Operate → Queues uses it)."
    :args {:message-id {:type :uuid}}
@@ -85,13 +97,23 @@
 
   ;; --- The consumer template (backend-agnostic) ----------------------
   {:name :queue-consumer
-   :description "A service that takes messages and runs `:handler` on each, acking on return and nacking on a throw; while the handler runs, `:extend` (message-id) is called every `:lease-every-ms` so a long handler keeps its claim. The handler runs as a traced hop: with the trace ids `:queue-publish` stamped on the message, its execution is persisted as a child of the publisher's (Run pane → Downstream calls). Backend-agnostic: bind `:take` (0-arg → messages), `:ack` (message-id), `:nack` (message-id, error), `:extend` (message-id) and `:lease-every-ms` to a backend's primitives — `:pg-queue-consumer` does it for Postgres. Inherits `:process` from `:future`; service-eligible once `:queue` / `:handler` are bound."
+   :description "A service that takes messages and runs `:handler` on each, acking on return and nacking on a throw; while the handler runs, `:extend` (message-id) is called every `:lease-every-ms` so a long handler keeps its claim. The handler runs as a traced hop: with the trace ids `:queue-publish` stamped on the message, its execution is persisted as a child of the publisher's (Run pane → Downstream calls). Backend-agnostic: bind `:take` (0-arg → messages), `:ack` (message-id) and `:nack` (message-id, error) to a backend's primitives — `:pg-queue-consumer` does it for Postgres, and also binds `:extend`; a backend without leases keeps the no-op default (`:_queue-no-extend`, every 10 s). Inherits `:process` from `:future`; service-eligible once `:queue` / `:handler` are bound."
    :parent :future
-   :args {:body :_queue-loop}}
+   :args {:body :_queue-loop
+          :extend :_queue-no-extend
+          :lease-every-ms 10000}}
 
   {:name :_queue-loop
    :parent :loop-until-interrupted
    :args {:body :_queue-step}}
+
+  ;; The lease defaults a backend without leases keeps: a no-op `:extend`
+  ;; (a 0-free fn fits the 1-arg slot) at the standard period, so a
+  ;; broker package binds only `:take` / `:ack` / `:nack`.
+  {:name :_queue-no-extend
+   :description "The `:extend` a backend without leases leaves in place — does nothing, answers false."
+   :parent :const
+   :args {:value false}}
 
   {:name :_queue-step
    :parent :map
@@ -203,5 +225,4 @@
    :args {:take :_pg-queue-take
           :ack :queue-ack
           :nack :_pg-queue-nack
-          :extend :_pg-queue-extend
-          :lease-every-ms 10000}}]}
+          :extend :_pg-queue-extend}}]}

@@ -125,6 +125,7 @@
     :ring-route-paths :ring-router :routes->js-bundle
     :rule-owner-of-name :running-entry :secret-leaf :secret-path-args :service-endpoint
     :queue-publish :queue-take :queue-ack :queue-nack :queue-extend :queue-requeue
+    :queue-stats :queue-dead-letters
     :call-with :call-traced :with-heartbeat :trace-headers
     :select-keys
     :service-blocking-free-args :set-branch-policy!

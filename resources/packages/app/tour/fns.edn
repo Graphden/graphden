@@ -1544,27 +1544,32 @@
              :title "Services talking to services"
              :steps
              [{:title "Two services, one graph"
-               :body "In lesson 32 a service just ran. Here a fn will find a running service by NAMING it — no address typed anywhere. The reconciler records where every listener answers; a consumer asks for that address by pointing at the service fn itself. The service you will name is the one you are looking at: the editor's own web-server."
+               :body "In lesson 32 a service just ran. Here a fn will call a running service over HTTP by NAMING it — no address typed anywhere. The reconciler records where every listener answers; a consumer asks for that address by pointing at the service fn itself. The service you will name is the one you are looking at: the editor's own web-server."
                :target nil
                :check {:kind "manual"}}
-              {:title "The address slot"
-               :body "Type `service-endpoint` in the Explorer filter, click the [[service-endpoint]] row, then [[⋯]] → [[Extend]] and name it `tutorial-endpoint` — [[Save]]. :service-endpoint is the primitive every service-to-service template is built on: given a service fn it answers the host, port and origin URL that service currently listens on."
+              {:title "A consumer"
+               :body "Type `service-get` in the Explorer filter, click the [[service-get]] row, then [[⋯]] → [[Extend]] and name it `tutorial-fetch` — [[Save]]. :service-get is :http-get whose URL is built from a SERVICE's recorded address plus a path. Look at the card: :service and :path are dashed placeholders — holes that live deeper in the template, drawn on your card all the same."
                :target "input[placeholder=\"Filter...\"]"
                :targets ["input[placeholder=\"Filter...\"]" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
-               :check {:kind "fn-parent" :name "tutorial-endpoint" :parent "service-endpoint"}
-               :creates {:type "fn" :name "tutorial-endpoint"}}
+               :check {:kind "fn-parent" :name "tutorial-fetch" :parent "service-get"}
+               :creates {:type "fn" :name "tutorial-fetch"}}
               {:title "Which service"
-               :body "On the tutorial-endpoint card click the [[+]] on the :service slot, choose [[Bind fn-ref]] and pick [[web-server]]. Look at the slot's type badge: fn-ref — the fn's IDENTITY. Every fn is Compatible here, whatever it returns, because the bound fn is never run: binding the listener does not start a second one; the consumer receives its id and asks the reconciler where it answers."
+               :body "Click the [[+]] on the :service placeholder, choose [[Bind fn-ref]] and pick [[web-server]]. The slot's type badge says fn-ref — the fn's IDENTITY. Every fn is Compatible here, whatever it returns, because the bound fn is never run: binding the listener does not start a second one; the consumer receives its id and asks the reconciler where it answers."
                :target ".placeholder-binder"
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"web-server\"]"]
-               :check {:kind "bindings-count" :name "tutorial-endpoint" :count 1}}
+               :check {:kind "bindings-count" :name "tutorial-fetch" :count 1}}
+              {:title "Which path"
+               :body "Click the [[+]] on the :path placeholder, choose [[Bind literal]] and type `\"/version\"` — with the quotes — then [[Save]]. That is the contract's other half; between your own services the path is a shared constant both sides reference."
+               :target ".placeholder-binder"
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :check {:kind "bindings-count" :name "tutorial-fetch" :count 2}}
               {:title "Ask it"
-               :body "Click [[⋯]] → [[▶]], tick the effects box and [[Run]]. The result is a map — host, port and url — the address the editor you are using answers on. Nothing named a host or a port: the reconciler recorded the listener's instance when it started it, and :service-endpoint read the row back."
+               :body "Click [[⋯]] → [[▶]], tick the effects box and [[Run]]. The result is the web-server's /version answer — status 200 and the build hashes in the body. Nothing named a host or a port: the reconciler recorded the listener's instance, :service-endpoint read it back, :http-get did the rest — and the request carried your run's trace, so a persisted run would list this hop under Downstream calls."
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
                :check {:kind "manual"}}
-              {:title "From address to call"
-               :body "The templates above this primitive join a path onto that url: :service-get and :service-post are :http-get / :http-post whose :url is the service's origin plus a free :path, with the caller's trace header merged in. Extend one and its card shows :service and :path as dashed placeholders — holes that live deeper in the template, bound on your fn all the same. Disable the service and the same call answers `service/not-running` instead of guessing."
+              {:title "Your own services"
+               :body "Point :service at any listener you make a service of (lesson 32) and it resolves the same way; disable that service and the call answers `service/not-running` instead of guessing. The written lesson 35 builds a producer, shows its running copy in the ⚙ popover, and follows the call across the wire."
                :target nil
                :check {:kind "manual"}}
               {:title "That's naming a service"

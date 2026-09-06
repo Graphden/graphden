@@ -64,7 +64,7 @@ async function hardCleanup(page) {
                      // finishAndDelete 409s the next run's create.
                      'tutorial-outer', 'tutorial-inner',
                      // lesson 35's consumer.
-                     'tutorial-endpoint'];
+                     'tutorial-endpoint', 'tutorial-fetch'];
   // Per-browser view-state the lessons exercise (smart views, recents,
   // last-used ns) — a leftover active view renders the next lesson's
   // Explorer as somebody else's virtual tree.

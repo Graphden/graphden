@@ -236,8 +236,12 @@ captures minus everything an enclosing scope supplies (lambda params,
 env-bindings) — whose slot has no placeholder yet becomes an unset node
 with an edge from the root, flagged `:deepArg`. Captures that are
 OPTIONAL stay off the card (they are the HOF target's knobs, listed in
-the Run form); a REQUIRED capture is a real hole and is drawn. A
-listener's card therefore shows its own slots only (real-graph test). The node names the ROOT fn
+the Run form and named — with their target — by the inspector's
+"Captured inside" section); a REQUIRED capture is a real hole and is
+drawn. Optionality is the entry's own `:optional?` (the executor's
+effective-required at the slot's owner), so the card, the form and the
+inspector cannot disagree. A listener's card therefore shows its own
+slots only (real-graph test). The node names the ROOT fn
 (`fnId`) keyed by the inner slot, so the `+` binder writes a binding on
 this fn — closure capture, what a fn-def `:args {:service …}` on the
 same fn stores. Type-row roots skip the pass (their only slot is the

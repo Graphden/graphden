@@ -37,7 +37,10 @@ also the **fail-safe default**: an org with no slug resolves here, so
 a mis-provisioned account is locked, never accidentally opened.
 
 **Free (registered)** is what *signing up* gives you (lesson 24),
-and it is genuinely useful: base effects PLUS metered `:network`. In
+and it is genuinely useful: base effects PLUS metered `:network`. It
+is kept as long as it is used: after 60 days with no sign-in and no
+run, the org is scheduled for deletion two weeks out and everyone in
+it gets an email saying so — one sign-in, or one run, keeps it. In
 practice that means you can build a personal Telegram bot, keep a few
 hundred records, and connect to **your own external database** — the
 external `:sql-query` / `:sql-exec` base-fns count as `network`, not

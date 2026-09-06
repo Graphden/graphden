@@ -17,7 +17,7 @@ what it costs.
 | Outbound calls / min | 0 | 120 | 6,000 | ∞ (uncapped) |
 | Max fns | 200 | 500 | 5,000 | 5,000 |
 | Max list items | 2,000 | 50,000 | 500,000 | 500,000 |
-| Persistence | ephemeral (reaped) | persistent | persistent | persistent |
+| Persistence | ephemeral (reaped) | persistent while used (see note) | persistent | persistent |
 | Always-on services | ✗ | ✗ | ✗ | ✓ (up to 20) |
 | Resource isolation | shared pod | shared pod | shared pod | dedicated cgroup-limited shard |
 | BYO executor (run your own — [BYO_RUNBOOK.md](BYO_RUNBOOK.md)) | ✗ | ✗ | ✓ | ✓ |
@@ -29,6 +29,14 @@ Notes:
   un-provisioned / un-slugged org resolves here): no outbound network, small
   ceilings, ephemeral (reaped by the demo GC). It exists to let someone *try
   graphs* with nothing to lose.
+- **Free (registered) is kept while it is used.** A free org with no sign-in
+  by its owner or any member, no run, and an owner account older than the
+  window (`GRAPHDEN_FREE_ORG_INACTIVE_DAYS`, 60) is marked for deletion a
+  grace period out (`GRAPHDEN_FREE_ORG_GRACE_DAYS`, 14); the owner and every
+  member are **emailed the deletion date** at that moment, and any sign-in or
+  run inside the grace un-marks it. Paid and suspended orgs are never
+  selected. The mechanics live in the tenancy addon's reaper
+  (`:tenancy/demo-gc`, [OPERATIONS.md § Inactive free organizations](OPERATIONS.md#inactive-free-organizations)).
 - **Free (registered)** is what a signed-up account gets — base effects PLUS
   metered `:network`, so you can build a personal Telegram bot, keep a few
   hundred records, and connect to your OWN external database, all within the

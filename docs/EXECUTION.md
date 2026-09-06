@@ -324,10 +324,17 @@ The ▶ button on a fn-card root row (auth-required, visible only to
 signed-in users) opens the **Run pane** — it selects the fn and lands
 the right inspector on its **Runs** tab, so the canvas stays fully
 visible (and pannable) next to the form, the result, and the fn's
-run history below:
+run history below. In the history, a row whose run consumed a secret
+and produced an effect carries a 🔒 (SECRETS.md § Audit trail), and
+the **Secret flows** chip narrows the list to those rows:
 
 - One type-aware form per free-arg, loaded via `/api/value-form` —
-  same widgets that drive binding edits.
+  same widgets that drive binding edits. Required holes are rows;
+  optional ones (`:required false` at the slot's owner — the same
+  `:optional?` the canvas styles) fold under a "N optional"
+  `<details>`, so an HTTP template's form shows its URL and folds the
+  headers / auth / timeout knobs. Rows come from `:free-arg-entries`
+  (name, slot-id, optional?, captured?, via), one walk per form.
 - Red **effects banner** when `:declared-effects ≠ #{}`, listing one
   chip per category (db / env / io / network / time / random).
 - **Effect-confirm gate** — checkbox "I understand this will produce

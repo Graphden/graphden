@@ -174,6 +174,34 @@ slug is rejected rather than silently applied. The change is effective on the
 org's next request (no memo). The same route upgrades / downgrades a paying org.
 See [PLANS.md § Suspending an org](PLANS.md).
 
+## Inactive free organizations
+
+The tenancy addon's reaper (`:tenancy/demo-gc`, the same sweep that purges
+expired demo orgs, hourly) also runs the free-org lifecycle when the accounts
+tables exist:
+
+1. **Mark** — a `plan = free` org with no session for its owner or any
+   member, no execution, and an owner account all older than
+   `GRAPHDEN_FREE_ORG_INACTIVE_DAYS` (default 60; `<= 0` disables the
+   lifecycle) gets `expires_at = now + GRAPHDEN_FREE_ORG_GRACE_DAYS`
+   (default 14, floored at 1).
+2. **Warn** — in the same pass, the owner and every user-member with a
+   verified primary email receive "Your Graphden organization X will be
+   deleted on <date>" (the accounts Mailer; pending email invitees are not
+   mailed). One mail per person per mark — the mark is the transition, so
+   nothing is re-sent on later sweeps. Without `:mailer` / `:link-origin`
+   on `:tenancy/demo-gc` the mark is only logged (`demo-gc: marked orgs NOT
+   warned`).
+3. **Rescue** — any sign-in or run inside the grace clears `expires_at` on
+   the next sweep, before that sweep purges anything.
+4. **Purge** — past `expires_at` the org, its graph rows, its grants, the
+   owner's account + sessions are hard-deleted. Members keep their accounts.
+
+Paid (`network` / `dedicated`) and `suspended` orgs are never selected.
+Logs: `demo-gc: marked inactive free orgs …`, `demo-gc: warned <org> → n of m
+recipients`, `demo-gc: un-marked returned free orgs …`, `demo-gc: purged
+expired org …`.
+
 ## Your responsibility vs Graphden's
 
 Graphden gives you: idempotent fleet-safe schema migration, self-healing

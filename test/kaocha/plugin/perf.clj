@@ -93,6 +93,9 @@
      ;; a human can read the trend; deliberately in their own key so nothing can
      ;; mistake them for the gateable counts above.
      :gauges (counters/gauges-snapshot)
+     ;; Evidence behind the counts (an SQL scenario's statement list) —
+     ;; what `bb perf` prints under a breached budget.
+     :notes (counters/notes-snapshot)
      :namespaces nses}))
 
 

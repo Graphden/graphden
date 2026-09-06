@@ -88,9 +88,10 @@
    host) landing inside it. Runs `f` up to `attempts` times and keeps
    the LOWEST count — repeating a read costs nothing but time, and the
    operation's own cost is what the budget is about. When an attempt
-   exceeds the kept minimum, its statements go to stderr (kaocha
-   swallows stdout of a green test; the gate log keeps stderr), so a
-   budget breach can be read back instead of guessed at."
+   exceeds the kept minimum, its statements go to stderr for a local
+   `--no-capture-output` run (kaocha swallows BOTH streams of a green
+   test otherwise); the kept attempt's statements reach the perf report
+   as the event's note, which is what `bb perf` prints on a breach."
   [event f attempts]
   (let [ds (datasource-of (:storage *graph*))]
     (loop [n attempts best nil]
@@ -145,20 +146,17 @@
   ;; querying moves it first, long before anyone times the tab.
   (testing "GET /partials/execute-popover for web-server"
     (let [fn-id (get (:all-name->id *graph*) :web-server)
-          {:keys [queries result statements]}
+          {:keys [queries result]}
           (record! :sql/execute-popover-app-root
                    #(setup/via-graph *graph* :_partial-xp-handler
                                      {:request-method :get
                                       :uri "/partials/execute-popover"
                                       :query-params {"fn-id" (str fn-id)}}))]
-      ;; The statement list goes to stderr (the gate log keeps it; kaocha
-      ;; swallows stdout of a green test) so a budget breach names the
-      ;; query that moved instead of leaving a bare count (2026-09-06:
-      ;; 22 / max 18 with nothing to read back).
-      (binding [*out* *err*]
-        (println "perf: execute-popover-app-root fired" queries "statements:")
-        (doseq [{:keys [calls query]} statements]
-          (println "  " calls "×" (subs (str query) 0 (min 160 (count (str query)))))))
+      ;; The statement list travels with the count as a NOTE in the perf
+      ;; report (`psql/record-measured!`), and `bb perf` prints it under a
+      ;; breached budget — not to stderr: kaocha swallows both streams of a
+      ;; green test, and the 2026-09-06 breach (22 / max 18) left nothing
+      ;; to read back.
       (is (some? fn-id) "web-server resolved in the golden bootstrap")
       (is (= 200 (:status result))
           "the shell must render, or its query count means nothing")

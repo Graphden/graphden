@@ -143,6 +143,14 @@ A scenario must also **assert that its operation succeeded**. One that quietly
 400s does no work, measures zero queries, and sails under any budget — a perf
 suite reporting "free" for a broken endpoint is worse than none.
 
+The count travels with its **evidence**: `record!` stores the normalised
+statement list as the event's *note* (`graphden.util.counters/note!`), the
+kaocha plugin writes it under `:notes` in `perf/runs/*.edn`, and `bb perf`
+prints it, most-called first, under a breached row. Don't `println` the
+list from the scenario instead — kaocha swallows both stdout and stderr of
+a green test, and the first breach of `execute-popover-app-root`
+(22 / max 18, 2026-09-06) arrived as a bare number for exactly that reason.
+
 ## The frontend
 
 ```bash

@@ -56,6 +56,12 @@
   (atom {}))
 
 
+(def ^:private notes
+  "{event-keyword → data}. Evidence behind a count — see the Notes section
+   below."
+  (atom {}))
+
+
 (defn count!
   "Record `n` (default 1) occurrences of `event`. Thread-safe; returns nil so
    it can never be mistaken for a value-producing call in a threading form."
@@ -91,6 +97,7 @@
   []
   (reset! counters {})
   (reset! gauges {})
+  (reset! notes {})
   nil)
 
 
@@ -117,3 +124,26 @@
   "Every observation so far. Reported by `kaocha.plugin/perf`; never gated."
   []
   @gauges)
+
+
+;; === Notes ==================================================================
+;;
+;; A note is the EVIDENCE behind a count: for an SQL scenario, the normalised
+;; statement list whose `calls` summed to the number. Neither gated nor
+;; compared — it exists so a budget breach can be read back from the report
+;; (`bb perf` prints the breached event's note) instead of re-run under a
+;; debugger. Its own atom for the same reason gauges have one: nothing may
+;; mistake it for a count.
+
+
+(defn note!
+  "Attach `data` to `event` — the breakdown behind its count."
+  [event data]
+  (swap! notes assoc event data)
+  nil)
+
+
+(defn notes-snapshot
+  "Every note so far. Written to the report by `kaocha.plugin/perf`."
+  []
+  @notes)

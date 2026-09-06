@@ -132,15 +132,27 @@
                 {:event event :n n :max cap :ok? (<= n cap) :why why}))})
 
 
+(defn- print-note!
+  "The evidence behind a breached count — for an SQL scenario, its
+   normalised statements, most-called first. Printed ONLY on a breach:
+   a green row's breakdown is noise, a red row's is the whole finding."
+  [note]
+  (when (sequential? note)
+    (doseq [{:keys [calls query]} (sort-by :calls > note)]
+      (println (str "      " dim (format "%3d" (or calls 0)) " × "
+                    (subs (str query) 0 (min 150 (count (str query)))) reset)))))
+
+
 (defn- print-suite!
-  [{:keys [suite rows]} counters]
+  [{:keys [suite rows]} counters notes]
   (println (str "\n" bold (name suite) reset))
   (doseq [{:keys [event n ok? why] cap :max} rows]
     (println (str "  " (if ok? (str green "✓" reset) (str red "✗" reset))
                   " " (format "%-38s" (str event))
                   (format "%4d" n) " / max " cap))
     (when-not ok?
-      (println (str "      " red why reset))))
+      (println (str "      " red why reset))
+      (print-note! (get notes event))))
   (let [budgeted (set (map :event rows))
         extra (sort (remove budgeted (keys counters)))]
     (when (seq extra)
@@ -231,7 +243,10 @@
         ;; Gauges are merged across reports: the calibration and the normalised
         ;; durations come from the :perf run, and the trend section reads them
         ;; regardless of which file carried them.
-        gauges (reduce merge {} (map :gauges (vals raw)))]
+        gauges (reduce merge {} (map :gauges (vals raw)))
+        ;; Notes likewise: the evidence behind a count lives in whichever
+        ;; suite's report recorded it.
+        notes (reduce merge {} (map :notes (vals raw)))]
     (cond
       (empty? reports)
       (do (println (str red "✗ no run reports under perf/runs/" reset))
@@ -280,7 +295,7 @@
                                             " + bb perf-frontend)" reset))
                               {:suite suite :rows []})
                           (let [checked (check-suite suite budget counters)]
-                            (print-suite! checked counters)
+                            (print-suite! checked counters notes)
                             checked))))
             _ (print-trend! (get budgets trend-key) gauges)
             failures (mapcat #(remove :ok? (:rows %)) results)]

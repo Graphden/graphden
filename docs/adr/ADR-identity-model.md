@@ -82,7 +82,13 @@ Stage 1 (this branch): registry re-key (above). Remaining, in order:
   anonymous rows are org-scoped rows, and one shape-only id let org
   B's create collide with org A's invisible row (a cross-org
   existence oracle). Same shape, two orgs → two rows; within one org
-  the dedup is unchanged.
+  the dedup is unchanged. The IDENTITY of an anonymous row is its
+  `(org, hash)`; the deterministic id is only the preferred id for a
+  NEW row. A sync (`composition/remap-anonymous-ids`) and a tighten
+  reuse the row the org already holds for the shape — so the rows
+  written before the org went into the id keep their old ids and a
+  re-sync of the same shape lands on them instead of tripping the
+  unique key with a second id.
 - **Stage 4 — qualified refs in fns.edn: DONE (syntax + validation).**
   `:ns.path/name`-qualified reference keywords are accepted in every
   reference position (parents, arg refs, `{:ref …}`, sequence items,

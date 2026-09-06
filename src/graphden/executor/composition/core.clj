@@ -14,12 +14,14 @@
    `:base-fn` entries — same pipeline, just driven by a different
    record source."
   (:require
+    [clojure.walk :as walk]
     [graphden.executor.composition.deps :as deps]
     [graphden.executor.composition.validation :as validation]
     [graphden.packages.export :as export]
     [graphden.packages.records :as records]
     [graphden.packages.records.slot-resolution :as slot-res]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tc]))
 
 
 ;; =============================================================================
@@ -164,6 +166,51 @@
         (sp/delete-entities storage :fn-slot stale-fn-slots)))))
 
 
+(defn remap-anonymous-ids
+  "Rewrite a record batch so every anonymous fn row (an inline
+   composite / structural `[:fn …]` shape, keyed by `:anonymous-hash`)
+   whose shape this org ALREADY holds under another id reuses that
+   row: the batch's own row for the shape is dropped and every
+   reference to its id — slot `:type-fn-id`, binding overrides,
+   `:parent-ids`, constraint mentions — is rewritten to the existing
+   id. `existing-by-hash` is `{hash existing-fn-id}` for this org.
+
+   Identity of an anonymous row is its `(org, hash)` — the deterministic
+   id is only the PREFERRED id for a NEW row. Rows written before the id
+   mixed the org in (2026-09-06) keep their old ids, and a re-sync of
+   the same shape must land on them rather than trip the
+   `(org-id, anonymous-hash)` unique key."
+  [records existing-by-hash]
+  (let [remap (into {}
+                    (keep (fn [r]
+                            (when-let [existing (and (= :fn (:kind r))
+                                                     (:anonymous-hash r)
+                                                     (get existing-by-hash (:anonymous-hash r)))]
+                              (when (not= existing (:id r)) [(:id r) existing]))))
+                    records)]
+    (if (empty? remap)
+      records
+      (->> records
+           (remove (fn [r] (and (= :fn (:kind r)) (contains? remap (:id r)))))
+           (walk/postwalk-replace remap)
+           vec))))
+
+
+(defn- org-anonymous-rows-by-hash
+  "`{hash fn-id}` of the anonymous rows THIS org already holds for the
+   batch's shapes. Platform-tier writes keep the pre-2026-09-06 ids, so
+   the batch's ids already ARE the existing ids — nothing to remap."
+  [storage records]
+  (let [hashes (into [] (comp (filter #(= :fn (:kind %))) (keep :anonymous-hash) (distinct)) records)]
+    (if (or (empty? hashes) (tc/current-platform-tier?))
+      {}
+      (let [org (tc/current-org)]
+        (into {}
+              (comp (filter #(= org (:org-id %)))
+                    (map (juxt :anonymous-hash :id)))
+              (sp/query-entities storage :fn {:anonymous-hash hashes}))))))
+
+
 (defn write-records!
   "Batch-upsert records of all kinds to storage in dependency order,
    then reconcile each synced fn's body so storage matches the
@@ -173,7 +220,8 @@
    `records/parse-module` or `records/boot-primitive-records`).
    Returns `{fn-name → fn-id}` for named fn rows."
   [storage records ns-id-map]
-  (let [{fns       :fn
+  (let [records (remap-anonymous-ids records (org-anonymous-rows-by-hash storage records))
+        {fns       :fn
          slots     :slot
          fn-slots  :fn-slot
          bindings  :binding

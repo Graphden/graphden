@@ -30,6 +30,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.packages.records :as records]
     [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tenancy]
     [graphden.types.core :as types]))
 
 
@@ -40,7 +41,13 @@
    readable."
   [storage binding-id b new-c _effects-vec]
   (let [hash-hex (records/digest-hex "SHA-1" (pr-str new-c))
-        new-id (records/anonymous-fn-id hash-hex)
+        ;; The row's identity is its (org, hash): reuse the id this org
+        ;; already holds for the shape (a pre-2026-09-06 row keeps its
+        ;; old id), else the deterministic id for a new one.
+        new-id (or (some->> (sp/query-entities storage :fn {:anonymous-hash hash-hex})
+                            (filter #(= (tenancy/current-org) (:org-id %)))
+                            first :id)
+                   (records/anonymous-fn-id hash-hex))
         pre-override (:type-override-fn-id b)
         ;; Track whether WE materialised the anon fn-row this call. A
         ;; pre-existing row is a shared dedup target (some other binding

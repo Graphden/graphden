@@ -212,3 +212,31 @@
         (is (= [10 20 30] (visible))
             "regrown tail items are visible — pre-fix they revived versionless ghosts"))
       (finally (sp/close (vs/unwrap storage))))))
+
+
+(deftest remap-anonymous-ids-reuses-the-org-row-for-a-known-shape-test
+  ;; An anonymous row's identity is its (org, hash); the deterministic id
+  ;; is only the preferred id of a NEW row. A batch whose inline shape
+  ;; this org already holds under another id (a row from before the id
+  ;; mixed the org in) must land on that row: its own row is dropped and
+  ;; every reference — a slot's type, a return type, a constraint mention
+  ;; — follows.
+  (let [batch-id (random-uuid)
+        legacy-id (random-uuid)
+        other-id (random-uuid)
+        records [{:kind :fn :id batch-id :name nil :anonymous-hash "h1" :parent-ids []}
+                 {:kind :fn :id other-id :name nil :anonymous-hash "h2" :parent-ids []}
+                 {:kind :fn :id (random-uuid) :name "f" :parent-ids [] :return-type-fn-id batch-id
+                  :constraint [:union batch-id other-id]}
+                 {:kind :slot :id (random-uuid) :name "x" :type-fn-id batch-id}]
+        out (cc/remap-anonymous-ids records {"h1" legacy-id})]
+    (is (= 3 (count out)) "the batch's own row for the known shape is dropped")
+    (is (not-any? #(= batch-id (:id %)) out))
+    (is (= legacy-id (:return-type-fn-id (first (filter #(= "f" (:name %)) out)))))
+    (is (= [:union legacy-id other-id] (:constraint (first (filter #(= "f" (:name %)) out))))
+        "references are rewritten; an unknown shape keeps its batch id")
+    (is (= legacy-id (:type-fn-id (first (filter #(= :slot (:kind %)) out)))))
+    (testing "a batch id that already IS the existing id needs no rewrite"
+      (is (= records (cc/remap-anonymous-ids records {"h1" batch-id}))))
+    (testing "no known shapes → the batch is returned untouched"
+      (is (= records (cc/remap-anonymous-ids records {}))))))

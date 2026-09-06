@@ -1311,12 +1311,82 @@
           :then :_insp-args-rows-div
           :else :_insp-args-empty}}
 
+  ;; --- Captured inside HOF targets ---------------------------------
+  ;; The free-arg SURFACE (`:free-arg-entries`) also lists what a HOF
+  ;; target reads from this fn's caller beyond its lambda params — a
+  ;; closure capture. The canvas draws only the REQUIRED ones as holes
+  ;; (an optional capture is the target's knob); this section names
+  ;; every capture and the target it is read inside, so a knob the card
+  ;; does not show is still one click from being found.
+  {:name :_insp-entries
+   :parent :free-arg-entries
+   :args {:fn-id :_insp-fn-id}}
+
+  {:name :_insp-entry-captured?
+   :parent :get :args {:coll {:as :item} :key {:value :captured?} :default false}}
+
+  {:name :_insp-captured-entries
+   :parent :sort-by
+   :args {:key-fn {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}
+          :coll {:parent :filter :args {:pred :_insp-entry-captured? :coll :_insp-entries}}}}
+
+  {:name :_insp-cap-name
+   :parent :keyword-to-str
+   :args {:keyword {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}}}
+
+  {:name :_insp-cap-via
+   :parent :coalesce
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :via} :default nil}}
+          :default {:value "a HOF target"}}}
+
+  {:name :_insp-cap-optional-chip
+   :parent :if
+   :args {:test {:parent :get :args {:coll {:as :item} :key {:value :optional?} :default false}}
+          :then {:value [:span {:class "gd-bind gd-bind-free gd-insp-cap-optional"} "optional · not on the card"]}
+          :else {:value [:span {:class "gd-bind gd-bind-free"} "required"]}}}
+
+  {:name :_insp-cap-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-prov-row gd-insp-cap-row"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "span"} :attrs {:value {:class "gd-prov-k"}}
+                             :children [:_insp-cap-name]}}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"} :attrs {:value {:class "gd-prov-v"}}
+                             :children [{:value "read inside "}
+                                        {:parent :hiccup
+                                         :args {:tag {:value "b"} :attrs {:value nil}
+                                                :children [:_insp-cap-via]}}
+                                        {:value " "}
+                                        :_insp-cap-optional-chip]}}]}}
+
+  {:name :_insp-cap-rows
+   :parent :map
+   :args {:func :_insp-cap-row :coll :_insp-captured-entries}}
+
+  {:name :_insp-captured-section
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-insp-sec gd-insp-captured"}}
+          :children [{:value [:div {:class "gd-insp-sec-head"} "Captured inside"]}
+                     {:value [:div {:class "gd-insp-sec-empty"}
+                              "Free args a HOF target reads from this fn's caller. Bind them here with the Run form, or on the target's own card."]}
+                     :_insp-cap-rows]}}
+
+  {:name :_insp-captured-opt
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_insp-captured-entries}}
+          :then :hidden-span
+          :else :_insp-captured-section}}
+
   {:name :_insp-args-section
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "gd-insp-sec"}}
           :children [{:value [:div {:class "gd-insp-sec-head"} "Arguments"]}
-                     :_insp-args-content]}}
+                     :_insp-args-content
+                     :_insp-captured-opt]}}
 
   ;; --- Provenance ------------------------------------------------------
   {:name :_insp-parent-ids

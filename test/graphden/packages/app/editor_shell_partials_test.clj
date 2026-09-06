@@ -21,8 +21,10 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.registry.core :as registry]
+    [graphden.executor.test-setup :as setup]
     [graphden.test-infra.golden-app :as ga]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [hiccup2.core :as hiccup]))
 
 
 (use-fixtures :once (ga/fixture (ns-name *ns*)))
@@ -65,6 +67,71 @@
     (is (re-find #"execute-run-btn\"[^>]*disabled=\"disabled\"" body)
         "Run starts disabled behind the confirm gate")
     (is (str/includes? body "execute-option-label-locked"))))
+
+
+(deftest optional-free-args-fold-under-a-disclosure
+  ;; `:get`: `coll` / `key` are the required holes; `default` is declared
+  ;; `:required false`. The optional one folds under "N optional" so the
+  ;; rows to fill in are the rows you see; every row keeps
+  ;; `.execute-arg-row` + its mount host either way.
+  (let [body (body-of :_partial-xp-handler
+                      {"fn-id" (str (ga/fn-id :get))})]
+    (is (str/includes? body "data-slot-name=\"coll\""))
+    (is (str/includes? body "execute-optional-args"))
+    (is (re-find #"<summary[^>]*>1 optional</summary>" body))
+    (is (str/includes? body "data-slot-name=\"default\""))
+    (testing "the required rows come BEFORE the fold (auto-focus + the tour helpers take the first field)"
+      (is (< (str/index-of body "data-slot-name=\"coll\"")
+             (str/index-of body "execute-optional-args"))))
+    (testing "an HTTP template's knobs fold: `url` is the row, the rest are optional"
+      (let [body (body-of :_partial-xp-handler
+                          {"fn-id" (str (ga/fn-id :http-get))})]
+        (is (re-find #"<summary[^>]*>4 optional</summary>" body))
+        (is (< (str/index-of body "data-slot-name=\"url\"")
+               (str/index-of body "execute-optional-args")))))
+    (testing "a fn with only required holes renders no fold"
+      (is (not (str/includes? (body-of :_partial-xp-handler
+                                       {"fn-id" (str (ga/fn-id :add))})
+                              "execute-optional-args"))))))
+
+
+(deftest inspector-names-the-captures-inside-hof-targets
+  ;; `:web-server` reads nothing itself; what its handler tree reads from
+  ;; the caller is a closure capture — the inspector lists each with the
+  ;; HOF target it is read inside, optional ones flagged as not on the
+  ;; card (the canvas draws only required captures).
+  (let [body (body-of :_partial-inspector-detail-handler
+                      {"fn-id" (str (ga/fn-id :web-server))})]
+    (is (str/includes? body "gd-insp-captured"))
+    (is (str/includes? body "read inside <b>"))
+    (testing "a leaf fn without captures has no such section"
+      (is (not (str/includes? (body-of :_partial-inspector-detail-handler
+                                       {"fn-id" (str (ga/fn-id :add))})
+                              "gd-insp-captured"))))))
+
+
+(deftest execute-history-secret-flows-chip
+  ;; The rollup strip's chip and the row filter, executed as fn-defs
+  ;; (the whole panel also reads the usage rollups, which the golden
+  ;; fixture does not carry): `?secrets=1` renders the chip active and
+  ;; narrows the rows to the audit-trail ones.
+  (let [{:keys [ctx storage]} ga/*bootstrap*
+        run (fn [fn-name request]
+              (setup/exec-with-storage ctx storage (ga/fn-id fn-name)
+                                       {:request request
+                                        :fn-id (ga/fn-id :add)}))
+        plain-req {:query-params {"fn-id" (str (ga/fn-id :add))}}
+        only-req {:query-params {"fn-id" (str (ga/fn-id :add)) "secrets" "1"}}
+        plain (str (hiccup/html (run :_peh-secrets-toggle plain-req)))
+        only (str (hiccup/html (run :_peh-secrets-toggle only-req)))]
+    (is (str/includes? plain "execute-history-secrets-toggle"))
+    (is (not (str/includes? plain "execute-history-secrets-toggle-active")))
+    (is (str/includes? plain "data-secrets=\"0\""))
+    (is (str/includes? only "execute-history-secrets-toggle-active"))
+    (is (str/includes? only "data-secrets=\"1\""))
+    (testing "the row filter keeps only touched-secret rows"
+      (is (= [] (run :_partial-exec-hist-rows only-req))
+          "no run of :add ever touched a secret"))))
 
 
 (deftest missing-or-unknown-fn-id-degrades

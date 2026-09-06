@@ -56,15 +56,19 @@
                 :description "Absolute URL, e.g. `https://httpbin.org/anything`."}
           :headers {:type :text-map
                     :value {}
+                    :required false
                     :description "Header map. Keys + values are strings. Defaults to empty. Plain `:text` values only — secret-typed values are rejected at sync-time; auth flows go through `:auth-value`."}
           :body {:type :nullable-text
                  :value nil
+                 :required false
                  :description "Request body as text (JSON-encode upstream via `:to-json-string`; set the `Content-Type` header alongside). nil = no body (methods that require one on the wire send an empty body)."}
           :auth-value {:type [:union :null [:secret :text]]
                        :value nil
+                       :required false
                        :description "Full `Authorization` header value (e.g. `\"Bearer xxx\"`), or nil for unauthenticated requests. The slot accepts `[:secret :text]` structurally — a vault-sourced token never crosses the generic `:headers` map; the impl injects it at the wire boundary (auth wins on key collision)."}
           :timeout-ms {:type :positive-int
                        :value 10000
+                       :required false
                        :description "Connect+read timeout in milliseconds. Defaults to 10s."}}
    :return-type :http-response-shape
    :effects #{:network}}

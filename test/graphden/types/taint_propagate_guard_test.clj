@@ -87,7 +87,7 @@
     :filter :filter-xf :find-first :fn-signature :fn-type? :first :fix :flatten
     :fn-names-with-tag :fn-return-type :form-decode :fn-stats-raw :fn-type-bound-effects
     :fork-package-fns
-    :free-arg-slot-map :free-memory :future :get :get-entity
+    :free-arg-entries :free-arg-slot-map :free-memory :future :get :get-entity
     :get-execution :get-in :graph-fn-defs :graph-rows :group-by :gt :gte :gzip-bytes
     :h-raw :header-get :heap-committed :heap-max :heap-used :hiccup
     :http-request :http-server :http-stop :hub-fetch-bundle :hub-push-bundle! :if :into

@@ -97,20 +97,45 @@
 
   ;; --- free-arg scaffold ------------------------------------------------
 
-  {:name :_xp-free-map
-   :parent :free-arg-slot-map
+  ;; One walk (`:free-arg-entries`) carries every fact the form needs —
+  ;; name, slot-id, and whether the hole is OPTIONAL (the executor's own
+  ;; effective-required at the slot's owner). Required holes render as
+  ;; rows; optional ones fold under a "N optional" disclosure so a
+  ;; template's knobs (an `:http-get`'s headers / auth-value / timeout)
+  ;; don't bury the one thing to fill in. Rows keep `.execute-arg-row`
+  ;; either way; editor-execute.js mounts every `.execute-arg-form`.
+  {:name :_xp-entries
+   :parent :free-arg-entries
    :args {:fn-id {:ref :fn-id-param :type :nullable-uuid}}}
 
-  {:name :_xp-free-names
-   :description "Free-arg names, sorted for a stable row order (the slot-map is unordered)."
-   :parent :sort
-   :args {:coll {:parent :vec
-                 :args {:coll {:parent :keys :args {:map :_xp-free-map}}}}}}
+  {:name :_xp-entry-name
+   :parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}
+
+  {:name :_xp-entry-optional?
+   :parent :get :args {:coll {:as :item} :key {:value :optional?} :default false}}
+
+  {:name :_xp-entry-required?
+   :parent :not :args {:value :_xp-entry-optional?}}
+
+  {:name :_xp-required-entries
+   :description "Stable row order: the surface is unordered."
+   :parent :sort-by
+   :args {:key-fn :_xp-entry-name
+          :coll {:parent :filter :args {:pred :_xp-entry-required? :coll :_xp-entries}}}}
+
+  {:name :_xp-optional-entries
+   :parent :sort-by
+   :args {:key-fn :_xp-entry-name
+          :coll {:parent :filter :args {:pred :_xp-entry-optional? :coll :_xp-entries}}}}
+
+  {:name :_xp-entry-name-str
+   :parent :keyword-to-str
+   :args {:keyword :_xp-entry-name}}
 
   {:name :_xp-arg-slot-id-text
    :parent :to-str
    :args {:value {:parent :get
-                  :args {:coll :_xp-free-map :key {:as :item} :default nil}}}}
+                  :args {:coll {:as :item} :key {:value :slot-id} :default nil}}}}
 
   {:name :_xp-arg-host
    :description "Empty per-arg mount host — editor-execute.js fetches `/api/value-form` for the `(fn-id, slot-id)` pair and renders the widget into it post-swap."
@@ -120,7 +145,7 @@
                   :args {:keys [{:value :class} {:value :data-slot-id} {:value :data-slot-name}]
                          :vals [{:value "execute-arg-form"}
                                 :_xp-arg-slot-id-text
-                                :_kw-item-name]}}
+                                :_xp-entry-name-str]}}
           :children [{:value "…"}]}}
 
   {:name :_xp-arg-row
@@ -130,23 +155,49 @@
           :children [{:parent :hiccup
                       :args {:tag {:value "div"}
                              :attrs {:value {:class "execute-arg-label"}}
-                             :children [:_kw-item-name]}}
+                             :children [:_xp-entry-name-str]}}
                      :_xp-arg-host]}}
 
   {:name :_xp-arg-rows
    :parent :map
-   :args {:func :_xp-arg-row :coll :_xp-free-names}}
+   :args {:func :_xp-arg-row :coll :_xp-required-entries}}
+
+  {:name :_xp-optional-rows
+   :parent :map
+   :args {:func :_xp-arg-row :coll :_xp-optional-entries}}
+
+  {:name :_xp-optional-summary-text
+   :parent :str
+   :args {:parts [{:parent :to-str :args {:value {:parent :count :args {:coll :_xp-optional-entries}}}}
+                  {:value " optional"}]}}
+
+  {:name :_xp-optional-details
+   :parent :hiccup
+   :args {:tag {:value "details"}
+          :attrs {:value {:class "execute-optional-args"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "summary"}
+                             :attrs {:value {:class "execute-optional-summary"}}
+                             :children [:_xp-optional-summary-text]}}
+                     :_xp-optional-rows]}}
+
+  {:name :_xp-optional-block
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_xp-optional-entries}}
+          :then :hidden-span
+          :else :_xp-optional-details}}
 
   {:name :_xp-body
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "execute-popover-body"}}
           :children [{:parent :if
-                      :args {:test {:parent :empty? :args {:coll :_xp-free-names}}
+                      :args {:test {:parent :empty? :args {:coll :_xp-entries}}
                              :then {:value [:div {:class "execute-no-args-note"}
                                             "No free arguments — click Run to invoke."]}
                              :else :hidden-span}}
-                     :_xp-arg-rows]}}
+                     :_xp-arg-rows
+                     :_xp-optional-block]}}
 
   ;; --- options + actions -----------------------------------------------
   ;; Effects-bearing fns: confirm checkbox gates Run (server emits Run
@@ -324,12 +375,67 @@
    :description "Live by-fn executions data. Reuses `:_list-executions-by-fn` — same cond / parsed shape `/api/executions` uses, so the partial is the HTML projection of that JSON."
    :parent :_list-executions-by-fn}
 
-  {:name :_partial-exec-hist-rows
+  {:name :_partial-exec-hist-all-rows
    :description "`:executions` list out of the envelope. Falls to `[]` for the error envelope path (no fn-id supplied) so the empty-state renders cleanly."
    :parent :get
    :args {:coll :_partial-exec-hist-data
           :key {:value :executions}
           :default {:value []}}}
+
+  ;; --- Secret flows — the audit trail's read side ----------------------
+  ;; A row whose run CONSUMED a secret and produced a side effect carries
+  ;; `:touched-secret? true` (SECRETS.md § Audit trail). The panel marks
+  ;; such rows 🔒 and `?secrets=1` narrows the list to them — the toggle
+  ;; chip in the rollup strip; editor-execute-history.js re-fetches.
+  {:name :_peh-secrets-raw
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "secrets"}}}
+
+  {:name :_peh-secrets-only?
+   :parent :equal?
+   :args {:a :_peh-secrets-raw :b {:value "1"}}}
+
+  {:name :_peh-row-secret?
+   :description "HOF pred over execution rows — the audit flag."
+   :parent :equal?
+   :args {:a {:parent :get :args {:coll {:as :item} :key {:value :touched-secret?} :default false}}
+          :b {:value true}}}
+
+  {:name :_partial-exec-hist-rows
+   :parent :if
+   :args {:test :_peh-secrets-only?
+          :then {:parent :vec
+                 :args {:coll {:parent :filter
+                               :args {:pred :_peh-row-secret? :coll :_partial-exec-hist-all-rows}}}}
+          :else :_partial-exec-hist-all-rows}}
+
+  {:name :_partial-eh-row-lock
+   :parent :if
+   :args {:test :_peh-row-secret?
+          :then {:value [:span {:class "execute-history-lock"
+                                :title "This run consumed a secret and produced a side effect (audit trail)"}
+                         "🔒"]}
+          :else :hidden-span}}
+
+  {:name :_peh-secrets-toggle-class
+   :parent :if
+   :args {:test :_peh-secrets-only?
+          :then {:value "execute-history-secrets-toggle execute-history-secrets-toggle-active"}
+          :else {:value "execute-history-secrets-toggle"}}}
+
+  {:name :_peh-secrets-toggle-attrs
+   :parent :zipmap
+   :args {:keys [{:value :type} {:value :class} {:value :data-secrets} {:value :title}]
+          :vals [{:value "button"}
+                 :_peh-secrets-toggle-class
+                 {:parent :if :args {:test :_peh-secrets-only? :then {:value "1"} :else {:value "0"}}}
+                 {:value "Only runs that consumed a secret and produced a side effect"}]}}
+
+  {:name :_peh-secrets-toggle
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_peh-secrets-toggle-attrs
+          :children [{:value "🔒 Secret flows"}]}}
 
   {:name :_partial-exec-hist-empty?
    :parent :empty?
@@ -506,6 +612,7 @@
    :args {:tag {:value "div"}
           :attrs {:value {:class "execute-history-row-head"}}
           :children [:_partial-eh-row-status-span
+                     :_partial-eh-row-lock
                      :_partial-eh-row-ts-span
                      :_partial-eh-row-repeat-btn
                      :_partial-eh-row-path-btn
@@ -575,7 +682,7 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "execute-history-stats"}}
-          :children [:_peh-stats-text]}}
+          :children [:_peh-stats-text :_peh-secrets-toggle]}}
 
   ;; --- unresolved failures (the Failed runs panel's rows, this fn only) —
   ;;     message + ✕ dismiss, above the history. The ✕ POSTs to the

@@ -151,6 +151,26 @@
   (into {} (map (juxt :ext-name :slot-id)) entries))
 
 
+(defn free-arg-entries
+  "The public free-arg surface of `fn-id` as the editor reads it: a
+   vector of `{:name kw :slot-id uuid :optional? bool :captured? bool
+   :via text|nil}` — one per open hole (`surface/public-free-entries`),
+   `:via` the NAME of the HOF target a closure capture is read inside
+   (nil for the fn's own surface). The Run form folds the optional
+   ones, the inspector says which are captures and where. Same walk
+   as `free-arg-slot-map`, so the two never disagree."
+  [ctx fn-id]
+  (let [storage (request/require-storage ctx)
+        lookups (executor-lookups ctx storage fn-id)]
+    (mapv (fn [{:keys [ext-name slot-id optional? captured? via]}]
+            {:name (keyword ext-name)
+             :slot-id slot-id
+             :optional? (boolean optional?)
+             :captured? (boolean captured?)
+             :via (some->> via (get (:fn-by-id lookups)) :name)})
+          (surface/public-free-entries fn-id lookups))))
+
+
 (defn free-arg-slot-map
   "Return `{arg-name → slot-id}` for `fn-id`'s free args.
 

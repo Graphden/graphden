@@ -56,7 +56,6 @@
   nil)
 
 
-
 ;; === Merge-record memo (request-scoped) ===
 ;;
 ;; Unlike a chain, the `branch-merge` rows landing on a chain are
@@ -95,14 +94,15 @@
 
 (defn- merges-for-chain
   [base-storage branch-id branch-chain]
-  (let [load (fn [] (sp/query-entities base-storage :branch-merge
-                                       {:target-branch-id (vec branch-chain)}))]
+  (let [fetch (fn []
+                (sp/query-entities base-storage :branch-merge
+                                   {:target-branch-id (vec branch-chain)}))]
     (if-let [memo *merges-memo*]
       (or (get @memo branch-id)
-          (let [rows (load)]
+          (let [rows (fetch)]
             (swap! memo assoc branch-id rows)
             rows))
-      (load))))
+      (fetch))))
 
 
 (defn invalidate-chain-cache!

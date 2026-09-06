@@ -84,8 +84,10 @@
 
 (defn public-free-entries
   "The fn's free-arg HOLES as the public boundary presents them, slot-id
-   keyed — `{:ext-name :slot-id}` (+ `:captured? true` for a HOF
-   target's closure capture):
+   keyed — `{:ext-name :slot-id :optional?}` (+ `:captured? true :via
+   <hof-target-id>` for a HOF target's closure capture; `:optional?` is
+   the executor's own `effective-required?` read at the slot's owner, so
+   the Run form, the canvas and the inspector agree on what is a knob):
 
    - MEMBERSHIP and NAMES are the name walker's (`surface-names`) — the
      entries walker also lists env-covered slots the caller never
@@ -149,5 +151,10 @@
                               (distinct))
                         (r/deep-free-entries-with-captures fn-id lookups opts))]
      (into []
-           (filter open-hole?)
-           (into surface (map #(select-keys % [:ext-name :slot-id :captured?])) captures)))))
+           (comp (filter open-hole?)
+                 (map (fn [{:keys [slot-id via] :as e}]
+                        (let [slot (get slot-map slot-id)]
+                          (assoc e :optional?
+                                 (and (some? slot)
+                                      (not (b/effective-required? slot (or via fn-id) lookups))))))))
+           (into surface (map #(select-keys % [:ext-name :slot-id :captured? :via])) captures)))))

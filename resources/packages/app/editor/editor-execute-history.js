@@ -141,6 +141,17 @@ function bindHistoryActions(panel, fnEntity, resultHostEl) {
       onExpand(row.getAttribute('data-execution-id'));
     });
   });
+  // "Secret flows" chip — re-fetch the panel narrowed to (or widened
+  // from) the audit-trail rows and swap it in place; a fresh fetch
+  // re-binds everything above, so no htmx swap can strand a handler.
+  panel.querySelectorAll('.execute-history-secrets-toggle').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const secrets = btn.getAttribute('data-secrets') !== '1';
+      const fresh = await buildHistoryPanel(fnEntity, resultHostEl, { secrets });
+      panel.replaceWith(fresh);
+    });
+  });
 }
 
 
@@ -148,12 +159,13 @@ function bindHistoryActions(panel, fnEntity, resultHostEl) {
 // element ready for the caller to append. Signature matches the
 // legacy `buildHistoryPanel(fnEntity, resultHost) → element` so
 // editor-execute.js's call-sites stay untouched.
-async function buildHistoryPanel(fnEntity, resultHostEl) {
+async function buildHistoryPanel(fnEntity, resultHostEl, opts) {
   const wrap = document.createElement('div');
   wrap.className = 'execute-history-host-wrap';
   try {
     const r = await authFetch('/partials/execute-history?fn-id='
-                              + encodeURIComponent(fnEntity.id));
+                              + encodeURIComponent(fnEntity.id)
+                              + (opts?.secrets ? '&secrets=1' : ''));
     if (!r.ok) {
       const err = document.createElement('div');
       err.className = 'execute-history-error';

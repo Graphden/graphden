@@ -145,7 +145,7 @@
   (get slot-by-fn-source-slot [owner-fn-id source-slot-id]))
 
 
-(defn- effective-required?
+(defn effective-required?
   "Effective `:required` for `slot-id` at `fn-id`. Slot's own
    `:required` (default true) is the BASELINE; any binding along the
    inheritance chain with `:required true` clamps it to required.

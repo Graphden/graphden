@@ -973,12 +973,15 @@
                                              (true? (:list-append %))))
                                 (map (comp root-of :slot-id)))
                           (data/get-inheritance-chain* root-fn-id lookups))]
-    (doseq [{:keys [ext-name slot-id captured?]} (surface/public-free-entries root-fn-id lookups)
+    (doseq [{:keys [ext-name slot-id captured? optional?]} (surface/public-free-entries root-fn-id lookups)
             :when (and slot-id
                        (not (contains? shown (root-of slot-id)))
                        (not (contains? chain-bound (root-of slot-id))))
             :let [[arg-id arg-rec] (first (get args-by-slot slot-id))
-                  optional? (and arg-rec (arg-is-optional? arg-map arg-rec))]
+                  ;; The surface's own `:optional?` (the executor's
+                  ;; effective-required at the slot's owner), so the card
+                  ;; and the Run form cannot disagree on what is a knob.
+                  optional? (boolean optional?)]
             ;; A closure capture that is OPTIONAL is a knob of the HOF
             ;; target, not a hole of this card — the Run form lists it,
             ;; the card does not (a listener would sprout every optional

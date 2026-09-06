@@ -72,6 +72,17 @@
     {}))
 
 
+(defbase free-arg-entries
+  "The editor's view of `fn-id`'s free-arg surface — `lookup/free-arg-entries`
+   (name, slot-id, optional?, captured?, the HOF target a capture is read
+   inside). `[]` for nil fn-id."
+  [fn-id]
+  (cr/record-effect! :db)
+  (if (some? fn-id)
+    (fn-exec-lookup/free-arg-entries ctx fn-id)
+    []))
+
+
 (defbase service-blocking-free-args
   "`{arg-name → slot-id}` for only the free args that would prevent `fn-id`
    from being STARTED as a service — the service-ability projection of
@@ -305,6 +316,7 @@
    :create-entity create-entity-fn
    :update-entity update-entity-fn
    :free-arg-slot-map free-arg-slot-map
+   :free-arg-entries free-arg-entries
    :service-blocking-free-args service-blocking-free-args
    :list-all-graph-entities list-all-graph-entities
    :graph-fn-defs-subtree   graph-fn-defs-subtree

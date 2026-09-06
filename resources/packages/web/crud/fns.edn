@@ -254,6 +254,16 @@
    :return-type [:map :keyword :uuid]
    :effects #{:db}}
 
+  ;; The same surface with the facts the EDITOR needs per hole — whether
+  ;; it is optional (the executor's effective-required at the slot's
+  ;; owner), whether it is a closure capture and inside which HOF target.
+  ;; `:free-arg-slot-map` stays the executor-facing projection.
+  {:name :free-arg-entries
+   :description "`fn-id`'s free args as a list of `{:name :slot-id :optional? :captured? :via}` — one per open hole; `:via` names the HOF target a capture is read inside (nil on the fn's own surface). `[]` when fn-id is nil."
+   :args {:fn-id {:type :nullable-uuid :description "Target fn-id; nil short-circuits to an empty list."}}
+   :return-type [:list {:name :keyword :slot-id :uuid :optional? :bool :captured? :bool :via [:union :null :text]}]
+   :effects #{:db}}
+
   ;; --- :service-blocking-free-args — the service-ability PROJECTION of
   ;; :free-arg-slot-map. Same graph-traversal primitive (§3.3 carve-out),
   ;; but drops the fn's own top-level CALLBACK-slot subtrees: an

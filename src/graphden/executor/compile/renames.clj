@@ -615,7 +615,10 @@
                      lookup-id (or (:id own-rename-slot) bnd-slot-id)]
                  (get outer-renames lookup-id)))
              (walk
-               [fid covered-slots outer-renames covered-names hof-depth]
+               ;; `hof-root` — the HOF target whose closure the walk is
+               ;; inside (nil at the surface): a capture names it as `:via`,
+               ;; so a reader can say "read inside <target>".
+               [fid covered-slots outer-renames covered-names hof-depth hof-root]
                (when-not (contains? @visited-fns fid)
                  (swap! visited-fns conj fid)
                  (let [bindings (b/collect-bindings fid lookups)
@@ -627,7 +630,9 @@
                                                 (keep #(some-> (:env-name %) keyword))
                                                 env-bindings)
                        emit-entry! (fn [e]
-                                     (emit! (cond-> e captured? (assoc :captured? true))
+                                     (emit! (cond-> e
+                                              captured? (assoc :captured? true
+                                                               :via hof-root))
                                             next-covered-names))
                        ;; Cover by slot-id, mirroring
                        ;; `deep-free-ext-names*`'s own-primaries logic
@@ -705,14 +710,15 @@
                                                         (catch clojure.lang.ExceptionInfo _ nil))]
                                    (walk (:ref-id bnd) #{} {}
                                          (into next-covered-names (map keyword) lambda)
-                                         (inc hof-depth))))
+                                         (inc hof-depth)
+                                         (or hof-root (:ref-id bnd)))))
                                (walk (:ref-id bnd) next-covered next-renames
-                                     next-covered-names hof-depth))
+                                     next-covered-names hof-depth hof-root))
                        :seq  (doseq [item (:items bnd)]
                                (cond
                                  (:ref-fn-id item)
                                  (walk (:ref-fn-id item) next-covered next-renames
-                                       next-covered-names hof-depth)
+                                       next-covered-names hof-depth hof-root)
 
                                  (and (map? (:value item))
                                       (:as (:value item))
@@ -763,8 +769,8 @@
                                 (:ref-id env-bnd)
                                 (not (own-primary-slots (:slot-id env-bnd))))
                        (walk (:ref-id env-bnd) next-covered next-renames
-                             next-covered-names hof-depth))))))]
-       (walk fn-id #{} {} #{} 0))
+                             next-covered-names hof-depth hof-root))))))]
+       (walk fn-id #{} {} #{} 0 nil))
      @result)))
 
 

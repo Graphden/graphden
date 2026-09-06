@@ -71,6 +71,25 @@ endpoint is an abuse surface. A deploy opts in with
 on it is per-IP rate-limited (429 over the window), and the anonymous tier + TTL
 bound each demo's blast radius.
 
+## Founding beta — paid tiers before billing exists
+
+Until billing ships, paid tiers are granted **by hand** and never sold:
+
+- A user asks for a plan (the landing's pricing note links
+  `mailto:social@graphden.dev`; the plan-limit errors point at
+  `graphden.dev/#pricing`). The operator flips the org with the route below
+  (or Operate → Orgs in the editor) and records it in the private register
+  (`graphden-internal/docs/FOUNDING_ORGS.md`: org, contact, tier, date, what
+  was promised).
+- One public condition for everyone: free until billing launches, then a
+  fixed discount window on the same tier, in exchange for feedback. Capped
+  (30 orgs; Dedicated is a real pod, so at most a handful).
+- **Never tied to sponsorship.** Donations to the Open Collective do not buy
+  a tier — the fiscal host forbids selling through the collective — so
+  "support us and we unlock X" is not a thing this project says.
+- The first org that wants to *pay* triggers the billing work: a pilot on a
+  free tier meanwhile, then it converts first.
+
 ## Suspending an org (abuse kill-switch)
 
 `suspended` is a special tier — not something a tenant buys, but an operator's

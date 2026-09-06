@@ -98,7 +98,10 @@
    `:execution` / `:service` rows need every layer. Delegates to the
    shared `test-infra.schemas` builder."
   []
-  (schemas/full-schema {:packages? true}))
+  ;; `:stats?` — the usage rollups the Runs tab's partial reads; without
+  ;; the table the whole `/partials/execute-history` handler could not be
+  ;; exercised against the golden (2026-09-06).
+  (schemas/full-schema {:packages? true :stats? true}))
 
 
 (defn create-versioned-test-storage

@@ -326,7 +326,9 @@ the right inspector on its **Runs** tab, so the canvas stays fully
 visible (and pannable) next to the form, the result, and the fn's
 run history below. In the history, a row whose run consumed a secret
 and produced an effect carries a 🔒 (SECRETS.md § Audit trail), and
-the **Secret flows** chip narrows the list to those rows:
+the **Secret flows** chip narrows the list to those rows — in the
+API's SQL (`GET /api/executions?fn-id=X&secrets=1`), so the page is the
+last N secret flows, not the secret flows among the last N:
 
 - One type-aware form per free-arg, loaded via `/api/value-form` —
   same widgets that drive binding edits. Required holes are rows;

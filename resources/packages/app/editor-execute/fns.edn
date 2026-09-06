@@ -385,8 +385,9 @@
   ;; --- Secret flows — the audit trail's read side ----------------------
   ;; A row whose run CONSUMED a secret and produced a side effect carries
   ;; `:touched-secret? true` (SECRETS.md § Audit trail). The panel marks
-  ;; such rows 🔒 and `?secrets=1` narrows the list to them — the toggle
-  ;; chip in the rollup strip; editor-execute-history.js re-fetches.
+  ;; such rows 🔒 and `?secrets=1` narrows the list to them in the API's
+  ;; SQL — the toggle chip in the rollup strip; editor-execute-history.js
+  ;; re-fetches.
   {:name :_peh-secrets-raw
    :parent :query-param
    :args {:request {:as :request} :param-name {:value "secrets"}}}
@@ -401,13 +402,12 @@
    :args {:a {:parent :get :args {:coll {:as :item} :key {:value :touched-secret?} :default false}}
           :b {:value true}}}
 
+  ;; The narrowing itself happens in `/api/executions`' SQL (`?secrets=1`
+  ;; rides on the same request), so the page is the last N secret flows,
+  ;; not the secret flows among the last N.
   {:name :_partial-exec-hist-rows
-   :parent :if
-   :args {:test :_peh-secrets-only?
-          :then {:parent :vec
-                 :args {:coll {:parent :filter
-                               :args {:pred :_peh-row-secret? :coll :_partial-exec-hist-all-rows}}}}
-          :else :_partial-exec-hist-all-rows}}
+   :parent :identity
+   :args {:value :_partial-exec-hist-all-rows}}
 
   {:name :_partial-eh-row-lock
    :parent :if

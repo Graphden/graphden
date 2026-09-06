@@ -77,7 +77,10 @@
    to be a hand-kept duplicate precisely because requiring test-setup
    from here would cycle; the leaf ns removed that constraint)."
   []
-  (schemas/full-schema {:packages? true}))
+  ;; `:stats?` — the usage rollups the Runs tab's partial reads; without
+  ;; the table the whole `/partials/execute-history` handler could not be
+  ;; exercised against the golden (2026-09-06).
+  (schemas/full-schema {:packages? true :stats? true}))
 
 
 (defn- exec-on-cluster!

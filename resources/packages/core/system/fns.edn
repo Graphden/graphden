@@ -105,7 +105,7 @@
   {:name :parse-json
    :description "Parse a JSON string into a Clojure value."
    :args {:string {:type :text :description "JSON text to parse."}
-          :keywordize {:type :bool :value true
+          :keywordize {:required false :type :bool :value true
                        :description "When true, convert string keys to keywords."}}
    :return-type :jsonb}
 

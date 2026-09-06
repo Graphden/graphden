@@ -186,9 +186,9 @@
 
   {:name :range
    :description "Generate a vector of integers in `[start, end)` stepping by `step` (Clojure's `range`)."
-   :args {:start {:type :int :value 0 :description "Inclusive lower bound. Defaults to 0."}
+   :args {:start {:required false :type :int :value 0 :description "Inclusive lower bound. Defaults to 0."}
           :end {:type :int :description "Exclusive upper bound."}
-          :step {:type :int :value 1 :description "Step between successive values. Defaults to 1; must be non-zero."}}
+          :step {:required false :type :int :value 1 :description "Step between successive values. Defaults to 1; must be non-zero."}}
    :return-type [:list :int]}
 
   {:name :repeat

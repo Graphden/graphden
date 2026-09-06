@@ -42,7 +42,7 @@
    :description "Enqueue `:payload` on `:queue`, visible after `:delay-ms` (0 = now). Returns the message id and wakes waiting consumers through the NOTIFY bus. At-least-once: a consumer that dies mid-handling sees the message again after the visibility timeout. The message carries the publisher's trace (`cr/*execution*`) — or opens a trace of its own when published outside a persisted run — so the consumer's handling is persisted as a linked execution either way."
    :args {:queue {:type :non-blank-text :description "Queue name — the channel a consumer takes from."}
           :payload {:type :jsonb :description "The message body (JSON-shaped). Reference your contract's type-row on the publisher's slot."}
-          :delay-ms {:type :non-negative-int :value 0 :description "Delay before the message becomes takeable, in ms."}}
+          :delay-ms {:required false :type :non-negative-int :value 0 :description "Delay before the message becomes takeable, in ms."}}
    :return-type :uuid
    :effects #{:db}}
 

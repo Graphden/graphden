@@ -28,7 +28,8 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.perf.calibrate :as cal]
-    [graphden.perf.sql :as psql]))
+    [graphden.perf.sql :as psql]
+    [graphden.versioning.storage.resolution :as vres]))
 
 
 (def ^:dynamic *graph* nil)
@@ -146,12 +147,22 @@
   ;; querying moves it first, long before anyone times the tab.
   (testing "GET /partials/execute-popover for web-server"
     (let [fn-id (get (:all-name->id *graph*) :web-server)
+          ;; Under the router's per-request scope: `dispatch*` binds one
+          ;; merge-record memo around every request, so the handler is
+          ;; measured the way production reaches it — a scenario that
+          ;; called it bare counted the resolver's `branch_merge` re-reads
+          ;; the request never pays (18 → 15 → 14). The router itself is not
+          ;; driven here: its compiled ring closure needs the boot-shaped
+          ;; registry the golden clone does not carry (`smoke_pass_test`
+          ;; boots one for that), and its own request cost is constant.
           {:keys [queries result]}
           (record! :sql/execute-popover-app-root
-                   #(setup/via-graph *graph* :_partial-xp-handler
-                                     {:request-method :get
-                                      :uri "/partials/execute-popover"
-                                      :query-params {"fn-id" (str fn-id)}}))]
+                   #(vres/call-with-merges-memo
+                      (fn []
+                        (setup/via-graph *graph* :_partial-xp-handler
+                                         {:request-method :get
+                                          :uri "/partials/execute-popover"
+                                          :query-params {"fn-id" (str fn-id)}}))))]
       ;; The statement list travels with the count as a NOTE in the perf
       ;; report (`psql/record-measured!`), and `bb perf` prints it under a
       ;; breached budget — not to stderr: kaocha swallows both streams of a

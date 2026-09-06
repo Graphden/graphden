@@ -615,9 +615,9 @@
                      lookup-id (or (:id own-rename-slot) bnd-slot-id)]
                  (get outer-renames lookup-id)))
              (walk
-               ;; `hof-root` — the HOF target whose closure the walk is
-               ;; inside (nil at the surface): a capture names it as `:via`,
-               ;; so a reader can say "read inside <target>".
+               ;; `hof-root` — the innermost HOF target whose closure the
+               ;; walk is inside (nil at the surface): a capture names it as
+               ;; `:via`, so a reader can say "read inside <target>".
                [fid covered-slots outer-renames covered-names hof-depth hof-root]
                (when-not (contains? @visited-fns fid)
                  (swap! visited-fns conj fid)
@@ -711,7 +711,9 @@
                                    (walk (:ref-id bnd) #{} {}
                                          (into next-covered-names (map keyword) lambda)
                                          (inc hof-depth)
-                                         (or hof-root (:ref-id bnd)))))
+                                         ;; The INNERMOST target: the closest
+                                         ;; boundary the capture is read behind.
+                                         (:ref-id bnd))))
                                (walk (:ref-id bnd) next-covered next-renames
                                      next-covered-names hof-depth hof-root))
                        :seq  (doseq [item (:items bnd)]

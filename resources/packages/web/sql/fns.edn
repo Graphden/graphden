@@ -25,7 +25,7 @@
           :password {:type [:secret :text]
                      :description "Database password. Slot is `[:secret :text]` — only `[:secret :text]`-typed values flow in. Plain text auto-promotes (the slot tags it as a secret on entry); a stripped attempt downstream is rejected at type-check, and an inline `▶ Run` of any composition that touches this slot is hidden by the executor."}
           :sql {:type :text :description "A single SQL statement. Parametrise inputs with `?` and supply them via `:params` — never interpolate untrusted values into the SQL string."}
-          :params {:type [:list :jsonb]
+          :params {:required false :type [:list :jsonb]
                    :value []
                    :description "Positional parameters for the `?` placeholders. Each item may be any JSON-encodable value (or a fn-ref). Default empty."}}
    :return-type :int
@@ -45,7 +45,7 @@
           :password {:type [:secret :text]
                      :description "Database password. Slot is `[:secret :text]` — only `[:secret :text]`-typed values flow in. Plain text auto-promotes (the slot tags it as a secret on entry); a stripped attempt downstream is rejected at type-check, and an inline `▶ Run` of any composition that touches this slot is hidden by the executor."}
           :sql {:type :text :description "A SELECT statement. Use `?` placeholders for inputs."}
-          :params {:type [:list :jsonb]
+          :params {:required false :type [:list :jsonb]
                    :value []
                    :description "Positional parameters for the `?` placeholders. Default empty."}}
    :return-type [:list :jsonb]

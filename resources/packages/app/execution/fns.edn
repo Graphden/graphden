@@ -946,13 +946,23 @@
                         :on-throw {:parent :const :args {:value nil}}}}
           :else nil}}
 
+  ;; `?secrets=1` — only the audit-trail rows (`touched-secret? = true`,
+  ;; SECRETS.md § Audit trail): the Runs tab's "Secret flows" chip. In the
+  ;; SQL, not on the fetched page — a filter applied after the limit
+  ;; would show nothing when the last N runs happen to be plain.
+  {:name :_list-exec-secrets?
+   :parent :equal?
+   :args {:a {:parent :query-param :args {:request {:as :request} :param-name {:value "secrets"}}}
+          :b {:value "1"}}}
+
   {:name :_list-exec-parsed
-   :description "Parse `GET /api/executions` query-string into `{:fn-id :version-id :limit}`."
+   :description "Parse `GET /api/executions` query-string into `{:fn-id :version-id :limit :secrets?}`."
    :parent :zipmap
-   :args {:keys [{:value :fn-id} {:value :version-id} {:value :limit}]
+   :args {:keys [{:value :fn-id} {:value :version-id} {:value :limit} {:value :secrets?}]
           :vals [:fn-id-param
                  {:parent :parse-uuid :args {:string :_list-exec-version-id-raw}}
-                 :_list-exec-limit]}}
+                 :_list-exec-limit
+                 :_list-exec-secrets?]}}
 
   {:name :_list-exec-no-anchor?
    :description "Guard — neither `?fn-id` nor `?fn-version-id` was supplied. `:and [nil? (get parsed :version-id)] [nil? (get parsed :fn-id)]`."
@@ -1009,8 +1019,14 @@
           :value :_list-exec-by-version-hsql-where}}
 
   {:name :_list-exec-by-version-hsql-where
-   :parent :vec
-   :args {:coll [{:value :=} {:value :fn-version-id} :_list-exec-version-id]}}
+   :parent :if
+   :args {:test {:parent :get :args {:coll {:as :parsed} :key {:value :secrets?} :default false}}
+          :then {:parent :vec
+                 :args {:coll [{:value :and}
+                               {:parent :vec :args {:coll [{:value :=} {:value :fn-version-id} :_list-exec-version-id]}}
+                               {:value [:= :touched-secret? true]}]}}
+          :else {:parent :vec
+                 :args {:coll [{:value :=} {:value :fn-version-id} :_list-exec-version-id]}}}}
 
   {:name :_list-exec-version-id
    :parent :get :args {:coll {:as :parsed} :key {:value :version-id} :default nil}}
@@ -1072,7 +1088,11 @@
           :outer-limit {:parent :get
                         :args {:coll {:as :parsed}
                                :key {:value :limit}
-                               :default nil}}}}
+                               :default nil}}
+          :outer-secrets {:parent :get
+                          :args {:coll {:as :parsed}
+                                 :key {:value :secrets?}
+                                 :default false}}}}
 
   {:name :_list-exec-by-fn-version-id
    :parent :resolve-fn-version-id
@@ -1093,9 +1113,10 @@
    :description "Carry the resolved version-id + the OUTER limit into the by-version graph composition. The limit comes via `:outer-limit` from `:_list-exec-apply-by-fn` (NOT a re-read of `:as :parsed`) — at this level `:parsed` is BEING REDEFINED to point at this same fn, so re-reading it would loop. The structural shape mirrors `:_list-exec-by-version`'s declared `:parsed` (fn-id + version-id + limit) so the by-version's typed downstream chain doesn't fail open-record subtype against the missing `:fn-id`."
    :parent :assoc
    :args {:map {:parent :zipmap
-                :args {:keys [{:value :limit} {:value :fn-id}]
+                :args {:keys [{:value :limit} {:value :fn-id} {:value :secrets?}]
                        :vals [{:as :outer-limit :type :nullable-int}
-                              {:as :fn-id :type :nullable-uuid}]}}
+                              {:as :fn-id :type :nullable-uuid}
+                              {:as :outer-secrets :type :bool}]}}
           :key {:value :version-id}
           :value {:as :version-id}}}
 

@@ -131,7 +131,13 @@
     (is (str/includes? only "data-secrets=\"1\""))
     (testing "the row filter keeps only touched-secret rows"
       (is (= [] (run :_partial-exec-hist-rows only-req))
-          "no run of :add ever touched a secret"))))
+          "no run of :add ever touched a secret"))
+    (testing "the whole panel renders through its handler, chip and all (the golden carries usage-stat)"
+      (let [body (body-of :_partial-execute-history-handler
+                          {"fn-id" (str (ga/fn-id :add)) "secrets" "1"})]
+        (is (str/includes? body "execute-history-panel"))
+        (is (str/includes? body "execute-history-secrets-toggle-active"))
+        (is (str/includes? body "execute-history-stats"))))))
 
 
 (deftest missing-or-unknown-fn-id-degrades

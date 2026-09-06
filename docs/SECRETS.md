@@ -446,9 +446,10 @@ boolean column (`fn-execution-touched-secret-field-uuid` in
 `schema/executions/schema.clj`); not on the hot path.
 
 Read access: `GET /api/executions?fn-id=X` returns the flag on
-each row, and the Runs tab reads it: a flagged row carries a 🔒, and
-the **Secret flows** chip in the rollup strip narrows the list to
-those rows (`/partials/execute-history?fn-id=X&secrets=1`).
+each row, and `?secrets=1` narrows the query to flagged rows in SQL;
+the Runs tab reads it: a flagged row carries a 🔒, and the **Secret
+flows** chip in the rollup strip re-fetches the panel narrowed
+(`/partials/execute-history?fn-id=X&secrets=1`).
 
 The flag is an audit marker only — it does NOT hide anything. The
 Run pane's `Result hidden` notice keys on the redactor's own markers

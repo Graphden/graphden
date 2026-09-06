@@ -88,7 +88,7 @@
   {:name :brotli-bytes
    :description "brotli-compress a byte[] (brotli4j). `:quality` 0-11 — higher is smaller/slower."
    :args {:raw {:type :any :description "byte[] to compress."}
-          :quality {:type :int :value 6
+          :quality {:required false :type :int :value 6
                     :description "Brotli quality 0-11. Default 6 — the speed/ratio sweet spot for on-the-fly encoding."}}
    :return-type :any}
 

@@ -188,9 +188,12 @@ tables exist:
 2. **Warn** — in the same pass, the owner and every user-member with a
    verified primary email receive "Your Graphden organization X will be
    deleted on <date>" (the accounts Mailer; pending email invitees are not
-   mailed). One mail per person per mark — the mark is the transition, so
-   nothing is re-sent on later sweeps. Without `:mailer` / `:link-origin`
-   on `:tenancy/demo-gc` the mark is only logged (`demo-gc: marked orgs NOT
+   mailed), and the org row's `warned_at` is set. Any marked org without
+   `warned_at` — one marked before the warning shipped — is caught up on
+   the next sweep. `GRAPHDEN_FREE_ORG_REMIND_DAYS` (default 2) before the
+   deletion a "Last reminder" goes out once (`reminded_at`). Both columns
+   clear with the mark on rescue. Without `:mailer` / `:link-origin` on
+   `:tenancy/demo-gc` the mark is only logged (`demo-gc: marked orgs NOT
    warned`).
 3. **Rescue** — any sign-in or run inside the grace clears `expires_at` on
    the next sweep, before that sweep purges anything.

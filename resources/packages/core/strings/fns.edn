@@ -61,7 +61,7 @@
   {:name :str-join
    :description "Join a collection of strings into one (Clojure's `clojure.string/join`)."
    :args {:coll {:type [:list :any] :description "Collection of items to stringify and concatenate (each `str`'d before joining)."}
-          :separator {:type :text :value "" :description "Inserted between every pair. Defaults to empty."}}
+          :separator {:required false :type :text :value "" :description "Inserted between every pair. Defaults to empty."}}
    :return-type :text}
 
   {:name :str-to-keyword

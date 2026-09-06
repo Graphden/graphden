@@ -644,6 +644,14 @@
      :say "Translates the `/api/execute` `{:fn-id | :fn-name}` request into the
            full `:fn` row in one round-trip — the lookup that begins the
            execution + persist path."}
+    {:ns graphden.executor.compile.surface :defn public-free-entries
+     :say "The one free-arg surface every name-facing consumer reads — the Run
+           form's arg list, the service create-guard, the canvas's deep-free
+           placeholders: the name walker's public names plus the HOF closure
+           captures the entry walker finds by descending into HOF targets,
+           minus everything an enclosing scope supplies (lambda params by
+           alpha-equivalence, env-bindings), one hole per slot identity. Read
+           it before touching any of the three: they agree by construction."}
     {:ns graphden.crud.fn-execution :defn apply-execute
      :say "The `/api/execute` orchestrator: resolve fn + version + free-arg
            slots, acquire a concurrency slot, submit the future, and dispatch on

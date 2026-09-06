@@ -645,7 +645,9 @@ records. Tracing continues the tree across the wire:
    child and the tree continues on the other service's side.
 
 5. The **queue** is a hop too. `:queue-publish` stamps the publisher's
-   `:trace-id` / `:parent-execution-id` on the message row; the
+   `:trace-id` / `:parent-execution-id` on the message row (outside a
+   persisted run it opens a fresh trace — the handling is persisted,
+   parentless, findable by trace id); the
    consumer template runs its handler through `:call-traced` (core/
    system — `:call` as a trace hop: with a trace id it persists the
    call as an execution of the callee, linked to the parent, with

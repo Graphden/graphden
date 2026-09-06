@@ -172,3 +172,22 @@ identical under either resolver variant. Alternative 1 above (the
 in-memory `deep-free-ext-entries` walker) remains the end-state if the
 resolver's round trips ever matter; the decision to keep the base-fn
 pure (always-fresh) stands.
+
+## Addendum 2026-09-06 — one surface: the executor's walker
+
+`free-args-via` and `collect-reachable-graph` are gone. `free-arg-slot-map`
+(and the service-ability projection, `service-blocking-free-args`) now read
+`compile.surface/public-free-entries` over the executor's own compile
+lookups, built from the same `sp/resolve-execution-graph` closure (slot
+type-fn rows topped up as before). That surface is the name walker's
+membership and public (closest-chain-rename) names, plus the HOF closure
+captures the entry walker finds by descending into HOF targets — lambda
+params covered by name (alpha-equivalence included, a bare `:fn` slot
+capturing everything), every enclosing scope's env-bindings and outer
+lambda params covering by name, one hole per slot identity. Alternative 1
+above is therefore the shipped state. What it bought: the listener's Run
+form went from 22 phantom frees (`value`, `item`, `branch-id`, …) to one
+optional knob, and the Run form, the service create-guard and the canvas's
+deep placeholders can no longer disagree — they are one function. Caching
+(`free-arg-slot-map-cached`) and the pure base-fn's always-fresh contract
+are unchanged.

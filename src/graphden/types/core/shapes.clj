@@ -151,7 +151,8 @@
   "True when a slot's type ACCEPTS A CALLABLE — the bare `:fn` primitive
    (any callable, no structural shape) OR a structural `[:fn args ret …]`.
    The one predicate for \"is this a HOF slot\", shared by the type-checker
-   (`ref-free-args`) and the CRUD free-arg lookup (`free-args-via`) so the
+   (`ref-free-args`) and the executor's public free-arg surface
+   (`compile.surface/public-free-entries`, which the Run form reads) so the
    two don't each hand-roll `(or (= :fn t) (fn-type? t))`."
   [t]
   (or (= :fn t) (fn-type? t)))

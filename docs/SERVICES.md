@@ -309,8 +309,8 @@ exponential-backoff retry loop per `:restart-policy`:
 
 | Policy        | Behaviour                                                  |
 |---------------|------------------------------------------------------------|
-| `:always`     | Retry on start exception up to `max-retries` (default 3) with backoff 1s → 2s → 4s. No runtime watcher yet, so this is currently equivalent to `:on-failure`. |
-| `:on-failure` | Same as `:always` today. A future phase distinguishes "clean exit" vs "crash" once we have a runtime watcher. |
+| `:always`     | Retry on start exception up to `max-retries` (default 3) with backoff 1s → 2s → 4s; at runtime, restart after ANY exit — a clean stop included (`restart-after-exit?`, the liveness path). |
+| `:on-failure` | The same start-time retries; at runtime, restart only after a `:failed` exit — a clean stop stays down. |
 | `:never`      | Single attempt. On failure, record `:start-failed-at`, leave `:stopper` nil. |
 
 After the retries within a single pass are exhausted, the reconciler

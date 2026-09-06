@@ -209,7 +209,12 @@
    ;; Retired 2026-07: soft-deleted fn identities occupied (ns, name)
    ;; forever; per-branch live-view uniqueness moved to VersionedStorage's
    ;; check-fn-name-collision!. See the NOTE in schema/graph/schema.clj.
-   "idx_fn_namespace_id_name_unique"])
+   "idx_fn_namespace_id_name_unique"
+   ;; Retired 2026-09-06: `:ns` uniqueness is per ORG now —
+   ;; `(org-id, parent-id, name) NULLS NOT DISTINCT` (see the comment at the
+   ;; constraint in schema/graph/schema.clj); `ensure-unique-indexes!`
+   ;; lands the new key on a migrated DB.
+   "idx_ns_parent_id_name_unique"])
 
 
 (defn- drop-retired-indexes!
@@ -240,6 +245,9 @@
     ;; Side-effect after the migration; return the migration changes, not
     ;; the doseq's nil (callers read `:created`/`:renamed` off this).
     (ensure-field-indexes! tx schema)
+    ;; Same gap for UNIQUE keys: a constraint added to, or re-keyed on, an
+    ;; existing entity only ever fired on table creation.
+    (ddl/ensure-unique-indexes! tx schema)
     changes))
 
 

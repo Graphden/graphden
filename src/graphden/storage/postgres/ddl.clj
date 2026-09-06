@@ -3,6 +3,7 @@
    CREATE/ALTER for tables, columns, enums, indexes, and constraints."
   (:require
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.schema.protocol.protocol :as ds]
     [graphden.storage.postgres.util :as util]
     [honey.sql :as sql]))
@@ -324,3 +325,29 @@
   [ds schema entity-name]
   (run! #(create-constraint! ds schema entity-name %)
         (ds/entity-constraints schema entity-name)))
+
+
+(defn ensure-unique-indexes!
+  "`CREATE UNIQUE INDEX IF NOT EXISTS` for every unique constraint of every
+   entity — the migration pass's counterpart of `create-entity-constraints!`,
+   which fires only when a TABLE is created: a constraint added to (or
+   re-keyed on) an existing entity never reached an already-migrated DB.
+   Tolerant on purpose — rows that violate a new key make the index
+   creation fail, and a boot must not brick on that: the failure is logged
+   with the index name (clean the duplicates, the next boot lands it)."
+  [ds schema]
+  (doseq [entity-name (ds/entities schema)
+          constraint (ds/entity-constraints schema entity-name)
+          :when (= :unique (:type constraint))]
+    (let [index-name (constraint-index-name entity-name constraint)]
+      (try
+        (let [table-name (util/ident->sql entity-name)
+              fields (ds/entity-fields schema entity-name)
+              columns-sql (str/join ", " (map (fn [f] (constraint-column-sql f (get fields f)))
+                                              (:fields constraint)))
+              nulls-sql (if (:nulls-not-distinct? constraint) " NULLS NOT DISTINCT" "")]
+          (util/exec! ds [(str "CREATE UNIQUE INDEX IF NOT EXISTS \"" index-name "\" ON " table-name
+                               " (" columns-sql ")" nulls-sql)] {}))
+        (catch Exception e
+          (log/warn e "unique index NOT created — existing rows violate the key; clean them up, the next migration pass lands it"
+                    {:index index-name :entity entity-name :fields (:fields constraint)}))))))

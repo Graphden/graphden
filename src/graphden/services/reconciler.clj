@@ -139,10 +139,12 @@
 
 
 ;; Supervisor retry tuning. Bounded to keep reconcile-once! responsive
-;; — even max retries finishes inside ~7s (1+2+4). Currently catches
-;; STARTUP failures only (e.g. port-in-use); runtime crashes aren't
-;; detected (no healthcheck) so `:always` ≡ `:on-failure` in
-;; behaviour. Tunable per-call so tests can pin to zero-backoff.
+;; — even max retries finishes inside ~7s (1+2+4). This loop covers
+;; STARTUP failures only (e.g. port-in-use), where `:always` and
+;; `:on-failure` behave alike; the runtime distinction (a clean stop
+;; restarts under `:always` only) lives in the liveness path,
+;; `restart-after-exit?`. Tunable per-call so tests can pin to
+;; zero-backoff.
 (def ^:private default-max-retries 3)
 (def ^:private default-backoff-ms 1000)
 
@@ -151,9 +153,8 @@
   "Whether `policy` wants another start attempt after a failure."
   [policy]
   ;; Both :always and :on-failure retry on start-exception. :never
-  ;; gives up after the first attempt. Future phases distinguish
-  ;; :always (also restart on clean stop) once we have a runtime
-  ;; watcher.
+  ;; gives up after the first attempt. The clean-stop distinction is
+  ;; the liveness path's (`restart-after-exit?`), not this loop's.
   (contains? #{:always :on-failure} policy))
 
 

@@ -105,6 +105,15 @@ protocol:
 | `fn` | `(anonymous-hash)` | anonymous fn dedup |
 | `fn-slot` | `(fn-id, slot-id)` | a slot is exposed at most once per fn |
 | `binding` | `(fn-id, slot-id)` | one binding per `(fn, slot)` |
+| `ns` | `(org-id, parent-id, name)` NULLS NOT DISTINCT | per org, like `branch`: two orgs may both hold `packages/team`; a root namespace (NULL parent) is unique too |
+| `branch` | `(org-id, name)` NULLS NOT DISTINCT | per org |
+
+A `UNIQUE` key declared after an entity's table exists is landed on a
+migrated DB by `ensure-unique-indexes!` on every migration pass
+(`CREATE UNIQUE INDEX IF NOT EXISTS`); existing rows that violate the
+new key leave a boot-time warning naming the index, never a broken boot —
+clean the duplicates and the next pass lands it. A retired key is dropped
+by name via `retired-indexes` in `storage/postgres/migration.clj`.
 
 Two former base-table `UNIQUE` keys were retired because their
 invariant is a property of the per-branch RESOLVED VIEW, not of the

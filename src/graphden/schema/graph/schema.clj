@@ -682,7 +682,16 @@
                       :org-id {:uuid ns-org-id-field-uuid
                                :type :text
                                :nullable? true}})
-      (ds/add-constraint :ns {:type :unique :fields [:parent-id :name]})
+      ;; Per ORG, like `:branch` — `(org-id, parent-id, name) NULLS NOT
+      ;; DISTINCT`: two orgs may both create `packages/team` under the shared
+      ;; public parent (the old `(parent-id, name)` key bounced org B off org
+      ;; A's INVISIBLE row — a cross-org existence oracle), while a root
+      ;; namespace (NULL parent) is finally unique too (NULLS DISTINCT never
+      ;; fired on it). The old index is `retired-indexes` in
+      ;; storage/postgres/migration.clj; the new one lands on a migrated DB
+      ;; through `ensure-unique-indexes!`.
+      (ds/add-constraint :ns {:type :unique :fields [:org-id :parent-id :name]
+                              :nulls-not-distinct? true})
 
       ;; -----------------------------------------------------------------
       ;; fn: function entity (also represents types — see ns-doc).

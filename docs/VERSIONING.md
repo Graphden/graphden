@@ -725,11 +725,12 @@ panel keeps its inline 📍 badge on the same rows.
   seen (entry dropped, nil/new id returned); one landing after it sees
   the now-present entry and sweeps it. Covered by the
   `ref-cache-toctou-*` tests in `branch_router_test`.
-- The `:exec/branch-router` is unit-tested at the dispatcher level
-  (`branch-router-test`: header / query parsing, default fallback,
-  unknown-ref rejection, invalidate). The full middleware-through-storage
-  path — a request through the wrap into a per-branch ExecutionContext and
-  back through the branch's storage view — is covered end-to-end by
+- (Closed, kept for the map.) The `:exec/branch-router` is unit-tested at
+  the dispatcher level (`branch-router-test`: header / query parsing,
+  default fallback, unknown-ref rejection, invalidate) AND the full
+  middleware-through-storage path — a request through the wrap into a
+  per-branch ExecutionContext and back through the branch's storage view —
+  is covered end-to-end by
   `graphden.integration.branches-lifecycle-test`: it dispatches through
   `br/dispatch` (the same closure http-kit feeds real `/api` requests into)
   with explicit `X-Graphden-Branch` headers, creates a branch, writes a `:fn`

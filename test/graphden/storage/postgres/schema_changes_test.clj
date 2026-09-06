@@ -349,6 +349,45 @@
           (sp/close storage))))))
 
 
+(deftest unique-key-added-to-an-existing-entity-lands-on-migration-test
+  (testing "a UNIQUE constraint declared after the table exists is created by
+            the next migration pass; rows violating it leave a warning, not a
+            broken boot"
+    (let [storage (setup/create-test-storage)
+          nuuid #uuid "00000000-0000-0000-0000-000000000003"
+          fields {:name {:uuid nuuid :type :text}}
+          without (th/make-schema :fields fields)
+          with-key (th/make-schema :fields fields
+                                   :constraints [{:type :unique :fields [:name]
+                                                  :nulls-not-distinct? true}])]
+      (try
+        (sp/initialize storage without)
+        (is (not (contains? (index-names-on storage "user") "idx_user_name_unique")))
+        (sp/initialize storage with-key)
+        (is (contains? (index-names-on storage "user") "idx_user_name_unique")
+            "the migration pass created the new unique index on the existing table")
+        (sp/initialize storage with-key)
+        (is (contains? (index-names-on storage "user") "idx_user_name_unique")
+            "idempotent on the next pass")
+        (finally
+          (sp/close storage)))))
+  (testing "existing duplicates: the index is skipped with a warning and the boot proceeds"
+    (let [storage (setup/create-test-storage)
+          nuuid #uuid "00000000-0000-0000-0000-000000000003"
+          fields {:name {:uuid nuuid :type :text}}
+          without (th/make-schema :fields fields)
+          with-key (th/make-schema :fields fields
+                                   :constraints [{:type :unique :fields [:name]}])]
+      (try
+        (sp/initialize storage without)
+        (sp/create-entity storage :user {:name "dup"})
+        (sp/create-entity storage :user {:name "dup"})
+        (is (some? (sp/initialize storage with-key)) "initialize does not throw")
+        (is (not (contains? (index-names-on storage "user") "idx_user_name_unique")))
+        (finally
+          (sp/close storage))))))
+
+
 (deftest indexed-field-has-index-from-first-init-test
   (testing "an :indexed? field's index exists right after FIRST init — not only
             after the next boot's migration pass"

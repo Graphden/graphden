@@ -93,6 +93,27 @@
     (is (contains? (reg/rich-types-snapshot) :rtc-plain))))
 
 
+(deftest record-rich-types-inherits-the-parents-return-test
+  ;; A composed fn-def without its own `:return-type` is recorded with
+  ;; its parent's return from the seed on, not `:any` until the sweep —
+  ;; the compiler's produces-callable decision reads this entry.
+  (reg/record-rich-types! :rtc-parent {:args {:request :any} :return-type [:fn {:request :any} :any]})
+  (reg/record-rich-types! :rtc-child {:parent :rtc-parent :args {:request :any}})
+  (reg/record-rich-types! :rtc-grandchild {:parent :rtc-child :args {}})
+  (reg/record-rich-types! :rtc-narrowed {:parent :rtc-parent :args {} :return-type :int})
+  ;; Compare against the parent's REGISTERED return — the alias resolver
+  ;; canonicalises a fn type (effects slot appended).
+  (let [parent-ret (:return (reg/rich-type-of :rtc-parent))]
+    (is (= parent-ret (:return (reg/rich-type-of :rtc-child))))
+    (is (= parent-ret (:return (reg/rich-type-of :rtc-grandchild)))
+        "two levels up, through a parent that itself inherited"))
+  (is (= :int (:return (reg/rich-type-of :rtc-narrowed)))
+      "an own declaration wins")
+  (reg/record-rich-types! :rtc-orphan {:parent :rtc-not-yet-registered :args {}})
+  (is (= :any (:return (reg/rich-type-of :rtc-orphan)))
+      "an unregistered parent degrades to :any, as before"))
+
+
 (deftest record-rich-types-preserves-computed-effects-test
   ;; Race fix (commit 7a48234e): `record-rich-types!`'s former
   ;; unconditional `assoc` would clobber computed effects that the

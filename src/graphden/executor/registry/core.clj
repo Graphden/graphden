@@ -415,6 +415,26 @@
                      :arg-spec arg-spec}))))
 
 
+(declare rich-type-of)
+
+
+(defn- inherited-return
+  "A composed fn-def without its own `:return-type` returns what its
+   parent returns — the seed used to record `:any` and leave the
+   inherited type to the type-check sweep, so every reader between the
+   seed and the sweep (the compiler's produces-callable decision, the
+   pickers, the type chips) saw `:any` for an extension of a
+   callable-returning template. Read the nearest registered parent's
+   non-`:any` return; nil when no parent is registered yet (the module
+   re-seed pass runs after every name of the module is in)."
+  [fn-def]
+  (some (fn [parent]
+          (let [ret (:return (rich-type-of parent))]
+            (when (and (some? ret) (not= :any ret)) ret)))
+        (or (seq (:parents fn-def))
+            (some-> (:parent fn-def) vector))))
+
+
 (defn record-rich-types!
   "Snapshot the structured types for one fn-def into the in-memory
    registry. Idempotent — re-syncing overwrites. Aliases are resolved
@@ -447,7 +467,8 @@
    (record-rich-types! (fn-def-registry-id fn-name fn-def) fn-name fn-def))
   ([fn-id fn-name fn-def]
    (let [args (:args fn-def)
-         ret  (some-> (:return-type fn-def) types/resolve-alias)
+         ret  (or (some-> (:return-type fn-def) types/resolve-alias)
+                  (inherited-return fn-def))
          per-arg (into {}
                        (map (fn [[arg-name arg-spec]]
                               [arg-name (or (arg-spec->rich-type arg-name arg-spec) :any)]))

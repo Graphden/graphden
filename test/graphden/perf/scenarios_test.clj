@@ -26,10 +26,12 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
+    [graphden.executor.registry.core :as registry-core]
     [graphden.executor.test-setup :as setup]
     [graphden.perf.calibrate :as cal]
     [graphden.perf.sql :as psql]
-    [graphden.versioning.storage.resolution :as vres]))
+    [graphden.system.branch-router :as br]
+    [graphden.test-infra.shared-bootstrap :as sb]))
 
 
 (def ^:dynamic *graph* nil)
@@ -41,19 +43,32 @@
 (defn- graph-fixture
   [t]
   (exec/with-clean-registry
-    #(let [graph (setup/bootstrap-crud-graph-from-golden!)]
-       (try
-         (binding [*graph* graph]
-           ;; Calibrate once, here, against the same pool the scenarios use — a
-           ;; reference measured on a different connection or at a different
-           ;; moment would normalise against a machine this run never saw.
-           (cal/record! (datasource-of (:storage graph)))
-           (t))
-         (finally (setup/close-graph! graph))))))
+    #(do
+       ;; The cached type-check sweep BEFORE the bootstrap (the golden-app
+       ;; fixture's shape): the golden is built with the sweep skipped, so
+       ;; without the overlay a composed fn-def's inherited return type
+       ;; reads `:any`, `ref-produces-callable?` says no, and the router's
+       ;; `_router` HOF is compiled as a shape-callable instead of a thunk —
+       ;; `dispatch` then fails inside `update-in` with a callable where the
+       ;; response map should be (execute_http_test has the same note).
+       ;; Before the bootstrap, because the ambient rich-types are part of
+       ;; the compile-all cache key.
+       (reset! registry-core/*rich-types-override*
+               (sb/ensure-swept-rich-types! ["core" "web" "app"]))
+       (let [graph (setup/bootstrap-crud-graph-from-golden!)]
+         (try
+           (binding [*graph* graph]
+             ;; Calibrate once, here, against the same pool the scenarios use — a
+             ;; reference measured on a different connection or at a different
+             ;; moment would normalise against a machine this run never saw.
+             (cal/record! (datasource-of (:storage graph)))
+             (t))
+           (finally (setup/close-graph! graph)))))))
 
 
 (use-fixtures :once
   (setup/create-container-fixture)
+  exec/with-isolated-rich-types
   graph-fixture)
 
 
@@ -147,22 +162,20 @@
   ;; querying moves it first, long before anyone times the tab.
   (testing "GET /partials/execute-popover for web-server"
     (let [fn-id (get (:all-name->id *graph*) :web-server)
-          ;; Under the router's per-request scope: `dispatch*` binds one
-          ;; merge-record memo around every request, so the handler is
-          ;; measured the way production reaches it — a scenario that
-          ;; called it bare counted the resolver's `branch_merge` re-reads
-          ;; the request never pays (18 → 15 → 14). The router itself is not
-          ;; driven here: its compiled ring closure needs the boot-shaped
-          ;; registry the golden clone does not carry (`smoke_pass_test`
-          ;; boots one for that), and its own request cost is constant.
+          ;; Through the branch router, the way a request reaches the
+          ;; handler in production — its per-request scopes (the
+          ;; merge-record memo among them) and its own bookkeeping are part
+          ;; of what this costs. Built once, outside the measurement.
+          router (br/create-router (:ctx *graph*) "_app-ring-response")
           {:keys [queries result]}
           (record! :sql/execute-popover-app-root
-                   #(vres/call-with-merges-memo
-                      (fn []
-                        (setup/via-graph *graph* :_partial-xp-handler
-                                         {:request-method :get
-                                          :uri "/partials/execute-popover"
-                                          :query-params {"fn-id" (str fn-id)}}))))]
+                   #(br/dispatch router
+                                 ;; The wire shape (`smoke_pass_test`): the app
+                                 ;; chain parses `:query-string` itself.
+                                 {:request-method :get
+                                  :uri "/partials/execute-popover"
+                                  :headers {}
+                                  :query-string (str "fn-id=" fn-id)}))]
       ;; The statement list travels with the count as a NOTE in the perf
       ;; report (`psql/record-measured!`), and `bb perf` prints it under a
       ;; breached budget — not to stderr: kaocha swallows both streams of a

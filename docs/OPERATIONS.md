@@ -180,11 +180,15 @@ The tenancy addon's reaper (`:tenancy/demo-gc`, the same sweep that purges
 expired demo orgs, hourly) also runs the free-org lifecycle when the accounts
 tables exist:
 
-1. **Mark** — a `plan = free` org with no session for its owner or any
-   member, no execution, and an owner account all older than
+1. **Mark** — a `plan = free` org with no activity for
    `GRAPHDEN_FREE_ORG_INACTIVE_DAYS` (default 60; `<= 0` disables the
    lifecycle) gets `expires_at = now + GRAPHDEN_FREE_ORG_GRACE_DAYS`
-   (default 14, floored at 1).
+   (default 14, floored at 1). Activity is any of: a session of the owner
+   or a member created OR used (`session.last_used_at`, refreshed at most
+   hourly by every authenticated request — a browser cookie or an API
+   token in daily use), an execution in the org, a graph edit in the org
+   (an fn or binding version), or the owner account being younger than
+   the window.
 2. **Warn** — in the same pass, the owner and every user-member with a
    verified primary email receive "Your Graphden organization X will be
    deleted on <date>" (the accounts Mailer; pending email invitees are not
@@ -195,8 +199,9 @@ tables exist:
    clear with the mark on rescue. Without `:mailer` / `:link-origin` on
    `:tenancy/demo-gc` the mark is only logged (`demo-gc: marked orgs NOT
    warned`).
-3. **Rescue** — any sign-in or run inside the grace clears `expires_at` on
-   the next sweep, before that sweep purges anything.
+3. **Rescue** — any sign-in, token use, run or edit inside the grace
+   clears `expires_at` (and the mail ledger) on the next sweep, before that
+   sweep purges anything.
 4. **Purge** — past `expires_at` the org, its graph rows, its grants, the
    owner's account + sessions are hard-deleted. Members keep their accounts.
 

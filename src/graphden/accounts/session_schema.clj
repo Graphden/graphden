@@ -61,6 +61,10 @@
   #uuid "cbdddd4a-1f58-48b5-a0a7-c1954122ec6d")
 
 
+(def ^:private session-last-used-at-field-uuid
+  #uuid "6d1e9c4a-2b7f-4f3e-8a5c-9e0b1d2c3f47")
+
+
 (def ^:private session-created-at-field-uuid
   #uuid "79ecedec-cdb7-4f2e-a5a4-8692f21becd5")
 
@@ -86,5 +90,14 @@
                       :scopes {:uuid session-scopes-field-uuid
                                :type :text
                                :nullable? true}
-                      :created-at {:uuid session-created-at-field-uuid :type :int}})
+                      :created-at {:uuid session-created-at-field-uuid :type :int}
+                      ;; Last authenticated use, epoch millis, touched at most
+                      ;; once per `core/session-touch-interval-ms` by
+                      ;; `authenticate-token` — what "the org is used" means
+                      ;; for a long-lived browser cookie or an API token
+                      ;; (tenancy's inactivity marker reads it). nil = never
+                      ;; touched since the column shipped.
+                      :last-used-at {:uuid session-last-used-at-field-uuid
+                                     :type :int
+                                     :nullable? true}})
       (ds/add-constraint :session {:type :unique :fields [:token-hash]})))

@@ -94,6 +94,12 @@ function makeRowExpander(resultHostEl) {
 }
 
 
+// The "Secret flows" chip's state, remembered for the page's life: an
+// auditor stepping through fns keeps the narrowed view instead of
+// re-clicking the chip on every card.
+let historySecretsOnly = false;
+
+
 // Post-swap action wiring — both selectors point at markers the
 // server fragment carries (`data-execution-id` on the row + the
 // Repeat button; `.execute-history-repeat-btn` for the click target).
@@ -148,6 +154,7 @@ function bindHistoryActions(panel, fnEntity, resultHostEl) {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const secrets = btn.getAttribute('data-secrets') !== '1';
+      historySecretsOnly = secrets;
       const fresh = await buildHistoryPanel(fnEntity, resultHostEl, { secrets });
       panel.replaceWith(fresh);
     });
@@ -162,10 +169,11 @@ function bindHistoryActions(panel, fnEntity, resultHostEl) {
 async function buildHistoryPanel(fnEntity, resultHostEl, opts) {
   const wrap = document.createElement('div');
   wrap.className = 'execute-history-host-wrap';
+  const secrets = opts?.secrets ?? historySecretsOnly;
   try {
     const r = await authFetch('/partials/execute-history?fn-id='
                               + encodeURIComponent(fnEntity.id)
-                              + (opts?.secrets ? '&secrets=1' : ''));
+                              + (secrets ? '&secrets=1' : ''));
     if (!r.ok) {
       const err = document.createElement('div');
       err.className = 'execute-history-error';

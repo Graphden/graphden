@@ -12,6 +12,7 @@
    as the return value the caller hands to the client."
   (:require
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.accounts.crypto :as crypto]
     [graphden.accounts.totp :as totp]
     [graphden.storage.protocol.core :as sp])
@@ -236,10 +237,36 @@
     (into #{} (map keyword) (str/split (str/trim scopes-str) #"\s+"))))
 
 
+(def session-touch-interval-ms
+  "How often an authenticating session's `:last-used-at` is refreshed: once
+   an hour, not per request — one UPDATE per session-hour instead of one per
+   call, while the inactivity clock (days) stays exact enough."
+  (* 60 60 1000))
+
+
+(defn- touch-session!
+  "Refresh `:last-used-at` on `s` when the last touch is older than
+   `session-touch-interval-ms`. Best-effort: authentication never fails on
+   a bookkeeping write (a read replica, a transient error)."
+  [storage s]
+  (let [t (now)
+        last-touch (or (:last-used-at s) (:created-at s) 0)]
+    (when (> (- t last-touch) session-touch-interval-ms)
+      (try
+        (sp/update-entity storage :session (:id s) {:last-used-at t})
+        (catch Exception e
+          (log/debug e "session touch skipped" {:session (:id s)}))))))
+
+
 (defn authenticate-token
   "Resolve a raw session/bearer token to its ACTIVE account, or nil. Matches
    the session by hash, requires an authenticating `:kind` (nil/\"api\") that is
    still live, and an account whose status is \"active\". Fails closed.
+
+   A successful match touches the session's `:last-used-at` (throttled —
+   `touch-session!`): a browser cookie or an API token in daily use keeps
+   its org alive for the tenancy inactivity marker, which before read only
+   the session's CREATION time.
 
    The returned account map is enriched with the SESSION's `:token-kind` and
    `:token-scopes` (parsed set, nil = unscoped) so a policy layer can apply a
@@ -251,6 +278,7 @@
       (when (and (contains? #{nil "api"} (:kind s)) (session-live? s))
         (when-let [acct (account-of storage (:account-id s))]
           (when (= "active" (:status acct))
+            (touch-session! storage s)
             (assoc acct
                    :token-kind (:kind s)
                    :token-scopes (parse-scopes (:scopes s)))))))))

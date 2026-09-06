@@ -7,6 +7,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.accounts.account-schema :as account-schema]
     [graphden.accounts.core :as accounts]
+    [graphden.accounts.crypto :as crypto]
     [graphden.accounts.identity-schema :as identity-schema]
     [graphden.accounts.session-schema :as session-schema]
     [graphden.schema.malli.core :as mds]
@@ -74,6 +75,22 @@
           (accounts/password-login! (storage) {:email "alice@EXAMPLE.com" :password "s3cret-pw"})]
       (is (some? token))
       (is (= account-id (str (:id (accounts/authenticate-token (storage) token)))))))
+
+  (testing "an authenticated use touches the session's :last-used-at, throttled"
+    (let [{:keys [token]} (accounts/password-login! (storage) {:email "alice@example.com" :password "s3cret-pw"})
+          row (fn []
+                (first (sp/query-entities (storage) :session
+                                          {:token-hash (crypto/sha256-hex token)})))
+          stale (- (System/currentTimeMillis) (* 2 accounts/session-touch-interval-ms))]
+      (is (nil? (:last-used-at (row))) "minting alone is not a use")
+      ;; Backdate the mint so the first use is past the throttle window.
+      (sp/update-entity (storage) :session (:id (row)) {:created-at stale})
+      (is (some? (accounts/authenticate-token (storage) token)))
+      (let [first-touch (:last-used-at (row))]
+        (is (some? first-touch) "the first use in an hour is recorded")
+        (is (some? (accounts/authenticate-token (storage) token)))
+        (is (= first-touch (:last-used-at (row)))
+            "a second use inside the hour is not another write"))))
 
   (testing "wrong password / unknown email fail closed"
     (is (nil? (accounts/password-login! (storage) {:email "alice@example.com" :password "wrong"})))

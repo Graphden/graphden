@@ -30,8 +30,8 @@ Notes:
   ceilings, ephemeral (reaped by the demo GC). It exists to let someone *try
   graphs* with nothing to lose.
 - **Free (registered) is kept while it is used.** A free org with no sign-in
-  by its owner or any member, no run, and an owner account older than the
-  window (`GRAPHDEN_FREE_ORG_INACTIVE_DAYS`, 60) is marked for deletion a
+  or token use by its owner or any member, no run, no edit, and an owner
+  account older than the window (`GRAPHDEN_FREE_ORG_INACTIVE_DAYS`, 60) is marked for deletion a
   grace period out (`GRAPHDEN_FREE_ORG_GRACE_DAYS`, 14); the owner and every
   member are **emailed the deletion date** at that moment and reminded
   `GRAPHDEN_FREE_ORG_REMIND_DAYS` (2) before it, and any sign-in or run

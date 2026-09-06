@@ -1444,11 +1444,17 @@
   {:name :_er-error-is-tainted?
    :parent :equal? :args {:a :_er-error-data-reason :b {:value :tainted}}}
 
-  {:name :_er-touched-secret?
-   :parent :get :args {:coll {:as :exec} :key {:value :touched-secret?} :default nil}}
+  ;; The redactor's own marker (`persist/redact-outcome`): the inline
+  ;; `/api/execute` body carries `:tainted? true`; a persisted row keeps
+  ;; the same fact as `:error-data {:reason :tainted}`. NOT the audit
+  ;; flag `:touched-secret?` — that one fires for any effectful run of a
+  ;; fn with a secret-CAPABLE slot (`:http-get`'s `:auth-value`), and
+  ;; keying the pane on it hid every plain HTTP response as "secret".
+  {:name :_er-redacted?
+   :parent :get :args {:coll {:as :exec} :key {:value :tainted?} :default nil}}
 
   {:name :_er-tainted?
-   :parent :or :args {:values [:_er-error-is-tainted? :_er-touched-secret?]}}
+   :parent :or :args {:values [:_er-error-is-tainted? :_er-redacted?]}}
 
   ;; status comes back as a keyword from JSON parsing; coerce to text
   ;; for safe `:equal?` comparison against the literal strings below.
@@ -2118,7 +2124,7 @@
   ;; --- Top-level body — final dispatch ---
 
   {:name :_er-body
-   :description "Full result body hiccup — exec → hiccup. Replaces `crud.fn-execution/render-execute-result-hiccup` per §3.3. nil exec → `<span hidden>`; tainted (touched-secret? OR `:error-data.reason == :tainted`) → `Result hidden` pane; status=succeeded → result-shape dispatch via `:_er-succeeded-body`; status=failed → error pane; other (pending/cancelled/unknown) → neutral status note."
+   :description "Full result body hiccup — exec → hiccup. Replaces `crud.fn-execution/render-execute-result-hiccup` per §3.3. nil exec → `<span hidden>`; tainted (`:tainted?` OR `:error-data.reason == :tainted` — the redactor's markers, not the audit flag) → `Result hidden` pane; status=succeeded → result-shape dispatch via `:_er-succeeded-body`; status=failed → error pane; other (pending/cancelled/unknown) → neutral status note."
    :parent :cond
    :args {:clauses [:_er-exec-nil?           :hidden-span
                     :_er-tainted?            :_er-tainted-pane

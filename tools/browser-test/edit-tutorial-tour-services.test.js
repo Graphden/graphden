@@ -52,11 +52,20 @@ const {
     await runWithEffectAck(page);
     // The editor's own /version answers: the result pane shows the 200
     // and the three build hashes.
-    await page.waitForFunction(() => {
-      const p = document.querySelector('.execute-popover.visible');
-      const t = p ? (p.textContent || '') : '';
-      return /frontend/.test(t) && /200/.test(t);
-    }, null, {timeout: 60000, polling: 250});
+    try {
+      await page.waitForFunction(() => {
+        const p = document.querySelector('.execute-popover.visible');
+        const t = p ? (p.textContent || '') : '';
+        return /frontend/.test(t) && /200/.test(t);
+      }, null, {timeout: 60000, polling: 250});
+    } catch (e) {
+      const dump = await page.evaluate(() => {
+        const p = document.querySelector('.execute-popover.visible');
+        return p ? (p.textContent || '').replace(/\s+/g, ' ').slice(0, 1500) : '(no visible run pane)';
+      });
+      console.log('  run pane text: ' + dump);
+      throw e;
+    }
     assert(await clickTourButton(page, 'Next'), 'lesson 35 run Next');
     await waitTourTitle(page, 'Your own services', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 35 explain Next');

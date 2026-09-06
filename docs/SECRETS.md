@@ -449,6 +449,14 @@ Read access: `GET /api/executions?fn-id=X` returns the flag on
 each row. The future "Secret flows" history tab can filter on
 `touched-secret? = true` to surface just the audit-relevant rows.
 
+The flag is an audit marker only — it does NOT hide anything. The
+Run pane's `Result hidden` notice keys on the redactor's own markers
+(`:tainted?` on the inline response, `:error-data {:reason :tainted}`
+on a persisted row), which fire only when the fn's RETURN carries the
+marker. An effectful run of a fn with a merely secret-capable slot
+(`:http-get` with its `:auth-value`) trips the audit flag and still
+shows its response (`execute_result_tainted_test`).
+
 ## Binding-IS-secret model
 
 The secret lives as a TYPED BINDING, not a separate fn-def shape.

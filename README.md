@@ -251,5 +251,21 @@ codebase can also follow the per-topic engineering map in
 
 ## License
 
-GNU Affero General Public License v3.0 (AGPL-3.0) — see [LICENSE](LICENSE).
-For commercial licensing: licensing@graphden.dev
+GNU Affero General Public License v3.0 (AGPL-3.0) — see [LICENSE](LICENSE)
+and [NOTICE](NOTICE). Copyright (c) 2026 Artem Markov.
+
+- **Packages and embedded surfaces are yours.** Loading a package into
+  Graphden or embedding a Graphden-generated form in your own site does not
+  make it a covered work — see the
+  [Package and Embedding Exception](LICENSE-EXCEPTIONS.md) for the exact
+  permission and the seams it deliberately does not cover.
+- **The name is not the code.** "Graphden" is a trademark; forks and hosted
+  services need their own name — see [TRADEMARKS.md](TRADEMARKS.md).
+- **Contributions** are accepted under the [CLA](CLA.md), enforced by a bot
+  on every pull request — see [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Commercial licensing** for organisations that cannot accept the AGPL:
+  licensing@graphden.dev.
+
+The multi-tenant cloud policy layer (`graphden-tenancy`) and the cloud
+control plane (`graphden-cloud`) are separate proprietary works and are not
+part of this repository.

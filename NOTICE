@@ -1,0 +1,15 @@
+Graphden
+Copyright (c) 2026 Artem Markov
+
+This work is licensed under the GNU Affero General Public License,
+version 3 (AGPL-3.0) — see LICENSE — together with the additional
+permission for packages and embedded surfaces set out in
+LICENSE-EXCEPTIONS.md.
+
+"Graphden" is a name and mark of Artem Markov. Use of the name is
+governed by TRADEMARKS.md, not by the software license.
+
+The multi-tenant cloud policy layer (graphden-tenancy) and the cloud
+control plane (graphden-cloud) are separate, proprietary works of the
+same copyright holder and are NOT covered by this license. This
+repository contains only the open core.

@@ -70,7 +70,19 @@
    `:compile-deps` index it FULL-CLEARS, and a full clear on a warm
    holder keeps serving the stale registry while a background rebuild
    runs — which is exactly the observed symptom. So the next occurrence
-   should say whether the delta ran, instead of starting this over."
+   should say whether the delta ran, instead of starting this over.
+
+   FOUND (2026-09-07, `the cached branch recompiles` read 1, twice in
+   five local runs with the coverage job's seed): an ASYNC graph-epoch
+   heal. `clean-database-fast!` restarts the epoch sequence between
+   deftests while the NS-thread's epoch state keeps the old watermark,
+   so `create-router` in `fixture!` sees a regression and heals on a
+   background thread; after refreshing the base that heal DROPS every
+   non-default entry installed meanwhile — the `inherits-main` entry
+   `ctx-for` had just built and the test still holds — so
+   `invalidate-affected-ctxs!` no longer sees it and the held ctx
+   keeps its pre-edit closure. `setup/create-container-fixture` now
+   forces heals inline for every container-backed NS."
   [ctx before]
   (let [d (counters/delta-since before)]
     (str "deps-index " (if (some-> (:compile-deps ctx) deref some?) "present" "ABSENT")

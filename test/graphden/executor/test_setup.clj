@@ -60,7 +60,22 @@
 
 
 (defn create-container-fixture
+  "The shared-container `:once` fixture — and, since 2026-09-07, the
+   place every container-backed NS gets INLINE graph-epoch heals
+   (`inline-heal-fixture`'s `alter-var-root`, applied here so no NS has
+   to remember to compose it). An async heal races the NS's own
+   router: `clean-database-fast!` between deftests restarts the epoch
+   sequence, the NS-thread's epoch state still holds the old
+   watermark, so the next `create-router` sees a REGRESSION and heals
+   on a background thread — which, after refreshing the base, drops
+   every non-default entry installed meanwhile, including the branch
+   ctx the test just built with `ctx-for` and still holds. That
+   orphaned ctx never receives the write's delta, and the test reads
+   the pre-edit value (`branch-invalidation-test`, 2 of 5 local runs
+   with seed 405495992; the main-CI coverage job). Inline, the heal
+   finishes before `ctx-for` runs."
   []
+  (alter-var-root #'br/*epoch-heal-sync?* (constantly true))
   (pth/create-container-fixture #'*container*))
 
 
@@ -684,7 +699,12 @@
 
    Sets the root true and does NOT restore: inline heal is always-correct
    (just synchronous) and no test relies on the async path, so leaving it
-   true for the test JVM avoids a set/restore race between parallel NSes."
+   true for the test JVM avoids a set/restore race between parallel NSes.
+
+   `create-container-fixture` applies the same root-set for EVERY
+   container-backed NS now (see its docstring — the branch-invalidation
+   flake); this fixture stays for NSes that build their container some
+   other way."
   [t]
   (alter-var-root #'br/*epoch-heal-sync?* (constantly true))
   (t))

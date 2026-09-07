@@ -588,6 +588,7 @@
                            :branches (filter #(= (:name b) (:name %))) first))
         popover (fn [] (:body (gh/via :_partial-branch-popover-handler (get-req "/partials/branch-popover"))))]
     (is (nil? (:archived-at (list-branch))) "a fresh branch is active")
+    (is (str/includes? (popover) ">Archive<") "the ⋯ menu offers Archive on an active row")
     (let [resp (gh/via :set-branch-archive-handler
                        (json-req (str "/api/branches/" (:name b) "/archive") {}))
           body (json-body resp)]
@@ -600,6 +601,9 @@
       (is (str/includes? archived-part (str "data-branch-name=\"" (:name b) "\""))
           "the folded row lives in the Merged group")
       (is (str/includes? archived-part "data-archived=\"1\""))
+      (is (str/includes? archived-part "class=\"branch-row-archive\" data-archive-branch=")
+          "the ⋯ menu offers Reopen on a folded row")
+      (is (str/includes? archived-part ">Reopen<"))
       (is (not (str/includes? (subs html 0 (String/.indexOf ^String html "branch-archived"))
                               (str "data-branch-name=\"" (:name b) "\"")))
           "...and not in the active listbox"))

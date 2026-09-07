@@ -135,10 +135,32 @@
             "(Re)start the instance from the image that is ALREADY built, then
              wait + verify + smoke. Lets the landing gate refresh the develop
              instance from the image it built in the feature worktree, without
-             paying for a second uberjar."
+             paying for a second uberjar.
+
+             Honours `.git/wtq/demo-needs-reset`: the gate leaves it when a
+             `--deploy` landed while the demo was down (the schema behind the
+             stopped instance is stale) — the database is dropped + re-seeded
+             here, before the executor starts, and the marker is cleared."
             []
-            (p/shell "docker-compose up -d executor")
-            (await-healthy-then-verify!)))
+            (let [marker (fs/file ".git/wtq/demo-needs-reset")
+                  reset? (fs/exists? marker)]
+              (when reset?
+                (println "demo-needs-reset marker found (a --deploy landed while the demo was down) — dropping the schema first")
+                (p/shell "docker-compose up -d postgres")
+                (loop [n 0]
+                  (when (and (< n 30)
+                             (not (zero? (:exit (p/shell {:continue true :out nil :err nil}
+                                                         (str "docker exec " gd-instance "-postgres pg_isready -U graphden"))))))
+                    (Thread/sleep 1000)
+                    (recur (inc n))))
+                (p/shell (str "docker exec " gd-instance "-postgres"
+                              " psql -U graphden -d graphden -c"
+                              " \"DROP SCHEMA public CASCADE; CREATE SCHEMA public;\""))
+                (fs/delete marker))
+              (p/shell (if reset?
+                         "docker-compose up -d --force-recreate executor"
+                         "docker-compose up -d executor"))
+              (await-healthy-then-verify!))))
 
   :enter (println (str cyan "▶ " (:name (current-task)) reset))
 

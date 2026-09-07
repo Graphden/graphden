@@ -121,6 +121,26 @@
   false)
 
 
+(defn- with-bump*
+  "Bump the graph epoch for a graph-shaped write (bump BEFORE write — a
+   committed change is always preceded by a visible bump), run `write!`,
+   and on a THROW mark the bump applied. The write paths are transactional,
+   so a refused write — a name collision, a protection or constraint
+   violation, a tenant gate — changed nothing; left un-noted, its bump aged
+   past the grace into an `:aborted` heal, i.e. a full base rebuild per
+   user error (three per e2e run on 2026-09-07). A bump that never happened
+   (no pool, no sequence) needs no note; an Error (not an Exception) leaves
+   the bump un-noted on purpose — the heal is the right answer to a JVM
+   that may not have rolled back."
+  [base-storage entity-name write!]
+  (let [v (epoch/bump! base-storage entity-name)]
+    (try
+      (write!)
+      (catch Exception t
+        (when v (epoch/note-applied! base-storage [v]))
+        (throw t)))))
+
+
 (defn- tombstone-version!
   "Write a tombstone version (current resolved data + `:deleted-at`) on
    `branch-id`, so the entity resolves ABSENT here and on descendants while
@@ -1014,10 +1034,11 @@
   (create-entity
     [_ entity-name data]
     (assert-not-merge-protected! base-storage branch-id entity-name)
-    (epoch/bump! base-storage entity-name)
-    (if-not (res/versioned-entity? entity-name)
-      (sp/create-entity base-storage entity-name data)
-      (create-entity-versioned! base-storage branch-id entity-name data)))
+    (with-bump* base-storage entity-name
+      (fn []
+        (if-not (res/versioned-entity? entity-name)
+          (sp/create-entity base-storage entity-name data)
+          (create-entity-versioned! base-storage branch-id entity-name data)))))
 
 
   (read-entity
@@ -1030,30 +1051,32 @@
   (update-entity
     [_ entity-name id data]
     (assert-not-merge-protected! base-storage branch-id entity-name)
-    (epoch/bump! base-storage entity-name)
-    (if-not (res/versioned-entity? entity-name)
-      (sp/update-entity base-storage entity-name id data)
-      (update-entity-versioned! base-storage branch-id entity-name id data)))
+    (with-bump* base-storage entity-name
+      (fn []
+        (if-not (res/versioned-entity? entity-name)
+          (sp/update-entity base-storage entity-name id data)
+          (update-entity-versioned! base-storage branch-id entity-name id data)))))
 
 
   (delete-entity
     [_ entity-name id]
     (assert-not-merge-protected! base-storage branch-id entity-name)
-    (epoch/bump! base-storage entity-name)
-    (cond
-      (not (res/versioned-entity? entity-name))
-      (sp/delete-entity base-storage entity-name id)
+    (with-bump* base-storage entity-name
+      (fn []
+        (cond
+          (not (res/versioned-entity? entity-name))
+          (sp/delete-entity base-storage entity-name id)
 
-      ;; User-facing delete: tombstone so an inherited entity is hidden too.
-      *tombstone-delete?*
-      (tombstone-version! base-storage entity-name id branch-id)
+          ;; User-facing delete: tombstone so an inherited entity is hidden too.
+          *tombstone-delete?*
+          (tombstone-version! base-storage entity-name id branch-id)
 
-      ;; Hard delete (sync / rollback): drop this branch's own version
-      ;; rows, and — when no other branch retains a version — the
-      ;; identity row too, so no versionless ghost survives to swallow
-      ;; a later re-mint of the same deterministic id.
-      :else
-      (hard-delete-entity! base-storage branch-id entity-name id)))
+          ;; Hard delete (sync / rollback): drop this branch's own version
+          ;; rows, and — when no other branch retains a version — the
+          ;; identity row too, so no versionless ghost survives to swallow
+          ;; a later re-mint of the same deterministic id.
+          :else
+          (hard-delete-entity! base-storage branch-id entity-name id)))))
 
 
   (query-entities
@@ -1104,10 +1127,11 @@
   (create-entities
     [_ entity-name data-seq]
     (assert-not-merge-protected! base-storage branch-id entity-name)
-    (epoch/bump! base-storage entity-name)
-    (if-not (res/versioned-entity? entity-name)
-      (sp/create-entities base-storage entity-name data-seq)
-      (create-entities-versioned! base-storage branch-id entity-name data-seq)))
+    (with-bump* base-storage entity-name
+      (fn []
+        (if-not (res/versioned-entity? entity-name)
+          (sp/create-entities base-storage entity-name data-seq)
+          (create-entities-versioned! base-storage branch-id entity-name data-seq)))))
 
 
   (read-entities
@@ -1122,10 +1146,11 @@
   (update-entities
     [_ entity-name data-seq]
     (assert-not-merge-protected! base-storage branch-id entity-name)
-    (epoch/bump! base-storage entity-name)
-    (if-not (res/versioned-entity? entity-name)
-      (sp/update-entities base-storage entity-name data-seq)
-      (update-entities-versioned! base-storage branch-id entity-name data-seq)))
+    (with-bump* base-storage entity-name
+      (fn []
+        (if-not (res/versioned-entity? entity-name)
+          (sp/update-entities base-storage entity-name data-seq)
+          (update-entities-versioned! base-storage branch-id entity-name data-seq)))))
 
 
   (upsert-entities
@@ -1157,16 +1182,17 @@
   (delete-entities
     [_ entity-name ids]
     (assert-not-merge-protected! base-storage branch-id entity-name)
-    (epoch/bump! base-storage entity-name)
-    (cond
-      (not (res/versioned-entity? entity-name))
-      (sp/delete-entities base-storage entity-name ids)
+    (with-bump* base-storage entity-name
+      (fn []
+        (cond
+          (not (res/versioned-entity? entity-name))
+          (sp/delete-entities base-storage entity-name ids)
 
-      *tombstone-delete?*
-      (count (filterv #(tombstone-version! base-storage entity-name % branch-id) ids))
+          *tombstone-delete?*
+          (count (filterv #(tombstone-version! base-storage entity-name % branch-id) ids))
 
-      :else
-      (hard-delete-entities! base-storage branch-id entity-name ids)))
+          :else
+          (hard-delete-entities! base-storage branch-id entity-name ids)))))
 
 
   (query-ref-many-owners
@@ -1262,22 +1288,23 @@
   ([versioned-storage branch-name {:keys [base-branch-id forbid-invalid?
                                           owner-id write-policy require-merge?]}]
    (let [parent-id (or base-branch-id (:branch-id versioned-storage))]
-     (epoch/bump! (:base-storage versioned-storage) :branch)
-     (sp/create-entity (:base-storage versioned-storage) :branch
-                       (cond-> {:id (random-uuid)
-                                :name branch-name
-                                :base-branch-id parent-id
-                                :created-at (now)}
-                         ;; cond-> (not a bare assoc): an absent optional key
-                         ;; must not surface as an explicit nil column write.
-                         (some? forbid-invalid?)
-                         (assoc :forbid-invalid? (boolean forbid-invalid?))
-                         (some? owner-id)
-                         (assoc :owner-id owner-id)
-                         (some? write-policy)
-                         (assoc :write-policy write-policy)
-                         (some? require-merge?)
-                         (assoc :require-merge? (boolean require-merge?)))))))
+     (with-bump* (:base-storage versioned-storage) :branch
+       (fn []
+         (sp/create-entity (:base-storage versioned-storage) :branch
+                           (cond-> {:id (random-uuid)
+                                    :name branch-name
+                                    :base-branch-id parent-id
+                                    :created-at (now)}
+                             ;; cond-> (not a bare assoc): an absent optional key
+                             ;; must not surface as an explicit nil column write.
+                             (some? forbid-invalid?)
+                             (assoc :forbid-invalid? (boolean forbid-invalid?))
+                             (some? owner-id)
+                             (assoc :owner-id owner-id)
+                             (some? write-policy)
+                             (assoc :write-policy write-policy)
+                             (some? require-merge?)
+                             (assoc :require-merge? (boolean require-merge?)))))))))
 
 
 (defn switch-branch
@@ -1367,11 +1394,12 @@
    ;; transaction; bump the graph epoch here (bump-before-write) so a
    ;; committed merge is always visible to the router's lazy epoch
    ;; validation even when the eager post-commit invalidate is skipped.
-   (epoch/bump! (:base-storage versioned-storage) :branch-merge)
-   (let [result (mrg/merge-branch! versioned-storage source-branch-id opts)]
-     ;; See the 2-arity note — post-commit target-branch invalidation.
-     (diag/clear-branch! (:branch-id versioned-storage))
-     result)))
+   (with-bump* (:base-storage versioned-storage) :branch-merge
+     (fn []
+       (let [result (mrg/merge-branch! versioned-storage source-branch-id opts)]
+         ;; See the 2-arity note — post-commit target-branch invalidation.
+         (diag/clear-branch! (:branch-id versioned-storage))
+         result)))))
 
 
 ;; === Delete Branch ===
@@ -1425,91 +1453,92 @@
     ;; bump is harmless over-invalidation, a committed delete is always
     ;; preceded by a visible bump. Non-PG storages (no `:pool`) fall back
     ;; to the prior sequential behaviour.
-    (epoch/bump! base :branch)
-    (let [do-delete!
-          (fn [st]
-            ;; L5: serialize this delete against a concurrent merge that
-            ;; uses this branch as SOURCE (which locks both its endpoints).
-            ;; Taken FIRST, inside the tx, so the merge-source guard below
-            ;; and the version-row deletes see a lock-stable view — a merge
-            ;; committing after an unlocked guard read would otherwise be
-            ;; missed and its target reverted. `nil` when off a pooled
-            ;; backend, matching the merge path.
-            (mrg/lock-branches! st branch-id)
-            ;; Refuse to delete a branch that is a live MERGE SOURCE. Merge is
-            ;; by-reference — no version rows are copied — so the target's
-            ;; merged-in content lives entirely in THIS branch's version rows.
-            ;; Deleting them (below) would silently revert every such target to
-            ;; its pre-merge state, leaving versionless ghost identities.
-            ;; Data-integrity beats convenience: the merged branch stays
-            ;; deletable only once its targets are gone. (Targets already
-            ;; deleted don't count — their merge records were removed with
-            ;; them.) Read on `st` (the tx connection) UNDER the lock so a
-            ;; racing merge is either already committed-and-visible or blocked
-            ;; behind us.
-            (let [source-merges (sp/query-entities st :branch-merge {:source-branch-id branch-id})
-                  live-targets (into []
-                                     (comp (map :target-branch-id)
-                                           (distinct)
-                                           (filter #(some? (sp/read-entity st :branch %))))
-                                     source-merges)]
-              (when (seq live-targets)
-                (throw (ex-info (str "Branch is a merge source for " (count live-targets)
-                                     " branch(es) that still exist — deleting it would "
-                                     "revert their merged-in content. Delete those "
-                                     "branches first, or keep this one.")
-                                {:type :constraint-violation/branch-is-merge-source
-                                 :branch-id branch-id
-                                 :merged-into-branch-ids live-targets}))))
-            ;; Soft-disable services scoped to this branch so the
-            ;; reconciler stops them on its next pass — see the
-            ;; docstring's cascade note. The `:service` entity is only
-            ;; registered when the services schema is loaded (production
-            ;; system + integration tests); storage-only tests use a
-            ;; smaller schema that omits it. Skip the cascade quietly in
-            ;; that case rather than throwing `:table-not-found`.
-            (when (contains? (sp/current-entities st) :service)
-              (let [svcs (sp/query-entities st :service {:branch-id branch-id
-                                                         :enabled? true})]
-                (when (seq svcs)
-                  ;; One batched partial-UPDATE instead of a round-trip per service.
-                  (sp/update-entities st :service
-                                      (mapv (fn [s] {:id (:id s) :enabled? false}) svcs)))))
-            ;; Delete all version records on this branch (batch)
-            (doseq [[_ {:keys [version-entity]}] res/entity-config]
-              (let [version-ids (mapv :id (sp/query-entities st version-entity {:branch-id branch-id}))]
-                (when (seq version-ids)
-                  (sp/delete-entities st version-entity version-ids))))
-            ;; Delete branch-merge records referencing this branch.
-            ;; Two targeted queries are more efficient than full table scan + memory filter
-            (let [source-merges (sp/query-entities st :branch-merge {:source-branch-id branch-id})
-                  target-merges (sp/query-entities st :branch-merge {:target-branch-id branch-id})
-                  merge-ids (into [] (comp (map :id) (distinct))
-                                  (concat source-merges target-merges))]
-              (when (seq merge-ids)
-                (sp/delete-entities st :branch-merge merge-ids)))
-            ;; Delete change-review approvals recorded against this branch
-            ;; (the proposal source). Without this, deleting a proposed /
-            ;; approved branch would orphan its :branch-approval rows.
-            (let [appr-ids (mapv :id (sp/query-entities st :branch-approval
-                                                        {:source-branch-id branch-id}))]
-              (when (seq appr-ids)
-                (sp/delete-entities st :branch-approval appr-ids)))
-            ;; ... and its review comments, same rationale.
-            (let [cmt-ids (mapv :id (sp/query-entities st :branch-comment
-                                                       {:source-branch-id branch-id}))]
-              (when (seq cmt-ids)
-                (sp/delete-entities st :branch-comment cmt-ids)))
-            ;; Delete the branch record
-            (sp/delete-entity st :branch branch-id))]
-      (if-let [pool (:pool base)]
-        ;; `:ignore` so a nested `with-transaction` in an inner write
-        ;; (e.g. a ref-many junction replacement) runs INLINE rather than
-        ;; committing early and breaking the atomic boundary.
-        (binding [jdbc-tx/*nested-tx* :ignore]
-          (jdbc/with-transaction [tx pool]
-                                 (do-delete! (assoc base :pool tx))))
-        (do-delete! base)))
+    (with-bump* base :branch
+      (fn []
+        (let [do-delete!
+              (fn [st]
+                ;; L5: serialize this delete against a concurrent merge that
+                ;; uses this branch as SOURCE (which locks both its endpoints).
+                ;; Taken FIRST, inside the tx, so the merge-source guard below
+                ;; and the version-row deletes see a lock-stable view — a merge
+                ;; committing after an unlocked guard read would otherwise be
+                ;; missed and its target reverted. `nil` when off a pooled
+                ;; backend, matching the merge path.
+                (mrg/lock-branches! st branch-id)
+                ;; Refuse to delete a branch that is a live MERGE SOURCE. Merge is
+                ;; by-reference — no version rows are copied — so the target's
+                ;; merged-in content lives entirely in THIS branch's version rows.
+                ;; Deleting them (below) would silently revert every such target to
+                ;; its pre-merge state, leaving versionless ghost identities.
+                ;; Data-integrity beats convenience: the merged branch stays
+                ;; deletable only once its targets are gone. (Targets already
+                ;; deleted don't count — their merge records were removed with
+                ;; them.) Read on `st` (the tx connection) UNDER the lock so a
+                ;; racing merge is either already committed-and-visible or blocked
+                ;; behind us.
+                (let [source-merges (sp/query-entities st :branch-merge {:source-branch-id branch-id})
+                      live-targets (into []
+                                         (comp (map :target-branch-id)
+                                               (distinct)
+                                               (filter #(some? (sp/read-entity st :branch %))))
+                                         source-merges)]
+                  (when (seq live-targets)
+                    (throw (ex-info (str "Branch is a merge source for " (count live-targets)
+                                         " branch(es) that still exist — deleting it would "
+                                         "revert their merged-in content. Delete those "
+                                         "branches first, or keep this one.")
+                                    {:type :constraint-violation/branch-is-merge-source
+                                     :branch-id branch-id
+                                     :merged-into-branch-ids live-targets}))))
+                ;; Soft-disable services scoped to this branch so the
+                ;; reconciler stops them on its next pass — see the
+                ;; docstring's cascade note. The `:service` entity is only
+                ;; registered when the services schema is loaded (production
+                ;; system + integration tests); storage-only tests use a
+                ;; smaller schema that omits it. Skip the cascade quietly in
+                ;; that case rather than throwing `:table-not-found`.
+                (when (contains? (sp/current-entities st) :service)
+                  (let [svcs (sp/query-entities st :service {:branch-id branch-id
+                                                             :enabled? true})]
+                    (when (seq svcs)
+                      ;; One batched partial-UPDATE instead of a round-trip per service.
+                      (sp/update-entities st :service
+                                          (mapv (fn [s] {:id (:id s) :enabled? false}) svcs)))))
+                ;; Delete all version records on this branch (batch)
+                (doseq [[_ {:keys [version-entity]}] res/entity-config]
+                  (let [version-ids (mapv :id (sp/query-entities st version-entity {:branch-id branch-id}))]
+                    (when (seq version-ids)
+                      (sp/delete-entities st version-entity version-ids))))
+                ;; Delete branch-merge records referencing this branch.
+                ;; Two targeted queries are more efficient than full table scan + memory filter
+                (let [source-merges (sp/query-entities st :branch-merge {:source-branch-id branch-id})
+                      target-merges (sp/query-entities st :branch-merge {:target-branch-id branch-id})
+                      merge-ids (into [] (comp (map :id) (distinct))
+                                      (concat source-merges target-merges))]
+                  (when (seq merge-ids)
+                    (sp/delete-entities st :branch-merge merge-ids)))
+                ;; Delete change-review approvals recorded against this branch
+                ;; (the proposal source). Without this, deleting a proposed /
+                ;; approved branch would orphan its :branch-approval rows.
+                (let [appr-ids (mapv :id (sp/query-entities st :branch-approval
+                                                            {:source-branch-id branch-id}))]
+                  (when (seq appr-ids)
+                    (sp/delete-entities st :branch-approval appr-ids)))
+                ;; ... and its review comments, same rationale.
+                (let [cmt-ids (mapv :id (sp/query-entities st :branch-comment
+                                                           {:source-branch-id branch-id}))]
+                  (when (seq cmt-ids)
+                    (sp/delete-entities st :branch-comment cmt-ids)))
+                ;; Delete the branch record
+                (sp/delete-entity st :branch branch-id))]
+          (if-let [pool (:pool base)]
+            ;; `:ignore` so a nested `with-transaction` in an inner write
+            ;; (e.g. a ref-many junction replacement) runs INLINE rather than
+            ;; committing early and breaking the atomic boundary.
+            (binding [jdbc-tx/*nested-tx* :ignore]
+              (jdbc/with-transaction [tx pool]
+                                     (do-delete! (assoc base :pool tx))))
+            (do-delete! base)))))
     ;; Drop any cached chain that referenced this branch as an
     ;; ancestor — globals survive across CRUD calls and would
     ;; otherwise still hand back the pre-delete chain.

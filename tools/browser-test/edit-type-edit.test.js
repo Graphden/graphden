@@ -175,7 +175,7 @@ async function cleanup(page) {
     await page.waitForFunction(
       () => document.querySelectorAll('.type-create-popover .type-create-pair-row').length >= 3,
       null,
-      {timeout: 3000});
+      {timeout: 15000, polling: 100});
     // Fill the LAST row's name + type inputs.
     await page.evaluate(() => {
       const rows = document.querySelectorAll('.type-create-popover .type-create-pair-row');

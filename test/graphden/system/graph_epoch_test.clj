@@ -311,3 +311,28 @@
   (testing "bump!/current on a pool-less handle are nil no-ops"
     (is (nil? (epoch/bump! {:no :pool} :fn)))
     (is (nil? (epoch/current {:no :pool})))))
+
+
+(deftest refused-write-notes-its-own-bump-test
+  ;; The epoch is bumped BEFORE a graph-shaped write. A write the storage
+  ;; refuses (here: a name collision) changes nothing, but its bump used to
+  ;; stay un-noted, age past the grace and cost a heal — a full base
+  ;; rebuild per user error. Now the refusing write marks its own bump
+  ;; applied.
+  (let [base (storage)
+        v (vs/wrap-with-versioning base)]
+    (try
+      (binding [epoch/*request-bump-log* (atom [])]
+        (sp/create-entity v :fn {:name "dup-x" :parent-ids [] :description "h"})
+        (epoch/note-applied! base)
+        (let [before (epoch/current base)]
+          (is (thrown? clojure.lang.ExceptionInfo
+                (sp/create-entity v :fn {:name "dup-x" :parent-ids [] :description "h"})))
+          (let [after (epoch/current base)]
+            (is (= (inc before) after) "the refused write still took its bump")
+            (is (true? (:noted? (get @(:graph-epoch-local base) after)))
+                "…and marked it applied: nothing changed, no heal is owed")
+            (is (= #{:applied}
+                   (epoch/classify-range base (dec before) after 0))
+                "the validator sees a fully applied range even with zero grace"))))
+      (finally (sp/close base)))))

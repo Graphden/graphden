@@ -12,8 +12,13 @@ FROM eclipse-temurin:21-jre-jammy@sha256:fa4854e6057665066cb79953616671c20f32b96
 #     bash -c 'apt-get update -qq && apt-cache policy curl'
 # This is the hadolint DL3008 contract: deliberate awareness of every
 # dependency patch instead of latent "whatever apt ships today" drift.
+# curl is pinned to its UPSTREAM version only: the Ubuntu revision
+# (`-1ubuntu1.NN`) changes with every security update and the old one leaves
+# the mirror the same day — an exact pin broke the cloud deploy on 2026-09-07
+# (and three releases before that). On an LTS base the upstream version is
+# fixed for the image's life, so `7.81.0-*` is the honest pin.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl=7.81.0-1ubuntu1.27 \
+        'curl=7.81.0-*' \
     && rm -rf /var/lib/apt/lists/*
 
 # Marks every executor image we build — canonical and per-agent alike — so

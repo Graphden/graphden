@@ -1166,7 +1166,14 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
     step "advance the $TARGET instance onto the landed image"
     if [ "$demo_was_up" != 1 ]; then
       echo "(the demo instance was not running when the gate started — leaving it down;"
-      echo " \`bb instance-up\` brings it onto the landed image, \`bb instance-reset\` after a --deploy)"
+      echo " \`bb instance-up\` brings it onto the landed image)"
+      if [ "$deploy" = 1 ]; then
+        # The schema behind the stopped demo is now stale. Leave a marker the
+        # next `bb instance-up` honours (drop + re-seed before starting), so
+        # nobody has to remember `bb instance-reset` weeks later.
+        touch "$MAIN_WT/.git/wtq/demo-needs-reset"
+        echo " (--deploy: marked the demo schema for reset — the next \`bb instance-up\` drops + re-seeds it first)"
+      fi
     elif [ "$deploy" = 1 ]; then
       echo "(--deploy: dropping the $TARGET schema first — the branch changes it)"
       ( cd "$MAIN_WT" && bb instance-reset ) || { echo "FAIL(post-land): instance-reset (LANDED, but the demo is stale)"; return 4; }

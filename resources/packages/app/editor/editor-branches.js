@@ -544,8 +544,11 @@ function wireBranchPopoverHandlers(popover, current) {
       const name = row.getAttribute('data-branch-name');
       if (name === current) { closeBranchPopover(); return; }
       // A row in the "Merged" group is folded away; opening it brings it
-      // back to the active list (explicit — nothing else un-archives).
+      // back to the active list — asked first, so a stray click on the
+      // folded group does not silently un-archive (the ⋯ menu's "Reopen"
+      // does the same without switching).
       if (row.getAttribute('data-archived') === '1') {
+        if (!confirm('Reopen "' + name + '"? It moves back to the active list.')) return;
         try {
           await window.authFetch(API.api_branches_ref_archive(name), {
             method: 'POST',
@@ -588,6 +591,15 @@ function wireBranchPopoverHandlers(popover, current) {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       toggleBranchPropose(btn);
+    });
+  });
+
+  // ⋯ → Archive / Reopen: POSTs /branches/:ref/archive with the flipped
+  // state (read off `data-archived`) and re-renders the popover.
+  popover.querySelectorAll('.branch-row-archive').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleBranchArchive(btn);
     });
   });
 
@@ -982,6 +994,33 @@ function openProtectionMenu(btn) {
 // `proposed` is the JSON key the /propose handler reads. WHO may
 // propose/withdraw is open-core (any authenticated writer of the branch);
 // a rejection surfaces in the shared slot.
+async function toggleBranchArchive(btn) {
+  const branchName = btn.getAttribute('data-archive-branch');
+  const branchRef = branchRefFrom(btn, branchName);
+  const next = btn.getAttribute('data-archived') !== '1';
+  const err = document.getElementById('branch-popover-error');
+  try {
+    const resp = await window.authFetch(API.api_branches_ref_archive(branchRef), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archived: next }),
+    });
+    const body = await resp.json();
+    if (body.ok) {
+      openBranchPopover(); // re-render: the row moves between the lists
+    } else if (err) {
+      err.textContent = body.error || 'Could not change the archive state';
+      err.classList.remove('hidden');
+    }
+  } catch (e2) {
+    if (err) {
+      err.textContent = 'Network error: ' + (e2?.message || e2);
+      err.classList.remove('hidden');
+    }
+  }
+}
+
+
 async function toggleBranchPropose(btn) {
   const branchName = btn.getAttribute('data-propose-branch');
   const branchRef = branchRefFrom(btn, branchName);

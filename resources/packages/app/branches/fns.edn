@@ -3055,6 +3055,41 @@
           :then :hidden-span
           :else :_bp-row-propose-btn-shown}}
 
+  ;; --- Archive / Reopen (⋯ menu) ---
+  ;; A merge into the branch's own base archives it automatically; this
+  ;; item folds any other finished branch away by hand, and reopens an
+  ;; archived one. Hidden on the root and on the current branch.
+  {:name :_bp-row-archive-label
+   :parent :if
+   :args {:test :_bp-row-archived?
+          :then {:value "Reopen"}
+          :else {:value "Archive"}}}
+
+  {:name :_bp-row-archive-attrs
+   :parent :zipmap
+   :args {:keys [{:value :class} {:value :role} {:value :data-archive-branch} {:value :data-archived}]
+          :vals [{:value "branch-row-archive"}
+                 {:value "menuitem"}
+                 :_bp-row-name
+                 {:parent :if :args {:test :_bp-row-archived? :then {:value "1"} :else {:value ""}}}]}}
+
+  {:name :_bp-row-archive-btn-shown
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_bp-row-archive-attrs
+          :children [{:parent :_bp-menu-ic-span :args {:icon {:value "📦"}}}
+                     {:parent :_bp-menu-label-span :args {:label :_bp-row-archive-label}}]}}
+
+  {:name :_bp-row-archive-hidden?
+   :parent :or
+   :args {:values [:_bp-row-is-root? :_bp-row-on-current?]}}
+
+  {:name :_bp-row-archive-btn
+   :parent :if
+   :args {:test :_bp-row-archive-hidden?
+          :then :hidden-span
+          :else :_bp-row-archive-btn-shown}}
+
   ;; --- Approve button (open-core; only on PROPOSED rows) ---
   ;; The reviewer's core action: ✅ records an approval via POST
   ;; /branches/:ref/approve. WHO may approve is enforced server-side
@@ -3264,7 +3299,7 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs :_bp-row-more-menu-attrs
-          :children [:_bp-row-review-btn :_bp-row-propose-btn :_bp-row-protect-btn :_bp-row-policy-btn :_bp-row-delete-btn]}}
+          :children [:_bp-row-review-btn :_bp-row-propose-btn :_bp-row-protect-btn :_bp-row-policy-btn :_bp-row-archive-btn :_bp-row-delete-btn]}}
 
   {:name :_bp-row-actions-span
    :parent :hiccup

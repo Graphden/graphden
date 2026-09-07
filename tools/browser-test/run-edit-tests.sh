@@ -117,8 +117,16 @@ probe_compiled_path() {
 # instrument, not against it: a printed measurement can be re-read and
 # corrected, a remembered one just gets repeated.
 executor_mem() {
-  local id
-  id="$(docker ps --filter "ancestor=${GD_IMAGE:-graphden-executor:latest}" \
+  local id port
+  # The container BEHIND $URL: match on the published port (a `bb wt up`
+  # stack, an isolated e2e stack), not on the canonical image tag — with
+  # several executors on the box the ancestor filter picked the first one
+  # (2026-09-07: a worktree run reported the personal instance's memory).
+  port="$(printf '%s' "$URL" | sed -nE 's#^[a-z]+://[^:/]+:([0-9]+).*#\1#p')"
+  if [ -n "$port" ]; then
+    id="$(docker ps --filter "publish=$port" --format '{{.ID}}' 2>/dev/null | head -1)"
+  fi
+  [ -n "$id" ] || id="$(docker ps --filter "ancestor=${GD_IMAGE:-graphden-executor:latest}" \
                   --format '{{.ID}}' 2>/dev/null | head -1)"
   [ -n "$id" ] || { printf '?'; return; }
   docker stats --no-stream --format '{{.MemUsage}}' "$id" 2>/dev/null \

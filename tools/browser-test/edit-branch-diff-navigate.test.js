@@ -139,7 +139,9 @@ async function cleanup(page) {
       ({ probe, feat }) => window.__switchToBranchCalledWith === feat
         && (location.hash || '').includes(probe),
       { probe: PROBE_FN, feat: FEAT_BRANCH },
-      {timeout: 5000});
+      // A fresh stack's first ghost click resolves the target lazily;
+      // 5 s missed it once on 2026-09-07 (passed on the next two runs).
+      {timeout: 30000, polling: 100});
     assert(true, 'ghost click switches to feat with the probe in the hash');
     await page.evaluate(() => window.gdExitDiffMode());
 

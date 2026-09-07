@@ -57,7 +57,13 @@
                (sb/ensure-swept-rich-types! ["core" "web" "app"]))
        (let [graph (setup/bootstrap-crud-graph-from-golden!)]
          (try
-           (binding [*graph* graph]
+           ;; The graph-epoch validator (TTL ≈1 s) may fire a heal in the
+           ;; middle of a scenario — and a heal's ctx rebuild lands its SQL
+           ;; in the same pg_stat_statements window (`:sql/merge-fork` read
+           ;; 38 in one gate, 36 in the next, for the same code). Hold it
+           ;; off for the whole run: the budgets are about the operation.
+           (binding [*graph* graph
+                     br/*epoch-check-ttl-ms* (* 24 60 60 1000)]
              ;; Calibrate once, here, against the same pool the scenarios use — a
              ;; reference measured on a different connection or at a different
              ;; moment would normalise against a machine this run never saw.

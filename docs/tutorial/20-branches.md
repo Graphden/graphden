@@ -57,11 +57,13 @@ row → switch        → click a branch row to switch to it
                           count-own-approval. Works everywhere,
                           including single-user.
                         ⛨ Who can write… — (cloud/tenancy only)
+                        📦 Archive / Reopen — fold a finished branch
+                          into the Merged group, or bring one back
                         × Delete branch
 Merged · N          → collapsed group at the bottom: branches already
                       merged into their base. A merge folds its source
                       here (it cannot be deleted — the base reads
-                      through it); click a row to reopen it.
+                      through it); click a row to reopen it (asks first).
                       The ⋯ is accented when the row is proposed or
                       protected; a 🔒 marks write-policy rows.
 ```

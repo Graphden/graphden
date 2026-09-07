@@ -708,8 +708,15 @@
    aborted eager path and healed. This no longer suppresses healing of
    FOREIGN gaps — a missed sibling write heals immediately regardless
    of local write activity (the first design's 10s blanket suppression
-   was the amplifier that let local notes bury foreign epochs)."
-  10000)
+   was the amplifier that let local notes bury foreign epochs).
+
+   Must exceed the abort-shield join budget (30 s): a write that is
+   merely SLOW — still inside its request, its note still to come — must
+   never read as aborted, because the heal it would trigger stalls the
+   next writes past the budget, whose un-noted bumps trigger the next
+   heal (the 2026-09-07 e2e heal storm: one 27 s namespace move, then a
+   heal every 30 s until the stack died)."
+  45000)
 
 
 (defn note-graph-epoch-validated!
@@ -801,18 +808,27 @@
    somebody's write reached the DB without this pod applying its
    invalidation.
 
-   STALE-WHILE-REVALIDATE: rebuild each cached ctx on a BACKGROUND
+   STALE-WHILE-REVALIDATE for the BASE ctx: rebuild it on a BACKGROUND
    thread instead of nil-ing its registry — `cr/rebuild!` reads the
    graph fresh, compiles, and only then swaps the atoms, so requests
    keep serving the (stale) registry for the rebuild's duration
-   instead of queueing behind a ~50s cold compile. The first heal
-   design full-cleared, and one heal mid-e2e took /health down past
-   its 60s ceiling — availability must survive the freshness
-   backstop. Staleness is bounded by one rebuild.
+   instead of queueing behind a cold compile. The first heal design
+   full-cleared, and one heal mid-e2e took /health down past its 60s
+   ceiling — availability must survive the freshness backstop.
+   Staleness is bounded by one rebuild.
 
-   BASE FIRST (the graph-identical fast path copies the base registry
-   by value — after base swaps, copies are fresh), then the snapshot,
-   then a RE-snapshot for entries installed mid-heal. Serialized on a
+   Every OTHER cached branch ctx is DROPPED, not rebuilt: the next
+   request for that branch builds it fresh (the graph-identical fast
+   path copies the now-fresh base by value; a branch with its own
+   changes compiles once, on demand). Rebuilding every cached entry
+   made a heal cost O(cached branches) full compiles — merged source
+   branches stay forever (main resolves through them), so an e2e run
+   or a busy workspace holds dozens of them, and one heal became
+   minutes of compile that stalled writes past the abort budget,
+   whose un-noted bumps triggered the next heal (2026-09-07).
+
+   Base first, then drop the rest — including entries installed while
+   the base rebuilt (they copied the pre-swap base). Serialized on a
    monitor so two heals can't interleave. The watermark advances
    immediately — the heal is now in flight and a re-trigger would
    only duplicate it."
@@ -832,13 +848,12 @@
               work (fn []
                      (when-let [e (get snap default-branch-id)]
                        (refresh! default-branch-id e))
-                     (doseq [[bid entry] snap]
-                       (when (not= bid default-branch-id) (refresh! bid entry)))
-                     ;; Entries installed while the rebuilds ran may have
-                     ;; copied the pre-swap base — refresh them too
-                     ;; (over-refresh of a fresh one is harmless).
-                     (doseq [[bid entry] @handlers]
-                       (when-not (contains? snap bid) (refresh! bid entry))))
+                     ;; Every non-base entry — the snapshot's AND those
+                     ;; installed while the base rebuilt (they copied the
+                     ;; pre-swap base) — is dropped; its next request
+                     ;; rebuilds it against the fresh base.
+                     (doseq [bid (keys @handlers)]
+                       (when (not= bid default-branch-id) (invalidate! router bid))))
               ;; Convey ONLY the test-isolation registry overrides onto the
               ;; heal thread — NOT bound-fn* (that would drag per-request
               ;; bindings like the tenant org into a background rebuild).

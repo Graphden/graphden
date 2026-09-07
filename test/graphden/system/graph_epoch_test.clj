@@ -133,6 +133,36 @@
       (finally (sp/close base)))))
 
 
+(deftest heal-rebuilds-the-base-and-drops-other-cached-ctxs-test
+  ;; A heal used to rebuild EVERY cached branch ctx — O(cached
+  ;; branches) full compiles per heal, minutes on a workspace that keeps
+  ;; its merged source branches (they cannot be deleted while the target
+  ;; resolves through them), stalling writes past the abort budget and
+  ;; feeding the next heal. Now: the base is refreshed in place, every
+  ;; other entry is dropped and rebuilt on its next request.
+  (let [base (storage)
+        v (vs/wrap-with-versioning base)
+        rebuilt (atom [])]
+    (try
+      (binding [br/*epoch-state-override* (fresh-state)
+                br/*epoch-check-ttl-ms* 0
+                br/*epoch-heal-sync?* true
+                epoch/*request-bump-log* (atom [])
+                cr/*impl-override* {:rebuild-optimistic! (fn [c _] (swap! rebuilt conj (:x c)) true)
+                                    :rebuild! (fn [c] (swap! rebuilt conj (:x c)))}]
+        (let [main-id (vs/current-branch-id v)
+              other-id (random-uuid)
+              router (router-over v {main-id {:ctx {:x :main} :handler :h}
+                                     other-id {:ctx {:x :other} :handler :h}})]
+          (foreign-bump! base)
+          (br/handler-for router nil)
+          (is (= [:main] @rebuilt) "only the base ctx is rebuilt in place")
+          (is (contains? @(:handlers router) main-id) "the base entry stays")
+          (is (not (contains? @(:handlers router) other-id))
+              "the other branch's entry is dropped — its next request rebuilds it")))
+      (finally (sp/close base)))))
+
+
 (deftest pending-local-write-waits-not-heals-test
   ;; A young un-noted local bump (eager invalidation in flight) must
   ;; neither heal nor advance; once noted, the range advances quietly.

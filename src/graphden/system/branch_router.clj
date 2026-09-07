@@ -498,6 +498,13 @@
                  {:branch-id branch-id}))))
 
 
+(def ^:dynamic *ctx-build-async-recheck?*
+  "Test seam: bind false to SKIP the background user-fn recompute a ctx
+   build schedules, so a test can assert what the build itself recorded
+   synchronously (the branch's own fns) without racing the future."
+  true)
+
+
 (defn- schedule-user-fn-recheck!
   "Fire `recheck-user-fns!` on a background future. `future` conveys
    the caller's dynamic bindings (org context, the diagnostics-store
@@ -505,9 +512,26 @@
    slice), so the recompute records into the same stores the
    triggering thread would."
   [branch-ctx branch-id]
-  (when *recheck-user-fns?*
+  (when (and *recheck-user-fns?* *ctx-build-async-recheck?*)
     (future (recheck-user-fns! branch-ctx branch-id)))
   nil)
+
+
+(defn- record-fn-types!
+  "Re-run the type-check for exactly `fn-ids` under `branch-ctx`'s own
+   slices (rich-types + per-org), SYNCHRONOUSLY — the caller decides
+   whether to run it inline or on a future. Best-effort per fn."
+  [branch-ctx branch-id fn-ids]
+  (binding [registry-core/*rich-types-override*
+            (or (:rich-types-atom branch-ctx) registry-core/*rich-types-override*)
+            registry-core/*per-org-rich-override*
+            (or (:per-org-rich-atom branch-ctx) registry-core/*per-org-rich-override*)]
+    (doseq [id fn-ids]
+      (try
+        (type-check/type-check-fn-after-mutation! (:storage branch-ctx) id)
+        (catch Exception t
+          (log/debug t "slice type re-record failed for fn"
+                     {:branch-id branch-id :fn-id id}))))))
 
 
 (defn recheck-ctx-types!
@@ -525,21 +549,15 @@
    best-effort, same contract as the ctx-build recompute."
   [branch-ctx branch-id fn-ids]
   (when *recheck-user-fns?*
-    (let [slice (:rich-types-atom branch-ctx)
-          org-slice (:per-org-rich-atom branch-ctx)
-          work (fn []
-                 (binding [registry-core/*rich-types-override*
-                           (or slice registry-core/*rich-types-override*)
-                           registry-core/*per-org-rich-override*
-                           (or org-slice registry-core/*per-org-rich-override*)]
-                   (if (seq fn-ids)
-                     (doseq [id fn-ids]
-                       (try
-                         (type-check/type-check-fn-after-mutation!
-                           (:storage branch-ctx) id)
-                         (catch Exception t
-                           (log/debug t "slice type re-record failed for fn"
-                                      {:branch-id branch-id :fn-id id}))))
+    (let [work (fn []
+                 (if (seq fn-ids)
+                   (record-fn-types! branch-ctx branch-id fn-ids)
+                   (binding [registry-core/*rich-types-override*
+                             (or (:rich-types-atom branch-ctx)
+                                 registry-core/*rich-types-override*)
+                             registry-core/*per-org-rich-override*
+                             (or (:per-org-rich-atom branch-ctx)
+                                 registry-core/*per-org-rich-override*)]
                      (recheck-user-fns! branch-ctx branch-id))))]
       (future (work))))
   nil)
@@ -608,7 +626,18 @@
           (when-let [src-deps (some-> (:compile-deps base-ctx) deref)]
             (when-let [holder (:compile-deps branch-ctx)]
               (reset! holder src-deps)))
-          (cr/delta-recompile! branch-ctx (set own-fn-ids)))
+          (cr/delta-recompile! branch-ctx (set own-fn-ids))
+          ;; The slice forked from the base knows nothing about THIS
+          ;; branch's own fns: record them now, before the entry is
+          ;; served. The async recompute below covers the rest, but it
+          ;; used to cover these too — so the first `/api/types` after a
+          ;; rebuild (a heal, an eviction) could miss a branch-authored
+          ;; fn until the future landed (main-CI flake, 2026-09-08:
+          ;; `rich-types-registry-branch-scope-test` on a slow runner).
+          ;; Bounded like the sweep; a wider divergence stays async.
+          (when (and *recheck-user-fns?*
+                     (<= (count own-fn-ids) max-user-fn-recheck))
+            (record-fn-types! branch-ctx branch-id own-fn-ids)))
 
         ;; 3. Merge target (merged fns own their rows on the source, not cheaply
         ;;    seedable here), or cold start with no base registry → full compile.

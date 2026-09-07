@@ -26,9 +26,11 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.services.reconciler :as recon]
+    [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
     [graphden.test-infra.shared-bootstrap :as sb]
+    [graphden.versioning.storage.core :as vs]
     [graphden.web.errors :as web-errors]))
 
 
@@ -741,7 +743,26 @@
         (is (some? (get (types feat) (keyword only-name)))
             "the branch's own registry carries the fn")
         (is (nil? (get (types nil) (keyword only-name)))
-            "main's registry does NOT (pre-fix: cross-branch union)"))
+            "main's registry does NOT (pre-fix: cross-branch union)")
+        ;; A REBUILT ctx must carry it at once, not after the async
+        ;; recompute lands: drop the cached entry (what a heal or an
+        ;; eviction does), switch the background recompute OFF so the
+        ;; read cannot win by luck, and read straight away. main CI
+        ;; 2026-09-08 lost this race on a slow runner — the build now
+        ;; records the branch's own fns synchronously.
+        (let [feat-id (:id (some #(when (= feat (:name %)) %)
+                                 (:branches (parse-json (dispatch {:method :get :path "/api/branches"})))))]
+          (is (some? feat-id))
+          ;; Exactly what main CI saw: a heal (a foreign epoch bump this
+          ;; handle never noted, checked at once) refreshes the base and
+          ;; drops the branch entry; the next read rebuilds it.
+          (epoch/bump! (dissoc (vs/unwrap (:storage (:base-ctx *router*)))
+                               :graph-epoch-local :graph-epoch-covered)
+                       :fn)
+          (binding [br/*ctx-build-async-recheck?* false
+                    br/*epoch-check-ttl-ms* 0]
+            (is (some? (get (types feat) (keyword only-name)))
+                "a branch ctx rebuilt after a heal already carries the branch-authored fn"))))
 
       (testing "effect sets answer per branch"
         (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn"

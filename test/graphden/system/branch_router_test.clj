@@ -289,14 +289,25 @@
 
 (deftest lru-no-eviction-below-cap
   (let [m {:a (entry 1) :b (entry 2)}
-        out (#'br/evict-lru-if-full m 4 :default :c)]
+        out (#'br/evict-lru-if-full m 4 :default :c #{})]
     (is (= m out)
         "size 2, cap 4 → nothing evicted")))
 
 
+(deftest lru-never-evicts-a-pinned-branch
+  ;; A branch with a running service is pinned: the cap skips it even
+  ;; when it is the oldest, and when every other entry is pinned the
+  ;; cache grows past the cap rather than strand a service's ctx.
+  (let [m {:default (entry 0) :svc (entry 1) :b (entry 5) :c (entry 3)}]
+    (is (= #{:default :svc :b} (set (keys (#'br/evict-lru-if-full m 4 :default :new #{:svc}))))
+        "the oldest (:svc) is pinned → the next-oldest (:c) goes")
+    (is (= m (#'br/evict-lru-if-full m 4 :default :new #{:svc :b :c}))
+        "everything pinned → nothing evicted, the cache exceeds the cap")))
+
+
 (deftest lru-evicts-oldest-non-default
   (let [m {:default (entry 0) :a (entry 5) :b (entry 1) :c (entry 3)}
-        out (#'br/evict-lru-if-full m 4 :default :new)]
+        out (#'br/evict-lru-if-full m 4 :default :new #{})]
     (is (= 3 (count out)))
     (is (contains? out :default) "default-branch entry is pinned")
     (is (not (contains? out :b)) "oldest non-default :b evicted (last-used 1)")
@@ -308,7 +319,7 @@
   (let [m {:default (entry 0) :a (entry 5) :b (entry 1)}
         ;; Adding :a when :a already exists is a replace, not a new
         ;; entry — no eviction.
-        out (#'br/evict-lru-if-full m 3 :default :a)]
+        out (#'br/evict-lru-if-full m 3 :default :a #{})]
     (is (= 3 (count out)))
     (is (contains? out :b)
         "replacement doesn't fill any new slot, so nothing is evicted")))
@@ -316,14 +327,14 @@
 
 (deftest lru-handles-missing-last-used
   (let [m {:default (entry 0) :a {:handler :stub} :b (entry 5)}
-        out (#'br/evict-lru-if-full m 3 :default :new)]
+        out (#'br/evict-lru-if-full m 3 :default :new #{})]
     (is (not (contains? out :a))
         "entry without :last-used sorts as 0 → evicted first")))
 
 
 (deftest lru-no-evictable-entries-keeps-everything
   (let [m {:default (entry 0)}
-        out (#'br/evict-lru-if-full m 1 :default :new)]
+        out (#'br/evict-lru-if-full m 1 :default :new #{})]
     (is (= m out)
         "only the pinned default entry exists → no eligible eviction target")))
 

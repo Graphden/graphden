@@ -730,7 +730,10 @@ panel keeps its inline 📍 badge on the same rows.
 - Per-branch ctx cache is LRU-bounded (`default-max-cached-branches` = 16,
   `evict-lru-if-full` keyed on `:last-used`); tune via the
   `GRAPHDEN_MAX_CACHED_BRANCHES` env var (read by `:exec/branch-router`
-  into `create-router`'s `:max-size`).
+  into `create-router`'s `:max-size`). A branch with a running service is
+  pinned (the reconciler's `set-pinned-branches-fn!`): the cap, the idle
+  sweep and the epoch heal all leave its ctx in place (the heal refreshes
+  it), so the cache may exceed the cap by the number of such branches.
 - `resolve-branch-id` re-reads AFTER its ref-cache write (one extra read
   per cache miss only). This closes a TOCTOU: without the recheck, a
   branch deleted between the first (uncached) resolution's DB read and

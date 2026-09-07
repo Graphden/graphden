@@ -365,6 +365,30 @@
             (recur next-frontier seen')))))))
 
 
+(defn- duplicate-key-ex?
+  "A raw Postgres unique-violation — it carries no ex-data, so the
+   status map cannot classify it; the message can."
+  [^Exception e]
+  (boolean (re-find #"(?i)duplicate key" (or (Throwable/.getMessage e) ""))))
+
+
+(defn- log-write-failure!
+  "A REJECTED write — a name collision, a validation miss, a duplicate
+   key: anything the status map puts under 500 — is the caller's input
+   being refused, and is logged at INFO without the stack (it used to
+   be an ERROR with a full trace, so every duplicate-name typo in the
+   editor landed in the error log and the alerter's counters). An
+   unmapped / 5xx exception is ours and keeps the ERROR + stack."
+  [^Exception e op entity-type & details]
+  (let [status (if (duplicate-key-ex? e) 409 (web-errors/status-for-ex-data (ex-data e)))]
+    (if (< status 500)
+      (log/info (str op " rejected for") entity-type
+                {:status status
+                 :type (:type (ex-data e))
+                 :message (Throwable/.getMessage e)})
+      (log/error e (str op " failed for") entity-type (vec details)))))
+
+
 (defn- humanise-create-exception
   "Render the user-facing form of a create-entity failure — Postgres
    unique-violation messages read like internal log lines; rewrite the
@@ -419,8 +443,7 @@
       :else (try
               {:created (:id (sp/create-entity storage entity-type entity-data))}
               (catch Exception e
-                (log/error e "create-entity failed for"
-                           entity-type entity-data)
+                (log-write-failure! e "create-entity" entity-type entity-data)
                 ;; The error's HTTP status comes from the central map —
                 ;; a name/position collision is a 409 CONFLICT, not a
                 ;; malformed 400 (audit-7 error honesty).
@@ -431,8 +454,7 @@
                 ;; `(fn-id, slot-id)`) then read as an internal error and
                 ;; paged as one. It is a conflict: the row is already there.
                 {:error (humanise-create-exception e entity-type entity-data type-str)
-                 :http-status (if (re-find #"(?i)duplicate key"
-                                           (or (Throwable/.getMessage e) ""))
+                 :http-status (if (duplicate-key-ex? e)
                                 409
                                 (web-errors/status-for-ex-data (ex-data e)))})))))
 
@@ -628,8 +650,7 @@
         updated (when-not pkg-reason
                   (try (sp/update-entity storage entity-type id-uuid entity-data)
                        (catch Exception e
-                         (log/error e "update-entity failed for"
-                                    entity-type id-uuid entity-data)
+                         (log-write-failure! e "update-entity" entity-type id-uuid entity-data)
                          ;; Surface a write-rejection reason when the storage
                          ;; layer provides one (e.g. the fn-name collision
                          ;; check) — a bare "Failed to update entity" hides

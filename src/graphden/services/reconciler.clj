@@ -375,25 +375,86 @@
 (declare ^:private stop-and-forget!)
 
 
+(def ^:dynamic *exit-backoff-cap-ms*
+  "Ceiling on the restart delay after repeated in-place exits."
+  60000)
+
+
+(def ^:dynamic *exit-stable-ms*
+  "A copy that lived at least this long before exiting counts as a
+   stable run: its restart is immediate and the exit counter resets."
+  60000)
+
+
+(defonce ^:private exit-backoff
+  ;; sid → {:exits n :until ms}. Restart-after-exit used to be
+  ;; immediate every pass: a `:restart-policy :always` service whose fn
+  ;; returns at once (`:exit :done` — a one-shot that should have been
+  ;; an `:interval`) restarted on EVERY liveness tick forever, a WARN
+  ;; per tick (7 restarts in 15 s in the e2e gate, 2026-09-07). Now the
+  ;; first restart is immediate and the delay doubles per further
+  ;; short-lived exit — 1 s, 2 s, … `*exit-backoff-cap-ms*` — while a
+  ;; run that lasted `*exit-stable-ms*` resets it.
+  (atom {}))
+
+
+(defn- exit-backoff-ms
+  "The delay before restarting `sid` after an in-place exit, updating
+   the counter: 0 after a stable run (counter reset) and for the FIRST
+   short-lived exit (a one-off crash restarts at once, as before), then
+   `min(cap, 1 s × 2^(exits-2))` — 1 s, 2 s, 4 s, …"
+  [sid started-at now-ms]
+  (let [ran-ms (- now-ms (if (instance? java.time.Instant started-at)
+                           (java.time.Instant/.toEpochMilli started-at)
+                           now-ms))]
+    (if (>= ran-ms *exit-stable-ms*)
+      (do (swap! exit-backoff dissoc sid) 0)
+      (let [n (inc (get-in @exit-backoff [sid :exits] 0))
+            wait-ms (if (= n 1)
+                      0
+                      (min *exit-backoff-cap-ms*
+                           (* 1000 (bit-shift-left 1 (min 16 (- n 2))))))]
+        (swap! exit-backoff assoc sid {:exits n :until (+ now-ms wait-ms)})
+        wait-ms))))
+
+
+(defn- drop-due-backoffs!
+  "Top-of-pass: a `::backoff` placeholder whose delay has elapsed is
+   dropped so the diff restarts the service this pass; the others stay
+   (still counted as running, so the diff leaves them alone)."
+  [running-atom now-ms]
+  (let [due (into #{} (keep (fn [[sid {:keys [until]}]]
+                              (when (<= until now-ms) sid)))
+                  @exit-backoff)]
+    (swap! running-atom
+           (fn [m] (into {} (remove (fn [[sid v]] (and (= ::backoff v) (contains? due sid)))) m)))))
+
+
 (defn- check-liveness!
   "The per-tick liveness pass over this pod's running copies: heartbeat
    every live instance row; for a copy that died in place, release its
    lock + row and either drop it from `running-atom` (so the diff below
-   restarts it this pass) or park it as `::exited` per `restart-after-
+   restarts it this pass), park it as `::backoff` until its restart
+   delay elapses (`exit-backoff-ms` — repeated short-lived exits back
+   off exponentially), or park it as `::exited` per `restart-after-
    exit?`. Called under `reconcile-monitor`."
   [running-atom lock-conn storage]
   (doseq [[sid entry] @running-atom
           :when (and (map? entry) (some? (:stopper entry)))]
     (if (copy-exited? entry)
-      (let [restart? (restart-after-exit? entry)]
+      (let [restart? (restart-after-exit? entry)
+            backoff-ms (when restart?
+                         (exit-backoff-ms sid (:started-at entry) (System/currentTimeMillis)))]
         (log/warn "service copy exited in place"
-                  {:service-id sid :fn-id (:fn-id entry)
-                   :exit (some-> (:exit (handle-meta (:stopper entry))) deref)
-                   :restart-policy (:restart-policy entry)
-                   :restart? restart?})
+                  (cond-> {:service-id sid :fn-id (:fn-id entry)
+                           :exit (some-> (:exit (handle-meta (:stopper entry))) deref)
+                           :restart-policy (:restart-policy entry)
+                           :restart? restart?}
+                    (some-> backoff-ms pos?) (assoc :backoff-ms backoff-ms)))
         (stop-and-forget! lock-conn running-atom sid storage)
-        (when-not restart?
-          (swap! running-atom assoc sid ::exited)))
+        (cond
+          (not restart?) (swap! running-atom assoc sid ::exited)
+          (pos? backoff-ms) (swap! running-atom assoc sid ::backoff)))
       (heartbeat-instance! storage (:instance-id entry)))))
 
 
@@ -485,8 +546,9 @@
    Postgres to unlock a key the session never held every time a
    `:per-pod` service stops.
 
-   `::not-our-lock` / `::exited` placeholders have nothing to stop and no
-   lock to release. A running entry deletes its instance row."
+   `::not-our-lock` / `::exited` / `::backoff` placeholders have nothing
+   to stop and no lock to release. A running entry deletes its instance
+   row."
   [lock-conn running-atom sid storage]
   (let [entry (get @running-atom sid)]
     (when (map? entry)
@@ -654,6 +716,7 @@
     ;; service still fully held by siblings is simply re-marked ::not-our-lock
     ;; below, so the placeholder is transient, recomputed each pass.
     (swap! running-atom (fn [m] (into {} (remove (fn [[_ v]] (contains? #{::not-our-lock ::start-failed} v))) m)))
+    (drop-due-backoffs! running-atom (System/currentTimeMillis))
     (let [storage (:storage ctx)
           lock-conn (lock-conn-from-ctx ctx)
           ;; Liveness + heartbeat over this pod's copies BEFORE the diff, so
@@ -698,6 +761,9 @@
           to-start (vec (concat to-start drifted))
           not-our-lock (atom [])]
       (doseq [sid to-stop]
+        ;; A row that was disabled / deleted / edited starts its exit
+        ;; history afresh when it comes back.
+        (swap! exit-backoff dissoc sid)
         (stop-and-forget! lock-conn running-atom sid storage))
       (doseq [sid to-start]
         (let [svc (get enabled-by-id sid)

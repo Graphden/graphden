@@ -330,7 +330,7 @@ exponential-backoff retry loop per `:restart-policy`:
 
 | Policy        | Behaviour                                                  |
 |---------------|------------------------------------------------------------|
-| `:always`     | Retry on start exception up to `max-retries` (default 3) with backoff 1s → 2s → 4s; at runtime, restart after ANY exit — a clean stop included (`restart-after-exit?`, the liveness path). |
+| `:always`     | Retry on start exception up to `max-retries` (default 3) with backoff 1s → 2s → 4s; at runtime, restart after ANY exit — a clean stop included (`restart-after-exit?`, the liveness path). The first restart is immediate; further exits of a copy that lived under 60 s back off 1s → 2s → 4s → … → 60s (parked as `::backoff`, restarted on the first pass after the delay), and a run of 60 s or more resets the counter — so a one-shot fn under `:always` (use `:interval` for that) is not a hot loop. |
 | `:on-failure` | The same start-time retries; at runtime, restart only after a `:failed` exit — a clean stop stays down. |
 | `:never`      | Single attempt. On failure, record `:start-failed-at`, leave `:stopper` nil. |
 

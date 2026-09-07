@@ -135,8 +135,18 @@ async function newContext(chromium) {
   // net::ERR_* so a network failure is diagnosable from the log alone.
   page.on('requestfailed', (req) => {
     const failure = req.failure();
-    console.log('  [requestfailed]', req.method(), req.url(),
-                '—', (failure && failure.errorText) || 'unknown');
+    const errorText = (failure && failure.errorText) || 'unknown';
+    // ERR_ABORTED *after* a response arrived is the page navigating or
+    // closing before the body was read — the server already answered
+    // (the `[op]` line above it shows the status). ~200 of those per
+    // suite run, all from teardown DELETEs, buried the real failures
+    // (aborted before any response: response() is null). Skip them.
+    req.response().then((resp) => {
+      if (errorText === 'net::ERR_ABORTED' && resp) return;
+      console.log('  [requestfailed]', req.method(), req.url(), '—', errorText);
+    }).catch(() => {
+      console.log('  [requestfailed]', req.method(), req.url(), '—', errorText);
+    });
   });
   // Two blind spots kept this suite's flake undiagnosed for weeks. Both are
   // filled below; together they turned "a wait timed out" into "the package

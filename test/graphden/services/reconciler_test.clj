@@ -1525,6 +1525,57 @@
       (finally (sp/close storage)))))
 
 
+(deftest liveness-backs-off-repeated-short-lived-exits-test
+  ;; `:always` used to restart an in-place exit on EVERY pass — a
+  ;; one-shot fn under `:always` was a hot loop with a WARN per tick.
+  ;; The first restart stays immediate; from the second short-lived exit
+  ;; on, the copy is parked as `::backoff` (still "running" to the diff)
+  ;; until its delay elapses; a stable run resets the counter.
+  (let [storage (setup/create-branch-versioned-test-storage)
+        calls (atom []) stops (atom []) alive (atom true) exit (atom nil)
+        {composed :composed} (make-listener-fn! storage "live-backoff" 43214 calls stops alive exit)
+        svc (service-row-with-policy! storage (:id composed) :always)
+        c (setup/default-registry-ctx storage)
+        running (atom {})
+        ;; The stub copies share `alive`: flip it false so THIS pass sees
+        ;; the copy dead, and back to true afterwards so the restarted
+        ;; copy reads as alive on the next pass.
+        die! (fn [] (reset! alive false) (reset! exit :done))]
+    (try
+      (binding [recon/*exit-stable-ms* (* 60 60 1000)
+                recon/*exit-backoff-cap-ms* 300]
+        (recon/reconcile-once! c running)
+        (is (= 1 (count @calls)))
+        (die!)
+        (recon/reconcile-once! c running)
+        (reset! alive true)
+        (testing "first short-lived exit restarts at once"
+          (is (= 2 (count @calls)))
+          (is (map? (get @running (:id svc)))))
+        (die!)
+        (recon/reconcile-once! c running)
+        (reset! alive true)
+        (testing "second short-lived exit is parked, not restarted"
+          (is (= 2 (count @calls)))
+          (is (= ::recon/backoff (get @running (:id svc))))
+          (is (empty? (instances-of storage (:id svc))) "its instance row is gone"))
+        (recon/reconcile-once! c running)
+        (testing "still parked while the delay runs"
+          (is (= 2 (count @calls))))
+        (Thread/sleep 350)
+        (recon/reconcile-once! c running)
+        (testing "restarted once the delay elapsed"
+          (is (= 3 (count @calls)))
+          (is (map? (get @running (:id svc)))))
+        (testing "a stable run resets the counter — immediate restart again"
+          (binding [recon/*exit-stable-ms* 0]
+            (die!)
+            (recon/reconcile-once! c running)
+            (reset! alive true)
+            (is (= 4 (count @calls))))))
+      (finally (sp/close storage)))))
+
+
 (deftest liveness-never-parks-a-copy-that-exited-test
   (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom []) stops (atom []) alive (atom true) exit (atom nil)

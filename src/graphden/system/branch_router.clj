@@ -269,14 +269,48 @@
              m))))
 
 
+(defonce ^:private pinned-branches-fn
+  ;; Seam: `(fn [] #{branch-id …})` — the branches whose cached ctx must
+  ;; NOT be dropped by a heal, the idle sweep or the LRU cap. Registered by the
+  ;; service reconciler (`init/services`): a running per-branch service
+  ;; holds its ctx by reference, so dropping the router's entry left the
+  ;; service on a registry nobody refreshes while every request built a
+  ;; second, divergent ctx for the same branch (2026-09-07). nil = no pins.
+  (atom nil))
+
+
+(defn set-pinned-branches-fn!
+  "Install (or clear, with nil) the pinned-branches seam — see
+   `pinned-branches-fn`."
+  [f]
+  (reset! pinned-branches-fn f))
+
+
+(defn- pinned-branches
+  "The set of branch ids whose ctx a heal refreshes in place and the idle
+   sweep + LRU cap leave alone; empty when no seam is registered or it
+   throws."
+  []
+  (or (when-let [f @pinned-branches-fn]
+        (try (set (f))
+             (catch Exception e
+               (log/warn e "pinned-branches seam failed; treating as none")
+               nil)))
+      #{}))
+
+
 (defn- evict-lru-if-full
   "If the cache is at `max-size` AND inserting `new-id` would push
-   it past, drop the oldest non-default entry. The default-branch
-   entry is pinned (it's seeded eagerly and represents the hottest
-   path). `new-id` is also excluded from consideration — if the
-   caller is replacing an existing entry, no eviction is needed."
-  [m max-size default-branch-id new-id]
-  (let [evictable (-> m (dissoc default-branch-id new-id))]
+   it past, drop the oldest non-default, non-pinned entry. The
+   default-branch entry is pinned (it's seeded eagerly and represents
+   the hottest path); so is every branch in `pinned` — a running
+   service holds that ctx by reference, and the cap used to be the
+   one eviction path that ignored pins (heal + idle sweep honour
+   them). `new-id` is also excluded from consideration — if the
+   caller is replacing an existing entry, no eviction is needed. When
+   everything else is pinned the cache simply grows past the cap."
+  [m max-size default-branch-id new-id pinned]
+  (let [evictable (apply dissoc m default-branch-id new-id pinned)]
     (if (and (>= (count m) max-size)
              (not (contains? m new-id))
              (seq evictable))
@@ -612,14 +646,15 @@
    Returns `entry` regardless (the request in flight is still served from
    it even when the cache install is discarded)."
   [{:keys [handlers build-monitors]} branch-id entry max-size default-branch-id gen-holder gen0]
-  (let [[old new] (swap-vals!
+  (let [pinned (pinned-branches)
+        [old new] (swap-vals!
                     handlers
                     (fn [m]
                       (if (and gen-holder
                                (not= gen0 (java.util.concurrent.atomic.AtomicLong/.get gen-holder)))
                         m
                         (-> m
-                            (evict-lru-if-full max-size default-branch-id branch-id)
+                            (evict-lru-if-full max-size default-branch-id branch-id pinned)
                             (assoc branch-id entry)))))]
     (when build-monitors
       (doseq [gone (keys old)
@@ -801,35 +836,6 @@
                   (cr/rebuild! c)))))
           (catch Exception e
             (log/warn e "graph-epoch heal: ctx rebuild failed")))))))
-
-
-(defonce ^:private pinned-branches-fn
-  ;; Seam: `(fn [] #{branch-id …})` — the branches whose cached ctx must
-  ;; NOT be dropped by a heal or the idle sweep. Registered by the
-  ;; service reconciler (`init/services`): a running per-branch service
-  ;; holds its ctx by reference, so dropping the router's entry left the
-  ;; service on a registry nobody refreshes while every request built a
-  ;; second, divergent ctx for the same branch (2026-09-07). nil = no pins.
-  (atom nil))
-
-
-(defn set-pinned-branches-fn!
-  "Install (or clear, with nil) the pinned-branches seam — see
-   `pinned-branches-fn`."
-  [f]
-  (reset! pinned-branches-fn f))
-
-
-(defn- pinned-branches
-  "The set of branch ids whose ctx a heal refreshes in place and the idle
-   sweep leaves alone; empty when no seam is registered or it throws."
-  []
-  (or (when-let [f @pinned-branches-fn]
-        (try (set (f))
-             (catch Exception e
-               (log/warn e "pinned-branches seam failed; treating as none")
-               nil)))
-      #{}))
 
 
 (defn- heal-stale-ctxs!

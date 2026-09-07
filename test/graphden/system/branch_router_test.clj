@@ -704,3 +704,35 @@
               (is (nil? (diag/errors-for-fn branch-id det-id))
                   "package-derived id skipped — the boot sweep owns those"))
             (finally (sp/close (vs/unwrap vstorage)))))))))
+
+
+(deftest idle-ctxs-are-evicted-after-the-ttl
+  ;; The count cap bounds the worst case; the idle TTL bounds the steady
+  ;; state — a workspace keeps its merged source branches forever, so
+  ;; without it every branch touched today sits warm (one compiled
+  ;; registry each) until the cap. The default entry never goes; a
+  ;; freshly used one stays; the sweep runs at most once per period.
+  (let [now (System/currentTimeMillis)
+        old (- now (* 60 60 1000))
+        router {:default-branch-id :main
+                :handlers (atom {:main {:ctx {:x :main} :last-used old}
+                                 :stale {:ctx {:x :stale} :last-used old}
+                                 :fresh {:ctx {:x :fresh} :last-used now}})
+                :ref-cache (atom {})
+                :idle-sweep (atom 0)}]
+    (binding [br/*ctx-idle-ttl-ms* (* 15 60 1000)
+              br/*ctx-idle-sweep-period-ms* 0]
+      (#'br/evict-idle-ctxs! router)
+      (is (= #{:main :fresh} (set (keys @(:handlers router))))
+          "the idle non-default entry is gone; the default and the fresh one stay")
+      (testing "a router without the sweep stamp (a test stub) never sweeps"
+        (let [stub {:default-branch-id :main
+                    :handlers (atom {:main {:ctx {} :last-used old} :stale {:ctx {} :last-used old}})
+                    :ref-cache (atom {})}]
+          (#'br/evict-idle-ctxs! stub)
+          (is (= #{:main :stale} (set (keys @(:handlers stub)))))))
+      (testing "within the sweep period the walk is skipped"
+        (swap! (:handlers router) assoc :stale2 {:ctx {} :last-used old})
+        (binding [br/*ctx-idle-sweep-period-ms* (* 60 60 1000)]
+          (#'br/evict-idle-ctxs! router)
+          (is (contains? @(:handlers router) :stale2)))))))

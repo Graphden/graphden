@@ -109,6 +109,15 @@
   #uuid "805548b9-d190-4622-92f8-f68f89254a7f")
 
 
+(def ^:private branch-archived-at-field-uuid
+  ;; Merged-and-done (2026-09-07): stamped on the SOURCE when a merge
+  ;; lands it into its own base. A merged source cannot be deleted (the
+  ;; target resolves through its rows), so without this the popover
+  ;; filled with finished branches. Archived = folded into the popover's
+  ;; "Merged" group; opening the branch clears it. NULL ≡ active.
+  #uuid "3f6b1c2e-8d4a-4b7e-9a1c-5e2f7d8c9b04")
+
+
 (def ^:private branch-review-state-field-uuid
   ;; Change proposals (2026-08-23) — the async review handoff. nil ≡ an
   ;; ordinary working branch; "proposed" ≡ its owner asked for this
@@ -798,6 +807,11 @@
                       :review-state {:uuid branch-review-state-field-uuid
                                      :type :text
                                      :nullable? true}
+                      ;; Merged into its base and folded away (see the
+                      ;; field-uuid comment). NULL ≡ active.
+                      :archived-at {:uuid branch-archived-at-field-uuid
+                                    :type :timestamptz
+                                    :nullable? true}
                       ;; Review policy (on the merge TARGET): how many
                       ;; approvals, whether self-approval counts, and an
                       ;; explicit reviewer allow-list. All NULL ≡ off.

@@ -913,13 +913,51 @@
                   (swap! state update :w max global)))))))))
 
 
+(def ^:dynamic *ctx-idle-ttl-ms*
+  "How long a cached non-default branch ctx may go unused before it is
+   dropped. The count cap (`default-max-cached-branches`, 16) bounds the
+   worst case; this bounds the STEADY state — every cached ctx is a
+   compiled registry (tens of MB), and a workspace keeps its merged
+   source branches forever (the target resolves through them), so a
+   day's branches would otherwise sit warm until the cap. A dropped
+   ctx rebuilds on its next request (a branch without own changes copies
+   the base by value)."
+  (* 15 60 1000))
+
+
+(def ^:dynamic *ctx-idle-sweep-period-ms*
+  "How often `evict-idle-ctxs!` scans the cache — on the request path,
+   so keep it rare; the scan itself is a map walk."
+  60000)
+
+
+(defn- evict-idle-ctxs!
+  "Drop every non-default cached ctx whose `:last-used` is older than
+   `*ctx-idle-ttl-ms*`. At most once per `*ctx-idle-sweep-period-ms*`
+   (a CAS on the router's `:idle-sweep` stamp keeps concurrent requests
+   from repeating the walk); routers built without the stamp (test
+   stubs) never sweep."
+  [{:keys [handlers default-branch-id idle-sweep] :as router}]
+  (when idle-sweep
+    (let [now (now-ms)
+          prev @idle-sweep]
+      (when (and (> (- now prev) *ctx-idle-sweep-period-ms*)
+                 (compare-and-set! idle-sweep prev now))
+        (doseq [[bid entry] @handlers]
+          (when (and (not= bid default-branch-id)
+                     (> (- now (or (:last-used entry) now)) *ctx-idle-ttl-ms*))
+            (invalidate! router bid)))))))
+
+
 (defn entry-for
   "The cached `{:ctx :handler}` entry for `branch-id`, building lazily
    on miss. Falls back to the default-branch entry when `branch-id` is
    nil or matches the default. Records the access via `touch!` on
-   cache hits so the LRU eviction sees the freshest order."
+   cache hits so the LRU eviction sees the freshest order, and sweeps
+   idle entries (`evict-idle-ctxs!`) on the way."
   [{:keys [default-branch-id handlers] :as router} branch-id]
   (validate-graph-epoch! router)
+  (evict-idle-ctxs! router)
   (let [effective (or branch-id default-branch-id)
         cached (get @handlers effective)]
     (when (and cached (not= effective default-branch-id))
@@ -1152,7 +1190,8 @@
                                           (atom {}) handler-fn-id)
                     true (assoc :ref-cache (atom {})
                                 :optional-handler-fn-ids optional-handler-fn-ids
-                                :build-monitors (java.util.concurrent.ConcurrentHashMap.))
+                                :build-monitors (java.util.concurrent.ConcurrentHashMap.)
+                                :idle-sweep (atom (now-ms)))
                     max-size (assoc :max-size max-size))]
        ;; Eager seed for the default branch: reuse the base-ctx (which
        ;; already has its compiled-registry primed by

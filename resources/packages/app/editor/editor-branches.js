@@ -539,11 +539,22 @@ function wireBranchPopoverHandlers(popover, current) {
   // the CURRENT row is a no-op for switching but still dismisses the
   // popover.
   popover.querySelectorAll('.branch-row[data-branch-name]').forEach((row) => {
-    row.addEventListener('click', (e) => {
+    row.addEventListener('click', async (e) => {
       if (e.target.closest('.branch-row-actions')) return;
       const name = row.getAttribute('data-branch-name');
-      if (name !== current) switchToBranch(name);
-      else closeBranchPopover();
+      if (name === current) { closeBranchPopover(); return; }
+      // A row in the "Merged" group is folded away; opening it brings it
+      // back to the active list (explicit — nothing else un-archives).
+      if (row.getAttribute('data-archived') === '1') {
+        try {
+          await window.authFetch(API.api_branches_ref_archive(name), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ archived: false }),
+          });
+        } catch (_) { /* switching still works; the row stays folded until the next open */ }
+      }
+      switchToBranch(name);
     });
   });
 

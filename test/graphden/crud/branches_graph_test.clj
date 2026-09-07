@@ -19,6 +19,7 @@
    branch / fn rows from neighbouring tests don't collide."
   (:require
     [cheshire.core :as cheshire]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
@@ -575,6 +576,64 @@
     (is (= "inherited-content-not-transferable" (:reason body)))
     (is (= [(:name r)] (mapv :name (:plan body))) "merge R first")
     (is (= [(:id r)] (mapv :id (:plan body))) "each step carries the id-safe ref")))
+
+
+(deftest archive-route-folds-a-branch-away-and-back
+  ;; POST /api/branches/:ref/archive — `archived-at` set / cleared; the
+  ;; JSON list carries it; the popover folds archived rows under the
+  ;; collapsed "Merged" group and keeps active rows in the listbox.
+  (let [b (mk-branch! (uniq "arch"))
+        list-branch (fn []
+                      (->> (json-body (gh/via :list-branches-handler (get-req "/api/branches")))
+                           :branches (filter #(= (:name b) (:name %))) first))
+        popover (fn [] (:body (gh/via :_partial-branch-popover-handler (get-req "/partials/branch-popover"))))]
+    (is (nil? (:archived-at (list-branch))) "a fresh branch is active")
+    (let [resp (gh/via :set-branch-archive-handler
+                       (json-req (str "/api/branches/" (:name b) "/archive") {}))
+          body (json-body resp)]
+      (is (= 200 (:status resp)))
+      (is (true? (:archived body))))
+    (is (string? (:archived-at (list-branch))) "the list shows when it was folded away")
+    (let [html (popover)
+          archived-part (subs html (String/.indexOf ^String html "branch-archived"))]
+      (is (str/includes? html "class=\"branch-archived\"") "the Merged group renders")
+      (is (str/includes? archived-part (str "data-branch-name=\"" (:name b) "\""))
+          "the folded row lives in the Merged group")
+      (is (str/includes? archived-part "data-archived=\"1\""))
+      (is (not (str/includes? (subs html 0 (String/.indexOf ^String html "branch-archived"))
+                              (str "data-branch-name=\"" (:name b) "\"")))
+          "...and not in the active listbox"))
+    (let [body (json-body (gh/via :set-branch-archive-handler
+                                  (json-req (str "/api/branches/" (:name b) "/archive") {:archived false})))]
+      (is (false? (:archived body))))
+    (is (nil? (:archived-at (list-branch))) "opening it brings it back")
+    (testing "an unknown ref is a 404 envelope"
+      (is (false? (:ok (json-body (gh/via :set-branch-archive-handler
+                                          (json-req "/api/branches/no-such-branch-xyz/archive" {})))))))))
+
+
+(deftest merge-into-own-base-archives-the-source
+  ;; The source landed into ITS base: it is done and cannot be deleted
+  ;; (the target resolves through it), so the merge folds it away. A
+  ;; merge into a branch that is NOT the source's base leaves it active.
+  (let [fn-name (uniq "arch-merge")
+        fn-id (mk-fn! fn-name)
+        target (mk-branch! (uniq "tgt"))
+        feat (mk-branch! (uniq "feat") (:name target))
+        sibling (mk-branch! (uniq "sib") (:name target))
+        on-feat (vs/switch-branch *storage* (java.util.UUID/fromString (:id feat)))
+        _ (sp/update-entity on-feat :fn fn-id {:name fn-name :description "edited on feat"})
+        row (fn [b] (sp/read-entity *storage* :branch (java.util.UUID/fromString (:id b))))]
+    (testing "into a sibling: source stays active"
+      (is (true? (:ok (json-body (gh/via :merge-branch-handler
+                                         (json-req (str "/api/branches/" (:name sibling) "/merge")
+                                                   {:source (:name feat)}))))))
+      (is (nil? (:archived-at (row feat)))))
+    (testing "into its own base: source is archived"
+      (is (true? (:ok (json-body (gh/via :merge-branch-handler
+                                         (json-req (str "/api/branches/" (:name target) "/merge")
+                                                   {:source (:name feat)}))))))
+      (is (some? (:archived-at (row feat)))))))
 
 
 (deftest merge-branch-bad-resolutions-silently-dropped

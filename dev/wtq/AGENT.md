@@ -103,7 +103,7 @@ You were started in one of two ways:
 
    `bb wt merge` takes **~30–50 min** for a full run, ~10 min for a
    docs-only / diff-scoped one (merge develop → ci → build image →
-   e2e → integration → fast-forward develop → advance the demo instance) —
+   e2e → integration → fast-forward develop → advance the demo instance — only if it was running when the gate started) —
    longer than a
    foreground command may run, so **launch it with `run_in_background: true`**
    and wait to be re-invoked when it exits. Then check the outcome:

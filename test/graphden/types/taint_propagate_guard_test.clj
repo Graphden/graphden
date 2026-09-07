@@ -128,7 +128,7 @@
     :queue-stats :queue-dead-letters
     :call-with :call-traced :with-heartbeat :trace-headers
     :select-keys
-    :service-blocking-free-args :set-branch-policy!
+    :service-blocking-free-args :set-branch-archived! :set-branch-policy!
     :set-branch-require-merge! :set-review-state!
     ;; Cached, allow-listed read of a shipped frontend asset — no caller content.
     :shipped-asset

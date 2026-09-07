@@ -12,6 +12,7 @@
     [graphden.executor.defbase :refer [defbase]]
     [graphden.services.reconciler :as recon]
     [graphden.storage.postgres.graph-epoch :as epoch]
+    [graphden.storage.postgres.util :as pg-util]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
     [graphden.tenancy.context :as tc]
@@ -290,6 +291,25 @@
     record))
 
 
+(defn- archive-landed-source!
+  "The source landed into ITS OWN base: it is done. Fold it into the
+   popover's \"Merged\" group (`:archived-at`) — it cannot be deleted
+   (the target resolves through its rows) and would otherwise sit in
+   the list forever. A sync the other way (base → feature) or a merge
+   into a sibling leaves the source active. Best-effort, base storage
+   (no epoch bump — nothing compiled changes); ONE conditional UPDATE,
+   not read-then-update — the merge path is perf-budgeted per round trip
+   (`:sql/merge-fork`)."
+  [base source-branch-id target-branch-id]
+  (try
+    (when-let [pool (:pool base)]
+      (pg-util/exec! pool ["UPDATE branch SET archived_at = now() WHERE id = ? AND base_branch_id = ?"
+                           source-branch-id target-branch-id]))
+    (catch Exception e
+      (log/warn e "merge post-commit: archiving the source failed — it stays listed"
+                {:source-branch-id source-branch-id}))))
+
+
 (defn- run-merge-post-commit!
   "The post-commit thread's body — invalidate the TARGET ctx, re-check
    the affected set into its registry slices, fan the invalidation out
@@ -300,9 +320,10 @@
   (let [t0 (System/nanoTime)
         timings (atom {})
         lap! (fn [k t] (swap! timings assoc k (long (/ (- (System/nanoTime) t) 1e6))))
-        affected (mrg/merge-affected-fn-ids
-                   (branches/base-storage ctx) source-branch-id)
+        base (branches/base-storage ctx)
+        affected (mrg/merge-affected-fn-ids base source-branch-id)
         _ (lap! :affected-ms t0)]
+    (archive-landed-source! base source-branch-id target-branch-id)
     (when (seq affected)
       (let [t-ctx (System/nanoTime)
             target-ctx (if router
@@ -481,6 +502,20 @@
                       {:require-merge? flag})
     (epoch/bump! (branches/base-storage ctx) :branch)
     flag))
+
+
+(defbase set-branch-archived!
+  "Fold a branch away (`archived?` truthy → `:archived-at` now) or bring
+   it back (falsy → nil). A merge into the source's own base stamps it;
+   opening the branch clears it. Same base-storage write as
+   `set-review-state!` — WHO may is the tenancy authorize-writer's call
+   on the branch row. Returns the flag as stored."
+  [branch-id archived?]
+  (cr/record-effect! :db)
+  (cr/record-effect! :time)
+  (sp/update-entity (branches/base-storage ctx) :branch branch-id
+                    {:archived-at (when archived? (java.time.Instant/now))})
+  (boolean archived?))
 
 
 (defbase set-review-state!
@@ -809,6 +844,7 @@
    :set-branch-policy!         set-branch-policy!
    :set-branch-require-merge!  set-branch-require-merge!
    :set-review-state!          set-review-state!
+   :set-branch-archived! set-branch-archived!
    :set-branch-review-policy!  set-branch-review-policy!
    :approve-proposal!          approve-proposal!
    :dismiss-my-approval!       dismiss-my-approval!

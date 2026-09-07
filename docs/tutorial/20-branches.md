@@ -58,6 +58,10 @@ row → switch        → click a branch row to switch to it
                           including single-user.
                         ⛨ Who can write… — (cloud/tenancy only)
                         × Delete branch
+Merged · N          → collapsed group at the bottom: branches already
+                      merged into their base. A merge folds its source
+                      here (it cannot be deleted — the base reads
+                      through it); click a row to reopen it.
                       The ⋯ is accented when the row is proposed or
                       protected; a 🔒 marks write-policy rows.
 ```

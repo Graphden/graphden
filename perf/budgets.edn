@@ -57,9 +57,9 @@
         :why
         "GET /api/secrets — 6 round trips steady-state, INDEPENDENT of how big the graph is, and deliberately budgeted with headroom rather than tightly. This one number jitters by ±1 with branch-row caching (measured 5, 6 and 7 across runs on two machines), so a tight ceiling fails honestly-green runs and a loose one misses small regressions. The real guard is in the scenario itself: pg_stat_statements normalises a graph scan into one row with calls > 1, and the test asserts every statement runs exactly once. This budget is the coarse backstop for a change that adds whole new statements — cross 8 and something structural moved."},
        :merge-fork
-       {:max 35,
+       {:max 36,
         :why
-        "POST /api/branches/main/merge for a branch forked off main carrying one new fn — lesson 20's flow, every review's last click. Before 2026-09-03 the merge ran a full resolved-view diff of both branches (`untransferable-inherited-entities`) and scanned EVERY version row on main for conflicts — thousands of round trips' worth of rows, 1.6 s here and ~7 s on the cloud. The fork case now decides from the two branches' visibility sets (a fork shows nothing the target can't see) and the conflict scan asks the target only about the ids the source touched. If this climbs by more than a handful, somebody put a whole-branch read back on the merge path."},
+        "POST /api/branches/main/merge for a branch forked off main carrying one new fn. 35 → 36 on 2026-09-07: the post-commit folds the source into the popover's Merged group — ONE conditional UPDATE (`archived_at = now() WHERE base_branch_id = target`), no read-back. — lesson 20's flow, every review's last click. Before 2026-09-03 the merge ran a full resolved-view diff of both branches (`untransferable-inherited-entities`) and scanned EVERY version row on main for conflicts — thousands of round trips' worth of rows, 1.6 s here and ~7 s on the cloud. The fork case now decides from the two branches' visibility sets (a fork shows nothing the target can't see) and the conflict scan asks the target only about the ids the source touched. If this climbs by more than a handful, somebody put a whole-branch read back on the merge path."},
        :execute-popover-app-root
        {:max 15,
         :why

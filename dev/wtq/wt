@@ -878,6 +878,13 @@ stop_sampler() {
 run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
   local wt="$1" no_e2e="$2" deploy="$3" no_fleet="$4" no_visual="$5"
   local built_candidate=0
+  # The demo instance is advanced post-land ONLY if it was running when the
+  # gate started: the demo is off-by-default on a shared box (a 3 GB JVM
+  # nobody asked for is what starved three e2e phases on 2026-09-07), and a
+  # gate must not turn it on behind the operator's back. `bb instance-up`
+  # brings it onto the landed image whenever it is wanted.
+  local demo_was_up=0
+  docker ps --format '{{.Names}}' 2>/dev/null | grep -qx graphden-executor && demo_was_up=1
   # The heavy suites refuse to run in a worktree unless this is set: they boot
   # the canonical image and saturate the machine, so only the gate — which holds
   # the queue lock — may start them. We are the gate.
@@ -1157,7 +1164,10 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
     # compares /version against the freshly-landed tree: proof the demo really is
     # running what just landed. That check is what caught this whole class of bug.
     step "advance the $TARGET instance onto the landed image"
-    if [ "$deploy" = 1 ]; then
+    if [ "$demo_was_up" != 1 ]; then
+      echo "(the demo instance was not running when the gate started — leaving it down;"
+      echo " \`bb instance-up\` brings it onto the landed image, \`bb instance-reset\` after a --deploy)"
+    elif [ "$deploy" = 1 ]; then
       echo "(--deploy: dropping the $TARGET schema first — the branch changes it)"
       ( cd "$MAIN_WT" && bb instance-reset ) || { echo "FAIL(post-land): instance-reset (LANDED, but the demo is stale)"; return 4; }
     else

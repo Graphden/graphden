@@ -461,9 +461,6 @@ async function cleanup(page) {
     skip('no /login at ' + BASE + ' — is a tenancy stack running there?');
   }
   const {browser, page} = await tenancyContext();
-  page.on('console', (m) => {
-    if (m.type() === 'error') console.log('  (console.error: ' + m.text().slice(0, 160) + ')');
-  });
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
   console.log('edit-tutorial-tour-org — lessons 23 / 24 / 26 / 29 / 32 / 33 @ ' + BASE);
 

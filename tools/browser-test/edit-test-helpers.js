@@ -133,20 +133,46 @@ async function newContext(chromium) {
   // the same string for a reset connection, an abort, a DNS miss and a CORS
   // rejection. Chromium knows which it was; nobody was asking. Print the
   // net::ERR_* so a network failure is diagnosable from the log alone.
+  // Lines that are ONLY noise when a navigation follows them. 54 of the 90
+  // files boot a page here, seed data over the API, then `reload()` / goto
+  // `#fn` so the editor boots on the probe — which aborts the first boot's
+  // still-in-flight fetches (initGraph, /api/services, /api/types, /api/lint,
+  // secrets, the Operate partials). Each abort used to print an editor
+  // `console.error … Failed to fetch` AND a `[requestfailed] … ERR_ABORTED`:
+  // ~280 lines per suite run that buried the real failures. Hold such a line
+  // for up to a second; a main-frame navigation inside that window collapses
+  // everything held into one `[nav]` line, otherwise it prints as before — a
+  // genuine "Failed to fetch" (server down) is never lost, just a second late.
+  const heldAborts = [];
+  const holdAbortLine = (line) => {
+    const item = {line};
+    item.timer = setTimeout(() => {
+      const i = heldAborts.indexOf(item);
+      if (i >= 0) { heldAborts.splice(i, 1); console.log(line); }
+    }, 1000);
+    if (typeof item.timer.unref === 'function') item.timer.unref();
+    heldAborts.push(item);
+  };
+  page.on('framenavigated', (frame) => {
+    if (frame !== page.mainFrame() || heldAborts.length === 0) return;
+    const n = heldAborts.length;
+    for (const it of heldAborts) clearTimeout(it.timer);
+    heldAborts.length = 0;
+    console.log('  [nav] ' + n + ' in-flight fetch(es) of the previous document aborted by navigation to '
+                + frame.url().replace(/^https?:\/\/[^/]+/, ''));
+  });
   page.on('requestfailed', (req) => {
     const failure = req.failure();
     const errorText = (failure && failure.errorText) || 'unknown';
+    const line = '  [requestfailed] ' + req.method() + ' ' + req.url() + ' — ' + errorText;
+    if (errorText !== 'net::ERR_ABORTED') { console.log(line); return; }
     // ERR_ABORTED *after* a response arrived is the page navigating or
     // closing before the body was read — the server already answered
-    // (the `[op]` line above it shows the status). ~200 of those per
-    // suite run, all from teardown DELETEs, buried the real failures
-    // (aborted before any response: response() is null). Skip them.
+    // (the `[op]` line above it shows the status). Skip those outright;
+    // hold the rest for the navigation check above.
     req.response().then((resp) => {
-      if (errorText === 'net::ERR_ABORTED' && resp) return;
-      console.log('  [requestfailed]', req.method(), req.url(), '—', errorText);
-    }).catch(() => {
-      console.log('  [requestfailed]', req.method(), req.url(), '—', errorText);
-    });
+      if (!resp) holdAbortLine(line);
+    }).catch(() => holdAbortLine(line));
   });
   // Two blind spots kept this suite's flake undiagnosed for weeks. Both are
   // filled below; together they turned "a wait timed out" into "the package
@@ -159,9 +185,15 @@ async function newContext(chromium) {
   //    downstream symptom — a wait that never completed.
   page.on('console', (msg) => {
     const t = msg.type();
-    if (t === 'error' || t === 'warning') {
-      console.log('  [console.' + t + ']', msg.text().slice(0, 300));
+    if (t !== 'error' && t !== 'warning') return;
+    const line = '  [console.' + t + '] ' + msg.text().slice(0, 300);
+    // An editor fetch rejected with the bare "Failed to fetch": held for the
+    // navigation check above (`holdAbortLine`).
+    if (t === 'error' && /TypeError: Failed to fetch/.test(msg.text())) {
+      holdAbortLine(line);
+      return;
     }
+    console.log(line);
   });
   // 2. Mutating ops were untimed. HTMX drives them as XHR (not fetch), so a
   //    fetch-wrap would miss them; page.on('response') sees both. These are the

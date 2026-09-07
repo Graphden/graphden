@@ -59,11 +59,6 @@ async function putDescriptionOn(page, fnId, branch, desc) {
     console.log('  [dialog]:', d.message().slice(0, 200));
     d.accept();
   });
-  page.on('console', (m) => {
-    if (m.type() === 'error') {
-      console.log('  (console.error: ' + m.text().slice(0, 200) + ')');
-    }
-  });
   console.log('edit-merge-conflict — modal renders + per-row picker + Apply merge');
 
   try {

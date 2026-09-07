@@ -194,11 +194,6 @@ async function openVersionHistory(page) {
 
 (async () => {
   const {browser, page} = await newContext(chromium);
-  page.on('console', (m) => {
-    if (m.type() === 'error') {
-      console.log('  (console.error: ' + m.text().slice(0, 200) + ')');
-    }
-  });
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
   console.log('edit-tutorial-tour-history — lessons 22 / 16');
   let failed = false;

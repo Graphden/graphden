@@ -81,9 +81,6 @@ async function deleteAnyExistingServiceFor(page, fnName) {
     console.log('  (dialog: ' + d.type() + ': ' + d.message().slice(0, 200) + ')');
     d.accept();
   });
-  page.on('console', (m) => {
-    if (m.type() === 'error') console.log('  (console.error: ' + m.text().slice(0, 200) + ')');
-  });
   console.log('edit-service — ⚙ button, create / badge / sidebar filter / delete');
   try {
     // Defensive cleanup before we start.

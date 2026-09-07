@@ -32,9 +32,6 @@ const BH = {'X-Graphden-Branch': BRANCH};
   await nodeApiJson('POST', '/api/branches', {name: BRANCH});
 
   const {browser, page} = await newContext(chromium);
-  page.on('console', (m) => {
-    if (m.type() === 'error') console.log('  (console.error: ' + m.text().slice(0, 160) + ')');
-  });
   console.log('edit-packages-publish-form — ⬆ ns row-action publish, single-tenant');
 
   try {

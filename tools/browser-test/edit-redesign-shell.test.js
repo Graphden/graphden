@@ -18,9 +18,6 @@ const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 
 (async () => {
   const {browser, page} = await newContext(chromium);
-  page.on('console', (m) => {
-    if (m.type() === 'error') console.log('  (console.error: ' + m.text().slice(0, 160) + ')');
-  });
   console.log('edit-redesign-shell — rail / inspector / workspace / details toggle');
 
   try {

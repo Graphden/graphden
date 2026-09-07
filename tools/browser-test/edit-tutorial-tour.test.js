@@ -23,11 +23,6 @@ const {
 
 (async () => {
   const {browser, page} = await newContext(chromium);
-  page.on('console', (m) => {
-    if (m.type() === 'error') {
-      console.log('  (console.error: ' + m.text().slice(0, 200) + ')');
-    }
-  });
   // Lesson 05's "remove this binding" step fires a native confirm(); with no
   // handler Playwright auto-dismisses it and the step would never complete.
   page.on('dialog', (d) => { d.accept().catch(() => {}); });

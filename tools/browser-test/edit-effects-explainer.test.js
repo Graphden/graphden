@@ -28,11 +28,6 @@ const TARGET_FN = 'current-time-ms';
     console.log('  [dialog]:', d.message().slice(0, 200));
     d.accept();
   });
-  page.on('console', (m) => {
-    if (m.type() === 'error') {
-      console.log('  (console.error: ' + m.text().slice(0, 200) + ')');
-    }
-  });
   console.log('edit-effects-explainer — click effect chip → popover → dismiss');
 
   try {

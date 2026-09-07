@@ -97,11 +97,6 @@ async function openServicePopover(page, fnHash) {
   // Swallow the :process rejection alert from Phase A — we never click
   // Save, but a stray click would pop one and stall the test.
   page.on('dialog', (d) => d.accept());
-  page.on('console', (m) => {
-    if (m.type() === 'error') {
-      console.log('  (console.error: ' + m.text().slice(0, 200) + ')');
-    }
-  });
   console.log('edit-branch-local — service picker + diff badge');
 
   try {

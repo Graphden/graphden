@@ -34,11 +34,6 @@ async function cleanup(page) {
     console.log('  [dialog]:', d.message().slice(0, 200));
     d.accept();
   });
-  page.on('console', (m) => {
-    if (m.type() === 'error') {
-      console.log('  (console.error: ' + m.text().slice(0, 200) + ')');
-    }
-  });
   console.log('edit-free-arg-strip — unbound slot → placeholder-binder + chooser');
 
   try {

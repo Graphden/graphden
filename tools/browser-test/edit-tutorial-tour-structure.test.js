@@ -24,11 +24,6 @@ const {
 
 (async () => {
   const {browser, page} = await newContext(chromium);
-  page.on('console', (m) => {
-    if (m.type() === 'error') {
-      console.log('  (console.error: ' + m.text().slice(0, 200) + ')');
-    }
-  });
   // Lesson 05's "remove this binding" step fires a native confirm().
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
   console.log('edit-tutorial-tour-structure — lessons 03 / 05 / 06 / 07 / 08');

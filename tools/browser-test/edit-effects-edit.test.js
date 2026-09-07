@@ -93,11 +93,6 @@ async function gotoProbe(page) {
 (async () => {
   const {browser, page} = await newContext(chromium);
   page.on('dialog', (d) => { d.accept(); });
-  page.on('console', (m) => {
-    if (m.type() === 'error') {
-      console.log('  (console.error: ' + m.text().slice(0, 200) + ')');
-    }
-  });
   console.log('edit-effects-edit — declared-effects form roundtrip');
 
   try {

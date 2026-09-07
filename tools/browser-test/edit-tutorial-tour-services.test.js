@@ -15,11 +15,6 @@ const {
 
 (async () => {
   const {browser, page} = await newContext(chromium);
-  page.on('console', (m) => {
-    if (m.type() === 'error') {
-      console.log('  (console.error: ' + m.text().slice(0, 200) + ')');
-    }
-  });
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
   console.log('edit-tutorial-tour-services — lesson 35');
   let failed = false;

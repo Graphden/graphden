@@ -69,11 +69,6 @@ async function openTypeCreate(page, nsName) {
     console.log('  [dialog]:', d.message().slice(0, 200));
     d.accept();
   });
-  page.on('console', (m) => {
-    if (m.type() === 'error') {
-      console.log('  (console.error: ' + m.text().slice(0, 200) + ')');
-    }
-  });
   console.log('edit-type-create — kind tabs + refinement create + cancel');
 
   try {

@@ -46,11 +46,6 @@ const EXPECTED_PATH = ('auto/fill/probe/name' + RUN_ID).replace(/-/g, '/');
     console.log('  [dialog]:', d.message().slice(0, 200));
     d.accept();
   });
-  page.on('console', (m) => {
-    if (m.type() === 'error') {
-      console.log('  (console.error: ' + m.text().slice(0, 200) + ')');
-    }
-  });
   console.log('edit-secrets-panel — sidebar section + new-secret form + error path');
 
   try {

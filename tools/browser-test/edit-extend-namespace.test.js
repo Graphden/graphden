@@ -59,11 +59,6 @@ async function openExtendPopover(page, ownerName) {
 (async () => {
   const {browser, page} = await newContext(chromium);
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  page.on('console', (m) => {
-    if (m.type() === 'error') {
-      console.log('  (console.error: ' + m.text().slice(0, 200) + ')');
-    }
-  });
   console.log('edit-extend-namespace — "in <ns>" defaults + in-use ns-move');
   let failed = false;
 

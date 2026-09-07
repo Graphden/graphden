@@ -41,11 +41,6 @@ async function popoverVisible(page) {
 
 (async () => {
   const {browser, page} = await newContext(chromium);
-  page.on('console', (m) => {
-    if (m.type() === 'error') {
-      console.log('  (console.error: ' + m.text().slice(0, 200) + ')');
-    }
-  });
   console.log('edit-row-actions-pin — toggle / outside-click / Escape dismiss');
 
   try {

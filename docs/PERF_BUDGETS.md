@@ -272,7 +272,8 @@ retry", always a different innocent file (`edit-execute` ×3, `edit-fn-picker`,
 landing is a coin flip at ~40 minutes a throw.
 
 The obvious suspect was a compiled-registry full-clear: it makes the next request
-rebuild the whole graph (49.8 s at 4137 fns), which would time a test out at 10 s
+rebuild the whole graph (49.8 s at 4137 fns in 2026-07; ~5 s at 6.5k fns today),
+which would time a test out at 10 s
 and let the retry through ten seconds later. That is the exact shape of the
 symptom.
 

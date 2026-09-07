@@ -268,6 +268,12 @@
     ;; mutates `:service`. Callback closes over the lock-augmented
     ;; ctx so per-NOTIFY reconciles use the same advisory-lock path
     ;; as boot.
+    ;; Pin the branches with a running service: the router's heal and
+    ;; idle sweep refresh those ctxs in place instead of dropping them,
+    ;; so a service keeps running on the ctx the router serves.
+    (br/set-pinned-branches-fn!
+      #(into #{} (keep (fn [e] (when (map? e) (:branch-id e))))
+             (vals @recon/running)))
     (let [callback (when notify-listener
                      (pg-notify/register! notify-listener (on-notify ctx reconcile!)))
           ticker (start-reconcile-ticker! ctx reconcile! (or reconcile-period-ms 15000))]
@@ -282,6 +288,7 @@
 (defmethod ig/halt-key! :exec/service-reconciler
   [_ {:keys [running context notify-listener notify-callback ticker stop-all-fn]}]
   (log/info "Stopping service reconciler...")
+  (br/set-pinned-branches-fn! nil)
   (when ticker
     (java.util.concurrent.ExecutorService/.shutdown ^java.util.concurrent.ExecutorService ticker)
     (try (java.util.concurrent.ExecutorService/.awaitTermination

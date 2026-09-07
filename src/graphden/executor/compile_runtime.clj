@@ -160,7 +160,7 @@
    :list-items}`), and `invalidate-graph-cache!` splices it immediately
    before calling us. Re-reading all of it out of Postgres to recompile a
    handful of fns is the single most expensive thing on the write path:
-   measured at 4137 fns, a `:fn` create spent 477 ms of its 918 ms right
+   measured at 4137 fns (2026-07), a `:fn` create spent 477 ms of its 918 ms right
    here, with a blast radius of one fn; on the cloud, where the database
    is a network away, the same read was 1.7 s of a 1.85 s merge
    (2026-09-03) — and it ran on EVERY write there, because this used to
@@ -461,7 +461,8 @@
 (defonce ^:private full-compile-semaphore
   ;; Process-wide bound on CONCURRENT full compiles. A full read-graph +
   ;; compile-all holds the whole graph, its lookups AND the new registry
-  ;; live at once (measured 49.8 s at 4137 fns) — and nothing used to stop
+  ;; live at once (49.8 s at 4137 fns in 2026-07; ~5 s at 6.5k fns today) —
+  ;; and nothing used to stop
   ;; several of them running together: the per-branch build monitor dedupes
   ;; one branch only, so two cold branches, or a cold-branch build racing
   ;; the epoch heal's `heal-stale-ctxs!`, each ran their own compile-all.
@@ -618,7 +619,8 @@
     (do
       ;; The expensive outcome, counted where it actually happens rather than at
       ;; the call site — a caller can ask for a delta and still land here (see
-      ;; `delta-recompile!`'s fallback). Measured at 4137 fns: 49.8 s.
+      ;; `delta-recompile!`'s fallback). 49.8 s at 4137 fns in 2026-07; ~5 s
+      ;; at 6.5k fns today.
       (counters/count! :registry/rebuild)
       (call-with-invalidation-lock
         ctx
@@ -659,7 +661,8 @@
   "Kick a single background stale-while-revalidate for `ctx` when its
    `:registry-stale?` flag is set and none is already running. This is the
    availability contract for the request-path full clear: the gate keeps
-   returning the STALE registry (never blocks behind a ~50s cold compile),
+   returning the STALE registry (never blocks behind a cold compile — ~5 s
+   today, 49.8 s in 2026-07),
    and this refreshes it off-thread. Coalesced via the ctx's
    `:registry-rebuild-inflight` CAS guard, so N concurrent requests that
    observe the flag still spawn only one rebuild.
@@ -940,7 +943,7 @@
         (do
           ;; Serve the current registry immediately. If a full clear flagged
           ;; it stale, revalidate in the BACKGROUND — a reader never blocks
-          ;; behind the ~50s cold compile. Coalesced (a no-op once one is in
+          ;; behind the cold compile (~5 s today). Coalesced (a no-op once one is in
           ;; flight), so this is cheap on the hot path.
           (when (some-> (:registry-stale? ctx) deref)
             (maybe-schedule-revalidate! ctx))

@@ -60,6 +60,14 @@ async function freshContext() {
 
 
 (async () => {
+  // Auth-off stacks (the isolated wt stack boots with no admin token) have
+  // no lock flow to exercise: /api/auth/check answers 200 to a tokenless
+  // GET. Skip cleanly instead of timing out on a popover that never opens.
+  const probe = await fetch(BASE + '/api/auth/check').catch(() => null);
+  if (probe && probe.status === 200) {
+    console.log('SKIP: auth is off on this stack (tokenless /api/auth/check → 200)');
+    process.exit(0);
+  }
   const {browser, page} = await freshContext();
   page.on('dialog', (d) => {
     console.log('  [dialog]:', d.message().slice(0, 200));

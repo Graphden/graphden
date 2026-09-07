@@ -735,4 +735,21 @@
         (swap! (:handlers router) assoc :stale2 {:ctx {} :last-used old})
         (binding [br/*ctx-idle-sweep-period-ms* (* 60 60 1000)]
           (#'br/evict-idle-ctxs! router)
-          (is (contains? @(:handlers router) :stale2)))))))
+          (is (contains? @(:handlers router) :stale2))))
+      (testing "a pinned branch (running service) is never swept, however idle"
+        (swap! (:handlers router) assoc :svc {:ctx {} :last-used old})
+        (br/set-pinned-branches-fn! (fn [] #{:svc}))
+        (try
+          (reset! (:idle-sweep router) 0)
+          (#'br/evict-idle-ctxs! router)
+          (is (contains? @(:handlers router) :svc) "pinned stays")
+          (is (not (contains? @(:handlers router) :stale2)) "unpinned idle goes")
+          (finally (br/set-pinned-branches-fn! nil))))
+      (testing "a throwing seam counts as no pins"
+        (swap! (:handlers router) assoc :stale3 {:ctx {} :last-used old})
+        (br/set-pinned-branches-fn! (fn [] (throw (ex-info "boom" {}))))
+        (try
+          (reset! (:idle-sweep router) 0)
+          (#'br/evict-idle-ctxs! router)
+          (is (not (contains? @(:handlers router) :stale3)))
+          (finally (br/set-pinned-branches-fn! nil)))))))

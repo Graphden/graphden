@@ -175,7 +175,8 @@
 
      `#{}` used to fall into the full clear, and the full clear drops
      the compiled registry — so the next request rebuilt the whole
-     graph. At 4137 fns that cost 49.8 s, against 14 ms either side.
+     graph. At 4137 fns (2026-07) that cost 49.8 s, against 14 ms either
+     side; a cold compile is ~5 s at 6.5k fns today, still 300× a read.
 
    Both paths re-register type-aliases from storage so newly-created
    types are resolvable to the type-checker without a server
@@ -239,7 +240,7 @@
                         ;; WARM: keep serving the stale registry, flag it for
                         ;; revalidation. The gate rebuilds it in the background
                         ;; (`rebuild-optimistic!`) — no request ever blocks behind
-                        ;; a ~50s cold compile on this ctx. See the ctx-atom
+                        ;; a cold compile on this ctx (~5 s today; 49.8 s in 2026-07). See the ctx-atom
                         ;; comment in `make-execution-context`.
                         (reset! stale? true)
                         ;; COLD (never compiled, e.g. boot / cold branch) or a
@@ -255,13 +256,14 @@
      ;;
      ;; The distinction is worth its own branch because the full clear drops the
      ;; compiled registry, and then the NEXT request rebuilds the entire graph.
-     ;; Measured at 4137 fns: create one slot, and the next request took 49.8 s;
-     ;; one namespace, 49.6 s. Reads either side of it, 14 ms. Both of those
+     ;; Measured at 4137 fns (2026-07): create one slot, and the next request took 49.8 s;
+     ;; one namespace, 49.6 s (a cold compile is ~5 s at 6.5k fns today). Reads
+     ;; either side of it, 14 ms. Both of those
      ;; writes used to land here, and every type-editing test creates slots.
      (if (and (some? changed-fn-ids) (empty? changed-fn-ids))
        ;; This counter IS the regression test for 0b74f1dc. The branch it guards
        ;; is invisible from outside — the write succeeds either way, and the only
-       ;; evidence it went wrong is 49.8 s appearing on some LATER request, on a
+       ;; evidence it went wrong is a cold compile appearing on some LATER request, on a
        ;; box that will be blamed for being busy. A count of skips that drops to
        ;; zero says the `#{}` answer stopped being honoured, immediately and on
        ;; any hardware.
@@ -429,7 +431,7 @@
       (assoc :loaded-roots (atom #{}))
       ;; Availability: stale-while-revalidate for the request-path full clear.
       ;; A full clear (nil-seed write, migration) used to nil `:compiled-registry`,
-      ;; so the next request ran the ~50s cold `rebuild!` UNDER the invalidation
+      ;; so the next request ran the cold `rebuild!` (49.8 s then, ~5 s today) UNDER the invalidation
       ;; lock and every concurrent request on this ctx blocked behind it (the
       ;; pod-wide hang). Instead we KEEP the (now stale) registry, flip
       ;; `:registry-stale?`, and let the gate serve stale while a background

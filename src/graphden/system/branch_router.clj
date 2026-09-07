@@ -803,6 +803,35 @@
             (log/warn e "graph-epoch heal: ctx rebuild failed")))))))
 
 
+(defonce ^:private pinned-branches-fn
+  ;; Seam: `(fn [] #{branch-id …})` — the branches whose cached ctx must
+  ;; NOT be dropped by a heal or the idle sweep. Registered by the
+  ;; service reconciler (`init/services`): a running per-branch service
+  ;; holds its ctx by reference, so dropping the router's entry left the
+  ;; service on a registry nobody refreshes while every request built a
+  ;; second, divergent ctx for the same branch (2026-09-07). nil = no pins.
+  (atom nil))
+
+
+(defn set-pinned-branches-fn!
+  "Install (or clear, with nil) the pinned-branches seam — see
+   `pinned-branches-fn`."
+  [f]
+  (reset! pinned-branches-fn f))
+
+
+(defn- pinned-branches
+  "The set of branch ids whose ctx a heal refreshes in place and the idle
+   sweep leaves alone; empty when no seam is registered or it throws."
+  []
+  (or (when-let [f @pinned-branches-fn]
+        (try (set (f))
+             (catch Exception e
+               (log/warn e "pinned-branches seam failed; treating as none")
+               nil)))
+      #{}))
+
+
 (defn- heal-stale-ctxs!
   "An epoch in (w, global] is neither locally-noted nor NOTIFY-covered:
    somebody's write reached the DB without this pod applying its
@@ -845,15 +874,23 @@
               refresh! (fn [bid entry]
                          (heal-refresh-entry! router base default-branch-id
                                               bid entry))
+              pinned (pinned-branches)
               work (fn []
                      (when-let [e (get snap default-branch-id)]
                        (refresh! default-branch-id e))
                      ;; Every non-base entry — the snapshot's AND those
                      ;; installed while the base rebuilt (they copied the
                      ;; pre-swap base) — is dropped; its next request
-                     ;; rebuilds it against the fresh base.
+                     ;; rebuilds it against the fresh base. PINNED entries
+                     ;; (a branch with a running service) are refreshed in
+                     ;; place instead: the service holds that ctx by
+                     ;; reference, so dropping it would strand the service
+                     ;; on a stale registry while requests built another.
                      (doseq [bid (keys @handlers)]
-                       (when (not= bid default-branch-id) (invalidate! router bid))))
+                       (when (not= bid default-branch-id)
+                         (if (contains? pinned bid)
+                           (when-let [e (get @handlers bid)] (refresh! bid e))
+                           (invalidate! router bid)))))
               ;; Convey ONLY the test-isolation registry overrides onto the
               ;; heal thread — NOT bound-fn* (that would drag per-request
               ;; bindings like the tenant org into a background rebuild).
@@ -903,7 +940,15 @@
           (let [statuses (epoch/classify-range base w global *epoch-heal-grace-ms*)]
             (cond
               (or (:foreign statuses) (:aborted statuses))
-              (heal-stale-ctxs! router base global)
+              (do
+                ;; WHY — an aborted epoch names the entity whose write
+                ;; never reached its note (a missing call site, or a
+                ;; write that outlived the grace); a foreign one is a
+                ;; sibling pod's write this pod's NOTIFY missed.
+                (log/info "graph-epoch heal reason"
+                          (assoc (epoch/explain-range base w global *epoch-heal-grace-ms*)
+                                 :watermark w :global global))
+                (heal-stale-ctxs! router base global))
 
               (:pending statuses)
               nil ; eager invalidations in flight — check again next TTL
@@ -932,8 +977,9 @@
 
 
 (defn- evict-idle-ctxs!
-  "Drop every non-default cached ctx whose `:last-used` is older than
-   `*ctx-idle-ttl-ms*`. At most once per `*ctx-idle-sweep-period-ms*`
+  "Drop every non-default, non-pinned cached ctx whose `:last-used` is
+   older than `*ctx-idle-ttl-ms*` (a branch with a running service is
+   pinned — its idle ctx is the service's ctx). At most once per `*ctx-idle-sweep-period-ms*`
    (a CAS on the router's `:idle-sweep` stamp keeps concurrent requests
    from repeating the walk); routers built without the stamp (test
    stubs) never sweep."
@@ -943,10 +989,12 @@
           prev @idle-sweep]
       (when (and (> (- now prev) *ctx-idle-sweep-period-ms*)
                  (compare-and-set! idle-sweep prev now))
-        (doseq [[bid entry] @handlers]
-          (when (and (not= bid default-branch-id)
-                     (> (- now (or (:last-used entry) now)) *ctx-idle-ttl-ms*))
-            (invalidate! router bid)))))))
+        (let [pinned (pinned-branches)]
+          (doseq [[bid entry] @handlers]
+            (when (and (not= bid default-branch-id)
+                       (not (contains? pinned bid))
+                       (> (- now (or (:last-used entry) now)) *ctx-idle-ttl-ms*))
+              (invalidate! router bid))))))))
 
 
 (defn entry-for
@@ -1305,7 +1353,7 @@
 ;; Static liveness path — the ONE endpoint that must answer WITHOUT the
 ;; compiled registry. Every other route (including `/health`) is an
 ;; `app.routes` graph fn reached through `ring-callable-for-ctx` →
-;; `cr/registry` below, so while a pod runs a full recompile (~50 s, holding
+;; `cr/registry` below, so while a pod runs a full recompile (seconds — ~5 s today, 49.8 s in 2026-07 — holding
 ;; the ctx invalidation lock) they all block. A k8s livenessProbe / Docker
 ;; HEALTHCHECK pointed at such a path would kill a busy-but-alive pod, discard
 ;; its in-flight compile, and force a cold boot (~115 s) — a slower outage than

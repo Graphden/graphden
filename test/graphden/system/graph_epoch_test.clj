@@ -163,6 +163,48 @@
       (finally (sp/close base)))))
 
 
+(deftest heal-refreshes-a-pinned-branch-ctx-in-place-test
+  ;; A branch with a RUNNING service is pinned (the reconciler registers
+  ;; the seam): its ctx is the service's ctx, held by reference. A heal
+  ;; that dropped it left the service on a registry nobody refreshed
+  ;; while every request built a second, divergent ctx for the same
+  ;; branch. Pinned entries rebuild in place like the base; the rest
+  ;; still drop; a pinned id whose branch row is gone still drops.
+  (let [base (storage)
+        v (vs/wrap-with-versioning base)
+        rebuilt (atom [])]
+    (try
+      (binding [br/*epoch-state-override* (fresh-state)
+                br/*epoch-check-ttl-ms* 0
+                br/*epoch-heal-sync?* true
+                epoch/*request-bump-log* (atom [])
+                cr/*impl-override* {:rebuild-optimistic! (fn [c _] (swap! rebuilt conj (:x c)) true)
+                                    :rebuild! (fn [c] (swap! rebuilt conj (:x c)))}]
+        (let [main-id (vs/current-branch-id v)
+              svc-id (:id (sp/create-entity base :branch
+                                            {:name "svc-branch"
+                                             :created-at (java.time.Instant/now)}))
+              other-id (random-uuid)
+              gone-id (random-uuid)
+              router (router-over v {main-id {:ctx {:x :main} :handler :h}
+                                     svc-id {:ctx {:x :svc} :handler :h}
+                                     other-id {:ctx {:x :other} :handler :h}
+                                     gone-id {:ctx {:x :gone} :handler :h}})]
+          (br/set-pinned-branches-fn! (fn [] #{svc-id gone-id}))
+          (try
+            (foreign-bump! base)
+            (br/handler-for router nil)
+            (is (= #{:main :svc} (set @rebuilt))
+                "the base AND the pinned branch rebuild in place")
+            (is (contains? @(:handlers router) svc-id) "the pinned entry stays")
+            (is (not (contains? @(:handlers router) other-id))
+                "an unpinned branch still drops")
+            (is (not (contains? @(:handlers router) gone-id))
+                "a pinned id with no branch row drops (a deleted branch)")
+            (finally (br/set-pinned-branches-fn! nil)))))
+      (finally (sp/close base)))))
+
+
 (deftest pending-local-write-waits-not-heals-test
   ;; A young un-noted local bump (eager invalidation in flight) must
   ;; neither heal nor advance; once noted, the range advances quietly.

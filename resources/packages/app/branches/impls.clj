@@ -478,10 +478,16 @@
    open)."
   [branch-id write-policy]
   (cr/record-effect! :db)
+  ;; No graph-epoch bump here (nor in the other branch-row dials below):
+  ;; policy / require-merge / review-state / review-policy are read
+  ;; straight off the row on every use, nothing compiled or cached
+  ;; depends on them, and a bump nobody notes ages past grace into a
+  ;; spurious heal 45 s after every flip (the e2e suite's residual
+  ;; heals, 2026-09-07 — one per merge, from stage 2b's review-state
+  ;; clear, and one per propose / protect click).
   (let [policy (normalize-write-policy write-policy)]
     (sp/update-entity (branches/base-storage ctx) :branch branch-id
                       {:write-policy policy})
-    (epoch/bump! (branches/base-storage ctx) :branch)
     policy))
 
 
@@ -500,7 +506,6 @@
   (let [flag (boolean require-merge?)]
     (sp/update-entity (branches/base-storage ctx) :branch branch-id
                       {:require-merge? flag})
-    (epoch/bump! (branches/base-storage ctx) :branch)
     flag))
 
 
@@ -531,7 +536,6 @@
   (let [state (when proposed? "proposed")]
     (sp/update-entity (branches/base-storage ctx) :branch branch-id
                       {:review-state state})
-    (epoch/bump! (branches/base-storage ctx) :branch)
     state))
 
 
@@ -587,8 +591,7 @@
               (not (keep? approver-ids))
               (assoc :approver-ids (normalize-approver-ids approver-ids)))]
     (when (seq row)
-      (sp/update-entity (branches/base-storage ctx) :branch branch-id row)
-      (epoch/bump! (branches/base-storage ctx) :branch))
+      (sp/update-entity (branches/base-storage ctx) :branch branch-id row))
     (-> (sp/read-entity (branches/base-storage ctx) :branch branch-id)
         (select-keys [:required-approvals :allow-self-approval? :approver-ids]))))
 

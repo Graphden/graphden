@@ -109,8 +109,12 @@
                           pool [(str "SELECT nextval('" sequence-name "')")] {})
                         vals first)]
           (when (and v (:graph-epoch-local storage))
+            ;; `:entity` names the write for the heal's reason log —
+            ;; an un-noted bump that ages past grace is a missing note
+            ;; call site, and the entity is what finds it.
             (swap! (:graph-epoch-local storage)
-                   assoc v {:at (System/currentTimeMillis) :noted? false})
+                   assoc v {:at (System/currentTimeMillis) :noted? false
+                            :entity entity-name})
             (when *request-bump-log*
               (swap! *request-bump-log* conj v)))
           v)
@@ -147,6 +151,30 @@
   (when-let [covered (:graph-epoch-covered storage)]
     (when (seq vs)
       (swap! covered into vs))))
+
+
+(defn explain-range
+  "Diagnostic companion to `classify-range` for the heal's reason log:
+   the `:aborted` epochs with the entity that bumped them and their age,
+   and the `:foreign` epochs (values only). Bounded like the classifier
+   — a range wider than 512 reports just its width."
+  [storage w global grace-ms]
+  (if (> (- global w) 512)
+    {:width (- global w)}
+    (let [local @(:graph-epoch-local storage)
+          covered @(:graph-epoch-covered storage)
+          now (System/currentTimeMillis)]
+      (reduce (fn [acc e]
+                (if-let [{:keys [at noted? entity]} (get local e)]
+                  (if (or noted? (<= (- now at) grace-ms))
+                    acc
+                    (update acc :aborted (fnil conj [])
+                            {:epoch e :entity entity :age-ms (- now at)}))
+                  (if (contains? covered e)
+                    acc
+                    (update acc :foreign (fnil conj []) e))))
+              {}
+              (range (inc w) (inc global))))))
 
 
 (defn classify-range

@@ -102,8 +102,8 @@ fns.
 Where that leaves the two audiences:
 
 - **Production:** the 17 full-clears are the only real target, and each
-  is worth real money — measured at 4137 fns, the next request after one
-  takes ~49.8 s. Finding *which* call sites they are needs a per-caller
+  is worth real money — measured at 4137 fns (2026-07), the next request
+  after one took ~49.8 s; a cold compile is ~5 s at 6.5k fns today. Finding *which* call sites they are needs a per-caller
   breakdown; `affected-fn-ids` covers every entity type today, so they
   are coming from somewhere else (a write whose `entity-data` lacked an
   `:id`, or one of the direct 1-arity callers in `system/init/services`,

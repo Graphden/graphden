@@ -15,7 +15,7 @@ const ORIG = 'test-fn-rename-orig';
 const NEW = 'test-fn-rename-new';
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('fn-rename — Phase 1: rename via root card pencil');
   try {
     await deleteFnByName(page, ORIG);
@@ -30,7 +30,6 @@ const NEW = 'test-fn-rename-new';
     const fn = (await getEntities(page, ORIG)).fns.find(f => f.name === ORIG);
     assert(fn, 'test fn created');
 
-    await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + ORIG);
     await page.waitForFunction(
       () => graphReady()

@@ -505,10 +505,16 @@ function renderSingleFnRow(line, levelInfo, ctx) {
       badge.className = 'service-badge service-badge-' + state;
       badge.textContent = '●';
       const stateLabels = {
-        running:  'Running as a service',
-        failed:   'Service start failed — exhausted retries',
-        disabled: 'Service declared but disabled',
-        pending:  'Service enabled but not yet running — reconcile to start',
+        running:   'Running as a service',
+        failed:    'Service start failed — exhausted retries',
+        backoff:   'Service exited — restart backing off'
+                   + (svc.running?.['next-attempt-at']
+                      ? ', next attempt at ' + String(svc.running['next-attempt-at']).slice(11, 19) + ' UTC'
+                      : ''),
+        exited:    'Service exited — its restart policy leaves it stopped',
+        elsewhere: 'Service running on another executor (lock held elsewhere)',
+        disabled:  'Service declared but disabled',
+        pending:   'Service enabled but not yet running — reconcile to start',
       };
       badge.title = stateLabels[state] + '. Click for settings.';
       badge.setAttribute('role', 'button');

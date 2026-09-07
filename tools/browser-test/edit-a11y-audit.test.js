@@ -169,11 +169,10 @@ const CONTRAST = (opts) => {
 
 (async () => {
   await waitForServerHealthy();
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('edit-a11y-audit — structural invariants across the editor');
 
   try {
-    await page.goto('about:blank');
     await page.goto(BASE + '/#' + PROBE_FN);
     await page.waitForFunction(() => graphReady() && !graph.animating,
                                null, {timeout: 20000, polling: 100});

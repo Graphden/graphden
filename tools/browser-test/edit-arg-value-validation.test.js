@@ -19,7 +19,7 @@ const {assert, newContext, api, getEntities, synthArgs, deleteFnByName, waitFor}
 const TEST_NAME = 'test-arg-value-validation';
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('arg-value-validation — backend guard + live ✓/✗');
   try {
     await deleteFnByName(page, TEST_NAME);
@@ -103,7 +103,6 @@ const TEST_NAME = 'test-arg-value-validation';
 
     // === Editor live ✓/✗ ===
 
-    await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
     await page.waitForFunction(
       () => graphReady()

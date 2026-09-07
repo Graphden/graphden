@@ -17,7 +17,7 @@ const {assert, newContext} = require('./edit-test-helpers');
 const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('edit-redesign-shell — rail / inspector / workspace / details toggle');
 
   try {

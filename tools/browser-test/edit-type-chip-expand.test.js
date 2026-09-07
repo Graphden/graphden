@@ -26,7 +26,7 @@ const TARGET_FN = 'assoc-fn';
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('edit-type-chip-expand — inline expand panel + provenance popover');
 
   try {

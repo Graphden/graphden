@@ -46,7 +46,7 @@
   "Top-level fn-def keys in reading order; unlisted keys follow,
    alphabetically."
   [:name :description :parent :parents :args :input :type :refine :list
-   :variants :tuple :fn-type :marker :return-type :expects-effects
+   :variants :tuple :fn-type :marker :return-type :return-type-wide? :expects-effects
    :lambda-params :branch-local?])
 
 

@@ -22,7 +22,7 @@ const {assert, newContext, nodeApi} = require('./edit-test-helpers');
 const BRANCH = 'stale-recovery-probe';
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
   let failed = false;
   try {

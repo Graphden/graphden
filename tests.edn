@@ -18,7 +18,10 @@
    ;; it counts into the same process-global counters this run reports — leaving
    ;; it in would both slow the suite and inflate its own numbers.
    :skip-meta [:integration :container-e2e :perf]
-   :kaocha/parallelism 8}
+   ;; 8 → 6 (2026-09-07): on the 12 GB dev host the unit phase at 8 ran
+   ;; the box to the memory floor (the harness killed unrelated waiters
+   ;; twice during gates); 6 costs a little wall time and keeps headroom.
+   :kaocha/parallelism 6}
 
   ;; Integration tests — run against the shared PG container. Each NS
   ;; fixture is scoped to its OWN logical DB on the cluster (see

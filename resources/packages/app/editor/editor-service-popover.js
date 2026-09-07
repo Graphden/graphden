@@ -201,16 +201,26 @@ function serviceNsIds() {
 
 
 // Render-state classifier used by the badge. Returns one of:
-//   'running'  — stopper-set + no give-up
-//   'failed'   — start-failed-at recorded
-//   'disabled' — :enabled? false (admin parked the row)
-//   'pending'  — enabled but not yet started (no running entry)
+//   'running'   — a live copy (stopper-set, or the reconciler says so)
+//   'failed'    — start-failed-at recorded / retries exhausted
+//   'backoff'   — exited in place; the restart is delayed (state from
+//                 `running.state`, next attempt in `next-attempt-at`)
+//   'exited'    — exited in place; the restart policy leaves it down
+//   'elsewhere' — another executor holds its lock (not-our-lock)
+//   'disabled'  — :enabled? false (admin parked the row)
+//   'pending'   — enabled but not yet started (no running entry)
+// The three middle states arrive via the reconciler's verdict
+// (`running.state`); before it, every placeholder read as 'pending'.
 function serviceBadgeState(svc) {
   if (!svc) return null;
   if (!svc['enabled?']) return 'disabled';
   const r = svc.running;
-  if (r?.['start-failed-at']) return 'failed';
-  if (r?.['stopper-set?']) return 'running';
+  const verdict = r?.state;
+  if (verdict === 'backoff') return 'backoff';
+  if (verdict === 'exited') return 'exited';
+  if (verdict === 'not-our-lock') return 'elsewhere';
+  if (r?.['start-failed-at'] || verdict === 'start-failed') return 'failed';
+  if (r?.['stopper-set?'] || verdict === 'running') return 'running';
   return 'pending';
 }
 

@@ -27,7 +27,7 @@ const {assert, newContext} = require('./edit-test-helpers');
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('edit-types-lens — unloaded type-bearing namespaces stay visible');
 
   try {

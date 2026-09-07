@@ -70,7 +70,11 @@
    :args {:map :_ring-response--w-headers
           :key {:value :body}
           :value {:as :body :type :text}}
-   :return-type :ring-response-shape}
+   ;; The alias IS the response contract (`:body :any` — bytes and
+   ;; streams are responses too); this builder's text body is one
+   ;; instance of it, not a tighter contract.
+   :return-type :ring-response-shape
+   :return-type-wide? true}
 
   {:name :ring-bytes-response
    :description "`:ring-response` for a BINARY body — the same status + headers builder, `:body` typed `:any` so a byte array from `:read-resource-bytes` fits (the encode wrap skips non-compressible content-types; the immutable-response cache replays a byte array verbatim). Set `Content-Type` yourself."

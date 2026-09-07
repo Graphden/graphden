@@ -16,7 +16,7 @@ const {assert, newContext, api, getEntities, synthArgs, deleteFnByName} =
 const TEST_NAME = 'test-arg-type-flip';
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('arg-type-flip — Phase 2: type chip → <select> → save');
   try {
     await deleteFnByName(page, TEST_NAME);
@@ -38,7 +38,6 @@ const TEST_NAME = 'test-arg-type-flip';
       a => a['fn-id'] === fn.id && a['slot-id'] === stringArg['slot-id']);
     assert(arg && arg.value === 'hello', ':string="hello" seeded');
 
-    await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
     await page.waitForFunction(
       () => graphReady()

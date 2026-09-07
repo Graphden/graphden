@@ -74,7 +74,12 @@ async function waitForServerHealthy(deadlineMs = 60000) {
 //   /dev/shm for Chrome's shared memory. Default /dev/shm in
 //   docker / minimal Linux is 64 MB; under heavy DOM mutation
 //   that's exhausted in seconds and Chrome OOM-kills the tab.
-async function newContext(chromium) {
+// `opts.boot` (default true): navigate to BASE and settle the editor shell
+// before returning. Tests that seed data over the API and then boot the
+// editor on `#probe` themselves pass `{boot: false}` — the first boot was
+// pure waste (its fetches were aborted by the test's own navigation; 23
+// files did that, one editor boot each per run).
+async function newContext(chromium, opts = {}) {
   const browser = await chromium.launch({
     headless: true,
     args: [
@@ -268,6 +273,7 @@ async function newContext(chromium) {
   // test dies on `TypeError: Failed to fetch`. The cost is at
   // most ~30s during a cold-start window, ~500ms otherwise.
   await waitForServerHealthy();
+  if (opts.boot === false) return { browser, page };
   await page.goto(BASE + '/');
   // Wait for the editor shell to exist rather than for a fixed slice of
   // time: on the loaded gate stack 300ms was sometimes short, and every

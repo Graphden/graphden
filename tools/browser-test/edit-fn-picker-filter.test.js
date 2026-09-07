@@ -13,7 +13,7 @@ const {assert, newContext, api, getEntities, synthArgs, deleteFnByName} =
 const TEST_NAME = 'test-fn-picker-filter';
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('fn-picker-filter — type-compatible candidates float + ✓');
   try {
     await deleteFnByName(page, TEST_NAME);
@@ -37,7 +37,6 @@ const TEST_NAME = 'test-fn-picker-filter';
     // every inheriting child). The legacy "POST inheriting arg"
     // step the old test had here is gone.
 
-    await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
     // Wait for cytoscape and the unset-placeholder overlay (which
     // is what the next step actually targets).

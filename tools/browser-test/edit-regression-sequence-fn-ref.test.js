@@ -28,7 +28,7 @@ const STR_FN = 'test-regr-seq-str';
 const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 
 (async () => {
-  const { browser, page } = await newContext(chromium);
+  const { browser, page } = await newContext(chromium, {boot: false});
   console.log('regression — :sequence slot bound to a fn-ref must produce an edge');
   try {
     // The str fn refs the list fn, so it has to go first.
@@ -74,7 +74,6 @@ const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
       (b) => b['fn-id'] === strFn.id && b['ref-fn-id'] === listFn.id);
     assert(refBinding, 'the sequence-slot ref binding is in storage');
 
-    await page.goto('about:blank');
     await page.goto(BASE + '/#' + STR_FN);
     await page.waitForFunction(
       () => graphReady() && !!document.querySelector('button.more-actions-trigger')

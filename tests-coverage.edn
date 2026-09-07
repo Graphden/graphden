@@ -34,7 +34,7 @@
    ;; a stable "4 errors, 35 failures" under cloverage that the
    ;; workflow's un-pipefail'd `| tee` then swallowed for days.
    :skip-meta [:integration :container-e2e :perf]
-   :kaocha/parallelism 8}]
+   :kaocha/parallelism 6}]
 
  :plugins [:kaocha.plugin/profiling
            :kaocha.plugin/parallel

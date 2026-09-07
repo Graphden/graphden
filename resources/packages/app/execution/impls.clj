@@ -162,6 +162,19 @@
 ;; Used by the editor's "Only services" sidebar filter, the
 ;; "Make service" row-actions popover, and the per-fn service badge.
 
+(defbase running-state
+  "Atomic library boundary — the reconciler's verdict on `service-id`
+   (`recon/running-state`) as JSON-safe text: `{:state
+   \"running\"|\"start-failed\"|\"exited\"|\"backoff\"|\"not-our-lock\"|\"pending\"
+   :next-attempt-at iso|nil}`. Rides on `:enrich-running` next to the
+   raw entry fields so the badge and popover can name WHY a service is
+   not running."
+  [service-id]
+  (let [{:keys [state next-attempt-at]} (recon/running-state recon/running service-id)]
+    {:state (name state)
+     :next-attempt-at (some-> next-attempt-at str)}))
+
+
 (defbase running-entry
   "Atomic library boundary — pull the per-service entry off the
    reconciler's `@running` atom by `:service-id`. Returns the raw
@@ -333,6 +346,7 @@
    :resolve-fn-version-id      resolve-fn-version-id
    :_reconcile-services-apply  _reconcile-services-apply
    :running-entry              running-entry
+   :running-state              running-state
    :fn-stats-raw fn-stats-raw
    :usage-org-summary usage-org-summary
    :usage-org-daily usage-org-daily

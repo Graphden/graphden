@@ -475,8 +475,7 @@
    :parent :if
    :args {:test :_pub-fns-empty?
           :then :_pub-err-empty
-          :else :_pub-compat-checked}
-   :return-type :keyword-map}
+          :else :_pub-compat-checked}}
 
   ;; ---------------------------------------------------------------------
   ;; Registry primitives — the base-fn cores the fork / materialize /
@@ -639,8 +638,7 @@
   {:name :list-package-versions
    :description "All published package versions as a registry index — metadata only (name, version, ns-root, content-hash, published-at, fn-count, dependencies); omits the heavy :fns bundle. Pure graph composition over `:query-entities` + a HOF reshape."
    :parent :map
-   :args {:func :_pkg-index-entry :coll :_pkg-index-rows}
-   :return-type [:list :keyword-map]}
+   :args {:func :_pkg-index-entry :coll :_pkg-index-rows}}
 
   {:name :_list-packages-result
    :parent :list-package-versions}
@@ -703,12 +701,13 @@
    :args {:test :_fpv-row-nil?
           :then {:value nil}
           :else :_fpv-decorated}
-   ;; DELIBERATELY wide (type-drift warns): the computed narrow form
+   ;; DELIBERATELY wide: the computed narrow form
    ;; ([:union :null {:id :text :published-at :text}]) is checker
    ;; imprecision — the :assoc chain loses the base row's bundle fields
    ;; (:name :version :fns …), which consumers genuinely read. Declaring
    ;; the computed shape would misdescribe the value.
-   :return-type :nullable-keyword-map}
+   :return-type :nullable-keyword-map
+   :return-type-wide? true}
 
   {:name :_fetch-pkg-name
    :description "`:name` path-param from /api/packages/:name/:version (reitit-enriched)."

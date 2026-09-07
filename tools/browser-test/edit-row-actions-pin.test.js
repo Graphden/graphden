@@ -40,7 +40,7 @@ async function popoverVisible(page) {
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('edit-row-actions-pin — toggle / outside-click / Escape dismiss');
 
   try {
@@ -54,7 +54,6 @@ async function popoverVisible(page) {
     await api(page, 'POST', '/api/entities/fn',
               'name=' + PROBE_FN + '&parent-ids=' + identity.id);
 
-    await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')
                     + '/#' + PROBE_FN);
     await page.waitForFunction(

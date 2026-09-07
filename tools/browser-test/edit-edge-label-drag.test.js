@@ -29,11 +29,10 @@ const DRAG_DX = 600;
 
 (async () => {
   await waitForServerHealthy();
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('edit-edge-label-drag — label anchors after the bend post-drag');
 
   try {
-    await page.goto('about:blank');
     await page.goto(BASE + '/#' + PROBE_FN);
     await page.waitForFunction(
       () => graphReady() && !graph.animating,

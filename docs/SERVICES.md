@@ -263,6 +263,15 @@ Port / resource conflicts surface as OS-level failures —
 `Address already in use` records `:start-failed-at` and shows up
 in the running-atom for the UI badge.
 
+What the editor shows comes from `:enrich-running` (`GET
+/api/services`): the raw entry fields plus the reconciler's verdict
+(`recon/running-state` → `:state` / `:next-attempt-at`), so every
+placeholder has a name — `running`, `start-failed`, `exited` (policy
+leaves it down), `backoff` (restart delayed; the next attempt time
+rides along), `not-our-lock` (another pod holds the slot; the badge
+says "elsewhere"), `pending` (nothing recorded yet). Before the
+verdict every placeholder rendered as "pending".
+
 ## Reconciler
 
 Lives in `graphden.services.reconciler`. Diff-driven, idempotent.

@@ -27,11 +27,10 @@ const TOL = 1.5;
 
 (async () => {
   await waitForServerHealthy();
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('edit-overlay-layer — one transformed layer, graph-coord overlays');
 
   try {
-    await page.goto('about:blank');
     await page.goto(BASE + '/#' + PROBE_FN);
     await page.waitForFunction(
       () => graphReady() && !graph.animating

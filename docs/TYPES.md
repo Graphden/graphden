@@ -1189,6 +1189,17 @@ when at least one fn-def has REAL drift (a computed effect not in
 its `:expects-effects`). Useful in CI as an audit gate without
 blocking on the more lenient sync-time WARN.
 
+**Return-type drift** is the same idea for `:return-type`: a declaration
+strictly wider than the computed return logs a sync-time WARN
+(`type-drift: fn-def … declares … but the computed return is strictly
+narrower`). Either tighten the declaration, or — when the wide contract
+is the point (the `:ring-response` family declares the shared
+`:ring-response-shape` whose `:body :any` also covers bytes and streams;
+`:fetch-package-version`'s computed shape is checker imprecision) — mark
+the fn-def `:return-type-wide? true`, which accepts it and silences the
+WARN. The marker is an authoring-time (fns.edn) key only; it is not a
+stored column.
+
 ---
 
 ## Implementation Phases

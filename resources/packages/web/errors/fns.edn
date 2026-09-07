@@ -80,4 +80,5 @@
           :body :_jer-json
           :envelope {:type :nullable-keyword-map
                      :description "The response envelope; :http-status (int, optional) selects the HTTP status. nil renders as an empty 200 body (a nil-returning primitive behind a guard unions :null into the computed type)."}}
-   :return-type :ring-response-shape}]}
+   :return-type :ring-response-shape
+   :return-type-wide? true}]}

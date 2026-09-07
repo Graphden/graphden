@@ -12,7 +12,7 @@ const { assert, newContext, api, getEntities, synthArgs, deleteFnByName } =
 const TEST_NAME = 'test-edit-phase5';
 
 (async () => {
-  const { browser, page } = await newContext(chromium);
+  const { browser, page } = await newContext(chromium, {boot: false});
   console.log('Phase 5 — sequence add/remove + empty-anchor');
   try {
     await deleteFnByName(page, TEST_NAME);
@@ -30,7 +30,6 @@ const TEST_NAME = 'test-edit-phase5';
     const created = (await getEntities(page, TEST_NAME)).fns.find(f => f.name === TEST_NAME);
     assert(created, 'test fn created');
 
-    await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
     // Wait for cytoscape + cards rendered and fit-animation drained.
     await page.waitForFunction(

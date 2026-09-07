@@ -430,6 +430,30 @@
            (fn [m] (into {} (remove (fn [[sid v]] (and (= ::backoff v) (contains? due sid)))) m)))))
 
 
+(defn running-state
+  "What THIS pod knows about service `sid`, for the UI —
+   `{:state kw :next-attempt-at Instant|nil}`:
+   `:running` (a live copy), `:start-failed` (retries exhausted; the
+   entry keeps `:start-failed-at`), `:exited` (exited in place, the
+   restart policy leaves it down), `:backoff` (exited in place, the
+   restart is delayed until `:next-attempt-at`), `:not-our-lock`
+   (another pod holds its slot), `:pending` (nothing recorded yet).
+   The four placeholders used to reach the editor as a bare
+   \"pending\" — a service parked in backoff looked like one that
+   never started."
+  [running-atom sid]
+  (let [e (get @running-atom sid)]
+    (cond
+      (map? e) {:state (if (:start-failed-at e) :start-failed :running)}
+      (= e ::backoff) {:state :backoff
+                       :next-attempt-at (some-> (get-in @exit-backoff [sid :until])
+                                                java.time.Instant/ofEpochMilli)}
+      (= e ::exited) {:state :exited}
+      (= e ::not-our-lock) {:state :not-our-lock}
+      (= e ::start-failed) {:state :start-failed}
+      :else {:state :pending})))
+
+
 (defn- check-liveness!
   "The per-tick liveness pass over this pod's running copies: heartbeat
    every live instance row; for a copy that died in place, release its

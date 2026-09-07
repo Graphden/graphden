@@ -34,7 +34,7 @@ async function cleanup(page) {
 }
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('problem-lenses — lint pair + failed run → /api/lint + /api/failures → chips, ns chips, row markers, lens focus');
   try {
     await cleanup(page);

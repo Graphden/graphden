@@ -17,7 +17,7 @@ const {assert, newContext} = require('./edit-test-helpers');
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('edit-fn-picker — popover / search filter / row click / dismiss');
 
   try {

@@ -26,7 +26,7 @@ async function typeErrorCount() {
 }
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('type-errors-panel — record → panel row + card badge → fix → empty');
   try {
     await deleteFnByName(page, TEST_NAME);
@@ -63,7 +63,6 @@ async function typeErrorCount() {
     // Reload: the context's page booted before the diagnostic existed, and a
     // hash-only goto keeps that document (and its tree counts).
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002') + '/#' + TEST_NAME);
-    await page.reload();
     await page.waitForFunction(
       () => graphReady()
             && !!document.querySelector('button.more-actions-trigger')

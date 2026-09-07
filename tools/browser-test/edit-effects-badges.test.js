@@ -9,7 +9,7 @@ const {chromium} = require('playwright');
 const {assert, newContext} = require('./edit-test-helpers');
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('effects-badges — chips render per :effects category');
   try {
     // web-server transitively depends on http-server (network, process,
@@ -76,7 +76,6 @@ const {assert, newContext} = require('./edit-test-helpers');
     // ---------------------------------------------------------------
     // /health declares :expects-effects #{:time} AND computes #{:time}
     // — chip should be solid (no drift, no ghost).
-    await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#health');
     await page.waitForFunction(
       () => graphReady()

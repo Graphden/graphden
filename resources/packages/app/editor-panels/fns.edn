@@ -122,8 +122,7 @@
   {:name :type-diagnostics-list
    :description "The CURRENT branch's recorded type diagnostics as flat display rows — `[{:fn-id :fn-name :arg :message} …]`, sorted by fn name. Pure graph reshape over `:branch-diagnostics-flat` (the org-scoped join); the arg coalescing (`:arg-name`, else a keyword `:binding`, else empty) and the uuid label for anonymous fns are graph-visible. Empty when the branch has no recorded diagnostics."
    :parent :vec
-   :args {:coll :_tdl-sorted}
-   :return-type [:list :keyword-map]}
+   :args {:coll :_tdl-sorted}}
 
   ;; ---------------------------------------------------------------------
   ;; LINT partial — GET /partials/lint. The graph lint (docs/GRAPH_LINT.md)

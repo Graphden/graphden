@@ -1309,10 +1309,21 @@
   ;; `:running-entry` + `:if (some? entry)` + `:zipmap`. Admins can
   ;; vary the response shape by reparenting `:_enrich-running-shape`.
 
+  {:name :running-state
+   :description "The reconciler's verdict on a service, JSON-safe — `{:state \"running\"|\"start-failed\"|\"exited\"|\"backoff\"|\"not-our-lock\"|\"pending\" :next-attempt-at iso|nil}`. The placeholders the raw entry cannot express (a parked restart, another pod's lock) get a name here."
+   :args {:service-id {:type :uuid :description "Service's row id."}}
+   :return-type {:state :text :next-attempt-at :nullable-text}
+   :effects #{}}
+
   {:name :_enrich-running-entry
    :description "Closure-capture seed — the raw entry pulled off the reconciler atom. Referenced by the per-field readers below."
    :parent :running-entry
    :return-type [:union :null :running-info-shape]
+   :args {:service-id {:as :service-id}}}
+
+  {:name :_enrich-running-verdict
+   :description "The reconciler's `{:state :next-attempt-at}` for the same service — the two extra fields of the JSON shape."
+   :parent :running-state
    :args {:service-id {:as :service-id}}}
 
   {:name :_enrich-running-stopper-set?
@@ -1342,17 +1353,22 @@
           :else {:value nil}}}
 
   {:name :_enrich-running-shape
-   :description "4-field JSON shape — `{:stopper-set? :started-at :start-attempts :start-failed-at}`. Admins can reparent / reorder to vary the response shape."
+   :description "6-field JSON shape — `{:stopper-set? :started-at :start-attempts :start-failed-at :state :next-attempt-at}`. The last two come from `:running-state` (the reconciler's verdict: a placeholder such as a parked restart has no entry fields to read). Admins can reparent / reorder to vary the response shape."
    :parent :zipmap
    :return-type {:stopper-set? :bool
                  :started-at :nullable-text
                  :start-attempts :int
-                 :start-failed-at :nullable-text}
-   :args {:keys [{:value :stopper-set?} {:value :started-at} {:value :start-attempts} {:value :start-failed-at}]
+                 :start-failed-at :nullable-text
+                 :state :text
+                 :next-attempt-at :nullable-text}
+   :args {:keys [{:value :stopper-set?} {:value :started-at} {:value :start-attempts} {:value :start-failed-at}
+                 {:value :state} {:value :next-attempt-at}]
           :vals [:_enrich-running-stopper-set?
                  :_enrich-running-started-at
                  {:parent :get :args {:coll :_enrich-running-entry :key {:value :start-attempts} :default nil}}
-                 :_enrich-running-start-failed-at]}}
+                 :_enrich-running-start-failed-at
+                 {:parent :get :args {:coll :_enrich-running-verdict :key {:value :state} :default nil}}
+                 {:parent :get :args {:coll :_enrich-running-verdict :key {:value :next-attempt-at} :default nil}}]}}
 
   {:name :enrich-running
    :description "Reshape the in-process running entry for `service-id` (from `@recon/running`) into a JSON-safe map. nil when nothing is registered. Pure graph composition over `:running-entry` + `:if (some?)` + 4-field `:zipmap` reshape."
@@ -2480,12 +2496,43 @@
    :parent :str
    :args {:parts [{:value "Running"} :_sp-status-line-running-since {:value "."}]}}
 
+  {:name :_sp-state
+   :description "The reconciler's verdict text (`:running-state` via `:enrich-running`) — names the placeholders the entry fields cannot."
+   :parent :get :args {:coll :_sp-running :key {:value :state} :default nil}}
+
+  {:name :_sp-state-backoff?
+   :parent :equal? :args {:a :_sp-state :b {:value "backoff"}}}
+
+  {:name :_sp-state-exited?
+   :parent :equal? :args {:a :_sp-state :b {:value "exited"}}}
+
+  {:name :_sp-state-elsewhere?
+   :parent :equal? :args {:a :_sp-state :b {:value "not-our-lock"}}}
+
+  {:name :_sp-next-attempt-text
+   :parent :coalesce
+   :args {:value {:parent :get :args {:coll :_sp-running :key {:value :next-attempt-at} :default nil}}
+          :default {:value ""}}}
+
+  {:name :_sp-next-attempt-short
+   :parent :subs
+   :args {:string :_sp-next-attempt-text :start {:value 11} :end {:value 19}}}
+
+  {:name :_sp-status-line-backoff
+   :parent :str
+   :args {:parts [{:value "Exited — restart backing off, next attempt at "}
+                  :_sp-next-attempt-short
+                  {:value " UTC."}]}}
+
   {:name :_sp-status-line
    :parent :cond
-   :args {:clauses [:_sp-running-nil?  {:value "Not yet started (reconcile to apply)."}
-                    :_sp-start-failed? :_sp-status-line-failed
-                    :_sp-stopper-set?  :_sp-status-line-running
-                    {:value true}      {:value "Tracked but no active stopper."}]}}
+   :args {:clauses [:_sp-running-nil?      {:value "Not yet started (reconcile to apply)."}
+                    :_sp-state-backoff?    :_sp-status-line-backoff
+                    :_sp-state-exited?     {:value "Exited — the restart policy leaves it stopped."}
+                    :_sp-state-elsewhere?  {:value "Running on another executor (its lock is held elsewhere)."}
+                    :_sp-start-failed?     :_sp-status-line-failed
+                    :_sp-stopper-set?      :_sp-status-line-running
+                    {:value true}          {:value "Tracked but no active stopper."}]}}
 
   {:name :_sp-status-div-shown
    :parent :hiccup

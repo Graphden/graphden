@@ -28,7 +28,7 @@ async function cleanup(page) {
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('edit-provenance-popover — ↳ badge click → 4-tier resolution chain');
 
   try {
@@ -81,7 +81,6 @@ async function cleanup(page) {
     // Navigate; wait for the fn-card + at least one arg-overlay with
     // a provenance badge.
     // ===================================================================
-    await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')
                     + '/#' + PROBE_FN);
     await page.waitForFunction(

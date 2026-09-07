@@ -4793,9 +4793,12 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-.service-badge-running  { color: var(--success-fg); }
-.service-badge-failed   { color: var(--error-fg); }
-.service-badge-disabled { color: var(--muted-fg); opacity: 0.65; }
+.service-badge-running   { color: var(--success-fg); }
+.service-badge-failed    { color: var(--error-fg); }
+.service-badge-backoff   { color: var(--warning-fg); animation: service-badge-pulse 1.5s ease-in-out infinite; }
+.service-badge-exited    { color: var(--warning-fg); opacity: 0.8; }
+.service-badge-elsewhere { color: var(--muted-fg); }
+.service-badge-disabled  { color: var(--muted-fg); opacity: 0.65; }
 .service-badge-pending  {
   color: var(--muted-fg);
   animation: service-badge-pulse 1.5s ease-in-out infinite;
@@ -5547,9 +5550,12 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   color: var(--muted-fg);
   user-select: none;
 }
-.kind-marker-service.svc-running  { color: var(--success-fg); }
-.kind-marker-service.svc-failed   { color: var(--error-fg); }
-.kind-marker-service.svc-disabled { color: var(--muted-fg); opacity: 0.65; }
+.kind-marker-service.svc-running   { color: var(--success-fg); }
+.kind-marker-service.svc-failed    { color: var(--error-fg); }
+.kind-marker-service.svc-backoff   { color: var(--warning-fg); }
+.kind-marker-service.svc-exited    { color: var(--warning-fg); opacity: 0.8; }
+.kind-marker-service.svc-elsewhere { color: var(--muted-fg); }
+.kind-marker-service.svc-disabled  { color: var(--muted-fg); opacity: 0.65; }
 .kind-marker-app { color: var(--accent); }
 /* fx detail marker — effect footprint; italic + muted so a tree full of
    effectful web fns reads as texture, not alarm. */

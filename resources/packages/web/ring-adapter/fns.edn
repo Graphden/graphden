@@ -343,6 +343,7 @@
    :description "Canonical 401 response used by `auth-required-middleware` when the bearer token is missing or wrong — `{:status 401 :body \"Unauthorized\"}` with text content-type."
    :parent :_default-auth-fail-body
    :return-type :ring-response-shape
+   :return-type-wide? true
    :args {:body "Unauthorized"}}
 
   ;; =============================================================================

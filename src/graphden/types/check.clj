@@ -2348,10 +2348,16 @@
    Type-vars on both sides are treated as opaque — a parametric
    `[:fn {:arg a} b]` doesn't drift against another parametric
    form. Drift comparison only fires when both sides are
-   concrete-enough that `subtype?` decides them definitively."
+   concrete-enough that `subtype?` decides them definitively.
+
+   `:return-type-wide? true` on the fn-def ACCEPTS the wide contract
+   — no drift is reported. Without it the sync-time WARN's own advice
+   (\"or accept it as a deliberately-wide contract\") had no way to be
+   followed, and seven platform fn-defs re-warned on every boot."
   [fn-def computed-return]
   (let [declared (some-> fn-def :return-type types/resolve-alias)]
     (when (and declared
+               (not (:return-type-wide? fn-def))
                (not= declared computed-return)
                (types/subtype? computed-return declared)
                (not (types/subtype? declared computed-return)))
@@ -2369,7 +2375,7 @@
                 (and source-file source-line) (str source-file ":" source-line)
                 source-file                   source-file
                 :else                         "<unknown>")]
-    (log/warnf "type-drift: fn-def %s declares :return-type %s but the computed return is strictly narrower: %s — consider tightening the declaration (or accept it as a deliberately-wide contract). at %s"
+    (log/warnf "type-drift: fn-def %s declares :return-type %s but the computed return is strictly narrower: %s — tighten the declaration, or accept it as a deliberately-wide contract with `:return-type-wide? true`. at %s"
                (pr-str fn-name)
                (pr-str declared)
                (pr-str computed)

@@ -123,7 +123,7 @@
     :rewrite-refs-to-version
     :rich-type-of-name :ring-create-default-handler :ring-handler
     :ring-route-paths :ring-router :routes->js-bundle
-    :rule-owner-of-name :running-entry :secret-leaf :secret-path-args :semver-compatible? :service-endpoint
+    :rule-owner-of-name :running-entry :running-state :secret-leaf :secret-path-args :semver-compatible? :service-endpoint
     :queue-publish :queue-take :queue-ack :queue-nack :queue-extend :queue-requeue
     :queue-stats :queue-dead-letters
     :call-with :call-traced :with-heartbeat :trace-headers

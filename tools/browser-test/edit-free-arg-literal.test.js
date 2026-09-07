@@ -12,7 +12,7 @@ const {assert, newContext, api, getEntities, synthArgs, deleteFnByName, waitFor}
 const TEST_NAME = 'test-free-arg-literal';
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('free-arg-literal — Phase 4: bind a literal into a free slot');
   try {
     await deleteFnByName(page, TEST_NAME);
@@ -31,7 +31,6 @@ const TEST_NAME = 'test-free-arg-literal';
     // No explicit "POST inheriting arg" step — slot/binding model
     // exposes the inherited :string slot automatically.
 
-    await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
     await page.waitForFunction(
       () => graphReady()

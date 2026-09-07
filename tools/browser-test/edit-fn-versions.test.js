@@ -49,7 +49,7 @@ async function putDescription(page, fnId, branch, desc) {
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => {
     console.log('  [dialog]:', d.message().slice(0, 200));
     d.accept();
@@ -87,7 +87,6 @@ async function putDescription(page, fnId, branch, desc) {
     // Phase A: navigate to the probe (still on main) + open ⌛
     // popover via the row-actions group.
     // ===================================================================
-    await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + FN_NAME);
     // Wait for cytoscape + the `⋯` trigger + cy fit animation drain.
     await page.waitForFunction(

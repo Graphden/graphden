@@ -32,7 +32,7 @@ async function cleanup(page) {
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => {
     console.log('  [dialog]:', d.message().slice(0, 200));
     d.accept();
@@ -64,7 +64,6 @@ async function cleanup(page) {
     // ===================================================================
     // Phase A: navigate, hover the i badge → tooltip in read-only mode.
     // ===================================================================
-    await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#app.' + FN_NAME);
     await page.waitForFunction(
       () => graphReady()

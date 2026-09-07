@@ -32,7 +32,7 @@ async function cleanup(page) {
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => {
     console.log('  [dialog]:', d.message().slice(0, 200));
     d.accept();
@@ -99,7 +99,6 @@ async function cleanup(page) {
     // (direct storage write bypass, or a refinement-typed slot whose
     // runtime predicate fails after a previously-valid bind).
     // ===================================================================
-    await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + PROBE_FN);
     await page.waitForFunction(
       () => graphReady()

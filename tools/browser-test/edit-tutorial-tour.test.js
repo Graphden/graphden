@@ -22,7 +22,7 @@ const {
 } = require('./tutorial-tour-helpers');
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   // Lesson 05's "remove this binding" step fires a native confirm(); with no
   // handler Playwright auto-dismisses it and the step would never complete.
   page.on('dialog', (d) => { d.accept().catch(() => {}); });

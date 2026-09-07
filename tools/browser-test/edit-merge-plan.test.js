@@ -45,7 +45,7 @@ async function putDescriptionOn(page, fnId, branch, desc) {
 }
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => d.accept());
   try {
     console.log('edit-merge-plan — the inherited-content refusal offers "merge R first"');

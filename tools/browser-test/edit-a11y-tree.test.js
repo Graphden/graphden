@@ -41,14 +41,13 @@ const rowInfo = () => {
 
 (async () => {
   await waitForServerHealthy();
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('edit-a11y-tree — the Explorer tree from the keyboard');
 
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
 
   try {
-    await page.goto('about:blank');
     await page.goto(BASE + '/#' + PROBE_FN);
     await page.waitForFunction(
       () => graphReady() && document.querySelectorAll('#entity-list [role="treeitem"]').length > 0,

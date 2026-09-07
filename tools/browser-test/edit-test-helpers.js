@@ -246,7 +246,9 @@ async function newContext(chromium, opts = {}) {
   //    stall) and "it answered in 2 s and the DOM never updated" (it didn't).
   const started = new Map();
   page.on('request', (req) => {
-    if (/\/api\/(packages|branches|entities)/.test(req.url())
+    // The layout POST rides along: its failure used to reach the log only
+    // as the editor's "Failed to fetch layout from backend", status unknown.
+    if (/\/api\/(packages|branches|entities|graph\/layout)/.test(req.url())
         && req.method() !== 'GET') started.set(req, Date.now());
   });
   page.on('response', async (res) => {
@@ -765,7 +767,28 @@ async function openOperate(page) {
   await page.waitForSelector('#gd-operate:not([hidden])', { timeout: 5000 }).catch(() => {});
 }
 
-module.exports = { assert, deepEqual, newContext, api, getEntities,
+// Wait until the element `pick(arg)` returns (evaluated IN the page) has
+// been initialised by htmx, then click it. htmx wires swapped-in content
+// after its settle delay; a click that lands in that window on an
+// `hx-post` form's submit button reaches nobody (the packages-panel ↑
+// flake, gate 2026-09-08: the request never left the browser, 150 s
+// timeout, passed on retry). A person cannot click inside 20 ms; a test
+// polling at 250 ms lands there about one time in twelve.
+async function clickWhenHtmxReady(page, pick, arg, timeout = 15000) {
+  const src = pick.toString();
+  await page.waitForFunction(({src, arg}) => {
+    const el = (new Function('return (' + src + ')')())(arg);
+    if (!el) return false;
+    const owner = el.closest('[hx-post],[hx-get],[hx-delete],[hx-put],[hx-patch]') || el;
+    return !!owner['htmx-internal-data'];
+  }, {src, arg}, {timeout, polling: 50});
+  await page.evaluate(({src, arg}) => {
+    (new Function('return (' + src + ')')())(arg).click();
+  }, {src, arg});
+}
+
+
+module.exports = { assert, deepEqual, newContext, api, getEntities, clickWhenHtmxReady,
                    nodeApi, nodeApiJson, openBranchPopover, openOperate,
                    synthArgs, waitFor, waitForServerHealthy,
                    deleteFnByName, AUTH, BASE };

@@ -14,7 +14,7 @@ const { assert, newContext, api, getEntities, synthArgs, waitFor,
 const TEST_NAME = 'test-edit-phase3';
 
 (async () => {
-  const { browser, page } = await newContext(chromium);
+  const { browser, page } = await newContext(chromium, {boot: false});
   console.log('Phase 3 — re-parent cascade');
   try {
     await deleteFnByName(page, TEST_NAME);
@@ -43,7 +43,6 @@ const TEST_NAME = 'test-edit-phase3';
     // 2. Open editor and drive the new UI flow. Confirm dialogs from
     //    `removeParentInline` are auto-accepted.
     page.on('dialog', d => d.accept());
-    await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
     await page.waitForFunction(
       () => graphReady()

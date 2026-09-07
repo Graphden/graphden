@@ -33,7 +33,7 @@ async function cleanup(page) {
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => {
     console.log('  [dialog]:', d.message().slice(0, 200));
     d.accept();
@@ -86,7 +86,6 @@ async function cleanup(page) {
     // ===================================================================
     // Phase A: drift probe. :env chip should carry effects-chip-drift.
     // ===================================================================
-    await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + DRIFT_FN);
     await page.waitForFunction(
       () => graphReady()
@@ -94,7 +93,6 @@ async function cleanup(page) {
             && !graph.animating,
       null,
       {timeout: 20000, polling: 100});
-    await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.effects-chip-env', {timeout: 15000});
     const driftState = await page.evaluate(() => {
       const chips = Array.from(document.querySelectorAll('.effects-chip-env'));
@@ -124,7 +122,6 @@ async function cleanup(page) {
             && !graph.animating,
       null,
       {timeout: 20000, polling: 100});
-    await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.effects-chip-network', {timeout: 15000});
     const ghostState = await page.evaluate(() => {
       const chips = Array.from(document.querySelectorAll('.effects-chip-network'));

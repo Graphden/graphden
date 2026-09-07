@@ -39,7 +39,7 @@ async function revertAssetViaApi(page, base) {
 }
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   // Uninstall and revert both confirm natively.
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
   console.log('edit-tutorial-tour-platform — lessons 31 / 28 / 21');

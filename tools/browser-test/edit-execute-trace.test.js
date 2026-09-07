@@ -64,7 +64,7 @@ async function openExecutePopoverForCard(page, fnId) {
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('edit-execute-trace — trace checkbox → run → path highlight → clear → history replay → value capture');
 
   // Debug P3 — the "+ capture values" checkbox opens a real
@@ -121,7 +121,6 @@ async function openExecutePopoverForCard(page, fnId) {
     // ===================================================================
     // Phase A: real popover — tick "Trace path" (+ persist), Run.
     // ===================================================================
-    await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')
                     + '/#' + WRAP_FN);
     await openExecutePopoverForCard(page, probeWrap.id);

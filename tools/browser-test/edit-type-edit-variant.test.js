@@ -27,7 +27,7 @@ async function cleanup(page) {
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => d.accept());
   console.log('edit-type-edit-variant — open / add branch / save / storage');
 
@@ -62,7 +62,6 @@ async function cleanup(page) {
     // `initGraph()` manually on top of a hash-navigated page raced that
     // boot init (two concurrent `initGraph`s clobber `lookups`, leaving
     // `fnMap` intermittently empty — the source of this test's flake).
-    await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + VAR_FN,
                     {waitUntil: 'networkidle'});
     // Boot init loads the hashed fn's subtree into fnMap. Wait for THAT

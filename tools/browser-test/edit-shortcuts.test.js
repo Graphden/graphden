@@ -27,14 +27,13 @@ const PROBE_FN = 'web-server';
 
 (async () => {
   await waitForServerHealthy();
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('edit-shortcuts — leader menu, cheatsheet, and the typing guards');
 
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
 
   try {
-    await page.goto('about:blank');
     await page.goto(BASE + '/#' + PROBE_FN);
     await page.waitForFunction(() => graphReady() && !graph.animating,
                                null, {timeout: 20000, polling: 100});

@@ -79,7 +79,7 @@ async function cleanup(page) {
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => d.accept());
   console.log('edit-tests-suite — tests namespace / runner / dots / run-all / inspector / auto-run');
 

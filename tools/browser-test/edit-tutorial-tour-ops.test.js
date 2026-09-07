@@ -22,7 +22,7 @@ const {
 } = require('./tutorial-tour-helpers');
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
   console.log('edit-tutorial-tour-ops — lessons 13 / 19 / 20 / 14 + branch isolation');
   let failed = false;

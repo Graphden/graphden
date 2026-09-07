@@ -358,6 +358,11 @@ for f in $FILES; do
   fi
   FILE_SECS=$((SECONDS - FILE_START))
   FILE_MEM="$(executor_mem)"
+  # The wall time above spans EVERY attempt; say so on the line itself —
+  # a 181 s file that was 11 s + a 150 s timeout + a retry reads very
+  # differently from one slow run (the FLAKED note lives only in the summary).
+  ATTEMPT_NOTE=""
+  if [ "${attempt:-1}" -gt 1 ]; then ATTEMPT_NOTE="  attempts=$attempt"; fi
   # Thrash signal: a file far past the norm. (Heap high-water is tracked too but
   # only for the banner — see the HEAP_HWM_MIB note above for why it is not a trigger.)
   # executor_mem is like "1.701GiB" / "812.3MiB" / "?" — normalise to MiB.
@@ -369,8 +374,8 @@ for f in $FILES; do
   CTR_DELTA="$(counters_delta "$CTR_BEFORE" "$(executor_counters)")"
   FN_LEAKED=$(( (FN_AFTER - FN_BEFORE) + (NS_AFTER - NS_BEFORE) ))
   if [ "$FN_LEAKED" -gt 0 ] 2>/dev/null && [ "$passed" = 1 ]; then
-    printf '  [%3ds  executor=%s]%s  \033[31mLEAKED %d entities into the graph\033[0m\n' \
-      "$FILE_SECS" "$FILE_MEM" "${CTR_DELTA:+  $CTR_DELTA}" "$FN_LEAKED"
+    printf '  [%3ds  executor=%s%s]%s  \033[31mLEAKED %d entities into the graph\033[0m\n' \
+      "$FILE_SECS" "$FILE_MEM" "$ATTEMPT_NOTE" "${CTR_DELTA:+  $CTR_DELTA}" "$FN_LEAKED"
     LEAKS="$LEAKS$FN_LEAKED	$f
 "
     # A leak in a PASSING test is a real cleanup-bug signal — the entities stay
@@ -395,10 +400,10 @@ for f in $FILES; do
     # cleanup regression. It is already counted as a fail above, so note it
     # but do NOT double-red or mis-name it a "leak" (that named a different
     # innocent file each gate run when a slow window aborted it mid-flow).
-    printf '  [%3ds  executor=%s]%s  (%d entities left by the failed test — abort collateral, not a leak)\n' \
-      "$FILE_SECS" "$FILE_MEM" "${CTR_DELTA:+  $CTR_DELTA}" "$FN_LEAKED"
+    printf '  [%3ds  executor=%s%s]%s  (%d entities left by the failed test — abort collateral, not a leak)\n' \
+      "$FILE_SECS" "$FILE_MEM" "$ATTEMPT_NOTE" "${CTR_DELTA:+  $CTR_DELTA}" "$FN_LEAKED"
   else
-    printf '  [%3ds  executor=%s]%s\n' "$FILE_SECS" "$FILE_MEM" \
+    printf '  [%3ds  executor=%s%s]%s\n' "$FILE_SECS" "$FILE_MEM" "$ATTEMPT_NOTE" \
       "${CTR_DELTA:+  $CTR_DELTA}"
   fi
   TIMINGS="$TIMINGS$FILE_SECS	$FILE_MEM	$f

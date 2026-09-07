@@ -48,7 +48,7 @@ async function revertViaApi(page) {
 }
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => d.accept());
   console.log('edit-asset-override — panel / edit / save / hash roll / revert');
 

@@ -41,14 +41,13 @@ const ACTIVE = () => {
 
 (async () => {
   await waitForServerHealthy();
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('edit-a11y-dialogs — focus enters, stays, and comes back');
 
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
 
   try {
-    await page.goto('about:blank');
     await page.goto(BASE + '/#' + PROBE_FN);
     await page.waitForFunction(() => graphReady() && !graph.animating,
                                null, {timeout: 20000, polling: 100});

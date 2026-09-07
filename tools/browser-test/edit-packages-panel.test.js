@@ -33,7 +33,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, nodeApi, nodeApiJson} = require('./edit-test-helpers');
+const {assert, newContext, clickWhenHtmxReady, nodeApi, nodeApiJson} = require('./edit-test-helpers');
 
 
 // Per-run unique package name so reruns against a shared stack stay
@@ -105,7 +105,7 @@ async function panelState(page) {
 // at it (the server answers 409), and the install builds a tree. Repeat until a
 // pass deletes nothing, then report whatever is stuck rather than swallowing it.
 
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => { console.log('  [dialog]:', d.message().slice(0, 120)); d.accept(); });
   console.log('edit-packages-panel — install / update / uninstall lifecycle');
 
@@ -184,19 +184,19 @@ async function panelState(page) {
     // ===================================================================
     // Phase C: Install 1.0.0 → pin appears in the installed table.
     // ===================================================================
-    await page.evaluate((pkg) => {
+    await page.evaluate(() => {
       const d = document.querySelector('#gd-pkg-pop details.packages-available');
       if (d) d.open = true;
-      // Scope by BOTH name and version — the registry may hold other
-      // packages that also publish a 1.0.0 (matching version alone would
-      // click the wrong row).
-      const btn = [...document.querySelectorAll('#gd-pkg-pop .packages-install-btn')]
+    });
+    // Scope by BOTH name and version — the registry may hold other
+    // packages that also publish a 1.0.0 (matching version alone would
+    // click the wrong row). Clicked only once htmx owns the button.
+    await clickWhenHtmxReady(page, (pkg) =>
+      [...document.querySelectorAll('#gd-pkg-pop .packages-install-btn')]
         .find((x) => {
           const p = x.getAttribute('hx-post') || '';
           return p.includes('name=' + pkg) && p.includes('version=1.0.0');
-        });
-      btn && btn.click();
-    }, PKG);
+        }), PKG);
     // install materializes the version's fns + delta-recompiles them (see
     // PERF note at the top of this file — no longer a full-graph freeze).
     // The ceiling is GC-stall tolerance for the constrained gate stack, not
@@ -218,12 +218,20 @@ async function panelState(page) {
     // ===================================================================
     // Phase D: Update 1.0.0 → 1.1.0 via the version input + ↑.
     // ===================================================================
+    // The ↑ is the submit of an hx-post form swapped in by Install: click it
+    // only once htmx owns the form (2026-09-08 flake — the click in htmx's
+    // settle window sent nothing and the wait below ran its 150 s out).
     await page.evaluate((pkg) => {
       const root = document.querySelector('#gd-pkg-pop [data-packages-panel]');
       const tr = [...root.querySelectorAll(':scope > .packages-panel-table tbody tr')]
         .find((r) => r.querySelector('td')?.textContent === pkg);
       tr.querySelector('.packages-version-input').value = '1.1.0';
-      tr.querySelector('.packages-update-btn').click();
+    }, PKG);
+    await clickWhenHtmxReady(page, (pkg) => {
+      const root = document.querySelector('#gd-pkg-pop [data-packages-panel]');
+      const tr = [...root.querySelectorAll(':scope > .packages-panel-table tbody tr')]
+        .find((r) => r.querySelector('td')?.textContent === pkg);
+      return tr && tr.querySelector('.packages-update-btn');
     }, PKG);
     // update materializes the target version, rewrites the project's refs,
     // then delta-recompiles only the touched fns (see PERF note) — the

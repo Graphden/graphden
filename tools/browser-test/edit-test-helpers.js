@@ -133,18 +133,49 @@ async function newContext(chromium) {
   // the same string for a reset connection, an abort, a DNS miss and a CORS
   // rejection. Chromium knows which it was; nobody was asking. Print the
   // net::ERR_* so a network failure is diagnosable from the log alone.
-  // Lines that are ONLY noise when a navigation follows them. 54 of the 90
-  // files boot a page here, seed data over the API, then `reload()` / goto
-  // `#fn` so the editor boots on the probe — which aborts the first boot's
-  // still-in-flight fetches (initGraph, /api/services, /api/types, /api/lint,
-  // secrets, the Operate partials). Each abort used to print an editor
-  // `console.error … Failed to fetch` AND a `[requestfailed] … ERR_ABORTED`:
-  // ~280 lines per suite run that buried the real failures. Hold such a line
-  // for up to a second; a main-frame navigation inside that window collapses
-  // everything held into one `[nav]` line, otherwise it prints as before — a
-  // genuine "Failed to fetch" (server down) is never lost, just a second late.
+  // Lines that are ONLY noise when a navigation (or the page closing)
+  // accounts for them. 54 of the 90 files boot a page here, seed data over
+  // the API, then `reload()` / goto `#fn` so the editor boots on the probe —
+  // which aborts the first boot's still-in-flight fetches (initGraph,
+  // /api/services, /api/types, /api/lint, secrets, the Operate partials).
+  // Each abort used to print an editor `console.error … Failed to fetch` AND
+  // a `[requestfailed] … ERR_ABORTED`: ~280 lines per suite run that buried
+  // the real failures. Hold such a line for up to a second; a main-frame
+  // navigation (or page close) inside that window folds everything held —
+  // plus the aborts Chromium reports in the 1.5 s AFTER the navigation event
+  // (loadingFailed is delivered after frameNavigated) — into one `[nav]`
+  // line. Otherwise the line prints as before: a genuine "Failed to fetch"
+  // (server down) is never lost, just a second late.
   const heldAborts = [];
+  let fold = null; // {label, count, timer, at} — the summary being assembled
+  const printFold = () => {
+    if (!fold) return;
+    // A fold opened speculatively on a navigation that aborted nothing (a
+    // same-document `#hash` change, a clean boot) prints nothing.
+    if (fold.count > 0) {
+      console.log('  [nav] ' + fold.count + ' in-flight fetch(es) of the previous document aborted by '
+                  + fold.label);
+    }
+    fold = null;
+  };
+  const foldInto = (label) => {
+    if (fold && fold.label !== label) printFold();
+    if (!fold) fold = {label, count: 0, at: Date.now(), timer: null};
+    for (const it of heldAborts) clearTimeout(it.timer);
+    fold.count += heldAborts.length;
+    heldAborts.length = 0;
+    clearTimeout(fold.timer);
+    fold.timer = setTimeout(printFold, 500);
+    if (typeof fold.timer.unref === 'function') fold.timer.unref();
+  };
   const holdAbortLine = (line) => {
+    if (fold && Date.now() - fold.at < 1500) {
+      fold.count += 1;
+      clearTimeout(fold.timer);
+      fold.timer = setTimeout(printFold, 500);
+      if (typeof fold.timer.unref === 'function') fold.timer.unref();
+      return;
+    }
     const item = {line};
     item.timer = setTimeout(() => {
       const i = heldAborts.indexOf(item);
@@ -154,12 +185,20 @@ async function newContext(chromium) {
     heldAborts.push(item);
   };
   page.on('framenavigated', (frame) => {
-    if (frame !== page.mainFrame() || heldAborts.length === 0) return;
-    const n = heldAborts.length;
-    for (const it of heldAborts) clearTimeout(it.timer);
-    heldAborts.length = 0;
-    console.log('  [nav] ' + n + ' in-flight fetch(es) of the previous document aborted by navigation to '
-                + frame.url().replace(/^https?:\/\/[^/]+/, ''));
+    if (frame !== page.mainFrame()) return;
+    if (heldAborts.length === 0 && !(fold && Date.now() - fold.at < 1500)) {
+      // Nothing held: still open a fold so late-reported aborts of the
+      // document just left are counted, but only print if any arrive.
+      fold = {label: 'navigation to ' + frame.url().replace(/^https?:\/\/[^/]+/, ''),
+              count: 0, at: Date.now(), timer: null};
+      return;
+    }
+    foldInto('navigation to ' + frame.url().replace(/^https?:\/\/[^/]+/, ''));
+  });
+  page.on('close', () => {
+    if (heldAborts.length === 0) return;
+    foldInto('page close');
+    printFold();
   });
   page.on('requestfailed', (req) => {
     const failure = req.failure();

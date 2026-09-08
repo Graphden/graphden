@@ -435,10 +435,19 @@
         ;; serving the fork-time entry (the slices are branch-scoped
         ;; now — no shared global to paper over it).
         request-org (tc/current-org)
+        ;; …and the caller's epoch STATE. In production it is nil (one
+        ;; global state per JVM); under the parallel test plugin each NS
+        ;; thread has its own, and a raw thread validating against the
+        ;; GLOBAL one advanced + pruned the shared ledger from a watermark
+        ;; the NS thread had not reached — phantom foreign gaps, a heal
+        ;; per merge (2026-09-08). Carrying the state closes that split at
+        ;; its source; the ledger's retention window is the backstop.
+        epoch-state br/*epoch-state-override*
         post-commit!
         (fn []
-          (run-merge-post-commit! ctx router request-org merge-bumps
-                                  source-branch-id target-branch-id))
+          (binding [br/*epoch-state-override* epoch-state]
+            (run-merge-post-commit! ctx router request-org merge-bumps
+                                    source-branch-id target-branch-id)))
         t (Thread. ^Runnable post-commit! "merge-post-commit")]
     (Thread/.start t)
     (try

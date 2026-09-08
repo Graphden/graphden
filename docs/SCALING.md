@@ -289,7 +289,9 @@ our Postgres. Built in these pieces:
     port, parallel to the app server — keeping the async SSE channel out of
     the graph-composed router + tenancy request-scope, which expect ordinary
     response maps. Wired as the `:sse/relay` integrant component, opt-in via
-    `GRAPHDEN_SSE_PORT` (unset ⇒ no-op). Bearer-gated.
+    `GRAPHDEN_SSE_PORT` (unset ⇒ no-op). Bearer-gated by the provider it is
+    handed; with none it runs OPEN and logs a SECURITY warning at boot
+    (`warn-if-relay-open!`) — the cloud config hands it the accounts provider.
   - **Remote** — `storage.remote.sse/start-source!` holds an SSE connection to
     the hub (`java.net.http.HttpClient`, which streams on the response head —
     the httpkit client buffers the whole body and can't do SSE), parses each

@@ -142,10 +142,29 @@
 ;; invalidation is infra below the graph-composed router, not an app route.
 ;; =============================================================================
 
+(defn warn-if-relay-open!
+  "The relay authenticates subscribers with the provider it is handed and
+   runs OPEN with none — by design for a self-hosted instance that runs
+   everything open, but it must be said out loud: an open relay streams
+   every graph invalidation (fn ids, branch ids, org ids) to anyone who
+   can reach the port. Same verdict shape as `:exec/context`'s
+   `warn-if-auth-off!`; the cloud config points the relay at the accounts
+   provider so it never trips there."
+  [port auth-provider]
+  (when (nil? auth-provider)
+    (log/warn (str "SECURITY: the SSE invalidation relay on port " port
+                   " is OPEN (no auth provider wired into :sse/relay) — every "
+                   "graph invalidation streams to anyone who can reach it. Set "
+                   "AUTH_TOKEN, or hand :sse/relay the addon's provider, before "
+                   "exposing this port.")))
+  auth-provider)
+
+
 (defmethod ig/init-key :sse/relay [_ {:keys [port notify-listener auth-provider]}]
   (let [p (if (string? port) (parse-long port) port)]
     (if (and p (pos? p))
       (do (log/info "Wiring SSE invalidation relay" {:port p})
+          (warn-if-relay-open! p auth-provider)
           (sse/start-relay! {:port p
                              :notify-listener notify-listener
                              :auth-provider auth-provider}))

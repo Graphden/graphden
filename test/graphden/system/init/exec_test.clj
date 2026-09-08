@@ -6,7 +6,8 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [clojure.tools.logging.test :refer [logged? with-log]]
-    [graphden.system.init.exec :as init-exec]))
+    [graphden.system.init.exec :as init-exec]
+    [graphden.system.init.storage :as init-storage]))
 
 
 (deftest warn-if-auth-off-logs-only-without-a-provider
@@ -19,3 +20,14 @@
       (let [p {:kind :addon}]
         (is (= p (init-exec/warn-if-auth-off! p)))
         (is (not (logged? 'graphden.system.init.exec :warn #"SECURITY")))))))
+
+
+(deftest warn-if-relay-open-logs-only-without-a-provider
+  (testing "a relay with no provider is OPEN — say so"
+    (with-log
+      (is (nil? (init-storage/warn-if-relay-open! 8081 nil)))
+      (is (logged? 'graphden.system.init.storage :warn #"SECURITY: the SSE invalidation relay"))))
+  (testing "a provider → silence"
+    (with-log
+      (is (= {:p 1} (init-storage/warn-if-relay-open! 8081 {:p 1})))
+      (is (not (logged? 'graphden.system.init.storage :warn #"SECURITY"))))))

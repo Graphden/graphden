@@ -117,7 +117,6 @@ const PAPER = '#123456';
       const caps = [...document.querySelectorAll('#gd-keymap-root .gd-km-row[data-shortcut="graph-fit"] .gd-key-cap')].map((k) => k.textContent);
       return caps.join(' ') === 'Space p q';
     }, null, {timeout: 10000, polling: 100});
-    await page.waitForFunction(async () => true, null, {timeout: 1000}).catch(() => {});
     const km = await nodeApiJson('GET', '/api/prefs');
     assert(km && km.keymap && km.keymap.payload && km.keymap.payload.bindings && km.keymap.payload.bindings['graph-fit']
       && km.keymap.payload.bindings['graph-fit'].keys === 'p q', 'server keymap preference holds the override: ' + JSON.stringify(km && km.keymap));

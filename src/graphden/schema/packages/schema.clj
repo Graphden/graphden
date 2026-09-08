@@ -294,29 +294,8 @@
 ;; Schema
 ;; =============================================================================
 
-(defn extend-builder
-  "Extend a schema builder with the package-registry entities. Chain
-   after `services.schema/extend-builder`.
-
-   - `:package-version` — immutable published snapshot (content-addressed).
-     Org-scoped (`:org-id` + `:public?`, see ns-doc § Org-scoped
-     registry): a tenant's publish is private to its org unless the
-     explicit public opt-in is set; NULL-org rows are the shared
-     platform registry.
-   - `:package-install` — a per-branch version PIN (desired-state: \"branch B
-     uses package P at version V\"). Carries `:org-id` because pins ARE
-     tenant-owned — each org installs/updates packages in its own project.
-     One pin per `(branch-id, package-name)`, enforced app-side (mirrors the
-     app-side uniqueness of `:package-version`).
-
-   - `:package-review` / `:package-stat` / `:ui-pref` — the marketplace
-     companions (ns-doc § Marketplace): reviews, the global install
-     counter, and per-user editor preferences.
-
-   All are non-versioned (a published snapshot is immutable by contract; a
-   pin, a review, a counter and a preference are runtime state, same class
-   as `:service`), so the versioned-storage decorator passes writes
-   straight through."
+(defn- add-package-version
+  "The artifact row — see `extend-builder`'s docstring."
   [builder]
   (-> builder
       (ds/add-entity :package-version package-version-entity-uuid
@@ -362,7 +341,38 @@
                              :nullable? true}
                       :payload {:uuid pv-payload-field-uuid
                                 :type :jsonb
-                                :nullable? true}})
+                                :nullable? true}})))
+
+
+(defn- add-package-install
+  "The per-branch version pin."
+  [builder]
+  (-> builder
+      ;; :branch-id is a bare :uuid, NOT {:type :ref :ref-entity :branch}
+      ;; like every other branch pointer — no FK, so an install row
+      ;; survives deletion of the branch it was made on (installs are
+      ;; per-branch state the user may re-point; a cascade/reject on
+      ;; branch delete would be wrong either way). If you add the ref,
+      ;; you take on that lifecycle question.
+      (ds/add-entity :package-install package-install-entity-uuid
+                     {:branch-id {:uuid pi-branch-id-field-uuid
+                                  :type :uuid}
+                      :package-name {:uuid pi-package-name-field-uuid
+                                     :type :text}
+                      :version {:uuid pi-version-field-uuid
+                                :type :text}
+                      :org-id {:uuid pi-org-id-field-uuid
+                               :type :text
+                               :nullable? true}
+                      :installed-at {:uuid pi-installed-at-field-uuid
+                                     :type :timestamptz
+                                     :nullable? true}})))
+
+
+(defn- add-marketplace-companions
+  "Reviews, the global install counter, per-user preferences."
+  [builder]
+  (-> builder
       ;; One review per (package-name, author-id) — app-side uniqueness
       ;; (the review upsert reads-then-writes under the caller's org, and a
       ;; review is small + low-stakes, so no advisory lock). `:public?` is
@@ -426,23 +436,34 @@
                       :updated-at {:uuid up-updated-at-field-uuid
                                    :type :timestamptz
                                    :nullable? true}})
-      (ds/add-constraint :ui-pref {:type :unique :fields [:owner-id :key]})
-      ;; :branch-id is a bare :uuid, NOT {:type :ref :ref-entity :branch}
-      ;; like every other branch pointer — no FK, so an install row
-      ;; survives deletion of the branch it was made on (installs are
-      ;; per-branch state the user may re-point; a cascade/reject on
-      ;; branch delete would be wrong either way). If you add the ref,
-      ;; you take on that lifecycle question.
-      (ds/add-entity :package-install package-install-entity-uuid
-                     {:branch-id {:uuid pi-branch-id-field-uuid
-                                  :type :uuid}
-                      :package-name {:uuid pi-package-name-field-uuid
-                                     :type :text}
-                      :version {:uuid pi-version-field-uuid
-                                :type :text}
-                      :org-id {:uuid pi-org-id-field-uuid
-                               :type :text
-                               :nullable? true}
-                      :installed-at {:uuid pi-installed-at-field-uuid
-                                     :type :timestamptz
-                                     :nullable? true}})))
+      (ds/add-constraint :ui-pref {:type :unique :fields [:owner-id :key]})))
+
+
+(defn extend-builder
+  "Extend a schema builder with the package-registry entities. Chain
+   after `services.schema/extend-builder`.
+
+   - `:package-version` — immutable published snapshot (content-addressed).
+     Org-scoped (`:org-id` + `:public?`, see ns-doc § Org-scoped
+     registry): a tenant's publish is private to its org unless the
+     explicit public opt-in is set; NULL-org rows are the shared
+     platform registry.
+   - `:package-install` — a per-branch version PIN (desired-state: \"branch B
+     uses package P at version V\"). Carries `:org-id` because pins ARE
+     tenant-owned — each org installs/updates packages in its own project.
+     One pin per `(branch-id, package-name)`, enforced app-side (mirrors the
+     app-side uniqueness of `:package-version`).
+
+   - `:package-review` / `:package-stat` / `:ui-pref` — the marketplace
+     companions (ns-doc § Marketplace): reviews, the global install
+     counter, and per-user editor preferences.
+
+   All are non-versioned (a published snapshot is immutable by contract; a
+   pin, a review, a counter and a preference are runtime state, same class
+   as `:service`), so the versioned-storage decorator passes writes
+   straight through."
+  [builder]
+  (-> builder
+      add-package-version
+      add-package-install
+      add-marketplace-companions))

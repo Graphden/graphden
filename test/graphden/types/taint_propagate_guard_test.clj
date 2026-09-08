@@ -52,6 +52,11 @@
     ;; names / counts, all server-derived; `days` is a window, not content.
     :unresolved-failure-counts
     :breaking-changes-between :brotli-bytes :build-form
+    ;; Marketplace (docs/MARKETPLACE.md): identity + roster reads are
+    ;; server-derived; :round / :url-encode / :semver-latest / :ui-pref-write!
+    ;; return caller content and carry :taint-propagate?.
+    :current-instant :current-user-id :current-user-label :loaded-packages
+    :round :semver-latest :semver-rank :ui-pref-write! :ui-prefs-read :url-encode
     ;; Cached read of the fixed build artifact — no caller content.
     :build-hashes-raw :byte-count
     :byte-len :cached-api-routes-js :call :call-noargs :call-noargs-traced
@@ -168,7 +173,8 @@
    SECRETS.md § T3 set. Before changing this, for each ADDED name ask \"does it
    pass/transform caller content? then it needs `:taint-propagate?`\"; for each
    REMOVED name confirm it genuinely no longer handles content."
-  #{:abs :add :and :assert :assert-eq :assert-some :assoc :assoc-in :atom :blank? :byte-len :call-with :call :call-traced :with-heartbeat
+  #{:round :semver-latest :ui-pref-write! :url-encode ; marketplace: answer caller content
+    :abs :add :and :assert :assert-eq :assert-some :assoc :assoc-in :atom :blank? :byte-len :call-with :call :call-traced :with-heartbeat
     :call-noargs :call-noargs-traced :case :cell :coalesce :comp :concat :cond :conj :cons :const
     :constant-time-equal? :constantly :contains? :count :deref :dissoc :distinct :div :do :drop
     :empty? :eq :equal? :every? :ex-data :ex-info :filter :filter-xf :find-first

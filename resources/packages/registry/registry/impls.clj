@@ -888,7 +888,8 @@
    :current-user-id current-user-id
    :current-user-label current-user-label
    :loaded-packages loaded-packages
-   :semver-latest semver-latest
+   ;; taint-propagate: answers one of the caller's own version strings
+   :semver-latest {:impl semver-latest :taint-propagate? true}
    :semver-rank semver-rank
    :graph-rows graph-rows
    :publish-package-apply publish-package-apply

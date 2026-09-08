@@ -91,8 +91,15 @@ const PAPER = '#123456';
       .some((b) => b.textContent.includes('Lovely dark paper.')), null, {timeout: 15000, polling: 100});
     assert(await page.evaluate(() => /Update review/.test(document.querySelector('#gd-market-root .mk-review-submit')?.textContent || '')),
       'the form now offers an update (one review per author)');
+    // ---- the publisher edits the listing in place (no new version)
+    await page.waitForSelector('#gd-market-root .mk-listing-form', {timeout: 15000});
+    await page.fill('#gd-market-root .mk-listing-form textarea[name="description"]', 'An e2e theme, revised');
+    await clickWhenHtmxReady(page, () => document.querySelector('#gd-market-root .mk-listing-save'));
+    await page.waitForFunction(() => /Listing saved/.test(document.querySelector('#gd-market-root .mk-notice')?.textContent || ''), null, {timeout: 15000, polling: 100});
     await clickWhenHtmxReady(page, () => document.querySelector('#gd-market-root .mk-back'));
     await page.waitForSelector('#gd-market-root [data-mk-card="' + THEME + '"] .mk-rating:not(.mk-rating-none)', {timeout: 15000});
+    assert(await page.evaluate((name) => document.querySelector('[data-mk-card="' + name + '"] .mk-card-desc').textContent, THEME) === 'An e2e theme, revised',
+      'the card shows the revised listing');
     const rating = await page.evaluate((name) => document.querySelector('[data-mk-card="' + name + '"] .mk-rating').textContent, THEME);
     assert(/4\.0 \(1\)/.test(rating), 'the card shows the rating: ' + rating);
 

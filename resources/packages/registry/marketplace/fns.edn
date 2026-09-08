@@ -257,20 +257,31 @@
   {:name :_mkc-name
    :parent :get :args {:coll :_mkc-latest :key {:value :name} :default {:value ""}}}
 
+  ;; A MIRROR (`:origin` set on the latest row) shows its origin's signals,
+  ;; never local ones: the origin is the one authority for the package's
+  ;; reviews (docs/MARKETPLACE.md § 7).
+  {:name :_mkc-origin
+   :parent :get :args {:coll :_mkc-latest :key {:value :origin} :default nil}}
+  {:name :_mkc-mirrored?
+   :parent :some? :args {:value :_mkc-origin}}
   {:name :_mkc-rating
-   :parent :get
-   :args {:coll {:as :reviews :type [:map :text :any]} :key :_mkc-name :default nil}}
+   :parent :if
+   :args {:test :_mkc-mirrored?
+          :then {:parent :get :args {:coll :_mkc-origin :key {:value :rating} :default nil}}
+          :else {:parent :get :args {:coll {:as :reviews :type [:map :text :any]} :key :_mkc-name :default nil}}}}
 
   {:name :_mkc-installs
-   :parent :get
-   :args {:coll {:as :installs :type [:map :text :any]} :key :_mkc-name :default {:value 0}}}
+   :parent :if
+   :args {:test :_mkc-mirrored?
+          :then {:parent :get :args {:coll :_mkc-origin :key {:value :installs} :default {:value 0}}}
+          :else {:parent :get :args {:coll {:as :installs :type [:map :text :any]} :key :_mkc-name :default {:value 0}}}}}
 
   {:name :marketplace-card
-   :description "One marketplace card from a package's index rows: `{:name :kind :description :category :tags :org-id :public :latest :versions :version-count :published-at :fn-count :rating {:count :avg} | nil :installs}`. `:reviews` / `:installs` are the captured aggregate maps."
+   :description "One marketplace card from a package's index rows: `{:name :kind :description :category :tags :org-id :public :latest :versions :version-count :published-at :fn-count :rating {:count :avg} | nil :installs :origin}`. `:reviews` / `:installs` are the captured aggregate maps; a mirror (`:origin` set) reports the origin's rating / installs instead."
    :parent :zipmap
    :args {:keys [{:value :name} {:value :kind} {:value :description} {:value :category} {:value :tags}
                  {:value :org-id} {:value :public} {:value :latest} {:value :versions} {:value :version-count}
-                 {:value :published-at} {:value :fn-count} {:value :rating} {:value :installs}]
+                 {:value :published-at} {:value :fn-count} {:value :rating} {:value :installs} {:value :origin}]
           :vals [:_mkc-name
                  {:parent :get :args {:coll :_mkc-latest :key {:value :kind} :default {:value "fns"}}}
                  {:parent :get :args {:coll :_mkc-latest :key {:value :description} :default nil}}
@@ -284,7 +295,8 @@
                  {:parent :get :args {:coll :_mkc-latest :key {:value :published-at} :default {:value ""}}}
                  {:parent :get :args {:coll :_mkc-latest :key {:value :fn-count} :default {:value 0}}}
                  :_mkc-rating
-                 :_mkc-installs]}}
+                 :_mkc-installs
+                 :_mkc-origin]}}
 
   {:name :marketplace-cards
    :description "Every visible package as a card — the registry index grouped by name, each group folded by `:marketplace-card` with the review / install aggregates captured once."
@@ -363,8 +375,13 @@
           :b :current-org-id}}
 
   ;; --- the filter chain (each stage skipped when its param is blank) ---
+  ;; `kind=any` lists every kind — what a REMOTE mirror asks for
+  ;; (`:remote-package-card`) when it does not yet know the package's kind.
   {:name :_mkf-by-kind
-   :parent :filter :args {:pred :_mkf-kind? :coll :marketplace-cards :kind :_mkq-kind}}
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_mkq-kind :b {:value "any"}}}
+          :then :marketplace-cards
+          :else {:parent :filter :args {:pred :_mkf-kind? :coll :marketplace-cards :kind :_mkq-kind}}}}
   {:name :_mkf-by-mine
    :parent :if
    :args {:test :_mkq-mine?
@@ -501,6 +518,16 @@
    :args {:test {:parent :empty? :args {:coll :_mkh-card-category-val}}
           :then {:value nil}
           :else {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "mk-category"}} :children [:_mkh-card-category-val]}}}}
+  {:name :_mkh-card-origin-url
+   :parent :to-str
+   :args {:value {:parent :get-in :args {:map {:as :item} :path [{:value :origin} {:value :url}] :default {:value ""}}}}}
+  {:name :_mkh-card-mirror
+   :description "`mirror of <url>` on a card whose latest version was pulled from another registry — its rating / installs are the origin's."
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_mkh-card-origin-url}}
+          :then {:value nil}
+          :else {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "mk-mirror" :title "Mirrored from another registry — its rating and installs are the origin's"}}
+                                        :children [{:value "mirror of "} :_mkh-card-origin-url]}}}}
   {:name :_mkh-card-private
    :parent :if
    :args {:test {:parent :equal? :args {:a {:parent :get :args {:coll {:as :item} :key {:value :public} :default nil}} :b {:value false}}}
@@ -543,7 +570,7 @@
                   :args {:map {:value {:class "mk-card"}} :key {:value :data-mk-card} :value :_mkh-card-name}}
           :children [:_mkh-card-title
                      {:parent :hiccup :args {:tag {:value "div"} :attrs {:value {:class "mk-card-meta"}}
-                                             :children [:_mkh-card-category :_mkh-card-private :_mkh-card-rating-maybe :_mkh-card-installs :_mkh-card-versions]}}
+                                             :children [:_mkh-card-category :_mkh-card-private :_mkh-card-mirror :_mkh-card-rating-maybe :_mkh-card-installs :_mkh-card-versions]}}
                      :_mkh-card-desc
                      :_mkh-card-tags]}}
 
@@ -962,6 +989,71 @@
                                                                                                                          :value {:parent :str-join :args {:coll [{:value "/api/marketplace/unreview?name="} :_mk-url-name] :separator {:value ""}}}}}
                                                                                                           :children [{:value "Delete my review"}]}}}}]}}]}}
 
+  ;; --- a MIRROR: the origin's signals, and where to review it ---
+  {:name :_mki-origin
+   :parent :get :args {:coll :_mki-latest :key {:value :origin} :default nil}}
+  {:name :_mki-mirrored?
+   :parent :some? :args {:value :_mki-origin}}
+  {:name :_mki-origin-url
+   :parent :to-str :args {:value {:parent :get :args {:coll :_mki-origin :key {:value :url} :default {:value ""}}}}}
+  {:name :_mki-origin-as-of
+   :parent :str-clip
+   :args {:string {:parent :to-str :args {:value {:parent :get :args {:coll :_mki-origin :key {:value :as-of} :default {:value ""}}}}}
+          :limit {:value 10}}}
+  {:name :_mki-origin-note
+   :description "Where the reviews live: the origin registry. The rating / installs shown above are ITS numbers, as of the mirror."
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "mk-origin-note"}}
+          :children [{:value "Mirrored from "}
+                     {:parent :hiccup :args {:tag {:value "a"}
+                                             :attrs {:parent :assoc :args {:map {:value {:class "mk-origin-link" :target "_blank" :rel "noopener"}}
+                                                                           :key {:value :href} :value :_mki-origin-url}}
+                                             :children [:_mki-origin-url]}}
+                     {:value " — its rating and install count are the origin's, as of "}
+                     :_mki-origin-as-of
+                     {:value ". Reviews are written there, not here."}]}}
+  {:name :_mki-reviews-section
+   :description "Local reviews + the form for a package published here; the origin note for a mirror."
+   :parent :if
+   :args {:test :_mki-mirrored?
+          :then {:parent :list :args {:items [:_mki-origin-note]}}
+          :else {:parent :list :args {:items [:_mki-review-list :_mki-review-form]}}}}
+
+  ;; --- the publisher's listing edit (own package, published here) ---
+  {:name :_mki-own?
+   :parent :and
+   :args {:values [{:parent :not :args {:value :_mki-mirrored?}}
+                   {:parent :equal? :args {:a {:parent :to-str :args {:value {:parent :get :args {:coll :_mki-latest :key {:value :org-id} :default {:value ""}}}}}
+                                           :b :current-org-id}}]}}
+  {:name :_mki-listing-form
+   :description "Edit the LATEST version's listing — description / category / tags — without a new version (the artifact is untouched; the card shows the latest version's listing)."
+   :parent :hiccup
+   :args {:tag {:value "form"}
+          :attrs {:value {:class "mk-listing-form" :hx-post "/api/marketplace/listing"}}
+          :children [{:parent :hiccup :args {:tag {:value "h3"} :attrs {:value {:class "mk-h3"}} :children [{:value "Listing"}]}}
+                     {:parent :hiccup :args {:tag {:value "input"}
+                                             :attrs {:parent :assoc :args {:map {:value {:type "hidden" :name "name"}} :key {:value :value} :value {:as :pkg-name :type :text}}}}}
+                     {:parent :hiccup :args {:tag {:value "textarea"}
+                                             :attrs {:value {:name "description" :class "mk-review-text" :rows "2" :maxlength "2000" :placeholder "Description" :aria-label "Description"}}
+                                             :children [{:parent :to-str :args {:value {:parent :get :args {:coll :_mki-latest :key {:value :description} :default {:value ""}}}}}]}}
+                     {:parent :hiccup :args {:tag {:value "div"} :attrs {:value {:class "mk-review-actions"}}
+                                             :children [{:parent :hiccup :args {:tag {:value "select"} :attrs {:value {:name "category" :class "mk-select" :aria-label "Category"}}
+                                                                                :children {:parent :concat
+                                                                                           :args {:colls [:_mkt-cat-head
+                                                                                                          {:parent :map :args {:func :_mkt-cat-option
+                                                                                                                               :coll {:parent :get :args {:coll :listing-categories
+                                                                                                                                                          :key {:parent :str-to-keyword :args {:string :_mki-kind}}
+                                                                                                                                                          :default {:value []}}}
+                                                                                                                               :category {:parent :to-str :args {:value {:parent :get :args {:coll :_mki-latest :key {:value :category} :default {:value ""}}}}}}}]}}}}
+                                                        {:parent :hiccup :args {:tag {:value "input"}
+                                                                                :attrs {:parent :assoc :args {:map {:value {:type "text" :name "tags" :class "mk-search mk-tags-input" :placeholder "tags, comma separated" :aria-label "Tags"}}
+                                                                                                              :key {:value :value}
+                                                                                                              :value {:parent :str-join :args {:coll {:parent :get :args {:coll :_mki-latest :key {:value :tags} :default {:value []}}} :separator {:value ", "}}}}}}}
+                                                        {:parent :hiccup :args {:tag {:value "button"} :attrs {:value {:type "submit" :class "packages-install-btn mk-listing-save"}} :children [{:value "Save listing"}]}}]}}]}}
+  {:name :_mki-listing-maybe
+   :parent :if
+   :args {:test :_mki-own? :then :_mki-listing-form :else {:value nil}}}
+
   {:name :_mki-notice
    :description "A transient notice above the item (an action's outcome). Free arg: `:notice` (nil = none)."
    :parent :if
@@ -974,11 +1066,11 @@
    :parent :hiccup
    :args {:tag {:value "div"} :attrs {:value {:class "mk-item-body"}}
           :children [:_mki-title :_mki-meta :_mki-desc :_mki-tags
+                     :_mki-listing-maybe
                      {:parent :hiccup :args {:tag {:value "h3"} :attrs {:value {:class "mk-h3"}} :children [{:value "Versions"}]}}
                      :_mki-versions
                      {:parent :hiccup :args {:tag {:value "h3"} :attrs {:value {:class "mk-h3"}} :children [{:value "Reviews"}]}}
-                     :_mki-review-list
-                     :_mki-review-form]}}
+                     :_mki-reviews-section]}}
   {:name :_mki-not-found
    :parent :hiccup
    :args {:tag {:value "div"} :attrs {:value {:class "mk-empty"}}
@@ -1148,16 +1240,21 @@
    :args {:entity-type {:value "package-review"}
           :id {:ref :_mka-existing-review-id :type :uuid}
           :data :_mka-review-fields}}
+  ;; A MIRROR takes no local review — the origin registry is the authority.
+  {:name :_mka-mirrored?
+   :parent :some?
+   :args {:value {:parent :get :args {:coll {:parent :_mkl-latest-row :args {:pkg-name :_mka-name}} :key {:value :origin} :default nil}}}}
   {:name :_mka-review-write
    :parent :cond
-   :args {:clauses [{:parent :not :args {:value :_mka-rating-ok?}} {:value nil}
+   :args {:clauses [:_mka-mirrored? {:value nil}
+                    {:parent :not :args {:value :_mka-rating-ok?}} {:value nil}
                     {:parent :nil? :args {:value :_mka-existing-review}} :_mka-review-create
                     {:value true} :_mka-review-update]}}
   {:name :_mka-review-notice
-   :parent :if
-   :args {:test :_mka-rating-ok?
-          :then {:value "Thanks — your review is posted."}
-          :else {:value "Refused: pick a rating from 1 to 5."}}}
+   :parent :cond
+   :args {:clauses [:_mka-mirrored? {:value "Refused: this package is mirrored from another registry — reviews are written there."}
+                    :_mka-rating-ok? {:value "Thanks — your review is posted."}
+                    {:value true} {:value "Refused: pick a rating from 1 to 5."}]}}
   {:name :_mka-review-then-item
    :parent :do
    :args {:steps [:_mka-review-write {:parent :marketplace-item-html :args {:pkg-name :_mka-name :notice :_mka-review-notice}}]}}
@@ -1193,6 +1290,67 @@
    :description "DELETE /api/marketplace/unreview?name=<pkg> — remove the current user's review. Returns the item HTML. Auth-required."
    :parent :delete
    :args {:path "/marketplace/unreview" :handler :_mka-review-delete-handler}}
+
+  ;; =====================================================================
+  ;; POST /api/marketplace/listing — edit the latest version's listing
+  ;; (description / category / tags) without a new version. Own package,
+  ;; published here (a mirror's listing is its origin's). The decorator
+  ;; keeps the write own-org.
+  ;; =====================================================================
+  {:name :_mkl-latest-row
+   :description "The newest visible `:package-version` row of `:pkg-name` (full row, `:payload` and all) — nil when none. Free arg: `:pkg-name`."
+   :parent :first
+   :args {:coll {:parent :reverse
+                 :args {:coll {:parent :sort-by
+                               :args {:key-fn :_mkr-rank
+                                      :coll {:parent :query-entities
+                                             :args {:entity-type {:value "package-version"}
+                                                    :where {:parent :assoc-empty :args {:key {:value :name} :value {:as :pkg-name :type :text}}}}}}}}}}}
+  {:name :_mkl-row
+   :parent :_mkl-latest-row :args {:pkg-name :_mka-name}}
+  {:name :_mkl-editable?
+   :description "Own (this org's), published here — not a mirror."
+   :parent :and
+   :args {:values [{:parent :some? :args {:value :_mkl-row}}
+                   {:parent :nil? :args {:value {:parent :get :args {:coll :_mkl-row :key {:value :origin} :default nil}}}}
+                   {:parent :equal? :args {:a {:parent :to-str :args {:value {:parent :get :args {:coll :_mkl-row :key {:value :org-id} :default {:value ""}}}}}
+                                           :b :current-org-id}}]}}
+  {:name :_mkl-listing
+   :parent :listing-normalize
+   :args {:kind {:parent :coalesce :args {:value {:parent :get :args {:coll :_mkl-row :key {:value :kind} :default nil}} :default {:value "fns"}}}
+          :description {:parent :_mka-param :args {:param-name {:value "description"}}}
+          :category {:parent :_mka-param :args {:param-name {:value "category"}}}
+          :tags {:parent :_mka-param :args {:param-name {:value "tags"}}}
+          :payload {:value nil}}}
+  {:name :_mkl-write
+   :parent :update-entity
+   :args {:entity-type {:value "package-version"}
+          :id {:ref :_mkl-row-id :type :uuid}
+          :data {:parent :select-keys :args {:m :_mkl-listing :ks [{:value :description} {:value :category} {:value :tags}]}}}}
+  {:name :_mkl-row-id
+   :parent :get :args {:coll :_mkl-row :key {:value :id} :default nil}}
+  {:name :_mkl-do
+   :parent :cond
+   :args {:clauses [{:parent :not :args {:value :_mkl-editable?}} {:value nil}
+                    {:parent :listing-invalid? :args {:listing :_mkl-listing}} {:value nil}
+                    {:value true} :_mkl-write]}}
+  {:name :_mkl-notice
+   :parent :cond
+   :args {:clauses [{:parent :not :args {:value :_mkl-editable?}} {:value "Refused: only the publisher edits a listing, and a mirror's listing is its origin's."}
+                    {:parent :listing-invalid? :args {:listing :_mkl-listing}} {:value "Refused: pick a category from the list."}
+                    {:value true} {:value "Listing saved — the card shows it."}]}}
+  {:name :_mkl-then-item
+   :parent :do
+   :args {:steps [:_mkl-do {:parent :marketplace-item-html :args {:pkg-name :_mka-name :notice :_mkl-notice}}]}}
+  {:name :_mkl-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /api/marketplace/listing (form: name, description, category, tags) — updates the latest version's listing of an own, locally published package; returns the refreshed item."
+   :parent :html-ok-response
+   :args {:body :_mkl-then-item}}
+  {:name :api-marketplace-listing
+   :description "POST /api/marketplace/listing — form `name`, `description`, `category`, `tags`: edit the newest version's listing without publishing a new version. Own packages published on this registry only. Returns the item HTML. Auth-required."
+   :parent :post
+   :args {:path "/marketplace/listing" :handler :_mkl-handler}}
 
   ;; =====================================================================
   ;; POST /api/marketplace/publish — a theme or keymap (payload IS the artifact)

@@ -81,6 +81,20 @@ package it is on — public for a public package, in-org for a private
 one. Nobody else can edit or delete it, not even through the raw entity
 API: the server stamps the author.
 
+What if the package came from *another* graphden? Lesson 29's
+remote-install form pulls a version from, say, `graphden.dev` into your
+own registry. That copy is a **mirror**: its card wears a `mirror of
+<url>` badge, its ★ and ↓ are the *origin's* numbers as of the moment
+you pulled it, and instead of a review form the item links you to the
+origin — that is where the package's reviews live, the way PyPI shows a
+project's GitHub stars without letting you star it on PyPI. Your own
+registry reviews its own packages; nothing syncs either way.
+
+Changed your mind about a description or a tag? On a package you
+published here, the item shows a small **Listing** form (description,
+category, tags) — **Save listing** rewrites the newest version's listing
+in place, no new version needed; older versions keep theirs.
+
 The **↓ install count** is cumulative: every *new* pin of the package on
 any branch, in any organization, counts once. Moving an existing pin
 (update, rollback) is not an install, and the counter cannot be set by

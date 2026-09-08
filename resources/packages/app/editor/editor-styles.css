@@ -7955,6 +7955,12 @@ body.gd-no-write .branch-comment-form { display: none; }
 .mk-tag:hover { border-color: var(--gd-flow); color: var(--gd-flow-ink); }
 .mk-tag:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 1px; }
 .mk-tag-active { background: var(--gd-flow-wash); color: var(--gd-flow-ink); border-color: var(--gd-flow-wash); }
+/* a mirrored package: badge on the card, origin note on the item */
+.mk-mirror { padding: 0 6px; border-radius: 999px; background: var(--gd-lit-wash); color: var(--gd-lit); font-size: 0.625rem; }
+.mk-origin-note { margin: 4px 0; font-size: 0.75rem; line-height: 1.5; color: var(--gd-ink-2); }
+.mk-origin-link { color: var(--gd-flow-ink); }
+.mk-listing-form { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--gd-line); }
+.mk-tags-input { flex: 1 1 160px; }
 /* roster (Executor tab) */
 .mk-roster { width: 100%; font-size: 0.75rem; border-collapse: collapse; }
 .mk-roster th, .mk-roster td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--gd-line); vertical-align: top; }

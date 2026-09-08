@@ -280,7 +280,10 @@ into your self-hosted install). Behind the scenes the version is
 never re-published as public), then installed exactly as above —
 reference, pin, secrets manifest and all. If the remote registry
 requires auth, the server presents its `GRAPHDEN_REGISTRY_TOKEN`; the
-browser never handles that credential.
+browser never handles that credential. The copy also snapshots the
+origin's marketplace numbers (rating, installs) and shows them read-only
+— reviews stay where the package was published
+([lesson 37](37-marketplace-themes-keymaps.md)).
 
 ## Beyond the registry — an external package from its own git repo
 

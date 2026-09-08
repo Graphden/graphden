@@ -52,7 +52,9 @@
    package, `theme` = an editor theme, `keymap` = a keyboard layout);
    the listing metadata `:description` / `:category` / `:tags`; and
    `:payload` (the theme's token map / the keymap's binding overrides —
-   nil for fns packages, whose content is `:fns`). Reusing the artifact
+   nil for fns packages, whose content is `:fns`); `:origin` — on a
+   MIRRORED copy, the read-only snapshot of the origin registry's rating /
+   installs (the origin stays the one place to review it). Reusing the artifact
    row rather than minting a `:theme` / `:keymap` entity keeps ONE
    publish / visibility / withdraw / version-resolution path
    (principle #2). Three small companions carry what the artifact can't:
@@ -168,6 +170,16 @@
 
 (def ^:private pv-payload-field-uuid
   #uuid "1d7c3e59-6f8b-4a2d-b3e9-4a6c8d0f5e72")
+
+
+;; A MIRRORED copy's read-only snapshot of its origin registry's social
+;; signals — `{:url :rating {:count :avg} :installs :version-count :as-of}`
+;; — taken when the version was pulled. The origin is the one authority
+;; for a package's reviews (docs/MARKETPLACE.md § 7): a mirror shows these
+;; numbers and links there, and accepts no local review. nil = published
+;; HERE.
+(def ^:private pv-origin-field-uuid
+  #uuid "3f8b5d61-8a2c-4e4f-b5d7-6c9e1f3a5b82")
 
 
 ;; =============================================================================
@@ -341,7 +353,10 @@
                              :nullable? true}
                       :payload {:uuid pv-payload-field-uuid
                                 :type :jsonb
-                                :nullable? true}})))
+                                :nullable? true}
+                      :origin {:uuid pv-origin-field-uuid
+                               :type :jsonb
+                               :nullable? true}})))
 
 
 (defn- add-package-install

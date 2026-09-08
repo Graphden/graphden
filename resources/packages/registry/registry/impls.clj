@@ -622,6 +622,30 @@
           (last (sort-by semver/parse-version versions)))))))
 
 
+(defbase remote-package-card
+  "The REMOTE registry's marketplace card for `pkg-name` (`GET
+   <source>/api/marketplace?q=<name>&kind=any`, exact-name match) — the
+   social signals a mirror snapshots as its `:origin` (docs/MARKETPLACE.md
+   § 7). nil when the remote has no marketplace (an older graphden), is
+   unreachable, or lists no such package — a mirror without signals is
+   still a mirror. Egress-guarded in restricted executions like the other
+   remote dials."
+  [source pkg-name]
+  (cr/record-effect! :network)
+  (cr/record-effect! :env)
+  (let [base (str/replace (str source) #"/+$" "")
+        url (str base "/api/marketplace?kind=any&q="
+                 (java.net.URLEncoder/encode (str pkg-name) "UTF-8"))
+        _ (when (some? cr/*allowed-effects*) (egress/check-target! url))
+        resp @(http-client/get url {:headers (remote-auth-headers) :as :text :timeout 60000})]
+    (when (and (nil? (:error resp)) (= 200 (:status resp)))
+      (let [cards (try (json/parse-string (:body resp) true) (catch Exception _ nil))]
+        (when (sequential? cards)
+          (some-> (first (filter #(= (str pkg-name) (str (:name %))) cards))
+                  (select-keys [:rating :installs :version-count :latest :published-at])
+                  (assoc :url base :as-of (str (java.time.Instant/now)))))))))
+
+
 (defbase mirror-remote-package!
   "Fetch the CONCRETE `(pkg-name, version)` from the REMOTE registry
    `source` and store it as a local `:package-version` row. Idempotent: an
@@ -634,7 +658,7 @@
    `GRAPHDEN_REGISTRY_TOKEN` (the caller's account token on the remote —
    a public package needs any valid account there). Errors ride as data
    (`{:error …}`) so the install worklist can wrap them."
-  [source pkg-name version]
+  [source pkg-name version origin]
   (cr/record-effect! :network)
   (cr/record-effect! :db)
   (cr/record-effect! :env)
@@ -678,6 +702,11 @@
                                                ;; a mirrored copy is LOCAL — never
                                                ;; re-published as public here
                                                :public? false
+                                               ;; the origin's read-only signals
+                                               ;; (nil = a remote without them —
+                                               ;; the url alone still marks the row
+                                               ;; as a mirror)
+                                               :origin (merge {:url base} origin)
                                                :published-at (java.time.Instant/now)))))
                 {:mirrored (str pkg-name) :version (str version) :from base}))))))))
 
@@ -907,6 +936,7 @@
    :rewrite-refs-to-version rewrite-refs-to-version
    :package-upsert-pin package-upsert-pin
    :mirror-remote-package! mirror-remote-package!
+   :remote-package-card remote-package-card
    ;; taint-propagate: both return caller-graph bundle content / the hub's
    ;; report about it — content passthrough (SECRETS.md § T3).
    :hub-fetch-bundle {:impl hub-fetch-bundle :taint-propagate? true}

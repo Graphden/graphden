@@ -622,6 +622,14 @@
                     "/api/packages/remote.pkg/1.0.0"
                     {:status 200 :headers {"Content-Type" "application/edn"}
                      :body (pr-str remote-row)}
+                    ;; the origin's marketplace card — the social signals a
+                    ;; mirror snapshots read-only (docs/MARKETPLACE.md § 7)
+                    "/api/marketplace"
+                    {:status 200 :headers {"Content-Type" "application/json"}
+                     :body (json/generate-string
+                             [{:name "other.pkg" :rating {:count 1 :avg 1.0} :installs 1}
+                              {:name "remote.pkg" :rating {:count 3 :avg 4.7} :installs 12
+                               :version-count 2 :latest "1.0.0"}])}
                     {:status 404 :body "no"}))
         stop (http-kit/run-server handler {:port 0})
         port (:local-port (meta stop))
@@ -641,7 +649,12 @@
         (is (seq (sp/query-entities (storage) :fn {:name "remote-greeting"}))
             "the fn materialized under the versioned ns")
         (is (seq (sp/query-entities (storage) :package-install {:package-name "remote.pkg"}))
-            "a :package-install pin was written"))
+            "a :package-install pin was written")
+        (let [origin (:origin (first (sp/query-entities (storage) :package-version {:name "remote.pkg"})))]
+          (is (= (str "http://127.0.0.1:" port) (:url origin)) "the mirror remembers its origin")
+          (is (= {:count 3 :avg 4.7} (:rating origin)) "…and the origin's rating, exact-name matched")
+          (is (= 12 (:installs origin)))
+          (is (string? (:as-of origin)) "stamped with when the snapshot was taken")))
       (finally (stop)))))
 
 

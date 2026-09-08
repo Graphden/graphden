@@ -44,7 +44,7 @@ One artifact entity, three companions (`src/graphden/schema/packages/schema.clj`
 
 | Entity | Role | Tenancy classification |
 |---|---|---|
-| `:package-version` + `kind` / `description` / `category` / `tags` / `payload` | the artifact. `kind` nil or `"fns"` = a fn-def package (content in `:fns`); `"theme"` / `"keymap"` = the `:payload` IS the artifact (`:fns []`, `:ns-root ""`) | org-scoped, `public?` opt-in (unchanged) |
+| `:package-version` + `kind` / `description` / `category` / `tags` / `payload` / `origin` | the artifact. `kind` nil or `"fns"` = a fn-def package (content in `:fns`); `"theme"` / `"keymap"` = the `:payload` IS the artifact (`:fns []`, `:ns-root ""`). `origin` — on a MIRRORED copy, the read-only snapshot of the origin registry's signals `{:url :rating :installs :version-count :as-of}`; nil = published here | org-scoped, `public?` opt-in (unchanged) |
 | `:package-review` `(package-name, rating 1–5, body, author-id, author-label, public?, timestamps)` | one review per author per package; the aggregate is computed in the graph | org-scoped + the `public?` RLS arm (a review is as visible as its package); **author-owned writes** — the addon stamps `author-id` and refuses another member's edit / delete |
 | `:package-stat` `(package-name, installs)` | the cumulative install counter — GLOBAL by design: an installer in org B cannot write org A's artifact row, and per-org pins are invisible across orgs | no org; **platform-write-only** (`system-write-entities`) — bumped by the pin write itself around the decorator |
 | `:ui-pref` `(owner-id, key, value)` | the current user's active `theme` / `keymap`: `{:source {:name :version} :payload …}` — the payload is COPIED so a withdrawn version leaves the editor as it was | **owner-scoped**: read and written as the current user only; no org axis, a preference follows the person |
@@ -86,12 +86,13 @@ rest of `/api/packages/*`; all auth-required):
 
 | Route | Purpose |
 |---|---|
-| `GET /api/marketplace?kind=&q=&category=&tag=&sort=&mine=1` | the cards as JSON — what Settings reads for "my saved themes" |
+| `GET /api/marketplace?kind=&q=&category=&tag=&sort=&mine=1` | the cards as JSON — what Settings reads for "my saved themes"; `kind=any` spans every kind (what a remote mirror asks) |
 | `GET /api/marketplace/categories` | the vocabulary |
 | `POST /api/marketplace/publish` | a THEME or KEYMAP version: `{kind, name, version, description?, category?, tags?, public?, payload}` — refuses `unsupported-kind` (fns publish from a namespace), `missing-name` / `missing-version` / `missing-payload`, `bad-category`, `version-exists`; capability-gated like every publish |
 | `POST /api/marketplace/install?name=&version=[&fork=1]` | install (or fork) a fns package; answers the item HTML |
 | `POST /api/marketplace/apply?name=&version=` | make a theme / keymap the user's active one (writes the `theme` / `keymap` preference); answers the item HTML |
-| `POST /api/marketplace/review` (form `name`, `rating`, `body`) · `DELETE /api/marketplace/unreview?name=` | write / update / delete the current user's review; answer the item HTML |
+| `POST /api/marketplace/review` (form `name`, `rating`, `body`) · `DELETE /api/marketplace/unreview?name=` | write / update / delete the current user's review; answer the item HTML. Refused on a mirror (the origin is the authority) |
+| `POST /api/marketplace/listing` (form `name`, `description`, `category`, `tags`) | edit the NEWEST version's listing without a new version — own packages published here; the artifact is untouched, the card shows the latest version's listing |
 | `GET /partials/marketplace` · `GET /partials/marketplace/item?name=` | the two surface partials |
 
 `POST /api/packages/publish` (namespace publish) accepts the same
@@ -177,7 +178,29 @@ dialogs' Escape / Enter are the platform's ([ACCESSIBILITY.md](ACCESSIBILITY.md)
 The keymap payload stores overrides only: `{"bindings": {"graph-fit": {"keys": "z z", "leader": true}}}`.
 Save / share / roll-back / reset mirror the theme pane.
 
-## 7. Security notes
+## 7. Reviews live where the package was published
+
+The PyPI rule: a package has ONE authority for its social signals — the
+registry it was published on. A self-hosted graphden reviews and counts
+its own packages locally; when it **mirrors** a version from another
+registry (the remote-install form, [PACKAGE_DISTRIBUTION.md § 13](PACKAGE_DISTRIBUTION.md#13-self-hosted-install-by-package-type)),
+the install worklist also snapshots the origin's marketplace card
+(`:remote-package-card` → `GET <origin>/api/marketplace?q=<name>&kind=any`)
+into the mirrored row's `:origin` — url, rating, install count, version
+count, and when the snapshot was taken. From then on:
+
+- the mirror's card and item show the ORIGIN's rating and installs, marked
+  `mirror of <url>` and "as of <date>"; local reviews (and the local
+  install counter) never count for it;
+- the item links to the origin instead of offering a review form, and
+  `POST /api/marketplace/review` refuses a mirror;
+- nothing flows back — a mirror is read-only about the package, like PyPI
+  showing GitHub's stars without letting you star there.
+
+A remote without a marketplace (an older graphden) still mirrors: the
+`:origin` then carries the url only, and the card shows no rating.
+
+## 8. Security notes
 
 - **Reviews cannot be forged.** The generic entity route (`/api/entities/…`)
   reaches `:package-review` too; the tenancy decorator's
@@ -198,7 +221,7 @@ Save / share / roll-back / reset mirror the theme pane.
   no longer be global by omission (the gap that this feature's three new
   entities made visible).
 
-## 8. What is deliberately not here
+## 9. What is deliberately not here
 
 - **No anonymous storefront.** Every route is auth-required; a demo session
   browses the public rows like any tenant. A signed-out landing catalog is a
@@ -206,20 +229,20 @@ Save / share / roll-back / reset mirror the theme pane.
 - **No moderation queue.** Unchanged from
   [PACKAGE_DISTRIBUTION.md § 9](PACKAGE_DISTRIBUTION.md#9-moderation--cloudself-hosted-export):
   a public listing is the publisher's call, and withdraw is the remedy.
-- **No per-version listing edits.** Description / category / tags are set at
-  publish and the card shows the latest version's; a correction is the next
-  version.
-- **No cross-instance ratings.** A remote-registry pull mirrors a version
-  (with its listing fields) but not its reviews or count; those belong to the
-  instance the reviews were written on.
+- **No listing history.** A listing edit rewrites the newest version's
+  description / category / tags in place (the artifact itself is immutable);
+  older versions keep what they were published with.
+- **No review sync.** A mirror snapshots the origin's numbers once, at pull
+  time (§ 7); it does not poll the origin, and nothing flows back.
 
-## 9. Tests
+## 10. Tests
 
 - `test/graphden/packages/marketplace_test.clj` — the normaliser, the
   theme / keymap publish route, cards (semver-ordered versions, rating
   aggregate, filters, sort), reviews (upsert-in-place, delete, refusal),
   the install counter, apply → preference, the prefs routes, both partials,
-  the roster.
+  the roster, mirrors (origin signals, no local review), the listing edit;
+  `registry_test` — the remote pull snapshots the origin's card.
 - `tools/runtime-test/theme-payload.test.js` — the sanitiser and the apply /
   clear path; `tools/runtime-test/keymap.test.js` — overrides, late
   registration, reset, the which-key footer.

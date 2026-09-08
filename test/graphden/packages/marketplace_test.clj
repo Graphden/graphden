@@ -10,7 +10,8 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.loaded :as loaded]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tc]))
 
 
 (def ^:dynamic *bootstrap* nil)
@@ -316,3 +317,64 @@
       (is (pos? (:base-fn-count core-row))))
     (is (= "fns-only" (:kind (loaded/roster-entry {:name "x" :modules ["m"]} 0 false))))
     (is (= "manifest" (:origin (loaded/roster-entry {:name "x"} 3 true))))))
+
+
+(deftest mirrors-show-the-origin-and-take-no-review
+  ;; docs/MARKETPLACE.md § 7: the origin registry is the one authority for a
+  ;; package's reviews. A mirrored copy shows the origin's rating / installs
+  ;; (its own local reviews never count) and refuses a local review.
+  (sp/create-entity (storage) :package-version
+                    {:name "mir.pkg" :version "1.0.0" :ns-root "mir.demo" :fns [{:name :m}]
+                     :dependencies [] :content-hash "mh" :description "Mirrored thing"
+                     :origin {:url "https://hub.example" :rating {:count 5 :avg 4.2} :installs 40
+                              :as-of "2026-09-08T10:00:00Z"}})
+  (testing "the card carries the origin's signals"
+    (let [card (first (filter #(= "mir.pkg" (:name %)) (cards {"kind" "fns"})))]
+      (is (= {:count 5 :avg 4.2} (:rating card)))
+      (is (= 40 (:installs card)))
+      (is (= "https://hub.example" (get-in card [:origin :url])))))
+  (testing "the item links to the origin instead of offering a review form"
+    (let [html (:body (setup/via-graph *bootstrap* :_partial-marketplace-item-handler (get-req {"name" "mir.pkg"})))]
+      (is (re-find #"mk-origin-note" html))
+      (is (re-find #"href=\"https://hub.example\"" html))
+      (is (re-find #"as of 2026-09-08" html))
+      (is (not (re-find #"mk-review-form" html)) "no local review form on a mirror")
+      (is (not (re-find #"mk-listing-form" html)) "no listing edit on a mirror")
+      (is (re-find #"mirror of https://hub.example" (:body (setup/via-graph *bootstrap* :_partial-marketplace-handler (get-req {"kind" "fns" "q" "mir.pkg"}))))
+          "the card wears the mirror badge")))
+  (testing "a local review on a mirror is refused and writes nothing"
+    (let [resp (setup/via-graph *bootstrap* :_mka-review-handler (form-req {:name "mir.pkg" :rating 5 :body "nope"}))]
+      (is (re-find #"reviews are written there" (:body resp)))
+      (is (empty? (sp/query-entities (storage) :package-review {:package-name "mir.pkg"})))))
+  (testing "kind=any lists every kind (what a remote mirror asks)"
+    (is (some #(= "mir.pkg" (:name %)) (cards {"kind" "any"})))))
+
+
+(deftest listing-edit-on-own-latest-version
+  (doseq [v ["1.0.0" "1.1.0"]]
+    (sp/create-entity (storage) :package-version
+                      {:name "lst.pkg" :version v :ns-root "lst.demo" :fns [{:name :l}]
+                       :dependencies [] :content-hash (str "l" v) :description "old" :category "web"
+                       :org-id "public"}))
+  (testing "the item shows the publisher's listing form, and a save updates the LATEST version only"
+    (let [html (:body (setup/via-graph *bootstrap* :_partial-marketplace-item-handler (get-req {"name" "lst.pkg"})))]
+      (is (re-find #"mk-listing-form" html))
+      (is (re-find #"<option[^>]*selected[^>]*value=\"web\"|<option[^>]*value=\"web\"[^>]*selected" html) "the current category is selected"))
+    (let [resp (setup/via-graph *bootstrap* :_mkl-handler
+                                (form-req {:name "lst.pkg" :description "New words" :category "data" :tags "Fresh, tag"}))
+          rows (into {} (map (juxt :version identity)) (sp/query-entities (storage) :package-version {:name "lst.pkg"}))]
+      (is (re-find #"Listing saved" (:body resp)))
+      (is (= "New words" (:description (get rows "1.1.0"))))
+      (is (= "data" (:category (get rows "1.1.0"))))
+      (is (= ["fresh" "tag"] (:tags (get rows "1.1.0"))))
+      (is (= "old" (:description (get rows "1.0.0"))) "older versions keep their listing")
+      (is (= "New words" (:description (first (filter #(= "lst.pkg" (:name %)) (cards {"kind" "fns"}))))) "the card shows the latest")))
+  (testing "a category outside the vocabulary is refused"
+    (let [resp (setup/via-graph *bootstrap* :_mkl-handler (form-req {:name "lst.pkg" :description "x" :category "dark"}))]
+      (is (re-find #"pick a category" (:body resp)))
+      (is (= "New words" (:description (first (filter #(= "1.1.0" (:version %)) (sp/query-entities (storage) :package-version {:name "lst.pkg"}))))))))
+  (testing "another org's package is not editable"
+    (binding [tc/*current-org* "someone-else"]
+      (let [resp (setup/via-graph *bootstrap* :_mkl-handler (form-req {:name "lst.pkg" :description "hijack"}))]
+        (is (re-find #"only the publisher" (:body resp)))))
+    (is (= "New words" (:description (first (filter #(= "1.1.0" (:version %)) (sp/query-entities (storage) :package-version {:name "lst.pkg"}))))))))

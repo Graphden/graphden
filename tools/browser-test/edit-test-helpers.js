@@ -233,7 +233,7 @@ async function newContext(chromium, opts = {}) {
     const line = '  [console.' + t + '] ' + msg.text().slice(0, 300);
     // An editor fetch rejected with the bare "Failed to fetch": held for the
     // navigation check above (`holdAbortLine`).
-    if (t === 'error' && /TypeError: Failed to fetch/.test(msg.text())) {
+    if (t === 'error' && /Failed to fetch/.test(msg.text())) {
       holdAbortLine(line);
       return;
     }

@@ -32,6 +32,7 @@
     [graphden.packages.records.parse :as records-parse]
     [graphden.packages.records.slot-resolution :as slot-res]
     [graphden.services.port-check :as port-check]
+    [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.config :as sp-config]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.check :as types-check]
@@ -1063,6 +1064,10 @@
          ;; fn-defs both bound to :port 8080) BEFORE any service is
          ;; even created — earlier than `:start-failed-at`.
          (port-check/warn-on-collisions! expanded-fn-defs)))
+     ;; Every bump the sync made is applied by construction — the
+     ;; registry is compiled AFTER this returns. Un-noted, they read as
+     ;; aborted 45 s into every boot and cost one spurious heal.
+     (epoch/note-all-applied! (vs/unwrap storage))
      fns)))
 
 

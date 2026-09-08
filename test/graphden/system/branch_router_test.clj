@@ -26,6 +26,7 @@
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records :as records]
     [graphden.storage.postgres.core :as pg]
+    [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.branch-router :as br]
@@ -109,6 +110,29 @@
    pre-seeds the atom."
   [handlers]
   (br/->BranchRouter nil default-id (atom (or handlers {})) :stub-fn-id))
+
+
+(deftest dispatch-binds-the-epoch-bump-log
+  ;; The http-server adapter binds the request bump log; a caller that
+  ;; drives `dispatch` directly (every integration test) used to run
+  ;; with it unbound, so no write was ever noted and a heal followed
+  ;; 45 s later. dispatch now binds a fresh log for such callers and
+  ;; keeps the caller's own when there is one.
+  (binding [br/*resolve-branch-id-override* (stub-resolutions {})]
+    (let [seen (atom nil)
+          router (fake-router {default-id
+                               {:handler (fn [_]
+                                           (reset! seen epoch/*request-bump-log*)
+                                           {:status 200 :body "ok"})}})]
+      (br/dispatch router {:headers {} :query-string nil})
+      (is (instance? clojure.lang.Atom @seen)
+          "an unbound caller gets a request-scoped log")
+      (is (nil? epoch/*request-bump-log*) "…that does not leak past the dispatch")
+      (let [mine (atom [])]
+        (binding [epoch/*request-bump-log* mine]
+          (br/dispatch router {:headers {} :query-string nil}))
+        (is (identical? mine @seen)
+            "a caller's own binding (the http-server's) is kept, not shadowed")))))
 
 
 (deftest dispatch-falls-back-to-default-branch

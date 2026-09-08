@@ -153,6 +153,18 @@
       (swap! covered into vs))))
 
 
+(defn note-all-applied!
+  "Mark EVERY ledger entry noted. For the boot package sync: its
+   hundreds of bumps happen before anything is compiled or cached, so
+   the registry built right after them is by definition up to date —
+   but nobody noted them, and 45 s into every boot (production too)
+   the first validation read them as ABORTED and healed once for
+   nothing: a base rebuild plus every cached branch ctx dropped."
+  [storage]
+  (when-let [ledger (:graph-epoch-local storage)]
+    (swap! ledger (fn [m] (into (sorted-map) (map (fn [[v e]] [v (assoc e :noted? true)])) m)))))
+
+
 (defn explain-range
   "Diagnostic companion to `classify-range` for the heal's reason log:
    the `:aborted` epochs with the entity that bumped them and their age,
@@ -201,23 +213,53 @@
             (range (inc w) (inc global))))))
 
 
+(def ^:dynamic *ledger-retention-ms*
+  "How long a ledger entry at or below an advanced watermark is kept
+   before `prune!` drops it. The watermark lives in the EPOCH STATE —
+   one per JVM in production, but one per NS thread under the parallel
+   test plugin's isolation — while the ledger is per storage HANDLE and
+   shared. A raw thread (merge post-commit, a heal) validates against the
+   global state, advances it and pruned the shared ledger to ITS global;
+   the test thread's state, still behind, then found its own noted
+   bumps gone from the ledger and classified them foreign → a spurious
+   heal mid-test (the background rebuilds behind two 2026-09-08 flakes).
+   Keeping entries for a retention window lets a state that is behind
+   still classify them — five minutes covers a test namespace's whole
+   bootstrap + first compile before its first request; production,
+   with one state, only holds five minutes of tiny entries."
+  300000)
+
+
 (defn prune!
-  "Drop ledger + covered entries ≤ the advanced watermark."
+  "Drop covered entries ≤ the advanced watermark, and ledger entries ≤
+   it that are older than `*ledger-retention-ms*` (see there for why
+   the ledger keeps recent ones)."
   [storage w]
   (when-let [ledger (:graph-epoch-local storage)]
-    (swap! ledger (fn [m] (into (sorted-map) (subseq m > w)))))
+    (let [cutoff (- (System/currentTimeMillis) *ledger-retention-ms*)]
+      (swap! ledger (fn [m]
+                      (into (sorted-map)
+                            (remove (fn [[v {:keys [at]}]]
+                                      (and (<= v w) (< at cutoff))))
+                            m)))))
   (when-let [covered (:graph-epoch-covered storage)]
     (swap! covered (fn [s] (into (sorted-set) (subseq s > w))))))
 
 
 (defn current
-  "The global epoch (sequence `last_value`, no bump). nil on a
-   pool-less handle or missing sequence — callers treat nil as
-   'cannot validate, skip healing'."
+  "The global epoch (the sequence's last handed-out value, no bump).
+   A never-called sequence reports `last_value` 1 with `is_called`
+   false — reading that as epoch 1 made every fresh database (each
+   test namespace, a first-boot install) heal once over a phantom
+   foreign epoch before any write; it is 0. nil on a pool-less handle
+   or missing sequence — callers treat nil as 'cannot validate, skip
+   healing'."
   [storage]
   (when-let [pool (:pool storage)]
     (try
-      (some-> (util/exec-one!
-                pool [(str "SELECT last_value FROM " sequence-name)] {})
-              vals first)
+      (let [row (util/exec-one!
+                  pool [(str "SELECT last_value, is_called FROM " sequence-name)] {})
+            [last-value called?] (some-> row vals vec)]
+        (when (some? last-value)
+          (if called? last-value 0)))
       (catch Exception e (warn-once e) nil))))

@@ -1413,11 +1413,23 @@
    request, resolves the branch, and delegates to the per-branch
    handler. Unknown branch refs surface a 400 rather than silently
    misrouting. `/livez` short-circuits FIRST as a registry-independent
-   liveness probe (see `liveness-path`)."
+   liveness probe (see `liveness-path`).
+
+   Binds `epoch/*request-bump-log*` for the request when the caller
+   has not (the `:http-server` adapter does; a test or an embedded
+   caller driving `dispatch` directly did not). Without the log a
+   write's epoch bumps are never NOTED — `note-graph-epoch-validated!`
+   drains an unbound log into nothing — so every such write aged into
+   an \"aborted\" epoch 45 s later and a heal dropped every cached
+   branch ctx mid-suite: the background rebuilds behind two flakes of
+   2026-09-08 (`branch-invalidation-test`,
+   `rich-types-registry-branch-scope-test`)."
   [router request]
-  (if (= liveness-path (:uri request))
-    liveness-response
-    (dispatch* router request)))
+  (cond
+    (= liveness-path (:uri request)) liveness-response
+    epoch/*request-bump-log* (dispatch* router request)
+    :else (binding [epoch/*request-bump-log* (atom [])]
+            (dispatch* router request))))
 
 
 (defn- dispatch*

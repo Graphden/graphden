@@ -99,6 +99,50 @@
       (finally (sp/close base)))))
 
 
+(deftest a-state-behind-another-still-sees-its-noted-bumps-test
+  ;; Two epoch STATES over one ledger (a raw merge-post-commit / heal
+  ;; thread under the parallel test plugin's per-thread isolation): the
+  ;; one that validates first advances and prunes. The one behind must
+  ;; still find the noted entries — with retention it does; the old
+  ;; `prune!` dropped them and it healed on a phantom foreign gap.
+  (let [base (storage)
+        v (vs/wrap-with-versioning base)
+        healed (atom 0)
+        run (fn [state f]
+              (binding [br/*epoch-state-override* state
+                        br/*epoch-check-ttl-ms* 0
+                        br/*epoch-heal-sync?* true
+                        epoch/*request-bump-log* (atom [])
+                        cr/*impl-override* {:rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
+                                            :rebuild! (fn [_] (swap! healed inc))}]
+                (f)))
+        router (router-over v {(vs/current-branch-id v) {:ctx {:x 1} :handler :h}})
+        ahead (fresh-state)
+        behind (fresh-state)]
+    (try
+      (is (zero? (epoch/current base)) "a never-bumped sequence reads as epoch 0, not 1")
+      (run ahead (fn [] (br/handler-for router nil)))
+      (run behind (fn [] (br/handler-for router nil)))
+      (is (zero? @healed) "both states start level")
+      (run ahead (fn []
+                   (sp/create-entity v :fn {:name "shared" :parent-ids [] :description "h"})
+                   (epoch/note-applied! base)
+                   (br/handler-for router nil)))
+      (is (zero? @healed) "the writer's state advances over its noted bump")
+      (testing "the state behind classifies the same (pruned-by-the-other) range as applied"
+        (run behind (fn [] (br/handler-for router nil)))
+        (is (zero? @healed)))
+      (testing "past the retention window the entry is gone — a genuinely stale state heals"
+        (run ahead (fn []
+                     (sp/create-entity v :fn {:name "later" :parent-ids [] :description "h"})
+                     (epoch/note-applied! base)
+                     (binding [epoch/*ledger-retention-ms* 0]
+                       (br/handler-for router nil))))
+        (run behind (fn [] (br/handler-for router nil)))
+        (is (pos? @healed)))
+      (finally (sp/close base)))))
+
+
 (deftest foreign-gap-heals-despite-recent-local-write-test
   ;; FINDING-1 regression: local write (noted), FOREIGN missed write,
   ;; local write (noted). The old max-advance note buried the foreign

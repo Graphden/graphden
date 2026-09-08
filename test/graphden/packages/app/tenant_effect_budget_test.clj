@@ -1,5 +1,6 @@
-(ns ^:integration graphden.packages.app.tenant-effect-budget-test
-  "The cloud's request-level effect gate vs the `app` package's own routes.
+(ns ^:integration ^:serial graphden.packages.app.tenant-effect-budget-test
+  "`^:serial` — installs the process-global deploy setting (`deploy-config/install!`) for the length of a test; under kaocha's parallel plugin another namespace's reset landed mid-test.
+   The cloud's request-level effect gate vs the `app` package's own routes.
 
    On the cloud EVERY tenant request — signed-in, demo, anonymous-with-a-
    session — runs under `cr/cloud-request-allowed-effects`

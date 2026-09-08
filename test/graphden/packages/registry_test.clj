@@ -1,5 +1,6 @@
-(ns graphden.packages.registry-test
-  "Tests for the package registry — the `:package-version` entity that
+(ns ^:serial graphden.packages.registry-test
+  "`^:serial` — installs process-global seams (`tc/install-*-fn!` / `deploy-config/install!`) for the length of a test; under kaocha's parallel plugin another namespace's `finally` reset them mid-test (the CI perf job, 2026-09-09).
+   Tests for the package registry — the `:package-version` entity that
    stores immutable published bundles."
   (:require
     [cheshire.core :as json]

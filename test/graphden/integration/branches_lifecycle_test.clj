@@ -756,13 +756,19 @@
           ;; Exactly what main CI saw: a heal (a foreign epoch bump this
           ;; handle never noted, checked at once) refreshes the base and
           ;; drops the branch entry; the next read rebuilds it.
-          (epoch/bump! (dissoc (vs/unwrap (:storage (:base-ctx *router*)))
-                               :graph-epoch-local :graph-epoch-covered)
-                       :fn)
-          (binding [br/*ctx-build-async-recheck?* false
-                    br/*epoch-check-ttl-ms* 0]
-            (is (some? (get (types feat) (keyword only-name)))
-                "a branch ctx rebuilt after a heal already carries the branch-authored fn"))))
+          (let [base (vs/unwrap (:storage (:base-ctx *router*)))
+                foreign (epoch/bump! (dissoc base :graph-epoch-local :graph-epoch-covered) :fn)]
+            (binding [br/*ctx-build-async-recheck?* false
+                      br/*epoch-check-ttl-ms* 0]
+              (is (some? (get (types feat) (keyword only-name)))
+                  "a branch ctx rebuilt after a heal already carries the branch-authored fn"))
+            ;; Contain the blast: record the forced epoch in the shared ledger
+            ;; as a NOTED local bump (the covered set is pruned at the
+            ;; watermark; ledger entries outlive it), so the other epoch state
+            ;; (a raw thread's) and the tests after this one don't heal over
+            ;; it and lose their cached ctxs.
+            (swap! (:graph-epoch-local base) assoc foreign
+                   {:at (System/currentTimeMillis) :noted? true :entity :fn}))))
 
       (testing "effect sets answer per branch"
         (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn"

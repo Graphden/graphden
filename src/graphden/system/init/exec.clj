@@ -76,16 +76,34 @@
   ;; the tenancy addon, which wires its own provider) to turn auth ON. This is a
   ;; fail-CLOSED-by-omission-safe default: an unconfigured token doesn't lock you
   ;; out AND doesn't half-authenticate — it's simply off until you opt in.
+  ;;
+  ;; This key cannot tell whether auth ends up ON: the cloud config points
+  ;; `:exec/context`'s `:auth-provider` at `:accounts/provider` and leaves
+  ;; this key in place (the SSE relay still refs it), so it used to log
+  ;; "SECURITY: auth is OFF" on every production boot of an instance that
+  ;; answers 401 to everything. The verdict is logged by `:exec/context`,
+  ;; which sees the provider that was actually wired (`warn-if-auth-off!`).
   (if (str/blank? token)
-    (do (log/warn
-          (str "SECURITY: auth is OFF (no AUTH_TOKEN and no tenancy addon) — "
-               "this instance accepts UNAUTHENTICATED graph authoring AND "
-               "execution with io/network/process effects. Safe only on a "
-               "trusted local network. Set AUTH_TOKEN (or load the tenancy "
-               "addon) before exposing this port. See docs/DEPLOYMENT.md."))
+    (do (log/info "No AUTH_TOKEN — no single-token auth provider; auth is ON only if an addon wires another provider into :exec/context")
         nil)
     (do (log/info "Wiring auth provider {:provider :single-token}")
         (auth/single-token-provider token))))
+
+
+(defn warn-if-auth-off!
+  "The point of truth for the auth verdict: called by `:exec/context` with
+   the provider it actually wired (core's single-token one, an addon's, or
+   none). Logs the SECURITY warning only when there is none."
+  [auth-provider]
+  (when (nil? auth-provider)
+    (log/warn
+      (str "SECURITY: auth is OFF (no auth provider wired into :exec/context — "
+           "no AUTH_TOKEN and no addon provider) — this instance accepts "
+           "UNAUTHENTICATED graph authoring AND execution with "
+           "io/network/process effects. Safe only on a trusted local network. "
+           "Set AUTH_TOKEN (or load the tenancy addon) before exposing this "
+           "port. See docs/DEPLOYMENT.md.")))
+  auth-provider)
 
 
 (defn- parse-executor-orgs
@@ -109,6 +127,7 @@
              execute-guard app-router verify-domain user-ops
              my-tokens executor-orgs byo-executor? executor-id notify-listener]}]
   (log/info "Creating executor context...")
+  (warn-if-auth-off! auth-provider)
   ;; `assoc` (not the constructor's named opts) — the ExecutionContext
   ;; record stays narrow; vault rides on the extra-key surface
   ;; alongside `:compiled-templates`. Impls grab it via `(:vault ctx)`.

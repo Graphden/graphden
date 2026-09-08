@@ -120,7 +120,10 @@ Graphden is a visual functional programming environment where functions and thei
   platform-write-only, bumped by the pin write). `ui-pref` — the current
   user's active theme / keymap, owner-scoped (`tenancy.context/current-user-id`).
   A `package-version` carries `kind` (fns / theme / keymap) + `description`
-  / `category` / `tags` / `payload`. See [docs/MARKETPLACE.md](docs/MARKETPLACE.md).
+  / `category` / `tags` / `payload`, a moderation `status` + note, `origin`
+  (a mirror's snapshot of its source) and `publisher-id` (who is mailed the
+  decision); `(name, version)` is UNIQUE registry-wide. See
+  [docs/MARKETPLACE.md](docs/MARKETPLACE.md).
 - `resource-override` — versioned `path → content` row shadowing a shipped
   frontend asset (the editor's own JS/CSS), served through
   `:read-resource-overridable`; every save rolls the effective `?v=` asset

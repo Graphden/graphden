@@ -78,11 +78,24 @@ package as usual), so a catalog still shows one org per card. The check is
 `foreign-public-holder` inside `publish-package-apply`
 (`registry/impls.clj`), adjacent to the insert like the version check;
 under row-level security a tenant sees exactly the other orgs' public rows,
-which is the set that matters. `(name, version)` is **`UNIQUE` at the DB**
-(applied to an existing database by the migration pass); the publish path
-keeps its friendly pre-check and answers a constraint violation the same
-way (`version-exists`), so a race or another org's private row — invisible
-to an org-scoped read — never becomes a 500.
+which is the set that matters. `(name, version)` is **`UNIQUE` at the DB,
+registry-wide** (applied to an existing database by the migration pass); the
+publish path keeps its friendly pre-check and answers a constraint
+violation the same way (`version-exists`), so a race or another org's
+private row — invisible to an org-scoped read — never becomes a 500.
+
+*Why the key is global and not per org (decided 2026-09-09).* A per-org
+key `(org, name, version)` would let two orgs hold the same `(name,
+version)` privately — and then the shadowing above cannot save every
+reader: install, apply, the version resolver and the mirror all address a
+row by `(name, version)`, and a caller who holds a private `utils 1.0.0`
+while another org lists a public `utils 1.0.0` would see two rows for one
+address. The global key makes `(name, version)` a true identity for every
+reader. Its price is a small existence oracle: publishing a `(name,
+version)` another org holds privately answers `version-exists`, which
+reveals that the pair exists somewhere (not who holds it, not what it is).
+That is the same class of disclosure as a taken username, and it is
+accepted.
 
 ## 3. Listing vocabulary
 
@@ -273,6 +286,14 @@ The bodies are graph (`tenancy-admin.mail/package-submitted-email`,
 fallback pinned by the parity test); without a mailer, a trusted origin or
 a recipient the sink answers a reason and the write stands.
 
+The decision's write runs in the **row's org scope** (`tc/with-org` around
+the update): row level security lets an org update only its own rows, and
+the operator's decision is an action on that org's row — the platform-admin
+gate is the authorization, the scope is how the write reaches the table.
+A write that lands on no row throws `:moderation/not-applied` instead of
+reporting a decision that never happened (the addon's
+`marketplace_moderation_test` found exactly that silent loss).
+
 Enforcement lives in the tenancy decorator's `visible?`: the `public?`
 arm counts for OTHER orgs only when `:status` is nil / `approved` (or the
 reader is the platform-admin). Row-level security keeps `"public?" IS
@@ -367,7 +388,10 @@ storefront is the cloud's control-plane page.
   `tools/runtime-test/marketplace-shell.test.js` (refusal wording, the URL
   mirror) and `moderation-section.test.js` (the Platform section's gate —
   the section itself exists only with the tenancy addon, so it has no
-  browser test on the single-tenant e2e stack).
+  browser test on the single-tenant e2e stack). The addon-level flow — the
+  real `platform-admin` grant, the org-cap seam, `visible?` + RLS hiding a
+  pending row from a rival org, both notification events — is
+  `graphden-tenancy` `integration/marketplace_moderation_test`.
 - `tools/runtime-test/theme-payload.test.js` — the sanitiser and the apply /
   clear path; `tools/runtime-test/keymap.test.js` — overrides, late
   registration, reset, the which-key footer.

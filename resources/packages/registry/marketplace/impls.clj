@@ -79,10 +79,17 @@
    Gated on the platform-admin right at the deepest effectful core, so no
    route bypasses it; a tenant / org-admin cannot list itself. Reads the
    row through the BASE storage (`vs/unwrap`) — the operator's org-scoped
-   view would hide another org's pending row. Raises `:package-moderated`
+   view would hide another org's pending row. The WRITE runs in the row's
+   own org scope (`tc/with-org`): row level security lets an org update
+   only its own rows, and the operator's decision is an action ON that
+   org's row — the platform-admin check above is the authorization, the
+   scope is how the decided write reaches the table (found by the addon's
+   `marketplace_moderation_test`: without it the update touched no row
+   and the decision was silently lost). Raises `:package-moderated`
    through the notification seam (`tc/notify!`) with the updated row —
-   the tenancy addon mails the publishing org's owner. Returns the
-   updated row, or nil when no such (name, version)."
+   the tenancy addon mails the publisher. Returns the updated row, or nil
+   when no such (name, version); throws `:moderation/not-applied` when
+   the row was found but the write did not land."
   [pkg-name pkg-version decision note]
   (when-not (tc/current-platform-admin?)
     (throw (ex-info "Moderating a listing requires the platform-admin right."
@@ -93,10 +100,14 @@
         row (first (sp/query-entities base :package-version {:name pkg-name :version pkg-version}))
         status (case (str decision) "approve" "approved" "reject" "rejected" nil)]
     (when (and row status)
-      (let [updated (sp/update-entity base :package-version (:id row)
-                                      {:status status
-                                       :moderation-note (when (= status "rejected") (some-> note str str/trim not-empty))
-                                       :moderated-at (java.time.Instant/now)})]
+      (let [updated (tc/with-org (:org-id row)
+                                 (sp/update-entity base :package-version (:id row)
+                                                   {:status status
+                                                    :moderation-note (when (= status "rejected") (some-> note str str/trim not-empty))
+                                                    :moderated-at (java.time.Instant/now)}))]
+        (when-not (= status (:status updated))
+          (throw (ex-info "The moderation decision did not reach the row."
+                          {:type :moderation/not-applied :name pkg-name :version pkg-version :org (:org-id row)})))
         (tc/notify! :package-moderated updated)
         updated))))
 

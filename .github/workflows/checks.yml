@@ -26,7 +26,7 @@ jobs:
       # while every local/gate run (the pinned alias) stayed green
       # (2026-07-24: new :constant-condition linter did exactly that).
       # Bump BOTH together.
-      - uses: DeLaGuardo/setup-clojure@13.6.1
+      - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
           clj-kondo: '2026.08.04'
           bb: latest
@@ -49,7 +49,7 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
 
-      - uses: DeLaGuardo/setup-clojure@13.6.1
+      - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
           cli: latest
           bb: latest
@@ -72,7 +72,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: DeLaGuardo/setup-clojure@13.6.1
+      - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
           bb: latest
 
@@ -90,7 +90,7 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
 
-      - uses: DeLaGuardo/setup-clojure@13.6.1
+      - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
           cli: latest
           bb: latest
@@ -146,7 +146,7 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
 
-      - uses: DeLaGuardo/setup-clojure@13.6.1
+      - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
           cli: latest
           bb: latest
@@ -223,7 +223,7 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
 
-      - uses: DeLaGuardo/setup-clojure@13.6.1
+      - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
           cli: latest
           bb: latest
@@ -261,7 +261,7 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
 
-      - uses: DeLaGuardo/setup-clojure@13.6.1
+      - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
           cli: latest
           bb: latest
@@ -336,7 +336,7 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
 
-      - uses: DeLaGuardo/setup-clojure@13.6.1
+      - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
           cli: latest
           bb: latest
@@ -376,7 +376,7 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
 
-      - uses: DeLaGuardo/setup-clojure@13.6.1
+      - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
           cli: latest
           bb: latest
@@ -450,7 +450,7 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
 
-      - uses: DeLaGuardo/setup-clojure@13.6.1
+      - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
           cli: latest
           bb: latest
@@ -484,7 +484,7 @@ jobs:
         with:
           node-version: '20'
 
-      - uses: DeLaGuardo/setup-clojure@13.6.1
+      - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
           bb: latest
 
@@ -510,7 +510,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: DeLaGuardo/setup-clojure@13.6.1
+      - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
           bb: latest
 
@@ -657,7 +657,7 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - uses: DeLaGuardo/setup-clojure@13.6.1
+      - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
           bb: latest
 

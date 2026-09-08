@@ -300,6 +300,24 @@
       (is (= 413 (:status resp))))))
 
 
+(defn- with-fixture-roster
+  "Run `f` against a KNOWN loaded-package roster and put the previous one
+   back. The roster is a process global that `:app/packages`' halt clears —
+   a test that boots and halts a system (there are several) would otherwise
+   decide what the Executor tab shows here, depending on run order."
+  [f]
+  (let [before (loaded/read-roster)]
+    (loaded/install! {:packages [{:name "core" :version "1.0.0" :description "Core primitives"
+                                  :modules ["arithmetic" "logic"] :dependencies []}
+                                 {:name "registry" :version "1.0.0" :description "The registry"
+                                  :modules ["registry" "marketplace"] :dependencies ["core"]}]
+                      :base-fn-counts {"core" 163}})
+    (try (f)
+         (finally
+           (loaded/install! {:packages (mapv #(select-keys % [:name :version :description :modules :dependencies]) before)
+                             :base-fn-counts (into {} (map (juxt :name :base-fn-count)) before)})))))
+
+
 (deftest partials-render
   (sp/create-entity (storage) :package-version
                     {:name "part.theme" :version "1.0.0" :ns-root "" :fns [] :dependencies []
@@ -320,11 +338,14 @@
                                                                                                                                 (get-req {"kind" "theme" "category" "light"}))))
           "the category select keeps the selection")))
   (testing "the Executor tab lists the loaded package roster"
-    (let [html (:body (setup/via-graph *bootstrap* :_partial-marketplace-handler (get-req {"kind" "executor"})))]
-      (is (re-find #"mk-roster" html))
-      (is (re-find #"<td>core</td>" html))
-      (is (re-find #"impl\+fns" html))
-      (is (not (re-find #"mk-search" html)) "no search on a roster")))
+    (with-fixture-roster
+      #(let [html (:body (setup/via-graph *bootstrap* :_partial-marketplace-handler (get-req {"kind" "executor"})))]
+         (is (re-find #"mk-roster" html))
+         (is (re-find #"<td>core</td>" html))
+         (is (re-find #"<td>registry</td>" html))
+         (is (re-find #"impl\+fns" html))
+         (is (re-find #"fns-only" html) "a package without impls")
+         (is (not (re-find #"mk-search" html)) "no search on a roster"))))
   (testing "the item partial: versions with Apply, the review form"
     (let [html (:body (setup/via-graph *bootstrap* :_partial-marketplace-item-handler (get-req {"name" "part.theme"})))]
       (is (re-find #"data-marketplace-item=\"part.theme\"" html))
@@ -340,14 +361,17 @@
 
 
 (deftest loaded-roster-shape
-  (let [roster (loaded/read-roster)]
-    (is (seq roster) "the golden bootstrap loaded packages")
-    (let [core-row (first (filter #(= "core" (:name %)) roster))]
-      (is (= "impl+fns" (:kind core-row)))
-      (is (= "bundled" (:origin core-row)))
-      (is (pos? (:base-fn-count core-row))))
-    (is (= "fns-only" (:kind (loaded/roster-entry {:name "x" :modules ["m"]} 0 false))))
-    (is (= "manifest" (:origin (loaded/roster-entry {:name "x"} 3 true))))))
+  (with-fixture-roster
+    (fn []
+      (let [roster (loaded/read-roster)
+            by-name (into {} (map (juxt :name identity)) roster)]
+        (is (= ["core" "registry"] (mapv :name roster)) "load order, one row per package")
+        (is (= "impl+fns" (:kind (by-name "core"))))
+        (is (= "bundled" (:origin (by-name "core"))))
+        (is (= 163 (:base-fn-count (by-name "core"))))
+        (is (= "fns-only" (:kind (by-name "registry")))))))
+  (is (= "fns-only" (:kind (loaded/roster-entry {:name "x" :modules ["m"]} 0 false))))
+  (is (= "manifest" (:origin (loaded/roster-entry {:name "x"} 3 true)))))
 
 
 (deftest mirrors-show-the-origin-and-take-no-review

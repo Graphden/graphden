@@ -116,7 +116,16 @@
               (Thread/sleep 50)))
           (is (>= @ticks 3) (str "expected ≥3 ticks from two triggers, got " @ticks)))
         (testing "each interval fire is a persisted run of the tick fn (traced-call)"
-          (let [rows (sp/query-entities storage :fn-execution {})
+          ;; The 200 ms interval keeps firing while we look: a run row read
+          ;; mid-tick is still `:pending`, so wait for the in-flight ones to
+          ;; land (≤ 2 s) before asking what every row became.
+          (let [settled (fn [] (sp/query-entities storage :fn-execution {}))
+                deadline (+ (System/currentTimeMillis) 2000)
+                rows (loop [rows (settled)]
+                       (if (and (some #(= :pending (:status %)) rows)
+                                (< (System/currentTimeMillis) deadline))
+                         (do (Thread/sleep 100) (recur (settled)))
+                         rows))
                 tick-versions (set (map :id (sp/query-entities storage :fn-version
                                                                {:fn-id (:id tick-fn)})))]
             (is (>= (count rows) 1) "the fire landed as an :fn-execution row")

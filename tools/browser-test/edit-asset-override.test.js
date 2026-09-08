@@ -19,12 +19,17 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext} = require('./edit-test-helpers');
+const {assert, newContext, nodeApi} = require('./edit-test-helpers');
 
 const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 const MARKER = '/* e2e-asset-override-' + process.pid + ' */';
 
 async function openAssetsSection(page) {
+  // After a reload `networkidle` can land before the deferred editor bundle
+  // has defined the shell — wait for it rather than evaluate into a page
+  // whose scripts are still arriving (the flake of 2026-09-08).
+  await page.waitForFunction(() => typeof window.gdShellSurface === 'function', null,
+                             {timeout: 20000, polling: 100});
   await page.evaluate(async () => {
     gdShellSurface('operate');
     document.querySelector('#gd-operate-nav button[data-section="assets"]')?.click();
@@ -38,13 +43,12 @@ function stylesRow(page) {
                       {hasText: 'editor-styles.css'}).first();
 }
 
-async function revertViaApi(page) {
-  // Belt-and-braces cleanup — direct DELETE, independent of the UI.
-  await page.evaluate(async ({base}) => {
-    const url = base + '/api/assets/revert?path='
-      + encodeURIComponent('packages/app/editor/editor-styles.css');
-    await window.authFetch(url, {method: 'DELETE'});
-  }, {base: BASE});
+async function revertViaApi() {
+  // Belt-and-braces cleanup — direct DELETE from node, independent of the
+  // UI AND of the page (a broken page context must not leave the override
+  // behind for the next attempt to trip on).
+  await nodeApi('DELETE', '/api/assets/revert?path='
+    + encodeURIComponent('packages/app/editor/editor-styles.css'));
 }
 
 (async () => {
@@ -187,7 +191,7 @@ async function revertViaApi(page) {
     process.exit(0);
   } catch (e) {
     console.error('FAIL:', e.message);
-    try { await revertViaApi(page); } catch (_) {}
+    try { await revertViaApi(); } catch (_) {}
     try { await browser.close(); } catch (_) {}
     process.exit(1);
   }

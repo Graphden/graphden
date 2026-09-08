@@ -364,11 +364,12 @@
   ;; =====================================================================
 
   {:name :_mki-rows
-   :description "The package's index rows, newest version first."
+   :description "The package's index rows, newest version first — the caller's own rows shadowing another org's under the same name (`:_mkg-shadowed`)."
    :parent :reverse
    :args {:coll {:parent :sort-by
                  :args {:key-fn :_mkr-rank
-                        :coll {:parent :filter :args {:pred :_mki-row-named? :coll :list-package-versions :pkg-name {:as :pkg-name :type :text}}}}}}}
+                        :coll {:parent :_mkg-shadowed
+                               :args {:value {:parent :filter :args {:pred :_mki-row-named? :coll :list-package-versions :pkg-name {:as :pkg-name :type :text}}}}}}}}}
   {:name :_mki-row-named?
    :parent :equal? :args {:a :_mkr-name :b {:as :pkg-name :type :text}}}
 

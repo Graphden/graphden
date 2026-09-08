@@ -213,10 +213,15 @@
     }
     // `@marketplace/<name>` — the public storefront's "sign in to install"
     // lands on the package (editor-marketplace.js opens the item partial).
+    // Idempotent: the surface mirrors the open item into the hash, and the
+    // boot routes the hash again once the graph has loaded — re-fetching an
+    // item that is already up would tear down the partial the user is
+    // working in (a form post mid-flight lands on a detached root).
     if (name === 'market' && parts[1] && typeof window.gdMarketOpen === 'function') {
       let pkg = parts.slice(1).join('/');
       try { pkg = decodeURIComponent(pkg); } catch (_) { /* keep raw */ }
-      window.gdMarketOpen({ name: pkg });
+      const shown = document.querySelector('#gd-market-root [data-marketplace]')?.dataset.marketplaceItem;
+      if (shown !== pkg) window.gdMarketOpen({ name: pkg });
     }
     return true;
   }

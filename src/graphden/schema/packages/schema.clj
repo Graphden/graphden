@@ -202,6 +202,15 @@
   #uuid "9e5b1d27-3a8c-4e0f-b2a6-4b7f9a1d3e58")
 
 
+;; Who published — `tenancy.context/current-user-id` at publish time
+;; (`"anonymous"` without per-user identity). The row's `:org-id` says
+;; which org owns it; this says which person to tell about it (the
+;; moderation decision mail goes to the publisher, the org owner is the
+;; fallback). Never an authz key.
+(def ^:private pv-publisher-id-field-uuid
+  #uuid "d3fc5aa1-1cc2-41d8-bb83-c4a0dac10d21")
+
+
 ;; =============================================================================
 ;; Entity UUID — :package-review (one rating + body per package × author)
 ;; =============================================================================
@@ -385,7 +394,17 @@
                                         :nullable? true}
                       :moderated-at {:uuid pv-moderated-at-field-uuid
                                      :type :timestamptz
-                                     :nullable? true}})))
+                                     :nullable? true}
+                      :publisher-id {:uuid pv-publisher-id-field-uuid
+                                     :type :text
+                                     :nullable? true}})
+      ;; One row per (name, version) — the immutable registry's key, at the
+      ;; DB. The publish path still pre-checks (a friendly `version-exists`
+      ;; instead of a constraint error) and treats the violation the same;
+      ;; the index closes the check-then-insert race and the cross-org
+      ;; blind spot (an org-scoped read never sees another org's private
+      ;; row). Applied to an existing DB by `ensure-unique-indexes!`.
+      (ds/add-constraint :package-version {:type :unique :fields [:name :version]})))
 
 
 (defn- add-package-install
@@ -495,8 +514,9 @@
    - `:package-install` — a per-branch version PIN (desired-state: \"branch B
      uses package P at version V\"). Carries `:org-id` because pins ARE
      tenant-owned — each org installs/updates packages in its own project.
-     One pin per `(branch-id, package-name)`, enforced app-side (mirrors the
-     app-side uniqueness of `:package-version`).
+     One pin per `(branch-id, package-name)`, enforced app-side.
+     `:package-version` itself is UNIQUE on `(name, version)` at the DB
+     (plus the publish path's friendly pre-check).
 
    - `:package-review` / `:package-stat` / `:ui-pref` — the marketplace
      companions (ns-doc § Marketplace): reviews, the global install

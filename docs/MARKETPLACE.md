@@ -44,7 +44,7 @@ One artifact entity, three companions (`src/graphden/schema/packages/schema.clj`
 
 | Entity | Role | Tenancy classification |
 |---|---|---|
-| `:package-version` + `kind` / `description` / `category` / `tags` / `payload` / `origin` | the artifact. `kind` nil or `"fns"` = a fn-def package (content in `:fns`); `"theme"` / `"keymap"` = the `:payload` IS the artifact (`:fns []`, `:ns-root ""`). `origin` — on a MIRRORED copy, the read-only snapshot of the origin registry's signals `{:url :rating :installs :version-count :as-of}`; nil = published here | org-scoped, `public?` opt-in (unchanged) |
+| `:package-version` + `kind` / `description` / `category` / `tags` / `payload` / `origin` / `publisher-id` | the artifact. `kind` nil or `"fns"` = a fn-def package (content in `:fns`); `"theme"` / `"keymap"` = the `:payload` IS the artifact (`:fns []`, `:ns-root ""`). `origin` — on a MIRRORED copy, the read-only snapshot of the origin registry's signals `{:url :rating :installs :version-count :as-of}`; nil = published here. `publisher-id` — `current-user-id` at publish, who the moderation mail goes to (never an authz key) | org-scoped, `public?` opt-in (unchanged); `UNIQUE (name, version)` |
 | `:package-review` `(package-name, rating 1–5, body, author-id, author-label, public?, timestamps)` | one review per author per package; the aggregate is computed in the graph | org-scoped + the `public?` RLS arm (a review is as visible as its package); **author-owned writes** — the addon stamps `author-id` and refuses another member's edit / delete |
 | `:package-stat` `(package-name, installs)` | the cumulative install counter — GLOBAL by design: an installer in org B cannot write org A's artifact row, and per-org pins are invisible across orgs | no org; **platform-write-only** (`system-write-entities`) — bumped by the pin write itself around the decorator |
 | `:ui-pref` `(owner-id, key, value)` | the current user's active `theme` / `keymap`: `{:source {:name :version} :payload …}` — the payload is COPIED so a withdrawn version leaves the editor as it was | **owner-scoped**: read and written as the current user only; no org axis, a preference follows the person |
@@ -70,14 +70,19 @@ status — a pending listing already claims it) holds it, and every other
 org's publish under that name — public *or* private — is refused
 `name-taken` with the `holder` org named, so no catalog ever shows two
 orgs under one card. Private names are per org: two orgs may each keep a
-private `utils`, and a private name is no claim (someone else may list it
-publicly later; the private holder's own catalog then shows the foreign
-public package beside its own — pick a distinct name if that grates). The
-check is `foreign-public-holder` inside `publish-package-apply`
+private `utils`, and a private name is no claim — someone else may list it
+publicly later. When that happens the private holder's **own rows shadow**
+the foreign ones under that name (`:_mkg-shadowed`: the card and the item
+show its own versions only; an org with no rows of its own sees the public
+package as usual), so a catalog still shows one org per card. The check is
+`foreign-public-holder` inside `publish-package-apply`
 (`registry/impls.clj`), adjacent to the insert like the version check;
 under row-level security a tenant sees exactly the other orgs' public rows,
-which is the set that matters. The DB-level `UNIQUE(name, version)`
-hardening (PACKAGE_DISTRIBUTION § 2.1) is still the follow-up.
+which is the set that matters. `(name, version)` is **`UNIQUE` at the DB**
+(applied to an existing database by the migration pass); the publish path
+keeps its friendly pre-check and answers a constraint violation the same
+way (`version-exists`), so a race or another org's private row — invisible
+to an org-scoped read — never becomes a 500.
 
 ## 3. Listing vocabulary
 
@@ -111,7 +116,7 @@ auth-required:
 |---|---|
 | `GET /api/marketplace?kind=&q=&category=&tag=&sort=&mine=1` | the cards as JSON — what Settings reads for "my saved themes"; `kind=any` spans every kind (what a remote mirror asks) |
 | `GET /api/marketplace/categories` | the vocabulary |
-| `POST /api/marketplace/publish` | a THEME or KEYMAP version: `{kind, name, version, description?, category?, tags?, public?, payload}` — refuses `unsupported-kind` (fns publish from a namespace), `missing-name` / `missing-version` / `missing-payload`, `bad-category`, `version-exists`, `name-taken` (§ 2 Names); capability-gated like every publish |
+| `POST /api/marketplace/publish` | a THEME or KEYMAP version: `{kind, name, version, description?, category?, tags?, public?, payload}` — refuses `unsupported-kind` (fns publish from a namespace), `missing-name` / `missing-version` / `missing-payload`, `bad-category`, `version-exists`, `name-taken` (§ 2 Names); capability-gated like every publish. The share dialog words each code (`editor-marketplace.js`) |
 | `POST /api/marketplace/install?name=&version=[&fork=1]` | install (or fork) a fns package; answers the item HTML |
 | `POST /api/marketplace/apply?name=&version=` | make a theme / keymap the user's active one (writes the `theme` / `keymap` preference); answers the item HTML |
 | `POST /api/marketplace/review` (form `name`, `rating`, `body`) · `DELETE /api/marketplace/unreview?name=` | write / update / delete the current user's review; answer the item HTML. Refused on a mirror (the origin is the authority) |
@@ -135,7 +140,9 @@ HTMX contract of the partials: every root is `div[data-marketplace]` with
 inherits — a tab, a card, a tag chip or an action button names only its URL
 and every response is the next whole root. `editor-marketplace.js` mounts
 the first partial and, after every swap, re-pulls `/api/prefs` so an Apply
-takes effect at once.
+takes effect at once — and mirrors the open item into the URL
+(`#@marketplace/<name>`, `#@marketplace` on the listing), so a reload or a
+copied link lands on the same package.
 
 ## 5. Themes
 
@@ -246,18 +253,25 @@ new review. `POST /api/marketplace/moderate` is the decision route
 (`:moderate-package-version!`, platform-admin only); `GET
 /api/marketplace/moderation` the queue as JSON.
 
-**The publisher is told.** A decision raises `:package-moderated` through
-core's notification seam (`tenancy.context/notify!`,
-[TENANCY_SEAM.md § Notifications](TENANCY_SEAM.md#notifications)) with the
-updated row; the tenancy addon's `:tenancy/notifications` sink emails the
-publishing org's **owner** (the row records the org, not the user) — the
-verdict, the moderator's note on a rejection, and the editor deep link —
-through the accounts Mailer, the same way invites and the inactivity
-warning go out. The body is graph
-(`tenancy-admin.mail/package-moderation-decision-email`, with a
-byte-identical Clojure fallback pinned by the parity test); without a
-mailer, a trusted origin or an owner email the sink answers a reason and
-the decision stands.
+**Both sides are told.** Two events go through core's notification seam
+(`tenancy.context/notify!`,
+[TENANCY_SEAM.md § Notifications](TENANCY_SEAM.md#notifications)), and the
+tenancy addon's `:tenancy/notifications` sink turns each into mail through
+the accounts Mailer, the same way invites and the inactivity warning go
+out:
+
+- `:package-submitted` — a tenant's public opt-in landed `pending`; every
+  **platform-admin** (the `platform-admin` grant holders) is told the queue
+  has work, with a link to the Platform surface.
+- `:package-moderated` — the decision, with the updated row; the
+  **publisher** (`publisher-id`, the org's owner when that resolves to no
+  email) gets the verdict, the moderator's note on a rejection, and the
+  editor deep link.
+
+The bodies are graph (`tenancy-admin.mail/package-submitted-email`,
+`package-moderation-decision-email`, each with a byte-identical Clojure
+fallback pinned by the parity test); without a mailer, a trusted origin or
+a recipient the sink answers a reason and the write stands.
 
 Enforcement lives in the tenancy decorator's `visible?`: the `public?`
 arm counts for OTHER orgs only when `:status` is nil / `approved` (or the
@@ -334,18 +348,26 @@ storefront is the cloud's control-plane page.
   the install counter, apply → preference, the prefs routes, both partials,
   the roster, mirrors (origin signals, no local review), the listing edit,
   moderation (pending → approve / reject with a note, the queue's gate, the
-  decision raised through the notification seam), the name rule
-  (`name-taken` for a public or private publish under another org's public
-  name; a private name is no claim);
+  decision raised through the notification seam, a pending publish raising
+  `:package-submitted`), the name rule (`name-taken` for a public or
+  private publish under another org's public name; a private name is no
+  claim; own rows shadow a foreign card of the same name), the publisher
+  stamp and the DB's `(name, version)` key;
   `graphden-cloud` `landing_tutorial_e2e_test` — the storefront pages
   (public rows only, the item page, 404, robots, sitemap, the minute cache);
   `registry_test` — the remote pull snapshots the origin's card, the
   publish envelope's row-derived fields, `name-taken` on the namespace
   publish; `tenancy/context_test` — the notify seam; `graphden-tenancy`
-  `notifications_test` (the owner is mailed, every no-op reason, the sink
-  never throws) and `mail_parity_test` (graph template ≡ Clojure copy).
+  `notifications_test` (the publisher, else the owner, is mailed the
+  decision; every platform-admin the submission; every no-op reason; the
+  sink never throws) and `mail_parity_test` (graph templates ≡ Clojure
+  copies).
 - `tools/browser-test/edit-marketplace.test.js` — the surface, apply,
-  review, the keymap, and the `#@marketplace/<name>` deep link.
+  review, the keymap, and the `#@marketplace/<name>` deep link;
+  `tools/runtime-test/marketplace-shell.test.js` (refusal wording, the URL
+  mirror) and `moderation-section.test.js` (the Platform section's gate —
+  the section itself exists only with the tenancy addon, so it has no
+  browser test on the single-tenant e2e stack).
 - `tools/runtime-test/theme-payload.test.js` — the sanitiser and the apply /
   clear path; `tools/runtime-test/keymap.test.js` — overrides, late
   registration, reset, the which-key footer.

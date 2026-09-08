@@ -133,6 +133,24 @@
          :org-id)))
 
 
+(defn- insert-or-exists!
+  "The publish INSERT under the DB's `UNIQUE (name, version)`: the created
+   row, or nil when the key is already taken — the same answer the
+   pre-check gives, so a race or another org's private row (invisible to
+   an org-scoped read) ends as `version-exists`, not a 500. A pending row
+   (a tenant's public opt-in under moderation) is announced through the
+   notification seam so the operator hears about the queue."
+  [storage row]
+  (try
+    (let [created (sp/create-entity storage :package-version row)]
+      (when (= "pending" (:status created))
+        (tc/notify! :package-submitted created))
+      created)
+    (catch clojure.lang.ExceptionInfo e
+      (when-not (= :unique-violation (:type (ex-data e)))
+        (throw e)))))
+
+
 (defbase publish-package-apply
   [pkg-name pkg-version bundle pkg-public listing]
   ;; Authz chokepoint: publishing to an ORG's registry requires the
@@ -168,41 +186,44 @@
       ;; a row is platform-visible iff `:public?` is true. A tenant
       ;; publish without the opt-in stays private to its org
       ;; (`:org-id` stamped by the tenancy decorator, spec §5).
-      (sp/create-entity storage :package-version
-                        {:name pkg-name
-                         :version pkg-version
-                         :ns-root (:namespace bundle)
-                         :fns fns
-                         :dependencies (:dependencies bundle)
-                         :package-dependencies (:package-dependencies bundle)
-                         :secrets (vec (:secrets bundle))
-                         :content-hash (ids/digest-hex "SHA-256" (json/generate-string fns))
-                         ;; Same value the tenancy decorator stamps when
-                         ;; scoped (it overwrites with `(tc/current-org)`
-                         ;; too) — set here as well so SINGLE-TENANT rows
-                         ;; carry the public org instead of NULL and the
-                         ;; governance catalog's org-equality filter works
-                         ;; identically with and without the addon.
-                         :org-id (tc/current-org)
-                         :public? (boolean (or pkg-public (tc/current-platform-tier?)))
-                         ;; Moderation (docs/MARKETPLACE.md § 8): a TENANT's public
-                         ;; opt-in on a deployment that runs it waits for the
-                         ;; operator; the platform's own and every private
-                         ;; publish are listed outright.
-                         :status (if (and pkg-public
-                                          (shared/moderation-enabled?)
-                                          (not (tc/current-platform-tier?)))
-                                   "pending"
-                                   "approved")
-                         :published-at (java.time.Instant/now)
-                         ;; marketplace listing (docs/MARKETPLACE.md) — the
-                         ;; graph validated + normalised it (`:listing-normalize`);
-                         ;; nil listing = a plain fns publish with no metadata
-                         :kind (:kind listing)
-                         :description (:description listing)
-                         :category (:category listing)
-                         :tags (some-> (:tags listing) vec)
-                         :payload (:payload listing)}))))
+      (insert-or-exists!
+        storage
+        {:name pkg-name
+         :version pkg-version
+         :ns-root (:namespace bundle)
+         :fns fns
+         :dependencies (:dependencies bundle)
+         :package-dependencies (:package-dependencies bundle)
+         :secrets (vec (:secrets bundle))
+         :content-hash (ids/digest-hex "SHA-256" (json/generate-string fns))
+         ;; Same value the tenancy decorator stamps when
+         ;; scoped (it overwrites with `(tc/current-org)`
+         ;; too) — set here as well so SINGLE-TENANT rows
+         ;; carry the public org instead of NULL and the
+         ;; governance catalog's org-equality filter works
+         ;; identically with and without the addon.
+         :org-id (tc/current-org)
+         :public? (boolean (or pkg-public (tc/current-platform-tier?)))
+         ;; Moderation (docs/MARKETPLACE.md § 8): a TENANT's public
+         ;; opt-in on a deployment that runs it waits for the
+         ;; operator; the platform's own and every private
+         ;; publish are listed outright.
+         :status (if (and pkg-public
+                          (shared/moderation-enabled?)
+                          (not (tc/current-platform-tier?)))
+                   "pending"
+                   "approved")
+         :published-at (java.time.Instant/now)
+         ;; marketplace listing (docs/MARKETPLACE.md) — the
+         ;; graph validated + normalised it (`:listing-normalize`);
+         ;; nil listing = a plain fns publish with no metadata
+         :kind (:kind listing)
+         :description (:description listing)
+         :category (:category listing)
+         :tags (some-> (:tags listing) vec)
+         :payload (:payload listing)
+         ;; who to tell about the moderation decision
+         :publisher-id (tc/current-user-id)}))))
 
 
 (defbase breaking-changes-between

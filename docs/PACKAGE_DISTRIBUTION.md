@@ -62,8 +62,8 @@ implementation tasks.
   declared dependencies. Columns: `name`, `version`, `ns-root`, `fns` (jsonb
   bundle), `dependencies` (jsonb), `content-hash`, `published-at`, plus the
   org-scoped-registry pair `org-id` / `public?` (packages spec §5, below). NOT
-  versioned (immutable by contract — the publish path rejects re-publishing an
-  existing `(name, version)`).
+  versioned (immutable by contract — `UNIQUE (name, version)` at the DB, and
+  the publish path rejects re-publishing an existing pair before the insert).
 - **Org-scoped registry (packages spec §5).** `:package-version` is an
   org-scoped entity in the tenancy addon (`default-scoped-entities`): a
   tenant's publish stamps `org-id` and is invisible to every other org —

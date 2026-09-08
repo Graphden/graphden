@@ -363,11 +363,33 @@
                  {:parent :get :args {:coll :_mkc-latest :key {:value :status} :default {:value "approved"}}}
                  {:parent :get :args {:coll :_mkc-latest :key {:value :moderation-note} :default nil}}]}}
 
+  ;; --- one org per name in YOUR catalog (docs/MARKETPLACE.md § 2, Names) ---
+  ;; A public name is registry-wide, but a PRIVATE name is no claim: you may
+  ;; hold a private `utils` while another org later lists `utils` publicly.
+  ;; Your own rows then SHADOW the foreign ones under that name — the card
+  ;; and the item show yours only; a name with no rows of yours shows the
+  ;; public package as usual. `:value` = one name's index rows.
+  {:name :_mkg-own-rows
+   :parent :filter
+   :args {:pred :_mkf-mine? :coll {:as :value :type [:list :keyword-map]}}}
+  {:name :_mkg-shadowed
+   :description "One name's index rows with the caller's own rows shadowing another org's."
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_mkg-own-rows}}
+          :then {:as :value :type [:list :keyword-map]}
+          :else :_mkg-own-rows}}
+
+  {:name :marketplace-index-groups
+   :description "The registry index grouped by name — one group of rows per package, the caller's own rows shadowing another org's under the same name."
+   :parent :map
+   :args {:func :_mkg-shadowed
+          :coll {:parent :vals :args {:map {:parent :group-by :args {:key-fn :_mkr-name :coll :list-package-versions}}}}}}
+
   {:name :marketplace-cards
-   :description "Every visible package as a card — the registry index grouped by name, each group folded by `:marketplace-card` with the review / install aggregates captured once."
+   :description "Every visible package as a card — the registry index grouped by name (`:marketplace-index-groups`), each group folded by `:marketplace-card` with the review / install aggregates captured once."
    :parent :map
    :args {:func :marketplace-card
-          :coll {:parent :vals :args {:map {:parent :group-by :args {:key-fn :_mkr-name :coll :list-package-versions}}}}
+          :coll :marketplace-index-groups
           :reviews :marketplace-review-map
           :installs :marketplace-install-map}}
 

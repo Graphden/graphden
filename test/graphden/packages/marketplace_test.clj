@@ -114,7 +114,12 @@
         (is (= "#101214" (get-in row [:payload :tokens (keyword "--gd-paper")]))
             "the token map round-trips through jsonb (keys keywordised)")
         (is (= [] (:fns row)) "a theme carries no fn-defs")
-        (is (= "" (:ns-root row))))))
+        (is (= "" (:ns-root row)))
+        (is (= (tc/current-user-id) (:publisher-id row)) "who published — the decision mail's recipient")
+        (testing "the DB holds the (name, version) key itself"
+          (is (thrown? clojure.lang.ExceptionInfo
+                (sp/create-entity (storage) :package-version
+                                  (-> row (dissoc :id) (assoc :org-id "someone-else")))))))))
   (testing "the same (name, version) again is refused — immutable"
     (is (= "version-exists"
            (:reason (body-json (setup/via-graph *bootstrap* :_mkp-handler
@@ -144,6 +149,32 @@
                                                              :public true :payload theme-payload}))))))
       (is (empty? (filter #(= "2.0.0" (:version %)) (sp/query-entities (storage) :package-version {:name "night-ink"})))
           "nothing written under the taken name")
+      (finally (tc/install-org-cap-fn! nil))))
+  (testing "your own rows shadow another org's public package of the same name — one org per card"
+    (tc/install-org-cap-fn! (fn [cap] (= cap :publish-packages)))
+    (try
+      (binding [tc/*current-org* "shadow-org"]
+        (is (true? (:ok (body-json (setup/via-graph *bootstrap* :_mkp-handler
+                                                    (json-req {:kind "theme" :name "shadow.theme" :version "1.0.0"
+                                                               :payload theme-payload})))))
+            "a private name is no claim"))
+      (is (true? (:ok (body-json (setup/via-graph *bootstrap* :_mkp-handler
+                                                  (json-req {:kind "theme" :name "shadow.theme" :version "2.0.0"
+                                                             :public true :payload theme-payload}))))))
+      (let [card (fn []
+                   (first (filter #(= "shadow.theme" (:name %))
+                                  (body-json (setup/via-graph *bootstrap* :_mk-index-handler (get-req {"kind" "theme"}))))))]
+        (is (= ["2.0.0"] (:versions (card))) "the platform sees its own public version only")
+        (binding [tc/*current-org* "shadow-org"]
+          (is (= ["1.0.0"] (:versions (card))) "the private holder sees its own, the foreign public one is shadowed")
+          (is (re-find #"version=1\.0\.0" (:body (setup/via-graph *bootstrap* :_partial-marketplace-item-handler (get-req {"name" "shadow.theme"})))))
+          (is (not (re-find #"version=2\.0\.0" (:body (setup/via-graph *bootstrap* :_partial-marketplace-item-handler (get-req {"name" "shadow.theme"})))))
+              "the item page too"))
+        ;; (an org with no rows of its own keeps every row it can see — here,
+        ;; without the tenancy decorator, that includes the private one; under
+        ;; the addon it sees the public package alone)
+        (binding [tc/*current-org* "third-org"]
+          (is (= #{"1.0.0" "2.0.0"} (set (:versions (card)))) "no rows of its own → nothing shadowed")))
       (finally (tc/install-org-cap-fn! nil))))
   (testing "refusals: fns kind (a namespace export), missing payload, bad category"
     (is (= "unsupported-kind"
@@ -444,6 +475,7 @@
   ;; addon would grant it
   (tc/install-org-cap-fn! (fn [cap] (= cap :publish-packages)))
   ;; the notification seam — the addon's mailer stands here in prod
+  (reset! notified [])
   (tc/install-notify-fn! (fn [event payload] (swap! notified conj [event payload])))
   (try
     (testing "a tenant's public theme waits for review"
@@ -453,7 +485,11 @@
                                                           :public true :payload theme-payload}))))]
         (is (true? (:ok body)))
         (is (= "pending" (:status body)))
-        (is (= "pending" (:status (first (sp/query-entities (storage) :package-version {:name "mod.theme"})))))))
+        (is (= "pending" (:status (first (sp/query-entities (storage) :package-version {:name "mod.theme"})))))
+        (testing "the queue's new entry is raised through the notification seam — the operator hears about it"
+          (let [[event row] (last @notified)]
+            (is (= :package-submitted event))
+            (is (= ["mod.theme" "1.0.0" "pending" "acme-mod"] [(:name row) (:version row) (:status row) (:org-id row)]))))))
     (testing "a private publish and the platform's own publish are approved at once"
       (binding [tc/*current-org* "acme-mod"]
         (setup/via-graph *bootstrap* :_mkp-handler

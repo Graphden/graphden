@@ -28,6 +28,32 @@
   const PARTIAL_ITEM = '/partials/marketplace/item';
   function fetcher() { return window.authFetch || fetch; }
 
+  // The publish route's refusal codes, worded for the share dialog (the
+  // namespace-publish panel words the same codes in the graph).
+  const REFUSALS = {
+    'version-exists': 'that version already exists — versions are immutable; publish under a new version.',
+    'name-taken': 'another organization already publishes under this name — public names are first come, first served; pick a different name.',
+    'bad-category': 'pick a category from the list.',
+    'missing-name': 'a name is required.',
+    'missing-version': 'a version is required.',
+    'missing-payload': 'nothing to save — the theme / layout payload is empty.',
+    'unsupported-kind': 'only themes and keyboard layouts publish here.',
+  };
+  function refusalText(reason) { return REFUSALS[reason] || reason; }
+
+  // Mirror the open item into the URL: `#@marketplace/<name>` while an item
+  // is shown, `#@marketplace` on the listing — so a reload or a copied link
+  // lands on the same package (the shell routes the hash on load).
+  function gdMarketSyncHash() {
+    try {
+      if (document.body.getAttribute('data-surface') !== 'market') return;
+      const root = document.querySelector('#gd-market-root [data-marketplace]');
+      const item = root?.dataset.marketplaceItem;
+      const want = item ? '#@marketplace/' + encodeURIComponent(item) : '#@marketplace';
+      if (window.location.hash !== want) window.history.replaceState(null, '', want);
+    } catch (_) { /* the hash is a mirror, not state */ }
+  }
+
   // ---- category vocabulary (the graph's :listing-categories, fetched once) ----
   let _categories = null;
   let _categoriesPromise = null;
@@ -110,6 +136,7 @@
     fetcher()(url).then((r) => (r.ok ? r.text() : Promise.reject(r.status))).then((html) => {
       root.innerHTML = html;
       if (window.htmx) window.htmx.process(root);
+      gdMarketSyncHash();
     }).catch(() => {});
   }
 
@@ -119,6 +146,7 @@
     const t = e.target;
     if (!(t instanceof Element) || !t.closest('#gd-market-root')) return;
     if (typeof window.gdPrefsRefresh === 'function') window.gdPrefsRefresh();
+    gdMarketSyncHash();
     // keep the keyboard inside the surface (the swapped root has no focus)
     const first = t.querySelector('button, input, select, a[href]');
     if (first && typeof focusSafely === 'function' && document.activeElement === document.body) focusSafely(first);
@@ -241,7 +269,7 @@
           el.querySelector('#gd-mkpub-cancel').textContent = 'Close';
           go.hidden = true;
         } else {
-          setResult('Refused: ' + (j?.reason || (typeof authFetchErrorMessage === 'function'
+          setResult('Not saved: ' + (j?.reason ? refusalText(j.reason) : (typeof authFetchErrorMessage === 'function'
             ? authFetchErrorMessage(r, { fallback: 'HTTP ' + r.status }) : 'HTTP ' + r.status)), false);
           go.disabled = false;
         }
@@ -261,6 +289,8 @@
   window.gdMarketOpenPublishDialog = gdMarketOpenPublishDialog;
   window.gdRenderMarket = gdRenderMarket;
   window.gdMarketOpen = gdMarketOpen;
+  window.gdMarketSyncHash = gdMarketSyncHash;
+  window.gdMarketRefusalText = refusalText;
   window.gdMarketBumpPatch = bumpPatch;
 
   // the category vocabulary is wanted by the ns-publish popover too — warm it

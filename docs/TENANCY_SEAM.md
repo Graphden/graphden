@@ -92,7 +92,8 @@ sender's to log, not the domain write's to undo. Events raised today:
 
 | Event | Payload | Raised by | The addon's sink |
 |---|---|---|---|
-| `:package-moderated` | the updated `:package-version` row (`status`, `moderation-note`, `org-id`, …) | `moderate-package-version!` (`registry/marketplace/impls.clj`) | `:tenancy/notifications` — emails the publishing org's owner ([MARKETPLACE.md § 8](MARKETPLACE.md#8-moderation-of-public-listings)) |
+| `:package-submitted` | the created `:package-version` row that landed `pending` | `publish-package-apply` (`registry/registry/impls.clj`) | `:tenancy/notifications` — emails every platform-admin ([MARKETPLACE.md § 8](MARKETPLACE.md#8-moderation-of-public-listings)) |
+| `:package-moderated` | the updated `:package-version` row (`status`, `moderation-note`, `org-id`, `publisher-id`, …) | `moderate-package-version!` (`registry/marketplace/impls.clj`) | `:tenancy/notifications` — emails the publisher, else the publishing org's owner |
 
 ## Auth seam
 

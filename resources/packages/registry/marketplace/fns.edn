@@ -1,0 +1,1238 @@
+;; The MARKETPLACE — discovery over the registry (docs/MARKETPLACE.md).
+;;
+;; One artifact entity serves every kind: a `:package-version` row is a
+;; fns package (`:kind` nil / "fns"), an editor THEME ("theme" — its
+;; `:payload` is the token map) or a KEYBOARD LAYOUT ("keymap" — its
+;; `:payload` the binding overrides). This module adds what a listing
+;; needs on top of publish / install:
+;;
+;;   • the listing vocabulary + normaliser every publish path shares
+;;     (`:listing-normalize` — kind, category, tags, description, payload);
+;;   • the CARD aggregation — one card per package name: latest version,
+;;     every version, the rating (avg + count over `:package-review`) and
+;;     the install count (`:package-stat`) — plus the search / category /
+;;     tag / sort filters, as pure graph over the index;
+;;   • the two server-rendered partials the Marketplace SURFACE mounts
+;;     (`/partials/marketplace` = toolbar + cards or the Executor roster;
+;;     `/partials/marketplace/item` = one package: versions, actions,
+;;     reviews) and the action routes that re-render them (install / fork,
+;;     apply a theme or keymap, write / delete a review);
+;;   • `POST /api/marketplace/publish` for the non-fns kinds (a theme or
+;;     keymap has no namespace to export — the payload IS the artifact)
+;;     and `GET /api/marketplace` (the cards as JSON — what Settings reads
+;;     for "my saved themes", and what scripts read).
+;;
+;; HTMX contract: every partial root is `div[data-marketplace]` carrying
+;; `hx-target="closest [data-marketplace]" hx-swap="outerHTML"`, which
+;; htmx INHERITS — so a card, a tab, a tag chip or an action button only
+;; names its URL, and every response is the next whole root.
+;;
+;; HOF-callback convention: the element is `:item`; a callback that also
+;; needs a value from the caller declares it as its own free arg
+;; (`{:as :reviews}` …) and the `:map` / `:filter` site binds it — the
+;; wrap-time capture contract (docs/CLOSURE_CAPTURE.md). Effectful reads
+;; (the review / stat queries) are computed ONCE at the site and captured,
+;; never re-read per card.
+
+{:namespace "app.marketplace"
+ :description "Marketplace over the registry — listing vocabulary, per-package cards (versions, rating, installs), search/category/tag filters, the surface partials, reviews, apply-a-theme/keymap, and the non-fns publish route."
+ :fns
+ [;; =====================================================================
+  ;; LISTING VOCABULARY + NORMALISER
+  ;; =====================================================================
+
+  {:name :listing-kinds
+   :description "The marketplace kinds a `:package-version` row can be — `fns` (a fn-def package), `theme` (an editor theme), `keymap` (a keyboard layout). Nil `:kind` on a row reads as `fns`."
+   :parent :const
+   :args {:value ["fns" "theme" "keymap"]}}
+
+  {:name :listing-categories
+   :description "The category vocabulary per kind — one category per listing, chosen from this list (a free-text category would make the category filter useless)."
+   :parent :const
+   :args {:value {"fns" ["web" "data" "integrations" "utilities" "ai" "devops" "examples" "other"]
+                  "theme" ["light" "dark" "high-contrast" "colorful" "minimal" "other"]
+                  "keymap" ["vim-like" "emacs-like" "ide-like" "accessibility" "other"]}}}
+
+  {:name :listing-max-tags
+   :parent :const :args {:value 10}}
+
+  {:name :listing-max-description
+   :parent :const :args {:value 2000}}
+
+  ;; --- the inputs, nil-safe ---
+  {:name :_lst-kind
+   :parent :coalesce
+   :args {:value {:as :kind :type :nullable-text} :default {:value "fns"}}}
+
+  {:name :_lst-kind-ok?
+   :description "`|`-delimited membership — a pure string test, no HOF closure."
+   :parent :str-contains?
+   :args {:string {:parent :str-join
+                   :args {:coll [{:value "|"}
+                                 {:parent :str-join :args {:coll :listing-kinds :separator {:value "|"}}}
+                                 {:value "|"}]
+                          :separator {:value ""}}}
+          :substring {:parent :str-join :args {:coll [{:value "|"} :_lst-kind {:value "|"}] :separator {:value ""}}}}}
+
+  {:name :_lst-category-raw
+   :parent :str-lower
+   :args {:string {:parent :str-trim
+                   :args {:string {:parent :to-str :args {:value {:as :category :type :nullable-text}}}}}}}
+
+  {:name :_lst-category-blank?
+   :parent :empty? :args {:coll :_lst-category-raw}}
+
+  {:name :_lst-category
+   :description "The category, or nil when none was given."
+   :parent :if
+   :args {:test :_lst-category-blank? :then {:value nil} :else :_lst-category-raw}}
+
+  {:name :_lst-categories-for-kind
+   :parent :get
+   :args {:coll :listing-categories :key :_lst-kind :default {:value []}}}
+
+  {:name :_lst-category-ok?
+   :parent :or
+   :args {:values [:_lst-category-blank?
+                   {:parent :str-contains?
+                    :args {:string {:parent :str-join
+                                    :args {:coll [{:value "|"}
+                                                  {:parent :str-join :args {:coll :_lst-categories-for-kind :separator {:value "|"}}}
+                                                  {:value "|"}]
+                                           :separator {:value ""}}}
+                           :substring {:parent :str-join :args {:coll [{:value "|"} :_lst-category-raw {:value "|"}] :separator {:value ""}}}}}]}}
+
+  ;; tags: a comma-separated string (every API takes the same shape —
+  ;; the form field, the JSON body, the ns-publish popover) → trimmed,
+  ;; lower-cased, restricted to [a-z0-9-], non-empty, distinct, capped.
+  {:name :_lst-tag-clean
+   :parent :re-replace
+   :args {:string {:parent :str-lower :args {:string {:parent :str-trim :args {:string {:parent :to-str :args {:value {:as :item}}}}}}}
+          :pattern {:value "[^a-z0-9-]"}
+          :replacement {:value ""}}}
+
+  {:name :_lst-tag-keep?
+   :parent :not :args {:value {:parent :empty? :args {:coll {:as :item}}}}}
+
+  {:name :_lst-tags-split
+   :parent :str-split
+   :args {:string {:parent :to-str :args {:value {:as :tags :type :nullable-text}}}
+          :separator {:value ","}}}
+
+  {:name :_lst-tags
+   :parent :take
+   :args {:count :listing-max-tags
+          :coll {:parent :distinct
+                 :args {:coll {:parent :filter
+                               :args {:pred :_lst-tag-keep?
+                                      :coll {:parent :map :args {:func :_lst-tag-clean :coll :_lst-tags-split}}}}}}}}
+
+  {:name :_lst-description-raw
+   :parent :str-clip
+   :args {:string {:parent :str-trim :args {:string {:parent :to-str :args {:value {:as :description :type :nullable-text}}}}}
+          :limit :listing-max-description}}
+
+  {:name :_lst-description
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_lst-description-raw}}
+          :then {:value nil}
+          :else :_lst-description-raw}}
+
+  {:name :_lst-error
+   :description "nil, or the refusal reason — `bad-kind` / `bad-category`."
+   :parent :cond
+   :args {:clauses [{:parent :not :args {:value :_lst-kind-ok?}} {:value "bad-kind"}
+                    {:parent :not :args {:value :_lst-category-ok?}} {:value "bad-category"}
+                    {:value true} {:value nil}]}}
+
+  {:name :listing-normalize
+   :description "Normalise a marketplace listing — `{:kind :description :category :tags :payload :error}`: kind defaults to `fns`, category lower-cased and checked against the kind's vocabulary, tags parsed from a comma string ([a-z0-9-], distinct, ≤ 10), description trimmed + clipped. `:error` is nil or the refusal reason (`bad-kind` / `bad-category`); `:listing-invalid?` reads it."
+   :parent :zipmap
+   :args {:keys [{:value :kind} {:value :description} {:value :category} {:value :tags} {:value :payload} {:value :error}]
+          :vals [:_lst-kind :_lst-description :_lst-category
+                 {:parent :vec :args {:coll :_lst-tags}}
+                 {:as :payload :type :nullable-keyword-map}
+                 :_lst-error]}
+   :return-type {:kind :text :description :nullable-text :category :nullable-text
+                 :tags [:list :text] :payload :nullable-keyword-map :error :nullable-text}}
+
+  {:name :listing-invalid?
+   :description "True when a normalised listing carries an `:error`."
+   :parent :some?
+   :args {:value {:parent :get :args {:coll {:as :listing :type :keyword-map} :key {:value :error} :default nil}}}}
+
+  {:name :listing-error-envelope
+   :description "The `{:ok false :reason …}` envelope for an invalid listing."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason}]
+          :vals [{:value false}
+                 {:parent :get :args {:coll {:as :listing :type :keyword-map} :key {:value :error} :default nil}}]}}
+
+  ;; --- GET /api/marketplace/categories — the vocabulary, for the editor's
+  ;;     publish forms (one source of truth: the graph const above) ---
+  {:name :_mk-categories-handler
+   :lambda-params []
+   :description "Ring handler for GET /api/marketplace/categories — `:listing-categories` as JSON."
+   :parent :json-handler
+   :args {:data :listing-categories}}
+
+  {:name :api-marketplace-categories
+   :description "GET /api/marketplace/categories — `{kind [category …]}`, the listing vocabulary the publish forms offer. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/marketplace/categories" :handler :_mk-categories-handler}}
+
+  ;; =====================================================================
+  ;; CARDS — one per package name, over the registry index
+  ;; =====================================================================
+
+  ;; --- row accessors (`:item` = one index entry) ---
+  {:name :_mkr-name
+   :parent :get :args {:coll {:as :item} :key {:value :name} :default {:value ""}}}
+  {:name :_mkr-version
+   :parent :get :args {:coll {:as :item} :key {:value :version} :default {:value ""}}}
+  {:name :_mkr-rank
+   :parent :semver-rank :args {:version :_mkr-version}}
+
+  ;; --- reviews → `{name {:count n :avg x}}` (one query, captured once) ---
+  {:name :_mk-review-rows
+   :parent :query-entities
+   :args {:entity-type {:value "package-review"} :where {:value {}}}}
+
+  {:name :_mkv-package-name
+   :parent :get :args {:coll {:as :item} :key {:value :package-name} :default {:value ""}}}
+
+  {:name :_mkv-rating
+   :parent :get :args {:coll {:as :item} :key {:value :rating} :default {:value 0}}}
+
+  ;; `:value` = one group's review rows
+  {:name :_mkv-count
+   :parent :count :args {:coll {:as :value}}}
+  {:name :_mkv-sum
+   :parent :add
+   :args {:nums {:ref :_mkv-ratings :type [:list :numeric]}}}
+  {:name :_mkv-ratings
+   :parent :map :args {:func :_mkv-rating :coll {:as :value}}}
+  {:name :_mkv-avg
+   :parent :round
+   :args {:number {:parent :div :args {:nums [:_mkv-sum :_mkv-count]}} :decimals {:value 1}}}
+  {:name :_mkv-agg
+   :parent :zipmap
+   :args {:keys [{:value :count} {:value :avg}] :vals [:_mkv-count :_mkv-avg]}}
+
+  {:name :marketplace-review-map
+   :description "`{package-name {:count n :avg x}}` over every visible review — one query, aggregated in the graph."
+   :parent :update-vals
+   :args {:m {:parent :group-by :args {:key-fn :_mkv-package-name :coll :_mk-review-rows}}
+          :f :_mkv-agg}}
+
+  ;; --- installs → `{name installs}` ---
+  {:name :_mk-stat-rows
+   :parent :query-entities
+   :args {:entity-type {:value "package-stat"} :where {:value {}}}}
+
+  {:name :_mks-pair
+   :parent :vec
+   :args {:coll [{:parent :get :args {:coll {:as :item} :key {:value :package-name} :default {:value ""}}}
+                 {:parent :get :args {:coll {:as :item} :key {:value :installs} :default {:value 0}}}]}}
+
+  {:name :marketplace-install-map
+   :description "`{package-name installs}` — the global cumulative install counters."
+   :parent :into
+   :args {:to {:value {}}
+          :from {:parent :map :args {:func :_mks-pair :coll :_mk-stat-rows}}}}
+
+  ;; --- the card (`:item` = one package's index rows; `:reviews` / `:installs` captured) ---
+  {:name :_mkc-sorted-desc
+   :description "The package's rows newest version first."
+   :parent :reverse
+   :args {:coll {:parent :sort-by :args {:key-fn :_mkr-rank :coll {:as :item}}}}}
+
+  {:name :_mkc-latest
+   :parent :first :args {:coll :_mkc-sorted-desc}}
+
+  {:name :_mkc-name
+   :parent :get :args {:coll :_mkc-latest :key {:value :name} :default {:value ""}}}
+
+  {:name :_mkc-rating
+   :parent :get
+   :args {:coll {:as :reviews :type [:map :text :any]} :key :_mkc-name :default nil}}
+
+  {:name :_mkc-installs
+   :parent :get
+   :args {:coll {:as :installs :type [:map :text :any]} :key :_mkc-name :default {:value 0}}}
+
+  {:name :marketplace-card
+   :description "One marketplace card from a package's index rows: `{:name :kind :description :category :tags :org-id :public :latest :versions :version-count :published-at :fn-count :rating {:count :avg} | nil :installs}`. `:reviews` / `:installs` are the captured aggregate maps."
+   :parent :zipmap
+   :args {:keys [{:value :name} {:value :kind} {:value :description} {:value :category} {:value :tags}
+                 {:value :org-id} {:value :public} {:value :latest} {:value :versions} {:value :version-count}
+                 {:value :published-at} {:value :fn-count} {:value :rating} {:value :installs}]
+          :vals [:_mkc-name
+                 {:parent :get :args {:coll :_mkc-latest :key {:value :kind} :default {:value "fns"}}}
+                 {:parent :get :args {:coll :_mkc-latest :key {:value :description} :default nil}}
+                 {:parent :get :args {:coll :_mkc-latest :key {:value :category} :default nil}}
+                 {:parent :get :args {:coll :_mkc-latest :key {:value :tags} :default {:value []}}}
+                 {:parent :get :args {:coll :_mkc-latest :key {:value :org-id} :default nil}}
+                 {:parent :get :args {:coll :_mkc-latest :key {:value :public} :default nil}}
+                 {:parent :get :args {:coll :_mkc-latest :key {:value :version} :default {:value ""}}}
+                 {:parent :map :args {:func :_mkr-version :coll :_mkc-sorted-desc}}
+                 {:parent :count :args {:coll {:as :item}}}
+                 {:parent :get :args {:coll :_mkc-latest :key {:value :published-at} :default {:value ""}}}
+                 {:parent :get :args {:coll :_mkc-latest :key {:value :fn-count} :default {:value 0}}}
+                 :_mkc-rating
+                 :_mkc-installs]}}
+
+  {:name :marketplace-cards
+   :description "Every visible package as a card — the registry index grouped by name, each group folded by `:marketplace-card` with the review / install aggregates captured once."
+   :parent :map
+   :args {:func :marketplace-card
+          :coll {:parent :vals :args {:map {:parent :group-by :args {:key-fn :_mkr-name :coll :list-package-versions}}}}
+          :reviews :marketplace-review-map
+          :installs :marketplace-install-map}}
+
+  ;; =====================================================================
+  ;; FILTERS — kind / q / category / tag / mine / sort, read off the request
+  ;; =====================================================================
+
+  {:name :_mkq-param
+   :description "A query param as trimmed text (\"\" when absent). Free args: `:request`, `:param-name`."
+   :parent :str-trim
+   :args {:string {:parent :to-str
+                   :args {:value {:parent :query-param :args {:request {:as :request} :param-name {:as :param-name}}}}}}}
+
+  {:name :_mkq-kind-raw
+   :parent :_mkq-param :args {:param-name {:value "kind"}}}
+  {:name :_mkq-kind
+   :description "The kind tab — `fns` by default; `executor` is the roster tab, not a listing kind."
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_mkq-kind-raw}} :then {:value "fns"} :else :_mkq-kind-raw}}
+  {:name :_mkq-q
+   :parent :str-lower :args {:string {:parent :_mkq-param :args {:param-name {:value "q"}}}}}
+  {:name :_mkq-category
+   :parent :str-lower :args {:string {:parent :_mkq-param :args {:param-name {:value "category"}}}}}
+  {:name :_mkq-tag
+   :parent :str-lower :args {:string {:parent :_mkq-param :args {:param-name {:value "tag"}}}}}
+  {:name :_mkq-sort-raw
+   :parent :_mkq-param :args {:param-name {:value "sort"}}}
+  {:name :_mkq-sort
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_mkq-sort-raw}} :then {:value "rating"} :else :_mkq-sort-raw}}
+  {:name :_mkq-mine?
+   :parent :equal?
+   :args {:a {:parent :_mkq-param :args {:param-name {:value "mine"}}} :b {:value "1"}}}
+
+  ;; --- predicates over a card (`:item`), the parameter captured ---
+  {:name :_mkf-card-kind
+   :parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :kind} :default {:value "fns"}}}}}
+  {:name :_mkf-kind?
+   :parent :equal? :args {:a :_mkf-card-kind :b {:as :kind :type :text}}}
+
+  {:name :_mkf-category?
+   :parent :equal? :args {:a :_mkh-card-category-val :b {:as :category :type :text}}}
+
+  {:name :_mkf-card-tags-blob
+   :description "`|tag|tag|` — membership by delimiter."
+   :parent :str-join
+   :args {:coll [{:value "|"}
+                 {:parent :str-join :args {:coll {:parent :get :args {:coll {:as :item} :key {:value :tags} :default {:value []}}} :separator {:value "|"}}}
+                 {:value "|"}]
+          :separator {:value ""}}}
+  {:name :_mkf-tag?
+   :parent :str-contains?
+   :args {:string :_mkf-card-tags-blob
+          :substring {:parent :str-join :args {:coll [{:value "|"} {:as :tag :type :text} {:value "|"}] :separator {:value ""}}}}}
+
+  {:name :_mkf-card-search-blob
+   :description "name + description + tags, lower-cased — what the search box matches against."
+   :parent :str-lower
+   :args {:string {:parent :str-join
+                   :args {:coll [{:parent :get :args {:coll {:as :item} :key {:value :name} :default {:value ""}}}
+                                 {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :description} :default {:value ""}}}}}
+                                 {:parent :str-join :args {:coll {:parent :get :args {:coll {:as :item} :key {:value :tags} :default {:value []}}} :separator {:value " "}}}]
+                          :separator {:value " "}}}}}
+  {:name :_mkf-q?
+   :parent :str-contains? :args {:string :_mkf-card-search-blob :substring {:as :q :type :text}}}
+
+  {:name :_mkf-mine?
+   :parent :equal?
+   :args {:a {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :org-id} :default {:value ""}}}}}
+          :b :current-org-id}}
+
+  ;; --- the filter chain (each stage skipped when its param is blank) ---
+  {:name :_mkf-by-kind
+   :parent :filter :args {:pred :_mkf-kind? :coll :marketplace-cards :kind :_mkq-kind}}
+  {:name :_mkf-by-mine
+   :parent :if
+   :args {:test :_mkq-mine?
+          :then {:parent :filter :args {:pred :_mkf-mine? :coll :_mkf-by-kind}}
+          :else :_mkf-by-kind}}
+  {:name :_mkf-by-category
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_mkq-category}}
+          :then :_mkf-by-mine
+          :else {:parent :filter :args {:pred :_mkf-category? :coll :_mkf-by-mine :category :_mkq-category}}}}
+  {:name :_mkf-by-tag
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_mkq-tag}}
+          :then :_mkf-by-category
+          :else {:parent :filter :args {:pred :_mkf-tag? :coll :_mkf-by-category :tag :_mkq-tag}}}}
+  {:name :_mkf-by-q
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_mkq-q}}
+          :then :_mkf-by-tag
+          :else {:parent :filter :args {:pred :_mkf-q? :coll :_mkf-by-tag :q :_mkq-q}}}}
+
+  ;; --- sort keys ---
+  {:name :_mks-key-installs
+   :parent :get :args {:coll {:as :item} :key {:value :installs} :default {:value 0}}}
+  {:name :_mks-key-recent
+   :description "`:published-at` is already ISO text on a card (the index stringified it) — sortable as is."
+   :parent :get :args {:coll {:as :item} :key {:value :published-at} :default {:value ""}}}
+  {:name :_mks-key-name
+   :parent :get :args {:coll {:as :item} :key {:value :name} :default {:value ""}}}
+
+  {:name :_mks-by-rating
+   :parent :reverse :args {:coll {:parent :sort-by :args {:key-fn :_mkh-card-rating-avg :coll :_mkf-by-q}}}}
+  {:name :_mks-by-installs
+   :parent :reverse :args {:coll {:parent :sort-by :args {:key-fn :_mks-key-installs :coll :_mkf-by-q}}}}
+  {:name :_mks-by-recent
+   :parent :reverse :args {:coll {:parent :sort-by :args {:key-fn :_mks-key-recent :coll :_mkf-by-q}}}}
+  {:name :_mks-by-name
+   :parent :sort-by :args {:key-fn :_mks-key-name :coll :_mkf-by-q}}
+
+  {:name :marketplace-listing
+   :description "The cards the request asks for — `kind` (default fns) / `mine=1` / `category` / `tag` / `q` filters, then `sort` (`rating` default, `installs`, `recent`, `name`). Free arg: `:request`."
+   :parent :cond
+   :args {:clauses [{:parent :equal? :args {:a :_mkq-sort :b {:value "installs"}}} :_mks-by-installs
+                    {:parent :equal? :args {:a :_mkq-sort :b {:value "recent"}}} :_mks-by-recent
+                    {:parent :equal? :args {:a :_mkq-sort :b {:value "name"}}} :_mks-by-name
+                    {:value true} :_mks-by-rating]}}
+
+  ;; --- GET /api/marketplace — the listing as JSON ---
+  {:name :_mk-index-handler
+   :lambda-params [:request]
+   :description "Ring handler for GET /api/marketplace — the filtered, sorted cards as a JSON array."
+   :parent :json-handler
+   :args {:data :marketplace-listing}}
+
+  {:name :api-marketplace-index
+   :description "GET /api/marketplace?kind=&q=&category=&tag=&sort=&mine= — marketplace cards (one per package: latest, versions, rating, installs, listing). Auth-required."
+   :parent :get-auth-required
+   :args {:path "/marketplace" :handler :_mk-index-handler}}
+
+  ;; =====================================================================
+  ;; RENDER HELPERS
+  ;; =====================================================================
+
+  {:name :_mk-stars-n
+   :description "The rating rounded to whole stars (0–5)."
+   :parent :round :args {:number {:as :rating :type :numeric} :decimals {:value 0}}}
+  {:name :_mk-stars-start
+   :parent :sub :args {:nums [{:value 5} :_mk-stars-n]}}
+  {:name :_mk-stars-end
+   :parent :sub :args {:nums [{:value 10} :_mk-stars-n]}}
+  {:name :_mk-stars
+   :description "`★★★☆☆` for a 0–5 rating (rounded) — a fixed 10-glyph strip windowed by the rating. Free arg: `:rating`."
+   :parent :subs
+   :args {:string {:value "★★★★★☆☆☆☆☆"}
+          :start {:ref :_mk-stars-start :type :int}
+          :end {:ref :_mk-stars-end :type :int}}}
+
+  {:name :_mk-url-name
+   :parent :url-encode :args {:string {:as :pkg-name :type :text}}}
+
+
+  ;; --- one card ---
+  {:name :_mkh-card-name
+   :parent :get :args {:coll {:as :item} :key {:value :name} :default {:value ""}}}
+  {:name :_mkh-card-kind
+   :parent :get :args {:coll {:as :item} :key {:value :kind} :default {:value "fns"}}}
+  {:name :_mkh-card-open-url
+   :parent :str-join
+   :args {:coll [{:value "/partials/marketplace/item?name="} {:parent :url-encode :args {:string :_mkh-card-name}}]
+          :separator {:value ""}}}
+  {:name :_mkh-card-title
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "button" :class "mk-card-open"}}
+                         :key {:value :hx-get} :value :_mkh-card-open-url}}
+          :children [{:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "mk-card-name"}} :children [:_mkh-card-name]}}
+                     {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "mk-card-latest"}}
+                                             :children [{:parent :get :args {:coll {:as :item} :key {:value :latest} :default {:value ""}}}]}}]}}
+  {:name :_mkh-card-rating
+   :parent :get :args {:coll {:as :item} :key {:value :rating} :default nil}}
+  {:name :_mkh-card-rating-avg
+   :parent :get-in :args {:map {:as :item} :path [{:value :rating} {:value :avg}] :default {:value 0}}}
+  {:name :_mkh-card-rating-el
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "mk-rating" :title "Average rating (reviews)"}}
+          :children [{:parent :_mk-stars :args {:rating :_mkh-card-rating-avg}}
+                     {:value " "}
+                     {:parent :to-str :args {:value :_mkh-card-rating-avg}}
+                     {:value " ("}
+                     {:parent :to-str :args {:value {:parent :get-in :args {:map {:as :item} :path [{:value :rating} {:value :count}] :default {:value 0}}}}}
+                     {:value ")"}]}}
+  {:name :_mkh-card-rating-maybe
+   :parent :if
+   :args {:test {:parent :nil? :args {:value :_mkh-card-rating}}
+          :then {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "mk-rating mk-rating-none"}} :children [{:value "no reviews yet"}]}}
+          :else :_mkh-card-rating-el}}
+  {:name :_mkh-card-installs
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "mk-installs" :title "Installs"}}
+          :children [{:value "↓ "} {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :installs} :default {:value 0}}}}}]}}
+  {:name :_mkh-card-versions
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "mk-versions"}}
+          :children [{:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :version-count} :default {:value 0}}}}}
+                     {:value " version(s)"}]}}
+  {:name :_mkh-card-category-val
+   :parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :category} :default {:value ""}}}}}
+  {:name :_mkh-card-category
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_mkh-card-category-val}}
+          :then {:value nil}
+          :else {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "mk-category"}} :children [:_mkh-card-category-val]}}}}
+  {:name :_mkh-card-private
+   :parent :if
+   :args {:test {:parent :equal? :args {:a {:parent :get :args {:coll {:as :item} :key {:value :public} :default nil}} :b {:value false}}}
+          :then {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "packages-private-badge"}} :children [{:value "private"}]}}
+          :else {:value nil}}}
+  {:name :_mkh-card-desc-val
+   :parent :str-clip
+   :args {:string {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :description} :default {:value ""}}}}}
+          :limit {:value 160}}}
+  {:name :_mkh-card-desc
+   :parent :hiccup
+   :args {:tag {:value "p"} :attrs {:value {:class "mk-card-desc"}} :children [:_mkh-card-desc-val]}}
+
+  ;; tag chip (`:item` = a tag string; `:kind` captured for the URL)
+  {:name :_mkh-tag-url
+   :parent :str-join
+   :args {:coll [{:value "/partials/marketplace?kind="} {:parent :url-encode :args {:string {:as :kind :type :text}}}
+                 {:value "&tag="} {:parent :url-encode :args {:string {:parent :to-str :args {:value {:as :item}}}}}]
+          :separator {:value ""}}}
+  {:name :_mkh-tag-chip
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "button" :class "mk-tag" :title "Filter by this tag"}}
+                         :key {:value :hx-get} :value :_mkh-tag-url}}
+          :children [{:value "#"} {:parent :to-str :args {:value {:as :item}}}]}}
+  {:name :_mkh-card-tags
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mk-tags"}}
+          :children {:parent :map :args {:func :_mkh-tag-chip
+                                         :coll {:parent :get :args {:coll {:as :item} :key {:value :tags} :default {:value []}}}
+                                         :kind :_mkh-card-kind}}}}
+
+  {:name :marketplace-card-html
+   :description "One `article.mk-card` — name + latest (opens the item), category / private badges, rating, installs, version count, description, tag chips."
+   :parent :hiccup
+   :args {:tag {:value "article"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:class "mk-card"}} :key {:value :data-mk-card} :value :_mkh-card-name}}
+          :children [:_mkh-card-title
+                     {:parent :hiccup :args {:tag {:value "div"} :attrs {:value {:class "mk-card-meta"}}
+                                             :children [:_mkh-card-category :_mkh-card-private :_mkh-card-rating-maybe :_mkh-card-installs :_mkh-card-versions]}}
+                     :_mkh-card-desc
+                     :_mkh-card-tags]}}
+
+  ;; --- toolbar ---
+  ;; kind tabs (`:item` = ["kind" "Label"]; `:kind` = the current one)
+  {:name :_mkt-tab-value
+   :parent :first :args {:coll {:as :item}}}
+  {:name :_mkt-tab-checked?
+   :parent :equal? :args {:a {:parent :to-str :args {:value :_mkt-tab-value}} :b {:as :kind :type :text}}}
+  {:name :_mkt-tab-input
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:parent :assoc
+                  :args {:map {:parent :assoc
+                               :args {:map {:value {:type "radio" :name "kind" :class "mk-tab-input"}}
+                                      :key {:value :value} :value :_mkt-tab-value}}
+                         :key {:value :checked} :value :_mkt-tab-checked?}}}}
+  {:name :_mkt-tab
+   :parent :hiccup
+   :args {:tag {:value "label"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:class "mk-tab"}} :key {:value :data-mk-tab} :value :_mkt-tab-value}}
+          :children [:_mkt-tab-input
+                     {:parent :hiccup :args {:tag {:value "span"}
+                                             :children [{:parent :first :args {:coll {:parent :reverse :args {:coll {:as :item}}}}}]}}]}}
+  {:name :_mkt-tabs
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mk-tabs" :role "tablist" :aria-label "Marketplace kinds"}}
+          :children {:parent :map
+                     :args {:func :_mkt-tab
+                            :coll {:value [["fns" "Packages"] ["theme" "Themes"] ["keymap" "Keymaps"] ["executor" "Executor"]]}
+                            :kind :_mkq-kind}}}}
+
+  {:name :_mkt-search
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "search" :name "q" :class "mk-search" :placeholder "Search packages, themes, keymaps…"
+                                       :aria-label "Search the marketplace" :autocomplete "off"}}
+                         :key {:value :value} :value :_mkq-q}}}}
+
+  ;; category options (`:item` = a category; `:category` = the current)
+  {:name :_mkt-cat-option
+   :parent :hiccup
+   :args {:tag {:value "option"}
+          :attrs {:parent :assoc
+                  :args {:map {:parent :assoc :args {:map {:value {}} :key {:value :value} :value {:parent :to-str :args {:value {:as :item}}}}}
+                         :key {:value :selected} :value {:parent :equal? :args {:a {:parent :to-str :args {:value {:as :item}}} :b {:as :category :type :text}}}}}
+          :children [{:parent :to-str :args {:value {:as :item}}}]}}
+  {:name :_mkt-cat-select
+   :parent :hiccup
+   :args {:tag {:value "select"}
+          :attrs {:value {:name "category" :class "mk-select" :aria-label "Category"}}
+          :children {:parent :concat
+                     :args {:colls [[{:parent :hiccup :args {:tag {:value "option"} :attrs {:value {:value ""}} :children [{:value "All categories"}]}}]
+                                    {:parent :map :args {:func :_mkt-cat-option
+                                                         :coll {:parent :get :args {:coll :listing-categories :key :_mkq-kind :default {:value []}}}
+                                                         :category :_mkq-category}}]}}}}
+
+  ;; sort options (`:item` = ["key" "Label"]; `:sort` = the current)
+  {:name :_mkt-sort-option
+   :parent :hiccup
+   :args {:tag {:value "option"}
+          :attrs {:parent :assoc
+                  :args {:map {:parent :assoc :args {:map {:value {}} :key {:value :value} :value {:parent :first :args {:coll {:as :item}}}}}
+                         :key {:value :selected} :value {:parent :equal? :args {:a {:parent :to-str :args {:value {:parent :first :args {:coll {:as :item}}}}} :b {:as :sort :type :text}}}}}
+          :children [{:parent :first :args {:coll {:parent :reverse :args {:coll {:as :item}}}}}]}}
+  {:name :_mkt-sort-select
+   :parent :hiccup
+   :args {:tag {:value "select"}
+          :attrs {:value {:name "sort" :class "mk-select" :aria-label "Sort"}}
+          :children {:parent :map
+                     :args {:func :_mkt-sort-option
+                            :coll {:value [["rating" "Top rated"] ["installs" "Most installed"] ["recent" "Recently published"] ["name" "Name"]]}
+                            :sort :_mkq-sort}}}}
+
+  {:name :_mkt-tag-hidden
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:parent :assoc :args {:map {:value {:type "hidden" :name "tag"}} :key {:value :value} :value :_mkq-tag}}}}
+  {:name :_mkt-tag-clear-url
+   :parent :str-join
+   :args {:coll [{:value "/partials/marketplace?kind="} {:parent :url-encode :args {:string :_mkq-kind}}
+                 {:value "&category="} {:parent :url-encode :args {:string :_mkq-category}}
+                 {:value "&sort="} {:parent :url-encode :args {:string :_mkq-sort}}]
+          :separator {:value ""}}}
+  {:name :_mkt-tag-active
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_mkq-tag}}
+          :then {:value nil}
+          :else {:parent :hiccup
+                 :args {:tag {:value "button"}
+                        :attrs {:parent :assoc
+                                :args {:map {:value {:type "button" :class "mk-tag mk-tag-active" :title "Clear the tag filter"}}
+                                       :key {:value :hx-get} :value :_mkt-tag-clear-url}}
+                        :children [{:value "#"} :_mkq-tag {:value " ×"}]}}}}
+
+  {:name :_mkt-controls
+   :description "Search + category + sort — hidden on the Executor tab (a roster has none)."
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_mkq-kind :b {:value "executor"}}}
+          :then {:value nil}
+          :else {:parent :hiccup
+                 :args {:tag {:value "div"} :attrs {:value {:class "mk-controls"}}
+                        :children [:_mkt-search :_mkt-cat-select :_mkt-sort-select :_mkt-tag-hidden :_mkt-tag-active]}}}}
+
+  {:name :marketplace-toolbar
+   :description "The listing toolbar — a `form` htmx re-GETs on any change (kind tabs, search with a 300 ms debounce, category, sort; the active tag rides a hidden input)."
+   :parent :hiccup
+   :args {:tag {:value "form"}
+          :attrs {:value {:class "mk-toolbar"
+                          :hx-get "/partials/marketplace"
+                          :hx-trigger "change, keyup changed delay:300ms from:[name=q], submit"
+                          :role "search"}}
+          :children [:_mkt-tabs :_mkt-controls]}}
+
+  ;; --- results ---
+  {:name :_mk-cards-grid
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mk-grid"}}
+          :children {:parent :map :args {:func :marketplace-card-html :coll :marketplace-listing}}}}
+  {:name :_mk-empty
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mk-empty"}}
+          :children [{:value "Nothing here yet — publish a namespace (⬆ on a namespace row), or save a theme / keyboard layout from Settings and share it."}]}}
+  {:name :_mk-results
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :marketplace-listing}}
+          :then :_mk-empty
+          :else :_mk-cards-grid}}
+
+  ;; --- the Executor roster (Type-2 / bundled packages of THIS executor) ---
+  {:name :_mkx-cell
+   :parent :hiccup :args {:tag {:value "td"} :children [{:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:as :key} :default {:value ""}}}}}]}}
+  {:name :_mkx-row
+   :parent :hiccup
+   :args {:tag {:value "tr"}
+          :children [{:parent :_mkx-cell :args {:key {:value :name}}}
+                     {:parent :_mkx-cell :args {:key {:value :version}}}
+                     {:parent :_mkx-cell :args {:key {:value :kind}}}
+                     {:parent :_mkx-cell :args {:key {:value :origin}}}
+                     {:parent :_mkx-cell :args {:key {:value :base-fn-count}}}
+                     {:parent :_mkx-cell :args {:key {:value :description}}}]}}
+  {:name :_mkx-table
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :attrs {:value {:class "packages-panel-table mk-roster"}}
+          :children [{:parent :hiccup :args {:tag {:value "thead"}
+                                             :children [{:parent :hiccup :args {:tag {:value "tr"}
+                                                                                :children [{:parent :hiccup :args {:tag {:value "th"} :children [{:value "Package"}]}}
+                                                                                           {:parent :hiccup :args {:tag {:value "th"} :children [{:value "Version"}]}}
+                                                                                           {:parent :hiccup :args {:tag {:value "th"} :children [{:value "Kind"}]}}
+                                                                                           {:parent :hiccup :args {:tag {:value "th"} :children [{:value "Origin"}]}}
+                                                                                           {:parent :hiccup :args {:tag {:value "th"} :children [{:value "Base-fns"}]}}
+                                                                                           {:parent :hiccup :args {:tag {:value "th"} :children [{:value "Description"}]}}]}}]}}
+                     {:parent :hiccup :args {:tag {:value "tbody"} :children {:parent :map :args {:func :_mkx-row :coll :loaded-packages}}}}]}}
+  {:name :_mkx-note
+   :parent :hiccup
+   :args {:tag {:value "p"}
+          :attrs {:value {:class "mk-note"}}
+          :children [{:value "The packages this executor loaded at boot. An impl+fns package ships Clojure base-fns, so it enters through the build, not the registry: a self-hosted operator lists it in executor-packages.edn (git / Maven coord) and rebuilds; on the shared cloud the platform ships the set. Everything published from a namespace, a theme or a keymap is a fns-only artifact and lives in the other tabs."}]}}
+  {:name :_mk-executor-tab
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "mk-executor"}} :children [:_mkx-note :_mkx-table]}}
+
+  {:name :_mk-body
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_mkq-kind :b {:value "executor"}}}
+          :then :_mk-executor-tab
+          :else :_mk-results}}
+
+  {:name :marketplace-root
+   :description "The listing partial root — `div[data-marketplace]` (the inherited hx-target of everything inside) with the toolbar and the cards / roster."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:data-marketplace "1" :class "mk-root"
+                                       :hx-target "closest [data-marketplace]" :hx-swap "outerHTML"}}
+                         :key {:value :data-mk-kind} :value :_mkq-kind}}
+          :children [:marketplace-toolbar :_mk-body]}}
+
+  {:name :_partial-marketplace-handler
+   :lambda-params [:request]
+   :description "Ring handler for GET /partials/marketplace — the listing (toolbar + cards, or the Executor roster) as text/html."
+   :parent :html-ok-response
+   :args {:body {:parent :render-hiccup :args {:hiccup :marketplace-root}}}}
+
+  {:name :partial-marketplace
+   :description "GET /partials/marketplace?kind=&q=&category=&tag=&sort= — the Marketplace surface's listing. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/partials/marketplace" :handler :_partial-marketplace-handler}}
+
+  ;; =====================================================================
+  ;; ITEM — one package: versions, actions, reviews. Free arg: `:pkg-name`.
+  ;; =====================================================================
+
+  {:name :_mki-rows
+   :description "The package's index rows, newest version first."
+   :parent :reverse
+   :args {:coll {:parent :sort-by
+                 :args {:key-fn :_mkr-rank
+                        :coll {:parent :filter :args {:pred :_mki-row-named? :coll :list-package-versions :pkg-name {:as :pkg-name :type :text}}}}}}}
+  {:name :_mki-row-named?
+   :parent :equal? :args {:a :_mkr-name :b {:as :pkg-name :type :text}}}
+
+  {:name :_mki-latest
+   :parent :first :args {:coll :_mki-rows}}
+  {:name :_mki-missing?
+   :parent :nil? :args {:value :_mki-latest}}
+  {:name :_mki-kind
+   :parent :coalesce
+   :args {:value {:parent :get :args {:coll :_mki-latest :key {:value :kind} :default nil}} :default {:value "fns"}}}
+  {:name :_mki-fns?
+   :parent :equal? :args {:a :_mki-kind :b {:value "fns"}}}
+
+  {:name :_mki-card
+   :description "The package's card (rating / installs) — the listing folded for this one name."
+   :parent :marketplace-card
+   :args {:item :_mki-rows :reviews :marketplace-review-map :installs :marketplace-install-map}}
+
+  ;; this branch's pin (fns) / the user's active selection (theme, keymap)
+  {:name :_mki-pin-rows
+   :parent :query-entities
+   :args {:entity-type {:value "package-install"}
+          :where {:parent :assoc
+                  :args {:map {:parent :assoc-empty :args {:key {:value :branch-id} :value :current-branch-id}}
+                         :key {:value :package-name} :value {:as :pkg-name :type :text}}}}}
+  {:name :_mki-pinned-version
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll {:parent :first :args {:coll :_mki-pin-rows}} :key {:value :version} :default {:value ""}}}}}
+  {:name :_mki-pref
+   :parent :get :args {:coll :ui-prefs-read :key :_mki-kind :default nil}}
+  {:name :_mki-active-version
+   :description "The version of THIS package the user's active theme / keymap came from (\"\" when it's another package or a local edit)."
+   :parent :if
+   :args {:test {:parent :equal? :args {:a {:parent :to-str :args {:value {:parent :get-in :args {:map :_mki-pref :path [{:value :source} {:value :name}] :default {:value ""}}}}}
+                                        :b {:as :pkg-name :type :text}}}
+          :then {:parent :to-str :args {:value {:parent :get-in :args {:map :_mki-pref :path [{:value :source} {:value :version}] :default {:value ""}}}}}
+          :else {:value ""}}}
+  {:name :_mki-current-version
+   :description "What counts as \"current\" for the version rows: the pin for a fns package, the active selection for a theme / keymap."
+   :parent :if
+   :args {:test :_mki-fns? :then :_mki-pinned-version :else :_mki-active-version}}
+
+  ;; --- header ---
+  {:name :_mki-back-url
+   :parent :str-join
+   :args {:coll [{:value "/partials/marketplace?kind="} {:parent :url-encode :args {:string :_mki-kind}}] :separator {:value ""}}}
+  {:name :_mki-back
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :assoc :args {:map {:value {:type "button" :class "mk-back"}} :key {:value :hx-get} :value :_mki-back-url}}
+          :children [{:value "← Marketplace"}]}}
+  {:name :_mki-title
+   :parent :hiccup
+   :args {:tag {:value "h2"} :attrs {:value {:class "mk-item-title"}}
+          :children [{:as :pkg-name :type :text}
+                     {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "mk-kind"}} :children [:_mki-kind]}}]}}
+  {:name :_mki-meta
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "mk-card-meta mk-item-meta"}}
+          :children [{:parent :_mkh-card-category :args {:item :_mki-card}}
+                     {:parent :_mkh-card-private :args {:item :_mki-card}}
+                     {:parent :_mkh-card-rating-maybe :args {:item :_mki-card}}
+                     {:parent :_mkh-card-installs :args {:item :_mki-card}}
+                     {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "mk-publisher"}}
+                                             :children [{:value "by "} {:parent :to-str :args {:value {:parent :get :args {:coll :_mki-latest :key {:value :org-id} :default {:value "—"}}}}}]}}]}}
+  {:name :_mki-desc
+   :parent :hiccup
+   :args {:tag {:value "p"} :attrs {:value {:class "mk-item-desc"}}
+          :children [{:parent :coalesce
+                      :args {:value {:parent :get :args {:coll :_mki-latest :key {:value :description} :default nil}}
+                             :default {:value "No description — the publisher can add one on the next version."}}}]}}
+  {:name :_mki-tags
+   :parent :_mkh-card-tags :args {:item :_mki-card}}
+
+  ;; --- version rows (`:item` = an index row; `:current` / `:kind` captured) ---
+  {:name :_mkvr-action-url
+   :parent :str-join
+   :args {:coll [{:as :path :type :text} {:value "?name="} {:parent :url-encode :args {:string :_mkr-name}}
+                 {:value "&version="} {:parent :url-encode :args {:string :_mkr-version}}]
+          :separator {:value ""}}}
+  {:name :_mkvr-btn
+   :description "An action button hx-POSTing `:path?name=&version=`. Free: `:path`, `:label`, `:class`."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :assoc
+                  :args {:map {:parent :assoc :args {:map {:value {:type "button"}} :key {:value :class} :value {:as :class :type :text}}}
+                         :key {:value :hx-post} :value :_mkvr-action-url}}
+          :children [{:as :label :type :text}]}}
+  {:name :_mkvr-is-current?
+   :parent :equal? :args {:a :_mkr-version :b {:as :current :type :text}}}
+  {:name :_mkvr-current-badge
+   :parent :hiccup
+   :args {:tag {:value "span"} :attrs {:value {:class "mk-current"}}
+          :children [{:parent :if :args {:test {:parent :equal? :args {:a {:as :kind :type :text} :b {:value "fns"}}}
+                                         :then {:value "installed"} :else {:value "active"}}}]}}
+  {:name :_mkvr-fns-actions
+   :parent :hiccup
+   :args {:tag {:value "span"} :attrs {:value {:class "mk-actions"}}
+          :children [{:parent :_mkvr-btn :args {:path {:value "/api/marketplace/install"} :label {:value "Install"} :class {:value "packages-install-btn mk-install"}}}
+                     {:parent :_mkvr-btn :args {:path {:value "/api/marketplace/install?fork=1"} :label {:value "Fork"} :class {:value "packages-fork-btn mk-fork"}}}]}}
+  {:name :_mkvr-apply-actions
+   :parent :hiccup
+   :args {:tag {:value "span"} :attrs {:value {:class "mk-actions"}}
+          :children [{:parent :_mkvr-btn :args {:path {:value "/api/marketplace/apply"} :label {:value "Apply"} :class {:value "packages-install-btn mk-apply"}}}]}}
+  {:name :_mkvr-actions
+   :parent :cond
+   :args {:clauses [:_mkvr-is-current? :_mkvr-current-badge
+                    {:parent :equal? :args {:a {:as :kind :type :text} :b {:value "fns"}}} :_mkvr-fns-actions
+                    {:value true} :_mkvr-apply-actions]}}
+  {:name :_mkvr-row
+   :parent :hiccup
+   :args {:tag {:value "tr"}
+          :attrs {:parent :assoc :args {:map {:value {:class "mk-version-row"}} :key {:value :data-mk-version} :value :_mkr-version}}
+          :children [{:parent :hiccup :args {:tag {:value "td"} :children [:_mkr-version]}}
+                     {:parent :hiccup :args {:tag {:value "td"} :children [{:parent :str-clip :args {:string {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :published-at} :default {:value ""}}}}} :limit {:value 10}}}]}}
+                     {:parent :hiccup :args {:tag {:value "td"} :children [:_mkvr-actions]}}]}}
+  {:name :_mki-versions
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :attrs {:value {:class "packages-panel-table mk-versions-table"}}
+          :children [{:parent :hiccup :args {:tag {:value "thead"}
+                                             :children [{:parent :hiccup :args {:tag {:value "tr"}
+                                                                                :children [{:parent :hiccup :args {:tag {:value "th"} :children [{:value "Version"}]}}
+                                                                                           {:parent :hiccup :args {:tag {:value "th"} :children [{:value "Published"}]}}
+                                                                                           {:parent :hiccup :args {:tag {:value "th"} :children [{:value ""}]}}]}}]}}
+                     {:parent :hiccup :args {:tag {:value "tbody"}
+                                             :children {:parent :map :args {:func :_mkvr-row :coll :_mki-rows :current :_mki-current-version :kind :_mki-kind}}}}]}}
+
+  ;; --- reviews ---
+  {:name :_mki-review-rows
+   :parent :reverse
+   :args {:coll {:parent :sort-by
+                 :args {:key-fn :_mkw-updated
+                        :coll {:parent :query-entities
+                               :args {:entity-type {:value "package-review"}
+                                      :where {:parent :assoc-empty :args {:key {:value :package-name} :value {:as :pkg-name :type :text}}}}}}}}}
+  {:name :_mkw-updated
+   :parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :updated-at} :default {:value ""}}}}}
+  {:name :_mkw-mine?
+   :parent :equal?
+   :args {:a {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :author-id} :default {:value ""}}}}}
+          :b :current-user-id}}
+  {:name :_mki-own-review
+   :parent :find-first :args {:pred :_mkw-mine? :coll :_mki-review-rows}}
+  {:name :_mki-own-rating
+   :parent :get :args {:coll :_mki-own-review :key {:value :rating} :default {:value 0}}}
+
+  {:name :_mkw-row
+   :parent :hiccup
+   :args {:tag {:value "li"}
+          :attrs {:value {:class "mk-review"}}
+          :children [{:parent :hiccup :args {:tag {:value "div"} :attrs {:value {:class "mk-review-head"}}
+                                             :children [{:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "mk-rating"}}
+                                                                                :children [{:parent :_mk-stars :args {:rating {:parent :get :args {:coll {:as :item} :key {:value :rating} :default {:value 0}}}}}]}}
+                                                        {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "mk-review-author"}}
+                                                                                :children [{:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :author-label} :default {:value "anonymous"}}}}}]}}
+                                                        {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "mk-review-date"}}
+                                                                                :children [{:parent :str-clip :args {:string :_mkw-updated :limit {:value 10}}}]}}]}}
+                     {:parent :hiccup :args {:tag {:value "p"} :attrs {:value {:class "mk-review-body"}}
+                                             :children [{:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :body} :default {:value ""}}}}}]}}]}}
+  {:name :_mki-review-list
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_mki-review-rows}}
+          :then {:parent :hiccup :args {:tag {:value "p"} :attrs {:value {:class "mk-note"}} :children [{:value "No reviews yet — be the first."}]}}
+          :else {:parent :hiccup :args {:tag {:value "ul"} :attrs {:value {:class "mk-reviews"}}
+                                        :children {:parent :map :args {:func :_mkw-row :coll :_mki-review-rows}}}}}}
+
+  ;; the form — pre-filled with the user's own review (one per author)
+  {:name :_mkf-star-option
+   :parent :hiccup
+   :args {:tag {:value "option"}
+          :attrs {:parent :assoc
+                  :args {:map {:parent :assoc :args {:map {:value {}} :key {:value :value} :value {:parent :to-str :args {:value {:as :item}}}}}
+                         :key {:value :selected} :value {:parent :equal? :args {:a {:as :item} :b {:as :own :type :int}}}}}
+          :children [{:parent :_mk-stars :args {:rating {:as :item}}}]}}
+  {:name :_mki-review-form
+   :parent :hiccup
+   :args {:tag {:value "form"}
+          :attrs {:value {:class "mk-review-form" :hx-post "/api/marketplace/review"}}
+          :children [{:parent :hiccup :args {:tag {:value "input"}
+                                             :attrs {:parent :assoc :args {:map {:value {:type "hidden" :name "name"}} :key {:value :value} :value {:as :pkg-name :type :text}}}}}
+                     {:parent :hiccup :args {:tag {:value "label"} :attrs {:value {:class "mk-review-label"}}
+                                             :children [{:value "Your rating "}
+                                                        {:parent :hiccup :args {:tag {:value "select"} :attrs {:value {:name "rating" :class "mk-select" :required true}}
+                                                                                :children {:parent :map :args {:func :_mkf-star-option :coll {:value [5 4 3 2 1]} :own {:ref :_mki-own-rating :type :int}}}}}]}}
+                     {:parent :hiccup :args {:tag {:value "textarea"}
+                                             :attrs {:value {:name "body" :class "mk-review-text" :rows "3" :maxlength "2000"
+                                                             :placeholder "What worked, what didn't (optional)" :aria-label "Review"}}
+                                             :children [{:parent :to-str :args {:value {:parent :get :args {:coll :_mki-own-review :key {:value :body} :default {:value ""}}}}}]}}
+                     {:parent :hiccup :args {:tag {:value "div"} :attrs {:value {:class "mk-review-actions"}}
+                                             :children [{:parent :hiccup :args {:tag {:value "button"} :attrs {:value {:type "submit" :class "packages-install-btn mk-review-submit"}}
+                                                                                :children [{:parent :if :args {:test {:parent :nil? :args {:value :_mki-own-review}} :then {:value "Post review"} :else {:value "Update review"}}}]}}
+                                                        {:parent :if :args {:test {:parent :nil? :args {:value :_mki-own-review}}
+                                                                            :then {:value nil}
+                                                                            :else {:parent :hiccup :args {:tag {:value "button"}
+                                                                                                          :attrs {:parent :assoc
+                                                                                                                  :args {:map {:value {:type "button" :class "packages-uninstall mk-review-delete" :hx-confirm "Delete your review?"}}
+                                                                                                                         :key {:value :hx-delete}
+                                                                                                                         :value {:parent :str-join :args {:coll [{:value "/api/marketplace/review?name="} :_mk-url-name] :separator {:value ""}}}}}
+                                                                                                          :children [{:value "Delete my review"}]}}}}]}}]}}
+
+  {:name :_mki-notice
+   :description "A transient notice above the item (an action's outcome). Free arg: `:notice` (nil = none)."
+   :parent :if
+   :args {:test {:parent :nil? :args {:value {:as :notice :type :nullable-text}}}
+          :then {:value nil}
+          :else {:parent :hiccup :args {:tag {:value "div"} :attrs {:value {:class "packages-fork-note packages-fork-ok mk-notice"}}
+                                        :children [{:as :notice :type :nullable-text}]}}}}
+
+  {:name :_mki-found
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "mk-item-body"}}
+          :children [:_mki-title :_mki-meta :_mki-desc :_mki-tags
+                     {:parent :hiccup :args {:tag {:value "h3"} :attrs {:value {:class "mk-h3"}} :children [{:value "Versions"}]}}
+                     :_mki-versions
+                     {:parent :hiccup :args {:tag {:value "h3"} :attrs {:value {:class "mk-h3"}} :children [{:value "Reviews"}]}}
+                     :_mki-review-list
+                     :_mki-review-form]}}
+  {:name :_mki-not-found
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "mk-empty"}}
+          :children [{:value "No such package is visible here — it may be private to another organization, or withdrawn."}]}}
+
+  {:name :marketplace-item-root
+   :description "The item partial root for `:pkg-name` — back link, (optional) notice, and the package: header, description, tags, versions with actions, reviews + the review form. Free args: `:pkg-name`, `:notice`."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:data-marketplace "1" :class "mk-root mk-item"
+                                       :hx-target "closest [data-marketplace]" :hx-swap "outerHTML"}}
+                         :key {:value :data-marketplace-item} :value {:as :pkg-name :type :text}}}
+          :children [:_mki-back :_mki-notice
+                     {:parent :if :args {:test :_mki-missing? :then :_mki-not-found :else :_mki-found}}]}}
+
+  {:name :marketplace-item-html
+   :parent :render-hiccup :args {:hiccup :marketplace-item-root}}
+
+  {:name :_partial-item-name
+   :parent :to-str :args {:value {:parent :query-param :args {:request {:as :request} :param-name {:value "name"}}}}}
+  {:name :_partial-marketplace-item-handler
+   :lambda-params [:request]
+   :description "Ring handler for GET /partials/marketplace/item?name= — one package as text/html."
+   :parent :html-ok-response
+   :args {:body {:parent :marketplace-item-html :args {:pkg-name :_partial-item-name :notice {:value nil}}}}}
+  {:name :partial-marketplace-item
+   :description "GET /partials/marketplace/item?name=<pkg> — the package's versions (install / fork, or apply for a theme / keymap), reviews and the review form. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/partials/marketplace/item" :handler :_partial-marketplace-item-handler}}
+
+  ;; =====================================================================
+  ;; ACTIONS — each does its write, then re-renders the item
+  ;; =====================================================================
+
+  ;; params ride the query string (buttons) or the urlencoded form; query wins
+  {:name :_mka-form
+   :parent :parse-form-body-kw}
+  {:name :_mka-param
+   :description "Query param `:param-name`, else the form field of the same name, else \"\"."
+   :parent :str-trim
+   :args {:string {:parent :to-str
+                   :args {:value {:parent :coalesce
+                                  :args {:value {:parent :query-param :args {:request {:as :request} :param-name {:as :param-name}}}
+                                         :default {:parent :get :args {:coll :_mka-form :key {:parent :str-to-keyword :args {:string {:as :param-name}}} :default {:value ""}}}}}}}}}
+  {:name :_mka-name
+   :parent :_mka-param :args {:param-name {:value "name"}}}
+  {:name :_mka-version
+   :parent :_mka-param :args {:param-name {:value "version"}}}
+  {:name :_mka-fork?
+   :parent :equal? :args {:a {:parent :_mka-param :args {:param-name {:value "fork"}}} :b {:value "1"}}}
+
+  ;; --- install / fork (fns) ---
+  {:name :_mka-install-do
+   :parent :if
+   :args {:test :_mka-fork?
+          :then {:parent :fork-package :args {:pkg-name :_mka-name :pkg-version :_mka-version}}
+          :else {:parent :install-package :args {:pkg-name :_mka-name :pkg-version :_mka-version :source {:value nil}}}}}
+  {:name :_mka-install-notice
+   :description "The outcome as a sentence — ok, or the refusal's `:reason`."
+   :parent :if
+   :args {:test {:parent :get :args {:coll :_mka-install-do :key {:value :ok} :default {:value false}}}
+          :then {:parent :if :args {:test :_mka-fork?
+                                    :then {:value "Forked — the fns are now editable copies in the graph (reload the Explorer to see them)."}
+                                    :else {:value "Installed on this branch — the pin is in the packages chip."}}}
+          :else {:parent :str-join :args {:coll [{:value "Refused: "} {:parent :to-str :args {:value {:parent :get :args {:coll :_mka-install-do :key {:value :reason} :default {:value "unknown"}}}}}] :separator {:value ""}}}}}
+  {:name :_mka-install-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /api/marketplace/install?name=&version=[&fork=1] — installs (or forks) then returns the refreshed item as text/html."
+   :parent :html-ok-response
+   :args {:body {:parent :marketplace-item-html :args {:pkg-name :_mka-name :notice :_mka-install-notice}}}}
+  {:name :api-marketplace-install
+   :description "POST /api/marketplace/install?name=<pkg>&version=<v>[&fork=1] — reference-install (or fork) a fns package from the Marketplace; returns the item HTML. Auth-required."
+   :parent :post
+   :args {:path "/marketplace/install" :handler :_mka-install-handler}}
+
+  ;; --- apply (theme / keymap): the row's payload becomes the user's pref ---
+  {:name :_mka-row
+   :parent :package-version-row
+   :args {:pkg-name :_mka-name :resolved {:parent :resolve-package-version :args {:pkg-name :_mka-name :spec :_mka-version}}}}
+  {:name :_mka-row-kind
+   :parent :coalesce
+   :args {:value {:parent :get :args {:coll :_mka-row :key {:value :kind} :default nil}} :default {:value "fns"}}}
+  {:name :_mka-applyable?
+   :parent :and
+   :args {:values [{:parent :some? :args {:value :_mka-row}}
+                   {:parent :not :args {:value {:parent :equal? :args {:a :_mka-row-kind :b {:value "fns"}}}}}]}}
+  {:name :_mka-pref-value
+   :description "`{:source {:name :version} :payload …}` — the selection the editor applies; the payload is COPIED so a later withdraw of the version leaves the user's editor as it was."
+   :parent :zipmap
+   :args {:keys [{:value :source} {:value :payload}]
+          :vals [{:parent :zipmap :args {:keys [{:value :name} {:value :version}]
+                                         :vals [:_mka-name {:parent :get :args {:coll :_mka-row :key {:value :version} :default {:value ""}}}]}}
+                 {:parent :get :args {:coll :_mka-row :key {:value :payload} :default {:value {}}}}]}}
+  {:name :_mka-apply-do
+   :parent :if
+   :args {:test :_mka-applyable?
+          :then {:parent :ui-pref-write! :args {:pref-key :_mka-row-kind :pref-value :_mka-pref-value}}
+          :else {:value nil}}}
+  {:name :_mka-apply-notice
+   :parent :if
+   :args {:test :_mka-applyable?
+          :then {:value "Applied — the editor picks it up now; Settings → Appearance / Keyboard shows it as the active one."}
+          :else {:value "Refused: no such version, or not a theme / keymap."}}}
+  {:name :_mka-apply-then-item
+   :parent :do
+   :args {:steps [:_mka-apply-do {:parent :marketplace-item-html :args {:pkg-name :_mka-name :notice :_mka-apply-notice}}]}}
+  {:name :_mka-apply-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /api/marketplace/apply?name=&version= — stores the theme / keymap as the user's active one, then returns the refreshed item."
+   :parent :html-ok-response
+   :args {:body :_mka-apply-then-item}}
+  {:name :api-marketplace-apply
+   :description "POST /api/marketplace/apply?name=<pkg>&version=<v> — make a published theme / keymap the current user's active one (writes the `theme` / `keymap` preference with the version's payload); returns the item HTML. Auth-required."
+   :parent :post
+   :args {:path "/marketplace/apply" :handler :_mka-apply-handler}}
+
+  ;; --- review: upsert (one per author per package) ---
+  {:name :_mka-rating-raw
+   :parent :_mka-param :args {:param-name {:value "rating"}}}
+  {:name :_mka-rating
+   :parent :case
+   :args {:value :_mka-rating-raw
+          :clauses {"1" 1 "2" 2 "3" 3 "4" 4 "5" 5}
+          :default {:value 0}}}
+  {:name :_mka-rating-ok?
+   :parent :gt :args {:nums [:_mka-rating {:value 0}]}}
+  {:name :_mka-body
+   :parent :str-clip :args {:string {:parent :_mka-param :args {:param-name {:value "body"}}} :limit {:value 2000}}}
+  {:name :_mka-existing-review
+   :parent :first
+   :args {:coll {:parent :query-entities
+                 :args {:entity-type {:value "package-review"}
+                        :where {:parent :assoc
+                                :args {:map {:parent :assoc-empty :args {:key {:value :package-name} :value :_mka-name}}
+                                       :key {:value :author-id} :value :current-user-id}}}}}}
+  {:name :_mka-review-fields
+   :parent :zipmap
+   :args {:keys [{:value :rating} {:value :body} {:value :author-label} {:value :updated-at}]
+          :vals [:_mka-rating :_mka-body :current-user-label :current-instant]}}
+  {:name :_mka-review-create
+   :parent :create-entity
+   :args {:entity-type {:value "package-review"}
+          :data {:parent :merge
+                 :args {:maps [:_mka-review-fields
+                               {:parent :zipmap
+                                :args {:keys [{:value :package-name} {:value :author-id} {:value :public?} {:value :created-at}]
+                                       :vals [:_mka-name :current-user-id {:value true} :current-instant]}}]}}}}
+  {:name :_mka-existing-review-id
+   :parent :get :args {:coll :_mka-existing-review :key {:value :id} :default nil}}
+  {:name :_mka-review-update
+   :parent :update-entity
+   :args {:entity-type {:value "package-review"}
+          :id {:ref :_mka-existing-review-id :type :uuid}
+          :data :_mka-review-fields}}
+  {:name :_mka-review-write
+   :parent :cond
+   :args {:clauses [{:parent :not :args {:value :_mka-rating-ok?}} {:value nil}
+                    {:parent :nil? :args {:value :_mka-existing-review}} :_mka-review-create
+                    {:value true} :_mka-review-update]}}
+  {:name :_mka-review-notice
+   :parent :if
+   :args {:test :_mka-rating-ok?
+          :then {:value "Thanks — your review is posted."}
+          :else {:value "Refused: pick a rating from 1 to 5."}}}
+  {:name :_mka-review-then-item
+   :parent :do
+   :args {:steps [:_mka-review-write {:parent :marketplace-item-html :args {:pkg-name :_mka-name :notice :_mka-review-notice}}]}}
+  {:name :_mka-review-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /api/marketplace/review (form: name, rating 1–5, body) — upserts the current user's review of the package, then returns the refreshed item."
+   :parent :html-ok-response
+   :args {:body :_mka-review-then-item}}
+  {:name :api-marketplace-review
+   :description "POST /api/marketplace/review — form `name`, `rating` (1–5), `body`: write or update the current user's review; one per author per package. Returns the item HTML. Auth-required."
+   :parent :post
+   :args {:path "/marketplace/review" :handler :_mka-review-handler}}
+
+  ;; --- review: delete own ---
+  {:name :_mka-review-delete-do
+   :parent :if
+   :args {:test {:parent :nil? :args {:value :_mka-existing-review}}
+          :then {:value nil}
+          :else {:parent :delete-entity
+                 :args {:entity-type {:value "package-review"}
+                        :id {:ref :_mka-existing-review-id :type :uuid}}}}}
+  {:name :_mka-review-delete-then-item
+   :parent :do
+   :args {:steps [:_mka-review-delete-do {:parent :marketplace-item-html :args {:pkg-name :_mka-name :notice {:value "Your review is deleted."}}}]}}
+  {:name :_mka-review-delete-handler
+   :lambda-params [:request]
+   :description "Ring handler for DELETE /api/marketplace/review?name= — deletes the current user's review of the package, then returns the refreshed item."
+   :parent :html-ok-response
+   :args {:body :_mka-review-delete-then-item}}
+  {:name :api-marketplace-review-delete
+   :description "DELETE /api/marketplace/review?name=<pkg> — remove the current user's review. Returns the item HTML. Auth-required."
+   :parent :delete
+   :args {:path "/marketplace/review" :handler :_mka-review-delete-handler}}
+
+  ;; =====================================================================
+  ;; POST /api/marketplace/publish — a theme or keymap (payload IS the artifact)
+  ;; =====================================================================
+
+  {:name :_mkp-body
+   :parent :parse-json-body}
+  {:name :_mkp-field
+   :parent :get :args {:coll :_mkp-body :key {:as :key} :default nil}}
+  {:name :_mkp-kind
+   :parent :to-str :args {:value {:parent :_mkp-field :args {:key {:value :kind}}}}}
+  {:name :_mkp-name
+   :parent :str-trim :args {:string :json-body-name}}
+  {:name :_mkp-version
+   :parent :str-trim :args {:string :_body-version}}
+  {:name :_mkp-payload
+   :parent :_mkp-field :args {:key {:value :payload}}}
+  {:name :_mkp-listing
+   :parent :listing-normalize
+   :args {:kind :_mkp-kind
+          :description {:parent :_mkp-field :args {:key {:value :description}}}
+          :category {:parent :_mkp-field :args {:key {:value :category}}}
+          :tags {:parent :_mkp-field :args {:key {:value :tags}}}
+          :payload {:ref :_mkp-payload :type :nullable-keyword-map}}}
+  {:name :_mkp-kind-ok?
+   :description "This route publishes the NON-fns kinds — a fns package is a namespace export (POST /api/packages/publish)."
+   :parent :or
+   :args {:values [{:parent :equal? :args {:a :_mkp-kind :b {:value "theme"}}}
+                   {:parent :equal? :args {:a :_mkp-kind :b {:value "keymap"}}}]}}
+  {:name :_mkp-empty-bundle
+   :description "A theme / keymap carries no fn-defs — the bundle shape with nothing in it."
+   :parent :const
+   :args {:value {:namespace "" :namespaces [] :fns [] :dependencies [] :package-dependencies []
+                  :secrets [] :secret-paths-included? false}}}
+  {:name :_mkp-apply
+   :parent :publish-package-apply
+   :args {:pkg-name :_mkp-name :pkg-version :_mkp-version
+          :bundle {:ref :_mkp-empty-bundle :type :package-bundle-shape}
+          :pkg-public {:parent :_mkp-field :args {:key {:value :public}}}
+          :listing :_mkp-listing}}
+  {:name :_mkp-err
+   :description "`{:ok false :reason R}` — free arg `:reason`."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :version}]
+          :vals [{:value false} {:as :reason :type :text} :_mkp-name :_mkp-version]}}
+  {:name :_mkp-ok
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :id} {:value :name} {:value :version} {:value :kind} {:value :public}]
+          :vals [{:value true}
+                 {:parent :to-str :args {:value {:parent :get :args {:coll {:ref :_mkp-apply :type :keyword-map} :key {:value :id} :default nil}}}}
+                 :_mkp-name :_mkp-version :_mkp-kind
+                 {:parent :get :args {:coll {:ref :_mkp-apply :type :keyword-map} :key {:value :public?} :default nil}}]}}
+  {:name :_mkp-write-result
+   :parent :if
+   :args {:test {:parent :nil? :args {:value :_mkp-apply}}
+          :then {:parent :_mkp-err :args {:reason {:value "version-exists"}}}
+          :else :_mkp-ok}}
+  {:name :marketplace-publish-result
+   :description "Publish a theme / keymap: refuses `unsupported-kind` (fns go through the namespace publish), `missing-name`, `missing-version`, `missing-payload`, the listing's `bad-category`, and `version-exists`; else `{:ok true :id :name :version :kind :public}`."
+   :parent :cond
+   :args {:clauses [{:parent :not :args {:value :_mkp-kind-ok?}} {:parent :_mkp-err :args {:reason {:value "unsupported-kind"}}}
+                    {:parent :empty? :args {:coll :_mkp-name}} {:parent :_mkp-err :args {:reason {:value "missing-name"}}}
+                    {:parent :empty? :args {:coll :_mkp-version}} {:parent :_mkp-err :args {:reason {:value "missing-version"}}}
+                    {:parent :empty? :args {:coll :_mkp-payload}} {:parent :_mkp-err :args {:reason {:value "missing-payload"}}}
+                    {:parent :listing-invalid? :args {:listing :_mkp-listing}} {:parent :listing-error-envelope :args {:listing :_mkp-listing}}
+                    {:value true} :_mkp-write-result]}}
+  {:name :_mkp-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /api/marketplace/publish — JSON `{kind name version description category tags public payload}` → `{ok …}`."
+   :parent :json-handler
+   :args {:data :marketplace-publish-result}}
+  {:name :api-marketplace-publish
+   :description "POST /api/marketplace/publish — publish a THEME or KEYMAP version: body `{kind, name, version, description?, category?, tags? (comma string), public?, payload}`. The payload is the artifact (a theme's tokens / a keymap's bindings). Requires the publish-packages capability under tenancy. Auth-required."
+   :parent :post
+   :args {:path "/marketplace/publish" :handler :_mkp-handler}}]}

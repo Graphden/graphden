@@ -38,6 +38,14 @@
 //   group  — heading in the leader menu and the cheatsheet
 const _shortcuts = [];
 
+// Keymaps (Settings → Keyboard, docs/MARKETPLACE.md § Keymaps). `_defaults`
+// remembers each id's DECLARED keys/leader the first time it registers, so a
+// layout can be reset; `_overrides` is the active layout's `{id: {keys,
+// leader}}` and is consulted by every registration — a module that registers
+// late (the canvas's `g g`) still lands on the user's keys.
+const _defaults = new Map();
+let _overrides = {};
+
 const LEADER = ' ';
 const CHEATSHEET_KEY = '?';
 
@@ -48,10 +56,14 @@ const CHEATSHEET_KEY = '?';
 function registerShortcut(spec) {
   if (!spec?.keys || typeof spec.run !== 'function') return;
   const existing = _shortcuts.findIndex((s) => s.id === spec.id);
+  if (!_defaults.has(spec.id)) {
+    _defaults.set(spec.id, { keys: String(spec.keys).trim(), leader: spec.leader !== false });
+  }
+  const ov = _overrides[spec.id];
   const entry = {
     id: spec.id,
-    keys: String(spec.keys).trim(),
-    leader: spec.leader !== false,
+    keys: ov?.keys ? String(ov.keys).trim() : String(spec.keys).trim(),
+    leader: ov && typeof ov.leader === 'boolean' ? ov.leader : spec.leader !== false,
     when: spec.when || null,
     run: spec.run,
     description: spec.description || spec.id,
@@ -59,6 +71,34 @@ function registerShortcut(spec) {
   };
   if (existing >= 0) _shortcuts[existing] = entry;
   else _shortcuts.push(entry);
+}
+
+/**
+ * Apply a keyboard layout — `bindings` is `{id: {keys, leader}}` (only the
+ * ids that differ from the defaults need to be present; null/{} = the
+ * defaults). Every registered binding is re-resolved against it.
+ */
+function gdApplyKeymap(bindings) {
+  _overrides = (bindings && typeof bindings === 'object') ? bindings : {};
+  for (const s of _shortcuts) {
+    const d = _defaults.get(s.id) || { keys: s.keys, leader: s.leader };
+    const ov = _overrides[s.id];
+    s.keys = ov?.keys ? String(ov.keys).trim() : d.keys;
+    s.leader = ov && typeof ov.leader === 'boolean' ? ov.leader : d.leader;
+  }
+}
+
+/** Every registered binding, active or not, with its declared default. */
+function gdShortcutEntries() {
+  return _shortcuts.map((s) => {
+    const d = _defaults.get(s.id) || { keys: s.keys, leader: s.leader };
+    let active = true;
+    if (s.when) { try { active = !!s.when(); } catch (_) { active = false; } }
+    return {
+      id: s.id, keys: s.keys, leader: s.leader, description: s.description, group: s.group,
+      defaultKeys: d.keys, defaultLeader: d.leader, active,
+    };
+  });
 }
 
 /** Bindings currently applicable, given each one's `when` predicate. */
@@ -270,7 +310,11 @@ function showWhichKey(prefix) {
   foot.className = 'gd-which-key-foot';
   // Mention the bare keys here: they are not reachable through the leader,
   // so the menu is the only place a user would learn they exist.
-  foot.textContent = 'Esc cancel · / search · +/− zoom · ? all shortcuts';
+  // Read the bare keys off the registry, not a literal — a keymap may have
+  // moved them.
+  const bare = (id, fallback) => (_shortcuts.find((s) => s.id === id && !s.leader)?.keys) || fallback;
+  foot.textContent = 'Esc cancel · ' + bare('search', '/') + ' search · '
+    + bare('zoom-in', '+') + '/' + bare('zoom-out', '−') + ' zoom · ? all shortcuts';
   el.appendChild(foot);
 
   el.classList.add('visible');
@@ -505,6 +549,14 @@ function registerBuiltinShortcuts() {
           || ((typeof window.graphdenHasCap === 'function') && window.graphdenHasCap('platform-admin'))),
   });
   registerShortcut({
+    id: 'surface-market', keys: 'v m', group: 'Surfaces',
+    description: 'Marketplace',
+    run: () => window.gdShellSurface('market'),
+    // Only with the optional registry package (its routes are in window.API).
+    when: () => surfaces() && typeof window.API === 'object' && window.API
+      && typeof window.API.partials_marketplace !== 'undefined',
+  });
+  registerShortcut({
     id: 'help', keys: '?', group: 'Help',
     description: 'All keyboard shortcuts',
     run: openCheatsheet,
@@ -534,4 +586,6 @@ if (document.readyState === 'loading') {
 
 window.registerShortcut = registerShortcut;
 window.gdShortcutGroups = shortcutGroups;
+window.gdShortcutEntries = gdShortcutEntries;
+window.gdApplyKeymap = gdApplyKeymap;
 window.gdOpenCheatsheet = openCheatsheet;

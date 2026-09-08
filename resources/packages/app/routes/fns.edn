@@ -941,4 +941,7 @@
                   :api-secret-inline-binding
                   :api-secret-delete
                   :api-secret-rotate-value
+                  ;; per-user editor preferences (app-base/prefs — themes, keymaps)
+                  :api-prefs-get
+                  :api-prefs-put
                   :auth-check]}}]}

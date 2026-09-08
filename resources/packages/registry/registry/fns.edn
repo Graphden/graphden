@@ -274,12 +274,40 @@
    :args {}
    :return-type :bool}
 
+  ;; --- marketplace identity + roster primitives (docs/MARKETPLACE.md) ---
+  {:name :current-user-id
+   :description "The current request's user id as text — the accounts principal's `:user-id`, or `anonymous` on a deployment without per-user identity (`tenancy.context/current-user-id`). The owner key of preferences and the author key of reviews — stamped server-side, never taken from the caller."
+   :args {}
+   :return-type :text}
+
+  {:name :current-user-label
+   :description "A PUBLIC-safe label for the current user — display name, else the local part of the email, else the org, else `anonymous`. What a review is signed with."
+   :args {}
+   :return-type :text}
+
+  {:name :loaded-packages
+   :description "The executor's loaded-package roster — one row per package `:app/packages` loaded at boot: `{:name :version :description :modules :dependencies :base-fn-count :kind (impl+fns | fns-only) :origin (bundled | manifest)}`. Boot-constant; the Marketplace's Executor tab."
+   :args {}
+   :return-type [:list :keyword-map]
+   :effects #{}}
+
+  {:name :semver-latest
+   :description "The highest version string in `:versions` by parsed `[major minor patch]` — nil for an empty list. Pure."
+   :args {:versions {:type [:list :text] :description "Version strings."}}
+   :return-type :nullable-text}
+
+  {:name :semver-rank
+   :description "A version string as ONE sortable number (`major·10⁶ + minor·10³ + patch`, components capped at 999) — the pure `:sort-by` key that orders versions; nil / unparsable → 0."
+   :args {:version {:type :nullable-text :description "Version string."}}
+   :return-type :int}
+
   {:name :publish-package-apply
    :description "Atomic publish core — reject if `(:pkg-name, :pkg-version)` already exists (immutable registry), else hash + insert. The existence check stays adjacent to the insert to keep the race window minimal until the DB-level UNIQUE(name, version) hardening ships. Returns the CREATED ROW, or nil when the version already exists — both result envelopes are graph composition under `:publish-package`."
    :args {:pkg-name {:type :text :description "Package name, e.g. \"web.components\"."}
           :pkg-version {:type :text :description "Semver version string, e.g. \"1.2.0\"."}
           :bundle {:type :package-bundle-shape :description "Bundle from :export-namespace."}
-          :pkg-public {:type :nullable-bool :required false :description "Truthy → platform-visible (`:public?` on the row — the explicit publish-publicly opt-in, spec §5). Absent/nil → private to the publisher's org; a platform-tier publish is always public."}}
+          :pkg-public {:type :nullable-bool :required false :description "Truthy → platform-visible (`:public?` on the row — the explicit publish-publicly opt-in, spec §5). Absent/nil → private to the publisher's org; a platform-tier publish is always public."}
+          :listing {:type :nullable-keyword-map :required false :description "Marketplace listing (docs/MARKETPLACE.md) — `{:kind :description :category :tags :payload}` as NORMALISED by `app.marketplace/:listing-normalize`; nil = a plain fns publish with no listing metadata."}}
    :return-type :nullable-keyword-map
    :effects #{:db :time}}
 
@@ -319,7 +347,8 @@
    :args {:pkg-name {:as :pkg-name}
           :pkg-version {:as :pkg-version}
           :bundle {:as :bundle}
-          :pkg-public {:as :pkg-public}}}
+          :pkg-public {:as :pkg-public}
+          :listing {:as :listing}}}
 
   ;; --- result envelopes over the core's row-or-nil (formerly built
   ;;     inside the Clojure impl) ---
@@ -559,13 +588,30 @@
    :description "Exported bundle for the requested root namespace."
    :parent :export-namespace :args {:root :_publish-ns-root}}
 
+  ;; The marketplace listing (docs/MARKETPLACE.md) — `description` /
+  ;; `category` / `tags` from the same JSON body, normalised by the
+  ;; marketplace module's shared validator (kind pinned to fns: this
+  ;; route publishes a namespace; themes / keymaps go through
+  ;; POST /api/marketplace/publish). nil when the body carries none.
+  {:name :_publish-listing
+   :parent :listing-normalize
+   :args {:kind {:value "fns"}
+          :description {:parent :get :args {:coll :_publish-body :key {:value :description} :default nil}}
+          :category {:parent :get :args {:coll :_publish-body :key {:value :category} :default nil}}
+          :tags {:parent :get :args {:coll :_publish-body :key {:value :tags} :default nil}}
+          :payload {:value nil}}}
+
   {:name :_publish-result
-   :description "Publish the exported bundle under the requested name + version."
-   :parent :publish-package
-   :args {:pkg-name :json-body-name
-          :pkg-version :_body-version
-          :bundle :_publish-bundle
-          :pkg-public :_publish-public-raw}}
+   :description "Publish the exported bundle under the requested name + version — refused with `bad-category` when the listing names a category outside the fns vocabulary."
+   :parent :if
+   :args {:test {:parent :listing-invalid? :args {:listing :_publish-listing}}
+          :then {:parent :listing-error-envelope :args {:listing :_publish-listing}}
+          :else {:parent :publish-package
+                 :args {:pkg-name :json-body-name
+                        :pkg-version :_body-version
+                        :bundle :_publish-bundle
+                        :pkg-public :_publish-public-raw
+                        :listing :_publish-listing}}}}
 
   {:name :publish-package-handler
    :lambda-params [:request]
@@ -625,15 +671,34 @@
   {:name :_pie-public
    :parent :get :args {:coll {:as :item} :key {:value :public?} :default nil}}
 
+  ;; Marketplace listing columns (docs/MARKETPLACE.md). A nil `:kind` is a
+  ;; pre-marketplace fns row — read as "fns" so every consumer keys on one
+  ;; vocabulary. `:payload` is deliberately NOT in the index (a theme's
+  ;; token map / a keymap's bindings ride the version fetch, like `:fns`).
+  {:name :_pie-kind
+   :parent :coalesce
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :kind} :default nil}}
+          :default {:value "fns"}}}
+  {:name :_pie-description
+   :parent :get :args {:coll {:as :item} :key {:value :description} :default nil}}
+  {:name :_pie-category
+   :parent :get :args {:coll {:as :item} :key {:value :category} :default nil}}
+  {:name :_pie-tags
+   :parent :coalesce
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :tags} :default nil}}
+          :default {:value []}}}
+
   {:name :_pkg-index-entry
    :description "One registry-index entry — the JSON reshape of a :package-version row."
    :parent :zipmap
    :args {:keys [{:value :id} {:value :name} {:value :version} {:value :ns-root}
                  {:value :content-hash} {:value :published-at} {:value :fn-count}
-                 {:value :dependencies} {:value :org-id} {:value :public}]
+                 {:value :dependencies} {:value :org-id} {:value :public}
+                 {:value :kind} {:value :description} {:value :category} {:value :tags}]
           :vals [:_pie-id :_pie-name :_pie-version :_pie-ns-root
                  :_pie-content-hash :_pie-published-at :_pie-fn-count
-                 :_pie-dependencies :_pie-org-id :_pie-public]}}
+                 :_pie-dependencies :_pie-org-id :_pie-public
+                 :_pie-kind :_pie-description :_pie-category :_pie-tags]}}
 
   {:name :list-package-versions
    :description "All published package versions as a registry index — metadata only (name, version, ns-root, content-hash, published-at, fn-count, dependencies); omits the heavy :fns bundle. Pure graph composition over `:query-entities` + a HOF reshape."
@@ -1930,11 +1995,24 @@
   ;; level, and a namespace-scoped publish affordance is the next slice (A2).
   ;; Until then publish is simply not surfaced in the editor — deliberate, not
   ;; an orphan to "fix" by re-adding it to the chip.
+  ;; The door to the Marketplace surface — the browse `<details>` below is
+  ;; the quick "install one of these" list; discovery (search, categories,
+  ;; ratings, themes, keymaps) is the surface. `data-gd-surface` is the
+  ;; editor's delegated surface-switch hook (editor-marketplace.js), so
+  ;; the server-rendered panel needs no inline script.
+  {:name :_pkg-market-link
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button" :class "packages-market-link"
+                          :data-gd-surface "market"
+                          :title "Browse the marketplace — search, categories, ratings, themes and keymaps"}}
+          :children [{:value "Browse marketplace →"}]}}
+
   {:name :_pkg-panel-root
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:data-packages-panel "1"}}
-          :children [:_pkg-panel-body :_pkg-avail-details]}}
+          :children [:_pkg-panel-body :_pkg-avail-details :_pkg-market-link]}}
 
   {:name :_pkg-panel-html
    :parent :render-hiccup :args {:hiccup :_pkg-panel-root}}
@@ -2401,7 +2479,9 @@
           ;; publish is always private-by-default (platform-tier publishes
           ;; normalise to public in the apply core). Pinning also keeps the
           ;; free arg from leaking into the panel's handler chain.
-          :pkg-public {:value false}}}
+          :pkg-public {:value false}
+          ;; the legacy panel form carries no listing fields either
+          :listing {:value nil}}}
   ;; The notice reads the publish OUTCOME (the `outcome` lambda-param of
   ;; `:_pkg-publish-outcome-panel`) — `{:ok true …}` or one of the three
   ;; refusals `:publish-package` answers with (`empty-bundle`,
@@ -2927,12 +3007,21 @@
                   :api-import-graph
                   :api-sync-status
                   :api-sync-push
-                  :api-sync-pull]}}
+                  :api-sync-pull
+                  ;; marketplace (app.marketplace module, docs/MARKETPLACE.md)
+                  :api-marketplace-index
+                  :api-marketplace-categories
+                  :api-marketplace-publish
+                  :api-marketplace-install
+                  :api-marketplace-apply
+                  :api-marketplace-review
+                  :api-marketplace-review-delete]}}
 
   {:name :_registry-routes
-   :description "The registry package's full route list — the `/api/*` group plus the flat `/partials/packages-panel` + `/partials/packages-governance` leaves."
+   :description "The registry package's full route list — the `/api/*` group plus the flat `/partials/packages-panel` + `/partials/packages-governance` + `/partials/marketplace[/item]` leaves."
    :parent :list
-   :args {:items [:_registry-api-routes :partial-packages-panel :partial-packages-governance]}}
+   :args {:items [:_registry-api-routes :partial-packages-panel :partial-packages-governance
+                  :partial-marketplace :partial-marketplace-item]}}
 
   {:name :registry-router
    :description "Fall-through reitit router over `:_registry-routes` — returns nil on no-match (`:router-or-nil`) so the branch-router falls through to the main app router for any non-registry path."

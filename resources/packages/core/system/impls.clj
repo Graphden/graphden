@@ -187,6 +187,11 @@
   (System/currentTimeMillis))
 
 
+(defbase current-instant []
+  (cr/record-effect! :time)
+  (java.time.Instant/now))
+
+
 (defbase env-fn [name]
   (cr/record-effect! :env)
   (System/getenv name))
@@ -466,6 +471,7 @@
    :counters-snapshot counters-snapshot
    :log-warn log-warn-fn
    :current-time-ms current-time-ms
+   :current-instant current-instant
    :env env-fn
    :deploy-config deploy-config-fn
    :ex-info {:impl ex-info-fn :taint-propagate? true}

@@ -15,6 +15,7 @@
    decorator is wired does scoping take effect — making tenancy opt-in by
    construction (ADR §3.0)."
   (:require
+    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.storage.protocol.core :as sp]))
 
@@ -176,6 +177,37 @@
    enforcement at the storage layer, which needs the `:user`. nil = no
    authenticated principal."
   nil)
+
+
+(defn current-user-id
+  "The current request's user identity as text — the accounts principal's
+   `:user-id`, or `\"anonymous\"` when the deployment has no per-user
+   identity (single-token auth, auth off, an unauthenticated request).
+   The owner key of per-user rows (`:ui-pref`) and the author key of
+   reviews (`:package-review`): stamped and filtered server-side by the
+   base-fns that write them, never taken from the caller."
+  []
+  (let [p *current-principal*]
+    (if (and (map? p) (:authenticated? p) (seq (str (:user-id p))))
+      (str (:user-id p))
+      "anonymous")))
+
+
+(defn current-user-label
+  "A PUBLIC-safe label for the current user — what a review is signed
+   with: the account's display name, else the local part of its email
+   (never the whole address), else the principal's org, else
+   `anonymous`."
+  []
+  (let [p *current-principal*
+        user (:user p)
+        display (or (:display-name user) (:display-name p))
+        email (or (:email p) (:primary-email user))]
+    (cond
+      (seq (str display)) (str display)
+      (seq (str email)) (first (str/split (str email) #"@" 2))
+      (seq (str (:org p))) (str (:org p))
+      :else "anonymous")))
 
 
 (defn org-from-principal

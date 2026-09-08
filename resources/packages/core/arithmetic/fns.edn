@@ -48,6 +48,12 @@
    :args {:number {:type :numeric :description "Number whose absolute value to return."}}
    :return-type :numeric}
 
+  {:name :round
+   :description "Round a number to `decimals` decimal places (half-up, `BigDecimal` `setScale`) — `(round 4.26 1)` → `4.3`, `(round 4.26 0)` → `4`. A rating average / a percentage for display."
+   :args {:number {:type :numeric :description "Number to round."}
+          :decimals {:type :non-negative-int :description "Decimal places to keep (0 → an integer-valued number)."}}
+   :return-type :numeric}
+
   ;; === Comparison ===
   {:name :eq
    :description "Test all values for equality (Clojure's `=`)."

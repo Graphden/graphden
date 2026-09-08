@@ -278,6 +278,12 @@
                 (re-find (safe-compile-regex pattern) string))))
 
 
+(defbase url-encode-fn
+  "Percent-encode `string` as a URL query value (UTF-8); nil → \"\"."
+  [string]
+  (java.net.URLEncoder/encode (str string) "UTF-8"))
+
+
 (defbase re-replace-fn
   "Replace every match of the regex `pattern` in `string` with
    `replacement` — `clojure.string/replace` over a compiled pattern
@@ -327,4 +333,5 @@
    :str-starts-with?   {:impl str-starts-with?-fn   :taint-propagate? true}
    :str-replace        {:impl str-replace-fn        :taint-propagate? true}
    :re-find?           {:impl re-find?-fn           :taint-propagate? true}
-   :re-replace         {:impl re-replace-fn         :taint-propagate? true}})
+   :re-replace         {:impl re-replace-fn         :taint-propagate? true}
+   :url-encode         {:impl url-encode-fn         :taint-propagate? true}})

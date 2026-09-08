@@ -56,6 +56,13 @@
                   "packages/app/editor/editor-shortcuts.js"
                   "packages/app/editor/editor-busy.js"
                   "packages/app/editor/editor-prefs.js"
+                  ;; Marketplace surface + share dialog, the theme editor and
+                  ;; the keyboard-layout pane (docs/MARKETPLACE.md). After
+                  ;; prefs (they read/write the preference store) and the
+                  ;; shortcut registry (the keymap pane re-registers keys).
+                  "packages/app/editor/editor-marketplace.js"
+                  "packages/app/editor/editor-theme.js"
+                  "packages/app/editor/editor-keymap.js"
                   ;; Feedback ("Report a problem") — early so its uncaught-
                   ;; error ring buffer sees everything after boot; the shell
                   ;; menu (editor-auth.js) and the Failed runs panel call its
@@ -548,6 +555,8 @@
                ;; Account nav entry — hidden outside the open accounts addon;
                ;; editor-account.js unhides it after the /auth/me boot probe.
                [:button {:type "button" :class "gd-op-nav-btn" :data-section "account" :aria-current "false" :hidden "hidden"} "Account"]
+               ;; Keyboard — the rebindable shortcut table (editor-keymap.js)
+               [:button {:type "button" :class "gd-op-nav-btn" :data-section "keyboard" :aria-current "false"} "Keyboard"]
                [:button {:type "button" :class "gd-op-nav-btn" :data-section "build" :aria-current "false"} "About this build"]
                [:button {:type "button" :class "gd-op-nav-btn" :data-section "access" :aria-current "false"} "Access"]]
               [:div {:id "gd-settings-panels" :class "gd-op-pane"}
@@ -562,7 +571,15 @@
                  [:div {:class "gd-set-copy"}
                   [:div {:class "gd-set-label"} "Graph cards"]
                   [:div {:class "gd-set-hint"} "Compact hides the type / effect strips until you reveal them."]]
-                 [:button {:id "gd-set-compact" :type "button" :class "gd-set-btn"} "—"]]]
+                 [:button {:id "gd-set-compact" :type "button" :class "gd-set-btn"} "—"]]
+                ;; Custom themes — tokens / fonts / size, saved + shared through
+                ;; the marketplace (editor-theme.js renders into this root).
+                [:div {:id "gd-theme-root" :class "gd-theme-root"}]]
+               ;; KEYBOARD — every registered shortcut with a Change control;
+               ;; layouts save + share through the marketplace (editor-keymap.js).
+               [:section {:class "gd-op-card gd-set-pane gd-set-pane-wide" :data-section "keyboard" :hidden "hidden"}
+                [:h2 {:class "gd-op-card-title"} "Keyboard"]
+                [:div {:id "gd-keymap-root" :class "gd-keymap-root"}]]
                ;; ACCOUNT — the /account page merged in (2026-08-15): sign-in
                ;; methods, 2FA, API tokens, the verify-email banner. Shown only
                ;; under the open accounts addon (editor-account.js unhides its
@@ -588,6 +605,15 @@
                 [:h2 {:class "gd-op-card-title"} "Access"]
                 [:p {:class "gd-set-hint"} "Who may touch what is enforced by the server. Under a tenancy addon your granted capabilities show below; the admin controls (grants, users, roles, orgs) live in the Organization surface."]
                 [:div {:id "gd-set-caps" :class "gd-set-caps"}]]]]]
+            ;; MARKETPLACE surface — discovery over the registry: packages,
+            ;; themes, keyboard layouts, and this executor's package roster.
+            ;; Server-rendered partials (registry/marketplace/fns.edn) mounted
+            ;; by editor-marketplace.js; hidden without the registry package.
+            [:section {:id "gd-market" :hidden "hidden" :aria-label "Marketplace"}
+             [:div {:class "gd-operate-head"}
+              [:h1 "Marketplace"]
+              [:p "Packages to install, themes and keyboard layouts to apply — published from this instance and shared by others. Reviews and install counts help you pick."]]
+             [:div {:id "gd-market-root" :class "gd-market-root"}]]
             ;; (No Run surface: running a fn is the ▶ action on its node/card
             ;; → the execute popover; its run history is the inspector "Runs"
             ;; tab and its version timeline the "Versions" tab. A dedicated

@@ -442,6 +442,12 @@
    :return-type :null
    :effects #{:io}}
 
+  {:name :current-instant
+   :description "The wall clock as a `java.time.Instant` — what a `:timestamptz` column stores (`:current-time-ms` is the epoch-millis sibling)."
+   :args {}
+   :return-type :any
+   :effects #{:time}}
+
   {:name :current-time-ms
    :description "Wall-clock milliseconds since Unix epoch."
    :args {}

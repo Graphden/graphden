@@ -202,6 +202,11 @@
           :pattern {:type :text :description "Regex pattern (Java syntax)."}}
    :return-type :bool}
 
+  {:name :url-encode
+   :description "Percent-encode a string for a URL query value (`java.net.URLEncoder`, UTF-8; a space becomes `+`). Nil → \"\"."
+   :args {:string {:type :nullable-text :description "Value to encode (nil → empty)."}}
+   :return-type :text}
+
   {:name :re-replace
    :description "Replace every match of the regex `:pattern` in `:string` with `:replacement` (`clojure.string/replace` over a compiled pattern — the regex sibling of the literal-only `:str-replace`; same safe-compile caps as `:re-find?`). Nil `:string` flows through unchanged. `$1`-style group refs work in `:replacement`."
    :args {:string {:type :nullable-text :description "Source string (nil → returns nil)."}

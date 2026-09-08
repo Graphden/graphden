@@ -42,7 +42,7 @@
     // returning to Build must re-home focus (hiding a section silently drops
     // focus to <body>, and the next Tab would restart from the page top).
     const leavingWithFocus = !!document.activeElement?.closest?.(
-      '#gd-operate, #gd-platform, #gd-settings, #gd-surface-overlay');
+      '#gd-operate, #gd-platform, #gd-settings, #gd-market, #gd-surface-overlay');
     gdHideAllSurfaces();
     // A surface switch is a context switch: floating popovers from the
     // previous surface (Run form, pickers, viewers) must not survive on
@@ -71,7 +71,10 @@
     if (realId) {
       const el = document.getElementById(realId);
       if (el) el.hidden = false;
-      const render = { operate: gdRenderOperate, platform: gdRenderPlatform, settings: gdRenderSettings }[name];
+      const render = {
+        operate: gdRenderOperate, platform: gdRenderPlatform, settings: gdRenderSettings,
+        market: () => { if (typeof window.gdRenderMarket === 'function') window.gdRenderMarket(); },
+      }[name];
       if (typeof render === 'function') render();
       gdEnterSurface(el, SURFACE_LABELS[name] || name);
       return;
@@ -150,6 +153,7 @@
     operate: 'gd-operate',
     platform: 'gd-platform',
     settings: 'gd-settings',
+    market: 'gd-market',
   };
 
   // What a screen reader hears on arrival (gdEnterSurface). `operate` keeps
@@ -158,13 +162,14 @@
     operate: 'Organization',
     platform: 'Platform',
     settings: 'Settings',
+    market: 'Marketplace',
   };
 
   // ---- Surface deep links ---------------------------------------------------
   // surface name <-> `@` hash token. `organization` is the user-facing token
   // for the internal `operate` id (mechanics + e2e stay on `operate`).
-  const SURFACE_TO_HASH = { operate: '@organization', platform: '@platform', settings: '@settings' };
-  const HASH_TO_SURFACE = { organization: 'operate', platform: 'platform', settings: 'settings' };
+  const SURFACE_TO_HASH = { operate: '@organization', platform: '@platform', settings: '@settings', market: '@marketplace' };
+  const HASH_TO_SURFACE = { organization: 'operate', platform: 'platform', settings: 'settings', marketplace: 'market' };
 
   // Mirror the active surface into the URL the same way fn selection does
   // (pushState — no hashchange feedback loop, and browser Back walks the
@@ -295,6 +300,13 @@
       themeBtn.onclick = () => {
         const d = !document.body.classList.contains('theme-dark');
         applyTheme(d); setDarkStored(d);
+        // A custom theme owns the mode too — record it so the next load
+        // (which applies the theme after the class) agrees with the click.
+        const active = (typeof window.gdActiveThemePayload === 'function') ? window.gdActiveThemePayload() : null;
+        if (active && typeof window.gdPrefWrite === 'function') {
+          const cur = (typeof window.gdPrefRead === 'function') ? window.gdPrefRead('theme') : null;
+          window.gdPrefWrite('theme', { source: cur?.source || null, payload: Object.assign({}, active, { mode: d ? 'dark' : 'light' }) });
+        }
         gdRenderSettings();
       };
     }
@@ -309,6 +321,10 @@
     // 2FA, API tokens). editor-account.js owns it; hidden outside the
     // accounts addon.
     if (typeof gdRenderAccountCard === 'function') gdRenderAccountCard();
+    // Theme editor (Appearance) + keyboard layout (Keyboard) — their own
+    // modules; each renders once and keeps itself in sync afterwards.
+    if (typeof window.gdRenderThemePane === 'function') window.gdRenderThemePane();
+    if (typeof window.gdRenderKeymapPane === 'function') window.gdRenderKeymapPane();
 
     const hashEl = document.getElementById('gd-set-hash');
     if (hashEl) {
@@ -800,6 +816,7 @@
     chip.hidden = !(typeof window.API === 'object' && window.API
       && typeof window.API.api_packages_installed !== 'undefined');
   }
+  window.gdClosePkgPop = () => gdClosePkgPop();
   function gdClosePkgPop() {
     const p = document.getElementById('gd-pkg-pop'); if (p) p.remove();
     const s = document.getElementById('gd-pkg-scrim'); if (s) s.remove();

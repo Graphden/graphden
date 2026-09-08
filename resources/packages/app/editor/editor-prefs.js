@@ -226,6 +226,8 @@ function initPrefsEarly() {
   applyWidth(getStoredWidth());
   applyTheme(isDarkStored());
   applyCollapsed(decideCollapsed());
+  // the mirrored theme, before first paint (the server copy reconciles later)
+  gdPrefApply('theme');
 }
 
 function initPrefsLate() {
@@ -236,7 +238,11 @@ function initPrefsLate() {
   // correct icon + title.
   applyCollapsed(decideCollapsed());
   applyTheme(isDarkStored());
+  gdPrefApply('theme');
+  gdPrefApply('keymap');
   installViewportWatcher();
+  // the per-user server copy (theme + keymap) — wins over the mirror
+  gdPrefsRefresh();
 }
 
 // Re-apply auto-collapse decision when the viewport crosses the
@@ -290,6 +296,175 @@ function gdLastUsedNs() {
     && graphData.namespaces.some((n) => n.id === raw);
   return known ? raw : undefined;
 }
+
+
+// =============================================================================
+// THEMES + SERVER-SIDE PREFERENCES (docs/MARKETPLACE.md § Themes / Preferences)
+// =============================================================================
+//
+// A THEME is a payload `{mode, tokens, fonts, scale}`:
+//   mode   — 'light' | 'dark' (which base the tokens sit on; sets body.theme-dark)
+//   tokens — {'--gd-paper': '#eff1f0', …} over the allow-listed custom
+//            properties below (the same list Settings → Appearance edits)
+//   fonts  — {ui, mono, body} font-family stacks
+//   scale  — 70..160, the root font-size percentage (everything is rem)
+// It is applied as INLINE custom properties on <body> — inline beats
+// `body.theme-dark { … }`, so a theme wins in both modes and clears cleanly.
+//
+// The active theme (and keymap) is a PER-USER server preference
+// (`/api/prefs`, the `:ui-pref` row) with a localStorage MIRROR so the very
+// first paint already has it; the server copy wins once it answers.
+
+const THEME_TOKENS = [
+  // group, name, label
+  ['Grounds', '--gd-paper', 'Paper'], ['Grounds', '--gd-paper-2', 'Paper (raised)'], ['Grounds', '--gd-panel', 'Panel'],
+  ['Ink', '--gd-ink', 'Ink'], ['Ink', '--gd-ink-2', 'Ink 2'], ['Ink', '--gd-ink-3', 'Ink 3 (muted)'], ['Ink', '--gd-ink-4', 'Ink 4 (faint)'],
+  ['Lines', '--gd-line', 'Line'], ['Lines', '--gd-line-2', 'Line 2'], ['Lines', '--gd-grid', 'Dot grid'],
+  ['Accent', '--gd-flow', 'Flow (accent)'], ['Accent', '--gd-flow-ink', 'Flow ink'], ['Accent', '--gd-flow-wash', 'Flow wash'], ['Accent', '--gd-flow-2', 'Flow 2'],
+  ['Bindings', '--gd-lit', 'Literal'], ['Bindings', '--gd-lit-wash', 'Literal wash'], ['Bindings', '--gd-ref', 'Reference'], ['Bindings', '--gd-ref-wash', 'Reference wash'], ['Bindings', '--gd-free', 'Free arg'], ['Bindings', '--gd-free-wash', 'Free-arg wash'],
+  ['Status', '--gd-ok', 'OK'], ['Status', '--gd-warn', 'Warning'], ['Status', '--gd-crit', 'Critical'], ['Status', '--gd-crit-wash', 'Critical wash'],
+  ['Canvas', '--bg', 'Canvas background'], ['Canvas', '--fg', 'Canvas text'], ['Canvas', '--muted-fg', 'Canvas muted text'], ['Canvas', '--border', 'Canvas border'], ['Canvas', '--accent', 'Canvas accent'],
+  ['Canvas', '--card-bg', 'Card background'], ['Canvas', '--card-fg', 'Card text'], ['Canvas', '--card-border', 'Card border'], ['Canvas', '--card-header-bg', 'Card header'], ['Canvas', '--card-header-fg', 'Card header text'],
+  ['Canvas', '--hover-bg', 'Hover'], ['Canvas', '--selected-bg', 'Selected'], ['Canvas', '--sidebar-bg', 'Explorer background'], ['Canvas', '--header-bg', 'Top bar'], ['Canvas', '--header-fg', 'Top bar text'],
+];
+const THEME_TOKEN_NAMES = new Set(THEME_TOKENS.map((t) => t[1]));
+const THEME_FONT_VARS = { ui: '--gd-ui-font', mono: '--gd-mono', body: '--gd-body-font' };
+const THEME_SCALE_MIN = 70;
+const THEME_SCALE_MAX = 160;
+
+// A colour is a hex / rgb() / hsl() literal — nothing that could reach the
+// network (`url(…)`) or another declaration. A shared theme is data from
+// another user, so the allow-list is the boundary.
+const THEME_COLOR_RE = /^(#[0-9a-fA-F]{3,8}|(rgb|rgba|hsl|hsla)\([0-9.,%\s/]+\)|transparent)$/;
+const THEME_FONT_RE = /^[A-Za-z0-9 ,'"-]{1,160}$/;
+
+function sanitizeThemePayload(p) {
+  if (!p || typeof p !== 'object') return null;
+  const out = { mode: p.mode === 'dark' ? 'dark' : 'light', tokens: {}, fonts: {}, scale: 100 };
+  const tokens = (p.tokens && typeof p.tokens === 'object') ? p.tokens : {};
+  for (const [k, v] of Object.entries(tokens)) {
+    if (THEME_TOKEN_NAMES.has(k) && typeof v === 'string' && THEME_COLOR_RE.test(v.trim())) out.tokens[k] = v.trim();
+  }
+  const fonts = (p.fonts && typeof p.fonts === 'object') ? p.fonts : {};
+  for (const k of Object.keys(THEME_FONT_VARS)) {
+    const v = fonts[k];
+    if (typeof v === 'string' && v.trim() && THEME_FONT_RE.test(v.trim())) out.fonts[k] = v.trim();
+  }
+  const sc = Number(p.scale);
+  out.scale = Number.isFinite(sc) ? Math.max(THEME_SCALE_MIN, Math.min(THEME_SCALE_MAX, Math.round(sc))) : 100;
+  return out;
+}
+
+let _activeThemePayload = null;
+
+// Apply a theme payload (null = the built-in look: clear every inline token).
+function gdApplyThemePayload(payload) {
+  const body = document.body;
+  if (!body) return;
+  const clean = sanitizeThemePayload(payload);
+  // clear what the previous theme set
+  for (const name of THEME_TOKEN_NAMES) body.style.removeProperty(name);
+  for (const v of Object.values(THEME_FONT_VARS)) body.style.removeProperty(v);
+  body.style.removeProperty('--mono');
+  document.documentElement.style.removeProperty('font-size');
+  _activeThemePayload = clean;
+  if (!clean) { body.classList.toggle('gd-custom-theme', false); return; }
+  applyTheme(clean.mode === 'dark');
+  for (const [k, v] of Object.entries(clean.tokens)) body.style.setProperty(k, v);
+  for (const [k, v] of Object.entries(clean.fonts)) {
+    body.style.setProperty(THEME_FONT_VARS[k], v);
+    if (k === 'mono') body.style.setProperty('--mono', v);
+  }
+  if (clean.scale !== 100) document.documentElement.style.fontSize = clean.scale + '%';
+  body.classList.toggle('gd-custom-theme', true);
+}
+
+function gdActiveThemePayload() { return _activeThemePayload; }
+
+// The effective value of a token right now (inline theme or the stylesheet's
+// light/dark value) — what the theme editor starts from.
+function gdThemeTokenValue(name) {
+  try { return getComputedStyle(document.body).getPropertyValue(name).trim(); } catch (_) { return ''; }
+}
+
+// ---- the preference store ----------------------------------------------
+const PREFS_MIRROR_KEY = 'graphden.prefs.server';
+
+function readPrefsMirror() {
+  try { const raw = localStorage.getItem(PREFS_MIRROR_KEY); return raw ? JSON.parse(raw) : {}; }
+  catch (_) { return {}; }
+}
+function writePrefsMirror(map) {
+  try { localStorage.setItem(PREFS_MIRROR_KEY, JSON.stringify(map || {})); } catch (_) {}
+}
+
+let _prefs = readPrefsMirror();
+const _prefListeners = new Set();
+
+function gdPrefRead(key) { return _prefs?.[key] ?? null; }
+
+// Apply a preference to the running editor (theme → tokens; keymap → the
+// shortcut registry). Idempotent — safe to call on every refresh.
+function gdPrefApply(key) {
+  const v = gdPrefRead(key);
+  if (key === 'theme') gdApplyThemePayload(v?.payload || null);
+  if (key === 'keymap' && typeof window.gdApplyKeymap === 'function') window.gdApplyKeymap(v?.payload?.bindings || null);
+}
+
+function gdPrefNotify(key) {
+  for (const fn of _prefListeners) { try { fn(key, gdPrefRead(key)); } catch (_) {} }
+}
+
+// Write a preference: apply now, mirror locally, persist server-side.
+async function gdPrefWrite(key, value) {
+  _prefs = Object.assign({}, _prefs, { [key]: value });
+  writePrefsMirror(_prefs);
+  gdPrefApply(key);
+  gdPrefNotify(key);
+  const api = window.API;
+  if (!api || typeof api.api_prefs_key !== 'function') return false;
+  try {
+    const f = window.authFetch || fetch;
+    const r = await f(api.api_prefs_key(key), {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
+    });
+    return r.ok;
+  } catch (_) { return false; }
+}
+
+// Pull the server's map (per-principal) and apply what changed.
+async function gdPrefsRefresh() {
+  const api = window.API;
+  if (!api || typeof api.api_prefs !== 'string') return;
+  try {
+    const f = window.authFetch || fetch;
+    const r = await f(api.api_prefs);
+    if (!r.ok) return;
+    const map = await r.json();
+    if (!map || typeof map !== 'object') return;
+    _prefs = map;
+    writePrefsMirror(_prefs);
+    gdPrefApply('theme');
+    gdPrefApply('keymap');
+    gdPrefNotify('theme');
+    gdPrefNotify('keymap');
+  } catch (_) { /* offline / signed out — the mirror stands */ }
+}
+
+function gdPrefOnChange(fn) { _prefListeners.add(fn); return () => _prefListeners.delete(fn); }
+
+window.gdThemeTokens = THEME_TOKENS;
+window.gdThemeFontVars = THEME_FONT_VARS;
+window.gdThemeScaleRange = [THEME_SCALE_MIN, THEME_SCALE_MAX];
+window.gdSanitizeThemePayload = sanitizeThemePayload;
+window.gdApplyThemePayload = gdApplyThemePayload;
+window.gdActiveThemePayload = gdActiveThemePayload;
+window.gdThemeTokenValue = gdThemeTokenValue;
+window.gdPrefRead = gdPrefRead;
+window.gdPrefWrite = gdPrefWrite;
+window.gdPrefApply = gdPrefApply;
+window.gdPrefsRefresh = gdPrefsRefresh;
+window.gdPrefOnChange = gdPrefOnChange;
 
 window.initPrefsEarly = initPrefsEarly;
 window.initPrefsLate  = initPrefsLate;

@@ -573,6 +573,7 @@
    {:base-fn-defs {fn-name -> {:args ... :return-type ... :impl fn}}
     :fn-defs [{:name :foo :parent :bar :args {...}} ...]
     :packages [{:name \"core\" :version \"1.0.0\" ...} ...]
+    :base-fn-counts {\"core\" 120 ...}
     :seeded-services [{:package-name \"app\"
                        :service-name :default
                        :fn-name :web-server
@@ -593,14 +594,19 @@
                                          (update :fn-defs into (:fn-defs result))
                                          (update :base-fn-pairs into (:base-fn-pairs result))
                                          (update :ns-descriptions merge (:ns-descriptions result))
-                                         (update :packages conj (:meta result)))
+                                         (update :packages conj (:meta result))
+                                         ;; per-package impl count — the loaded-package
+                                         ;; roster (packages.loaded) reads it to tell an
+                                         ;; impl+fns package from a fns-only one
+                                         (update :base-fn-counts assoc pkg-name
+                                                 (count (:base-fn-defs result))))
                                (seq pkg-services)
                                (update :seeded-services into
                                        (mapv (fn [svc]
                                                (assoc svc :package-name pkg-name))
                                              pkg-services)))))
                          {:base-fn-defs {} :fn-defs [] :base-fn-pairs []
-                          :ns-descriptions {}
+                          :ns-descriptions {} :base-fn-counts {}
                           :packages [] :seeded-services []}
                          results)
         ;; Collect all namespace paths declared in modules.

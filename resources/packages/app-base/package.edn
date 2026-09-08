@@ -9,5 +9,7 @@
  ;; so moving only the package DIRECTORY leaves every id + every ref
  ;; resolution byte-identical — no remint, no `:post`/`:delete`
  ;; collision-resolution change.
+ ;; `storage` is NOT needed by prefs — its two base-fns go through the
+ ;; request storage (`:query-entities`-class reads), like registry's.
  :dependencies ["core" "web"]
- :modules ["common" "routes-method" "routes-auth"]}
+ :modules ["common" "routes-method" "routes-auth" "prefs"]}

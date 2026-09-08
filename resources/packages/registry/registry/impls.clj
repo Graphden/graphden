@@ -6,6 +6,7 @@
     [cheshire.core :as json]
     [clojure.edn :as edn]
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.clients.egress :as egress]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
@@ -14,12 +15,14 @@
     [graphden.executor.registry.core :as registry-core]
     [graphden.packages.compat :as compat]
     [graphden.packages.export :as export]
+    [graphden.packages.loaded :as loaded]
     [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.wire :as wire]
     [graphden.packages.semver :as semver]
     [graphden.packages.sync :as pkg-sync]
     [graphden.storage.protocol.core :as sp]
+    [graphden.storage.sql.pg :as pg]
     [graphden.system.branch-router :as br]
     [graphden.tenancy.context :as tc]
     [graphden.versioning.storage.core :as vs]
@@ -98,6 +101,52 @@
   (tc/tenancy-addon-active?))
 
 
+(defbase current-user-id
+  "The current request's user id as text — the accounts principal's
+   `:user-id`, or `anonymous` on a deployment without per-user identity
+   (`tenancy.context/current-user-id`, the seam)."
+  []
+  (tc/current-user-id))
+
+
+(defbase current-user-label
+  "A public-safe label for the current user (display name / email local
+   part / org / `anonymous`) — what a review is signed with."
+  []
+  (tc/current-user-label))
+
+
+(defbase loaded-packages
+  "The executor's loaded-package roster (`graphden.packages.loaded`): one
+   row per package `:app/packages` loaded at boot — name, version,
+   description, modules, dependencies, base-fn count, `:kind`
+   (`impl+fns` / `fns-only`) and `:origin` (`bundled` / `manifest`).
+   Boot-constant — no effect."
+  []
+  (loaded/read-roster))
+
+
+(defbase semver-rank
+  "A version string as one sortable number — `major·10⁶ + minor·10³ +
+   patch` (each component capped at 999) — the pure `:sort-by` key that
+   orders a version list; nil / unparsable → 0."
+  [version]
+  (let [[ma mi pa] (or (semver/parse-version version) [0 0 0])
+        cap #(min 999 (long (or % 0)))]
+    (+ (* 1000000 (cap ma)) (* 1000 (cap mi)) (cap pa))))
+
+
+(defbase semver-latest
+  "The highest version string in `versions` by parsed `[major minor patch]`
+   — nil for an empty list. Pure; the marketplace card's \"latest\" pick."
+  [versions]
+  (->> versions
+       (map str)
+       (remove str/blank?)
+       (sort-by semver/parse-version)
+       last))
+
+
 (defbase graph-rows
   []
   (cr/record-effect! :db)
@@ -115,7 +164,7 @@
 ;; content-hash + `:public?` normalisation stay here: both are STORED
 ;; on the row at write time (readers never re-derive them).
 (defbase publish-package-apply
-  [pkg-name pkg-version bundle pkg-public]
+  [pkg-name pkg-version bundle pkg-public listing]
   ;; Authz chokepoint: publishing to an ORG's registry requires the
   ;; `:publish-packages` org capability. Guard the deepest effectful core so
   ;; NO route (JSON or panel) can bypass it. Single-tenant-safe via the
@@ -156,7 +205,15 @@
                          ;; identically with and without the addon.
                          :org-id (tc/current-org)
                          :public? (boolean (or pkg-public (tc/current-platform-tier?)))
-                         :published-at (java.time.Instant/now)}))))
+                         :published-at (java.time.Instant/now)
+                         ;; marketplace listing (docs/MARKETPLACE.md) — the
+                         ;; graph validated + normalised it (`:listing-normalize`);
+                         ;; nil listing = a plain fns publish with no metadata
+                         :kind (:kind listing)
+                         :description (:description listing)
+                         :category (:category listing)
+                         :tags (some-> (:tags listing) vec)
+                         :payload (:payload listing)}))))
 
 
 (defbase breaking-changes-between
@@ -318,8 +375,36 @@
 ;; request-scoped VersionedStorage, so it records on the request's branch
 ;; (staging). Shared by the `:package-upsert-pin` base-fn (which the
 ;; graph install flow + :set-package-pin bind) and the update core.
+(defn- bump-install-stat!
+  "Count one install of `pkg-name` on the GLOBAL `:package-stat` row —
+   an atomic `INSERT … ON CONFLICT DO UPDATE` over the pool, the
+   `usage-stat` bump's shape: the row is deliberately un-scoped (an
+   installer in org B cannot write org A's artifact, and per-org pins
+   are invisible across orgs) and platform-write-only under tenancy, so
+   the generic entity route cannot forge a count. Best-effort: a failed
+   bump is logged and never fails the install."
+  [ctx pkg-name]
+  (try
+    (pg/pg-execute ctx {:insert-into :package_stat
+                        :values [{:id (random-uuid)
+                                  :package_name pkg-name
+                                  :installs 1
+                                  :updated_at (java.time.Instant/now)}]
+                        :on-conflict [:package_name]
+                        :do-update-set {:installs [:+ :package_stat.installs 1]
+                                        :updated_at (java.time.Instant/now)}})
+    (catch Exception e
+      (log/warn e "package-stat bump failed (install unaffected)" {:package pkg-name}))))
+
+
 (defn- upsert-pin!
-  [storage pkg-name version]
+  "One pin per (branch, package). A NEW pin is an install and bumps the
+   package's global install counter; moving an existing pin (update /
+   rollback) is not — the counter is installs, not pin writes. The bump is
+   part of the pin write unit (like the cache invalidation an entity write
+   owes), not a separate graph step: a graph-side \"was it pinned?\" probe
+   is an effectful read that a later ref would re-run AFTER the pin."
+  [ctx storage pkg-name version]
   (let [branch-id (vs/current-branch-id storage)
         existing (first (sp/query-entities storage :package-install
                                            {:branch-id branch-id :package-name pkg-name}))
@@ -327,11 +412,13 @@
     (if existing
       (sp/update-entity storage :package-install (:id existing)
                         {:version version :installed-at installed-at})
-      (sp/create-entity storage :package-install
-                        {:branch-id branch-id
-                         :package-name pkg-name
-                         :version version
-                         :installed-at installed-at}))
+      (do
+        (sp/create-entity storage :package-install
+                          {:branch-id branch-id
+                           :package-name pkg-name
+                           :version version
+                           :installed-at installed-at})
+        (bump-install-stat! ctx pkg-name)))
     branch-id))
 
 
@@ -580,7 +667,9 @@
                                     (-> row
                                         (select-keys [:name :version :ns-root :fns
                                                       :dependencies :package-dependencies
-                                                      :secrets :content-hash])
+                                                      :secrets :content-hash
+                                                      ;; marketplace listing rides along
+                                                      :kind :description :category :tags :payload])
                                         (assoc :org-id (tc/current-org)
                                                ;; a mirrored copy is LOCAL — never
                                                ;; re-published as public here
@@ -760,7 +849,7 @@
   [pkg-name pkg-version]
   (cr/record-effect! :db)
   (cr/record-effect! :time)
-  (str (upsert-pin! (request/require-storage ctx) pkg-name pkg-version)))
+  (str (upsert-pin! ctx (request/require-storage ctx) pkg-name pkg-version)))
 
 
 ;; `:list-installed-packages` / `:remove-package-pin` are pure graph
@@ -792,6 +881,11 @@
    :namespace-external-deps namespace-external-deps
    :current-org-id current-org-id
    :tenancy-active? tenancy-active?
+   :current-user-id current-user-id
+   :current-user-label current-user-label
+   :loaded-packages loaded-packages
+   :semver-latest semver-latest
+   :semver-rank semver-rank
    :graph-rows graph-rows
    :publish-package-apply publish-package-apply
    :breaking-changes-between breaking-changes-between

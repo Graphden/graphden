@@ -103,6 +103,11 @@
   (abs number))
 
 
+(defbase round-fn [number decimals]
+  (let [d (.setScale (bigdec number) (long decimals) java.math.RoundingMode/HALF_UP)]
+    (if (zero? (long decimals)) (long d) (double d))))
+
+
 ;; === Comparison ===
 
 (defbase eq [values]
@@ -199,6 +204,7 @@
    :quot {:impl quot-fn :taint-propagate? true}
    :neg {:impl neg :return-type-rule neg-return-rule :taint-propagate? true}
    :abs {:impl abs-fn :return-type-rule abs-return-rule :taint-propagate? true}
+   :round {:impl round-fn :taint-propagate? true}
    :eq {:impl eq :taint-propagate? true}
    :neq {:impl neq :taint-propagate? true}
    :lt {:impl lt :taint-propagate? true}

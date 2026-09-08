@@ -269,6 +269,15 @@ function openNsPublishPopover(anchorEl, nsPath) {
     +   '<input type="text" class="packages-publish-input" id="gd-nspub-name"></div>'
     + '<div class="gd-nspub-field"><label>Version</label>'
     +   '<input type="text" class="packages-publish-input" id="gd-nspub-version" placeholder="1.0.0"></div>'
+    // Marketplace listing (docs/MARKETPLACE.md): what the card shows.
+    // Categories come from the graph's vocabulary (editor-marketplace.js
+    // fetched it at boot); tags are a comma list.
+    + '<div class="gd-nspub-field"><label>Description</label>'
+    +   '<textarea class="packages-publish-input" id="gd-nspub-desc" rows="2" maxlength="2000" placeholder="What it does, for the marketplace card"></textarea></div>'
+    + '<div class="gd-nspub-field"><label>Category</label>'
+    +   '<select class="packages-publish-input" id="gd-nspub-category"><option value="">— none —</option></select></div>'
+    + '<div class="gd-nspub-field"><label>Tags</label>'
+    +   '<input type="text" class="packages-publish-input" id="gd-nspub-tags" placeholder="comma, separated, tags"></div>'
     // Public opt-in (spec §5): only meaningful under the tenancy addon — a
     // tenant publish is private to its org unless this is checked. Single-
     // tenant / operator publishes are always platform-visible, so the
@@ -285,6 +294,9 @@ function openNsPublishPopover(anchorEl, nsPath) {
   const versionInput = pop.querySelector('#gd-nspub-version');
   nameInput.value = nsPath.split('.').pop() || nsPath;
   versionInput.value = '1.0.0';
+  if (typeof window.gdMarketCategoriesInto === 'function') {
+    window.gdMarketCategoriesInto(pop.querySelector('#gd-nspub-category'), 'fns');
+  }
 
   const r = anchorEl.getBoundingClientRect();
   pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 320)) + 'px';
@@ -313,6 +325,9 @@ function openNsPublishPopover(anchorEl, nsPath) {
         body: JSON.stringify({
           name, version, 'ns-root': nsPath,
           public: !!publicInput?.checked,
+          description: pop.querySelector('#gd-nspub-desc')?.value || '',
+          category: pop.querySelector('#gd-nspub-category')?.value || '',
+          tags: pop.querySelector('#gd-nspub-tags')?.value || '',
         }),
       });
       if (resp.ok) {

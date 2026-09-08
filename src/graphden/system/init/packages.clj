@@ -8,6 +8,7 @@
    the actual sync logic)."
   (:require
     [clojure.tools.logging :as log]
+    [graphden.packages.loaded :as loaded]
     [graphden.packages.loader :as pkg]
     [graphden.packages.manifest :as manifest]
     [graphden.packages.sync :as sync]
@@ -26,7 +27,13 @@
       (log/info "Packages loaded:" (count (:packages packages)) "packages,"
                 (count (:base-fn-defs packages)) "base-fns,"
                 (count (:fn-defs packages)) "fn-defs")
+      ;; the read model the marketplace's Executor tab lists (`:loaded-packages`)
+      (loaded/install! packages)
       packages)))
+
+
+(defmethod ig/halt-key! :app/packages [_ _]
+  (loaded/clear!))
 
 
 (defmethod ig/init-key :exec/base-fns

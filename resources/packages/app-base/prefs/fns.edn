@@ -1,0 +1,113 @@
+;; Per-user editor preferences — `:ui-pref` rows keyed (owner, key). The
+;; owner is the tenancy seam's `current-user-id` (an account under the
+;; addon, `anonymous` on a single-user deployment), stamped and filtered
+;; by the two base-fns; the key vocabulary, the size cap and every
+;; envelope are graph. Today's keys: `theme` (the active editor theme —
+;; its token payload + where it came from) and `keymap` (the active
+;; keyboard layout). docs/MARKETPLACE.md § Preferences.
+;;
+;; Lives in app-base (not app) so BOTH the editor (app) and the
+;; marketplace (registry) reach it without an app dependency — "apply
+;; this theme" is a marketplace act that writes a preference.
+
+{:namespace "app.prefs"
+ :description "Per-user editor preferences (`:ui-pref`): the owner-stamped read/write primitives, the key vocabulary, and the GET/PUT /api/prefs routes."
+ :fns
+ [{:name :ui-prefs-read
+   :description "The CURRENT user's preferences as a `{key value}` map (string keys; empty when none). Owner = `tenancy.context/current-user-id`, filtered server-side."
+   :args {}
+   :return-type [:map :text :any]
+   :effects #{:db}}
+
+  {:name :ui-pref-write!
+   :description "Upsert the CURRENT user's preference `:pref-key` → `:pref-value` (any JSON document). Owner-stamped server-side; returns the stored value."
+   :args {:pref-key {:type :text :description "Preference key — one of `:pref-keys`."}
+          :pref-value {:type :jsonb :description "The document to store (a theme / keymap selection)."}}
+   :return-type :jsonb
+   :effects #{:db :time}}
+
+  {:name :pref-keys
+   :description "The preference keys the editor knows — the vocabulary PUT /api/prefs/:key accepts. `theme` = the active editor theme, `keymap` = the active keyboard layout."
+   :parent :const
+   :args {:value ["theme" "keymap"]}}
+
+  {:name :pref-key-known?
+   :description "Is `:pref-key` one of `:pref-keys`? (`|`-delimited membership test — a pure string check, no HOF closure.)"
+   :parent :str-contains?
+   :args {:string {:parent :str-join
+                   :args {:coll [{:value "|"}
+                                 {:parent :str-join :args {:coll :pref-keys :separator {:value "|"}}}
+                                 {:value "|"}]
+                          :separator {:value ""}}}
+          :substring {:parent :str-join
+                      :args {:coll [{:value "|"} {:as :pref-key :type :text} {:value "|"}]
+                             :separator {:value ""}}}}}
+
+  ;; --- GET /api/prefs — the current user's map ------------------------
+  {:name :_prefs-get-handler
+   :lambda-params []
+   :description "Ring handler for GET /api/prefs — the current user's `{key value}` preferences as JSON."
+   :parent :json-handler
+   :args {:data :ui-prefs-read}}
+
+  {:name :api-prefs-get
+   :description "GET /api/prefs — the current user's editor preferences (`{\"theme\" …, \"keymap\" …}`). Auth-required; per-principal."
+   :parent :get-auth-required
+   :args {:path "/prefs" :handler :_prefs-get-handler}}
+
+  ;; --- PUT /api/prefs/:key — body `{value: …}` ------------------------
+  {:name :_pref-put-key
+   :description "`:key` path-param of PUT /api/prefs/:key."
+   :parent :to-str
+   :args {:value {:parent :get-in
+                  :args {:map {:as :request} :path [{:value :path-params} {:value :key}] :default nil}}}}
+
+  {:name :_pref-put-value
+   :parent :get :args {:coll :parse-json-body :key {:value :value} :default nil}}
+
+  ;; A preference is a small selection document (a theme's tokens, a
+  ;; keymap's overrides) — cap it so the row can't become a blob store.
+  {:name :_pref-put-too-large?
+   :parent :gt
+   :args {:nums [{:parent :byte-len :args {:string {:parent :to-json-string :args {:data :_pref-put-value}}}}
+                 {:value 65536}]}}
+
+  {:name :_pref-put-unknown?
+   :parent :not :args {:value :_pref-put-known?}}
+
+  {:name :_pref-put-known?
+   :parent :pref-key-known?
+   :args {:pref-key :_pref-put-key}}
+
+  {:name :_pref-put-err-key
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :key} {:value :http-status}]
+          :vals [{:value false} {:value "unknown-key"} :_pref-put-key {:value 400}]}}
+
+  {:name :_pref-put-err-size
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :key} {:value :http-status}]
+          :vals [{:value false} {:value "too-large"} :_pref-put-key {:value 413}]}}
+
+  {:name :_pref-put-ok
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :key} {:value :value}]
+          :vals [{:value true} :_pref-put-key
+                 {:parent :ui-pref-write! :args {:pref-key :_pref-put-key :pref-value :_pref-put-value}}]}}
+
+  {:name :_pref-put-result
+   :parent :cond
+   :args {:clauses [:_pref-put-unknown? :_pref-put-err-key
+                    :_pref-put-too-large? :_pref-put-err-size
+                    {:value true} :_pref-put-ok]}}
+
+  {:name :_pref-put-handler
+   :lambda-params [:request]
+   :description "Ring handler for PUT /api/prefs/:key — body `{value: …}`; `{ok true key value}`, 400 `unknown-key`, 413 `too-large`."
+   :parent :json-envelope-response
+   :args {:envelope :_pref-put-result}}
+
+  {:name :api-prefs-put
+   :description "PUT /api/prefs/:key — store the current user's preference `key` (`theme` / `keymap`) from body `{value: …}`. Auth-required; per-principal."
+   :parent :put
+   :args {:path "/prefs/:key" :handler :_pref-put-handler}}]}

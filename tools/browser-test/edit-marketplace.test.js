@@ -10,6 +10,8 @@
 //     clears it.
 //   • Settings → Keyboard: Change on a row records a new sequence; the
 //     layout survives a reload (server preference).
+//   • `#@marketplace/<name>` (the storefront's sign-in landing) opens the
+//     Marketplace on that item.
 //
 // Setup publishes the theme through the JSON route; cleanup withdraws it,
 // deletes the review and resets both preferences, so the default state is
@@ -140,6 +142,20 @@ const PAPER = '#123456';
     await page.waitForFunction(() => typeof window.gdShortcutEntries === 'function'
       && (window.gdShortcutEntries().find((e) => e.id === 'graph-fit') || {}).keys === 'p q', null, {timeout: 20000, polling: 200});
     assert(true, 'the layout is live again after a reload');
+
+    // ---- the storefront's "Sign in to install" lands on the package:
+    //      `#@marketplace/<name>` on a FRESH document (a new tab, the way the
+    //      storefront link arrives) opens the Marketplace on the item.
+    const landing = await page.context().newPage();
+    try {
+      await landing.goto(BASE + '/#@marketplace/' + encodeURIComponent(THEME));
+      await landing.waitForSelector('#gd-market-root [data-marketplace-item="' + THEME + '"]', {timeout: 20000});
+      assert(await landing.evaluate(() => document.body.dataset.surface === 'market'), 'the deep link opens the Marketplace surface');
+      assert(await landing.evaluate((t) => document.querySelector('#gd-market-root [data-marketplace]')?.dataset.marketplaceItem === t, THEME),
+        'the deep link lands on the item');
+    } finally {
+      await landing.close();
+    }
   } finally {
     await browser.close();
     // ---- cleanup: preferences, review, the theme

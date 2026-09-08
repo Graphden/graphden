@@ -846,8 +846,21 @@
            an effectful read a later ref would re-run AFTER the pin. Moving a
            pin (update / rollback) is not an install. Everything else the
            marketplace needs — listing normalisation, the cards' rating
-           aggregate, the filters, both partials, the review upsert — is
-           graph: `registry/marketplace/fns.edn`."}
+           aggregate, the filters, the partials, the review upsert, the
+           storefront bodies — is graph, four modules sharing the
+           `app.marketplace` namespace: `registry/marketplace{,-surface,
+           -storefront,-moderation}/fns.edn`."}
+    {:file "resources/packages/registry/marketplace/impls.clj" :defn moderate-package-version!
+     :say "The operator's decision on a public listing (docs/MARKETPLACE.md
+           § 8). Three things to notice: the platform-admin gate sits at the
+           deepest effectful core so no route bypasses it; the read goes
+           through `registry-shared/platform-base` — the storage BENEATH the
+           org-scoped decorator, because the operator's own org would hide
+           another org's pending row; and the updated row is raised through
+           core's notification seam (`tc/notify! :package-moderated`), which
+           the tenancy addon turns into the publisher's email. The module's
+           impls file is small on purpose: identity, roster, semver, the
+           origin card and moderation — everything else is graph."}
     {:ns graphden.packages.loaded :defn install!
      :say "The loaded-package ROSTER — recorded by `load-packages` itself, so
            boot and the test golden bootstrap leave the same read model. One
@@ -1442,6 +1455,15 @@
            is how core code asks `am I the platform, or a tenant?` without
            depending on the policy. Everything org-scoped downstream keys off
            this seam."}
+    {:ns graphden.tenancy.context :defn notify!
+     :say "The notification seam — the same install-a-hook shape as the
+           capability predicates, pointed the other way: core RAISES a domain
+           event (`:package-moderated` with the decided row) and the addon
+           decides who is told and how (the publishing org's owner, through
+           the accounts Mailer, on the trusted origin). Without an addon the
+           event is dropped, and the sink's result is never inspected — a
+           mail failure is the sender's to log, not the domain write's to
+           undo."}
     {:ns graphden.auth.provider :defn single-token-provider
      :say "Auth is provider-driven: core ships this single-token default behind
            the `:auth/provider` Integrant key, and the addon swaps in its

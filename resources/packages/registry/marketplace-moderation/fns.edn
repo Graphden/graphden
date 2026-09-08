@@ -1,0 +1,125 @@
+;; MODERATION of public listings (docs/MARKETPLACE.md § 8) — the operator's
+;; side; the publisher's badges live in the surface module, the status
+;; itself is written by `publish-package-apply` (registry) and read by the
+;; tenancy decorator's `visible?`.
+
+{:namespace "app.marketplace"
+ :description "Marketplace MODERATION — the operator's queue of pending public listings (Platform → Moderation): the partial with Approve / Reject forms, the JSON queue and the decision route. Same `app.marketplace` namespace."
+ :fns
+ [;; =====================================================================
+  ;; MODERATION — the operator's queue (docs/MARKETPLACE.md § 8). Platform
+  ;; surface → Moderation; `GET /partials/moderation-queue` lists every
+  ;; pending public listing across orgs with Approve / Reject (+ note);
+  ;; both post to /api/marketplace/moderate and swap the refreshed queue.
+  ;; =====================================================================
+  {:name :_mq-row-name
+   :parent :get :args {:coll {:as :item} :key {:value :name} :default {:value ""}}}
+  {:name :_mq-row-version
+   :parent :get :args {:coll {:as :item} :key {:value :version} :default {:value ""}}}
+  {:name :_mq-hidden
+   :description "A hidden field. Free args: `:field`, `:val`."
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:parent :assoc
+                  :args {:map {:parent :assoc :args {:map {:value {:type "hidden"}} :key {:value :name} :value {:as :field :type :text}}}
+                         :key {:value :value} :value {:as :val :type :text}}}}}
+  {:name :_mq-form
+   :description "One decision form per row — `:decision` `approve` / `reject`; the reject form carries a note field."
+   :parent :hiccup
+   :args {:tag {:value "form"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:hx-post "/api/marketplace/moderate" :hx-target "closest [data-moderation-queue]" :hx-swap "outerHTML"}}
+                         :key {:value :class} :value {:parent :str-join :args {:coll [{:value "mq-form mq-form-"} {:as :decision :type :text}] :separator {:value ""}}}}}
+          :children [{:parent :_mq-hidden :args {:field {:value "name"} :val :_mq-row-name}}
+                     {:parent :_mq-hidden :args {:field {:value "version"} :val :_mq-row-version}}
+                     {:parent :_mq-hidden :args {:field {:value "decision"} :val {:as :decision :type :text}}}
+                     {:parent :if :args {:test {:parent :equal? :args {:a {:as :decision :type :text} :b {:value "reject"}}}
+                                         :then {:parent :hiccup :args {:tag {:value "input"} :attrs {:value {:type "text" :name "note" :class "mk-search mq-note" :placeholder "why (the publisher sees this)" :aria-label "Rejection note"}}}}
+                                         :else {:value nil}}}
+                     {:parent :hiccup :args {:tag {:value "button"}
+                                             :attrs {:parent :assoc :args {:map {:value {:type "submit"}} :key {:value :class}
+                                                                           :value {:parent :if :args {:test {:parent :equal? :args {:a {:as :decision :type :text} :b {:value "approve"}}}
+                                                                                                      :then {:value "packages-install-btn mq-approve"} :else {:value "packages-fork-btn mq-reject"}}}}}
+                                             :children [{:parent :if :args {:test {:parent :equal? :args {:a {:as :decision :type :text} :b {:value "approve"}}}
+                                                                            :then {:value "Approve"} :else {:value "Reject"}}}]}}]}}
+  {:name :_mq-row
+   :parent :hiccup
+   :args {:tag {:value "tr"}
+          :attrs {:parent :assoc :args {:map {:value {:class "mq-row"}} :key {:value :data-mq-name} :value :_mq-row-name}}
+          :children [{:parent :hiccup :args {:tag {:value "td"} :children [:_mq-row-name {:value " "} {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "mk-card-latest"}} :children [:_mq-row-version]}}]}}
+                     {:parent :_mkx-cell :args {:key {:value :kind}}}
+                     {:parent :_mkx-cell :args {:key {:value :org-id}}}
+                     {:parent :_mkx-cell :args {:key {:value :category}}}
+                     {:parent :_mkx-cell :args {:key {:value :description}}}
+                     {:parent :hiccup :args {:tag {:value "td"} :children [{:parent :str-clip :args {:string {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :published-at} :default {:value ""}}}}} :limit {:value 10}}}]}}
+                     {:parent :hiccup :args {:tag {:value "td"} :attrs {:value {:class "mq-actions"}}
+                                             :children [{:parent :_mq-form :args {:decision {:value "approve"}}}
+                                                        {:parent :_mq-form :args {:decision {:value "reject"}}}]}}]}}
+  {:name :_mq-table
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :attrs {:value {:class "packages-panel-table mk-roster mq-table"}}
+          :children [{:parent :hiccup :args {:tag {:value "thead"}
+                                             :children [{:parent :hiccup :args {:tag {:value "tr"}
+                                                                                :children [{:parent :hiccup :args {:tag {:value "th"} :children [{:value "Package"}]}}
+                                                                                           {:parent :hiccup :args {:tag {:value "th"} :children [{:value "Kind"}]}}
+                                                                                           {:parent :hiccup :args {:tag {:value "th"} :children [{:value "Org"}]}}
+                                                                                           {:parent :hiccup :args {:tag {:value "th"} :children [{:value "Category"}]}}
+                                                                                           {:parent :hiccup :args {:tag {:value "th"} :children [{:value "Description"}]}}
+                                                                                           {:parent :hiccup :args {:tag {:value "th"} :children [{:value "Published"}]}}
+                                                                                           {:parent :hiccup :args {:tag {:value "th"} :children [{:value ""}]}}]}}]}}
+                     {:parent :hiccup :args {:tag {:value "tbody"} :children {:parent :map :args {:func :_mq-row :coll :moderation-queue}}}}]}}
+  {:name :_mq-body
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :moderation-queue}}
+          :then {:parent :hiccup :args {:tag {:value "div"} :attrs {:value {:class "mk-empty"}} :children [{:value "Nothing awaiting review."}]}}
+          :else :_mq-table}}
+  {:name :_mq-off-note
+   :parent :if
+   :args {:test :moderation-on?
+          :then {:value nil}
+          :else {:parent :hiccup :args {:tag {:value "p"} :attrs {:value {:class "mk-note"}}
+                                        :children [{:value "Moderation is OFF on this deployment (GRAPHDEN_MARKETPLACE_MODERATION unset): a public listing is visible the moment it is published. Rows below, if any, were published while it was on."}]}}}}
+  {:name :moderation-queue-root
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:data-moderation-queue "1" :class "mk-root mq-root"}}
+          :children [:_mq-off-note :_mq-body]}}
+  {:name :moderation-queue-html
+   :parent :render-hiccup :args {:hiccup :moderation-queue-root}}
+  {:name :_partial-moderation-queue-handler
+   :lambda-params []
+   :description "Ring handler for GET /partials/moderation-queue — the operator's pending listings as text/html (platform-admin; the base-fn refuses anyone else)."
+   :parent :html-ok-response
+   :args {:body :moderation-queue-html}}
+  {:name :partial-moderation-queue
+   :description "GET /partials/moderation-queue — every public listing awaiting a decision, with Approve / Reject. Platform-admin only. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/partials/moderation-queue" :handler :_partial-moderation-queue-handler}}
+
+  {:name :_mq-json-handler
+   :lambda-params []
+   :description "Ring handler for GET /api/marketplace/moderation — the queue as JSON (platform-admin)."
+   :parent :json-handler
+   :args {:data :moderation-queue}}
+  {:name :api-marketplace-moderation
+   :description "GET /api/marketplace/moderation — the pending public listings as JSON. Platform-admin only. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/marketplace/moderation" :handler :_mq-json-handler}}
+
+  {:name :_mq-decide
+   :parent :moderate-package-version!
+   :args {:pkg-name :_mka-name :pkg-version :_mka-version
+          :decision {:parent :_mka-param :args {:param-name {:value "decision"}}}
+          :note {:parent :_mka-param :args {:param-name {:value "note"}}}}}
+  {:name :_mq-decide-then-queue
+   :parent :do :args {:steps [:_mq-decide :moderation-queue-html]}}
+  {:name :_mq-decide-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /api/marketplace/moderate (form / query: name, version, decision approve|reject, note) — records the decision, returns the refreshed queue."
+   :parent :html-ok-response
+   :args {:body :_mq-decide-then-queue}}
+  {:name :api-marketplace-moderate
+   :description "POST /api/marketplace/moderate — `name`, `version`, `decision` (`approve` / `reject`), `note`: the operator's decision on a pending public listing; returns the queue HTML. Platform-admin only. Auth-required."
+   :parent :post
+   :args {:path "/marketplace/moderate" :handler :_mq-decide-handler}}]}

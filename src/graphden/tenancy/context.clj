@@ -153,6 +153,34 @@
   (boolean (@org-cap-fn cap)))
 
 
+;; Notification SEAM. Core raises a few domain EVENTS whose delivery is a
+;; deployment question — who to tell, over what channel — so the sender
+;; lives in the addon (it owns the accounts Mailer, the org→owner lookup
+;; and the trusted link origin). Core keeps only the installable hook + the
+;; one-liner that raises through it; with no addon an event is dropped.
+;; Events raised today: `:package-moderated` with the updated
+;; `:package-version` row (docs/MARKETPLACE.md § 8). The installed fn is
+;; `(fn [event payload])`; its result is returned to the caller and never
+;; inspected by core — so an installed sender must not throw (a mail failure
+;; is the sender's to log, not the domain write's to undo).
+(defonce ^:private notify-fn (atom nil))
+
+
+(defn install-notify-fn!
+  "Install the addon's 2-arg event sink `(fn [event payload])`. `nil`
+   restores the default (events are dropped)."
+  [f]
+  (reset! notify-fn f))
+
+
+(defn notify!
+  "Raise domain `event` with `payload` through the installed sink; nil when
+   no addon listens."
+  [event payload]
+  (when-let [f @notify-fn]
+    (f event payload)))
+
+
 (def ^:dynamic *current-capabilities*
   "The capability names (strings) the tenancy addon computed for the current
    request — the SAME list it stamps into the `X-Graphden-Capabilities`

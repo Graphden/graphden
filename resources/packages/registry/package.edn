@@ -11,4 +11,4 @@
  ;; uuid-v5(namespace,name), so moving only the directory keeps every id + ref
  ;; byte-identical.
  :dependencies ["core" "web" "storage" "app-base"]
- :modules ["registry" "marketplace"]}
+ :modules ["registry" "marketplace" "marketplace-surface" "marketplace-storefront" "marketplace-moderation"]}

@@ -90,6 +90,21 @@
       "nil restores the default-deny no-op"))
 
 
+(deftest notify-seam-drops-without-a-sink-and-passes-the-event-through
+  (is (nil? (ctx/notify! :package-moderated {:name "x"}))
+      "no tenancy addon → the event is dropped")
+  (let [seen (atom [])]
+    (try
+      (ctx/install-notify-fn! (fn [event payload] (swap! seen conj [event payload]) :sent))
+      (is (= :sent (ctx/notify! :package-moderated {:name "x" :status "approved"}))
+          "the sink's result is returned to the caller")
+      (is (= [[:package-moderated {:name "x" :status "approved"}]] @seen))
+      (finally
+        (ctx/install-notify-fn! nil))))
+  (is (nil? (ctx/notify! :package-moderated {}))
+      "nil restores the dropping default"))
+
+
 (deftest platform-cap-seam-passes-the-capability-through
   (try
     (is (false? (ctx/current-has-platform-cap? :view-all-stats))

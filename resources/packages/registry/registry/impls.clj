@@ -15,16 +15,15 @@
     [graphden.executor.registry.core :as registry-core]
     [graphden.packages.compat :as compat]
     [graphden.packages.export :as export]
-    [graphden.packages.loaded :as loaded]
     [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.wire :as wire]
+    [graphden.packages.registry-shared :as shared]
     [graphden.packages.semver :as semver]
     [graphden.packages.sync :as pkg-sync]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.sql.pg :as pg]
     [graphden.system.branch-router :as br]
-    [graphden.system.deploy-config :as deploy-config]
     [graphden.tenancy.context :as tc]
     [graphden.versioning.storage.core :as vs]
     [org.httpkit.client :as http-client]))
@@ -102,52 +101,6 @@
   (tc/tenancy-addon-active?))
 
 
-(defbase current-user-id
-  "The current request's user id as text — the accounts principal's
-   `:user-id`, or `anonymous` on a deployment without per-user identity
-   (`tenancy.context/current-user-id`, the seam)."
-  []
-  (tc/current-user-id))
-
-
-(defbase current-user-label
-  "A public-safe label for the current user (display name / email local
-   part / org / `anonymous`) — what a review is signed with."
-  []
-  (tc/current-user-label))
-
-
-(defbase loaded-packages
-  "The executor's loaded-package roster (`graphden.packages.loaded`): one
-   row per package `:app/packages` loaded at boot — name, version,
-   description, modules, dependencies, base-fn count, `:kind`
-   (`impl+fns` / `fns-only`) and `:origin` (`bundled` / `manifest`).
-   Boot-constant — no effect."
-  []
-  (loaded/read-roster))
-
-
-(defbase semver-rank
-  "A version string as one sortable number — `major·10⁶ + minor·10³ +
-   patch` (each component capped at 999) — the pure `:sort-by` key that
-   orders a version list; nil / unparsable → 0."
-  [version]
-  (let [[ma mi pa] (or (semver/parse-version version) [0 0 0])
-        cap #(min 999 (long (or % 0)))]
-    (+ (* 1000000 (cap ma)) (* 1000 (cap mi)) (cap pa))))
-
-
-(defbase semver-latest
-  "The highest version string in `versions` by parsed `[major minor patch]`
-   — nil for an empty list. Pure; the marketplace card's \"latest\" pick."
-  [versions]
-  (->> versions
-       (map str)
-       (remove str/blank?)
-       (sort-by semver/parse-version)
-       last))
-
-
 (defbase graph-rows
   []
   (cr/record-effect! :db)
@@ -155,7 +108,8 @@
 
 
 ;; Atomic publish core: reject if `(pkg-name, pkg-version)` already
-;; exists, else hash + insert. The existence check stays ADJACENT to the
+;; exists (nil) or another org lists the NAME publicly (`{:refused
+;; "name-taken"}`), else hash + insert. The existence check stays ADJACENT to the
 ;; insert (one base-fn) to keep the check-then-insert race window
 ;; minimal until the DB-level UNIQUE(name, version) hardening noted in
 ;; the schema ships. Returns the CREATED ROW (nil = version already
@@ -164,73 +118,19 @@
 ;; `:publish-package`), so the response shape is admin-visible. The
 ;; content-hash + `:public?` normalisation stay here: both are STORED
 ;; on the row at write time (readers never re-derive them).
-(defn- moderation-enabled?
-  "Does this deployment moderate public listings? The public deploy
-   setting `GRAPHDEN_MARKETPLACE_MODERATION` (`:marketplace-moderation`),
-   truthy when \"1\" / \"true\"."
-  []
-  (contains? #{"1" "true" "yes"} (some-> (deploy-config/read-setting :marketplace-moderation)
-                                         str str/trim str/lower-case)))
-
-
-(defbase moderation-on?
-  "Whether this deployment moderates PUBLIC listings (`GRAPHDEN_MARKETPLACE_MODERATION`)."
-  []
-  (moderation-enabled?))
-
-
-(defn- platform-base
-  "The storage BENEATH the org-scoped decorator (`vs/unwrap` lands on the
-   decorator; its `:base` is the backend). The operator's moderation reads
-   cross orgs; the org-scoped view would show only the operator's own. Row
-   level security still applies at the pool (public rows are readable by
-   every org — a pending listing is public by intent)."
-  [storage]
-  (let [s (vs/unwrap storage)]
-    (or (:base s) s)))
-
-
-(defbase moderate-package-version!
-  "The operator's decision on a pending public listing — `decision` is
-   `approve` or `reject` (with an optional `note` the publisher sees).
-   Gated on the platform-admin right at the deepest effectful core, so no
-   route bypasses it; a tenant / org-admin cannot list itself. Reads the
-   row through the BASE storage (`vs/unwrap`) — the operator's org-scoped
-   view would hide another org's pending row. Returns the updated row, or
-   nil when no such (name, version)."
-  [pkg-name pkg-version decision note]
-  (when-not (tc/current-platform-admin?)
-    (throw (ex-info "Moderating a listing requires the platform-admin right."
-                    {:type :authz/forbidden :capability :platform-admin})))
-  (cr/record-effect! :db)
-  (cr/record-effect! :time)
-  (let [base (platform-base (request/require-storage ctx))
-        row (first (sp/query-entities base :package-version {:name pkg-name :version pkg-version}))
-        status (case (str decision) "approve" "approved" "reject" "rejected" nil)]
-    (when (and row status)
-      (sp/update-entity base :package-version (:id row)
-                        {:status status
-                         :moderation-note (when (= status "rejected") (some-> note str str/trim not-empty))
-                         :moderated-at (java.time.Instant/now)}))))
-
-
-(defbase moderation-queue
-  "Every listing awaiting a decision, across orgs — the operator's queue.
-   Platform-admin only (the read itself goes through the BASE storage; an
-   org-scoped read would show only the operator's own org). Newest first."
-  []
-  (when-not (tc/current-platform-admin?)
-    (throw (ex-info "The moderation queue requires the platform-admin right."
-                    {:type :authz/forbidden :capability :platform-admin})))
-  (cr/record-effect! :db)
-  (let [base (platform-base (request/require-storage ctx))]
-    (->> (sp/query-entities base :package-version {:status "pending"})
-         (sort-by :published-at)
-         reverse
-         (mapv #(-> %
-                    (select-keys [:id :name :version :kind :description :category :tags :org-id :published-at :status])
-                    (update :id str)
-                    (update :published-at str))))))
+(defn- foreign-public-holder
+  "The OTHER org that already lists `pkg-name` publicly (any moderation
+   status), or nil — a public name is registry-wide, first come first
+   served, the way pypi.org names are (docs/MARKETPLACE.md § 2, Names).
+   Reads the platform-wide storage: the org-scoped view would hide the
+   holder's rows... except its public ones, which is exactly the set that
+   matters, so row level security answers the same question for a tenant."
+  [storage pkg-name]
+  (let [own (str (tc/current-org))]
+    (->> (sp/query-entities (shared/platform-base storage) :package-version {:name pkg-name})
+         (filter #(and (:public? %) (not= own (str (:org-id %)))))
+         first
+         :org-id)))
 
 
 (defbase publish-package-apply
@@ -249,9 +149,19 @@
   (cr/record-effect! :db)
   (cr/record-effect! :time)
   (let [storage (request/require-storage ctx)
-        fns (:fns bundle)]
-    (when-not (seq (sp/query-entities storage :package-version
-                                      {:name pkg-name :version pkg-version}))
+        fns (:fns bundle)
+        holder (foreign-public-holder storage pkg-name)]
+    (cond
+      (seq (sp/query-entities storage :package-version
+                              {:name pkg-name :version pkg-version}))
+      nil
+
+      ;; Names (docs/MARKETPLACE.md § 2): another org lists this name
+      ;; publicly — neither a public nor a private version may join it.
+      holder
+      {:refused "name-taken" :holder holder}
+
+      :else
       ;; Public = the explicit opt-in OR a platform-tier publish
       ;; (single-tenant / operator — the shared registry). Normalised
       ;; AT WRITE time so readers never re-derive tier from org-id:
@@ -280,7 +190,7 @@
                          ;; operator; the platform's own and every private
                          ;; publish are listed outright.
                          :status (if (and pkg-public
-                                          (moderation-enabled?)
+                                          (shared/moderation-enabled?)
                                           (not (tc/current-platform-tier?)))
                                    "pending"
                                    "approved")
@@ -652,17 +562,6 @@
 ;; class as `publish-package-apply`).
 ;; ---------------------------------------------------------------------------
 
-(defn- remote-registry-token
-  []
-  (System/getenv "GRAPHDEN_REGISTRY_TOKEN"))
-
-
-(defn- remote-auth-headers
-  []
-  (let [token (remote-registry-token)]
-    (cond-> {} (seq (str token)) (assoc "Authorization" (str "Bearer " token)))))
-
-
 (defbase resolve-remote-version
   "Resolve `spec` (nil/\"latest\"/\"*\" or a semver constraint) to a CONCRETE
    published version of `pkg-name` on the remote registry `source` — the
@@ -690,7 +589,7 @@
           ;; still resolves — mirrors `web/http-client` http-request.
           _ (when (some? cr/*allowed-effects*) (egress/check-target! list-url))
           resp @(http-client/get list-url
-                                 {:headers (remote-auth-headers) :as :text :timeout 60000})]
+                                 {:headers (shared/remote-auth-headers) :as :text :timeout 60000})]
       (when (and (nil? (:error resp)) (= 200 (:status resp)))
         (let [rows (try (json/parse-string (:body resp) true) (catch Exception _ nil))
               versions (into []
@@ -699,30 +598,6 @@
                                    (filter #(semver/satisfies-constraint? % constraint)))
                              (if (map? rows) (:packages rows (:versions rows)) rows))]
           (last (sort-by semver/parse-version versions)))))))
-
-
-(defbase remote-package-card
-  "The REMOTE registry's marketplace card for `pkg-name` (`GET
-   <source>/api/marketplace?q=<name>&kind=any`, exact-name match) — the
-   social signals a mirror snapshots as its `:origin` (docs/MARKETPLACE.md
-   § 7). nil when the remote has no marketplace (an older graphden), is
-   unreachable, or lists no such package — a mirror without signals is
-   still a mirror. Egress-guarded in restricted executions like the other
-   remote dials."
-  [source pkg-name]
-  (cr/record-effect! :network)
-  (cr/record-effect! :env)
-  (let [base (str/replace (str source) #"/+$" "")
-        url (str base "/api/marketplace?kind=any&q="
-                 (java.net.URLEncoder/encode (str pkg-name) "UTF-8"))
-        _ (when (some? cr/*allowed-effects*) (egress/check-target! url))
-        resp @(http-client/get url {:headers (remote-auth-headers) :as :text :timeout 60000})]
-    (when (and (nil? (:error resp)) (= 200 (:status resp)))
-      (let [cards (try (json/parse-string (:body resp) true) (catch Exception _ nil))]
-        (when (sequential? cards)
-          (some-> (first (filter #(= (str pkg-name) (str (:name %))) cards))
-                  (select-keys [:rating :installs :version-count :latest :published-at])
-                  (assoc :url base :as-of (str (java.time.Instant/now)))))))))
 
 
 (defbase mirror-remote-package!
@@ -751,7 +626,7 @@
             ;; a RESTRICTED execution (see resolve-remote-version) so a self-host
             ;; localhost hub still works.
             _ (when (some? cr/*allowed-effects*) (egress/check-target! url))
-            resp @(http-client/get url {:headers (remote-auth-headers)
+            resp @(http-client/get url {:headers (shared/remote-auth-headers)
                                         :as :text :timeout 60000})]
         (cond
           (:error resp)
@@ -993,12 +868,6 @@
    :namespace-external-deps namespace-external-deps
    :current-org-id current-org-id
    :tenancy-active? tenancy-active?
-   :current-user-id current-user-id
-   :current-user-label current-user-label
-   :loaded-packages loaded-packages
-   ;; taint-propagate: answers one of the caller's own version strings
-   :semver-latest {:impl semver-latest :taint-propagate? true}
-   :semver-rank semver-rank
    :graph-rows graph-rows
    :publish-package-apply publish-package-apply
    :breaking-changes-between breaking-changes-between
@@ -1015,11 +884,6 @@
    :rewrite-refs-to-version rewrite-refs-to-version
    :package-upsert-pin package-upsert-pin
    :mirror-remote-package! mirror-remote-package!
-   :remote-package-card remote-package-card
-   :moderation-on? moderation-on?
-   ;; taint-propagate: the updated row carries the operator's note
-   :moderate-package-version! {:impl moderate-package-version! :taint-propagate? true}
-   :moderation-queue moderation-queue
    ;; taint-propagate: both return caller-graph bundle content / the hub's
    ;; report about it — content passthrough (SECRETS.md § T3).
    :hub-fetch-bundle {:impl hub-fetch-bundle :taint-propagate? true}

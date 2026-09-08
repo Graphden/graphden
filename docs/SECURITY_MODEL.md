@@ -94,7 +94,20 @@ so a gap in one does not by itself cross tenants:
    client-side (`package-owned` rides out on each fn row): no `+`
    placeholder, no rename/delete, and the edit-block reason says to
    extend instead — so the affordance is absent rather than failing.
-8. **Resource isolation** — see below.
+8. **Marketplace gates** ([MARKETPLACE.md](MARKETPLACE.md)) — the shared
+   catalog is the one surface where tenants meet. A tenant's **public
+   listing is moderated** on the cloud: it lands `pending`, invisible to
+   other orgs until the platform-admin approves it, and both the queue and
+   the decision are gated on the platform-admin right at the base-fn, not
+   the route. A public **name is first come, first served** registry-wide
+   — another org's publish under it is refused. **Reviews are
+   author-owned** (the addon stamps the author, a foreign edit or delete is
+   refused, the generic entity route included), **install counts are
+   platform-write-only**, and **preferences are owner-scoped** (a user's
+   theme / keymap is neither readable nor writable by anyone else). The
+   anonymous storefront renders public + approved rows only and mutates
+   nothing.
+9. **Resource isolation** — see below.
 
 ## Resource isolation: shared vs dedicated
 

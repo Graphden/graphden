@@ -25,6 +25,13 @@ what it costs.
 
 Notes:
 
+- **Publishing to the shared marketplace** is open to every registered
+  tier (the org's `:publish-packages` right), but a tenant's **public**
+  listing is **moderated**: it waits in the operator's queue and reaches
+  the shared catalog (and the anonymous storefront) only once approved;
+  the publisher is emailed the decision. Private packages, themes and
+  keymaps are listed for the org at once. Public names are first come,
+  first served across the registry ([MARKETPLACE.md § 2, § 8](MARKETPLACE.md)).
 - **Anonymous** is the LOCKED landing-demo tier and the fail-safe default (an
   un-provisioned / un-slugged org resolves here): no outbound network, small
   ceilings, ephemeral (reaped by the demo GC). It exists to let someone *try

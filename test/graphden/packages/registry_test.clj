@@ -487,6 +487,12 @@
       (is (true? (:ok body)))
       (is (= "demo.pkg" (:name body)))
       (is (pos? (:fn-count body)))
+      ;; the row-derived fields — nil until 2026-09-08, when the envelope re-ran
+      ;; the effectful apply for each field it read
+      (is (re-matches #"[0-9a-f-]{36}" (str (:id body))) "the created row's id")
+      (is (true? (:public body)) "a platform-tier publish is public")
+      (is (= "approved" (:status body)))
+      (is (string? (:content-hash body)))
       (is (some #{"html-page-handler"} (:dependencies body))
           "external dep surfaced (keyword → string over JSON)")
       (testing "the row persisted with the exported subtree"
@@ -494,6 +500,19 @@
           (is (= 1 (count rows)))
           (is (= "app.contact-demo" (:ns-root (first rows))))
           (is (seq (:fns (first rows))))))))
+  (testing "another org cannot publish under a name this org lists publicly — names are first come, first served"
+    (tc/install-org-cap-fn! (fn [cap] (= cap :publish-packages)))
+    (try
+      (let [resp (binding [tc/*current-org* "rival-org"]
+                   (setup/via-graph *bootstrap* :publish-package-handler
+                                    (publish-req {:name "demo.pkg" :version "2.0.0"
+                                                  :ns-root "app.contact-demo"})))
+            body (json/parse-string (:body resp) true)]
+        (is (false? (:ok body)))
+        (is (= "name-taken" (:reason body)))
+        (is (= "public" (:holder body)) "the holder is named")
+        (is (= 1 (count (sp/query-entities (storage) :package-version {:name "demo.pkg"}))) "nothing written"))
+      (finally (tc/install-org-cap-fn! nil))))
   (testing "re-publishing the same (name, version) is rejected — immutability"
     (let [resp (setup/via-graph *bootstrap* :publish-package-handler
                                 (publish-req {:name "demo.pkg" :version "1.0.0"

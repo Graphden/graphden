@@ -62,6 +62,23 @@ without per-user identity. `current-user-label` (display name → email local
 part → org → `anonymous`) is what a review is signed with; the whole email
 is never shown.
 
+### Names
+
+A package name is **registry-wide once it is public**, the way a pypi.org
+project name is: the first org to list a name publicly (any moderation
+status — a pending listing already claims it) holds it, and every other
+org's publish under that name — public *or* private — is refused
+`name-taken` with the `holder` org named, so no catalog ever shows two
+orgs under one card. Private names are per org: two orgs may each keep a
+private `utils`, and a private name is no claim (someone else may list it
+publicly later; the private holder's own catalog then shows the foreign
+public package beside its own — pick a distinct name if that grates). The
+check is `foreign-public-holder` inside `publish-package-apply`
+(`registry/impls.clj`), adjacent to the insert like the version check;
+under row-level security a tenant sees exactly the other orgs' public rows,
+which is the set that matters. The DB-level `UNIQUE(name, version)`
+hardening (PACKAGE_DISTRIBUTION § 2.1) is still the follow-up.
+
 ## 3. Listing vocabulary
 
 `app.marketplace/:listing-categories` (a graph const, served at
@@ -81,14 +98,20 @@ and clipped at 2000 characters.
 
 ## 4. Routes
 
-Registry package (`registry/marketplace/fns.edn`, served per-branch like the
-rest of `/api/packages/*`; all auth-required):
+Registry package — four modules sharing the `app.marketplace` namespace
+(the `app.editor` precedent): `registry/marketplace/fns.edn` (the API
+layer: vocabulary, normaliser, the base-fn declarations, cards, filters,
+the JSON routes; its base-fns' impls in `marketplace/impls.clj`),
+`marketplace-surface` (the editor partials + actions), `marketplace-storefront`
+(the anonymous catalog bodies) and `marketplace-moderation` (the operator's
+queue). Served per-branch like the rest of `/api/packages/*`; all
+auth-required:
 
 | Route | Purpose |
 |---|---|
 | `GET /api/marketplace?kind=&q=&category=&tag=&sort=&mine=1` | the cards as JSON — what Settings reads for "my saved themes"; `kind=any` spans every kind (what a remote mirror asks) |
 | `GET /api/marketplace/categories` | the vocabulary |
-| `POST /api/marketplace/publish` | a THEME or KEYMAP version: `{kind, name, version, description?, category?, tags?, public?, payload}` — refuses `unsupported-kind` (fns publish from a namespace), `missing-name` / `missing-version` / `missing-payload`, `bad-category`, `version-exists`; capability-gated like every publish |
+| `POST /api/marketplace/publish` | a THEME or KEYMAP version: `{kind, name, version, description?, category?, tags?, public?, payload}` — refuses `unsupported-kind` (fns publish from a namespace), `missing-name` / `missing-version` / `missing-payload`, `bad-category`, `version-exists`, `name-taken` (§ 2 Names); capability-gated like every publish |
 | `POST /api/marketplace/install?name=&version=[&fork=1]` | install (or fork) a fns package; answers the item HTML |
 | `POST /api/marketplace/apply?name=&version=` | make a theme / keymap the user's active one (writes the `theme` / `keymap` preference); answers the item HTML |
 | `POST /api/marketplace/review` (form `name`, `rating`, `body`) · `DELETE /api/marketplace/unreview?name=` | write / update / delete the current user's review; answer the item HTML. Refused on a mirror (the origin is the authority) |
@@ -96,8 +119,9 @@ rest of `/api/packages/*`; all auth-required):
 | `GET /partials/marketplace` · `GET /partials/marketplace/item?name=` | the two surface partials |
 
 `POST /api/packages/publish` (namespace publish) accepts the same
-`description` / `category` / `tags` fields; the ⬆ popover on a namespace row
-offers them.
+`description` / `category` / `tags` fields and answers the same
+`name-taken`; the ⬆ popover on a namespace row offers them and words the
+refusal.
 
 app-base package (`app-base/prefs/fns.edn`, works without the registry):
 
@@ -222,6 +246,19 @@ new review. `POST /api/marketplace/moderate` is the decision route
 (`:moderate-package-version!`, platform-admin only); `GET
 /api/marketplace/moderation` the queue as JSON.
 
+**The publisher is told.** A decision raises `:package-moderated` through
+core's notification seam (`tenancy.context/notify!`,
+[TENANCY_SEAM.md § Notifications](TENANCY_SEAM.md#notifications)) with the
+updated row; the tenancy addon's `:tenancy/notifications` sink emails the
+publishing org's **owner** (the row records the org, not the user) — the
+verdict, the moderator's note on a rejection, and the editor deep link —
+through the accounts Mailer, the same way invites and the inactivity
+warning go out. The body is graph
+(`tenancy-admin.mail/package-moderation-decision-email`, with a
+byte-identical Clojure fallback pinned by the parity test); without a
+mailer, a trusted origin or an owner email the sink answers a reason and
+the decision stands.
+
 Enforcement lives in the tenancy decorator's `visible?`: the `public?`
 arm counts for OTHER orgs only when `:status` is nil / `approved` (or the
 reader is the platform-admin). Row-level security keeps `"public?" IS
@@ -251,6 +288,11 @@ declares the bare `:get-route`s. Two rules keep an anonymous page safe:
   never renders, and a package page for one answers 404.
 - Nothing mutates: plain anchors and a GET search form, no htmx, no
   review form — reviews and installs happen in the editor, signed in.
+
+Every storefront response (the pages, the 404, the sitemap) carries
+`Cache-Control: public, max-age=60` — login-less and identical for every
+visitor, so the CDN and the browser may hold one a minute; a decision or a
+new publish shows within that.
 
 A self-hosted instance keeps its marketplace behind sign-in; the
 storefront is the cloud's control-plane page.
@@ -291,10 +333,19 @@ storefront is the cloud's control-plane page.
   aggregate, filters, sort), reviews (upsert-in-place, delete, refusal),
   the install counter, apply → preference, the prefs routes, both partials,
   the roster, mirrors (origin signals, no local review), the listing edit,
-  moderation (pending → approve / reject with a note, the queue's gate);
+  moderation (pending → approve / reject with a note, the queue's gate, the
+  decision raised through the notification seam), the name rule
+  (`name-taken` for a public or private publish under another org's public
+  name; a private name is no claim);
   `graphden-cloud` `landing_tutorial_e2e_test` — the storefront pages
-  (public rows only, the item page, 404, robots, sitemap);
-  `registry_test` — the remote pull snapshots the origin's card.
+  (public rows only, the item page, 404, robots, sitemap, the minute cache);
+  `registry_test` — the remote pull snapshots the origin's card, the
+  publish envelope's row-derived fields, `name-taken` on the namespace
+  publish; `tenancy/context_test` — the notify seam; `graphden-tenancy`
+  `notifications_test` (the owner is mailed, every no-op reason, the sink
+  never throws) and `mail_parity_test` (graph template ≡ Clojure copy).
+- `tools/browser-test/edit-marketplace.test.js` — the surface, apply,
+  review, the keymap, and the `#@marketplace/<name>` deep link.
 - `tools/runtime-test/theme-payload.test.js` — the sanitiser and the apply /
   clear path; `tools/runtime-test/keymap.test.js` — overrides, late
   registration, reset, the which-key footer.

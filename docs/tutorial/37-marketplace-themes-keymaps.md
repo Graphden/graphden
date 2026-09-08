@@ -73,6 +73,20 @@ curl -X POST http://localhost:9002/api/packages/publish \
 A category outside the vocabulary is refused (`bad-category`) before
 anything is written.
 
+**Names are first come, first served** once they are public, the way
+project names are on pypi.org: if another organization already lists
+`hello` publicly, your publish under that name — public or private — is
+refused (`name-taken`, and the popover names the holder) so no catalog
+ever shows two organizations under one card. A private name is yours
+inside your organization only; someone else may list it publicly later.
+Pick a name with your org or product in it (`mycorp.hello`) and this never
+comes up.
+
+On the cloud a **public** listing does not appear in the shared catalog
+by itself: it waits for the operator's review (your card says *pending
+review*), and you are emailed the decision — with the moderator's note if
+it was declined. A corrected next version starts a new review.
+
 ## Reviews and the rating
 
 Open a card. Under its versions is the **Reviews** list and a small

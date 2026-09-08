@@ -80,6 +80,20 @@ The addon's decorator classifies both (`owner-scoped-entities` /
 `author-owned-entities`) and stamps / filters them; core only exposes the
 identity ([MARKETPLACE.md § 2](MARKETPLACE.md#2-data-model)).
 
+### Notifications
+
+`install-notify-fn!` / `notify! event payload` — the same install-a-hook
+shape pointed the other way: core **raises** a domain event and the addon
+decides who is told and over what channel (it owns the accounts Mailer,
+the org → owner lookup and the trusted link origin). Without an addon the
+event is dropped; the sink's result is returned to the caller and never
+inspected, so an installed sink must not throw — a mail failure is the
+sender's to log, not the domain write's to undo. Events raised today:
+
+| Event | Payload | Raised by | The addon's sink |
+|---|---|---|---|
+| `:package-moderated` | the updated `:package-version` row (`status`, `moderation-note`, `org-id`, …) | `moderate-package-version!` (`registry/marketplace/impls.clj`) | `:tenancy/notifications` — emails the publishing org's owner ([MARKETPLACE.md § 8](MARKETPLACE.md#8-moderation-of-public-listings)) |
+
 ## Auth seam
 
 Auth is provider-driven, never hardcoded. Core defines

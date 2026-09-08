@@ -75,9 +75,10 @@ implementation tasks.
   (single-tenant / operator) always lands `public? = true`, so readers key on
   the flag alone, never on the org value. Postgres RLS mirrors both rules
   (an extra `"public?" IS TRUE` SELECT arm on `package_version`; own-only
-  writes). Legacy NULL-org rows read as the shared tier. Known limitation:
-  package NAMES are not org-scoped — `(name, version)` can exist once per
-  org; per-org name scoping is a future design task.
+  writes). Legacy NULL-org rows read as the shared tier. Package NAMES: a
+  public name is registry-wide, first come first served — another org's
+  publish under it (public or private) is refused `name-taken`; private
+  names are per org ([MARKETPLACE.md § 2, Names](MARKETPLACE.md#names)).
 - **Base-fns + HTTP routes** — `resources/packages/registry/registry/{fns.edn,impls.clj}`:
   `export-namespace`, `publish-package`, `list-package-versions`,
   `fetch-package-version`, `install-package`, wired to

@@ -1,0 +1,230 @@
+;; The anonymous STOREFRONT bodies (docs/MARKETPLACE.md § 9) — rendered by
+;; graphden-cloud's landing app in its own chrome. See the section comment
+;; below for the two rules that keep a login-less page safe.
+
+{:namespace "app.marketplace"
+ :description "Marketplace STOREFRONT — the anonymous catalog bodies the cloud's landing renders at /marketplace (public + approved rows only, anchors and a GET form, no htmx) plus the sitemap contributor. Same `app.marketplace` namespace."
+ :fns
+ [;; =====================================================================
+  ;; STOREFRONT — the ANONYMOUS catalog (docs/MARKETPLACE.md § 9). The
+  ;; cloud's landing app (graphden-cloud, the apex host, platform ctx, no
+  ;; principal) renders these bodies inside its own page chrome at
+  ;; /marketplace and /marketplace/:name. Two rules make it safe to serve
+  ;; without a login: the platform ctx sees EVERY row, so the rows are
+  ;; filtered HERE to `public? true` AND `status approved`; and nothing
+  ;; here mutates — the only actions are links into the editor
+  ;; (`:app-origin`, the landing passes `https://app.graphden.dev`), where
+  ;; sign-in and the org context take over. Plain GET forms and anchors,
+  ;; no htmx: the page must work with no script at all (search engines,
+  ;; reader modes).
+  ;; =====================================================================
+  {:name :_sf-row-listed?
+   :description "Public AND approved — what an anonymous reader may see."
+   :parent :and
+   :args {:values [{:parent :equal? :args {:a {:parent :get :args {:coll {:as :item} :key {:value :public} :default {:value false}}} :b {:value true}}}
+                   {:parent :equal? :args {:a {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :status} :default {:value "approved"}}}}}
+                                           :b {:value "approved"}}}]}}
+  {:name :storefront-rows
+   :description "The registry index reduced to the rows an anonymous reader may see — public and approved."
+   :parent :filter
+   :args {:pred :_sf-row-listed? :coll :list-package-versions}}
+  {:name :storefront-cards
+   :description "Cards over `:storefront-rows` (same fold as the signed-in marketplace, same review / install aggregates)."
+   :parent :map
+   :args {:func :marketplace-card
+          :coll {:parent :vals :args {:map {:parent :group-by :args {:key-fn :_mkr-name :coll :storefront-rows}}}}
+          :reviews :marketplace-review-map
+          :installs :marketplace-install-map}}
+  ;; the same request filters as the signed-in listing, over the public cards
+  {:name :_sf-by-kind
+   :parent :filter :args {:pred :_mkf-kind? :coll :storefront-cards :kind :_mkq-kind}}
+  {:name :_sf-by-category
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_mkq-category}}
+          :then :_sf-by-kind
+          :else {:parent :filter :args {:pred :_mkf-category? :coll :_sf-by-kind :category :_mkq-category}}}}
+  {:name :_sf-by-tag
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_mkq-tag}}
+          :then :_sf-by-category
+          :else {:parent :filter :args {:pred :_mkf-tag? :coll :_sf-by-category :tag :_mkq-tag}}}}
+  {:name :_sf-by-q
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_mkq-q}}
+          :then :_sf-by-tag
+          :else {:parent :filter :args {:pred :_mkf-q? :coll :_sf-by-tag :q :_mkq-q}}}}
+  {:name :storefront-listing
+   :description "The public cards the request asks for — `kind` (default fns) / `category` / `tag` / `q`, sorted by `sort` (`rating` default, `installs`, `recent`, `name`). Free arg: `:request`."
+   :parent :cond
+   :args {:clauses [{:parent :equal? :args {:a :_mkq-sort :b {:value "installs"}}}
+                    {:parent :reverse :args {:coll {:parent :sort-by :args {:key-fn :_mks-key-installs :coll :_sf-by-q}}}}
+                    {:parent :equal? :args {:a :_mkq-sort :b {:value "recent"}}}
+                    {:parent :reverse :args {:coll {:parent :sort-by :args {:key-fn :_mks-key-recent :coll :_sf-by-q}}}}
+                    {:parent :equal? :args {:a :_mkq-sort :b {:value "name"}}}
+                    {:parent :sort-by :args {:key-fn :_mks-key-name :coll :_sf-by-q}}
+                    {:value true}
+                    {:parent :reverse :args {:coll {:parent :sort-by :args {:key-fn :_mkh-card-rating-avg :coll :_sf-by-q}}}}]}}
+
+  ;; --- rendering: anchors, not htmx ---
+  {:name :_sf-item-href
+   :parent :str-join
+   :args {:coll [{:value "/marketplace/"} {:parent :url-encode :args {:string :_mkh-card-name}}] :separator {:value ""}}}
+  {:name :_sf-tag-href
+   :parent :str-join
+   :args {:coll [{:value "/marketplace?kind="} {:parent :url-encode :args {:string {:as :kind :type :text}}}
+                 {:value "&tag="} {:parent :url-encode :args {:string {:parent :to-str :args {:value {:as :item}}}}}]
+          :separator {:value ""}}}
+  {:name :_sf-tag-chip
+   :parent :hiccup
+   :args {:tag {:value "a"}
+          :attrs {:parent :assoc :args {:map {:value {:class "mk-tag"}} :key {:value :href} :value :_sf-tag-href}}
+          :children [{:value "#"} {:parent :to-str :args {:value {:as :item}}}]}}
+  {:name :_sf-card
+   :description "One public card — the title is an anchor to the item page; tags are anchors to the tag filter."
+   :parent :hiccup
+   :args {:tag {:value "article"}
+          :attrs {:parent :assoc :args {:map {:value {:class "mk-card"}} :key {:value :data-mk-card} :value :_mkh-card-name}}
+          :children [{:parent :hiccup :args {:tag {:value "a"}
+                                             :attrs {:parent :assoc :args {:map {:value {:class "mk-card-open"}} :key {:value :href} :value :_sf-item-href}}
+                                             :children [{:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "mk-card-name"}} :children [:_mkh-card-name]}}
+                                                        {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "mk-card-latest"}}
+                                                                                :children [{:parent :get :args {:coll {:as :item} :key {:value :latest} :default {:value ""}}}]}}]}}
+                     {:parent :hiccup :args {:tag {:value "div"} :attrs {:value {:class "mk-card-meta"}}
+                                             :children [:_mkh-card-category :_mkh-card-mirror :_mkh-card-rating-maybe :_mkh-card-installs :_mkh-card-versions]}}
+                     :_mkh-card-desc
+                     {:parent :hiccup :args {:tag {:value "div"} :attrs {:value {:class "mk-tags"}}
+                                             :children {:parent :map :args {:func :_sf-tag-chip
+                                                                            :coll {:parent :get :args {:coll {:as :item} :key {:value :tags} :default {:value []}}}
+                                                                            :kind :_mkh-card-kind}}}}]}}
+  {:name :_sf-tab
+   :description "A kind tab as an anchor (`:item` = [kind label]); the current one is marked."
+   :parent :hiccup
+   :args {:tag {:value "a"}
+          :attrs {:parent :assoc
+                  :args {:map {:parent :assoc :args {:map {:value {:class "mk-tab"}} :key {:value :href}
+                                                     :value {:parent :str-join :args {:coll [{:value "/marketplace?kind="} :_mkt-tab-value] :separator {:value ""}}}}}
+                         :key {:value :aria-current} :value {:parent :if :args {:test :_mkt-tab-checked? :then {:value "page"} :else {:value false}}}}}
+          :children [{:parent :first :args {:coll {:parent :reverse :args {:coll {:as :item}}}}}]}}
+  {:name :_sf-toolbar
+   :description "Kind tabs + a plain GET search form (no script needed)."
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "mk-toolbar"}}
+          :children [{:parent :hiccup :args {:tag {:value "nav"} :attrs {:value {:class "mk-tabs" :aria-label "Marketplace kinds"}}
+                                             :children {:parent :map :args {:func :_sf-tab
+                                                                            :coll {:value [["fns" "Packages"] ["theme" "Themes"] ["keymap" "Keymaps"]]}
+                                                                            :kind :_mkq-kind}}}}
+                     {:parent :hiccup :args {:tag {:value "form"} :attrs {:value {:class "mk-controls" :method "get" :action "/marketplace" :role "search"}}
+                                             :children [{:parent :hiccup :args {:tag {:value "input"}
+                                                                                :attrs {:parent :assoc :args {:map {:value {:type "hidden" :name "kind"}} :key {:value :value} :value :_mkq-kind}}}}
+                                                        :_mkt-search
+                                                        {:parent :hiccup :args {:tag {:value "select"} :attrs {:value {:name "category" :class "mk-select" :aria-label "Category"}}
+                                                                                :children {:parent :concat :args {:colls [:_mkt-cat-head :_mkt-cat-options]}}}}
+                                                        :_mkt-sort-select
+                                                        {:parent :hiccup :args {:tag {:value "button"} :attrs {:value {:type "submit" :class "mk-back"}} :children [{:value "Search"}]}}]}}
+                     :_mkt-tag-active-link]}}
+  {:name :_mkt-tag-active-link
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_mkq-tag}}
+          :then {:value nil}
+          :else {:parent :hiccup :args {:tag {:value "a"}
+                                        :attrs {:parent :assoc :args {:map {:value {:class "mk-tag mk-tag-active"}} :key {:value :href}
+                                                                      :value {:parent :str-join :args {:coll [{:value "/marketplace?kind="} {:parent :url-encode :args {:string :_mkq-kind}}] :separator {:value ""}}}}}
+                                        :children [{:value "#"} :_mkq-tag {:value " ×"}]}}}}
+  {:name :storefront-body
+   :description "The anonymous catalog page body for the request's filters — toolbar + cards (or the empty notice). Free arg: `:request`."
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "mk-root mk-storefront"}}
+          :children [:_sf-toolbar
+                     {:parent :if :args {:test {:parent :empty? :args {:coll :storefront-listing}}
+                                         :then {:parent :hiccup :args {:tag {:value "div"} :attrs {:value {:class "mk-empty"}} :children [{:value "Nothing published publicly under these filters yet."}]}}
+                                         :else {:parent :hiccup :args {:tag {:value "div"} :attrs {:value {:class "mk-grid"}}
+                                                                       :children {:parent :map :args {:func :_sf-card :coll :storefront-listing}}}}}}]}}
+
+  ;; --- the item page: read-only versions + reviews, "sign in" links ---
+  {:name :_sfi-rows
+   :description "The public, approved rows of `:pkg-name`, newest first."
+   :parent :reverse
+   :args {:coll {:parent :sort-by
+                 :args {:key-fn :_mkr-rank
+                        :coll {:parent :filter :args {:pred :_mki-row-named? :coll :storefront-rows :pkg-name {:as :pkg-name :type :text}}}}}}}
+  {:name :_sfi-latest
+   :parent :first :args {:coll :_sfi-rows}}
+  {:name :_sfi-card
+   :parent :marketplace-card
+   :args {:item :_sfi-rows :reviews :marketplace-review-map :installs :marketplace-install-map}}
+  {:name :_sfi-kind
+   :parent :coalesce :args {:value {:parent :get :args {:coll :_sfi-latest :key {:value :kind} :default nil}} :default {:value "fns"}}}
+  {:name :_sfi-open-href
+   :description "Into the editor: sign in, then the Marketplace opens on this package (`#@marketplace/<name>`)."
+   :parent :str-join
+   :args {:coll [{:as :app-origin :type :text} {:value "/#@marketplace/"} {:parent :url-encode :args {:string {:as :pkg-name :type :text}}}]
+          :separator {:value ""}}}
+  {:name :_sfi-open-link
+   :parent :hiccup
+   :args {:tag {:value "a"}
+          :attrs {:parent :assoc :args {:map {:value {:class "packages-install-btn mk-install"}} :key {:value :href} :value :_sfi-open-href}}
+          :children [{:parent :if :args {:test {:parent :equal? :args {:a :_sfi-kind :b {:value "fns"}}}
+                                         :then {:value "Sign in to install"} :else {:value "Sign in to apply"}}}]}}
+  {:name :_sfi-version-row
+   :parent :hiccup
+   :args {:tag {:value "tr"}
+          :children [{:parent :hiccup :args {:tag {:value "td"} :children [:_mkr-version]}}
+                     {:parent :hiccup :args {:tag {:value "td"} :children [{:parent :str-clip :args {:string {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :published-at} :default {:value ""}}}}} :limit {:value 10}}}]}}]}}
+  {:name :_sfi-versions
+   :parent :hiccup
+   :args {:tag {:value "table"} :attrs {:value {:class "packages-panel-table mk-versions-table"}}
+          :children [{:parent :hiccup :args {:tag {:value "thead"}
+                                             :children [{:parent :hiccup :args {:tag {:value "tr"}
+                                                                                :children [{:parent :hiccup :args {:tag {:value "th"} :children [{:value "Version"}]}}
+                                                                                           {:parent :hiccup :args {:tag {:value "th"} :children [{:value "Published"}]}}]}}]}}
+                     {:parent :hiccup :args {:tag {:value "tbody"} :children {:parent :map :args {:func :_sfi-version-row :coll :_sfi-rows}}}}]}}
+  {:name :_sfi-reviews
+   :description "Read-only reviews (the local ones for a package published here; a mirror shows its origin note)."
+   :parent :if
+   :args {:test {:parent :some? :args {:value {:parent :get :args {:coll :_sfi-latest :key {:value :origin} :default nil}}}}
+          :then {:parent :list :args {:items [{:parent :_mki-origin-note :args {:pkg-name {:as :pkg-name :type :text}}}]}}
+          :else {:parent :list :args {:items [{:parent :_mki-review-list :args {:pkg-name {:as :pkg-name :type :text}}}]}}}}
+  {:name :_sfi-found
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "mk-item-body"}}
+          :children [{:parent :hiccup :args {:tag {:value "h1"} :attrs {:value {:class "mk-item-title"}}
+                                             :children [{:as :pkg-name :type :text}
+                                                        {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "mk-kind"}} :children [:_sfi-kind]}}]}}
+                     {:parent :hiccup :args {:tag {:value "div"} :attrs {:value {:class "mk-card-meta mk-item-meta"}}
+                                             :children [{:parent :_mkh-card-category :args {:item :_sfi-card}}
+                                                        {:parent :_mkh-card-mirror :args {:item :_sfi-card}}
+                                                        {:parent :_mkh-card-rating-maybe :args {:item :_sfi-card}}
+                                                        {:parent :_mkh-card-installs :args {:item :_sfi-card}}
+                                                        {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "mk-publisher"}}
+                                                                                :children [{:value "by "} {:parent :to-str :args {:value {:parent :get :args {:coll :_sfi-latest :key {:value :org-id} :default {:value "—"}}}}}]}}]}}
+                     {:parent :hiccup :args {:tag {:value "p"} :attrs {:value {:class "mk-item-desc"}}
+                                             :children [{:parent :coalesce :args {:value {:parent :get :args {:coll :_sfi-latest :key {:value :description} :default nil}}
+                                                                                  :default {:value "No description yet."}}}]}}
+                     {:parent :hiccup :args {:tag {:value "div"} :attrs {:value {:class "mk-tags"}}
+                                             :children {:parent :map :args {:func :_sf-tag-chip
+                                                                            :coll {:parent :get :args {:coll :_sfi-latest :key {:value :tags} :default {:value []}}}
+                                                                            :kind :_sfi-kind}}}}
+                     {:parent :hiccup :args {:tag {:value "p"} :attrs {:value {:class "mk-review-actions"}} :children [:_sfi-open-link]}}
+                     {:parent :hiccup :args {:tag {:value "h2"} :attrs {:value {:class "mk-h3"}} :children [{:value "Versions"}]}}
+                     :_sfi-versions
+                     {:parent :hiccup :args {:tag {:value "h2"} :attrs {:value {:class "mk-h3"}} :children [{:value "Reviews"}]}}
+                     :_sfi-reviews]}}
+  {:name :storefront-item-body
+   :description "The anonymous item page body for `:pkg-name` — or the not-found notice when nothing public and approved carries that name. Free args: `:pkg-name`, `:app-origin`."
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "mk-root mk-storefront mk-item"}}
+          :children [{:parent :hiccup :args {:tag {:value "a"} :attrs {:value {:class "mk-back" :href "/marketplace"}} :children [{:value "← Marketplace"}]}}
+                     {:parent :if :args {:test {:parent :nil? :args {:value :_sfi-latest}}
+                                         :then {:parent :hiccup :args {:tag {:value "div"} :attrs {:value {:class "mk-empty"}} :children [{:value "No public package by that name."}]}}
+                                         :else :_sfi-found}}]}}
+  {:name :storefront-item-found?
+   :description "Whether a public, approved package by `:pkg-name` exists — the landing answers 404 otherwise."
+   :parent :some? :args {:value :_sfi-latest}}
+  {:name :storefront-item-title
+   :description "`<name> — Graphden marketplace` (the page title)."
+   :parent :str-join
+   :args {:coll [{:as :pkg-name :type :text} {:value " — Graphden marketplace"}] :separator {:value ""}}}
+  {:name :storefront-sitemap-urls
+   :description "The item paths every public package contributes to a sitemap — `/marketplace/<name>`, one per name."
+   :parent :map
+   :args {:func :_sf-item-href :coll :storefront-cards}}]}

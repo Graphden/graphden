@@ -60,6 +60,11 @@
   (json/parse-string (:body resp) true))
 
 
+(def ^:private notified
+  "What the notification seam received — `[event payload]` pairs."
+  (atom []))
+
+
 (def ^:private theme-payload
   {:mode "dark" :tokens {"--gd-paper" "#101214" "--gd-ink" "#e6e9e8"} :fonts {:ui "Inter"} :scale 110})
 
@@ -115,6 +120,31 @@
            (:reason (body-json (setup/via-graph *bootstrap* :_mkp-handler
                                                 (json-req {:kind "theme" :name "night-ink" :version "1.0.0"
                                                            :payload theme-payload})))))))
+  (testing "names are registry-wide: another org may not publish under a publicly listed name, public or private"
+    (tc/install-org-cap-fn! (fn [cap] (= cap :publish-packages)))
+    (try
+      (binding [tc/*current-org* "rival-org"]
+        (is (= "name-taken"
+               (:reason (body-json (setup/via-graph *bootstrap* :_mkp-handler
+                                                    (json-req {:kind "theme" :name "night-ink" :version "2.0.0"
+                                                               :public true :payload theme-payload}))))))
+        (is (= "name-taken"
+               (:reason (body-json (setup/via-graph *bootstrap* :_mkp-handler
+                                                    (json-req {:kind "theme" :name "night-ink" :version "2.0.0"
+                                                               :payload theme-payload})))))
+            "a private version under the public name is refused too — one org per name in every catalog")
+        (testing "a private name is no claim: another org lists it publicly"
+          (is (true? (:ok (body-json (setup/via-graph *bootstrap* :_mkp-handler
+                                                      (json-req {:kind "theme" :name "rival.private" :version "1.0.0"
+                                                                 :payload theme-payload}))))))))
+      ;; (a fresh version: `(name, version)` is checked across the whole
+      ;; registry here — the DB-level UNIQUE hardening is the follow-up)
+      (is (true? (:ok (body-json (setup/via-graph *bootstrap* :_mkp-handler
+                                                  (json-req {:kind "theme" :name "rival.private" :version "2.0.0"
+                                                             :public true :payload theme-payload}))))))
+      (is (empty? (filter #(= "2.0.0" (:version %)) (sp/query-entities (storage) :package-version {:name "night-ink"})))
+          "nothing written under the taken name")
+      (finally (tc/install-org-cap-fn! nil))))
   (testing "refusals: fns kind (a namespace export), missing payload, bad category"
     (is (= "unsupported-kind"
            (:reason (body-json (setup/via-graph *bootstrap* :_mkp-handler
@@ -389,6 +419,8 @@
   ;; a tenant org (non-platform tier) holding the publish right, as the
   ;; addon would grant it
   (tc/install-org-cap-fn! (fn [cap] (= cap :publish-packages)))
+  ;; the notification seam — the addon's mailer stands here in prod
+  (tc/install-notify-fn! (fn [event payload] (swap! notified conj [event payload])))
   (try
     (testing "a tenant's public theme waits for review"
       (let [body (binding [tc/*current-org* "acme-mod"]
@@ -432,6 +464,11 @@
               (is (= "rejected" (:status row)))
               (is (= "Too dark to read" (:moderation-note row)))
               (is (some? (:moderated-at row))))
+            (testing "the decision is raised through the notification seam with the updated row"
+              (let [[event row] (last @notified)]
+                (is (= :package-moderated event))
+                (is (= ["mod.theme" "1.0.0" "rejected" "Too dark to read" "acme-mod"]
+                       [(:name row) (:version row) (:status row) (:moderation-note row) (:org-id row)]))))
             (binding [tc/*current-org* "acme-mod"]
               (is (re-find #"declined the public listing: Too dark to read"
                            (:body (setup/via-graph *bootstrap* :_partial-marketplace-item-handler (get-req {"name" "mod.theme"}))))))))
@@ -456,4 +493,5 @@
       (is (= "approved" (:status (first (sp/query-entities (storage) :package-version {:name "mod.open"}))))))
     (finally
       (deploy-config/install! {})
+      (tc/install-notify-fn! nil)
       (tc/install-org-cap-fn! nil))))

@@ -21,7 +21,11 @@
   
 
   function api() { return (typeof window.API === 'object' && window.API) ? window.API : null; }
-  function gdMarketPresent() { return !!api() && typeof api().partials_marketplace !== 'undefined'; }
+  // The probe is an /api/* key: window.API carries API routes, not partials
+  // (partial paths are literals here, as everywhere in the editor).
+  function gdMarketPresent() { return !!api() && typeof api().api_marketplace !== 'undefined'; }
+  const PARTIAL = '/partials/marketplace';
+  const PARTIAL_ITEM = '/partials/marketplace/item';
   function fetcher() { return window.authFetch || fetch; }
 
   // ---- category vocabulary (the graph's :listing-categories, fetched once) ----
@@ -83,7 +87,7 @@
     if (_mounted && root.querySelector('[data-marketplace]')) return;
     _mounted = true;
     root.innerHTML = '<div data-marketplace="1" class="mk-root mk-loading">Loading the marketplace…</div>';
-    fetcher()(api().partials_marketplace)
+    fetcher()(PARTIAL)
       .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
       .then((html) => {
         root.innerHTML = html;
@@ -100,8 +104,8 @@
     const root = document.getElementById('gd-market-root');
     if (!root || !gdMarketPresent() || !query) return;
     const url = query.name
-      ? api().partials_marketplace_item + '?name=' + encodeURIComponent(query.name)
-      : api().partials_marketplace + '?kind=' + encodeURIComponent(query.kind || 'fns');
+      ? PARTIAL_ITEM + '?name=' + encodeURIComponent(query.name)
+      : PARTIAL + '?kind=' + encodeURIComponent(query.kind || 'fns');
     _mounted = true;
     fetcher()(url).then((r) => (r.ok ? r.text() : Promise.reject(r.status))).then((html) => {
       root.innerHTML = html;
@@ -158,6 +162,10 @@
     closeDialog();
     const kind = opts.kind === 'keymap' ? 'keymap' : 'theme';
     const label = kind === 'keymap' ? 'keyboard layout' : 'theme';
+    // Fetched BEFORE the dialog exists: every listener below is wired the
+    // moment the dialog appears, so a Save right after the name input shows
+    // cannot race this request.
+    const own = await gdMarketOwnCards(kind);
     const scrim = document.createElement('div');
     scrim.className = 'gd-pop-scrim';
     scrim.id = 'gd-mkpub-scrim';
@@ -190,7 +198,6 @@
     el.querySelector('#gd-mkpub-tags').value = Array.isArray(opts.tags) ? opts.tags.join(', ') : (opts.tags || '');
     gdMarketCategoriesInto(el.querySelector('#gd-mkpub-category'), kind, opts.category || '');
     // next patch of the caller's own versions of that name, else 1.0.0
-    const own = await gdMarketOwnCards(kind);
     const suggest = () => {
       const card = own.find((c) => c.name === nameIn.value.trim());
       verIn.value = card ? bumpPatch(card.latest) : '1.0.0';
@@ -229,7 +236,10 @@
         if (j?.ok) {
           setResult('Saved ' + name + '@' + version + (j.public ? ' — public in the marketplace.' : '.'), true);
           if (typeof opts.onDone === 'function') opts.onDone(j);
-          setTimeout(closeDialog, 900);
+          // Stays open: the reader (and the tutorial) get to see the
+          // outcome; Cancel is now Close.
+          el.querySelector('#gd-mkpub-cancel').textContent = 'Close';
+          go.hidden = true;
         } else {
           setResult('Refused: ' + (j?.reason || (typeof authFetchErrorMessage === 'function'
             ? authFetchErrorMessage(r, { fallback: 'HTTP ' + r.status }) : 'HTTP ' + r.status)), false);

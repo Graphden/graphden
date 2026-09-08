@@ -27,8 +27,6 @@
       (log/info "Packages loaded:" (count (:packages packages)) "packages,"
                 (count (:base-fn-defs packages)) "base-fns,"
                 (count (:fn-defs packages)) "fn-defs")
-      ;; the read model the marketplace's Executor tab lists (`:loaded-packages`)
-      (loaded/install! packages)
       packages)))
 
 

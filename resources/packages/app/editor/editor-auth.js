@@ -458,7 +458,7 @@ function openShellMenu() {
   item('Settings', () => goSurface('settings'));
   item('Organization', () => goSurface('operate'));
   // Marketplace — only with the optional registry package (docs/MARKETPLACE.md).
-  if (typeof window.API === 'object' && window.API && typeof window.API.partials_marketplace !== 'undefined') {
+  if (typeof window.API === 'object' && window.API && typeof window.API.api_marketplace !== 'undefined') {
     item('Marketplace', () => goSurface('market'));
   }
   if (document.body.classList.contains('gd-platform') || isOp) {

@@ -49,6 +49,7 @@
     [clojure.tools.logging :as log]
     [clojure.tools.reader :as treader]
     [clojure.tools.reader.reader-types :as treader-types]
+    [graphden.packages.loaded :as loaded]
     [graphden.packages.records.wire :as wire]
     [graphden.packages.semver :as semver]
     [graphden.storage.protocol.core :as sp]))
@@ -629,6 +630,10 @@
                          (set paths)))
         all-namespaces (reduce into #{} (map expand-ns (into all-ns-paths fn-def-ns)))
         combined (assoc combined :namespaces all-namespaces)]
+    ;; the loaded-package roster (packages.loaded) — recorded HERE, not in
+    ;; the init-key, so every loader use (boot, the test golden bootstrap)
+    ;; leaves the same read model behind
+    (loaded/install! combined)
     (log/info "Loaded" (count (:base-fn-defs combined)) "base functions,"
               (count (:fn-defs combined)) "fn-defs")
     combined))

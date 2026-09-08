@@ -11,6 +11,12 @@ menu, the shortcut cheatsheet (`?`), the roving tab stop, walking the
 graph along its edges, the skip link, and how the editor responds to
 your browser's font-size and reduced-motion settings.
 
+> Every command behind `Space` can be given other keys — **Settings →
+> Keyboard** — and a layout can be saved and shared;
+> [lesson 37](37-marketplace-themes-keymaps.md) shows how. The navigation
+> keys this lesson teaches (arrows, `h j k l`, `Escape`, `Enter`) stay
+> fixed.
+
 ## The idea in one paragraph
 
 There are two kinds of key in the editor. A **bare key** is one you

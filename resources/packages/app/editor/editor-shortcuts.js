@@ -554,7 +554,7 @@ function registerBuiltinShortcuts() {
     run: () => window.gdShellSurface('market'),
     // Only with the optional registry package (its routes are in window.API).
     when: () => surfaces() && typeof window.API === 'object' && window.API
-      && typeof window.API.partials_marketplace !== 'undefined',
+      && typeof window.API.api_marketplace !== 'undefined',
   });
   registerShortcut({
     id: 'help', keys: '?', group: 'Help',

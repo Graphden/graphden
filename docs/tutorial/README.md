@@ -89,6 +89,7 @@ of order.
 | 34 | [Plans & tiers — what the cloud grants each account](34-plans-and-tiers.md) | ✅ written · ▶ interactive |
 | 35 | [Services talking to services — the contract lives in the graph](35-services-talking-to-services.md) | ✅ written · ▶ interactive |
 | 36 | [Queues — asynchronous work between services](36-queues.md) | ✅ written |
+| 37 | [The Marketplace: themes, keyboard layouts, and what others published](37-marketplace-themes-keymaps.md) | ✅ written · ▶ interactive |
 
 ▶ interactive — the lesson also exists as a guided in-editor tour:
 open the editor with `?tutorial=NN` (the landing demo link does this for

@@ -44,6 +44,7 @@ records — ADRs, RFCs, perf notes, migration ledgers.)
 | Executing a fn (HTTP API) | [EXECUTION.md](EXECUTION.md) |
 | Graph constraints | [CONSTRAINTS.md](CONSTRAINTS.md) |
 | Distributing packages | [PACKAGE_DISTRIBUTION.md](PACKAGE_DISTRIBUTION.md) |
+| Marketplace — listings, reviews, themes, keymaps | [MARKETPLACE.md](MARKETPLACE.md) |
 | Extending below the package layer | [EXTENDING.md](EXTENDING.md) |
 | Guide served to external AI authors | [AI_CONTEXT.md](AI_CONTEXT.md) |
 | Connecting AI clients (Claude Code / Cursor) to `/mcp` | [MCP_CLIENTS.md](MCP_CLIENTS.md) |

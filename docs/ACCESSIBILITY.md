@@ -35,7 +35,13 @@ doing nothing.
 add a `keydown` listener. The registry is what `Space` and `?` render
 from, so a binding declared anywhere else is invisible and undiscoverable.
 Prefer the leader (`Space x`) — bare keys are nearly exhausted and the
-letter keys belong to canvas navigation.
+letter keys belong to canvas navigation. A registered binding is also what
+the user can REBIND (Settings → Keyboard, [MARKETPLACE.md § 6](MARKETPLACE.md#6-keymaps)):
+declare it with the registry and the user's layout applies to it; a raw
+listener is both undiscoverable and un-rebindable. The two deliberate
+exceptions stay fixed — the canvas / tree navigation keys and the dialogs'
+Escape / Enter — because a layout that moved Escape would break every
+dismiss contract on this page.
 
 **Any state that changes without moving focus** — a selection, a branch
 switch, a lens toggle — calls `gdAnnounce`. A screen reader has no other

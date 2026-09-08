@@ -114,6 +114,13 @@ Graphden is a visual functional programming environment where functions and thei
   due time, visibility lock, `pending` / `dead`). The Postgres queue behind
   `:queue-publish` / `:queue-take` and the `:queue-consumer` template. NOT
   versioned. See [docs/SERVICES.md § Queues](docs/SERVICES.md).
+- `package-review` — one `(rating, body)` per package × author; org-scoped
+  like `package-version` with the same `public?` arm, writes are the
+  AUTHOR's. `package-stat` — the GLOBAL cumulative install counter (no org;
+  platform-write-only, bumped by the pin write). `ui-pref` — the current
+  user's active theme / keymap, owner-scoped (`tenancy.context/current-user-id`).
+  A `package-version` carries `kind` (fns / theme / keymap) + `description`
+  / `category` / `tags` / `payload`. See [docs/MARKETPLACE.md](docs/MARKETPLACE.md).
 - `resource-override` — versioned `path → content` row shadowing a shipped
   frontend asset (the editor's own JS/CSS), served through
   `:read-resource-overridable`; every save rolls the effective `?v=` asset
@@ -198,6 +205,7 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/RECURSION.md](docs/RECURSION.md) | Graph recursion — `:fix` (shipped) vs lazy ref resolution (road not taken) | When considering recursion-related work |
 | [docs/SECRETS.md](docs/SECRETS.md) | `:secret` taint marker — asymmetric subtyping, propagation rules, hide-at-sink, Secrets-panel UX | When touching secret-type code or adding a base-fn that handles user data |
 | [docs/PACKAGE_DISTRIBUTION.md](docs/PACKAGE_DISTRIBUTION.md) | Module kinds (fns-only / impl+fns / core-swap), registry lifecycle, export, § 15.1 as-built repo map | When touching `registry` / `packages/{loader,export}` / `executor-packages.edn`, or deciding what belongs in its own repo |
+| [docs/MARKETPLACE.md](docs/MARKETPLACE.md) | The Marketplace surface — listing metadata, reviews, install counts, editor themes and keyboard layouts as registry kinds, per-user preferences, the tenancy classification of each | When touching `registry/marketplace`, `app-base/prefs`, `editor-{marketplace,theme,keymap}.js`, or adding a schema entity (the classification guard) |
 | [docs/TENANCY_SEAM.md](docs/TENANCY_SEAM.md) | The core seams the tenancy addon plugs into — context, auth, addon manifest, storage/schema, route collection, effect gate, execute guard | When touching `tenancy/context.clj`, the effect gate, an admission/quota seam, or any `:tenancy/*` init-key |
 | [docs/ACCOUNTS.md](docs/ACCOUNTS.md) | The open opt-in identity module — account/identity/session model, social providers, email verification, TOTP, the `/auth/*` + `/login` surface | When touching `src/graphden/accounts/` or wiring auth for a deployment |
 | [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) | The trust model — what each principal may do and which layer enforces it | Before touching an authz gate, or when reasoning about a tenant-facing surface |
@@ -626,9 +634,12 @@ resources/packages/     # First-party packages (fns.edn + impls.clj per module)
 ├── core/               # Core primitives (arithmetic, logic, hof, collections, strings, system)
 ├── storage/            # Storage primitives (pg, protocol, versioned, branches)
 ├── web/                # Web primitives (http, reitit, html, crud, graph, runtime JS)
-├── app-base/           # Route-building vocabulary shared by app + addon/registry (no app dep)
+├── app-base/           # Route-building vocabulary shared by app + addon/registry (no app dep);
+│                       #   + `prefs` — the per-user `:ui-pref` read/write + GET/PUT /api/prefs
 ├── registry/           # OPTIONAL — in-graph publish/install/fork/export; routes served
-│                       #   per-branch via branch_router; drop from :package-names to omit
+│                       #   per-branch via branch_router; drop from :package-names to omit;
+│                       #   + `marketplace` — listings, reviews, install counts, themes/keymaps
+│                       #   (docs/MARKETPLACE.md)
 ├── mcp/                # OPTIONAL — the /mcp JSON-RPC AI endpoint; same per-branch serving
 └── app/                # Application server — editor UI + JS/CSS, the editor partial
                         #   modules (editor-row-actions / editor-provenance /

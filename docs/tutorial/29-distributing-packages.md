@@ -256,6 +256,20 @@ on Organization; acting on it happens on the Build packages chip.
    `still-installed` refusal. Uninstall first, and the withdraw
    goes through.
 
+## The Marketplace — browsing with more than a name
+
+The chip's browse list is the quick door: every version, an Install
+button. Discovery — searching, filtering by category or tag, reading
+what a package does, how others rated it and how often it was
+installed — is the **Marketplace** surface (**Browse marketplace →**
+at the bottom of the chip, or `Space` `v` `m`). Its **Packages** tab
+shows one card per package with the listing you gave it at publish
+(the ⬆ popover's description / category / tags), the ★ rating and the
+↓ install count; opening a card lists every version with Install /
+Fork and the reviews. The other tabs list editor themes and keyboard
+layouts, which are published and applied the same way —
+[lesson 37](37-marketplace-themes-keymaps.md) is about those.
+
 ## Installing from ANOTHER graphden's registry
 
 The browse `<details>` has one more affordance under the local table:

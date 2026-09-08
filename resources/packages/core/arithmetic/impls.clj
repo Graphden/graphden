@@ -104,7 +104,7 @@
 
 
 (defbase round-fn [number decimals]
-  (let [d (.setScale (bigdec number) (long decimals) java.math.RoundingMode/HALF_UP)]
+  (let [d (BigDecimal/.setScale (bigdec number) (long decimals) java.math.RoundingMode/HALF_UP)]
     (if (zero? (long decimals)) (long d) (double d))))
 
 

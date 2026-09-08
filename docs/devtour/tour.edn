@@ -837,6 +837,25 @@
            version's fns into a version-qualified `@`-namespace and writes a
            `:package-install` pin; update/rollback rewrites refs between
            versions; fork copies copy-on-write with no pin."}
+    {:file "resources/packages/registry/registry/impls.clj" :defn upsert-pin!
+     :say "Where the marketplace's install COUNT comes from (docs/MARKETPLACE.md).
+           A new pin is an install and bumps the global `:package-stat` row
+           with an atomic `INSERT … ON CONFLICT DO UPDATE` over the pool —
+           deliberately inside the pin write unit, like the invalidation an
+           entity write owes, because a graph-side 'was it pinned?' probe is
+           an effectful read a later ref would re-run AFTER the pin. Moving a
+           pin (update / rollback) is not an install. Everything else the
+           marketplace needs — listing normalisation, the cards' rating
+           aggregate, the filters, both partials, the review upsert — is
+           graph: `registry/marketplace/fns.edn`."}
+    {:ns graphden.packages.loaded :defn install!
+     :say "The loaded-package ROSTER — recorded by `load-packages` itself, so
+           boot and the test golden bootstrap leave the same read model. One
+           row per package (version, description, base-fn count, `impl+fns`
+           vs `fns-only`, `bundled` vs `manifest`); the marketplace's Executor
+           tab lists it through `:loaded-packages`. It is the honest answer
+           to 'what does this executor run?' without offering to install a
+           Type-2 package, which is code and enters through the build."}
     {:file "resources/packages/registry/registry/impls.clj" :defn import-bundle!
      :say "The WRITE half of the export/import pair — `POST /api/import/graph`
            applies an exported bundle to a NAMED branch: resolve/create the
@@ -1244,6 +1263,23 @@
            read and write stays on the current branch, so the user keeps
            editing with the lens on."}
 
+    {:file "resources/packages/app/editor/editor-prefs.js" :defn gdApplyThemePayload
+     :say "A THEME (Settings → Appearance, docs/MARKETPLACE.md § 5) is a payload
+           `{mode tokens fonts scale}` applied as INLINE custom properties on
+           `<body>` — inline beats `body.theme-dark {…}`, so it wins in either
+           base and clears cleanly. Read `sanitizeThemePayload` just above: a
+           shared theme is another user's data, so only allow-listed tokens
+           with colour literals get through; a `url()` or a second
+           declaration is dropped. The mirror in localStorage is applied
+           before first paint; the server preference reconciles after boot."}
+    {:file "resources/packages/app/editor/editor-shortcuts.js" :defn gdApplyKeymap
+     :say "A keyboard LAYOUT is an overrides map `{id {keys leader}}` over the
+           shortcut registry. `_defaults` remembers each id's declared keys the
+           first time it registers (reset is possible), and `registerShortcut`
+           consults `_overrides` on every registration — so the canvas's late
+           `g g` still lands on the user's keys. Settings → Keyboard renders
+           `gdShortcutEntries()`; the which-key menu and the `?` cheatsheet
+           show the rebound keys because they already read the registry."}
     {:file "resources/packages/app/editor/editor-auth.js" :defn authFetch
      :say "Every mutating call in the editor goes through this. It is 12 lines
            and worth all of them: a 401 clears the stored credential and

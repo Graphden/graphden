@@ -53,11 +53,13 @@
                   "theme" ["light" "dark" "high-contrast" "colorful" "minimal" "other"]
                   "keymap" ["vim-like" "emacs-like" "ide-like" "accessibility" "other"]}}}
 
+  ;; `:non-negative-int` — the refinement `:take :count` / `:str-clip :limit`
+  ;; demand (a bare `:int` const fails the sweep).
   {:name :listing-max-tags
-   :parent :const :args {:value 10}}
+   :parent :const :args {:value 10} :return-type :non-negative-int}
 
   {:name :listing-max-description
-   :parent :const :args {:value 2000}}
+   :parent :const :args {:value 2000} :return-type :non-negative-int}
 
   ;; --- the inputs, nil-safe ---
   {:name :_lst-kind
@@ -87,9 +89,11 @@
    :parent :if
    :args {:test :_lst-category-blank? :then {:value nil} :else :_lst-category-raw}}
 
+  ;; The vocabulary's string keys come back KEYWORDISED from the jsonb
+  ;; round-trip (a literal map on a const) — look up by keyword.
   {:name :_lst-categories-for-kind
    :parent :get
-   :args {:coll :listing-categories :key :_lst-kind :default {:value []}}}
+   :args {:coll :listing-categories :key {:parent :str-to-keyword :args {:string :_lst-kind}} :default {:value []}}}
 
   {:name :_lst-category-ok?
    :parent :or
@@ -590,15 +594,27 @@
                   :args {:map {:parent :assoc :args {:map {:value {}} :key {:value :value} :value {:parent :to-str :args {:value {:as :item}}}}}
                          :key {:value :selected} :value {:parent :equal? :args {:a {:parent :to-str :args {:value {:as :item}}} :b {:as :category :type :text}}}}}
           :children [{:parent :to-str :args {:value {:as :item}}}]}}
+  ;; "All categories" first — its own fn-def and a `:list` head: an inline
+  ;; anonymous fn nested inside a vector literal is not resolved as a ref
+  ;; (it rendered as its `_anon-…` name), so the head is composed, not
+  ;; written in place.
+  {:name :_mkt-cat-all-option
+   :parent :hiccup
+   :args {:tag {:value "option"} :attrs {:value {:value ""}} :children [{:value "All categories"}]}}
+  {:name :_mkt-cat-head
+   :parent :list :args {:items [:_mkt-cat-all-option]}}
+  {:name :_mkt-cat-options
+   :parent :map
+   :args {:func :_mkt-cat-option
+          :coll {:parent :get :args {:coll :listing-categories
+                                     :key {:parent :str-to-keyword :args {:string :_mkq-kind}}
+                                     :default {:value []}}}
+          :category :_mkq-category}}
   {:name :_mkt-cat-select
    :parent :hiccup
    :args {:tag {:value "select"}
           :attrs {:value {:name "category" :class "mk-select" :aria-label "Category"}}
-          :children {:parent :concat
-                     :args {:colls [[{:parent :hiccup :args {:tag {:value "option"} :attrs {:value {:value ""}} :children [{:value "All categories"}]}}]
-                                    {:parent :map :args {:func :_mkt-cat-option
-                                                         :coll {:parent :get :args {:coll :listing-categories :key :_mkq-kind :default {:value []}}}
-                                                         :category :_mkq-category}}]}}}}
+          :children {:parent :concat :args {:colls [:_mkt-cat-head :_mkt-cat-options]}}}}
 
   ;; sort options (`:item` = ["key" "Label"]; `:sort` = the current)
   {:name :_mkt-sort-option
@@ -943,7 +959,7 @@
                                                                                                           :attrs {:parent :assoc
                                                                                                                   :args {:map {:value {:type "button" :class "packages-uninstall mk-review-delete" :hx-confirm "Delete your review?"}}
                                                                                                                          :key {:value :hx-delete}
-                                                                                                                         :value {:parent :str-join :args {:coll [{:value "/api/marketplace/review?name="} :_mk-url-name] :separator {:value ""}}}}}
+                                                                                                                         :value {:parent :str-join :args {:coll [{:value "/api/marketplace/unreview?name="} :_mk-url-name] :separator {:value ""}}}}}
                                                                                                           :children [{:value "Delete my review"}]}}}}]}}]}}
 
   {:name :_mki-notice
@@ -1021,19 +1037,29 @@
    :args {:test :_mka-fork?
           :then {:parent :fork-package :args {:pkg-name :_mka-name :pkg-version :_mka-version}}
           :else {:parent :install-package :args {:pkg-name :_mka-name :pkg-version :_mka-version :source {:value nil}}}}}
+  ;; The notice reads the install OUTCOME under the `outcome` lambda-param —
+  ;; `:call` runs the install ONCE; a second ref to the effectful
+  ;; `:_mka-install-do` would install again.
   {:name :_mka-install-notice
-   :description "The outcome as a sentence — ok, or the refusal's `:reason`."
+   :description "The outcome as a sentence — ok, or the refusal's `:reason`. Free arg: `:outcome`."
    :parent :if
-   :args {:test {:parent :get :args {:coll :_mka-install-do :key {:value :ok} :default {:value false}}}
+   :args {:test {:parent :get :args {:coll {:as :outcome :type :keyword-map} :key {:value :ok} :default {:value false}}}
           :then {:parent :if :args {:test :_mka-fork?
                                     :then {:value "Forked — the fns are now editable copies in the graph (reload the Explorer to see them)."}
                                     :else {:value "Installed on this branch — the pin is in the packages chip."}}}
-          :else {:parent :str-join :args {:coll [{:value "Refused: "} {:parent :to-str :args {:value {:parent :get :args {:coll :_mka-install-do :key {:value :reason} :default {:value "unknown"}}}}}] :separator {:value ""}}}}}
+          :else {:parent :str-join :args {:coll [{:value "Refused: "} {:parent :to-str :args {:value {:parent :get :args {:coll {:as :outcome :type :keyword-map} :key {:value :reason} :default {:value "unknown"}}}}}] :separator {:value ""}}}}}
+  {:name :_mka-install-item
+   :lambda-params [:outcome]
+   :description "The refreshed item for one install outcome."
+   :parent :marketplace-item-html
+   :args {:pkg-name :_mka-name :notice :_mka-install-notice}}
+  {:name :_mka-install-then-item
+   :parent :call :args {:func :_mka-install-item :arg :_mka-install-do}}
   {:name :_mka-install-handler
    :lambda-params [:request]
    :description "Ring handler for POST /api/marketplace/install?name=&version=[&fork=1] — installs (or forks) then returns the refreshed item as text/html."
    :parent :html-ok-response
-   :args {:body {:parent :marketplace-item-html :args {:pkg-name :_mka-name :notice :_mka-install-notice}}}}
+   :args {:body :_mka-install-then-item}}
   {:name :api-marketplace-install
    :description "POST /api/marketplace/install?name=<pkg>&version=<v>[&fork=1] — reference-install (or fork) a fns package from the Marketplace; returns the item HTML. Auth-required."
    :parent :post
@@ -1046,7 +1072,7 @@
   {:name :_mka-row-kind
    :parent :coalesce
    :args {:value {:parent :get :args {:coll :_mka-row :key {:value :kind} :default nil}} :default {:value "fns"}}}
-  {:name :_mka-applyable?
+  {:name :_mka-apply-ok?
    :parent :and
    :args {:values [{:parent :some? :args {:value :_mka-row}}
                    {:parent :not :args {:value {:parent :equal? :args {:a :_mka-row-kind :b {:value "fns"}}}}}]}}
@@ -1059,12 +1085,12 @@
                  {:parent :get :args {:coll :_mka-row :key {:value :payload} :default {:value {}}}}]}}
   {:name :_mka-apply-do
    :parent :if
-   :args {:test :_mka-applyable?
+   :args {:test :_mka-apply-ok?
           :then {:parent :ui-pref-write! :args {:pref-key :_mka-row-kind :pref-value :_mka-pref-value}}
           :else {:value nil}}}
   {:name :_mka-apply-notice
    :parent :if
-   :args {:test :_mka-applyable?
+   :args {:test :_mka-apply-ok?
           :then {:value "Applied — the editor picks it up now; Settings → Appearance / Keyboard shows it as the active one."}
           :else {:value "Refused: no such version, or not a theme / keymap."}}}
   {:name :_mka-apply-then-item
@@ -1084,10 +1110,14 @@
   {:name :_mka-rating-raw
    :parent :_mka-param :args {:param-name {:value "rating"}}}
   {:name :_mka-rating
-   :parent :case
-   :args {:value :_mka-rating-raw
-          :clauses {"1" 1 "2" 2 "3" 3 "4" 4 "5" 5}
-          :default {:value 0}}}
+   :description "The form's rating as 1–5, else 0 (refused) — five equality arms; a `:case` map's literal keys keywordise through jsonb and would not match the string."
+   :parent :cond
+   :args {:clauses [{:parent :equal? :args {:a :_mka-rating-raw :b {:value "1"}}} {:value 1}
+                    {:parent :equal? :args {:a :_mka-rating-raw :b {:value "2"}}} {:value 2}
+                    {:parent :equal? :args {:a :_mka-rating-raw :b {:value "3"}}} {:value 3}
+                    {:parent :equal? :args {:a :_mka-rating-raw :b {:value "4"}}} {:value 4}
+                    {:parent :equal? :args {:a :_mka-rating-raw :b {:value "5"}}} {:value 5}
+                    {:value true} {:value 0}]}}
   {:name :_mka-rating-ok?
    :parent :gt :args {:nums [:_mka-rating {:value 0}]}}
   {:name :_mka-body
@@ -1154,13 +1184,15 @@
    :args {:steps [:_mka-review-delete-do {:parent :marketplace-item-html :args {:pkg-name :_mka-name :notice {:value "Your review is deleted."}}}]}}
   {:name :_mka-review-delete-handler
    :lambda-params [:request]
-   :description "Ring handler for DELETE /api/marketplace/review?name= — deletes the current user's review of the package, then returns the refreshed item."
+   :description "Ring handler for DELETE /api/marketplace/unreview?name= — deletes the current user's review of the package, then returns the refreshed item."
    :parent :html-ok-response
    :args {:body :_mka-review-delete-then-item}}
+  ;; Its own path, not a DELETE on /review: reitit refuses two leaves on one
+  ;; path (the registry's uninstall / withdraw follow the same convention).
   {:name :api-marketplace-review-delete
-   :description "DELETE /api/marketplace/review?name=<pkg> — remove the current user's review. Returns the item HTML. Auth-required."
+   :description "DELETE /api/marketplace/unreview?name=<pkg> — remove the current user's review. Returns the item HTML. Auth-required."
    :parent :delete
-   :args {:path "/marketplace/review" :handler :_mka-review-delete-handler}}
+   :args {:path "/marketplace/unreview" :handler :_mka-review-delete-handler}}
 
   ;; =====================================================================
   ;; POST /api/marketplace/publish — a theme or keymap (payload IS the artifact)
@@ -1206,18 +1238,27 @@
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :version}]
           :vals [{:value false} {:as :reason :type :text} :_mkp-name :_mkp-version]}}
+  ;; The envelope is a 1-arg CALLEE over the apply's ROW: `:call` runs the
+  ;; write ONCE and hands the row-or-nil in under the `row` lambda-param,
+  ;; so reading `:id` / `:public?` never re-references the effectful apply
+  ;; (which would run it again and answer `version-exists` against its own
+  ;; first write — the same trap the panel publish documents).
   {:name :_mkp-ok
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :id} {:value :name} {:value :version} {:value :kind} {:value :public}]
           :vals [{:value true}
-                 {:parent :to-str :args {:value {:parent :get :args {:coll {:ref :_mkp-apply :type :keyword-map} :key {:value :id} :default nil}}}}
+                 {:parent :to-str :args {:value {:parent :get :args {:coll {:as :row :type :nullable-keyword-map} :key {:value :id} :default nil}}}}
                  :_mkp-name :_mkp-version :_mkp-kind
-                 {:parent :get :args {:coll {:ref :_mkp-apply :type :keyword-map} :key {:value :public?} :default nil}}]}}
-  {:name :_mkp-write-result
+                 {:parent :get :args {:coll {:as :row :type :nullable-keyword-map} :key {:value :public?} :default nil}}]}}
+  {:name :_mkp-outcome
+   :lambda-params [:row]
+   :description "The publish envelope for one apply outcome (`row` = the created row, nil = the version existed)."
    :parent :if
-   :args {:test {:parent :nil? :args {:value :_mkp-apply}}
+   :args {:test {:parent :nil? :args {:value {:as :row :type :nullable-keyword-map}}}
           :then {:parent :_mkp-err :args {:reason {:value "version-exists"}}}
           :else :_mkp-ok}}
+  {:name :_mkp-write-result
+   :parent :call :args {:func :_mkp-outcome :arg :_mkp-apply}}
   {:name :marketplace-publish-result
    :description "Publish a theme / keymap: refuses `unsupported-kind` (fns go through the namespace publish), `missing-name`, `missing-version`, `missing-payload`, the listing's `bad-category`, and `version-exists`; else `{:ok true :id :name :version :kind :public}`."
    :parent :cond

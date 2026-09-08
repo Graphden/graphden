@@ -385,14 +385,18 @@
    bump is logged and never fails the install."
   [ctx pkg-name]
   (try
-    (pg/pg-execute ctx {:insert-into :package_stat
-                        :values [{:id (random-uuid)
-                                  :package_name pkg-name
-                                  :installs 1
-                                  :updated_at (java.time.Instant/now)}]
-                        :on-conflict [:package_name]
-                        :do-update-set {:installs [:+ :package_stat.installs 1]
-                                        :updated_at (java.time.Instant/now)}})
+    ;; `java.sql.Timestamp`, not `Instant` — pgjdbc cannot infer a bind
+    ;; type for a bare Instant (the usage-stat bump's `hour-bucket` does
+    ;; the same conversion).
+    (let [now (java.sql.Timestamp/from (java.time.Instant/now))]
+      (pg/pg-execute ctx {:insert-into :package_stat
+                          :values [{:id (random-uuid)
+                                    :package_name pkg-name
+                                    :installs 1
+                                    :updated_at now}]
+                          :on-conflict [:package_name]
+                          :do-update-set {:installs [:+ :package_stat.installs 1]
+                                          :updated_at now}}))
     (catch Exception e
       (log/warn e "package-stat bump failed (install unaffected)" {:package pkg-name}))))
 

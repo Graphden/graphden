@@ -70,6 +70,16 @@ guarding `publish-package-apply` (`registry/impls.clj`) and the
 `:view-all-stats` gate in `app/execution/impls.clj` are the two
 precedents.
 
+### User identity (owner / author keys)
+
+`tenancy.context/current-user-id` — the accounts principal's `:user-id`,
+`"anonymous"` without per-user identity — and `current-user-label` (a
+public-safe display label) are the seam the marketplace's per-user rows key
+on: `:ui-pref` (owner-scoped) and `:package-review` (author-owned writes).
+The addon's decorator classifies both (`owner-scoped-entities` /
+`author-owned-entities`) and stamps / filters them; core only exposes the
+identity ([MARKETPLACE.md § 2](MARKETPLACE.md#2-data-model)).
+
 ## Auth seam
 
 Auth is provider-driven, never hardcoded. Core defines

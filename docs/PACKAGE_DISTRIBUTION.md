@@ -518,6 +518,13 @@ UUIDs (AD-2). No symbolic-ref column.
   materialised `<ns-root>@<version>` copy is NOT removed — it is ordinary graph
   content by then, deleted like any other namespace.
 
+**Marketplace (shipped 2026-09, [MARKETPLACE.md](MARKETPLACE.md)):** discovery
+over this registry — cards with description / category / tags, ratings and
+reviews, install counts, every version; the same `:package-version` row
+also carries editor THEMES and KEYBOARD LAYOUTS (`:kind`), applied per user.
+The chip below keeps the quick "what is pinned here" view and links to the
+surface.
+
 **Editor (shipped):** a **Build-surface "packages" context-bar chip**
 (`#gd-pkg-chip`, sibling of the workspace/branch chips) opens a browse/install
 browser — install is a build act, so it lives with the project context, not on

@@ -1575,6 +1575,55 @@
               {:title "That's naming a service"
                :body "The service fn is the value; the address is a fact the platform records; the call is explicit HTTP in the graph. Click [[Finish]] to clean up."
                :target nil
+               :check {:kind "manual"}}]}
+            ;; 37 — the Marketplace: a theme saved, shared, rolled back; a
+            ;; key rebound; a review posted. Needs the registry package
+            ;; (publish-packages under tenancy — the same gate as lesson 29).
+            {:id "37"
+             :chapter "Your organization"
+             :requires "publish-packages"
+             :title "Marketplace, themes & keymaps"
+             :steps
+             [{:title "Make it yours, then share it"
+               :body "The editor's colours, fonts and text size are a THEME; its keys are a LAYOUT. Both are yours per user, both can be saved as versions and rolled back, and both can be shared through the Marketplace — the same registry packages live in."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Open the theme editor"
+               :body "Open the account menu, choose [[Settings]] — Appearance is the first section. Click [[Customize…]] to open the token editor."
+               :target "#gd-theme-edit"
+               :targets ["#auth-lock-btn" "#gd-theme-edit"]
+               :check {:kind "dom" :selector "#gd-theme-editor"}}
+              {:title "Pick a paper"
+               :body "Under Grounds click the [[Paper]] swatch and choose any colour — the editor follows at once, and the choice is already saved as your preference. The contrast line tells you when ink on paper drops under 4.5:1."
+               :target "#gd-theme-editor .gd-theme-swatch"
+               :check {:kind "dom" :selector "body.gd-custom-theme"}}
+              {:title "Save it as a version"
+               :body "Click [[Save / share…]]. Name it `my-board`, keep the suggested version, tick [[Public]] — and [[Save]]. A theme is now a versioned package in the registry; Public lists it in the Marketplace."
+               :target "#gd-theme-save"
+               :targets ["#gd-theme-save" "#gd-mkpub-pop"]
+               :check {:kind "dom" :selector "#gd-mkpub-result.packages-fork-ok"}
+               :creates {:type "package-version" :name "my-board"}}
+              {:title "Roll back is a version"
+               :body "The [[Saved themes]] select lists what you saved, by version. Change a colour, save again as the next patch, and pick the FIRST version in the select — that is the roll-back: versions never change."
+               :target "#gd-theme-select"
+               :check {:kind "manual"}}
+              {:title "Now the keys"
+               :body "Open [[Keyboard]] in the Settings nav. Every command behind Space is listed with its keys. On “Fit the graph in view” click [[Change]], press `f` `f`, then [[Enter]]."
+               :target "#gd-settings-nav [data-section=\"keyboard\"]"
+               :targets ["#gd-settings-nav [data-section=\"keyboard\"]" "#gd-keymap-root .gd-km-row[data-shortcut=\"graph-fit\"] .gd-km-change"]
+               :check {:kind "dom" :selector "#gd-keymap-root .gd-km-row[data-shortcut=\"graph-fit\"] .gd-km-default"}}
+              {:title "Browse the Marketplace"
+               :body "Press [[Space]] [[v]] [[m]] (or pick Marketplace in the account menu). The [[Themes]] tab lists your my-board card with its versions and, so far, no reviews. Cards carry the description, category and tags a publisher gave, a rating and an install count."
+               :target "#gd-market-root .mk-tab[data-mk-tab=\"theme\"]"
+               :check {:kind "dom" :selector "#gd-market-root [data-mk-card=\"my-board\"]"}}
+              {:title "Review it"
+               :body "Open the [[my-board]] card. Under Versions is the review form: pick a rating, write a line, [[Post review]]. One review per author — posting again updates yours. Back on the card the ★ figure is the average over every review."
+               :target "#gd-market-root [data-mk-card=\"my-board\"] .mk-card-open"
+               :targets ["#gd-market-root [data-mk-card=\"my-board\"] .mk-card-open" "#gd-market-root .mk-review-submit"]
+               :check {:kind "dom" :selector "#gd-market-root .mk-review"}}
+              {:title "That's the Marketplace"
+               :body "Packages install, themes and keymaps apply, reviews and install counts help you pick, and the Executor tab shows what this instance runs. Settings → Appearance [[Reset to built-in]] and Keyboard [[Reset to defaults]] put the editor back; the published versions stay. Click [[Finish]]."
+               :target nil
                :check {:kind "manual"}}]}]}}}
 
   {:name :_tour-json

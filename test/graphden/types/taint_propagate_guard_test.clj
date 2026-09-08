@@ -57,6 +57,9 @@
     ;; return caller content and carry :taint-propagate?.
     :current-instant :current-user-id :current-user-label :loaded-packages
     :round :semver-latest :semver-rank :ui-pref-write! :ui-prefs-read :url-encode
+    ;; the origin's marketplace card — remote, server-derived data, not the
+    ;; caller's content
+    :remote-package-card
     ;; Cached read of the fixed build artifact — no caller content.
     :build-hashes-raw :byte-count
     :byte-len :cached-api-routes-js :call :call-noargs :call-noargs-traced

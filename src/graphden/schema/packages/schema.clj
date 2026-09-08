@@ -54,7 +54,9 @@
    `:payload` (the theme's token map / the keymap's binding overrides —
    nil for fns packages, whose content is `:fns`); `:origin` — on a
    MIRRORED copy, the read-only snapshot of the origin registry's rating /
-   installs (the origin stays the one place to review it). Reusing the artifact
+   installs (the origin stays the one place to review it); `:status` /
+   `:moderation-note` / `:moderated-at` — the moderation of a PUBLIC
+   listing (pending → approved | rejected by the operator). Reusing the artifact
    row rather than minting a `:theme` / `:keymap` entity keeps ONE
    publish / visibility / withdraw / version-resolution path
    (principle #2). Three small companions carry what the artifact can't:
@@ -180,6 +182,24 @@
 ;; HERE.
 (def ^:private pv-origin-field-uuid
   #uuid "3f8b5d61-8a2c-4e4f-b5d7-6c9e1f3a5b82")
+
+
+;; Moderation of PUBLIC listings (docs/MARKETPLACE.md § 8). `:status` —
+;; nil / "approved" (listed), "pending" (public opt-in awaiting the
+;; operator; visible to its own org only), "rejected" (own org only, with
+;; the note). Only a tenant's public publish under a deployment that runs
+;; moderation (`GRAPHDEN_MARKETPLACE_MODERATION`) lands pending; platform
+;; and single-tenant publishes are approved outright.
+(def ^:private pv-status-field-uuid
+  #uuid "5a1d7f83-9c4e-4a6b-8e2f-0d3b5c7a9e14")
+
+
+(def ^:private pv-moderation-note-field-uuid
+  #uuid "7c3f9b05-1e6a-4c8d-a0f4-2f5d7e9b1c36")
+
+
+(def ^:private pv-moderated-at-field-uuid
+  #uuid "9e5b1d27-3a8c-4e0f-b2a6-4b7f9a1d3e58")
 
 
 ;; =============================================================================
@@ -356,7 +376,16 @@
                                 :nullable? true}
                       :origin {:uuid pv-origin-field-uuid
                                :type :jsonb
-                               :nullable? true}})))
+                               :nullable? true}
+                      :status {:uuid pv-status-field-uuid
+                               :type :text
+                               :nullable? true}
+                      :moderation-note {:uuid pv-moderation-note-field-uuid
+                                        :type :text
+                                        :nullable? true}
+                      :moderated-at {:uuid pv-moderated-at-field-uuid
+                                     :type :timestamptz
+                                     :nullable? true}})))
 
 
 (defn- add-package-install

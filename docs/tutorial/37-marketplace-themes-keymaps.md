@@ -46,6 +46,11 @@ tags; the sort menu orders by rating, installs, recency or name.
 > (`bundled` / `manifest`) so you know what your fns can build on. It is
 > deliberately not an install surface.
 
+On the cloud the public catalog is also a page anyone can read without
+signing in — [graphden.dev/marketplace](https://graphden.dev/marketplace):
+the same cards and package pages, with **Sign in to install** where the
+buttons would be. A public, approved package of yours is listed there.
+
 ## A listing: describe what you publish
 
 The ⬆ **publish** popover on a namespace row (Lesson 29) now has three
@@ -99,6 +104,13 @@ The **↓ install count** is cumulative: every *new* pin of the package on
 any branch, in any organization, counts once. Moving an existing pin
 (update, rollback) is not an install, and the counter cannot be set by
 hand — it lives on a row only the platform writes.
+
+> **On the cloud, Public means "after review".** A public listing from an
+> organization waits for the operator's approval before other
+> organizations see it; until then your card wears *pending review* and
+> your own organization can already install or apply it. A rejection
+> comes with a note on the package — publish a corrected version to try
+> again. On a self-hosted instance nothing waits: you are the operator.
 
 ## Your own theme
 

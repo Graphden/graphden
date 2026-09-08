@@ -211,6 +211,13 @@
     if (name === 'settings' && parts[1]) {
       gdActivateSettingsSection(parts[1]);
     }
+    // `@marketplace/<name>` — the public storefront's "sign in to install"
+    // lands on the package (editor-marketplace.js opens the item partial).
+    if (name === 'market' && parts[1] && typeof window.gdMarketOpen === 'function') {
+      let pkg = parts.slice(1).join('/');
+      try { pkg = decodeURIComponent(pkg); } catch (_) { /* keep raw */ }
+      window.gdMarketOpen({ name: pkg });
+    }
     return true;
   }
 

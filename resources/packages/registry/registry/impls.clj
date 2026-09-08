@@ -24,6 +24,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.sql.pg :as pg]
     [graphden.system.branch-router :as br]
+    [graphden.system.deploy-config :as deploy-config]
     [graphden.tenancy.context :as tc]
     [graphden.versioning.storage.core :as vs]
     [org.httpkit.client :as http-client]))
@@ -163,6 +164,75 @@
 ;; `:publish-package`), so the response shape is admin-visible. The
 ;; content-hash + `:public?` normalisation stay here: both are STORED
 ;; on the row at write time (readers never re-derive them).
+(defn- moderation-enabled?
+  "Does this deployment moderate public listings? The public deploy
+   setting `GRAPHDEN_MARKETPLACE_MODERATION` (`:marketplace-moderation`),
+   truthy when \"1\" / \"true\"."
+  []
+  (contains? #{"1" "true" "yes"} (some-> (deploy-config/read-setting :marketplace-moderation)
+                                         str str/trim str/lower-case)))
+
+
+(defbase moderation-on?
+  "Whether this deployment moderates PUBLIC listings (`GRAPHDEN_MARKETPLACE_MODERATION`)."
+  []
+  (moderation-enabled?))
+
+
+(defn- platform-base
+  "The storage BENEATH the org-scoped decorator (`vs/unwrap` lands on the
+   decorator; its `:base` is the backend). The operator's moderation reads
+   cross orgs; the org-scoped view would show only the operator's own. Row
+   level security still applies at the pool (public rows are readable by
+   every org — a pending listing is public by intent)."
+  [storage]
+  (let [s (vs/unwrap storage)]
+    (or (:base s) s)))
+
+
+(defbase moderate-package-version!
+  "The operator's decision on a pending public listing — `decision` is
+   `approve` or `reject` (with an optional `note` the publisher sees).
+   Gated on the platform-admin right at the deepest effectful core, so no
+   route bypasses it; a tenant / org-admin cannot list itself. Reads the
+   row through the BASE storage (`vs/unwrap`) — the operator's org-scoped
+   view would hide another org's pending row. Returns the updated row, or
+   nil when no such (name, version)."
+  [pkg-name pkg-version decision note]
+  (when-not (tc/current-platform-admin?)
+    (throw (ex-info "Moderating a listing requires the platform-admin right."
+                    {:type :authz/forbidden :capability :platform-admin})))
+  (cr/record-effect! :db)
+  (cr/record-effect! :time)
+  (let [base (platform-base (request/require-storage ctx))
+        row (first (sp/query-entities base :package-version {:name pkg-name :version pkg-version}))
+        status (case (str decision) "approve" "approved" "reject" "rejected" nil)]
+    (when (and row status)
+      (sp/update-entity base :package-version (:id row)
+                        {:status status
+                         :moderation-note (when (= status "rejected") (some-> note str str/trim not-empty))
+                         :moderated-at (java.time.Instant/now)}))))
+
+
+(defbase moderation-queue
+  "Every listing awaiting a decision, across orgs — the operator's queue.
+   Platform-admin only (the read itself goes through the BASE storage; an
+   org-scoped read would show only the operator's own org). Newest first."
+  []
+  (when-not (tc/current-platform-admin?)
+    (throw (ex-info "The moderation queue requires the platform-admin right."
+                    {:type :authz/forbidden :capability :platform-admin})))
+  (cr/record-effect! :db)
+  (let [base (platform-base (request/require-storage ctx))]
+    (->> (sp/query-entities base :package-version {:status "pending"})
+         (sort-by :published-at)
+         reverse
+         (mapv #(-> %
+                    (select-keys [:id :name :version :kind :description :category :tags :org-id :published-at :status])
+                    (update :id str)
+                    (update :published-at str))))))
+
+
 (defbase publish-package-apply
   [pkg-name pkg-version bundle pkg-public listing]
   ;; Authz chokepoint: publishing to an ORG's registry requires the
@@ -205,6 +275,15 @@
                          ;; identically with and without the addon.
                          :org-id (tc/current-org)
                          :public? (boolean (or pkg-public (tc/current-platform-tier?)))
+                         ;; Moderation (docs/MARKETPLACE.md § 8): a TENANT's public
+                         ;; opt-in on a deployment that runs it waits for the
+                         ;; operator; the platform's own and every private
+                         ;; publish are listed outright.
+                         :status (if (and pkg-public
+                                          (moderation-enabled?)
+                                          (not (tc/current-platform-tier?)))
+                                   "pending"
+                                   "approved")
                          :published-at (java.time.Instant/now)
                          ;; marketplace listing (docs/MARKETPLACE.md) — the
                          ;; graph validated + normalised it (`:listing-normalize`);
@@ -937,6 +1016,10 @@
    :package-upsert-pin package-upsert-pin
    :mirror-remote-package! mirror-remote-package!
    :remote-package-card remote-package-card
+   :moderation-on? moderation-on?
+   ;; taint-propagate: the updated row carries the operator's note
+   :moderate-package-version! {:impl moderate-package-version! :taint-propagate? true}
+   :moderation-queue moderation-queue
    ;; taint-propagate: both return caller-graph bundle content / the hub's
    ;; report about it — content passthrough (SECRETS.md § T3).
    :hub-fetch-bundle {:impl hub-fetch-bundle :taint-propagate? true}

@@ -152,6 +152,8 @@
                   "packages/app/editor/editor-executors-admin.js"
                   "packages/app/editor/editor-orgs-admin.js"
                   "packages/app/editor/editor-platform-access.js"
+                  ;; Marketplace moderation queue (Platform surface, platform-admin)
+                  "packages/app/editor/editor-moderation.js"
                   "packages/app/editor/editor-quota.js"
                   "packages/app/editor/editor-stats.js"
                   ;; Tests: status cache + Operate section shell + the

@@ -7961,6 +7961,17 @@ body.gd-no-write .branch-comment-form { display: none; }
 .mk-origin-link { color: var(--gd-flow-ink); }
 .mk-listing-form { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--gd-line); }
 .mk-tags-input { flex: 1 1 160px; }
+/* moderation: publisher-side badges, the operator's queue */
+.mk-status { padding: 0 6px; border-radius: 999px; font-size: 0.625rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.mk-status-pending { background: var(--gd-free-wash); color: var(--gd-free); }
+.mk-status-rejected { background: var(--gd-crit-wash); color: var(--gd-crit); }
+.mk-moderation-rejected { color: var(--gd-crit); }
+.mq-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mq-form { display: inline-flex; gap: 4px; align-items: center; }
+.mq-note { max-width: 180px; font-size: 0.6875rem; padding: 3px 6px; }
+.mq-approve, .mq-reject { font: inherit; font-size: 0.6875rem; padding: 3px 8px; cursor: pointer; border-radius: var(--gd-r-sm); }
+.mq-approve { border: 1px solid var(--gd-ok); background: var(--gd-ok); color: var(--on-accent); }
+.mq-reject { border: 1px solid var(--gd-crit); background: transparent; color: var(--gd-crit); }
 /* roster (Executor tab) */
 .mk-roster { width: 100%; font-size: 0.75rem; border-collapse: collapse; }
 .mk-roster th, .mk-roster td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--gd-line); vertical-align: top; }

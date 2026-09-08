@@ -176,7 +176,10 @@
  {:settings {:hub-url                 #env GRAPHDEN_HUB_URL
              :feedback-url            #env GRAPHDEN_FEEDBACK_URL
              :feedback-intake         #env GRAPHDEN_FEEDBACK_INTAKE
-             :disable-asset-overrides #env GRAPHDEN_DISABLE_ASSET_OVERRIDES}}
+             :disable-asset-overrides #env GRAPHDEN_DISABLE_ASSET_OVERRIDES
+             ;; "1" ⇒ a tenant's PUBLIC listing waits for the operator's
+             ;; approval before other orgs see it (docs/MARKETPLACE.md § 8)
+             :marketplace-moderation  #env GRAPHDEN_MARKETPLACE_MODERATION}}
 
  ;; NOTE: the OPTIONAL packages `registry` / `mcp` are NOT wired as separate
  ;; route installers — the `:exec/branch-router` resolves their per-branch

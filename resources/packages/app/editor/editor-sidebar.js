@@ -65,7 +65,7 @@ const _adminNavBtns = new Map();
 const OP_SECTION_LABELS = {
   grants: 'Grants', users: 'Members', roles: 'Roles', orgs: 'Organizations',
   packages: 'Packages', stats: 'Monitoring',
-  'platform-access': 'Platform access',
+  'platform-access': 'Platform access', moderation: 'Moderation',
   assets: 'Assets', queues: 'Queues', tests: 'Tests', debug: 'Debug', executors: 'Executor',
 };
 
@@ -1493,6 +1493,10 @@ function mountOpsSections(fallbackList, searchMode) {
   if (typeof buildPlatformAccessSection === 'function') {
     // Platform-access delegation → Platform surface (manage-platform-access).
     mountAdminSection(platHost, platNavHost, 'platform-access', buildPlatformAccessSection);
+  }
+  if (typeof buildModerationSection === 'function') {
+    // Marketplace moderation queue → Platform surface (platform-admin).
+    mountAdminSection(platHost, platNavHost, 'moderation', buildModerationSection);
   }
   // Packages (install/browse) live on the BUILD surface via the #gd-pkg-chip
   // context-bar chip → popover (editor-shell.js) — install is a build act.

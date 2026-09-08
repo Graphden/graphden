@@ -291,6 +291,27 @@
    :return-type [:list :keyword-map]
    :effects #{}}
 
+  {:name :moderation-on?
+   :description "Whether this deployment moderates PUBLIC listings — the public deploy setting `GRAPHDEN_MARKETPLACE_MODERATION` (docs/MARKETPLACE.md § 8). Boot-constant."
+   :args {}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :moderate-package-version!
+   :description "The operator's decision on a pending public listing: `:decision` `approve` / `reject` (+ an optional `:note` the publisher sees on a rejection). Platform-admin only — gated at this core so no route bypasses it; reads through the platform base storage (cross-org). Returns the updated row, nil when no such (name, version) or an unknown decision."
+   :args {:pkg-name {:type :text :description "Package name."}
+          :pkg-version {:type :text :description "Version."}
+          :decision {:type :text :description "`approve` or `reject`."}
+          :note {:type :nullable-text :required false :description "Why — shown to the publisher on a rejection."}}
+   :return-type :nullable-keyword-map
+   :effects #{:db :time}}
+
+  {:name :moderation-queue
+   :description "Every PUBLIC listing awaiting a decision, across orgs, newest first — `[{:id :name :version :kind :description :category :tags :org-id :published-at :status} …]`. Platform-admin only (cross-org read through the platform base storage)."
+   :args {}
+   :return-type [:list :keyword-map]
+   :effects #{:db}}
+
   {:name :semver-latest
    :description "The highest version string in `:versions` by parsed `[major minor patch]` — nil for an empty list. Pure."
    :args {:versions {:type [:list :text] :description "Version strings."}}
@@ -397,13 +418,19 @@
                  :args {:coll {:as :bundle :type :package-bundle-shape}
                         :key {:value :secrets} :default {:value []}}}}}
 
+  {:name :_pub-status
+   :description "`approved`, or `pending` when the deployment moderates public listings and this is a tenant's public opt-in."
+   :parent :get
+   :args {:coll {:ref :_pub-apply :type :keyword-map}
+          :key {:value :status} :default nil}}
+
   {:name :_pub-ok
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :id} {:value :name} {:value :version}
-                 {:value :public} {:value :content-hash} {:value :fn-count}
+                 {:value :public} {:value :status} {:value :content-hash} {:value :fn-count}
                  {:value :dependencies} {:value :secrets}]
           :vals [{:value true} :_pub-row-id {:as :pkg-name} {:as :pkg-version}
-                 :_pub-public :_pub-content-hash :_pub-fn-count
+                 :_pub-public :_pub-status :_pub-content-hash :_pub-fn-count
                  :_pub-deps :_pub-secrets]}}
 
   {:name :_pub-result
@@ -690,6 +717,13 @@
   ;; nil = published here; a map = a MIRROR's read-only origin snapshot
   {:name :_pie-origin
    :parent :get :args {:coll {:as :item} :key {:value :origin} :default nil}}
+  ;; moderation (nil on pre-moderation rows = approved)
+  {:name :_pie-status
+   :parent :coalesce
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :status} :default nil}}
+          :default {:value "approved"}}}
+  {:name :_pie-moderation-note
+   :parent :get :args {:coll {:as :item} :key {:value :moderation-note} :default nil}}
 
   {:name :_pkg-index-entry
    :description "One registry-index entry — the JSON reshape of a :package-version row."
@@ -697,11 +731,13 @@
    :args {:keys [{:value :id} {:value :name} {:value :version} {:value :ns-root}
                  {:value :content-hash} {:value :published-at} {:value :fn-count}
                  {:value :dependencies} {:value :org-id} {:value :public}
-                 {:value :kind} {:value :description} {:value :category} {:value :tags} {:value :origin}]
+                 {:value :kind} {:value :description} {:value :category} {:value :tags} {:value :origin}
+                 {:value :status} {:value :moderation-note}]
           :vals [:_pie-id :_pie-name :_pie-version :_pie-ns-root
                  :_pie-content-hash :_pie-published-at :_pie-fn-count
                  :_pie-dependencies :_pie-org-id :_pie-public
-                 :_pie-kind :_pie-description :_pie-category :_pie-tags :_pie-origin]}}
+                 :_pie-kind :_pie-description :_pie-category :_pie-tags :_pie-origin
+                 :_pie-status :_pie-moderation-note]}}
 
   {:name :list-package-versions
    :description "All published package versions as a registry index — metadata only (name, version, ns-root, content-hash, published-at, fn-count, dependencies); omits the heavy :fns bundle. Pure graph composition over `:query-entities` + a HOF reshape."
@@ -3031,13 +3067,15 @@
                   :api-marketplace-apply
                   :api-marketplace-review
                   :api-marketplace-review-delete
-                  :api-marketplace-listing]}}
+                  :api-marketplace-listing
+                  :api-marketplace-moderation
+                  :api-marketplace-moderate]}}
 
   {:name :_registry-routes
    :description "The registry package's full route list — the `/api/*` group plus the flat `/partials/packages-panel` + `/partials/packages-governance` + `/partials/marketplace[/item]` leaves."
    :parent :list
    :args {:items [:_registry-api-routes :partial-packages-panel :partial-packages-governance
-                  :partial-marketplace :partial-marketplace-item]}}
+                  :partial-marketplace :partial-marketplace-item :partial-moderation-queue]}}
 
   {:name :registry-router
    :description "Fall-through reitit router over `:_registry-routes` — returns nil on no-match (`:router-or-nil`) so the branch-router falls through to the main app router for any non-registry path."

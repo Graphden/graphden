@@ -11,6 +11,7 @@
     [graphden.executor.test-setup :as setup]
     [graphden.packages.loaded :as loaded]
     [graphden.storage.protocol.core :as sp]
+    [graphden.system.deploy-config :as deploy-config]
     [graphden.tenancy.context :as tc]))
 
 
@@ -378,3 +379,81 @@
       (let [resp (setup/via-graph *bootstrap* :_mkl-handler (form-req {:name "lst.pkg" :description "hijack"}))]
         (is (re-find #"only the publisher" (:body resp)))))
     (is (= "New words" (:description (first (filter #(= "1.1.0" (:version %)) (sp/query-entities (storage) :package-version {:name "lst.pkg"}))))))))
+
+
+(deftest moderation-of-public-listings
+  ;; docs/MARKETPLACE.md § 8. With GRAPHDEN_MARKETPLACE_MODERATION on, a
+  ;; TENANT's public opt-in lands `pending`; the platform's own publish is
+  ;; approved outright; the operator approves / rejects from the queue.
+  (deploy-config/install! {:marketplace-moderation "1"})
+  ;; a tenant org (non-platform tier) holding the publish right, as the
+  ;; addon would grant it
+  (tc/install-org-cap-fn! (fn [cap] (= cap :publish-packages)))
+  (try
+    (testing "a tenant's public theme waits for review"
+      (let [body (binding [tc/*current-org* "acme-mod"]
+                   (body-json (setup/via-graph *bootstrap* :_mkp-handler
+                                               (json-req {:kind "theme" :name "mod.theme" :version "1.0.0"
+                                                          :public true :payload theme-payload}))))]
+        (is (true? (:ok body)))
+        (is (= "pending" (:status body)))
+        (is (= "pending" (:status (first (sp/query-entities (storage) :package-version {:name "mod.theme"})))))))
+    (testing "a private publish and the platform's own publish are approved at once"
+      (binding [tc/*current-org* "acme-mod"]
+        (setup/via-graph *bootstrap* :_mkp-handler
+                         (json-req {:kind "theme" :name "mod.private" :version "1.0.0" :payload theme-payload})))
+      (is (= "approved" (:status (first (sp/query-entities (storage) :package-version {:name "mod.private"})))))
+      (setup/via-graph *bootstrap* :_mkp-handler
+                       (json-req {:kind "theme" :name "mod.platform" :version "1.0.0" :public true :payload theme-payload}))
+      (is (= "approved" (:status (first (sp/query-entities (storage) :package-version {:name "mod.platform"}))))))
+    (testing "the publisher's card and item carry the pending mark"
+      (binding [tc/*current-org* "acme-mod"]
+        (is (= "pending" (:status (first (filter #(= "mod.theme" (:name %)) (cards {"kind" "theme"}))))))
+        (let [html (:body (setup/via-graph *bootstrap* :_partial-marketplace-handler (get-req {"kind" "theme" "q" "mod.theme"})))]
+          (is (re-find #"mk-status-pending" html)))
+        (is (re-find #"Awaiting the operator" (:body (setup/via-graph *bootstrap* :_partial-marketplace-item-handler (get-req {"name" "mod.theme"})))))))
+    (testing "the queue and the decision are platform-admin only"
+      (is (thrown-with-msg? Exception #"platform-admin"
+            (run-named :moderation-queue {})))
+      (tc/install-platform-admin-fn! (constantly true))
+      (try
+        (let [queue (run-named :moderation-queue {})]
+          (is (= ["mod.theme"] (map :name queue)) "only the pending row is queued")
+          (is (= "acme-mod" (:org-id (first queue)))))
+        (let [html (:body (setup/via-graph *bootstrap* :_partial-moderation-queue-handler {:request-method :get :headers {}}))]
+          (is (re-find #"data-mq-name=\"mod.theme\"" html))
+          (is (re-find #"mq-approve" html))
+          (is (re-find #"name=\"note\"" html) "the reject form carries a note field"))
+        (testing "reject with a note — the publisher sees it"
+          (let [resp (setup/via-graph *bootstrap* :_mq-decide-handler
+                                      (form-req {:name "mod.theme" :version "1.0.0" :decision "reject" :note "Too dark to read"}))]
+            (is (re-find #"Nothing awaiting review" (:body resp)) "the queue empties")
+            (let [row (first (sp/query-entities (storage) :package-version {:name "mod.theme"}))]
+              (is (= "rejected" (:status row)))
+              (is (= "Too dark to read" (:moderation-note row)))
+              (is (some? (:moderated-at row))))
+            (binding [tc/*current-org* "acme-mod"]
+              (is (re-find #"declined the public listing: Too dark to read"
+                           (:body (setup/via-graph *bootstrap* :_partial-marketplace-item-handler (get-req {"name" "mod.theme"}))))))))
+        (testing "approve"
+          (binding [tc/*current-org* "acme-mod"]
+            (setup/via-graph *bootstrap* :_mkp-handler
+                             (json-req {:kind "theme" :name "mod.theme" :version "1.0.1" :public true :payload theme-payload})))
+          (setup/via-graph *bootstrap* :_mq-decide-handler
+                           (form-req {:name "mod.theme" :version "1.0.1" :decision "approve"}))
+          (is (= "approved" (:status (first (filter #(= "1.0.1" (:version %)) (sp/query-entities (storage) :package-version {:name "mod.theme"}))))))
+          (is (nil? (:moderation-note (first (filter #(= "1.0.1" (:version %)) (sp/query-entities (storage) :package-version {:name "mod.theme"})))))))
+        (testing "an unknown decision changes nothing"
+          (setup/via-graph *bootstrap* :_mq-decide-handler
+                           (form-req {:name "mod.theme" :version "1.0.1" :decision "maybe"}))
+          (is (= "approved" (:status (first (filter #(= "1.0.1" (:version %)) (sp/query-entities (storage) :package-version {:name "mod.theme"})))))))
+        (finally (tc/install-platform-admin-fn! nil))))
+    (testing "with moderation off, a public publish is approved outright"
+      (deploy-config/install! {})
+      (binding [tc/*current-org* "acme-mod"]
+        (setup/via-graph *bootstrap* :_mkp-handler
+                         (json-req {:kind "theme" :name "mod.open" :version "1.0.0" :public true :payload theme-payload})))
+      (is (= "approved" (:status (first (sp/query-entities (storage) :package-version {:name "mod.open"}))))))
+    (finally
+      (deploy-config/install! {})
+      (tc/install-org-cap-fn! nil))))

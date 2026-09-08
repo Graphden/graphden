@@ -549,12 +549,11 @@ update/rollback.)
 
 ## 9. Moderation + cloud→self-hosted export
 
-- **Moderation** (self-hosted → our public registry): a published version enters
-  a `:pending` moderation state; an admin review promotes it to `:public`
-  (visible/installable by cloud tenants). Model as a `status` field on
-  `:package-version` (or a small `:package-moderation` row) — decide at that
-  checkpoint. Self-hosted → self-hosted sharing needs no moderation (direct
-  git/EDN exchange).
+- **Moderation** — shipped 2026-09 as a `status` field on `:package-version`
+  (`pending` → `approved` / `rejected`), on by `GRAPHDEN_MARKETPLACE_MODERATION`;
+  the operator's queue is Platform → Moderation. See
+  [MARKETPLACE.md § 8](MARKETPLACE.md#8-moderation-of-public-listings).
+  Self-hosted → self-hosted sharing needs none (direct git/EDN exchange).
 - **Cloud → self-hosted export** — the open-core piece **shipped**:
   `GET /api/export/graph` (auth-required) returns the WHOLE graph (current
   branch/scope) as an EDN migration bundle `{:fns [fn-def …] :namespaces

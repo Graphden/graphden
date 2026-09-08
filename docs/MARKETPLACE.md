@@ -200,7 +200,62 @@ count, and when the snapshot was taken. From then on:
 A remote without a marketplace (an older graphden) still mirrors: the
 `:origin` then carries the url only, and the card shows no rating.
 
-## 8. Security notes
+## 8. Moderation of public listings
+
+On a deployment that sets `GRAPHDEN_MARKETPLACE_MODERATION=1` (the cloud;
+declared as the public deploy setting `:marketplace-moderation`), a
+TENANT's public opt-in does not reach the shared catalog by itself:
+
+| who publishes | `public?` | `:status` at publish | who sees it |
+|---|---|---|---|
+| a tenant, private | false | `approved` | its org |
+| a tenant, Public ticked | true | **`pending`** | its org (badge *pending review*) + the platform-admin |
+| the platform / single-tenant | true | `approved` | everyone |
+| any, moderation off | as published | `approved` | as before |
+
+The operator decides from **Platform → Moderation** (`GET
+/partials/moderation-queue`, a cross-org read gated on the platform-admin
+right at the base-fn `:moderation-queue`): **Approve** lists it, **Reject**
+(with a note) keeps it the org's own — the publisher's card wears
+*rejected* and the item shows the note; a corrected next version starts a
+new review. `POST /api/marketplace/moderate` is the decision route
+(`:moderate-package-version!`, platform-admin only); `GET
+/api/marketplace/moderation` the queue as JSON.
+
+Enforcement lives in the tenancy decorator's `visible?`: the `public?`
+arm counts for OTHER orgs only when `:status` is nil / `approved` (or the
+reader is the platform-admin). Row-level security keeps `"public?" IS
+TRUE` unchanged — a pending row is public by the publisher's intent, not
+a secret; moderation guards the catalog, and the app layer is where the
+catalog is read. Pre-moderation rows (nil status) read as approved.
+
+## 9. The anonymous storefront (cloud)
+
+`https://graphden.dev/marketplace` — the catalog without a login, the way
+pypi.org shows a project to anyone: kind tabs, search, category / tag /
+sort, one page per package (`/marketplace/<name>`: description, tags,
+rating, install count, every version, the reviews read-only) and a single
+action, **Sign in to install / apply**, which lands in the editor on that
+package (`app.graphden.dev/#@marketplace/<name>`). `robots.txt` and
+`sitemap.xml` (the landing, the tutorial index, every public package)
+make it indexable.
+
+The bodies are graph in the registry package (`:storefront-body`,
+`:storefront-item-body`, `:storefront-sitemap-urls`); the cloud's landing
+app (`graphden-cloud`, the apex host) wraps them in its page chrome and
+declares the bare `:get-route`s. Two rules keep an anonymous page safe:
+
+- The landing runs in the PLATFORM ctx (no principal, every row visible),
+  so the storefront filters the index itself to `public? true` AND
+  `status approved` (`:storefront-rows`) — a pending or private package
+  never renders, and a package page for one answers 404.
+- Nothing mutates: plain anchors and a GET search form, no htmx, no
+  review form — reviews and installs happen in the editor, signed in.
+
+A self-hosted instance keeps its marketplace behind sign-in; the
+storefront is the cloud's control-plane page.
+
+## 10. Security notes
 
 - **Reviews cannot be forged.** The generic entity route (`/api/entities/…`)
   reaches `:package-review` too; the tenancy decorator's
@@ -221,27 +276,24 @@ A remote without a marketplace (an older graphden) still mirrors: the
   no longer be global by omission (the gap that this feature's three new
   entities made visible).
 
-## 9. What is deliberately not here
+## 11. What is deliberately not here
 
-- **No anonymous storefront.** Every route is auth-required; a demo session
-  browses the public rows like any tenant. A signed-out landing catalog is a
-  cloud-control-plane page, if ever.
-- **No moderation queue.** Unchanged from
-  [PACKAGE_DISTRIBUTION.md § 9](PACKAGE_DISTRIBUTION.md#9-moderation--cloudself-hosted-export):
-  a public listing is the publisher's call, and withdraw is the remedy.
 - **No listing history.** A listing edit rewrites the newest version's
   description / category / tags in place (the artifact itself is immutable);
   older versions keep what they were published with.
 - **No review sync.** A mirror snapshots the origin's numbers once, at pull
   time (§ 7); it does not poll the origin, and nothing flows back.
 
-## 10. Tests
+## 12. Tests
 
 - `test/graphden/packages/marketplace_test.clj` — the normaliser, the
   theme / keymap publish route, cards (semver-ordered versions, rating
   aggregate, filters, sort), reviews (upsert-in-place, delete, refusal),
   the install counter, apply → preference, the prefs routes, both partials,
-  the roster, mirrors (origin signals, no local review), the listing edit;
+  the roster, mirrors (origin signals, no local review), the listing edit,
+  moderation (pending → approve / reject with a note, the queue's gate);
+  `graphden-cloud` `landing_tutorial_e2e_test` — the storefront pages
+  (public rows only, the item page, 404, robots, sitemap);
   `registry_test` — the remote pull snapshots the origin's card.
 - `tools/runtime-test/theme-payload.test.js` — the sanitiser and the apply /
   clear path; `tools/runtime-test/keymap.test.js` — overrides, late

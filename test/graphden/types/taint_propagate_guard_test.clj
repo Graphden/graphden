@@ -60,6 +60,9 @@
     ;; the origin's marketplace card — remote, server-derived data, not the
     ;; caller's content
     :remote-package-card
+    ;; moderation: the flag and the queue are server-derived; the decision
+    ;; answers the row with the operator's note (caller content) → tainted
+    :moderation-on? :moderation-queue :moderate-package-version!
     ;; Cached read of the fixed build artifact — no caller content.
     :build-hashes-raw :byte-count
     :byte-len :cached-api-routes-js :call :call-noargs :call-noargs-traced
@@ -176,7 +179,7 @@
    SECRETS.md § T3 set. Before changing this, for each ADDED name ask \"does it
    pass/transform caller content? then it needs `:taint-propagate?`\"; for each
    REMOVED name confirm it genuinely no longer handles content."
-  #{:round :semver-latest :ui-pref-write! :url-encode ; marketplace: answer caller content
+  #{:round :semver-latest :ui-pref-write! :url-encode :moderate-package-version! ; marketplace: answer caller content
     :abs :add :and :assert :assert-eq :assert-some :assoc :assoc-in :atom :blank? :byte-len :call-with :call :call-traced :with-heartbeat
     :call-noargs :call-noargs-traced :case :cell :coalesce :comp :concat :cond :conj :cons :const
     :constant-time-equal? :constantly :contains? :count :deref :dissoc :distinct :div :do :drop

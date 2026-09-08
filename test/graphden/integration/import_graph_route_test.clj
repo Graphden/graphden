@@ -283,8 +283,12 @@
             json (json/parse-string (str (:body resp)) true)]
         (is (= 200 (:status resp)) (pr-str json))
         (is (true? (:ok json)) (pr-str json))
-        (is (= ["/api/packages/acme.rp/1.0.0"] @seen)
-            "exactly one remote fetch (idempotent mirror)")
+        ;; Two dials, each once: the version's EDN face, and the origin's
+        ;; marketplace card for the read-only `:origin` snapshot
+        ;; (docs/MARKETPLACE.md § 7) — which this remote answers 404 to, as
+        ;; an older graphden would.
+        (is (= {"/api/packages/acme.rp/1.0.0" 1 "/api/marketplace" 1} (frequencies @seen))
+            "the version and the origin card are each fetched exactly once (idempotent mirror)")
         (testing "the mirrored row exists locally, never public"
           (let [local (first (sp/query-entities *storage* :package-version
                                                 {:name "acme.rp" :version "1.0.0"}))]
@@ -292,7 +296,10 @@
             (is (false? (:public? local)))
             (is (= "rp-hash" (:content-hash local)))
             (is (= (:fns row) (:fns local))
-                "fn-def keywords survive the EDN wire")))
+                "fn-def keywords survive the EDN wire")
+            (is (= source (get-in local [:origin :url]))
+                "the mirror remembers its origin even when the remote has no marketplace")
+            (is (nil? (get-in local [:origin :rating])))))
         (testing "the version is materialized under its version-qualified ns"
           (is (seq (sp/query-entities *storage* :fn {:name "rp-hello"})))))
       (finally (stub)))))

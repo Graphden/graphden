@@ -239,7 +239,10 @@ commands, and a layout that moved `Escape` would break every dialog.
 
 ## Next
 
-This is the last lesson of the chapter. The written docs continue where
-the tutorial stops: [docs/MARKETPLACE.md](../MARKETPLACE.md) for the
-marketplace, [docs/PACKAGE_DISTRIBUTION.md](../PACKAGE_DISTRIBUTION.md)
-for everything else about packages.
+[Lesson 38 — The package lifecycle](38-package-lifecycle.md): the loop
+between a package's author and its consumers — install and follow
+versions, fix what you did not write, send the fix back, accept it and
+ship the next version. The written docs continue where the tutorial
+stops: [docs/MARKETPLACE.md](../MARKETPLACE.md) for the marketplace,
+[docs/PACKAGE_DISTRIBUTION.md](../PACKAGE_DISTRIBUTION.md) for
+everything else about packages.

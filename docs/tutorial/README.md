@@ -90,6 +90,7 @@ of order.
 | 35 | [Services talking to services — the contract lives in the graph](35-services-talking-to-services.md) | ✅ written · ▶ interactive |
 | 36 | [Queues — asynchronous work between services](36-queues.md) | ✅ written |
 | 37 | [The Marketplace: themes, keyboard layouts, and what others published](37-marketplace-themes-keymaps.md) | ✅ written · ▶ interactive |
+| 38 | [The package lifecycle — both sides of a version](38-package-lifecycle.md) | ✅ written |
 
 ▶ interactive — the lesson also exists as a guided in-editor tour:
 open the editor with `?tutorial=NN` (the landing demo link does this for
@@ -101,12 +102,14 @@ drift-guarded by `tools/browser-test/edit-tutorial-tour.test.js` —
 keep the written lesson's “Try it” section and the tour steps in
 sync when either changes.
 
-Three lessons have no tour: **27** is about files on disk and
+Five lessons have no tour: **28** is about files on disk and
 `bb rebuild`, which the editor cannot show; **11** is a route-wiring
-marathon that reads better as text than as thirty steps; and **30** is
+marathon that reads better as text than as thirty steps; **31** is
 about running a second, local instance — something one editor session
-cannot demonstrate. All three sit in the chapter their subject belongs
-to, which is why the ▶ column is worth reading.
+cannot demonstrate; **36** is a service-to-service exchange that
+plays out in logs, not on the canvas; and **38** is a two-role loop
+whose halves belong to different people. All five sit in the chapter
+their subject belongs to, which is why the ▶ column is worth reading.
 
 The organization tours drive surfaces not every session has, so they
 declare what they need (`:requires`) — a capability (`manage-users`,

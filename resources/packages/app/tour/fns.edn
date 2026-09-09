@@ -1218,7 +1218,7 @@
                :target "#gd-operate-nav button[data-section=\"users\"]"
                :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"users\"]:not([hidden])"}}
               {:title "Invite someone"
-               :body "In the field under the table type any address you can receive mail at — a plus-alias of your own works (you+teammate@…) — and click [[Invite]]. Nobody has that account yet, so an INVITE appears in the Invites list below, pinned to that email."
+               :body "In the field under the table type any address you can receive mail at — a plus-alias of your own works (you+teammate@…) — and click [[Invite]]. Nobody has that account yet, so an INVITE appears in the Invites list below, pinned to that email. (If the list already holds an invite from earlier, this step passes by itself — the next steps read that row.)"
                :target "[data-users-panel] form[hx-post=\"/api/org-members\"]"
                :check {:kind "dom" :selector "[data-users-panel] [data-invite-row]"}}
               {:title "What an invite is"
@@ -1247,7 +1247,7 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Open Grants"
-               :body "Account button (top right) → [[Organization]] → [[Grants]]. The table is every grant in this org: subject, capability, namespace. Your own admin row is there — that is what makes you the owner in practice."
+               :body "Account button (top right) → [[Organization]] — it opens on [[Grants]], its first section. The table is every grant in this org: subject, capability, namespace. Your own admin row is there — that is what makes you the owner in practice."
                :target "#auth-lock-btn, .auth-avatar"
                :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Organization\"]" "#gd-operate-nav button[data-section=\"grants\"]"]
                :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"grants\"]:not([hidden])"}}

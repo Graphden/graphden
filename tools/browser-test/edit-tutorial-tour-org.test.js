@@ -1,6 +1,7 @@
-// Lessons 23, 24, 26, 29, 32, 33 — the ORGANIZATION tours.
+// Lessons 24, 25, 26, 27, 30, 33, 34 — the ORGANIZATION tours.
 //
-// These six are the only lessons no machine has ever walked. They drive
+// Until 2026-09-09 these were the only lessons no machine had walked (the
+// first pass ran against a local cloud-shaped stack). They drive
 // surfaces that exist solely under the tenancy addon (Members, Grants, Apps,
 // the account Settings surface, usage), which the monorepo's e2e stack does
 // not have — so the other guards can assert nothing about them beyond "the
@@ -384,6 +385,13 @@ async function lesson31(page) {
   await waitTourTitle(page, 'Give it a member', 30000);
   // Membership is a SET: submitting the field replaces the whole list. Put
   // the signed-in owner in and read it back.
+  // The submit is an htmx post that swaps the WHOLE panel; count swaps and
+  // wait for one, because the typed value is already in the input and a
+  // click on the row about to be replaced would land on nothing.
+  await page.evaluate(() => {
+    window.__gdSwaps = 0;
+    document.body.addEventListener('htmx:afterSettle', () => { window.__gdSwaps += 1; });
+  });
   await page.evaluate(({role, email}) => {
     const tr = Array.from(document.querySelectorAll('[data-roles-panel] tbody tr'))
       .find((r) => r.textContent.includes(role));
@@ -392,14 +400,16 @@ async function lesson31(page) {
     input.value = email;
     form.querySelector('button[type="submit"]').click();
   }, {role: ROLE_NAME, email: EMAIL});
-  // The submit is an htmx post that swaps the WHOLE panel; wait for the
-  // re-rendered row to carry the member (names are account emails since
-  // the 2026-09-09 roles fix) — clicking × on the stale row would do nothing.
-  await page.waitForFunction(({role, email}) => {
+  await page.waitForFunction(() => window.__gdSwaps >= 1, null, {timeout: 30000, polling: 100});
+  // Names are account emails since the 2026-09-09 roles fix: the swapped
+  // row carries the owner.
+  const memberCell = await page.evaluate((role) => {
     const tr = Array.from(document.querySelectorAll('[data-roles-panel] tbody tr'))
       .find((r) => r.textContent.includes(role));
-    return tr && tr.querySelector('[name="usernames"]')?.value.includes(email);
-  }, {role: ROLE_NAME, email: EMAIL}, {timeout: 30000, polling: 200});
+    return tr ? tr.querySelector('[name="usernames"]')?.value : null;
+  }, ROLE_NAME);
+  assert(memberCell && memberCell.includes(EMAIL),
+         'the role lists the owner by email (got: ' + memberCell + ')');
   assert(await clickTourAdvance(page, 'Next'), 'lesson 26 member Next');
 
   await waitTourTitle(page, 'What they can do now', 30000);
@@ -484,7 +494,7 @@ async function cleanup(page) {
   }
   const {browser, page} = await tenancyContext();
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-org — lessons 23 / 24 / 26 / 29 / 32 / 33 @ ' + BASE);
+  console.log('edit-tutorial-tour-org — lessons 24 / 25 / 26 / 27 / 30 / 33 / 34 @ ' + BASE);
 
   let failed = false;
   try {

@@ -878,6 +878,9 @@ async function openAccountSettings(page) {
     if (!item) throw new Error('no "Settings" item in the account menu');
     item.click();
   });
+  // Settings opens on Appearance; the account card is its own section.
+  await page.waitForSelector('#gd-settings-nav button[data-section="account"]', {timeout: 30000});
+  await page.evaluate(() => document.querySelector('#gd-settings-nav button[data-section="account"]').click());
   await page.waitForSelector('#gd-acct-idents', {timeout: 30000});
 }
 

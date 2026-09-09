@@ -63,7 +63,7 @@
   ;; The client half of web.sse: `hx-ext="sse"` activates the htmx SSE
   ;; extension, `sse-connect` opens the EventSource, `sse-swap` names
   ;; the event whose payload swaps into the element. Pair with
-  ;; `:sse-fragment-route` (app.page) and `:with-htmx-sse` in :head.
+  ;; a `:sse-fragment-handler` child on a `:get-route` (app.page) and `:with-htmx-sse` in :head.
 
   ;; Optional free with a default — introduced as a list item under
   ;; `:first` because `:required false` is illegal on `:coalesce`'s
@@ -85,7 +85,7 @@
    :args {:keys [{:value :hx-ext} {:value :sse-connect} {:value :sse-swap}]
           :vals [{:value "sse"}
                  {:as :url :type :non-blank-text
-                  :description "The stream URL — typically a `:sse-fragment-route` path."}
+                  :description "The stream URL — typically the path of a `:get-route` whose handler is a `:sse-fragment-handler` child."}
                  :_sse-swap-event]}}
 
   ;; --- convenience template ----------------------------------------

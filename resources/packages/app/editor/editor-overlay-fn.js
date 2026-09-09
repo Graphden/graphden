@@ -253,6 +253,10 @@ function createFnOverlay(node, container) {
   const overlay = createOverlay(nodeId, { background: 'var(--card-header-bg)' });
   overlay.dataset.originalFnId = originalFnId;
   overlay.dataset.nodeId = nodeId;
+  // The fn's NAME, so a tour step can ring one card among several by the
+  // name its text uses (`.node-overlay[data-fn-name="str-len"] …`) — ids
+  // are per-instance and unknown when the step is written.
+  if (ownFn?.name) overlay.dataset.fnName = ownFn.name;
   // Compare-mode mark (diff v2): the whole card rings when this fn
   // differs vs the compared branch under the current type lens — so the
   // MAIN graph view reads as a diff, not just the selected fn's args.

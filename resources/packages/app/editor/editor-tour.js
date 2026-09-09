@@ -679,8 +679,13 @@ function _tourTick() {
   // step, and only when the fn this step is waiting for is the one hidden.
   // (Lessons 18 / 23, where the lens IS the subject, name no fn in their
   // checks, so they are untouched.)
+  // The row a step needs is the fn its check NAMES — or, for an
+  // "extend X" step (`fn-parent`), the PARENT the reader must find first:
+  // tour 15's "click const, then Extend" was unreachable with the tests
+  // lens left on by tour 14, because the child did not exist yet.
   if (_tourState._lensClearedFor !== _tourState.step) {
-    const wanted = step.check?.name;
+    const check = step.check;
+    const wanted = check?.kind === 'fn-parent' ? check.parent : check?.name;
     if (wanted && typeof toggleKindLens === 'function' && _tourFnRowHidden(wanted)) {
       _tourState._lensClearedFor = _tourState.step;
       try { toggleKindLens('all'); } catch (_) { /* leave the lens alone */ }

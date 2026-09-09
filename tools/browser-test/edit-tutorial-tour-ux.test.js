@@ -101,6 +101,10 @@ const {
       document.querySelectorAll('.gd-insp-tab')).map((t) => t.textContent.trim()));
     assert(tabs.includes('Bindings') && tabs.includes('Runs'),
       'the Inspector shows its tabs (got ' + JSON.stringify(tabs) + ')');
+    // The step tells the reader to click Bindings, and (since the audit of
+    // 2026-09-09) waits for that tab to be selected — it used to pass on the
+    // tabs merely existing, so the reader could skip the click unnoticed.
+    await page.click('.gd-insp-tab[data-insp-tab="bindings"]');
     await waitTourTitle(page, 'Who uses a fn?', 150000);
     await filterAndSelect(page, 'const', 'const');
     await waitTourTitle(page, 'Used by', 150000);

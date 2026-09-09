@@ -158,7 +158,7 @@
                :target "input[placeholder=\"Filter...\"]"
                :check {:kind "selected" :name "add"}}
               {:title "Extend it"
-               :body "Click the [[⋯]] button on the add row, choose [[Extend]], type exactly `add-10`. The in line shows which namespace the child will live in — extending someone else's fn defaults to YOUR last-used namespace, and you can change it right there. Then [[Save]]: a child fn whose :parent is add; the editor opens it."
+               :body "Click the [[⋯]] button on the add row, choose [[Extend]], type exactly `add-10`. The [[in]] line shows which namespace the child will live in — extending someone else's fn defaults to YOUR last-used namespace, and you can change it right there. Then [[Save]]: a child fn whose :parent is add; the editor opens it."
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "add-10" :parent "add"}
@@ -358,13 +358,13 @@
                :target ".mismatch-explainer"
                :check {:kind "dom" :selector ".type-error-badge"}}
               {:title "A diagnostic, not a wall"
-               :body "The binding saved and the card gained a ⚠ badge (the Type errors panel lists it). The fn refuses to EXECUTE until it is fixed, but your work was never blocked — that is the doctrine: warn and record, not reject."
+               :body "The binding saved and the card gained a ⚠ badge (the Explorer's [[⚠ type errors]] lens lists it — lesson 16). The fn refuses to EXECUTE until it is fixed, but your work was never blocked — that is the doctrine: warn and record, not reject."
                :target ".type-error-badge"
                :check {:kind "manual"}}
               {:title "Clear it"
                :body "Click [[⋯]] on the str-len value node (the one hanging under :string), choose [[×]] to remove the binding and confirm. The slot goes back to free — and the ⚠ disappears."
-               :target ".type-error-badge"
-               :targets [".type-error-badge" ".row-actions-popover"]
+               :target ".node-overlay[data-fn-name=\"str-len\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"str-len\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"remove-use-site-binding\"]"]
                :check {:kind "dom-absent" :selector ".type-error-badge"}}
               {:title "Types are things you MAKE, too"
                :body "So far you only used types the packages ship; your own are the same kind of row. First CLEAR the Explorer filter (it still says str-len, and a filtered tree hides everything else). Then, if there is no [[tutorial]] namespace, click [[New namespace]] at the bottom and type exactly `tutorial` — if it is already there, this step passes by itself."
@@ -467,7 +467,7 @@
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-button" :slot "label"}}
               {:title "Run it"
-               :body "[[⋯]] → [[▶ Run]] → [[Run]]. Back comes [\"button\" \"Run\"] — hiccup, the data form of HTML. Nothing renders it yet; it is a value like any other."
+               :body "[[⋯]] → [[▶ Run]] → [[Run]]. The Run pane recognises hiccup and shows a component preview; open [[Raw]] under it to read the value itself: [\"button\" \"Run\"] — the data form of HTML, a value like any other."
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
@@ -492,7 +492,7 @@
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-button\"]"]
                :check {:kind "bindings-count" :name "tutorial-card" :count 1}}
               {:title "Run the card"
-               :body "[[⋯]] → [[▶ Run]] → [[Run]]. The result nests: [\"div\" {\"class\" \"card\"} [\"button\" \"Run\"]]. Composing fns IS composing markup — there is no separate component runtime."
+               :body "[[⋯]] → [[▶ Run]] → [[Run]]. The preview now shows the card with your button inside, and [[Raw]] reads [\"div\" {\"class\" \"card\"} [\"button\" \"Run\"]] — the result nests. Composing fns IS composing markup — there is no separate component runtime."
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
@@ -607,11 +607,11 @@
                :check {:kind "selected" :name "branch-chain"}}
               {:title "Its parent is :fix"
                :body "Look at the card: the parent is fix — the recursion primitive. It takes a step (the body of the loop) and an input (where the first iteration starts), and it hands the step two call-site args: :input, the current value, and :self, a one-argument callable that re-enters the step."
-               :target nil
+               :target ".node-overlay[data-fn-name=\"branch-chain\"]"
                :check {:kind "manual"}}
               {:title "Follow the step"
-               :body "Expand the card's :step slot to see _branch-chain-step. It is an :if — which is the whole shape: one arm returns a value, the other recurses. The base case comes first because :if is lazy, so the recursive arm is never forced once the walk is done."
-               :target nil
+               :body "Follow the :step edge to the node it draws below the card — _branch-chain-step, already on the canvas. It is an :if — which is the whole shape: one arm returns a value, the other recurses. The base case comes first because :if is lazy, so the recursive arm is never forced once the walk is done."
+               :target ".edge-label-overlay"
                :check {:kind "manual"}}
               {:title "The recursive arm"
                :body "The :else arm is an :invoke whose :func is {:as :self} — that is the self-reference, created at RUN time by fix's impl. No fn in the graph points at itself, so the cycle check never has to bend."
@@ -655,7 +655,7 @@
                :target ".execute-history-row"
                :check {:kind "manual"}}
               {:title "That's the run loop"
-               :body "Free args in, result out, history when you ask for it. The written lesson 12 adds cancellation, TTLs and the run-from-another-fn story. Click [[Finish]]."
+               :body "Free args in, result out, history when you ask for it. The written lesson 12 adds cancellation, how long history is kept, and the run-from-another-fn story. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
             {:id "13"
@@ -663,7 +663,7 @@
              :title "Effects"
              :steps
              [{:title "Effects are declared, then they spread"
-               :body "Every base-fn declares what it touches — :db, :network, :io, :env, :time, :random, :state, :process. The checker unions those along parent and ref edges, so a fn's effect set is what it TRANSITIVELY pulls in. You will read one, then watch it gate a run."
+               :body "Every base-fn declares what it touches — :db, :network, :io, :env, :time, :random, :state, :process, :raw-sql (and, on a cloud, :cross-org). The checker unions those along parent and ref edges, so a fn's effect set is what it TRANSITIVELY pulls in. You will read one, then watch it gate a run."
                :target nil
                :check {:kind "manual"}}
               {:title "Find env"
@@ -671,8 +671,8 @@
                :target "input[placeholder=\"Filter...\"]"
                :check {:kind "selected" :name "env"}}
               {:title "Read the effect chip"
-               :body "The card's effects strip carries one chip: env. That is a computed value, not a label someone typed on this fn — the checker derived it."
-               :target ".effects-chip"
+               :body "The Inspector's Overview shows Effects: one chip, env. That is a computed value, not a label someone typed on this fn — the checker derived it. (The card carries the same strip once you turn off Graph cards: Compact in Settings → Appearance.)"
+               :target ".gd-insp-effects .effects-chip"
                :check {:kind "manual"}}
               {:title "Open Run"
                :body "Click [[⋯]] on the env row, then [[▶ Run]]. Before the fields, the popover states “side effects: env” — and the Run button is DISABLED."
@@ -688,7 +688,7 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Secrets ride the same rails"
-               :body "A vault value is typed [:secret T]: the checker propagates that marker exactly like an effect, and the executor hides such values at sinks (the Run pane shows ●●●). Creating one needs vault access, so the written lesson 13 covers it end to end — the marker is the part to remember. Click [[Finish]]."
+               :body "A vault value is typed [:secret T]: the checker propagates that marker exactly like an effect, and the executor hides such values at sinks (the Run pane says “Result hidden”). Creating one needs vault access, so the written lesson 13 covers it end to end — the marker is the part to remember. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
             {:id "14"
@@ -700,7 +700,7 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Create the tests namespace"
-               :body "In the Explorer, click [[+ Namespace]] and name it exactly `tests`"
+               :body "At the bottom of the Explorer click [[New namespace]], type exactly `tests` — and press [[Enter]]."
                :target ".create-root-ns-btn"
                :targets [".create-root-ns-btn" ".inline-input"]
                :check {:kind "ns-exists" :name "tests"}
@@ -820,7 +820,7 @@
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
               {:title "Find it in the tree"
-               :body "Click the [[✕ failed]] chip under the Explorer's filter. The tree narrows to fns with UNRESOLVED failures from the last 7 days — yours, with a ✕1 on its row, its namespace counting it, the chip counting the runs. A failure clears when you fix the fn, when the same version later succeeds, or when you dismiss it."
+               :body "First clear the filter (the [[×]] next to it — a filtered tree hides everything else), then click the [[✕ failed]] chip under it. The tree narrows to fns with UNRESOLVED failures from the last 7 days — yours, with a ✕1 on its row, its namespace counting it, the chip counting the runs. A failure clears when you fix the fn, when the same version later succeeds, or when you dismiss it."
                :target "#kind-filters .kind-toggle[data-kind=\"failed\"]"
                :check {:kind "dom" :selector "#kind-filters .kind-toggle[data-kind=\"failed\"][aria-pressed=\"true\"]"}}
               {:title "Read the failure"
@@ -844,7 +844,7 @@
                :target nil
                :check {:kind "manual"}}
               {:title "What each surface answers"
-               :body "The lenses answer WHERE: which fns, which namespaces, how many. The Inspector answers WHAT: the failure's message and ✕, the diagnostic under its argument, the finding with your say. Debug — in the bar under the canvas — answers why (lesson 15), and Monitoring (account menu → [[Organization]]) answers how often. Click [[◍ all]] to clear the lens, then [[Finish]] — the tour offers to delete tutorial-bad-json."
+               :body "The lenses answer WHERE: which fns, which namespaces, how many. The Inspector answers WHAT: the failure's message and ✕, the diagnostic under its argument, the finding with your say. The trace tree answers why (lesson 15), and Monitoring (account menu → [[Organization]]) answers how often. Click [[◍ all]] to clear the lens, then [[Finish]] — the tour offers to delete tutorial-bad-json."
                :target "#kind-filters .kind-toggle[data-kind=\"all\"]"
                :check {:kind "manual"}}]}
             {:id "17"
@@ -857,7 +857,7 @@
                :check {:kind "manual"}}
               {:title "Narrow by kind"
                :body "Under the filter box sit the kind chips: ◍ all, λ fn, T types, 🔒 secrets, ⚙ services. Click [[T types]] — the tree collapses to type-rows only, and the chip carries their count."
-               :target ".kind-toggle"
+               :target ".kind-toggle[data-kind=\"types\"]"
                :check {:kind "manual"}}
               {:title "Back to everything"
                :body "Click [[◍ all]] to clear the lens. Your choice is remembered per browser, so the editor opens where you left it."
@@ -868,9 +868,10 @@
                :target "input[placeholder=\"Filter...\"]"
                :check {:kind "selected" :name "str-len"}}
               {:title "The Inspector's tabs"
-               :body "Overview, Bindings, Runs. Click [[Bindings]] — it lists the same slot table you would assemble by hand from lesson 03, computed server-side."
+               :body "Overview, Bindings, Runs, Versions. Click [[Bindings]] — it lists the same slot table you would assemble by hand from lesson 03, computed server-side."
                :target ".gd-insp-tabs"
-               :check {:kind "dom" :selector ".gd-insp-tab"}}
+               :targets [".gd-insp-tabs" ".gd-insp-tab[data-insp-tab=\"bindings\"]"]
+               :check {:kind "dom" :selector ".gd-insp-tab[data-insp-tab=\"bindings\"][aria-selected=\"true\"]"}}
               {:title "Who uses a fn?"
                :body "The graph points both ways. Type `const` in the filter and click the [[const]] row (core.logic) — the primitive that returns its :value; half the platform pins constants through it."
                :target "input[placeholder=\"Filter...\"]"
@@ -957,7 +958,7 @@
                :targets ["#gd-views-btn" ".gd-views-pop"]
                :check {:kind "dom-absent" :selector ".gd-views-active"}}
               {:title "That's workspaces"
-               :body "Scope is a view, not a permission: everything stays reachable, you just stop looking at it. The written lesson 19 adds per-fn hiding (⊘) and how workspaces interact with grants. Click [[Finish]]."
+               :body "Scope is a view, not a permission: everything stays reachable, you just stop looking at it. The written lesson 19 adds per-namespace hiding (⊘) and the shared smart-views fn. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
             {:id "20"
@@ -1092,12 +1093,13 @@
                :check {:kind "dom" :selector "#branch-popover-error:not(.hidden)"}}
               {:title "Propose it"
                :body "Click [[⋯]] on the tutorial-feature row and choose [[📤 Propose for review]] — the branch is now submitted for review into its base, and the popover header counts “1 proposal awaiting review”. Proposed branches are the reviewer's to-do list."
-               :target ".branch-row-more[data-more-branch=\"tutorial-feature\"]"
-               :targets [".branch-row-more[data-more-branch=\"tutorial-feature\"]" ".branch-row-more-menu.open .branch-row-propose[data-propose-branch=\"tutorial-feature\"]"]
+               :target "#branch-chip-btn"
+               :targets ["#branch-chip-btn" ".branch-row-more[data-more-branch=\"tutorial-feature\"]" ".branch-row-more-menu.open .branch-row-propose[data-propose-branch=\"tutorial-feature\"]"]
                :check {:kind "dom" :selector ".branch-row-approve[data-approve-branch=\"tutorial-feature\"]"}}
               {:title "Approve it"
                :body "Click [[✅]] on the same row. Its badge flips to 1/1 — the requirement is met. (By default your OWN approval counts, so a solo user is never locked out; a team that wants four-eyes review unticks “Count the author's own approval” in ⚙.)"
-               :target ".branch-row-approve[data-approve-branch=\"tutorial-feature\"]"
+               :target "#branch-chip-btn"
+               :targets ["#branch-chip-btn" ".branch-row-approve[data-approve-branch=\"tutorial-feature\"]"]
                :check {:kind "dom" :selector ".branch-appr-count.ok"}}
               {:title "Ready to land — and why we stop"
                :body "The badge reads 1/1: pressing [[⇢]] now WOULD land the merge. The tour leaves it unclicked on purpose — a merge is by-reference (the target reads the source's version rows), so a merged branch becomes part of its target's history and can no longer be deleted. Landing this one would make the sandbox permanent; in real work that permanence is exactly the point."
@@ -1139,8 +1141,9 @@
                :target nil
                :check {:kind "manual"}}
               {:title "See exactly what you changed"
-               :body "Click [[edit]] on that row again and press [[Diff vs baseline]]. The override is a row, not a patch: the shipped file is untouched underneath, which is what makes the next step total."
-               :target ".gd-asset-diff-btn"
+               :body "The reload closed the panel: open it again (account button → [[Organization]] → [[Assets]]), click [[edit]] on the editor-styles.css row and press [[Diff vs baseline]]. The override is a row, not a patch: the shipped file is untouched underneath, which is what makes the next step total."
+               :target "#auth-lock-btn, .auth-avatar"
+               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Organization\"]" "#gd-operate-nav button[data-section=\"assets\"]" "[data-section=\"assets\"] .gd-asset-edit-btn" ".gd-asset-diff-btn"]
                :check {:kind "manual"}}
               {:title "Put it back"
                :body "Click [[Revert to baseline]] and confirm. The row is deleted, the shipped file serves again, and the chip reads baseline — reload once more to run it."
@@ -1165,14 +1168,14 @@
                :check {:kind "fn-parent" :name "tutorial-versioned" :parent "const"}
                :creates {:type "fn" :name "tutorial-versioned"}}
               {:title "Give it a description"
-               :body "Click [[⋯]] on the tutorial-versioned row and choose [[i]] (Description). Type `first draft` and [[Save]]. That write appends a version row — the fn now has two."
+               :body "Click [[⋯]] on the tutorial-versioned row and choose [[i]] (Description). A small note opens — click its [[✎ Edit]], type `first draft` and [[Save]]. That write appends a version row — the fn now has two."
                :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"description\"]" ".arg-value-edit-popover"]
+               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"description\"]" ".description-tooltip" ".description-tooltip-textarea"]
                :check {:kind "manual"}}
               {:title "And another"
-               :body "Do it once more: [[⋯]] → [[i]], this time `second draft`, [[Save]]. Three version rows now — the create and two edits. Nothing was replaced."
+               :body "Do it once more: [[⋯]] → [[i]] → [[✎ Edit]], this time `second draft`, [[Save]]. Three version rows now — the create and two edits. Nothing was replaced."
                :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"description\"]" ".arg-value-edit-popover"]
+               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"description\"]" ".description-tooltip" ".description-tooltip-textarea"]
                :check {:kind "manual"}}
               {:title "Open the history"
                :body "Click [[⋯]] and then [[⌛]] — version history. Every version row for this fn, newest first, ACROSS BRANCHES: each row names the branch it was written on, so a fn you edited on a fork shows both timelines here."
@@ -1189,7 +1192,7 @@
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"fn-versions\"]"]
                :check {:kind "manual"}}
               {:title "What restore does not touch"
-               :body "Only the fn's own fields travel: name, description, return type, constraint. Bindings have their OWN version rows (lesson 03), so a value you rebound stays rebound. Reverting those silently, from a fn-level button, would undo edits you never named."
+               :body "Only the fn's own fields travel: description, return type, constraint (never the name). Bindings have their OWN version rows (lesson 03), so a value you rebound stays rebound. Reverting those silently, from a fn-level button, would undo edits you never named."
                :target nil
                :check {:kind "manual"}}
               {:title "That's the timeline"
@@ -1231,7 +1234,7 @@
                :target "[data-users-panel] [data-invite-row] .grant-delete"
                :check {:kind "dom-absent" :selector "[data-users-panel] [data-invite-row]"}}
               {:title "That's membership"
-               :body "Invite by email or by link, remove by row, transfer ownership when you hand the org over. What a member may DO is the next lesson: capabilities are granted per namespace, not per person. The written lesson 24 covers roles and the owner-only actions."
+               :body "Invite by email or by link, remove by row, transfer ownership when you hand the org over. What a member may DO is the next lesson: capabilities are granted per namespace, not per person. The written lesson 24 covers the owner-only actions; lesson 26 covers roles."
                :target nil
                :check {:kind "manual"}}]}
             {:id "25"
@@ -1283,7 +1286,7 @@
                :target "[data-roles-panel] form"
                :check {:kind "manual"}}
               {:title "Give it a member"
-               :body "The members cell is an editable list of usernames, prefilled with the current set. Type a member's username and submit. It is a SET, not an append: what you submit becomes the whole membership, so clearing a name removes that person from the role."
+               :body "The members cell is an editable list of member emails (the address each account signs in with), prefilled with the current set. Type a member's email and submit. It is a SET, not an append: what you submit becomes the whole membership, so clearing a name removes that person from the role."
                :target "[data-roles-panel]"
                :check {:kind "manual"}}
               {:title "What they can do now"
@@ -1387,7 +1390,7 @@
                :target "[data-packages-panel] .packages-uninstall"
                :check {:kind "dom-absent" :selector "[data-packages-panel] .packages-uninstall"}}
               {:title "That's distribution"
-               :body "Publish freezes, install pins, fork copies. The written lessons 27 and 28 cover the on-disk package format (package.edn / fns.edn / impls.clj, which is how the built-in packages are written) and the governance catalog in the Organization surface. Click [[Finish]] to clean up."
+               :body "Publish freezes, install pins, fork copies. The written lessons 28 and 29 cover the on-disk package format (package.edn / fns.edn / impls.clj, which is how the built-in packages are written) and the governance catalog in the Organization surface. Click [[Finish]] to clean up."
                :target nil
                :check {:kind "manual"}}]}
             {:id "30"
@@ -1468,11 +1471,12 @@
                :check {:kind "manual"}}
               {:title "What the row means"
                :body "Enabled decides whether the reconciler starts it. Restart policy decides what happens when it exits — always, only on failure, never. The row is scoped to your organization and to the branch you are on, so the same fn can run on dev and prod at once without a second definition."
-               :target ".service-popover"
+               :target nil
                :check {:kind "manual"}}
               {:title "Remove it"
                :body "Open [[⋯]] → [[⚙]] once more: the popover now reads “Service: :tutorial-daemon” and carries the row’s state. Click [[Delete service]]. Deleting the row is how you stop a service for good — the fn itself is untouched."
-               :target ".service-popover"
+               :target "button.more-actions-trigger"
+               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"service-settings\"]" ".service-popover"]
                :check {:kind "manual"}}
               {:title "That's supervision"
                :body "A service is desired state, not a deployment: you write the row, the reconciler makes it true. The written lesson 32 builds a real one — a :future-parented thunk, then a scheduled job — and covers cardinality and the dedicated-tier isolation this runs under. Click [[Finish]] to clean up."
@@ -1608,7 +1612,7 @@
                :target "#gd-theme-select"
                :check {:kind "manual"}}
               {:title "Now the keys"
-               :body "Open [[Keyboard]] in the Settings nav. Every command behind Space is listed with its keys. On “Fit the graph in view” click [[Change]], press `f` `f`, then [[Enter]]."
+               :body "Close the token editor and the save dialog with their [[×]], then open [[Keyboard]] in the Settings nav. Every command behind Space is listed with its keys. On “Fit the graph in view” click [[Change]], press `f` `f`, then [[Enter]]."
                :target "#gd-settings-nav [data-section=\"keyboard\"]"
                :targets ["#gd-settings-nav [data-section=\"keyboard\"]" "#gd-keymap-root .gd-km-row[data-shortcut=\"graph-fit\"] .gd-km-change"]
                :check {:kind "dom" :selector "#gd-keymap-root .gd-km-row[data-shortcut=\"graph-fit\"] .gd-km-default"}}

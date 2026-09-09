@@ -151,6 +151,23 @@
       (is (empty? (filter #(= "2.0.0" (:version %)) (sp/query-entities (storage) :package-version {:name "night-ink"})))
           "nothing written under the taken name")
       (finally (tc/install-org-cap-fn! nil))))
+  (testing "two orgs racing for one public name: exactly one wins, every time (the name lock)"
+    (tc/install-org-cap-fn! (fn [cap] (= cap :publish-packages)))
+    (try
+      (doseq [round (range 6)]
+        (let [pkg (str "race.theme" round)
+              publish (fn [org version]
+                        (future
+                          (binding [tc/*current-org* org]
+                            (body-json (setup/via-graph *bootstrap* :_mkp-handler
+                                                        (json-req {:kind "theme" :name pkg :version version
+                                                                   :public true :payload theme-payload}))))))
+              results (mapv deref [(publish "race-a" "1.0.0") (publish "race-b" "2.0.0")])]
+          (is (= 1 (count (filter :ok results))) (str "round " round ": " (pr-str results)))
+          (is (= ["name-taken"] (mapv :reason (remove :ok results))) (str "round " round ": " (pr-str results)))
+          (is (= 1 (count (distinct (map :org-id (sp/query-entities (storage) :package-version {:name pkg})))))
+              "one org holds the name")))
+      (finally (tc/install-org-cap-fn! nil))))
   (testing "your own rows shadow another org's public package of the same name — one org per card"
     (tc/install-org-cap-fn! (fn [cap] (= cap :publish-packages)))
     (try

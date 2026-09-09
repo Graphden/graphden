@@ -151,23 +151,12 @@
         (throw e)))))
 
 
-(defbase publish-package-apply
-  [pkg-name pkg-version bundle pkg-public listing]
-  ;; Authz chokepoint: publishing to an ORG's registry requires the
-  ;; `:publish-packages` org capability. Guard the deepest effectful core so
-  ;; NO route (JSON or panel) can bypass it. Single-tenant-safe via the
-  ;; platform-tier short-circuit — mirrors the `:view-all-stats` precedent in
-  ;; app/execution/impls.clj; the org-cap seam is default-deny without the
-  ;; tenancy addon, so the short-circuit keeps self-hosted/operator publishing
-  ;; open. `:authz/forbidden` → 403 in the tenancy request-scope wrapper.
-  (when-not (or (tc/current-platform-tier?)
-                (tc/current-has-org-cap? :publish-packages))
-    (throw (ex-info "Publishing requires the publish-packages capability."
-                    {:type :authz/forbidden :capability :publish-packages})))
-  (cr/record-effect! :db)
-  (cr/record-effect! :time)
-  (let [storage (request/require-storage ctx)
-        fns (:fns bundle)
+(defn- publish-under-lock!
+  "The check-then-insert of a publish, run with the package's name lock
+   held (`shared/with-package-name-lock`): the version pre-check, the
+   public-name holder check, the insert. See `publish-package-apply`."
+  [storage pkg-name pkg-version bundle pkg-public listing]
+  (let [fns (:fns bundle)
         holder (foreign-public-holder storage pkg-name)]
     (cond
       (seq (sp/query-entities storage :package-version
@@ -224,6 +213,30 @@
          :payload (:payload listing)
          ;; who to tell about the moderation decision
          :publisher-id (tc/current-user-id)}))))
+
+
+(defbase publish-package-apply
+  [pkg-name pkg-version bundle pkg-public listing]
+  ;; Authz chokepoint: publishing to an ORG's registry requires the
+  ;; `:publish-packages` org capability. Guard the deepest effectful core so
+  ;; NO route (JSON or panel) can bypass it. Single-tenant-safe via the
+  ;; platform-tier short-circuit — mirrors the `:view-all-stats` precedent in
+  ;; app/execution/impls.clj; the org-cap seam is default-deny without the
+  ;; tenancy addon, so the short-circuit keeps self-hosted/operator publishing
+  ;; open. `:authz/forbidden` → 403 in the tenancy request-scope wrapper.
+  (when-not (or (tc/current-platform-tier?)
+                (tc/current-has-org-cap? :publish-packages))
+    (throw (ex-info "Publishing requires the publish-packages capability."
+                    {:type :authz/forbidden :capability :publish-packages})))
+  (cr/record-effect! :db)
+  (cr/record-effect! :time)
+  (let [storage (request/require-storage ctx)]
+    ;; Serialised per package name across executors (docs/MARKETPLACE.md
+    ;; § 2, Names): without the lock two orgs racing for the same public
+    ;; name both pass the holder check and both land.
+    (shared/with-package-name-lock
+      storage pkg-name
+      #(publish-under-lock! storage pkg-name pkg-version bundle pkg-public listing))))
 
 
 (defbase breaking-changes-between

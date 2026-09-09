@@ -78,7 +78,14 @@ package as usual), so a catalog still shows one org per card. The check is
 `foreign-public-holder` inside `publish-package-apply`
 (`registry/impls.clj`), adjacent to the insert like the version check;
 under row-level security a tenant sees exactly the other orgs' public rows,
-which is the set that matters. `(name, version)` is **`UNIQUE` at the DB,
+which is the set that matters. The whole check-then-insert runs under a
+per-name **advisory lock** (`registry-shared/with-package-name-lock`, a
+session lock on a borrowed connection, taken with `pg_try_advisory_lock`
+in a short retry loop so a waiter never parks a pool connection —
+cluster-wide, so two executors count too): two orgs racing for the same
+public name cannot both pass the holder check, which the `(name, version)`
+key alone would not prevent for different versions. A name held for the
+whole retry window (~5 s) answers `:packages/name-busy`. `(name, version)` is **`UNIQUE` at the DB,
 registry-wide** (applied to an existing database by the migration pass); the
 publish path keeps its friendly pre-check and answers a constraint
 violation the same way (`version-exists`), so a race or another org's

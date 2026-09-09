@@ -117,8 +117,10 @@ The organization tours drive surfaces not every session has, so they
 declare what they need (`:requires`) — a capability (`manage-users`,
 `publish-packages`, …), or a named condition: the services tour needs the
 **dedicated plan** (services run on an executor the org owns), the
-cross-org tour needs organizations to exist at all, and the
-asset-override tour needs a single-tenant instance. Anywhere the condition
+services-talking-to-services tour additionally needs **your own
+instance** (it names the editor's web-server, which a cloud organization
+does not own), the cross-org tour needs organizations to exist at all,
+and the asset-override tour needs a single-tenant instance. Anywhere the condition
 fails — the public demo, a free-plan org, a self-hosted instance with no
 tenancy addon — the picker still lists the lesson, disabled, with the
 reason on the row.

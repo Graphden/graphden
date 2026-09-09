@@ -42,6 +42,18 @@ const REQUIRE_SIGNALS = {
     phrase: 'the dedicated plan (or your own instance)',
     short: 'the dedicated plan',
   },
+  // Lesson 35 names the editor's OWN web-server as the service it calls. A
+  // cloud organization has no such service of its own (the platform's row is
+  // not the tenant's to resolve — the run answers an internal error), so the
+  // tour needs both services and a single-tenant instance.
+  'own-web-server': {
+    test: () => typeof window.gdServicesManageable === 'function'
+             && window.gdServicesManageable()
+             && !(typeof window.graphdenTenancyActive === 'function'
+                  && window.graphdenTenancyActive()),
+    phrase: 'your own instance (a cloud organization has no web-server of its own to name)',
+    short: 'your own instance',
+  },
   // The Assets panel edits the frontend every session on the instance loads,
   // so it exists only on a single-tenant deployment — under the cloud tenancy
   // addon it is hidden and its writes are platform-only.

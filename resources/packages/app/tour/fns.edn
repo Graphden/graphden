@@ -1544,7 +1544,7 @@
                :check {:kind "manual"}}]}
             {:id "35"
              :chapter "Your organization"
-             :requires "services"
+             :requires "own-web-server"
              :title "Services talking to services"
              :steps
              [{:title "Two services, one graph"

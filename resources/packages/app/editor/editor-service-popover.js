@@ -343,7 +343,7 @@ function tenantServicePopoverHtml(fnEntity, svc) {
     + (policy === val ? ' checked' : '') + '> ' + label + '</label>';
   return ''
     + '<div class="service-popover-header">'
-    +   '<span class="service-popover-title">Service — :' + name + '</span>'
+    +   '<span class="service-popover-title">' + (existingId ? 'Service: :' : 'Make service: :') + name + '</span>'
     +   '<button class="service-popover-close" aria-label="Close">×</button>'
     + '</div>'
     + '<div class="service-popover-body">'
@@ -360,10 +360,10 @@ function tenantServicePopoverHtml(fnEntity, svc) {
     + '</div>'
     + '<div class="service-popover-actions">'
     +   '<button class="service-popover-save-btn" data-existing-service-id="' + existingId + '">'
-    +     (existingId ? 'Save' : 'Create service') + '</button>'
+    +     (existingId ? 'Save & reconcile' : 'Create & reconcile') + '</button>'
     +   (existingId
         ? '<button class="service-popover-delete-btn" data-existing-service-id="'
-          + existingId + '">Delete</button>'
+          + existingId + '">Delete service</button>'
         : '')
     + '</div>';
 }

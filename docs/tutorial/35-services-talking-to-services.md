@@ -35,9 +35,11 @@ HTTP in the graph, and nothing is typed by hand.
 You will create a producer service on a free port, a consumer that
 calls it, and watch the address appear and disappear.
 
-0. **The shortest version first** (what the in-editor tour does): the
-   editor's own `:web-server` is already a running service, so name
-   *it*. Extend `:service-get` (filter `service-get`, `⋯` →
+0. **The shortest version first** (what the in-editor tour does, on
+   your own instance): the editor's own `:web-server` is already a
+   running service, so name *it*. (On a cloud organization that row is
+   the platform's, not yours to resolve — skip to step 1 and name the
+   producer you make there.) Extend `:service-get` (filter `service-get`, `⋯` →
    **Extend**, name `tutorial-fetch`); on the card bind the `service`
    placeholder with **Bind fn-ref** → `web-server` and the `path`
    placeholder with **Bind literal** → `/version`; `⋯` → `▶`, tick

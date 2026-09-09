@@ -15,6 +15,7 @@
     [graphden.crud.fn-execution.trace :as trace]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
+    [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
     [graphden.system.deploy-config :as deploy-config]
     [graphden.types.core :as types]
@@ -69,6 +70,21 @@
    base-fn names are globally unique, so shared primitives live in core."
   [string]
   (try (edn/read-string string) (catch Exception _ nil)))
+
+
+(defbase platform-owned-def-names
+  "Names among `fn-defs` whose deterministic `(namespace, name)` fn-id was
+   written by the package sync this boot — the fns the editor API's
+   package-guard refuses to touch (`crud.package-guard`, the 2026-08-20
+   `:add`-poisoning class). The MCP upsert guard and the registry's fork
+   consult this so no bundle-sync path stays a write route around that
+   protection. Moved here from the optional mcp package when the registry
+   needed it too — base-fn names are globally unique."
+  [fn-defs]
+  (into []
+        (comp (filter #(owned/owned-fn-id? (ids/fn-id (:namespace %) (:name %))))
+              (map #(some-> (:name %) name)))
+        fn-defs))
 
 
 ;; === System Information ===
@@ -455,6 +471,9 @@
    :to-json-pretty {:impl to-json-pretty :taint-propagate? true}
    :parse-json {:impl parse-json :taint-propagate? true}
    :parse-edn {:impl parse-edn :taint-propagate? true}
+   ;; taint-propagate: returns the caller bundle's own :name fields —
+   ;; content passthrough (SECRETS.md § T3).
+   :platform-owned-def-names {:impl platform-owned-def-names :taint-propagate? true}
    :system-property system-property-fn
    :jvm-uptime-ms jvm-uptime-ms-fn
    :heap-used heap-used-fn

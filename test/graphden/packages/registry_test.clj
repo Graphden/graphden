@@ -8,6 +8,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.wire :as wire]
     [graphden.storage.protocol.core :as sp]
@@ -712,6 +713,39 @@
           "rolled back to the older version"))))
 
 
+(deftest withdraw-blocks-only-the-pinned-version
+  ;; A pin resolves through ITS version row, so the still-installed gate is
+  ;; (name, version): a branch that moved on to 1.0.1 must not keep 1.0.0
+  ;; unwithdrawable forever (the gate matched by name alone, so an old
+  ;; version could never be retired while anyone pinned any version).
+  (doseq [v ["1.0.0" "1.0.1"]]
+    (sp/create-entity (storage) :package-version
+                      {:name "wd.gate" :version v :ns-root "wdgate.demo"
+                       :fns [{:name :wd-gate-fn :namespace "wdgate.demo"
+                              :parent :const :args {:value v}}]
+                       :dependencies [:const] :content-hash (str "wdg-" v)}))
+  (exec/execute-with-named-args (:ctx *bootstrap*)
+                                (get (:all-name->id *bootstrap*) :set-package-pin)
+                                {:pkg-name "wd.gate" :pkg-version "1.0.1"})
+  (let [withdraw! (fn [v]
+                    (let [resp (setup/via-graph *bootstrap* :withdraw-package-handler
+                                                {:request-method :delete
+                                                 :query-params {"name" "wd.gate" "version" v}})]
+                      [(:status resp) (json/parse-string (:body resp) true)]))]
+    (testing "the version nobody pins any more withdraws"
+      (let [[status body] (withdraw! "1.0.0")]
+        (is (= 200 status))
+        (is (true? (:ok body)))
+        (is (empty? (sp/query-entities (storage) :package-version {:name "wd.gate" :version "1.0.0"}))
+            "the 1.0.0 row is gone")))
+    (testing "the pinned version answers 409 still-installed"
+      (let [[status body] (withdraw! "1.0.1")]
+        (is (= 409 status))
+        (is (= "still-installed" (:reason body)))
+        (is (seq (sp/query-entities (storage) :package-version {:name "wd.gate" :version "1.0.1"}))
+            "the pinned row survives")))))
+
+
 (deftest panel-fork-handler-copies-fns-and-notes-result
   ;; Distinct package/fn/ns names from fork-package-copies-into-original-ns —
   ;; both share the one `:once` bootstrap DB, so a reused (name, version) would
@@ -916,6 +950,48 @@
           "copied at its ORIGINAL namespace (not a versioned one)")
       (is (empty? (sp/query-entities (storage) :package-install {:package-name "fork.demo"}))
           "fork does NOT write a pin — it is a copy, not a reference install"))))
+
+
+(deftest fork-refuses-a-package-owned-namespace
+  ;; Fork syncs at the ORIGINAL namespace on the deterministic (ns, name)
+  ;; ids. A namespace the loader synced from disk on this instance owns
+  ;; those ids: the fork would land on platform rows, the "copies" would
+  ;; stay read-only behind crud.package-guard, and the next boot's sync
+  ;; would overwrite them (the written lesson 29 used to promise editable
+  ;; copies here). The graph guard refuses the whole fork with the owned
+  ;; names — the same predicate the MCP upsert guard consults.
+  (let [{:keys [ctx all-name->id]} *bootstrap*
+        bundle (exec/execute-with-named-args ctx (get all-name->id :export-namespace)
+                                             {:root "app.contact-demo"})
+        owned-before (->> (:fns bundle)
+                          (filter #(owned/owned-fn-id? (ids/fn-id (:namespace %) (:name %))))
+                          (map #(name (:name %)))
+                          set)]
+    (exec/execute-with-named-args ctx (get all-name->id :publish-package)
+                                  {:pkg-name "cd-owned" :pkg-version "1.0.0" :bundle bundle})
+    (is (seq owned-before) "precondition: the exported platform namespace IS package-owned")
+    (testing "POST /api/packages/fork answers a package-owned envelope and writes nothing"
+      (let [resp (setup/via-graph *bootstrap* :fork-package-handler
+                                  (publish-req {:name "cd-owned" :version "1.0.0"}))
+            body (json/parse-string (:body resp) true)]
+        (is (= 200 (:status resp)))
+        (is (false? (:ok body)))
+        (is (= "package-owned" (:reason body)))
+        (is (= "cd-owned" (:name body)))
+        (is (= owned-before (set (:owned body)))
+            "every package-synced name in the bundle is reported, nothing else")
+        (is (nil? (:forked body)) "no fns were synced")))
+    (testing "the panel's fork notice names the owned fns and where the fix belongs"
+      (let [resp (setup/via-graph *bootstrap* :_pkg-fork-panel-handler
+                                  {:request-method :post
+                                   :query-params {"name" "cd-owned" "version" "1.0.0"}})]
+        (is (= 200 (:status resp)))
+        (is (re-find #"packages-fork-err" (:body resp)) "error notice class")
+        (is (re-find #"package-owned" (:body resp)) "the reason code")
+        (is (re-find #"synced from a package on this instance" (:body resp)))
+        (is (re-find #"fns.edn instead" (:body resp)) "where the fix belongs")
+        (is (re-find (re-pattern (first owned-before)) (:body resp))
+            "an owned fn name is listed")))))
 
 
 (deftest install-resolves-ref-based-free-arg-slot-on-external-fn

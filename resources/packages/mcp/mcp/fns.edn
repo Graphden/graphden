@@ -20,15 +20,11 @@
  :description "MCP server — JSON-RPC endpoint + tools/resources over existing graph primitives."
  :fns
  [;; ==========================================================================
-  ;; Base-fns (impls.clj). (`:parse-edn` moved to core/system — the
-  ;; registry's import route needed it too and base-fn names are globally
-  ;; unique; the bare refs below still resolve.)
+  ;; Base-fns (impls.clj). (`:parse-edn` and `:platform-owned-def-names`
+  ;; moved to core/system — the registry's import route and fork needed
+  ;; them too and base-fn names are globally unique; the bare refs below
+  ;; still resolve.)
   ;; ==========================================================================
-  {:name :platform-owned-def-names
-   :description "Names among `fn-defs` whose deterministic (namespace, name) fn-id was written by the package sync this boot — the fns the editor's package-guard protects. One in-memory registry lookup per def."
-   :args {:fn-defs {:type [:union :null [:list :keyword-map]] :description "Parsed fn-def maps (fns.edn shape); nil treated as empty."}}
-   :return-type [:list :text]}
-
   {:name :sync-fn-defs-branch!
    :description "Sync fn-defs into a NAMED branch + delta-invalidate that branch's registry. Atomic effect boundary (same carve-out as `:merge-branch!`). Returns the synced fn-ids as text."
    :args {:branch-id {:type :uuid :description "Target branch — the AI's `ai/…` branch, never the request's own."}

@@ -879,13 +879,19 @@
   {:name :_wd-missing?
    :parent :nil? :args {:value :_wd-row}}
 
-  ;; Pins are per-branch rows keyed by package NAME — any branch counts, so
-  ;; the lookup deliberately drops the branch filter the install path uses.
+  ;; Pins are per-branch rows keyed by package name + VERSION — any branch
+  ;; counts, so the lookup deliberately drops the branch filter the install
+  ;; path uses; but only pins AT THIS VERSION block (a pin resolves through
+  ;; its own version row — a branch on 1.0.1 does not need 1.0.0 to exist).
+  ;; Matching by name alone made every old version unwithdrawable for as
+  ;; long as anyone pinned any version (the lesson-29 step-8 promise).
   {:name :_wd-pins
    :parent :query-entities
    :args {:entity-type {:value "package-install"}
-          :where {:parent :assoc-empty
-                  :args {:key {:value :package-name} :value :_wd-name}}}}
+          :where {:parent :assoc
+                  :args {:map {:parent :assoc-empty
+                               :args {:key {:value :package-name} :value :_wd-name}}
+                         :key {:value :version} :value :_wd-version}}}}
 
   {:name :_wd-pinned?
    :parent :not :args {:value {:parent :empty? :args {:coll :_wd-pins}}}}
@@ -1586,6 +1592,30 @@
    :parent :fork-package-fns
    :args {:fns {:ref :_pkgv-fns :type [:list :jsonb]}}}
 
+  ;; Package-owned guard: fork syncs the bundle at its ORIGINAL namespace,
+  ;; on the deterministic (namespace, name) ids. When that namespace is a
+  ;; package the loader synced from disk on THIS instance, those ids are
+  ;; the platform's own — the write would land on rows the editor API's
+  ;; package-guard protects, the copies would stay read-only, and the
+  ;; next boot's sync would overwrite them. Refuse the whole fork (a
+  ;; partial copy of the un-owned remainder is not a usable package);
+  ;; the fix belongs in the package's fns.edn (self-host) or in a fork
+  ;; taken on an instance where the namespace is not platform-owned.
+  ;; Same predicate the MCP upsert guard uses (`:platform-owned-def-names`).
+  {:name :_fork-owned-names
+   :description "Names in the resolved version's bundle whose deterministic fn-id is package-synced on this instance — a fork would write over platform rows."
+   :parent :platform-owned-def-names
+   :args {:fn-defs {:ref :_pkgv-fns :type [:list :keyword-map]}}}
+
+  {:name :_fork-owned-any?
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll :_fork-owned-names}}}}
+
+  {:name :_fork-err-owned
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :owned}]
+          :vals [{:value false} {:value "package-owned"} {:as :pkg-name} :_fork-owned-names]}}
+
   {:name :_fork-do-ok
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :name} {:value :version} {:value :forked}]
@@ -1596,12 +1626,14 @@
    :parent :cond
    :args {:clauses [:_pkgv-row-nil?     :_pkgv-err-not-found
                     :_pkgv-missing-any? :_pkgv-err-missing
+                    :_fork-owned-any?   :_fork-err-owned
                     {:value true}       :_fork-do-ok]}
-   ;; The three cond branches' envelopes, verbatim — ok | missing-deps |
-   ;; not-found. Matches the computed union (type-drift sweep).
+   ;; The four cond branches' envelopes, verbatim — ok | missing-deps |
+   ;; package-owned | not-found. Matches the computed union (type-drift sweep).
    :return-type [:union {:ok :bool :name :any :version [:union :null :text]
                          :forked :int}
                  {:ok :bool :reason :text :missing [:list :keyword]}
+                 {:ok :bool :reason :text :name :any :owned [:list :text]}
                  {:ok :bool :reason :text :name :any :requested :any}]}
 
   {:name :_body-version
@@ -2405,9 +2437,21 @@
    :parent :get :args {:coll :_pkg-fork-result :key {:value :ok} :default {:value false}}}
   {:name :_pkg-fork-reason
    :parent :get :args {:coll :_pkg-fork-result :key {:value :reason} :default {:value "unknown"}}}
+  {:name :_pkg-fork-owned
+   :parent :get :args {:coll :_pkg-fork-result :key {:value :owned} :default {:value []}}}
+  {:name :_pkg-fork-owned-text
+   :description "Detail for a package-owned refusal — which fns the package sync owns on this instance and where the fix belongs; empty for every other failure."
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_pkg-fork-owned}}
+          :then {:value ""}
+          :else {:parent :str-join
+                 :args {:coll [{:value " — these fns are synced from a package on this instance ("}
+                               {:parent :str-join :args {:coll :_pkg-fork-owned :separator {:value ", "}}}
+                               {:value "); edit the package's fns.edn instead, or fork it where it is not built in."}]
+                        :separator {:value ""}}}}}
   {:name :_pkg-fork-err-text
    :parent :str-join
-   :args {:coll [{:value "Fork failed: "} :_pkg-fork-reason] :separator {:value ""}}}
+   :args {:coll [{:value "Fork failed: "} :_pkg-fork-reason :_pkg-fork-owned-text] :separator {:value ""}}}
   {:name :_pkg-fork-notice-ok
    :parent :hiccup
    :args {:tag {:value "div"}

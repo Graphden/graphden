@@ -1379,7 +1379,7 @@
                :check {:kind "dom" :selector "[data-packages-panel] .packages-uninstall"}
                :creates {:type "ns" :name "mycorp@1-0-0"}}
               {:title "A pin, not a copy"
-               :body "The installed row carries a version box and ↑: type another version and press it to move the pin — that is what an update and a rollback both are. [[Fork]] is the other door: it copies the fns in so you can edit them, and the pin is gone."
+               :body "The installed row carries a version box and ↑: type another version and press it to move the pin — that is what an update and a rollback both are. [[Fork]] is the other door: it copies the fns in so you can edit them, and writes no pin — it is for a package whose namespace is not built into this instance (the written lesson 38)."
                :target "[data-packages-panel]"
                :check {:kind "manual"}}
               {:title "Uninstall"

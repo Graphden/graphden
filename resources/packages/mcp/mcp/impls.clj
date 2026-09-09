@@ -1,5 +1,5 @@
 (ns graphden.packages.app.mcp.impls
-  "The two Clojure boundaries the MCP mutation tools need. Everything
+  "The one Clojure boundary the MCP mutation tools need. Everything
    else in `app/mcp` — parsing, validation, error envelopes, dispatch —
    is graph composition, in the `parse → validate → apply` shape
    `app/execution` established.
@@ -17,28 +17,14 @@
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.executor.registry.core :as registry-core]
-    [graphden.packages.owned :as owned]
-    [graphden.packages.records :as records]
     [graphden.packages.sync :as pkg-sync]
     [graphden.system.branch-router :as br]
     [graphden.versioning.storage.core :as vs]))
 
 
-;; (`parse-edn` moved to core/system/impls.clj — the registry's import
-;; route needed it too, and base-fn names are globally unique.)
-
-
-(defbase platform-owned-def-names
-  "Names among `fn-defs` whose deterministic `(namespace, name)` fn-id was
-   written by the package sync this boot — the fns the editor API's
-   package-guard refuses to touch (`crud.package-guard`, the 2026-08-20
-   `:add`-poisoning class). The MCP upsert guard consults this so the sync
-   path stops being the one write route around that protection."
-  [fn-defs]
-  (into []
-        (comp (filter #(owned/owned-fn-id? (records/fn-id (:namespace %) (:name %))))
-              (map #(some-> (:name %) name)))
-        fn-defs))
+;; (`parse-edn` and `platform-owned-def-names` moved to core/system/impls.clj
+;; — the registry's import route and fork needed them too, and base-fn
+;; names are globally unique.)
 
 
 (defbase sync-fn-defs-branch!
@@ -76,8 +62,4 @@
 
 
 (def impls
-  {;; taint-propagate: returns the caller bundle's own :name fields —
-   ;; content passthrough (SECRETS.md § T3).
-   :platform-owned-def-names {:impl platform-owned-def-names
-                              :taint-propagate? true}
-   :sync-fn-defs-branch! sync-fn-defs-branch!})
+  {:sync-fn-defs-branch! sync-fn-defs-branch!})

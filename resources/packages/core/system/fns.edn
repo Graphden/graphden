@@ -118,6 +118,11 @@
    :args {:string {:type :nullable-text :description "EDN source text."}}
    :return-type :any}
 
+  {:name :platform-owned-def-names
+   :description "Names among `fn-defs` whose deterministic (namespace, name) fn-id was written by the package sync this boot — the fns the editor's package-guard protects. One in-memory registry lookup per def, no storage read. Every write path that syncs a bundle by deterministic id (the MCP `upsert-fn-defs` tool, the registry's fork) consults it so the sync path is never a route around that protection. Lives in core because base-fn names are globally unique and both optional packages need it."
+   :args {:fn-defs {:type [:union :null [:list :keyword-map]] :description "Parsed fn-def maps (fns.edn shape); nil treated as empty."}}
+   :return-type [:list :text]}
+
   {:name :system-property
    :description "`(System/getProperty name)` — read a JVM system property (`java.vm.name`, `java.version`, `user.dir`, etc.). Returns nil when unset. Counterpart to `:env` for environment variables."
    :args {:name {:type :text :description "Property name (`java.version`, …)."}}

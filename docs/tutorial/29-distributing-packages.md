@@ -120,8 +120,8 @@ Packages
 ```
 
 The top table is what's **installed on the current branch**
-(remember branches from Lesson 8 — pins are per-branch, so dev
-and prod can run different versions). The `<details>` below it
+(remember branches from [Lesson 20](20-branches.md) — pins are
+per-branch, so dev and prod can run different versions). The `<details>` below it
 is the **registry** — every published version, with an action
 per row. (The **packages** chip appears only when the optional
 `registry` package is installed on the deployment.)
@@ -169,12 +169,25 @@ one), so they become ordinary editable fn-defs — and writes **no
 pin** (it's a copy, not a reference). A short notice confirms it;
 reload to see the copied fns in the explorer tree.
 
+**When Fork refuses.** The copy lands at the original namespace on
+the same deterministic ids the package loader would use. If that
+namespace is a package synced **from disk on this instance**
+(Lesson 28), those ids are the platform's own: the "copy" would land
+on rows the editor keeps read-only, and the next boot's sync would
+overwrite it. So the fork is refused —
+`{"ok":false,"reason":"package-owned","owned":["greet", …]}` naming
+the fns, and the panel shows the same as a notice. A built-in
+package is changed in its `fns.edn`; Fork is for a package that
+*arrived through the registry* — the case
+[Lesson 38](38-package-lifecycle.md) walks end to end.
+
 | | Install | Fork |
 |---|---|---|
 | Rows | Referenced (shared) | Copied (yours) |
 | Namespace | `ns@version` (qualified) | `ns` (original) |
 | Editable? | No | Yes |
 | Writes a pin? | Yes | No |
+| Refused when | a dependency is missing | a dependency is missing, or the namespace is a built-in package here |
 
 ## Uninstall
 
@@ -200,9 +213,10 @@ curl -X DELETE "http://localhost:9002/api/packages/withdraw?name=hello&version=1
 Rules:
 
 - **Refused with 409 `still-installed`** while *any* branch still
-  pins the package — a pin resolves through the version row, so
-  withdrawing under it would break installs. Consumers unpin
-  (uninstall or update away) first.
+  pins the package **at that version** — a pin resolves through its
+  version row, so withdrawing under it would break installs.
+  Consumers unpin (uninstall or update away) first; a branch that
+  already moved to `1.1.0` does not keep `1.0.0` alive.
 - **404 `no-such-version`** when the `(name, version)` pair is
   unknown.
 - Withdrawing is gated by the same **`publish-packages`**
@@ -243,8 +257,13 @@ on Organization; acting on it happens on the Build packages chip.
    Watch the pin appear.
 4. Type `1.0.0` in the installed row's version box, click `↑` —
    you've rolled back. Type `1.1.0`, `↑` — forward again.
-5. Click **Fork** on `hello 1.0.0`, reload — `mycorp.hello`'s fns
-   are now editable copies.
+5. Click **Fork** on `hello 1.0.0`. Refused: *Fork failed:
+   package-owned — these fns are synced from a package on this
+   instance (greet); edit the package's fns.edn instead…*. That is
+   right: `mycorp.hello` is a package the loader synced from disk,
+   so here its fns are platform-owned and a fork would have landed
+   on those very rows. Fork is for a package whose namespace is
+   *not* built into your instance — Lesson 38 does that one.
 6. Click `×` — the pin's gone.
 7. Open the **Organization** surface's **packages** section — the
    governance catalog lists both published `hello` versions with
@@ -359,5 +378,8 @@ build, not the graph. Two practical notes:
 
 ## Next
 
-Lesson 09 — [State: cells, swap, and a graph-native cache](09-state-cells-and-caches.md):
-holding mutable state in the graph that survives across calls.
+[Lesson 30 — Working across organizations](30-working-across-orgs.md).
+For the whole loop between a package's author and its consumers —
+fixing someone else's package, sending the fix back, accepting it and
+shipping the next version — jump to
+[Lesson 38](38-package-lifecycle.md).

@@ -354,6 +354,21 @@ own namespace (this is where today's copy-`install-package` logic is retained,
 renamed to a fork operation). Only then do rows get duplicated, and only into
 the forker's own org — a deliberate act, not the default.
 
+**Refused on a package-owned namespace.** The copy syncs at the ORIGINAL
+namespace on the deterministic `(namespace, name)` ids — the same ids the boot
+loader writes. When that namespace is a package synced from disk on the
+serving instance, those ids are platform-owned (`graphden.packages.owned`):
+the fork would land on rows `crud.package-guard` keeps API-read-only, the
+"copies" would not be editable, and the next boot's sync would overwrite them.
+`:fork-package` therefore refuses the whole fork with
+`{:ok false :reason "package-owned" :owned [<names>]}` (the panel renders the
+names + where the fix belongs) — a partial copy of the un-owned remainder is
+not a usable package. Same predicate the MCP `upsert-fn-defs` guard consults
+(`:platform-owned-def-names`, core/system). Editing a built-in package is a
+`fns.edn` change; fork serves packages that arrived through the registry
+(another org's public version, a mirror from another graphden), whose
+namespace is not built into the instance.
+
 ---
 
 ## 5. Type 2 — impl+fns packages
@@ -514,8 +529,10 @@ UUIDs (AD-2). No symbolic-ref column.
 - `DELETE /api/packages/withdraw?name=&version=` — withdraw a published
   version — shipped. A release is immutable, not eternal: publishing the wrong
   namespace or the wrong number used to be permanent. Refused with **409
-  `still-installed`** while any branch pins the package (a pin resolves through
-  the version row), **404 `no-such-version`** when the pair is unknown. The
+  `still-installed`** while any branch pins the package **at that version** (a
+  pin resolves through its own version row — a branch that moved on to 1.0.1
+  does not keep 1.0.0 alive), **404 `no-such-version`** when the pair is
+  unknown. The
   materialised `<ns-root>@<version>` copy is NOT removed — it is ordinary graph
   content by then, deleted like any other namespace.
 

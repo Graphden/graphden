@@ -40,7 +40,7 @@
 (def ^:private require-signals
   "The `:requires` values that are named conditions rather than
    capabilities (REQUIRE_SIGNALS in the picker)."
-  #{"services" "assets" "org"})
+  #{"services" "assets" "org" "own-web-server"})
 
 
 (def ^:private known-capabilities

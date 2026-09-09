@@ -27,7 +27,7 @@ Open it from the account menu, press `Space` `v` `m`, or click
 
 | Tab | What is listed | What you can do with a version |
 |---|---|---|
-| **Packages** | fns-only packages published from a namespace | Install (a per-branch pin) or Fork (editable copies) — exactly Lesson 29's two doors |
+| **Packages** | fns-only packages published from a namespace | Install (a per-branch pin) or Fork (editable copies — refused for a package built into this instance) — exactly Lesson 29's two doors |
 | **Themes** | editor themes people saved from Settings → Appearance | Apply |
 | **Keymaps** | keyboard layouts saved from Settings → Keyboard | Apply |
 | **Executor** | the packages *this* executor loaded at boot | nothing — a read-only roster |

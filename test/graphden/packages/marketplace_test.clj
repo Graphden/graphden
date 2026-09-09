@@ -293,6 +293,28 @@
     (is (empty? (filter #(str/starts-with? (:name %) "cards.") (cards {"kind" "theme"}))) "kind tabs partition")))
 
 
+(deftest marketplace-fork-refusal-names-the-owned-fns
+  ;; The Marketplace's Fork goes through `:fork-package`, so a version whose
+  ;; namespace is a package built into this instance is refused as
+  ;; `package-owned`; the card's notice must say WHICH fns and where the fix
+  ;; belongs (mirrors the packages chip's notice), not just the reason code.
+  (let [{:keys [ctx all-name->id]} *bootstrap*
+        bundle (exec/execute-with-named-args ctx (get all-name->id :export-namespace)
+                                             {:root "app.contact-demo"})]
+    (exec/execute-with-named-args ctx (get all-name->id :publish-package)
+                                  {:pkg-name "mk-owned" :pkg-version "1.0.0" :bundle bundle})
+    (let [resp (setup/via-graph *bootstrap* :_mka-install-handler
+                                {:request-method :post
+                                 :query-params {"name" "mk-owned" "version" "1.0.0" "fork" "1"}
+                                 :headers {}})]
+      (is (= 200 (:status resp)))
+      (is (re-find #"Refused: package-owned" (:body resp)) "the reason code")
+      (is (re-find #"synced from a package on this instance" (:body resp)))
+      (is (re-find #"demo-contact" (:body resp)) "an owned fn is named")
+      (is (re-find #"fns.edn instead" (:body resp)) "where the fix belongs")
+      (is (not (re-find #"Forked — " (:body resp)))))))
+
+
 (deftest install-counts-and-apply
   (sp/create-entity (storage) :package-version
                     {:name "cnt.pkg" :version "1.0.0" :ns-root "cnt.demo"

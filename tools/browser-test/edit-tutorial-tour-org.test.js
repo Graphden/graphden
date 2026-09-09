@@ -159,20 +159,36 @@ async function lesson16(page) {
 
   await submitPanelForm(page, '[data-users-panel] form[hx-post="/api/org-members"]',
                         {email: INVITEE});
-  await waitTourTitle(page, 'What an invite actually is', 60000);
-  const invited = await page.evaluate(() => {
-    const badge = document.querySelector('[data-users-panel] .grant-role-badge[title^="Invited"]');
-    return badge ? badge.closest('tr')?.textContent.trim() : null;
-  });
+  await waitTourTitle(page, 'What an invite is', 60000);
+  // The invite lives in the Invites list under the members table (one
+  // `[data-invite-row]` per pending invite), not as a badge on a member row.
+  const invited = await page.evaluate((email) => {
+    const row = Array.from(document.querySelectorAll('[data-users-panel] [data-invite-row]'))
+      .find((r) => r.textContent.includes(email));
+    return row ? row.textContent.trim() : null;
+  }, INVITEE);
   assert(invited && invited.includes(INVITEE),
          'the invited row names the address (got: ' + invited + ')');
   assert(await clickTourButton(page, 'Next'), 'lesson 24 invite-explained Next');
 
+  // The link-invite form step is read-only ("try it or skip it").
+  await waitTourTitle(page, 'The other way in: a link', 30000);
+  assert(await clickTourButton(page, 'Next'), 'lesson 24 link-invite Next');
+
   await waitTourTitle(page, 'Take it back', 30000);
-  await page.evaluate(() => {
-    const badge = document.querySelector('[data-users-panel] .grant-role-badge[title^="Invited"]');
-    badge.closest('tr').querySelector('.grant-delete').click();
-  });
+  // The step's check wants NO invite rows left — a crashed earlier run may
+  // have left its own, so revoke ours first, then any stragglers.
+  for (let i = 0; i < 10; i++) {
+    const clicked = await page.evaluate((email) => {
+      const rows = Array.from(document.querySelectorAll('[data-users-panel] [data-invite-row]'));
+      const row = rows.find((r) => r.textContent.includes(email)) || rows[0];
+      if (!row) return false;
+      row.querySelector('.grant-delete').click();
+      return true;
+    }, INVITEE);
+    if (!clicked) break;
+    await page.waitForTimeout(2500);
+  }
   await waitTourTitle(page, "That's membership", 60000);
   await finishTour(page, 'lesson 24');
   console.log('  lesson 24: walked — invited, read the row, revoked');
@@ -368,20 +384,22 @@ async function lesson31(page) {
   await waitTourTitle(page, 'Give it a member', 30000);
   // Membership is a SET: submitting the field replaces the whole list. Put
   // the signed-in owner in and read it back.
-  await page.evaluate((role) => {
+  await page.evaluate(({role, email}) => {
     const tr = Array.from(document.querySelectorAll('[data-roles-panel] tbody tr'))
       .find((r) => r.textContent.includes(role));
     const form = tr.querySelector('form[hx-post*="/members"]');
     const input = form.querySelector('[name="usernames"]');
-    input.value = '';
+    input.value = email;
     form.querySelector('button[type="submit"]').click();
-  }, ROLE_NAME);
-  // The submit is an htmx post; wait for the tour to offer its Next again
-  // rather than guessing how long the swap takes.
-  await page.waitForFunction(() => Array.from(
-    document.querySelectorAll('#gd-tour-pop .gd-tour-btn'))
-    .some((b) => b.textContent.trim() === 'Next'),
-  null, {timeout: 30000, polling: 100});
+  }, {role: ROLE_NAME, email: EMAIL});
+  // The submit is an htmx post that swaps the WHOLE panel; wait for the
+  // re-rendered row to carry the member (names are account emails since
+  // the 2026-09-09 roles fix) — clicking × on the stale row would do nothing.
+  await page.waitForFunction(({role, email}) => {
+    const tr = Array.from(document.querySelectorAll('[data-roles-panel] tbody tr'))
+      .find((r) => r.textContent.includes(role));
+    return tr && tr.querySelector('[name="usernames"]')?.value.includes(email);
+  }, {role: ROLE_NAME, email: EMAIL}, {timeout: 30000, polling: 200});
   assert(await clickTourAdvance(page, 'Next'), 'lesson 26 member Next');
 
   await waitTourTitle(page, 'What they can do now', 30000);
@@ -390,11 +408,15 @@ async function lesson31(page) {
   assert(await clickTourButton(page, 'Next'), 'lesson 26 not-a-grant Next');
 
   await waitTourTitle(page, 'Take it back', 30000);
-  await page.evaluate((role) => {
+  const del = await page.evaluate((role) => {
     const tr = Array.from(document.querySelectorAll('[data-roles-panel] tbody tr'))
       .find((r) => r.textContent.includes(role));
-    tr.querySelector('.grant-delete').click();
+    const b = tr && tr.querySelector('.grant-delete');
+    if (!b) return {row: !!tr, btn: false};
+    b.click();
+    return {row: true, btn: true, hx: b.getAttribute('hx-delete'), cls: b.className};
   }, ROLE_NAME);
+  assert(del.btn, 'the role row still has its × (got ' + JSON.stringify(del) + ')');
   await page.waitForFunction((role) => {
     const panel = document.querySelector('[data-roles-panel]');
     return panel && !panel.textContent.includes(role);

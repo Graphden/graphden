@@ -143,13 +143,17 @@
                                          :coll {:parent :get :args {:coll {:as :item} :key {:value :tags} :default {:value []}}}
                                          :kind :_mkh-card-kind}}}}
 
-  {:name :marketplace-card-html
-   :description "One `article.mk-card` — name + latest (opens the item), category / private badges, rating, installs, version count, description, tag chips."
+  {:name :marketplace-card-shell
+   :description "`article.mk-card` carrying `data-mk-card=<name>` — the signed-in card and the public storefront card bind `:children`."
    :parent :hiccup
    :args {:tag {:value "article"}
           :attrs {:parent :assoc
-                  :args {:map {:value {:class "mk-card"}} :key {:value :data-mk-card} :value :_mkh-card-name}}
-          :children [:_mkh-card-title
+                  :args {:map {:value {:class "mk-card"}} :key {:value :data-mk-card} :value :_mkh-card-name}}}}
+
+  {:name :marketplace-card-html
+   :description "One `article.mk-card` — name + latest (opens the item), category / private badges, rating, installs, version count, description, tag chips."
+   :parent :marketplace-card-shell
+   :args {:children [:_mkh-card-title
                      {:parent :hiccup :args {:tag {:value "div"} :attrs {:value {:class "mk-card-meta"}}
                                              :children [:_mkh-card-category :_mkh-card-private :_mkh-card-mirror :_mkh-card-moderation :_mkh-card-rating-maybe :_mkh-card-installs :_mkh-card-versions]}}
                      :_mkh-card-desc
@@ -262,11 +266,15 @@
                                        :key {:value :hx-get} :value :_mkt-tag-clear-url}}
                         :children [{:value "#"} :_mkq-tag {:value " ×"}]}}}}
 
+  {:name :_mk-on-executor
+   :description "`:if` over the Executor tab — `:then` on the roster, `:else` on every other kind."
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_mkq-kind :b {:value "executor"}}}}}
+
   {:name :_mkt-controls
    :description "Search + category + sort — hidden on the Executor tab (a roster has none)."
-   :parent :if
-   :args {:test {:parent :equal? :args {:a :_mkq-kind :b {:value "executor"}}}
-          :then {:value nil}
+   :parent :_mk-on-executor
+   :args {:then {:value nil}
           :else {:parent :hiccup
                  :args {:tag {:value "div"} :attrs {:value {:class "mk-controls"}}
                         :children [:_mkt-search :_mkt-cat-select :_mkt-sort-select :_mkt-tag-hidden :_mkt-tag-active]}}}}
@@ -333,9 +341,8 @@
    :args {:tag {:value "div"} :attrs {:value {:class "mk-executor"}} :children [:_mkx-note :_mkx-table]}}
 
   {:name :_mk-body
-   :parent :if
-   :args {:test {:parent :equal? :args {:a :_mkq-kind :b {:value "executor"}}}
-          :then :_mk-executor-tab
+   :parent :_mk-on-executor
+   :args {:then :_mk-executor-tab
           :else :_mk-results}}
 
   {:name :marketplace-root

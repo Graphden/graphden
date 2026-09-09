@@ -40,9 +40,8 @@
   ;; the resolver looks up `:fn-id` / `:slot-id` off the binding row.
   {:name :_partial-binding-parsed
    :description "Synthesise the `:_value-form-parsed-shape` map for `:resolve-slot-effective-type` / `:current-slot-value` — `:fn-id` and `:slot-id` are derived off the binding row server-side, `:item-id` propagated for list-item rows. Shared by the mismatch explainer and the standalone provenance popover (same URL params)."
-   :parent :zipmap
-   :args {:keys [{:value :binding-id} {:value :fn-id} {:value :slot-id} {:value :item-id}]
-          :vals [:_partial-mismatch-binding-id
+   :parent :value-form-record
+   :args {:vals [:_partial-mismatch-binding-id
                  {:value nil}
                  {:value nil}
                  :_partial-mismatch-item-id]}}

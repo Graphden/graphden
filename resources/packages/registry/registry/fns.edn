@@ -311,10 +311,14 @@
    :parent :empty?
    :args {:coll :_pub-fns}}
 
-  {:name :_pub-err-empty
+  {:name :package-result-record
+   :description "`{:ok :reason :name :version}` over `:vals` — the publish / marketplace outcome envelope."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :version}]
-          :vals [{:value false} {:value "empty-bundle"} {:as :pkg-name} {:as :pkg-version}]}}
+   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :version}]}}
+
+  {:name :_pub-err-empty
+   :parent :package-result-record
+   :args {:vals [{:value false} {:value "empty-bundle"} {:as :pkg-name} {:as :pkg-version}]}}
 
   {:name :_pub-apply
    :parent :publish-package-apply
@@ -344,9 +348,8 @@
    :args {:value {:as :row :type :nullable-keyword-map}}}
 
   {:name :_pub-err-exists
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :version}]
-          :vals [{:value false} {:value "version-exists"} {:as :pkg-name} {:as :pkg-version}]}}
+   :parent :package-result-record
+   :args {:vals [{:value false} {:value "version-exists"} {:as :pkg-name} {:as :pkg-version}]}}
 
   {:name :_pub-refused
    :description "The apply's refusal (`name-taken`), nil for a created row."
@@ -1045,10 +1048,14 @@
    :return-type :keyword-map}
 
   ;; --- initial state: resolve the root package; nothing visited yet ---
-  {:name :_inst-root-op
+  {:name :_inst-op-record
+   :description "One install-plan op — `{:op :name :spec :parents}` over `:vals`."
    :parent :zipmap
-   :args {:keys [{:value :op} {:value :name} {:value :spec} {:value :parents}]
-          :vals [{:value :resolve} {:as :pkg-name} {:as :pkg-version} {:value []}]}}
+   :args {:keys [{:value :op} {:value :name} {:value :spec} {:value :parents}]}}
+
+  {:name :_inst-root-op
+   :parent :_inst-op-record
+   :args {:vals [{:value :resolve} {:as :pkg-name} {:as :pkg-version} {:value []}]}}
 
   {:name :_inst-initial-pending
    :parent :list
@@ -1131,9 +1138,8 @@
    :parent :nil? :args {:value :_inst-row}}
 
   {:name :_inst-err-not-found
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :requested}]
-          :vals [{:value false} {:value "not-found"} :_inst-op-name :_inst-op-spec]}}
+   :parent :_not-found-err
+   :args {:vals [{:value false} {:value "not-found"} :_inst-op-name :_inst-op-spec]}}
   {:name :_inst-fail-not-found
    :parent :_inst-wrap-failure
    :args {:base-env :_inst-err-not-found}}
@@ -1169,9 +1175,8 @@
           :item :_inst-op-name}}
   ;; one dep `{:name N :version V}` → its `:resolve` op (pure — `:map`able)
   {:name :_inst-dep-op
-   :parent :zipmap
-   :args {:keys [{:value :op} {:value :name} {:value :spec} {:value :parents}]
-          :vals [{:value :resolve}
+   :parent :_inst-op-record
+   :args {:vals [{:value :resolve}
                  {:parent :get :args {:coll {:as :item} :key {:value :name}}}
                  {:parent :get :args {:coll {:as :item} :key {:value :version}}}
                  :_inst-child-parents]}}
@@ -1462,10 +1467,14 @@
 
   ;; Shared failure envelopes over the guard prefix — one per rejection
   ;; kind, not one per flow (they were byte-identical in all three).
-  {:name :_pkgv-err-not-found
+  {:name :_not-found-err
+   :description "`{:ok :reason :name :requested}` over `:vals` — a package version that does not exist."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :requested}]
-          :vals [{:value false} {:value "not-found"} {:as :pkg-name} {:as :pkg-version}]}}
+   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :requested}]}}
+
+  {:name :_pkgv-err-not-found
+   :parent :_not-found-err
+   :args {:vals [{:value false} {:value "not-found"} {:as :pkg-name} {:as :pkg-version}]}}
 
   {:name :_pkgv-err-missing
    :parent :zipmap
@@ -1548,15 +1557,18 @@
    :args {:keys [{:value :ok} {:value :reason} {:value :name}]
           :vals [{:value false} {:value "not-installed"} {:as :pkg-name}]}}
 
-  {:name :_upd-noop
+  {:name :_upd-result
+   :description "`{:ok :name :from :to :rewritten-refs}` over `:vals` — the update outcome."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :name} {:value :from} {:value :to} {:value :rewritten-refs}]
-          :vals [{:value true} {:as :pkg-name} :_upd-old :_pkgv-resolved {:value 0}]}}
+   :args {:keys [{:value :ok} {:value :name} {:value :from} {:value :to} {:value :rewritten-refs}]}}
+
+  {:name :_upd-noop
+   :parent :_upd-result
+   :args {:vals [{:value true} {:as :pkg-name} :_upd-old :_pkgv-resolved {:value 0}]}}
 
   {:name :_upd-ok
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :name} {:value :from} {:value :to} {:value :rewritten-refs}]
-          :vals [{:value true} {:as :pkg-name} :_upd-old :_pkgv-resolved :_upd-rewritten]}}
+   :parent :_upd-result
+   :args {:vals [{:value true} {:as :pkg-name} :_upd-old :_pkgv-resolved :_upd-rewritten]}}
 
   {:name :update-package-version
    :description "Update (or roll back) an installed package to a different version: materialize the target, REWRITE the project's own refs from the pinned version to the target (package-internal refs untouched), repoint the pin. Symmetric (older version = rollback). Pure graph :cond — rejects on not-installed / not-found / missing-dependencies; same-version is a no-op; the apply core (`:update-package-apply`) is the coupled write+invalidate unit."

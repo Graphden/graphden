@@ -226,9 +226,8 @@
                   {:value "</p><p>The link expires in 24 hours. If you didn't create a Graphden account, ignore this email.</p>"}]}}
   {:name :auth-verify-email
    :description "Email-verification message — `{:subject :text :html}` over `:base-url` + `:token`. The copy/branding is graph-composable; the /auth/verify link path is a fixed part of the auth surface."
-   :parent :zipmap
-   :args {:keys [{:value :subject} {:value :text} {:value :html}]
-          :vals [{:value "Verify your Graphden email"} :_auth-verify-text :_auth-verify-html]
+   :parent :_auth-message
+   :args {:vals [{:value "Verify your Graphden email"} :_auth-verify-text :_auth-verify-html]
           :base-url {:type :text :description "Public app origin, e.g. https://app.graphden.dev."}
           :token {:type :text :description "base64url verification token (URL-safe, no escaping needed)."}}
    :return-type {:subject :text :text :text :html :text}}
@@ -248,11 +247,15 @@
                   {:value "\">Set a new password</a></p><p>Or paste this link into your browser:<br>"}
                   :_auth-reset-link
                   {:value "</p><p>The link expires in 1 hour. If you didn't ask, ignore this email — nothing changes.</p>"}]}}
+  {:name :_auth-message
+   :description "`{:subject :text :html}` record — the two mails bind `:vals`."
+   :parent :zipmap
+   :args {:keys [{:value :subject} {:value :text} {:value :html}]}}
+
   {:name :auth-reset-email
    :description "Password-reset message — `{:subject :text :html}` over `:base-url` + `:token`. The /reset link path is a fixed part of the auth surface."
-   :parent :zipmap
-   :args {:keys [{:value :subject} {:value :text} {:value :html}]
-          :vals [{:value "Reset your Graphden password"} :_auth-reset-text :_auth-reset-html]
+   :parent :_auth-message
+   :args {:vals [{:value "Reset your Graphden password"} :_auth-reset-text :_auth-reset-html]
           :base-url {:type :text :description "Public app origin."}
           :token {:type :text :description "base64url reset token."}}
    :return-type {:subject :text :text :text :html :text}}]}

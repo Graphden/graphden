@@ -79,15 +79,18 @@
    :parent :pref-key-known?
    :args {:pref-key :_pref-put-key}}
 
-  {:name :_pref-put-err-key
+  {:name :_pref-put-err
+   :description "`{:ok :reason :key :http-status}` over `:vals` — the PUT's rejection shape."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :reason} {:value :key} {:value :http-status}]
-          :vals [{:value false} {:value "unknown-key"} :_pref-put-key {:value 400}]}}
+   :args {:keys [{:value :ok} {:value :reason} {:value :key} {:value :http-status}]}}
+
+  {:name :_pref-put-err-key
+   :parent :_pref-put-err
+   :args {:vals [{:value false} {:value "unknown-key"} :_pref-put-key {:value 400}]}}
 
   {:name :_pref-put-err-size
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :reason} {:value :key} {:value :http-status}]
-          :vals [{:value false} {:value "too-large"} :_pref-put-key {:value 413}]}}
+   :parent :_pref-put-err
+   :args {:vals [{:value false} {:value "too-large"} :_pref-put-key {:value 413}]}}
 
   {:name :_pref-put-ok
    :parent :zipmap

@@ -268,10 +268,14 @@
   {:name :_prom-root-ks
    :parent :keys
    :args {:map {:ref :_prom-m :type [:map :any :any]}}}
-  {:name :_prom-root-frame
+  {:name :_prom-frame-record
+   :description "One flatten frame — `{:prefix :ks :m}` over `:vals`."
    :parent :zipmap
-   :args {:keys [{:value :prefix} {:value :ks} {:value :m}]
-          :vals [{:value "graphden"} :_prom-root-ks :_prom-m]}}
+   :args {:keys [{:value :prefix} {:value :ks} {:value :m}]}}
+
+  {:name :_prom-root-frame
+   :parent :_prom-frame-record
+   :args {:vals [{:value "graphden"} :_prom-root-ks :_prom-m]}}
   {:name :_prom-initial-stack
    :parent :list
    :args {:items [:_prom-root-frame]}}
@@ -345,9 +349,8 @@
    :parent :keys
    :args {:map {:ref :_prom-v :type [:map :any :any]}}}
   {:name :_prom-child-frame
-   :parent :zipmap
-   :args {:keys [{:value :prefix} {:value :ks} {:value :m}]
-          :vals [:_prom-key :_prom-child-ks :_prom-v]}}
+   :parent :_prom-frame-record
+   :args {:vals [:_prom-key :_prom-child-ks :_prom-v]}}
   {:name :_prom-stack-descend
    :parent :cons
    :args {:item :_prom-child-frame

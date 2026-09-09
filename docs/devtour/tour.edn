@@ -897,15 +897,18 @@
     {:ns graphden.lint.core :defn lint
      :say "The graph's own linter, run over the same loader output at CI time
            (`bb graph-lint`): duplicate definitions — exact, and after inlining
-           `_`-private helpers — plus unreferenced privates and pure aliases.
-           One engine over EDN-shape fn-defs, so the editor's per-branch graph
-           can be linted through `reconstruct-fn-def` too. docs/GRAPH_LINT.md."}
+           `_`-private helpers — dead privates (unreferenced, and the cluster
+           behind them), bindings that restate what a fn inherits, siblings
+           that should share a parent, and over-deep chains. One engine over
+           EDN-shape fn-defs, so the editor's per-branch graph is linted by
+           the same code. docs/GRAPH_LINT.md."}
     {:ns graphden.lint.graph :defn lint-branch
      :say "The editor's side of the same engine: the per-ctx graph snapshot
            (org-sliced, branch-resolved) is rebuilt into loader-shaped
-           fn-defs and linted, memoised while the snapshot object is
-           unchanged. The Lint drawer tab's base-fn is this one call; the
-           suppressions it subtracts live in the graph as a `:const`."}]}
+           fn-defs and linted, memoised per branch while that branch's
+           snapshot object is unchanged. The ⚐ lens and the Inspector's Lint
+           section share this one call; the suppressions it subtracts live in
+           the graph as a `:const`."}]}
 
   {:id :boot
    :title "Boot & lifecycle"

@@ -311,11 +311,15 @@
    :parent :parse-json-body
    :args {:request {:as :request}}}
 
+  {:name :value-form-record
+   :description "`{:binding-id :fn-id :slot-id :item-id}` over `:vals` — the value-form parse and the provenance partial's synthesised twin inherit it."
+   :parent :zipmap
+   :args {:keys [{:value :binding-id} {:value :fn-id} {:value :slot-id} {:value :item-id}]}}
+
   {:name :_value-form-parsed
    :description "Stage 1 of value-form — JSON body -> {:binding-id :fn-id :slot-id :item-id}, each coerced to a UUID."
-   :parent :zipmap
-   :args {:keys [{:value :binding-id} {:value :fn-id} {:value :slot-id} {:value :item-id}]
-          :vals [{:parent :parse-uuid :args {:string {:parent :get :args {:coll :_value-form-body :key {:value :binding-id} :default nil}}}}
+   :parent :value-form-record
+   :args {:vals [{:parent :parse-uuid :args {:string {:parent :get :args {:coll :_value-form-body :key {:value :binding-id} :default nil}}}}
                  {:parent :parse-uuid :args {:string {:parent :get :args {:coll :_value-form-body :key {:value :fn-id} :default nil}}}}
                  {:parent :parse-uuid :args {:string {:parent :get :args {:coll :_value-form-body :key {:value :slot-id} :default nil}}}}
                  {:parent :parse-uuid :args {:string {:parent :get :args {:coll :_value-form-body :key {:value :item-id} :default nil}}}}]}}

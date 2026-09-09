@@ -128,7 +128,7 @@ either re-records or does not.
 
 The **⚐ lint** chip is the graph's own reviewer. It reads the branch
 the way the package loader reads `fns.edn` — every fn-def as parents
-plus bindings, with names and descriptions stripped — and marks three
+plus bindings, with names and descriptions stripped — and marks a few
 things; select a marked fn and the Inspector's **Lint** section shows
 the finding with the other fns involved as links:
 
@@ -139,6 +139,18 @@ the finding with the other fns involved as links:
   spread it over two namespaces, but it computes the same thing.
 - **unreferenced-private** — a `_`-private fn-def that nothing
   references any more.
+- **unreachable-private** — a `_`-private fn-def that only dead code
+  still references: the rest of the cluster behind an unreferenced
+  one, so deleting the head does not reveal a new mark each round.
+- **shadowed-override** — a fn re-binds an argument to exactly what it
+  already inherits. The binding changes nothing and hides where the
+  value really comes from; drop it.
+- **fan-in-extract-parent** — two or more fns inherit the same parent
+  and bind the same values, differing elsewhere. Lesson 02's move:
+  extract a parent that binds the shared part and inherit it.
+- **deep-hierarchy** — a fn six or more levels of inheritance above
+  its base-fn. Filed quietly (it is a warning only from eight); each
+  level should name a concept, or be flattened.
 
 Small coincidences are not shown. Two accessors that both read
 `:id` off a row are the normal way to give each code path its own

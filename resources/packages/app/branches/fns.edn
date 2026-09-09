@@ -237,10 +237,9 @@
 
   {:name :_get-branch-err
    :description "Not-found shape — `{:ok false :reason :not-found :error \"Branch not found: <ref>\"}`. Same envelope as the delete-branch not-found sibling."
-   :parent :zipmap
+   :parent :_branch-err-envelope
    :return-type :_error-result-with-reason-shape
-   :args {:keys [{:value :ok} {:value :reason} {:value :error}]
-          :vals [{:value false}
+   :args {:vals [{:value false}
                  {:value :not-found}
                  {:parent :str :args {:parts ["Branch not found: " :_get-branch-ref]}}]}}
 
@@ -774,16 +773,20 @@
                  :_diff-apply-count
                  :_diff-apply-diffs]}}
 
-  {:name :_diff-branches-data
-   :description "GET /api/branches/:ref/diff?against=<source> — flat `:cond` of 3 guards + apply."
+  {:name :_diff-guarded
+   :description "The three diff guards over `:parsed` / `:target-branch` / `:source-branch` — each diff route appends its `true → apply` pair to the chain (`{:append …}` on `:clauses`)."
    :parent :cond
    :args {:clauses [:_diff-target-missing?  :_diff-err-target-missing
                     :_diff-against-missing? :_diff-err-against-missing
-                    :_diff-source-missing?  :_diff-err-source-missing
-                    {:value true}           :_diff-apply]
+                    :_diff-source-missing?  :_diff-err-source-missing]
           :parsed :_diff-parsed
           :target-branch :_target-branch
           :source-branch :_diff-source-branch}}
+
+  {:name :_diff-branches-data
+   :description "GET /api/branches/:ref/diff?against=<source> — flat `:cond` of 3 guards + apply."
+   :parent :_diff-guarded
+   :args {:clauses {:append [{:value true} :_diff-apply]}}}
 
   {:name :diff-branches-handler
    :lambda-params [:branch-row :request :default]
@@ -830,14 +833,8 @@
 
   {:name :_diff-view-data
    :description "GET /api/branches/:ref/diff-view?against=<source> — the v1 guards, the v2 grouped payload."
-   :parent :cond
-   :args {:clauses [:_diff-target-missing?  :_diff-err-target-missing
-                    :_diff-against-missing? :_diff-err-against-missing
-                    :_diff-source-missing?  :_diff-err-source-missing
-                    {:value true}           :_diff-view-apply]
-          :parsed :_diff-parsed
-          :target-branch :_target-branch
-          :source-branch :_diff-source-branch}}
+   :parent :_diff-guarded
+   :args {:clauses {:append [{:value true} :_diff-view-apply]}}}
 
   {:name :diff-view-handler
    :lambda-params [:branch-row :request :default]
@@ -920,11 +917,15 @@
           :key {:value :require-merge}
           :default nil}}
 
+  {:name :create-branch-record
+   :description "The create-branch pipeline's parsed shape — `{:branch-name :base-ref :forbid-invalid? :write-policy :require-merge?}` over `:vals`; the HTTP body parse and the MCP tool both inherit it."
+   :parent :zipmap
+   :args {:keys [{:value :branch-name} {:value :base-ref} {:value :forbid-invalid?} {:value :write-policy} {:value :require-merge?}]}}
+
   {:name :_create-branch-parsed
    :description "Parse POST /api/branches body into `{:branch-name :base-ref :forbid-invalid? :write-policy :require-merge?}`. Pure graph composition over `:parse-json-body` + `:get` + `:to-str` + `:str-trim` + `:if` + `:zipmap`."
-   :parent :zipmap
-   :args {:keys [{:value :branch-name} {:value :base-ref} {:value :forbid-invalid?} {:value :write-policy} {:value :require-merge?}]
-          :vals [:_create-branch-name :_create-branch-base-ref :_create-branch-forbid-invalid :_create-branch-write-policy :_create-branch-require-merge]}}
+   :parent :create-branch-record
+   :args {:vals [:_create-branch-name :_create-branch-base-ref :_create-branch-forbid-invalid :_create-branch-write-policy :_create-branch-require-merge]}}
 
   {:name :_create-branch-policy-value
    :parent :get
@@ -1830,12 +1831,16 @@
                  {:value "Branch has children — delete or re-parent them first"}
                  :_delete-branch-apply-ex-child-ids-str]}}
 
+  {:name :_branch-err-envelope
+   :description "`{:ok :reason :error}` over `:vals` — the branch routes' error shape."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :error}]}}
+
   {:name :_delete-branch-err-not-found
    :description "Dynamic error — cites the raw branch-ref. Shared by the parse-time guard and the exception-surfaced path: same envelope (incl. `:reason :not-found`)."
-   :parent :zipmap
+   :parent :_branch-err-envelope
    :return-type :_error-result-with-reason-shape
-   :args {:keys [{:value :ok} {:value :reason} {:value :error}]
-          :vals [{:value false}
+   :args {:vals [{:value false}
                  {:value :not-found}
                  {:parent :str
                   :args {:parts ["Branch not found: "
@@ -3568,10 +3573,8 @@
 
   {:name :_partial-branch-popover-body
    :description "Full hiccup for the popover body — list + create form + hub-sync section + error slot. Pure-graph composition over the `:_bp-*` chain."
-   :parent :hiccup
-   :args {:tag {:value "div"}
-          :attrs {:value {}}
-          :children [:_bp-list-div :_bp-create-div :_bp-hub-div :_bp-error-div]
+   :parent :plain-div
+   :args {:children [:_bp-list-div :_bp-create-div :_bp-hub-div :_bp-error-div]
           :branches :_list-branches-rows
           :current-name :_partial-branch-popover-current-name}}
 

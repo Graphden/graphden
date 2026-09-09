@@ -250,11 +250,46 @@
    :parent :branch-lint-warnings
    :args {:suppressed :_plint-suppressed}}
 
+  ;; Conditional GET. The lens re-primes after every run and Inspector
+  ;; action, and most of those reads see a branch the lint already
+  ;; answered for (memoised per branch snapshot) — so the JSON is hashed
+  ;; into a weak validator and a client whose `If-None-Match` still
+  ;; matches gets a bodiless 304. `Cache-Control: no-cache` makes the
+  ;; browser revalidate instead of guessing a lifetime.
+  {:name :_api-lint-json
+   :description "The lens rows as JSON — hashed for the validator and sent as the body; one realisation per request (a ref thunk is once)."
+   :parent :to-json-string
+   :args {:data :_api-lint-data}}
+  {:name :_api-lint-etag
+   :description "Weak validator over the JSON — `W/\"<sha256>\"`; weak because the encoding wrap may change the bytes on the wire."
+   :parent :str
+   :args {:parts [{:value "W/\""} {:parent :sha256-hex :args {:s :_api-lint-json}} {:value "\""}]}}
+  {:name :_api-lint-if-none-match
+   :parent :header-get
+   :args {:headers :ring-headers :header-name {:value "if-none-match"}}}
+  {:name :_api-lint-fresh?
+   :description "The client's validator still matches — nothing to send."
+   :parent :eq
+   :args {:values [:_api-lint-if-none-match :_api-lint-etag]}}
+  {:name :_api-lint-headers
+   :parent :assoc
+   :args {:map {:value {"Content-Type" "application/json" "Cache-Control" "no-cache"}}
+          :key {:value "ETag"}
+          :value :_api-lint-etag}}
+  {:name :_api-lint-not-modified
+   :parent :not-modified-response
+   :args {:headers :_api-lint-headers :body {:value ""}}}
+  {:name :_api-lint-ok
+   :parent :ok-response
+   :args {:headers :_api-lint-headers :body :_api-lint-json}}
+
   {:name :api-lint-handler
    :lambda-params []
-   :description "Ring handler for GET /api/lint — the current branch's graph-lint warnings as JSON (`[{:rule :message :weight :fn-ids :fns [{:id :name :ns}]} …]`), for the editor's lint lens counts."
-   :parent :json-handler
-   :args {:data :_api-lint-data}}
+   :description "Ring handler for GET /api/lint — the current branch's graph-lint warnings as JSON (`[{:rule :message :weight :fn-ids :fns [{:id :name :ns}]} …]`), for the editor's lint lens counts. Carries a weak `ETag`; an `If-None-Match` that matches it answers 304."
+   :parent :if
+   :args {:test :_api-lint-fresh?
+          :then :_api-lint-not-modified
+          :else :_api-lint-ok}}
 
   ;; --- POST suppress / restore: apply the write, then render from the
   ;;     list just written (the store's thunk was forced BEFORE the write). ---

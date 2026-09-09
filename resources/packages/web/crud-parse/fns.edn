@@ -422,20 +422,24 @@
                                                        :default nil}}}}]}}
           :else {:value {}}}}
 
-  {:name :_parse-slot-form-required-fragment
-   :description "`{:required (= \"true\" v)}` when form-data contains `:required`."
+  {:name :_parse-form-required-fragment
+   :description "`{:required …}` when form-data carries `:required`, else `{}` — `:then` is the coercion each form applies."
    :parent :if
    :args {:test {:parent :contains?
                  :args {:coll {:as :form-data} :key {:value :required}}}
-          :then {:parent :zipmap
+          :else {:value {}}}}
+
+  {:name :_parse-slot-form-required-fragment
+   :description "`{:required (= \"true\" v)}` when form-data contains `:required`."
+   :parent :_parse-form-required-fragment
+   :args {:then {:parent :zipmap
                  :args {:keys [{:value :required}]
                         :vals [{:parent :equal?
                                 :args {:a {:value "true"}
                                        :b {:parent :get
                                            :args {:coll {:as :form-data}
                                                   :key {:value :required}
-                                                  :default nil}}}}]}}
-          :else {:value {}}}}
+                                                  :default nil}}}}]}}}}
 
   {:name :parse-slot-from-form
    :description "Extract a slot entity's field map from a parsed form-data map. `:name` (string) is required on create; `:type-fn-id` (UUID), `:description`, `:required` are optional."
@@ -590,13 +594,10 @@
           :else nil}}
 
   {:name :_parse-bnd-form-required-fragment
-   :parent :if
-   :args {:test {:parent :contains?
-                 :args {:coll {:as :form-data} :key {:value :required}}}
-          :then {:parent :zipmap
+   :parent :_parse-form-required-fragment
+   :args {:then {:parent :zipmap
                  :args {:keys [{:value :required}]
-                        :vals [:_parse-bnd-form-required-coerced]}}
-          :else {:value {}}}}
+                        :vals [:_parse-bnd-form-required-coerced]}}}}
 
   {:name :parse-binding-from-form
    :description "Extract a binding entity's field map. `:fn-id` and `:slot-id` (UUIDs) identify the slot being bound. Optional fields: `:value` (JSON literal), `:ref-fn-id` (UUID), `:rename-to` (string), `:type-override-fn-id` (UUID), `:description`, `:list-append`/`:list-closed` (bool). Empty form values clear the corresponding column. (`:override-kind` is retired — an unknown-field write rejects at storage.)"

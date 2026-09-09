@@ -290,11 +290,15 @@
           :then :_mcp-tool-read-fn-rows
           :else :_mcp-tool-read-fn-edn}}
 
-  {:name :_mcp-tool-read-fn
+  {:name :_mcp-with-read-fn
+   :description "`:if` over the read-fn lookup — `:then` is the missing-fn error; a tool binds `:else` with its answer."
    :parent :if
    :args {:test {:parent :nil? :args {:value :_mcp-read-fn-id}}
-          :then :_mcp-read-fn-missing
-          :else :_mcp-tool-read-fn-found}}
+          :then :_mcp-read-fn-missing}}
+
+  {:name :_mcp-tool-read-fn
+   :parent :_mcp-with-read-fn
+   :args {:else :_mcp-tool-read-fn-found}}
 
   ;; describe-fn → the fn's COMPUTED contract: free args (`:free-arg-slot-map`,
   ;; the same map execute-fn validates against), the start-blocking subset
@@ -352,10 +356,8 @@
    :args {:text {:parent :to-json-string :args {:data :_mcp-describe-data}}}}
 
   {:name :_mcp-tool-describe-fn
-   :parent :if
-   :args {:test {:parent :nil? :args {:value :_mcp-read-fn-id}}
-          :then :_mcp-read-fn-missing
-          :else :_mcp-tool-describe-fn-found}}
+   :parent :_mcp-with-read-fn
+   :args {:else :_mcp-tool-describe-fn-found}}
 
   ;; execute-fn → synthesize a Ring request for the EXISTING :execute-handler
   ;; (same admission path: caps, quotas, effect gate, persisted history).
@@ -375,11 +377,8 @@
 
   {:name :_mcp-exec-parsed
    :description "The execute pipeline's parsed-request shape, built from tool arguments instead of an HTTP body. Overriding :execute's :parsed slot (closer-fn-wins) skips its own body parse — re-entering the Ring handler with a synthesized request would collide with the OUTER :request free arg the MCP dispatch itself reads. `:persist?` and `:trace?` follow the tool's `trace` flag."
-   :parent :zipmap
-   :args {:keys [{:value :fn-id} {:value :fn-name} {:value :args}
-                 {:value :timeout-ms} {:value :persist?} {:value :trace?}
-                 {:value :capture-values?}]
-          :vals [{:parent :parse-uuid :args {:string nil}}
+   :parent :execute-parsed-record
+   :args {:vals [{:parent :parse-uuid :args {:string nil}}
                  {:parent :to-str :args {:value :_mcp-read-fn-name}}
                  {:parent :coalesce :args {:value :_mcp-exec-args :default {}}}
                  {:value 10000} :_mcp-exec-trace? :_mcp-exec-trace? {:value false}]}}
@@ -449,9 +448,8 @@
 
   {:name :_mcp-create-branch-parsed
    :description "The create-branch pipeline's parsed shape, from tool arguments instead of a JSON body. `:base` defaults to main. `:forbid-invalid?`, `:write-policy` and `:require-merge?` are carried as nil — the MCP tool exposes none of the policy flags (yet); the parsed record must still satisfy the pipeline's shape."
-   :parent :zipmap
-   :args {:keys [{:value :branch-name} {:value :base-ref} {:value :forbid-invalid?} {:value :write-policy} {:value :require-merge?}]
-          :vals [{:parent :to-str
+   :parent :create-branch-record
+   :args {:vals [{:parent :to-str
                   :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :name} :default {:value ""}}}}}
                  {:parent :to-str
                   :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :base} :default {:value "main"}}}}}

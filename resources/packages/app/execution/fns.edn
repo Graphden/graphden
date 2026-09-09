@@ -95,17 +95,15 @@
    :parent :equal?
    :args {:a :_execute-body-capture-values :b {:value true}}}
 
+  {:name :execute-parsed-record
+   :description "The execute pipeline's parsed shape — `{:fn-id :fn-name :args :timeout-ms :persist? :trace? :capture-values?}` over `:vals`; the HTTP body parse, the editor's previews and the MCP tool inherit it."
+   :parent :zipmap
+   :args {:keys [{:value :fn-id} {:value :fn-name} {:value :args} {:value :timeout-ms} {:value :persist?} {:value :trace?} {:value :capture-values?}]}}
+
   {:name :_execute-parsed
    :description "Stage 1 — JSON body → `{:fn-id :fn-name :args :timeout-ms :persist? :trace? :capture-values?}`. Per-field graph composition over `:parse-json-body` + `:get` + (`:parse-uuid` / `:coalesce` / nil-safe `:to-str` / `:equal? true`) — admin-extensible without touching Clojure."
-   :parent :zipmap
-   :args {:keys [{:value :fn-id}
-                 {:value :fn-name}
-                 {:value :args}
-                 {:value :timeout-ms}
-                 {:value :persist?}
-                 {:value :trace?}
-                 {:value :capture-values?}]
-          :vals [:_execute-fn-id
+   :parent :execute-parsed-record
+   :args {:vals [:_execute-fn-id
                  :_execute-fn-name
                  :_execute-args
                  :_execute-timeout-ms
@@ -3150,10 +3148,8 @@
 
   {:name :_partial-service-popover-body
    :description "Full popover body — pure-graph composition over the `:_sp-*` chain."
-   :parent :hiccup
-   :args {:tag {:value "div"}
-          :attrs {:value {}}
-          :children [:_sp-header-div :_sp-status-div :_sp-instances-div
+   :parent :plain-div
+   :args {:children [:_sp-header-div :_sp-status-div :_sp-instances-div
                      :_sp-sibling-warn-div
                      :_sp-enabled-label :_sp-branch-wrap :_sp-policy-wrap
                      :_sp-card-wrap :_sp-actions-div]

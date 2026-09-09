@@ -106,13 +106,17 @@
                                           :default nil}}}}
                    {:parent :some? :args {:value :_create-form-data}}]}}
 
-  {:name :_create-dispatched-merge
-   :description "When :try succeeded, `:_create-entity-data-or-error` is the entity-data map; merge under `:entity-data`. When :try caught, it's `{:parse-error msg}` — `:merge` adds that key directly."
+  {:name :_dispatched-merge
+   :description "`:if` over the dispatched parse — `:then` merges the parse error, `:else` the entity data, into the handler's base map."
    :parent :if
    :args {:test {:parent :contains?
                  :args {:coll :_create-entity-data-or-error
-                        :key {:value :parse-error}}}
-          :then {:parent :merge
+                        :key {:value :parse-error}}}}}
+
+  {:name :_create-dispatched-merge
+   :description "When :try succeeded, `:_create-entity-data-or-error` is the entity-data map; merge under `:entity-data`. When :try caught, it's `{:parse-error msg}` — `:merge` adds that key directly."
+   :parent :_dispatched-merge
+   :args {:then {:parent :merge
                  :args {:maps [:_create-base :_create-entity-data-or-error]}}
           :else {:parent :merge
                  :args {:maps [:_create-base
@@ -557,15 +561,12 @@
 
   {:name :_create-apply-ok-warn-response
    :description "200 JSON success-with-warnings envelope — `{\"message\": \"Entity created successfully\", \"type-warnings\": [...]}`."
-   :parent :zipmap
-   :args {:keys [{:value :status} {:value :headers} {:value :body}]
-          :vals [{:value 200}
-                 {:value {:Content-Type "application/json"}}
-                 {:parent :to-json-string
-                  :args {:data {:parent :zipmap
-                                :args {:keys [{:value :message} {:value :type-warnings}]
-                                       :vals [{:value "Entity created successfully"}
-                                              :_create-apply-type-warnings]}}}}]}}
+   :parent :json-ok-response
+   :args {:body {:parent :to-json-string
+                 :args {:data {:parent :zipmap
+                               :args {:keys [{:value :message} {:value :type-warnings}]
+                                      :vals [{:value "Entity created successfully"}
+                                             :_create-apply-type-warnings]}}}}}}
 
   ;; --- :_update-parsed. Mirrors :_create-parsed plus
   ;; (a) `:id-str` + `:id-uuid` from the URI, (b) `:pre-existing` row
@@ -636,11 +637,8 @@
   ;; Reuse the create-side per-type :try result. Same dispatch, same
   ;; parse-error shape.
   {:name :_update-dispatched-merge
-   :parent :if
-   :args {:test {:parent :contains?
-                 :args {:coll :_create-entity-data-or-error
-                        :key {:value :parse-error}}}
-          :then {:parent :merge
+   :parent :_dispatched-merge
+   :args {:then {:parent :merge
                  :args {:maps [:_update-base :_create-entity-data-or-error]}}
           :else {:parent :merge
                  :args {:maps [:_update-base
@@ -813,15 +811,12 @@
 
   {:name :_update-apply-ok-warn-response
    :description "200 JSON success-with-warnings envelope — `{\"message\": \"Entity updated successfully\", \"type-warnings\": [...]}`."
-   :parent :zipmap
-   :args {:keys [{:value :status} {:value :headers} {:value :body}]
-          :vals [{:value 200}
-                 {:value {:Content-Type "application/json"}}
-                 {:parent :to-json-string
-                  :args {:data {:parent :zipmap
-                                :args {:keys [{:value :message} {:value :type-warnings}]
-                                       :vals [{:value "Entity updated successfully"}
-                                              :_update-apply-type-warnings]}}}}]}}
+   :parent :json-ok-response
+   :args {:body {:parent :to-json-string
+                 :args {:data {:parent :zipmap
+                               :args {:keys [{:value :message} {:value :type-warnings}]
+                                      :vals [{:value "Entity updated successfully"}
+                                             :_update-apply-type-warnings]}}}}}}
 
   {:name :_rejected?
    :description "True when a `validate-*` stage produced a rejection. `:some? :validation`."

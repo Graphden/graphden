@@ -351,7 +351,7 @@
    :task (binding [*command-line-args* ["build"]] (load-file "scripts/devtour.clj"))}
 
   graph-lint
-  {:doc "Graph linters over the first-party package corpus (no DB): duplicate definitions (exact and after private-helper expansion), unreferenced private fn-defs, private aliases. Warnings fail unless allowlisted in graphden.lint.corpus/allowed-warnings; a stale allowlist entry fails too. ~10s."
+  {:doc "Graph linters over the first-party package corpus (no DB): duplicate definitions (exact and after private-helper expansion), unreferenced / unreachable private fn-defs, shadowed overrides, siblings to extract a parent from, over-deep chains. Warnings fail unless allowlisted in graphden.lint.corpus/allowed-warnings; a stale allowlist entry fails too. ~10s."
    :task (clojure "-M:dev -m graphden.lint.corpus")}
 
   devtour-check

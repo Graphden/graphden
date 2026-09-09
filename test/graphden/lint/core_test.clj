@@ -182,6 +182,111 @@
                         {:base-fn-names base-fns})]
       ;; `_dead` is unreferenced (warning); a/use + b/use are the same
       ;; graph once their private `_name` helpers expand (warning); the
-      ;; two `_name` accessors themselves are an info-tier duplicate.
-      (is (= [:warning :warning :info] (map :severity fs)))
+      ;; two `_name` accessors themselves are an info-tier duplicate, and
+      ;; a/use + b/use also bind one value alike (info-tier fan-in).
+      (is (= [:warning :warning :info :info] (map :severity fs)))
       (is (= 2 (count (lint/warnings fs)))))))
+
+
+(deftest unreachable-private-test
+  (let [defs [(fd "a" :_head :parent :assoc :args {:map :a/_tail :key {:value :k}})
+              (fd "a" :_tail :parent :get :args {:key {:value :k}})
+              (fd "a" :_live :parent :get :args {:key {:value :j}})
+              (fd "a" :page :parent :assoc :args {:map :a/_live :key {:value :k}})]]
+    (testing "a private referenced only from an unreferenced private is the rest of the dead cluster"
+      (is (= [[["a" :_tail]]] (map :fns (findings-for :unreachable-private defs))))
+      (is (= [[["a" :_head]]] (map :fns (findings-for :unreferenced-private defs))))
+      (is (re-find #"a/_head" (:message (first (findings-for :unreachable-private defs))))))
+    (testing "a by-name root keeps its whole subtree alive"
+      (is (empty? (findings-for :unreachable-private defs :roots #{:_head}))))
+    (testing "a platform private is a live root"
+      (is (empty? (findings-for :unreachable-private defs :platform-fn? #(= :_head (:name %))))))
+    (testing "a private reached through a type-row field is alive, and so is what it references"
+      (is (empty? (findings-for :unreachable-private
+                                [(fd "a" :_pred :parent :nil? :args {:value :a/_inner})
+                                 (fd "a" :_inner :parent :get :args {:key {:value :k}})
+                                 (fd "a" :url :refine {:base :text :pred :a/_pred})]))))))
+
+
+(deftest shadowed-override-test
+  (let [title (fd "a" :title :parent :const :args {:value {:value "t"}})
+        cell (fd "a" :cell :parent :assoc :args {:map {:value {:class "x"}} :key {:value :k} :value :a/title})]
+    (testing "re-binding args to exactly what the parent binds is one finding naming them"
+      (let [[f :as fs] (findings-for :shadowed-override
+                                     [title cell (fd "a" :cell2 :parent :a/cell :args {:key {:value :k} :value {:ref :a/title :description "docs"}})])]
+        (is (= 1 (count fs)))
+        (is (= [["a" :cell2]] (:fns f)))
+        (is (= 2 (:weight f)))
+        (is (= :warning (:severity f)))
+        (is (re-find #"key, value" (:message f)))))
+    (testing "a type pin, a rename, a doc-only spec, a list and a different value say something new"
+      (is (empty? (findings-for :shadowed-override
+                                [title cell
+                                 (fd "a" :pinned :parent :a/cell :args {:value {:ref :a/title :type :text}})
+                                 (fd "a" :renamed :parent :a/cell :args {:key {:as :the-key}})
+                                 (fd "a" :documented :parent :a/cell :args {:key {:description "why"}})
+                                 (fd "a" :listed :parent :assoc :args {:map [{:value 1}]})
+                                 (fd "a" :listed2 :parent :a/listed :args {:map [{:value 1}]})
+                                 (fd "a" :other :parent :a/cell :args {:key {:value :other}})]))))
+    (testing "two parents that disagree leave no single value to restate"
+      (let [p1 (fd "a" :p1 :parent :assoc :args {:key {:value :k}})
+            p2 (fd "a" :p2 :parent :assoc :args {:key {:value :j}})]
+        (is (empty? (findings-for :shadowed-override
+                                  [p1 p2 (fd "a" :child :parents [:a/p1 :a/p2] :args {:key {:value :k}})])))))
+    (testing "the inherited value is found past an intermediate that does not bind the arg"
+      (let [mid (fd "a" :mid :parent :a/cell :args {:map {:value {:class "y"}}})]
+        (is (= [[["a" :leaf]]]
+               (map :fns (findings-for :shadowed-override
+                                       [title cell mid (fd "a" :leaf :parent :a/mid :args {:key {:value :k}})]))))))))
+
+
+(deftest fan-in-extract-parent-test
+  (let [zipmap-fns (conj base-fns :zipmap)
+        keys-v [{:value :ok} {:value :reason} {:value :error}]
+        e1 (fd "a" :e1 :parent :zipmap :args {:keys keys-v :vals [{:value false} {:value :nf} {:value "x"}]})
+        e2 (fd "a" :e2 :parent :zipmap :args {:keys keys-v :vals [{:value false} {:value :bad} {:value "y"}]})
+        e3 (fd "b" :e3 :parent :zipmap :args {:keys keys-v :vals [{:value false} {:value :nf} {:value "x"}]})]
+    (testing "siblings that bind the same three values are a warning, listed once under the shared set"
+      (let [[f :as fs] (findings-for :fan-in-extract-parent [e1 e2] :base-fn-names zipmap-fns)]
+        (is (= 1 (count fs)))
+        (is (= [["a" :e1] ["a" :e2]] (:fns f)))
+        (is (= 3 (:weight f)))
+        (is (= :warning (:severity f)))
+        (is (re-find #"bind keys identically" (:message f)))))
+    (testing "an exact copy joins the wider group; the pair it duplicates is the duplicate rule's"
+      (let [fs (findings-for :fan-in-extract-parent [e1 e2 e3] :base-fn-names zipmap-fns)]
+        (is (= [[["a" :e1] ["a" :e2] ["b" :e3]]] (map :fns fs)))
+        (is (= 1 (count (findings-for :duplicate-definition [e1 e2 e3] :base-fn-names zipmap-fns))))))
+    (testing "one or two shared values is info — the let-rule's separate child per code path"
+      (let [[f] (findings-for :fan-in-extract-parent
+                              [(fd "a" :x :parent :assoc :args {:map {:value {}} :key {:value :k} :value {:value 1}})
+                               (fd "a" :y :parent :assoc :args {:map {:value {}} :key {:value :k} :value {:value 2}})])]
+        (is (= :info (:severity f)))
+        (is (= 2 (:weight f)))))
+    (testing "different parents, or nothing bound alike, is not a group"
+      (is (empty? (findings-for :fan-in-extract-parent
+                                [(fd "a" :x :parent :assoc :args {:map {:value {}} :key {:value :k}})
+                                 (fd "a" :y :parent :get :args {:coll {:value {}} :key {:value :k}})
+                                 (fd "a" :z :parent :assoc :args {:map {:value {:a 1}} :key {:value :j}})]))))))
+
+
+(deftest deep-hierarchy-test
+  (let [chain (fn [n]
+                (into [(fd "a" :c1 :parent :get :args {:key {:value :k}})]
+                      (map (fn [i]
+                             (fd "a" (keyword (str "c" i)) :parent (keyword "a" (str "c" (dec i)))
+                                 :args {:default {:value i}})))
+                      (range 2 (inc n))))]
+    (testing "a chain is reported at its tip only, info from six levels and a warning from eight"
+      (let [fs (findings-for :deep-hierarchy (chain 8))]
+        (is (= [[["a" :c8]]] (map :fns fs)))
+        (is (= 8 (:weight (first fs))))
+        (is (= :warning (:severity (first fs))))
+        (is (re-find #"a/c1 → a/c2 → .* → a/c8" (:message (first fs)))))
+      (is (= [:info] (map :severity (findings-for :deep-hierarchy (chain 6)))))
+      (is (empty? (findings-for :deep-hierarchy (chain 5)))))
+    (testing "the depth is the LONGEST parent path under multiple inheritance"
+      (let [defs (conj (chain 7)
+                       (fd "a" :short :parent :get :args {:key {:value :s}})
+                       (fd "a" :tip :parents [:a/short :a/c7] :args {:default {:value 0}}))]
+        (is (= [[["a" :tip]]] (map :fns (findings-for :deep-hierarchy defs))))))))

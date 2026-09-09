@@ -742,11 +742,15 @@
   ;;     (swap target `.execute-history-failures`).
   {:name :_peh-fail-fn-id-str
    :parent :to-str :args {:value :fn-id-param}}
+  {:name :_peh-mine?
+   :description "HOF pred over rows carrying `:fn-id` — the row's id as text against `:b`."
+   :parent :equal?
+   :args {:a {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :fn-id} :default {:value ""}}}}}}}
+
   {:name :_peh-fail-mine?
    :description "HOF pred over failure rows — this fn's."
-   :parent :equal?
-   :args {:a {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :fn-id} :default {:value ""}}}}}
-          :b :_peh-fail-fn-id-str}}
+   :parent :_peh-mine?
+   :args {:b :_peh-fail-fn-id-str}}
   {:name :_peh-failures
    :parent :vec
    :args {:coll {:parent :filter
@@ -802,10 +806,8 @@
   ;; arm / cancel and the poll while armed. Nothing for other fns.
   {:name :_peh-svc-mine?
    :description "HOF pred over `:service` rows — this fn's."
-   :parent :equal?
-   :args {:a {:parent :to-str
-              :args {:value {:parent :get :args {:coll {:as :item} :key {:value :fn-id} :default {:value ""}}}}}
-          :b {:parent :to-str :args {:value :fn-id-param}}}}
+   :parent :_peh-mine?
+   :args {:b {:parent :to-str :args {:value :fn-id-param}}}}
   {:name :_peh-services
    :parent :vec
    :args {:coll {:parent :filter :args {:pred :_peh-svc-mine? :coll :_list-services-rows}}}}
@@ -1096,11 +1098,8 @@
 
   {:name :_pv-parsed
    :description "Execute-pipeline parsed map for a preview render — query-param fn-id, no args, inline timeout, `persist? false` BY REQUEST (the apply's auto-persist matrix still persists effectful runs for the audit trail)."
-   :parent :zipmap
-   :args {:keys [{:value :fn-id} {:value :fn-name} {:value :args}
-                 {:value :timeout-ms} {:value :persist?}
-                 {:value :trace?} {:value :capture-values?}]
-          ;; :fn-name is always nil (the preview anchors on fn-id) but
+   :parent :execute-parsed-record
+   :args {;; :fn-name is always nil (the preview anchors on fn-id) but
           ;; the key must be PRESENT — the execute stages' parsed-shape
           ;; is a record type, and a record with a missing field is not
           ;; a subtype (the boot sweep rejects it).
@@ -1469,11 +1468,8 @@
                    {:parent :get :args {:coll {:as :item} :key {:value :zero-free?} :default {:value false}}}]}}
 
   {:name :_pvg-card-parsed
-   :parent :zipmap
-   :args {:keys [{:value :fn-id} {:value :fn-name} {:value :args}
-                 {:value :timeout-ms} {:value :persist?}
-                 {:value :trace?} {:value :capture-values?}]
-          ;; `:get`-plucked ids type as `:any`, and record-field
+   :parent :execute-parsed-record
+   :args {;; `:get`-plucked ids type as `:any`, and record-field
           ;; comparison is strict (`:any` ⊄ `[:union :null :uuid]`) —
           ;; the to-str→parse-uuid roundtrip launders the field to
           ;; `:nullable-uuid` for the parsed-shape contract.

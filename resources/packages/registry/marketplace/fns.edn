@@ -385,13 +385,17 @@
    :args {:func :_mkg-shadowed
           :coll {:parent :vals :args {:map {:parent :group-by :args {:key-fn :_mkr-name :coll :list-package-versions}}}}}}
 
-  {:name :marketplace-cards
-   :description "Every visible package as a card — the registry index grouped by name (`:marketplace-index-groups`), each group folded by `:marketplace-card` with the review / install aggregates captured once."
+  {:name :marketplace-cards-over
+   :description "`:marketplace-card` folded over a `:coll` of index groups, the review / install aggregates captured once — the signed-in listing and the public storefront bind `:coll`."
    :parent :map
    :args {:func :marketplace-card
-          :coll :marketplace-index-groups
           :reviews :marketplace-review-map
           :installs :marketplace-install-map}}
+
+  {:name :marketplace-cards
+   :description "Every visible package as a card — the registry index grouped by name (`:marketplace-index-groups`), each group folded by `:marketplace-card` with the review / install aggregates captured once."
+   :parent :marketplace-cards-over
+   :args {:coll :marketplace-index-groups}}
 
   ;; =====================================================================
   ;; FILTERS — kind / q / category / tag / mine / sort, read off the request
@@ -570,9 +574,8 @@
           :listing :_mkp-listing}}
   {:name :_mkp-err
    :description "`{:ok false :reason R}` — free arg `:reason`."
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :version}]
-          :vals [{:value false} {:as :reason :type :text} :_mkp-name :_mkp-version]}}
+   :parent :package-result-record
+   :args {:vals [{:value false} {:as :reason :type :text} :_mkp-name :_mkp-version]}}
   ;; The envelope is a 1-arg CALLEE over the apply's ROW: `:call` runs the
   ;; write ONCE and hands the row-or-nil in under the `row` lambda-param,
   ;; so reading `:id` / `:public?` never re-references the effectful apply

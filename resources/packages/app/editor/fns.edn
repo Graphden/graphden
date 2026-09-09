@@ -384,7 +384,7 @@
                 [:span {:class "kind-count" :aria-hidden "true"}]]
                [:button {:type "button" :class "kind-toggle kind-problem" :data-kind "lint"
                          :aria-pressed "false" :onclick "toggleKind('lint')"
-                         :title "Only fns the graph lint reports (duplicates, unreferenced privates)"}
+                         :title "Only fns the graph lint reports (duplicates, dead privates, restated bindings, siblings to share a parent)"}
                 [:span {:class "kind-glyph" :aria-hidden "true"} "⚐"]
                 [:span {:class "kind-label"} "lint"]
                 [:span {:class "kind-count" :aria-hidden "true"}]]

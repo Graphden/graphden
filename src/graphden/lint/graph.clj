@@ -23,7 +23,8 @@
     [graphden.crud.types-api :as types-api]
     [graphden.lint.core :as lint]
     [graphden.packages.owned :as owned]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.storage.core :as vcore]))
 
 
 ;; -----------------------------------------------------------------------------
@@ -182,12 +183,30 @@
                           :suppress suppress}))))
 
 
+(def ^:private memo-cap
+  "Branches whose last lint result is kept — enough for the branches an
+   editor session flips between; the oldest entry goes when a new
+   branch arrives."
+  16)
+
+
 (def ^:private memo
-  "One-entry memo for the CACHED path: the last snapshot object linted
-   and its result. The snapshot is replaced (not mutated) on every graph
-   write, so identity is the freshness check; a different suppression
-   set recomputes."
-  (atom nil))
+  "Per-branch memo for the CACHED path: branch-id → the last snapshot
+   object linted for it, the suppression set and the result. The
+   snapshot is replaced (not mutated) on every graph write, so identity
+   is the freshness check; a different suppression set recomputes. Keyed
+   per branch so two branches open side by side (or two orgs on one
+   executor) do not evict each other on every read."
+  (atom {}))
+
+
+(defn- remember!
+  [branch-id entry]
+  (swap! memo (fn [m]
+                (let [m (assoc m branch-id (assoc entry :at (System/nanoTime)))]
+                  (if (> (count m) memo-cap)
+                    (dissoc m (key (apply min-key (comp :at val) m)))
+                    m)))))
 
 
 (defn- ns-rows
@@ -197,17 +216,20 @@
 
 (defn lint-branch
   "The current branch's lint warnings over the per-ctx graph snapshot
-   (`cached-or-load-graph`), recomputed only when the snapshot object or
-   the suppression set changed. The snapshot is what every reader sees:
-   writes splice it inline and a load-on-miss that a write outran is
-   discarded (`executor.context/fill-graph-cache!`), so a read right after
-   an edit is the post-edit graph — no storage bypass needed."
+   (`cached-or-load-graph`), recomputed only when the branch's snapshot
+   object or the suppression set changed. The snapshot is what every
+   reader sees: writes splice it inline and a load-on-miss that a write
+   outran is discarded (`executor.context/fill-graph-cache!`), so a read
+   right after an edit is the post-edit graph — no storage bypass
+   needed."
   [ctx suppress]
   (let [suppress (set suppress)
+        storage (request/require-storage ctx)
         graph (types-api/cached-or-load-graph ctx)
-        hit @memo]
+        branch-id (vcore/current-branch-id storage)
+        hit (get @memo branch-id)]
     (if (and hit (identical? (:graph hit) graph) (= (:suppress hit) suppress))
       (:findings hit)
       (let [findings (lint-graph graph (ns-rows ctx) suppress)]
-        (reset! memo {:graph graph :suppress suppress :findings findings})
+        (remember! branch-id {:graph graph :suppress suppress :findings findings})
         findings))))

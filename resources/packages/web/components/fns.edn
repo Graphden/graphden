@@ -265,6 +265,14 @@
                  {:as :attrs :required false
                   :description "Extra attrs (`:id` / extra `:class` / …)."}]}}
 
+  {:name :plain-div
+   :description "A bare `<div>` around `:children` — no class, no attrs; the block to reach for when a wrapper is all that is needed."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {}}
+          :children {:as :children :type [:list :hiccup-node]
+                     :description "Wrapped hiccup nodes."}}}
+
   {:name :stack
    :description "Vertical flex container — `<div class=" stack " [attrs]>children...</div>` (column, gap from graphden-components.css). Slot `:children` is the stacked content."
    :parent :hiccup

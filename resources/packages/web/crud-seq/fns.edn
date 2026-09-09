@@ -104,11 +104,8 @@
                  {:parent :get :args {:coll {:as :result} :key {:value :binding-id} :default nil}}]}}
 
   {:name :_seq-append-apply-ok-response
-   :parent :zipmap
-   :args {:keys [{:value :status} {:value :headers} {:value :body}]
-          :vals [{:value 200}
-                 {:value {:Content-Type "application/json"}}
-                 :_seq-append-apply-ok-body]}}
+   :parent :json-ok-response
+   :args {:body :_seq-append-apply-ok-body}}
 
   {:name :_seq-append-apply-ok-body
    :description "JSON body `{:item-id :position}` rendered via `:to-json-string` over the result map — plus `:type-warnings` additively when the write landed but the owning fn now fails the aggregate type-check (error-tolerance Phase 3)."
@@ -131,11 +128,15 @@
           :vals [{:parent :get :args {:coll {:as :result} :key {:value :created} :default nil}}
                  {:parent :get :args {:coll {:as :result} :key {:value :position} :default nil}}]}}
 
+  {:name :_seq-apply-ok-body-warn
+   :description "`{:item-id :position :type-warnings}` over `:vals` — the success-with-warnings body of a sequence write."
+   :parent :zipmap
+   :args {:keys [{:value :item-id} {:value :position} {:value :type-warnings}]}}
+
   {:name :_seq-append-apply-ok-body-warn
    :description "Success-with-warnings body — `{:item-id :position :type-warnings [...]}` (row kept, diagnostic recorded per-branch)."
-   :parent :zipmap
-   :args {:keys [{:value :item-id} {:value :position} {:value :type-warnings}]
-          :vals [{:parent :get :args {:coll {:as :result} :key {:value :created} :default nil}}
+   :parent :_seq-apply-ok-body-warn
+   :args {:vals [{:parent :get :args {:coll {:as :result} :key {:value :created} :default nil}}
                  {:parent :get :args {:coll {:as :result} :key {:value :position} :default nil}}
                  :_seq-append-apply-type-warnings]}}
 
@@ -339,15 +340,12 @@
 
   {:name :_seq-update-apply-ok-warn-response
    :description "200 JSON success-with-warnings envelope — `{\"message\": \"Sequence item updated\", \"type-warnings\": [...]}`."
-   :parent :zipmap
-   :args {:keys [{:value :status} {:value :headers} {:value :body}]
-          :vals [{:value 200}
-                 {:value {:Content-Type "application/json"}}
-                 {:parent :to-json-string
-                  :args {:data {:parent :zipmap
-                                :args {:keys [{:value :message} {:value :type-warnings}]
-                                       :vals [{:value "Sequence item updated"}
-                                              :_seq-update-apply-type-warnings]}}}}]}}
+   :parent :json-ok-response
+   :args {:body {:parent :to-json-string
+                 :args {:data {:parent :zipmap
+                               :args {:keys [{:value :message} {:value :type-warnings}]
+                                      :vals [{:value "Sequence item updated"}
+                                             :_seq-update-apply-type-warnings]}}}}}}
 
   {:name :_seq-update-apply-do-invalidate
    :parent :invalidate-after-write
@@ -451,11 +449,8 @@
           :entity-data {:as :item}}}
 
   {:name :_seq-move-apply-ok-response
-   :parent :zipmap
-   :args {:keys [{:value :status} {:value :headers} {:value :body}]
-          :vals [{:value 200}
-                 {:value {:Content-Type "application/json"}}
-                 :_seq-move-apply-ok-body]}}
+   :parent :json-ok-response
+   :args {:body :_seq-move-apply-ok-body}}
 
   {:name :_seq-move-apply-ok-body
    :description "JSON body `{:item-id :position}` — plus `:type-warnings` additively when the move landed but the owning fn now fails the aggregate type-check (order can matter, e.g. a nav-typed path)."
@@ -479,9 +474,8 @@
                  {:parent :get :args {:coll {:as :result} :key {:value :position} :default nil}}]}}
 
   {:name :_seq-move-apply-ok-body-warn
-   :parent :zipmap
-   :args {:keys [{:value :item-id} {:value :position} {:value :type-warnings}]
-          :vals [{:parent :get :args {:coll {:as :result} :key {:value :moved} :default nil}}
+   :parent :_seq-apply-ok-body-warn
+   :args {:vals [{:parent :get :args {:coll {:as :result} :key {:value :moved} :default nil}}
                  {:parent :get :args {:coll {:as :result} :key {:value :position} :default nil}}
                  :_seq-move-apply-type-warnings]}}
 
@@ -657,11 +651,8 @@
           :entity-data :_tighten-apply-success-result}}
 
   {:name :_tighten-apply-ok-response
-   :parent :zipmap
-   :args {:keys [{:value :status} {:value :headers} {:value :body}]
-          :vals [{:value 200}
-                 {:value {:Content-Type "application/json"}}
-                 {:parent :to-json-string :args {:data :_tighten-apply-success-result}}]}}
+   :parent :json-ok-response
+   :args {:body {:parent :to-json-string :args {:data :_tighten-apply-success-result}}}}
 
   {:name :try-apply-tighten
    :description "§3.3 core of tighten-fn-effects: narrows the fn-typed binding's effective type. Returns `{:status :reason :result}` — graph dispatches on `:status`. Error-tolerance Phase 2: when the post-write aggregate type-check fails the override is KEPT, the failure is recorded as a per-branch diagnostic, and `:result` carries `:type-warnings [<diagnostic> …]` in the 200 JSON body. The subtype-safety pre-checks (widening / bound-callable effect escape / non-fn slot) still return 400."

@@ -29,6 +29,11 @@
    :parent :ring-response
    :args {:status 200}}
 
+  {:name :not-modified-response
+   :description "Status axis: 304 Not Modified — the validator the client sent (`If-None-Match`) still holds; pair with the validator headers and an empty body."
+   :parent :ring-response
+   :args {:status 304}}
+
   {:name :not-found-response
    :description "Status axis: 404 Not Found."
    :parent :ring-response

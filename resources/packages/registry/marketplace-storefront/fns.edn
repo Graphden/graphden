@@ -30,11 +30,8 @@
    :args {:pred :_sf-row-listed? :coll :list-package-versions}}
   {:name :storefront-cards
    :description "Cards over `:storefront-rows` (same fold as the signed-in marketplace, same review / install aggregates)."
-   :parent :map
-   :args {:func :marketplace-card
-          :coll {:parent :vals :args {:map {:parent :group-by :args {:key-fn :_mkr-name :coll :storefront-rows}}}}
-          :reviews :marketplace-review-map
-          :installs :marketplace-install-map}}
+   :parent :marketplace-cards-over
+   :args {:coll {:parent :vals :args {:map {:parent :group-by :args {:key-fn :_mkr-name :coll :storefront-rows}}}}}}
   ;; the same request filters as the signed-in listing, over the public cards
   {:name :_sf-by-kind
    :parent :filter :args {:pred :_mkf-kind? :coll :storefront-cards :kind :_mkq-kind}}
@@ -81,10 +78,8 @@
           :children [{:value "#"} {:parent :to-str :args {:value {:as :item}}}]}}
   {:name :_sf-card
    :description "One public card — the title is an anchor to the item page; tags are anchors to the tag filter."
-   :parent :hiccup
-   :args {:tag {:value "article"}
-          :attrs {:parent :assoc :args {:map {:value {:class "mk-card"}} :key {:value :data-mk-card} :value :_mkh-card-name}}
-          :children [{:parent :hiccup :args {:tag {:value "a"}
+   :parent :marketplace-card-shell
+   :args {:children [{:parent :hiccup :args {:tag {:value "a"}
                                              :attrs {:parent :assoc :args {:map {:value {:class "mk-card-open"}} :key {:value :href} :value :_sf-item-href}}
                                              :children [{:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "mk-card-name"}} :children [:_mkh-card-name]}}
                                                         {:parent :hiccup :args {:tag {:value "span"} :attrs {:value {:class "mk-card-latest"}}

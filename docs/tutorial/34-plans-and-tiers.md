@@ -2,8 +2,9 @@
 
 **Goal**: by the end of this lesson you can tell which tier an org
 is on, predict what its graphs may and may not do, read the quota
-display in the editor, and — as an operator — change an org's tier
-(including freezing an abuser) and hand a visitor an anonymous demo.
+badge in the editor, and know where the operator-side levers —
+changing a tier, freezing an abuser, handing out a demo — are
+documented.
 
 **Concepts introduced**: the `:plan` slug, the access tiers
 (anonymous / free / network / dedicated) and the `suspended`
@@ -36,7 +37,7 @@ reaped after a TTL — you can *try graphs* with nothing to lose. It is
 also the **fail-safe default**: an org with no slug resolves here, so
 a mis-provisioned account is locked, never accidentally opened.
 
-**Free (registered)** is what *signing up* gives you (lesson 24),
+**Free (registered)** is what *signing up* gives you (lesson 33),
 and it is genuinely useful: base effects PLUS metered `:network`. It
 is kept as long as it is used: after 60 days with no sign-in, no API
 call, no run and no edit, the org is scheduled for deletion two weeks out and everyone in
@@ -55,31 +56,25 @@ turned into a DDoS.
 
 ## Seeing your quota
 
-The editor shows the current org's usage against its ceilings
-(fetched from `GET /api/orgs/quota`) — `plan`, `N / max fns`,
-`N / max list items`. When you approach a ceiling it's a nudge to
-upgrade; if you ever see plan `anonymous` on an account you thought
-was registered, that's the fail-safe default telling you the org's
-`:plan` was never set.
+The editor shows a small badge above the Explorer's entity list —
+`fns: N / max`, the current org's fn count against its ceiling
+(fetched from `GET /api/orgs/quota`); hover it and the tooltip names
+the plan. It is hidden on an uncapped plan. When you approach the
+ceiling it's a nudge to upgrade; if the tooltip ever names
+`anonymous` on an account you thought was registered, that's the
+fail-safe default telling you the org's `:plan` was never set.
 
 ## Changing a tier (operator)
 
 `:org` is a tenant-forbidden entity (lesson 24), so tiers are an
-**operator** activity. One platform-only route sets any org's plan:
+**operator** activity: one platform-only route sets any org's plan,
+and `suspended` is the freeze — [PLANS.md § Suspending an
+org](../PLANS.md#suspending-an-org-abuse-kill-switch) and
+[OPERATIONS.md § Suspending an abusive
+org](../OPERATIONS.md#suspending-an-abusive-org) have the route and
+the runbook.
 
-```text
-POST /api/orgs/plan   (form: name=<org>&plan=<tier>)
-```
-
-`plan` must be one of `free` / `network` / `dedicated` / `suspended`
-(a typo is rejected, not silently applied). Use it to upgrade a
-paying customer — or to **freeze an abuser**: setting `suspended`
-gives the org no effects and zero ceilings, so it can neither run nor
-create anything, effective on its next request. Restore by setting
-its real tier back. (Delete still works, so a frozen tenant can clean
-up its own data.)
-
-Operators also get a fourth surface, **Platform** (its account-menu entry appears
+Operators also get an extra surface, **Platform** (its account-menu entry appears
 only for platform-tier principals): the cross-org registry of
 organizations and the platform-access delegation panel — the
 UI counterpart to the operator routes above, and the place where
@@ -103,26 +98,24 @@ is [BYO_RUNBOOK.md](../BYO_RUNBOOK.md).
 
 ## Handing out a demo
 
-A landing page mints an anonymous org for a visitor through the
-unauthenticated `POST /api/demo/start`, which returns a bearer token
-for a throwaway `anonymous` org. It is **off by default** (a public
-row-creating endpoint is an abuse surface) — a deploy opts in, and it
-is per-IP rate-limited. See [PLANS.md § Starting an anonymous
-demo](../PLANS.md).
+A landing page mints a throwaway `anonymous` org for a visitor
+through an opt-in, rate-limited endpoint — [PLANS.md § Starting an
+anonymous demo](../PLANS.md#starting-an-anonymous-demo).
 
 ## Try it
 
-(Operator account on a tenancy-addon instance.)
+(A tenancy-addon instance; steps 2–3 need an operator account.)
 
-1. Sign up a new account (lesson 24) — its org lands on `free`.
-   Confirm the quota display reads `free`.
-2. `POST /api/orgs/plan name=<that-org> plan=suspended`. As that
-   account, try to run any fn — the effect gate now refuses even
-   `:db`; a create is rejected by the zero row-cap.
+1. Sign up a new account (lesson 33) — its org lands on `free`.
+   Hover the quota badge: the tooltip names the `free` plan.
+2. As the operator, freeze that org with the route from
+   [OPERATIONS.md](../OPERATIONS.md#suspending-an-abusive-org)
+   (`plan=suspended`). As the account, try to run any fn — the
+   effect gate now refuses even `:db`; a create is rejected by the
+   zero row-cap.
 3. Set it back to `free`; the account works again on its next
-   request (the resolver isn't memoised).
-4. Try `plan=premium` — rejected (`:plan/unknown`), the org's tier
-   is unchanged.
+   request (the resolver isn't memoised). A typo like `plan=premium`
+   is rejected (`:plan/unknown`) and the tier stays put.
 
 ## What we glossed over
 
@@ -136,5 +129,7 @@ demo](../PLANS.md).
 
 ## Next
 
-That's the end of the current tutorial. New lessons are added as
-features ship — see [tutorial/README.md](README.md).
+[Lesson 35 — Services talking to
+services](35-services-talking-to-services.md): one service names
+another and calls it over HTTP, with the contract shared in the
+graph.

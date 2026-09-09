@@ -52,7 +52,7 @@ parent to:
 | Kind | What it is | Example | How to spot one |
 |---|---|---|---|
 | **Base function** | A small Clojure impl wrapping one library call | `:const`, `:add`, `:render-hiccup`, `:pg-query` | Has a `:return-type-fn-id`, no `:parent-ids` |
-| **fn-def** | A pure composition — no Clojure, just bindings | `:hello-handler`, `:web-server`, `:editor-page` | Has at least one `:parent-ids` |
+| **fn-def** | A pure composition — no Clojure, just bindings | `:hello-handler`, `:web-server`, `:get-route` | Has at least one `:parent-ids` |
 
 You can parent a new fn-def to either kind. Inheritance works
 the same way for both.
@@ -92,20 +92,26 @@ cover that in lesson 06 when we hit higher-order functions.
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu.
 
-In the running editor, in a namespace of your choice (or create
-`tutorial/01-fn-defs`):
+In the running editor:
 
-1. Click `+` to add a new fn. Name it `hello-handler`.
-2. Set its parent to `:const`. The editor will show one free arg
-   `:value`.
-3. Click `:value` and bind a literal map. The editor's value form
-   takes JSON: `{"status": 200, "body": "Hello!"}` (in `fns.edn`
-   you'd write the same map as EDN). When the slot's type is
-   already known, the form renders one field per key instead —
-   the `{} raw` button in its corner switches back to a raw
-   editor that accepts any JSON, a bare number, or plain text.
-4. Open the row's `⋯` actions popover and click ▶ Run — you
+1. At the bottom of the Explorer click **New namespace**, type
+   `tutorial` and press Enter.
+2. Expand the `tutorial` row, hover it and click its **+**. Choose
+   **New graph…**, type `hello-handler` and press Enter. The new fn
+   opens on the canvas.
+3. On the card click **set parent…**, type `const` in the picker and
+   pick `core.logic.const`. Inheriting `:const` exposes its `:value`
+   slot as a `+` placeholder.
+4. Click the `+` on `:value`, choose **Bind literal** and enter the
+   JSON `{"status": 200, "body": "Hello!"}` (in `fns.edn` you'd
+   write the same map as EDN), then **Save**.
+5. Click the `⋯` button on the card's top row, then **▶ Run**, then
+   **Run** in the Run pane that opens in the right panel — you
    should see the map come back.
+
+The value form takes JSON: a map, a bare number, or plain text. When
+the slot's type is already known it renders one field per key instead,
+and its `{} raw` button switches back to the raw editor.
 
 ## What we glossed over
 
@@ -120,4 +126,4 @@ peeling layers.
 
 ## Next
 
-Lesson 02 — Parents and inheritance ([already written](02-parents-and-inheritance.md))
+[Lesson 02 — Parents and inheritance](02-parents-and-inheritance.md)

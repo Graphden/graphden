@@ -27,7 +27,7 @@ Open it from the account menu, press `Space` `v` `m`, or click
 
 | Tab | What is listed | What you can do with a version |
 |---|---|---|
-| **Packages** | fns-only packages published from a namespace | Install (a per-branch pin) or Fork (editable copies — refused for a package built into this instance) — exactly Lesson 29's two doors |
+| **Packages** | fns-only packages published from a namespace | Install (a per-branch pin) or Fork (editable copies — [Lesson 29 § Fork](29-distributing-packages.md#fork--copy-on-write-when-you-want-to-edit) says when it refuses) — exactly Lesson 29's two doors |
 | **Themes** | editor themes people saved from Settings → Appearance | Apply |
 | **Keymaps** | keyboard layouts saved from Settings → Keyboard | Apply |
 | **Executor** | the packages *this* executor loaded at boot | nothing — a read-only roster |
@@ -82,12 +82,6 @@ inside your organization only; someone else may list it publicly later,
 and then your own versions shadow theirs in your catalog. Pick a name
 with your org or product in it (`mycorp.hello`) and this never comes up.
 
-On the cloud a **public** listing does not appear in the shared catalog
-by itself: it waits for the operator's review (your card says *pending
-review*; the operators are notified), and you are emailed the decision —
-with the moderator's note if it was declined. A corrected next version
-starts a new review.
-
 ## Reviews and the rating
 
 Open a card. Under its versions is the **Reviews** list and a small
@@ -122,10 +116,12 @@ hand — it lives on a row only the platform writes.
 
 > **On the cloud, Public means "after review".** A public listing from an
 > organization waits for the operator's approval before other
-> organizations see it; until then your card wears *pending review* and
-> your own organization can already install or apply it. A rejection
-> comes with a note on the package — publish a corrected version to try
-> again. On a self-hosted instance nothing waits: you are the operator.
+> organizations see it; until then your card wears *pending review*
+> (the operators are notified) and your own organization can already
+> install or apply it. You are emailed the decision — with the
+> moderator's note if it was declined — and a corrected next version
+> starts a new review. On a self-hosted instance nothing waits: you are
+> the operator.
 
 ## Your own theme
 

@@ -1,6 +1,6 @@
 # Lesson 03 — Slots and bindings at the data level
 
-**Goal**: by the end of this lesson you can name the five entities
+**Goal**: by the end of this lesson you can name the four entities
 that make up graphden's slot/binding model and explain why
 they're separate.
 
@@ -8,7 +8,7 @@ they're separate.
 `binding-list-item`, `slot identity`, rename-view slots
 (`slot.source-slot-id`), `type-override`.
 
-## Why three entities instead of one
+## Why four entities instead of one
 
 If a "slot binding" were ONE row carrying `(fn-id, slot-name,
 value)`, graphden couldn't:
@@ -19,7 +19,8 @@ value)`, graphden couldn't:
   child overrides it).
 - Express sequence bindings like `:list-append` cleanly.
 
-So the data model splits the concern across five entities:
+So the data model splits the concern across four entities (plus one
+self-referencing field on `slot` for renames):
 
 | Entity | What it is | Lives across branches? |
 |---|---|---|
@@ -128,47 +129,58 @@ violations still reject the save outright.)
 ## Try it
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
-> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial={id})
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=03)
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu.
 
-1. Find `:str-len` in the editor. Click its `:string` slot
-   chip. Note its declared type (`:text`).
-2. Create a descendant:
+One slot, many bindings — prove it with two children of one fn:
 
-   ```edn
-   {:name :tutorial-renamed-input
-    :parent :str-len
-    :args  {:string {:as :input :type :non-blank-text}}}
-   ```
+1. Type `str-upper` in the Explorer filter and click the
+   `str-upper` row (`core.strings`). It declares one slot,
+   `:string`; its type chip says `text`.
+2. Click `⋯` on the `str-upper` row, choose **Extend**, name it
+   `tutorial-a`, then **Save**. The `:string` row on the new card
+   comes from `str-upper`: the slot is INHERITED, not copied.
+3. Click the `+` on `:string`, choose **Bind literal**, type
+   `alpha`, then **Save**.
+4. Select `str-upper` again (filter for it). Its `:string` is still
+   unbound — your binding lives on `tutorial-a`, not on the slot.
+5. **⋯ → Extend** again, name this one `tutorial-b`, **Save**. Same
+   slot identity as `tutorial-a`'s, and an empty `+` again, because
+   `tutorial-b` has no binding of its own yet.
+6. Click the `+` on `:string`, **Bind literal**, type `beta`,
+   **Save**.
 
-3. Open `:tutorial-renamed-input`'s card. The arg row now says
-   `:input` (renamed) and its type chip says `non-blank-text`
-   (narrowed). The provenance ↳ badge shows where each came from
-   — `:input` from `:tutorial-renamed-input`'s slot,
-   `:non-blank-text` from the type-override binding.
-4. Try widening: click the arg's type-chip. The compatible-type
-   select offers only types that NARROW `:text` — `:any` isn't
-   even listed. Widening is a type error, and while a type error
-   would no longer block the save (it records a diagnostic —
-   below), the select simply doesn't offer one.
-5. So break a type the way it actually happens — with a value.
-   Create `{:name :tutorial-bad-port :parent :http-server}` and
-   click its `:port` arg (type `port`, a refined `:int` —
-   1..65535). The number widget opens; type `-1`. The live
-   status flips to ✗ (refinement violated) — but Save still
-   LANDS. The fn is now flagged: its card root row gains a ⚠
-   badge (hover: "1 type error on this fn"), the Explorer's
-   **⚠ type errors** chip counts it, and the Inspector's Bindings
-   tab shows the refinement diagnostic under `port`.
-6. Press ▶, tick the side-effects acknowledgement, and hit Run
-   (no need to fill the free args — the refusal fires before
-   anything executes): execution is REFUSED — "unresolved type
-   errors", naming the fn and the mismatch. The graph keeps
-   your work-in-progress, but won't run it.
-7. Edit `:port` again to `8081`. The fixing save clears the
-   recorded diagnostic — the ⚠ badge and the panel entry
-   disappear.
+`tutorial-a` says `alpha`, `tutorial-b` says `beta`, `str-upper`
+stays open — one slot identity, three independent binding states.
+That separation is why inheritance never copies anything.
+
+### Going further (fns.edn / MCP only)
+
+A rename and a type override on the same slot, in one fn-def:
+
+```edn
+{:name :tutorial-renamed-input
+ :parent :str-len
+ :args  {:string {:as :input :type :non-blank-text}}}
+```
+
+Open its card: the arg row now says `:input` (renamed) and its
+type chip says `non-blank-text` (narrowed). The provenance ↳ badge
+shows where each came from — `:input` from
+`:tutorial-renamed-input`'s slot, `:non-blank-text` from the
+type-override binding. Clicking the type chip in the editor offers
+only types that NARROW `:text` — `:any` isn't listed (the
+compatible-type select is described in [Lesson 05](05-types.md)).
+
+To see a type diagnostic land the way it actually happens — with a
+value — extend `:http-server` as `:tutorial-bad-port` and bind its
+`:port` (type `port`, a refined `:int`, 1..65535) to `-1`. The live
+status flips to ✗, but Save still LANDS: the card root row gains a
+⚠ badge, the Explorer's **⚠ type errors** lens counts it, the
+Inspector's Bindings tab shows the diagnostic under `port`, and
+**▶ Run** is REFUSED with "unresolved type errors". Bind `:port`
+to `8081` and the fixing save clears all of it.
 
 ## What we glossed over
 
@@ -178,8 +190,8 @@ violations still reject the save outright.)
   those flow differently. Lesson 06.
 - **Per-branch evolution of bindings** — how a binding's
   `value` lives on a `binding-version` row scoped to a branch.
-  Lesson 20 (already written).
+  Lesson 20.
 
 ## Next
 
-Lesson 04 — Free arguments ([already written](04-free-arguments.md))
+[Lesson 04 — Free arguments](04-free-arguments.md)

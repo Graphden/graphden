@@ -6,9 +6,10 @@ no custom JS, no page reload — with the data, the markup and the
 wiring all visible in the graph.
 
 **Concepts introduced**: `web.htmx` (`:hx-get-attrs`,
-`:hx-post-attrs`, `:hx-button`, `:hx-swap-mode`),
-`:fragment-route` / `:fragment-post-route` /
-`:html-fragment-handler` (app.page), `:with-htmx`,
+`:hx-post-attrs`, `:hx-button`, `:hx-swap-mode`,
+`:sse-connect-attrs`), `:fragment-route` /
+`:html-fragment-handler` / `:sse-fragment-handler` (app.page),
+`:wake-on-writes`, `:with-htmx` / `:with-htmx-sse`,
 `/assets/htmx.min.js` (vendored — no CDN).
 
 ## The idea
@@ -82,8 +83,8 @@ platform, hash-busted per deploy), so pages work with no CDN and
 no external dependency.
 
 Mount `:clock-page` and `:clock-fragment-route` the same way as
-any route (lesson 07: the `:all` items list locally, an app route
-on the cloud). Open `/clock`, press **Refresh** — the number
+any route (lesson 07's `:all` list on a self-hosted instance, or
+as an app — lesson 27). Open `/clock`, press **Refresh** — the number
 changes on every click, straight from a fresh graph execution.
 
 ## Auto-refresh — `:trigger`
@@ -192,9 +193,7 @@ degrades to a keepalive ceiling:
 ```
 
 Spurious wakes are cheap — a wake is one server-side render plus a
-hash compare, and only a **changed** fragment is pushed. The demo
-clock on `/demo/contact` runs exactly this way: save any fn in the
-editor and watch the panel jump ahead of its 5-second keepalive.
+hash compare, and only a **changed** fragment is pushed.
 
 Streams are bounded by design: each closes itself after
 `:max-lifetime-ms` (default 5 min, capped at 30) and the
@@ -205,8 +204,9 @@ turns overload into a clean 503 + retry instead of resource
 exhaustion.
 
 Live demo: the contact-form demo page (`/demo/contact`, lesson
-07) now carries exactly this panel — a server clock streaming
-over `/demo/contact/clock`.
+07) carries exactly this panel — a server clock streaming over
+`/demo/contact/clock`; save any fn in the editor and watch it
+jump ahead of its 5-second keepalive.
 
 ## When to use which layer
 
@@ -214,9 +214,13 @@ over `/demo/contact/clock`.
 |---|---|
 | Click → run a registered JS handler | `:dispatch-action` (lesson 07) |
 | Click/submit → fetch a **server** fragment | `web.htmx` + `:fragment-route` (this lesson) |
-| Server-pushed live panel (no polling) | `:sse-connect-attrs` + `:sse-fragment-route` (this lesson) |
+| Server-pushed live panel (no polling) | `:sse-connect-attrs` + `:sse-fragment-handler` on a `:get-route` (this lesson) |
 | One-off DOM behaviour no vocabulary covers | `:custom-script` (lesson 08) |
 
 htmx fragments keep the behaviour server-side: the fragment is a
 graph fn you can inspect, type-check, branch and reuse — the same
 property the editor relies on for its own UI.
+
+## Next
+
+[Lesson 12 — Executing a fn: free-arg form, history, cancel](12-executing-a-fn.md)

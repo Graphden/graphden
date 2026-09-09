@@ -36,8 +36,9 @@ is **lifetime**, and it is the whole story of this lesson.
 
 An `:atom` fn-def hands back a **fresh** box on every top-level
 `execute`. Within that one call, every reference to the same
-`:atom` fn-def resolves to the *same* box (result-caching, lesson
-04) — so several steps can share it — but the next call starts over.
+`:atom` fn-def resolves to the *same* box (results are cached
+within one execution) — so several steps can share it — but the
+next call starts over.
 
 That's exactly what you want for a per-request accumulator: a
 transaction journal, a running total for one computation. It's the
@@ -79,7 +80,9 @@ supplied per-swap.
 `:swap`'s `:func` slot is `[:fn {:current a} a]` — a 1-arg callable
 `a → a`. `:_bump-one` fits: it reads `:current` and returns a number
 of the same type. Now `▶ Run` (via `⋯`) on `:count-a-hit` (lesson 12) returns `1`,
-then `2`, then `3` — it remembers.
+then `2`, then `3` — it remembers. Writing a cell is the `:state`
+effect, so the Run pane first asks you to tick the side-effects
+acknowledgement before Run enables.
 
 Swap `:cell` for `:atom` in `:hit-count` and it returns `1` every
 time: a fresh box per call.
@@ -122,8 +125,7 @@ exactly how the editor's own response cache is built.
 with `key = "a"` → `1`, in a *later* call — the write persisted.
 
 > Keys come back as **strings**, not keywords, after the JSONB
-> round-trip — `(get m "a")`, not `(get m :a)`. See lesson 03's note
-> on literal keys.
+> round-trip — `(get m "a")`, not `(get m :a)`.
 
 ## `:swap` vs `:reset` — which write
 
@@ -171,9 +173,10 @@ falls back to `:atom` behaviour — fresh each call.
 
 ## Next
 
-[lesson 24 — Members: managing who is in your org](24-users-admin.md)
+[lesson 10 — Recursion: loops without cycles](10-recursion.md)
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
 > [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=09)
 > (no sign-up), or pick “Interactive tutorial” in the editor's
-> account menu.
+> account menu. The tour builds a lighter variant — a list cell plus
+> `:swap-conj`, under its own names — rather than the counter above.

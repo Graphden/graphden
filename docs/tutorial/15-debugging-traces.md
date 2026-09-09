@@ -32,16 +32,19 @@ sits paused holding threads.
 Take any composed fn of yours (something with a few refs — the
 `slugify` test subject from lesson 14, or any page fn):
 
-1. Open its ▶ **Run** popover.
-2. Check **Trace path**. If you also want per-node return values,
-   check **+ capture values** — it asks for an explicit confirm with
-   a cost estimate (values are stored with the run, up to 4 KB per
+1. Open its Run pane — `⋯ → ▶ Run` lands the Inspector on the
+   **Runs** tab.
+2. Check **Trace path**, and **Save to history** — the trace is
+   stored on the run, so an unsaved run keeps it only until you
+   navigate away. If you also want per-node return values, check
+   **+ capture values** — it asks for an explicit confirm with a
+   cost estimate (values are stored with the run, up to 4 KB per
    node).
 3. Run. The result pane now offers **Show path on canvas** — every
    traversed fn card gets a timing badge (`3× 12ms`, `cache`,
    `secret`), and with values captured, an `= value` chip.
-4. Open **History** in the popover header. The traced row carries
-   two extra buttons:
+4. In the history list under the form, the traced row carries two
+   extra buttons:
    - **path** — the same aggregate canvas highlight;
    - **tree** — the step-through call tree.
 
@@ -56,9 +59,23 @@ a chip (`12ms` fresh call · `cache` memoised — the body didn't run ·
 - Click a row (or use **◀ ▶** / arrow keys) to step; the selected
   frame's card highlights on the canvas.
 - `Esc` or ✕ closes the panel.
-- A `trace truncated` note means the run had more frames than the
-  caps keep (10 000 entries / 256 KB stored) — the newest frames
-  survive.
+- A `trace truncated` note means the run hit a cap. There are two,
+  and they cut from opposite ends: recording **stops at 10 000
+  frames** (the first 10 000 are kept), and a stored trace over
+  **256 KB** drops its **oldest** frames until it fits. Frames whose
+  parent was dropped show up as roots rather than vanishing.
+
+Captured values have caps of their own, each reported rather than
+silent:
+
+- a single value over **4 KB** is not captured — the card's chip
+  reads `= 4KB+` and its popover explains the cap;
+- when all captured values together pass the **16 MB** budget, the
+  oldest entries drop first and the path panel says `some values
+  dropped`;
+- a fn that touches `:secret`-typed data gets a red `secret` badge,
+  no timings and no value chip — its value is never read by the
+  capture machinery, in either mode (next section).
 
 ## Secrets never leak into a trace
 

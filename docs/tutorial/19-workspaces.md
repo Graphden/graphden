@@ -26,7 +26,7 @@ branch choice).
 ## The workspace chip
 
 In the **Build** surface's context bar — alongside the *branch*
-and *packages* chips (Lessons 8 and 14) — sits the **workspace
+and *packages* chips (Lessons 20 and 29) — sits the **workspace
 chip**, showing your current scope. Click it:
 
 ```text
@@ -99,11 +99,11 @@ browser's local storage. Consequences worth knowing:
 > account menu.
 
 1. Open the **workspace chip** in the Build context bar. Tick
-   `mycorp` — the Explorer collapses to `mycorp.*` and the
+   `core` — the Explorer collapses to `core.*` and the
    "(primitives)" bucket disappears.
 2. Tick a second project — the popover stays open; both trees are
    now in scope.
-3. Hover `mycorp.hello` in the Explorer, click **⊘** — it's gone
+3. Hover `core.strings` in the Explorer, click **⊘** — it's gone
    from your tree. Reopen the chip: it's listed under **Hidden by
    you**; click **↺** to bring it back.
 4. Reload the page — your scope survives.
@@ -144,7 +144,5 @@ other change.
 
 ## Next
 
-Lesson 17 — [Finding your way: the lens and the
-Inspector](17-explorer-and-inspector.md): the other half of not
-drowning in a big graph — filter by *kind*, and read everything
-about a selected fn in one panel.
+[Lesson 20 — Branches: fork, edit, diff, merge](20-branches.md): a
+change that lives on its own branch until you fold it back.

@@ -35,6 +35,17 @@ HTTP in the graph, and nothing is typed by hand.
 You will create a producer service on a free port, a consumer that
 calls it, and watch the address appear and disappear.
 
+0. **The shortest version first** (what the in-editor tour does): the
+   editor's own `:web-server` is already a running service, so name
+   *it*. Extend `:service-get` (filter `service-get`, `⋯` →
+   **Extend**, name `tutorial-fetch`); on the card bind the `service`
+   placeholder with **Bind fn-ref** → `web-server` and the `path`
+   placeholder with **Bind literal** → `/version`; `⋯` → `▶`, tick
+   the effects box, **Run**. The result is the web-server's
+   `/version` answer — status 200, the build hashes in the body — and
+   nothing named a host or a port. The rest of this walkthrough does
+   the same with a producer you own.
+
 1. **The producer.** Add these fn-defs the way you add any (the editor,
    `upsert-fn-defs` over `/mcp` — [docs/MCP_CLIENTS.md](../MCP_CLIENTS.md) —
    or a package module, lesson 28). Pick a port nothing else uses:
@@ -182,5 +193,5 @@ nothing). Every hop shares the top-level run's trace id, so a chain
 
 ## Next
 
-Lesson 28 — Packages ([already written](28-packages.md)): put the
-contract namespace in a package so another org can install it.
+[Lesson 36 — Queues](36-queues.md): asynchronous work between
+services.

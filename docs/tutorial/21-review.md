@@ -24,11 +24,10 @@ on the branch-popover row **of the branch being merged into**:
 
 - **Required approvals** (0–3) — a merge into this branch is refused
   (409, *"requires N approval(s)…"*) until the proposal has N valid
-  approvals.
+  approvals. It is a one-tap `0…3` segmented control — pick the
+  number and the rule is saved immediately.
 - **Push only via merge** — no direct writes at all; the only way in
   is a merge (lesson 20 covers this one).
-  Required approvals is a one-tap `0…3` segmented control — pick the
-  number and the rule is saved immediately.
 - **Count the author's own approval** — on by default, so a solo user
   is never locked out; untick it for genuine four-eyes review.
 

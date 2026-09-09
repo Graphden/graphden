@@ -14,9 +14,11 @@ owner's special position, ownership transfer.
 
 ## Membership is grants
 
-Under the accounts model ([Lesson 33](33-signing-up-and-in.md)),
-people *sign themselves up* — there is no admin-creates-user flow
-and no per-org password store. What an org controls is
+Under the accounts model people *sign themselves up* — there is no
+admin-creates-user flow and no per-org password store.
+([Lesson 33](33-signing-up-and-in.md), later in this chapter, covers
+signing up and in; here it is enough that you have an account and
+own an org.) What an org controls is
 **membership**, and membership is simply *grants*: an account is
 a member of your org iff it holds a `:grant` row there (or owns
 the org outright). "Add a member" = write them a grant; "remove a
@@ -110,7 +112,7 @@ is no revoke — ownership only moves.
 
 Adding and removing members requires the `manage-users`
 org-management capability — held implicitly by the **owner**, or
-delegated via a role ([Lesson 25](25-grants.md)). Everyone else
+delegated via a role ([Lesson 26](26-roles.md)). Everyone else
 sees the panel read-only at best: the underlying entities
 (`:account`, `:grant`, `:org`) are guarded server-side, so the
 affordances are just UX — the enforcement is in storage.
@@ -134,7 +136,7 @@ affordances are just UX — the enforcement is in storage.
 - **Where accounts come from** — self-serve signup, social
   sign-in, verification ([Lesson 33](33-signing-up-and-in.md)).
 - **Delegating member management** — a role carrying
-  `manage-users` (next lesson).
+  `manage-users` ([Lesson 26](26-roles.md)).
 - **Personal namespaces** — every member implicitly owns
   `<prefix>.<name>`; that interacts with grants (next lesson).
 

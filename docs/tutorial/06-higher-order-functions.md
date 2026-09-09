@@ -6,8 +6,8 @@ behave differently from other slots, and reason about
 closure-capture (why `:request` from an outer Ring handler is
 available inside a deeply-nested callable).
 
-**Concepts introduced**: `:fn`-typed slot`,`HOF`,`closure-
-capture`,`lambda-params`,`iterating vs one-shot HOF`.
+**Concepts introduced**: `:fn`-typed slot, `HOF`,
+`closure-capture`, `lambda-params`, `iterating vs one-shot HOF`.
 
 ## The two kinds of slot
 
@@ -88,30 +88,15 @@ A user fn-def that wraps `:future`:
  :args  {:value "starting up"}}
 ```
 
-`:future` invokes `:greet` once, in a thread, prints the
-constant.
+`:future` invokes `:greet` once, in a thread; the body's result
+(`"starting up"`) is discarded, and `:startup-task` returns the
+stopper-thunk.
 
-### Covariant return — fn-typed slots are subtype-checked
-
-When you bind a fn-ref into a `[:fn args ret]` slot, the
-binding-site type-check synthesizes the ref's static
-signature `[:fn (ref's args) (ref's return)]` and runs
-fn-subtype against the slot's expected shape. Return is
-covariant: a ref returning `:int` satisfies a slot expecting
-`[:fn {} :any]` because `:int ⊆ :any`.
-
-The same applies above: `:greet` is `:const`-parented and
-statically returns `:text`. The slot `:body` wants `[:fn {}
-:any]`. The synthesized ref-type `[:fn {} :text]` is a
-subtype (zero args match the slot's `{}`, `:text` ⊆ `:any`),
-so the bind passes.
-
-This is the structural reason the from-scratch service-eligible
-probe recipe in [lesson 32](32-services.md) works — bind a
-const-thunk to `:future.body`, the type-check accepts, the
-runtime `hof-wrap`s the ref as the daemon's callable. Without
-covariant return you'd need to box the thunk in a `:identity`-
-parented shim just to satisfy the slot.
+The bind type-checks because fn-typed slots are subtype-checked
+with a covariant return — `:greet` statically returns `:text`,
+and `[:fn {} :text]` fits a slot wanting `[:fn {} :any]`; that is
+what lets a plain const-thunk drive `:future` in
+[Lesson 32](32-services.md).
 
 ## Closure-capture: how `:request` propagates
 
@@ -160,8 +145,9 @@ automatically through ref chains AND through HOF boundaries.
 Coming from Clojure you may reach for a factory — a fn that takes
 parameters and returns the callable you then hand to `:map`. There is
 no such step here, because a graph fn with unbound free args already
-IS that returned callable: binding some of its args (`add-5 :parent
-add :args {:a 5}`) is the factory call, the bound args are the
+IS that returned callable: binding some of its args
+(`{:name :add-5 :parent :add :args {:nums [5]}}`) is the factory
+call, the bound args are the
 closure, and the still-free arg is the lambda parameter the HOF
 supplies per element. Referencing a fn into a `:fn`-typed slot always
 passes the fn itself, unrun — the executor never evaluates it first
@@ -202,39 +188,50 @@ in your base-fn impl and the dispatch picks the right behavior.
 ## Try it
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
-> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial={id})
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=06)
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu.
 
-1. Find `:map` in the editor. Its `:func` slot's type chip says
-   `[:fn {:item …} …]` — the `:item` is the structural marker
-   that classifies `:map` as iterating.
-2. Create:
+1. Type `map` in the Explorer filter and click the `map` row
+   (`core.hof`). Read the two slots: the `:coll` chip reads `['a]`
+   — a list of anything; the `:func` chip reads `(item:'a) → 'b` —
+   a callable taking `:item` and returning something else. Only the
+   second one is a HOF slot, and the `:item` name is the structural
+   marker that classifies `:map` as iterating.
+2. Click `⋯` on the `map` row, choose **Extend**, name it
+   `tutorial-map`, then **Save**. (`map` itself is package-owned,
+   so its own slots are read-only — you customize by extending.)
+   Both inherited slots show a `+` on your card.
+3. Click the `+` on `:func`. Instead of the value form you saw in
+   earlier lessons, the fn picker opens straight away: a literal is
+   not a thing you can put in a callable slot. The picker states
+   *Expected: (item:a) → b* and splits candidates into
+   **Compatible** and **Other** — a fn qualifies when its FREE
+   argument is named `:item`, the name a HOF passes each element
+   under. Press Escape to close it.
+4. Type `stringify-map-keys` in the filter and select it
+   (`core.collections`). Its `:f` slot is already bound to a
+   callback fn — the edge on the canvas is that binding.
+5. `⋯ → ▶ Run`. Its free arg is the map to convert — enter
+   `{"a": 1}` and **Run**. The callback ran once per key, without
+   you ever invoking it yourself.
 
-   ```edn
-   {:name :tutorial-double-each
-    :parent :map
-    :args  {:func {:parent :mul
-                   :args {:nums [{:as :item} 2]}}
-            :coll [1 2 3]}}
-   ```
+### Going further (fns.edn / MCP only)
 
-   (`{:parent …}` inline-anonymizes the callback — see lesson
-   01 for the named alternative.) Run it. Result: `[2 4 6]`.
+An inline `{:parent …}` map in a `:fn`-typed slot anonymizes the
+callback (the named alternative is `:double` above):
 
-3. Try replacing the constant `2` with a free arg:
+```edn
+{:name :tutorial-double-each
+ :parent :map
+ :args  {:func {:parent :mul
+                :args {:nums [{:as :item} 2]}}
+         :coll [1 2 3]}}
+```
 
-   ```edn
-   {:name :tutorial-multiply-each-by
-    :parent :map
-    :args  {:func {:parent :mul
-                   :args {:nums [{:as :item} {:as :factor}]}}
-            :coll [1 2 3]}}
-   ```
-
-   The card now shows a free arg `:factor`. Open the row's `⋯`
-   popover, click ▶ Run — the
-   editor asks you to supply `:factor`, then runs.
+Run it: `[2 4 6]`. Replace the constant `2` with `{:as :factor}`
+and the card grows a free arg `:factor` — the Run pane asks for it
+before running.
 
 ## What we glossed over
 
@@ -245,8 +242,10 @@ in your base-fn impl and the dispatch picks the right behavior.
   refs without spilling. Lesson 13.
 - **`hof-wrap` / `hof-lambda-params` source** — the actual
   Clojure code that implements the dispatch lives in
-  `executor/compile/renames.clj` if you want to dig.
+  `executor/compile_eager.clj` (`hof-wrap`) and
+  `executor/compile/renames.clj` (`hof-lambda-params`) if you
+  want to dig.
 
 ## Next
 
-[Lesson 13 — Effects and the `:secret` type-marker](13-effects-and-secrets.md)
+[Lesson 07 — Composing pages from components](07-components-and-pages.md)

@@ -7,7 +7,8 @@ first-party packages are layered.
 
 **Concepts introduced**: `package`, `module`, `fns.edn`,
 `impls.clj`, `package.edn`, `:dependencies`, `:package-names`,
-`defbase`, the `impls` map, `namespace tree`, optional package.
+`defbase`, the `impls` map, `namespace tree`, optional package, and
+an **external package pulled by git coord** (`executor-packages.edn`).
 
 ## What's a package
 
@@ -203,6 +204,60 @@ publish / install / update / fork — is [Lesson 29](29-distributing-packages.md
    (Lesson 04); the `{:value …}` items are literal strings joined
    with an empty separator.
 
+## An external package from its own git repo
+
+Everything above is a package **inside the main tree**. There is a
+second way for a package to reach a graphden it wasn't authored in —
+an **external package that lives in its own git repository** and is
+pulled onto the classpath as a Clojure dependency. This is how a
+**Type-2** package (one that ships its own base-fn *impls*, not just
+fn-defs) travels: it is code, so it enters through the build, not
+through the graph.
+
+The moving parts, with the worked example `mathx` (a tiny package whose
+whole job is one `:gcd` base-fn plus a `:gcd-with-12` fn-def):
+
+1. **The package is its own repo.** `graphden/graphden-mathx` is a
+   normal Clojure project — a `deps.edn` and a `packages/mathx/`
+   resource tree (`package.edn` + `ops/fns.edn` + `ops/impls.clj`),
+   exactly the on-disk shape above, just outside the main tree.
+
+2. **The consuming graphden lists it by git coord** — in `deps.edn`
+   (so it's on the classpath) and in `resources/executor-packages.edn`,
+   the operator's one-file manifest of external packages:
+
+   ```clojure
+   {:packages
+    [{:name "mathx"
+      :lib mathx/mathx
+      :coord {:git/url "https://github.com/Graphden/graphden-mathx.git"
+              :git/sha "8337147…"}}]}
+   ```
+
+3. **`bb rebuild` pulls it in.** The build clones the repo at that sha,
+   bundles its `packages/mathx/` resources into the uberjar, and the
+   loader syncs it at boot alongside `core` / `web` / `app` — you'll see
+   `Loading package: mathx` in the logs. Its base-fn (`:gcd`) and fn-def
+   (`:gcd-with-12`) are then first-class: `POST /api/execute` of
+   `:gcd-with-12 {b 18}` returns `6`.
+
+Unlike a registry install ([Lesson 29](29-distributing-packages.md)),
+this is a **rebuild-time, operator** action, not an in-editor click.
+Two practical notes:
+
+- **Dev stays offline.** While developing the package you don't want
+  every `bb test` reaching for git. The `:test` / `:dev` aliases carry
+  an `:override-deps` that points `mathx` at a local checkout
+  (`external-packages/mathx`), so lint/test resolve the in-tree copy and
+  never touch the network. Only the *build* (`bb rebuild`) uses the git
+  coord.
+- **A private package repo needs build-time access.** If the repo is
+  private, the build host must be able to read it (an `ssh-agent`
+  holding your key, or a read-only deploy key). `bb test` / `bb dev`
+  don't — they use the local override. See
+  [docs/DEPLOYMENT.md](../DEPLOYMENT.md) and
+  [docs/PACKAGE_DISTRIBUTION.md § 5](../PACKAGE_DISTRIBUTION.md).
+
 ## What we glossed over
 
 - **Cross-package references** — ref a fn-def from another
@@ -217,4 +272,6 @@ publish / install / update / fork — is [Lesson 29](29-distributing-packages.md
 
 ## Next
 
-[Lesson 07 — Composing pages from components](07-components-and-pages.md).
+[Lesson 29 — Distributing packages](29-distributing-packages.md):
+publish a namespace into the registry, install it by reference,
+update, roll back, fork.

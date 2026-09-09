@@ -5,7 +5,7 @@ fn-card, supply its free arguments, inspect the result, replay
 from history, and cancel a running execution.
 
 **Concepts introduced**: `execute`, `free-arg form`, `effect-gate`,
-`persist toggle`, `execute history`, `repeat`, `cancel`, `TTL`.
+`persist toggle`, `execute history`, `repeat`, `cancel`, `retention`.
 
 ## Two modes — one-shot vs supervised
 
@@ -39,18 +39,17 @@ them. Field types match the slot's declared type:
 - Record / list slots → nested form (see lesson 05)
 - `:fn`-typed slot → fn-picker
 
-Live validation runs as you type — `✓ OK` or `✗ <reason>` next
-to the input. Submit is disabled until every required field is
-valid.
+Live validation runs as you type — a `✓` or `✗ <reason>` marker
+next to the input. The marker is advice, not a lock: the server
+re-checks the args on submit and rejects a mismatch outright.
 
 ### Try it
 
 1. Open `:str-len` in the editor. It has one free arg
    `:string` (declared :text). Click `▶`.
-2. The Run pane opens in the right panel's **Runs** tab, with a
-   `:string` field and the hint
-   `Expected: text`. Type `hello world`.
-3. Click `Run`. Result `11` appears.
+2. The Run pane opens in the right panel's **Runs** tab, with one
+   field named after the free slot, `:string`. Type `hello`.
+3. Click `Run`. Result `5` appears.
 
 If you create a tutorial fn-def with multiple free args, the
 form lists them all. The placeholder `+` edges on the card
@@ -117,19 +116,9 @@ tenants.)
 ## The effect gate
 
 Every fn carries a set of effects it transitively touches
-(computed from the impl + propagation through refs). Categories:
-
-| Effect | Means |
-|---|---|
-| `:db` | Writes / reads graphden's storage |
-| `:network` | Outbound HTTP / TCP |
-| `:io` | Disk / filesystem |
-| `:env` | Reads OS env vars |
-| `:time` | Reads wall-clock time |
-| `:random` | Non-deterministic input |
-| `:process` | Spawns supervised background work (service-eligibility marker) |
-| `:state` | Mutates in-graph state (`:swap` / `:reset` on a `:cell` / `:atom`) |
-| `:raw-sql` | Raw SQL escape hatches (`:pg-query` & co) that bypass the storage protocol |
+(computed from the impl + propagation through refs) — one keyword
+per category, `:db`, `:network`, `:env` and the rest; lesson 13
+lists all ten and explains where they come from.
 
 When you open the Run pane for a fn with EFFECTS, it shows
 a warning banner — `side effects:` followed by one chip per
@@ -161,10 +150,10 @@ half-typed sketch in the graph, but it won't execute.
 
 ## The persist toggle
 
-By default, PURE runs are kept in memory only — visible for
-the next few minutes (TTL), then garbage-collected. Tick the
-`Save to history` checkbox in the pane and the result
-writes a `:fn-execution` row.
+By default, PURE runs are not stored: the result shows in the
+pane and that is all — no row is written, so there is nothing to
+come back to after a reload. Tick the `Save to history` checkbox
+in the pane and the run writes a `:fn-execution` row.
 
 Effectful runs don't get a choice: the checkbox comes
 pre-ticked and locked (*"Automatically saved — runs that
@@ -174,20 +163,20 @@ The persisted row carries:
 - `:fn-id` + `:fn-version-id` (frozen at start time so the
   audit trail survives later fn-def edits)
 - `:args` (the resolved free-arg values, capped at 256 KB)
-- `:result` (capped at 5 MB; oversize results write a placeholder
-  with a download link)
+- `:result` (capped at 5 MB; an oversize result is stored as `nil`
+  with `:result-truncated? true`)
 - `:effects` (the actual effect set the runtime saw, NOT the
   declared one — drift between the two surfaces in the editor)
 - `:error` + `:error-data` on failure (capped at 4 KB)
 
 Persisted executions show up in the runs list under the form
-(see below) and survive restarts.
+(see below), survive restarts, and are swept by retention (below).
 
 ## The history list
 
 The Runs tab doubles as this fn's history: below the form sits
-the list of its PERSISTED runs (in-memory non-persisted runs
-never appear there). Each row shows:
+the list of its PERSISTED runs (a run without `Save to history`
+leaves no row, so it never appears there). Each row shows:
 
 - The args used
 - The status (`succeeded` / `failed` / `cancelled` / `pending` —
@@ -196,9 +185,10 @@ never appear there). Each row shows:
 - A `Repeat` button — re-fills the form with the same args so
   you can re-run
 
-History is per-fn (across branches). `Save to history` is what
-controls whether a pure run's result survives the in-memory TTL
-— effectful runs are always there.
+History is per fn, for the version the current branch resolves —
+the one `▶` would run now. `Save to history` is what decides
+whether a pure run gets a row at all — effectful runs are always
+there.
 
 ## Cancel
 
@@ -206,9 +196,8 @@ Long-running executions (an `:http-get` that hangs, a
 `:sleep` for 30 minutes) can be cancelled:
 
 - From the Run pane during the run — a `Cancel` button appears
-  in place of `Run`.
-- From the history panel later — the running row has a `Cancel`
-  action.
+  while the run is pending.
+- Programmatically — `POST /api/execute/<id>/cancel` (below).
 
 Cancel sets a flag the executor checks at each ref boundary
 (`*cancel-check*`). Already-running impls don't get
@@ -245,21 +234,22 @@ curl -X POST http://localhost:9002/api/execute/<id>/cancel ...
 The shape of `:result` mirrors the in-memory return value —
 JSON-encoded.
 
-## TTL — what gets garbage-collected
+## Retention — what gets swept
 
-Non-persisted executions live in an in-memory atom with a
-configurable TTL (default 30 minutes). After the TTL elapses,
-the row is dropped. Persisted executions are immune — they
-live in PG until you delete them.
+Persisted rows are not kept forever. An hourly sweep deletes
+`succeeded` and `cancelled` runs after **7 days** and `failed`
+runs after **30 days**; a row stuck in `pending` for over an hour
+is flipped to `cancelled` first and then follows the 7-day rule.
 
-Two side effects of this:
+Two consequences:
 
-1. Only persisted runs appear in the History panel — a pure
-   run without `Save to history` leaves no visible trace once
-   its in-memory row expires.
-2. The TTL also bounds the cancel window — once a row's
-   garbage-collected, you can't cancel an execution you no
-   longer have a handle for.
+1. Only persisted runs appear in the Runs tab — a pure run
+   without `Save to history` leaves no row, so there is nothing
+   to `Repeat` later.
+2. Cancel needs a pending row. A run that outlives the inline
+   wait is written as `pending` (whether or not you ticked the
+   box) and hands back its id — that id is what the `Cancel`
+   button and `/cancel` act on.
 
 ## Try it (the persist + history loop)
 
@@ -269,90 +259,25 @@ Two side effects of this:
 > account menu.
 
 1. On `:str-len`, run with `:string = "hello"` (no persist).
-   See the result + a fresh history row.
+   See the result; the runs list under the form does not change.
 2. Run again with `:string = "world"` (also no persist).
 3. Tick `Save to history`. Run with `:string = "graphden"`.
-4. Refresh the page. The first two runs are gone; the third
-   (persisted) is still in history.
+4. Refresh the page. The first two runs left no trace; the third
+   (persisted) is in the list.
 5. Click `Repeat` on the persisted row — the form pre-fills,
    you run again, get the same result.
 
 ## Tracing an execution
 
-The Run pane also has a `Trace path` checkbox (off by
-default — tracing adds a small capture cost to the run). When
-checked, the run records which fns it traversed: one entry per
-internal fn call, with the time each call took and whether it
-was served from the per-run cache.
-
-Try it:
-
-1. Open ▶ on a composed fn (anything that references other
-   fns — `:str-len` wrapped in your own fn-def works).
-2. Tick `Trace path` (and `Save to history` if you want the
-   trace to survive the page).
-3. Run. Under the result you get a `Show path on canvas`
-   button — click it.
-4. The traversed fn cards light up with a blue ring, each
-   wearing a small badge: `12ms` (time spent in that fn),
-   `3× 12ms` (called 3 times, 12 ms total — loops and shared
-   subtrees re-enter the same fn), or `cache` (the result was
-   reused, no time spent).
-5. A small panel at the bottom of the screen summarises the
-   path. If the run traversed fns that aren't currently drawn
-   on the canvas, it says `not on canvas: N fns` — hover it
-   for their names. Click `✕ clear` (or navigate anywhere) to
-   restore normal rendering.
-
-Persisted traced runs keep their path: in the History panel,
-rows with a recorded path show a `path` button that replays
-the same highlight.
-
-### Capturing values
-
-By default the trace records only fn ids, timings and cache
-flags — never the data flowing through. When you need the
-data too, there is a second step:
-
-1. Tick `Trace path` first. That unlocks the `+ capture
-   values` checkbox next to it (it stays greyed out
-   otherwise).
-2. Tick `+ capture values`. A confirmation dialog appears
-   with an estimated cost line — something like `Estimated
-   cost: up to ~48 KB (~12 fns in this fn's reach)`. This is
-   the expensive mode, so graphden asks explicitly; declining
-   the dialog unticks the box.
-3. Run, then `Show path on canvas`. Traversed cards now wear
-   a second chip under the timing badge: `= value`. Click it
-   to see that fn's captured return value, pretty-printed.
-   When a fn ran several times, you see the last value (the
-   popover says `Last of N captured invocations`).
-
-Limits you may run into, each reported rather than silent:
-
-- A single value larger than 4 KB is not captured — the chip
-  shows `= 4KB+` and its popover explains the cap.
-- If all captured values together exceed the total budget
-  (16 MB), the oldest entries are dropped first and the
-  bottom panel says `some values dropped`.
-- A fn that touches `:secret`-typed data (lesson 13) shows a
-  red `secret` badge, no timings and **no value chip** — its
-  value is never even read by the capture machinery, in
-  either mode.
-
-What the trace never contains:
-
-- **Values, unless you explicitly confirmed capture.** A
-  plain `Trace path` run records fn ids, timings and cache
-  flags only.
-- **Secrets.** The capture pipeline redacts secret-touching
-  fns at record time, values included.
+The Run pane also has a `Trace path` checkbox (and, behind it,
+`+ capture values`): the run records which fns it traversed, and
+optionally what each returned. That is lesson 15's subject — the
+canvas highlight, the step-through call tree, and the capture caps.
 
 ## What we glossed over
 
 - **Branch-aware execution** — the active branch picks which
-  version of the fn-graph runs. Lesson 20 (already written)
-  covers branches.
+  version of the fn-graph runs. Lesson 20 covers branches.
 - **Service-mode execution** — fns marked as services run
   forever, supervised by graphden. Lesson 32.
 - **HOF call shape** — how internal refs get their free args
@@ -360,4 +285,4 @@ What the trace never contains:
 
 ## Next
 
-Lesson 32 — Services ([already written](32-services.md))
+[Lesson 13 — Effects and the `:secret` type-marker](13-effects-and-secrets.md)

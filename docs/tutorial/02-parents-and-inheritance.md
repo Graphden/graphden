@@ -122,12 +122,12 @@ Two failure modes guard an MI parent set:
 - **Conflicting contracts on a SHARED slot** — both parents bind
   the same inherited slot to incompatible values, or pin it to
   incompatible types (neither a subtype of the other). This is a
-  TYPE error: at package sync it fails the load; in the editor
-  the fn still SAVES, and the conflict surfaces as a recorded
-  diagnostic — ⚠ badge on the card, an entry in the diagnostics
-  bar's "Type errors" tab (Lesson 03) — with
-  execution refused until one
-  side backs off.
+  TYPE error: at package sync it fails the load; in the editor it
+  is a recorded diagnostic — the fn saves, gets a ⚠ badge and shows
+  under the Explorer's **⚠ type errors** lens, and refuses to
+  execute until one side backs off (the doctrine is in
+  [Lesson 05](05-types.md), the lens in
+  [Lesson 16](16-errors-and-diagnostics.md)).
 
 ## The fn-card as a chain visualizer
 
@@ -145,12 +145,14 @@ you can walk the chain visually.
 
 ## Try it
 
-In the editor, in a namespace of your choice:
+In the editor:
 
-1. Find `:add` (a base function). Its card shows ONE row —
-   `:add` has no parents.
-2. Create `:add-10`, a fn-def parented to `:add` that seeds the
-   `:nums` list with `10`:
+1. Type `add` in the Explorer filter and click the `add` row (in
+   `core.arithmetic`). Its card shows ONE row — a base function has
+   no parents.
+2. Click `⋯` on the `add` row, choose **Extend**, type `add-10`,
+   then **Save**. That creates a child whose `:parent` is `:add` —
+   in `fns.edn` terms:
 
    ```edn
    {:name :add-10
@@ -158,11 +160,7 @@ In the editor, in a namespace of your choice:
     :args  {:nums [10]}}
    ```
 
-   Its card shows TWO rows: `:add-10` (with the bound `:nums`)
-   and `:add` below it.
-
-   Doing this through the editor's **⋯ → Extend** instead: the
-   popover's **in** line picks the child's namespace. Extending
+   The popover's **in** line picks the child's namespace. Extending
    your own fn defaults to the parent's namespace (the module
    stays together); extending a *platform* fn defaults to your
    last-used namespace — a child of `:add` belongs to your
@@ -172,19 +170,29 @@ In the editor, in a namespace of your choice:
    **⋯ → ✎ Rename** (both are always safe, callers included —
    everyone references the fn by identity, not by its name or
    namespace).
+3. The editor opens `add-10`: its card shows TWO rows, `add-10` on
+   top and `add` below it. `add-10` inherited `add`'s `:nums` slot —
+   a sequence. Click the `+` placeholder on `:nums`, choose
+   **Append literal**, enter `10`, then **Save**. The seed becomes
+   the list's first item.
+4. Click `⋯` on the `add-10` row, then **▶ Run**, then **Run**. The
+   bound seed makes the sum `10` — the child runs the parent's
+   implementation with its own bindings.
+5. Now go the other way. Extend went DOWN — a child under `add`.
+   **⋯ → ⬆ Wrap in new fn** goes UP: a new fn that CALLS `add-10`
+   and does something with its result. Click `⋯` on the `add-10`
+   row, choose **⬆ Wrap in new fn**, type `to-str` in the picker
+   and pick `core.strings.to-str` — the wrapper's parent. Name it
+   `add-10-text`, leave the **into** slot on `:value`, then
+   **Save**. The editor creates the wrapper with `add-10` already
+   bound into it and opens it: your sum, stringified.
 
-   The mirror of Extend is **⋯ → ⬆ Wrap in new fn**: where Extend
-   creates a child *under* the fn, Wrap builds a caller *above*
-   it — pick the wrapping parent (which fn should process this
-   one's result, say `:to-str`), name the wrapper, choose the slot
-   that receives the fn, and the editor creates the new fn with
-   the current one already bound in, then opens it. Compatible free
-   slots sort first with a ✓; picking a slot marked "(bound — will
-   override)" is legal too — the wrapper's own binding wins over the
-   parent's (closest-fn-wins, Lesson 03). That is how
-   you add a step on top of existing logic without re-assembling
-   it by hand.
-3. Try writing a multiple-inheritance fn-def over the two real
+   Compatible free slots sort first with a ✓; picking a slot marked
+   "(bound — will override)" is legal too — the wrapper's own
+   binding wins over the parent's (closer wins, as above). That is
+   how you add a step on top of existing logic without
+   re-assembling it by hand.
+6. Try writing a multiple-inheritance fn-def over the two real
    response axes:
 
    ```edn
@@ -210,4 +218,4 @@ In the editor, in a namespace of your choice:
 
 ## Next
 
-Lesson 03 — Slots and bindings ([already written](03-slots-and-bindings.md))
+[Lesson 03 — Slots and bindings](03-slots-and-bindings.md)

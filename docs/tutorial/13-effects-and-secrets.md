@@ -44,8 +44,8 @@ property a caller might care about:
 - "does this hit the DB?" → check `:effects` contains `:db`
 - "can this fn be a service?" → check it has `:process`
 
-The category set is closed by design (see [docs/PHILOSOPHY.md
-§ Effects](../PHILOSOPHY.md)).
+The category set is closed by design (see [docs/TYPES.md
+§ Effect Categories](../TYPES.md#effect-categories)).
 
 ## Where effects come from
 
@@ -205,8 +205,8 @@ or a response body) are sync-time errors.
 > refuse to execute (Lessons 03 / 05). Secret-flow violations are
 > a SECURITY class and keep the hard save-time reject: the write
 > is rolled back and the API answers 400 — the guarantee must not
-> depend on the derived diagnostics store. See
-> `docs/SECRETS.md` § Flow protection vs Error Tolerance.
+> depend on the derived diagnostics store. [docs/SECRETS.md](../SECRETS.md)
+> has the flow-protection rules in full.
 
 ### Per-base-fn `:taint-propagate?`
 
@@ -243,9 +243,9 @@ with `nil` and a `tainted?` flag is set. The succeeded response is:
 (A persisted row stores `:result null` and an `:error-data {:reason
 :tainted}` sidecar.) There is no `result-hidden` / `result-type`
 key — the value simply never leaves the server. The editor's
-execute-result pane renders the redacted body as an empty/hidden
-result; History rows mark the run as secret-typed rather than
-showing a value preview.
+result pane renders the redacted body as a **Result hidden** notice
+with a 🔒 in place of a value; a persisted row stores `:result null`,
+so the Runs list has nothing to preview for it either.
 
 This applies AT THE BOUNDARY (HTTP response). Inside the
 graph, secret values flow freely between fn-defs — they're
@@ -262,9 +262,9 @@ filter) are the canonical admin flow:
    - The secret VALUE to OpenBao at the given path.
    - A fn-def parented from `:secret-leaf` with a **resolver
      binding** — `:resolver-fn-id` pointing at `:vault-get`, the
-     vault path stored in the binding's `:value` (authoring form:
-     `{:resolver :vault-get :value "kv/path"}`, or the
-     `{:secret-path "kv/path"}` sugar).
+     vault path stored in the binding's `:value`. In `fns.edn` this
+     is written as `{:resolver :vault-get :value "kv/path"}`, or the
+     `{:secret-path "kv/path"}` sugar.
 4. Other fn-defs ref the new secret-leaf fn-def. At execute
    time, the executor reads the vault path from OpenBao,
    binds the value to the slot, runs the rest of the graph.
@@ -337,4 +337,4 @@ The graphden DB never holds the secret value. Only the path.
 
 ## Next
 
-Lesson 20 — Branches ([already written](20-branches.md))
+[Lesson 14 — Tests: the `tests` namespace](14-tests.md)

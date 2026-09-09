@@ -12,7 +12,7 @@ modifying any Clojure code.
 
 ## When you'd reach for this
 
-Lesson 07 covered the 10 platform components and the two
+Lesson 07 covered the platform components and the two
 built-in click handlers (`navigate`, `submit-form`). Real
 sites usually need a sliver of behaviour outside that scope —
 a tooltip on hover, a date-picker library, a confetti burst
@@ -32,8 +32,9 @@ Two shapes, picked by where you need the JS to live:
 
 `:wrap-custom-script` renders a JS body as
 `<script>body</script>` for inclusion in a page's `:scripts`
-list. Free arg `:body` is typed `:js-source` (the editor's code-editor widget — a
-CodeMirror editor with JS syntax highlighting — kicks in).
+list. Free arg `:body` is typed `:js-source`, which is what
+gives it a code editor in the value form (see "Editor widget"
+below).
 
 Worked example — a script that decorates every `[data-tip]`
 element on the page with its tooltip text:
@@ -44,18 +45,21 @@ element on the page with its tooltip text:
  :args {:body "document.querySelectorAll('[data-tip]').forEach(e => { e.title = e.dataset.tip; });"}}
 ```
 
-Then in your page:
+Then in your page route (the `:html-page-route` template from
+Lesson 07 — `:html-page` alone gives you hiccup, not a route):
 
 ```clojure
 {:name :my-page
- :parent :html-page
- :args {:title "Tips demo"
+ :parent :html-page-route
+ :args {:path "/tips"
+        :title "Tips demo"
         :body :my-page-body
+        :head :graphden-page-head
         :scripts [:graphden-runtime-script-tag :my-tooltip-script]}}
 ```
 
-Reload, hover over any `[data-tip]` element — the browser
-tooltip appears.
+Mount it (Lesson 07), open `/tips`, hover over any `[data-tip]`
+element — the browser tooltip appears.
 
 ### When to use `:custom-script` instead
 
@@ -111,8 +115,8 @@ button shipped on `/demo/contact`):
 
 `:custom-button` (in `web.components`, Lesson 07) is the
 convenience template — its `:body` slot is `:js-source`-typed,
-which gives you the code-editor widget (CodeMirror, JS-highlighted)
-instead of a single-line input.
+so the value form gives you the code editor instead of a
+single-line input.
 
 If you'd rather see the underlying composition, the raw shape
 is `:button` with `:attrs` built from
@@ -158,8 +162,9 @@ matching) rather than a text box: the slot's type is
 everywhere else. Type `document.title = 'Graphden';`, Save, then
 run the fn. The result pane shows **`‹script› tag`** with your JS
 source under it — the same type-driven dispatch again, on the way
-OUT this time: the fn's return type is `:script-tag` (a narrowing
-of `:hiccup-node` — see Lesson 5), so the editor knows the value
+OUT this time: the fn's return type is `:script-tag` — a
+refinement (Lesson 05) of `[:list :any]` whose first element must
+be `"script"` — so the editor knows the value
 is a page asset, not a visual component, and shows its source
 instead of trying to render it. The value itself is ordinary
 hiccup — `["script" {} "document.title = 'Graphden';"]` — ready
@@ -185,26 +190,6 @@ Append it to `:_contact-demo-page-body`'s `:children`, run
 `bb rebuild`, reload `/demo/contact`. Click "Use template" —
 the textarea fills.
 
-## What you've now got
+## Next
 
-| Layer | What | Lessons |
-|---|---|---|
-| Graph model | fn-defs, slots, bindings, types, effects | 1–7 |
-| Process | branches, executing fns, services | 8–10 |
-| Code re-use | packages | 11 |
-| User-facing UI | components, dispatch, page routes | 12 |
-| Escape hatch | `:custom-script` / `:dispatch-custom` | 13 |
-| Distribution | publish, install, update, fork | 14 |
-
-Lesson 29 continues from packages (Lesson 28): once you've
-authored a namespace, it shows how to publish it as a versioned
-artifact (the namespace's **⬆** action) and install / update /
-fork it across branches from the **packages** chip on the Build
-surface.
-
-Multi-tenancy (multiple users hosting their own sites on one
-graphden instance, each with their own deploys / secrets /
-auth-isolated routes) is a separate future phase. Today every
-fn-def in this graphden installation shares the same surface;
-Lesson 07 covers how to mount your own page routes alongside
-the editor's, Lesson 08 gives you the JS escape hatch.
+[Lesson 09 — State: cells, swap, and a graph-native cache](09-state-cells-and-caches.md)

@@ -90,8 +90,10 @@ which you have lost work by pressing this button.
 
 ## What restore does NOT touch
 
-Fn-level fields only — the ones listed above. **Bindings are not
-restored.** A binding is its own entity with its own version rows
+Fn-level fields only — description, return type, constraint, expected
+effects. The **name** stays as it is (it is not among the fields restore
+carries, so undoing a rename means renaming back), and **bindings are
+not restored.** A binding is its own entity with its own version rows
 (lesson 03), so:
 
 - restoring a fn after you rebound one of its slots leaves the new
@@ -107,8 +109,8 @@ edits the reader never named. See
 ## Deletion is a version too
 
 Deleting a fn writes a tombstone version — `deleted-at` set — rather
-than removing rows. That is why lesson 01's cleanup says "deletes are
-soft, nothing is lost for good", and why a deleted fn's name is free
+than removing rows. That is why the tour's cleanup dialog says "Deletes
+are soft — nothing is lost for good", and why a deleted fn's name is free
 again immediately (the name-collision check reads the resolved view,
 not the history).
 
@@ -117,9 +119,9 @@ for as long as you can reach its id.
 
 ## Try it
 
-1. Pick any fn-def of yours — `:greet` from lesson 01 does — and edit
-   its **description** twice (⋯ → `i`), so the timeline has something
-   to show.
+1. Extend `const` (core.logic) into `tutorial-versioned` — the fn the
+   tour builds — and edit its **description** twice (⋯ → `i`: `first
+   draft`, then `second draft`), so the timeline has something to show.
 2. Open ⋯ → **⌛**. Three rows: the two edits and the create.
 3. Click the OLDEST row to expand it. If that version ever ran, its
    executions are listed; a version that never ran says so.
@@ -135,5 +137,6 @@ for as long as you can reach its id.
 - **Branches** (Lesson 20) — the same version rows, read through a
   different branch chain. A merge picks version rows; a `:branch-local?`
   fn's rows deliberately do not travel.
-- **Debugging** (lesson 15) — a trace names the version it ran, so a
-  failed run points at the exact row in this popover.
+- **Runs** — the Inspector's Runs tab (lesson 12) is the same
+  execution history sliced by fn; an expanded row here is it sliced by
+  version.

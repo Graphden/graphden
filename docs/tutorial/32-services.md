@@ -39,64 +39,87 @@ work". The seeded base-fns that declare it:
 | `:future` | Spawns a daemon thread (used by both above) |
 
 If you try to create a service for a fn whose ancestor chain
-doesn't have `:process`, the editor's create-guard rejects:
-"`:current-time-ms` is not service-eligible — neither it nor any
-ancestor declares the `:process` effect."
+doesn't have `:process`, the create-guard rejects it: *Cannot make a
+:service for fn "current-time-ms" — neither it nor any ancestor
+declares the :process effect. :service is reserved for fns that spawn
+supervised background work (long-running listeners, scheduled loops,
+etc.) …* — and goes on to suggest wrapping a one-shot fn in
+`:schedule`.
 
 ## Try it: one service
 
-1. Find the editor's own server `:web-server` (parented from
-   `:http-server`, port 8080). The `⚙` button on its row-actions
-   popover is enabled.
-2. Click `⚙`. The popover shows:
+The in-editor tour builds the same two fns, so the names match it.
+
+1. Type `const` in the Explorer filter, click the `const` row, then
+   `⋯` → **Extend**; name it `tutorial-tick`, **Save**. On its card
+   click the `+` on the `:value` slot, **Bind literal**, and type
+   `"tick"` — with the quotes; the slot is `:any`, read as JSON. This
+   is the work the service will keep doing: the smallest stand-in for
+   a listener or a cron loop.
+2. Clear the filter, type `future`, click the `future` row, `⋯` →
+   **Extend**; name it `tutorial-daemon`. On its card click the `+`
+   on the `:body` slot and pick `tutorial-tick` — a callable slot, so
+   the picker opens straight away. The fn now has no free arguments
+   AND carries `:process`: the two conditions for a service.
+3. `⋯` → `⚙` on `tutorial-daemon`. The popover reads "Make service:
+   :tutorial-daemon" and shows:
    - **Branch** picker (default = your current branch)
    - **Enabled** checkbox (default = on)
    - **Restart policy**: `:always` / `:on-failure` / `:never`
-3. Click `Create & reconcile`. The badge on the fn-card turns
-   `running` once the reconciler starts it.
+4. **Untick Enabled**, leave the policy on `:always`, click
+   `Create & reconcile`. The row is written and the popover closes;
+   the badge reads `disabled`. "This exists but should not be
+   running" is a desired state worth writing on purpose — and where
+   the tour stops, so it never spawns a daemon on your instance.
+5. `⋯` → `⚙` again: the popover now reads "Service: :tutorial-daemon"
+   with the row's state. Tick **Enabled**, `Save & reconcile`. The
+   reconciler starts a daemon thread that calls `:tutorial-tick` once
+   and exits; under `:always` it respawns, with a growing delay
+   because each copy lived under a minute (badge `backoff` between
+   attempts). Switch the policy to `:never`, save: it runs once and
+   the badge flips to `exited`.
+6. `⚙` once more → **Delete service**. Deleting the row is how you
+   stop a service for good; the fn itself is untouched.
 
 The reconciler runs on a NOTIFY callback — every `:service`
 write fires `service:write:<id>` on the `graphden_events`
 channel, the in-process callback diffs enabled-rows vs the
 running-atom, starts the missing ones, stops the deleted ones.
 
-## Building your own service-eligible fn-def
+## What you just built, as fn-defs
 
-`:web-server` is a pre-built example; let's walk a from-scratch
-recipe. We'll write the smallest possible service-eligible
+The two fns above are the smallest possible service-eligible
 fn-def — a future-parented thunk that just spawns a no-op
 daemon thread. Useful as a sanity probe; the structure
 generalises to real services (an HTTP server, a cron loop, a
-pg-listen consumer) by swapping the bound body.
-
-Two fn-defs, one parent each:
+pg-listen consumer) by swapping the bound body. In a package's
+`fns.edn` they are two fn-defs, one parent each:
 
 ```edn
 ;; Step 1 — a thunk. :const returns its bound :value as-is;
 ;; with :value bound, the thunk has zero free args and
 ;; statically returns :text.
-{:name :my-tick
+{:name :tutorial-tick
  :parent :const
  :args  {:value "tick"}}
 
 ;; Step 2 — a service-eligible probe. :future's :body slot is
 ;; [:fn {} :any] — a 0-arg callable returning anything. Binding
-;; it to :my-tick is accepted by the type-checker because the
+;; it to :tutorial-tick is accepted by the type-checker because the
 ;; ref's static signature [:fn {} :text] is a subtype of the
 ;; slot (covariant return: :text ⊆ :any). The runtime hof-wraps
-;; :my-tick as the daemon's body.
-{:name :my-probe
+;; :tutorial-tick as the daemon's body.
+{:name :tutorial-daemon
  :parent :future
- :args  {:body :my-tick}}
+ :args  {:body :tutorial-tick}}
 ```
 
-`:my-probe` now has zero free args (every slot in the chain is
-bound) AND the `:process` effect (inherited from `:future`).
-The `⚙` button in its row-actions popover is enabled. Click it → popover
-says "Make service: :my-probe" + "Create & reconcile". The
-reconciler starts a daemon thread that calls `:my-tick` once
-and exits; with `:restart-policy :always`, it respawns. With
-`:never`, it runs once and the badge flips to `disabled`.
+`:tutorial-daemon` has zero free args (every slot in the chain is
+bound) AND the `:process` effect (inherited from `:future`) — which
+is why its `⚙` was enabled. The reconciler starts a daemon thread
+that calls `:tutorial-tick` once and exits; with `:restart-policy
+:always` it respawns, with `:never` it runs once and the badge flips
+to `exited`.
 
 This is the minimum reproducible service. Real services swap
 the body for a long-lived loop — `:loop-until-interrupted`
@@ -124,7 +147,7 @@ The type-checker enforces the `[:fn {} :any]` slot shape on
   a fn-ref or an inline `{:parent …}`"), and executing it is
   refused until fixed. In a package's `fns.edn` the same
   mistake still hard-fails the sync. Either way the fix is the
-  `:my-tick` indirection or an inline
+  `:tutorial-tick` indirection or an inline
   `{:parent :const :args {:value "tick"}}` directly inside
   `:body`.
 
@@ -136,9 +159,20 @@ The type-checker enforces the `[:fn {} :any]` slot shape on
 | `:on-failure` | Only uncaught exceptions |
 | `:never` | Single-shot. Log on exit, move on. |
 
-In Phase 1 there's no runtime liveness check, so `:always`
-≡ `:on-failure` in practice — both kick in only on startup
-exception (e.g. port-in-use). A future phase will add a watchdog.
+Two moments count. **Start-time** — a throw while starting (port in
+use, a constructor error) is retried up to three times with a
+1 s → 2 s → 4 s backoff under `:always` and `:on-failure`; `:never`
+makes a single attempt and records `:start-failed-at` (badge
+`failed`). **Runtime** — every reconciler pass checks that each
+running copy is still alive (the listener is up, the daemon thread
+has not ended). A copy that died in place is restarted under
+`:always` after ANY exit, a clean stop included; under `:on-failure`
+only after an uncaught throw — a clean exit is parked (badge
+`exited`); under `:never` it is parked either way. Restarts of a copy
+that lived under a minute back off 1 s → 2 s → 4 s → … → 60 s (badge
+`backoff`), so a one-shot fn under `:always` is not a hot loop — use
+`:interval` for that. Details:
+[docs/SERVICES.md § Liveness](../SERVICES.md#liveness--a-copy-that-died-in-place).
 
 ### Cardinality — how many pods run it
 
@@ -237,8 +271,8 @@ curl -X PUT "$BASE/api/entities/service/$SERVICE_ID" \
 A cron loop is one trigger. A real job set usually has several — a
 nightly rebuild and a five-minute poll — and they belong to ONE service
 row, started and stopped together. There is no "schedules" table for
-that: a trigger list is a graph list, exactly like the migrations list
-above.
+that: a trigger list is a graph list, like the migrations list in the
+appendix at the end of this lesson.
 
 `:interval` is the fixed-period sibling of `:schedule` (bind
 `:every-ms` and `:fn`; `:interval-now` is the same loop that also fires
@@ -310,8 +344,9 @@ affects port 9001 without touching port 8080.
 ### Try it (per-branch edition)
 
 1. Pre-req: complete the per-branch web-server walk-through in
-   lesson 20. You should have `:dev-server` on `feat-dev-server`
-   parented from `:http-server` with `:port 9001`.
+   lesson 20. You should have a copy of `:web-server` on
+   `feat-dev-server` parented from `:http-server` with `:port 9001`
+   (call it `:dev-server`).
 2. Stay on `feat-dev-server`. Click `⚙` on `:dev-server`. The
    branch picker defaults to `feat-dev-server`. Hit
    `Create & reconcile`.
@@ -365,7 +400,7 @@ The rule that makes it safe: a persistent tenant service is only offered on a
 **dedicated** runtime.
 
 - **The free / network tiers are a full FaaS *without* services.** You compose
-  fns, deploy a live app at `your-org.graphden.app`, and execute on demand — but
+  fns, deploy a live app at `<label>.graphden.app` (lesson 27), and execute on demand — but
   a `:service` is off-limits. The `⚙` popover shows an *upgrade* note, and the
   API answers `403` with `:reason :service/tier-required`. (Under the hood
   `:service` is a platform-managed entity a shared tenant can't write directly.)
@@ -424,9 +459,20 @@ editor badge reads *configured* / *disabled*, not *running* / *failed*, for now.
 Operators provisioning a dedicated tenant (the pod set, the shard, the limits):
 see [docs/FLEET_DEPLOY.md § Dedicated tenant shard](../FLEET_DEPLOY.md).
 
-## A startup step: schema migrations
+## What we glossed over
 
-Because a service is just a no-arg fn, "run this before the listener
+- The rest of the multi-pod story — how a fn edit on one pod
+  invalidates the others' compiled registries, and how a
+  `:singleton` survives the pod that owned it crashing — see
+  [docs/SCALING.md](../SCALING.md).
+- Closure-capture and why cron loops need an explicit restart
+  after merge — see [docs/CLOSURE_CAPTURE.md](../CLOSURE_CAPTURE.md).
+- The package-declared seed services (web-server is one) — see
+  [docs/SERVICES.md § Packages-based seeding](../SERVICES.md).
+
+## Appendix — migrations as a service
+
+A separate recipe, for when a service owns a table. Because a service is just a no-arg fn, "run this before the listener
 starts" is `:do` — sequencing, not a service setting. `storage/pg`
 ships the classic migration shape as two templates you derive from:
 
@@ -467,21 +513,8 @@ in the one Postgres graphden itself uses. The full contract, including
 the advisory lock that lets several pods start at once, is in
 [docs/SERVICES.md § Startup steps](../SERVICES.md#startup-steps--schema-migrations).
 
-## What we glossed over
-
-- The rest of the multi-pod story — how a fn edit on one pod
-  invalidates the others' compiled registries, and how a
-  `:singleton` survives the pod that owned it crashing — see
-  [docs/SCALING.md](../SCALING.md).
-- Closure-capture and why cron loops need an explicit restart
-  after merge — see [docs/CLOSURE_CAPTURE.md](../CLOSURE_CAPTURE.md).
-- The package-declared seed services (web-server is one) — see
-  [docs/SERVICES.md § Packages-based seeding](../SERVICES.md).
-
 ## Next
 
-Lesson 35 — Services talking to services
-([35-services-talking-to-services.md](35-services-talking-to-services.md)):
-one service names another and calls it over HTTP, with the contract
-shared in the graph. Or Lesson 28 — Packages
-([already written](28-packages.md)).
+[Lesson 33 — Signing up & signing in](33-signing-up-and-in.md): your
+account on a graphden cloud. One service naming and calling another
+over HTTP is [lesson 35](35-services-talking-to-services.md).

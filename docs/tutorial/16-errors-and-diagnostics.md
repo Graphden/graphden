@@ -140,10 +140,13 @@ the finding with the other fns involved as links:
 - **unreferenced-private** — a `_`-private fn-def that nothing
   references any more.
 
-Small coincidences are not reported. Two accessors that both read
+Small coincidences are not shown. Two accessors that both read
 `:id` off a row are the normal way to give each code path its own
-child (lesson 04); the lint only speaks up when the shared structure
-carries at least three bound values — a copied graph, not a habit.
+child (lesson 04); a duplicate becomes a **warning** only when the
+shared structure carries at least three bound values — a copied
+graph, not a habit. Lighter matches the engine still files, as an
+*info* tier — calibration data for the lint itself — and the editor's
+lens and Inspector list warnings only.
 
 ```text
 Lint
@@ -167,24 +170,15 @@ branch, merges with it, and you can open it on the canvas and edit or
 delete it like any other fn. Nothing in graphden's diagnostics is
 stored state except what you explicitly said.
 
-## The lens next door, and the trap
+## The lens next door
 
-Tests are the fourth lens: **✓ tests** (lesson 14) focuses the tree
-on the `tests` namespaces with a status dot per test, reveals
-**▶ Run all**, and the Inspector's **Test** section runs one. The
-«catch next request» trap and the last captured trace (lesson 15)
-live on the **Runs** tab of the fn that runs as a service. Nothing
-sits under the canvas: every diagnostic is a lens in the Explorer
-and a section in the Inspector.
+Tests are the fourth lens — **✓ tests** (lesson 14) — and the trace
+tree with the «catch next request» trap (lesson 15) live on the
+**Runs** tab. Nothing sits under the canvas: every diagnostic is a
+lens in the Explorer and a section in the Inspector.
 
-And **Monitoring** — usage rollups: runs, failures and average
-duration per fn (lesson 34 reads the same numbers for the plan's
-ceilings) — is an org-level report, so it lives on the account menu's
-**Organization** surface.
-
-The ✕ lens answers *what broke and where*, Monitoring *how often*,
-Debug *why*, ⚐ *where this already is*. In that order, most of the
-time.
+The ✕ lens answers *what broke and where*, the trace tree *why*, ⚐
+*where this already is*. In that order, most of the time.
 
 ## Try it
 
@@ -240,6 +234,33 @@ time.
    entry, while a new fn `lint-suppressions` appears at the root of
    the Explorer. Open it: the value is your decision, spelled out.
    **Restore** puts the finding back.
+
+## Report a problem
+
+When what broke is the editor itself, the account menu has a
+**Report a problem** row. It opens a small form — category (Bug /
+Idea / Question), a description, an optional email for follow-up —
+plus a checklist of what travels with it, each item yours to untick:
+build and environment (the frontend and server version hashes, the
+browser), the recent console errors, and off by default your current
+location (instance URL, branch, open fn) and, when signed in, the
+already-redacted error log. Nothing is sent until you press **Send**.
+The report goes to the intake URL this instance announces — the
+official graphden intake unless the operator pointed it elsewhere or
+switched the row off — and lands as a row in that instance's
+`feedback_reports` table, from where the built-in alerter pings the
+operator's channel ([MONITORING.md § 3b](../MONITORING.md)).
+
+## Organization → Monitoring
+
+How often things break is not a lens: it is a report. The account
+menu's **Organization** surface has a **Monitoring** section — your
+org's last seven days as headline totals, a per-day trend table and
+the busiest fns, every number a usage rollup (run counts and
+durations only, never args, results or error bodies; kept for 90
+days). It is the same source the `7d: N runs · M failed · avg K ms`
+strip in the Runs tab reads per fn, and the one lesson 34's plan
+ceilings are measured against ([MONITORING.md § 1](../MONITORING.md)).
 
 ## Where this shows up next
 

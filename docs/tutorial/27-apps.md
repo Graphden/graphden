@@ -53,7 +53,7 @@ deployment has app routing at all.
 
 ## Creating an app
 
-In the fn's ▣ popover, the **Add app** form asks for one thing:
+In the fn's ▣ popover, the **+ Add app** form asks for one thing:
 
 a **subdomain label** — the `<label>` in `<label>.graphden.app`.
 It must be a DNS-safe subdomain (lower-case letters, digits and
@@ -88,12 +88,21 @@ GitHub serves user content from `githubusercontent.com`, not
 ## Custom domains
 
 A `<label>.graphden.app` address is the free default. For a real
-site you'll want your own domain — `shop.acme.com`. In the editor:
+site you'll want your own domain — `shop.acme.com`. Three steps, on
+two sides:
 
-1. register the hostname for your org;
-2. prove you own it by adding the DNS `TXT` record graphden shows
-   you (`graphden-verify=<your-org>`);
-3. once verified, that hostname serves the same app.
+1. **Operator side** — the hostname is registered for your org by
+   the platform operator (`POST /api/domains`; a `:domain` row is
+   tenant-forbidden, so there is no self-serve form). Ask for it;
+   the row starts *unverified*.
+2. **Your side, at your DNS provider** — add a `TXT` record on that
+   hostname reading `graphden-verify=<your-org>`.
+3. **Your side, against graphden** — call
+   `POST /api/my-app/verify-domain` with `hostname=shop.acme.com`
+   (an authenticated request; no panel yet). Graphden looks the
+   record up, refuses a hostname registered to another org, and
+   flips the row to verified. From then on the hostname serves the
+   same app.
 
 An unverified domain never routes — you can't hijack a name you
 don't control.
@@ -133,7 +142,6 @@ the routing, not your code.
 - Deploying, re-pointing, and removing an app are all single
   actions with no build or restart.
 
-Next: [lesson 30 — Working across
-organizations](30-working-across-orgs.md) covers the flip side of
-the same domain model: where *your editor* lives when you belong
-to more than one org.
+Next: [lesson 28 — Packages](28-packages.md). The flip side of the
+domain model — where *your editor* lives when you belong to more
+than one org — is [lesson 30](30-working-across-orgs.md).

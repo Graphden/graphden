@@ -178,29 +178,10 @@ needing pattern-match syntax.
 
 ## Fn-types — `[:fn args ret]`
 
-A slot can declare it wants a CALLABLE (see lesson 06 for what
-that means at runtime):
-
-```edn
-{:name :map
- :args {:func {:type [:fn {:item a} b]}
-        :coll {:type [:list a]}}
- :return-type [:list b]}
-```
-
-`[:fn {:item a} b]` — a structural fn-type with arg map `{:item
-a}` and return type `b` (where `a` and `b` are TYPE VARIABLES).
-The type-checker unifies `a` and `b` at the call site against
-the actual `:coll` element type and the callback's return.
-
-Fn-types CAN also be NAMED via `:fn-type`:
-
-```edn
-{:name :ring-handler
- :fn-type [{:request :ring-request-shape} :ring-response-shape]}
-```
-
-…and used as `:type :ring-handler` elsewhere.
+A slot can also declare it wants a CALLABLE — `[:fn {:item a} b]`,
+a structural fn-type with an arg map and a return type (`a` and `b`
+are type variables), or a NAMED one via `:fn-type`. What that means
+at runtime is [Lesson 06](06-higher-order-functions.md).
 
 ## `[:secret T]` — the security marker
 
@@ -274,75 +255,25 @@ Create one of each kind:
 
 Each writes a `:fn` row visible in the editor's namespace tree.
 The arg-type chip for any slot referencing one of these resolves
-to the chip's full name (e.g. `:tutorial-cursor`) instead of its
-unfolded structural form.
+to the type's name (e.g. `tutorial-cursor`) instead of its
+unfolded structural form. Click the chip's `▸` to expand inline
+and see the structural form; the provenance ↳ badge shows where
+the type came from.
 
-Click the chip's `▸` to expand inline and see the structural form.
-The provenance ↳ badge shows where the type came from.
+Then create a fn-def with `:parent :assoc` and bind `:key` to a
+literal `:total`. Its return-type strip grows a `↳` — click it and
+read which base-fn's type rule computed the record shape and from
+which inputs.
 
-## Type UX in the editor
-
-Creating one comes first: hover a namespace row in the Explorer,
-click its `+`, choose **New type…**, and pick a kind — Refinement,
-Record, Union, Variant or List. Each kind gets the form it needs
-(field rows for a record, a condition builder for a refinement,
-branch rows for a union), plus an "Advanced (raw JSON)" escape
-for a shape the builders don't cover. What lands is a fn row with
-no impl and no parents — exactly what the sections above
-described, authored without writing a structural form by hand.
-
-Four more affordances make the type system usable day to day:
-
-**1. The compatible-type select.** Click an arg's type-chip on
-an editable card and the select lists ONLY the types that can
-legally narrow the slot — primitives, refinements, records,
-unions — computed by one server-side, alias-aware `subtype?`
-sweep over every named type in the graph. The current type is
-seeded first; the rest of the options stream in when the server
-answers. An fn-typed slot never offers `:int`; a `:numeric`
-slot offers `:int`, `:positive-int`, `:port`, and friends.
-(The inline `▸` panel's "narrow to…" select is the same list,
-minus the bare primitives.)
-
-**2. The "Type rule" popover.** When a fn-def's return type was
-COMPUTED by an ancestor base-fn's type rule (`:assoc`, `:get`,
-`:first`, arithmetic, …) rather than declared, the return-type
-strip carries a `↳` badge. Clicking it opens a server-rendered
-popover that names the rule-owning base-fn (clickable — jumps
-to it), explains in one sentence what the rule did (e.g. for
-`:assoc`: literal key + typed value add that field to the map's
-record shape; a computed key widens to `:jsonb`), and lists the
-Inputs the rule saw — which slots were bound by literal vs
-fn-ref, and their effective types.
-
-**3. Name autocomplete in the create-type form.** The name
-fields in the `+ Type` form autocomplete from a server-fed
-datalist of every named type-row, each labeled with its kind
-(`refinement` / `record` / `union` / `variant` / `list`) plus
-the primitives — so "base type" and "element type" inputs offer
-real names instead of trusting your memory.
-
-**4. Warnings on save, not blocked saves.** A write whose
-aggregate type-check fails still lands; the failure is recorded
-as a per-branch diagnostic. You see it as: the ⚠ badge on the
-fn-card's root row, the Explorer's **⚠ type errors** lens marking every
-flagged fn (with the message under the argument in the Inspector's
-Bindings tab), per-namespace
-⚠ counts on the explorer tree rows, and a REFUSAL when you try to
-execute the fn (clear message naming the fn and the first error).
-Fixing the offending binding clears all of it. Structural and
-secret-flow violations are the exception — those still reject the
-save itself.
-
-### Try it
-
-1. On your `:tutorial-cursor` record from earlier, click an
-   `:int`-typed arg's chip. The select offers `positive-int`,
-   `port`, `non-negative-int`, … — and NOT `:text`.
-2. Create a fn-def with `:parent :assoc` and bind `:key` to a
-   literal `:total`. Its return-type strip grows a `↳` — click
-   it and read which rule computed the record shape and from
-   which inputs.
+In the editor, a type is authored without writing the structural
+form by hand: hover a namespace row, click its `+`, choose
+**New type…** and pick a kind (Refinement, Record, Union, Variant
+or List). The arg-type **chips**, the compatible-type **select**
+behind them (only types that legally narrow the slot), the `↳`
+"Type rule" popover and the **⚠ type errors** lens are the
+editor's type surface — described in
+[Lesson 17](17-explorer-and-inspector.md) and
+[Lesson 16](16-errors-and-diagnostics.md).
 
 ## What we glossed over
 
@@ -360,4 +291,4 @@ save itself.
 
 ## Next
 
-Lesson 06 — Higher-order functions ([already written](06-higher-order-functions.md))
+[Lesson 06 — Higher-order functions](06-higher-order-functions.md)

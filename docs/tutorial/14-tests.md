@@ -50,15 +50,23 @@ editor:
 2. Click `+` in it to add a new fn. Name it `slugify-spaces` — the
    name states the invariant.
 3. Set its parent to `:assert-eq`. The editor shows two free args.
-4. Bind `:actual` to a ref of the fn under test with its input
-   pinned — e.g. an inline `{:parent :slugify :args {:s "Hello World"}}`
-   (any fn of your own works; `{:parent :add :args {:nums [2 2]}}`
-   if you just want to see the machinery).
-5. Bind `:expected` to the literal you expect — `"hello-world"`
-   (or `4` for the `:add` variant).
-6. Open the row's `⋯` actions popover and ▶ Run it once — a passing
-   test returns its `:actual` value; a failing one errors with
-   `assert-eq failed` and both operands in the error data.
+4. `:actual` wants a ref to the fn under test with its input pinned,
+   so make that fn first: `⋯ → Extend` on `slugify`, name the child
+   `slugify-hello`, then click the `+` on its `:s` placeholder,
+   choose **Bind literal**, enter `Hello World`, Save. (Any fn of
+   your own works; extend `:add` with `:nums` bound to `[2 2]` if you
+   just want to see the machinery.) In `fns.edn` terms that child is
+   `{:name :slugify-hello :parent :slugify :args {:s "Hello World"}}`.
+5. Back on `slugify-spaces`: click the `+` on `:actual`, choose
+   **Bind fn-ref** and pick `slugify-hello`; then the `+` on
+   `:expected`, **Bind literal**, `hello-world` (or `4` for the
+   `:add` variant).
+6. With every free arg bound the write itself triggers the auto-run
+   (see below), so the status dot may already be green by the time
+   you look. Open the row's `⋯` actions popover and ▶ Run it once
+   anyway to see the result — a passing test returns its `:actual`
+   value; a failing one errors with `assert-eq failed` and both
+   operands in the error data.
 
 Now the surfaces:
 

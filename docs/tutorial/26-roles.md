@@ -45,7 +45,9 @@ support     manage-users, manage-grants     alice, bob     ×
 - **capabilities** — from the fixed five above. The create form is a
   set of checkboxes, not a free-text field, because these five are the
   entire vocabulary.
-- **members** — an editable, comma-separated list of usernames. It is
+- **members** — an editable, comma-separated list of **usernames**. A
+  member's username is the sign-in email of their account — the same
+  string the Members panel lists them under (lesson 24). It is
   a **set**, not an append: submitting the field replaces the whole
   membership, so removing a name from the box removes that person from
   the role.

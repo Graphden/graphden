@@ -23,8 +23,7 @@ Retrying until a condition holds. Flattening a nested structure.
 In a normal language you would call the function from inside itself.
 Here you cannot, and not by omission: graphden **rejects every cycle**
 in the graph at write time, and again over the whole set at sync time
-(lesson 02 hinted at this; [CONSTRAINTS.md](../CONSTRAINTS.md) has the
-rules). A fn that referred to itself would be a cycle, so it is
+([CONSTRAINTS.md](../CONSTRAINTS.md) has the rules). A fn that referred to itself would be a cycle, so it is
 refused. There is no flag to turn that off.
 
 That constraint is load-bearing — it is what makes the graph safe to
@@ -112,8 +111,8 @@ Four things in that listing are the whole technique:
 1. **`{:as :input}` and `{:as :self}`** are how the step reads its
    call-site args. They are free args (lesson 04) filled by `:fix` at
    each iteration, not bindings you set.
-2. **The base case comes first.** `:if` is lazy (lesson 06's note on
-   short-circuiting): when `:_sum-done?` is true, `:_sum-recurse` is
+2. **The base case comes first.** `:if` is lazy — only the taken arm
+   is forced: when `:_sum-done?` is true, `:_sum-recurse` is
    never forced, so the recursion stops rather than running one extra
    level and discarding it.
 3. **State is one value.** `:self` takes exactly one argument, so
@@ -157,7 +156,8 @@ uses it for its own work.
 
 1. Build the `:sum-to` chain above. Seven fn-defs; the fastest way is
    the editor's `+` on each slot, but pasting the block through the
-   MCP endpoint (lesson 28) is legitimate too.
+   MCP endpoint ([docs/MCP_CLIENTS.md](../MCP_CLIENTS.md)) is
+   legitimate too.
 2. Run `:sum-to` with `n = 4`. Expect `10`.
 3. Break the base case deliberately: change `:_sum-done?` to compare
    against `-1` and run again with `n = 4`. The counter walks past
@@ -176,3 +176,7 @@ uses it for its own work.
 - **Tests** (lesson 14) — a recursive fn is worth an `:assert-eq`
   covering the base case AND one recursive step; those are the two
   places this shape goes wrong.
+
+## Next
+
+[Lesson 11 — Live fragments: htmx from the graph](11-htmx-fragments.md)

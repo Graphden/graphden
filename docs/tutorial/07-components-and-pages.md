@@ -22,39 +22,15 @@ templates.
 
 ## The starter component library
 
-`web.components` ships two groups of primitives, each a thin
-fn-def over `:hiccup` that pins the variable bits (label,
-content, children) as slots and inherits an optional `:attrs`
-map you can extend.
-
-| fn-def | Renders | Required slots | Optional |
-|---|---|---|---|
-| `:button` | `<button>label</button>` | `:label` | `:attrs` |
-| `:input` | `<input/>` | — | `:attrs` |
-| `:textarea` | `<textarea>content</textarea>` | `:content` | `:attrs` |
-| `:select` | `<select>options...</select>` | `:options` | `:attrs` |
-| `:option` | `<option>label</option>` | `:label` | `:attrs` |
-| `:checkbox` | `<input type="checkbox"/>` (`type` merged in) | — | `:attrs` |
-| `:form` | `<form>children...</form>` | `:children` | `:attrs` |
-| `:link` | `<a href=...>label</a>` | `:href`, `:label` | `:attrs` |
-| `:image` | `<img src=... alt=.../>` | `:src`, `:alt` | `:attrs` |
-| `:card` | `<div class="card">children...</div>` | `:children` | `:attrs` |
-
-And the text/layout set:
-
-| fn-def | Renders | Required slots | Optional |
-|---|---|---|---|
-| `:heading` | `<h1>`..`<h6>` by `:level` | `:level` (1-6), `:content` | `:attrs` |
-| `:paragraph` | `<p>children...</p>` | `:children` | `:attrs` |
-| `:stack` | `<div class="stack">` (vertical flex) | `:children` | `:attrs` |
-| `:row` | `<div class="row">` (horizontal flex) | `:children` | `:attrs` |
-| `:nav-bar` | `<nav>children...</nav>` | `:children` | `:attrs` |
-| `:unordered-list` | `<ul>children...</ul>` | `:children` | `:attrs` |
-| `:list-item` | `<li>children...</li>` | `:children` | `:attrs` |
-| `:table` | `<table>rows...</table>` | `:children` | `:attrs` |
-| `:table-row` | `<tr>cells...</tr>` | `:children` | `:attrs` |
-| `:table-cell` / `:table-header-cell` | `<td>` / `<th>` | `:children` | `:attrs` |
-| `:field-label` | `<label>children...</label>` | `:children` | `:attrs` |
+`web.components` is a namespace of thin fn-defs over `:hiccup`:
+each pins the variable bits (label, content, children) as slots
+and inherits an optional `:attrs` map you can extend. The ten
+form primitives are `:button`, `:input`, `:textarea`, `:select`,
+`:option`, `:checkbox`, `:form`, `:link`, `:image` and `:card`;
+a text/layout set (`:heading`, `:paragraph`, `:stack`, `:row`,
+`:nav-bar`, lists, tables, `:field-label`) covers the rest of a
+page. Browse the namespace in the Explorer — each row's
+description says what it renders and which slots it takes.
 
 For example, a two-level page skeleton:
 
@@ -76,13 +52,17 @@ its free args then show on the canvas ready to bind.
 
 `:attrs` is the inherited slot from `:hiccup`. Bind it to a
 keyword-map to add `:class` / `:id` / `:placeholder` / etc.
-For `:link`, `:image`, `:card`, and `:checkbox` the
-required-or-default slots are merged on top of caller-supplied
-`:attrs`, so you can't accidentally lose the platform shape.
+Components with a platform shape pre-merge it, in two directions:
+`:link` and `:image` put their required `:href` / `:src` + `:alt`
+on top of your `:attrs`, so you can't lose the shape; `:card` and
+`:checkbox` put their default `{:class "card"}` /
+`{:type "checkbox"}` underneath, so your `:attrs` win on conflict
+(open `:_card-attrs` and `:_link-attrs` in the Explorer to see the
+two `:merge` orders).
 
 ## Try it: the smallest example
 
-Open the editor, hit "New fn-def", and create:
+Create this fn-def (the click-by-click editor version follows):
 
 ```clojure
 {:name :my-run-button
@@ -90,8 +70,10 @@ Open the editor, hit "New fn-def", and create:
  :args {:label "Run"}}
 ```
 
-Execute it. The result hiccup is `[:button "Run"]`. You just
-built your first component composition.
+Run it (⋯ → ▶ Run). The result pane shows the hiccup in its
+JSON form — `["button", "Run"]`, keywords come back as strings —
+which as a value is `[:button "Run"]`. You just built your first
+component composition.
 
 In the editor the same thing is two clicks. Select `:button`,
 ⋯ → "Extend", name the child — and look at the two lighter,
@@ -129,7 +111,9 @@ pre-registers three handlers:
 |---|---|
 | `navigate` | Reads `data-href`, sets `window.location.href`. |
 | `submit-form` | Finds the nearest `<form>` ancestor, POSTs its fields, swaps the response into `data-target` (CSS selector) or back into the form. |
-| `custom` | Evaluates `data-custom-handler` as `(btn, event, host) => …` — the escape hatch (see Lesson 08). |
+
+The third, `custom`, evaluates an inline JS body — that escape
+hatch is [Lesson 08](08-custom-script-escape-hatch.md)'s.
 
 Four convenience templates cover the common cases — each pre-
 wires the matching `data-action` so you only think about the
@@ -213,7 +197,8 @@ don't have to know that chain exists.
 
 `:graphden-page-head` is a drop-in `:head` bundle that includes
 the components stylesheet `<link>` (default styling for
-`button`/`input`/`form`/etc — see "Default styling" below).
+`button`/`input`/`form`/etc — see the styling appendix at the
+end of this lesson).
 Pass `{:value []}` if you want no stylesheet.
 
 To mount it, edit `resources/packages/app/route-groups/fns.edn`
@@ -237,54 +222,6 @@ and append `:my-about-page` to `:all`'s `:items`. Run
 
 All three templates expose the same `:title` / `:body` /
 `:head` / `:scripts` free args — pick the layer you need.
-
-## Default styling
-
-`:graphden-page-head` injects a `<link rel="stylesheet"
-href="/assets/graphden-components.css?v=…">` tag into `<head>`.
-The stylesheet (`resources/packages/app/editor/components.css`)
-uses tag-level selectors (`button`, `input`, `textarea`,
-`form`, `a`, `img`, `h1-h3`) so the platform components get
-sensible defaults — padding, focus rings, primary-button
-color for `type="submit"`, form gap — without any inline
-`:style` attrs at the call site.
-
-CSS design tokens (`--gd-primary-bg`, `--gd-radius`, etc.)
-live at the top of the file; re-theme by overriding them in
-your own stylesheet that you append to `:head`.
-
-### Your own stylesheet, from the graph
-
-Two ways to add CSS without leaving the editor:
-
-- **Inline** — a `:custom-stylesheet` const wrapped in
-  `:wrap-custom-style`, appended to the page's `:head` list:
-
-  ```clojure
-  {:name :my-theme
-   :parent :custom-stylesheet
-   :args {:body ".card { border-width: 2px; }"}}
-
-  {:name :my-theme-style-tag
-   :parent :wrap-custom-style
-   :args {:body :my-theme}}
-  ```
-
-- **Served** — mount the same body at its own URL with
-  `:stylesheet-route` and `<link>` it from any number of pages:
-
-  ```clojure
-  {:name :my-styles-route
-   :parent :stylesheet-route
-   :args {:path "/styles.css" :css :my-theme}}
-  ```
-
-  The route serves `text/css` with no cache directives, so an
-  edit in the editor shows on the next reload.
-
-If you don't want the default stylesheet — pass
-`:head {:value []}` and the page gets no styling beyond
-browser defaults.
 
 ## Wiring the runtime
 
@@ -315,16 +252,18 @@ After this any button in `:my-contact-body` whose `:attrs`
 were built with `:dispatch-action` / `:dispatch-custom` /
 `submit-form` will work — no extra wiring.
 
-> **Why not `/assets/editor.js`?** That bundle is ~700 KB
-> and initialises the graph renderer + WebSocket subscriptions
-> that crash a non-editor page. `/assets/graphden-runtime.js`
-> is the minimal subset (~9 KB) — just the dispatcher +
-> built-in handlers.
+> **Why not `/assets/editor.js`?** That bundle is the whole
+> editor and initialises the graph renderer + WebSocket
+> subscriptions that crash a non-editor page.
+> `/assets/graphden-runtime.js` is the minimal subset — just the
+> dispatcher + built-in handlers.
 
 ## A full page: the contact-form demo
 
-`app.contact-demo` (shipped) composes the ten primitives, the
-DSL, and the page templates into a working contact form.
+`app.contact-demo` (shipped) composes the form primitives, the
+`web.runtime` attrs builders (`:dispatch-action` /
+`:dispatch-custom`) and the page templates into a working
+contact form.
 Visit `/demo/contact` in the running editor; the page is:
 
 ```text
@@ -376,9 +315,11 @@ list to prepend an extra input:
 {:name :_contact-demo-name-input
  :parent :input
  :args {:attrs {:value {:type "text" :name "name"
-                        :placeholder "Your name" :required true
-                        :style "width:100%;padding:8px;margin:6px 0"}}}}
+                        :placeholder "Your name" :required true}}}}
 ```
+
+No inline `:style` — the components stylesheet already styles
+`input`.
 
 Then update `:_contact-demo-form` `:children` to
 `[:_contact-demo-name-input
@@ -392,15 +333,55 @@ thanks partial swaps in.
 
 ## What's next
 
-Lessons 1–11 covered the graph model. Lesson 07 turns it on
+Lessons 01–06 covered the graph model. This lesson turns it on
 itself: every element on a user-facing page is a fn-def, the
 dispatch is graph-visible, the response is a fn-def too. The
 escape hatch for the 20% of behaviour the components don't
 cover (a custom hover effect, a one-off computed style) is
 Lesson 08's `:custom-script` block.
 
-Multi-tenancy — multiple users hosting their own sites on
-one graphden instance, with their own deploys, secrets, and
-auth-isolated routes — is a separate future phase. Today's
-mount-point is the single shared `:all` items list (you edit
-the EDN to add a route).
+Editing the `:all` list needs a rebuild; to mount a page without
+one — and on the cloud, where the EDN isn't yours to edit —
+publish the fn as an app ([Lesson 27](27-apps.md)).
+
+## Appendix: styling
+
+`:graphden-page-head` injects a `<link rel="stylesheet"
+href="/assets/graphden-components.css?v=…">` tag into `<head>`.
+The stylesheet (`resources/packages/app/editor/components.css`)
+uses tag-level selectors (`button`, `input`, `textarea`, `form`,
+`a`, `img`, `h1-h3`) so the platform components get sensible
+defaults — padding, focus rings, primary-button color for
+`type="submit"`, form gap — without any inline `:style` attrs at
+the call site. CSS design tokens (`--gd-primary-bg`,
+`--gd-radius`, etc.) live at the top of the file; re-theme by
+overriding them in your own stylesheet appended to `:head`. Pass
+`:head {:value []}` and the page gets no styling beyond browser
+defaults.
+
+Two ways to add your own CSS without leaving the editor:
+
+- **Inline** — a `:custom-stylesheet` const wrapped in
+  `:wrap-custom-style`, appended to the page's `:head` list:
+
+  ```clojure
+  {:name :my-theme
+   :parent :custom-stylesheet
+   :args {:body ".card { border-width: 2px; }"}}
+
+  {:name :my-theme-style-tag
+   :parent :wrap-custom-style
+   :args {:body :my-theme}}
+  ```
+
+- **Served** — mount the same body at its own URL with
+  `:stylesheet-route` and `<link>` it from any number of pages:
+
+  ```clojure
+  {:name :my-styles-route
+   :parent :stylesheet-route
+   :args {:path "/styles.css" :css :my-theme}}
+  ```
+
+  The route serves `text/css` with no cache directives, so an
+  edit in the editor shows on the next reload.

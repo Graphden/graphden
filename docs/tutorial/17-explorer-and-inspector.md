@@ -47,33 +47,11 @@ Details worth knowing:
 
 ### Problem lenses
 
-The second row of chips focuses on what needs attention rather than
-on what a row *is*: **✕ failed** (fns with unresolved failed runs in
-the last 7 days), **⚠ type errors** (fns with recorded type
-diagnostics on this branch), **⚐ lint** (fns the graph lint reports —
-Lesson 16). They are an overlay over the kind chips: a failing fn is
-still a fn, so the fn lens keeps it, and a problem lens keeps it too.
-
-The counts are the same facts three ways down the tree:
-
-- on the chip — the total (failed *runs*, type *diagnostics*, lint
-  *findings*);
-- on a namespace row — `✕ 3`, `⚠ 2`, `⚐ 1`: how much of it is in
-  there, so a collapsed namespace still tells you where to look;
-- on the fn's row — `✕1`, `⚠2`, `⚐1`: the fn's own share, always
-  shown, lens or not. The same marks sit on the card's title row on
-  the canvas.
-
-Each mark leads to its detail in the Inspector: **Bindings** shows a
-type diagnostic under the argument it objects to, **Runs** lists the
-fn's unresolved failures with ✕, and the **Lint** section carries the
-finding with **Not an issue** / **Restore** — every action next to the
-fn it concerns.
-
-A problem lens narrows the tree to exactly the rows carrying that
-mark and keeps their namespaces open. Clear it with **◍ all**, or by
-fixing the problem — the counts re-read whenever the graph reloads
-or a run finishes.
+The second row of chips — **✕ failed**, **⚠ type errors**, **⚐ lint** —
+focuses on what needs attention rather than on what a row *is*; it
+overlays the kind chips (a failing fn is still a fn). The counts, the
+marks on rows and cards, and where each mark leads in the Inspector are
+[lesson 16](16-errors-and-diagnostics.md)'s subject.
 
 The lens composes with the workspace (Lesson 19): the workspace
 picks *which projects* you see, the lens picks *which kind of
@@ -121,6 +99,11 @@ Two more reading affordances live outside the Inspector:
   the trail permanently (★, until unpinned). The list hides while
   the filter is active (search owns that space).
 
+The cards themselves have one setting: **Settings → Appearance → Graph
+cards**. *Compact* hides the type / effect strips on every card until
+you reveal them — the same facts stay one click away in the Inspector,
+and a large graph gets noticeably calmer.
+
 The Inspector is the "read" side of the editor: popovers are for
 *acting* (edit a binding, run, publish), the Inspector is for
 *understanding* what's in front of you.
@@ -151,5 +134,6 @@ The Inspector is the "read" side of the editor: popovers are for
 
 ## Next
 
-That's the current end of the tutorial — new lessons are added as
-features ship (see the [index](README.md)).
+[Lesson 18 — Working without the mouse](18-keyboard-and-accessibility.md):
+everything this lesson did with clicks — find, read, walk the graph —
+from the keyboard.

@@ -46,7 +46,7 @@ Now compose:
 caller of `:greet-len` doesn't need to supply `:string` —
 graphden invokes `:greeting` at runtime and feeds the result
 to `:str-len`. So `:greet-len` has ZERO free args. `▶ Run`
-opens the run popover saying *"No free arguments — click Run
+opens the Run pane saying *"No free arguments — click Run
 to invoke"* — no form to fill, one confirming click.
 
 ## If you think in Clojure
@@ -107,13 +107,13 @@ public name:
 ```edn
 {:name :json-route
  :parent :route
- :args  {:method {:value :get}
+ :args  {:method "get"
          :path   {:as :path}        ; :path is free
          :handler {:as :handler}}}  ; :handler is free
 ```
 
 `:json-route` is now a TEMPLATE. Callers fill in `:path` and
-`:handler`; everything else is baked in (`:method = :get`).
+`:handler`; everything else is baked in (`:method = "get"`).
 
 ```edn
 {:name :get-users-route
@@ -150,9 +150,9 @@ rename is a view over the same slot, not a second slot. An arg
 that only got a rename stays unbound.
 
 The run form mirrors them: open the row's `⋯` popover and click
-▶ Run → the execute popover has exactly one field per free arg. A
-fn with **no** free args (every slot bound) shows *"No free
-arguments — click Run to invoke"* instead of a form.
+▶ Run → the Run pane in the right panel has exactly one field per
+free arg. A fn with **no** free args (every slot bound) shows *"No
+free arguments — click Run to invoke"* instead of a form.
 
 One thinner, informational **strip** can sit at the BOTTOM of the
 card — read-only, surfaced from the storage chain:
@@ -167,7 +167,7 @@ are the dimmed and λ-ghost edges you just met above.
 
 ## Free args + HOF
 
-Lesson 06 covered HOFs in detail; the short version of how they
+Lesson 06 covers HOFs in detail; the short version of how they
 interact with free args:
 
 For ITERATING HOFs (`:map`, `:filter`, …) the callback's
@@ -226,47 +226,73 @@ out.
 
 ## Try it
 
-1. Create a template:
+> Prefer to be shown? This lesson exists as a guided in-editor tour:
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=04)
+> (no sign-up), or pick “Interactive tutorial” in the editor's
+> account menu.
 
-   ```edn
-   {:name :tutorial-status-response
-    :parent :ring-response
-    :args  {:status {:as :status}
-            :body   {:as :body}
-            :headers {:value {"Content-Type" "text/plain"}}}}
-   ```
+Run a template through its free arg, pin that arg in a child, then
+rename it in another:
 
-   The canvas should show two placeholder nodes — `status` and
-   `body` — and the Run form two fields. `Content-Type` is baked in.
+1. Type `to-json` in the Explorer filter and click the
+   `to-json-string` row (`core.system`). Its card shows a `+`
+   placeholder on `:data` — the slot is FREE.
+2. Click `⋯` on the row, then **▶ Run**. The Run pane opens in the
+   right panel with a `data` field — the free slot surfaced as your
+   input. Enter `{"a": 1}` and **Run**: the JSON string comes back.
+3. Pin it in a child: `⋯ → Extend`, name it `tutorial-json`,
+   **Save**. The `+` placeholder on `:data` moved onto your card.
+   Click it, choose **Bind literal**, enter `{"greeting": "hello"}`,
+   **Save**.
+4. Run `tutorial-json` (`⋯ → ▶ Run → Run`): no fields this time —
+   the binding closed the slot, so callers have nothing left to
+   supply. Bound beats free.
+5. Now rename instead of binding. Select `to-json-string` again,
+   `⋯ → Extend`, name it `tutorial-renamed`, **Save**. On the edge
+   running into the card, click the arg's NAME (`data`) — not the
+   type chip beside it — type `payload`, **Save**. The label on the
+   edge changes.
+6. `⋯ → ▶ Run`: the form asks for `payload` now, not `data`. Enter
+   `{"a": 1}` and **Run**. A rename is a VIEW over the same slot —
+   the parent still knows it as `:data`, your callers see `payload`.
 
-2. Specialize:
+### Going further (fns.edn / MCP only)
 
-   ```edn
-   {:name :tutorial-200-ok
-    :parent :tutorial-status-response
-    :args  {:status 200
-            :body {:as :message}}}
-   ```
+The same three moves in one template chain, with a literal pinned
+alongside the renames:
 
-   Now there's just one placeholder node — `message` — and one Run
-   field. `:status` is pinned to 200; `:body` is renamed from
-   internal `:body` to the public `:message`.
+```edn
+{:name :tutorial-status-response
+ :parent :ring-response
+ :args  {:status {:as :status}
+         :body   {:as :body}
+         :headers {:value {"Content-Type" "text/plain"}}}}
 
-3. Run `:tutorial-200-ok` with `:message = "OK"`. Result is a
-   Ring response map.
+{:name :tutorial-200-ok
+ :parent :tutorial-status-response
+ :args  {:status 200
+         :body {:as :message}}}
+```
+
+`:tutorial-status-response` shows two placeholder nodes — `status`
+and `body` — and two Run fields; `Content-Type` is baked in.
+`:tutorial-200-ok` has just one placeholder, `message`: `:status`
+is pinned to 200 and `:body` renamed to the public `:message`. Run
+it with `:message = "OK"` for a Ring response map.
 
 ## What we glossed over
 
 - **Optional vs required free args** — slots can be marked
   `:required false`. Optional frees default to nil; required
-  ones must be supplied. See lesson 03's `:required`
-  monotonicity rule.
+  ones must be supplied. A descendant may only make an optional
+  slot required, never the reverse — see
+  [TYPES.md](../TYPES.md) on required-narrowing monotonicity.
 - **Type checking free args** — the executor validates each
   supplied value against the slot's declared type at call time.
-  Mismatch → `:execution-error/arg-type-mismatch`. Lesson 12.
+  Mismatch → `:validation-error/type-mismatch`. Lesson 12.
 - **Closure-capture** — free args propagate through `:fn`-typed
   slots in a way that requires special handling. Lesson 06.
 
 ## Next
 
-Lesson 05 — Types ([already written](05-types.md))
+[Lesson 05 — Types](05-types.md)

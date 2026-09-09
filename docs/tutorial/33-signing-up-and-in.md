@@ -4,9 +4,10 @@
 graphden cloud, sign back into it (by password or a social
 provider), verify your email, protect the account with two-factor
 authentication — and you'll understand how the same login surface
-behaves on a self-hosted instance. This is the on-ramp to the
-operator lessons that follow ([16 Members](24-users-admin.md),
-[17 Grants](25-grants.md), [18 Plans](34-plans-and-tiers.md)).
+behaves on a self-hosted instance. The org lessons earlier in this
+chapter ([24 Members](24-users-admin.md), [25 Grants](25-grants.md))
+and [34 Plans](34-plans-and-tiers.md), next, all assume the account
+this lesson makes.
 
 **Concepts introduced**: the `/login` page, accounts and sign-in
 *identities* (one account, many ways in), email verification,
@@ -86,6 +87,8 @@ redirects here). It holds:
 - **API tokens** — long-lived scoped keys for MCP/API clients
   (the block appears on cloud/tenancy deployments; **Create
   token…** unfolds the scopes-and-lifetime form).
+  [Lesson 39](39-ai-clients-and-api-tokens.md) walks minting one
+  and pointing an AI client at `/mcp` with it.
 
 **Sign out** (this device, or everywhere at once) is in the same
 account menu.

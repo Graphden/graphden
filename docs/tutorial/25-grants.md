@@ -41,11 +41,6 @@ narrow edit caps (`bind-args`, `append-list`). The narrow
 caps exist so you can hand someone "tune the parameters of my
 app" without handing them "restructure my app".
 
-(The panel's capability `<select>` deliberately offers only six
-of these — every one except `view-impl`, which is set through the
-graph-read filter rather than picked by hand — but the
-`POST /api/grants` API accepts all seven.)
-
 One freebie needs no grant row at all: every user implicitly
 holds `admin` over their **personal namespace**
 (`<prefix>.<account-id>` — built from the stable id, so it survives an email change).
@@ -67,10 +62,17 @@ The editor also *reads* the grant table indirectly: the
 `X-Graphden-Capabilities` header (Lesson 24) that unlocks
 tenant-mode UI is computed from these same rows.
 
+You can read your *own* answer without opening any admin panel:
+avatar → **Settings** → **Access** lists the capabilities you hold
+in this org, under a tenancy addon — the same fact every response
+carries in that header. It is a readout, not a control: who may
+touch what is enforced by the server, and the admin panels stay on
+the Organization surface.
+
 ## The panel
 
 Expand **Grants** on the **Organization** surface (open it from the
-account menu; same gating as Users: signed in + tenancy addon). The partial (`GET /partials/grants-admin`)
+account menu; same gating as Members: signed in + tenancy addon). The partial (`GET /partials/grants-admin`)
 renders:
 
 ```text
@@ -81,8 +83,8 @@ bob     | execute    | acme          |  ×
 
 Below it, the add form: a `subject` input (a member's email, or a
 **role name** — see below; with type-ahead over the org's members),
-a capability `<select>` (the six pickable values — every capability
-except `view-impl`), a `namespace` input, and **+ Add grant**
+a capability `<select>` (all seven), a `namespace` input, and
+**+ Add grant**
 (`POST /api/grants`).
 
 One subtlety worth knowing: the form takes an *email*, but
@@ -127,16 +129,8 @@ no panel. (The operator, on the public platform org, holds no
 are both the *subjects* AND the *administrators* of grants within
 their org.
 
-### Roles — bundling capabilities
-
-A **role** is a named bundle of grants an org owner (or a
-`manage-roles` holder) defines once and assigns to members, so you
-don't re-issue the same capability set per person. It has its own
-**Roles** sidebar panel (`GET /partials/roles-admin`, gated on
-`manage-roles`), parallel to Grants. Lesson 24's "delegate a
-capability via a role" points here. (A full roles walk-through is
-still a planned lesson; for now, know the panel exists and is
-org-scoped like Grants.)
+Handing several members the same org-management capability as one
+row is a **role** — the next lesson, [Lesson 26](26-roles.md).
 
 ## Try it
 
@@ -163,10 +157,7 @@ instance.)
   the effect gate says *what kinds of side effects* cloud code
   may perform at all
   ([docs/TENANCY_SEAM.md § Effect gate](../TENANCY_SEAM.md#effect-gate)).
-- **Groups** — the design sketch allows group subjects; the
-  panel today handles user subjects only.
 
 ## Next
 
-[lesson 34 — Plans & tiers](34-plans-and-tiers.md): what the cloud
-grants each account, and how an operator changes an org's tier.
+[lesson 26 — Roles](26-roles.md): capabilities as a bundle.

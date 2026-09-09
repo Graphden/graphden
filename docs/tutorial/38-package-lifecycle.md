@@ -117,12 +117,9 @@ they are yours to edit:
 - Edit the copy, then point `welcome` at it (**Bind fn-ref** again,
   this time `greet` under `acme.greet`) — or keep the pin for the
   fns you did not change and reference only the fixed one.
-- **When Fork refuses.** If the namespace is a package built into
-  *this* instance from disk (Lesson 28), the fork is refused:
-  *Fork failed: package-owned — these fns are synced from a package on
-  this instance (…)*. The copies would have landed on rows the editor
-  keeps read-only and the next boot would overwrite them. A built-in
-  package is changed in its `fns.edn`.
+- **When Fork refuses** — a namespace built into *this* instance from
+  disk answers `package-owned`:
+  [Lesson 29 § Fork](29-distributing-packages.md#fork--copy-on-write-when-you-want-to-edit).
 
 Sending the fix back from a fork is the **contribution door**; it
 depends on where the author is:
@@ -234,7 +231,10 @@ request acts on.
 
 ## Next
 
-This is the last lesson. The written docs continue where the tutorial
-stops: [docs/PACKAGE_DISTRIBUTION.md](../PACKAGE_DISTRIBUTION.md) for
-the registry's design and API, [docs/MARKETPLACE.md](../MARKETPLACE.md)
+[Lesson 39 — AI clients and API tokens](39-ai-clients-and-api-tokens.md):
+letting an AI coding client read, extend and run the graph on a branch
+of its own, and the tokens that bound what it may do. The written docs
+continue where the tutorial stops:
+[docs/PACKAGE_DISTRIBUTION.md](../PACKAGE_DISTRIBUTION.md) for the
+registry's design and API, [docs/MARKETPLACE.md](../MARKETPLACE.md)
 for the marketplace.

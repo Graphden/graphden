@@ -63,6 +63,11 @@ the file already running in your tab is the old one.
 frontend hash, so you can tell a stale tab from a stale deploy
 (see [DEPLOYMENT.md](../DEPLOYMENT.md) § `bb verify`).
 
+Both are readable without DevTools: **Settings → About this build**
+shows the frontend hash your browser is running next to the server's
+per-section hashes, and its **Reload editor** button drops the cache
+and fetches the fresh bundle — the reload step below, as one click.
+
 ## The syntax gate
 
 A JS file with a syntax error would break the **whole**
@@ -118,6 +123,6 @@ the server enforces its own regardless.
 
 ## Next
 
-That is the last of the platform lessons. The
-[end-to-end worked example](../TUTORIAL_API_POLL.md) builds a real
-integration out of everything you have seen.
+[Lesson 23 — Version history](23-version-history.md): every edit in
+this tutorial appended a version row somewhere; the next lesson reads a
+fn's timeline back and restores an earlier row.

@@ -11,8 +11,8 @@ edit.
 (`<org>.graphden.dev`), **per-origin sessions**, the **org
 switcher**, and how the apex landing routes a first-time sign-in.
 
-This follows on from [lesson 33 (Signing up & signing
-in)](33-signing-up-and-in.md) — you have an account and an org.
+Signing up and in is [lesson 33](33-signing-up-and-in.md), later in
+this chapter; here it is enough that you have an account and an org.
 
 ## Your org has its own editor address
 

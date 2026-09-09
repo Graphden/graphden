@@ -94,7 +94,7 @@ its own messages like any other row.
    climbs by one every five seconds (the default retry delay) and
    `error` carries the parser's message; after the fifth attempt
    `state` is `dead` and the worker leaves it alone. Fix the handler,
-   then open **Operate → Queues**: every queue with its pending /
+   then open **Organization → Queues**: every queue with its pending /
    in-flight / dead counts, and the dead letter with its error — *Requeue* puts it back
    (`:queue-requeue`: pending, attempts 0, error cleared) and it is
    handled; *Delete* drops it.
@@ -165,9 +165,10 @@ longer fits at write time.
   the message again after the visibility timeout (a live worker keeps
   renewing its claim, so only a dead one loses it). Make handlers
   idempotent, or key the side effect on the message id.
-- Dead letters stay until you requeue or delete them (Operate →
+- Dead letters stay until you requeue or delete them (Organization →
   Queues); there is no automatic sweep.
 
 ## Next
 
-Lesson 28 — Packages ([already written](28-packages.md)).
+[Lesson 37 — The Marketplace](37-marketplace-themes-keymaps.md):
+themes, keyboard layouts, and what others published.

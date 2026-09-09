@@ -74,7 +74,9 @@ composition, which is what the picture is *of*. If a card is
 off-screen, the view pans to it.
 
 At the canvas level (after `Escape`) the arrows pan, `+` and `-`
-zoom, and `Space g f` fits the whole graph on screen.
+zoom, and the rest of the graph group sits behind the leader:
+`Space g f` fits the whole graph on screen, `Space g r` goes to the
+root node, `Space g p` resets the node positions.
 
 ## Dialogs
 

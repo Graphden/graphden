@@ -38,8 +38,9 @@ the org's branches (`main` and your current branch sort first).
 ```text
 Create              → type a name, click Create
                       (forks from the current branch)
-Advanced            → (cloud/tenancy only) pick who can write the
-                      new branch: everyone / only me / org admins
+Advanced            → (cloud/tenancy only) "Who can write" the new
+                      branch: "Everyone with write access (default)",
+                      "Only me (org admins can unlock)", "Org admins only"
 row → switch        → click a branch row to switch to it
 Δ (compare)         → COMPARE MODE: pick this branch as the
                       second one and the whole editor becomes
@@ -56,7 +57,8 @@ row → switch        → click a branch row to switch to it
                           required approvals (0–3, one-tap segments),
                           count-own-approval. Works everywhere,
                           including single-user.
-                        ⛨ Who can write… — (cloud/tenancy only)
+                        ⛨ Who can write… — (cloud/tenancy only) the same
+                          three choices, on an existing branch
                         📦 Archive / Reopen — fold a finished branch
                           into the Merged group, or bring one back
                         × Delete branch
@@ -90,72 +92,55 @@ The usual shape: turn it on for `main`, do your work on a child branch
 itself, so it survives reloads and applies to every client. Untick it
 any time to re-open direct writes.
 
-### Change proposals & review (📤 → ✅ → ⇢)
+### Change proposals & review
 
-> Prefer to be shown? The review cycle is its own guided in-editor
-> tour — protection, the 409 refusal, proposal and approval:
-> [open the demo with tour 21 running](https://app.graphden.dev/?demo=1&tutorial=21)
-> (no sign-up), or pick lesson 21 in the editor's account menu.
-
-Beyond "who/how" you can require *review*: someone proposes a change,
-someone (with rights) approves it, then it merges. All in the branch
-popover, no separate "pull request" object:
-
-- **📤 Propose** (in the row's ⋯ menu) marks a branch as submitted for
-  review into its base. Proposed branches are the reviewer's to-do
-  list (their ⋯ lights up, and a ✅ appears on the row).
-- **⚙ Required approvals** on the *target* branch (e.g. `main`) — open
-  its `⋯` → **⚙ Protection…** and set "Required approvals" to 1. A merge into `main` is
-  then refused (409, *"requires 1 approval(s)…"*) until the proposal is
-  approved.
-- **✅ Approve** records your approval of a proposed branch. Who may
-  approve = who may write the target (its write-policy roles, plus any
-  explicit reviewer list set via the API). Once the count is met, the
-  merge goes through.
-
-Every proposal also carries a **comment thread** — open **💬 Review &
-comments** in the row's ⋯ menu: the conversation, a collapsible "What
-changed" list, and suggestions live there. A comment can also be
-**anchored to one element** — click 💬 on a change row (in the dialog,
-or right in the inspector's diff panel while comparing) to pin the
-note to exactly that fn or arg (lesson 21 walks it).
-
-Approvals are **content-aware**: if the proposed branch is edited after
-it was approved, that approval is automatically dismissed (it went
-stale) and the branch needs a fresh approval before it can merge —
-just like GitHub dismissing stale reviews on a new push.
-
-By default a proposal author's **own** approval counts, so a solo user or
-a small team isn't locked out — propose → approve → merge works with one
-person. A team that wants genuine four-eyes review unticks **"Count the
-author's own approval"** in the target row's `⋯` → **⚙ Protection**
-menu, and then a required approval must come from **someone other than
-the author**.
+Requiring *review* before a merge — 📤 propose, ✅ approve, required
+approvals on the target, comment threads and suggestions — is
+[lesson 21](21-review.md)'s subject; its knobs live in the same
+**⚙ Protection…** dialog.
 
 ### Try it — the plain flow
 
-1. Click the branch chip. In the create row, type `feat-tutorial`
-   and click **Create**. The editor reloads on `feat-tutorial`;
-   the URL gets `?branch=feat-tutorial`.
-2. Navigate to any fn-def with a literal value (e.g. one of the
-   tutorial fns you made in lesson 01). Edit the value.
-3. Switch back to `main`. The fn-def is unchanged — your edit
-   lives only on `feat-tutorial`.
-4. Open the branch popover, click `Δ` next to `feat-tutorial` —
-   **the editor becomes the diff** (compare mode). Every changed fn
-   is badged `+`/`±`/`−` in the Explorer (namespaces carry
-   `+n ±n −n ∿n` summaries) with a one-line digest under the row
-   (`value: 42 (there 41)`), changed fn CARDS and their changed args
-   ring on the canvas and the change is written ON the node: the
-   value the other branch holds sits under yours, struck through
-   (`there: 41`); a renamed fn shows its other name on the card; an
-   arg you bound here only rings green. Fns that exist only on the
-   compared branch show as dimmed ghost rows (click one to switch
-   there), and selecting a changed fn shows its exact `old → new`
-   fields in the **inspector's diff panel** — with 💬 anchors for
-   line-comments.
+> Prefer to be shown? This lesson exists as a guided in-editor tour:
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=20)
+> (no sign-up), or pick “Interactive tutorial” in the editor's
+> account menu.
 
-   Two things make it a diff of the GRAPH rather than of rows:
+1. Make something to change: find `str-upper` (core.strings), `⋯` →
+   **Extend**, name it `branch-demo`. Click the `+` on its `:string`
+   slot, **Bind literal**, type `main version`, **Save**.
+2. Click the branch chip. In the create row, type `tutorial-branch`
+   and click **Create**. The editor reloads on `tutorial-branch`;
+   the URL gets `?branch=tutorial-branch`.
+3. Still looking at `branch-demo`, click its value and change it to
+   `branch version`.
+4. Switch back to `main` (branch chip → the `main` row). `branch-demo`
+   reads `main version` again — your edit lives only on
+   `tutorial-branch`.
+5. Open the branch popover, click `Δ` next to `tutorial-branch` —
+   **the editor becomes the diff** (compare mode). Read it in four
+   places:
+
+   - **The Explorer.** Every changed fn is badged `+`/`±`/`−`, with a
+     one-line digest under the row (`string: main version (there
+     branch version)`); namespaces carry `+n ±n −n ∿n` summaries. Fns
+     that exist only on the compared branch show as dimmed ghost rows
+     (click one to switch there).
+   - **The canvas.** Changed cards and their changed args ring, and
+     the change is written ON the node: the value the other branch
+     holds sits under yours, struck through (`there: branch version`);
+     a renamed fn shows its other name on the card; an arg you bound
+     here only rings green.
+   - **The inspector.** Selecting a changed fn shows its exact
+     `old → new` fields in the **diff panel** — with 💬 anchors for
+     line-comments.
+   - **The chip.** `Δ vs tutorial-branch · 1` appears by the branch
+     chip — the number is how many fns differ. It survives reloads,
+     so "always see my drift vs main" is one click. Its menu is the
+     review cockpit: **💬 Review & comments**, **📤 propose** the
+     current branch and **⇢ merge** the compared branch in.
+
+6. Two things make it a diff of the GRAPH rather than of rows:
 
    - **Changed inside (`∿`).** A fn whose own rows are equal on both
      branches but which INHERITS a change — its parent's binding was
@@ -171,10 +156,8 @@ the author**.
      card, and the compared branch's side hangs beside it as a
      dashed, dimmed GHOST — that fn and what it composes, read-only,
      joined to the arg by a dashed elbow. Click its head to fold it.
-   A `Δ vs feat-tutorial · 3` chip appears by the branch chip —
-   the number is how many fns differ; it survives reloads, so
-   "always see my drift vs main" is one click.
-   Under the kind chips the Explorer gains a **diff lens row**:
+
+7. Under the kind chips the Explorer gains a **diff lens row**:
    `Δ changed` (show only what differs, auto-expanding the groups
    that hold them), `+`/`±`/`−` by change type, `Aa core` (hide
    edits that touch nothing but names and descriptions), `💬 notes`
@@ -184,11 +167,8 @@ the author**.
    mark, the strongest "this affects behaviour" signal). While any
    lens filter is on, the chip turns dashed and counts
    `visible/total` (say `· 1/3`) — a reminder that "no badges"
-   means "hidden by the lens", not "no changes". The chip's menu is the review cockpit: **💬 Review &
-   comments**, **📤 propose the current branch** (the merge-request
-   act) and **⇢ merge** the compared branch in. Exit = click the
-   lit `Δ` again (or the chip's `×`).
-5. The diff isn't only about values — it shows the graph's SHAPE
+   means "hidden by the lens", not "no changes".
+8. The diff isn't only about values — it shows the graph's SHAPE
    changing too. Each entry kind reads differently:
 
    | You did (on the branch) | The diff row says |
@@ -201,28 +181,16 @@ the author**.
    | added/edited a list element | `± item 0 of nums` · `1 → 2` |
    | created a whole fn | a `−` ghost row here ("only on <branch>"), a `+` group in ITS branch's view |
 
-   Try one: on `feat-tutorial`, extend some fn with a new child (or
+   Try one: on `tutorial-branch`, extend some fn with a new child (or
    ⋯-bind an arg to a different fn), then compare again — the
    structural rows appear in that fn's inspector diff panel, and the
    same args ring on the canvas.
-6. From `main`, click `⇢` next to `feat-tutorial`. Confirm.
-   The page reloads and `main` now sees your edit.
-
-### Try it — with review required
-
-1. Click `⋯` on the `main` row, choose **⚙ Protection…** and set
-   **Required approvals** to `1` — `main` now requires one approval
-   to merge into.
-2. Create a second branch `feat-review`, edit a value on it, switch
-   back to `main`.
-3. From `main`, click `⇢` next to `feat-review`. It's refused —
-   *"requires 1 approval(s)…"*.
-4. In the `feat-review` row's `⋯` menu click **📤 Propose for
-   review**, then click `✅` on the row (approve it). Its badge reads
-   `0/1` before and `1/1` after.
-5. `⇢` now merges cleanly, and the merged proposal drops off the
-   review list. Reopen `main`'s `⋯` → **⚙ Protection…** and set
-   Required approvals back to `0` to turn the requirement off.
+9. Exit compare mode: click the lit `Δ` again (or the chip's `×`).
+10. From `main`, click `⇢` next to `tutorial-branch`. Confirm. The
+    page reloads and `main` now sees your edit. (The guided tour
+    leaves this click to you: a merged branch becomes part of `main`'s
+    history and can no longer be deleted — [lesson 21](21-review.md)
+    explains why.)
 
 ## Conflicts
 
@@ -247,7 +215,9 @@ ancestor is sticky-local, you are too. Seeded defaults:
 | `:http-server` | Port + handler are per-environment |
 | `:secret-leaf` | Vault path is per-environment |
 | `:schedule` | Cron cadence is per-environment |
+| `:interval`, `:interval-now` | Tick cadence is per-environment |
 | `:env` | Env-var indirection is per-deployment |
+| `:deploy-config` | A deployment setting is per-instance by definition |
 
 Any fn-def parented from one of those inherits the flag. So this
 fn-def…
@@ -314,7 +284,7 @@ curl -X POST "$BASE/api/branches" \
 ```
 
 While either the SOURCE or the TARGET branch carries recorded
-type diagnostics (what the Explorer's ⚠ type errors lens marks — Lesson 03),
+type diagnostics (what the Explorer's ⚠ type errors lens marks — Lesson 16),
 merging INTO such a branch is refused with a 409
 (`:merge-protection-violation`) whose message names the broken
 fns: "Merge blocked: target branch forbids invalid fns —
@@ -329,11 +299,6 @@ either side. One scopes what propagates; the other enforces
 when propagation may happen at all.
 
 ## Try it (sticky-local edition)
-
-> Prefer to be shown? This lesson exists as a guided in-editor tour:
-> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=20)
-> (no sign-up), or pick “Interactive tutorial” in the editor's
-> account menu.
 
 1. On `main`, find `:web-server` (the editor's own server). Note
    its port (8080).
@@ -362,4 +327,5 @@ when propagation may happen at all.
 
 ## Next
 
-[Lesson 12 — Executing a fn](12-executing-a-fn.md)
+[Lesson 21 — Review: propose, approve, and the protected merge](21-review.md):
+the merge you just made, made conditional on someone's approval.

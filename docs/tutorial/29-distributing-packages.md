@@ -14,9 +14,7 @@ so it lives as a **⬆ action on the namespace** in the Explorer.
 `rollback`, `withdraw`, the **packages chip** (Build surface) and the
 per-namespace **⬆ publish** action, publish **visibility**
 (org-private vs public) and the `publish-packages` capability,
-the Organization surface's **governance view**, and — beyond the
-registry — an **external package pulled by git coord**
-(`executor-packages.edn`).
+and the Organization surface's **governance view**.
 
 ## Authoring vs distributing
 
@@ -38,21 +36,22 @@ Two different things share the word "package":
 ## Publish — freeze a namespace into the registry
 
 Publishing exports the fn-def subtree rooted at a namespace and
-stores it as a `:package-version`. Using the `mycorp.hello`
-package from Lesson 28:
+stores it as a `:package-version`. Take a `mycorp` namespace holding
+one fn, `:greet` (a namespace you make in the Explorer; Lesson 28's
+on-disk package gives you `mycorp.hello`, which works the same way):
 
 ```bash
 curl -X POST http://localhost:9002/api/packages/publish \
   -H "Authorization: Bearer $AUTH_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name":"hello","version":"1.0.0","ns-root":"mycorp.hello"}'
-# → {"ok":true,"name":"hello","version":"1.0.0","fn-count":1,...}
+  -d '{"name":"mycorp-hello","version":"1.0.0","ns-root":"mycorp"}'
+# → {"ok":true,"name":"mycorp-hello","version":"1.0.0","fn-count":1,...}
 ```
 
 `ns-root` is the namespace to snapshot; `name` + `version` are
-how the registry indexes it. Bump a fn in `mycorp.hello`,
-`bb rebuild`, and publish again as `1.1.0` — now the registry
-holds **both** versions. `GET /api/packages` lists the index.
+how the registry indexes it. Change `:greet` and publish again as
+`1.1.0` — now the registry holds **both** versions.
+`GET /api/packages` lists the index.
 
 The version number is checked, not just recorded. Before writing the
 row, publish diffs the bundle against the newest version already
@@ -113,10 +112,10 @@ chips) click **packages**. A popover opens:
 ```text
 Packages
   Package        Version
-  hello          1.0.0    [1.0.0 ↑] ×      ← installed pins on THIS branch
+  mycorp-hello   1.0.0    [1.0.0 ↑] ×      ← installed pins on THIS branch
   ▾ + Install a package                    ← native <details>, click to open
-      hello   1.0.0   [Install] [Fork]     ← the registry index
-      hello   1.1.0   [Install] [Fork]
+      mycorp-hello   1.0.0   [Install] [Fork]     ← the registry index
+      mycorp-hello   1.1.0   [Install] [Fork]
 ```
 
 The top table is what's **installed on the current branch**
@@ -128,17 +127,17 @@ per row. (The **packages** chip appears only when the optional
 
 ## Install — by reference, not by copy
 
-Click **Install** next to `hello 1.1.0`. Graphden:
+Click **Install** next to `mycorp-hello 1.1.0`. Graphden:
 
 1. **Materializes** the version's fns under a version-qualified
-   namespace — `mycorp.hello@1-1-0` (dots in the version become
+   namespace — `mycorp@1-1-0` (dots in the version become
    dashes). Idempotent: a second install is a no-op.
 2. Writes a **pin** — a `:package-install` row saying "this
-   branch uses `hello` at `1.1.0`". The pin, plus the visible
+   branch uses `mycorp-hello` at `1.1.0`". The pin, plus the visible
    materialized fns, IS the install.
 
 Nothing is copied into your own namespaces — you **reference**
-`mycorp.hello@1-1-0`. The panel refreshes to show the new pin in
+`mycorp@1-1-0`. The panel refreshes to show the new pin in
 the installed table.
 
 ## Update / rollback — repoint the pin, rewrite your refs
@@ -155,7 +154,7 @@ version and an `↑` button. Type a different version and click
 
 Update doesn't just move the pin: it **rewrites your project's own
 references** from the old version-qualified namespace to the new
-one (so fns you built on top of `mycorp.hello@1-0-0` now point at
+one (so fns you built on top of `mycorp@1-0-0` now point at
 `@1-1-0`). Package-internal refs are left alone. Same version =
 no-op.
 
@@ -164,8 +163,8 @@ no-op.
 **Install** references fns you can't change (they're the
 package's). When you want to *modify* a package, click **Fork**
 instead. Fork **copies** the version's fns into the graph at
-their **original** namespace (`mycorp.hello`, not the versioned
-one), so they become ordinary editable fn-defs — and writes **no
+their **original** namespace (`mycorp`, not the versioned one), so
+they become ordinary editable fn-defs — and writes **no
 pin** (it's a copy, not a reference). A short notice confirms it;
 reload to see the copied fns in the explorer tree.
 
@@ -205,9 +204,9 @@ wrong namespace or the wrong number shouldn't be permanent. The
 publisher can delete the registry row:
 
 ```bash
-curl -X DELETE "http://localhost:9002/api/packages/withdraw?name=hello&version=1.0.0" \
+curl -X DELETE "http://localhost:9002/api/packages/withdraw?name=mycorp-hello&version=1.0.0" \
   -H "Authorization: Bearer $AUTH_TOKEN"
-# → {"ok":true,"withdrawn":"hello"}
+# → {"ok":true,"withdrawn":"mycorp-hello"}
 ```
 
 Rules:
@@ -248,29 +247,35 @@ on Organization; acting on it happens on the Build packages chip.
 
 ## Try it
 
-1. Hover the `mycorp.hello` namespace in the Explorer, click **⬆**,
-   and publish it as `hello` `1.0.0` (or use the `curl` above).
-2. Edit `:greet` in `mycorp.hello/fns.edn` (change the greeting),
-   `bb rebuild`, publish again as `1.1.0` (the **⬆** popover again).
+1. At the bottom of the Explorer click **New namespace** and type
+   `mycorp`. Hover its row, click **+** → **New graph…**, name it
+   `greet` (parent `const`, `:value` bound to `"Hello"`). Hover
+   `mycorp` again, click **⬆**: package name `mycorp-hello`, version
+   `1.0.0`, **Publish** (or use the `curl` above). (If you built
+   Lesson 28's on-disk package, `mycorp` already exists — publish its
+   `mycorp.hello` namespace instead and read `mycorp.hello@…` for
+   `mycorp@…` below.)
+2. Change `:greet`'s value, then publish again as `1.1.0` (the **⬆**
+   popover again). On a disk package that is a `fns.edn` edit and a
+   `bb rebuild` first.
 3. Open the **packages** chip in the Build context bar, expand
-   **+ Install a package**, click **Install** on `hello 1.1.0`.
-   Watch the pin appear.
+   **+ Install a package**, click **Install** on `mycorp-hello 1.1.0`.
+   Watch the pin appear — and `mycorp@1-1-0` in the Explorer.
 4. Type `1.0.0` in the installed row's version box, click `↑` —
    you've rolled back. Type `1.1.0`, `↑` — forward again.
-5. Click **Fork** on `hello 1.0.0`. Refused: *Fork failed:
-   package-owned — these fns are synced from a package on this
-   instance (greet); edit the package's fns.edn instead…*. That is
-   right: `mycorp.hello` is a package the loader synced from disk,
-   so here its fns are platform-owned and a fork would have landed
-   on those very rows. Fork is for a package whose namespace is
-   *not* built into your instance — Lesson 38 does that one.
+5. **Fork** is the other door, and not one to open here: the copy
+   lands at the original namespace on the same ids — the very
+   `mycorp` rows you just published from — and on a namespace synced
+   from disk it is refused outright (`package-owned`, § Fork above).
+   Fork is for a package whose source is *not* on your branch;
+   [Lesson 38](38-package-lifecycle.md) plays that with two branches.
 6. Click `×` — the pin's gone.
 7. Open the **Organization** surface's **packages** section — the
-   governance catalog lists both published `hello` versions with
-   their visibility; the install audit shows a row per pin
+   governance catalog lists both published `mycorp-hello` versions
+   with their visibility; the install audit shows a row per pin
    (re-install first if you removed the pin in step 6).
-8. Withdraw `hello 1.0.0` with the `curl` above — it's unpinned,
-   so the row disappears from the registry browse. Now try
+8. Withdraw `mycorp-hello 1.0.0` with the `curl` above — it's
+   unpinned, so the row disappears from the registry browse. Now try
    withdrawing `1.1.0` while its pin from step 7 exists: a 409
    `still-installed` refusal. Uninstall first, and the withdraw
    goes through.
@@ -278,16 +283,9 @@ on Organization; acting on it happens on the Build packages chip.
 ## The Marketplace — browsing with more than a name
 
 The chip's browse list is the quick door: every version, an Install
-button. Discovery — searching, filtering by category or tag, reading
-what a package does, how others rated it and how often it was
-installed — is the **Marketplace** surface (**Browse marketplace →**
-at the bottom of the chip, or `Space` `v` `m`). Its **Packages** tab
-shows one card per package with the listing you gave it at publish
-(the ⬆ popover's description / category / tags), the ★ rating and the
-↓ install count; opening a card lists every version with Install /
-Fork and the reviews. The other tabs list editor themes and keyboard
-layouts, which are published and applied the same way —
-[lesson 37](37-marketplace-themes-keymaps.md) is about those.
+button. Searching, filtering, ratings and install counts are the
+**Marketplace** surface (**Browse marketplace →** at the bottom of the
+chip) — [lesson 37](37-marketplace-themes-keymaps.md).
 
 ## Installing from ANOTHER graphden's registry
 
@@ -306,57 +304,10 @@ origin's marketplace numbers (rating, installs) and shows them read-only
 
 ## Beyond the registry — an external package from its own git repo
 
-Everything above lives **inside one graphden install**: the registry
-is a table in your database, and publish / install / fork move fn-defs
-around within it. There's a second, complementary axis of distribution
-— an **external package that lives in its own git repository** and is
-pulled onto the classpath as a Clojure dependency. This is how a
-**Type-2** package (one that ships its own base-fn *impls*, not just
-fn-defs — Lesson 28) reaches a graphden it wasn't authored in.
-
-The moving parts, with the worked example `mathx` (a tiny package whose
-whole job is one `:gcd` base-fn plus a `:gcd-with-12` fn-def):
-
-1. **The package is its own repo.** `graphden/graphden-mathx` is a
-   normal Clojure project — a `deps.edn` and a `packages/mathx/`
-   resource tree (`package.edn` + `ops/fns.edn` + `ops/impls.clj`),
-   exactly the on-disk shape from Lesson 28, just outside the main tree.
-
-2. **The consuming graphden lists it by git coord** — in `deps.edn`
-   (so it's on the classpath) and in `resources/executor-packages.edn`,
-   the operator's one-file manifest of external packages:
-
-   ```clojure
-   {:packages
-    [{:name "mathx"
-      :lib mathx/mathx
-      :coord {:git/url "https://github.com/Graphden/graphden-mathx.git"
-              :git/sha "8337147…"}}]}
-   ```
-
-3. **`bb rebuild` pulls it in.** The build clones the repo at that sha,
-   bundles its `packages/mathx/` resources into the uberjar, and the
-   loader syncs it at boot alongside `core` / `web` / `app` — you'll see
-   `Loading package: mathx` in the logs. Its base-fn (`:gcd`) and fn-def
-   (`:gcd-with-12`) are then first-class: `POST /api/execute` of
-   `:gcd-with-12 {b 18}` returns `6`.
-
-Unlike a registry install, this is a **rebuild-time, operator** action,
-not an in-editor click — the package is *code*, so it enters through the
-build, not the graph. Two practical notes:
-
-- **Dev stays offline.** While developing the package you don't want
-  every `bb test` reaching for git. The `:test` / `:dev` aliases carry
-  an `:override-deps` that points `mathx` at a local checkout
-  (`external-packages/mathx`), so lint/test resolve the in-tree copy and
-  never touch the network. Only the *build* (`bb rebuild`) uses the git
-  coord.
-- **A private package repo needs build-time access.** If the repo is
-  private, the build host must be able to read it (an `ssh-agent`
-  holding your key, or a read-only deploy key). `bb test` / `bb dev`
-  don't — they use the local override. See
-  [docs/DEPLOYMENT.md](../DEPLOYMENT.md) and
-  [docs/PACKAGE_DISTRIBUTION.md § 5](../PACKAGE_DISTRIBUTION.md).
+Everything above lives **inside one graphden install**. A package that
+ships its own base-fn *impls* is code and enters through the build
+instead — pulled by git coord via `executor-packages.edn`:
+[Lesson 28 § An external package from its own git repo](28-packages.md#an-external-package-from-its-own-git-repo).
 
 ## What we glossed over
 
@@ -369,12 +320,6 @@ build, not the graph. Two practical notes:
 - **Dependencies** — a published bundle records the external
   fn-names it depends on; install/fork reject if a dependency is
   absent from the target graph.
-- **The other cross-install routes** — beyond the external git
-  package above, pulling a *registry* package from one graphden
-  install into a different one (download as EDN, the cloud
-  reference-install with capability grants) is the rest of
-  [docs/PACKAGE_DISTRIBUTION.md](../PACKAGE_DISTRIBUTION.md); the
-  registry half of this lesson stays within one install.
 
 ## Next
 

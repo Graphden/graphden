@@ -1,8 +1,7 @@
 # Graphden Tutorial
 
-> Step-by-step introduction to graphden. Text-only for now —
-> per [ROADMAP § Block 0](../ROADMAP.md#block-0--tutorial-framework-continuous)
-> the UI integration is a later decision.
+> Step-by-step introduction to graphden: text lessons, most of them
+> paired with a guided in-editor tour (the ▶ column below).
 >
 > **Audience**: someone who can program but has never seen
 > graphden before. Each lesson assumes the previous ones and
@@ -91,6 +90,7 @@ of order.
 | 36 | [Queues — asynchronous work between services](36-queues.md) | ✅ written |
 | 37 | [The Marketplace: themes, keyboard layouts, and what others published](37-marketplace-themes-keymaps.md) | ✅ written · ▶ interactive |
 | 38 | [The package lifecycle — both sides of a version](38-package-lifecycle.md) | ✅ written |
+| 39 | [AI clients and API tokens: the graph over `/mcp`](39-ai-clients-and-api-tokens.md) | ✅ written |
 
 ▶ interactive — the lesson also exists as a guided in-editor tour:
 open the editor with `?tutorial=NN` (the landing demo link does this for
@@ -102,14 +102,16 @@ drift-guarded by `tools/browser-test/edit-tutorial-tour.test.js` —
 keep the written lesson's “Try it” section and the tour steps in
 sync when either changes.
 
-Five lessons have no tour: **28** is about files on disk and
+Six lessons have no tour: **28** is about files on disk and
 `bb rebuild`, which the editor cannot show; **11** is a route-wiring
 marathon that reads better as text than as thirty steps; **31** is
 about running a second, local instance — something one editor session
-cannot demonstrate; **36** is a service-to-service exchange that
-plays out in logs, not on the canvas; and **38** is a two-role loop
-whose halves belong to different people. All five sit in the chapter
-their subject belongs to, which is why the ▶ column is worth reading.
+cannot demonstrate; **36** needs a second service running while the
+tour would hold the page; **38** is a two-role loop that a tour cannot
+play from one seat without inventing the other person; and **39** is
+mostly set-up in a terminal and an AI client, outside the editor. All
+six sit in the chapter their subject belongs to, which is why the ▶
+column is worth reading.
 
 The organization tours drive surfaces not every session has, so they
 declare what they need (`:requires`) — a capability (`manage-users`,

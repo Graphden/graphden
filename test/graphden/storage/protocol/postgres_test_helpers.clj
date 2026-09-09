@@ -27,7 +27,7 @@
     [graphden.test-infra.shared-container :as sc]
     [next.jdbc :as jdbc])
   (:import
-    (org.testcontainers.containers
+    (org.testcontainers.postgresql
       PostgreSQLContainer)))
 
 

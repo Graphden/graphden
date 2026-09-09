@@ -37,11 +37,12 @@
       Duration)
     (org.testcontainers.containers
       GenericContainer
-      Network
-      PostgreSQLContainer)
+      Network)
     (org.testcontainers.containers.wait.strategy
       HttpWaitStrategy
-      Wait)))
+      Wait)
+    (org.testcontainers.postgresql
+      PostgreSQLContainer)))
 
 
 (def ^:private internal-token "fleet-e2e-internal")

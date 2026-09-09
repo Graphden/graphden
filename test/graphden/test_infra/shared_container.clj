@@ -35,7 +35,7 @@
   (:import
     (java.sql
       SQLException)
-    (org.testcontainers.containers
+    (org.testcontainers.postgresql
       PostgreSQLContainer)))
 
 

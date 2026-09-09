@@ -89,8 +89,8 @@
     ;; `tests-coverage.edn`). Plugin stays off in normal `bb test`
     ;; runs so we don't pay bytecode-instrumentation cost.
     lambdaisland/kaocha-cloverage {:mvn/version "1.1.89"}
-    org.testcontainers/testcontainers {:mvn/version "1.21.4"}
-    org.testcontainers/postgresql {:mvn/version "1.21.4"}}}
+    org.testcontainers/testcontainers {:mvn/version "2.0.5"}
+    org.testcontainers/testcontainers-postgresql {:mvn/version "2.0.5"}}}
 
   :dev
   {:extra-paths ["test" "development/src" "external-packages/examples/resources"]
@@ -98,16 +98,16 @@
    ;; the in-tree `examples` package (dev/test-only, off the prod resources path).
    :override-deps {mathx/mathx {:local/root "external-packages/mathx"}}
    :extra-deps
-   {org.testcontainers/testcontainers {:mvn/version "1.21.4"}
-    org.testcontainers/postgresql {:mvn/version "1.21.4"}
+   {org.testcontainers/testcontainers {:mvn/version "2.0.5"}
+    org.testcontainers/testcontainers-postgresql {:mvn/version "2.0.5"}
     integrant/repl {:mvn/version "0.5.1"}}}
 
   :bench
   {:extra-paths ["development/bench"]
    :extra-deps
    {criterium/criterium {:mvn/version "0.4.6"}
-    org.testcontainers/testcontainers {:mvn/version "1.21.4"}
-    org.testcontainers/postgresql {:mvn/version "1.21.4"}}}
+    org.testcontainers/testcontainers {:mvn/version "2.0.5"}
+    org.testcontainers/testcontainers-postgresql {:mvn/version "2.0.5"}}}
 
   :cloverage
   {:extra-deps {cloverage/cloverage {:mvn/version "1.2.4"}}
@@ -159,8 +159,6 @@
    :override-deps {mathx/mathx {:local/root "external-packages/mathx"}}
    :main-opts
    ["-m" "antq.core"
-    "--exclude=org.testcontainers/testcontainers"
-    "--exclude=org.testcontainers/postgresql"
     ;; why: `mathx` is a git coord pinned to an exact SHA. An antq version
     ;; report on it would be noise: the pin is deliberate (see § mathx above),
     ;; and moving it is a manifest decision made in

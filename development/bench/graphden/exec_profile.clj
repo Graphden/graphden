@@ -28,6 +28,7 @@
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.interface :as exec]
     [graphden.packages.records :as records]
+    [graphden.packages.sync :as pkg-sync]
     [graphden.schema.executions.schema :as es]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
@@ -38,10 +39,9 @@
     [graphden.schema.versioned.schema :as vds]
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
-    [graphden.system.core :as sys]
     [graphden.versioning.storage.core :as vs])
   (:import
-    (org.testcontainers.containers
+    (org.testcontainers.postgresql
       PostgreSQLContainer)))
 
 
@@ -94,7 +94,7 @@
                  :username (PostgreSQLContainer/.getUsername container)
                  :password (PostgreSQLContainer/.getPassword container)}
             storage (versioned-storage cfg)
-            _ (sys/bootstrap-from-packages! storage ["core"] {:skip-type-check? true})
+            _ (pkg-sync/bootstrap-from-packages! storage ["core"] {:skip-type-check? true})
             ctx (exec/create-context {:storage storage})
             _ (cr/rebuild! ctx)]
         (println "Bootstrapped [core]; syncing workload…")

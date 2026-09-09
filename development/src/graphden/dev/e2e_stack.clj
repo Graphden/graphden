@@ -48,13 +48,14 @@
       ServerSocket)
     (org.testcontainers.containers
       GenericContainer
-      Network
-      PostgreSQLContainer)
+      Network)
     (org.testcontainers.containers.output
       Slf4jLogConsumer)
     (org.testcontainers.containers.wait.strategy
       HttpWaitStrategy
-      Wait)))
+      Wait)
+    (org.testcontainers.postgresql
+      PostgreSQLContainer)))
 
 
 (defn- pick-free-host-port!

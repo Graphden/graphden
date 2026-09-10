@@ -65,13 +65,16 @@
   ;; behalf. An allowlist entry for a fn-def that no longer exists is
   ;; how the audit would start hiding a real leftover.
   (let [known (loaded-fn-names)
-        {:keys [roots vocabulary]} (registry)
+        {:keys [roots vocabulary external]} (registry)
         registered (into (into {}
                                (map (fn [[n why]] [n why]))
                                vocabulary)
                          (mapcat (fn [[file names]]
                                    (map (fn [n] [n file]) names)))
-                         roots)
+                         ;; `:external` — the sibling repos' qualified targets;
+                         ;; a stale entry there is a consumer this repo cannot
+                         ;; see, so it must be caught here, not in their CI.
+                         (concat roots external))
         missing (into (sorted-map)
                       (remove (fn [[n _]] (contains? known n)))
                       registered)]

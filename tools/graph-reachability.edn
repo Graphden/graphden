@@ -86,6 +86,24 @@
  ;; vocabulary kept complete for whoever is composing in the editor,
  ;; not leftovers. Each is user-facing (public name + `:description`),
  ;; and the reason is recorded at the definition too.
+ ;; fn-defs the OTHER repos reach by QUALIFIED name from their own fns.edn —
+ ;; graphden-cloud's landing (the anonymous storefront pages) and the
+ ;; tenancy addon. The audit also scans a sibling checkout when one is
+ ;; present (../graphden-cloud, ../graphden-tenancy, or two levels up from
+ ;; a worktree) and treats every qualified ref it finds as a root; this
+ ;; list is the record for a box without them (CI has the monorepo only).
+ ;; 2026-09-10: `storefront-item-title` / `-found?` were deleted as
+ ;; "unreachable" and the cloud test job caught it — a name here is a
+ ;; consumer you cannot see from this repo.
+ :external
+ {"graphden-cloud resources/packages/landing/landing/fns.edn"
+  [:storefront-body
+   :storefront-item-body
+   :storefront-item-found?
+   :storefront-item-title
+   :storefront-sitemap-urls
+   :http-server]}
+
  :vocabulary
  {:unauthorized-response "web.response keeps the status x content-type matrix complete"
   :too-many-requests-response "web.response keeps the status x content-type matrix complete"

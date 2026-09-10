@@ -144,6 +144,30 @@
        set))
 
 
+(defn- collect-external-roots
+  "fn-defs the sibling repos reach by QUALIFIED name from their own
+   fns.edn: the registry's `:external` list, plus — when a sibling
+   checkout is on disk (../graphden-cloud, ../graphden-tenancy, or two
+   levels up from an agent worktree) — every `:ns.path/name` token in its
+   `resources/packages/**/fns.edn`. The monorepo cannot see those
+   consumers otherwise; deleting one of their targets as dead breaks the
+   cloud's test job, not this repo's (2026-09-10)."
+  [fn-defs-by-name]
+  (let [listed (->> (:external (edn/read-string (slurp registry-file)))
+                    vals (apply concat))
+        siblings (for [up ["../" "../../"]
+                       repo ["graphden-cloud" "graphden-tenancy"]
+                       :let [d (io/file (str up repo "/resources/packages"))]
+                       :when (.isDirectory d)]
+                   d)
+        scanned (for [d siblings
+                      f (file-seq d)
+                      :when (and (.isFile f) (= "fns.edn" (.getName f)))
+                      [_ n] (re-seq #":(?:app|web|core|storage|registry|mcp)\.[a-z.-]+/([a-z0-9?!_-]+)" (slurp f))]
+                  (keyword n))]
+    (into #{} (filter #(contains? fn-defs-by-name %)) (concat listed scanned))))
+
+
 (defn- collect-test-roots
   "Walk `test/` for ANY keyword token that names a fn-def — those are
    reachable through the test contract even though the static graph
@@ -226,18 +250,22 @@
                                   fn-defs))
         dynamic-roots (collect-entry-point-roots all-by-name)
         test-roots (collect-test-roots all-by-name)
+        external-roots (collect-external-roots fn-def-by-name)
         docs-roots (collect-docs-roots all-by-name)
         roots (-> #{:web-server}
                   (into example-roots)
                   (into dynamic-roots)
                   (into test-roots)
+                  (into external-roots)
                   (into docs-roots))
+        _ (println "External roots (sibling repos' qualified refs + registry :external):"
+                   external-roots)
         _ (println "Dynamic roots (from tools/graph-reachability.edn):"
-                   dynamic-roots)
+                   (count dynamic-roots))
         _ (println "Test roots (from `:name :the-fn` in test/):"
-                   test-roots)
+                   (count test-roots))
         _ (println "Docs roots (from back-ticked names in docs/*.md):"
-                   docs-roots)
+                   (count docs-roots))
         reachable (bfs-reachable all-by-name roots)
         composed (filter #(composed? (val %)) fn-def-by-name)
         type-rows (filter #(type-row? (val %)) fn-def-by-name)

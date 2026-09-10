@@ -102,6 +102,17 @@
     (when (string? b) (json/parse-string b true))))
 
 
+(defn- ok-200
+  "Assert a 200 and, on anything else, show the STATUS AND BODY — a bare
+   `(is (= 200 (:status resp)))` left the 2026-09-10 GH-runner flake
+   (a 400 on a step that passes everywhere else) with no diagnosis at all."
+  [resp step]
+  (is (= 200 (:status resp))
+      (str step " → HTTP " (:status resp) ": "
+           (subs (str (:body resp)) 0 (min 400 (count (str (:body resp)))))))
+  resp)
+
+
 (defn- list-fns
   "Pull every visible `:fn` row on `branch-name` through the
    `/api/graph/entities` projection that the editor uses. Returns the
@@ -285,9 +296,9 @@
         probe (str "prot-probe" run-id)
         identity-fn (fn-by-name nil "identity")]
     ;; a protected branch off main, flag on
-    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                   :body {:name prot :base-branch-id "main"
-                                          :require-merge true}}))))
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name prot :base-branch-id "main"
+                              :require-merge true}}) "/api/branches")
     (testing "the branch row carries require-merge? true"
       (let [row (-> (dispatch {:method :get :path (str "/api/branches/" prot)})
                     parse-json :branch)]
@@ -301,12 +312,11 @@
                  "(well-formed write refused by policy); got " (:status resp)))
         (is (nil? (fn-by-name prot probe)) "nothing was written")))
     (testing "a MERGE into the protected branch still lands"
-      (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                     :body {:name feat :base-branch-id prot}}))))
-      (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn" :branch feat
-                                     :content-type "application/x-www-form-urlencoded"
-                                     :body (str "name=" probe "&parent-ids=" (:id identity-fn))})))
-          "a write on the UNprotected child is fine")
+      (ok-200 (dispatch {:method :post :path "/api/branches"
+                         :body {:name feat :base-branch-id prot}}) "/api/branches")
+      (ok-200 (dispatch {:method :post :path "/api/entities/fn" :branch feat
+                         :content-type "application/x-www-form-urlencoded"
+                         :body (str "name=" probe "&parent-ids=" (:id identity-fn))}) (str "a write on the UNprotected child is fine" " — " "/api/entities/fn"))
       (is (some? (fn-by-name feat probe)) "probe IS on feat before merge")
       (let [m (dispatch {:method :post :path (str "/api/branches/" prot "/merge")
                          :body {:source feat}})]
@@ -314,8 +324,8 @@
       (is (some? (fn-by-name prot probe))
           "the fn landed on the protected branch via merge, not a direct write"))
     (testing "clearing the flag re-opens direct writes"
-      (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" prot "/protect")
-                                     :body {:require-merge false}}))))
+      (ok-200 (dispatch {:method :post :path (str "/api/branches/" prot "/protect")
+                         :body {:require-merge false}}) (str "/api/branches/" prot "/protect"))
       (let [probe2 (str probe "-after")
             resp (dispatch {:method :post :path "/api/entities/fn" :branch prot
                             :content-type "application/x-www-form-urlencoded"
@@ -331,8 +341,8 @@
   ;; is what a reviewer's proposal list filters on.
   (let [run-id (str "-" (System/currentTimeMillis))
         feat (str "propose-feat" run-id)]
-    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                   :body {:name feat :base-branch-id "main"}}))))
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name feat :base-branch-id "main"}}) "/api/branches")
     (testing "a fresh branch is not a proposal"
       (let [row (-> (dispatch {:method :get :path (str "/api/branches/" feat)})
                     parse-json :branch)]
@@ -372,26 +382,26 @@
         src (str "rp-src" run-id)
         probe (str "rp-probe" run-id)
         identity-fn (fn-by-name nil "identity")]
-    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                   :body {:name tgt :base-branch-id "main"}}))))
-    (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" tgt "/review-policy")
-                                   :body {:required-approvals 1}}))))
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name tgt :base-branch-id "main"}}) "/api/branches")
+    (ok-200 (dispatch {:method :post :path (str "/api/branches/" tgt "/review-policy")
+                       :body {:required-approvals 1}}) (str "/api/branches/" tgt "/review-policy"))
     (testing "the policy is surfaced on the branch row"
       (is (= 1 (:required-approvals (-> (dispatch {:method :get :path (str "/api/branches/" tgt)})
                                         parse-json :branch)))))
-    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                   :body {:name src :base-branch-id tgt}}))))
-    (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn" :branch src
-                                   :content-type "application/x-www-form-urlencoded"
-                                   :body (str "name=" probe "&parent-ids=" (:id identity-fn))}))))
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name src :base-branch-id tgt}}) "/api/branches")
+    (ok-200 (dispatch {:method :post :path "/api/entities/fn" :branch src
+                       :content-type "application/x-www-form-urlencoded"
+                       :body (str "name=" probe "&parent-ids=" (:id identity-fn))}) "/api/entities/fn")
     (testing "merge is refused (409) while the proposal has no approvals"
       (let [m (dispatch {:method :post :path (str "/api/branches/" tgt "/merge")
                          :body {:source src}})]
         (is (= 409 (:status m)) (str "needs approval; body=" (:body m))))
       (is (nil? (fn-by-name tgt probe)) "nothing merged while blocked"))
     (testing "approving satisfies the policy and the merge lands"
-      (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" src "/approve")
-                                     :body {}}))))
+      (ok-200 (dispatch {:method :post :path (str "/api/branches/" src "/approve")
+                         :body {}}) (str "/api/branches/" src "/approve"))
       (let [st (-> (dispatch {:method :get :path (str "/api/branches/" src "/approvals")})
                    parse-json)]
         (is (= 1 (:required st)))
@@ -403,7 +413,7 @@
       (is (some? (fn-by-name tgt probe))
           "the fn landed on the target after the approved merge"))
     (testing "withdrawing the approval removes it"
-      (is (= 200 (:status (dispatch {:method :delete :path (str "/api/branches/" src "/approve")}))))
+      (ok-200 (dispatch {:method :delete :path (str "/api/branches/" src "/approve")}) (str "/api/branches/" src "/approve"))
       (let [st (-> (dispatch {:method :get :path (str "/api/branches/" src "/approvals")})
                    parse-json)]
         (is (zero? (:have st)))))))
@@ -421,14 +431,14 @@
                  (dispatch {:method :post :path "/api/entities/fn" :branch branch
                             :content-type "application/x-www-form-urlencoded"
                             :body (str "name=" nm "&parent-ids=" (:id identity-fn))}))]
-    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                   :body {:name tgt :base-branch-id "main"}}))))
-    (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" tgt "/review-policy")
-                                   :body {:required-approvals 1}}))))
-    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                   :body {:name src :base-branch-id tgt}}))))
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name tgt :base-branch-id "main"}}) "/api/branches")
+    (ok-200 (dispatch {:method :post :path (str "/api/branches/" tgt "/review-policy")
+                       :body {:required-approvals 1}}) (str "/api/branches/" tgt "/review-policy"))
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name src :base-branch-id tgt}}) "/api/branches")
     (is (= 200 (:status (write! src probe))))
-    (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" src "/approve") :body {}}))))
+    (ok-200 (dispatch {:method :post :path (str "/api/branches/" src "/approve") :body {}}) (str "/api/branches/" src "/approve"))
     (testing "approved → satisfied"
       (is (true? (:satisfied (parse-json (dispatch {:method :get :path (str "/api/branches/" src "/approvals")}))))))
     (testing "editing the source after approval auto-dismisses it (stale) → merge re-blocked"
@@ -441,7 +451,7 @@
       ;; re-approving at the new content re-satisfies the policy (the merge
       ;; landing itself is covered by branch-review-policy-gate-lifecycle-test;
       ;; not repeated here to avoid a second committing merge in one deftest).
-      (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" src "/approve") :body {}}))))
+      (ok-200 (dispatch {:method :post :path (str "/api/branches/" src "/approve") :body {}}) (str "/api/branches/" src "/approve"))
       (is (true? (:satisfied (parse-json (dispatch {:method :get :path (str "/api/branches/" src "/approvals")}))))
           "fresh approval at the new content re-satisfies"))))
 
@@ -463,8 +473,8 @@
                                    :body body})
                         nil
                         (catch clojure.lang.ExceptionInfo ex ex)))]
-    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                   :body {:name tgt :base-branch-id "main"}}))))
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name tgt :base-branch-id "main"}}) "/api/branches")
     (testing "a negative required-approvals is rejected → 400 at the boundary"
       (let [e (rejected {:required-approvals -1})]
         (is (some? e) "rejected, not silently accepted as off")
@@ -483,8 +493,8 @@
   (let [run-id (str "-" (System/currentTimeMillis))
         feat (str "cmt-feat" run-id)
         cpath (fn [] (str "/api/branches/" feat "/comments"))]
-    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                   :body {:name feat :base-branch-id "main"}}))))
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name feat :base-branch-id "main"}}) "/api/branches")
     (testing "empty body is refused"
       (let [r (parse-json (dispatch {:method :post :path (cpath) :body {:body "   "}}))]
         (is (false? (:ok r)))))
@@ -517,8 +527,8 @@
         read-policy (fn []
                       (-> (dispatch {:method :get :path (str "/api/branches/" tgt)})
                           parse-json :branch))]
-    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                   :body {:name tgt :base-branch-id "main"}}))))
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name tgt :base-branch-id "main"}}) "/api/branches")
     (testing "API sets an explicit reviewer allow-list"
       (is (= 200 (:status (rp {:required-approvals 2 :approver-ids ["alice" "bob"]}))))
       (is (= ["alice" "bob"] (:approver-ids (read-policy)))))
@@ -545,8 +555,8 @@
   ;; its type maps to 400 (the boundary's job in prod), and nothing stored.
   (let [src (str "cc-" (System/currentTimeMillis))
         cpath (str "/api/branches/" src "/comments")]
-    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                   :body {:name src :base-branch-id "main"}}))))
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name src :base-branch-id "main"}}) "/api/branches")
     (testing "a body over the cap is rejected → 400 and nothing is stored"
       (let [e (try (dispatch {:method :post :path cpath
                               :body {:body (str/join (repeat 10001 "x"))}})
@@ -569,19 +579,19 @@
         src (str "mc-src" run-id)
         probe (str "mc-probe" run-id)
         identity-fn (fn-by-name nil "identity")]
-    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                   :body {:name tgt :base-branch-id "main"}}))))
-    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                   :body {:name src :base-branch-id tgt}}))))
-    (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn" :branch src
-                                   :content-type "application/x-www-form-urlencoded"
-                                   :body (str "name=" probe "&parent-ids=" (:id identity-fn))}))))
-    (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" src "/propose")
-                                   :body {:proposed true}}))))
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name tgt :base-branch-id "main"}}) "/api/branches")
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name src :base-branch-id tgt}}) "/api/branches")
+    (ok-200 (dispatch {:method :post :path "/api/entities/fn" :branch src
+                       :content-type "application/x-www-form-urlencoded"
+                       :body (str "name=" probe "&parent-ids=" (:id identity-fn))}) "/api/entities/fn")
+    (ok-200 (dispatch {:method :post :path (str "/api/branches/" src "/propose")
+                       :body {:proposed true}}) (str "/api/branches/" src "/propose"))
     (testing "proposed before merge"
       (is (= "proposed" (:review-state (:branch (parse-json (dispatch {:method :get :path (str "/api/branches/" src)})))))))
-    (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" tgt "/merge")
-                                   :body {:source src}}))))
+    (ok-200 (dispatch {:method :post :path (str "/api/branches/" tgt "/merge")
+                       :body {:source src}}) (str "/api/branches/" tgt "/merge"))
     (testing "review-state cleared after the merge — proposal left the inbox"
       (is (nil? (:review-state (:branch (parse-json (dispatch {:method :get :path (str "/api/branches/" src)})))))))))
 
@@ -592,8 +602,8 @@
   ;; 400, nothing stored. Cap bound low for the test.
   (let [src (str "cap-" (System/currentTimeMillis))
         cpath (str "/api/branches/" src "/comments")]
-    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                   :body {:name src :base-branch-id "main"}}))))
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name src :base-branch-id "main"}}) "/api/branches")
     ;; the impls ns is loader-loaded, not on the classpath — resolve
     ;; the cap var at runtime (the fixture has booted the packages).
     ;; NB the suite's dispatch sits BELOW wrap-error-boundary (it lives
@@ -626,8 +636,8 @@
         cpath (str "/api/branches/" src "/comments")
         fid (str (random-uuid))
         comments (fn [] (:comments (parse-json (dispatch {:method :get :path cpath}))))]
-    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                   :body {:name src :base-branch-id "main"}}))))
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name src :base-branch-id "main"}}) "/api/branches")
     (testing "anchored comment round-trips entity-name + entity-id"
       (is (true? (:ok (parse-json (dispatch {:method :post :path cpath
                                              :body {:body "pin me"
@@ -677,11 +687,11 @@
   ;; carries its own atom and a write into the branch's slice never
   ;; reaches the base's.
   (let [feat (str "orgslice-" (System/currentTimeMillis))]
-    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                   :body {:name feat :base-branch-id "main"}}))))
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name feat :base-branch-id "main"}}) "/api/branches")
     ;; Force the branch entry to build (any dispatch on it).
-    (is (= 200 (:status (dispatch {:method :get :path "/api/branches"
-                                   :branch feat}))))
+    (ok-200 (dispatch {:method :get :path "/api/branches"
+                       :branch feat}) "/api/branches")
     (let [branches-resp (parse-json (dispatch {:method :get :path "/api/branches"}))
           feat-id (:id (some #(when (= feat (:name %)) %) (:branches branches-resp)))
           base-ctx (:base-ctx *router*)
@@ -716,8 +726,8 @@
         graph (fn [branch]
                 (parse-json (dispatch {:method :get :path "/api/graph/entities"
                                        :branch branch})))]
-    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                   :body {:name feat :base-branch-id "main"}}))))
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name feat :base-branch-id "main"}}) "/api/branches")
     (let [ents (graph nil)
           by-name (fn [nm] (some #(when (= nm (:name %)) %) (:fns ents)))
           identity-fn (by-name "identity")
@@ -733,11 +743,11 @@
       (is (and identity-fn coalesce time-fn value-slot) "baseline fns + :value slot resolved")
 
       (testing "a fn created ONLY on a branch stays out of main's registry"
-        (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn"
-                                       :branch feat
-                                       :content-type "application/x-www-form-urlencoded"
-                                       :body (form-encode {:name only-name
-                                                           :parent-ids (:id identity-fn)})}))))
+        (ok-200 (dispatch {:method :post :path "/api/entities/fn"
+                           :branch feat
+                           :content-type "application/x-www-form-urlencoded"
+                           :body (form-encode {:name only-name
+                                               :parent-ids (:id identity-fn)})}) "/api/entities/fn")
         ;; Compile/serve the BRANCH first — the leak direction was
         ;; "branch compile clobbers the global".
         (is (some? (get (types feat) (keyword only-name)))
@@ -771,19 +781,19 @@
                    {:at (System/currentTimeMillis) :noted? true :entity :fn}))))
 
       (testing "effect sets answer per branch"
-        (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn"
-                                       :content-type "application/x-www-form-urlencoded"
-                                       :body (form-encode {:name eff-name
-                                                           :parent-ids (:id coalesce)})}))))
+        (ok-200 (dispatch {:method :post :path "/api/entities/fn"
+                           :content-type "application/x-www-form-urlencoded"
+                           :body (form-encode {:name eff-name
+                                               :parent-ids (:id coalesce)})}) "/api/entities/fn")
         (let [eff-id (:id (some #(when (= eff-name (:name %)) %) (:fns (graph nil))))]
           (is (some? eff-id))
           ;; Wire the :value slot to :current-time-ms ON THE BRANCH only.
-          (is (= 200 (:status (dispatch {:method :post :path "/api/entities/binding"
-                                         :branch feat
-                                         :content-type "application/x-www-form-urlencoded"
-                                         :body (form-encode {:fn-id eff-id
-                                                             :slot-id (:id value-slot)
-                                                             :ref-fn-id (:id time-fn)})}))))
+          (ok-200 (dispatch {:method :post :path "/api/entities/binding"
+                             :branch feat
+                             :content-type "application/x-www-form-urlencoded"
+                             :body (form-encode {:fn-id eff-id
+                                                 :slot-id (:id value-slot)
+                                                 :ref-fn-id (:id time-fn)})}) "/api/entities/binding")
           (let [feat-effects (set (:effects (get (types feat) (keyword eff-name))))
                 main-effects (set (:effects (get (types nil) (keyword eff-name))))]
             (is (contains? feat-effects "time")
@@ -799,14 +809,14 @@
   (let [run-id (str "-" (System/currentTimeMillis))
         feat (str "dvep" run-id)
         probe (str "dvep-fn" run-id)]
-    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                   :body {:name feat :base-branch-id "main"}}))))
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name feat :base-branch-id "main"}}) "/api/branches")
     (let [identity-fn (fn-by-name nil "identity")]
-      (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn"
-                                     :branch feat
-                                     :content-type "application/x-www-form-urlencoded"
-                                     :body (form-encode {:name probe
-                                                         :parent-ids (:id identity-fn)})})))))
+      (ok-200 (dispatch {:method :post :path "/api/entities/fn"
+                         :branch feat
+                         :content-type "application/x-www-form-urlencoded"
+                         :body (form-encode {:name probe
+                                             :parent-ids (:id identity-fn)})}) "/api/entities/fn"))
 
     (testing "GET /api/branches/:ref/diff-view?against= — grouped envelope"
       (let [resp (dispatch {:method :get
@@ -829,20 +839,20 @@
       (let [base-nm (str "dvep-base" run-id)
             child-nm (str "dvep-child" run-id)
             identity-fn (fn-by-name nil "identity")]
-        (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn"
-                                       :content-type "application/x-www-form-urlencoded"
-                                       :body (form-encode {:name base-nm
-                                                           :parent-ids (:id identity-fn)})}))))
+        (ok-200 (dispatch {:method :post :path "/api/entities/fn"
+                           :content-type "application/x-www-form-urlencoded"
+                           :body (form-encode {:name base-nm
+                                               :parent-ids (:id identity-fn)})}) "/api/entities/fn")
         (let [base-fn (fn-by-name nil base-nm)]
-          (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn"
-                                         :content-type "application/x-www-form-urlencoded"
-                                         :body (form-encode {:name child-nm
-                                                             :parent-ids (:id base-fn)})}))))
-          (is (= 200 (:status (dispatch {:method :put
-                                         :path (str "/api/entities/fn/" (:id base-fn))
-                                         :branch feat
-                                         :content-type "application/x-www-form-urlencoded"
-                                         :body (form-encode {:description "retuned on the branch"})}))))
+          (ok-200 (dispatch {:method :post :path "/api/entities/fn"
+                             :content-type "application/x-www-form-urlencoded"
+                             :body (form-encode {:name child-nm
+                                                 :parent-ids (:id base-fn)})}) "/api/entities/fn")
+          (ok-200 (dispatch {:method :put
+                             :path (str "/api/entities/fn/" (:id base-fn))
+                             :branch feat
+                             :content-type "application/x-www-form-urlencoded"
+                             :body (form-encode {:description "retuned on the branch"})}) (str "/api/entities/fn/" (:id base-fn)))
           (let [child-fn (fn-by-name nil child-nm)
                 body (parse-json (dispatch {:method :get
                                             :path "/api/branches/main/diff-view"
@@ -892,14 +902,14 @@
                      (contains? (parse-json (dispatch {:method :get
                                                        :path "/api/types"}))
                                 (keyword moved)))]
-    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
-                                   :body {:name feat :base-branch-id "main"}}))))
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name feat :base-branch-id "main"}}) "/api/branches")
     (let [identity-fn (fn-by-name nil "identity")]
-      (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn"
-                                     :branch feat
-                                     :content-type "application/x-www-form-urlencoded"
-                                     :body (form-encode {:name moved
-                                                         :parent-ids (:id identity-fn)})})))))
+      (ok-200 (dispatch {:method :post :path "/api/entities/fn"
+                         :branch feat
+                         :content-type "application/x-www-form-urlencoded"
+                         :body (form-encode {:name moved
+                                             :parent-ids (:id identity-fn)})}) "/api/entities/fn"))
     (is (false? (types-has?)) "pre-merge: main's slice does not know the fn")
     (is (true? (:ok (parse-json (dispatch {:method :post
                                            :path "/api/branches/main/merge"

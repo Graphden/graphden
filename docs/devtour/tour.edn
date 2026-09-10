@@ -18,7 +18,8 @@
   what it assumes you have already seen. Start with the **Executor** — it is
   the spine everything else hangs off — then follow the dependency order:
   Storage, then Branches, Types, CRUD, Packages, Boot, Web, Layout, the
-  Editor frontend, Services, Platform seams, Accounts. (The Platform block
+  Editor frontend, Services, Platform seams, Accounts, and last the
+  Constellation — the six repos around this one. (The Platform block
   tours the in-repo seams and hardening; the multi-tenant / cloud POLICY
   layer itself is in the private graphden-tenancy repo — the open-core
   split — plugging into the `graphden.tenancy.context` seam kept here.)
@@ -191,7 +192,49 @@
            projected-free-args]` in a per-call map (with a `::nil` sentinel and a
            size cap). This is how the lazy graph avoids recomputing the same
            sub-result and delivers a single cached value back up to the caller —
-           the DRY principle, enforced at runtime."}]}
+           the DRY principle, enforced at runtime."}
+    {:file "resources/packages/core/hof/impls.clj" :defn map-fn
+     :say "A HOF base-fn as the executor sees it: `func` arrives already
+           `hof-wrap`ped (the slot's type resolves to `:fn`, so the executor
+           hands over a callable, never a value) and the impl is one library
+           call. The comment is the lesson — the seq is realised with `doall`
+           INSIDE the execution scope, because a lazy seq escaping the
+           effect-gate / trace / cancel bindings gets realised later, ungated
+           and mislabeled. Streaming stays on the transducer arity."
+     :see [[:executor "arg-builder"]]}
+    {:file "resources/packages/core/recursion/impls.clj" :defn fix-fn
+     :say "Recursion. A bare graph cycle through `ref-fn-id` is rejected at
+           write time (twice — per binding, and at sync's topological sort),
+           so a fn cannot name itself. `:fix` is the ONE door: `step` receives
+           `{:input … :self …}` and re-enters through `:self`, depth-capped by
+           `*max-recursion-depth*`. docs/RECURSION.md records the road not
+           taken (lazy ref resolution) and why this combinator won."}
+    {:ns graphden.executor.compile.renames :defn hof-lambda-params
+     :say "Which of a callback's free args are the per-element PARAMETERS and
+           which are captured from the caller (docs/CLOSURE_CAPTURE.md).
+           Resolution order: an authored `:lambda-params` on the fn-def
+           (`[]` = capture everything — handler chains), else the slot's
+           structural `[:fn {ARGS} RET]` shape, accepted only when
+           unambiguous. Everything `hof-wrap` does at call time was decided
+           here at compile time."}
+    {:ns graphden.executor.compile.renames :defn build-ref-renames
+     :say "Renames, call-site half. When F renames a slot that its ref R still
+           exposes under the original name (`{:as …}`, or a rename-view slot
+           with `source-slot-id`), the caller supplies the value under F's
+           name and R reads its own — this builds the `{R-name → F-name}`
+           translation applied to the free-arg map on the way into R.
+           docs/adr/ADR-inherited-rename-surface.md: public names are the
+           closest-chain rename, applied at the BOUNDARY; the walkers stay
+           per-fid."
+     :see [[:crud "public-free-entries"]]}
+    {:ns graphden.executor.compile.renames :defn compute-rename-aliases
+     :say "Renames, inherited half. An own rename slot whose source chain
+           reaches OUTSIDE the root's slot set yields one alias per chain
+           link, so an inner walker reading `:branch-row` finds the value the
+           caller passed as `:item`. Compile-time table, runtime copy — the
+           worked example in the docstring is the one to trace by hand. This
+           1300-line namespace is the densest in the executor; these two
+           entry points are its map."}]}
 
   {:id :storage
    :title "Storage & the graph"
@@ -291,7 +334,24 @@
            `IN`-clause queries, and hand off to `->execution-graph`. O(1)
            round-trips versus the generic O(N) — the payoff of the whole
            protocol split."
-     :see [[:storage "->execution-graph"]]}]}
+     :see [[:storage "->execution-graph"]]}
+    {:ns graphden.storage.postgres.notify :defn make-emitter
+     :say "How a committed write reaches every OTHER pod. The emitter is a
+           closure over the pooled DataSource that sends one `pg_notify` on
+           `graphden_events`; best-effort by design — a NOTIFY failure must
+           never roll back a row-level write, because the mutation-driven
+           reconcile is the correctness path and NOTIFY only makes propagation
+           fast. `notify-after-write!` in the CRUD block is its caller."
+     :see [[:crud "notify-after-write!"]]}
+    {:ns graphden.storage.postgres.notify :defn create-listener
+     :say "The receiving end: one DEDICATED connection (outside the pool —
+           LISTEN is session state) subscribed to `graphden_events`, a
+           background poll thread, reconnect with backoff, and a callback set
+           that `register!` / `unregister!` mutate. Callback exceptions are
+           isolated so one bad listener cannot silence the rest. The branch
+           router's invalidation, the reconciler and the SSE panels all hang
+           off this handle."
+     :see [[:versioning "dispatch*"] [:services "reconcile-once!"]]}]}
 
   {:id :versioning
    :title "Branches & versioning"
@@ -682,6 +742,20 @@
            runtime gate, then push the output through the
            `web.hiccup-sanitize` allowlist before the editor inlines it into
            its own DOM."}
+    {:ns graphden.crud.value-form :defn resolve-form
+     :say "The other direction of `render-repr`: EDITING a value. A slot's
+           effective type is classified into a form-descriptor tree — record,
+           list, union, or leaf — purely, with aliases resolved and variants
+           desugared, so the editor never has to know the type algebra. A
+           depth guard keeps a recursive record type from unfolding forever."}
+    {:ns graphden.crud.value-form :defn build-form
+     :say "…and the descriptor becomes hiccup: a record is a labelled
+           fieldset, a union a branch `<select>` plus one sub-form per branch
+           (the backend pre-selects the branch the current value fits), a
+           leaf goes through the form-fn registry the `app/forms` package
+           populates. This is what `GET /partials/value-form` returns and
+           what the Inspector swaps in — server-rendered, HTMX-wired
+           (docs/PARTIALS.md)."}
     {:ns graphden.crud.debug-capture :defn run-captured!
      :say "The «catch next request» debugger entry (docs/EXECUTION.md § Debug):
            a one-shot, TTL-bounded, org+branch-keyed trap consumed in
@@ -714,7 +788,15 @@
            compile-deps REVERSE closure (the service-restart blast walk),
            intersect with the branch's tests, gate on an EMPTY effect closure,
            and re-run debounced on a conveyed-bindings future with
-           `:allowed-effects #{}` as the runtime backstop."}]}
+           `:allowed-effects #{}` as the runtime backstop."}
+    {:ns graphden.crud.entities.list :defn list-all-graph-entities
+     :say "The read side the editor lives on. One call, one shared lazy
+           `graph-list-env` over the graph-cache, and a `scope` that picks a
+           projection: the sidebar tree (namespaces + counts, O(namespaces)),
+           one namespace's leaves, a search, a subtree, or the full dump.
+           Every fn row is tagged with a `:role` so Types vs Functions is
+           decided server-side. When the editor feels slow after a write,
+           this is where to look — it is what every refresh re-reads."}]}
 
   {:id :packages
    :title "Packages — the graph's content"
@@ -762,6 +844,33 @@
            reader, attaching `:source-file` / `:source-line` to every fn-def so
            later type errors point at `file:line`. How the on-disk declarations
            enter memory."}
+    {:ns graphden.packages.records.parse :defn parse-module
+     :say "Where an `fns.edn` entry becomes ROWS. Two passes: mint the
+           deterministic ids (`name->id`, so the same def yields the same uuid
+           on every sync), then `parse-fn-def` each entry with the whole
+           module — plus prior syncs' defs — in hand, because resolving which
+           ancestor a bound arg targets needs to see the ancestors' shapes."}
+    {:ns graphden.packages.records.parse :defn parse-composed
+     :say "The composed case: `:parent` / `:parents` become the parent-ids
+           junction, each `:args` entry becomes a binding row on the inherited
+           slot it targets — or, when the entry is `{:type T …}` with no
+           binding markers, a NEW own slot on top of inheritance. Which of the
+           two, and on which ancestor, is `resolve-slot-owner`'s call."}
+    {:ns graphden.packages.records.slot-resolution :defn resolve-slot-owner
+     :say "Given a composed fn and an arg name, find the ancestor that
+           DECLARED the slot — walking the inheritance chain, then the refs'
+           trees, and disambiguating a name owned on both paths by type. This
+           is the parse-time twin of the executor's `build-lookups`: the same
+           slot identity, computed once from EDN so the binding row carries
+           the right `slot-id` before a single row is written."
+     :see [[:executor "build-lookups"]]}
+    {:ns graphden.packages.records.slot-resolution :defn build-rename-slot-records
+     :say "A `{Y {:as :X}}` rename is not a binding column — it is a NEW slot
+           owned by the renaming fn, linked to its source through
+           `source-slot-id`. That FK is what `rename-for-slot` and the
+           editor's `getEffectiveSlotName` read, and what the executor's
+           rename translation walks. Minted here, on parse."
+     :see [[:executor "build-ref-renames"]]}
     {:ns graphden.packages.loader :defn load-impls-via-eval
      :say "The counterpart to fns.edn: slurp `impls.clj`, `eval` each form in a
            fresh namespace, and return that namespace's `impls` var — the
@@ -1007,7 +1116,30 @@
            handler chain tries them in turn and falls through to the app
            router on `nil`. With nothing installed the collection is `{}`,
            this short-circuits, and single-tenant behaviour is byte-for-byte
-           unchanged — the shape every seam in this codebase aims for."}]}
+           unchanged — the shape every seam in this codebase aims for."}
+    {:ns graphden.system.api-url-drift :defn check-router!
+     :say "A boot-time guard rather than a component: enumerate the router's
+           paths, scan every editor JS module for `/api/*` string literals,
+           and refuse to start if one names a route the router does not
+           serve. This is why the frontend never hardcodes a path the backend
+           can silently move — the coupling is checked once, at boot, on the
+           real router."}
+    {:ns graphden.cli :defn -main
+     :say "The same jar has a second entry point. `graphden.cli` moves whole
+           branches between INSTANCES over the export/import HTTP API —
+           `export` / `import` / `diff`, and `push` / `pull` against a hub —
+           with nothing but a URL and a token. It is how a self-hosted graph
+           reaches a cloud org and back, and the model for any other
+           out-of-process tool: the API is the contract, not the DB."}
+    {:ns graphden.crac :defn register-checkpoint-hooks!
+     :say "CRaC (checkpoint/restore) is the optional fast-start track
+           (docs/FLEET_RFC.md): snapshot the warmed JVM, restore in
+           milliseconds. The catch is that CRIU cannot snapshot a socket, so
+           `quiesce!` drains the Hikari pool, closes the LISTEN and
+           advisory-lock connections and the http-kit server — schedulers
+           paused FIRST so no tick reopens one mid-checkpoint — and `resume!`
+           undoes it. Inert on a plain JVM; `development/crac/` has the
+           bake."}]}
 
   {:id :web
    :title "Web — routing & the page runtime"
@@ -1059,6 +1191,22 @@
      :say "The auth gate applied to a request inside the handler chain before a
            page or action runs. Sits between routing/dispatch and the handler
            body that will build a response."}
+    {:file "resources/packages/web/crud-write/impls.clj" :defn write-rej
+     :say "The CRUD HTTP surface is one namespace, `web.crud`, spread over
+           seven modules (`crud`, `-types`, `-write`, `-delete`, `-seq`,
+           `-parse`, `-routes`) — every `/api/entities/*` route is a fn-def
+           over base-fns like this one. `write-rej` is the whole of stage 2
+           as ONE library boundary: the cycle / MI / override / list-closed
+           chain from the CRUD block, returned as `{:reason …}` or nil, so
+           the parse → validate → apply pipeline is visible in the graph."
+     :see [[:crud "write-rej"] [:crud "apply-create-core"]]}
+    {:file "resources/packages/web/crud-parse/impls.clj" :defn form-decode
+     :say "Stage 1 of the same pipeline, and a model base-fn: one codec call,
+           the ring-vector-for-repeated-keys quirk collapsed so the declared
+           `:text-map` return stays honest, and a comment explaining why no
+           regex (a 200KB asset override would trip
+           `*max-regex-input-length*`). The `htmx` module next door is
+           fns-only — `hx-*` attribute builders, no impl at all."}
     {:file "resources/packages/web/html/impls.clj" :defn hiccup-element
      :say "The generic `[tag attrs children]` constructor behind the graph-native
            page runtime. User-composed pages are fn-defs (`:html-page`,
@@ -1571,4 +1719,118 @@
      :say "RFC 6238 in ~100 lines: base32, HOTP, a ±1-step skew window and a
            constant-time compare, verified against the RFC's reference vectors.
            The enrollment/confirm flow that uses it lives in accounts.core."}]}
+
+  {:id :constellation
+   :title "Constellation — the repos around the monorepo"
+   :status :toured
+   :summary "graphden is one of seven repositories, and the seams the other
+   six plug into all live here: addon config fragments, the capability
+   predicates, the external-package manifest, and a CI guard for the vars a
+   private repo reaches. This block tours those seams and tells the other
+   side of each — what graphden-cloud, graphden-tenancy, graphden-mathx,
+   graphden-examples, graphden-internal and the org `.github` repo contribute,
+   how they pin each other, and how a release moves through all of them."
+   :paths ["src/graphden/system/config.clj" "src/graphden/tenancy/context.clj"
+           "src/graphden/packages/manifest.clj" "tools/open-core-seam.edn"
+           "resources/executor-packages.edn" "external-packages/"]
+   :after [:boot :packages :platform]
+   :steps
+   [{:ns graphden.system.config :defn addon-config-resources
+     :say "The whole open-core split hangs off ONE environment variable. Core
+           runs as-is with it unset (single-tenant, every seam at its
+           default). Production sets
+           `GRAPHDEN_ADDON_CONFIGS=graphden/tenancy/addon.edn,cloud/addon.edn,cloud/prod.edn`
+           — three classpath resources from two OTHER repos, applied in
+           order. The map of the constellation, and the direction of every
+           arrow: **graphden-cloud** depends on **graphden-tenancy** and
+           **graphden**; tenancy depends on graphden; graphden depends only on
+           **graphden-mathx**. Nothing public ever depends on anything
+           private, and nothing depends on graphden-cloud."
+     :see [[:boot "read-config"]]}
+    {:ns graphden.system.config :defn merge-addon
+     :say "How a fragment attaches: its `:graphden/require` directive loads
+           the addon's namespaces (so their `ig/init-key` defmethods exist —
+           tenancy registers about twenty-five: `:org/scoped-storage`,
+           `:tenancy/request-scope`, `:tenancy/execute-guard`,
+           `:auth/multi-tenant-provider`, `:tenancy/app-router`, …), then the
+           rest deep-merges over the core config. graphden-tenancy is a pure
+           source library (33 namespaces under `graphden.tenancy.*`, hub
+           `addon.clj`, plus the `tenancy-admin` package — deliberately NOT
+           depending on `app`); graphden-cloud adds only three more namespaces
+           (usage metering, a quota execute-guard, a db helper) and the
+           `landing` package that IS graphden.dev's own site. The rule in
+           docs/PACKAGE_DISTRIBUTION.md § 16: cloud vs self-hosted is a MODE
+           of one binary, never a fork."
+     :see [[:boot "context"] [:boot "dispatch-first"]]}
+    {:ns graphden.tenancy.context :defn install-org-cap-fn!
+     :say "The only policy seam core exposes as a mutable slot. `graphden.tenancy.context`
+           is the ONE tenancy namespace kept in this repo: the `*current-org*`
+           thread-local, the tier predicates, and two default-deny capability
+           predicates the addon installs at boot (`addon.clj` calls this with
+           `org-admin/current-has-org-capability?` and its platform twin with
+           `grant/current-has-platform-capability?`). Every authz gate in
+           core reads through them — so a self-hosted instance denies nothing
+           and a cloud instance denies by grant, from the same call sites.
+           docs/TENANCY_SEAM.md is the mechanism half; the policy half's ADRs
+           live in the private repo's `docs/PLATFORM_NOTES.md`."
+     :see [[:platform "platform-tier?"]]}
+    {:ns graphden.tenancy.context :defn tenancy-addon-active?
+     :say "…and the one fact server-rendered copy is allowed to branch on: is
+           the addon installed at all. Not a config flag, not a tier — the
+           installed predicate itself. The editor derives the same answer from
+           capability headers, so nothing is duplicated client-side; a page
+           that says 'organisation' only when there are organisations gets it
+           from here."}
+    {:file "test/graphden/open_core_seam_test.clj" :defn every-addon-facing-var-still-resolves-test
+     :say "The guard that makes a private consumer safe to have. Most vars the
+           tenancy addon reaches have NO caller in graphden — they exist for
+           the addon — so a refactor here can drop one and this suite stays
+           green; the break would surface at pin-bump time in a repo this CI
+           cannot see (it did: splitting `crud/entities.clj` lost
+           `view-impl-filter`). `tools/open-core-seam.edn` lists every such
+           var, generated from the addon's own requires, and this test
+           resolves each one. Rename or move one → red HERE, in the same
+           landing."
+     :see [[:crud "create-entity"]]}
+    {:ns graphden.packages.manifest :defn read-manifest
+     :say "The other kind of sibling: an external Type-2 package (code + fn-defs
+           in its own repo). `resources/executor-packages.edn` is the
+           operator's single data file naming them — today exactly one,
+           **graphden-mathx** (`:gcd` + `:gcd-with-12`, the smallest package
+           that proves the path end-to-end). `build.clj` bundles the listed
+           libs into the uberjar; `:app/packages` loads them by name at boot.
+           A name-only entry means the package is already on the classpath by
+           other means."
+     :see [[:boot "packages"] [:packages "load-default-packages"]]}
+    {:ns graphden.packages.manifest :defn extra-deps
+     :say "Where the manifest meets tools.deps. The `{lib coord}` map the build
+           basis adds — and the reason `bb pkg-pin-sync` exists: `deps.edn`
+           and the manifest must name the same `:git/sha`, or the lint/test
+           classpath and the shipped jar disagree. Its sibling `bb
+           pkg-copy-sync` guards CONTENT: `external-packages/{mathx,examples}`
+           are plain in-tree copies (no submodules — § 15 AD-3) that
+           `:override-deps` / the test paths actually exercise, checked
+           byte-identical against the standalone checkouts when they are
+           present. **graphden-examples** rides only that way — 28 lesson
+           modules on the dev/test path, never in a production graph."
+     :see [[:packages "install!"]]}
+    {:ns graphden.executor-runtime.core :defn -main
+     :say "Same `-main`, second reading: graphden-cloud's `:run` alias starts
+           THIS namespace — it ships no main of its own — and its Dockerfile
+           pins the same JRE digest as ours. The release train
+           (`bb release` in graphden-cloud, every step idempotent): bump
+           tenancy's graphden pin → push tenancy `main` → wait for its CI on
+           the self-hosted runner → bump both pins in cloud → regenerate the
+           baked tutorial → assert the **pin diamond** is closed (cloud and
+           tenancy must name ONE graphden sha, or prod runs tenancy against a
+           graphden it was never tested on; checked again in `deploy.yml`) →
+           push, and the push to cloud `main` IS the prod deploy → fast-forward
+           this repo's public `main` and tag `prod-<stamp>`. The two repos
+           without code edges: **graphden-internal** (private planning,
+           legal, the RU translations of the tutorial and of THIS tour — its
+           bake re-invokes our `bb devtour` — and the CI-runner setup) and
+           **graphden-dotgithub** (org-level issue / PR templates, no reusable
+           workflows). `graphden-wt/` beside them is not a repo but the
+           worktree root the merge queue parks agents in (dev/wtq/)."
+     :see [[:boot "boot!"] [:boot "read-config"]]}]}
 ]}

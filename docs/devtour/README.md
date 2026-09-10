@@ -22,7 +22,8 @@ Blocks are listed left, roughly in reading order; each block's `after:` line
 names what it assumes you have already seen. Start with the **Executor** (the
 spine everything else hangs off), then follow the dependency order: Storage,
 Branches, Types, CRUD, Packages, Boot, Web, Layout, Editor frontend, Services,
-Platform seams, Accounts.
+Platform seams, Accounts, and last the Constellation — the six repositories
+around this one and the seams they plug into.
 
 **Boot & lifecycle** is the block to jump to early if you would rather start
 from a running process than from a hot path — it walks `-main` → the Integrant

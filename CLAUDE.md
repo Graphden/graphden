@@ -764,9 +764,9 @@ feature is complete enough for the lesson to be verified end-to-end.
 The **developer code-tour** lives in [docs/devtour/](docs/devtour/README.md) —
 a navigable, symbol-anchored walkthrough of the *host codebase* for a new
 contributor, organised by block (executor, storage, versioning, types, crud,
-packages, boot, web, layout, editor frontend, services, platform, accounts). It
-is the developer-facing counterpart to
-the user tutorial above: `docs/tutorial/` teaches *using* the editor; the tour
+packages, boot, web, layout, editor frontend, services, platform, accounts,
+constellation — the sibling repos and the seams they plug into). It is the
+developer-facing counterpart to the user tutorial above: `docs/tutorial/` teaches *using* the editor; the tour
 teaches *the code that runs it*.
 
 Source of truth is [docs/devtour/tour.edn](docs/devtour/tour.edn) (blocks →

@@ -1,0 +1,752 @@
+;; web.tests — the platform's own self-tests for the `web` package's
+;; fn-defs. Ordinary fn-defs in a `tests` namespace (docs/TESTS.md):
+;; every non-`_` fn here is a test, runs with `{}` args, and passes
+;; when it does not throw. `_wt-`-prefixed fns are scaffolding.
+;;
+;; Everything here is PURE — no subject carries a :db / :network /
+;; :time / :env / :vault effect — so the suite auto-runs on writes
+;; that reach these fn-defs and never needs a live system.
+;;
+;; Verified live through /mcp before landing (run-tests: failed=0,
+;; other=0). Things deliberately NOT covered, with the reason:
+;;   * `:parse-fn-from-form` — its closure carries `:resolve-type-fn-id`
+;;     (`:db`), so it is not a pure subject.
+;;   * `:service-url` (`:service-endpoint` is `:db`), `:response-cache-get`
+;;     (cell-backed), `:proceed` (needs a middleware chain),
+;;     `:types-compatible` (reads the registry), `:encode-response`
+;;     (its `:request` does not reach the negotiation when bound on a
+;;     child — free-args surface shows `[unencoded-response default]`),
+;;     the http-client templates (`:network`), and the type rows
+;;     (`:script-tag` / `:style-tag` / `:hx-swap-mode` /
+;;     `:security-headers-shape` / `:service-endpoint-shape`).
+;;   * `:card` / `:link` / `:image` / `:stack` / `:row` / `:checkbox`
+;;     and `:r405` — see the note at the components section.
+
+{:namespace "web.tests"
+ :description "Platform self-tests for web: hiccup/html scaffolding, htmx attrs builders, the response matrix, the starter components, ring-adapter helpers and wraps, request parsing, and the JSON/HTML response builders."
+ :fns
+ [;; =========================================================================
+  ;; Scaffolding (private, `_wt-` prefixed — not tests).
+  ;; =========================================================================
+
+  ;; A Ring response reduced to the four facts every response test pins:
+  ;; `[status content-type cache-control body]`. Header keys are keywords
+  ;; at runtime — the content-type fn-defs bind them as JSONB literals and
+  ;; the `:http-server` adapter stringifies once on the way to http-kit.
+  {:name :_wt-resp-sig
+   :description "Signature of a Ring response — `[status Content-Type Cache-Control body]` — so a response test pins both axes and the body with one literal vector."
+   :parent :vec
+   :args {:coll [{:parent :get :args {:coll {:as :resp} :key {:value :status} :default nil}}
+                 {:parent :get-in :args {:map {:as :resp} :path [{:value :headers} {:value :Content-Type}] :default nil}}
+                 {:parent :get-in :args {:map {:as :resp} :path [{:value :headers} {:value :Cache-Control}] :default nil}}
+                 {:parent :get :args {:coll {:as :resp} :key {:value :body} :default nil}}]
+          :resp {:type [:map :any :any] :description "The Ring response under test. Typed as a plain map, not `:ring-response-shape`: a response built inline computes `:status :int`, which cannot be proved to satisfy the shape's `[:refine :int [:and [:>= 100] [:<= 599]]]`, and this helper only reads three keys."}}}
+
+  ;; Ring handlers for the wrap tests. A handler that ignores the request
+  ;; declares `:lambda-params []`; one that reads it declares `[:request]`.
+  {:name :_wt-const-handler
+   :description "Handler that answers 200 text/plain \"ok\" to any request."
+   :lambda-params []
+   :parent :text-ok-response
+   :args {:body "ok"}}
+
+  {:name :_wt-xfo-handler
+   :description "Handler that sets its own `X-Frame-Options` — the header `:secure-headers-wrap` must NOT overwrite."
+   :lambda-params []
+   :parent :ok-response
+   :args {:body "ok" :headers {"X-Frame-Options" "SAMEORIGIN"}}}
+
+  {:name :_wt-echo-body-handler
+   :description "Handler that echoes the request's `:body` as a text/plain 200."
+   :lambda-params [:request]
+   :parent :text-ok-response
+   :args {:body {:parent :get :args {:coll {:as :request} :key {:value :body} :default ""}}}}
+
+  {:name :_wt-ring-request
+   :description "A full `:ring-request-shape` literal (every field present) for the wraps whose `:request` slot is nominally typed."
+   :parent :const
+   :args {:value {:request-method :get :uri "/" :query-string "" :headers {} :body "raw" :async-channel nil}}}
+
+  ;; `:uri-segment-after` reads only `:uri`, but its slot is the full
+  ;; `:ring-request-shape` record — a partial literal is a type error at
+  ;; sync time (the sweep, not the runtime). Each URI under test gets a
+  ;; complete request; `:const` carries the literal, as `:_wt-ring-request`
+  ;; above does.
+  {:name :_wt-request-uri-segment
+   :description "Full Ring request for `/api/secrets/abc` — the marker `secrets` has a segment after it."
+   :parent :const
+   :args {:value {:request-method :get :uri "/api/secrets/abc" :query-string ""
+                  :headers {} :body "" :async-channel nil}}}
+
+  {:name :_wt-request-uri-marker-last
+   :description "Full Ring request for `/api/secrets` — the marker is the last segment."
+   :parent :const
+   :args {:value {:request-method :get :uri "/api/secrets" :query-string ""
+                  :headers {} :body "" :async-channel nil}}}
+
+  {:name :_wt-request-uri-no-marker
+   :description "Full Ring request for `/api/x` — the marker never appears."
+   :parent :const
+   :args {:value {:request-method :get :uri "/api/x" :query-string ""
+                  :headers {} :body "" :async-channel nil}}}
+
+  ;; Requests with STRING header keys (as http-kit delivers them). A
+  ;; literal map would keywordize through the JSONB roundtrip, so the
+  ;; header map is built at runtime with `:zipmap`.
+  {:name :_wt-form-request
+   :description "Ring request carrying an `application/x-www-form-urlencoded` body `a=1&b=x+y`."
+   :parent :zipmap
+   :args {:keys [{:value :headers} {:value :body}]
+          :vals [{:parent :zipmap :args {:keys [{:value "content-type"}] :vals [{:value "application/x-www-form-urlencoded"}]}}
+                 {:value "a=1&b=x+y"}]}}
+
+  {:name :_wt-json-request
+   :description "Ring request carrying an `application/json` body `{\"name\":\"foo\",\"n\":[1,2]}`."
+   :parent :zipmap
+   :args {:keys [{:value :headers} {:value :body}]
+          :vals [{:parent :zipmap :args {:keys [{:value "content-type"}] :vals [{:value "application/json; charset=utf-8"}]}}
+                 {:value "{\"name\":\"foo\",\"n\":[1,2]}"}]}}
+
+  {:name :_wt-r404-router
+   :description "A `:r404` router with no routes — every request falls through to the 404 slot."
+   :parent :r404
+   :args {:routes []
+          :method-not-allowed-response {:parent :text-method-not-allowed-response :args {:body "mna"}}
+          :error-response {:parent :text-error-response :args {:body "err"}}}}
+
+  {:name :_wt-page-with-assets
+   :description "An `:html-page` with one `<style>` in head and one `<script>` at the end of body, both carrying characters that HTML-escaping would mangle."
+   :parent :html-page
+   :args {:title "T"
+          :body {:value ["p" "x"]}
+          :head [{:parent :wrap-style :args {:content "b{}"}}]
+          :scripts [{:parent :wrap-script :args {:content "1<2"}}]}}
+
+  ;; =========================================================================
+  ;; web.html
+  ;; =========================================================================
+
+  {:name :hidden-span-is-an-empty-hidden-span
+   :description "`:hidden-span` is `[:span {:hidden \"1\"}]` — the shape-stable `:else` of a conditional section."
+   :parent :assert-eq
+   :args {:actual :hidden-span
+          :expected {:value [:span {:hidden "1"}]}}}
+
+  {:name :hiccup-builds-tag-attrs-children
+   :description "`:hiccup` assembles `[tag attrs & children]`."
+   :parent :assert-eq
+   :args {:actual {:parent :hiccup :args {:tag "b" :attrs {:class "c"} :children ["x" "y"]}}
+          :expected {:value [:b {:class "c"} "x" "y"]}}}
+
+  {:name :hiccup-omits-nil-attrs
+   :description "`:hiccup` with no `:attrs` yields `[tag & children]` — no empty attrs map."
+   :parent :assert-eq
+   :args {:actual {:parent :hiccup :args {:tag "b" :attrs nil :children ["x"]}}
+          :expected {:value [:b "x"]}}}
+
+  {:name :render-hiccup-escapes-text-children
+   :description "`:render-hiccup` HTML-escapes text children (`<` → `&lt;`) and renders attrs."
+   :parent :assert-eq
+   :args {:actual {:parent :render-hiccup :args {:hiccup {:value ["div" {"class" "a"} "x<y"]}}}
+          :expected "<div class=\"a\">x&lt;y</div>"}}
+
+  {:name :hiccup-normalize-keywordizes-string-tags
+   :description "`:hiccup-normalize` turns string tags into keywords at every depth and keeps the attrs map."
+   :parent :assert-eq
+   :args {:actual {:parent :hiccup-normalize :args {:tree {:value ["div" {"class" "a"} ["span" "x"]]}}}
+          :expected {:value [:div {:class "a"} [:span "x"]]}}}
+
+  {:name :hiccup-normalize-passes-scalars-through
+   :description "`:hiccup-normalize` on a non-element (a bare string) returns it unchanged."
+   :parent :assert-eq
+   :args {:actual {:parent :hiccup-normalize :args {:tree "x"}}
+          :expected "x"}}
+
+  {:name :hiccup-normalize-keeps-style-text-verbatim
+   :description "String children of a normalized `<style>` render unescaped — `>` survives as `>`."
+   :parent :assert-eq
+   :args {:actual {:parent :render-hiccup :args {:hiccup {:parent :hiccup-normalize :args {:tree {:value ["style" "a>b{}"]}}}}}
+          :expected "<style>a>b{}</style>"}}
+
+  {:name :html-page-scaffolds-head-and-body
+   :description "`:html-page` yields `<html lang=en>` with charset + viewport metas and the title in `<head>`, and the (keywordized) body in `<body>`."
+   :parent :assert-eq
+   :args {:actual {:parent :html-page :args {:title "T" :body {:value ["div" {"class" "a"} "x"]} :head [] :scripts []}}
+          :expected {:value [:html {:lang "en"}
+                             [:head {}
+                              [:meta {:charset "utf-8"}]
+                              [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
+                              [:title {} "T"]]
+                             [:body {} [:div {:class "a"} "x"]]]}}}
+
+  {:name :html-page-renders-head-styles-and-body-scripts-verbatim
+   :description "Rendered, a page's `:head` `<style>` follows the title, its `:scripts` `<script>` closes the body, and neither body is HTML-escaped."
+   :parent :assert-eq
+   :args {:actual {:parent :render-hiccup :args {:hiccup :_wt-page-with-assets}}
+          :expected "<html lang=\"en\"><head><meta charset=\"utf-8\" /><meta content=\"width=device-width, initial-scale=1\" name=\"viewport\" /><title>T</title><style>b{}</style></head><body><p>x</p><script>1<2</script></body></html>"}}
+
+  {:name :with-cdn-script-appends-script-src-to-head
+   :description "`:with-cdn-script` conj's `[:script {:src url}]` onto the existing head list, after its elements."
+   :parent :assert-eq
+   :args {:actual {:parent :with-cdn-script :args {:head {:value [[:meta {:charset "utf-8"}]]} :url "https://cdn.example/x.js"}}
+          :expected {:value [[:meta {:charset "utf-8"}] [:script {:src "https://cdn.example/x.js"}]]}}}
+
+  {:name :wrap-element-builds-a-single-child-element
+   :description "`:wrap-element` is `[tag {} content]` — attrs pinned to `{}`."
+   :parent :assert-eq
+   :args {:actual {:parent :wrap-element :args {:tag "em" :content "x"}}
+          :expected {:value [:em {} "x"]}}}
+
+  {:name :wrap-style-wraps-css-in-a-style-tag
+   :description "`:wrap-style` is `[:style {} css]`."
+   :parent :assert-eq
+   :args {:actual {:parent :wrap-style :args {:content "b{}"}}
+          :expected {:value [:style {} "b{}"]}}}
+
+  {:name :wrap-script-wraps-js-in-a-script-tag
+   :description "`:wrap-script` is `[:script {} js]`."
+   :parent :assert-eq
+   :args {:actual {:parent :wrap-script :args {:content "1"}}
+          :expected {:value [:script {} "1"]}}}
+
+  ;; =========================================================================
+  ;; web.htmx
+  ;; =========================================================================
+
+  {:name :hx-get-attrs-carries-url-and-nil-options
+   :description "`:hx-get-attrs` with only `:url` bound carries `hx-get` and nil for target/swap/trigger (nil attrs vanish at render)."
+   :parent :assert-eq
+   :args {:actual {:parent :hx-get-attrs :args {:url "/x" :swap nil}}
+          :expected {:value {:hx-get "/x" :hx-target nil :hx-swap nil :hx-trigger nil}}}}
+
+  {:name :hx-post-attrs-carries-target-swap-and-trigger
+   :description "`:hx-post-attrs` maps the three options onto `hx-target` / `hx-swap` / `hx-trigger`."
+   :parent :assert-eq
+   :args {:actual {:parent :hx-post-attrs :args {:url "/x" :target "#t" :swap "outerHTML" :trigger "load"}}
+          :expected {:value {:hx-post "/x" :hx-target "#t" :hx-swap "outerHTML" :hx-trigger "load"}}}}
+
+  {:name :hx-request-attrs-takes-an-arbitrary-verb-attr
+   :description "`:hx-request-attrs` keys the URL under whatever `:verb-attr` is bound — here `:hx-put`."
+   :parent :assert-eq
+   :args {:actual {:parent :hx-request-attrs :args {:verb-attr {:value :hx-put} :url "/x" :swap nil}}
+          :expected {:value {:hx-put "/x" :hx-target nil :hx-swap nil :hx-trigger nil}}}}
+
+  {:name :sse-connect-attrs-defaults-the-event-to-message
+   :description "`:sse-connect-attrs` without `:event` subscribes to the `message` event."
+   :parent :assert-eq
+   :args {:actual {:parent :sse-connect-attrs :args {:url "/s"}}
+          :expected {:value {:hx-ext "sse" :sse-connect "/s" :sse-swap "message"}}}}
+
+  {:name :sse-connect-attrs-uses-the-bound-event
+   :description "`:sse-connect-attrs` puts a bound `:event` into `sse-swap`."
+   :parent :assert-eq
+   :args {:actual {:parent :sse-connect-attrs :args {:url "/s" :event "tick"}}
+          :expected {:value {:hx-ext "sse" :sse-connect "/s" :sse-swap "tick"}}}}
+
+  {:name :hx-button-posts-to-its-url
+   :description "`:hx-button` is a `<button hx-post=url>label</button>` with the unbound options as nil attrs."
+   :parent :assert-eq
+   :args {:actual {:parent :hx-button :args {:label "Go" :url "/x" :swap nil :extras {}}}
+          :expected {:value [:button {:hx-post "/x" :hx-target nil :hx-swap nil :hx-trigger nil} "Go"]}}}
+
+  {:name :hx-button-merges-extras-last
+   :description "`:hx-button`'s `:extras` merge last — a caller's `hx-target` wins over the unbound nil and extra keys ride along."
+   :parent :assert-eq
+   :args {:actual {:parent :hx-button :args {:label "Go" :url "/x" :swap nil :extras {:class "c" :hx-target "#t"}}}
+          :expected {:value [:button {:hx-post "/x" :hx-target "#t" :hx-swap nil :hx-trigger nil :class "c"} "Go"]}}}
+
+  ;; =========================================================================
+  ;; web.response — status × content-type matrix
+  ;; =========================================================================
+
+  {:name :ok-response-is-200-with-the-bound-headers-and-body
+   :description "`:ok-response` pins status 200 and passes headers + body through."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :ok-response :args {:headers {"Content-Type" "x/y"} :body "b"}}}}
+          :expected {:value [200 "x/y" nil "b"]}}}
+
+  {:name :not-modified-response-is-304
+   :description "`:not-modified-response` pins status 304."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :not-modified-response :args {:headers {} :body ""}}}}
+          :expected {:value [304 nil nil ""]}}}
+
+  {:name :unauthorized-response-is-401
+   :description "`:unauthorized-response` pins status 401."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :unauthorized-response :args {:headers {} :body "no"}}}}
+          :expected {:value [401 nil nil "no"]}}}
+
+  {:name :too-many-requests-response-is-429
+   :description "`:too-many-requests-response` pins status 429."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :too-many-requests-response :args {:headers {} :body "slow"}}}}
+          :expected {:value [429 nil nil "slow"]}}}
+
+  {:name :json-content-type-is-application-json
+   :description "`:json-content-type` pins `Content-Type: application/json` and leaves status + body to the caller."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :json-content-type :args {:status 201 :body "{}"}}}}
+          :expected {:value [201 "application/json" nil "{}"]}}}
+
+  {:name :html-content-type-is-text-html-utf8
+   :description "`:html-content-type` pins `text/html; charset=utf-8`."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :html-content-type :args {:status 201 :body "<p/>"}}}}
+          :expected {:value [201 "text/html; charset=utf-8" nil "<p/>"]}}}
+
+  {:name :text-content-type-is-text-plain
+   :description "`:text-content-type` pins `text/plain`."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :text-content-type :args {:status 201 :body "t"}}}}
+          :expected {:value [201 "text/plain" nil "t"]}}}
+
+  {:name :edn-ok-response-is-200-application-edn
+   :description "`:edn-ok-response` = 200 × `application/edn`."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :edn-ok-response :args {:body "{:a 1}"}}}}
+          :expected {:value [200 "application/edn" nil "{:a 1}"]}}}
+
+  {:name :json-ok-response-is-200-application-json
+   :description "`:json-ok-response` = 200 × `application/json`."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :json-ok-response :args {:body "{}"}}}}
+          :expected {:value [200 "application/json" nil "{}"]}}}
+
+  {:name :text-ok-response-is-200-text-plain
+   :description "`:text-ok-response` = 200 × `text/plain`."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :text-ok-response :args {:body "t"}}}}
+          :expected {:value [200 "text/plain" nil "t"]}}}
+
+  {:name :css-ok-response-is-200-text-css-without-cache-directives
+   :description "`:css-ok-response` = 200 × `text/css; charset=utf-8` with NO `Cache-Control` — user-editable stylesheets must show edits on the next reload."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :css-ok-response :args {:body "b{}"}}}}
+          :expected {:value [200 "text/css; charset=utf-8" nil "b{}"]}}}
+
+  {:name :text-unauthorized-response-is-401-text-plain
+   :description "`:text-unauthorized-response` = 401 × `text/plain`."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :text-unauthorized-response :args {:body "no"}}}}
+          :expected {:value [401 "text/plain" nil "no"]}}}
+
+  {:name :text-too-many-requests-response-is-429-text-plain
+   :description "`:text-too-many-requests-response` = 429 × `text/plain`."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :text-too-many-requests-response :args {:body "slow"}}}}
+          :expected {:value [429 "text/plain" nil "slow"]}}}
+
+  {:name :cached-svg-ok-response-caches-for-a-day
+   :description "`:cached-svg-ok-response` = 200 × `image/svg+xml` with `Cache-Control: public, max-age=86400`."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :cached-svg-ok-response :args {:body "<svg/>"}}}}
+          :expected {:value [200 "image/svg+xml" "public, max-age=86400" "<svg/>"]}}}
+
+  {:name :immutable-js-ok-response-is-immutable-for-a-year
+   :description "`:immutable-js-ok-response` = 200 × `application/javascript; charset=utf-8` with a 1-year `immutable` `Cache-Control`."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :immutable-js-ok-response :args {:body "1"}}}}
+          :expected {:value [200 "application/javascript; charset=utf-8" "public, max-age=31536000, immutable" "1"]}}}
+
+  {:name :immutable-css-ok-response-is-immutable-for-a-year
+   :description "`:immutable-css-ok-response` = 200 × `text/css; charset=utf-8` with a 1-year `immutable` `Cache-Control`."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :immutable-css-ok-response :args {:body "b{}"}}}}
+          :expected {:value [200 "text/css; charset=utf-8" "public, max-age=31536000, immutable" "b{}"]}}}
+
+  {:name :html-no-cache-ok-response-revalidates-every-load
+   :description "`:html-no-cache-ok-response` = 200 × `text/html; charset=utf-8` with `Cache-Control: no-cache`."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :html-no-cache-ok-response :args {:body "<p/>"}}}}
+          :expected {:value [200 "text/html; charset=utf-8" "no-cache" "<p/>"]}}}
+
+  ;; =========================================================================
+  ;; web.components
+  ;; =========================================================================
+
+  {:name :button-renders-its-label
+   :description "`:button` without attrs is `[:button label]`."
+   :parent :assert-eq
+   :args {:actual {:parent :button :args {:label "L" :attrs nil}}
+          :expected {:value [:button "L"]}}}
+
+  {:name :button-merges-attrs-onto-the-tag
+   :description "`:button` with `:attrs` is `[:button attrs label]`."
+   :parent :assert-eq
+   :args {:actual {:parent :button :args {:label "L" :attrs {:class "c"}}}
+          :expected {:value [:button {:class "c"} "L"]}}}
+
+  {:name :input-is-self-closing-with-attrs
+   :description "`:input` is `[:input attrs]` — no children."
+   :parent :assert-eq
+   :args {:actual {:parent :input :args {:attrs {:value {:type "email" :name "e"}}}}
+          :expected {:value [:input {:type "email" :name "e"}]}}}
+
+  {:name :textarea-carries-its-initial-content
+   :description "`:textarea` is `[:textarea attrs content]`."
+   :parent :assert-eq
+   :args {:actual {:parent :textarea :args {:attrs {:name "m" :rows 6} :content "hi"}}
+          :expected {:value [:textarea {:name "m" :rows 6} "hi"]}}}
+
+  {:name :select-wraps-its-option-nodes
+   :description "`:select` nests `:option` nodes as its children."
+   :parent :assert-eq
+   :args {:actual {:parent :select :args {:attrs {:name "c"}
+                                         :options [{:parent :option :args {:label "Red" :attrs {:value {:value "r"}}}}]}}
+          :expected {:value [:select {:name "c"} [:option {:value "r"} "Red"]]}}}
+
+  {:name :form-wraps-fields-with-method-and-action
+   :description "`:form` is `[:form attrs & children]`."
+   :parent :assert-eq
+   :args {:actual {:parent :form :args {:attrs {:method "POST" :action "/c"}
+                                       :children [{:parent :input :args {:attrs {:name "e"}}}]}}
+          :expected {:value [:form {:method "POST" :action "/c"} [:input {:name "e"}]]}}}
+
+  {:name :heading-picks-its-tag-from-the-level
+   :description "`:heading` level 2 renders `<h2>`."
+   :parent :assert-eq
+   :args {:actual {:parent :heading :args {:level 2 :content "H" :attrs nil}}
+          :expected {:value [:h2 "H"]}}}
+
+  {:name :paragraph-keeps-inline-children-in-order
+   :description "`:paragraph` is `[:p & children]` with strings and inline elements interleaved as given."
+   :parent :assert-eq
+   :args {:actual {:parent :paragraph :args {:attrs nil :children ["a" {:parent :hiccup :args {:tag "em" :attrs nil :children ["b"]}} "c"]}}
+          :expected {:value [:p "a" [:em "b"] "c"]}}}
+
+  {:name :plain-div-has-no-attrs
+   :description "`:plain-div` is `[:div {} & children]` — attrs pinned empty."
+   :parent :assert-eq
+   :args {:actual {:parent :plain-div :args {:children ["x"]}}
+          :expected {:value [:div {} "x"]}}}
+
+  {:name :nav-bar-wraps-children-in-nav
+   :description "`:nav-bar` is `[:nav & children]`."
+   :parent :assert-eq
+   :args {:actual {:parent :nav-bar :args {:children ["home" "about"] :attrs nil}}
+          :expected {:value [:nav "home" "about"]}}}
+
+  {:name :unordered-list-nests-list-items
+   :description "`:unordered-list` over `:list-item`s is `[:ul [:li …] …]`."
+   :parent :assert-eq
+   :args {:actual {:parent :unordered-list :args {:attrs nil
+                                                 :children [{:parent :list-item :args {:attrs nil :children ["a"]}}
+                                                            {:parent :list-item :args {:attrs nil :children ["b"]}}]}}
+          :expected {:value [:ul [:li "a"] [:li "b"]]}}}
+
+  {:name :table-composes-rows-header-cells-and-cells
+   :description "`:table` / `:table-row` / `:table-header-cell` / `:table-cell` compose to `[:table [:tr [:th …] [:td …]]]`."
+   :parent :assert-eq
+   :args {:actual {:parent :table
+                   :args {:attrs nil
+                          :children [{:parent :table-row
+                                      :args {:attrs nil
+                                             :children [{:parent :table-header-cell :args {:attrs nil :children ["h"]}}
+                                                        {:parent :table-cell :args {:attrs nil :children ["c"]}}]}}]}}
+          :expected {:value [:table [:tr [:th "h"] [:td "c"]]]}}}
+
+  {:name :field-label-links-to-a-control-via-for
+   :description "`:field-label` is `[:label attrs & children]` — `:attrs {:for id}` associates the control."
+   :parent :assert-eq
+   :args {:actual {:parent :field-label :args {:attrs {:for "i"} :children ["Name"]}}
+          :expected {:value [:label {:for "i"} "Name"]}}}
+
+  {:name :submit-button-wires-the-submit-form-action
+   :description "`:submit-button` carries `data-action=\"submit-form\"` and `type=\"submit\"`."
+   :parent :assert-eq
+   :args {:actual {:parent :submit-button :args {:label "Send" :extras {}}}
+          :expected {:value [:button {:data-action "submit-form" :type "submit"} "Send"]}}}
+
+  {:name :submit-button-merges-extras-last
+   :description "`:submit-button`'s `:extras` win on conflict (`type`) and add keys (`data-target`)."
+   :parent :assert-eq
+   :args {:actual {:parent :submit-button :args {:label "Send" :extras {:value {:type "button" :data-target "#r"}}}}
+          :expected {:value [:button {:data-action "submit-form" :type "button" :data-target "#r"} "Send"]}}}
+
+  {:name :click-button-dispatches-the-named-action
+   :description "`:click-button` carries `data-action=<action>`."
+   :parent :assert-eq
+   :args {:actual {:parent :click-button :args {:label "Run" :action "run-fn" :extras {}}}
+          :expected {:value [:button {:data-action "run-fn"} "Run"]}}}
+
+  {:name :navigate-button-carries-the-href
+   :description "`:navigate-button` carries `data-action=\"navigate\"` + `data-href=<href>`."
+   :parent :assert-eq
+   :args {:actual {:parent :navigate-button :args {:label "Go" :href "/x" :extras {}}}
+          :expected {:value [:button {:data-action "navigate" :data-href "/x"} "Go"]}}}
+
+  {:name :custom-button-carries-the-inline-handler-body
+   :description "`:custom-button` carries `data-action=\"custom\"` + `data-custom-handler=<body>`."
+   :parent :assert-eq
+   :args {:actual {:parent :custom-button :args {:label "C" :body "alert(1)" :extras {}}}
+          :expected {:value [:button {:data-action "custom" :data-custom-handler "alert(1)"} "C"]}}}
+
+  {:name :custom-script-holds-its-body
+   :description "`:custom-script` is the JS body itself."
+   :parent :assert-eq
+   :args {:actual {:parent :custom-script :args {:body "1"}}
+          :expected "1"}}
+
+  {:name :wrap-custom-script-wraps-the-body-in-a-script-tag
+   :description "`:wrap-custom-script` is `[:script {} body]`, body untouched."
+   :parent :assert-eq
+   :args {:actual {:parent :wrap-custom-script :args {:body "1<2"}}
+          :expected {:value [:script {} "1<2"]}}}
+
+  {:name :custom-stylesheet-holds-its-body
+   :description "`:custom-stylesheet` is the CSS body itself."
+   :parent :assert-eq
+   :args {:actual {:parent :custom-stylesheet :args {:body "b{}"}}
+          :expected "b{}"}}
+
+  {:name :wrap-custom-style-wraps-the-body-in-a-style-tag
+   :description "`:wrap-custom-style` is `[:style {} body]`."
+   :parent :assert-eq
+   :args {:actual {:parent :wrap-custom-style :args {:body "b{}"}}
+          :expected {:value [:style {} "b{}"]}}}
+
+  ;; =========================================================================
+  ;; web.ring-adapter
+  ;; =========================================================================
+
+  {:name :uri-segment-after-returns-the-segment-after-the-marker
+   :description "`/api/secrets/abc` with marker `secrets` → `abc`."
+   :parent :assert-eq
+   :args {:actual {:parent :uri-segment-after :args {:request :_wt-request-uri-segment :marker "secrets" :default nil}}
+          :expected "abc"}}
+
+  {:name :uri-segment-after-is-nil-when-the-marker-is-last
+   :description "`/api/secrets` with marker `secrets` → nil (nothing follows)."
+   :parent :assert-eq
+   :args {:actual {:parent :uri-segment-after :args {:request :_wt-request-uri-marker-last :marker "secrets" :default nil}}
+          :expected nil}}
+
+  {:name :uri-segment-after-is-nil-when-the-marker-is-absent
+   :description "`/api/x` with marker `secrets` → nil."
+   :parent :assert-eq
+   :args {:actual {:parent :uri-segment-after :args {:request :_wt-request-uri-no-marker :marker "secrets" :default nil}}
+          :expected nil}}
+
+  {:name :default-security-headers-pin-the-six-headers
+   :description "`:default-security-headers` is exactly the six-header map (nosniff / DENY / XSS 0 / strict-origin-when-cross-origin / frame-ancestors CSP / 1-year HSTS)."
+   :parent :assert-eq
+   :args {:actual :default-security-headers
+          :expected {:value {:X-Content-Type-Options "nosniff"
+                             :X-Frame-Options "DENY"
+                             :X-XSS-Protection "0"
+                             :Referrer-Policy "strict-origin-when-cross-origin"
+                             :Content-Security-Policy "frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+                             :Strict-Transport-Security "max-age=31536000; includeSubDomains"}}}}
+
+  {:name :secure-headers-wrap-adds-the-default-headers
+   :description "A handler response without security headers comes back through `:secure-headers-wrap` with `X-Frame-Options: DENY`, its own content-type and body intact."
+   :parent :assert-eq
+   :args {:actual {:parent :vec
+                   :args {:coll [{:parent :get-in :args {:map :_wt-secured-const :path [{:value :headers} {:value :X-Frame-Options}] :default nil}}
+                                 {:parent :get-in :args {:map :_wt-secured-const :path [{:value :headers} {:value :Content-Type}] :default nil}}
+                                 {:parent :get :args {:coll :_wt-secured-const :key {:value :body} :default nil}}]}}
+          :expected {:value ["DENY" "text/plain" "ok"]}}}
+
+  {:name :_wt-secured-const
+   :description "`:_wt-const-handler` run through `:secure-headers-wrap`."
+   :parent :secure-headers-wrap
+   :args {:base-handler :_wt-const-handler :request :_wt-ring-request}}
+
+  {:name :secure-headers-wrap-keeps-the-handlers-own-header
+   :description "`:secure-headers-wrap` fills MISSING keys only — a handler's explicit `X-Frame-Options` survives."
+   :parent :assert-eq
+   :args {:actual {:parent :get-in
+                   :args {:map {:parent :secure-headers-wrap :args {:base-handler :_wt-xfo-handler :request :_wt-ring-request}}
+                          :path [{:value :headers} {:value :X-Frame-Options}] :default nil}}
+          :expected "SAMEORIGIN"}}
+
+  {:name :request-authenticated-is-false-without-a-principal
+   :description "`:request-authenticated?` on a request carrying no credentials is false."
+   :parent :assert-eq
+   :args {:actual {:parent :request-authenticated? :args {:request :_wt-ring-request}}
+          :expected false}}
+
+  {:name :default-auth-fail-response-is-401-unauthorized-text
+   :description "`:default-auth-fail-response` is 401, `text/plain`, body `Unauthorized`."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp :default-auth-fail-response}}
+          :expected {:value [401 "text/plain" nil "Unauthorized"]}}}
+
+  ;; =========================================================================
+  ;; web.http / web.reitit-text
+  ;; =========================================================================
+
+  {:name :realize-body-wrap-hands-the-handler-a-string-body
+   :description "`:realize-body-wrap` calls `:base-handler` with the request's body realised as a String — an echo handler answers it back."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig
+                   :args {:resp {:parent :realize-body-wrap :args {:base-handler :_wt-echo-body-handler :request :_wt-ring-request}}}}
+          :expected {:value [200 "text/plain" nil "raw"]}}}
+
+  {:name :r404-answers-not-found-for-an-unmatched-path
+   :description "A `:r404` router with no routes answers 404 `text/plain` \"Not Found\"."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig
+                   :args {:resp {:parent :invoke :args {:func :_wt-r404-router :arg {:value {:uri "/nope" :request-method :get :headers {}}}}}}}
+          :expected {:value [404 "text/plain" nil "Not Found"]}}}
+
+  ;; =========================================================================
+  ;; web.crud — request parsing
+  ;; =========================================================================
+
+  {:name :parse-form-body-decodes-urlencoded-fields-with-string-keys
+   :description "`:parse-form-body` decodes `a=1&b=x+y` into a string-keyed map (`+` → space)."
+   :parent :assert-eq
+   :args {:actual {:parent :get :args {:coll {:parent :parse-form-body :args {:request :_wt-form-request}} :key {:value "b"} :default nil}}
+          :expected "x y"}}
+
+  {:name :parse-form-body-is-empty-when-the-content-type-differs
+   :description "`:parse-form-body` on a JSON-typed request is `{}`."
+   :parent :assert-eq
+   :args {:actual {:parent :parse-form-body :args {:request :_wt-json-request}}
+          :expected {:value {}}}}
+
+  {:name :parse-form-body-kw-keywordizes-the-field-names
+   :description "`:parse-form-body-kw` yields `{:a \"1\" :b \"x y\"}`."
+   :parent :assert-eq
+   :args {:actual {:parent :parse-form-body-kw :args {:request :_wt-form-request}}
+          :expected {:value {:a "1" :b "x y"}}}}
+
+  {:name :parse-json-body-parses-and-keywordizes
+   :description "`:parse-json-body` on a JSON-typed request is the keywordized value."
+   :parent :assert-eq
+   :args {:actual {:parent :parse-json-body :args {:request :_wt-json-request}}
+          :expected {:value {:name "foo" :n [1 2]}}}}
+
+  {:name :parse-json-body-is-nil-when-the-content-type-differs
+   :description "`:parse-json-body` on a form-typed request is nil. Asserted with `:nil?` rather than `:assert-eq` against a literal nil: the two operands of `:assert-eq` share one typevar, and `:null` does not unify with the parse result's type."
+   :parent :assert
+   :args {:value {:parent :nil?
+                  :args {:value {:parent :parse-json-body :args {:request :_wt-form-request}}}}}}
+
+  {:name :json-body-name-reads-the-name-field
+   :description "`:json-body-name` is `(str (:name body))`."
+   :parent :assert-eq
+   :args {:actual {:parent :json-body-name :args {:request :_wt-json-request}}
+          :expected "foo"}}
+
+  {:name :json-body-name-is-empty-without-a-json-body
+   :description "`:json-body-name` on a request with no body is the empty string, not nil."
+   :parent :assert-eq
+   :args {:actual {:parent :json-body-name :args {:request {:value {:headers {} :body nil}}}}
+          :expected ""}}
+
+  {:name :row-id-name-pair-picks-id-and-name
+   :description "`:row-id-name-pair` on a row is `[id name]`, other fields dropped."
+   :parent :assert-eq
+   :args {:actual {:parent :row-id-name-pair :args {:item {:value {:id "u1" :name "n1" :x 2}}}}
+          :expected {:value ["u1" "n1"]}}}
+
+  {:name :parse-ns-from-form-keeps-name-and-description
+   :description "`:parse-ns-from-form` copies `:name` + `:description`; an absent `:parent-id` stays absent."
+   :parent :assert-eq
+   :args {:actual {:parent :parse-ns-from-form :args {:form-data {:value {:name "ns1" :description "d"}}}}
+          :expected {:value {:name "ns1" :description "d"}}}}
+
+  {:name :parse-ns-from-form-parses-the-parent-id
+   :description "`:parse-ns-from-form` turns a non-blank `:parent-id` into a UUID."
+   :parent :assert-eq
+   :args {:actual {:parent :parse-ns-from-form :args {:form-data {:value {:name "ns1" :parent-id "00000000-0000-0000-0000-000000000001"}}}}
+          :expected {:parent :zipmap :args {:keys [{:value :name} {:value :parent-id}]
+                                            :vals [{:value "ns1"}
+                                                   {:parent :parse-uuid :args {:string "00000000-0000-0000-0000-000000000001"}}]}}}}
+
+  {:name :parse-slot-from-form-coerces-type-fn-id-and-required
+   :description "`:parse-slot-from-form` parses `:type-fn-id` as a UUID and `:required \"true\"` as `true`."
+   :parent :assert-eq
+   :args {:actual {:parent :parse-slot-from-form :args {:form-data {:value {:name "s" :type-fn-id "00000000-0000-0000-0000-000000000002" :required "true"}}}}
+          :expected {:parent :zipmap :args {:keys [{:value :name} {:value :type-fn-id} {:value :required}]
+                                            :vals [{:value "s"}
+                                                   {:parent :parse-uuid :args {:string "00000000-0000-0000-0000-000000000002"}}
+                                                   {:value true}]}}}}
+
+  {:name :parse-slot-from-form-reads-anything-but-true-as-not-required
+   :description "`:parse-slot-from-form` maps `:required \"yes\"` to `false` — only the literal `\"true\"` counts."
+   :parent :assert-eq
+   :args {:actual {:parent :parse-slot-from-form :args {:form-data {:value {:name "s" :required "yes"}}}}
+          :expected {:value {:name "s" :required false}}}}
+
+  {:name :parse-fn-slot-from-form-parses-ids-and-position
+   :description "`:parse-fn-slot-from-form` parses both ids as UUIDs and `:position` as an int."
+   :parent :assert-eq
+   :args {:actual {:parent :parse-fn-slot-from-form
+                   :args {:form-data {:value {:fn-id "00000000-0000-0000-0000-000000000001"
+                                              :slot-id "00000000-0000-0000-0000-000000000002"
+                                              :position "3"}}}}
+          :expected {:parent :zipmap :args {:keys [{:value :fn-id} {:value :slot-id} {:value :position}]
+                                            :vals [{:parent :parse-uuid :args {:string "00000000-0000-0000-0000-000000000001"}}
+                                                   {:parent :parse-uuid :args {:string "00000000-0000-0000-0000-000000000002"}}
+                                                   {:value 3}]}}}}
+
+  {:name :parse-binding-from-form-parses-value-json-and-flags
+   :description "`:parse-binding-from-form` JSON-parses `:value` and reads the list flags as booleans."
+   :parent :assert-eq
+   :args {:actual {:parent :parse-binding-from-form :args {:form-data {:value {:value "[1,2]" :list-append "true" :list-closed "false"}}}}
+          :expected {:value {:value [1 2] :list-append true :list-closed false}}}}
+
+  {:name :parse-binding-from-form-clears-required-on-blank
+   :description "`:parse-binding-from-form` maps a blank `:required` to nil (empty-as-clear) and a blank `:value` to nil."
+   :parent :assert-eq
+   :args {:actual {:parent :parse-binding-from-form :args {:form-data {:value {:required "" :value ""}}}}
+          :expected {:value {:required nil :value nil}}}}
+
+  {:name :parse-binding-list-item-from-form-parses-position-value-and-literal
+   :description "`:parse-binding-list-item-from-form` reads `:position` as int, `:value` as JSON and `:literal \"true\"` as true."
+   :parent :assert-eq
+   :args {:actual {:parent :parse-binding-list-item-from-form :args {:form-data {:value {:position "0" :value "\"kw\"" :literal "true"}}}}
+          :expected {:value {:position 0 :value "kw" :literal true}}}}
+
+  {:name :parse-service-from-form-coerces-enabled-and-enums
+   :description "`:parse-service-from-form` reads `:enabled?` as a boolean and the policy/cardinality strings as keywords."
+   :parent :assert-eq
+   :args {:actual {:parent :parse-service-from-form :args {:form-data {:value {:enabled? "true" :restart-policy "always" :cardinality "per-pod"}}}}
+          :expected {:value {:enabled? true :restart-policy :always :cardinality :per-pod}}}}
+
+  ;; =========================================================================
+  ;; web.crud — responses; web.errors
+  ;; =========================================================================
+
+  {:name :json-handler-serialises-data-as-a-json-200
+   :description "`:json-handler` is 200 `application/json` with `:data` JSON-encoded as the body."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :json-handler :args {:data {:value {:a 1}}}}}}
+          :expected {:value [200 "application/json" nil "{\"a\":1}"]}}}
+
+  {:name :html-action-response-keeps-status-and-body-and-adds-html-content-type
+   :description "`:html-action-response` passes a partial's status + body through and supplies `text/html; charset=utf-8`."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :html-action-response :args {:result {:value {:status 201 :body "hi"}}}}}}
+          :expected {:value [201 "text/html; charset=utf-8" nil "hi"]}}}
+
+  {:name :html-error-response-wraps-the-reason-in-an-error-paragraph
+   :description "`:html-error-response` is the bound status, `text/html; charset=utf-8`, body `<p class=\"error\">reason</p>`."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :html-error-response :args {:status 409 :reason "dup"}}}}
+          :expected {:value [409 "text/html; charset=utf-8" nil "<p class=\"error\">dup</p>"]}}}
+
+  {:name :json-envelope-response-takes-status-from-the-envelope-and-strips-it
+   :description "`:json-envelope-response` reads `:http-status` for the status and drops it from the JSON body."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :json-envelope-response :args {:envelope {:value {:http-status 429 :ok false}}}}}}
+          :expected {:value [429 "application/json" nil "{\"ok\":false}"]}}}
+
+  {:name :json-envelope-response-advertises-retry-after-on-429
+   :description "A 429 envelope response carries `Retry-After: 1`."
+   :parent :assert-eq
+   :args {:actual {:parent :get-in
+                   :args {:map {:parent :json-envelope-response :args {:envelope {:value {:http-status 429}}}}
+                          :path [{:value :headers} {:value :Retry-After}] :default nil}}
+          :expected "1"}}
+
+  {:name :json-envelope-response-defaults-to-an-empty-200
+   :description "A nil envelope renders as 200 `application/json` with body `{}`."
+   :parent :assert-eq
+   :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :json-envelope-response :args {:envelope nil}}}}
+          :expected {:value [200 "application/json" nil "{}"]}}}]
+}

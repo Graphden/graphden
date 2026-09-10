@@ -38,16 +38,31 @@ function getTestStatusForFnId(fnId) {
   return _testStatuses ? (_testStatuses.get(fnId) || null) : null;
 }
 
-function getTestStatusCount() {
-  return _testStatuses ? _testStatuses.size : null;
+// The chip counts the ORG's tests. Platform tests (`row['platform?']` —
+// the shipped packages' own `core.tests` / `web.tests` / … self-tests,
+// package-synced) are listed under the lens with their dots and run
+// one at a time from the Inspector, but [Run all] skips them (the
+// server's default, `platform?` false) and the count matches what
+// [Run all] runs.
+function isPlatformTestRow(row) {
+  return !!row?.['platform?'];
 }
 
-// How many of the primed tests currently read `failed` — the red half of
-// the ✓ chip's count, the old panel's summary line in two characters.
+function getTestStatusCount() {
+  if (!_testStatuses) return null;
+  let n = 0;
+  _testStatuses.forEach((row) => { if (!isPlatformTestRow(row)) n += 1; });
+  return n;
+}
+
+// How many of the org's primed tests currently read `failed` — the red
+// half of the ✓ chip's count, the old panel's summary line in two characters.
 function getTestFailedCount() {
   if (!_testStatuses) return null;
   let failed = 0;
-  _testStatuses.forEach((row) => { if (row.status === 'failed') failed += 1; });
+  _testStatuses.forEach((row) => {
+    if (!isPlatformTestRow(row) && row.status === 'failed') failed += 1;
+  });
   return failed;
 }
 

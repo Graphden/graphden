@@ -153,6 +153,8 @@ shows the free-arg list; an unexpected `else` there is this.
    to switch headers to look at your own branch.
 6. **`run-tests`** — after writing tests (§10), run the branch's test set
    and read `{total passed failed}` — the write→verify loop, closed.
+   (The platform's own self-tests — `core.tests`, `web.tests`, … — are
+   skipped unless you pass `platform?: true`; they are not yours.)
 7. **`diff-branch`** — this is what the human reviews: added / modified /
    removed entities. Leave your branch clean and readable.
    (`list-branches` re-orients you after a context loss.)

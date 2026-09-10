@@ -195,7 +195,8 @@
              :description "Run the branch's tests (the `tests`-namespace fns) through the standard execute pipeline and get {total passed failed other results}. Run after upsert-fn-defs to close the write→verify loop."
              :inputSchema {:type "object"
                            :properties {:fn-ids {:type "array" :items {:type "string"} :description "Optional test fn-id strings — run only these; omit to run every test on the branch."}
-                                        :timeout-ms {:type "integer" :description "Per-test timeout in ms. Defaults to 10000."}}
+                                        :timeout-ms {:type "integer" :description "Per-test timeout in ms. Defaults to 10000."}
+                                        :platform? {:type "boolean" :description "Also run the platform's own self-tests (the shipped `core.tests` / `web.tests` / … namespaces). Default false: your branch's tests only."}}
                            :required []}}
             {:name "list-branches"
              :description "Every branch with its base, timestamps and policy — orient after a context loss: which ai/* scratch branches already exist."
@@ -594,13 +595,18 @@
    :parent :get
    :args {:coll :_mcp-tool-args :key {:value :timeout-ms} :default {:value nil}}}
 
+  {:name :_mcp-run-tests-platform?
+   :parent :get
+   :args {:coll :_mcp-tool-args :key {:value :platform?} :default {:value nil}}}
+
   {:name :_mcp-tool-run-tests
    :description "run-tests tool — the SAME sequential runner POST /api/tests/run uses (effect gating, redaction, per-org caps, persistence), summarised as {total passed failed other results}."
    :parent :_mcp-tool-ok
    :args {:text {:parent :to-json-string
                  :args {:data {:parent :_tests-run-apply
                                :args {:fn-ids :_mcp-run-tests-fn-ids
-                                      :timeout-ms :_mcp-run-tests-timeout}}}}}}
+                                      :timeout-ms :_mcp-run-tests-timeout
+                                      :platform? :_mcp-run-tests-platform?}}}}}}
 
   ;; --- list-branches: the GET /api/branches data, JSON-stringified -----------
   {:name :_mcp-tool-list-branches

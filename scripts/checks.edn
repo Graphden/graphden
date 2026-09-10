@@ -84,6 +84,12 @@
  {:name "graph-lint"    :bb "graph-lint"    :timeout 180000 :group :clj
   :relevant ["fns\\.edn$" "^src/graphden/lint/" "^src/graphden/packages/loader\\.clj$"
              "^tools/graph-reachability\\.edn$" "^bb\\.edn$"]}
+ ;; The corpus type-check sweep — production's boot-time gate, run on
+ ;; package data alone. Test fixtures skip the sweep, so this is the only
+ ;; check before the e2e stack that sees a corpus type regression.
+ {:name "type-sweep"    :bb "type-sweep"    :timeout 240000 :group :clj
+  :relevant ["fns\\.edn$" "^src/graphden/types/" "^src/graphden/packages/"
+             "^tools/type_sweep\\.clj$" "^bb\\.edn$"]}
  {:name "devtour"       :bb "devtour-check" :timeout  60000 :group :docs
   ;; `resources/packages/**/impls.clj` IS toured (~15 steps anchor on
   ;; base-fn impls like :add / :http-server / publish-package-apply), so

@@ -12,4 +12,4 @@
  ;; `storage` is NOT needed by prefs — its two base-fns go through the
  ;; request storage (`:query-entities`-class reads), like registry's.
  :dependencies ["core" "web"]
- :modules ["common" "routes-method" "routes-auth" "prefs"]}
+ :modules ["common" "routes-method" "routes-auth" "prefs" "tests"]}

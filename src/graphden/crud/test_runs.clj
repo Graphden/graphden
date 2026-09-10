@@ -21,6 +21,18 @@
      until re-run — staleness-by-construction, no bookkeeping.
    - `test-fn-rows` / `test-namespace-ids` — the discovery predicate.
 
+   PLATFORM tests: the shipped packages carry their own `*.tests`
+   namespaces (core.tests, web.tests, …) — the platform's self-tests,
+   synced into every instance like any other fn-def. They are tests
+   like any other (discovered, status-joined, runnable one at a time
+   from the Inspector, listed under the ✓ lens) but `run-tests!`
+   SKIPS them unless asked (`:platform? true`): a tenant's [Run all]
+   should spend the org's execution budget on the org's tests, and
+   the platform suite is the CI anchor's job
+   (`packages.platform-tests-test`). The row flag is
+   `packages.owned/owned-fn-id?` — package-synced this boot — so
+   membership is a property of the deployment, not a column.
+
    The `matched by SEGMENT, not substring` rule matters: `tests.api`
    and `myproj.tests` are test namespaces; `testsuite` is not. Any-
    segment (not root-only) placement keeps a project's tests inside the
@@ -30,6 +42,7 @@
     [graphden.crud.fn-execution :as fn-exec]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.request :as request]
+    [graphden.packages.owned :as owned]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
     [graphden.types.core :as types]
@@ -169,17 +182,30 @@
     (into #{} (keep #(if (uuid? %) % (parse-uuid (str %)))) fn-ids)))
 
 
+(defn platform-test-row?
+  "True iff `row` is a PLATFORM test — a package-synced fn this boot
+   (`packages.owned`), i.e. one of the shipped `*.tests` namespaces'
+   own self-tests rather than the org's."
+  [row]
+  (owned/owned-fn-id? (:id row)))
+
+
 (defn run-tests!
   "Run every test on the current branch (or the `:fn-ids` subset),
    sequentially, and summarise:
    `{:total N :passed N :failed N :other N :results [{…} …]}`.
    Pass = `:succeeded`; fail = `:failed`; everything else (`:pending`
    timeout-overrun, `:rejected` type-errors/capacity, `:not-runnable`
-   free args) counts under `:other` with its own `:status`."
-  [ctx {:keys [fn-ids timeout-ms]}]
+   free args) counts under `:other` with its own `:status`.
+
+   Without `:fn-ids`, PLATFORM tests (`platform-test-row?`) are
+   skipped unless `:platform?` is true — an explicit `:fn-ids` subset
+   always runs exactly what it names."
+  [ctx {:keys [fn-ids timeout-ms platform?]}]
   (let [wanted (coerce-fn-ids fn-ids)
         rows (cond->> (test-fn-rows ctx)
-               wanted (filter (comp wanted :id)))
+               wanted (filter (comp wanted :id))
+               (and (not wanted) (not platform?)) (remove platform-test-row?))
         ;; Nudge SSE listeners (the ✓ tests lens re-primes its status
         ;; cache on each ping) — best-effort, from EVERY run path (button,
         ;; API, auto-run). After EACH test, so a long suite's dots move
@@ -258,15 +284,17 @@
 
 (defn tests-with-statuses
   "Discovery + status join, the GET /api/tests/status payload:
-   `[{:fn-id :fn-name :namespace-id :status :error :execution-id
-      :started-at :finished-at} …]`, name-sorted. `:status` nil = the
-   current version has no recorded run."
+   `[{:fn-id :fn-name :namespace-id :platform? :status :error
+      :execution-id :started-at :finished-at} …]`, name-sorted.
+   `:status` nil = the current version has no recorded run;
+   `:platform?` marks the shipped packages' own self-tests."
   [ctx]
   (let [rows (test-fn-rows ctx)
         statuses (latest-statuses ctx (mapv :id rows))]
     (mapv (fn [row]
             (merge {:fn-id (str (:id row))
                     :fn-name (:name row)
-                    :namespace-id (some-> (:namespace-id row) str)}
+                    :namespace-id (some-> (:namespace-id row) str)
+                    :platform? (platform-test-row? row)}
                    (get statuses (:id row))))
           rows)))

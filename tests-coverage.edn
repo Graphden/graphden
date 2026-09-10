@@ -41,8 +41,14 @@
            :kaocha.plugin/shared-container
            :kaocha.plugin/cloverage]
 
+ ;; `:src-ns-path` names WHERE cloverage looks for namespaces to
+ ;; instrument: `src` plus the symlink tree `bb coverage` generates for
+ ;; the package layer's impls.clj files (see the `:coverage` alias in
+ ;; deps.edn) — without it every `defbase` body is invisible to the
+ ;; report because the loader `eval`s impls from resources.
  :cloverage/opts
- {:ns-regex ["graphden\\..*"]
+ {:src-ns-path ["src" "target/coverage-src"]
+  :ns-regex ["graphden\\..*"]
   :ns-exclude-regex [".*-test"
                      ".*contract-tests"
                      ".*test-helpers"

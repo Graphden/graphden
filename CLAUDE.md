@@ -198,7 +198,8 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/EXECUTION.md](docs/EXECUTION.md) | `/api/execute*` schema, cancel/TTL, Run popover | When touching execution API or its UI |
 | [docs/MONITORING.md](docs/MONITORING.md) | Usage rollups, error viewer, both alerting paths (Prometheus + built-in alerter) | When touching stats/error-log/counters or adding a metric |
 | [docs/SERVICES.md](docs/SERVICES.md) | `:service` registry — schema, cardinality, reconciler, supervisor, HTTP API | When touching `services/` or `:exec/service-reconciler` |
-| [docs/TESTS.md](docs/TESTS.md) | Tests — the `tests` namespace convention, `:assert`/`:assert-eq`, runner + statuses, auto-run on writes | When touching `crud/test_runs.clj`, `crud/test_autorun.clj`, `app/test-api/`, or the tests UI |
+| [docs/TESTS.md](docs/TESTS.md) | Tests — the `tests` namespace convention, `:assert`/`:assert-eq`, runner + statuses, auto-run on writes, the platform's own `*.tests` modules + `bb type-sweep` | When touching `crud/test_runs.clj`, `crud/test_autorun.clj`, `app/test-api/`, a `tests` module, or the tests UI |
+| [docs/TESTS_JS_COVERAGE.md](docs/TESTS_JS_COVERAGE.md) | Snapshot of what the e2e suite actually executes in the editor bundle (2026-09-11: 76.3 % of lines), how to re-take it, and the modules it never reaches | When deciding whether an editor change has any automated signal, or before adding an e2e spec |
 | [docs/SCALING.md](docs/SCALING.md) | Static fleet — org-keyed shards, NOTIFY invalidation, `:executor-orgs`, `421`, per-org quota, BYO executor | Before touching reconciler / branch-router invalidation / `storage/remote` / `system/sse` / `byo.clj`, or proposing distribution work |
 | [docs/BYO_RUNBOOK.md](docs/BYO_RUNBOOK.md) | BYO provisioning runbook — operator flip (tier-gated), token mint, customer's run command / compose, verification + troubleshooting | When provisioning or debugging a customer's BYO executor |
 | [docs/FLEET_RFC.md](docs/FLEET_RFC.md) | Dynamic fleet design — cell placement, rebalancing controller, CRaC track, tenant-service resource isolation; what is shipped vs evidence-gated | Before ANY autoscaling / placement / hot-reload / native-image work or touching `fleet/*` |
@@ -255,6 +256,10 @@ bb visual-update # Refresh visual baselines after intentional UI changes
                 #   Baselines must be INSTANCE-INDEPENDENT — the landing gate runs
                 #   the same suite against a fresh isolated stack (`bb test-visual`),
                 #   so a snapshot of whatever data your box happens to hold reds it.
+bb type-sweep   # The corpus type-check sweep (no DB, ~1 min): production's
+                #   boot-time gate over the same package data, allowlist and
+                #   all. Test fixtures skip the sweep, so this is what keeps a
+                #   fn-def type regression from reaching a real boot. In bb ci.
 bb graph-lint   # Graph linters over the fns.edn corpus (no DB, ~10s): duplicate
                 #   definitions (exact + after private-helper expansion), unreferenced
                 #   privates, pure aliases — docs/GRAPH_LINT.md. In bb ci.

@@ -15,4 +15,6 @@
            "ring-adapter" "branch-router" "runtime" "components" "htmx" "sse" "response" "errors"
            ;; Service-to-service: a service fn as a VALUE (`:service-endpoint`
            ;; over a `:fn-ref` slot) + the call templates over http-client.
-           "service"]}
+           "service"
+           ;; The package's own in-graph self-tests (docs/TESTS.md) — last.
+           "tests"]}

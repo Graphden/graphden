@@ -120,6 +120,43 @@ async function newContext(chromium, opts = {}) {
     try { localStorage.setItem('graphden.cards.compact', '0'); } catch (_) {}
   }, AUTH);
   const page = await ctx.newPage();
+  // JS-coverage snapshot (Chromium block coverage). Opt-in via
+  // GRAPHDEN_JS_COVERAGE=<dir>: V8 precise coverage runs for the page's
+  // whole life (across navigations) and is dumped at `browser.close()` —
+  // every spec ends in a `finally` that closes the browser, so the hook
+  // rides that. The bundle SOURCE is written once per dir (it is the same
+  // ~2 MB text for every spec; 92 copies of it was 300 MB and an OOM);
+  // each spec writes only its ranges. Report:
+  // `node js-coverage-report.js <dir>` (docs/TESTS_JS_COVERAGE.md).
+  const covDir = process.env.GRAPHDEN_JS_COVERAGE;
+  if (covDir) {
+    await page.coverage.startJSCoverage({ resetOnNavigation: false });
+    const realClose = browser.close.bind(browser);
+    browser.close = async () => {
+      try {
+        const entries = await page.coverage.stopJSCoverage();
+        const fs = require('node:fs');
+        const path = require('node:path');
+        const crypto = require('node:crypto');
+        fs.mkdirSync(covDir, { recursive: true });
+        const out = [];
+        for (const e of entries) {
+          if (!e.source || !/\.js(\?|$)/.test(e.url) || /cdn|unpkg|jsdelivr/.test(e.url)) continue;
+          const hash = crypto.createHash('sha1').update(e.source).digest('hex').slice(0, 16);
+          const srcFile = path.join(covDir, `src-${hash}.js`);
+          if (!fs.existsSync(srcFile)) fs.writeFileSync(srcFile, e.source);
+          out.push({ url: e.url, source: hash, functions: e.functions });
+        }
+        if (out.length) {
+          fs.writeFileSync(path.join(covDir, `ranges-${process.pid}-${Date.now()}.json`),
+                           JSON.stringify(out));
+        }
+      } catch (e) {
+        console.log('  [js-coverage] dump skipped:', e.message);
+      }
+      return realClose();
+    };
+  }
   // Generous default timeouts so a transient GC pause under the
   // deliberately-tight e2e heap doesn't fail a test. The executor has
   // no leak (see the `project_e2e_memory_no_leak` note) — it just

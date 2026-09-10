@@ -28,6 +28,9 @@
   {:name :_tests-run-timeout-ms
    :parent :get :args {:coll :_tests-run-body :key {:value :timeout-ms} :default nil}}
 
+  {:name :_tests-run-platform?
+   :parent :get :args {:coll :_tests-run-body :key {:value :platform?} :default nil}}
+
   {:name :_tests-run-apply
    :description "Single `test-runs/run-tests!` call — sequential execution of the branch's tests through the standard execute pipeline (effect gating, redaction, per-org caps, persistence), summarised as `{:total :passed :failed :other :results}`. `:request` is unused data-wise but pins the fn to the request scope so the summary is never call-cached across requests."
    :args {:request {:type :ring-request-shape
@@ -35,7 +38,9 @@
           :fn-ids {:type [:union :null [:list :text]]
                    :description "Optional fn-id strings — run only these tests; nil = every test on the branch."}
           :timeout-ms {:type :nullable-int
-                       :description "Per-test deref timeout; nil = 10000 ms. An overrunning test reports `:pending` and its terminal status lands on the execution row asynchronously."}}
+                       :description "Per-test deref timeout; nil = 10000 ms. An overrunning test reports `:pending` and its terminal status lands on the execution row asynchronously."}
+          :platform? {:type :nullable-bool
+                      :description "Include the PLATFORM tests (the shipped packages' own `*.tests` self-tests, package-synced this boot) in an all-tests run; nil/false = the org's tests only. An explicit `:fn-ids` subset ignores this."}}
    :return-type {:total :int :passed :int :failed :int :other :int
                  :results [:list :keyword-map]}
    :effects #{:db}}
@@ -44,7 +49,8 @@
    :description "The apply stage with the body fields bound — `:request` stays free and unifies with the parse chain's request."
    :parent :_tests-run-apply
    :args {:fn-ids :_tests-run-fn-ids
-          :timeout-ms :_tests-run-timeout-ms}}
+          :timeout-ms :_tests-run-timeout-ms
+          :platform? :_tests-run-platform?}}
 
   {:name :tests-run-handler
    :lambda-params [:request]

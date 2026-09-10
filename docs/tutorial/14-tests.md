@@ -76,8 +76,12 @@ Now the surfaces:
 - With the lens on, the chip row shows **▶ Run all** — every test
   on the branch runs, and the dots update one by one as each run
   lands (the lens keeps a live signal open, so nothing needs a
-  refresh). The chip's number is how many tests the branch has — and,
-  in red, how many of them failed.
+  refresh). The chip's number is how many tests of YOURS the branch
+  has — and, in red, how many of them failed. The platform ships its
+  own self-tests too (`core.tests`, `web.tests`, …): they show under
+  the lens with their dots and run one at a time from the Inspector,
+  but Run all leaves them out — they are graphden's tests, not your
+  project's.
 - Select a test and open the Inspector's **Bindings** tab: a
   **Test** section shows the same status with the assertion's
   message on a failure, and **Run this test** runs just this one —

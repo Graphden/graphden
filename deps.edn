@@ -70,7 +70,7 @@
   ;; stay offline + hermetic (a speed/determinism convenience, not an access
   ;; workaround).
   mathx/mathx {:git/url "https://github.com/Graphden/graphden-mathx.git"
-               :git/sha "8337147045ff2fec94212806ae16235ad2f625bc"}}
+               :git/sha "e2401db63434150492fd7620d579c837813a7102"}}
 
  :aliases
  {:test
@@ -108,6 +108,18 @@
    {criterium/criterium {:mvn/version "0.4.6"}
     org.testcontainers/testcontainers {:mvn/version "2.0.5"}
     org.testcontainers/testcontainers-postgresql {:mvn/version "2.0.5"}}}
+
+  ;; `bb coverage` stacks this on :dev:test — the package layer under
+  ;; cloverage. `target/coverage-src` is the symlink tree
+  ;; `scripts/coverage_src.clj` generates (one `graphden/packages/<pkg>/
+  ;; <mod>/impls.clj` per module, at the classpath position cloverage
+  ;; derives from the ns name), so the impls namespaces are FOUND and
+  ;; instrumented up front; the system property makes the package loader
+  ;; reuse those instrumented namespaces instead of re-`eval`ing the
+  ;; resource over them (`packages.loader/reuse-loaded-impls?`).
+  :coverage
+  {:extra-paths ["target/coverage-src"]
+   :jvm-opts ["-Dgraphden.impls.reuse-loaded=true"]}
 
   :cloverage
   {:extra-deps {cloverage/cloverage {:mvn/version "1.2.4"}}

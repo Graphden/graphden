@@ -1,0 +1,521 @@
+;; app.registry.tests — the platform's own self-tests for the `registry`
+;; package's fn-defs (docs/TESTS.md). Ordinary fn-defs in a `tests`
+;; namespace: every free arg bound, `:assert` / `:assert-eq` over the
+;; subject, passing when they do not throw.
+;;
+;; Everything here is PURE: the compositions that read the registry
+;; through `:query-entities` (`:marketplace-review-map`,
+;; `:marketplace-index-groups`, `:storefront-rows`, `:list-package-versions`,
+;; …) are tested by re-binding their data slot to literal rows, which drops
+;; the `:db` read from the closure — the transform is the subject, not
+;; the query. Compositions whose reads sit BELOW a private (the request
+;; filters `:marketplace-listing` / `:storefront-listing`, the item pages,
+;; the moderation queue, `:fetch-package-version`, `:fork-package`) cannot
+;; be re-bound from outside and stay untested here — they are covered by
+;; the HTTP-level suites.
+;;
+;; String-keyed maps (the review / install aggregates) are built with
+;; `:zipmap` at run time: a `{:value {"p" …}}` literal round-trips through
+;; jsonb with its keys keywordised.
+
+{:namespace "app.registry.tests"
+ :description "Platform self-tests for registry: the listing vocabulary + normaliser, the review / install aggregates, the marketplace card and its hiccup, the storefront filters, the index reshape and the pure semver / compat / secret-path / EDN-wire base-fns."
+ :fns
+ [;; =====================================================================
+  ;; LISTING VOCABULARY + NORMALISER (marketplace)
+  ;; =====================================================================
+  {:name :listing-kinds-are-fns-theme-keymap
+   :description "The three marketplace kinds, in vocabulary order."
+   :parent :assert-eq
+   :args {:actual :listing-kinds :expected ["fns" "theme" "keymap"]}}
+
+  {:name :listing-categories-are-keyed-by-kind
+   :description "The category vocabulary is looked up per kind (keyword key — the const map's keys round-trip keywordised)."
+   :parent :assert-eq
+   :args {:actual {:parent :get :args {:coll :listing-categories :key {:value :theme} :default nil}}
+          :expected ["light" "dark" "high-contrast" "colorful" "minimal" "other"]}}
+
+  {:name :listing-max-tags-is-ten
+   :parent :assert-eq
+   :args {:actual :listing-max-tags :expected 10}}
+
+  {:name :listing-max-description-is-two-thousand
+   :parent :assert-eq
+   :args {:actual :listing-max-description :expected 2000}}
+
+  {:name :listing-normalize-defaults-a-blank-listing
+   :description "Nothing given: kind falls back to `fns`, category / description / payload / error are nil, tags empty."
+   :parent :assert-eq
+   :args {:actual {:parent :listing-normalize
+                   :args {:kind {:value nil} :description {:value nil} :category {:value nil} :tags {:value nil} :payload {:value nil}}}
+          :expected {:value {:kind "fns" :description nil :category nil :tags [] :payload nil :error nil}}}}
+
+  {:name :listing-normalize-trims-lowercases-and-dedupes
+   :description "Category is trimmed + lower-cased, tags are cleaned to [a-z0-9-] / distinct / non-empty, the description trimmed, the payload passed through."
+   :parent :assert-eq
+   :args {:actual {:parent :listing-normalize
+                   :args {:kind {:value "theme"} :description {:value "  hi  "} :category {:value " Dark "}
+                          :tags {:value " Foo,bar!,foo,,baz "} :payload {:value {:a 1}}}}
+          :expected {:value {:kind "theme" :description "hi" :category "dark" :tags ["foo" "bar" "baz"] :payload {:a 1} :error nil}}}}
+
+  {:name :listing-normalize-rejects-an-unknown-kind
+   :parent :assert-eq
+   :args {:actual {:parent :get
+                   :args {:coll {:parent :listing-normalize
+                                 :args {:kind {:value "bogus"} :description {:value nil} :category {:value nil} :tags {:value nil} :payload {:value nil}}}
+                          :key {:value :error} :default nil}}
+          :expected "bad-kind"}}
+
+  {:name :listing-normalize-rejects-a-category-outside-the-kinds-vocabulary
+   :description "`web` is a fns category, not a theme one."
+   :parent :assert-eq
+   :args {:actual {:parent :get
+                   :args {:coll {:parent :listing-normalize
+                                 :args {:kind {:value "theme"} :description {:value nil} :category {:value "web"} :tags {:value nil} :payload {:value nil}}}
+                          :key {:value :error} :default nil}}
+          :expected "bad-category"}}
+
+  {:name :listing-normalize-caps-tags-at-the-maximum
+   :description "Twelve distinct tags in, `:listing-max-tags` (10) out."
+   :parent :assert-eq
+   :args {:actual {:parent :count
+                   :args {:coll {:parent :get
+                                 :args {:coll {:parent :listing-normalize
+                                               :args {:kind {:value "fns"} :description {:value nil} :category {:value nil}
+                                                      :tags {:value "a,b,c,d,e,f,g,h,i,j,k,l"} :payload {:value nil}}}
+                                        :key {:value :tags} :default nil}}}}
+          :expected 10}}
+
+  {:name :listing-normalize-blank-description-is-nil
+   :parent :assert
+   :args {:value {:parent :nil?
+                  :args {:value {:parent :get
+                                 :args {:coll {:parent :listing-normalize
+                                               :args {:kind {:value "fns"} :description {:value "   "} :category {:value nil} :tags {:value nil} :payload {:value nil}}}
+                                        :key {:value :description} :default nil}}}}}}
+
+  {:name :_t-long-text
+   :description "2100 × `x` — longer than every clip limit in the package."
+   :parent :str-join
+   :args {:coll {:parent :repeat :args {:count {:value 2100} :item {:value "x"}}} :separator {:value ""}}}
+
+  {:name :listing-normalize-clips-the-description-at-the-maximum
+   :parent :assert-eq
+   :args {:actual {:parent :count
+                   :args {:coll {:parent :get
+                                 :args {:coll {:parent :listing-normalize
+                                               :args {:kind {:value "fns"} :description :_t-long-text :category {:value nil} :tags {:value nil} :payload {:value nil}}}
+                                        :key {:value :description} :default nil}}}}
+          :expected 2000}}
+
+  {:name :listing-invalid-is-true-with-an-error
+   :parent :assert
+   :args {:value {:parent :listing-invalid? :args {:listing {:value {:kind "fns" :error "bad-kind"}}}}}}
+
+  {:name :listing-invalid-is-false-without-an-error
+   :parent :assert
+   :args {:value {:parent :not :args {:value {:parent :listing-invalid? :args {:listing {:value {:kind "fns" :error nil}}}}}}}}
+
+  {:name :listing-error-envelope-carries-the-reason
+   :parent :assert-eq
+   :args {:actual {:parent :listing-error-envelope :args {:listing {:value {:kind "theme" :error "bad-category"}}}}
+          :expected {:value {:ok false :reason "bad-category"}}}}
+
+  ;; =====================================================================
+  ;; CARDS — review / install aggregates, index groups, the card itself
+  ;; =====================================================================
+  ;; String-keyed maps are built with `:zipmap` at run time: a `{:value {"p" …}}`
+  ;; literal round-trips through jsonb with its keys keywordised.
+  {:name :review-map-aggregates-count-and-rounded-average
+   :description "`{name {:count n :avg x}}` — the average rounded HALF_UP to one decimal (17 / 4 = 4.25 → 4.3). Ratings whose mean is a non-terminating decimal (e.g. 14 / 3) are avoided: `:round` over the ratio `:div` yields throws — a core arithmetic gap, not this fold's contract."
+   :parent :assert-eq
+   :args {:actual {:parent :marketplace-review-map
+                   :args {:m {:parent :zipmap
+                              :args {:keys [{:value "p"} {:value "q"}]
+                                     :vals [{:value [{:package-name "p" :rating 4} {:package-name "p" :rating 5} {:package-name "p" :rating 5} {:package-name "p" :rating 3}]}
+                                            {:value [{:package-name "q" :rating 2}]}]}}}}
+          :expected {:parent :zipmap
+                     :args {:keys [{:value "p"} {:value "q"}]
+                            :vals [{:value {:count 4 :avg 4.3}} {:value {:count 1 :avg 2.0}}]}}}}
+
+  {:name :review-map-is-empty-without-reviews
+   :parent :assert
+   :args {:value {:parent :empty? :args {:coll {:parent :marketplace-review-map :args {:m {:value {}}}}}}}}
+
+  {:name :install-map-folds-pairs-into-a-name-keyed-map
+   :parent :assert-eq
+   :args {:actual {:parent :marketplace-install-map :args {:from {:value [["a" 3] ["b" 0]]}}}
+          :expected {:parent :zipmap :args {:keys [{:value "a"} {:value "b"}] :vals [{:value 3} {:value 0}]}}}}
+
+  {:name :index-groups-keep-foreign-rows-when-none-are-mine
+   :description "A name listed by two other orgs: nothing of mine to shadow them, both rows stay."
+   :parent :assert-eq
+   :args {:actual {:parent :marketplace-index-groups
+                   :args {:coll {:value [[{:name "a" :org-id "org-x"} {:name "a" :org-id "org-y"}]]}}}
+          :expected {:value [[{:name "a" :org-id "org-x"} {:name "a" :org-id "org-y"}]]}}}
+
+  {:name :index-groups-are-empty-for-an-empty-index
+   :parent :assert
+   :args {:value {:parent :empty? :args {:coll {:parent :marketplace-index-groups :args {:coll {:value []}}}}}}}
+
+  {:name :_t-card-three-versions
+   :description "Subject: one package's three index rows (out of order), no reviews / installs."
+   :parent :marketplace-card
+   :args {:item {:value [{:name "p" :version "1.0.0" :published-at "2026-01-01" :kind "fns" :description "old"}
+                         {:name "p" :version "1.10.0" :published-at "2026-02-01" :kind "theme" :description "new" :category "dark" :tags ["a"] :org-id "o" :public true :fn-count 3}
+                         {:name "p" :version "1.9.9" :published-at "2026-01-15"}]}
+          :reviews {:value {}} :installs {:value {}}}}
+
+  {:name :card-latest-is-the-highest-semver
+   :description "1.10.0 beats 1.9.9 — numeric, not lexical."
+   :parent :assert-eq
+   :args {:actual {:parent :get :args {:coll :_t-card-three-versions :key {:value :latest} :default nil}}
+          :expected "1.10.0"}}
+
+  {:name :card-versions-descend-and-are-counted
+   :parent :assert-eq
+   :args {:actual {:parent :select-keys :args {:m :_t-card-three-versions :ks [{:value :versions} {:value :version-count}]}}
+          :expected {:value {:versions ["1.10.0" "1.9.9" "1.0.0"] :version-count 3}}}}
+
+  {:name :card-listing-fields-come-from-the-latest-row
+   :description "Kind / description / category / tags / org / public / fn-count / published-at are the newest version's."
+   :parent :assert-eq
+   :args {:actual {:parent :select-keys
+                   :args {:m :_t-card-three-versions
+                          :ks [{:value :kind} {:value :description} {:value :category} {:value :tags} {:value :org-id} {:value :public} {:value :fn-count} {:value :published-at}]}}
+          :expected {:value {:kind "theme" :description "new" :category "dark" :tags ["a"] :org-id "o" :public true :fn-count 3 :published-at "2026-02-01"}}}}
+
+  {:name :card-defaults-for-a-bare-row
+   :description "A row with only name + version: kind `fns`, status `approved`, installs 0, rating nil, empty tags, one version."
+   :parent :assert-eq
+   :args {:actual {:parent :marketplace-card :args {:item {:value [{:name "q" :version "0.1.0"}]} :reviews {:value {}} :installs {:value {}}}}
+          :expected {:value {:name "q" :kind "fns" :description nil :category nil :tags [] :org-id nil :public nil
+                             :latest "0.1.0" :versions ["0.1.0"] :version-count 1 :published-at "" :fn-count 0
+                             :rating nil :installs 0 :origin nil :status "approved" :moderation-note nil}}}}
+
+  ;; A `:zipmap` with LITERAL keys computes a RECORD (`{:q {…}}`), and the
+  ;; review / install slots are declared `[:map :text :any]` — a record is
+  ;; not a subtype of that, so the fixture is widened at the call site with
+  ;; `{:parent :const :return-type :any}` (`:any` is provable from any
+  ;; computed type). Runtime value is unchanged: a string-keyed map.
+  {:name :_t-card-q
+   :description "Subject: a locally published package with one review aggregate and an install count captured."
+   :parent :marketplace-card
+   :args {:item {:value [{:name "q" :version "0.1.0"}]}
+          :reviews {:parent :const :return-type :any :return-type-wide? true :args {:value {:parent :zipmap :args {:keys [{:value "q"}] :vals [{:value {:count 1 :avg 3.0}}]}}}}
+          :installs {:parent :const :return-type :any :return-type-wide? true :args {:value {:parent :zipmap :args {:keys [{:value "q"}] :vals [{:value 7}]}}}}}}
+
+  {:name :card-rating-is-looked-up-by-name-in-the-review-map
+   :parent :assert-eq
+   :args {:actual {:parent :get :args {:coll :_t-card-q :key {:value :rating} :default nil}}
+          :expected {:value {:count 1 :avg 3.0}}}}
+
+  {:name :card-installs-are-looked-up-by-name-in-the-install-map
+   :parent :assert-eq
+   :args {:actual {:parent :get :args {:coll :_t-card-q :key {:value :installs} :default nil}}
+          :expected 7}}
+
+  {:name :_t-card-mirror
+   :description "Subject: a MIRROR (origin set) whose local aggregates disagree with the origin's snapshot."
+   :parent :marketplace-card
+   :args {:item {:value [{:name "m" :version "1.0.0" :origin {:url "https://x" :rating {:count 1 :avg 3.0} :installs 9}}]}
+          :reviews {:parent :const :return-type :any :return-type-wide? true :args {:value {:parent :zipmap :args {:keys [{:value "m"}] :vals [{:value {:count 5 :avg 4.5}}]}}}}
+          :installs {:parent :const :return-type :any :return-type-wide? true :args {:value {:parent :zipmap :args {:keys [{:value "m"}] :vals [{:value 70}]}}}}}}
+
+  {:name :card-mirror-reports-the-origins-rating-and-installs
+   :description "The origin is the one authority for a mirrored package — local reviews / installs are ignored."
+   :parent :assert-eq
+   :args {:actual {:parent :select-keys :args {:m :_t-card-mirror :ks [{:value :rating} {:value :installs} {:value :origin}]}}
+          :expected {:value {:rating {:count 1 :avg 3.0} :installs 9 :origin {:url "https://x" :rating {:count 1 :avg 3.0} :installs 9}}}}}
+
+  {:name :cards-over-folds-one-card-per-group
+   :parent :assert-eq
+   :args {:actual {:parent :map
+                   :args {:func {:parent :get :args {:coll {:as :item} :key {:value :name} :default {:value ""}}}
+                          :coll {:parent :marketplace-cards-over
+                                 :args {:coll {:value [[{:name "a" :version "1.0.0"}] [{:name "b" :version "2.0.0"} {:name "b" :version "2.1.0"}]]}
+                                        :reviews {:value {}} :installs {:value {}}}}}}
+          :expected ["a" "b"]}}
+
+  {:name :cards-over-captures-the-install-map-for-every-card
+   :parent :assert-eq
+   :args {:actual {:parent :map
+                   :args {:func {:parent :get :args {:coll {:as :item} :key {:value :installs} :default {:value -1}}}
+                          :coll {:parent :marketplace-cards-over
+                                 :args {:coll {:value [[{:name "a" :version "1.0.0"}] [{:name "b" :version "2.0.0"}]]}
+                                        :reviews {:value {}}
+                                        :installs {:parent :const :return-type :any :return-type-wide? true :args {:value {:parent :zipmap :args {:keys [{:value "a"} {:value "b"}] :vals [{:value 4} {:value 5}]}}}}}}}}
+          :expected [4 5]}}
+
+  ;; =====================================================================
+  ;; STOREFRONT — the anonymous catalog over literal rows
+  ;; =====================================================================
+  {:name :storefront-rows-keep-only-public-approved-rows
+   :description "Private, pending and public-less rows are dropped; a missing status reads as approved."
+   :parent :assert-eq
+   :args {:actual {:parent :storefront-rows
+                   :args {:coll {:value [{:name "a" :public true :status "approved"}
+                                         {:name "b" :public false :status "approved"}
+                                         {:name "c" :public true :status "pending"}
+                                         {:name "d" :public true}
+                                         {:name "e"}]}}}
+          :expected {:value [{:name "a" :public true :status "approved"} {:name "d" :public true}]}}}
+
+  {:name :storefront-cards-fold-the-public-rows
+   :description "One card per public name, the private sibling filtered out before the fold."
+   :parent :assert-eq
+   :args {:actual {:parent :map
+                   :args {:func {:parent :get :args {:coll {:as :item} :key {:value :name} :default {:value ""}}}
+                          :coll {:parent :storefront-cards
+                                 :args {:coll {:parent :list
+                                               :args {:items [{:parent :storefront-rows
+                                                               :args {:coll {:value [{:name "a" :version "1.0.0" :public true}
+                                                                                     {:name "a" :version "1.1.0" :public false}]}}}]}}
+                                        :reviews {:value {}} :installs {:value {}}}}}}
+          :expected ["a"]}}
+
+  {:name :storefront-item-title-suffixes-the-marketplace
+   :parent :assert-eq
+   :args {:actual {:parent :storefront-item-title :args {:pkg-name {:value "pkg"}}}
+          :expected "pkg — Graphden marketplace"}}
+
+  {:name :storefront-sitemap-urls-encode-one-path-per-card
+   :parent :assert-eq
+   :args {:actual {:parent :storefront-sitemap-urls :args {:coll {:value [{:name "a"} {:name "b c"}]}}}
+          :expected ["/marketplace/a" "/marketplace/b+c"]}}
+
+  {:name :storefront-sitemap-urls-are-empty-without-cards
+   :parent :assert
+   :args {:value {:parent :empty? :args {:coll {:parent :storefront-sitemap-urls :args {:coll {:value []}}}}}}}
+
+  ;; =====================================================================
+  ;; SURFACE — the card hiccup over literal cards
+  ;; =====================================================================
+  {:name :card-shell-carries-the-name-as-a-data-attribute
+   :parent :assert-eq
+   :args {:actual {:parent :marketplace-card-shell :args {:item {:value {:name "x"}} :children [{:value "c"}]}}
+          :expected {:value [:article {:class "mk-card" :data-mk-card "x"} "c"]}}}
+
+  {:name :_t-card-html-full
+   :description "Subject: a fully-listed private, pending, mirrored theme card."
+   :parent :marketplace-card-html
+   :args {:item {:value {:name "p q" :kind "theme" :latest "1.2.0" :rating {:avg 4.0 :count 3} :installs 7 :version-count 2
+                         :description "desc" :category "dark" :tags ["dark" "x y"] :public false :status "pending" :origin {:url "https://x"}}}}}
+
+  {:name :_t-card-html-full-str
+   :parent :render-hiccup :args {:hiccup :_t-card-html-full}}
+
+  {:name :_t-card-html-bare-str
+   :description "Subject: the rendered card of a name-only item."
+   :parent :render-hiccup
+   :args {:hiccup {:parent :marketplace-card-html :args {:item {:value {:name "z"}}}}}}
+
+  {:name :card-html-opens-the-item-by-url-encoded-name
+   :parent :assert
+   :args {:value {:parent :str-contains? :args {:string :_t-card-html-full-str :substring {:value "hx-get=\"/partials/marketplace/item?name=p+q\""}}}}}
+
+  {:name :card-html-renders-stars-average-and-review-count
+   :parent :assert
+   :args {:value {:parent :str-contains? :args {:string :_t-card-html-full-str :substring {:value "★★★★☆ 4.0 (3)"}}}}}
+
+  {:name :card-html-marks-a-private-listing
+   :parent :assert
+   :args {:value {:parent :str-contains? :args {:string :_t-card-html-full-str :substring {:value "packages-private-badge"}}}}}
+
+  {:name :card-html-marks-a-pending-listing
+   :parent :assert
+   :args {:value {:parent :str-contains? :args {:string :_t-card-html-full-str :substring {:value "pending review"}}}}}
+
+  {:name :card-html-marks-a-mirror-with-its-origin
+   :parent :assert
+   :args {:value {:parent :str-contains? :args {:string :_t-card-html-full-str :substring {:value "mirror of https://x"}}}}}
+
+  {:name :card-html-tag-chips-filter-by-kind-and-tag
+   :parent :assert
+   :args {:value {:parent :str-contains? :args {:string :_t-card-html-full-str :substring {:value "hx-get=\"/partials/marketplace?kind=theme&amp;tag=x+y\""}}}}}
+
+  {:name :card-html-counts-installs-and-versions
+   :parent :assert
+   :args {:value {:parent :and
+                  :args {:values [{:parent :str-contains? :args {:string :_t-card-html-full-str :substring {:value "↓ 7"}}}
+                                  {:parent :str-contains? :args {:string :_t-card-html-full-str :substring {:value "2 version(s)"}}}]}}}}
+
+  {:name :card-html-says-no-reviews-yet-without-a-rating
+   :parent :assert
+   :args {:value {:parent :str-contains? :args {:string :_t-card-html-bare-str :substring {:value "no reviews yet"}}}}}
+
+  {:name :card-html-has-no-badges-for-a-public-approved-local-card
+   :parent :assert
+   :args {:value {:parent :not
+                  :args {:value {:parent :or
+                                 :args {:values [{:parent :str-contains? :args {:string :_t-card-html-bare-str :substring {:value "packages-private-badge"}}}
+                                                 {:parent :str-contains? :args {:string :_t-card-html-bare-str :substring {:value "mk-status"}}}
+                                                 {:parent :str-contains? :args {:string :_t-card-html-bare-str :substring {:value "mk-mirror"}}}]}}}}}}
+
+  {:name :card-html-clips-the-description-at-160
+   :description "The description paragraph is `[:p attrs text]` at index 4 of the article. Indexed through an `:any` widening: a hiccup element computes as the union of everything a node can be, which `:get-in` will not accept as a map/vector."
+   :parent :assert-eq
+   :args {:actual {:parent :count
+                   :args {:coll {:parent :get-in
+                                 :args {:map {:parent :const :return-type :any :return-type-wide? true
+                                              :args {:value {:parent :marketplace-card-html
+                                                             :args {:item {:parent :assoc :args {:map {:value {:name "long"}} :key {:value :description} :value :_t-long-text}}}}}}
+                                        :path [{:value 4} {:value 2}] :default nil}}}}
+          :expected 160}}
+
+  ;; =====================================================================
+  ;; REGISTRY — envelopes, the index reshape, the pure base-fns
+  ;; =====================================================================
+  {:name :package-result-record-zips-ok-reason-name-version
+   :parent :assert-eq
+   :args {:actual {:parent :package-result-record :args {:vals [{:value true} {:value nil} {:value "p"} {:value "1.0.0"}]}}
+          :expected {:value {:ok true :reason nil :name "p" :version "1.0.0"}}}}
+
+  {:name :index-entry-reshapes-a-package-version-row
+   :description "id / published-at stringified, `:fns` collapsed to `:fn-count`, `:public?` emitted as `:public`, nil kind / tags / status defaulted."
+   :parent :assert-eq
+   :args {:actual {:parent :list-package-versions
+                   :args {:coll {:value [{:id "abc" :name "p" :version "1.0.0" :ns-root "p" :content-hash "h" :published-at "2026-01-01"
+                                          :fns [{:name "x"} {:name "y"}] :dependencies ["x"] :org-id "o" :public? true
+                                          :kind nil :description "d" :category "web" :tags nil :origin nil :status nil :moderation-note nil}]}}}
+          :expected {:value [{:id "abc" :name "p" :version "1.0.0" :ns-root "p" :content-hash "h" :published-at "2026-01-01"
+                              :fn-count 2 :dependencies ["x"] :org-id "o" :public true
+                              :kind "fns" :description "d" :category "web" :tags [] :origin nil :status "approved" :moderation-note nil}]}}}
+
+  {:name :index-is-empty-without-rows
+   :parent :assert
+   :args {:value {:parent :empty? :args {:coll {:parent :list-package-versions :args {:coll {:value []}}}}}}}
+
+  {:name :semver-rank-weights-major-minor-patch
+   :parent :assert-eq
+   :args {:actual {:parent :semver-rank :args {:version {:value "1.2.3"}}} :expected 1002003}}
+
+  {:name :semver-rank-caps-each-component-at-999
+   :parent :assert-eq
+   :args {:actual {:parent :semver-rank :args {:version {:value "1.2000.3"}}} :expected 1999003}}
+
+  {:name :semver-rank-is-zero-for-unparsable-text
+   :parent :assert-eq
+   :args {:actual {:parent :semver-rank :args {:version {:value "junk"}}} :expected 0}}
+
+  {:name :semver-latest-picks-the-numerically-highest
+   :parent :assert-eq
+   :args {:actual {:parent :semver-latest :args {:versions {:value ["0.9.0" "0.10.0" "0.9.12"]}}} :expected "0.10.0"}}
+
+  {:name :semver-latest-is-nil-for-no-versions
+   :parent :assert
+   :args {:value {:parent :nil? :args {:value {:parent :semver-latest :args {:versions {:value []}}}}}}}
+
+  {:name :semver-compatible-within-the-caret-major
+   :parent :assert
+   :args {:value {:parent :semver-compatible? :args {:from {:value "1.2.0"} :to {:value "1.9.0"}}}}}
+
+  {:name :semver-compatible-rejects-a-major-bump
+   :parent :assert
+   :args {:value {:parent :not :args {:value {:parent :semver-compatible? :args {:from {:value "1.2.0"} :to {:value "2.0.0"}}}}}}}
+
+  {:name :semver-compatible-rejects-a-downgrade
+   :parent :assert
+   :args {:value {:parent :not :args {:value {:parent :semver-compatible? :args {:from {:value "1.5.0"} :to {:value "1.2.0"}}}}}}}
+
+  {:name :semver-compatible-below-one-pins-the-minor
+   :parent :assert
+   :args {:value {:parent :not :args {:value {:parent :semver-compatible? :args {:from {:value "0.1.0"} :to {:value "0.2.0"}}}}}}}
+
+  {:name :semver-compatible-below-one-allows-a-patch
+   :parent :assert
+   :args {:value {:parent :semver-compatible? :args {:from {:value "0.1.0"} :to {:value "0.1.5"}}}}}
+
+  {:name :version-qualified-ns-inserts-the-version-under-the-root
+   :parent :assert-eq
+   :args {:actual {:parent :version-qualified-ns :args {:ns-root {:value "web.components"} :version {:value "1.3.0"} :fn-ns {:value "web.components.foo"}}}
+          :expected "web.components@1-3-0.foo"}}
+
+  {:name :version-qualified-ns-qualifies-the-root-itself
+   :parent :assert-eq
+   :args {:actual {:parent :version-qualified-ns :args {:ns-root {:value "web.components"} :version {:value "1.3.0"} :fn-ns {:value "web.components"}}}
+          :expected "web.components@1-3-0"}}
+
+  {:name :version-qualified-ns-leaves-a-foreign-namespace-alone
+   :parent :assert-eq
+   :args {:actual {:parent :version-qualified-ns :args {:ns-root {:value "web.components"} :version {:value "1.3.0"} :fn-ns {:value "other.ns"}}}
+          :expected "other.ns"}}
+
+  {:name :dependency-bumps-flag-only-the-incompatible-advance
+   :description "`a` 1→2 breaks; `b` dropped and `c` added are not breaks."
+   :parent :assert-eq
+   :args {:actual {:parent :incompatible-dependency-bumps
+                   :args {:old-deps {:value [{:name "a" :version "1.0.0"} {:name "b" :version "1.0.0"}]}
+                          :new-deps {:value [{:name "a" :version "2.0.0"} {:name "c" :version "1.0.0"}]}}}
+          :expected {:value [{:kind :dependency-incompatible :name "a" :old "1.0.0" :new "2.0.0"}]}}}
+
+  {:name :dependency-bumps-ignore-a-compatible-advance
+   :parent :assert
+   :args {:value {:parent :empty?
+                  :args {:coll {:parent :incompatible-dependency-bumps
+                                :args {:old-deps {:value [{:name "a" :version "1.0.0"}]}
+                                       :new-deps {:value [{:name "a" :version "1.4.0"}]}}}}}}}
+
+  {:name :breaking-changes-are-empty-for-identical-bundles
+   :parent :assert
+   :args {:value {:parent :empty?
+                  :args {:coll {:parent :breaking-changes-between
+                                :args {:old-fns {:value [{:name :x :parent :add :args {:nums [1]}}]}
+                                       :new-fns {:value [{:name :x :parent :add :args {:nums [1]}}]}}}}}}}
+
+  {:name :breaking-changes-report-a-removed-fn
+   :parent :assert-eq
+   :args {:actual {:parent :breaking-changes-between
+                   :args {:old-fns {:value [{:name :x :parent :add :args {:nums [1]}}]}
+                          :new-fns {:value []}}}
+          :expected {:value [{:kind :fn-removed :fn :x}]}}}
+
+  {:name :secret-path-args-list-each-vault-binding
+   :parent :assert-eq
+   :args {:actual {:parent :secret-path-args
+                   :args {:fn-defs {:value [{:name :x :parent :http-get :args {:token {:secret-path "kv/x"} :url "u"}}
+                                            {:name :y :parent :const :args {:value 1}}]}}}
+          :expected {:value [{:fn :x :arg :token}]}}}
+
+  {:name :strip-secret-paths-drops-the-vault-bound-arg
+   :description "The stripped arg reverts to a free slot at the importer; every other arg survives."
+   :parent :assert-eq
+   :args {:actual {:parent :strip-secret-paths
+                   :args {:fn-defs {:value [{:name :x :parent :http-get :args {:token {:secret-path "kv/x"} :url "u"}}]}}}
+          :expected {:value [{:name :x :parent :http-get :args {:url "u"}}]}}}
+
+  {:name :parse-graph-edn-reads-plain-edn
+   :parent :assert-eq
+   :args {:actual {:parent :parse-graph-edn :args {:string {:value "{:a 1 :b [:x]}"}}}
+          :expected {:value {:a 1 :b [:x]}}}}
+
+  {:name :parse-graph-edn-is-nil-on-malformed-text
+   :parent :assert
+   :args {:value {:parent :nil? :args {:value {:parent :parse-graph-edn :args {:string {:value "{{{"}}}}}}}
+
+  {:name :_t-versioned-ref
+   :description "Subject: a ref keyword no reader can spell — `web@1-0-0/foo`."
+   :parent :str-to-keyword :args {:string {:value "web@1-0-0/foo"}}}
+
+  {:name :parse-graph-edn-decodes-a-graphden-ref-tag
+   :parent :assert-eq
+   :args {:actual {:parent :parse-graph-edn :args {:string {:value "#graphden/ref \"web@1-0-0/foo\""}}}
+          :expected :_t-versioned-ref}}
+
+  {:name :encode-unreadable-kws-tags-a-versioned-ref-for-the-text-wire
+   :parent :assert
+   :args {:value {:parent :str-contains?
+                  :args {:string {:parent :pr-str :args {:value {:parent :encode-unreadable-kws :args {:value :_t-versioned-ref}}}}
+                         :substring {:value "#graphden/ref"}}}}}
+
+  {:name :encode-then-parse-round-trips-a-versioned-ref
+   :parent :assert-eq
+   :args {:actual {:parent :parse-graph-edn
+                   :args {:string {:parent :pr-str :args {:value {:parent :encode-unreadable-kws :args {:value :_t-versioned-ref}}}}}}
+          :expected :_t-versioned-ref}}
+
+  {:name :encode-unreadable-kws-leaves-a-readable-value-alone
+   :parent :assert-eq
+   :args {:actual {:parent :encode-unreadable-kws :args {:value {:value {:a "b" :c [:d]}}}}
+          :expected {:value {:a "b" :c [:d]}}}}]
+}

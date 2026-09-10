@@ -104,7 +104,11 @@
 
 
 (defbase round-fn [number decimals]
-  (let [d (BigDecimal/.setScale (bigdec number) (long decimals) java.math.RoundingMode/HALF_UP)]
+  ;; A Ratio (14/3 — `:div` over longs that don't divide) has no exact
+  ;; BigDecimal: `bigdec` throws "Non-terminating decimal expansion".
+  ;; Go through double first — this is display rounding, not accounting.
+  (let [n (if (ratio? number) (double number) number)
+        d (BigDecimal/.setScale (bigdec n) (long decimals) java.math.RoundingMode/HALF_UP)]
     (if (zero? (long decimals)) (long d) (double d))))
 
 

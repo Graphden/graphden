@@ -41,6 +41,7 @@ records — ADRs, RFCs, perf notes, migration ledgers.)
 | Branches, diff, merge | [VERSIONING.md](VERSIONING.md) |
 | Services (long-running fns) | [SERVICES.md](SERVICES.md) |
 | Tests (`tests` namespace convention) | [TESTS.md](TESTS.md) |
+| Frontend coverage snapshot (what the e2e suite reaches) | [TESTS_JS_COVERAGE.md](TESTS_JS_COVERAGE.md) |
 | Executing a fn (HTTP API) | [EXECUTION.md](EXECUTION.md) |
 | Graph constraints | [CONSTRAINTS.md](CONSTRAINTS.md) |
 | Distributing packages | [PACKAGE_DISTRIBUTION.md](PACKAGE_DISTRIBUTION.md) |

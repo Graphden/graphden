@@ -139,11 +139,19 @@
    :return-type :any}
 
   {:name :transduce
-   :description "Single-pass transducer pipeline with a reducing fn (Clojure's `transduce`). `transducer` typically comes from `:comp`-ing `:filter`/`:map` without `:coll`."
-   ;; Same pure-fold rationale as `:reduce`.
+   :description "Single-pass transducer pipeline with a reducing fn (Clojure's `transduce`). `transducer` typically comes from `:comp`-ing `:filter`/`:map` without `:coll`. `(reducer [acc item])` — the reducer is a 1-arg callable receiving the pair as one vector, exactly like `:reduce`'s `:func`."
+   ;; Same pure-fold rationale as `:reduce` — and the same calling
+   ;; convention: the impl calls `(reducer [acc item])`, ONE argument
+   ;; holding the pair. The slot used to be typed `[:fn {:acc a :item b}
+   ;; a #{}]`, a 2-arg shape the impl never produces: no corpus fn-def
+   ;; used `:transduce`, so the first caller to try (core.tests, 2026-09-11)
+   ;; was also the first to be rejected — a correct reducer could not be
+   ;; written past the checker. The pair widens to `[:list :any]` for the
+   ;; same reason as `:reduce`: graphden lists are homogeneous and the two
+   ;; slots hold different types.
    :args {:transducer {:type :any :description "Composed transducer."}
-          :reducer {:type [:fn {:acc a :item b} a #{}]
-                    :description "Pure reducing callable `(acc, item) → acc`."}
+          :reducer {:type [:fn {:pair [:list :any]} a #{}]
+                    :description "Pure reducing callable receiving `[acc item]` as a single vector."}
           :init {:type a :description "Seed accumulator."}
           :coll {:type [:list b] :description "Collection to consume."}}
    :return-type a}]}

@@ -1,0 +1,239 @@
+;; app.common.tests — the platform's own self-tests for the app-base
+;; package (docs/TESTS.md): the route-building vocabulary (`:route`,
+;; the method + auth templates, `:method-map`), the health/status map
+;; helpers, `:named-fn-def?` and the `app.prefs` key vocabulary.
+;;
+;; Every subject here is PURE — no :db / :network / :time — so the
+;; suite auto-runs on writes. Route values carry a hof-wrapped handler
+;; (a Clojure fn), so route tests pin the SHAPE around it (path, method
+;; key, middleware list) rather than comparing whole vectors. Maps with
+;; string keys are pinned through `:to-json-string`: a literal map in a
+;; binding comes back keyword-keyed from the JSONB round-trip and would
+;; never `=` a string-keyed runtime map.
+
+{:namespace "app.common.tests"
+ :description "Platform self-tests for app-base: route templates (plain / with-middleware / auth presets), method-map + assoc-handler shapes, health-status helpers, named-fn-def?, and the preference-key vocabulary."
+ :fns
+ [{:name :_t-echo-handler
+  :description "Test handler — a Ring callable that returns the request it was given."
+  :lambda-params [:request]
+  :parent :const
+  :args {:value {:as :request}}}
+
+ {:name :_t-get-route
+  :description "Subject: a concrete `:get-route` mounted at `/t` over the echo handler."
+  :parent :get-route
+  :args {:path "/t" :handler :_t-echo-handler}}
+
+ {:name :_t-get-route-mw
+  :description "Subject: a concrete `:get-route-with-middleware` at `/t` with a placeholder middleware list."
+  :parent :get-route-with-middleware
+  :args {:path "/t" :handler :_t-echo-handler :middleware ["mw-a" "mw-b"]}}
+
+ ;; `:named-fn-def?`'s `:item` slot is a union of the shapes an upsert
+ ;; payload entry can take; the REJECT case feeds it a bare string, which
+ ;; no literal can express against that slot. `{:parent :const
+ ;; :return-type :any}` widens at the call site — `:any` is provable from
+ ;; any computed type (core.tests uses the same escape for the refinement
+ ;; narrowers).
+
+ {:name :_t-method-data
+  :description "Test helper — the method-data map of a `[path method-data]` route (the 1st item of the `:list`). `:return-type :any` is declared: `first`-of-`rest` infers to `[:union :null a]`, which no longer reads as a map for the `:get` / `:get-in` readers below."
+  :parent :first
+  :return-type :any
+  :return-type-wide? true
+  :args {:coll {:parent :rest :args {:coll {:as :route}}}}}
+
+ ;; --- assoc-status / assoc-timestamp / health ---
+ {:name :assoc-status-builds-status-map
+  :description "`:assoc-status` puts `:status` under the string key \"status\" of a fresh map."
+  :parent :assert-eq
+  :args {:actual {:parent :to-json-string :args {:data {:parent :assoc-status :args {:status "ok"}}}}
+         :expected "{\"status\":\"ok\"}"}}
+
+ {:name :health-status-base-is-healthy
+  :description "`:health-status-base` is exactly `{\"status\" \"healthy\"}`."
+  :parent :assert-eq
+  :args {:actual {:parent :to-json-string :args {:data :health-status-base}}
+         :expected "{\"status\":\"healthy\"}"}}
+
+ {:name :assoc-timestamp-adds-timestamp-key
+  :description "`:assoc-timestamp` adds \"timestamp\" and keeps the map's other entries."
+  :parent :assert-eq
+  :args {:actual {:parent :to-json-string :args {:data {:parent :assoc-timestamp :args {:map {:value {"a" 1}} :timestamp 5}}}}
+         :expected "{\"a\":1,\"timestamp\":5}"}}
+
+ ;; --- named-fn-def? ---
+ {:name :named-fn-def-accepts-map-with-name
+  :description "A map carrying `:name` is an addressable fn-def."
+  :parent :assert
+  :args {:value {:parent :named-fn-def? :args {:item {:value {:name :x :parent :const}}}}}}
+
+ {:name :named-fn-def-rejects-map-without-name
+  :description "A map with no `:name` (an anonymous top-level def) is rejected."
+  :parent :assert-eq
+  :args {:actual {:parent :named-fn-def? :args {:item {:value {:parent :const}}}}
+         :expected false}}
+
+ {:name :named-fn-def-rejects-nil-name
+  :description "`:name nil` counts as absent."
+  :parent :assert-eq
+  :args {:actual {:parent :named-fn-def? :args {:item {:value {:name nil}}}}
+         :expected false}}
+
+ {:name :named-fn-def-rejects-non-map
+  :description "A bare string is not a fn-def map — `:and` short-circuits on the `:is-a? :map` guard."
+  :parent :assert-eq
+  :args {:actual {:parent :named-fn-def? :args {:item {:parent :const :return-type :any :return-type-wide? true :args {:value "const"}}}}
+         :expected false}}
+
+ ;; --- prefs vocabulary ---
+ {:name :pref-keys-are-theme-and-keymap
+  :description "The editor's preference vocabulary is exactly `theme` and `keymap`, in that order."
+  :parent :assert-eq
+  :args {:actual :pref-keys
+         :expected ["theme" "keymap"]}}
+
+ {:name :pref-key-known-accepts-theme
+  :description "`theme` is a known preference key."
+  :parent :assert
+  :args {:value {:parent :pref-key-known? :args {:pref-key "theme"}}}}
+
+ {:name :pref-key-known-accepts-keymap
+  :description "`keymap` is a known preference key."
+  :parent :assert
+  :args {:value {:parent :pref-key-known? :args {:pref-key "keymap"}}}}
+
+ {:name :pref-key-known-rejects-unknown-key
+  :description "A key outside the vocabulary is rejected."
+  :parent :assert-eq
+  :args {:actual {:parent :pref-key-known? :args {:pref-key "font"}}
+         :expected false}}
+
+ {:name :pref-key-known-rejects-prefix-of-a-key
+  :description "The membership test is whole-key (`|`-delimited): `them` is not `theme`."
+  :parent :assert-eq
+  :args {:actual {:parent :pref-key-known? :args {:pref-key "them"}}
+         :expected false}}
+
+ {:name :pref-key-known-rejects-empty-key
+  :description "The empty string is not a preference key."
+  :parent :assert-eq
+  :args {:actual {:parent :pref-key-known? :args {:pref-key ""}}
+         :expected false}}
+
+ ;; --- route vocabulary: shapes ---
+ {:name :assoc-handler-builds-handler-map
+  :description "`:assoc-handler` yields a one-entry map keyed \"handler\"."
+  :parent :assert-eq
+  :args {:actual {:parent :keys :args {:map {:parent :assoc-handler :args {:handler :_t-echo-handler}}}}
+         :expected ["handler"]}}
+
+ {:name :method-map-keys-by-method
+  :description "`:method-map` is a one-entry map keyed by the HTTP method string."
+  :parent :assert-eq
+  :args {:actual {:parent :keys :args {:map {:parent :method-map :args {:method "get" :handler :_t-echo-handler}}}}
+         :expected ["get"]}}
+
+ {:name :method-map-nests-handler-under-method
+  :description "Under the method key sits the `{\"handler\" h}` map reitit reads."
+  :parent :assert-eq
+  :args {:actual {:parent :keys :args {:map {:parent :get :args {:coll {:parent :method-map :args {:method "post" :handler :_t-echo-handler}} :key "post" :default nil}}}}
+         :expected ["handler"]}}
+
+ {:name :route-is-path-then-method-data
+  :description "A `:route` is the 2-vector `[path method-data]`."
+  :parent :assert-eq
+  :args {:actual {:parent :count :args {:coll :_t-get-route}}
+         :expected 2}}
+
+ {:name :route-first-item-is-path
+  :description "The route's 0th item is the bound `:path`."
+  :parent :assert-eq
+  :args {:actual {:parent :first :args {:coll :_t-get-route}}
+         :expected "/t"}}
+
+ {:name :get-route-binds-get-method
+  :description "`:get-route` fixes the method key to \"get\"."
+  :parent :assert-eq
+  :args {:actual {:parent :keys :args {:map {:parent :_t-method-data :args {:route :_t-get-route}}}}
+         :expected ["get"]}}
+
+ {:name :post-route-binds-post-method
+  :description "`:post-route` fixes the method key to \"post\"."
+  :parent :assert-eq
+  :args {:actual {:parent :keys :args {:map {:parent :_t-method-data :args {:route {:parent :post-route :args {:path "/p" :handler :_t-echo-handler}}}}}}
+         :expected ["post"]}}
+
+ {:name :route-method-data-has-only-handler
+  :description "A plain route's method data carries just \"handler\" — no middleware key."
+  :parent :assert-eq
+  :args {:actual {:parent :keys :args {:map {:parent :get-in :args {:map {:parent :_t-method-data :args {:route :_t-get-route}} :path ["get"] :default nil}}}}
+         :expected ["handler"]}}
+
+ {:name :route-with-middleware-carries-middleware-list
+  :description "`:route-with-middleware` stores the bound list under a route-data-level \"middleware\" key (beside the method entry — reitit composes it around the handler)."
+  :parent :assert-eq
+  :args {:actual {:parent :get :args {:coll {:parent :_t-method-data :args {:route :_t-get-route-mw}} :key "middleware" :default nil}}
+         :expected ["mw-a" "mw-b"]}}
+
+ {:name :route-with-middleware-method-data-keys
+  :description "The middleware route's method data has exactly the method key and \"middleware\"."
+  :parent :assert-eq
+  :args {:actual {:parent :sort :args {:coll {:parent :keys :args {:map {:parent :_t-method-data :args {:route :_t-get-route-mw}}}}}}
+         :expected ["get" "middleware"]}}
+
+ {:name :route-with-middleware-keeps-handler-under-method
+  :description "Under the method key the middleware route still carries just `{\"handler\" h}` — the middleware is NOT nested there."
+  :parent :assert-eq
+  :args {:actual {:parent :keys :args {:map {:parent :get-in :args {:map {:parent :_t-method-data :args {:route :_t-get-route-mw}} :path ["get"] :default nil}}}}
+         :expected ["handler"]}}
+
+ {:name :route-with-middleware-first-item-is-path
+  :description "The middleware route keeps the `[path method-data]` shape."
+  :parent :assert-eq
+  :args {:actual {:parent :first :args {:coll :_t-get-route-mw}}
+         :expected "/t"}}
+
+ {:name :post-route-with-middleware-binds-post
+  :description "`:post-route-with-middleware` fixes the method key to \"post\" (beside the route-level \"middleware\")."
+  :parent :assert-eq
+  :args {:actual {:parent :sort :args {:coll {:parent :keys :args {:map {:parent :_t-method-data :args {:route {:parent :post-route-with-middleware :args {:path "/p" :handler :_t-echo-handler :middleware []}}}}}}}}
+         :expected ["middleware" "post"]}}
+
+ {:name :put-route-with-middleware-binds-put
+  :description "`:put-route-with-middleware` fixes the method key to \"put\" (beside the route-level \"middleware\")."
+  :parent :assert-eq
+  :args {:actual {:parent :sort :args {:coll {:parent :keys :args {:map {:parent :_t-method-data :args {:route {:parent :put-route-with-middleware :args {:path "/p" :handler :_t-echo-handler :middleware []}}}}}}}}
+         :expected ["middleware" "put"]}}
+
+ {:name :delete-route-with-middleware-binds-delete
+  :description "`:delete-route-with-middleware` fixes the method key to \"delete\" (beside the route-level \"middleware\")."
+  :parent :assert-eq
+  :args {:actual {:parent :sort :args {:coll {:parent :keys :args {:map {:parent :_t-method-data :args {:route {:parent :delete-route-with-middleware :args {:path "/p" :handler :_t-echo-handler :middleware []}}}}}}}}
+         :expected ["delete" "middleware"]}}
+
+ {:name :empty-middleware-list-is-kept
+  :description "An empty `:middleware` binding still writes the key (reitit sees `[]`, not absence)."
+  :parent :assert-eq
+  :args {:actual {:parent :get :args {:coll {:parent :_t-method-data :args {:route {:parent :get-route-with-middleware :args {:path "/p" :handler :_t-echo-handler :middleware []}}}} :key "middleware" :default {:value :absent}}}
+         :expected []}}
+
+ ;; --- auth-required presets (app.routes.auth) ---
+ {:name :auth-post-preset-binds-post
+  :description "`app.routes.auth/post` is a POST route carrying route-level middleware."
+  :parent :assert-eq
+  :args {:actual {:parent :sort :args {:coll {:parent :keys :args {:map {:parent :_t-method-data :args {:route {:parent :app.routes.auth/post :args {:path "/a" :handler :_t-echo-handler}}}}}}}}
+         :expected ["middleware" "post"]}}
+
+ {:name :auth-get-preset-binds-get
+  :description "`:get-auth-required` is a GET route carrying route-level middleware."
+  :parent :assert-eq
+  :args {:actual {:parent :sort :args {:coll {:parent :keys :args {:map {:parent :_t-method-data :args {:route {:parent :get-auth-required :args {:path "/a" :handler :_t-echo-handler}}}}}}}}
+         :expected ["get" "middleware"]}}
+
+ {:name :auth-preset-carries-one-middleware
+  :description "The auth presets attach exactly one middleware entry — `:auth-required-middleware`."
+  :parent :assert-eq
+  :args {:actual {:parent :count :args {:coll {:parent :get :args {:coll {:parent :_t-method-data :args {:route {:parent :get-auth-required :args {:path "/a" :handler :_t-echo-handler}}}} :key "middleware" :default nil}}}}
+         :expected 1}}]}

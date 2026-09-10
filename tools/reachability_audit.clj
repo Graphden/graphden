@@ -198,6 +198,33 @@
           (find-clj-files "test/graphden"))))
 
 
+(defn- collect-tests-namespace-roots
+  "Every public fn-def living in a `tests` NAMESPACE is a root — the
+   platform's own in-graph tests (`core.tests`, `web.tests`, …,
+   docs/TESTS.md § Platform tests). Nothing references them by name:
+   the runner DISCOVERS them by namespace segment and executes each
+   one, exactly as it does a user's tests, and
+   `packages.platform-tests-test` runs the whole set in CI. So the
+   contract that makes them live is the same namespace predicate the
+   server uses (`crud.test-runs/test-ns-path?` — segment match, never
+   substring), mirrored here.
+
+   `_`-private fns in those namespaces are NOT roots: they are
+   scaffolding, reachable only through a test that uses them, which is
+   precisely what the walk should prove (an orphaned helper stays a
+   finding)."
+  [fn-defs]
+  (into #{}
+        (keep (fn [fd]
+                (let [ns-path (:namespace fd)
+                      fn-name (:name fd)]
+                  (when (and ns-path fn-name
+                             (some #{"tests"} (str/split (str ns-path) #"\."))
+                             (not (str/starts-with? (name fn-name) "_")))
+                    fn-name))))
+        fn-defs))
+
+
 (defn- collect-docs-roots
   "Scan `docs/*.md` for fn-name back-tick mentions — pattern docs
    (`PHILOSOPHY.md` etc.) reference `:wrap-element` / `wrap-style` /
@@ -252,12 +279,14 @@
         test-roots (collect-test-roots all-by-name)
         external-roots (collect-external-roots fn-def-by-name)
         docs-roots (collect-docs-roots all-by-name)
+        graph-test-roots (collect-tests-namespace-roots fn-defs)
         roots (-> #{:web-server}
                   (into example-roots)
                   (into dynamic-roots)
                   (into test-roots)
                   (into external-roots)
-                  (into docs-roots))
+                  (into docs-roots)
+                  (into graph-test-roots))
         _ (println "External roots (sibling repos' qualified refs + registry :external):"
                    external-roots)
         _ (println "Dynamic roots (from tools/graph-reachability.edn):"
@@ -266,6 +295,8 @@
                    (count test-roots))
         _ (println "Docs roots (from back-ticked names in docs/*.md):"
                    (count docs-roots))
+        _ (println "Graph-test roots (public fn-defs in a `tests` namespace):"
+                   (count graph-test-roots))
         reachable (bfs-reachable all-by-name roots)
         composed (filter #(composed? (val %)) fn-def-by-name)
         type-rows (filter #(type-row? (val %)) fn-def-by-name)

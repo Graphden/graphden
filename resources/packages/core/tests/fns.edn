@@ -1,0 +1,894 @@
+;; core.tests — the platform's own self-tests for the core package's
+;; fn-defs and base-fns. Discovered by the `tests` namespace segment
+;; (docs/TESTS.md), run by `graphden.packages.platform-tests-test`.
+;;
+;; Every test is a zero-arg `:assert` / `:assert-eq` composition over a
+;; PURE subject — nothing here touches :db / :network / :time / :env, so
+;; the suite runs under `:allowed-effects #{}`. `_`-prefixed fns are
+;; scaffolding shared by several tests; one-shot subjects are inlined.
+;;
+;; Literal keywords inside expected values are wrapped in `{:value …}`
+;; so a bare keyword is never mistaken for a fn-ref, and maps compared
+;; with `:assert-eq` use KEYWORD keys — a literal map's string keys are
+;; keywordized on the JSONB roundtrip, so a string-keyed result is read
+;; back through `:get` instead of compared whole.
+
+{:namespace "core.tests"
+ :description "Platform self-tests for core: arithmetic / logic / hof / collections / strings / system / variants / refinements / recursion invariants, as zero-arg assert compositions."
+ :fns
+ [;; --- shared scaffolding --------------------------------------------
+
+  ;; A narrower's input slot IS its refined type (`:ensure-positive-int`
+  ;; takes `:positive-int`), so a literal that VIOLATES the refinement —
+  ;; the only interesting input for a runtime check — cannot be written
+  ;; at the call site: the sweep rejects it before the test ever runs.
+  ;; `{:parent :const :return-type :any}` is the deliberate widening:
+  ;; `:any` is provable from any computed type, so the checker stops
+  ;; looking and the value reaches the narrower at runtime exactly as a
+  ;; caller's dynamic value would. (Declaring `:any` on a SHARED
+  ;; passthrough helper would not work — a child of a typevar
+  ;; passthrough re-infers its own literal's type.)
+
+  {:name :_ct-thrown-type
+   :description "`:on-throw` handler — the `:type` key of the caught exception's `ex-data` (nil for a non-ex-info throw). Bound as `:on-throw` by every test that pins a failure path."
+   :parent :get
+   :args {:coll {:parent :ex-data :args {:ex {:as :exception}}}
+          :key {:value :type}
+          :default nil}}
+
+  {:name :_ct-boom
+   :description "A ready-made `ExceptionInfo` (`\"boom\"`, `{:type :core.tests/boom}`) — thrown by the short-circuit tests to prove an untaken branch never runs, and inspected by the throwable-accessor tests."
+   :parent :ex-info
+   :args {:message "boom" :data {:value {:type :core.tests/boom}}}}
+
+  {:name :_ct-throw-boom
+   :description "Raise `:_ct-boom`. Placed in the branch a conditional must NOT take — the test fails loudly if it does."
+   :parent :throw
+   :args {:exception :_ct-boom}}
+
+  ;; --- core.arithmetic ---------------------------------------------------
+
+  {:name :add-sums-every-number
+   :description "`:add` is variadic — `[1 2 3 4]` sums to 10."
+   :parent :assert-eq
+   :args {:actual {:parent :add :args {:nums [1 2 3 4]}}
+          :expected 10}}
+
+  {:name :sub-subtracts-the-rest-from-the-first
+   :description "`:sub` — first minus every following number: `[10 3 2]` → 5."
+   :parent :assert-eq
+   :args {:actual {:parent :sub :args {:nums [10 3 2]}}
+          :expected 5}}
+
+  {:name :mul-multiplies-every-number
+   :description "`:mul` — `[2 3 4]` → 24."
+   :parent :assert-eq
+   :args {:actual {:parent :mul :args {:nums [2 3 4]}}
+          :expected 24}}
+
+  {:name :div-divides-the-first-by-the-product-of-the-rest
+   :description "`:div` — `[24 2 3]` → 4 (24 / (2·3))."
+   :parent :assert-eq
+   :args {:actual {:parent :div :args {:nums [24 2 3]}}
+          :expected 4}}
+
+  {:name :mod-takes-the-sign-of-the-divisor
+   :description "`:mod` follows Clojure's `mod`: `-7 mod 3` → 2, not -1."
+   :parent :assert-eq
+   :args {:actual {:parent :mod :args {:dividend -7 :divisor 3}}
+          :expected 2}}
+
+  {:name :quot-truncates-toward-zero
+   :description "`:quot` — `-7 quot 2` → -3 (truncation, not floor)."
+   :parent :assert-eq
+   :args {:actual {:parent :quot :args {:dividend -7 :divisor 2}}
+          :expected -3}}
+
+  {:name :abs-drops-the-sign
+   :description "`:abs` of -3 is 3."
+   :parent :assert-eq
+   :args {:actual {:parent :abs :args {:number -3}}
+          :expected 3}}
+
+  {:name :neg-flips-the-sign
+   :description "`:neg` of 5 is -5."
+   :parent :assert-eq
+   :args {:actual {:parent :neg :args {:number 5}}
+          :expected -5}}
+
+  {:name :round-is-half-up-at-the-given-scale
+   :description "`:round` 4.25 to 1 decimal is 4.3 (HALF_UP, not banker's rounding)."
+   :parent :assert-eq
+   :args {:actual {:parent :round :args {:number 4.25 :decimals 1}}
+          :expected 4.3}}
+
+  {:name :lt-requires-strictly-increasing
+   :description "`:lt` is chained and strict — `[1 2 2]` is false because the last pair is equal."
+   :parent :assert-eq
+   :args {:actual {:parent :lt :args {:nums [1 2 2]}}
+          :expected false}}
+
+  {:name :lte-admits-equal-neighbours
+   :description "`:lte` — `[1 2 2]` is true (non-decreasing)."
+   :parent :assert-eq
+   :args {:actual {:parent :lte :args {:nums [1 2 2]}}
+          :expected true}}
+
+  {:name :gt-and-gte-compare-descending
+   :description "`:gt` over `[3 2 1]` and `:gte` over `[3 3 1]` both hold."
+   :parent :assert
+   :args {:value {:parent :and
+                  :args {:values [{:parent :gt :args {:nums [3 2 1]}}
+                                  {:parent :gte :args {:nums [3 3 1]}}]}}}}
+
+  {:name :eq-holds-only-when-every-value-is-equal
+   :description "`:eq` over `[1 1 2]` is false; `:neq` over the same is true."
+   :parent :assert
+   :args {:value {:parent :and
+                  :args {:values [{:parent :not :args {:value {:parent :eq :args {:values [1 1 2]}}}}
+                                  {:parent :neq :args {:values [1 1 2]}}]}}}}
+
+  ;; --- core.logic ---------------------------------------------------------
+
+  {:name :and-short-circuits-on-the-first-falsy-value
+   :description "`:and` never evaluates the items after a falsy one — the second item here throws if it runs."
+   :parent :assert-eq
+   :args {:actual {:parent :and :args {:values [false :_ct-throw-boom]}}
+          :expected false}}
+
+  {:name :or-short-circuits-on-the-first-truthy-value
+   :description "`:or` stops at the first truthy item — the throwing second item never runs."
+   :parent :assert-eq
+   :args {:actual {:parent :or :args {:values [true :_ct-throw-boom]}}
+          :expected true}}
+
+  {:name :not-some-nil-agree-on-nil
+   :description "`(not nil)`, `(nil? nil)` and `(not (some? nil))` are all true."
+   :parent :assert
+   :args {:value {:parent :and
+                  :args {:values [{:parent :not :args {:value nil}}
+                                  {:parent :nil? :args {:value nil}}
+                                  {:parent :not :args {:value {:parent :some? :args {:value nil}}}}]}}}}
+
+  {:name :zero?-is-true-only-for-zero
+   :description "`:zero?` — 0 → true, 1 → false."
+   :parent :assert
+   :args {:value {:parent :and
+                  :args {:values [{:parent :zero? :args {:number 0}}
+                                  {:parent :not :args {:value {:parent :zero? :args {:number 1}}}}]}}}}
+
+  {:name :is-a?-checks-the-primitive-tag
+   :description "`:is-a?` — a keyword IS `:keyword` and is NOT `:text`."
+   :parent :assert
+   :args {:value {:parent :and
+                  :args {:values [{:parent :is-a? :args {:value {:value :k} :type {:value :keyword}}}
+                                  {:parent :not :args {:value {:parent :is-a? :args {:value {:value :k} :type {:value :text}}}}}]}}}}
+
+  {:name :if-takes-then-and-never-evaluates-else
+   :description "`:if` with a truthy test returns `:then`; the `:else` branch (a throw) is never forced."
+   :parent :assert-eq
+   :args {:actual {:parent :if :args {:test true :then "then" :else :_ct-throw-boom}}
+          :expected "then"}}
+
+  {:name :if-takes-else-on-a-falsy-test
+   :description "`:if` with a nil test returns `:else`."
+   :parent :assert-eq
+   :args {:actual {:parent :if :args {:test nil :then "then" :else "else"}}
+          :expected "else"}}
+
+  {:name :if-without-else-yields-nil
+   :description "`:if` whose test fails and whose `:else` is omitted returns nil."
+   :parent :assert
+   :args {:value {:parent :nil? :args {:value {:parent :if :args {:test false :then 1 :else nil}}}}}}
+
+  {:name :cond-returns-the-first-truthy-clause-and-stops
+   :description "`:cond` over `[false 1 true 2 true <throw>]` returns 2 — later clauses are never forced."
+   :parent :assert-eq
+   :args {:actual {:parent :cond :args {:clauses [false 1 true 2 true :_ct-throw-boom]}}
+          :expected 2}}
+
+  {:name :cond-without-a-match-is-nil
+   :description "`:cond` whose every test is falsy returns nil."
+   :parent :assert
+   :args {:value {:parent :nil? :args {:value {:parent :cond :args {:clauses [false 1 nil 2]}}}}}}
+
+  {:name :case-dispatches-on-the-clauses-map
+   :description "`:case` looks `:value` up in `:clauses` — `:b` → 2."
+   :parent :assert-eq
+   :args {:actual {:parent :case :args {:value {:value :b} :clauses {:value {:a 1 :b 2}} :default 0}}
+          :expected 2}}
+
+  {:name :case-falls-back-to-default
+   :description "`:case` with a value that is not a key returns `:default`."
+   :parent :assert-eq
+   :args {:actual {:parent :case :args {:value {:value :zzz} :clauses {:value {:a 1 :b 2}} :default 9}}
+          :expected 9}}
+
+  {:name :coalesce-keeps-a-non-nil-value
+   :description "`:coalesce` returns `:value` when it is non-nil, ignoring `:default`."
+   :parent :assert-eq
+   :args {:actual {:parent :coalesce :args {:value 1 :default 2}}
+          :expected 1}}
+
+  {:name :coalesce-substitutes-the-default-for-nil
+   :description "`:coalesce` returns `:default` when `:value` is nil."
+   :parent :assert-eq
+   :args {:actual {:parent :coalesce :args {:value nil :default 2}}
+          :expected 2}}
+
+  {:name :assert-some-throws-nil-assertion-on-nil
+   :description "`:assert-some` of nil throws `:execution-error/nil-assertion` — seen through `:try` + `:ex-data`."
+   :parent :assert-eq
+   :args {:actual {:parent :try
+                   :args {:body {:parent :assert-some :args {:value nil}}
+                          :on-throw :_ct-thrown-type}}
+          :expected {:value :execution-error/nil-assertion}}}
+
+  {:name :assert-eq-failure-carries-both-operands
+   :description "A failing `:assert-eq` throws `:execution-error/assertion-failed` with `:actual` and `:expected` in the error data."
+   :parent :assert-eq
+   :args {:actual {:parent :try
+                   :args {:body {:parent :assert-eq :args {:actual 1 :expected 2}}
+                          :on-throw {:parent :select-keys
+                                     :args {:m {:parent :ex-data :args {:ex {:as :exception}}}
+                                            :ks [{:value :type} {:value :actual} {:value :expected}]}}}}
+          :expected {:value {:type :execution-error/assertion-failed :actual 1 :expected 2}}}}
+
+  {:name :const-and-identity-pass-the-value-through
+   :description "`:const` and its alias `:identity` both return `:value` unchanged."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :const :args {:value "v"}}
+                                  {:parent :identity :args {:value "v"}}]}}
+          :expected ["v" "v"]}}
+
+  {:name :equal?-compares-structurally
+   :description "`:equal?` over two separately-built maps with the same entries is true."
+   :parent :assert-eq
+   :args {:actual {:parent :equal? :args {:a {:value {:x 1 :y [2]}} :b {:value {:y [2] :x 1}}}}
+          :expected true}}
+
+  {:name :constant-time-equal?-is-nil-safe-and-matches-equal-strings
+   :description "`:constant-time-equal?` — nil vs text is false, equal strings are true."
+   :parent :assert
+   :args {:value {:parent :and
+                  :args {:values [{:parent :not :args {:value {:parent :constant-time-equal? :args {:a nil :b "x"}}}}
+                                  {:parent :constant-time-equal? :args {:a "secret" :b "secret"}}]}}}}
+
+  ;; --- core.hof -----------------------------------------------------------
+
+  {:name :map-applies-the-callable-to-every-item
+   :description "`:map` with an `:item`-free callable — `[1 2 3]` incremented is `[2 3 4]`."
+   :parent :assert-eq
+   :args {:actual {:parent :map
+                   :args {:func {:parent :add :args {:nums [{:as :item} 1]}}
+                          :coll [1 2 3]}}
+          :expected [2 3 4]}}
+
+  {:name :filter-keeps-items-the-predicate-accepts
+   :description "`:filter` with a `> 1` predicate keeps `[2 3]` of `[1 2 3]`."
+   :parent :assert-eq
+   :args {:actual {:parent :filter
+                   :args {:pred {:parent :gt :args {:nums [{:as :item} 1]}}
+                          :coll [1 2 3]}}
+          :expected [2 3]}}
+
+  {:name :reduce-passes-acc-and-item-as-one-pair
+   :description "`:reduce` calls the reducer with `[acc item]` — summing the pair folds `[1 2 3]` from 0 to 6."
+   :parent :assert-eq
+   :args {:actual {:parent :reduce
+                   :args {:func {:parent :add :args {:nums {:as :pair}}}
+                          :init 0
+                          :coll [1 2 3]}}
+          :expected 6}}
+
+  {:name :transduce-runs-a-comp-of-xf-forms-left-to-right
+   :description "`:transduce` over `(comp (map-xf inc) (filter-xf > 2))` — the map runs first, so `[1 2 3]` → `[2 3 4]` → `[3 4]` → sum 7."
+   :parent :assert-eq
+   :args {:actual {:parent :transduce
+                   :args {:transducer {:parent :comp
+                                       :args {:functions [{:parent :map-xf :args {:func {:parent :add :args {:nums [{:as :item} 1]}}}}
+                                                          {:parent :filter-xf :args {:pred {:parent :gt :args {:nums [{:as :item} 2]}}}}]}}
+                          :reducer {:parent :add :args {:nums {:as :item}}}
+                          :init 0
+                          :coll [1 2 3]}}
+          :expected 7}}
+
+  {:name :some-is-the-first-truthy-predicate-result-or-nil
+   :description "`:some` with `> 2` over `[1 2 3]` is true, over `[1 2]` is nil."
+   :parent :assert
+   :args {:value {:parent :and
+                  :args {:values [{:parent :some :args {:pred {:parent :gt :args {:nums [{:as :item} 2]}} :coll [1 2 3]}}
+                                  {:parent :nil? :args {:value {:parent :some :args {:pred {:parent :gt :args {:nums [{:as :item} 2]}} :coll [1 2]}}}}]}}}}
+
+  {:name :every?-holds-for-all-items-and-for-the-empty-list
+   :description "`:every?` with `> 0` is true over `[1 2]` and vacuously true over `[]`; false over `[1 0]`."
+   :parent :assert
+   :args {:value {:parent :and
+                  :args {:values [{:parent :every? :args {:pred {:parent :gt :args {:nums [{:as :item} 0]}} :coll [1 2]}}
+                                  {:parent :every? :args {:pred {:parent :gt :args {:nums [{:as :item} 0]}} :coll []}}
+                                  {:parent :not :args {:value {:parent :every? :args {:pred {:parent :gt :args {:nums [{:as :item} 0]}} :coll [1 0]}}}}]}}}}
+
+  {:name :find-first-returns-the-first-matching-item
+   :description "`:find-first` with `> 1` over `[1 2 3]` is 2 — the item, not the predicate result."
+   :parent :assert-eq
+   :args {:actual {:parent :find-first
+                   :args {:pred {:parent :gt :args {:nums [{:as :item} 1]}}
+                          :coll [1 2 3]}}
+          :expected 2}}
+
+  {:name :group-by-buckets-items-under-the-key-fn-result
+   :description "`:group-by` with a `:big` / `:small` key-fn over `[1 2 3 4]` gives `{:small [1 2] :big [3 4]}`."
+   :parent :assert-eq
+   :args {:actual {:parent :group-by
+                   :args {:key-fn {:parent :if
+                                   :args {:test {:parent :gt :args {:nums [{:as :item} 2]}}
+                                          :then {:value :big}
+                                          :else {:value :small}}}
+                          :coll [1 2 3 4]}}
+          :expected {:value {:small [1 2] :big [3 4]}}}}
+
+  {:name :sort-by-orders-by-the-key-fn
+   :description "`:sort-by` with `:neg` as the key sorts `[1 3 2]` descending: `[3 2 1]`."
+   :parent :assert-eq
+   :args {:actual {:parent :sort-by
+                   :args {:key-fn {:parent :neg :args {:number {:as :item}}}
+                          :coll [1 3 2]}}
+          :expected [3 2 1]}}
+
+  {:name :constantly-ignores-its-input
+   :description "`:constantly` wrapped as a callable via `:call` returns `:value` whatever the argument."
+   :parent :assert-eq
+   :args {:actual {:parent :call
+                   :args {:func {:parent :constantly :args {:value 7}}
+                          :arg "ignored"}}
+          :expected 7}}
+
+  ;; --- core.collections ---------------------------------------------------
+
+  {:name :first-rest-cons-round-trip-a-list
+   :description "`:cons` of `(first xs)` onto `(rest xs)` rebuilds `[1 2 3]`."
+   :parent :assert-eq
+   :args {:actual {:parent :cons
+                   :args {:item {:parent :first :args {:coll [1 2 3]}}
+                          :coll {:parent :rest :args {:coll [1 2 3]}}}}
+          :expected [1 2 3]}}
+
+  {:name :first-of-an-empty-list-is-nil
+   :description "`:first` over `[]` returns nil (the `[:union :null a]` return)."
+   :parent :assert
+   :args {:value {:parent :nil? :args {:value {:parent :first :args {:coll []}}}}}}
+
+  {:name :list-mixes-literals-and-fn-refs-in-order
+   :description "`:list` items — a literal, a computed ref and a string — come back positionally."
+   :parent :assert-eq
+   :args {:actual {:parent :list :args {:items [1 {:parent :add :args {:nums [1 1]}} "x"]}}
+          :expected [1 2 "x"]}}
+
+  {:name :pairs->map-later-pairs-override-earlier
+   :description "`:pairs->map` over `[[:k 1] [:k 2] [:j 3]]` keeps the last value per key."
+   :parent :assert-eq
+   :args {:actual {:parent :pairs->map :args {:entries {:value [[:k 1] [:k 2] [:j 3]]}}}
+          :expected {:value {:k 2 :j 3}}}}
+
+  {:name :conj-appends-to-a-vector
+   :description "`:conj` on `[1]` with 2 gives `[1 2]` (vectors append)."
+   :parent :assert-eq
+   :args {:actual {:parent :conj :args {:coll [1] :item 2}}
+          :expected [1 2]}}
+
+  {:name :get-falls-back-to-default-for-a-missing-key
+   :description "`:get` with an absent key returns `:default`; a present key returns its value."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :get :args {:coll {:value {:a 1}} :key {:value :a} :default 9}}
+                                  {:parent :get :args {:coll {:value {:a 1}} :key {:value :zz} :default 9}}]}}
+          :expected [1 9]}}
+
+  {:name :get-in-walks-a-nested-path
+   :description "`:get-in` `[:a 1 :b]` mixes record keys and a vector index."
+   :parent :assert-eq
+   :args {:actual {:parent :get-in :args {:map {:value {:a [{:b 0} {:b 5}]}} :path [{:value :a} 1 {:value :b}] :default nil}}
+          :expected 5}}
+
+  {:name :assoc-and-assoc-empty-add-one-entry
+   :description "`:assoc` onto `{:a 1}` and `:assoc-empty` onto `{}` both write the single `:b 2` entry."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :assoc :args {:map {:value {:a 1}} :key {:value :b} :value 2}}
+                                  {:parent :assoc-empty :args {:key {:value :b} :value 2}}]}}
+          :expected {:value [{:a 1 :b 2} {:b 2}]}}}
+
+  {:name :dissoc-removes-one-key
+   :description "`:dissoc` `:a` from `{:a 1 :b 2}` leaves `{:b 2}`."
+   :parent :assert-eq
+   :args {:actual {:parent :dissoc :args {:map {:value {:a 1 :b 2}} :key {:value :a}}}
+          :expected {:value {:b 2}}}}
+
+  {:name :count-and-empty?-treat-nil-as-empty
+   :description "`:count` of nil is 0 and `:empty?` of nil is true; `:count` of `[1 2 3]` is 3."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :count :args {:coll nil}}
+                                  {:parent :empty? :args {:coll nil}}
+                                  {:parent :count :args {:coll [1 2 3]}}]}}
+          :expected [0 true 3]}}
+
+  {:name :contains?-checks-vector-indices-not-values
+   :description "`:contains?` on `[5 6]` — index 1 is present, value 5 is not an index."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :contains? :args {:coll [5 6] :key 1}}
+                                  {:parent :contains? :args {:coll [5 6] :key 5}}]}}
+          :expected [true false]}}
+
+  {:name :keys-and-vals-enumerate-a-map-in-the-same-order
+   :description "`:zipmap` of `(keys m)` and `(vals m)` rebuilds `m`."
+   :parent :assert-eq
+   :args {:actual {:parent :zipmap
+                   :args {:keys {:parent :keys :args {:map {:value {:a 1 :b 2 :c 3}}}}
+                          :vals {:parent :vals :args {:map {:value {:a 1 :b 2 :c 3}}}}}}
+          :expected {:value {:a 1 :b 2 :c 3}}}}
+
+  {:name :merge-later-maps-override-earlier-keys
+   :description "`:merge` of `{:a 1}` then `{:a 2 :b 3}` is `{:a 2 :b 3}`."
+   :parent :assert-eq
+   :args {:actual {:parent :merge :args {:maps {:value [{:a 1} {:a 2 :b 3}]}}}
+          :expected {:value {:a 2 :b 3}}}}
+
+  {:name :into-pours-pairs-into-a-map
+   :description "`:into` `{}` from `[[:a 1] [:b 2]]` builds the map."
+   :parent :assert-eq
+   :args {:actual {:parent :into :args {:to {:value {}} :from {:value [[:a 1] [:b 2]]}}}
+          :expected {:value {:a 1 :b 2}}}}
+
+  {:name :assoc-in-creates-intermediate-maps
+   :description "`:assoc-in` `[:a :b]` on `{}` yields `{:a {:b 1}}`."
+   :parent :assert-eq
+   :args {:actual {:parent :assoc-in :args {:m {:value {}} :path [{:value :a} {:value :b}] :v 1}}
+          :expected {:value {:a {:b 1}}}}}
+
+  {:name :update-in-applies-the-callable-to-the-existing-value
+   :description "`:update-in` `[:a]` with an `:existing`-free `+ 1` callable turns `{:a 1}` into `{:a 2}`."
+   :parent :assert-eq
+   :args {:actual {:parent :update-in
+                   :args {:m {:value {:a 1}}
+                          :path [{:value :a}]
+                          :f {:parent :add :args {:nums [{:as :existing} 1]}}}}
+          :expected {:value {:a 2}}}}
+
+  {:name :merge-in-fills-missing-keys-and-keeps-existing-ones
+   :description "`:merge-in` merges `:defaults` UNDER the map at `:path` — `:x` keeps its value, `:y` is filled in."
+   :parent :assert-eq
+   :args {:actual {:parent :merge-in
+                   :args {:m {:value {:a {:x 1}}}
+                          :path [{:value :a}]
+                          :defaults {:value {:x 0 :y 2}}}}
+          :expected {:value {:a {:x 1 :y 2}}}}}
+
+  {:name :range-honours-start-end-and-step
+   :description "`:range` 1 → 10 by 4 is `[1 5 9]`; 0 → 3 by 1 is `[0 1 2]`."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :range :args {:start 1 :end 10 :step 4}}
+                                  {:parent :range :args {:start 0 :end 3 :step 1}}]}}
+          :expected [[1 5 9] [0 1 2]]}}
+
+  {:name :repeat-take-drop-slice-a-list
+   :description "`:repeat` 3 × \"x\", `:take` 2 of `[1 2 3]`, `:drop` 2 of `[1 2 3]`."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :repeat :args {:count 3 :item "x"}}
+                                  {:parent :take :args {:count 2 :coll [1 2 3]}}
+                                  {:parent :drop :args {:count 2 :coll [1 2 3]}}]}}
+          :expected [["x" "x" "x"] [1 2] [3]]}}
+
+  {:name :reverse-sort-distinct-reshape-a-list
+   :description "`:reverse` `[1 2 3]`, `:sort` `[3 1 2]`, `:distinct` `[1 1 2 1]`."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :reverse :args {:coll [1 2 3]}}
+                                  {:parent :sort :args {:coll [3 1 2]}}
+                                  {:parent :distinct :args {:coll [1 1 2 1]}}]}}
+          :expected [[3 2 1] [1 2 3] [1 2]]}}
+
+  {:name :concat-and-flatten-join-nested-lists
+   :description "`:concat` of `[[1] [2 3]]` is `[1 2 3]`; `:flatten` of `[[1 [2]] 3]` is the same."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :concat :args {:colls [[1] [2 3]]}}
+                                  {:parent :flatten :args {:coll [[1 [2]] 3]}}]}}
+          :expected [[1 2 3] [1 2 3]]}}
+
+  {:name :vec-is-idempotent-on-a-vector
+   :description "`:vec` of `[1 2]` is `[1 2]`."
+   :parent :assert-eq
+   :args {:actual {:parent :vec :args {:coll [1 2]}}
+          :expected [1 2]}}
+
+  {:name :stringify-map-keys-turns-keyword-keys-into-strings
+   :description "`:stringify-map-keys` of `{:a 1}` is readable under the string key `\"a\"` and no longer under `:a`."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :get :args {:coll {:parent :stringify-map-keys :args {:m {:value {:a 1}}}} :key "a" :default nil}}
+                                  {:parent :get :args {:coll {:parent :stringify-map-keys :args {:m {:value {:a 1}}}} :key {:value :a} :default nil}}]}}
+          :expected [1 nil]}}
+
+  {:name :select-keys-keeps-only-the-named-keys
+   :description "`:select-keys` `[:a]` from `{:a 1 :b 2}` is `{:a 1}`."
+   :parent :assert-eq
+   :args {:actual {:parent :select-keys :args {:m {:value {:a 1 :b 2}} :ks [{:value :a}]}}
+          :expected {:value {:a 1}}}}
+
+  {:name :update-vals-transforms-every-value
+   :description "`:update-vals` with `+ 10` turns `{:a 1 :b 2}` into `{:a 11 :b 12}`."
+   :parent :assert-eq
+   :args {:actual {:parent :update-vals
+                   :args {:m {:value {:a 1 :b 2}}
+                          :f {:parent :add :args {:nums [{:as :value} 10]}}}}
+          :expected {:value {:a 11 :b 12}}}}
+
+  {:name :update-keys-transforms-every-key
+   :description "`:update-keys` with `:keyword-to-str` makes `{:a 1}` readable under `\"a\"`."
+   :parent :assert-eq
+   :args {:actual {:parent :get
+                   :args {:coll {:parent :update-keys
+                                 :args {:m {:value {:a 1}}
+                                        :f {:parent :keyword-to-str :args {:keyword {:as :value}}}}}
+                          :key "a"
+                          :default nil}}
+          :expected 1}}
+
+  {:name :postwalk-rewrites-every-nested-form
+   :description "`:postwalk` replacing every 1 with 100 reaches inside nested vectors: `[1 [1 2]]` → `[100 [100 2]]`."
+   :parent :assert-eq
+   :args {:actual {:parent :postwalk
+                   :args {:f {:parent :if
+                              :args {:test {:parent :equal? :args {:a {:as :value} :b 1}}
+                                     :then 100
+                                     :else {:as :value}}}
+                          :coll [1 [1 2]]}}
+          :expected [100 [100 2]]}}
+
+  {:name :position-in-is-the-index-of-the-first-occurrence-or-nil
+   :description "`:position-in` — `:b` in `[:a :b :c :b]` is 1; a missing value is nil."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :position-in :args {:coll {:value [:a :b :c :b]} :value {:value :b}}}
+                                  {:parent :position-in :args {:coll {:value [:a :b]} :value {:value :zz}}}]}}
+          :expected [1 nil]}}
+
+  ;; --- core.strings ----------------------------------------------------
+
+  {:name :str-stringifies-and-concatenates-parts
+   :description "`:str` over `[\"a\" 1 nil :k]` is `\"a1:k\"` — nil renders empty, keywords keep the colon."
+   :parent :assert-eq
+   :args {:actual {:parent :str :args {:parts ["a" 1 nil {:value :k}]}}
+          :expected "a1:k"}}
+
+  {:name :subs-end-is-exclusive
+   :description "`:subs` `\"hello\"` 1 3 is `\"el\"` — end exclusive; taking to the string's length gives `\"ello\"`. The impl's nil-`:end` arity is NOT pinned here: `:end` is an optional `:int` slot, so a graph test can neither leave it unbound (the runner reports `not-runnable`) nor bind nil (a type error at sync time). `graphden.packages.core.strings-test` covers that arity."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :subs :args {:string "hello" :start 1 :end 3}}
+                                  {:parent :subs :args {:string "hello" :start 1 :end 5}}]}}
+          :expected ["el" "ello"]}}
+
+  {:name :str-len-counts-chars-and-byte-len-counts-utf8-bytes
+   :description "`\"héllo\"` is 5 chars but 6 UTF-8 bytes."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :str-len :args {:string "héllo"}}
+                                  {:parent :byte-len :args {:string "héllo"}}]}}
+          :expected [5 6]}}
+
+  {:name :str-clip-truncates-long-and-keeps-short-input
+   :description "`:str-clip` limit 3 — `\"abcdef\"` → `\"abc\"`, `\"ab\"` stays `\"ab\"` (never throws)."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :str-clip :args {:string "abcdef" :limit 3}}
+                                  {:parent :str-clip :args {:string "ab" :limit 3}}]}}
+          :expected ["abc" "ab"]}}
+
+  {:name :str-upper-lower-trim-normalise-text
+   :description "`:str-upper` / `:str-lower` / `:str-trim` over `\"  Ab  \"`."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :str-upper :args {:string "  Ab  "}}
+                                  {:parent :str-lower :args {:string "  Ab  "}}
+                                  {:parent :str-trim :args {:string "  Ab  "}}]}}
+          :expected ["  AB  " "  ab  " "Ab"]}}
+
+  {:name :str-split-honours-the-part-limit
+   :description "`:str-split` `\"k=v=w\"` on `=` with limit 2 keeps the trailing `=` in the value; without a limit it splits fully."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :str-split :args {:string "k=v=w" :separator "=" :limit 2}}
+                                  {:parent :str-split :args {:string "k=v=w" :separator "="}}]}}
+          :expected [["k" "v=w"] ["k" "v" "w"]]}}
+
+  {:name :str-join-stringifies-items-and-joins-with-the-separator
+   :description "`:str-join` of `[1 \"a\"]` with `-` is `\"1-a\"`; an empty separator concatenates."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :str-join :args {:coll [1 "a"] :separator "-"}}
+                                  {:parent :str-join :args {:coll ["a" "b"] :separator ""}}]}}
+          :expected ["1-a" "ab"]}}
+
+  {:name :keyword-and-string-convert-both-ways
+   :description "`:str-to-keyword` `\"foo\"` is `:foo`; `:keyword-to-str` and `:name` give `\"foo\"` back; `:to-str` keeps the colon."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :str-to-keyword :args {:string "foo"}}
+                                  {:parent :keyword-to-str :args {:keyword {:value :foo}}}
+                                  {:parent :name :args {:value {:value :foo}}}
+                                  {:parent :to-str :args {:value {:value :foo}}}]}}
+          :expected {:value [:foo "foo" "foo" ":foo"]}}}
+
+  {:name :str-to-keyword-of-nil-is-nil
+   :description "`:str-to-keyword` is nil-safe."
+   :parent :assert
+   :args {:value {:parent :nil? :args {:value {:parent :str-to-keyword :args {:string nil}}}}}}
+
+  {:name :pr-str-quotes-and-to-str-does-not
+   :description "`:pr-str` of `\"x\"` is `\"\\\"x\\\"\"`; `:to-str` of nil is the empty string."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :pr-str :args {:value "x"}}
+                                  {:parent :to-str :args {:value nil}}]}}
+          :expected ["\"x\"" ""]}}
+
+  {:name :parse-query-string-splits-decodes-and-keeps-equals-in-values
+   :description "`\"a=1&b=2%203&c=x=y\"` parses so that `b` is `\"2 3\"` and `c` keeps its inner `=`; a blank string parses to nil."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :get :args {:coll {:parent :parse-query-string :args {:string "a=1&b=2%203&c=x=y"}} :key "b" :default nil}}
+                                  {:parent :get :args {:coll {:parent :parse-query-string :args {:string "a=1&b=2%203&c=x=y"}} :key "c" :default nil}}
+                                  {:parent :parse-query-string :args {:string ""}}]}}
+          :expected ["2 3" "x=y" nil]}}
+
+  {:name :blank?-and-non-blank?-are-complements-on-whitespace
+   :description "`:blank?` of `\"  \"` is true and `:non-blank?` of `\"x\"` is true."
+   :parent :assert
+   :args {:value {:parent :and
+                  :args {:values [{:parent :blank? :args {:string "  "}}
+                                  {:parent :non-blank? :args {:string "x"}}]}}}}
+
+  {:name :url-encode-and-decode-round-trip
+   :description "`:url-encode` `\"a b&c\"` is `\"a+b%26c\"` and `:url-decode` of that is the original."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :url-encode :args {:string "a b&c"}}
+                                  {:parent :url-decode :args {:string {:parent :url-encode :args {:string "a b&c"}}}}]}}
+          :expected ["a+b%26c" "a b&c"]}}
+
+  {:name :str-contains?-and-str-starts-with?-are-nil-safe
+   :description "Both predicates hold on a real match and are false for a nil `:string`."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :str-contains? :args {:string "hello" :substring "ell"}}
+                                  {:parent :str-contains? :args {:string nil :substring "ell"}}
+                                  {:parent :str-starts-with? :args {:string "hello" :prefix "he"}}
+                                  {:parent :str-starts-with? :args {:string nil :prefix "he"}}]}}
+          :expected [true false true false]}}
+
+  {:name :str-replace-is-literal-and-re-replace-is-a-regex
+   :description "`:str-replace` treats `.` literally (`\"a.b\"` → `\"a-b\"`); `:re-replace` `\\d+` → `#` rewrites every digit run and honours `$1`."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :str-replace :args {:string "a.b" :match "." :replacement "-"}}
+                                  {:parent :re-replace :args {:string "a1b22" :pattern "\\d+" :replacement "#"}}
+                                  {:parent :re-replace :args {:string "key=val" :pattern "(\\w+)=(\\w+)" :replacement "$2=$1"}}]}}
+          :expected ["a-b" "a#b#" "val=key"]}}
+
+  {:name :re-find?-matches-anywhere-and-is-false-for-nil
+   :description "`:re-find?` `\\d+` is true inside `\"abc123\"`, false for `\"abc\"` and for nil."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :re-find? :args {:string "abc123" :pattern "\\d+"}}
+                                  {:parent :re-find? :args {:string "abc" :pattern "\\d+"}}
+                                  {:parent :re-find? :args {:string nil :pattern "\\d+"}}]}}
+          :expected [true false false]}}
+
+  ;; --- core.system (pure subset) ----------------------------------------
+
+  {:name :to-json-string-and-parse-json-round-trip
+   :description "`{:a [1 \"x\"]}` serialises to `{\"a\":[1,\"x\"]}` and parses back keywordized."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :to-json-string :args {:data {:value {:a [1 "x"]}}}}
+                                  {:parent :parse-json :args {:string "{\"a\":[1,\"x\"]}" :keywordize true}}]}}
+          :expected {:value ["{\"a\":[1,\"x\"]}" {:a [1 "x"]}]}}}
+
+  {:name :parse-json-keeps-string-keys-when-keywordize-is-off
+   :description "`:parse-json` with `:keywordize false` leaves `\"a\"` a string key."
+   :parent :assert-eq
+   :args {:actual {:parent :get :args {:coll {:parent :parse-json :args {:string "{\"a\":1}" :keywordize false}} :key "a" :default nil}}
+          :expected 1}}
+
+  {:name :parse-edn-reads-a-value-and-nil-on-garbage
+   :description "`:parse-edn` of `\"[1 :k]\"` is `[1 :k]`; unparseable text is nil."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :parse-edn :args {:string "[1 :k]"}}
+                                  {:parent :parse-edn :args {:string "[1 :k"}}]}}
+          :expected {:value [[1 :k] nil]}}}
+
+  {:name :parse-int-reads-signed-decimal-text
+   :description "`:parse-int` `\"-42\"` is -42."
+   :parent :assert-eq
+   :args {:actual {:parent :parse-int :args {:s "-42"}}
+          :expected -42}}
+
+  {:name :parse-int-throws-on-malformed-text
+   :description "`:parse-int` of `\"4x\"` throws (a NumberFormatException — no ex-data, so the thrown type reads nil) rather than returning a partial parse."
+   :parent :assert-eq
+   :args {:actual {:parent :try
+                   :args {:body {:parent :throwable-class-name :args {:ex {:parent :parse-int :args {:s "4x"}}}}
+                          :on-throw {:parent :throwable-class-name :args {:ex {:as :exception}}}}}
+          :expected "java.lang.NumberFormatException"}}
+
+  {:name :sha256-hex-and-digest-hex-match-the-known-vectors
+   :description "SHA-256 of `\"abc\"` and MD5 of `\"abc\"` equal the published test vectors."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :sha256-hex :args {:s "abc"}}
+                                  {:parent :digest-hex :args {:algorithm "MD5" :s "abc"}}]}}
+          :expected ["ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+                     "900150983cd24fb0d6963f7d28e17f72"]}}
+
+  {:name :parse-uuid-round-trips-a-valid-uuid-and-nils-garbage
+   :description "`:parse-uuid` of a canonical uuid string prints back identically; a malformed string parses to nil."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :to-str :args {:value {:parent :parse-uuid :args {:string "123e4567-e89b-12d3-a456-426614174000"}}}}
+                                  {:parent :parse-uuid :args {:string "not-a-uuid"}}]}}
+          :expected ["123e4567-e89b-12d3-a456-426614174000" nil]}}
+
+  {:name :throwable-accessors-read-an-ex-info
+   :description "`:throwable-message`, `:throwable-class-name` and `:ex-data` over an `:ex-info` value."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :throwable-message :args {:ex :_ct-boom}}
+                                  {:parent :throwable-class-name :args {:ex :_ct-boom}}
+                                  {:parent :ex-data :args {:ex :_ct-boom}}]}}
+          :expected {:value ["boom" "clojure.lang.ExceptionInfo" {:type :core.tests/boom}]}}}
+
+  {:name :try-returns-the-body-result-when-nothing-throws
+   :description "`:try` whose body succeeds returns the body's value; `:on-throw` is not consulted."
+   :parent :assert-eq
+   :args {:actual {:parent :try
+                   :args {:body {:parent :add :args {:nums [1 2]}}
+                          :on-throw :_ct-thrown-type}}
+          :expected 3}}
+
+  {:name :try-hands-the-thrown-exception-to-on-throw
+   :description "`:try` whose body throws returns `:on-throw`'s result — here the ex-data `:type` of the raised `:_ct-boom`."
+   :parent :assert-eq
+   :args {:actual {:parent :try
+                   :args {:body :_ct-throw-boom
+                          :on-throw :_ct-thrown-type}}
+          :expected {:value :core.tests/boom}}}
+
+  {:name :call-invokes-a-fn-graph-with-one-argument
+   :description "`:call` wraps a `:item`-free doubling fn-graph and applies it to 21."
+   :parent :assert-eq
+   :args {:actual {:parent :call
+                   :args {:func {:parent :mul :args {:nums [{:as :item} 2]}}
+                          :arg 21}}
+          :expected 42}}
+
+  {:name :make-handler-answers-every-request-with-its-response
+   :description "`:make-handler` is a Ring-shaped constant — called with any request it returns `:response`."
+   :parent :assert-eq
+   :args {:actual {:parent :call
+                   :args {:func {:parent :make-handler :args {:response "fixed"}}
+                          :arg {:value {:uri "/x"}}}}
+          :expected "fixed"}}
+
+  {:name :ring-bytes-response-assembles-status-headers-and-body
+   :description "`:ring-bytes-response` builds the `{:status :headers :body}` record with the body stored verbatim."
+   :parent :assert-eq
+   :args {:actual {:parent :ring-bytes-response
+                   :args {:status 204 :headers {:value {}} :body "raw"}}
+          :expected {:value {:status 204 :headers {} :body "raw"}}}}
+
+  {:name :render-prometheus-flattens-nested-numeric-leaves
+   :description "`:render-prometheus` — one `graphden_<path> <n>` line per numeric leaf, nested keys joined with `_`, non-numeric leaves dropped."
+   :parent :assert-eq
+   :args {:actual {:parent :render-prometheus
+                   :args {:m {:value {:hits 1 :pool {:size 2.5 :name "x"}}} :default nil}}
+          :expected "graphden_hits 1\ngraphden_pool_size 2.5"}}
+
+  {:name :render-prometheus-sanitises-metric-keys
+   :description "A key with a dash and a `?` renders as `[a-z0-9_]` only — `:full-clears?` → `graphden_full_clears_`."
+   :parent :assert-eq
+   :args {:actual {:parent :render-prometheus :args {:m {:value {:full-clears? 3}} :default nil}}
+          :expected "graphden_full_clears_ 3"}}
+
+  {:name :hub-configured?-is-a-boolean
+   :description "`:hub-configured?` reads a deployment setting — its value is per-instance, but it is always a boolean."
+   :parent :assert
+   :args {:value {:parent :is-a? :args {:value :hub-configured? :type {:value :bool}}}}}
+
+  ;; --- core.variants ----------------------------------------------------
+
+  {:name :variant-tag-and-value-read-a-tagged-map
+   :description "`:variant-tag` / `:variant-value` over `{:tag :ok :value 1}`."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :variant-tag :args {:coll {:value {:tag :ok :value 1}} :default nil}}
+                                  {:parent :variant-value :args {:coll {:value {:tag :ok :value 1}} :default nil}}]}}
+          :expected {:value [:ok 1]}}}
+
+  {:name :variant-is?-discriminates-on-the-tag
+   :description "`:variant-is?` is true for the matching tag and false otherwise."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :variant-is? :args {:coll {:value {:tag :ok :value 1}} :tag {:value :ok} :default nil}}
+                                  {:parent :variant-is? :args {:coll {:value {:tag :ok :value 1}} :tag {:value :err} :default nil}}]}}
+          :expected [true false]}}
+
+  ;; --- core.refinements (runtime narrowers) ----------------------------
+
+  {:name :ensure-url-returns-an-http-url-unchanged
+   :description "`:ensure-url` passes an `https://` string through as-is."
+   :parent :assert-eq
+   :args {:actual {:parent :ensure-url :args {:value "https://example.org/x"}}
+          :expected "https://example.org/x"}}
+
+  {:name :ensure-url-rejects-a-non-http-scheme
+   :description "`:ensure-url` of `\"ftp://x\"` throws `:refinement/violated`."
+   :parent :assert-eq
+   :args {:actual {:parent :try
+                   :args {:body {:parent :ensure-url :args {:value "ftp://x"}}
+                          :on-throw :_ct-thrown-type}}
+          :expected {:value :refinement/violated}}}
+
+  {:name :ensure-non-empty-text-passes-text-and-rejects-empty
+   :description "`:ensure-non-empty-text` returns `\"x\"` unchanged and throws `:refinement/violated` for `\"\"`."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :ensure-non-empty-text :args {:value {:parent :const :return-type :any :return-type-wide? true :args {:value "x"}}}}
+                                  {:parent :try
+                                   :args {:body {:parent :ensure-non-empty-text :args {:value {:parent :const :return-type :any :return-type-wide? true :args {:value ""}}}}
+                                          :on-throw :_ct-thrown-type}}]}}
+          :expected {:value ["x" :refinement/violated]}}}
+
+  {:name :ensure-positive-int-names-the-violated-constraint
+   :description "`:ensure-positive-int` of 0 throws with `:refine-name :positive-int` and the `[:> 0]` constraint in the error data."
+   :parent :assert-eq
+   :args {:actual {:parent :try
+                   :args {:body {:parent :ensure-positive-int :args {:value {:parent :const :return-type :any :return-type-wide? true :args {:value 0}}}}
+                          :on-throw {:parent :select-keys
+                                     :args {:m {:parent :ex-data :args {:ex {:as :exception}}}
+                                            :ks [{:value :refine-name} {:value :constraint} {:value :value}]}}}}
+          :expected {:value {:refine-name :positive-int :constraint [:> 0] :value 0}}}}
+
+  ;; --- core.recursion ---------------------------------------------------
+  ;; Factorial as a `:fix` worklist: state `{:n :acc}`, one multiplication
+  ;; per step, base case at n ≤ 1. The same idiom `:render-prometheus`
+  ;; and the registry's install loop use.
+
+  {:name :_fact-n
+   :parent :get :args {:coll {:as :input} :key {:value :n} :default nil}}
+  {:name :_fact-acc
+   :parent :get :args {:coll {:as :input} :key {:value :acc} :default nil}}
+  {:name :_fact-next
+   :description "The next state — `n - 1`, `acc * n`."
+   :parent :zipmap
+   :args {:keys [{:value :n} {:value :acc}]
+          :vals [{:parent :sub :args {:nums [{:ref :_fact-n :type :int} 1]}}
+                 {:parent :mul :args {:nums [{:ref :_fact-acc :type :int} {:ref :_fact-n :type :int}]}}]}}
+  {:name :_fact-step
+   :description "One step: at `n ≤ 1` return the accumulator, else re-enter with the next state."
+   :parent :if
+   :args {:test {:parent :lte :args {:nums [{:ref :_fact-n :type :int} 1]}}
+          :then :_fact-acc
+          :else {:parent :invoke :args {:func {:as :self} :arg :_fact-next}}}}
+
+  {:name :fix-recurses-until-the-step-stops-calling-self
+   :description "`:fix` over the factorial step from `{:n 5 :acc 1}` is 120 — five re-entries through `:self`, then the base case."
+   :parent :assert-eq
+   :args {:actual {:parent :fix :args {:step :_fact-step :input {:value {:n 5 :acc 1}}}}
+          :expected 120}}]}

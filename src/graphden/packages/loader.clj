@@ -193,6 +193,21 @@
 (defonce ^:private eval-load-lock (Object.))
 
 
+(defn- reuse-loaded-impls?
+  "COVERAGE MODE — `-Dgraphden.impls.reuse-loaded=true` (the `:coverage`
+   deps alias, set by `bb coverage`). An impls.clj is normally `eval`ed
+   from the resource, which means cloverage never sees it: the package
+   layer (every `defbase` body) reported 0 % for as long as coverage
+   existed. Under the flag, an impls namespace that is ALREADY loaded —
+   cloverage instruments and loads it up front from the
+   `target/coverage-src` symlink tree (`scripts/coverage_src.clj`) — is
+   reused instead of re-evaluated, so the instrumented vars stay in
+   place and the executor's calls count. Off (the default) nothing
+   changes: prod and `bb test` still eval from the resource."
+  []
+  (= "true" (System/getProperty "graphden.impls.reuse-loaded")))
+
+
 (defn- load-impls-via-eval
   "Loads implementations by evaluating the impls.clj file as Clojure code.
    Returns the impls map from the namespace."
@@ -205,19 +220,26 @@
           (let [forms (read-string (str "[" content "]"))
                 ns-form (first forms)
                 ns-sym (when (and (seq? ns-form) (= 'ns (first ns-form)))
-                         (second ns-form))]
-            (when ns-sym
-              ;; Create the namespace if it doesn't exist
-              (create-ns ns-sym)
+                         (second ns-form))
+                loaded-impls (when (and ns-sym (reuse-loaded-impls?))
+                               (some-> (find-ns ns-sym) (ns-resolve 'impls)))]
+            (cond
+              ;; Coverage mode: the instrumented namespace is already here.
+              loaded-impls @loaded-impls
 
-              ;; Evaluate all forms in the namespace context
-              (binding [*ns* (the-ns ns-sym)]
-                (doseq [form forms]
-                  (eval form)))
+              ns-sym
+              (do
+                ;; Create the namespace if it doesn't exist
+                (create-ns ns-sym)
 
-              ;; Return the impls var value
-              (when-let [impls-var (ns-resolve ns-sym 'impls)]
-                @impls-var))))))))
+                ;; Evaluate all forms in the namespace context
+                (binding [*ns* (the-ns ns-sym)]
+                  (doseq [form forms]
+                    (eval form)))
+
+                ;; Return the impls var value
+                (when-let [impls-var (ns-resolve ns-sym 'impls)]
+                  @impls-var)))))))))
 
 
 (defn- load-module-impls

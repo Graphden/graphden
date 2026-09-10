@@ -105,11 +105,14 @@
 
              Bootstrap is dominated by compiled-registry build (~21s) + fn-entities
              create (~40s) + integrant init (~10s) — ~70-80s wall in practice. The
-             180 × 2s = 360s ceiling leaves margin for a cold-cache JVM warmup
+             300 × 2s = 600s ceiling leaves margin for a cold-cache JVM warmup
              without flaking on a slow host. The demo's compiled-registry boot
              (~4.7k fns) measured 186s on 2026-07-20 — the old 180s ceiling
              failed a gate whose instance came up healthy seconds later; the
-             ceiling must track the demo DB's growth, not race it."
+             ceiling must track the demo DB's growth, not race it. Raised
+             180→300 on 2026-09-11: the platform `*.tests` modules added ~360
+             fn-defs, and a FRESH-DB boot (which creates every fn entity) went
+             past 360s on a loaded dev host."
             []
             (loop [attempts 0]
               (Thread/sleep 2000)
@@ -123,11 +126,11 @@
                         (let [{:keys [exit]} (p/shell {:continue true} "bb" check gd-url)]
                           (when-not (zero? exit) (System/exit exit)))))
 
-                  (< attempts 180)
+                  (< attempts 300)
                   (do (print ".") (flush) (recur (inc attempts)))
 
                   :else
-                  (do (println (str red "✗ Server failed to start (360s timeout — check `docker logs "
+                  (do (println (str red "✗ Server failed to start (600s timeout — check `docker logs "
                                     gd-executor "`)" reset))
                       (System/exit 1))))))
 
@@ -353,6 +356,14 @@
   graph-lint
   {:doc "Graph linters over the first-party package corpus (no DB): duplicate definitions (exact and after private-helper expansion), unreferenced / unreachable private fn-defs, shadowed overrides, siblings to extract a parent from, over-deep chains. Warnings fail unless allowlisted in graphden.lint.corpus/allowed-warnings; a stale allowlist entry fails too. ~10s."
    :task (clojure "-M:dev -m graphden.lint.corpus")}
+
+  type-sweep
+  {:doc "Type-check sweep over the first-party package corpus (no DB, ~1 min) — the SAME sweep production runs at boot, with the same allowlist gate (`graphden.types.check/allowed-type-check-failures`, empty: the corpus stays at zero). Every test fixture passes `:skip-type-check? true`, so until this check existed a corpus type regression surfaced only when a real instance booted — `bb wt up`, or the gate's e2e stack, minutes in."
+   ;; -Xmx700m: the sweep peaks at ~695 MB RSS (measured 2026-09-11) and
+   ;; runs alongside every other linter in `bb ci`'s parallel wave — an
+   ;; uncapped JVM on a 12 GB dev box sizes its heap off total RAM and
+   ;; crowds the run.
+   :task (clojure "-J-Xmx700m -M:dev" "tools/type_sweep.clj")}
 
   reachability
   {:doc "Graph reachability audit over the fns.edn corpus (no DB, ~40s): every composed fn-def must be reachable from a root (routes, services, the by-name registry in tools/graph-reachability.edn, tests, docs) or be listed there as vocabulary with a reason. Unreachable = dead code; fails the check."
@@ -814,7 +825,8 @@
   test-unit-coverage
   {:doc "Unit tests with cloverage instrumentation. ~15-19 min on a dev host — the full-graph tests (packages.registry / packages.export / executor.effect-gating) recompile the whole graph under instrumentation (~50× amplification); that's also where their real coverage of the loader/compiler comes from. Same as `bb coverage`. Use this for the coverage report; `bb test-unit` for fast feedback without instrumentation."
    :task (do (assert-gate-only! "bb coverage")
-             (clojure "-M:dev:test -m kaocha.runner --config-file tests-coverage.edn :unit"))}
+             (shell "bb scripts/coverage_src.clj")
+             (clojure "-M:dev:test:coverage -m kaocha.runner --config-file tests-coverage.edn :unit"))}
 
   test-all-coverage
   {:doc "Unit-with-coverage + integration + e2e. ~41-45 min — DERIVED, not measured: ~15-19 (unit-with-coverage, itself an unverified figure from `bb coverage`'s docstring) + ~15 (integration, measured) + ~11 (e2e, measured). Coverage covers unit only; integration / e2e run un-instrumented (see `bb coverage` docstring for why instrumenting integration adds zero useful per-NS signal). e2e runs in a separate Node process so cloverage can't reach it anyway."
@@ -912,13 +924,14 @@
              (System/exit 1)))}
 
   coverage
-  {:doc "Unit-only coverage (~15-19 min wall on a dev host; 2026-08-31: 73.15% form / 84.36% line — the CURRENT watermark; a gate run landing visibly below it means unit coverage regressed and wants tests back, not a shrug — the run is dominated by the full-graph tests that recompile the whole graph under instrumentation, not by test count). Same as `bb test-unit-coverage` — kept for back-compat with scripts that already reference this name.
+  {:doc "Unit-only coverage (~15-19 min wall on a dev host; 2026-08-31: 73.15% form / 84.36% line — the CURRENT watermark, measured BEFORE the package layer joined the report on 2026-09-10 (impls.clj namespaces are mirrored into target/coverage-src by scripts/coverage_src.clj and reused, not re-evaled, under the :coverage alias — see the alias comment in deps.edn); the first post-change run sets the new watermark; a gate run landing visibly below it means unit coverage regressed and wants tests back, not a shrug — the run is dominated by the full-graph tests that recompile the whole graph under instrumentation, not by test count). Same as `bb test-unit-coverage` — kept for back-compat with scripts that already reference this name.
 
    Why unit-only: the integration suite (cron / services / secrets / storage / executor-runtime / branch-router / per-handler graph tests) doesn't add useful per-NS attribution under cloverage. Empirical 2026-06-23 finding: every CRUD NS that integration would exercise (`crud.entities`, `crud.fn-execution.*`, `crud.branches`, etc.) reports 0% form/line anyway — `cr/execute`'s pre-compiled closure cache (built by `cr/rebuild!`) holds already-resolved fn objects and never re-derefs through the instrumented vars. Confirmed identical under BOTH kaocha-cloverage AND a 2h32m sequential direct `clj -M:cloverage` audit (per-NS 0% identical). So adding integration to the cloverage pass costs ~30 min wall for ~0% useful per-NS signal; it ran via `bb test` / `bb test-integration` un-instrumented anyway. See `[[feedback_coverage_measurement]]` for the full reasoning.
 
    What the unit-only number tells you: 'do we need more UNIT tests?'. Low coverage for NSes like `system.demo-branches` (2.98%), `system.branch-router` (5.29%), `versioning.merge.core` (3.36%) here is BY DESIGN — those code paths get their gap-filling from integration tests, which we trust based on their pass/fail signal rather than cloverage attribution."
    :task (do (assert-gate-only! "bb coverage")
-             (clojure "-M:dev:test -m kaocha.runner --config-file tests-coverage.edn :unit"))}
+             (shell "bb scripts/coverage_src.clj")
+             (clojure "-M:dev:test:coverage -m kaocha.runner --config-file tests-coverage.edn :unit"))}
 
   ;; === FULL CHECK ===
 

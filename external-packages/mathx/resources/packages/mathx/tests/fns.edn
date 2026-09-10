@@ -1,0 +1,39 @@
+;; mathx.tests — the package's own in-graph tests (docs/TESTS.md § Platform
+;; tests). An EXTERNAL Type-2 package ships its self-tests the same way the
+;; first-party packages do: a `tests` namespace, `:assert-eq` over the
+;; package's fns with inputs pinned. They are discovered on any instance
+;; that loads mathx and run by graphden's `packages.platform-tests-test`
+;; anchor when the package is on the bundle under test.
+
+{:namespace "mathx.tests"
+ :description "Self-tests for the mathx package — the :gcd base-fn and the :gcd-with-12 composition."
+ :fns
+ [{:name :gcd-of-12-and-18-is-6
+   :description "Euclid on a plain pair: gcd(12, 18) = 6."
+   :parent :assert-eq
+   :args {:actual {:parent :gcd :args {:a 12 :b 18}}
+          :expected 6}}
+
+  {:name :gcd-with-zero-is-the-other-operand
+   :description "gcd(7, 0) = 7 — the loop stops on the zero remainder immediately."
+   :parent :assert-eq
+   :args {:actual {:parent :gcd :args {:a 7 :b 0}}
+          :expected 7}}
+
+  {:name :gcd-ignores-sign
+   :description "gcd(-8, 12) = 4 — operands are taken by absolute value."
+   :parent :assert-eq
+   :args {:actual {:parent :gcd :args {:a -8 :b 12}}
+          :expected 4}}
+
+  {:name :gcd-of-coprimes-is-1
+   :description "gcd(9, 28) = 1."
+   :parent :assert-eq
+   :args {:actual {:parent :gcd :args {:a 9 :b 28}}
+          :expected 1}}
+
+  {:name :gcd-with-12-seeds-a-and-leaves-b-free
+   :description "The composed fn-def: gcd-with-12 bound at b = 8 is 4."
+   :parent :assert-eq
+   :args {:actual {:parent :gcd-with-12 :args {:b 8}}
+          :expected 4}}]}

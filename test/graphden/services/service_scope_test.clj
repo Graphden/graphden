@@ -1,4 +1,4 @@
-(ns graphden.services.service-scope-test
+(ns ^:serial graphden.services.service-scope-test
   "Unit tests for the service-execution sandbox seam (`cr/run-service-scoped`
    + `cr/service-execution-scope`, task #6). The reconciler runs every
    service start through `run-service-scoped`; the tenancy addon installs a
@@ -12,7 +12,16 @@
 
    The `:future` impl is slurp+eval'd via the loader's private
    `load-module-impls`, exactly like `concurrency_test`, so the real
-   `future-fn` runs without a normal require."
+   `future-fn` runs without a normal require.
+
+   `^:serial` + the `:each` fixture below: `cr/service-execution-scope` is a
+   PROCESS-GLOBAL atom the reconciler reads on every service start. Under
+   the parallel plugin a sibling namespace's start ran while the
+   throwing seam of `seam-that-throws-propagates-fail-closed-test` was
+   installed (`reconciler-test/nil-returning-service…` failed with `bad
+   install` on the main coverage run, 2026-09-10). The fixture restores
+   whatever was installed before each test; serial keeps the window
+   from overlapping anyone else's service start."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.compile-runtime :as cr]))
@@ -28,6 +37,13 @@
           entry (:future impls)]
       (binding [*future-impl* (if (map? entry) (:impl entry) entry)]
         (f)))))
+
+
+(use-fixtures :each
+  (fn [f]
+    (let [before @cr/service-execution-scope]
+      (try (f)
+           (finally (reset! cr/service-execution-scope before))))))
 
 
 (use-fixtures :each

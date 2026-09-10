@@ -666,9 +666,14 @@ their origin branch:
       {"entity-name": "fn", "entity-id": "uuid…", "fn-name": "my-server"}
     ]
   },
+  "merged-first": [{"id": "uuid…", "name": "feature-base"}],
   "review-state-cleared": true
 }
 ```
+
+`merged-first` lists the branches the target lacked that were merged in
+before the source (a stacked or cross-base merge — see § Known gaps,
+transitive merge); `[]` for a fork off the target or a sibling.
 
 `review-state-cleared` reports stage 2b — whether the merged proposal's
 `review-state` marker was cleared. `false` means the clear was refused
@@ -701,32 +706,26 @@ panel keeps its inline 📍 badge on the same rows.
   overrides, so a tenant's same-named fns on two branches keep separate
   per-org name indexes (`per-org-rich-slice-is-branch-scoped-test`).
 
-- **Merge is one-hop (non-transitive) — and REFUSES rather than silently drops.**
-  A merge of source `S` into target `T` transfers only the versions `S` OWNS
-  (its own version rows since the last merge of `S` into `T`) — not content `S`
-  merely *inherits* from an intermediate ancestor `R` (`S.base = R`) or a branch
-  `S` itself merged, that `T` does not share. A by-reference merge (`branch-merge`
-  record) surfaces only `S`'s own rows, so that inherited content cannot be
-  carried. Rather than lose it silently, the merge is **blocked** with
-  `:merge/inherited-content-not-transferable` (409): `untransferable-inherited-
-  entities` (built on the resolved-view `diff-branches`) lists the entities that
-  would be dropped, and the merge refuses — with the remedy in the payload:
-  `:plan`, the ORDERED `[{:id :name} …]` of the branches `T` must take in first
-  (`inherited-merge-plan`, base-chain order, root-most first), which the editor
-  renders as one "Merge R first" button per step plus "Merge all in order",
-  which runs the steps and then `S` itself, stopping at the first step that
-  needs a decision. **So the workaround is a click, not a sentence: merge `R`
-  into `T`, then `S`.** The common cases never trip it —
-  a branch forked off `T`, or a sibling of `T` off a shared ancestor, shares all
-  its inherited content with `T`, so nothing is dropped. Making merge
-  *transitive* (walk the source's own ancestor/merge closure during resolution +
-  detect conflicts on inherited rows) is a deliberate larger change to the
-  resolution backbone, deferred as a future enhancement — the block makes the
-  current one-hop model SAFE in the meantime (guard added 2026-08-25).
-  (Re-merging the SAME source is also safe: a re-merge carries only the source's
-  changes SINCE the prior merge, so an unchanged re-merge cannot revert a target
-  edit made in between — `merge-candidates-from-cache`'s per-source eligible
-  window, regression-tested by `re-merge-does-not-silently-revert-target-edit`.)
+- ~~Merge is one-hop (non-transitive)~~ — **transitive since 2026-09-10.** A
+  merge record transfers only the versions the source OWNS, so a stacked /
+  cross-base / chained source (`S.base = R`, `R` edited) used to be refused
+  with `:merge/inherited-content-not-transferable` and a plan to click
+  through. `merge.core/merge-transitively!` — behind both the merge
+  handler and `safe-merge-branch!` — now runs that plan itself: the
+  branches the target lacks (`inherited-merge-plan`, root-most first) are
+  merged in first, each through the same policy gates a direct merge of
+  that branch would face (`:forbid-invalid?`, required approvals,
+  protected transfers), then the source. The response carries
+  `merged-first` (`[{id name} …]`); a step that conflicts or is refused
+  throws its own error with `:step` and `:merged-first`, the steps before
+  it stay committed, and re-running the merge with the conflict resolved
+  continues from there. The storage layer's refusal remains as the guard
+  for a caller that reaches `storage.merge/merge-branch!` directly.
+  (Re-merging the SAME source is also safe: a re-merge carries only the
+  source's changes SINCE the prior merge, so an unchanged re-merge cannot
+  revert a target edit made in between — `merge-candidates-from-cache`'s
+  per-source eligible window, regression-tested by
+  `re-merge-does-not-silently-revert-target-edit`.)
 - Per-branch ctx cache is LRU-bounded (`default-max-cached-branches` = 16,
   `evict-lru-if-full` keyed on `:last-used`); tune via the
   `GRAPHDEN_MAX_CACHED_BRANCHES` env var (read by `:exec/branch-router`

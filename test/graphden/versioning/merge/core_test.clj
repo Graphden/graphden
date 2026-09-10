@@ -577,3 +577,48 @@
       (is (empty? (sp/query-entities base :branch-comment {:source-branch-id src-id}))
           "comments cascaded with the branch")
       (sp/close storage))))
+
+
+(deftest merge-transitively-carries-inherited-content-test
+  ;; S forked off R, where R — not S — edited the binding. A plain
+  ;; `vs/merge-branch!` of S into main would drop R's change and the
+  ;; storage layer refuses it; the policy layer merges R first, gated
+  ;; the same way a direct R → main merge would be, then S.
+  (let [{:keys [storage fn-id slot-id]} (create-test-storage)
+        b (create-binding-on-current! storage fn-id slot-id "v0")
+        main (vs/current-branch-id storage)
+        r (vs/create-branch! storage "tr-R")
+        on-r (vs/switch-branch storage (:id r))
+        _ (sp/update-entity on-r :binding (:id b) {:value "vR"})
+        s2 (vs/create-branch! on-r "tr-S")
+        gated (atom [])
+        bmain #(:value (sp/read-entity (vs/switch-branch storage main) :binding (:id b)))]
+    (is (= "v0" (bmain)))
+    (testing "one call carries R's change; the gate saw R and then S"
+      (let [record (mp/merge-transitively! (vs/switch-branch storage main) (:id s2) {}
+                                           (fn [bid] (swap! gated conj bid)))]
+        (is (= [{:id (str (:id r)) :name "tr-R"}] (:merged-first record)))
+        (is (= [(:id r) (:id s2)] @gated) "every step passes the policy gate, root-most first")
+        (is (= "vR" (bmain)))))
+    (testing "a fork off the target inherits nothing the target lacks — no steps, no gate calls for others"
+      (let [f (vs/create-branch! (vs/switch-branch storage main) "tr-F")
+            _ (sp/update-entity (vs/switch-branch storage (:id f)) :binding (:id b) {:value "vF"})
+            seen (atom [])
+            record (mp/merge-transitively! (vs/switch-branch storage main) (:id f) {}
+                                           (fn [bid] (swap! seen conj bid)))]
+        (is (= [] (:merged-first record)))
+        (is (= [(:id f)] @seen))
+        (is (= "vF" (bmain)))))
+    (testing "a step the gate refuses stops the run and names the step"
+      (let [r2 (vs/create-branch! (vs/switch-branch storage main) "tr-R2")
+            _ (sp/update-entity (vs/switch-branch storage (:id r2)) :binding (:id b) {:value "vR2"})
+            s3 (vs/create-branch! (vs/switch-branch storage (:id r2)) "tr-S3")
+            ex (try (mp/merge-transitively! (vs/switch-branch storage main) (:id s3) {}
+                                            (fn [bid]
+                                              (when (= bid (:id r2))
+                                                (throw (ex-info "no" {:type :branch/approval-required})))))
+                    (catch clojure.lang.ExceptionInfo e e))]
+        (is (= :branch/approval-required (:type (ex-data ex))))
+        (is (= "tr-R2" (:name (:step (ex-data ex)))))
+        (is (= [] (:merged-first (ex-data ex))))
+        (is (= "vF" (bmain)) "nothing landed")))))

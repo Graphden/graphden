@@ -2212,7 +2212,9 @@
   {:name :merge-post-commit!
    :description "Post-commit finisher for a COMMITTED merge — delta-invalidate the TARGET branch's ctx (seeds = the merge's touched fns), restart the target's services, note the epoch. Runs on a dedicated joined thread so a client abort can't skip it (a committed but invisible merge); the thread+join+interrupt handling is the indivisible invariant, so the three steps stay one base-fn. Returns nil."
    :args {:source-branch-id {:type :uuid :description "Source branch id (seeds the affected-fn delta)."}
-          :target-branch-id {:type :uuid :description "Target branch id (whose ctx/services refresh)."}}
+          :target-branch-id {:type :uuid :description "Target branch id (whose ctx/services refresh)."}
+          :merged-first {:type [:list :keyword-map] :required false
+                         :description "The merge record's `:merged-first` — the branches merged in before the source (`merge-transitively!`); their touched fns seed the delta too."}}
    :return-type :null
    :effects #{:db}}
 
@@ -2250,7 +2252,9 @@
    :description "Stage 2 — the post-commit finisher, sequenced AFTER the commit by the `:do` (so a rejected merge invalidates nothing) and targeting the merge's TARGET ctx (correct for a cross-branch merge)."
    :parent :merge-post-commit!
    :args {:source-branch-id :_merge-source-id
-          :target-branch-id :_merge-target-id}}
+          :target-branch-id :_merge-target-id
+          :merged-first {:parent :get
+                         :args {:coll :_merge-record-committed :key {:value :merged-first} :default {:value []}}}}}
 
   ;; Stage 2b — a merged proposal is done: clear its `review-state` so it
   ;; leaves the "N proposals awaiting review" inbox (GitHub closes a merged
@@ -2357,12 +2361,17 @@
    :parent :get
    :args {:coll :_merge-apply-record :key {:value :review-state-cleared} :default {:value true}}}
 
+  {:name :_merge-apply-merged-first
+   :description "The branches merged into the target BEFORE the source on its behalf (`merge-transitively!` — a stacked / cross-base source), `[{:id :name} …]` with string ids; `[]` for a fork off the target or a sibling."
+   :parent :get
+   :args {:coll :_merge-apply-record :key {:value :merged-first} :default {:value []}}}
+
   {:name :_merge-apply-success-envelope
-   :description "Success envelope — `{:ok true :merge <record> :skipped {:branch-local […]} :review-state-cleared bool}` without the cache-invalidation side effect (which is sequenced by `:_merge-apply-success`)."
+   :description "Success envelope — `{:ok true :merge <record> :skipped {:branch-local […]} :merged-first [{:id :name} …] :review-state-cleared bool}` without the cache-invalidation side effect (which is sequenced by `:_merge-apply-success`)."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :merge} {:value :skipped} {:value :review-state-cleared}]
+   :args {:keys [{:value :ok} {:value :merge} {:value :skipped} {:value :merged-first} {:value :review-state-cleared}]
           :vals [{:value true} :_merge-apply-record-shaped :_merge-apply-skipped
-                 :_merge-apply-review-state-cleared]}}
+                 :_merge-apply-merged-first :_merge-apply-review-state-cleared]}}
 
   {:name :_merge-apply-success
    :description "Success path — `:do` forces `:_merge-apply-record` (the commit → post-commit → audit sequence; the commit THROWS on `:merge-conflict`, so the outer `:try` catches it and nothing below runs), then returns `:_merge-apply-success-envelope`. The post-commit invalidation is a graph step now (`:_merge-post-commit`); its three guarantees are preserved by construction: (a) it runs only on success — sequenced after the commit in the `:do`, (b) it targets the merge's TARGET ctx, not the request's current ctx (inside `:merge-post-commit!`), and (c) it is a DELTA seeded by the touched fns, not a full registry clear. `:do` returns the last step."

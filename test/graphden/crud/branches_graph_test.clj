@@ -556,11 +556,13 @@
       (is (string? (-> body :merge :created-at))))))
 
 
-(deftest merge-branch-inherited-content-refused-with-a-plan
-  ;; A stacked branch (S.base = R, R edited) merged into R's base is
-  ;; refused with the ORDERED remedy in the body: merge R first. The
-  ;; HTTP-level twin of core_test's
-  ;; `merge-refuses-to-silently-drop-inherited-content-test`.
+(deftest merge-branch-carries-inherited-content-transitively
+  ;; A stacked branch (S.base = R, R edited) merged into R's base lands
+  ;; R's change too: the handler merges R in first and says so in the
+  ;; body (`merged-first`). The HTTP-level twin of merge core_test's
+  ;; `merge-transitively-carries-inherited-content-test`; the storage
+  ;; guard a direct `mrg/merge-branch!` still raises is pinned by
+  ;; versioning core_test's `merge-refuses-to-silently-drop-…`.
   (let [fn-name (uniq "stack")
         fn-id (mk-fn! fn-name)
         target (mk-branch! (uniq "tgt"))
@@ -571,11 +573,14 @@
         resp (gh/via :merge-branch-handler
                      (json-req (str "/api/branches/" (:name target) "/merge")
                                {:source (:name s)}))
-        body (json-body resp)]
-    (is (= 409 (:status resp)))
-    (is (= "inherited-content-not-transferable" (:reason body)))
-    (is (= [(:name r)] (mapv :name (:plan body))) "merge R first")
-    (is (= [(:id r)] (mapv :id (:plan body))) "each step carries the id-safe ref")))
+        body (json-body resp)
+        on-target (vs/switch-branch *storage* (java.util.UUID/fromString (:id target)))]
+    (is (= 200 (:status resp)))
+    (is (true? (:ok body)))
+    (is (= [(:name r)] (mapv :name (:merged-first body))) "R was merged in first")
+    (is (= [(:id r)] (mapv :id (:merged-first body))) "each step carries the id-safe ref")
+    (is (= "edited on R" (:description (sp/read-entity on-target :fn fn-id)))
+        "R's inherited change reached the target through S's merge")))
 
 
 (deftest archive-route-folds-a-branch-away-and-back

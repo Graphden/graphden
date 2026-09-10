@@ -1246,14 +1246,6 @@ async function mergeBranchInto(sourceName, targetName, conflictResolutions, targ
     showMergeConflictsModal(body, sourceName, targetName, targetRef);
     return;
   }
-  if (body?.ok === false && body?.reason === 'inherited-content-not-transferable'
-      && Array.isArray(body.plan) && body.plan.length) {
-    // The refusal carries the remedy — the branches to merge first, in
-    // order. Offer it as clicks instead of a sentence.
-    closeBranchPopover();
-    showMergePlanModal(body, sourceName, targetName, targetRef);
-    return;
-  }
   if (!resp.ok || body?.ok === false) {
     setError(body?.error || ('HTTP ' + resp.status));
     return;
@@ -1265,6 +1257,13 @@ async function mergeBranchInto(sourceName, targetName, conflictResolutions, targ
   // them to KNOW these entries didn't propagate before the page
   // reloads. The diff's 📍 badge already showed them ahead
   // of time; this is the post-merge confirmation.
+  // A stacked / cross-base merge carries the branches the target lacked
+  // in first (server-side, `merge-transitively!`); say which ones landed.
+  const first = body?.['merged-first'] || [];
+  if (first.length > 0) {
+    alert('Merged ' + first.map((s) => s.name).join(', ') + ' into ' + targetName
+          + ' first, then ' + sourceName + ' — everything it inherited is carried.');
+  }
   const skipped = body?.skipped?.['branch-local'] || [];
   if (skipped.length > 0) {
     const names = skipped.map((s) => ':' + (s['fn-name'] || s['entity-id']))
@@ -1280,55 +1279,6 @@ async function mergeBranchInto(sourceName, targetName, conflictResolutions, targ
   location.reload();
 }
 
-
-// Merge `sources` into the target one after another — a merge plan's
-// steps and then the branch itself. One confirm up front; each step is a
-// plain POST. A severed response (the target restarting its services
-// after committing — merging into main) is waited out and the run goes
-// on; a refusal stops the run and re-enters `mergeBranchInto` for that
-// step, whose modal (conflicts, a nested plan) then shows. When every
-// step landed the page reloads onto the new resolved view.
-async function mergePlanInOrder(sources, targetName, targetRef) {
-  targetRef = targetRef || targetName;
-  if (!confirm('Merge ' + sources.map((s) => '"' + s + '"').join(', ')
-               + ' — in this order — INTO "' + targetName + '"?'
-               + (targetName === DEFAULT_BRANCH
-                  ? ' This affects main — every viewer will see these changes.'
-                  : ''))) {
-    return;
-  }
-  const errBox = document.getElementById('branch-popover-error');
-  const setError = (msg) => {
-    if (errBox) { errBox.textContent = msg; errBox.classList.remove('hidden'); }
-  };
-  for (const source of sources) {
-    let resp;
-    try {
-      resp = await window.authFetch(
-        API.api_branches_ref_merge(targetRef),
-        { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ source }) });
-    } catch (_netErr) {
-      // Committed; the target is restarting. Wait it out, then continue.
-      setError('"' + source + '" merged — ' + targetName + ' is restarting…');
-      if (!(await waitForServerBack(30000))) {
-        setError('"' + source + '" merged, but ' + targetName + ' has not come back yet — reload in a moment.');
-        return;
-      }
-      continue;
-    }
-    if (resp.status === 401) { setError('Sign in to merge'); return; }
-    const body = await resp.json().catch(() => ({}));
-    if (!resp.ok || body?.ok === false) {
-      // This step needs a decision (conflicts, its own plan) or failed —
-      // the ordinary path shows the right modal for it.
-      await mergeBranchInto(source, targetName, [], targetRef);
-      return;
-    }
-  }
-  closeBranchPopover();
-  location.reload();
-}
 
 
 // Poll /health until it answers OK or the deadline passes. Used after a
@@ -1464,90 +1414,6 @@ async function showMergeConflictsModal(body, sourceName, targetName, targetRef) 
 // Read each rendered row's `data-entity-*` + checked radio into the
 // `:conflict-resolutions` payload. The server owns the row markup, so the
 // JS↔partial contract is the two data-attrs + the radio `value`.
-// The inherited-content refusal's plan — "merge R first, then R2, then
-// yours". Client-rendered (createElement + textContent only: branch
-// names are user text) inside the conflicts modal's chrome; each step
-// is one click that runs the ordinary merge for that branch, and the
-// last step re-runs the merge the user asked for.
-function showMergePlanModal(body, sourceName, targetName, targetRef) {
-  const modal = ensureConflictsModal();
-  _conflictsTrigger = document.activeElement;
-  modal.setAttribute('aria-label', 'Merge these first');
-  modal.innerHTML = '';
-  const overlay = document.createElement('div');
-  overlay.className = 'merge-conflicts-overlay';
-  overlay.addEventListener('click', closeConflictsModal);
-  modal.appendChild(overlay);
-
-  const card = document.createElement('div');
-  card.className = 'merge-conflicts-card merge-plan-card';
-  const header = document.createElement('div');
-  header.className = 'merge-conflicts-header';
-  header.textContent = 'Merge these into "' + targetName + '" first';
-  card.appendChild(header);
-  const help = document.createElement('div');
-  help.className = 'merge-conflicts-help';
-  help.textContent = '"' + sourceName + '" shows changes it inherited from '
-    + (body.plan.length === 1 ? 'a branch' : body.plan.length + ' branches')
-    + ' the target does not share; a merge carries only a branch\'s own changes. '
-    + 'Merge the steps below in order, then "' + sourceName + '" itself.';
-  card.appendChild(help);
-
-  const steps = document.createElement('div');
-  steps.className = 'merge-conflicts-rows merge-plan-steps';
-  body.plan.forEach((step, i) => {
-    const row = document.createElement('div');
-    row.className = 'merge-plan-step';
-    row.setAttribute('data-plan-id', step.id);
-    row.setAttribute('data-plan-name', step.name);
-    const num = document.createElement('span');
-    num.className = 'merge-plan-step-num';
-    num.textContent = String(i + 1) + '.';
-    const name = document.createElement('span');
-    name.className = 'merge-plan-step-name';
-    name.textContent = step.name;
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'branch-popover-btn merge-plan-step-btn';
-    btn.textContent = 'Merge "' + step.name + '" first';
-    btn.addEventListener('click', () => {
-      closeConflictsModal();
-      mergeBranchInto(step.name, targetName, null, targetRef);
-    });
-    row.appendChild(num); row.appendChild(name); row.appendChild(btn);
-    steps.appendChild(row);
-  });
-  card.appendChild(steps);
-
-  const actions = document.createElement('div');
-  actions.className = 'merge-conflicts-actions';
-  // The whole plan in one go: every step in order, then the source itself.
-  // Stops at the first step that does not land and hands THAT step to the
-  // ordinary merge path, so its conflicts / its own plan get their modal.
-  const all = document.createElement('button');
-  all.type = 'button';
-  all.id = 'merge-plan-all';
-  all.className = 'branch-popover-btn merge-plan-all-btn';
-  all.textContent = 'Merge all in order (' + (body.plan.length + 1) + ' merges)';
-  all.addEventListener('click', () => {
-    closeConflictsModal();
-    mergePlanInOrder(body.plan.map((s) => s.name).concat([sourceName]), targetName, targetRef);
-  });
-  actions.appendChild(all);
-  const cancel = document.createElement('button');
-  cancel.type = 'button';
-  cancel.id = 'merge-plan-cancel';
-  cancel.className = 'branch-popover-btn merge-conflicts-cancel';
-  cancel.textContent = 'Cancel';
-  cancel.addEventListener('click', closeConflictsModal);
-  actions.appendChild(cancel);
-  card.appendChild(actions);
-  modal.appendChild(card);
-
-  modal.classList.remove('hidden');
-  setSiblingsInert(modal, true);
-  focusIntoDialog(modal);
-}
 
 
 async function submitConflictResolutions(sourceName, targetName, targetRef) {

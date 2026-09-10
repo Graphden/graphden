@@ -1358,17 +1358,6 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   display: flex; flex-direction: column; gap: 10px;
   font-size: 0.75rem; line-height: 1.4;
 }
-/* The inherited-content refusal's plan: one row per branch to merge
-   first, in order, each with its own button. Same chrome as the
-   conflicts modal. */
-.merge-plan-step {
-  display: flex; align-items: center; gap: 10px;
-  padding: 6px 0; border-bottom: 1px solid var(--border);
-}
-.merge-plan-step:last-child { border-bottom: none; }
-.merge-plan-step-num { font-family: var(--mono); color: var(--muted-fg); }
-.merge-plan-step-name { font-family: var(--mono); flex: 1; overflow-wrap: anywhere; }
-.merge-plan-all-btn { margin-right: auto; }
 .merge-conflicts-header {
   font-size: 0.875rem; font-weight: 600;
   border-bottom: 1px solid var(--border); padding-bottom: 6px;

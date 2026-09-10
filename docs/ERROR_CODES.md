@@ -24,7 +24,7 @@ shape, self-hosted included.
 | `:merge-protection-violation` (POST /api/branches/:ref/merge — protected-binding transfer OR the target branch's `:forbid-invalid?` policy over recorded type diagnostics) | 409 |
 | `:branch/merge-required` (a DIRECT write to a branch whose `require-merge?` is on — push-only-via-merge; merge into it instead) | 409 |
 | `:branch/approval-required` (a merge into a branch whose `required-approvals` exceeds the proposal's current valid approvals) | 409 |
-| `:merge/inherited-content-not-transferable` (POST /api/branches/:ref/merge — the source shows content inherited from a branch the target does not share; a by-reference merge carries only the source's own rows, so it would be silently lost; the body's `plan` is the ORDERED `[{id name} …]` of branches to merge into the target first, and the editor offers one click per step) | 409 |
+| `:merge/inherited-content-not-transferable` (a by-reference merge carries only the source's own rows; content the source inherits from a branch the target does not share would be lost — the storage layer refuses. Not reachable through `POST /api/branches/:ref/merge` or the editor since 2026-09-10: `merge.core/merge-transitively!` merges those branches in first, reported as `merged-first`; a failing step surfaces as that step's own error with `step` + `merged-first`) | 409 |
 | `:user/exists` | 409 |
 | `:user/invalid`, `:grant/invalid-capability`, `:domain/unverified` (tenancy control-plane) | 400 |
 | execute already-running-as-service | 409 |

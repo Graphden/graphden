@@ -666,7 +666,9 @@
    Arguments:
    - versioned-storage: VersionedStorage instance (target branch)
    - source-branch-id: Branch to merge from
-   - opts: Optional map with :conflict-resolutions
+   - opts: Optional map with :conflict-resolutions; `:inherited-checked?`
+     when the caller already ran `untransferable-inherited-entities` and
+     merged the plan (`merge.core/merge-transitively!`)
 
    conflict-resolutions is a map of {[entity-name entity-id] :source | :target}
    - :source — keep source branch version (create version record on target)
@@ -675,7 +677,7 @@
    Returns the branch-merge record."
   ([versioned-storage source-branch-id]
    (merge-branch! versioned-storage source-branch-id {}))
-  ([versioned-storage source-branch-id {:keys [conflict-resolutions]}]
+  ([versioned-storage source-branch-id {:keys [conflict-resolutions inherited-checked?]}]
    (let [base-storage (:base-storage versioned-storage)
          target-branch-id (:branch-id versioned-storage)
          ;; A branch cannot be merged into itself. `fork-point` degenerates
@@ -730,11 +732,17 @@
              ;; A by-reference merge carries only the source's OWN rows, so
              ;; content the source shows by inheritance from a branch the target
              ;; does not share would be SILENTLY dropped. Refuse rather than lose
-             ;; it — the user merges the intermediate branch into the target
-             ;; first. Empty (no-op) for the common forked-off-target / sibling
-             ;; merges; fires only on a genuine cross-base / stacked merge.
-             (let [dropped (untransferable-inherited-entities storage source-branch-id
-                                                              target-branch-id)]
+             ;; it. The policy layer (`merge.core/merge-transitively!`) merges
+             ;; the intermediate branches in first, so through the API and the
+             ;; editor this never fires; it stays as the storage-level guard
+             ;; for a caller that reaches `merge-branch!` directly. Empty
+             ;; (no-op) for the common forked-off-target / sibling merges.
+             ;; `:inherited-checked? true` — the policy layer already ran this
+             ;; check and merged the plan (`merge.core/merge-transitively!`);
+             ;; running it again here would only repeat its queries.
+             (let [dropped (when-not inherited-checked?
+                             (untransferable-inherited-entities storage source-branch-id
+                                                                target-branch-id))]
                (when (seq dropped)
                  (let [plan (inherited-merge-plan storage source-branch-id target-branch-id)]
                    (throw (ex-info

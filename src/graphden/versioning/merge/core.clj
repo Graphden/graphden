@@ -33,7 +33,9 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.traits-seed :as traits-seed]
     [graphden.types.diagnostics :as diag]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.merge :as mrg]
+    [graphden.versioning.storage.resolution :as res]))
 
 
 (defn- get-merge-protected-binding-ids
@@ -258,14 +260,73 @@
                        :target-branch-id (vs/current-branch-id versioned-storage)})))))
 
 
+(defn merge-transitively!
+  "Merge `source-branch-id` into the current branch of `versioned-storage`
+   CARRYING what the source shows by inheritance. A by-reference merge
+   surfaces only the source's OWN version rows (`storage.merge`); content
+   the source inherits from a branch the target does not share — the
+   stacked / cross-base / chained case — would be dropped, and the storage
+   layer refuses that with `:merge/inherited-content-not-transferable`.
+   This is the layer that makes the merge transitive instead: when the
+   refusal would fire, the branches the target lacks
+   (`mrg/inherited-merge-plan`, root-most first) are merged in first,
+   each through `gate!` — the policy checks a DIRECT merge of that branch
+   into the target would face (forbid-invalid, required approvals,
+   protected transfers), so a step can never bypass what the intermediate
+   branch's own merge would be held to — and then the source itself.
+
+   Returns the source's merge record with `:merged-first [{:id :name} …]`,
+   the steps that landed before it (empty for the common fork-off-target
+   and sibling merges, where nothing is inherited). A step that fails —
+   conflicts, a policy refusal — throws that step's own error with
+   `:step` and `:merged-first` added; the steps before it are committed,
+   exactly as merging the plan one click at a time would leave things,
+   and re-running the merge with the conflict resolved picks up where it
+   stopped."
+  [versioned-storage source-branch-id opts gate!]
+  ;; One merge-record memo over the check, the steps and the merge — the
+  ;; `branch_merge` rows the check reads are the ones the merge reads
+  ;; again (each landed record forgets the memo, so a step never reads
+  ;; stale rows).
+  (res/call-with-merges-memo
+    (fn []
+      (let [base (:base-storage versioned-storage)
+            target (vs/current-branch-id versioned-storage)
+            plan (when (seq (mrg/untransferable-inherited-entities base source-branch-id target))
+                   (mrg/inherited-merge-plan base source-branch-id target))
+            ;; The check ran here; the storage layer need not repeat its
+            ;; queries. Sound for the steps too: a step's own inheritance is
+            ;; inside the source's, and the plan lands root-most first.
+            opts (assoc opts :inherited-checked? true)]
+        (loop [steps plan
+               done []]
+          (if-let [{:keys [id] :as step} (first steps)]
+            (let [bid (java.util.UUID/fromString id)]
+              (try
+                (gate! bid)
+                (vs/merge-branch! versioned-storage bid opts)
+                (catch clojure.lang.ExceptionInfo e
+                  (throw (ex-info (str "While merging \"" (:name step) "\" first (step "
+                                       (inc (count done)) " of " (inc (count plan)) "): "
+                                       (ex-message e))
+                                  (assoc (ex-data e) :step step :merged-first done)
+                                  e))))
+              (recur (rest steps) (conj done step)))
+            (do
+              (gate! source-branch-id)
+              (assoc (vs/merge-branch! versioned-storage source-branch-id opts)
+                     :merged-first done))))))))
+
+
 (defn safe-merge-branch!
   ([versioned-storage source-branch-id]
    (safe-merge-branch! versioned-storage source-branch-id {}))
   ([versioned-storage source-branch-id {:keys [skip-protection-check] :as opts}]
-   (when-not skip-protection-check
-     (validate-merge! versioned-storage source-branch-id))
-   (vs/merge-branch! versioned-storage source-branch-id
-                     (dissoc opts :skip-protection-check))))
+   (merge-transitively! versioned-storage source-branch-id
+                        (dissoc opts :skip-protection-check)
+                        (fn [bid]
+                          (when-not skip-protection-check
+                            (validate-merge! versioned-storage bid))))))
 
 
 (defn has-merge-protected-trait?

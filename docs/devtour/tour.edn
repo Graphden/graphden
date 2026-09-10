@@ -422,6 +422,13 @@
            visible through resolution, copying no rows — plus any resolution
            overrides. The payoff step tying resolution and conflict detection
            together."}
+    {:ns graphden.versioning.merge.core :defn merge-transitively!
+     :say "What makes a merge transitive: the storage layer surfaces only the
+           source's OWN rows and refuses when the source inherits from a
+           branch the target lacks, so this layer merges those branches in
+           first — root-most first, each through the same policy gate a
+           direct merge would face — then the source, and reports the steps
+           as `:merged-first`. docs/VERSIONING.md § Known gaps."}
     {:ns graphden.versioning.merge.core :defn validate-approval-policy!
      :say "Merge GOVERNANCE — the code-review gate. When the target branch
            sets `:required-approvals`, a merge into it is refused

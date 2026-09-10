@@ -254,40 +254,43 @@
 
 (defbase merge-branch!
   "The atomic merge core: `vs/switch-branch` → policy check →
-   `vs/merge-branch!`. Returns the merge record on success. Throws
-   `ex-info` on `:merge-conflict` / `:merge-protection-violation`
-   (the graph `:on-throw` handler dispatches on `:ex-data → :type`).
+   `merge-transitively!` (the inherited branches the target lacks first,
+   each gated the same way, then the source). Returns the merge record
+   (+ `:merged-first`) on success. Throws `ex-info` on `:merge-conflict`
+   / `:merge-protection-violation` / `:branch/approval-required` (the
+   graph `:on-throw` handler dispatches on `:ex-data → :type`).
    The three steps share the SAME switched-to-target storage OBJECT —
    a runtime value no graph slot can carry — so they stay one
    base-fn; everything around them (post-commit invalidation, the
    `:skipped` audit) is graph composition (`:_merge-apply-record`)."
   [source-branch-id target-branch-id resolutions]
   (cr/record-effect! :db)
-  (let [t0 (System/nanoTime)
-        ms-since (fn [t] (/ (- (System/nanoTime) t) 1e6))
+  (let [ms-since (fn [t] (/ (- (System/nanoTime) t) 1e6))
         storage (vs/switch-branch (request/require-storage ctx) target-branch-id)
-        ;; Error-tolerance Phase 5 — when the TARGET branch row carries
-        ;; `:forbid-invalid?`, refuse while recorded type diagnostics
-        ;; exist on either side (throws :merge-protection-violation).
-        ;; Part of the atomic boundary: it must judge the same
-        ;; switched-to-target storage the merge itself uses.
-        _ (merge-policy/validate-branch-policy! storage source-branch-id)
-        ;; Review policy — when the TARGET requires N approvals, refuse
-        ;; unless the source has that many valid (non-stale, distinct,
-        ;; non-author-unless-allowed) approvals (throws
-        ;; :branch/approval-required). Same atomic boundary + target
-        ;; storage as the branch-policy gate above.
-        _ (merge-policy/validate-approval-policy! storage source-branch-id)
-        policy-ms (ms-since t0)
+        ;; The two policy gates, run for the source AND for every branch
+        ;; merged in first on its behalf (`merge-transitively!`):
+        ;; - error-tolerance Phase 5 — when the TARGET branch row carries
+        ;;   `:forbid-invalid?`, refuse while recorded type diagnostics
+        ;;   exist on either side (throws :merge-protection-violation);
+        ;; - review policy — when the TARGET requires N approvals, refuse
+        ;;   unless the branch has that many valid (non-stale, distinct,
+        ;;   non-author-unless-allowed) approvals (throws
+        ;;   :branch/approval-required).
+        ;; Both judge the same switched-to-target storage the merge uses.
+        gate! (fn [bid]
+                (merge-policy/validate-branch-policy! storage bid)
+                (merge-policy/validate-approval-policy! storage bid))
         t1 (System/nanoTime)
-        record (vs/merge-branch! storage source-branch-id
-                                 {:conflict-resolutions resolutions})]
+        record (merge-policy/merge-transitively! storage source-branch-id
+                                                 {:conflict-resolutions resolutions}
+                                                 gate!)]
     ;; Phase timings — the merge is the slowest write in the product
     ;; (~2 s on a 5k-fn self-host graph, ~8 s on the cloud demo) and
     ;; nothing said where the time went. Counts only, no tenant data.
     (log/info "merge commit"
               {:source source-branch-id :target target-branch-id
-               :policy-ms (long policy-ms) :merge-ms (long (ms-since t1))})
+               :merged-first (count (:merged-first record))
+               :merge-ms (long (ms-since t1))})
     record))
 
 
@@ -316,12 +319,18 @@
    cross-pod, restart the target's affected services, note the epoch bumps.
    Everything thread-hostile (dynamic router / org / bump-log state)
    is CAPTURED by the caller on the request thread and passed in."
-  [ctx router request-org merge-bumps source-branch-id target-branch-id]
+  [ctx router request-org merge-bumps source-branch-id target-branch-id merged-first-ids]
   (let [t0 (System/nanoTime)
         timings (atom {})
         lap! (fn [k t] (swap! timings assoc k (long (/ (- (System/nanoTime) t) 1e6))))
         base (branches/base-storage ctx)
-        affected (mrg/merge-affected-fn-ids base source-branch-id)
+        ;; A transitive merge landed the branches the target lacked BEFORE
+        ;; the source (`merge-transitively!`); their touched fns moved on the
+        ;; target too and must seed the same delta — seeding from the source
+        ;; alone left R's change invisible after an S-through-R merge.
+        affected (into (mrg/merge-affected-fn-ids base source-branch-id)
+                       (mapcat #(mrg/merge-affected-fn-ids base %))
+                       merged-first-ids)
         _ (lap! :affected-ms t0)]
     (archive-landed-source! base source-branch-id target-branch-id)
     (when (seq affected)
@@ -415,9 +424,10 @@
    therefore cannot be graph steps. With the branch-router this
    invalidates the merge's TARGET ctx — not the request's current ctx
    — which keeps a cross-branch merge correct. Returns nil."
-  [source-branch-id target-branch-id]
+  [source-branch-id target-branch-id merged-first]
   (cr/record-effect! :db)
   (let [merge-bumps (some-> epoch/*request-bump-log* deref seq vec)
+        merged-first-ids (into [] (keep (fn [m] (some-> (:id m) str parse-uuid))) merged-first)
         ;; Capture the router on the REQUEST thread. Like `merge-bumps`
         ;; above, `current-router` reads dynamic/per-thread state
         ;; (`*active-router-override*`) that does NOT convey to the raw
@@ -447,7 +457,7 @@
         (fn []
           (binding [br/*epoch-state-override* epoch-state]
             (run-merge-post-commit! ctx router request-org merge-bumps
-                                    source-branch-id target-branch-id)))
+                                    source-branch-id target-branch-id merged-first-ids)))
         t (Thread. ^Runnable post-commit! "merge-post-commit")]
     (Thread/.start t)
     (try

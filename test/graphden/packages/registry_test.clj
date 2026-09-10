@@ -691,17 +691,29 @@
     (exec/execute-with-named-args (:ctx *bootstrap*)
                                   (get (:all-name->id *bootstrap*) :set-package-pin)
                                   {:pkg-name "panel.upd" :pkg-version "1.0.0"})
-    (let [resp (setup/via-graph *bootstrap* :_pkg-update-panel-handler
-                                {:request-method :post
-                                 :body "name=panel.upd&version=2.0.0"
-                                 :headers {"content-type" "application/x-www-form-urlencoded"}})]
-      (is (= 200 (:status resp)))
-      (is (re-find #"data-packages-panel" (:body resp)))
-      (is (re-find #"panel\.upd" (:body resp)) "installed table still lists the package")
-      (is (re-find #"2\.0\.0" (:body resp)) "at the updated version")
-      (is (= "2.0.0" (:version (first (sp/query-entities (storage) :package-install
-                                                         {:package-name "panel.upd"}))))
-          "the pin was repointed to the target version")))
+    ;; Other tests leave their own pins on the branch; assert on THIS
+    ;; package's row.
+    (let [row-of (fn [body] (re-find #"(?s)<tr>(?:(?!</tr>).)*panel\.upd(?:(?!</tr>).)*</tr>" body))]
+      (testing "a pin behind the registry's highest version carries the update badge, prefilled into the ↑ input"
+        (let [row (row-of (:body (setup/via-graph *bootstrap* :_partial-packages-panel-handler
+                                                  {:request-method :get})))]
+          (is (re-find #"packages-update-available" row))
+          (is (re-find #"2\.0\.0 available" row))
+          (is (re-find #"name=\"version\"[^>]*value=\"2\.0\.0\"" row)
+              "the version input is prefilled with the update target")))
+      (let [resp (setup/via-graph *bootstrap* :_pkg-update-panel-handler
+                                  {:request-method :post
+                                   :body "name=panel.upd&version=2.0.0"
+                                   :headers {"content-type" "application/x-www-form-urlencoded"}})]
+        (is (= 200 (:status resp)))
+        (is (re-find #"data-packages-panel" (:body resp)))
+        (is (re-find #"panel\.upd" (:body resp)) "installed table still lists the package")
+        (is (re-find #"2\.0\.0" (:body resp)) "at the updated version")
+        (is (= "2.0.0" (:version (first (sp/query-entities (storage) :package-install
+                                                           {:package-name "panel.upd"}))))
+            "the pin was repointed to the target version")
+        (is (not (re-find #"packages-update-available" (row-of (:body resp))))
+            "at the highest version there is nothing to update to"))))
   (testing "rollback — the same handler accepts an OLDER version symmetrically"
     (let [resp (setup/via-graph *bootstrap* :_pkg-update-panel-handler
                                 {:request-method :post

@@ -93,7 +93,7 @@ async function openServicePopover(page, fnHash) {
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   // Swallow the :process rejection alert from Phase A — we never click
   // Save, but a stray click would pop one and stall the test.
   page.on('dialog', (d) => d.accept());

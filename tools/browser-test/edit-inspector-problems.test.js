@@ -51,7 +51,7 @@ const chipCount = (page, kind) => page.evaluate((k) => {
 }, kind);
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('inspector-problems — Lint Not-an-issue/Restore, Runs ✕ dismiss, Bindings diagnostics');
   try {
     await cleanup(page);

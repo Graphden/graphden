@@ -112,54 +112,68 @@
     :else v))
 
 
-(defn graph->fn-defs
-  "Rebuild every COMPOSED fn row of a graph snapshot as an EDN fn-def
-   (`:id` / `:name` / `:namespace` / `:parents` / `:args` /
-   `:return-type` / `:lambda-params` / `:expects-effects` /
-   `:branch-local?`), plus the set of base-fn / type-row names refs may
-   resolve to. `ns-rows` are the `:ns` rows the snapshot does not
-   carry."
+(defn- graph-indexes
+  "The per-fn groupings `fn-def-of` reads — built once per snapshot."
   [{:keys [fns slots fn-slots bindings list-items]} ns-rows]
-  (let [ns-path (ns-paths ns-rows)
-        fn-by-id (into {} (map (juxt :id identity)) fns)
-        slot-by-id (into {} (map (juxt :id identity)) slots)
-        items-by-binding (group-by :binding-id list-items)
-        bindings-by-fn (group-by :fn-id bindings)
-        fn-slots-by-fn (group-by :fn-id fn-slots)
-        ref (partial ref-kw fn-by-id ns-path)
-        slot-name (fn [slot-id] (some-> (get slot-by-id slot-id) :name keyword))
-        args-of (fn [row]
-                  (let [bound (into {}
-                                    (keep (fn [b]
-                                            (when-let [k (slot-name (:slot-id b))]
-                                              [k (binding-value ref (get items-by-binding (:id b)) b)])))
-                                    (get bindings-by-fn (:id row)))
-                        renames (keep (fn [fs]
-                                        (let [s (get slot-by-id (:slot-id fs))]
-                                          (when-let [src (:source-slot-id s)]
-                                            [(slot-name src) (keyword (:name s))])))
-                                      (get fn-slots-by-fn (:id row)))]
-                    (reduce (fn [m [src-name new-name]]
-                              (if src-name
-                                (update m src-name with-rename new-name)
-                                m))
-                            bound
-                            renames)))
-        fn-defs (into []
-                      (comp (filter composed-row?)
-                            (map (fn [row]
-                                   (cond-> {:id (:id row)
-                                            :name (fn-name-kw row)
-                                            :namespace (or (ns-path (:namespace-id row)) "")
-                                            :parents (into [] (keep ref) (:parent-ids row))
-                                            :args (args-of row)}
-                                     (:return-type-fn-id row) (assoc :return-type (ref (:return-type-fn-id row)))
-                                     (some? (:lambda-params row)) (assoc :lambda-params (:lambda-params row))
-                                     (some? (:expects-effects row)) (assoc :expects-effects (:expects-effects row))
-                                     (:branch-local? row) (assoc :branch-local? true)))))
-                      fns)
-        vocab (into #{} (comp (remove composed-row?) (map fn-name-kw)) fns)]
-    {:fn-defs fn-defs :base-fn-names vocab}))
+  (let [fn-by-id (into {} (map (juxt :id identity)) fns)
+        ns-path (ns-paths ns-rows)]
+    {:fn-by-id fn-by-id
+     :ns-path ns-path
+     :ref (partial ref-kw fn-by-id ns-path)
+     :slot-by-id (into {} (map (juxt :id identity)) slots)
+     :items-by-binding (group-by :binding-id list-items)
+     :bindings-by-fn (group-by :fn-id bindings)
+     :fn-slots-by-fn (group-by :fn-id fn-slots)}))
+
+
+(defn- fn-def-of
+  "One COMPOSED fn row as an EDN fn-def (`:id` / `:name` / `:namespace` /
+   `:parents` / `:args` / `:return-type` / `:lambda-params` /
+   `:expects-effects` / `:branch-local?`), every reference spelled as a
+   namespace-qualified keyword."
+  [{:keys [ns-path ref slot-by-id items-by-binding bindings-by-fn fn-slots-by-fn]} row]
+  (let [slot-name (fn [slot-id] (some-> (get slot-by-id slot-id) :name keyword))
+        bound (into {}
+                    (keep (fn [b]
+                            (when-let [k (slot-name (:slot-id b))]
+                              [k (binding-value ref (get items-by-binding (:id b)) b)])))
+                    (get bindings-by-fn (:id row)))
+        renames (keep (fn [fs]
+                        (let [s (get slot-by-id (:slot-id fs))]
+                          (when-let [src (:source-slot-id s)]
+                            [(slot-name src) (keyword (:name s))])))
+                      (get fn-slots-by-fn (:id row)))
+        args (reduce (fn [m [src-name new-name]]
+                       (if src-name
+                         (update m src-name with-rename new-name)
+                         m))
+                     bound
+                     renames)]
+    (cond-> {:id (:id row)
+             :name (fn-name-kw row)
+             :namespace (or (ns-path (:namespace-id row)) "")
+             :parents (into [] (keep ref) (:parent-ids row))
+             :args args}
+      (:return-type-fn-id row) (assoc :return-type (ref (:return-type-fn-id row)))
+      (some? (:lambda-params row)) (assoc :lambda-params (:lambda-params row))
+      (some? (:expects-effects row)) (assoc :expects-effects (:expects-effects row))
+      (:branch-local? row) (assoc :branch-local? true))))
+
+
+(defn- vocabulary
+  "The base-fn / type-row names refs may resolve to."
+  [fns]
+  (into #{} (comp (remove composed-row?) (map fn-name-kw)) fns))
+
+
+(defn graph->fn-defs
+  "Rebuild every COMPOSED fn row of a graph snapshot as an EDN fn-def,
+   plus the set of base-fn / type-row names refs may resolve to.
+   `ns-rows` are the `:ns` rows the snapshot does not carry."
+  [{:keys [fns] :as graph} ns-rows]
+  (let [ix (graph-indexes graph ns-rows)]
+    {:fn-defs (into [] (comp (filter composed-row?) (map #(fn-def-of ix %))) fns)
+     :base-fn-names (vocabulary fns)}))
 
 
 ;; -----------------------------------------------------------------------------
@@ -173,8 +187,8 @@
 
 
 (defn lint-graph
-  "Warnings over a graph snapshot. `suppress` is the set of
-   `lint/finding-key`s the author marked as not-an-issue."
+  "Warnings over a graph snapshot, from scratch. `suppress` is the set
+   of `lint/finding-key`s the author marked as not-an-issue."
   [graph ns-rows suppress]
   (let [{:keys [fn-defs base-fn-names]} (graph->fn-defs graph ns-rows)]
     (lint/warnings
@@ -184,19 +198,22 @@
 
 
 (def ^:private memo-cap
-  "Branches whose last lint result is kept — enough for the branches an
-   editor session flips between; the oldest entry goes when a new
-   branch arrives."
+  "Branches whose lint state is kept — enough for the branches an editor
+   session flips between; the oldest entry goes when a new branch
+   arrives."
   16)
 
 
 (def ^:private memo
-  "Per-branch memo for the CACHED path: branch-id → the last snapshot
-   object linted for it, the suppression set and the result. The
-   snapshot is replaced (not mutated) on every graph write, so identity
-   is the freshness check; a different suppression set recomputes. Keyed
-   per branch so two branches open side by side (or two orgs on one
-   executor) do not evict each other on every read."
+  "Per-branch lint state: branch-id → the last snapshot object linted for
+   it, the `:ns` rows, the per-fn EDN fn-defs, the engine's incremental
+   state, the suppression set and the findings. The snapshot is replaced
+   (not mutated) on every graph write, so identity is the freshness
+   check; a new snapshot is diffed against the old one row by row and
+   only the fns whose rows moved (plus their referrers) are rebuilt and
+   re-linted (`lint/lint-with-state`). Keyed per branch so two branches
+   open side by side (or two orgs on one executor) do not evict each
+   other on every read."
   (atom {}))
 
 
@@ -209,27 +226,122 @@
                     m)))))
 
 
-(defn- ns-rows
+(defn- read-ns-rows
   [ctx]
   (vec (sp/query-entities (request/require-storage ctx) :ns {})))
 
 
+(defn- rows-by-fn
+  "The rows that make up each fn — `{fn-id [fn-row fn-slot-rows binding-rows item-rows]}`
+   — so two snapshots can be compared per fn by row identity."
+  [{:keys [fns fn-slots bindings list-items]}]
+  (let [fs (group-by :fn-id fn-slots)
+        bs (group-by :fn-id bindings)
+        items (group-by :binding-id list-items)]
+    (into {}
+          (map (fn [row]
+                 [(:id row)
+                  [row
+                   (get fs (:id row))
+                   (get bs (:id row))
+                   (mapcat #(get items (:id %)) (get bs (:id row)))]]))
+          fns)))
+
+
+(defn- same-rows?
+  "Row-for-row identity: a write splices FRESH row objects for the fns it
+   touched and keeps every other object, so identity is the cheap and
+   exact 'did this fn's rows move' check."
+  [[fn-a slots-a binds-a items-a] [fn-b slots-b binds-b items-b]]
+  (and (identical? fn-a fn-b)
+       (= (count slots-a) (count slots-b)) (every? true? (map identical? slots-a slots-b))
+       (= (count binds-a) (count binds-b)) (every? true? (map identical? binds-a binds-b))
+       (= (count items-a) (count items-b)) (every? true? (map identical? items-a items-b))))
+
+
+(defn changed-fn-ids
+  "The fn ids whose rows differ between two snapshots' `rows-by-fn`
+   maps — moved, created or deleted."
+  [old new]
+  (set (concat (keep (fn [[id rows]] (when-not (same-rows? rows (get old id)) id)) new)
+               (remove #(contains? new %) (keys old)))))
+
+
+(defn- full-state
+  "Lint a snapshot from scratch — the first read of a branch, or a
+   namespace change (every fn-def's dotted path may have moved)."
+  [graph ns-rows suppress]
+  (let [ix (graph-indexes graph ns-rows)
+        fn-defs (into {} (comp (filter composed-row?) (map (fn [row] [(:id row) (fn-def-of ix row)]))) (:fns graph))
+        {:keys [findings state]} (lint/lint-with-state
+                                   (vals fn-defs)
+                                   {:base-fn-names (vocabulary (:fns graph))
+                                    :platform-fn? platform-fn?
+                                    :suppress suppress}
+                                   (lint/empty-state)
+                                   :all)]
+    {:graph graph :ns-rows ns-rows :rows (rows-by-fn graph) :fn-defs fn-defs
+     :lint-state state :suppress suppress :findings findings}))
+
+
+(defn- delta-state
+  "Re-lint after a write: rebuild the EDN of the fns whose rows moved and
+   of the fns that reference them (a renamed target changes the referrer's
+   spelling), hand the engine those keys as changed."
+  [prev graph suppress]
+  (let [ix (graph-indexes graph (:ns-rows prev))
+        rows (rows-by-fn graph)
+        moved (changed-fn-ids (:rows prev) rows)
+        key-of lint/fn-key
+        old-keys (into {} (map (fn [[id fd]] [id (key-of fd)])) (:fn-defs prev))
+        refs-of (lint/referrers (:refs (:lint-state prev)))
+        moved-keys (into #{} (keep old-keys) moved)
+        rebuild (into moved
+                      (comp (mapcat #(get refs-of %))
+                            (keep (fn [k] (some (fn [[id kk]] (when (= kk k) id)) old-keys))))
+                      moved-keys)
+        fn-by-id (:fn-by-id ix)
+        fn-defs (reduce (fn [m id]
+                          (let [row (get fn-by-id id)]
+                            (if (and row (composed-row? row))
+                              (assoc m id (fn-def-of ix row))
+                              (dissoc m id))))
+                        (:fn-defs prev)
+                        rebuild)
+        changed (set (concat (keep old-keys rebuild)
+                             (keep (fn [id] (some-> (get fn-defs id) key-of)) rebuild)))
+        {:keys [findings state]} (lint/lint-with-state
+                                   (vals fn-defs)
+                                   {:base-fn-names (vocabulary (:fns graph))
+                                    :platform-fn? platform-fn?
+                                    :suppress suppress}
+                                   (:lint-state prev)
+                                   changed)]
+    {:graph graph :ns-rows (:ns-rows prev) :rows rows :fn-defs fn-defs
+     :lint-state state :suppress suppress :findings findings}))
+
+
 (defn lint-branch
   "The current branch's lint warnings over the per-ctx graph snapshot
-   (`cached-or-load-graph`), recomputed only when the branch's snapshot
-   object or the suppression set changed. The snapshot is what every
-   reader sees: writes splice it inline and a load-on-miss that a write
-   outran is discarded (`executor.context/fill-graph-cache!`), so a read
-   right after an edit is the post-edit graph — no storage bypass
-   needed."
+   (`cached-or-load-graph`). Answered from the branch's memo when the
+   snapshot object and the suppression set are unchanged; after a write
+   only the fns whose rows moved, and their referrers, are rebuilt and
+   re-linted; a namespace change or a first read lints from scratch. The
+   snapshot is what every reader sees: writes splice it inline and a
+   load-on-miss that a write outran is discarded
+   (`executor.context/fill-graph-cache!`), so a read right after an edit
+   is the post-edit graph — no storage bypass needed."
   [ctx suppress]
   (let [suppress (set suppress)
         storage (request/require-storage ctx)
         graph (types-api/cached-or-load-graph ctx)
         branch-id (vcore/current-branch-id storage)
-        hit (get @memo branch-id)]
-    (if (and hit (identical? (:graph hit) graph) (= (:suppress hit) suppress))
-      (:findings hit)
-      (let [findings (lint-graph graph (ns-rows ctx) suppress)]
-        (remember! branch-id {:graph graph :suppress suppress :findings findings})
-        findings))))
+        prev (get @memo branch-id)]
+    (if (and prev (identical? (:graph prev) graph) (= (:suppress prev) suppress))
+      (lint/warnings (:findings prev))
+      (let [nss (read-ns-rows ctx)
+            entry (if (and prev (= (:ns-rows prev) nss))
+                    (delta-state prev graph suppress)
+                    (full-state graph nss suppress))]
+        (remember! branch-id entry)
+        (lint/warnings (:findings entry))))))

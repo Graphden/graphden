@@ -31,7 +31,7 @@ async function openRuns(page, name) {
 }
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => d.accept());
   console.log('edit-run-trap — the catch-next-request trap on a service fn\'s Runs tab');
   try {

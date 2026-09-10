@@ -19,8 +19,9 @@
 
 ;; Helper: tiny graph builders so the assertions read like prose.
 (defn- ->graph
-  [fns bindings list-items]
-  {:fns fns :bindings bindings :list-items list-items})
+  ([fns bindings list-items] (->graph fns bindings list-items [] []))
+  ([fns bindings list-items slots fn-slots]
+   {:fns fns :bindings bindings :list-items list-items :slots slots :fn-slots fn-slots}))
 
 
 (deftest forward-deps-edge-sources-test
@@ -50,6 +51,16 @@
           edges (deps/forward-deps-of ME (deps/index-graph graph))]
       (is (= #{PARENT BASE ELEMENT RETURN REF OVER ITEM RESOLVE} edges)
           "edge contributions: parent-ids + base/element/return + ref-fn-id (binding) + type-override + resolver-fn-id + ref-fn-id (item)")))
+
+  (testing "the declared type of an exposed slot is an edge — a type-row edit reaches the fns whose slots carry it"
+    (let [ME #uuid "00000000-0000-0000-0000-00000000000a"
+          SLOT #uuid "00000000-0000-0000-0000-000000000010"
+          TYPE #uuid "00000000-0000-0000-0000-000000000011"
+          graph (->graph [{:id ME :parent-ids []}] [] []
+                         [{:id SLOT :name "x" :type-fn-id TYPE}]
+                         [{:fn-id ME :slot-id SLOT :position 0}])]
+      (is (= #{TYPE} (deps/forward-deps-of ME (deps/index-graph graph))))
+      (is (= #{ME} (get (deps/build-reverse-deps graph) TYPE)))))
 
   (testing "nil edge sources are dropped"
     (let [ME #uuid "00000000-0000-0000-0000-00000000000a"

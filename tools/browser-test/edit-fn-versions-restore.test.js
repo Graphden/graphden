@@ -45,7 +45,7 @@ async function putDescription(page, fnId, desc) {
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   // No global dialog handler — restoreFnVersion's confirm() is awaited
   // explicitly via page.waitForEvent('dialog') below.
   console.log('edit-fn-versions-restore — ⌛ popover Restore on historic version');

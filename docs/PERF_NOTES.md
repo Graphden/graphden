@@ -101,13 +101,16 @@ fns.
 
 Where that leaves the two audiences:
 
-- **Production:** the 17 full-clears are the only real target, and each
+- **Production:** the full-clears are the only real target, and each
   is worth real money — measured at 4137 fns (2026-07), the next request
-  after one took ~49.8 s; a cold compile is ~5 s at 6.5k fns today. Finding *which* call sites they are needs a per-caller
-  breakdown; `affected-fn-ids` covers every entity type today, so they
-  are coming from somewhere else (a write whose `entity-data` lacked an
-  `:id`, or one of the direct 1-arity callers in `system/init/services`,
-  `branch_router`, `context`). Not yet done.
+  after one took ~49.8 s; a cold compile is ~5 s at 6.5k fns today.
+  Since 2026-09-10 every full clear is ATTRIBUTED: `:registry/
+  invalidate-full`'s note (`bb perf` prints notes under a breached
+  budget; `perf/runs/unit.edn` carries them) counts the graphden call
+  frames that asked for it and, for the CRUD path, the write shape
+  (`[entity-type keys]` — `crud.entities/invalidate!` passes it as the
+  third argument of `invalidate-graph-cache!`). See § 2026-09-10 below
+  for the breakdown that produced and what it fixed.
 - **The test suite:** ~129 cold compiles is inherent to per-NS ctx
   isolation. Sharing a compiled registry the way the golden DB is shared
   would be the lever, and it is a fixture-architecture change, not a
@@ -281,3 +284,28 @@ Smoke + e2e regression checked after ship: no measurable
 slowdown on any of the 11 smoke checks or the 51 e2e tests.
 No explicit benchmark added since the overhead is below
 `bb rebuild` round-trip noise (rebuild itself is ~3 minutes).
+
+### 2026-09-10 — the "17 full clears" were cold, and are now counted apart
+
+Attributing every `:registry/invalidate-full` (the note above) over the
+unit suite gave 24 events, none of them a product-path warm clear:
+
+| caller | warm? | seeded? | n |
+|---|---|---|---|
+| `crud.entities/invalidate!` — `:fn` writes carrying `:id` | no | yes | 9 |
+| `crud.entities/invalidate!` — `:binding` / `:binding-list-item` writes | no | yes | 2 |
+| `crud.entities-test`, `fn-execution-test`, `compile-runtime-test` — tests calling the 1-arity on purpose | mixed | no | 9 |
+| the shared-container fixture's bootstrap | mixed | mixed | 4 |
+
+"Seeded but cold" is the whole product story: a write names its fns
+(`affected-fn-ids` answered), but the ctx had no compiled registry and no
+reverse-deps index yet — a fresh per-namespace fixture ctx, or a branch ctx
+no request had compiled — so the delta branch could not run and the
+`:else` fell through, counting a *clear* of nothing. It costs nothing (the
+next request compiles once either way) and it was inflating the metric that
+is supposed to track the ~5 s / ~50 s stalls. The counter is now split:
+`:registry/invalidate-full` counts only WARM clears (a compiled registry was
+dropped), `:registry/invalidate-cold` the no-ops. The attribution note
+keys carry `{:warm? :seeded? :write [entity-type keys]}` so the next
+investigation reads the shape off `perf/runs/unit.edn` instead of
+re-instrumenting.

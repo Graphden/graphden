@@ -38,7 +38,7 @@ function chipState(page) {
 }
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   try {
     console.log('edit-execute-secret-flows — the Runs tab chip');
     await openRunsFor(page, 'add');

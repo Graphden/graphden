@@ -97,7 +97,7 @@ async function readResult(page) {
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('edit-execute — ▶ popover, fill args, Run, History panel');
   try {
     // === Phase A: inline run (no persist) ===

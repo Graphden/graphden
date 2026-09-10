@@ -46,7 +46,7 @@ async function openExecutePopoverFor(page, fnNameHash) {
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   console.log('edit-execute-effects — effect-confirm gate + runtime-effects strip');
   try {
     await openExecutePopoverFor(page, 'core.system.current-time-ms');

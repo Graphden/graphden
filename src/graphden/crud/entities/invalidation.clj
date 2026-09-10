@@ -169,9 +169,11 @@
         (when-let [id (:id entity-data)]
           (exec-ctx/refresh-slot-in-graph-cache! ctx id)))
       (let [seeds (affected-fn-ids storage entity-type entity-data)]
-        (if seeds
-          (exec-ctx/invalidate-graph-cache! ctx seeds)
-          (exec-ctx/invalidate-graph-cache! ctx))
+        ;; The write shape rides along for the full-clear attribution note
+        ;; (`bb perf` prints it under a breached budget): `nil` seeds is a
+        ;; full clear outright, and a seeded write on a COLD ctx (no
+        ;; compiled registry to patch) lands there too.
+        (exec-ctx/invalidate-graph-cache! ctx seeds [entity-type (vec (sort (keys entity-data)))])
         ;; The write is visible from every branch that inherits from the one
         ;; we wrote on, and each of those may have its own cached compiled
         ;; registry on this pod. Sweep them too — `invalidate-graph-cache!`

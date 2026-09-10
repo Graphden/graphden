@@ -354,6 +354,22 @@
   {:doc "Graph linters over the first-party package corpus (no DB): duplicate definitions (exact and after private-helper expansion), unreferenced / unreachable private fn-defs, shadowed overrides, siblings to extract a parent from, over-deep chains. Warnings fail unless allowlisted in graphden.lint.corpus/allowed-warnings; a stale allowlist entry fails too. ~10s."
    :task (clojure "-M:dev -m graphden.lint.corpus")}
 
+  compile-dev
+  {:doc "CI guard for the code CI never loads: require every namespace under development/ (the dev REPL entry, the e2e stack, the benches) under the :dev:test:bench aliases. `graphden.exec-profile` had called a helper that moved out of system.core for weeks before anyone ran it."
+   :task (let [ns-of (fn [root f]
+                       (-> (str f) (subs (inc (count root)))
+                           (str/replace (re-pattern "\\.clj$") "")
+                           (str/replace "/" ".")
+                           (str/replace "_" "-")))
+               roots ["development/src" "development/bench"]
+               nss (for [root roots
+                         f (file-seq (java.io.File. root))
+                         :when (and (.isFile f) (str/ends-with? (str f) ".clj"))]
+                     (ns-of root f))
+               form (str "(do " (apply str (map (fn [n] (str "(require '" n ") ")) nss)) "(println :compile-dev-ok " (count nss) "))")]
+           (println "compile-dev:" (str/join " " nss))
+           (clojure "-M:dev:test:bench" "-e" form))}
+
   devtour-check
   {:doc "CI guard for the developer code-tour: every tour.edn anchor still resolves to a unique form AND docs/devtour/index.html matches a fresh regeneration (fails if source drifted from the baked tour). Fix with `bb devtour`."
    :task (binding [*command-line-args* ["check"]] (load-file "scripts/devtour.clj"))}

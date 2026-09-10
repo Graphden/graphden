@@ -290,3 +290,44 @@
                        (fd "a" :short :parent :get :args {:key {:value :s}})
                        (fd "a" :tip :parents [:a/short :a/c7] :args {:default {:value 0}}))]
         (is (= [[["a" :tip]]] (map :fns (findings-for :deep-hierarchy defs))))))))
+
+
+(deftest incremental-state-equivalence-test
+  (let [zip (conj base-fns :zipmap)
+        title (fd "a" :title :parent :const :args {:value {:value "t"}} :id "t")
+        helper (fd "a" :_key :parent :const :args {:value {:value :k}} :id "h")
+        page (fd "a" :page :parent :assoc :args {:map {:value {:class "x"}} :key :a/_key :value :a/title} :id "p")
+        row (fd "b" :row :parent :assoc :args {:map {:value {:class "x"}} :key {:value :k} :value :a/title} :id "r")
+        dead (fd "a" :_dead :parent :get :args {:key {:value :d}} :id "d")
+        deep (fn [n]
+               (into [(fd "c" :c1 :parent :get :args {:key {:value :k}} :id "c1")]
+                     (map (fn [i]
+                            (fd "c" (keyword (str "c" i)) :parent (keyword "c" (str "c" (dec i)))
+                                :args {:default {:value i}} :id (str "c" i))))
+                     (range 2 (inc n))))
+        opts {:base-fn-names zip :roots #{}}
+        full (fn [defs] (lint/lint defs opts))
+        run (fn [defs state changed] (lint/lint-with-state defs opts state changed))
+        v0 (concat [title helper page row dead] (deep 8))
+        {s0 :state f0 :findings} (run v0 (lint/empty-state) :all)]
+    (is (= (full v0) f0) "a full run and an all-stale incremental run agree")
+    (testing "editing a private helper re-derives the fns that expand it (deep duplicate appears)"
+      (let [helper' (assoc-in helper [:args :value] {:value :k})
+            page' (assoc-in page [:args :key] :a/_key)
+            v1 (concat [title helper' page' row dead] (deep 8))
+            {s1 :state f1 :findings} (run v1 s0 #{["a" :_key]})]
+        (is (= (full v1) f1))
+        (testing "then deleting the dead private and shortening the chain"
+          (let [v2 (concat [title helper' page' row] (deep 5))
+                {s2 :state f2 :findings} (run v2 s1 #{["a" :_dead] ["c" :c6] ["c" :c7] ["c" :c8]})]
+            (is (= (full v2) f2))
+            (testing "then renaming a referenced fn (old key gone, new key in, referrer respelled)"
+              (let [title2 (assoc title :name :heading)
+                    page2 (assoc-in page' [:args :value] :a/heading)
+                    row2 (assoc-in row [:args :value] :a/heading)
+                    v3 (concat [title2 helper' page2 row2] (deep 5))
+                    {f3 :findings} (run v3 s2 #{["a" :title] ["a" :heading] ["a" :page] ["b" :row]})]
+                (is (= (full v3) f3))))))))
+    (testing "a change the closure does not reach leaves the memo untouched"
+      (let [{s :state} (run v0 s0 #{["a" :_dead]})]
+        (is (= (get (:sigs s0) [:shallow ["a" :page]]) (get (:sigs s) [:shallow ["a" :page]])))))))

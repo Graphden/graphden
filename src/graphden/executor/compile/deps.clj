@@ -3,8 +3,9 @@
 
    `forward-deps-of` lists the fn-ids whose mutation invalidates a
    given fn's closure (its parent-ids, the slot's base-fn /
-   element-fn / return-type, every binding's ref-fn-id /
-   type-override-fn-id, and every binding-list-item's ref-fn-id).
+   element-fn / return-type, the declared type of every slot it
+   exposes, every binding's ref-fn-id / type-override-fn-id /
+   resolver-fn-id, and every binding-list-item's ref-fn-id).
    `build-reverse-deps` inverts the forward graph so
    `delta-recompile!` can ask 'who needs recompile when X changes?'
    in O(degree). `transitive-blast` is the closure walk over those
@@ -45,7 +46,12 @@
 (defn forward-deps-of
   "Set of fn-ids whose mutation invalidates `fn-id`'s closure.
    Conservative — better to recompile a few extras than to ship a
-   stale closure.
+   stale closure. The declared type of every slot the fn EXPOSES is an
+   edge too (`slot.type-fn-id` through the fn's `fn-slot` rows): the
+   compiled closure dispatches on effective slot types (`:fn` = HOF,
+   `:fn-ref` = identity, scalars = deref), and the auto-run / restart
+   blasts walk the same index — without it a test reaching a changed
+   type-row only through a slot's declared type never re-ran.
 
    `indexed-graph` must carry pre-built `:bindings-by-fn` and
    `:items-by-binding` indexes — call `index-graph` once before
@@ -53,13 +59,17 @@
    `list-items` collections did an O(N) filter per call; on a
    3000-fn graph that turned `build-reverse-deps` into a
    billion-operation rebuild on every CRUD write."
-  [fn-id {:keys [fns bindings-by-fn items-by-binding slots-by-id]}]
+  [fn-id {:keys [fns bindings-by-fn items-by-binding slots-by-id fn-slots-by-fn]}]
   (let [f (get fns fn-id)
         bs (get bindings-by-fn fn-id [])
         items (mapcat #(get items-by-binding (:id %) []) bs)]
     (into #{}
           (comp cat (filter some?))
           [(:parent-ids f)
+           ;; The declared type of each exposed slot — a type-row edit
+           ;; recompiles the fns whose slots carry it.
+           (keep (fn [fs] (some-> (get slots-by-id (:slot-id fs)) :type-fn-id))
+                 (get fn-slots-by-fn fn-id []))
            (keep f [:base-fn-id :element-fn-id :return-type-fn-id])
            ;; A ref into a `:fn-ref` slot is an IDENTITY edge — the
            ;; closure bakes the target's id and never evaluates it, so
@@ -89,11 +99,12 @@
    Accepts either a `fns`-collection map (raw `read-graph` shape) or
    one whose `:fns` is already a `{fn-id → fn}` map — the indexes
    end up identical either way."
-  [{:keys [fns slots bindings list-items] :as graph}]
+  [{:keys [fns slots fn-slots bindings list-items] :as graph}]
   (let [fns-map (if (map? fns) fns (into {} (map (juxt :id identity)) fns))]
     (assoc graph
            :fns fns-map
            :slots-by-id (if (map? slots) slots (into {} (map (juxt :id identity)) slots))
+           :fn-slots-by-fn (group-by :fn-id fn-slots)
            :bindings-by-fn (index-bindings-by-fn bindings)
            :items-by-binding (index-items-by-binding list-items))))
 

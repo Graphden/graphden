@@ -58,6 +58,7 @@
      CI registry, not in the graph), and a duplicate group made only
      of them is the corpus gate's business, not the editor's."
   (:require
+    [clojure.set :as set]
     [clojure.string :as str]))
 
 
@@ -273,15 +274,59 @@
 
 
 (defn referrers
-  "Map fn-def key → set of fn-def keys that reference it."
-  [idx]
-  (reduce (fn [acc fd]
-            (let [from (fn-key fd)]
-              (reduce (fn [m to] (update m to (fnil conj #{}) from))
-                      acc
-                      (disj (references idx fd) from))))
-          {}
-          (:fn-defs idx)))
+  "Map fn-def key → set of fn-def keys that reference it, inverted from
+   a `{key → references}` map."
+  [refs-by-key]
+  (reduce-kv (fn [acc from tos]
+               (reduce (fn [m to] (update m to (fnil conj #{}) from))
+                       acc
+                       (disj tos from)))
+             {}
+             refs-by-key))
+
+
+;; -----------------------------------------------------------------------------
+;; Incremental state
+;; -----------------------------------------------------------------------------
+;;
+;; Everything a rule needs per fn-def is memoised in a STATE map that a
+;; caller threads from one run to the next: the two signatures, the
+;; forward references, the hierarchy depth, the shadowed-override finding.
+;; A run is told which fn-defs CHANGED; every memo of a changed fn-def and
+;; of every fn-def that referenced one (transitively — a deep signature
+;; expands the privates it reaches, an inherited value is read off the
+;; ancestors) is dropped and recomputed on demand. The rules themselves
+;; are then one linear pass of map lookups and set operations over the
+;; memos, so a write costs its referrer closure, not the graph. A full
+;; run is the same code with everything stale.
+
+(defn empty-state
+  "The state before any run."
+  []
+  {:sigs {} :refs {} :depth {} :shadowed {}})
+
+
+(defn- stale-closure
+  "`changed` plus every key that reached one of them through the prior
+   run's referrers, transitively."
+  [refs-of changed]
+  (loop [seen (set changed)
+         frontier (vec changed)]
+    (if-let [k (peek frontier)]
+      (let [more (remove seen (get refs-of k))]
+        (recur (into seen more) (into (pop frontier) more)))
+      seen)))
+
+
+(defn- drop-stale
+  "The memo maps of `state` without every stale key (signature memos are
+   keyed `[mode key]`)."
+  [state stale]
+  (-> state
+      (update :sigs (fn [m] (into {} (remove (fn [[[_ k] _]] (contains? stale k))) m)))
+      (update :refs (fn [m] (apply dissoc m stale)))
+      (update :depth (fn [m] (apply dissoc m stale)))
+      (update :shadowed (fn [m] (apply dissoc m stale)))))
 
 
 ;; -----------------------------------------------------------------------------
@@ -343,20 +388,19 @@
 
 
 (defn- unreferenced-private-findings
-  [idx roots platform-fn?]
-  (let [refs (referrers idx)]
-    (for [fd (:fn-defs idx)
-          :let [k (fn-key fd)]
-          :when (and (lintable? fd)
-                     (private-name? (:name fd))
-                     (empty? (get refs k))
-                     (not (contains? roots (:name fd)))
-                     (not (and platform-fn? (platform-fn? fd))))]
-      {:rule :unreferenced-private
-       :severity :warning
-       :fns [k]
-       :weight 0
-       :message (str (label k) " is private and nothing references it")})))
+  [idx refs roots platform-fn?]
+  (for [fd (:fn-defs idx)
+        :let [k (fn-key fd)]
+        :when (and (lintable? fd)
+                   (private-name? (:name fd))
+                   (empty? (get refs k))
+                   (not (contains? roots (:name fd)))
+                   (not (and platform-fn? (platform-fn? fd))))]
+    {:rule :unreferenced-private
+     :severity :warning
+     :fns [k]
+     :weight 0
+     :message (str (label k) " is private and nothing references it")}))
 
 
 ;; -----------------------------------------------------------------------------
@@ -387,17 +431,16 @@
 
 
 (defn- reachable-from-live
-  "Keys reachable from every live root through `references`."
-  [idx roots platform-fn?]
+  "Keys reachable from every live root through the memoised references."
+  [idx refs-by-key roots platform-fn?]
   (loop [seen #{}
          frontier (into [] (comp (filter #(live-root? roots platform-fn? %)) (map fn-key))
                         (:fn-defs idx))]
     (if-let [k (peek frontier)]
       (if (contains? seen k)
         (recur seen (pop frontier))
-        (let [fd (get (:by-key idx) k)]
-          (recur (conj seen k)
-                 (into (pop frontier) (remove seen) (when fd (references idx fd))))))
+        (recur (conj seen k)
+               (into (pop frontier) (remove seen) (get refs-by-key k))))
       seen)))
 
 
@@ -408,9 +451,8 @@
    head of the chain is that rule's finding; this one names the rest
    of the cluster so deleting the head does not leave a trail of new
    `:unreferenced-private` findings, one per round."
-  [idx roots platform-fn?]
-  (let [refs (referrers idx)
-        alive (reachable-from-live idx roots platform-fn?)]
+  [idx refs-by-key refs roots platform-fn?]
+  (let [alive (reachable-from-live idx refs-by-key roots platform-fn?)]
     (for [fd (:fn-defs idx)
           :let [k (fn-key fd)]
           :when (and (lintable? fd)
@@ -472,45 +514,46 @@
     :else (some? v)))
 
 
-(defn- shadowed-override-findings
-  "Every arg `fd` binds to exactly what its closest ancestors already
-   bind — the binding changes nothing and hides where the value really
-   comes from. One finding per fn-def, naming the args."
-  [idx memo]
-  (for [fd (:fn-defs idx)
-        :when (and (lintable? fd) (seq (parent-fn-defs idx fd)))
-        :let [k (fn-key fd)
-              shadowed (into []
-                             (keep (fn [[arg v]]
-                                     (when (restated-binding? v)
-                                       (let [own (canon-value idx :shallow memo v)]
-                                         (when (and (pos? (canon-weight own))
-                                                    (= own (inherited-arg idx memo fd arg)))
-                                           arg)))))
-                             (sort-by key (:args fd)))]
-        :when (seq shadowed)]
-    {:rule :shadowed-override
-     :severity :warning
-     :fns [k]
-     :weight (count shadowed)
-     :message (str (label k) " re-binds " (str/join ", " (map name shadowed))
-                   " to exactly what it already inherits — drop the binding"
-                   (when (> (count shadowed) 1) "s"))}))
+(defn- shadowed-override-finding
+  "`fd`'s `:shadowed-override` finding, or nil: every arg it binds to
+   exactly what its closest ancestors already bind — the binding changes
+   nothing and hides where the value really comes from."
+  [idx memo fd]
+  (when (and (lintable? fd) (seq (parent-fn-defs idx fd)))
+    (let [k (fn-key fd)
+          shadowed (into []
+                         (keep (fn [[arg v]]
+                                 (when (restated-binding? v)
+                                   (let [own (canon-value idx :shallow memo v)]
+                                     (when (and (pos? (canon-weight own))
+                                                (= own (inherited-arg idx memo fd arg)))
+                                       arg)))))
+                         (sort-by key (:args fd)))]
+      (when (seq shadowed)
+        {:rule :shadowed-override
+         :severity :warning
+         :fns [k]
+         :weight (count shadowed)
+         :message (str (label k) " re-binds " (str/join ", " (map name shadowed))
+                       " to exactly what it already inherits — drop the binding"
+                       (when (> (count shadowed) 1) "s"))}))))
 
 
 ;; -----------------------------------------------------------------------------
 ;; Fan-in — siblings that bind the same values on the same parent
 ;; -----------------------------------------------------------------------------
 
-(defn- bound-pairs
-  "`fd`'s own args as `[arg canonical-value]` pairs, bound values only
-   (a rename, a type pin or `:default nil` weighs nothing)."
-  [idx memo fd]
-  (into #{}
-        (keep (fn [[arg v]]
-                (let [c (canon-value idx :shallow memo v)]
-                  (when (pos? (canon-weight c)) [arg c]))))
-        (:args fd)))
+(defn- sig-parents
+  "The resolved parents of a shallow signature."
+  [[_ [_ parents]]]
+  parents)
+
+
+(defn- sig-pairs
+  "A shallow signature's own args as `[arg canonical-value]` pairs, bound
+   values only (a rename, a type pin or `:default nil` weighs nothing)."
+  [[_ _ [_ args]]]
+  (into #{} (keep (fn [[arg c]] (when (pos? (canon-weight c)) [arg c]))) args))
 
 
 (defn- fan-in-findings
@@ -520,16 +563,15 @@
    parent; the group for a candidate is every sibling that binds all of
    it, and the same member set is reported once, under its heaviest
    candidate. A group whose members are the same definition outright is
-   `:duplicate-definition` and is not repeated here."
+   `:duplicate-definition` and is not repeated here. Read entirely off
+   the memoised shallow signatures."
   [idx memo]
   (let [subjects (filter lintable? (:fn-defs idx))
-        parents-of (fn [fd]
-                     (let [ps (if (:parent fd) [(:parent fd)] (vec (:parents fd)))]
-                       (mapv #(canon-ref idx :shallow memo %) ps)))
+        sig-of (fn [fd] (signature idx :shallow memo fd))
         set-weight (fn [S] (reduce + (map (fn [[_ c]] (canon-weight c)) S)))]
-    (for [[parents fds] (group-by parents-of subjects)
+    (for [[parents fds] (group-by (comp sig-parents sig-of) subjects)
           :when (> (count fds) 1)
-          :let [pairs (into {} (map (fn [fd] [(fn-key fd) (bound-pairs idx memo fd)])) fds)
+          :let [pairs (into {} (map (fn [fd] [(fn-key fd) (sig-pairs (sig-of fd))])) fds)
                 shared (into #{}
                              (keep (fn [[pair n]] (when (> n 1) pair)))
                              (frequencies (mapcat val pairs)))
@@ -548,7 +590,7 @@
                                    groups)]
           [ks S] by-members
           :let [members (filter #(contains? ks (fn-key %)) fds)
-                sigs (into #{} (map #(signature idx :shallow memo %)) members)]
+                sigs (into #{} (map sig-of) members)]
           :when (> (count sigs) 1)
           :let [weight (set-weight S)
                 fns (vec (sort ks))
@@ -587,7 +629,7 @@
 (defn- depth-chain
   "`[depth chain]` for `fd` — the number of composed fn-defs on its
    longest parent path (base-fn parent = 0) and that path's keys,
-   `fd` first."
+   `fd` first. `cache` is the persistent per-key memo."
   [idx cache fd]
   (let [k (fn-key fd)]
     (or (when (:name fd) (get @cache k))
@@ -605,9 +647,8 @@
   "A composed fn-def `deep-hierarchy-depth` or more levels above its
    base-fn, reported at the TIP of the chain only — every fn-def that
    inherits it is deeper still and would repeat the same chain."
-  [idx]
-  (let [cache (atom {})
-        subjects (filter lintable? (:fn-defs idx))
+  [idx cache]
+  (let [subjects (filter lintable? (:fn-defs idx))
         is-parent (into #{} (comp (mapcat #(parent-fn-defs idx %)) (map fn-key)) subjects)]
     (for [fd subjects
           :let [k (fn-key fd)
@@ -652,6 +693,57 @@
        (every? #(platform-fn? (get (:by-key idx) %)) (:fns finding))))
 
 
+(defn lint-with-state
+  "Run every rule over `fn-defs`, reusing `state` (a prior run's, or
+   `empty-state`) for every fn-def not in `changed` — a set of fn-keys,
+   or `:all`. Returns `{:findings … :state …}`; thread `:state` into
+   the next call. Options as for `lint`."
+  [fn-defs {:keys [base-fn-names roots platform-fn? suppress]} state changed]
+  (let [idx (build-index fn-defs base-fn-names)
+        keys-now (into #{} (map fn-key) fn-defs)
+        prior-keys (set (keys (:refs state)))
+        stale (if (= :all changed)
+                (set/union keys-now prior-keys)
+                (set/union (stale-closure (referrers (:refs state)) changed)
+                           (set/difference keys-now prior-keys)
+                           (set/difference prior-keys keys-now)))
+        state (drop-stale state stale)
+        memo (atom (:sigs state))
+        depth (atom (:depth state))
+        refs (reduce (fn [m fd]
+                       (let [k (fn-key fd)]
+                         (if (contains? m k) m (assoc m k (references idx fd)))))
+                     (:refs state)
+                     fn-defs)
+        refs-by-key (into {} (filter (fn [[k _]] (contains? keys-now k))) refs)
+        refs-of (referrers refs-by-key)
+        shadowed (reduce (fn [m fd]
+                           (let [k (fn-key fd)]
+                             (if (contains? m k) m (assoc m k (shadowed-override-finding idx memo fd)))))
+                         (:shadowed state)
+                         fn-defs)
+        shadowed (into {} (filter (fn [[k _]] (contains? keys-now k))) shadowed)
+        roots (set roots)
+        suppress (set suppress)
+        findings (->> (concat (duplicate-findings idx memo :shallow)
+                              (duplicate-findings idx memo :deep)
+                              (unreferenced-private-findings idx refs-of roots platform-fn?)
+                              (unreachable-private-findings idx refs-by-key refs-of roots platform-fn?)
+                              (keep val shadowed)
+                              (fan-in-findings idx memo)
+                              (deep-hierarchy-findings idx depth))
+                      (map #(with-fn-ids idx %))
+                      (remove #(all-platform? idx platform-fn? %))
+                      (remove #(contains? suppress (finding-key %)))
+                      (sort-by (juxt (comp severity-rank :severity) :rule :fns))
+                      vec)]
+    {:findings findings
+     :state {:sigs (into {} (filter (fn [[[_ k] _]] (contains? keys-now k))) @memo)
+             :refs refs-by-key
+             :depth (into {} (filter (fn [[k _]] (contains? keys-now k))) @depth)
+             :shadowed shadowed}}))
+
+
 (defn lint
   "Run every rule over `fn-defs`. Options:
 
@@ -664,24 +756,11 @@
      duplicate group is dropped;
    - `:suppress` — set of `finding-key`s to drop.
 
-   Returns findings sorted warnings first, then by rule and fns."
+   Returns findings sorted warnings first, then by rule and fns. One
+   full pass — `lint-with-state` is the incremental form."
   ([fn-defs] (lint fn-defs {}))
-  ([fn-defs {:keys [base-fn-names roots platform-fn? suppress]}]
-   (let [idx (build-index fn-defs base-fn-names)
-         memo (atom {})
-         suppress (set suppress)]
-     (->> (concat (duplicate-findings idx memo :shallow)
-                  (duplicate-findings idx memo :deep)
-                  (unreferenced-private-findings idx (set roots) platform-fn?)
-                  (unreachable-private-findings idx (set roots) platform-fn?)
-                  (shadowed-override-findings idx memo)
-                  (fan-in-findings idx memo)
-                  (deep-hierarchy-findings idx))
-          (map #(with-fn-ids idx %))
-          (remove #(all-platform? idx platform-fn? %))
-          (remove #(contains? suppress (finding-key %)))
-          (sort-by (juxt (comp severity-rank :severity) :rule :fns))
-          vec))))
+  ([fn-defs opts]
+   (:findings (lint-with-state fn-defs opts (empty-state) :all))))
 
 
 (defn warnings

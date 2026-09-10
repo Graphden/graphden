@@ -213,6 +213,19 @@ async function panelState(page) {
     const cRow = c.installedRows.find((r) => r.name === PKG);
     assert(cRow && cRow.version === '1.0.0',
       'installed table shows ' + PKG + ' @ 1.0.0 after Install: ' + JSON.stringify(cRow));
+    // The pin is behind the registry (1.1.0 is published): the row carries
+    // the update badge and the ↑ input is prefilled with that version.
+    const cBadge = await page.evaluate((pkg) => {
+      const root = document.querySelector('#gd-pkg-pop [data-packages-panel]');
+      const tr = [...root.querySelectorAll(':scope > .packages-panel-table tbody tr')]
+        .find((r) => r.querySelector('td')?.textContent === pkg);
+      const b = tr && tr.querySelector('.packages-update-available');
+      return {badge: b ? b.textContent : null,
+              input: tr ? tr.querySelector('.packages-version-input').value : null};
+    }, PKG);
+    assert(cBadge.badge && cBadge.badge.includes('1.1.0'),
+      'update badge names the newer registry version: ' + JSON.stringify(cBadge.badge));
+    assert(cBadge.input === '1.1.0', '↑ input is prefilled with it: ' + cBadge.input);
     phase('install');
 
     // ===================================================================
@@ -249,6 +262,13 @@ async function panelState(page) {
     const dRow = d.installedRows.find((r) => r.name === PKG);
     assert(dRow && dRow.version === '1.1.0',
       'installed row updated to 1.1.0 after ↑: ' + JSON.stringify(dRow));
+    const dBadge = await page.evaluate((pkg) => {
+      const root = document.querySelector('#gd-pkg-pop [data-packages-panel]');
+      const tr = [...root.querySelectorAll(':scope > .packages-panel-table tbody tr')]
+        .find((r) => r.querySelector('td')?.textContent === pkg);
+      return !!(tr && tr.querySelector('.packages-update-available'));
+    }, PKG);
+    assert(!dBadge, 'at the highest version the update badge is gone');
     phase('update (ref-rewrite)');
 
     // ===================================================================

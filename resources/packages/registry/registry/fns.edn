@@ -1864,11 +1864,35 @@
           :key {:value :value} :value :_item-package-name}}
   {:name :_pkg-panel-update-name-input
    :parent :hiccup :args {:tag {:value "input"} :attrs :_pkg-panel-update-name-attrs}}
+  ;; --- update available: the registry's highest published version vs the
+  ;;     pin. A badge in the actions cell names it, and the version input is
+  ;;     prefilled with it so ↑ is the update in one click; a pin at the
+  ;;     highest version (or of a package no longer published) shows nothing.
+  {:name :_pkg-panel-latest
+   :description "The registry's highest published version of the row's package — nil once every version is withdrawn."
+   :parent :resolve-package-version
+   :args {:pkg-name :_item-package-name :spec {:value "latest"}}}
+  {:name :_pkg-panel-update-available?
+   :parent :if
+   :args {:test {:parent :nil? :args {:value :_pkg-panel-latest}}
+          :then {:value false}
+          :else {:parent :neq :args {:values [:_pkg-panel-latest :_item-version]}}}}
+  {:name :_pkg-panel-update-badge
+   :description "`↑ <latest> available` when the pin is behind the registry, nothing otherwise."
+   :parent :if
+   :args {:test :_pkg-panel-update-available?
+          :then {:parent :hiccup
+                 :args {:tag {:value "span"}
+                        :attrs {:value {:class "packages-update-available"
+                                        :title "A newer version is published — ↑ updates to it"}}
+                        :children [{:value "↑ "} :_pkg-panel-latest {:value " available"}]}}
+          :else {:value nil}}}
   {:name :_pkg-panel-update-version-attrs
    :parent :assoc
    :args {:map {:value {:type "text" :name "version" :class "packages-version-input"
                         :size "6" :title "Target version — exact, latest, or a constraint"}}
-          :key {:value :value} :value :_item-version}}
+          :key {:value :value}
+          :value {:parent :coalesce :args {:value :_pkg-panel-latest :default :_item-version}}}}
   {:name :_pkg-panel-update-version-input
    :parent :hiccup :args {:tag {:value "input"} :attrs :_pkg-panel-update-version-attrs}}
   {:name :_pkg-panel-update-btn
@@ -1885,7 +1909,7 @@
                           :hx-swap "outerHTML"}}
           :children [:_pkg-panel-update-name-input :_pkg-panel-update-version-input :_pkg-panel-update-btn]}}
   {:name :_pkg-panel-td-actions
-   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-panel-update-form :_pkg-panel-uninstall-btn]}}
+   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-panel-update-badge :_pkg-panel-update-form :_pkg-panel-uninstall-btn]}}
 
   {:name :_pkg-panel-row
    :parent :hiccup :args {:tag {:value "tr"} :children [:_td-package-name :_td-version :_pkg-panel-td-actions]}}

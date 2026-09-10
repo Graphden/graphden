@@ -308,8 +308,11 @@ as `:namespace` on each fn-def, reconstructed on install).
   merge to main.
 - **Rollback**: repoint the pin to the older version and rewrite refs back, or
   `git revert` the merge on main. Reuses branch/merge/revert wholesale.
-- **Notifications**: registry stores latest; a periodic check compares each
-  pin's version against registry-latest per org (later checkpoint).
+- **Update available** (shipped 2026-09-10): the packages panel compares each
+  pin against the registry's highest published version on render — a
+  `↑ <latest> available` badge on the row, and the ↑ input prefilled with it,
+  so the update is one click. No periodic job and nothing stored: the panel
+  is the check.
 
 ### 4.4 Dependencies + versions
 
@@ -558,10 +561,11 @@ Server-rendered via `GET /partials/packages-panel`; the chip +
 popover lifecycle lives in `editor-shell.js` (`gdRevealPkgChip` / `gdOpenPkgPop`,
 gated on the `window.API` registry probe). **Publish is NOT on the chip** — it is
 a namespace authoring action (packages spec §3); its `<details>` is excluded from
-the panel root and a namespace-scoped affordance is the next slice, though the
-`/api/packages/panel-publish` POST route stays live. (Also not yet built: a
-proactive "update available" indicator — the manual version input covers
-update/rollback.)
+the panel root and the namespace-scoped affordance is the ⬆ on a namespace row
+([MARKETPLACE.md](MARKETPLACE.md)); the `/api/packages/panel-publish` POST
+route stays live for API callers. Each installed row also carries an
+`↑ <latest> available` badge when its pin is behind the registry, with the
+version input prefilled to that version (§ 4.3).
 
 ---
 

@@ -1,6 +1,7 @@
 (ns graphden.executor.context
   "Execution context for the function executor."
   (:require
+    [clojure.string :as str]
     [graphden.crud.fn-execution.free-arg-cache :as free-arg-cache]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.registry :as registry]
@@ -35,6 +36,28 @@
 ;;   snapshot's prime over a newer one. The `swap!` on
 ;;   `:compiled-registry` is still defensive for direct delta-
 ;;   recompile callers that bypass invalidate-graph-cache!.
+
+
+(defn- note-full-clear-caller!
+  "The breakdown behind `:registry/invalidate-full` — which graphden
+   frames asked for a full clear, counted. A full clear is rare by
+   design and each one costs the next request a whole-graph compile, so
+   the stack walk here is paid ~once per suite, not per write; the
+   note is what `bb perf` prints when the budget breaks, so the
+   offending call site is read off the report instead of a debugger."
+  [reason]
+  (let [frames (->> (Thread/.getStackTrace (Thread/currentThread))
+                    (map (fn [^StackTraceElement e] (StackTraceElement/.getClassName e)))
+                    (filter #(str/starts-with? % "graphden."))
+                    (remove #(str/starts-with? % "graphden.executor.context"))
+                    (map #(first (str/split % #"\$")))
+                    (distinct)
+                    (take 3)
+                    (str/join " < "))
+        k (if reason (str frames " :: " (pr-str reason)) frames)]
+    (counters/note! :registry/invalidate-full
+                    (update (or (get (counters/notes-snapshot) :registry/invalidate-full) {})
+                            k (fnil inc 0)))))
 
 
 (defn- splice-graph-cache!
@@ -148,7 +171,9 @@
 (defn invalidate-graph-cache!
   "Drop derived caches on `ctx` and refresh type-aliases from storage.
 
-   Two arities:
+   Three arities (the third adds `reason` — what the write looked like,
+   for the full-clear attribution note; `nil` seeds with no reason is a
+   caller that could not say):
 
    - `[ctx]` — full invalidation. Used when the caller doesn't know
      which fns changed (mass updates, schema migrations). Clears
@@ -181,8 +206,9 @@
    Both paths re-register type-aliases from storage so newly-created
    types are resolvable to the type-checker without a server
    restart."
-  ([ctx] (invalidate-graph-cache! ctx nil))
-  ([ctx changed-fn-ids]
+  ([ctx] (invalidate-graph-cache! ctx nil nil))
+  ([ctx changed-fn-ids] (invalidate-graph-cache! ctx changed-fn-ids nil))
+  ([ctx changed-fn-ids reason]
    ;; Serialize the whole invalidation body on the per-context lock —
    ;; both branches (full clear / delta recompile) write to a cluster
    ;; of related atoms in sequence, and two concurrent callers that
@@ -232,7 +258,23 @@
                     ;; through `compile-runtime/registry`. Two full-clears before
                     ;; one read cost one rebuild, so these two counters answer
                     ;; different questions and must not be compared to each other.
-                    (counters/count! :registry/invalidate-full)
+                    ;; Warm = a compiled registry was dropped and the next
+                    ;; request pays a whole-graph compile — the count that
+                    ;; costs money. Cold = nothing was compiled yet (a fresh
+                    ;; ctx, or one already cleared), so the clear costs
+                    ;; nothing; counted apart so the budget gates the real
+                    ;; thing. Seeded = the caller named its fns but no index /
+                    ;; registry was there to patch, not a write of unknown
+                    ;; shape. The 2026-09-10 attribution of the unit suite's
+                    ;; "17 full clears" found every CRUD-path one cold+seeded
+                    ;; (docs/PERF_NOTES.md).
+                    (let [h (:compiled-registry ctx)
+                          warm? (boolean (and h (some? @h)))]
+                      (counters/count! (if warm? :registry/invalidate-full :registry/invalidate-cold))
+                      (note-full-clear-caller!
+                        {:warm? warm?
+                         :seeded? (boolean (seq changed-fn-ids))
+                         :write reason}))
                     (when-let [fc (:full-clear-count ctx)] (swap! fc inc))
                     (let [holder (:compiled-registry ctx)
                           stale? (:registry-stale? ctx)]

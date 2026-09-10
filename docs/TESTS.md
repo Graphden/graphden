@@ -152,6 +152,7 @@ write; statuses land in shared storage either way.
 - Effectful tests never auto-run (by design) and prompt the standard
   side-effect confirmation when run individually from the Run
   popover.
-- `slot.type-fn-id` is not an edge in the compile-deps index, so a
-  test reaching a changed type-row ONLY through a slot's declared
-  type won't auto-run (same known gap as the service-restart blast).
+- ~~`slot.type-fn-id` is not an edge in the compile-deps index~~ —
+  closed 2026-09-10: the declared type of every exposed slot is a
+  forward dep (`compile/deps.clj`), so a type-row edit reaches the
+  tests (and services) whose slots carry it through the same walk.

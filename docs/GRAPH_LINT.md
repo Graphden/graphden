@@ -139,15 +139,25 @@ which BFS-walks from the same registry.
 - **No stored procedure, no stored verdicts.** A stored flag drifts
   from the graph it describes; `types.diagnostics` already sets the
   rule — derived, in-memory, recomputed on write. The lint follows it.
-- **Per-branch, on read.** `lint.graph/lint-branch` lints the per-ctx
-  graph snapshot and memoises the result **per branch** (`branch-id →
-  snapshot object + suppression set + findings`, a small LRU): a read
-  recomputes only when that branch's snapshot object was replaced by a
-  write, and two branches open side by side — or two orgs on one
-  executor — no longer evict each other on every read. Incremental
-  re-signaturing (a write to F re-signatures F and its referrers) is
-  the next step if per-tenant graphs grow an order of magnitude; today
-  a full pass is sub-second and the trigger for it has not arrived.
+- **Per-branch, incremental, on read.** `lint.graph/lint-branch` keeps
+  a state per branch (a small LRU): the last snapshot object, its `:ns`
+  rows, the per-fn EDN fn-defs, the engine's memos and the findings. A
+  read with the same snapshot object answers from it. After a write the
+  new snapshot is diffed against the old one **row by row by identity**
+  (a write splices fresh row objects for the fns it touched and keeps
+  every other object — `executor.context/splice-graph-cache!`), so the
+  fns whose rows moved are known without a walk; those fns and the fns
+  that reference them (a renamed target changes the referrer's
+  spelling) are rebuilt as EDN and handed to
+  `lint.core/lint-with-state` as *changed*. The engine drops the memos
+  of the changed keys plus their referrer closure — a deep signature
+  expands the privates it reaches, an inherited value is read off the
+  ancestors, a chain depth off the parents — recomputes only those on
+  demand, and runs the rules as one pass of lookups and set operations
+  over the memos. **A write costs its referrer closure, not the graph.**
+  A namespace change (every dotted path may have moved) or a first read
+  lints from scratch through the same code with everything stale, and
+  `incremental-state-equivalence-test` pins that the two agree.
 - **Not a write-time SQL check.** The write-time guards that exist —
   the cycle CTE, the resolved-view name / position collisions under
   advisory locks — are Clojure over SQL, and they exist for what must

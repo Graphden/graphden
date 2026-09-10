@@ -19,13 +19,13 @@ rows — so one engine serves both authoring worlds.
 
 | Rule | Fires when | Severity |
 |------|-----------|----------|
-| `:duplicate-definition` | ≥ 2 named composed fn-defs have the same *shallow signature* — parents, canonical args (refs resolved to identities, literals as written), `:return-type`, `:lambda-params`, effects, `:branch-local?`. Names, namespaces and every `:description` are ignored. | warning at weight ≥ 3, info below |
-| `:duplicate-after-expansion` | the same, over the *deep signature* — every ref to a `_`-private fn-def is replaced by that fn-def's own signature. Catches the same graph factored through differently-named helpers, or spread over two namespaces. Groups already equal shallowly are not repeated. | same weighting |
+| `:duplicate-definition` | ≥ 2 named composed fn-defs have the same *shallow signature* — parents, canonical args (refs resolved to identities, literals as written), `:return-type`, `:lambda-params`, effects, `:branch-local?`. Names, namespaces and every `:description` are ignored. | weight ≥ 3 |
+| `:duplicate-after-expansion` | the same, over the *deep signature* — every ref to a `_`-private fn-def is replaced by that fn-def's own signature. Catches the same graph factored through differently-named helpers, or spread over two namespaces. Groups already equal shallowly are not repeated. | same line |
 | `:unreferenced-private` | a `_`-private composed fn-def no fn-def references (parents, args, list items, type-row fields; string names count — the value-form / repr registries hand names out as strings). | warning |
 | `:unreachable-private` | a `_`-private fn-def that IS referenced, but only from fn-defs no live root reaches — the rest of a dead cluster whose head is the `:unreferenced-private` finding. Live roots: every public fn-def, type-row and base-fn declaration, the by-name entry points, the platform's own rows. Deleting the head no longer leaves a trail of one new finding per round. | warning |
 | `:shadowed-override` | a fn-def re-binds an arg to exactly the value its closest ancestors already bind (closest-fn-wins over the parent closure; two parents that disagree leave nothing to restate). A bare ref, a `{:value …}` / `{:ref …}` spec or a scalar literal counts; a type pin, a rename, a doc-only spec or a list binding (which appends to the chain) says something new and does not. One finding per fn-def, naming the args. | warning |
-| `:fan-in-extract-parent` | ≥ 2 named fn-defs with the same parents bind ≥ 1 identical value — [PACKAGES.md § 1](PACKAGES.md#1-use-inheritance-to-eliminate-duplication-dry)'s extraction rule. Each fn-def's shared bindings (those a sibling repeats) are a candidate parent; the group is every sibling that binds all of it, reported once under its heaviest candidate. A group that is the same definition outright is `:duplicate-definition`'s. | same weighting as the duplicate rules |
-| `:deep-hierarchy` | a chain of composed fn-defs `deep-hierarchy-depth` (6) or more levels above its base-fn, reported at the chain's TIP only — [PACKAGES.md § 4](PACKAGES.md#4-hierarchy-depth-guidelines): 6+ needs a justification. The MCP surface's tool envelopes sit at 6–7 with a concept per level, so the info tier starts there and a warning needs `deep-hierarchy-warning-depth` (8). | info; warning at 8 |
+| `:fan-in-extract-parent` | ≥ 2 named fn-defs with the same parents bind ≥ 1 identical value — [PACKAGES.md § 1](PACKAGES.md#1-use-inheritance-to-eliminate-duplication-dry)'s extraction rule. Each fn-def's shared bindings (those a sibling repeats) are a candidate parent; the group is every sibling that binds all of it, reported once under its heaviest candidate. A group that is the same definition outright is `:duplicate-definition`'s. | same line as the duplicate rules |
+| `:deep-hierarchy` | a chain of composed fn-defs `deep-hierarchy-depth` (8) or more levels above its base-fn, reported at the chain's TIP only — [PACKAGES.md § 4](PACKAGES.md#4-hierarchy-depth-guidelines) puts the justification line at 6, and the shipped corpus justifies its 6–7-level chains (the MCP surface's tool envelopes carry a concept per level), so the engine speaks two levels past that line. | warning |
 
 **Weight** is the number of bound values a shared structure carries:
 a ref or a non-nil literal counts one, an inline fn-def counts one
@@ -34,11 +34,15 @@ nil` count nothing. `graphden.lint.core/warning-weight` (3) is the
 line between "a copied graph" and "two accessors that happen to read
 the same key" — `{:parent :get :args {:coll {:as :row} :key {:value
 :id} :default nil}}` written twice is the let-rule's separate child
-per code path, not copy-paste, and stays info.
+per code path, not copy-paste, and is not filed.
 
-Only warnings reach the editor — the info tier is calibration
-output for the corpus gate, not a problem to put in front of an
-author. There is no `private-alias` rule: a private fn-def that only
+**Every finding is a warning.** The engine files nothing it would not
+ask the author to act on: a "lighter" tier of matches nobody should
+extract would be a false recommendation, and the first-party corpus
+must pass its own linters outright — `bb graph-lint` is green at zero
+findings, not zero warnings. (Until 2026-09-10 the sub-line matches
+were filed as *info* "for calibration"; 517 of them sat there, and the
+calibration they offered was that the line was right.) There is no `private-alias` rule: a private fn-def that only
 renames its parent is the let-rule's "separate child per code path",
 and listing it would be noise dressed as a finding.
 
@@ -108,7 +112,8 @@ six hand-built `{:status 200 :headers …}` responses that were
 `div` popover bodies that became `:plain-div` children, and the diff
 routes' guard chain, which the two routes now `{:append …}` their apply
 clause to. `:shadowed-override` and `:unreachable-private` fired
-nothing on the corpus; `:deep-hierarchy` files the MCP tools as info.
+nothing on the corpus; `:deep-hierarchy` starts two levels above the
+MCP tools' chains.
 
 ## Gate
 

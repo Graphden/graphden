@@ -354,6 +354,10 @@
   {:doc "Graph linters over the first-party package corpus (no DB): duplicate definitions (exact and after private-helper expansion), unreferenced / unreachable private fn-defs, shadowed overrides, siblings to extract a parent from, over-deep chains. Warnings fail unless allowlisted in graphden.lint.corpus/allowed-warnings; a stale allowlist entry fails too. ~10s."
    :task (clojure "-M:dev -m graphden.lint.corpus")}
 
+  reachability
+  {:doc "Graph reachability audit over the fns.edn corpus (no DB, ~40s): every composed fn-def must be reachable from a root (routes, services, the by-name registry in tools/graph-reachability.edn, tests, docs) or be listed there as vocabulary with a reason. Unreachable = dead code; fails the check."
+   :task (clojure "-M:dev" "tools/reachability_audit.clj")}
+
   compile-dev
   {:doc "CI guard for the code CI never loads: require every namespace under development/ (the dev REPL entry, the e2e stack, the benches) under the :dev:test:bench aliases. `graphden.exec-profile` had called a helper that moved out of system.core for weeks before anyone ran it."
    :task (let [ns-of (fn [root f]
@@ -362,9 +366,12 @@
                            (str/replace "/" ".")
                            (str/replace "_" "-")))
                roots ["development/src" "development/bench"]
+               ;; Only NAMESPACES: a file without an `(ns …)` form is a script
+               ;; (top-level requires + work), and requiring it RUNS it.
                nss (for [root roots
                          f (file-seq (java.io.File. root))
-                         :when (and (.isFile f) (str/ends-with? (str f) ".clj"))]
+                         :when (and (.isFile f) (str/ends-with? (str f) ".clj")
+                                    (re-find (re-pattern "(?m)^\\(ns ") (slurp f)))]
                      (ns-of root f))
                form (str "(do " (apply str (map (fn [n] (str "(require '" n ") ")) nss)) "(println :compile-dev-ok " (count nss) "))")]
            (println "compile-dev:" (str/join " " nss))
@@ -691,6 +698,26 @@
   {:doc "Unit tests only (skips ^:integration). ~4 min (measured: 246 s as a process, 205 s of kaocha wall; the old ~1.5 min was stale). Emits perf/runs/unit.edn — the report `bb perf` gates the suite-wide structural invariants against."
    :task (clojure {:extra-env {"GRAPHDEN_PERF_REPORT" "perf/runs/unit.edn"}}
                   "-M:dev:test -m kaocha.runner :unit")}
+
+  test-e2e-org
+  {:doc "The organisation tours' e2e guard (tools/browser-test/edit-tutorial-tour-org.test.js) against the LOCAL tenancy stack: boots gdcloud from ../graphden-cloud (the release image graphden-cloud:latest, `bb gdcloud-up` there), signs up + verifies a throwaway account through the executor log (no mailer), runs the guard signed in as it. Needs the sibling graphden-cloud checkout; skips with a message otherwise. Not in `bb ci` — the tenancy stack is a second image; run it after a release or a tour edit."
+   :task (let [cloud-dir (or (System/getenv "GRAPHDEN_CLOUD_DIR")
+                             ;; the sibling checkout — one level up from the main
+                             ;; checkout, two from an agent worktree
+                             (some (fn [d] (when (fs/exists? d) d)) ["../graphden-cloud" "../../graphden-cloud"])
+                             "../graphden-cloud")
+               script (str cloud-dir "/dev/gdcloud/gdcloud.sh")
+               email (or (System/getenv "GRAPHDEN_ORG_EMAIL") "org-e2e@local.test")
+               password (or (System/getenv "GRAPHDEN_ORG_PASSWORD") "org-e2e-pass-1")]
+           (if-not (fs/exists? script)
+             (println "test-e2e-org: no graphden-cloud checkout at" script "— set GRAPHDEN_CLOUD_DIR")
+             (do (shell script "up")
+                 (shell script "account" email password)
+                 (shell {:dir "tools/browser-test"
+                         :extra-env {"GRAPHDEN_URL" "http://127.0.0.1:9900"
+                                     "GRAPHDEN_ORG_EMAIL" email
+                                     "GRAPHDEN_ORG_PASSWORD" password}}
+                        "node" "edit-tutorial-tour-org.test.js"))))}
 
   test-js
   {:doc "JS tests that need NO graphden stack — tools/runtime-test/*.test.js, run under node's vm with no browser at all: the shared client runtime, and (since 2026-08-22) the editor's type helpers + the resolution-section renderer.

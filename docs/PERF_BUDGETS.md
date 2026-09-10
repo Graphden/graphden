@@ -88,7 +88,9 @@ The invariants that are gated today:
 | `:fixture/type-check-sweep` | 0 | the ~24 s sweep leaking into the unit suite (was ~40 s before the 2026-08-17 `effective-ref-return` memoization) |
 | `:registry/delta-fell-back-to-rebuild` | 0 | a delta silently becoming a full rebuild |
 | `:registry/delta-read-graph` | 26 | a delta (or type refresh) reading the whole graph out of Postgres instead of the primed cache — on the cloud that read was 1.7 s per write |
+| `:registry/invalidate-full` | 5 | a WARM full clear (a compiled registry dropped; the next request compiles the whole graph). Warm-only since 2026-09-10 — the cold no-ops are `:registry/invalidate-cold`, trend-only — and every event carries an attribution note (frames + write shape). The 5 are tests calling the 1-arity on purpose; the CRUD path produces zero |
 | `:sql/graph-entities-tree` | 1 | the sidebar's first paint reading rows it doesn't paint |
+| `:sidebar/tree-kinds-computed` | 1 | the sidebar's per-namespace kind counts recomputed on a paint whose snapshot did not change — the memo missed and every paint annotates every fn again (the 4× trend drift of 2026-09) |
 | `:sql/create-fn` | 20 | the write path re-reading what it already had |
 | `:sql/execute-popover-app-root` | 18 | the Run form's free-arg walk querying per level again (30–50 s for the app root before 2026-09-02) |
 | `:sql/merge-fork` | 35 | the merge reading all of main again (a full resolved-view diff + a whole-branch conflict scan: 1.6 s locally, ~7 s on the cloud before 2026-09-03) |
@@ -387,7 +389,11 @@ dogpile, growing the compile cache — measured as noise or worse.
 `bb perf` also prints a `trend` section, and it **never fails the run**.
 
 `docs/PERF_NOTES.md` lists `?scope=tree` at ~15 ms. That number cannot be a
-baseline: it describes the box it was measured on. So `graphden.perf.calibrate`
+baseline (and the trend has already earned its keep once: it flagged
+`graph-entities-tree` at 4× its 2026-08-27 units, which was the per-namespace
+kind counts — added 2026-08-29 — annotating every fn's role on every sidebar
+paint; the counts are memoised per snapshot now and `:sidebar/tree-kinds-
+computed` gates the memo): it describes the box it was measured on. So `graphden.perf.calibrate`
 measures a **reference workload in the same run, against the same pool** — one
 empty `SELECT 1` round trip — and reports each scenario as a ratio to it. "This
 endpoint costs 22 round trips" is a statement about the code; a slow box slows the

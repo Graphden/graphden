@@ -284,7 +284,17 @@
       (println " "
                (format "%-50s  ns=%s"
                        (str name)
-                       (str (:namespace fd)))))))
+                       (str (:namespace fd)))))
+    {:unreachable-composed (vec (sort-by key unreachable-composed))}))
 
 
-(run-audit)
+;; A CI check (`bb reachability`, group :clj): an unreachable composed
+;; fn-def is dead code or unregistered vocabulary, and either is a fix.
+(let [{:keys [unreachable-composed]} (run-audit)]
+  (when (seq unreachable-composed)
+    (println)
+    (println (str "reachability: " (count unreachable-composed)
+                  " unreachable composed fn-def(s) — delete them, or, if an author is"
+                  " meant to reach for them, list them in tools/graph-reachability.edn"
+                  " :vocabulary with the reason"))
+    (System/exit 1)))

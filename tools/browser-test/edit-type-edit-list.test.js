@@ -11,8 +11,7 @@
 // Run from this directory:  node edit-type-edit-list.test.js
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, deleteFnByName, waitFor} =
-  require('./edit-test-helpers');
+const {assert, newContext, api, getEntities, deleteFnByName, waitFor, nodeApi} = require('./edit-test-helpers');
 
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
@@ -25,7 +24,7 @@ async function cleanup(page) {
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => d.accept());
   console.log('edit-type-edit-list — open / change element-type / save');
 
@@ -35,17 +34,7 @@ async function cleanup(page) {
     // ===================================================================
     // Seed via /api/types/list (JSON body).
     // ===================================================================
-    const seedResp = await page.evaluate(async ({base, auth, name}) => {
-      const r = await fetch(base + '/api/types/list', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + auth,
-        },
-        body: JSON.stringify({name, 'element-type': 'int'}),
-      });
-      return r.json();
-    }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: (process.env.AUTH_TOKEN || 'test123'), name: LIST_FN});
+    const seedResp = await nodeApi('POST', '/api/types/list', {name: LIST_FN, 'element-type': 'int'}).then((r) => r.json()).catch((err) => ({ok: false, error: 'fetch threw: ' + String(err).slice(0, 200)}));
     assert(seedResp.ok && seedResp.id,
            'list type-row created: ' + JSON.stringify(seedResp).slice(0, 120));
 

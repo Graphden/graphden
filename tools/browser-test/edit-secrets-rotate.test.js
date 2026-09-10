@@ -18,8 +18,7 @@
 // Run from this directory:  node edit-secrets-rotate.test.js
 
 const {chromium} = require('playwright');
-const {assert, newContext, getEntities, deleteFnByName} =
-  require('./edit-test-helpers');
+const {assert, newContext, getEntities, deleteFnByName, nodeApi} = require('./edit-test-helpers');
 
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
@@ -33,7 +32,7 @@ async function cleanup(page) {
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => d.accept());
   console.log('edit-secrets-rotate — create / ↻ / new value / PUT 200');
 
@@ -46,22 +45,7 @@ async function cleanup(page) {
     // — this scenario is documented as an outstanding container
     // stability tail.
     // ===================================================================
-    const seed = await page.evaluate(async ({base, auth, name, path}) => {
-      try {
-        const r = await fetch(base + '/api/secrets', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + auth,
-          },
-          body: JSON.stringify({name, path, value: 'initial-secret-v1'}),
-        });
-        return await r.json();
-      } catch (err) {
-        return {ok: false, error: 'fetch threw: ' + String(err).slice(0, 200)};
-      }
-    }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: (process.env.AUTH_TOKEN || 'test123'),
-        name: SECRET_NAME, path: SECRET_PATH});
+    const seed = await nodeApi('POST', '/api/secrets', {name: SECRET_NAME, path: SECRET_PATH, value: 'initial-secret-v1'}).then((r) => r.json()).catch((err) => ({ok: false, error: 'fetch threw: ' + String(err).slice(0, 200)}));
     if (!seed.ok) {
       // See edit-secrets-list.test.js for the rationale — default
       // fail-loud, opt-in soft-skip via GRAPHDEN_VAULT_OPTIONAL=1.

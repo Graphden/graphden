@@ -22,8 +22,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, deleteFnByName} =
-  require('./edit-test-helpers');
+const {assert, newContext, deleteFnByName, nodeApi} = require('./edit-test-helpers');
 
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
@@ -37,7 +36,7 @@ async function cleanup(page) {
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => d.accept());
   console.log('edit-secrets-list — seed / render / perf gate');
 
@@ -47,22 +46,7 @@ async function cleanup(page) {
     // ===================================================================
     // Seed: POST /api/secrets. Skip gracefully if Vault unreachable.
     // ===================================================================
-    const seed = await page.evaluate(async ({base, auth, name, path}) => {
-      try {
-        const r = await fetch(base + '/api/secrets', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + auth,
-          },
-          body: JSON.stringify({name, path, value: 'list-probe-v1'}),
-        });
-        return await r.json();
-      } catch (err) {
-        return {ok: false, error: 'fetch threw: ' + String(err).slice(0, 200)};
-      }
-    }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: (process.env.AUTH_TOKEN || 'test123'),
-        name: SECRET_NAME, path: SECRET_PATH});
+    const seed = await nodeApi('POST', '/api/secrets', {name: SECRET_NAME, path: SECRET_PATH, value: 'list-probe-v1'}).then((r) => r.json()).catch((err) => ({ok: false, error: 'fetch threw: ' + String(err).slice(0, 200)}));
     if (!seed.ok) {
       // Default: Vault MUST be reachable. The e2e stack
       // (development/dev/e2e_stack.clj) and demo (docker-compose.yml)

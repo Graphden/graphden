@@ -15,6 +15,7 @@
     [graphden.packages.owned :as owned]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.diagnostics :as diag]
+    [graphden.util.counters :as counters]
     [graphden.util.ns-path :as ns-path]
     [graphden.versioning.storage.core :as vcore]))
 
@@ -264,6 +265,8 @@
                       (owned/owned-fn-id? (:id f)) (assoc :package-owned true)
                       (pos? errs) (assoc :type-error-count errs))))]
     {:base base
+     :branch-id (vcore/current-branch-id storage)
+     :rich-snapshot rich-snapshot
      :role-of role-of
      :roled-fns (delay (mapv role-of (:fns base)))
      ;; Whole-graph reverse-ref tallies — realised only for the scopes
@@ -271,6 +274,64 @@
      :rev-index (delay (reverse-ref-index base))
      :diag-counts diag-counts
      :namespaces (delay (vec (sp/query-entities storage :ns {})))}))
+
+
+(def ^:private tree-kinds-memo
+  "Per-branch memo of the sidebar's per-namespace KIND counts (named fns
+   / type-rows / plain fns): branch-id → the graph snapshot object and
+   rich-types snapshot they were computed from, and the counts. Those
+   counts are a pure function of the two snapshots, and computing them
+   meant annotating the role of EVERY fn on every sidebar paint — the
+   one O(all-fns) walk left on the tree path after the O(namespaces)
+   redesign, and the 4× drift the perf trend flagged in 2026-09. A
+   write replaces the snapshot object (`executor.context/splice-graph-
+   cache!`), so identity is the freshness check; the per-namespace
+   diagnostic counts are NOT memoised here (they move without a graph
+   write) and stay per request. Bounded like the lint memo."
+  (atom {}))
+
+
+(def ^:private tree-kinds-memo-cap 16)
+
+
+(defn- ns-kind-counts
+  "`{namespace-id {:count n :types n :plain n}}` over the named fns —
+   the memoised half of the tree payload."
+  [base roled-fns]
+  (let [;; Secret-leaf ids resolved WITHOUT a query: registry tag → base-fn
+        ;; NAMES (globally unique for base-fns) → id match over the
+        ;; in-memory graph. Empty when web.vault isn't loaded.
+        secret-leaf-ids (let [names (into #{} (map name)
+                                          (registry/fn-names-with-tag :secret-shape))]
+                          (into #{}
+                                (comp (filter (comp names str :name)) (map :id))
+                                (:fns base)))
+        secret-shaped? (fn [f] (boolean (some #(secret-shape/secret-fn? f %) secret-leaf-ids)))]
+    (counters/count! :sidebar/tree-kinds-computed)
+    (into {}
+          (map (fn [[nid fns]]
+                 [nid {:count (count fns)
+                       :types (count (filter (comp types-api/type-lens-roles :role) fns))
+                       :plain (count (remove #(or (types-api/type-lens-roles (:role %))
+                                                  (secret-shaped? %))
+                                             fns))}]))
+          (group-by :namespace-id (filter :name @roled-fns)))))
+
+
+(defn- tree-kinds
+  [branch-id base rich-snapshot roled-fns]
+  (let [rich @rich-snapshot
+        hit (get @tree-kinds-memo branch-id)]
+    (if (and hit (identical? (:base hit) base) (identical? (:rich hit) rich))
+      (:kinds hit)
+      (let [kinds (ns-kind-counts base roled-fns)]
+        (swap! tree-kinds-memo
+               (fn [m]
+                 (let [m (assoc m branch-id {:base base :rich rich :kinds kinds :at (System/nanoTime)})]
+                   (if (> (count m) tree-kinds-memo-cap)
+                     (dissoc m (key (apply min-key (comp :at val) m)))
+                     m))))
+        kinds))))
 
 
 (defn- list-scope-tree
@@ -292,7 +353,7 @@
    namespace whose leaves were never fetched. (A service-backed or
    app-routed fn still counts here — the server doesn't classify those
    kinds; the rare namespace holding ONLY such fns over-shows.)"
-  [{:keys [base diag-counts namespaces roled-fns]}]
+  [{:keys [base diag-counts namespaces roled-fns rich-snapshot branch-id]}]
   (let [ns-of-fn (when (seq @diag-counts)
                    (into {} (map (juxt :id :namespace-id)) (:fns base)))
         ;; Count ONLY fns present in `base` (the viewer's own+public
@@ -308,28 +369,13 @@
                            (update m (get ns-of-fn fid) (fnil + 0) n)
                            m))
                        {} @diag-counts)
-        ;; Secret-leaf ids resolved WITHOUT a query: registry tag → base-fn
-        ;; NAMES (globally unique for base-fns) → id match over the
-        ;; in-memory graph. Empty when web.vault isn't loaded.
-        secret-leaf-ids (let [names (into #{} (map name)
-                                          (registry/fn-names-with-tag :secret-shape))]
-                          (into #{}
-                                (comp (filter (comp names str :name)) (map :id))
-                                (:fns base)))
-        secret-shaped? (fn [f] (boolean (some #(secret-shape/secret-fn? f %) secret-leaf-ids)))
-        counts (->> @roled-fns
-                    (filter :name)
-                    (group-by :namespace-id)
-                    (mapv (fn [[nid fns]]
-                            (let [errs (get ns-err nid 0)
-                                  types (count (filter (comp types-api/type-lens-roles :role) fns))
-                                  plain (count (remove #(or (types-api/type-lens-roles (:role %))
-                                                            (secret-shaped? %))
-                                                       fns))]
-                              (cond-> {:namespace-id nid :count (count fns)}
-                                (pos? errs) (assoc :type-error-count errs)
-                                (pos? types) (assoc :type-count types)
-                                (pos? plain) (assoc :fn-count plain))))))
+        counts (mapv (fn [[nid {n :count :keys [types plain]}]]
+                       (let [errs (get ns-err nid 0)]
+                         (cond-> {:namespace-id nid :count n}
+                           (pos? errs) (assoc :type-error-count errs)
+                           (pos? types) (assoc :type-count types)
+                           (pos? plain) (assoc :fn-count plain))))
+                     (tree-kinds branch-id base rich-snapshot roled-fns))
         ;; Namespaces whose only diagnosed fns are anonymous still
         ;; get a chip row (count 0 reads falsy client-side).
         covered (into #{} (map :namespace-id) counts)

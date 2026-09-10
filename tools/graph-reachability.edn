@@ -92,4 +92,7 @@
   :text-unauthorized-response "web.response keeps the status x content-type matrix complete"
   :text-too-many-requests-response "web.response keeps the status x content-type matrix complete"
   :concat-resources "core.system bundling over plain :read-resource; the app tier composes the :concat-resources-overridable twin"
-  :_concat-resources-list "the :map step inside :concat-resources"}}
+  :_concat-resources-list "the :map step inside :concat-resources"
+  :ensure-url "core.refinements narrower for graph-built URLs — the explicit point a :text re-earns :url; first-party code has no string-built URL to narrow, an author's does"
+  :fragment-post-route "app.page POST-route template for an :hx-post-attrs form; first-party pages take the :html-fragment-handler child directly — starter vocabulary for user apps"
+  :ring-bytes-response "core.system :ring-response twin for a BINARY body (:read-resource-bytes); first-party assets go through the overridable resource routes — starter vocabulary"}}

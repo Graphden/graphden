@@ -36,26 +36,23 @@
       (is (= [["a" :page-attrs] ["b" :row-attrs]] (:fns (first fs))))
       (is (= 3 (:weight (first fs))))))
 
-  (testing "a small accessor is info, not a warning — the let-rule's separate child per code path"
-    (let [fs (findings-for :duplicate-definition
-                           [(fd "a" :_name :parent :get :args {:coll {:as :row} :key {:value :name} :default nil})
-                            (fd "b" :_name :parent :get :args {:coll {:as :row} :key {:value :name} :default nil})])]
-      (is (= [:info] (map :severity fs)))
-      (is (= 1 (:weight (first fs))))))
+  (testing "a small accessor is not a finding — the let-rule's separate child per code path"
+    (is (empty? (findings-for :duplicate-definition
+                              [(fd "a" :_name :parent :get :args {:coll {:as :row} :key {:value :name} :default nil})
+                               (fd "b" :_name :parent :get :args {:coll {:as :row} :key {:value :name} :default nil})]))))
 
   (testing "a nil literal weighs nothing — `:default nil` spells out no default"
     (let [fs (findings-for :duplicate-definition
-                           [(fd "a" :_id :parent :get :args {:coll :a/row :key {:value :id} :default nil})
-                            (fd "b" :_id :parent :get :args {:coll :a/row :key {:value :id} :default nil})
-                            (fd "a" :row :parent :const :args {:value {:value {}}})])]
-      (is (= 2 (:weight (first fs))))))
+                           [(fd "a" :_id :parent :get :args {:coll :a/row :key {:value :id} :default nil :value :a/title})
+                            (fd "b" :_id :parent :get :args {:coll :a/row :key {:value :id} :default nil :value :a/title})
+                            (fd "a" :row :parent :const :args {:value {:value {}}})
+                            (fd "a" :title :parent :const :args {:value {:value "t"}})])]
+      (is (= 3 (:weight (first fs))) "coll + key + value; the nil default adds nothing")))
 
-  (testing "a rename-only binding weighs nothing"
-    (let [fs (findings-for :duplicate-definition
-                           [(fd "a" :_missing? :parent :nil? :args {:value {:as :resolved}})
-                            (fd "b" :_missing? :parent :nil? :args {:value {:as :resolved}})])]
-      (is (zero? (:weight (first fs))))
-      (is (= :info (:severity (first fs))))))
+  (testing "a rename-only binding weighs nothing and is not a finding"
+    (is (empty? (findings-for :duplicate-definition
+                              [(fd "a" :_missing? :parent :nil? :args {:value {:as :resolved}})
+                               (fd "b" :_missing? :parent :nil? :args {:value {:as :resolved}})]))))
 
   (testing "different return-type or lambda-params is a different definition"
     (is (empty? (findings-for :duplicate-definition
@@ -173,18 +170,18 @@
 
 
 (deftest ordering-test
-  (testing "warnings sort before info"
+  (testing "findings sort by rule, and only what crosses the line is filed"
     (let [fs (lint/lint [(fd "a" :_dead :parent :get :args {:key {:value :k}})
                          (fd "a" :_name :parent :get :args {:coll {:as :row} :key {:value :name}})
                          (fd "b" :_name :parent :get :args {:coll {:as :row} :key {:value :name}})
                          (fd "a" :use :parent :assoc :args {:map :a/_name :key {:value :k}})
                          (fd "b" :use :parent :assoc :args {:map :b/_name :key {:value :k}})]
                         {:base-fn-names base-fns})]
-      ;; `_dead` is unreferenced (warning); a/use + b/use are the same
-      ;; graph once their private `_name` helpers expand (warning); the
-      ;; two `_name` accessors themselves are an info-tier duplicate, and
-      ;; a/use + b/use also bind one value alike (info-tier fan-in).
-      (is (= [:warning :warning :info :info] (map :severity fs)))
+      ;; `_dead` is unreferenced; a/use + b/use are the same graph once
+      ;; their private `_name` helpers expand. The two `_name` accessors
+      ;; and the one value a/use + b/use bind alike sit below the line
+      ;; and are not filed.
+      (is (= [:warning :warning] (map :severity fs)))
       (is (= 2 (count (lint/warnings fs)))))))
 
 
@@ -257,12 +254,10 @@
       (let [fs (findings-for :fan-in-extract-parent [e1 e2 e3] :base-fn-names zipmap-fns)]
         (is (= [[["a" :e1] ["a" :e2] ["b" :e3]]] (map :fns fs)))
         (is (= 1 (count (findings-for :duplicate-definition [e1 e2 e3] :base-fn-names zipmap-fns))))))
-    (testing "one or two shared values is info — the let-rule's separate child per code path"
-      (let [[f] (findings-for :fan-in-extract-parent
-                              [(fd "a" :x :parent :assoc :args {:map {:value {}} :key {:value :k} :value {:value 1}})
-                               (fd "a" :y :parent :assoc :args {:map {:value {}} :key {:value :k} :value {:value 2}})])]
-        (is (= :info (:severity f)))
-        (is (= 2 (:weight f)))))
+    (testing "one or two shared values is not a finding — the let-rule's separate child per code path"
+      (is (empty? (findings-for :fan-in-extract-parent
+                                [(fd "a" :x :parent :assoc :args {:map {:value {}} :key {:value :k} :value {:value 1}})
+                                 (fd "a" :y :parent :assoc :args {:map {:value {}} :key {:value :k} :value {:value 2}})]))))
     (testing "different parents, or nothing bound alike, is not a group"
       (is (empty? (findings-for :fan-in-extract-parent
                                 [(fd "a" :x :parent :assoc :args {:map {:value {}} :key {:value :k}})
@@ -277,14 +272,13 @@
                              (fd "a" (keyword (str "c" i)) :parent (keyword "a" (str "c" (dec i)))
                                  :args {:default {:value i}})))
                       (range 2 (inc n))))]
-    (testing "a chain is reported at its tip only, info from six levels and a warning from eight"
+    (testing "a chain is reported at its tip only, from eight levels"
       (let [fs (findings-for :deep-hierarchy (chain 8))]
         (is (= [[["a" :c8]]] (map :fns fs)))
         (is (= 8 (:weight (first fs))))
         (is (= :warning (:severity (first fs))))
         (is (re-find #"a/c1 → a/c2 → .* → a/c8" (:message (first fs)))))
-      (is (= [:info] (map :severity (findings-for :deep-hierarchy (chain 6)))))
-      (is (empty? (findings-for :deep-hierarchy (chain 5)))))
+      (is (empty? (findings-for :deep-hierarchy (chain 7))) "the justified 6–7 of the shipped corpus is not a finding"))
     (testing "the depth is the LONGEST parent path under multiple inheritance"
       (let [defs (conj (chain 7)
                        (fd "a" :short :parent :get :args {:key {:value :s}})

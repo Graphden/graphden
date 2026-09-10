@@ -309,3 +309,19 @@ dropped), `:registry/invalidate-cold` the no-ops. The attribution note
 keys carry `{:warm? :seeded? :write [entity-type keys]}` so the next
 investigation reads the shape off `perf/runs/unit.edn` instead of
 re-instrumenting.
+
+### 2026-09-10 — the tree trend was the kind counts
+
+The perf trend (advisory) had `graph-entities-tree` at ~4× its 2026-08-27
+units while every other scenario held. Not the database (one round trip, as
+budgeted): the sidebar's per-namespace kind counts — `:type-count` /
+`:fn-count`, added 2026-08-29 so the fn / types lenses keep unloaded
+namespaces visible — were computed by annotating the ROLE of every fn on
+every paint (`roled-fns` in `crud.entities.list`, ~5k `compute-fn-role`
+calls). The counts are a pure function of the graph snapshot and the
+rich-types snapshot, so `tree-kinds` memoises them per branch on those two
+identities (the same freshness check the graph lint uses — a write replaces
+the snapshot object); the per-namespace diagnostic counts stay per request,
+because they move without a graph write. `:sidebar/tree-kinds-computed`
+counts the recomputations and `perf/budgets.edn` holds it at 1 for the
+three-paint scenario.

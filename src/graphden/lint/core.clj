@@ -17,10 +17,10 @@
    Rules (severity in parentheses):
 
    - `:duplicate-definition` — ≥ 2 named fn-defs with equal *shallow*
-     signatures. (warning when the shared structure carries
-     `warning-weight` or more bound values/refs, info below that — one-binding accessors and pure
+     signatures, when the shared structure carries `warning-weight` or
+     more bound values/refs — below that, one-binding accessors and pure
      aliases are the let-rule's sanctioned \"separate child per code
-     path\", not copy-paste.)
+     path\", not copy-paste, and nothing is filed.
    - `:duplicate-after-expansion` — equal *deep* signatures (private
      `_`-helpers inlined at their ref sites) but different shallow
      ones: the same graph factored differently across helpers or
@@ -40,8 +40,7 @@
      Weighted like the duplicate rules.
    - `:deep-hierarchy` — a chain `deep-hierarchy-depth` or more
      composed levels above its base-fn, reported at its tip
-     (PACKAGES.md § 4). (info; warning from
-     `deep-hierarchy-warning-depth`)
+     (PACKAGES.md § 4).
 
    A *finding* is `{:rule :severity :fns [[ns name] …] :fn-ids [uuid …]
    :weight :message}` (`:fn-ids` when the fn-defs carry `:id` — the DB
@@ -347,15 +346,12 @@
 
 (def warning-weight
   "Bound values a shared structure must carry before duplicating it is
-   a warning. Below this an extraction buys nothing: `{:parent :get
+   a finding. Below this an extraction buys nothing: `{:parent :get
    :args {:coll {:as :row} :key {:value :id} :default nil}}` written
-   twice is two accessors, not a copied graph."
+   twice is two accessors, not a copied graph — and a finding nobody
+   should act on is a false recommendation, so the engine reports
+   nothing below the line rather than filing an info tier."
   3)
-
-
-(defn- duplicate-severity
-  [weight]
-  (if (>= weight warning-weight) :warning :info))
 
 
 (defn- duplicate-findings
@@ -372,9 +368,10 @@
                 shallow-sigs (into #{} (map #(signature idx :shallow memo %)) g)]
           :when (or (= mode :shallow) (> (count shallow-sigs) 1))
           :let [weight (signature-weight sig)
-                fns (vec (sort (map fn-key g)))]]
+                fns (vec (sort (map fn-key g)))]
+          :when (>= weight warning-weight)]
       {:rule (if (= mode :shallow) :duplicate-definition :duplicate-after-expansion)
-       :severity (duplicate-severity weight)
+       :severity :warning
        :fns fns
        :weight weight
        :message (str (count g) " fn-defs "
@@ -594,9 +591,10 @@
           :when (> (count sigs) 1)
           :let [weight (set-weight S)
                 fns (vec (sort ks))
-                args (map (comp name first) (sort-by (comp str first) S))]]
+                args (map (comp name first) (sort-by (comp str first) S))]
+          :when (>= weight warning-weight)]
       {:rule :fan-in-extract-parent
-       :severity (duplicate-severity weight)
+       :severity :warning
        :fns fns
        :weight weight
        :message (str (count fns) " fn-defs inherit the same parent"
@@ -613,16 +611,12 @@
 ;; -----------------------------------------------------------------------------
 
 (def deep-hierarchy-depth
-  "Composed levels above a base-fn from which a chain needs a
-   justification (PACKAGES.md § 4: 2–3 is normal, 4–5 acceptable for
-   route/response composition, 6+ needs one). Filed as info from here —
-   the MCP surface's tool envelopes sit at 6–7 with a concept per level."
-  6)
-
-
-(def deep-hierarchy-warning-depth
-  "Depth at which a chain is a warning: two levels past the
-   justification line, beyond anything the first-party corpus needs."
+  "Composed levels above a base-fn from which a chain is a finding.
+   PACKAGES.md § 4 puts the justification line at 6, and the first-party
+   corpus justifies its 6–7-level chains (the MCP surface's tool
+   envelopes carry a concept per level) — so the engine speaks only two
+   levels past that line, where no shipped chain has needed to go, rather
+   than file findings nobody would act on."
   8)
 
 
@@ -655,7 +649,7 @@
                 [d chain] (depth-chain idx cache fd)]
           :when (and (>= d deep-hierarchy-depth) (not (contains? is-parent k)))]
       {:rule :deep-hierarchy
-       :severity (if (>= d deep-hierarchy-warning-depth) :warning :info)
+       :severity :warning
        :fns [k]
        :weight d
        :message (str (label k) " is " d " levels of inheritance above its base-fn: "
@@ -756,8 +750,9 @@
      duplicate group is dropped;
    - `:suppress` — set of `finding-key`s to drop.
 
-   Returns findings sorted warnings first, then by rule and fns. One
-   full pass — `lint-with-state` is the incremental form."
+   Returns findings sorted by rule and fns — every finding is a
+   warning: the engine files nothing it would not ask the author to act
+   on. One full pass — `lint-with-state` is the incremental form."
   ([fn-defs] (lint fn-defs {}))
   ([fn-defs opts]
    (:findings (lint-with-state fn-defs opts (empty-state) :all))))

@@ -95,6 +95,13 @@ GRAPHDEN_ORG_EMAIL=you@example.com GRAPHDEN_ORG_PASSWORD=… \
   node edit-tutorial-tour-org.test.js
 ```
 
+The whole thing is one task from the monorepo: `bb test-e2e-org` boots the
+local tenancy stack from the sibling `graphden-cloud` checkout (`bb gdcloud-up`
+there — the release image, no rebuild), signs up + verifies a throwaway
+account through the executor log (no mailer needed) and runs the guard signed
+in as it. It is not part of `bb ci` (a second image); run it after a release
+or a tour edit.
+
 The account must be an org OWNER — a fresh signup is one, since its first login
 creates the personal org it owns. The local cloud-shaped stack (boot
 `graphden-cloud` against local checkouts) is the usual target; run this before a

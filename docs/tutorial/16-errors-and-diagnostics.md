@@ -148,17 +148,15 @@ the finding with the other fns involved as links:
 - **fan-in-extract-parent** — two or more fns inherit the same parent
   and bind the same values, differing elsewhere. Lesson 02's move:
   extract a parent that binds the shared part and inherit it.
-- **deep-hierarchy** — a fn six or more levels of inheritance above
-  its base-fn. Filed quietly (it is a warning only from eight); each
-  level should name a concept, or be flattened.
+- **deep-hierarchy** — a fn eight or more levels of inheritance above
+  its base-fn; each level should name a concept, or be flattened.
 
 Small coincidences are not shown. Two accessors that both read
 `:id` off a row are the normal way to give each code path its own
-child (lesson 04); a duplicate becomes a **warning** only when the
-shared structure carries at least three bound values — a copied
-graph, not a habit. Lighter matches the engine still files, as an
-*info* tier — calibration data for the lint itself — and the editor's
-lens and Inspector list warnings only.
+child (lesson 04); a duplicate is a finding only when the shared
+structure carries at least three bound values — a copied graph, not
+a habit. Below that line the lint says nothing at all: a mark you
+should not act on would be a wrong recommendation.
 
 ```text
 Lint

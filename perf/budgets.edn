@@ -39,32 +39,40 @@
   {:max 0,
    :why
    "A caller named its changed fn-ids and STILL paid for a full graph recompile: delta-recompile! hit a cold reverse-deps index and silently called rebuild!. Nothing in the return value says so and no timing distinguishes it from a cold cache — this counter is the only evidence. It is the exact failure 9d66adc0 and 0b74f1dc were about; measured at 4137 fns, the rebuild it hides costs 49.8 s."},
+  :registry/invalidate-full
+  {:max 5,
+   :why
+   "A WARM full clear: a compiled registry was dropped because a write could not say what it changed, and the next request pays a whole-graph compile (~5 s at 6.5k fns; 49.8 s measured in 2026-07). Since 2026-09-10 the counter is warm-only (the cold no-ops are :registry/invalidate-cold, reported as trend) and every event carries an attribution note (frames + write shape, perf/runs/unit.edn). The unit suite's product path — crud.entities/invalidate! — produces ZERO; the 5 are tests calling the 1-arity on purpose (entities-test, fn-execution-test, compile-runtime-test) plus the shared-container fixture. A sixth is a write whose affected-fn-ids answered nil on a warm ctx — read the note, name the shape in affected-fn-ids."},
   :registry/delta-read-graph
   {:max 26,
    :why
    "A delta recompile (or a type-registry refresh) that read the WHOLE graph out of Postgres instead of taking the primed :graph-cache. The cache is the full org-agnostic graph on every deployment, so only a cold cache or a sharded (:executor-orgs) pod should ever read here. On the cloud that read was 1.7 s of a 1.85 s merge and ran on EVERY write (2026-09-03) — a timing could not tell it from a slow database. 26 = the suite's cold-cache cases at the time the counter was added."}},
  :perf
- #:sql{:graph-entities-tree
+ {:sidebar/tree-kinds-computed
+  {:max 1,
+   :why
+   "The sidebar's per-namespace kind counts (named / type-rows / plain fns) are memoised per branch on the graph-snapshot + rich-types-snapshot identities (`crud.entities.list/tree-kinds`). The scenario paints the tree three times on one snapshot: ONE computation. A second means the memo missed — a snapshot object that changes without a write, or the rich-types atom replaced on read — and every sidebar paint is back to annotating the role of every fn (the 4× trend drift of 2026-09)."},
+  :sql/graph-entities-tree
        {:max 1,
         :why
         "The sidebar's first paint. 1 round trip, steady-state (the compile is paid by whichever scenario runs first — see bb.edn's test-perf note on --no-randomize). This endpoint was 95 ms / 4.5 MB before it was scoped down to ?scope=tree; if this climbs, the scoping has sprung a leak and the sidebar is reading rows it does not paint."},
-       :create-fn
+  :sql/create-fn
        {:max 24,
         :why
         "Creating one :fn costs 24 round trips, steady-state — it runs first, so it pays the compile reads for the suite. 19→20 (2026-07-25): the graph-epoch bump — one nextval BEFORE every graph-shaped write, the freshness self-heal's write half (storage.postgres.graph-epoch); deliberate. 20→24 (2026-08-27): the bare :fn create now runs the post-write type-check so a freshly-extended child records its rich-types entry (typed repr / fn-return-type / effects work before the first binding) — reconstruct-fn-def reads the fn + parents + ns rows; deliberate. A further jump means the write path started re-reading what it already had: this operation once spent 477 ms of its 918 ms re-reading the whole graph to recompile a closure whose blast radius was one fn (9c1b882a spliced the cache instead)."},
-       :list-secrets
+  :sql/list-secrets
        {:max 8,
         :why
         "GET /api/secrets — 6 round trips steady-state, INDEPENDENT of how big the graph is, and deliberately budgeted with headroom rather than tightly. This one number jitters by ±1 with branch-row caching (measured 5, 6 and 7 across runs on two machines), so a tight ceiling fails honestly-green runs and a loose one misses small regressions. The real guard is in the scenario itself: pg_stat_statements normalises a graph scan into one row with calls > 1, and the test asserts every statement runs exactly once. This budget is the coarse backstop for a change that adds whole new statements — cross 8 and something structural moved."},
-       :merge-fork
+  :sql/merge-fork
        {:max 36,
         :why
         "POST /api/branches/main/merge for a branch forked off main carrying one new fn. 35 → 36 on 2026-09-07: the post-commit folds the source into the popover's Merged group — ONE conditional UPDATE (`archived_at = now() WHERE base_branch_id = target`), no read-back. — lesson 20's flow, every review's last click. Before 2026-09-03 the merge ran a full resolved-view diff of both branches (`untransferable-inherited-entities`) and scanned EVERY version row on main for conflicts — thousands of round trips' worth of rows, 1.6 s here and ~7 s on the cloud. The fork case now decides from the two branches' visibility sets (a fork shows nothing the target can't see) and the conflict scan asks the target only about the ids the source touched. If this climbs by more than a handful, somebody put a whole-branch read back on the merge path."},
-       :execute-popover-app-root
+  :sql/execute-popover-app-root
        {:max 15,
         :why
         "GET /partials/execute-popover for `web-server` — the fn whose reachable closure is the whole application. Its free-arg walk loads that closure through the storage's own graph resolver (a constant handful of round trips) and walks it in memory with per-fn memoisation. Before 2026-09-02 the walk was a per-level BFS — four queries per level, dozens of levels — and the Run form for the app root took 30–50 s (the inspector's Runs tab looked hung). 18 → 15 on 2026-09-06: the resolver's four entity loads share one `branch_merge` read (the request-scoped merge-record memo), and the scenario drives the BRANCH ROUTER (`br/dispatch`, the wire shape) so the router's own per-request work is in the count — the fixture overlays the cached type-check sweep for that, else `_router` compiles as a shape-callable. If this number grows with the DEPTH of the app graph, somebody put a query back inside the walk; +3 means the memo scope was lost."},
-       :graph-layout
+  :sql/graph-layout
        {:max 0,
         :why
         "POST /api/graph/layout — every card expansion in the editor, and steady-state it costs ZERO round trips: the layout reads the graph the compile cache already holds. A budget of 0 is the strictest one in this file and the cheapest to reason about — the FIRST query this endpoint issues is the regression, no factor to argue about. If it fires, a caching change started re-reading the graph per expansion."}},

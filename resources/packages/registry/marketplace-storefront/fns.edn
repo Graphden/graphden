@@ -212,13 +212,7 @@
                      {:parent :if :args {:test {:parent :nil? :args {:value :_sfi-latest}}
                                          :then {:parent :hiccup :args {:tag {:value "div"} :attrs {:value {:class "mk-empty"}} :children [{:value "No public package by that name."}]}}
                                          :else :_sfi-found}}]}}
-  {:name :storefront-item-found?
-   :description "Whether a public, approved package by `:pkg-name` exists — the landing answers 404 otherwise."
-   :parent :some? :args {:value :_sfi-latest}}
-  {:name :storefront-item-title
-   :description "`<name> — Graphden marketplace` (the page title)."
-   :parent :str-join
-   :args {:coll [{:as :pkg-name :type :text} {:value " — Graphden marketplace"}] :separator {:value ""}}}
+
   {:name :storefront-sitemap-urls
    :description "The item paths every public package contributes to a sitemap — `/marketplace/<name>`, one per name."
    :parent :map

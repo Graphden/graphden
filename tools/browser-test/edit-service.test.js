@@ -20,7 +20,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, waitFor} = require('./edit-test-helpers');
+const {assert, newContext, waitFor, nodeApi} = require('./edit-test-helpers');
 
 
 const SERVICE_FN = 'core.system.current-time-ms';
@@ -56,25 +56,21 @@ async function clickGearButton(page) {
 }
 
 
-async function deleteAnyExistingServiceFor(page, fnName) {
-  // Defensive cleanup — if a prior failed run left a stale service
-  // row, remove it before the test sets up its own state.
-  return page.evaluate(async (name) => {
-    const list = await authFetch('/api/services', {method: 'GET'});
-    if (!list.ok) return 'fetch-failed';
-    const body = await list.json();
-    const target = body.services?.find((s) => s['fn-name'] === name);
-    if (!target) return 'none';
-    await authFetch('/api/entities/service/' + encodeURIComponent(target.id),
-                    {method: 'DELETE'});
-    await authFetch('/api/services/reconcile', {method: 'POST'});
-    return 'cleaned';
-  }, fnName);
+async function deleteAnyExistingServiceFor(_page, fnName) {
+  // Node-side: runs before the editor is booted (`boot: false`).
+  const list = await nodeApi('GET', '/api/services');
+  if (!list.ok) return 'fetch-failed';
+  const body = await list.json();
+  const target = body.services?.find((s) => s['fn-name'] === fnName);
+  if (!target) return 'none';
+  await nodeApi('DELETE', '/api/entities/service/' + encodeURIComponent(target.id));
+  await nodeApi('POST', '/api/services/reconcile');
+  return 'cleaned';
 }
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   // Auto-accept any window.confirm — the delete button asks for
   // confirmation.
   page.on('dialog', (d) => {

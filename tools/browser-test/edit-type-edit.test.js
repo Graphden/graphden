@@ -14,8 +14,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, deleteFnByName, waitFor} =
-  require('./edit-test-helpers');
+const {assert, newContext, api, getEntities, deleteFnByName, waitFor, nodeApi} = require('./edit-test-helpers');
 
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
@@ -28,7 +27,7 @@ async function cleanup(page) {
 
 
 (async () => {
-  const {browser, page} = await newContext(chromium);
+  const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => {
     console.log('  [dialog]:', d.message().slice(0, 200));
     d.accept();
@@ -41,23 +40,13 @@ async function cleanup(page) {
     // ===================================================================
     // Seed: a record type-row with 2 fields.
     // ===================================================================
-    const seedResp = await page.evaluate(async ({base, auth, name}) => {
-      const r = await fetch(base + '/api/types/record', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + auth,
-        },
-        body: JSON.stringify({
-          name,
+    const seedResp = await nodeApi('POST', '/api/types/record', {
+          name: REC_FN,
           fields: [
             {name: 'a', type: 'int'},
             {name: 'b', type: 'text'},
           ],
-        }),
-      });
-      return r.json();
-    }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: (process.env.AUTH_TOKEN || 'test123'), name: REC_FN});
+        }).then((r) => r.json()).catch((err) => ({ok: false, error: 'fetch threw: ' + String(err).slice(0, 200)}));
     assert(seedResp.ok && seedResp.id,
            'record type-row created: ' + JSON.stringify(seedResp).slice(0, 120));
 

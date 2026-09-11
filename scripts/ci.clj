@@ -211,7 +211,7 @@
 ;; Check runner with timeout + proc tracking
 ;; ===========================================================================
 
-(defn- run-check
+(defn- run-check*
   [c status results failed]
   (let [check-name (:name c)
         cmd (:cmd c)
@@ -276,6 +276,32 @@
 
             :else
             (swap! status assoc check-name :passed)))))))
+
+
+(defn- run-check
+  "`run-check*`, with any exception it throws recorded as THAT CHECK's
+   failure instead of propagating.
+
+   A child process whose captured stream dies mid-read (`java.io.IOException:
+   Stream closed` — seen when a loaded host kills a child, and once for
+   every agent who ran two `bb ci`s at a time) used to escape the future
+   and blow up `run-waves!`, so a run with 28 green checks printed a stack
+   trace and NO verdict: the one thing the report exists to tell you —
+   which check died — was the one thing it could not say."
+  [c status results failed]
+  (try
+    (run-check* c status results failed)
+    (catch Exception e
+      (swap! results assoc (:name c)
+             {:exit -1
+              :output (str "runner error while running this check: "
+                           (Class/.getName (class e)) ": " (ex-message e)
+                           "\nCommand: " (pr-str (:cmd c))
+                           "\n(the check's own output was lost with the stream)")
+              :warnings false
+              :duration-ms 0})
+      (swap! status assoc (:name c) :failed)
+      (reset! failed true))))
 
 
 (defn- report-skips!
@@ -364,9 +390,20 @@
    have run, so every count reads low and every budget passes), so it is
    skipped rather than reported as a reassuring lie."
   [checks status results failed]
-  (let [wave (fn [cs]
-               (doseq [f (mapv (fn [c] (future (run-check c status results failed))) cs)]
-                 @f))
+  (let [;; Cap how many checks are in flight at once. The wave used to
+        ;; launch EVERY check as a future in one go — 24 of them on a full
+        ;; run, each a child process whose stdout/stderr this JVM reads.
+        ;; Past ~12 in flight on this host a child comes back with its
+        ;; stream already closed (`clj-kondo FAILED 0.0s`, reproducible),
+        ;; and before the guard in `run-check` that exception escaped and
+        ;; took the whole runner down with no verdict. A batch keeps the
+        ;; long poles (kondo / cljstyle / splint, ~100 s each) running
+        ;; together, so the wall time is unchanged in practice.
+        max-in-flight 8
+        wave (fn [cs]
+               (doseq [batch (partition-all max-in-flight cs)]
+                 (doseq [f (mapv (fn [c] (future (run-check c status results failed))) batch)]
+                   @f)))
         by-group (group-by :group checks)
         test-checks (:test by-group)
         post-checks (:post-test by-group)

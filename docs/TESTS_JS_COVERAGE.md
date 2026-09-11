@@ -69,6 +69,10 @@ The gaps below are where a regression would land silently.
 - A module at **100 %** is not "fully tested" — block coverage counts
   execution, not assertions. Several of the 100 % rows are 10–16-line
   panel shims that any editor load executes.
+- The Clojure side's companion number lives in the `bb coverage`
+  docstring (2026-09-11: 70.16 % form / 81.27 % line, package layer
+  included); this table and that one measure different things and are
+  not comparable.
 - Re-take the snapshot when the suite or the editor changes shape
   enough that the gaps would move; it is a periodic audit, like
   `bb coverage-full`, not a per-change signal.

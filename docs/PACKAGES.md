@@ -23,6 +23,12 @@ The packages system organizes base functions and fn-defs into modular, reusable 
 
 - **package.edn** — metadata, dependencies, and module list
 - **modules/** — directories containing `fns.edn` (definitions) and optionally `impls.clj` (Clojure implementations)
+- **modules/tests/** — optional, by convention: a module whose
+  `:namespace` carries the `tests` segment (`core.tests`, `app.registry.tests`)
+  holds the package's own self-tests as ordinary `:assert-eq` / `:assert`
+  compositions. They ship with the package and run through the ordinary
+  runner; an all-tests run skips them unless asked, because they are
+  package-owned. See [TESTS.md § Platform tests](TESTS.md)
 
 ### Package Hierarchy
 

@@ -319,7 +319,18 @@ jobs:
           # + `[[feedback_coverage_measurement]]`). Integration code
           # paths run via `bb test` un-instrumented and are verified
           # by the integration tests' own pass/fail signal.
-          COV_FLOOR=70
+          #
+          # 2026-09-11: 70 → 67. The MEASURED population changed, not
+          # the suite: the package layer (42 impls.clj namespaces,
+          # ~8.9k LOC that reported nothing at all before) joined the
+          # report, and ALL FILES moved 73.15 → 70.16 form on a green
+          # run of the same 2083 tests. A floor of 70 would leave
+          # 0.16pp of headroom and red `main` on noise, which teaches
+          # people to ignore the check. 67 restores the ~3pp margin
+          # the floor has always carried. Raise it back as the impls
+          # namespaces at 18-22% line (app.branches, app.registry,
+          # web.http-client, web.sse, app.mcp) get unit tests.
+          COV_FLOOR=67
           if awk "BEGIN { exit !($COVERAGE < $COV_FLOOR) }"; then
             echo "Form coverage ${COVERAGE}% is below ${COV_FLOOR}% threshold"
             exit 1

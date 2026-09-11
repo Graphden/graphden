@@ -189,8 +189,12 @@ copying the EDN into the module (CLAUDE.md § Live graph verification).
 Three different things are measured, and they answer different
 questions (`bb coverage` docstring + `feedback_coverage_measurement`):
 
-- **`src/` Clojure** — cloverage over the unit suite (`bb coverage`;
-  the CI `coverage` job floors form coverage at 70 % on `main`).
+- **`src/` Clojure + the package layer** — cloverage over the unit
+  suite (`bb coverage`; the CI `coverage` job floors form coverage on
+  `main`). 2026-09-11: 70.16 % form / 81.27 % line over 2083 tests.
+  Read a drop against WHICH namespaces moved: the number fell from
+  73.15 % that week because the 42 impls.clj namespaces joined the
+  denominator, not because tests were lost.
 - **`resources/packages/**/impls.clj`** — the package layer joined the
   same report on 2026-09-10. The loader `eval`s impls from resources,
   so cloverage never found them: `scripts/coverage_src.clj` mirrors

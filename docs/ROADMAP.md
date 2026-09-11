@@ -81,8 +81,14 @@ Launch-order refinements agreed 2026-07-20:
    drawer under the canvas was removed — every diagnostic is a lens +
    an Inspector section now), AND write-triggered auto-run of affected PURE tests
    (reverse compile-deps closure ∩ tests, effect-closure gate +
-   `:allowed-effects #{}` backstop, debounced per org×branch). See
-   [TESTS.md](TESTS.md).
+   `:allowed-effects #{}` backstop, debounced per org×branch).
+   2026-09-11 — the SHIPPED PACKAGES now carry their own tests the same
+   way (`core.tests`, `web.tests`, `app.common.tests`, `app.tests`,
+   `app.registry.tests`, plus the external `mathx.tests`): 364 assert
+   compositions over the platform's own fn-defs, gated by the Clojure
+   anchor `packages.platform-tests-test`. A tenant's **Run all** skips
+   them (`platform?` — ownership, not intent), so the ✓ chip still
+   counts the org's own. See [TESTS.md](TESTS.md).
 2. **Workspaces** (namespace M:N self-link + UI scoping) — SHIPPED
    2026-08-13: delivered as the ctxbar workspace chip's project
    checklist (scope the Explorer to picked root namespaces +

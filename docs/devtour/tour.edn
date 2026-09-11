@@ -782,7 +782,13 @@
            newest execution of its CURRENT version — so an edited test reads
            `stale` by construction, no bookkeeping. After EACH test it nudges
            the `test:updated` NOTIFY, which is what moves the Explorer's
-           dots one by one under the ✓ tests lens (its SSE ping stream)."}
+           dots one by one under the ✓ tests lens (its SSE ping stream).
+           Note the `platform?` arm: the SHIPPED packages carry their own
+           `*.tests` modules (`core.tests`, `web.tests`, …), and a default
+           all-tests run skips them — the rule is OWNERSHIP
+           (`packages.owned/owned-fn-id?`, package-synced this boot), not
+           intent, so a tenant's Run all spends its budget on its own tests.
+           The platform set is gated by its own Clojure anchor instead."}
     {:ns graphden.crud.test-autorun :defn schedule-affected!
      :say "Auto-run on writes: from `invalidate!`'s seeds, walk the
            compile-deps REVERSE closure (the service-restart blast walk),
@@ -875,7 +881,10 @@
      :say "The counterpart to fns.edn: slurp `impls.clj`, `eval` each form in a
            fresh namespace, and return that namespace's `impls` var — the
            `{fn-name → impl-fn}` map. How Clojure code on disk becomes live
-           functions."}
+           functions. The `reuse-loaded-impls?` arm is why coverage can see
+           this layer at all: evaluating from the resource leaves cloverage
+           with nothing to instrument, so under `bb coverage` the already-
+           instrumented namespace is reused instead of re-evaluated."}
     {:ns graphden.packages.loader :defn fn-def->base-fn-def
      :say "The glue: marry an fns.edn entry (args, return-type, effects, tags)
            with its impl-map value into the registry-shaped
@@ -904,9 +913,11 @@
            sweep. Read the two long comments — the batch-size binding (a
            fresh-DB boot writes >10k fn rows past the guard meant for USER
            writes) and `:skip-type-check?` (~15s of sweep the test bootstrap
-           may opt out of, production never does). This is declarative sync:
-           the packages on disk are the desired state, storage is reconciled
-           toward it."
+           may opt out of, production never does — which is precisely why
+           `bb type-sweep` exists: EVERY fixture opts out, so before that
+           check a corpus type regression surfaced only when a real instance
+           booted). This is declarative sync: the packages on disk are the
+           desired state, storage is reconciled toward it."
      :see [[:types "check-all-defs!"] [:versioning "repoint-refs!"]]}
 
     ;; --- Export & distribution: the loader's inverse -------------------

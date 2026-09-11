@@ -62,7 +62,23 @@
 
 
 (deftest assert-eq-composition-passes-and-fails-as-documented-test
-  (let [out (test-runs/run-tests! (:ctx *graph*) {})
+  ;; Scoped by `:fn-ids` to the `examples.tests` five. Two reasons, both
+  ;; about ownership: these fn-defs are package-synced, so a DEFAULT
+  ;; all-tests run skips them (that is the `platform?` rule — an org's
+  ;; [Run all] does not spend its budget on tests the deployment ships),
+  ;; and `{:platform? true}` would sweep in the shipped packages' own
+  ;; `core.tests` / `web.tests` modules, whose ~290 results have nothing
+  ;; to do with the buckets this test pins. An explicit id list always
+  ;; runs exactly what it names.
+  (let [wanted (into #{} (map :id)
+                     (filter (comp #{"addition-sums-its-arguments"
+                                     "str-concatenates-its-parts"
+                                     "empty-list-is-empty"
+                                     "needs-an-argument-so-cannot-run"
+                                     "intentionally-failing-example"}
+                                   :name)
+                             (test-runs/test-fn-rows (:ctx *graph*))))
+        out (test-runs/run-tests! (:ctx *graph*) {:fn-ids (mapv str wanted)})
         by-name (results-by-name out)]
     (testing "a satisfied :assert-eq is a pass"
       (is (= :succeeded (:status (get by-name "addition-sums-its-arguments")))

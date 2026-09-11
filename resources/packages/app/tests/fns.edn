@@ -17,372 +17,372 @@
  :description "Platform self-tests for app: fn-id-param, svg-polyline-points / tabulate-records / render-value-repr, resolve-form + the zipmap records, stringify-uuids, item-fn-name / item-fn-href, graphden-bootstrap-script, and the app.page render / fragment / route templates."
  :fns
  [;; --- helpers -------------------------------------------------------
- {:name :_t-uuid-str
-  :description "Test fixture — a well-formed uuid string."
-  :parent :const
-  :args {:value "0e5ad02b-2b5f-4f8e-8e6c-0f5f8f0a1c11"}}
+  {:name :_t-uuid-str
+   :description "Test fixture — a well-formed uuid string."
+   :parent :const
+   :args {:value "0e5ad02b-2b5f-4f8e-8e6c-0f5f8f0a1c11"}}
 
- ;; `:fn-id-param`'s `:request` slot is the whole `:ring-request-shape`
- ;; record, so a fixture must carry every field — a one-key map built with
- ;; `:assoc-empty` is a sync-time type error even though the fn reads only
- ;; `:query-string`. One complete request per query string under test
- ;; (`:const` carries the literal; web.tests does the same).
- {:name :_t-request-fn-id
-  :description "Full Ring request whose query string names a well-formed fn-id."
-  :parent :const
-  :args {:value {:request-method :get :uri "/api/x"
-                 :query-string "fn-id=0e5ad02b-2b5f-4f8e-8e6c-0f5f8f0a1c11"
-                 :headers {} :body "" :async-channel nil}}}
+  ;; `:fn-id-param`'s `:request` slot is the whole `:ring-request-shape`
+  ;; record, so a fixture must carry every field — a one-key map built with
+  ;; `:assoc-empty` is a sync-time type error even though the fn reads only
+  ;; `:query-string`. One complete request per query string under test
+  ;; (`:const` carries the literal; web.tests does the same).
+  {:name :_t-request-fn-id
+   :description "Full Ring request whose query string names a well-formed fn-id."
+   :parent :const
+   :args {:value {:request-method :get :uri "/api/x"
+                  :query-string "fn-id=0e5ad02b-2b5f-4f8e-8e6c-0f5f8f0a1c11"
+                  :headers {} :body "" :async-channel nil}}}
 
- {:name :_t-request-no-fn-id
-  :description "Full Ring request whose query string carries no `fn-id`."
-  :parent :const
-  :args {:value {:request-method :get :uri "/api/x" :query-string "other=1"
-                 :headers {} :body "" :async-channel nil}}}
+  {:name :_t-request-no-fn-id
+   :description "Full Ring request whose query string carries no `fn-id`."
+   :parent :const
+   :args {:value {:request-method :get :uri "/api/x" :query-string "other=1"
+                  :headers {} :body "" :async-channel nil}}}
 
- {:name :_t-request-bad-fn-id
-  :description "Full Ring request whose `fn-id` is not a uuid."
-  :parent :const
-  :args {:value {:request-method :get :uri "/api/x" :query-string "fn-id=not-a-uuid"
-                 :headers {} :body "" :async-channel nil}}}
+  {:name :_t-request-bad-fn-id
+   :description "Full Ring request whose `fn-id` is not a uuid."
+   :parent :const
+   :args {:value {:request-method :get :uri "/api/x" :query-string "fn-id=not-a-uuid"
+                  :headers {} :body "" :async-channel nil}}}
 
- {:name :_t-rendered-repr
-  :description "Test helper — the registered repr of `:value` (no producing fn), rendered to HTML; `\"\"` when no repr applies."
-  :parent :render-hiccup
-  :args {:hiccup {:parent :coalesce
-                  :args {:value {:parent :render-value-repr :args {:value {:as :value} :fn-id {:parent :get :args {:coll {:value {}} :key {:value :x} :default nil}}}}
-                         :default {:value ""}}}}}
+  {:name :_t-rendered-repr
+   :description "Test helper — the registered repr of `:value` (no producing fn), rendered to HTML; `\"\"` when no repr applies."
+   :parent :render-hiccup
+   :args {:hiccup {:parent :coalesce
+                   :args {:value {:parent :render-value-repr :args {:value {:as :value} :fn-id {:parent :get :args {:coll {:value {}} :key {:value :x} :default nil}}}}
+                          :default {:value ""}}}}}
 
- {:name :_t-fragment-handler
-  :description "Subject: a concrete `:html-fragment-handler` for one `<p>`."
-  :lambda-params []
-  :parent :html-fragment-handler
-  :args {:fragment {:value [:p "frag"]}}}
+  {:name :_t-fragment-handler
+   :description "Subject: a concrete `:html-fragment-handler` for one `<p>`."
+   :lambda-params []
+   :parent :html-fragment-handler
+   :args {:fragment {:value [:p "frag"]}}}
 
- {:name :_t-fragment-response
-  :parent :call-noargs
-  :args {:func :_t-fragment-handler}}
+  {:name :_t-fragment-response
+   :parent :call-noargs
+   :args {:func :_t-fragment-handler}}
 
- ;; --- app.lookups: fn-id-param ---------------------------------------
- {:name :fn-id-param-parses-the-fn-id-query-param
-  :description "`?fn-id=<uuid>` is read off the request and parsed; its string form round-trips."
-  :parent :assert-eq
-  :args {:actual {:parent :to-str :args {:value {:parent :fn-id-param :args {:request :_t-request-fn-id}}}}
-         :expected :_t-uuid-str}}
+  ;; --- app.lookups: fn-id-param ---------------------------------------
+  {:name :fn-id-param-parses-the-fn-id-query-param
+   :description "`?fn-id=<uuid>` is read off the request and parsed; its string form round-trips."
+   :parent :assert-eq
+   :args {:actual {:parent :to-str :args {:value {:parent :fn-id-param :args {:request :_t-request-fn-id}}}}
+          :expected :_t-uuid-str}}
 
- {:name :fn-id-param-yields-a-uuid-not-a-string
-  :description "The param is parsed into a real uuid value."
-  :parent :assert
-  :args {:value {:parent :is-a? :args {:value {:parent :fn-id-param :args {:request :_t-request-fn-id}} :type {:value :uuid}}}}}
+  {:name :fn-id-param-yields-a-uuid-not-a-string
+   :description "The param is parsed into a real uuid value."
+   :parent :assert
+   :args {:value {:parent :is-a? :args {:value {:parent :fn-id-param :args {:request :_t-request-fn-id}} :type {:value :uuid}}}}}
 
- {:name :fn-id-param-is-nil-when-absent
-  :description "A request without `fn-id` yields nil, not an error."
-  :parent :assert
-  :args {:value {:parent :nil? :args {:value {:parent :fn-id-param :args {:request :_t-request-no-fn-id}}}}}}
+  {:name :fn-id-param-is-nil-when-absent
+   :description "A request without `fn-id` yields nil, not an error."
+   :parent :assert
+   :args {:value {:parent :nil? :args {:value {:parent :fn-id-param :args {:request :_t-request-no-fn-id}}}}}}
 
- {:name :fn-id-param-is-nil-when-malformed
-  :description "Garbage in `fn-id` is swallowed to nil (`parse-uuid` never throws)."
-  :parent :assert
-  :args {:value {:parent :nil? :args {:value {:parent :fn-id-param :args {:request :_t-request-bad-fn-id}}}}}}
+  {:name :fn-id-param-is-nil-when-malformed
+   :description "Garbage in `fn-id` is swallowed to nil (`parse-uuid` never throws)."
+   :parent :assert
+   :args {:value {:parent :nil? :args {:value {:parent :fn-id-param :args {:request :_t-request-bad-fn-id}}}}}}
 
- ;; --- app.reprs: svg-polyline-points ----------------------------------
- {:name :svg-polyline-points-stretches-min-max-to-the-viewport
-  :description "The series' min lands on the bottom edge, its max on the top, x spread evenly across the width."
-  :parent :assert-eq
-  :args {:actual {:parent :svg-polyline-points :args {:nums [0 5 10] :width 200 :height 100}}
-         :expected "0.0,100.0 100.0,50.0 200.0,0.0"}}
+  ;; --- app.reprs: svg-polyline-points ----------------------------------
+  {:name :svg-polyline-points-stretches-min-max-to-the-viewport
+   :description "The series' min lands on the bottom edge, its max on the top, x spread evenly across the width."
+   :parent :assert-eq
+   :args {:actual {:parent :svg-polyline-points :args {:nums [0 5 10] :width 200 :height 100}}
+          :expected "0.0,100.0 100.0,50.0 200.0,0.0"}}
 
- {:name :svg-polyline-points-y-grows-downward
-  :description "SVG y is inverted: the smaller value sits at y=height."
-  :parent :assert-eq
-  :args {:actual {:parent :svg-polyline-points :args {:nums [0 10] :width 100 :height 50}}
-         :expected "0.0,50.0 100.0,0.0"}}
+  {:name :svg-polyline-points-y-grows-downward
+   :description "SVG y is inverted: the smaller value sits at y=height."
+   :parent :assert-eq
+   :args {:actual {:parent :svg-polyline-points :args {:nums [0 10] :width 100 :height 50}}
+          :expected "0.0,50.0 100.0,0.0"}}
 
- {:name :svg-polyline-points-empty-series-is-empty
-  :description "No points → empty `points` string."
-  :parent :assert-eq
-  :args {:actual {:parent :svg-polyline-points :args {:nums [] :width 10 :height 10}}
-         :expected ""}}
+  {:name :svg-polyline-points-empty-series-is-empty
+   :description "No points → empty `points` string."
+   :parent :assert-eq
+   :args {:actual {:parent :svg-polyline-points :args {:nums [] :width 10 :height 10}}
+          :expected ""}}
 
- {:name :svg-polyline-points-single-point-is-empty
-  :description "A single value cannot make a line → empty string."
-  :parent :assert-eq
-  :args {:actual {:parent :svg-polyline-points :args {:nums [7] :width 10 :height 10}}
-         :expected ""}}
+  {:name :svg-polyline-points-single-point-is-empty
+   :description "A single value cannot make a line → empty string."
+   :parent :assert-eq
+   :args {:actual {:parent :svg-polyline-points :args {:nums [7] :width 10 :height 10}}
+          :expected ""}}
 
- {:name :svg-polyline-points-flat-series-sits-on-the-baseline
-  :description "A constant series (min = max) draws along y=height instead of dividing by zero."
-  :parent :assert-eq
-  :args {:actual {:parent :svg-polyline-points :args {:nums [3 3 3] :width 10 :height 10}}
-         :expected "0.0,10.0 5.0,10.0 10.0,10.0"}}
+  {:name :svg-polyline-points-flat-series-sits-on-the-baseline
+   :description "A constant series (min = max) draws along y=height instead of dividing by zero."
+   :parent :assert-eq
+   :args {:actual {:parent :svg-polyline-points :args {:nums [3 3 3] :width 10 :height 10}}
+          :expected "0.0,10.0 5.0,10.0 10.0,10.0"}}
 
- ;; --- app.reprs: tabulate-records --------------------------------------
- {:name :tabulate-records-projects-columns-in-order
-  :description "Each record becomes one row of display strings in column order; a missing key is an empty cell."
-  :parent :assert-eq
-  :args {:actual {:parent :tabulate-records :args {:records {:value [{:a 1 :b "x"} {:a 2}]} :columns [{:value :a} {:value :b}]}}
-         :expected [["1" "x"] ["2" ""]]}}
+  ;; --- app.reprs: tabulate-records --------------------------------------
+  {:name :tabulate-records-projects-columns-in-order
+   :description "Each record becomes one row of display strings in column order; a missing key is an empty cell."
+   :parent :assert-eq
+   :args {:actual {:parent :tabulate-records :args {:records {:value [{:a 1 :b "x"} {:a 2}]} :columns [{:value :a} {:value :b}]}}
+          :expected [["1" "x"] ["2" ""]]}}
 
- {:name :tabulate-records-renders-structured-cells-as-json
-  :description "A map-valued cell renders as its JSON text."
-  :parent :assert-eq
-  :args {:actual {:parent :tabulate-records :args {:records {:value [{:a {:k 1}}]} :columns [{:value :a}]}}
-         :expected [["{\"k\":1}"]]}}
+  {:name :tabulate-records-renders-structured-cells-as-json
+   :description "A map-valued cell renders as its JSON text."
+   :parent :assert-eq
+   :args {:actual {:parent :tabulate-records :args {:records {:value [{:a {:k 1}}]} :columns [{:value :a}]}}
+          :expected [["{\"k\":1}"]]}}
 
- {:name :tabulate-records-no-records-no-rows
-  :description "An empty record list tabulates to no rows."
-  :parent :assert-eq
-  :args {:actual {:parent :tabulate-records :args {:records [] :columns [{:value :a}]}}
-         :expected []}}
+  {:name :tabulate-records-no-records-no-rows
+   :description "An empty record list tabulates to no rows."
+   :parent :assert-eq
+   :args {:actual {:parent :tabulate-records :args {:records [] :columns [{:value :a}]}}
+          :expected []}}
 
- ;; --- app.reprs: render-value-repr (registry dispatch) -----------------
- {:name :render-value-repr-numeric-list-is-a-sparkline
-  :description "A numeric series dispatches to the sparkline repr — the rendered HTML carries the polyline."
-  :parent :assert
-  :args {:value {:parent :str-contains? :args {:string {:parent :_t-rendered-repr :args {:value [1 2 3]}} :substring "<polyline"}}}}
+  ;; --- app.reprs: render-value-repr (registry dispatch) -----------------
+  {:name :render-value-repr-numeric-list-is-a-sparkline
+   :description "A numeric series dispatches to the sparkline repr — the rendered HTML carries the polyline."
+   :parent :assert
+   :args {:value {:parent :str-contains? :args {:string {:parent :_t-rendered-repr :args {:value [1 2 3]}} :substring "<polyline"}}}}
 
- {:name :render-value-repr-sparkline-counts-the-values
-  :description "The sparkline caption states how many values were plotted."
-  :parent :assert
-  :args {:value {:parent :str-contains? :args {:string {:parent :_t-rendered-repr :args {:value [1 2 3]}} :substring "3 values"}}}}
+  {:name :render-value-repr-sparkline-counts-the-values
+   :description "The sparkline caption states how many values were plotted."
+   :parent :assert
+   :args {:value {:parent :str-contains? :args {:string {:parent :_t-rendered-repr :args {:value [1 2 3]}} :substring "3 values"}}}}
 
- {:name :render-value-repr-record-list-is-a-table
-  :description "A list of keyword-keyed records dispatches to the table repr."
-  :parent :assert
-  :args {:value {:parent :str-contains? :args {:string {:parent :_t-rendered-repr :args {:value {:value [{:a 1} {:a 2}]}}} :substring "<table"}}}}
+  {:name :render-value-repr-record-list-is-a-table
+   :description "A list of keyword-keyed records dispatches to the table repr."
+   :parent :assert
+   :args {:value {:parent :str-contains? :args {:string {:parent :_t-rendered-repr :args {:value {:value [{:a 1} {:a 2}]}}} :substring "<table"}}}}
 
- {:name :render-value-repr-record-table-counts-rows
-  :description "The table caption reports the row count."
-  :parent :assert
-  :args {:value {:parent :str-contains? :args {:string {:parent :_t-rendered-repr :args {:value {:value [{:a 1} {:a 2}]}}} :substring "2 rows"}}}}
+  {:name :render-value-repr-record-table-counts-rows
+   :description "The table caption reports the row count."
+   :parent :assert
+   :args {:value {:parent :str-contains? :args {:string {:parent :_t-rendered-repr :args {:value {:value [{:a 1} {:a 2}]}}} :substring "2 rows"}}}}
 
- {:name :render-value-repr-plain-string-has-no-repr
-  :description "A bare string matches no registry row → nil (the caller falls back to shape rendering)."
-  :parent :assert
-  :args {:value {:parent :nil? :args {:value {:parent :render-value-repr :args {:value "plain" :fn-id {:parent :get :args {:coll {:value {}} :key {:value :x} :default nil}}}}}}}}
+  {:name :render-value-repr-plain-string-has-no-repr
+   :description "A bare string matches no registry row → nil (the caller falls back to shape rendering)."
+   :parent :assert
+   :args {:value {:parent :nil? :args {:value {:parent :render-value-repr :args {:value "plain" :fn-id {:parent :get :args {:coll {:value {}} :key {:value :x} :default nil}}}}}}}}
 
- ;; --- app.forms: resolve-form + value-form-record ------------------------
- {:name :resolve-form-classifies-an-atomic-type-as-leaf
-  :description "`:int` is a leaf descriptor."
-  :parent :assert-eq
-  :args {:actual {:parent :get :args {:coll {:parent :resolve-form :args {:type-expr {:value :int}}} :key {:value :kind} :default nil}}
-         :expected {:value :leaf}}}
+  ;; --- app.forms: resolve-form + value-form-record ------------------------
+  {:name :resolve-form-classifies-an-atomic-type-as-leaf
+   :description "`:int` is a leaf descriptor."
+   :parent :assert-eq
+   :args {:actual {:parent :get :args {:coll {:parent :resolve-form :args {:type-expr {:value :int}}} :key {:value :kind} :default nil}}
+          :expected {:value :leaf}}}
 
- {:name :resolve-form-keeps-the-leaf-type
-  :description "The leaf descriptor carries the type it classified."
-  :parent :assert-eq
-  :args {:actual {:parent :get :args {:coll {:parent :resolve-form :args {:type-expr {:value :int}}} :key {:value :type} :default nil}}
-         :expected {:value :int}}}
+  {:name :resolve-form-keeps-the-leaf-type
+   :description "The leaf descriptor carries the type it classified."
+   :parent :assert-eq
+   :args {:actual {:parent :get :args {:coll {:parent :resolve-form :args {:type-expr {:value :int}}} :key {:value :type} :default nil}}
+          :expected {:value :int}}}
 
- {:name :resolve-form-classifies-a-list-type-as-list
-  :description "`[:list :text]` is a `:list` descriptor."
-  :parent :assert-eq
-  :args {:actual {:parent :get :args {:coll {:parent :resolve-form :args {:type-expr {:value [:list :text]}}} :key {:value :kind} :default nil}}
-         :expected {:value :list}}}
+  {:name :resolve-form-classifies-a-list-type-as-list
+   :description "`[:list :text]` is a `:list` descriptor."
+   :parent :assert-eq
+   :args {:actual {:parent :get :args {:coll {:parent :resolve-form :args {:type-expr {:value [:list :text]}}} :key {:value :kind} :default nil}}
+          :expected {:value :list}}}
 
- {:name :resolve-form-list-descriptor-nests-the-element-form
-  :description "The list descriptor carries its element's descriptor under `:element` — a `:text` leaf here."
-  :parent :assert-eq
-  :args {:actual {:parent :get-in :args {:map {:parent :resolve-form :args {:type-expr {:value [:list :text]}}} :path [{:value :element} {:value :type}] :default nil}}
-         :expected {:value :text}}}
+  {:name :resolve-form-list-descriptor-nests-the-element-form
+   :description "The list descriptor carries its element's descriptor under `:element` — a `:text` leaf here."
+   :parent :assert-eq
+   :args {:actual {:parent :get-in :args {:map {:parent :resolve-form :args {:type-expr {:value [:list :text]}}} :path [{:value :element} {:value :type}] :default nil}}
+          :expected {:value :text}}}
 
- {:name :resolve-form-classifies-a-union-with-one-branch-per-member
-  :description "`[:union :int :text]` is a `:union` descriptor with two branches."
-  :parent :assert-eq
-  :args {:actual {:parent :count :args {:coll {:parent :get :args {:coll {:parent :resolve-form :args {:type-expr {:value [:union :int :text]}}} :key {:value :branches} :default []}}}}
-         :expected 2}}
+  {:name :resolve-form-classifies-a-union-with-one-branch-per-member
+   :description "`[:union :int :text]` is a `:union` descriptor with two branches."
+   :parent :assert-eq
+   :args {:actual {:parent :count :args {:coll {:parent :get :args {:coll {:parent :resolve-form :args {:type-expr {:value [:union :int :text]}}} :key {:value :branches} :default []}}}}
+          :expected 2}}
 
- {:name :resolve-form-union-kind
-  :description "The union descriptor's kind is `:union`."
-  :parent :assert-eq
-  :args {:actual {:parent :get :args {:coll {:parent :resolve-form :args {:type-expr {:value [:union :int :text]}}} :key {:value :kind} :default nil}}
-         :expected {:value :union}}}
+  {:name :resolve-form-union-kind
+   :description "The union descriptor's kind is `:union`."
+   :parent :assert-eq
+   :args {:actual {:parent :get :args {:coll {:parent :resolve-form :args {:type-expr {:value [:union :int :text]}}} :key {:value :kind} :default nil}}
+          :expected {:value :union}}}
 
- {:name :resolve-form-classifies-a-record-with-its-fields
-  :description "A record type becomes a `:record` descriptor with one entry per field."
-  :parent :assert-eq
-  :args {:actual {:parent :count :args {:coll {:parent :get :args {:coll {:parent :resolve-form :args {:type-expr {:value {:a :int :b :text}}}} :key {:value :fields} :default []}}}}
-         :expected 2}}
+  {:name :resolve-form-classifies-a-record-with-its-fields
+   :description "A record type becomes a `:record` descriptor with one entry per field."
+   :parent :assert-eq
+   :args {:actual {:parent :count :args {:coll {:parent :get :args {:coll {:parent :resolve-form :args {:type-expr {:value {:a :int :b :text}}}} :key {:value :fields} :default []}}}}
+          :expected 2}}
 
- {:name :resolve-form-record-kind
-  :description "The record descriptor's kind is `:record`."
-  :parent :assert-eq
-  :args {:actual {:parent :get :args {:coll {:parent :resolve-form :args {:type-expr {:value {:a :int :b :text}}}} :key {:value :kind} :default nil}}
-         :expected {:value :record}}}
+  {:name :resolve-form-record-kind
+   :description "The record descriptor's kind is `:record`."
+   :parent :assert-eq
+   :args {:actual {:parent :get :args {:coll {:parent :resolve-form :args {:type-expr {:value {:a :int :b :text}}}} :key {:value :kind} :default nil}}
+          :expected {:value :record}}}
 
- {:name :resolve-form-record-fields-carry-leaf-forms
-  :description "Each record field nests its own descriptor — the `:int` field's is a leaf."
-  :parent :assert-eq
-  :args {:actual {:parent :get-in :args {:map {:parent :resolve-form :args {:type-expr {:value {:a :int}}}} :path [{:value :fields} 0 {:value :form} {:value :kind}] :default nil}}
-         :expected {:value :leaf}}}
+  {:name :resolve-form-record-fields-carry-leaf-forms
+   :description "Each record field nests its own descriptor — the `:int` field's is a leaf."
+   :parent :assert-eq
+   :args {:actual {:parent :get-in :args {:map {:parent :resolve-form :args {:type-expr {:value {:a :int}}}} :path [{:value :fields} 0 {:value :form} {:value :kind}] :default nil}}
+          :expected {:value :leaf}}}
 
- {:name :value-form-record-zips-the-four-ids
-  :description "`:vals` land under `:binding-id :fn-id :slot-id :item-id` in that order."
-  :parent :assert-eq
-  :args {:actual {:parent :value-form-record :args {:vals [1 2 3 4]}}
-         :expected {:value {:binding-id 1 :fn-id 2 :slot-id 3 :item-id 4}}}}
+  {:name :value-form-record-zips-the-four-ids
+   :description "`:vals` land under `:binding-id :fn-id :slot-id :item-id` in that order."
+   :parent :assert-eq
+   :args {:actual {:parent :value-form-record :args {:vals [1 2 3 4]}}
+          :expected {:value {:binding-id 1 :fn-id 2 :slot-id 3 :item-id 4}}}}
 
- ;; --- app.branches: pure shapes -------------------------------------------
- {:name :stringify-uuids-passes-scalars-through
-  :description "Strings, numbers and booleans are untouched."
-  :parent :assert-eq
-  :args {:actual {:parent :stringify-uuids :args {:m {:value {:id "a" :n 1 :ok true}}}}
-         :expected {:value {:id "a" :n 1 :ok true}}}}
+  ;; --- app.branches: pure shapes -------------------------------------------
+  {:name :stringify-uuids-passes-scalars-through
+   :description "Strings, numbers and booleans are untouched."
+   :parent :assert-eq
+   :args {:actual {:parent :stringify-uuids :args {:m {:value {:id "a" :n 1 :ok true}}}}
+          :expected {:value {:id "a" :n 1 :ok true}}}}
 
- {:name :stringify-uuids-stringifies-uuid-values
-  :description "A uuid value becomes its string form (so the map is JSON-encodable)."
-  :parent :assert-eq
-  :args {:actual {:parent :stringify-uuids :args {:m {:parent :assoc-empty :args {:key {:value :id} :value {:parent :parse-uuid :args {:string :_t-uuid-str}}}}}}
-         :expected {:parent :assoc-empty :args {:key {:value :id} :value :_t-uuid-str}}}}
+  {:name :stringify-uuids-stringifies-uuid-values
+   :description "A uuid value becomes its string form (so the map is JSON-encodable)."
+   :parent :assert-eq
+   :args {:actual {:parent :stringify-uuids :args {:m {:parent :assoc-empty :args {:key {:value :id} :value {:parent :parse-uuid :args {:string :_t-uuid-str}}}}}}
+          :expected {:parent :assoc-empty :args {:key {:value :id} :value :_t-uuid-str}}}}
 
- {:name :stringify-uuids-nil-in-nil-out
-  :description "`nil` is passed through, not turned into `{}`."
-  :parent :assert
-  :args {:value {:parent :nil? :args {:value {:parent :stringify-uuids :args {:m {:parent :get :args {:coll {:value {}} :key {:value :x} :default nil}}}}}}}}
+  {:name :stringify-uuids-nil-in-nil-out
+   :description "`nil` is passed through, not turned into `{}`."
+   :parent :assert
+   :args {:value {:parent :nil? :args {:value {:parent :stringify-uuids :args {:m {:parent :get :args {:coll {:value {}} :key {:value :x} :default nil}}}}}}}}
 
- {:name :create-branch-record-zips-the-five-fields
-  :description "`:vals` land under `:branch-name :base-ref :forbid-invalid? :write-policy :require-merge?` in that order."
-  :parent :assert-eq
-  :args {:actual {:parent :create-branch-record :args {:vals ["b" "main" true "open" false]}}
-         :expected {:value {:branch-name "b" :base-ref "main" :forbid-invalid? true :write-policy "open" :require-merge? false}}}}
+  {:name :create-branch-record-zips-the-five-fields
+   :description "`:vals` land under `:branch-name :base-ref :forbid-invalid? :write-policy :require-merge?` in that order."
+   :parent :assert-eq
+   :args {:actual {:parent :create-branch-record :args {:vals ["b" "main" true "open" false]}}
+          :expected {:value {:branch-name "b" :base-ref "main" :forbid-invalid? true :write-policy "open" :require-merge? false}}}}
 
- ;; --- app.execution: execute-parsed-record ----------------------------------
- {:name :execute-parsed-record-zips-the-seven-fields
-  :description "`:vals` land under `:fn-id :fn-name :args :timeout-ms :persist? :trace? :capture-values?` in that order."
-  :parent :assert-eq
-  :args {:actual {:parent :execute-parsed-record :args {:vals [1 "f" {:value {:x 1}} 500 true false false]}}
-         :expected {:value {:fn-id 1 :fn-name "f" :args {:x 1} :timeout-ms 500 :persist? true :trace? false :capture-values? false}}}}
+  ;; --- app.execution: execute-parsed-record ----------------------------------
+  {:name :execute-parsed-record-zips-the-seven-fields
+   :description "`:vals` land under `:fn-id :fn-name :args :timeout-ms :persist? :trace? :capture-values?` in that order."
+   :parent :assert-eq
+   :args {:actual {:parent :execute-parsed-record :args {:vals [1 "f" {:value {:x 1}} 500 true false false]}}
+          :expected {:value {:fn-id 1 :fn-name "f" :args {:x 1} :timeout-ms 500 :persist? true :trace? false :capture-values? false}}}}
 
- ;; --- app.editor-panels: item accessors --------------------------------------
- {:name :item-fn-name-reads-the-row-fn-name
-  :description "`:item-fn-name` is the row's `:fn-name`."
-  :parent :assert-eq
-  :args {:actual {:parent :item-fn-name :args {:item {:value {:fn-name "foo"}}}}
-         :expected "foo"}}
+  ;; --- app.editor-panels: item accessors --------------------------------------
+  {:name :item-fn-name-reads-the-row-fn-name
+   :description "`:item-fn-name` is the row's `:fn-name`."
+   :parent :assert-eq
+   :args {:actual {:parent :item-fn-name :args {:item {:value {:fn-name "foo"}}}}
+          :expected "foo"}}
 
- {:name :item-fn-name-falls-back-to-question-mark
-  :description "A row without `:fn-name` reads as `?`."
-  :parent :assert-eq
-  :args {:actual {:parent :item-fn-name :args {:item {:value {:other 1}}}}
-         :expected "?"}}
+  {:name :item-fn-name-falls-back-to-question-mark
+   :description "A row without `:fn-name` reads as `?`."
+   :parent :assert-eq
+   :args {:actual {:parent :item-fn-name :args {:item {:value {:other 1}}}}
+          :expected "?"}}
 
- {:name :item-fn-href-is-the-hash-navigation
-  :description "`:item-fn-href` is `#<fn-name>`."
-  :parent :assert-eq
-  :args {:actual {:parent :item-fn-href :args {:item {:value {:fn-name "foo"}}}}
-         :expected "#foo"}}
+  {:name :item-fn-href-is-the-hash-navigation
+   :description "`:item-fn-href` is `#<fn-name>`."
+   :parent :assert-eq
+   :args {:actual {:parent :item-fn-href :args {:item {:value {:fn-name "foo"}}}}
+          :expected "#foo"}}
 
- {:name :item-fn-href-unknown-row-is-hash-question
-  :description "The fallback name flows into the href too."
-  :parent :assert-eq
-  :args {:actual {:parent :item-fn-href :args {:item {:value {:other 1}}}}
-         :expected "#?"}}
+  {:name :item-fn-href-unknown-row-is-hash-question
+   :description "The fallback name flows into the href too."
+   :parent :assert-eq
+   :args {:actual {:parent :item-fn-href :args {:item {:value {:other 1}}}}
+          :expected "#?"}}
 
- ;; --- app.editor: bootstrap script ---------------------------------------------
- {:name :graphden-bootstrap-script-body-wires-bind-action-dispatch
-  :description "The inline bootstrap's script body calls `bindActionDispatch(document.body)` on DOMContentLoaded."
-  :parent :assert-eq
-  :args {:actual {:parent :get :args {:coll :graphden-bootstrap-script :key 2 :default nil}}
-         :expected "document.addEventListener('DOMContentLoaded', function () { bindActionDispatch(document.body); });"}}
+  ;; --- app.editor: bootstrap script ---------------------------------------------
+  {:name :graphden-bootstrap-script-body-wires-bind-action-dispatch
+   :description "The inline bootstrap's script body calls `bindActionDispatch(document.body)` on DOMContentLoaded."
+   :parent :assert-eq
+   :args {:actual {:parent :get :args {:coll :graphden-bootstrap-script :key 2 :default nil}}
+          :expected "document.addEventListener('DOMContentLoaded', function () { bindActionDispatch(document.body); });"}}
 
- {:name :graphden-bootstrap-script-renders-verbatim-inside-a-page
-  :description "Bound as a page's `:scripts`, the bootstrap body is emitted raw (quotes NOT html-escaped) just before `</body>`."
-  :parent :assert
-  :args {:value {:parent :str-contains? :args {:string {:parent :html-page-rendered :args {:title "T" :body {:value [:p "hi"]} :head {:value []} :scripts {:parent :list :args {:items [:graphden-bootstrap-script]}}}}
-                                               :substring "<script>document.addEventListener('DOMContentLoaded', function () { bindActionDispatch(document.body); });</script></body>"}}}}
+  {:name :graphden-bootstrap-script-renders-verbatim-inside-a-page
+   :description "Bound as a page's `:scripts`, the bootstrap body is emitted raw (quotes NOT html-escaped) just before `</body>`."
+   :parent :assert
+   :args {:value {:parent :str-contains? :args {:string {:parent :html-page-rendered :args {:title "T" :body {:value [:p "hi"]} :head {:value []} :scripts {:parent :list :args {:items [:graphden-bootstrap-script]}}}}
+                                                :substring "<script>document.addEventListener('DOMContentLoaded', function () { bindActionDispatch(document.body); });</script></body>"}}}}
 
- ;; --- app.page: rendered pages / fragments / handlers ------------------------------
- {:name :html-page-rendered-emits-the-full-document
-  :description "Title and body land inside the standard `<html lang>` / charset / viewport shell."
-  :parent :assert-eq
-  :args {:actual {:parent :html-page-rendered :args {:title "T" :body {:value [:p "hi"]} :head {:value []} :scripts {:value []}}}
-         :expected "<html lang=\"en\"><head><meta charset=\"utf-8\" /><meta content=\"width=device-width, initial-scale=1\" name=\"viewport\" /><title>T</title></head><body><p>hi</p></body></html>"}}
+  ;; --- app.page: rendered pages / fragments / handlers ------------------------------
+  {:name :html-page-rendered-emits-the-full-document
+   :description "Title and body land inside the standard `<html lang>` / charset / viewport shell."
+   :parent :assert-eq
+   :args {:actual {:parent :html-page-rendered :args {:title "T" :body {:value [:p "hi"]} :head {:value []} :scripts {:value []}}}
+          :expected "<html lang=\"en\"><head><meta charset=\"utf-8\" /><meta content=\"width=device-width, initial-scale=1\" name=\"viewport\" /><title>T</title></head><body><p>hi</p></body></html>"}}
 
- {:name :html-page-rendered-appends-head-elements-after-the-title
-  :description "Extra `:head` nodes render inside `<head>`, after the base meta + title."
-  :parent :assert
-  :args {:value {:parent :str-contains? :args {:string {:parent :html-page-rendered :args {:title "T" :body {:value [:p "hi"]} :head {:value [[:link {:rel "stylesheet" :href "/s.css"}]]} :scripts {:value []}}}
-                                               :substring "<title>T</title><link href=\"/s.css\" rel=\"stylesheet\" /></head>"}}}}
+  {:name :html-page-rendered-appends-head-elements-after-the-title
+   :description "Extra `:head` nodes render inside `<head>`, after the base meta + title."
+   :parent :assert
+   :args {:value {:parent :str-contains? :args {:string {:parent :html-page-rendered :args {:title "T" :body {:value [:p "hi"]} :head {:value [[:link {:rel "stylesheet" :href "/s.css"}]]} :scripts {:value []}}}
+                                                :substring "<title>T</title><link href=\"/s.css\" rel=\"stylesheet\" /></head>"}}}}
 
- {:name :html-page-rendered-appends-scripts-at-the-end-of-body
-  :description "`:scripts` render after the body content, just before `</body>`."
-  :parent :assert
-  :args {:value {:parent :str-contains? :args {:string {:parent :html-page-rendered :args {:title "T" :body {:value [:p "hi"]} :head {:value []} :scripts {:value [[:script {} "x()"]]}}}
-                                               :substring "<p>hi</p><script>x()</script></body>"}}}}
+  {:name :html-page-rendered-appends-scripts-at-the-end-of-body
+   :description "`:scripts` render after the body content, just before `</body>`."
+   :parent :assert
+   :args {:value {:parent :str-contains? :args {:string {:parent :html-page-rendered :args {:title "T" :body {:value [:p "hi"]} :head {:value []} :scripts {:value [[:script {} "x()"]]}}}
+                                                :substring "<p>hi</p><script>x()</script></body>"}}}}
 
- {:name :html-fragment-rendered-has-no-page-shell
-  :description "A fragment renders to just its element — no `<html>`/`<body>`."
-  :parent :assert-eq
-  :args {:actual {:parent :html-fragment-rendered :args {:fragment {:value [:p {:class "x"} "hi"]}}}
-         :expected "<p class=\"x\">hi</p>"}}
+  {:name :html-fragment-rendered-has-no-page-shell
+   :description "A fragment renders to just its element — no `<html>`/`<body>`."
+   :parent :assert-eq
+   :args {:actual {:parent :html-fragment-rendered :args {:fragment {:value [:p {:class "x"} "hi"]}}}
+          :expected "<p class=\"x\">hi</p>"}}
 
- {:name :html-fragment-rendered-renders-nested-children
-  :description "Nested hiccup renders depth-first in order."
-  :parent :assert-eq
-  :args {:actual {:parent :html-fragment-rendered :args {:fragment {:value [:ul [:li "a"] [:li "b"]]}}}
-         :expected "<ul><li>a</li><li>b</li></ul>"}}
+  {:name :html-fragment-rendered-renders-nested-children
+   :description "Nested hiccup renders depth-first in order."
+   :parent :assert-eq
+   :args {:actual {:parent :html-fragment-rendered :args {:fragment {:value [:ul [:li "a"] [:li "b"]]}}}
+          :expected "<ul><li>a</li><li>b</li></ul>"}}
 
- {:name :html-fragment-handler-answers-200
-  :description "Calling the fragment handler yields a 200 Ring response."
-  :parent :assert-eq
-  :args {:actual {:parent :get :args {:coll :_t-fragment-response :key {:value :status} :default nil}}
-         :expected 200}}
+  {:name :html-fragment-handler-answers-200
+   :description "Calling the fragment handler yields a 200 Ring response."
+   :parent :assert-eq
+   :args {:actual {:parent :get :args {:coll :_t-fragment-response :key {:value :status} :default nil}}
+          :expected 200}}
 
- {:name :html-fragment-handler-serves-text-html
-  :description "The fragment response is `text/html; charset=utf-8` (the header key is the keyword the JSONB round-trip leaves — the Ring adapter stringifies it)."
-  :parent :assert-eq
-  :args {:actual {:parent :get :args {:coll {:parent :get :args {:coll :_t-fragment-response :key {:value :headers} :default nil}} :key {:value :Content-Type} :default nil}}
-         :expected "text/html; charset=utf-8"}}
+  {:name :html-fragment-handler-serves-text-html
+   :description "The fragment response is `text/html; charset=utf-8` (the header key is the keyword the JSONB round-trip leaves — the Ring adapter stringifies it)."
+   :parent :assert-eq
+   :args {:actual {:parent :get :args {:coll {:parent :get :args {:coll :_t-fragment-response :key {:value :headers} :default nil}} :key {:value :Content-Type} :default nil}}
+          :expected "text/html; charset=utf-8"}}
 
- {:name :html-page-rendered-escapes-text-content
-  :description "Text children are HTML-escaped — markup in data cannot inject elements."
-  :parent :assert
-  :args {:value {:parent :str-contains? :args {:string {:parent :html-page-rendered :args {:title "T" :body {:value [:p "<b>&"]} :head {:value []} :scripts {:value []}}}
-                                               :substring "<p>&lt;b&gt;&amp;</p>"}}}}
+  {:name :html-page-rendered-escapes-text-content
+   :description "Text children are HTML-escaped — markup in data cannot inject elements."
+   :parent :assert
+   :args {:value {:parent :str-contains? :args {:string {:parent :html-page-rendered :args {:title "T" :body {:value [:p "<b>&"]} :head {:value []} :scripts {:value []}}}
+                                                :substring "<p>&lt;b&gt;&amp;</p>"}}}}
 
- {:name :html-fragment-rendered-escapes-text-content
-  :description "Fragment text children are HTML-escaped too."
-  :parent :assert-eq
-  :args {:actual {:parent :html-fragment-rendered :args {:fragment {:value [:span "a<b"]}}}
-         :expected "<span>a&lt;b</span>"}}
+  {:name :html-fragment-rendered-escapes-text-content
+   :description "Fragment text children are HTML-escaped too."
+   :parent :assert-eq
+   :args {:actual {:parent :html-fragment-rendered :args {:fragment {:value [:span "a<b"]}}}
+          :expected "<span>a&lt;b</span>"}}
 
- {:name :render-value-repr-record-table-has-a-header-per-column
-  :description "The record table's header row names each column key."
-  :parent :assert
-  :args {:value {:parent :str-contains? :args {:string {:parent :_t-rendered-repr :args {:value {:value [{:a 1 :b 2}]}}} :substring "<th>a</th><th>b</th>"}}}}
+  {:name :render-value-repr-record-table-has-a-header-per-column
+   :description "The record table's header row names each column key."
+   :parent :assert
+   :args {:value {:parent :str-contains? :args {:string {:parent :_t-rendered-repr :args {:value {:value [{:a 1 :b 2}]}}} :substring "<th>a</th><th>b</th>"}}}}
 
- {:name :html-fragment-handler-body-is-the-rendered-fragment
-  :description "The fragment handler answers 200 with the bare fragment HTML."
-  :parent :assert-eq
-  :args {:actual {:parent :get :args {:coll :_t-fragment-response :key {:value :body} :default nil}}
-         :expected "<p>frag</p>"}}
+  {:name :html-fragment-handler-body-is-the-rendered-fragment
+   :description "The fragment handler answers 200 with the bare fragment HTML."
+   :parent :assert-eq
+   :args {:actual {:parent :get :args {:coll :_t-fragment-response :key {:value :body} :default nil}}
+          :expected "<p>frag</p>"}}
 
- {:name :fragment-route-mounts-at-its-path
-  :description "`:fragment-route` is a route whose 0th item is the bound path."
-  :parent :assert-eq
-  :args {:actual {:parent :first :args {:coll {:parent :fragment-route :args {:path "/f" :fragment {:value [:p "x"]}}}}}
-         :expected "/f"}}
+  {:name :fragment-route-mounts-at-its-path
+   :description "`:fragment-route` is a route whose 0th item is the bound path."
+   :parent :assert-eq
+   :args {:actual {:parent :first :args {:coll {:parent :fragment-route :args {:path "/f" :fragment {:value [:p "x"]}}}}}
+          :expected "/f"}}
 
- {:name :fragment-route-is-a-get-route
-  :description "`:fragment-route` fixes the method to GET."
-  :parent :assert-eq
-  :args {:actual {:parent :keys :args {:map {:parent :first :args {:coll {:parent :rest :args {:coll {:parent :fragment-route :args {:path "/f" :fragment {:value [:p "x"]}}}}}}}}}
-         :expected ["get"]}}
+  {:name :fragment-route-is-a-get-route
+   :description "`:fragment-route` fixes the method to GET."
+   :parent :assert-eq
+   :args {:actual {:parent :keys :args {:map {:parent :first :args {:coll {:parent :rest :args {:coll {:parent :fragment-route :args {:path "/f" :fragment {:value [:p "x"]}}}}}}}}}
+          :expected ["get"]}}
 
- {:name :fragment-post-route-is-a-post-route
-  :description "`:fragment-post-route` fixes the method to POST."
-  :parent :assert-eq
-  :args {:actual {:parent :keys :args {:map {:parent :first :args {:coll {:parent :rest :args {:coll {:parent :fragment-post-route :args {:path "/f" :fragment {:value [:p "x"]}}}}}}}}}
-         :expected ["post"]}}
+  {:name :fragment-post-route-is-a-post-route
+   :description "`:fragment-post-route` fixes the method to POST."
+   :parent :assert-eq
+   :args {:actual {:parent :keys :args {:map {:parent :first :args {:coll {:parent :rest :args {:coll {:parent :fragment-post-route :args {:path "/f" :fragment {:value [:p "x"]}}}}}}}}}
+          :expected ["post"]}}
 
- {:name :html-page-route-is-a-get-route-at-its-path
-  :description "`:html-page-route` mounts a GET route at `:path`."
-  :parent :assert-eq
-  :args {:actual {:parent :first :args {:coll {:parent :html-page-route :args {:path "/about" :title "T" :body {:value [:p "hi"]} :head {:value []} :scripts {:value []}}}}}
-         :expected "/about"}}
+  {:name :html-page-route-is-a-get-route-at-its-path
+   :description "`:html-page-route` mounts a GET route at `:path`."
+   :parent :assert-eq
+   :args {:actual {:parent :first :args {:coll {:parent :html-page-route :args {:path "/about" :title "T" :body {:value [:p "hi"]} :head {:value []} :scripts {:value []}}}}}
+          :expected "/about"}}
 
- {:name :stylesheet-route-is-a-get-route-at-its-path
-  :description "`:stylesheet-route` mounts a GET route at `:path`."
-  :parent :assert-eq
-  :args {:actual {:parent :first :args {:coll {:parent :stylesheet-route :args {:path "/s.css" :css "a{}"}}}}
-         :expected "/s.css"}}]}
+  {:name :stylesheet-route-is-a-get-route-at-its-path
+   :description "`:stylesheet-route` mounts a GET route at `:path`."
+   :parent :assert-eq
+   :args {:actual {:parent :first :args {:coll {:parent :stylesheet-route :args {:path "/s.css" :css "a{}"}}}}
+          :expected "/s.css"}}]}

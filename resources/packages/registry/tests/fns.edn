@@ -517,5 +517,4 @@
   {:name :encode-unreadable-kws-leaves-a-readable-value-alone
    :parent :assert-eq
    :args {:actual {:parent :encode-unreadable-kws :args {:value {:value {:a "b" :c [:d]}}}}
-          :expected {:value {:a "b" :c [:d]}}}}]
-}
+          :expected {:value {:a "b" :c [:d]}}}}]}

@@ -393,14 +393,14 @@
    :description "`:select` nests `:option` nodes as its children."
    :parent :assert-eq
    :args {:actual {:parent :select :args {:attrs {:name "c"}
-                                         :options [{:parent :option :args {:label "Red" :attrs {:value {:value "r"}}}}]}}
+                                          :options [{:parent :option :args {:label "Red" :attrs {:value {:value "r"}}}}]}}
           :expected {:value [:select {:name "c"} [:option {:value "r"} "Red"]]}}}
 
   {:name :form-wraps-fields-with-method-and-action
    :description "`:form` is `[:form attrs & children]`."
    :parent :assert-eq
    :args {:actual {:parent :form :args {:attrs {:method "POST" :action "/c"}
-                                       :children [{:parent :input :args {:attrs {:name "e"}}}]}}
+                                        :children [{:parent :input :args {:attrs {:name "e"}}}]}}
           :expected {:value [:form {:method "POST" :action "/c"} [:input {:name "e"}]]}}}
 
   {:name :heading-picks-its-tag-from-the-level
@@ -431,8 +431,8 @@
    :description "`:unordered-list` over `:list-item`s is `[:ul [:li …] …]`."
    :parent :assert-eq
    :args {:actual {:parent :unordered-list :args {:attrs nil
-                                                 :children [{:parent :list-item :args {:attrs nil :children ["a"]}}
-                                                            {:parent :list-item :args {:attrs nil :children ["b"]}}]}}
+                                                  :children [{:parent :list-item :args {:attrs nil :children ["a"]}}
+                                                             {:parent :list-item :args {:attrs nil :children ["b"]}}]}}
           :expected {:value [:ul [:li "a"] [:li "b"]]}}}
 
   {:name :table-composes-rows-header-cells-and-cells
@@ -748,5 +748,4 @@
    :description "A nil envelope renders as 200 `application/json` with body `{}`."
    :parent :assert-eq
    :args {:actual {:parent :_wt-resp-sig :args {:resp {:parent :json-envelope-response :args {:envelope nil}}}}
-          :expected {:value [200 "application/json" nil "{}"]}}}]
-}
+          :expected {:value [200 "application/json" nil "{}"]}}}]}

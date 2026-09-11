@@ -259,7 +259,9 @@ bb visual-update # Refresh visual baselines after intentional UI changes
 bb type-sweep   # The corpus type-check sweep (no DB, ~1 min): production's
                 #   boot-time gate over the same package data, allowlist and
                 #   all. Test fixtures skip the sweep, so this is what keeps a
-                #   fn-def type regression from reaching a real boot. In bb ci.
+                #   fn-def type regression from reaching a real boot. Runs in
+                #   `bb ci`'s post-test wave, NOT in `bb lint` — run it by hand
+                #   after an fns.edn change if you don't want to wait.
 bb graph-lint   # Graph linters over the fns.edn corpus (no DB, ~10s): duplicate
                 #   definitions (exact + after private-helper expansion), unreferenced
                 #   privates, pure aliases — docs/GRAPH_LINT.md. In bb ci.

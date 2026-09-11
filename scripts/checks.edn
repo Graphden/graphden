@@ -87,7 +87,13 @@
  ;; The corpus type-check sweep — production's boot-time gate, run on
  ;; package data alone. Test fixtures skip the sweep, so this is the only
  ;; check before the e2e stack that sees a corpus type regression.
- {:name "type-sweep"    :bb "type-sweep"    :timeout 240000 :group :clj
+ ;; :post-test, not :clj — the lint wave launches every check at once, and
+ ;; this one is a whole-corpus JVM (~700 MB, ~1 min). Adding it to that
+ ;; wave put a 12 GB dev host over the edge: children started dying and
+ ;; the runner came apart with `Stream closed` instead of a verdict. In
+ ;; the post-test wave it runs on a quiet box, still inside `bb ci`, and
+ ;; a corpus type error is caught long before the e2e stack boots.
+ {:name "type-sweep"    :bb "type-sweep"    :timeout 240000 :group :post-test
   :relevant ["fns\\.edn$" "^src/graphden/types/" "^src/graphden/packages/"
              "^tools/type_sweep\\.clj$" "^bb\\.edn$"]}
  {:name "devtour"       :bb "devtour-check" :timeout  60000 :group :docs

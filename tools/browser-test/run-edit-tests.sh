@@ -153,11 +153,19 @@ SUITE_START=$SECONDS
 # NAMESPACES as "LEAKED 2 fn(s)" and sent me looking for a cascade bug that was
 # not there. An instrument that misnames what it measures is worse than none: it
 # spends the time you gave it to save.
+#
+# A FAILED sample returns -1, never 0. The executor is allowed to die and come
+# back mid-suite (`--memory 3g` + `restart=on-failure:3` turn a >3GB burst into
+# a discrete, recoverable event on purpose), and during that window this curl
+# gets a connection reset. Reading that as "the graph holds 0 fns" made the next
+# file's after-count read as a leak of the WHOLE GRAPH — 8892 rows blamed on an
+# innocent test, which is the same misnaming trap as the namespaces note above.
+# -1 is not a count, so the leak verdict below can tell "no rows" from "no answer".
 fn_count() {
   curl -fsS -H "Authorization: Bearer ${AUTH_TOKEN:-}" \
        "$URL/api/graph/entities?scope=index" 2>/dev/null \
     | python3 -c 'import sys,json; d=json.load(sys.stdin); print(len(d.get("fns") or []))' \
-       2>/dev/null || echo 0
+       2>/dev/null || echo -1
 }
 # Namespaces leak too — a package install creates one per version — and they show
 # up in the sidebar tree of every file that runs after. Counted separately so the
@@ -166,7 +174,7 @@ ns_count() {
   curl -fsS -H "Authorization: Bearer ${AUTH_TOKEN:-}" \
        "$URL/api/graph/entities?scope=index" 2>/dev/null \
     | python3 -c 'import sys,json; d=json.load(sys.stdin); print(len(d.get("namespaces") or []))' \
-       2>/dev/null || echo 0
+       2>/dev/null || echo -1
 }
 # What did the executor DO while this file ran?
 #
@@ -200,6 +208,24 @@ print(" ".join(f"{k}={v}" for k, v in sorted(d.items())))
 ' "$1" "$2" 2>/dev/null || true
 }
 
+# Did the executor PROCESS restart while this file ran?
+#
+# The counters are monotonic within one JVM, so any of them moving BACKWARDS
+# means the numbers came from two different incarnations. That happens by
+# design: `--memory 3g` + `restart=on-failure:3` turn a >3GB burst into a
+# discrete OOM-and-come-back, and `wait_for_server` then recovers the suite
+# transparently. Nothing about that is a test's fault — but it invalidates
+# every before/after comparison taken across it, the leak count first of all.
+# Prints `1` when the counters cannot belong to the same process.
+counters_restarted() {
+  python3 -c '
+import sys, json
+b = json.loads(sys.argv[1] or "{}")
+a = json.loads(sys.argv[2] or "{}")
+print(1 if any(k in a and a[k] < b[k] for k in b) else 0)
+' "$1" "$2" 2>/dev/null || echo 0
+}
+
 LEAKS=""
 FLAKED=""
 
@@ -217,6 +243,9 @@ FAILED_NAMES=""
 STRICT_FLAKES=""    # flaked-passed-on-retry files; strict-escalated only if NOT degraded
 STRICT_LEAKS=""     # leak-in-passing-test files (name(count)); same
 DEGRADED_FILES=0    # count of files that ran slower than THRASH_FILE_SECS
+UNCOUNTABLE_LEAKS=0 # files whose leak check was skipped: the executor was down for a
+                    # sample, or restarted between the two. Named in the leak banner so
+                    # a skipped check never reads as a clean one.
 HEAP_HWM_MIB=0      # executor heap high-water (docker stats), MiB — INFO ONLY in the banner,
                     # NOT a degraded trigger: a JVM at MaxRAMPercentage commits heap toward
                     # the cap regardless of pressure (the "executor memory" note at the end
@@ -245,9 +274,10 @@ for f in $FILES; do
   fi
   echo "─── $f ───"
   FILE_START=$SECONDS
-  FN_BEFORE="$(fn_count)"
-  NS_BEFORE="$(ns_count)"
-  CTR_BEFORE="$(executor_counters)"
+  # NOTE: the baseline is sampled AFTER wait_for_server, not before it. The
+  # previous file may have ended on an executor OOM-restart (a designed,
+  # recoverable event — see the --memory bullet in e2e_stack.clj), and a
+  # baseline taken against the dead or still-booting server is not a baseline.
   if ! wait_for_server; then
     WORST=1
     FAIL=$((FAIL+1))
@@ -260,6 +290,9 @@ for f in $FILES; do
     continue
   fi
   CONSECUTIVE_DOWN=0
+  FN_BEFORE="$(fn_count)"
+  NS_BEFORE="$(ns_count)"
+  CTR_BEFORE="$(executor_counters)"
   # Per-test wall-clock cap. Individual tests should complete in
   # < 1 min under load; bounded at 5 min hard, then SIGKILL via the
   # GNU coreutils `timeout`. Without this a stuck `page.evaluate`
@@ -371,8 +404,30 @@ for f in $FILES; do
   if [ "${file_mib:-0}" -gt "$HEAP_HWM_MIB" ] 2>/dev/null; then HEAP_HWM_MIB="$file_mib"; fi
   FN_AFTER="$(fn_count)"
   NS_AFTER="$(ns_count)"
-  CTR_DELTA="$(counters_delta "$CTR_BEFORE" "$(executor_counters)")"
+  CTR_AFTER="$(executor_counters)"
+  CTR_DELTA="$(counters_delta "$CTR_BEFORE" "$CTR_AFTER")"
   FN_LEAKED=$(( (FN_AFTER - FN_BEFORE) + (NS_AFTER - NS_BEFORE) ))
+  # Is the leak number MEANINGFUL at all? Two ways it is not, and in both the
+  # honest answer is silence rather than a number: a sample that never arrived
+  # (-1 sentinel, the executor was down when we asked), and a process restart
+  # between the two samples (monotonic counters moved backwards), which resets
+  # the graph to its boot state and makes the whole corpus read as "new rows".
+  # This is the accounting that reported `8892 edit-tutorial-tour-structure` and
+  # reddened an otherwise-green run: the file was innocent, the ruler was not.
+  LEAK_COUNTABLE=1
+  if [ "$FN_BEFORE" -lt 0 ] 2>/dev/null || [ "$NS_BEFORE" -lt 0 ] 2>/dev/null \
+     || [ "$FN_AFTER" -lt 0 ] 2>/dev/null || [ "$NS_AFTER" -lt 0 ] 2>/dev/null; then
+    LEAK_COUNTABLE=0
+    UNCOUNTABLE_LEAKS=$((UNCOUNTABLE_LEAKS+1))
+    echo "  (graph counts unavailable — executor was unreachable; leak check skipped)" >&2
+  elif [ "$(counters_restarted "$CTR_BEFORE" "$CTR_AFTER")" = "1" ]; then
+    LEAK_COUNTABLE=0
+    UNCOUNTABLE_LEAKS=$((UNCOUNTABLE_LEAKS+1))
+    echo "  (executor restarted while this file ran — leak check skipped, counts span two JVMs)" >&2
+  fi
+  if [ "$LEAK_COUNTABLE" = "0" ]; then
+    FN_LEAKED=0
+  fi
   if [ "$FN_LEAKED" -gt 0 ] 2>/dev/null && [ "$passed" = 1 ]; then
     printf '  [%3ds  executor=%s%s]%s  \033[31mLEAKED %d entities into the graph\033[0m\n' \
       "$FILE_SECS" "$FILE_MEM" "$ATTEMPT_NOTE" "${CTR_DELTA:+  $CTR_DELTA}" "$FN_LEAKED"
@@ -490,6 +545,10 @@ if [ -n "$LEAKS" ]; then
   echo "    not the file that trips over the mess."
 else
   echo "  none — every file left the graph as it found it"
+fi
+if [ "$UNCOUNTABLE_LEAKS" -gt 0 ] 2>/dev/null; then
+  echo "  ($UNCOUNTABLE_LEAKS file(s) could not be checked — the executor was down or restarted"
+  echo "   around them. 'none' above covers the files that WERE measured, not those.)"
 fi
 
 echo

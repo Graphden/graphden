@@ -248,6 +248,46 @@
           md-files)))
 
 
+(defn- collect-roots
+  "Every root the BFS starts from, and a line per source so a surprising
+   count is visible before the verdict. `:web-server` is the one hard-coded
+   root (the process's own entry point); everything else comes from a
+   contract some other layer enforces — the examples package, the
+   by-name registry, Clojure tests, sibling repos, the docs, and the
+   graph's own `tests` namespaces."
+  [fn-defs all-by-name fn-def-by-name]
+  (let [example-roots (into #{}
+                            (keep (fn [fd]
+                                    (let [ns (:namespace fd)]
+                                      (when (and ns
+                                                 (str/starts-with? ns "examples")
+                                                 (:name fd))
+                                        (:name fd))))
+                                  fn-defs))
+        dynamic-roots (collect-entry-point-roots all-by-name)
+        test-roots (collect-test-roots all-by-name)
+        external-roots (collect-external-roots fn-def-by-name)
+        docs-roots (collect-docs-roots all-by-name)
+        graph-test-roots (collect-tests-namespace-roots fn-defs)]
+    (println "External roots (sibling repos' qualified refs + registry :external):"
+             external-roots)
+    (println "Dynamic roots (from tools/graph-reachability.edn):"
+             (count dynamic-roots))
+    (println "Test roots (from `:name :the-fn` in test/):"
+             (count test-roots))
+    (println "Docs roots (from back-ticked names in docs/*.md):"
+             (count docs-roots))
+    (println "Graph-test roots (public fn-defs in a `tests` namespace):"
+             (count graph-test-roots))
+    (-> #{:web-server}
+        (into example-roots)
+        (into dynamic-roots)
+        (into test-roots)
+        (into external-roots)
+        (into docs-roots)
+        (into graph-test-roots))))
+
+
 (defn- run-audit
   []
   ;; The FULL first-party set incl. the optional registry/mcp packages —
@@ -267,36 +307,7 @@
         fn-def-by-name (into {} (keep (fn [fd] [(:name fd) fd])
                                       fn-defs))
         all-by-name (merge base-by-name fn-def-by-name)
-        example-roots (into #{}
-                            (keep (fn [fd]
-                                    (let [ns (:namespace fd)]
-                                      (when (and ns
-                                                 (str/starts-with? ns "examples")
-                                                 (:name fd))
-                                        (:name fd))))
-                                  fn-defs))
-        dynamic-roots (collect-entry-point-roots all-by-name)
-        test-roots (collect-test-roots all-by-name)
-        external-roots (collect-external-roots fn-def-by-name)
-        docs-roots (collect-docs-roots all-by-name)
-        graph-test-roots (collect-tests-namespace-roots fn-defs)
-        roots (-> #{:web-server}
-                  (into example-roots)
-                  (into dynamic-roots)
-                  (into test-roots)
-                  (into external-roots)
-                  (into docs-roots)
-                  (into graph-test-roots))
-        _ (println "External roots (sibling repos' qualified refs + registry :external):"
-                   external-roots)
-        _ (println "Dynamic roots (from tools/graph-reachability.edn):"
-                   (count dynamic-roots))
-        _ (println "Test roots (from `:name :the-fn` in test/):"
-                   (count test-roots))
-        _ (println "Docs roots (from back-ticked names in docs/*.md):"
-                   (count docs-roots))
-        _ (println "Graph-test roots (public fn-defs in a `tests` namespace):"
-                   (count graph-test-roots))
+        roots (collect-roots fn-defs all-by-name fn-def-by-name)
         reachable (bfs-reachable all-by-name roots)
         composed (filter #(composed? (val %)) fn-def-by-name)
         type-rows (filter #(type-row? (val %)) fn-def-by-name)

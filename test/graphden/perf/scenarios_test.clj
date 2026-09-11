@@ -25,6 +25,7 @@
    budget should send you to `bb perf`, not to a red test suite."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.crud.test-autorun :as autorun]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry-core]
     [graphden.executor.test-setup :as setup]
@@ -62,8 +63,20 @@
            ;; in the same pg_stat_statements window (`:sql/merge-fork` read
            ;; 38 in one gate, 36 in the next, for the same code). Hold it
            ;; off for the whole run: the budgets are about the operation.
+           ;;
+           ;; Same reason for the test auto-run, and it became real on
+           ;; 2026-09-11: the shipped packages now carry their own tests,
+           ;; so a scenario that WRITES schedules a debounced background
+           ;; pass, and that pass resolves branch chains ~500 ms later —
+           ;; inside whichever scenario is measuring by then. It surfaced
+           ;; as `branch_merge … IN ($1)` with calls=3 in
+           ;; `list-secrets-sql-cost`, a shape assertion that is supposed
+           ;; to mean "the ENDPOINT scanned", and said nothing about the
+           ;; endpoint at all. Before the platform tests existed the pass
+           ;; found nothing to run, which is why this never fired.
            (binding [*graph* graph
-                     br/*epoch-check-ttl-ms* (* 24 60 60 1000)]
+                     br/*epoch-check-ttl-ms* (* 24 60 60 1000)
+                     autorun/*auto-run?* false]
              ;; Calibrate once, here, against the same pool the scenarios use — a
              ;; reference measured on a different connection or at a different
              ;; moment would normalise against a machine this run never saw.

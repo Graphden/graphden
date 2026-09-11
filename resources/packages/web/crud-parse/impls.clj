@@ -42,7 +42,11 @@
 
    Returns nil on blank input. On non-blank input that fails to parse
    as JSON, returns the raw string unchanged (parse failure is
-   swallowed).
+   swallowed) — `parse-string-strict`, not `parse-string`, because the
+   latter parses a top-level ARRAY lazily: a truncated one (an
+   unterminated JSON array) then threw its JsonParseException out of
+   the `re-kw` walk, PAST the catch, and an untrusted constraint field
+   became a 500 + a paged `:http/server-error` instead of a 400.
 
    Kept as ONE base-fn deliberately — NOT for lack of recursion
    (`:fix` shipped; the walk WOULD express as a graph): this is a
@@ -54,7 +58,7 @@
    forbids."
   [raw]
   (when-not (str/blank? raw)
-    (let [parsed (try (json/parse-string raw)
+    (let [parsed (try (json/parse-string-strict raw)
                       (catch Exception _ raw))]
       (letfn [(re-kw
                 [x]

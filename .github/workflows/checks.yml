@@ -290,8 +290,8 @@ jobs:
           # regressing. A floor on that aggregate can only be lowered
           # (hiding the next real regression behind the new denominator)
           # or red `main` on arithmetic. Graded separately, src/ keeps
-          # the floor it always had (70, measured 73.50) and the package
-          # layer gets one of its own (41, measured 44.11) so it can only
+          # its floor (71, measured 74.22) and the package
+          # layer one of its own (48, measured 51.34) so it can only
           # improve.
           bb coverage-floor
 

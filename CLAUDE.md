@@ -247,8 +247,8 @@ bb kondo / bb cljstyle / bb biome / …   # any single check on its own
 bb fix          # Auto-fix Clojure formatting (cljstyle)
 bb test         # Run all tests
 bb coverage     # Tests with coverage report (open target/coverage/index.html)
-bb coverage-floor # Grade that report PER LAYER — src/ (floor 70, measured
-                #   73.50) and the package layer (floor 41, measured 44.11).
+bb coverage-floor # Grade that report PER LAYER — src/ (floor 71, measured
+                #   74.22) and the package layer (floor 48, measured 51.34).
                 #   What CI gates on: one aggregate stopped being gateable
                 #   when impls.clj joined the report and moved the headline
                 #   3 points without a single src/ namespace regressing.

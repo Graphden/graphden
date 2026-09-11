@@ -30,8 +30,8 @@
    the reading it was set from — the same margin the single floor always
    had. Raise a floor when its layer climbs; never lower one to make a
    run pass."
-  {:src {:floor 70.0 :measured "73.50% on 2026-09-11"}
-   :impls {:floor 41.0 :measured "44.1-45.0% across runs, 2026-09-11"}})
+  {:src {:floor 71.0 :measured "74.22% on 2026-09-11"}
+   :impls {:floor 48.0 :measured "51.34% on 2026-09-11"}})
 
 
 (defn- strip-tags

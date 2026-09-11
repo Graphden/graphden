@@ -195,19 +195,22 @@ questions (`bb coverage` docstring + `feedback_coverage_measurement`):
 
   | Layer | 2026-09-11 | Floor |
   |---|---:|---:|
-  | `src/` | 73.50 % form | 70 % |
-  | `resources/packages/**/impls.clj` | 44.11 % form | 41 % |
+  | `src/` | 74.22 % form | 71 % |
+  | `resources/packages/**/impls.clj` | 51.34 % form | 48 % |
 
   One aggregate stopped being gateable when the package layer joined the
   report: ~17k forms that had reported nothing landed at ~45 % and moved
   the ALL-FILES headline 73.15 → 70.16 without a single `src/` namespace
   regressing. Lowering a floor to absorb that would hide the next real
   regression behind the new denominator, so the two populations are
-  graded against their own baselines instead. The package layer's gap is
-  honest: its lowest namespaces (`app.branches`, `app.registry`,
-  `app.mcp`, `web.sse`, `web.http-client`) hold base-fns that are
-  storage-, vault- and network-bound — integration exercises them, and
-  cloverage cannot attribute integration coverage.
+  graded against their own baselines instead. Both floors were raised on 2026-09-11 (70→71, 41→48) once the
+  impl modules no test had ever loaded got direct unit tests — 126 of
+  them, taking `web.errors`, `web.ring-adapter`, `web.crud-parse`,
+  `web.branch-router`, `storage.branches` and `core.hof` to 100 %.
+  What is left low is storage-, vault- and network-bound
+  (`app.branches`, `app.registry`, `app.mcp`, `web.sse`,
+  `web.http-client`): integration exercises those, and cloverage
+  cannot attribute integration coverage.
 - **`resources/packages/**/impls.clj`** — the package layer joined the
   same report on 2026-09-10. The loader `eval`s impls from resources,
   so cloverage never found them: `scripts/coverage_src.clj` mirrors

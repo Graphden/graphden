@@ -185,14 +185,24 @@ async function _tourRemovePackages(created) {
 // the SERVER. The client's `graphData` is a view — it can be empty right after
 // a reload, and a lesson that ran before it populated would read as "already
 // gone" and leave the namespace behind for good.
+//
+// ROOT namespaces only — `name` is a SEGMENT, not a path, and every lesson
+// creates its namespace at the Explorer's root. Without that guard this
+// resolver matches the first row carrying the segment ANYWHERE: once the
+// platform shipped its own `core.tests` / `web.tests` self-tests, lesson 14's
+// recorded `tests` resolved to one of those and the cleanup walked a platform
+// namespace, deleting (403 / 409) its way through fns the lesson never made.
+// The `ns-exists` CHECK has carried this rule since the cloud's
+// `landing.tutorial` pages; the deleter has to agree with it.
 async function _tourNsByName(name) {
+  const rootNamed = (nss) => (nss || []).find((n) => n.name === name && !n['parent-id']) || null;
   try {
     const r = await authFetch(API.api_graph_entities + '?scope=tree');
     const payload = await r.json();
-    return (payload.namespaces || []).find((n) => n.name === name) || null;
+    return rootNamed(payload.namespaces);
   } catch (_) {
     return (typeof graphData !== 'undefined' && graphData
-      && (graphData.namespaces || []).find((n) => n.name === name)) || null;
+      && rootNamed(graphData.namespaces)) || null;
   }
 }
 

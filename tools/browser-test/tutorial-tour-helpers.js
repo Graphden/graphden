@@ -91,7 +91,14 @@ async function hardCleanup(page) {
   try {
     const tree = await api(page, 'GET', '/api/graph/entities?scope=tree');
     for (const nsName of [NS_NAME, 'tests', 'mycorp', 'mycorp@1-0-0']) {
-    const ns = (tree.namespaces || []).find((n) => n.name === nsName);
+    // ROOT namespaces only. `name` is a SEGMENT: the platform ships its own
+    // `core.tests` / `web.tests` self-test modules, so a bare `n.name ===
+    // 'tests'` match walks one of THOSE and spends a doomed round trip per
+    // fn in it (403 package-owned / 409 still referenced) — 88 s of this
+    // helper, per call, which is what pushed this file past the runner's
+    // 5-minute cap. The lessons create their namespaces at the root.
+    const ns = (tree.namespaces || []).find(
+      (n) => n.name === nsName && !n['parent-id']);
     if (ns) {
       const sub = await api(
         page, 'GET', '/api/graph/entities?scope=namespace&namespace-id=' + ns.id);
@@ -535,26 +542,26 @@ async function createRootNamespace(page, name) {
 
 
 async function createFnInNamespace(page, nsName, fnName) {
+  // Match the ROW BY PATH (`data-ns-path`), not by its label: a label is a
+  // SEGMENT, and the platform ships `core.tests` / `web.tests`, whose rows
+  // read "tests" exactly like the lesson's own root namespace once their
+  // parent is expanded.
   // The inline create row only renders inside an EXPANDED namespace.
-  await page.waitForFunction((name) => {
-    return Array.from(document.querySelectorAll('.ns-header'))
-      .some((h) => h.querySelector('.ns-label')?.textContent.trim() === name);
+  await page.waitForFunction((path) => {
+    return !!document.querySelector('.ns-header[data-ns-path="' + path + '"]');
   }, nsName, {timeout: 30000, polling: 200});
-  await page.evaluate((name) => {
-    const target = Array.from(document.querySelectorAll('.ns-header'))
-      .find((h) => h.querySelector('.ns-label')?.textContent.trim() === name);
+  await page.evaluate((path) => {
+    const target = document.querySelector('.ns-header[data-ns-path="' + path + '"]');
     const arrow = target.querySelector('.ns-arrow');
     if (arrow && /▶/.test(arrow.textContent || '')) target.click();
   }, nsName);
-  await page.waitForFunction((name) => {
-    const target = Array.from(document.querySelectorAll('.ns-header'))
-      .find((h) => h.querySelector('.ns-label')?.textContent.trim() === name);
+  await page.waitForFunction((path) => {
+    const target = document.querySelector('.ns-header[data-ns-path="' + path + '"]');
     const arrow = target?.querySelector('.ns-arrow');
     return arrow && /▼/.test(arrow.textContent || '');
   }, nsName, {timeout: 15000, polling: 100});
-  await page.evaluate((name) => {
-    const target = Array.from(document.querySelectorAll('.ns-header'))
-      .find((h) => h.querySelector('.ns-label')?.textContent.trim() === name);
+  await page.evaluate((path) => {
+    const target = document.querySelector('.ns-header[data-ns-path="' + path + '"]');
     target.querySelector('.ns-plus-btn').click();
   }, nsName);
   await page.waitForSelector('.create-menu', {timeout: 10000});

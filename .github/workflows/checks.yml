@@ -282,59 +282,18 @@ jobs:
           # masked a stable 39-problem cloverage run for days.
           set -o pipefail
           bb coverage 2>&1 | tee coverage-output.txt
-          # Extract form-coverage from the cloverage summary row.
-          # The table is pipe-delimited and uses ANSI colour codes
-          # (:colorize? true in tests-coverage.edn), so we strip ANSI
-          # first, then split on '|'. Column 3 = form %, column 4 = line %.
-          # Previous version used `awk '{print $4}'` on whitespace —
-          # that pulled the literal '|' separator, not the number, so
-          # the threshold check never actually fired.
-          COVERAGE=$(grep "ALL FILES" coverage-output.txt \
-                     | sed 's/\x1b\[[0-9;]*m//g' \
-                     | awk -F'|' '{print $3}' \
-                     | tr -d ' %')
-          echo "Form coverage: ${COVERAGE}%"
-          if [ -z "$COVERAGE" ]; then
-            echo "Could not parse coverage"
-            exit 1
-          fi
-          # Threshold matches the current unit-only baseline with a
-          # couple of points of slack. Bump it after intentional
-          # improvements; never silently lower it on regression — that
-          # defeats the gate.
-          #
-          # Baseline 2026-06-23: 71.50% form (unit-only) after a
-          # reclassification + new-unit-tests pass: 4 test files
-          # had ^:integration NS markers but contained pure-function
-          # deftests that didn't need a testcontainer (branch-router-
-          # test, branch-local-test, notify-test, type/refinements-
-          # test partly); switched to per-deftest tagging. Also added
-          # new pure-helper unit tests for versioning.storage.resolution
-          # + extended system.core-test / branch-local-test. Together
-          # pushed ALL FILES from 69.06 → 71.50 form (+2.44pp).
-          #
-          # Why 70 and not the older 72.8: integration suite is
-          # deliberately OUT of the cloverage pass (its per-NS
-          # attribution was misleading — see `bb coverage` docstring
-          # + `[[feedback_coverage_measurement]]`). Integration code
-          # paths run via `bb test` un-instrumented and are verified
-          # by the integration tests' own pass/fail signal.
-          #
-          # 2026-09-11: 70 → 67. The MEASURED population changed, not
-          # the suite: the package layer (42 impls.clj namespaces,
-          # ~8.9k LOC that reported nothing at all before) joined the
-          # report, and ALL FILES moved 73.15 → 70.16 form on a green
-          # run of the same 2083 tests. A floor of 70 would leave
-          # 0.16pp of headroom and red `main` on noise, which teaches
-          # people to ignore the check. 67 restores the ~3pp margin
-          # the floor has always carried. Raise it back as the impls
-          # namespaces at 18-22% line (app.branches, app.registry,
-          # web.http-client, web.sse, app.mcp) get unit tests.
-          COV_FLOOR=67
-          if awk "BEGIN { exit !($COVERAGE < $COV_FLOOR) }"; then
-            echo "Form coverage ${COVERAGE}% is below ${COV_FLOOR}% threshold"
-            exit 1
-          fi
+          # The headline ALL-FILES number stays in the log; the GATE is
+          # per layer (`scripts/coverage_floor.clj`). Why: on 2026-09-10
+          # the package layer joined the report — 42 impls.clj namespaces,
+          # ~17k forms that had reported nothing — and landed at ~45%,
+          # moving ALL FILES 73.15 → 70.16 without one src/ namespace
+          # regressing. A floor on that aggregate can only be lowered
+          # (hiding the next real regression behind the new denominator)
+          # or red `main` on arithmetic. Graded separately, src/ keeps
+          # the floor it always had (70, measured 73.50) and the package
+          # layer gets one of its own (41, measured 44.11) so it can only
+          # improve.
+          bb coverage-floor
 
   security:
     name: security scan

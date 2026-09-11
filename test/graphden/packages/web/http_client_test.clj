@@ -164,3 +164,56 @@
         (is (= :http-request (:parent fd)))
         (is (= "get" (get-in fd [:args :method])))
         (is (= :extra-headers (get-in fd [:args :headers :as])))))))
+
+
+;; =============================================================================
+;; Helpers the dialed tests above cannot reach
+;; =============================================================================
+;; The echo-server tests cover the PLATFORM path end to end; these two helpers
+;; belong to the RESTRICTED (OkHttp) path, which the suite deliberately never
+;; dials — so their rules have to be asserted directly or not at all.
+
+(defn- priv
+  [sym]
+  @(ns-resolve client-impls-ns sym))
+
+
+(deftest okhttp-request-body-follows-the-method-test
+  (let [f (priv 'okhttp-request-body)]
+    (testing "a body is sent whatever the method"
+      (is (some? (f "GET" "x")))
+      (is (some? (f "POST" "x"))))
+    (testing "POST / PUT / PATCH with no body send an EMPTY one — curl -X parity"
+      ;; OkHttp refuses to build these without a body object, so a nil body
+      ;; would be a 500 on a perfectly ordinary `:http-post` with no payload.
+      (doseq [m ["POST" "PUT" "PATCH"]]
+        (is (some? (f m nil)) (str m " must carry an empty body"))))
+    (testing "GET / HEAD with no body send none — OkHttp rejects a body there"
+      (is (nil? (f "GET" nil)))
+      (is (nil? (f "HEAD" nil))))))
+
+
+(deftest egress-blocked-cause-walks-the-chain-test
+  (let [f (priv 'egress-blocked-cause)]
+    (testing "an :egress/* ex-info is recognised at the top"
+      (let [e (ex-info "blocked" {:type :egress/blocked})]
+        (is (identical? e (f e)))))
+    (testing "and through a wrapper — OkHttp wraps the resolver's throw"
+      ;; Without the walk a DNS-rebind block surfaces as a generic
+      ;; "unexpected end of stream", which reads like a flaky upstream.
+      (let [inner (ex-info "blocked" {:type :egress/rebind})]
+        (is (identical? inner (f (java.io.IOException. "eof" inner))))))
+    (testing "an ordinary failure is not an egress block"
+      (is (nil? (f (java.io.IOException. "connection reset"))))
+      (is (nil? (f (ex-info "other" {:type :http/timeout}))))
+      (is (nil? (f nil))))))
+
+
+(deftest stringify-header-keys-handles-non-maps-test
+  (let [f (priv 'stringify-header-keys)]
+    (testing "a keywordized JSON header map is named for http-kit's writer"
+      (is (= {"Authorization" "Bearer x" "X-N" "1"} (f {:Authorization "Bearer x" :X-N 1}))))
+    (testing "a non-map is nil rather than a cast error at the boundary"
+      (is (nil? (f nil)))
+      (is (nil? (f "not a map")))
+      (is (= {} (f {}))))))

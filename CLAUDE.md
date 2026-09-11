@@ -247,6 +247,11 @@ bb kondo / bb cljstyle / bb biome / …   # any single check on its own
 bb fix          # Auto-fix Clojure formatting (cljstyle)
 bb test         # Run all tests
 bb coverage     # Tests with coverage report (open target/coverage/index.html)
+bb coverage-floor # Grade that report PER LAYER — src/ (floor 70, measured
+                #   73.50) and the package layer (floor 41, measured 44.11).
+                #   What CI gates on: one aggregate stopped being gateable
+                #   when impls.clj joined the report and moved the headline
+                #   3 points without a single src/ namespace regressing.
 bb biome        # Lint editor JS (resources/packages/app/editor/**/*.js)
 bb biome-fix    # Apply safe biome autofixes
 bb stylelint    # Lint editor CSS — enforces design tokens for color/background/fill/stroke

@@ -51,14 +51,19 @@
         js (run-names #{"resources/packages/app/editor/editor-main.js"})
         iac (run-names #{"deploy/kind/postgres.yaml"})
         compose (run-names #{"docker-compose.yml"})
-        sh (run-names #{"dev/new-script.sh"})]
-    (is (every? src ["clj-kondo" "splint" "cljstyle" "tests-unit" "tests-perf" "perf" "devtour"]))
+        sh (run-names #{"dev/new-script.sh"})
+        tour (run-names #{"docs/devtour/tour.edn"})]
+    (is (every? src ["clj-kondo" "splint" "cljstyle" "tests-unit" "tests-perf" "perf"
+                     "devtour" "devtour-emacs"])
+        "a toured form lives in src/ — the bake AND the emacs anchor path must re-check")
     (is (not-any? docs ["tests-unit" "tests-perf" "perf" "clj-kondo" "biome"]))
     (is (every? docs ["markdownlint" "lychee" "typos" "gitleaks" "commitlint"]))
     (is (every? js ["biome" "tests-js" "tests-unit"]))
     (is (contains? iac "trivy") "deploy/ IaC manifests are trivy-scanned — must stay relevant")
     (is (contains? compose "trivy") "docker-compose is trivy-scanned — must stay relevant")
-    (is (contains? sh "shellcheck"))))
+    (is (contains? sh "shellcheck"))
+    (is (every? tour ["devtour" "devtour-emacs" "devtour-page"])
+        "the tour's three reading paths are all baked from tour.edn")))
 
 
 ;; ---------------------------------------------------------------------------

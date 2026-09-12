@@ -7,9 +7,12 @@
 ;; ACTUAL source out of the file at build time and bakes it into a single
 ;; self-contained docs/devtour/index.html (no server, opens from file://).
 ;;
-;;   bb devtour        -> regenerate docs/devtour/index.html from tour.edn
-;;   bb devtour-check  -> (CI) every anchor still resolves uniquely AND the
-;;                        committed index.html matches a fresh regeneration.
+;;   bb devtour        -> regenerate the three baked outputs from tour.edn:
+;;                          docs/devtour/index.html  — the standalone page
+;;                          docs/devtour/tour.eld    — data for docs/devtour/devtour.el
+;;                          docs/devtour/org/*.org   — the emacs/org reading path
+;;   bb devtour-check  -> (CI) every anchor still resolves uniquely AND every
+;;                        baked output matches a fresh regeneration.
 ;;                        Fails loudly if source drifted from the baked tour.
 ;;
 ;; Because check regenerates and byte-compares, a rename/removal of a toured
@@ -20,6 +23,7 @@
   (:require
     [babashka.fs :as fs]
     [cheshire.core :as json]
+    [clojure.math :as math]
     [clojure.string :as str]
     [rewrite-clj.zip :as z]))
 
@@ -29,6 +33,27 @@
 ;; the generator. Defaults — and `bb devtour` / `bb devtour-check` — unchanged.
 (def ^:private tour-edn (or (System/getenv "DEVTOUR_TOUR") "docs/devtour/tour.edn"))
 (def ^:private out-html (or (System/getenv "DEVTOUR_OUT") "docs/devtour/index.html"))
+
+
+;; The emacs-side outputs live next to the page, so an alternate bake
+;; (DEVTOUR_OUT into another repo) carries its whole tour with it.
+(def ^:private out-dir (str (fs/parent out-html)))
+(def ^:private out-eld (or (System/getenv "DEVTOUR_ELD") (str (fs/path out-dir "tour.eld"))))
+(def ^:private out-org (or (System/getenv "DEVTOUR_ORG") (str (fs/path out-dir "org"))))
+
+
+;; Blob base for the "open on GitHub" action. A branch (not a sha): baking the
+;; current HEAD would make `devtour-check` fail on every commit.
+(def ^:private repo-url
+  (or (System/getenv "DEVTOUR_REPO") "https://github.com/Graphden/graphden/blob/develop"))
+
+
+;; How the org links reach the checkout from the org output directory. Computed
+;; (never absolutised — the byte-compare check must be path-independent), so a
+;; bake that writes elsewhere still links back here.
+(def ^:private src-prefix
+  (or (System/getenv "DEVTOUR_SRC_PREFIX")
+      (str (fs/relativize (fs/absolutize out-org) (fs/absolutize ".")))))
 
 
 ;; --- anchor resolution -----------------------------------------------------
@@ -224,25 +249,125 @@
                  :lang (if js? "js" "clj"))))))
 
 
+;; --- reading-time estimate --------------------------------------------------
+;;
+;; Displayed per step and summed per block, so a reader can size a session
+;; before starting one. Deliberately crude and stated in the docs: prose at
+;; ~140 wpm, code slower than prose and Clojure slower than JS (denser lines),
+;; plus a fixed per-step cost for orienting on a new form.
+
+(def ^:private prose-wpm 140.0)
+(def ^:private code-lpm {"js" 20.0})
+(def ^:private code-lpm-default 15.0)
+(def ^:private step-overhead-min 0.3)
+
+
+(defn- estimate-minutes
+  [say code lang]
+  (let [words (->> (str/replace (or say "") #"[`*\[\]_]" "")
+                   (re-seq #"\S+")
+                   count)
+        loc (->> (str/split-lines (or code "")) (remove str/blank?) count)
+        rate (get code-lpm lang code-lpm-default)]
+    (/ (math/round (* 10.0 (+ (/ words prose-wpm) (/ loc rate) step-overhead-min)))
+       10.0)))
+
+
+;; --- UI strings -------------------------------------------------------------
+;;
+;; Every string the page renders that is NOT tour prose. An alternate bake (the
+;; Russian tour) overrides them wholesale with `:ui` in its tour.edn, so the
+;; chrome speaks the same language as the prose.
+
+(def ^:private ui-strings
+  {:min "min"
+   :lines "lines"
+   :step "step"
+   :after "after:"
+   :seeAlso "see also"
+   :refs "referenced from"
+   :copyPath "click to copy path:line"
+   :copied "copied:"
+   :openEmacs "emacs"
+   :openGithub "GitHub"
+   :emacsHint "open in emacs (devtour.el + org-protocol)"
+   :showAll "show all %d lines"
+   :collapse "collapse"
+   :budget "%s steps across %b blocks — about %t h of reading."
+   :introKeys (str "Pick a step on the left, or press <kbd>&rarr;</kbd> to start. "
+                   "<kbd>/</kbd> searches names, prose and code; <kbd>?</kbd> lists every key.")
+   :stub "Not toured yet — this block is a stub. Code lives under:"
+   :stubAdd (str "Add steps to this block in <code class=inl>docs/devtour/tour.edn</code>, "
+                 "then run <code class=inl>bb devtour</code>.")
+   :resume "Continue where you left off:"
+   :noHits "nothing matches"
+   :searchHint "search step names, prose and code"
+   :cleared "reading progress cleared"
+   :clearConfirm "Forget which steps you have read?"
+   :find "Search"
+   :help "Keys"
+   :theme "Theme"
+   :clear "Reset"
+   :progress "steps read"
+   :findTitle "Search the tour"
+   :helpTitle "Keyboard"
+   :hint "/ search · ? keys"
+   :kNext "next step"
+   :kPrev "previous step"
+   :kBack "back along the path you took"
+   :kIntro "back to the intro"
+   :kFind "search"
+   :kHelp "this list"
+   :kExpand "expand / collapse a long form"
+   :kCopy "copy path:line of the current form"
+   :kEmacs "open the current form in emacs"
+   :kEsc "close an overlay"
+   :helpNote (str "Progress and theme live in this browser only. "
+                  "Every step has its own URL — copy the address bar to share one.")})
+
+
 ;; --- model -----------------------------------------------------------------
 
 (defn- resolve-step
-  "Anchor + prose for one step. `:gi` (global spine index) and `:n` (1-based
-   position within the block) are assigned by the caller; `:see` is resolved
-   in a second pass once every step's `:gi` is known."
+  "Anchor + prose for one step. `:gi` (global spine index), `:n` (1-based
+   position within the block) and `:key` (the stable URL/progress id) are
+   assigned by the caller; `:see` is resolved in a second pass once every
+   step's `:gi` is known."
   [block-id step]
-  (-> (resolve-anchor step)
-      (assoc :say (:say step) :block (str block-id))
-      (cond-> (:see step) (assoc :raw-see (:see step)))))
+  (let [resolved (resolve-anchor step)]
+    (-> resolved
+        (assoc :say (:say step)
+               :block (name block-id)
+               ;; first line of the baked form — what emacs searches for, so
+               ;; the editor path survives edits above the anchor exactly like
+               ;; the generator's own symbol lookup does.
+               :head (first (str/split-lines (:code resolved)))
+               :mins (estimate-minutes (:say step) (:code resolved) (:lang resolved)))
+        (cond-> (:see step) (assoc :raw-see (:see step))))))
+
+
+(defn- step-keys
+  "Stable per-step ids: `<block>/<defn>`, disambiguated with `~2`, `~3` when a
+   block legitimately tours two forms of the same name. Deep links and reading
+   progress key on these, so inserting a step must not renumber the others —
+   which rules out the global index."
+  [steps]
+  (let [seen (atom {})]
+    (mapv (fn [s]
+            (let [base (str (:block s) "/" (:defn s))
+                  n (get (swap! seen update base (fnil inc 0)) base)]
+              (assoc s :key (if (= 1 n) base (str base "~" n)))))
+          steps)))
 
 
 (defn- build-model
   "Resolve every toured block's anchors; validate stubs + :after edges; assign
-   each toured step a stable global index and resolve its see-also links to
-   those indices. Steps are identified by index, NOT by (block, defn) — a block
-   may legitimately tour two forms of the same name (e.g. the executor's two
-   `execute`s). Throws with block/step context on any bad anchor, and on a
-   see-also target that is missing or ambiguous."
+   each toured step a stable global index, a stable key, and resolve its
+   see-also links (plus the reverse `:refs` backlinks) to those. Steps are
+   identified by index, NOT by (block, defn) — a block may legitimately tour
+   two forms of the same name (e.g. the executor's two `execute`s). Throws with
+   block/step context on any bad anchor, and on a see-also target that is
+   missing or ambiguous."
   [tour]
   (let [blocks (:blocks tour)
         ids (set (map :id blocks))]
@@ -251,29 +376,31 @@
         (throw (ex-info (str "block " (:id b) " :after unknown block " a) {}))))
     (let [gi (atom -1)
           base (vec (for [b blocks]
-                      (cond-> {:id (str (:id b))
+                      (cond-> {:id (name (:id b))
                                :title (:title b)
                                :status (name (:status b :stub))
                                :summary (:summary b)
                                :paths (:paths b)
-                               :after (mapv str (:after b))}
+                               :after (mapv name (:after b))}
                         (= :toured (:status b))
                         (assoc :steps
-                               (vec (for [[i step] (map-indexed vector (:steps b))]
-                                      (try (assoc (resolve-step (:id b) step)
-                                                  :gi (swap! gi inc) :n (inc i))
-                                           (catch Exception e
-                                             (throw (ex-info
-                                                      (str "block " (:id b) " step " i ": "
-                                                           (ex-message e))
-                                                      (ex-data e) e))))))))))
+                               (step-keys
+                                 (vec (for [[i step] (map-indexed vector (:steps b))]
+                                        (try (assoc (resolve-step (:id b) step)
+                                                    :gi (swap! gi inc) :n (inc i))
+                                             (catch Exception e
+                                               (throw (ex-info
+                                                        (str "block " (:id b) " step " i ": "
+                                                             (ex-message e))
+                                                        (ex-data e) e)))))))))))
           spine (mapcat #(or (:steps %) []) base)
+          by-gi (into {} (map (juxt :gi identity)) spine)
           by-key (reduce (fn [m s] (update m [(:block s) (:defn s)] (fnil conj []) (:gi s)))
                          {} spine)
           resolve-see
           (fn [owner raw]
             (mapv (fn [pair]
-                    (let [k (mapv str pair)
+                    (let [k [(name (first pair)) (str (second pair))]
                           hits (get by-key k)]
                       (when-not hits
                         (throw (ex-info (str "see-also target not found: " k
@@ -281,331 +408,352 @@
                       (when (> (count hits) 1)
                         (throw (ex-info (str "see-also ambiguous: " k " (from " owner
                                              ") — target appears " (count hits) "x") {})))
-                      {:gi (first hits) :label (second k)}))
+                      {:gi (first hits)
+                       :key (:key (by-gi (first hits)))
+                       :label (second k)}))
                   raw))
-          finalize (fn [s]
-                     (-> s
-                         (cond-> (:raw-see s)
-                           (assoc :see (resolve-see (:defn s) (:raw-see s))))
-                         (dissoc :raw-see :block)))]
+          ;; forward links first, then the reverse index built from them: a
+          ;; step should say who points AT it, not only where it points.
+          linked (mapv (fn [s]
+                         (cond-> s
+                           (:raw-see s) (assoc :see (resolve-see (:defn s) (:raw-see s)))))
+                       spine)
+          refs (reduce (fn [m s]
+                         (reduce (fn [m {:keys [gi]}]
+                                   (update m gi (fnil conj [])
+                                           {:gi (:gi s) :key (:key s) :label (:defn s)}))
+                                 m (:see s)))
+                       {} linked)
+          finalized (into {} (map (fn [s]
+                                    [(:gi s)
+                                     (-> s
+                                         (cond-> (seq (refs (:gi s)))
+                                           (assoc :refs (vec (refs (:gi s)))))
+                                         (dissoc :raw-see :block))]))
+                          linked)
+          blocks' (mapv (fn [b]
+                          (cond-> b
+                            (:steps b)
+                            (as-> b'
+                              (let [ss (mapv #(finalized (:gi %)) (:steps b'))]
+                                (assoc b' :steps ss
+                                       :mins (reduce + 0.0 (map :mins ss)))))))
+                        base)]
       {:title (:title tour)
        :intro (:intro tour)
-       :blocks (mapv (fn [b] (cond-> b (:steps b) (update :steps #(mapv finalize %))))
-                     base)})))
+       :repo (:repo tour repo-url)
+       :ui (merge ui-strings (:ui tour))
+       :mins (reduce + 0.0 (map :mins (mapcat :steps blocks')))
+       :blocks blocks'})))
 
 
 ;; --- HTML render -----------------------------------------------------------
 
-(declare css js)
+(def ^:private css (delay (slurp "scripts/devtour/tour.css")))
+(def ^:private js (delay (slurp "scripts/devtour/tour.js")))
+
+
+(defn- key-rows
+  [ui]
+  (->> [["&rarr; / j / n" (:kNext ui)]
+        ["&larr; / k / p" (:kPrev ui)]
+        ["b" (:kBack ui)]
+        ["g" (:kIntro ui)]
+        ["/" (:kFind ui)]
+        ["?" (:kHelp ui)]
+        ["e" (:kExpand ui)]
+        ["c" (:kCopy ui)]
+        ["o" (:kEmacs ui)]
+        ["Esc" (:kEsc ui)]]
+       (map (fn [[k d]] (str "<tr><td><kbd>" k "</kbd></td><td>" d "</td></tr>")))
+       (str/join)))
 
 
 (defn- page
   ^String [model]
   (let [data (-> (json/generate-string model)
                  ;; keep the JSON safe inside a <script> element
-                 (str/replace "</" "<\\/"))]
+                 (str/replace "</" "<\\/"))
+        ui (:ui model)]
     (str "<!doctype html>
-<html lang=\"en\" data-theme=\"dark\">
+<html lang=\"en\">
 <head>
 <meta charset=\"utf-8\">
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
 <title>" (:title model) "</title>
-<style>" css "</style>
+<style>" @css "</style>
 </head>
 <body>
 <header id=\"top\"><h1>" (:title model) "</h1>
-<div id=\"crumb\"></div></header>
+<div id=\"crumb\"></div>
+<div id=\"tools\">
+  <span id=\"prog\" title=\"" (:progress ui) "\"><span id=\"pnum\"></span><span id=\"bar\"><i></i></span></span>
+  <button class=\"tbtn\" id=\"btn-find\">" (:find ui) "</button>
+  <button class=\"tbtn\" id=\"btn-help\">" (:help ui) "</button>
+  <button class=\"tbtn\" id=\"btn-theme\">" (:theme ui) "</button>
+  <button class=\"tbtn\" id=\"btn-clear\">" (:clear ui) "</button>
+</div></header>
 <div id=\"shell\">
   <nav id=\"map\" aria-label=\"tour map\"></nav>
   <main id=\"stage\"></main>
 </div>
 <footer id=\"nav\">
-  <button id=\"back\" title=\"where you came from\">← Back</button>
-  <button id=\"prev\">‹ Prev</button>
+  <button id=\"back\" title=\"" (:kBack ui) "\">&larr; Back</button>
+  <button id=\"prev\">&lsaquo; Prev</button>
   <span id=\"pos\"></span>
-  <button id=\"next\">Next ›</button>
+  <button id=\"next\">Next &rsaquo;</button>
+  <span id=\"hint\">" (:hint ui) "</span>
 </footer>
+<div class=\"ovl\" id=\"find\" hidden><div class=\"box\" role=\"dialog\" aria-modal=\"true\" aria-label=\"" (:findTitle ui) "\">
+  <h3>" (:findTitle ui) "</h3>
+  <input id=\"q\" autocomplete=\"off\" spellcheck=\"false\" placeholder=\"" (:searchHint ui) "\">
+  <ul id=\"res\"></ul>
+</div></div>
+<div class=\"ovl\" id=\"help\" hidden><div class=\"box\" role=\"dialog\" aria-modal=\"true\" aria-label=\"" (:helpTitle ui) "\">
+  <h3>" (:helpTitle ui) "</h3>
+  <div class=\"keys\"><table>" (key-rows ui) "</table><p>" (:helpNote ui) "</p></div>
+</div></div>
+<div id=\"toast\" hidden></div>
 <script id=\"tour-data\" type=\"application/json\">" data "</script>
-<script>" js "</script>
+<script>" @js "</script>
 </body>
 </html>
 ")))
 
 
-(def ^:private css
-  "
-:root{--bg:#0e1116;--panel:#161b22;--edge:#2a323d;--fg:#e6edf3;--dim:#8b949e;
---accent:#58a6ff;--hi:#213048;--kw:#79c0ff;--str:#a5d6a2;--cmt:#6e7681;--stub:#484f58}
-*{box-sizing:border-box}
-html,body{margin:0;height:100%}
-body{background:var(--bg);color:var(--fg);
-font:14px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;display:flex;flex-direction:column}
-header{padding:10px 18px;border-bottom:1px solid var(--edge);display:flex;
-align-items:baseline;gap:16px;flex:0 0 auto}
-header h1{font-size:15px;margin:0;font-weight:600}
-#crumb{color:var(--dim);font-size:12px}
-#crumb b{color:var(--fg);font-weight:600}
-#shell{flex:1 1 auto;display:flex;min-height:0}
-#map{width:290px;flex:0 0 auto;overflow:auto;border-right:1px solid var(--edge);
-padding:12px 8px;background:var(--panel)}
-#stage{flex:1 1 auto;overflow:auto;padding:22px 28px;max-width:980px}
-footer{flex:0 0 auto;display:flex;gap:10px;align-items:center;
-padding:9px 18px;border-top:1px solid var(--edge);background:var(--panel)}
-footer button{background:#21262d;color:var(--fg);border:1px solid var(--edge);
-border-radius:6px;padding:5px 12px;cursor:pointer;font-size:13px}
-footer button:hover:not(:disabled){border-color:var(--accent)}
-footer button:disabled{opacity:.4;cursor:default}
-#pos{color:var(--dim);font-size:12px;margin:0 6px}
-.blk{margin-bottom:6px}
-.blk-h{padding:6px 8px;border-radius:6px;cursor:default}
-.blk-h .t{font-weight:600}
-.blk-h .s{color:var(--dim);font-size:11.5px;display:block;margin-top:2px}
-.blk.stub .blk-h{opacity:.62}
-.blk.stub .t::after{content:' ⏳';font-size:11px}
-.blk .after{color:var(--stub);font-size:10.5px;margin:1px 0 0 8px}
-.steps{list-style:none;margin:4px 0 0;padding:0 0 0 8px}
-.steps li{padding:3px 8px;border-radius:5px;cursor:pointer;color:var(--dim);
-font-size:12.5px;border-left:2px solid transparent}
-.steps li:hover{color:var(--fg);background:#1c2330}
-.steps li.on{color:var(--fg);background:var(--hi);border-left-color:var(--accent)}
-.paths{margin:6px 0 0 8px}
-.paths code{color:var(--dim);font-size:11px;display:block}
-.say{margin:0 0 16px}
-.say p{margin:0 0 10px}
-.say code,code.inl{background:#1c2330;border-radius:4px;padding:.5px 5px;
-font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
-.say a{color:var(--accent)}
-.file{color:var(--dim);font-size:12px;margin:0 0 6px;
-font-family:ui-monospace,monospace}
-.file b{color:var(--fg)}
-pre.code{background:var(--panel);border:1px solid var(--edge);border-radius:8px;
-padding:12px 0;overflow:auto;margin:0 0 18px;font-size:12.5px;line-height:1.5}
-pre.code .ln{display:flex}
-pre.code .g{color:var(--cmt);text-align:right;padding:0 14px 0 12px;
-user-select:none;min-width:52px;flex:0 0 auto}
-pre.code .c{padding-right:16px;white-space:pre;
-font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-pre.code .head .c{background:var(--hi)}
-.tok-kw{color:var(--kw)}.tok-str{color:var(--str)}.tok-cmt{color:var(--cmt)}
-.see{margin:0 0 18px}
-.see .lbl{color:var(--dim);font-size:11.5px;margin-right:6px}
-.see a{display:inline-block;background:#1c2330;border:1px solid var(--edge);
-border-radius:12px;padding:2px 10px;font-size:12px;color:var(--accent);
-cursor:pointer;margin:0 6px 6px 0}
-.stub-note{color:var(--dim);border:1px dashed var(--edge);border-radius:8px;
-padding:16px;margin-top:12px}
-.intro{color:var(--dim);max-width:760px}
-kbd{background:#21262d;border:1px solid var(--edge);border-bottom-width:2px;
-border-radius:4px;padding:0 5px;font-size:11px}
-")
+;; --- org render -------------------------------------------------------------
+;;
+;; The reading path for an editor rather than a browser: prose in org, and a
+;; link that opens the REAL file at the anchored form (`::<first line>` — org's
+;; literal search, so the link survives edits above it just like the bake).
+;; No elisp required; `C-c C-o` is enough.
+
+(defn- org-inline
+  "The tour's tiny markdown -> org markup."
+  [s]
+  (-> (or s "")
+      (str/replace #"\*\*([^*]+)\*\*" "*$1*")
+      (str/replace #"`([^`]+)`" "~$1~")
+      (str/replace #"\[([^\]]+)\]\(([^)]+)\)" "[[$2][$1]]")))
 
 
-(def ^:private js
-  "
-const MODEL = JSON.parse(document.getElementById('tour-data').textContent);
-// flatten toured steps into a single ordered spine — index === step.gi
-const SPINE = [];
-MODEL.blocks.forEach(b => (b.steps||[]).forEach(s => SPINE.push({block:b, step:s})));
+(defn- org-prose
+  "Prose paragraphs, unwrapped (EDN strings carry the source indentation) and
+   never able to open an org heading."
+  [s]
+  (->> (str/split (or s "") #"\n\s*\n")
+       (map #(-> (org-inline %)
+                 (str/replace #"\s*\n\s*" " ")
+                 str/trim
+                 (str/replace #"^\*" " *")))
+       (remove str/blank?)
+       (str/join "\n\n")))
 
-let cur = 0;            // current global step index into SPINE (or -1 = intro)
-const hist = [];        // back-stack of previously-viewed indices
 
-const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+(defn- plain-prose
+  "Prose unwrapped into paragraphs with the tour's markdown left intact — what
+   devtour.el fontifies itself."
+  [s]
+  (->> (str/split (or s "") #"\n\s*\n")
+       (map #(-> % (str/replace #"\s*\n\s*" " ") str/trim))
+       (remove str/blank?)
+       (str/join "\n\n")))
 
-// tiny markdown: paragraphs, `code`, **bold**, [text](url)
-function md(src){
-  return (src||'').split(/\\n\\s*\\n/).map(p => {
-    let h = esc(p);
-    h = h.replace(/`([^`]+)`/g, (_,x)=>'<code class=\"inl\">'+x+'</code>');
-    h = h.replace(/\\*\\*([^*]+)\\*\\*/g, (_,x)=>'<b>'+x+'</b>');
-    h = h.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g,
-      (_,t,u)=>'<a href=\"'+esc(u)+'\">'+esc(t)+'</a>');
-    return '<p>'+h+'</p>';
-  }).join('');
-}
 
-// minimal JS tokeniser — strings, comments, keywords. Line-scoped like the
-// Clojure one: good enough to read, never claims to parse.
-const JS_KW = new RegExp('\\\\b(async|await|break|case|catch|class|const|continue|'+
-  'default|delete|do|else|export|extends|finally|for|function|if|import|in|'+
-  'instanceof|let|new|of|return|super|switch|this|throw|try|typeof|var|void|'+
-  'while|yield|null|undefined|true|false)\\\\b','g');
+(defn- org-search-target
+  "Org file-link search string for the anchored form: the head line up to the
+   first square bracket (org link syntax cannot carry one), keeping the
+   trailing space so `(defn foo ` cannot match `(defn foobar`. Falls back to
+   the line number when nothing usable is left."
+  [{:keys [head line]}]
+  (let [cut (first (str/split head #"[\[\]]" 2))]
+    (if (< (count (str/trim cut)) 5) (str line) cut)))
 
-function hlJs(line){
-  let out='', i=0;
-  while(i<line.length){
-    const c=line[i];
-    if(c==='/'&&line[i+1]==='/'){ out+='<span class=tok-cmt>'+esc(line.slice(i))+'</span>'; break; }
-    if(c==='*'&&/^\\s*\\*/.test(line)&&i===line.search(/\\S/)){
-      out+='<span class=tok-cmt>'+esc(line.slice(i))+'</span>'; break; }
-    if(c==='\"'||c===\"'\"||c==='`'){ let j=i+1;
-      while(j<line.length){ if(line[j]==='\\\\'){j+=2;continue;} if(line[j]===c){j++;break;} j++; }
-      out+='<span class=tok-str>'+esc(line.slice(i,j))+'</span>'; i=j; continue; }
-    let j=i+1;
-    while(j<line.length && line[j]!=='\"' && line[j]!==\"'\" && line[j]!=='`'
-          && !(line[j]==='/'&&line[j+1]==='/')) j++;
-    out+=esc(line.slice(i,j)).replace(JS_KW,m=>'<span class=tok-kw>'+m+'</span>');
-    i=j;
-  }
-  return out;
-}
 
-// minimal Clojure tokeniser -> highlighted HTML for one line
-function hl(line){
-  let out='', i=0;
-  while(i<line.length){
-    const c=line[i];
-    if(c===';'){ out+='<span class=tok-cmt>'+esc(line.slice(i))+'</span>'; break; }
-    if(c==='\"'){ let j=i+1; while(j<line.length){ if(line[j]==='\\\\'){j+=2;continue;}
-      if(line[j]==='\"'){j++;break;} j++; }
-      out+='<span class=tok-str>'+esc(line.slice(i,j))+'</span>'; i=j; continue; }
-    if(c===':'){ let j=i+1; while(j<line.length && /[\\w*+!?<>=./-]/.test(line[j])) j++;
-      out+='<span class=tok-kw>'+esc(line.slice(i,j))+'</span>'; i=j; continue; }
-    let j=i+1; while(j<line.length && line[j]!==';' && line[j]!=='\"' && line[j]!==':') j++;
-    out+=esc(line.slice(i,j)); i=j;
-  }
-  return out;
-}
+(defn- org-block
+  ^String [model block]
+  (let [ui (:ui model)]
+    (str "#+title: " (:title block) "\n"
+         "#+startup: showall\n"
+         "#+options: toc:nil num:nil\n"
+         "# generated by `bb devtour` from docs/devtour/tour.edn — do not edit\n\n"
+         (org-prose (:summary block)) "\n\n"
+         (when (seq (:after block))
+           (str (:after ui) " " (str/join ", " (:after block)) "\n\n"))
+         "[[file:index.org][index]]"
+         (when (:mins block) (str " · ~" (math/round ^double (:mins block)) " " (:min ui)))
+         "\n\n"
+         (->> (:steps block)
+              (map (fn [s]
+                     (str "* " (:n s) ". " (:defn s) "\n"
+                          ":PROPERTIES:\n"
+                          ":CUSTOM_ID: " (:key s) "\n"
+                          ":FILE: " (:file s) "\n"
+                          ":LINE: " (:line s) "\n"
+                          ":MINS: " (:mins s) "\n"
+                          ":END:\n\n"
+                          (org-prose (:say s)) "\n\n"
+                          "- source :: [[file:" src-prefix "/" (:file s)
+                          "::" (org-search-target s) "][" (:file s) ":" (:line s) "]]\n"
+                          (when (seq (:see s))
+                            (str "- " (:seeAlso ui) " :: "
+                                 (->> (:see s)
+                                      (map (fn [{:keys [key label]}]
+                                             (str "[[file:" (first (str/split key #"/"))
+                                                  ".org::#" key "][" label "]]")))
+                                      (str/join ", "))
+                                 "\n"))
+                          (when (seq (:refs s))
+                            (str "- " (:refs ui) " :: "
+                                 (->> (:refs s)
+                                      (map (fn [{:keys [key label]}]
+                                             (str "[[file:" (first (str/split key #"/"))
+                                                  ".org::#" key "][" label "]]")))
+                                      (str/join ", "))
+                                 "\n")))))
+              (str/join "\n")))))
 
-function codeBlock(step){
-  const lines = step.code.split('\\n');
-  const paint = step.lang==='js' ? hlJs : hl;
-  const rows = lines.map((ln,k)=>{
-    const n = step.line + k;
-    const head = k===0 ? ' head' : '';
-    return '<div class=\"ln'+head+'\"><span class=g>'+n+
-      '</span><span class=c>'+paint(ln)+'</span></div>';
-  }).join('');
-  return '<div class=file>'+esc(step.file)+' — <b>'+esc(step.defn)+
-    '</b></div><pre class=code>'+rows+'</pre>';
-}
 
-function seeBlock(step){
-  if(!step.see||!step.see.length) return '';
-  const chips = step.see.map(x=>
-    '<a data-gi=\"'+x.gi+'\">'+esc(x.label)+'</a>').join('');
-  return '<div class=see><span class=lbl>see also</span>'+chips+'</div>';
-}
+(defn- org-index
+  ^String [model]
+  (let [ui (:ui model)]
+    (str "#+title: " (:title model) "\n"
+         "#+startup: showall\n"
+         "#+options: toc:nil num:nil\n"
+         "# generated by `bb devtour` from docs/devtour/tour.edn — do not edit\n\n"
+         (org-prose (:intro model)) "\n\n"
+         "* Blocks\n\n"
+         (->> (:blocks model)
+              (map (fn [b]
+                     (str "- " (if (= "toured" (:status b))
+                                 (str "[[file:" (:id b) ".org][" (:title b) "]]"
+                                      " (" (count (:steps b)) " · ~"
+                                      (math/round ^double (:mins b)) " " (:min ui) ")")
+                                 (str (:title b) " — " (:stub ui)))
+                          " :: " (org-prose (:summary b)))))
+              (str/join "\n"))
+         "\n")))
 
-function renderIntro(){
-  cur=-1;
-  document.getElementById('crumb').innerHTML='';
-  document.getElementById('stage').innerHTML =
-    '<div class=intro>'+md(MODEL.intro||'')+
-    '<p style=\"margin-top:18px\">Pick a step on the left, or press '+
-    '<kbd>→</kbd> to start. <kbd>←</kbd>/<kbd>→</kbd> walk the spine; '+
-    '<b>Back</b> returns along the path you actually took.</p></div>';
-  paint();
-}
 
-function renderStub(b){
-  document.getElementById('crumb').innerHTML='<b>'+esc(b.title)+'</b>';
-  document.getElementById('stage').innerHTML =
-    '<h2>'+esc(b.title)+'</h2><div class=say>'+md(b.summary||'')+'</div>'+
-    '<div class=stub-note>Not toured yet — this block is a stub. '+
-    'Code lives under:<div class=paths>'+
-    (b.paths||[]).map(p=>'<code>'+esc(p)+'</code>').join('')+
-    '</div><p style=\"margin:10px 0 0\">Add steps to this block in '+
-    '<code class=inl>docs/devtour/tour.edn</code>, then run '+
-    '<code class=inl>bb devtour</code>.</p></div>';
-  paint();
-}
+(defn- org-files
+  "Relative filename -> content for the whole org tree."
+  [model]
+  (into {"index.org" (org-index model)}
+        (for [b (:blocks model) :when (= "toured" (:status b))]
+          [(str (:id b) ".org") (org-block model b)])))
 
-function go(gi, push){
-  if(push && cur>=0) hist.push(cur);
-  cur = gi;
-  const {block, step} = SPINE[gi];
-  document.getElementById('crumb').innerHTML =
-    '<b>'+esc(block.title)+'</b> › step '+step.n+' / '+(block.steps||[]).length+
-    ' — <code class=inl>'+esc(step.defn)+'</code>';
-  document.getElementById('stage').innerHTML =
-    '<div class=say>'+md(step.say)+'</div>'+seeBlock(step)+codeBlock(step);
-  document.getElementById('stage').scrollTop=0;
-  paint();
-}
 
-function paint(){
-  document.querySelectorAll('.steps li').forEach(li=>{
-    const on = +li.dataset.gi===cur;
-    li.classList.toggle('on', on);
-    // The spine is long enough that walking it with Next scrolls the current
-    // step out of the map entirely — keep the highlight in view.
-    if(on) li.scrollIntoView({block:'nearest'});
-  });
-  document.getElementById('pos').textContent =
-    cur<0 ? '' : ('step '+(cur+1)+' / '+SPINE.length);
-  document.getElementById('prev').disabled = cur<=0;
-  document.getElementById('next').disabled = cur>=SPINE.length-1;
-  document.getElementById('back').disabled = hist.length===0;
-}
+;; --- eld render -------------------------------------------------------------
+;;
+;; The same model as elisp data, for docs/devtour/devtour.el: the tour driving
+;; a live buffer instead of a baked snapshot of one. Code is deliberately NOT
+;; emitted — emacs reads the file itself, so it can never show stale source.
 
-function buildMap(){
-  const map=document.getElementById('map');
-  MODEL.blocks.forEach(b=>{
-    const wrap=document.createElement('div');
-    wrap.className='blk '+(b.status==='toured'?'toured':'stub');
-    let html='<div class=blk-h><span class=t>'+esc(b.title)+'</span>'+
-      '<span class=s>'+esc(b.summary||'')+'</span></div>';
-    if(b.after&&b.after.length)
-      html+='<div class=after>after: '+b.after.map(esc).join(', ')+'</div>';
-    if(b.status==='toured'){
-      html+='<ul class=steps>'+ (b.steps||[]).map(s=>
-        '<li data-gi=\"'+s.gi+'\">'+esc(s.defn)+'</li>').join('') +'</ul>';
-    }
-    wrap.innerHTML=html;
-    if(b.status!=='toured')
-      wrap.querySelector('.blk-h').onclick=()=>renderStub(b);
-    wrap.querySelectorAll('.steps li').forEach(li=>
-      li.onclick=()=>go(+li.dataset.gi,true));
-    map.appendChild(wrap);
-  });
-}
+(defn- el-str
+  ^String [s]
+  (str \" (-> (str s) (str/replace "\\" "\\\\") (str/replace "\"" "\\\"")) \"))
 
-document.getElementById('next').onclick=()=>{ if(cur<SPINE.length-1) go(cur+1,true); };
-document.getElementById('prev').onclick=()=>{ if(cur>0) go(cur-1,true); };
-document.getElementById('back').onclick=()=>{ if(hist.length) go(hist.pop(),false); };
-document.addEventListener('keydown',e=>{
-  if(e.target.tagName==='INPUT') return;
-  if(e.key==='ArrowRight' && cur<SPINE.length-1) go(cur<0?0:cur+1,true);
-  if(e.key==='ArrowLeft' && cur>0) go(cur-1,true);
-});
-document.getElementById('stage').addEventListener('click',e=>{
-  const a=e.target.closest('a[data-gi]');
-  if(a){ e.preventDefault(); go(+a.dataset.gi,true); }
-});
 
-buildMap();
-renderIntro();
-")
+(defn- el-links
+  [links]
+  (if (seq links)
+    (str "(" (str/join " " (map #(str "(" (el-str (:key %)) " . " (el-str (:label %)) ")")
+                                links)) ")")
+    "nil"))
+
+
+(defn- eld
+  ^String [model]
+  (str ";; -*- lisp-data -*-\n"
+       ";; generated by `bb devtour` from docs/devtour/tour.edn — do not edit.\n"
+       ";; Consumed by docs/devtour/devtour.el; every step carries the anchor\n"
+       ";; (:file + :head) rather than baked source, so emacs shows live code.\n"
+       "(:title " (el-str (:title model))
+       "\n :mins " (format "%.1f" (:mins model))
+       "\n :blocks\n ("
+       (->> (:blocks model)
+            (map (fn [b]
+                   (str "(:id " (el-str (:id b))
+                        " :title " (el-str (:title b))
+                        " :status " (el-str (:status b))
+                        " :mins " (format "%.1f" (or (:mins b) 0.0))
+                        " :summary " (el-str (:summary b))
+                        "\n   :steps\n   ("
+                        (->> (:steps b)
+                             (map (fn [s]
+                                    (str "(:key " (el-str (:key s))
+                                         " :n " (:n s) " :gi " (:gi s)
+                                         " :defn " (el-str (:defn s))
+                                         " :ns " (el-str (:ns s))
+                                         " :file " (el-str (:file s))
+                                         " :line " (:line s)
+                                         " :lang " (el-str (:lang s))
+                                         " :mins " (format "%.1f" (:mins s))
+                                         " :head " (el-str (:head s))
+                                         " :see " (el-links (:see s))
+                                         " :refs " (el-links (:refs s))
+                                         "\n     :say " (el-str (plain-prose (:say s))) ")")))
+                             (str/join "\n    "))
+                        "))")))
+            (str/join "\n  "))
+       "))\n"))
 
 
 ;; --- entry -----------------------------------------------------------------
 
+(defn- outputs
+  "Every baked artefact: path -> content. One map, so build and check cannot
+   drift apart."
+  [model]
+  (into {out-html (page model)
+         out-eld (eld model)}
+        (for [[f content] (org-files model)]
+          [(str (fs/path out-org f)) content])))
+
+
 (defn- build!
   []
   (let [tour (-> tour-edn slurp read-string)
-        model (build-model tour)]
-    (spit out-html (page model))
-    (println "devtour: wrote" out-html
+        model (build-model tour)
+        files (outputs model)]
+    (fs/create-dirs out-org)
+    ;; a renamed/removed block must not leave a stale .org behind
+    (doseq [f (fs/glob out-org "*.org")
+            :let [p (str f)]
+            :when (not (contains? files p))]
+      (fs/delete f))
+    (doseq [[path content] files]
+      (fs/create-dirs (fs/parent path))
+      (spit path content))
+    (println "devtour: wrote" (count files) "files"
              (str "(" (count (mapcat :steps (:blocks model))) " steps, "
-                  (count (:blocks model)) " blocks)"))))
+                  (count (:blocks model)) " blocks, ~"
+                  (math/round ^double (/ (:mins model) 60.0)) "h)")
+             (str "— " out-html))))
 
 
 (defn- check!
   []
   (let [tour (-> tour-edn slurp read-string)
         model (build-model tour)          ; throws on any broken anchor
-        fresh (page model)
-        current (when (fs/exists? out-html) (slurp out-html))]
-    (when-not (= fresh current)
+        files (outputs model)
+        stale (concat
+                (for [[path content] files
+                      :when (not= content (when (fs/exists? path) (slurp path)))]
+                  path)
+                (for [f (fs/glob out-org "*.org")
+                      :when (not (contains? files (str f)))]
+                  (str f " (orphan)")))]
+    (when (seq stale)
       (binding [*out* *err*]
-        (println "devtour-check FAILED:" out-html
-                 "is stale (source drifted from the baked tour).")
-        (println "  Run `bb devtour` and commit the regenerated HTML."))
+        (println "devtour-check FAILED: baked output is stale"
+                 "(source drifted from the tour):")
+        (run! #(println "  -" %) stale)
+        (println "  Run `bb devtour` and commit the regenerated files."))
       (System/exit 1))
     (println "devtour-check OK:"
              (count (mapcat :steps (:blocks model))) "anchors resolve;"
-             out-html "is up to date")))
+             (count files) "baked files up to date")))
 
 
 (let [cmd (first *command-line-args*)]

@@ -263,11 +263,15 @@
 
   stylelint
   {:doc "Lint editor CSS via stylelint (design-token discipline + standard rules)"
-   :task (p/shell "npx" "stylelint" "resources/packages/app/editor/**/*.css")}
+   :task (p/shell "npx" "stylelint" "resources/packages/app/editor/**/*.css"
+                  ;; the devtour page's stylesheet is authored the same way and
+                  ;; inlined into the baked HTML — same linter, same rules.
+                  "scripts/devtour/tour.css")}
 
   stylelint-fix
   {:doc "Auto-fix stylelint violations where possible"
-   :task (p/shell "npx" "stylelint" "--fix" "resources/packages/app/editor/**/*.css")}
+   :task (p/shell "npx" "stylelint" "--fix" "resources/packages/app/editor/**/*.css"
+                  "scripts/devtour/tour.css")}
 
   ;; === Cross-cutting linters (docker-image or downloaded binary) ===
   ;;
@@ -390,6 +394,28 @@
   devtour-check
   {:doc "CI guard for the developer code-tour: every tour.edn anchor still resolves to a unique form AND docs/devtour/index.html matches a fresh regeneration (fails if source drifted from the baked tour). Fix with `bb devtour`."
    :task (binding [*command-line-args* ["check"]] (load-file "scripts/devtour.clj"))}
+
+  devtour-emacs
+  {:doc "The emacs reading path for the developer code-tour (docs/devtour/devtour.el): every step's anchor resolves in the LIVE file, navigation/progress/see-also work, the eldoc annotation names the step at point, the org tree's links reach this checkout, and the org-protocol handler opens a file at a line. Batch ert, ~1s. SKIPS when emacs is not installed (GitHub CI) — like pkg-copy-sync, it guards the box a developer actually reads the tour on."
+   :task (if-not (fs/which "emacs")
+           (println "devtour-emacs: SKIP (emacs not installed)")
+           (let [{:keys [exit]} (p/shell {:continue true}
+                                         "emacs" "-Q" "--batch" "-l" "tools/devtour-el-test.el")]
+             (when-not (zero? exit)
+               (println (str red "\u2717 devtour-emacs" reset))
+               (System/exit 1))
+             (println (str green "\u2713 devtour-emacs" reset))))}
+
+  devtour-page
+  {:doc "The devtour PAGE in a real browser (tools/browser-test/devtour-page.test.js): deep-link hashes, Back/Prev/Next, reading progress in localStorage, the search overlay, folded long forms, the theme toggle and the jump-out links. Needs no graphden stack — docs/devtour/index.html is a standalone file:// page — so unlike the e2e suite it runs in `bb ci`. SKIPS without tools/browser-test/node_modules."
+   :task (if-not (fs/exists? "tools/browser-test/node_modules/playwright")
+           (println "devtour-page: SKIP (playwright not installed)")
+           (let [{:keys [exit]} (p/shell {:dir "tools/browser-test" :continue true}
+                                         "node" "devtour-page.test.js")]
+             (when-not (zero? exit)
+               (println (str red "\u2717 devtour-page" reset))
+               (System/exit 1))
+             (println (str green "\u2713 devtour-page" reset))))}
 
   ai-context-sync
   {:doc "CI guard: docs/AI_CONTEXT.md must be byte-identical to its classpath copy resources/packages/mcp/mcp/ai-context.md (the MCP server serves the latter at graphden://ai-context). The unit suite pins this too (mcp-doc-sync-test), but units are diff-scoped OUT of a docs-only change — this cheap check keeps the guard on that path. Fix by copying the edited file over the other."

@@ -105,9 +105,21 @@
   ;; …and so is the editor frontend (`.js` anchors, the `:editor` block), so a
   ;; renamed / edited toured JS function must re-run the check for the same
   ;; reason.
-  :relevant ["^docs/devtour/" "^src/" "^scripts/devtour\\.clj$"
+  :relevant ["^docs/devtour/" "^src/" "^scripts/devtour"
              "^resources/packages/.*impls\\.clj$"
              "^resources/packages/.*\\.js$"]}
+ ;; The two reading paths the tour ships beyond the baked page: the emacs mode
+ ;; (anchors resolved against LIVE files, so its own test is the only thing that
+ ;; proves the org links + devtour.el reach real forms) and the page's behaviour
+ ;; in a browser. Both self-skip when their runtime is absent, so GitHub CI stays
+ ;; green while the dev host keeps the guard.
+ {:name "devtour-emacs" :bb "devtour-emacs" :timeout  60000 :group :docs
+  :relevant ["^docs/devtour/" "^tools/devtour-el-test\\.el$" "^src/"
+             "^scripts/devtour" "^resources/packages/.*impls\\.clj$"
+             "^resources/packages/.*\\.js$"]}
+ {:name "devtour-page"  :bb "devtour-page"  :timeout 120000 :group :docs
+  :relevant ["^docs/devtour/" "^scripts/devtour"
+             "^tools/browser-test/devtour-page\\.test\\.js$"]}
  {:name "gitleaks"      :bb "gitleaks"      :timeout 300000 :group :sec}
  {:name "trivy"         :bb "trivy"         :timeout 300000 :group :sec
   ;; Three passes (see the `trivy` bb task): (1) `config .` — RECURSIVE IaC

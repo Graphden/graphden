@@ -14,6 +14,9 @@
 	"files": {
 		"includes": [
 			"**/resources/packages/app/editor/**/*.js",
+			// why: the devtour page script is authored the same way (a classic
+			// script inlined into the baked HTML) and deserves the same linter.
+			"**/scripts/devtour/tour.js",
 			"!**/node_modules/**",
 			"!**/tools/browser-test/**"
 		]

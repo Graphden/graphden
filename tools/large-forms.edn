@@ -44,8 +44,6 @@
   "data table: the version-mirror entities derived per versioned base entity"
   "graphden.accounts.routes/make-router"
   "data table: the /auth/* route vector; each route is a handler plus its method and path"
-  "devtour/js"
-  "data table: the tour page's baked client script, a string literal"
 
   ;; ---- relations: decision tables read for completeness ----------------
   "graphden.types.core/subtype?"

@@ -12,24 +12,94 @@ that returns you along the path you actually took).
 
 ## How to read it
 
-Open the generated page in any browser — no running instance, no build:
+Three reading paths, one source of truth. All three are baked by `bb devtour`
+and drift-checked in CI, so they can never disagree about what the code says.
+
+### 1. The page
 
 ```text
 docs/devtour/index.html
 ```
 
-Blocks are listed left, roughly in reading order; each block's `after:` line
-names what it assumes you have already seen. Start with the **Executor** (the
-spine everything else hangs off), then follow the dependency order: Storage,
-Branches, Types, CRUD, Packages, Boot, Web, Layout, Editor frontend, Services,
-Platform seams, Accounts, and last the Constellation — the six repositories
-around this one and the seams they plug into.
+Open it in any browser — no running instance, no build, works from `file://`.
+
+- **Every step has its own URL** (`…/index.html#executor/execute`): deep-link
+  one, share it, and the browser's own Back button walks the path you took.
+- **Reading progress** is remembered in that browser — ✓ ticks in the map, a
+  counter in the header, and a "continue where you left off" link on the intro.
+  *Reset* clears it.
+- **<kbd>/</kbd> searches** step names, prose and code; <kbd>?</kbd> lists every
+  key.
+- **Jump out of the tour**: the code card's header is `path:line` (click to
+  copy), with buttons that open the same form **in emacs** (see below) or on
+  GitHub.
+- Forms longer than 60 lines open folded — <kbd>e</kbd> or the button expands.
+- Each step and block shows a reading-time estimate; the intro totals the tour.
+  The estimate is deliberately crude: prose at ~140 wpm plus code at 15 (Clojure)
+  or 20 (JS) lines per minute, plus a fixed cost per step.
+
+### 2. Emacs
+
+`docs/devtour/devtour.el` runs the same tour against **live buffers** — prose in
+a side window, the real file at the anchored form beside it — so `xref`, grep,
+magit and the REPL are all one keystroke from wherever the tour has you.
+
+```elisp
+(load "/path/to/graphden/docs/devtour/devtour.el")
+(devtour-annotate-mode 1)   ; optional, see below
+```
+
+- `M-x devtour` — start, or resume where you stopped (progress is kept in
+  `devtour-progress-file`).
+- In the `*devtour*` window: `n` / `p` walk the spine, `b` goes back along the
+  path you took, `s` follows a see-also (or backlink), `g` picks a block, `/`
+  jumps to any step by name or prose, `o` moves point into the source, `q` quits.
+- `M-x devtour-here` — the other direction: open the tour **at the form point is
+  in**. With `devtour-annotate-mode`, eldoc names that step as you move around
+  ordinary source buffers, which is what makes the tour useful long after the
+  first read.
+- Reading the Russian tour instead: point `devtour-data-file` at its `tour.eld`.
+
+To make the page's **emacs** button work, register `org-protocol` once (Linux):
+
+```ini
+# ~/.local/share/applications/org-protocol.desktop
+[Desktop Entry]
+Name=org-protocol
+Exec=emacsclient -n %u
+Type=Application
+Terminal=false
+MimeType=x-scheme-handler/org-protocol;
+```
+
+```bash
+update-desktop-database ~/.local/share/applications/
+```
+
+…and `(require 'org-protocol)` in your init, with `devtour.el` loaded — it
+registers the `devtour` sub-protocol that opens `file` at `line`.
+
+### 3. Org
+
+`docs/devtour/org/` is the same tour as plain org files (one per block, plus
+`index.org`) — prose, and a `- source ::` link that opens the real file at the
+form (`C-c C-o`). No elisp required; useful if you would rather read in org,
+fold with the outline, or keep your own notes next to the steps.
+
+### Where to start
+
+Blocks are listed roughly in reading order; each block's `after:` line names
+what it assumes you have already seen. Start with the **Executor** (the spine
+everything else hangs off), then follow the dependency order: Storage, Branches,
+Types, CRUD, Packages, Boot, Web, Layout, Editor frontend, Services, Platform
+seams, Accounts, and last the Constellation — the six repositories around this
+one and the seams they plug into.
 
 **Boot & lifecycle** is the block to jump to early if you would rather start
 from a running process than from a hot path — it walks `-main` → the Integrant
 component graph → the router seams, which is the shortest route to seeing how
-the other blocks are wired together. **Editor frontend** tours JavaScript
-rather than Clojure, on the same anchor-and-bake contract.
+the other blocks are wired together. **Editor frontend** tours JavaScript rather
+than Clojure, on the same anchor-and-bake contract.
 
 ## How it works
 
@@ -43,14 +113,30 @@ rather than Clojure, on the same anchor-and-bake contract.
    :see [[:executor "create-context"]]}   ; optional cross-links
   ```
 
-- `bb devtour` reads `tour.edn`, pulls the anchored form's **actual source**
-  out of the file at generate time, and bakes everything into the single
-  self-contained `index.html`.
-- `bb devtour-check` (wired into `bb ci`, `:docs` group) fails if any anchor
-  no longer resolves to exactly one form, or if `index.html` has drifted from a
-  fresh regeneration. So the tour cannot silently point at code that was
-  renamed, moved, or deleted — a stale tour turns CI red until someone re-runs
-  `bb devtour` and commits.
+- `bb devtour` reads `tour.edn`, resolves every anchor, and writes **three**
+  outputs (`scripts/devtour/tour.css` + `tour.js` are the page's sources):
+
+  | Output | For |
+  |--------|-----|
+  | `index.html` | the standalone page — the anchored form's **actual source** baked in |
+  | `tour.eld` | `devtour.el` — the anchor (`:file` + `:head`), never the code, so emacs shows live source |
+  | `org/*.org` | the org reading path — prose plus a `file:…::<head>` link per step |
+
+- `bb devtour-check` (wired into `bb ci`, `:docs` group) fails if any anchor no
+  longer resolves to exactly one form, or if any baked output has drifted from a
+  fresh regeneration (an orphaned `org/*.org` counts). So the tour cannot
+  silently point at code that was renamed, moved, or deleted — a stale tour
+  turns CI red until someone re-runs `bb devtour` and commits.
+- `bb devtour-emacs` runs `tools/devtour-el-test.el` (batch ert): every step's
+  head line is findable in the LIVE file, navigation / progress / see-also work,
+  the eldoc annotation names the step at point, the org links resolve from the
+  org directory and the org-protocol handler opens a file at a line. It SKIPS
+  when emacs is not installed.
+- `bb devtour-page` drives `index.html` in a real browser
+  (`tools/browser-test/devtour-page.test.js`): deep links, Back/Prev/Next,
+  progress, search, folding, theme and the jump-out links. Needs no graphden
+  stack, so unlike the e2e suite it runs inside `bb ci`; it SKIPS without
+  `tools/browser-test/node_modules`.
 
 Anchors resolve by Clojure namespace munging (`graphden.executor.interface` →
 `src/graphden/executor/interface.clj`) and match any top-level `def`-form
@@ -90,8 +176,8 @@ Two kinds of change:
 Then regenerate and verify:
 
 ```bash
-bb devtour        # rewrite index.html
-bb devtour-check  # what CI runs
+bb devtour        # rewrite index.html + tour.eld + org/
+bb devtour-check  # what CI runs (plus bb devtour-emacs / bb devtour-page)
 ```
 
 Keep a step's `:say` to a few sentences: what this form does and **why it is

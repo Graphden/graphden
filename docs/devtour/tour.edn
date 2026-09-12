@@ -36,6 +36,13 @@
   use the *see also* chips — **Back** always returns you along the path you
   actually walked.
 
+  Prefer to read in your editor? The same tour runs there:
+  `docs/devtour/devtour.el` drives emacs against LIVE buffers — this prose in a
+  side window, the real file open at the form — and `docs/devtour/org/` is the
+  same tour as plain org files. Both are baked from the same source as this
+  page; [docs/devtour/README.md](../../docs/devtour/README.md) has the setup,
+  including the button below that opens the current form in your running emacs.
+
   This tour is about the code, not the workflow. For how to BUILD and test it
   — `bb ci`, the linters, the isolated worktrees and the serialized merge
   queue — read [CLAUDE.md](../../CLAUDE.md) and
@@ -278,7 +285,14 @@
      :say "Where the graph model is actually declared: the `ns` / `fn` / `slot`
            / `binding` / `binding-list-item` entities and the `:ref` edges
            between them. This is the concrete table + foreign-key layout that
-           every traversal walks."}
+           every traversal walks.
+
+           Long, but it is one `->` pipeline rather than an algorithm: an
+           `add-entity` per table with its fields inline, the `add-constraint`
+           calls that become real UNIQUE indexes, and at the end the
+           `retire-field` entries that keep dropped columns
+           (`binding.rename-to`, `fn.impl-hash`) from being resurrected. Skim
+           it entity by entity — this is DDL that happens to be data."}
     {:ns graphden.schema.fields.types :defn valid-type?
      :say "The runtime link between a field-spec's declared type and an
            actual value: one predicate per abstract type, permissive on
@@ -311,7 +325,14 @@
      :say "The concrete Postgres backend. Its `ExecutionGraph` extension
            delegates to the Postgres resolver instead of the generic BFS —
            showing how a backend overrides the default path when it can do
-           better."}
+           better.
+
+           Its length is protocol SURFACE, not logic: one record implementing
+           `Storage`, `StorageIntrospection`, `StorageCRUD`, the constraint
+           protocols and `ExecutionGraph` in turn, most methods a single call
+           deep. Read the protocol headings on the way down and stop at the
+           `ExecutionGraph` arm — it is the only one doing something the
+           generic path does not."}
     {:ns graphden.storage.postgres.migration :defn do-initialize
      :say "Nobody hand-writes DDL here: the schema of the previous steps is
            DATA, and this diffs it against the metadata table to emit exactly
@@ -481,7 +502,13 @@
            write ONE `branch-merge` record — which makes the source's versions
            visible through resolution, copying no rows — plus any resolution
            overrides. The payoff step tying resolution and conflict detection
-           together."}
+           together.
+
+           Read it in three parts: validate (conflicts resolved, approval
+           policy satisfied), write — the single `branch-merge` row plus any
+           resolution overrides, in one transaction — then report, including
+           `skipped-as-branch-local` right below it: the rows a merge
+           deliberately does NOT carry across."}
     {:ns graphden.versioning.merge.core :defn merge-transitively!
      :say "What makes a merge transitive: the storage layer surfaces only the
            source's OWN rows and refuses when the source inherits from a
@@ -572,7 +599,16 @@
      :say "The heart of assignability: reflexive / transitive subtyping across
            primitives, `:jsonb` sinks, records, lists, maps, tuples, refinements,
            unions, secrets, and fn-types. Every checker decision — is `actual`
-           a subtype of `expected`? — bottoms out here."}
+           a subtype of `expected`? — bottoms out here.
+
+           It is one `cond` ladder and the ORDER is the semantics: the
+           universal yes/no arms first (identity, `:any`, `:never`, the
+           typevar → `:jsonb` escape), then the `:empty-map` sentinel, unions
+           (EVERY member on the left, SOME member on the right), primitives,
+           `:jsonb`, refinements, the structural shapes, and the `:secret`
+           marker last. Don't hold the whole ladder in your head — find the arm
+           for the pair of shapes you are asking about and read the comment
+           that argues for it."}
     {:ns graphden.types.core :defn constraint-implies?
      :say "Decides when one refinement constraint entails another (numeric
            bounds, `:in` / `:=` / `:not=`, `:and` / `:or`). This is exactly how
@@ -583,7 +619,14 @@
      :say "Robinson unification with occurs-check and subtype-aware leniency,
            plus a union fallback. This is how polymorphic type variables get
            bound during checking — the two-way complement to the one-way
-           `subtype?` test."}
+           `subtype?` test.
+
+           Same shape as `subtype?`, so read it the same way: one `cond` over
+           the normalised pair — typevar arms bind first (with the occurs
+           check), then structural recursion into fn / list / record shapes,
+           then the union fallback. It returns a substitution map or the
+           `::fail` sentinel that `unify-ok?` / `unify-fail?` just below test
+           for."}
     {:ns graphden.types.core :defn strip-null
      :say "The single source of truth for nullability narrowing: remove `:null`
            from a top-level union (bare `:null` → `:never`) while NEVER stripping
@@ -1366,7 +1409,15 @@
            plus the per-node expansion spec to `/api/graph/layout` and gets
            back nodes, edges and a `nodeId → {x, y, row, col}` map. This is
            the wire crossing into the previous block: the server owns grid
-           topology, the client owns pixels."
+           topology, the client owns pixels.
+
+           Most of its length is the sizing pass that runs AFTER the response:
+           per-column widths, then per-column gaps computed from the widest
+           edge label plus the type chips and badges the overlays render beside
+           it. That is the client's one real layout responsibility — making the
+           server's grid fit the pixels its own cards actually occupy. Read the
+           POST at the top, then jump to the comment blocks that explain each
+           gap term."
      :see [[:layout "build-graph-elements"] [:layout "compute-layout-matrix"]]}
 
     {:file "resources/packages/app/editor/editor-render.js" :defn renderGraph

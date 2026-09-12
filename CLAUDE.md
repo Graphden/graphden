@@ -223,7 +223,7 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/adr/ADR-inherited-rename-surface.md](docs/adr/ADR-inherited-rename-surface.md) | The inherited-rename SURFACE contract — public names are the closest-chain rename, applied at the boundary; the walker/HOF internals stay per-fid | Before touching free-arg NAMING (`surface-entries`, `rename-for-slot`, `public-free-entries`) or proposing rename semantics changes |
 | [docs/adr/ADR-thunk-once-and-cache-keys.md](docs/adr/ADR-thunk-once-and-cache-keys.md) | Why ref thunks are ONCE (delay) + the identity-keyed call-cache audit; residual window + revisit triggers | Before touching `rt/thunk`, `call-with-cache` keys, or composing an effectful base-fn under env-bindings with several call sites |
 | [docs/adr/ADR-slot-id-keyed-type-checker.md](docs/adr/ADR-slot-id-keyed-type-checker.md) | Slot-id-keyed checker — EVALUATED + REJECTED; closes TYPE_SYSTEM_DECISIONS § β | Before proposing to re-key the type checker |
-| [docs/devtour/README.md](docs/devtour/README.md) | The developer code-tour — symbol-anchored read of the codebase; `bb devtour` bake + `bb devtour-check` drift guard | When onboarding, or when a toured top-level form is renamed/moved/deleted (CI goes red) |
+| [docs/devtour/README.md](docs/devtour/README.md) | The developer code-tour — symbol-anchored read of the codebase in three bakes (page / `devtour.el` / org), `bb devtour` + the `devtour*` drift guards | When onboarding, or when a toured top-level form is renamed/moved/deleted (CI goes red) |
 
 ## Common Commands
 
@@ -270,8 +270,12 @@ bb type-sweep   # The corpus type-check sweep (no DB, ~1 min): production's
 bb graph-lint   # Graph linters over the fns.edn corpus (no DB, ~10s): duplicate
                 #   definitions (exact + after private-helper expansion), unreferenced
                 #   privates, pure aliases — docs/GRAPH_LINT.md. In bb ci.
-bb devtour      # Regenerate the developer code-tour docs/devtour/index.html from tour.edn
-bb devtour-check # (in bb ci) fail if a tour anchor broke or index.html drifted
+bb devtour      # Regenerate the developer code-tour from tour.edn — the page
+                #   (docs/devtour/index.html), the emacs data (tour.eld) and org/
+bb devtour-check # (in bb ci) fail if a tour anchor broke or a baked output drifted
+bb devtour-emacs # (in bb ci) ert over docs/devtour/devtour.el — anchors resolve in
+                #   the LIVE files, org links reach this checkout. SKIPs without emacs
+bb devtour-page  # (in bb ci) the baked page in a real browser (no stack needed)
 
 # Build & Deploy (Docker)
 bb rebuild      # Rebuild jar + docker + restart (ALWAYS use this after code changes!)
@@ -783,19 +787,24 @@ teaches *the code that runs it*.
 
 Source of truth is [docs/devtour/tour.edn](docs/devtour/tour.edn) (blocks →
 ordered steps, each anchored on a `{:ns :defn}` **symbol**, never a line
-number). `bb devtour` bakes each anchored form's real source into the
-self-contained `docs/devtour/index.html`. The `editor` block anchors the same
-way on **JavaScript** declarations in `resources/packages/**/*.js` — so a
-renamed editor function reddens `bb devtour-check` exactly like a renamed
-`defn`.
+number). `bb devtour` bakes it three ways from that one source: the
+self-contained `docs/devtour/index.html` (the anchored form's real source baked
+in, deep-linkable per step, with search and reading progress), `tour.eld` for
+`docs/devtour/devtour.el` (emacs drives LIVE buffers — prose beside the real
+file at the form, plus `devtour-annotate-mode`, which makes eldoc name the tour
+step for the form at point in ordinary source buffers), and `org/*.org` (prose
+plus a `file:…::<head>` link per step). The `editor` block anchors the same way
+on **JavaScript** declarations in `resources/packages/**/*.js` — so a renamed
+editor function reddens `bb devtour-check` exactly like a renamed `defn`.
 
 **Two obligations when your change touches toured code:**
 
 1. **Mechanical (CI-enforced).** `bb devtour-check` (in `bb ci`, `:docs` group)
-   fails if any anchor stops resolving to a unique form, or if `index.html` has
-   drifted from a fresh regeneration. So if your change edits the body of — or
-   renames / moves / deletes — a form a step anchors on:
-   - run `bb devtour` and commit the regenerated `index.html`, and
+   fails if any anchor stops resolving to a unique form, or if any baked output
+   (page, `tour.eld`, `org/*.org`) has drifted from a fresh regeneration. So if
+   your change edits the body of — or renames / moves / deletes — a form a step
+   anchors on:
+   - run `bb devtour` and commit the regenerated outputs, and
    - if you renamed / moved / removed the form, fix its step in `tour.edn`
      (re-point the anchor, or drop the step) so it resolves again.
 

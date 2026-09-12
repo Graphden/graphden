@@ -139,6 +139,37 @@ costs a search, but it should not be stale right after a bake)."
       (devtour-see-also))
     (should (/= devtour--pos i))))
 
+(ert-deftest devtour-reload-rereads-the-data ()
+  "`devtour-reload' drops the cache so a re-bake (or another language's eld)
+is picked up without restarting emacs."
+  (devtour--load)
+  (let ((n (length devtour--steps)))
+    (devtour-reload)
+    (should (= n (length devtour--steps)))
+    (should devtour--tour))
+  ;; a data file that does not exist fails loudly rather than silently keeping
+  ;; the old tour
+  (let ((devtour-data-file "/nonexistent/tour.eld"))
+    (should-error (devtour-reload) :type 'user-error))
+  (devtour-reload))
+
+
+(ert-deftest devtour-evil-setup-binds-motion-state ()
+  "With evil present the tour's verbs must land in MOTION state — in normal
+state every one of them is already an evil command."
+  (skip-unless (require 'evil nil t))
+  (devtour--setup-evil)
+  (should (eq 'motion (evil-initial-state 'devtour-mode)))
+  (with-temp-buffer
+    (devtour-mode)
+    (evil-motion-state)
+    (should (eq (key-binding "n") 'devtour-next))
+    (should (eq (key-binding "i") 'devtour-index))
+    ;; …without stealing evil's own motions
+    (should (eq (key-binding "j") 'evil-next-line))
+    (should (keymapp (key-binding "g")))))
+
+
 (ert-deftest devtour-same-file-links-exist-and-follow ()
   "Steps sharing a file link to each other, and the picker follows one."
   (devtour--load)

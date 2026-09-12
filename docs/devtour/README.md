@@ -52,13 +52,20 @@ magit and the REPL are all one keystroke from wherever the tour has you.
 - `M-x devtour` — start, or resume where you stopped (progress is kept in
   `devtour-progress-file`).
 - In the `*devtour*` window: `n` / `p` walk the spine, `b` goes back along the
-  path you took, `s` follows a see-also (or backlink), `g` picks a block, `/`
-  jumps to any step by name or prose, `o` moves point into the source, `q` quits.
+  path you took, `s` follows a see-also / backlink / same-file link, `i` picks a
+  block, `/` jumps to any step by name or prose, `o` moves point into the
+  source, `q` quits.
+- **evil users** get the same keys in **motion state** (the tour sets its own
+  initial state), so `hjkl` still scroll and `gg` still goes to the top — which
+  is why the block index is on `i` and not on `g`. Nothing to configure.
 - `M-x devtour-here` — the other direction: open the tour **at the form point is
   in**. With `devtour-annotate-mode`, eldoc names that step as you move around
   ordinary source buffers, which is what makes the tour useful long after the
   first read.
-- Reading the Russian tour instead: point `devtour-data-file` at its `tour.eld`.
+- `M-x devtour-reload` — re-read the data after a fresh `bb devtour`, or after
+  pointing `devtour-data-file` somewhere else.
+- Reading the Russian tour instead: point `devtour-data-file` at its `tour.eld`
+  and `M-x devtour-reload`.
 
 To make the page's **emacs** button work, register `org-protocol` once (Linux):
 

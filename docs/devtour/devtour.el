@@ -18,8 +18,12 @@
 ;;   M-x devtour-goto       jump to any step by name or prose
 ;;
 ;; In the *devtour* window: n/p walk the spine, b goes back along the path you
-;; actually took, s follows a see-also link, g lists the blocks, o moves point
-;; into the source, q quits.
+;; actually took, s follows a see-also link, i lists the blocks, / jumps to any
+;; step, o moves point into the source, q quits. With evil installed the same
+;; keys live in motion state, so hjkl still scroll and `gg' still works.
+;;
+;; `M-x devtour-reload' re-reads the data — after a fresh `bb devtour', or after
+;; pointing `devtour-data-file' at another bake.
 ;;
 ;; `devtour-annotate-mode' is the other direction: a global minor mode that
 ;; makes eldoc say "Types, step 4/17 — <why this form matters>" whenever point
@@ -332,6 +336,17 @@ With prefix ARG, start from the first step instead."
   (when-let ((w (get-buffer-window "*devtour*")))
     (quit-window nil w)))
 
+(defun devtour-reload ()
+  "Re-read `devtour-data-file'.
+Use after a fresh `bb devtour', or after pointing `devtour-data-file' at
+another bake (the Russian tour, say)."
+  (interactive)
+  (setq devtour--tour nil devtour--steps nil devtour--by-key nil
+        devtour--pos nil devtour--history nil)
+  (devtour--load)
+  (message "devtour: %d steps from %s"
+           (length devtour--steps) (abbreviate-file-name devtour-data-file)))
+
 (defun devtour-reset-progress ()
   "Forget which steps have been read."
   (interactive)
@@ -434,7 +449,8 @@ the same file — close enough to name the form you are looking at."
     (define-key m "p" #'devtour-previous)
     (define-key m "b" #'devtour-back)
     (define-key m "s" #'devtour-see-also)
-    (define-key m "g" #'devtour-index)
+    (define-key m "i" #'devtour-index)
+    (define-key m "g" #'devtour-index)   ; `g' is an evil prefix — see below
     (define-key m "/" #'devtour-goto)
     (define-key m "o" #'devtour-source)
     (define-key m "q" #'devtour-quit)
@@ -450,6 +466,33 @@ the same file — close enough to name the form you are looking at."
 \\{devtour-mode-map}"
   (setq-local truncate-lines nil)
   (visual-line-mode 1))
+
+;;; --- evil ------------------------------------------------------------------
+;;
+;; Without this an evil user lands in NORMAL state, where every key below is
+;; already taken (`n' search-next, `p' paste, `b' word-back, `s' substitute…).
+;; Motion state is what evil gives read-only buffers, so the tour behaves like
+;; help / magit-log: hjkl scroll, and the tour's own verbs sit on top. `g' stays
+;; an evil prefix (so `gg' still goes to the top) — the block index is on `i'.
+
+(defun devtour--setup-evil ()
+  "Bind the tour's verbs in evil motion state."
+  (evil-set-initial-state 'devtour-mode 'motion)
+  (evil-define-key 'motion devtour-mode-map
+    "n" #'devtour-next
+    "p" #'devtour-previous
+    "b" #'devtour-back
+    "s" #'devtour-see-also
+    "i" #'devtour-index
+    "/" #'devtour-goto
+    "o" #'devtour-source
+    "q" #'devtour-quit
+    (kbd "SPC") #'devtour-next
+    (kbd "DEL") #'devtour-previous
+    "?" #'describe-mode))
+
+(with-eval-after-load 'evil
+  (devtour--setup-evil))
 
 (provide 'devtour)
 ;;; devtour.el ends here

@@ -20,6 +20,7 @@ after: executor
 The storage layer starts with three protocols; this is the first. ~Storage~ is the lifecycle contract (~initialize~ / ~close~) every backend implements, binding a concrete store to a ~DataSchema~ before any graph can be read or written.
 
 - source :: [[file:../../../src/graphden/storage/protocol/core.clj::(defprotocol Storage][src/graphden/storage/protocol/core.clj:81]]
+- same file :: [[file:storage.org::#storage/StorageCRUD][StorageCRUD]], [[file:storage.org::#storage/ExecutionGraph][ExecutionGraph]]
 
 * 2. StorageCRUD
 :PROPERTIES:
@@ -32,6 +33,7 @@ The storage layer starts with three protocols; this is the first. ~Storage~ is t
 The row-level contract: ~read-entity~, ~query-entities~, ~create-entity~, and friends. Every graph read the executor does bottoms out in these calls — learn this shape and you know how the whole system touches the database.
 
 - source :: [[file:../../../src/graphden/storage/protocol/core.clj::(defprotocol StorageCRUD][src/graphden/storage/protocol/core.clj:117]]
+- same file :: [[file:storage.org::#storage/Storage][Storage]], [[file:storage.org::#storage/ExecutionGraph][ExecutionGraph]]
 - referenced from :: [[file:storage.org::#storage/resolve-execution-graph][resolve-execution-graph]], [[file:platform.org::#platform/RemoteStorage][RemoteStorage]]
 
 * 3. ExecutionGraph
@@ -46,6 +48,7 @@ One method: ~resolve-execution-graph~ — given a root fn-id, return its entire 
 
 - source :: [[file:../../../src/graphden/storage/protocol/core.clj::(defprotocol ExecutionGraph][src/graphden/storage/protocol/core.clj:258]]
 - see also :: [[file:executor.org::#executor/rebuild!][rebuild!]]
+- same file :: [[file:storage.org::#storage/Storage][Storage]], [[file:storage.org::#storage/StorageCRUD][StorageCRUD]]
 
 * 4. DataSchema
 :PROPERTIES:
@@ -109,6 +112,7 @@ The runtime link between a field-spec's declared type and an actual value: one p
 The record every resolver returns: the entity collections plus by-fn / by-binding indexes. Know this shape first and the two resolvers below read easily — they all just fill it in.
 
 - source :: [[file:../../../src/graphden/storage/protocol/graph.clj::(defrecord ExecutionGraphResult][src/graphden/storage/protocol/graph.clj:159]]
+- same file :: [[file:storage.org::#storage/->execution-graph][->execution-graph]], [[file:storage.org::#storage/process-fn-node][process-fn-node]], [[file:storage.org::#storage/resolve-execution-graph-bfs][resolve-execution-graph-bfs]]
 
 * 9. ->execution-graph
 :PROPERTIES:
@@ -121,6 +125,7 @@ The record every resolver returns: the entity collections plus by-fn / by-bindin
 Builds that record and its O(1) convenience indexes — the shared ~assemble the result~ step both backends funnel into.
 
 - source :: [[file:../../../src/graphden/storage/protocol/graph.clj::(defn ->execution-graph][src/graphden/storage/protocol/graph.clj:169]]
+- same file :: [[file:storage.org::#storage/ExecutionGraphResult][ExecutionGraphResult]], [[file:storage.org::#storage/process-fn-node][process-fn-node]], [[file:storage.org::#storage/resolve-execution-graph-bfs][resolve-execution-graph-bfs]]
 - referenced from :: [[file:storage.org::#storage/resolve-execution-graph~2][resolve-execution-graph]]
 
 * 10. process-fn-node
@@ -134,6 +139,7 @@ Builds that record and its O(1) convenience indexes — the shared ~assemble the
 Expands one fn during traversal, extracting its outgoing edges: parent-ids, base / element / return-type, and binding + list-item ~ref-fn-id~s. This function IS the authoritative definition of what counts as a graph edge.
 
 - source :: [[file:../../../src/graphden/storage/protocol/graph.clj::(defn process-fn-node][src/graphden/storage/protocol/graph.clj:272]]
+- same file :: [[file:storage.org::#storage/ExecutionGraphResult][ExecutionGraphResult]], [[file:storage.org::#storage/->execution-graph][->execution-graph]], [[file:storage.org::#storage/resolve-execution-graph-bfs][resolve-execution-graph-bfs]]
 - referenced from :: [[file:storage.org::#storage/reachable-fns-sql][reachable-fns-sql]]
 
 * 11. resolve-execution-graph-bfs
@@ -147,6 +153,7 @@ Expands one fn during traversal, extracting its outgoing edges: parent-ids, base
 The backend-agnostic BFS driver: keep calling ~process-fn-node~ until the reachable closure is exhausted. This is the reference algorithm the Postgres recursive CTE mirrors.
 
 - source :: [[file:../../../src/graphden/storage/protocol/graph.clj::(defn resolve-execution-graph-bfs][src/graphden/storage/protocol/graph.clj:299]]
+- same file :: [[file:storage.org::#storage/ExecutionGraphResult][ExecutionGraphResult]], [[file:storage.org::#storage/->execution-graph][->execution-graph]], [[file:storage.org::#storage/process-fn-node][process-fn-node]]
 
 * 12. resolve-execution-graph
 :PROPERTIES:
@@ -199,6 +206,7 @@ The ~WITH RECURSIVE~ CTE that walks every outgoing edge from the seed fn in one 
 
 - source :: [[file:../../../src/graphden/storage/postgres/graph.clj::(def ^:private reachable-fns-sql][src/graphden/storage/postgres/graph.clj:44]]
 - see also :: [[file:storage.org::#storage/process-fn-node][process-fn-node]]
+- same file :: [[file:storage.org::#storage/resolve-execution-graph~2][resolve-execution-graph]]
 
 * 16. resolve-execution-graph
 :PROPERTIES:
@@ -212,6 +220,7 @@ The optimized resolver: run the CTE to get reachable ids, enforce the graph-size
 
 - source :: [[file:../../../src/graphden/storage/postgres/graph.clj::(defn resolve-execution-graph][src/graphden/storage/postgres/graph.clj:118]]
 - see also :: [[file:storage.org::#storage/->execution-graph][->execution-graph]]
+- same file :: [[file:storage.org::#storage/reachable-fns-sql][reachable-fns-sql]]
 
 * 17. make-emitter
 :PROPERTIES:
@@ -225,6 +234,7 @@ How a committed write reaches every OTHER pod. The emitter is a closure over the
 
 - source :: [[file:../../../src/graphden/storage/postgres/notify.clj::(defn make-emitter][src/graphden/storage/postgres/notify.clj:304]]
 - see also :: [[file:crud.org::#crud/notify-after-write!][notify-after-write!]]
+- same file :: [[file:storage.org::#storage/create-listener][create-listener]]
 
 * 18. create-listener
 :PROPERTIES:
@@ -238,3 +248,4 @@ The receiving end: one DEDICATED connection (outside the pool — LISTEN is sess
 
 - source :: [[file:../../../src/graphden/storage/postgres/notify.clj::(defn create-listener][src/graphden/storage/postgres/notify.clj:244]]
 - see also :: [[file:versioning.org::#versioning/dispatch*][dispatch*]], [[file:services.org::#services/reconcile-once!][reconcile-once!]]
+- same file :: [[file:storage.org::#storage/make-emitter][make-emitter]]

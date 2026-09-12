@@ -20,6 +20,7 @@ after: packages, boot
 The http-kit wrapper base-fn: ~run-server~ spins the listener thread and binds the composed Ring handler to a port, recording ~:network~ / ~:process~ effects. Where a request first enters the web layer, so the natural first stop. Note it is a tiny primitive — everything else is composed from small base-fns in ~web/http/fns.edn~.
 
 - source :: [[file:../../../resources/packages/web/http/impls.clj::(defbase http-server][resources/packages/web/http/impls.clj:239]]
+- same file :: [[file:web.org::#web/realize-request-body][realize-request-body]], [[file:web.org::#web/pick-encoding-fn][pick-encoding-fn]]
 
 * 2. realize-request-body
 :PROPERTIES:
@@ -32,6 +33,7 @@ The http-kit wrapper base-fn: ~run-server~ spins the listener thread and binds t
 Fully realizes the incoming request body so downstream graph handlers see plain data instead of a one-shot stream — the very next thing that happens to a raw request after it lands.
 
 - source :: [[file:../../../resources/packages/web/http/impls.clj::(defbase realize-request-body][resources/packages/web/http/impls.clj:137]]
+- same file :: [[file:web.org::#web/http-server][http-server]], [[file:web.org::#web/pick-encoding-fn][pick-encoding-fn]]
 
 * 3. ring-handler-fn
 :PROPERTIES:
@@ -44,6 +46,7 @@ Fully realizes the incoming request body so downstream graph handlers see plain 
 Composes the compiled reitit router with the default handler into the single Ring callable http-kit actually invokes per request. The seam between the server socket and routing.
 
 - source :: [[file:../../../resources/packages/web/reitit/impls.clj::(defbase ring-handler-fn][resources/packages/web/reitit/impls.clj:46]]
+- same file :: [[file:web.org::#web/ring-router-fn][ring-router-fn]], [[file:web.org::#web/ring-create-default-handler-fn][ring-create-default-handler-fn]], [[file:web.org::#web/middleware][middleware]]
 
 * 4. ring-router-fn
 :PROPERTIES:
@@ -56,6 +59,7 @@ Composes the compiled reitit router with the default handler into the single Rin
 Builds the bare ~reitit.ring/router~ from route data — which is itself graph-composed vectors and keywords. This is the routing table the handler consults to match a path to a handler.
 
 - source :: [[file:../../../resources/packages/web/reitit/impls.clj::(defbase ring-router-fn][resources/packages/web/reitit/impls.clj:22]]
+- same file :: [[file:web.org::#web/ring-handler-fn][ring-handler-fn]], [[file:web.org::#web/ring-create-default-handler-fn][ring-create-default-handler-fn]], [[file:web.org::#web/middleware][middleware]]
 
 * 5. ring-create-default-handler-fn
 :PROPERTIES:
@@ -68,6 +72,7 @@ Builds the bare ~reitit.ring/router~ from route data — which is itself graph-c
 Constructs the fallback handler reitit uses when nothing matches, wrapping the graph-composed 404 / 405 / 406 response maps. The ~no route~ branch.
 
 - source :: [[file:../../../resources/packages/web/reitit/impls.clj::(defbase ring-create-default-handler-fn][resources/packages/web/reitit/impls.clj:33]]
+- same file :: [[file:web.org::#web/ring-handler-fn][ring-handler-fn]], [[file:web.org::#web/ring-router-fn][ring-router-fn]], [[file:web.org::#web/middleware][middleware]]
 
 * 6. middleware
 :PROPERTIES:
@@ -80,6 +85,7 @@ Constructs the fallback handler reitit uses when nothing matches, wrapping the g
 The middleware factory: turn a graph ~body~ (with ~:request~ and ~:next-handler~ free args) into a reitit ~{:name :wrap}~ spec folded around each route handler. How cross-cutting logic — like the branch-routing wrap next — is expressed as a graph fn.
 
 - source :: [[file:../../../resources/packages/web/reitit/impls.clj::(defbase middleware][resources/packages/web/reitit/impls.clj:64]]
+- same file :: [[file:web.org::#web/ring-handler-fn][ring-handler-fn]], [[file:web.org::#web/ring-router-fn][ring-router-fn]], [[file:web.org::#web/ring-create-default-handler-fn][ring-create-default-handler-fn]]
 
 * 7. current-branch-router
 :PROPERTIES:
@@ -92,6 +98,7 @@ The middleware factory: turn a graph ~body~ (with ~:request~ and ~:next-handler~
 Reads the currently-installed per-branch router from a global atom (nil before boot installs it). The branch-routing wrap needs this router first.
 
 - source :: [[file:../../../resources/packages/web/branch-router/impls.clj::(defbase current-branch-router][resources/packages/web/branch-router/impls.clj:10]]
+- same file :: [[file:web.org::#web/dispatch-to-branch][dispatch-to-branch]]
 
 * 8. dispatch-to-branch
 :PROPERTIES:
@@ -105,6 +112,7 @@ The branch-routing wrap: delegate the Ring request to the correct per-branch han
 
 - source :: [[file:../../../resources/packages/web/branch-router/impls.clj::(defbase dispatch-to-branch][resources/packages/web/branch-router/impls.clj:18]]
 - see also :: [[file:versioning.org::#versioning/dispatch*][dispatch*]]
+- same file :: [[file:web.org::#web/current-branch-router][current-branch-router]]
 
 * 9. authenticate-request
 :PROPERTIES:
@@ -155,6 +163,7 @@ The generic ~[tag attrs children]~ constructor behind the graph-native page runt
 
 - source :: [[file:../../../resources/packages/web/html/impls.clj::(defbase hiccup-element][resources/packages/web/html/impls.clj:26]]
 - see also :: [[file:editor.org::#editor/bindActionDispatch][bindActionDispatch]], [[file:editor.org::#editor/loadPartial][loadPartial]]
+- same file :: [[file:web.org::#web/h-raw][h-raw]], [[file:web.org::#web/render-hiccup][render-hiccup]]
 - referenced from :: [[file:editor.org::#editor/bindActionDispatch][bindActionDispatch]]
 
 * 13. h-raw
@@ -168,6 +177,7 @@ The generic ~[tag attrs children]~ constructor behind the graph-native page runt
 Wraps a string in a hiccup ~RawString~ so inline script / style bodies (like the editor's bundled JS / CSS) render verbatim instead of being HTML-escaped. The escape hatch that lets a composed page embed the JS frontend without mangling it.
 
 - source :: [[file:../../../resources/packages/web/html/impls.clj::(defbase h-raw][resources/packages/web/html/impls.clj:18]]
+- same file :: [[file:web.org::#web/hiccup-element][hiccup-element]], [[file:web.org::#web/render-hiccup][render-hiccup]]
 
 * 14. render-hiccup
 :PROPERTIES:
@@ -180,6 +190,7 @@ Wraps a string in a hiccup ~RawString~ so inline script / style bodies (like the
 Serializes the assembled hiccup tree into an HTML string, with a taint-propagation rule so rendered secrets stay redacted. The point where a graph-composed page turns into the response body.
 
 - source :: [[file:../../../resources/packages/web/html/impls.clj::(defbase render-hiccup][resources/packages/web/html/impls.clj:13]]
+- same file :: [[file:web.org::#web/hiccup-element][hiccup-element]], [[file:web.org::#web/h-raw][h-raw]]
 
 * 15. pick-encoding-fn
 :PROPERTIES:
@@ -192,6 +203,7 @@ Serializes the assembled hiccup tree into an HTML string, with a taint-propagati
 The outbound finalizer is a graph composition now — ~:process-response~ in web/http/fns.edn stringifies headers, applies the ~Connection: close~ policy, and encodes the body, all as fn-defs over single-call primitives. This RFC 7231 Accept-Encoding negotiation is the one self-contained parse the pipeline keeps in Clojure; the DECISION to encode (thresholds, compressible pattern) lives in the graph. The last stop as the rendered page leaves the web layer back through http-kit.
 
 - source :: [[file:../../../resources/packages/web/http/impls.clj::(defbase pick-encoding-fn][resources/packages/web/http/impls.clj:159]]
+- same file :: [[file:web.org::#web/http-server][http-server]], [[file:web.org::#web/realize-request-body][realize-request-body]]
 
 * 16. compatible-type-names
 :PROPERTIES:
@@ -204,6 +216,7 @@ The outbound finalizer is a graph composition now — ~:process-response~ in web
 The server-side type-picker sweep behind ~/partials/compatible-type-options~. It filters the ~type-name-kinds~ roster to the names that can legally narrow ~expected~ in ONE alias-aware ~subtype?~ pass — replacing the editor's former per-name fan-out of ~50 parallel ~POST /api/types/compatible~ requests per picker open. The graph-first migration's clearest case: a client loop collapses into one server render.
 
 - source :: [[file:../../../src/graphden/crud/types_api.clj::(defn compatible-type-names][src/graphden/crud/types_api.clj:183]]
+- same file :: [[file:web.org::#web/api-rich-types][api-rich-types]]
 
 * 17. api-rich-types
 :PROPERTIES:
@@ -216,6 +229,7 @@ The server-side type-picker sweep behind ~/partials/compatible-type-options~. It
 The ~/api/types~ wire-shaping layer the editor loads at boot and after every mutation: the augmented rich-type snapshot with ~bulk-omitted-fields~ stripped from each entry. The old ~?fn=<name>~ per-fn full-entry backfill is gone with its only client consumer — the return-type-rule popover is a server partial now, and the layout strip facts read the raw registry directly. How the type-checker's registry reaches the browser as a lean payload.
 
 - source :: [[file:../../../src/graphden/crud/types_api.clj::(defn api-rich-types][src/graphden/crud/types_api.clj:844]]
+- same file :: [[file:web.org::#web/compatible-type-names][compatible-type-names]]
 - referenced from :: [[file:types.org::#types/record-rich-types!][record-rich-types!]]
 
 * 18. sync-fn-defs-branch!

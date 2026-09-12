@@ -20,6 +20,7 @@ after: executor
 The newcomer's entry point: it just calls ~load-packages [core web app]~, naming the default package set and showing where the whole disk-to-graph pipeline is kicked off at boot.
 
 - source :: [[file:../../../src/graphden/packages/loader.clj::(defn load-default-packages][src/graphden/packages/loader.clj:731]]
+- same file :: [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 - referenced from :: [[file:constellation.org::#constellation/read-manifest][read-manifest]]
 
 * 2. load-packages
@@ -33,6 +34,7 @@ The newcomer's entry point: it just calls ~load-packages [core web app]~, naming
 The top-level orchestrator: resolve dependency order, load each package, and fold every module's results into the combined ~{:base-fn-defs … :fn-defs … :namespaces …}~ map that seeds the graph. The hub the rest of this block drills into.
 
 - source :: [[file:../../../src/graphden/packages/loader.clj::(defn load-packages][src/graphden/packages/loader.clj:589]]
+- same file :: [[file:packages.org::#packages/load-default-packages][load-default-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 - referenced from :: [[file:boot.org::#boot/packages][packages]]
 
 * 3. resolve-dependencies
@@ -46,6 +48,7 @@ The top-level orchestrator: resolve dependency order, load each package, and fol
 A DFS topological sort over each ~package.edn~'s ~:dependencies~, pulling transitive deps so primitives load before their consumers. This is the dependency-driven load order.
 
 - source :: [[file:../../../src/graphden/packages/loader.clj::(defn- resolve-dependencies][src/graphden/packages/loader.clj:551]]
+- same file :: [[file:packages.org::#packages/load-default-packages][load-default-packages]], [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 
 * 4. validate-dep-constraints!
 :PROPERTIES:
@@ -58,6 +61,7 @@ A DFS topological sort over each ~package.edn~'s ~:dependencies~, pulling transi
 Runs after ordering to check declared semver constraints against the classpath, failing fast at boot with ~:packages/version-conflict~ instead of a cryptic ~Unknown parent~ later. The version machinery guarding load order.
 
 - source :: [[file:../../../src/graphden/packages/loader.clj::(defn- validate-dep-constraints!][src/graphden/packages/loader.clj:530]]
+- same file :: [[file:packages.org::#packages/load-default-packages][load-default-packages]], [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 
 * 5. load-single-package
 :PROPERTIES:
@@ -70,6 +74,7 @@ Runs after ordering to check declared semver constraints against the classpath, 
 For one package: read its ~package.edn~ metadata and reduce over its ~:modules~, merging each module's base-fn-defs and fn-defs. The bridge from ~a package~ down to ~its modules~.
 
 - source :: [[file:../../../src/graphden/packages/loader.clj::(defn- load-single-package][src/graphden/packages/loader.clj:469]]
+- same file :: [[file:packages.org::#packages/load-default-packages][load-default-packages]], [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 
 * 6. process-module
 :PROPERTIES:
@@ -82,6 +87,7 @@ For one package: read its ~package.edn~ metadata and reduce over its ~:modules~,
 The heart of one module: load its ~fns.edn~ and ~impls.clj~, then ~group-by~ splits the entries into base-fns (which need impls) versus fn-defs (compositions / type-rows). Where fns.edn and impls.clj first meet.
 
 - source :: [[file:../../../src/graphden/packages/loader.clj::(defn- process-module][src/graphden/packages/loader.clj:410]]
+- same file :: [[file:packages.org::#packages/load-default-packages][load-default-packages]], [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 
 * 7. base-fn?
 :PROPERTIES:
@@ -94,6 +100,7 @@ The heart of one module: load its ~fns.edn~ and ~impls.clj~, then ~group-by~ spl
 The classifier ~process-module~ groups on: an entry is a base-fn only if it has no ~:parent~ / ~:parents~ and is not a type-row. This is the fundamental base-fn versus fn-def distinction a newcomer must internalize.
 
 - source :: [[file:../../../src/graphden/packages/loader.clj::(defn- base-fn?][src/graphden/packages/loader.clj:303]]
+- same file :: [[file:packages.org::#packages/load-default-packages][load-default-packages]], [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 
 * 8. load-module-fns
 :PROPERTIES:
@@ -106,6 +113,7 @@ The classifier ~process-module~ groups on: an entry is a base-fn only if it has 
 Reads a module's ~fns.edn~ (pure EDN data) via a source-position reader, attaching ~:source-file~ / ~:source-line~ to every fn-def so later type errors point at ~file:line~. How the on-disk declarations enter memory.
 
 - source :: [[file:../../../src/graphden/packages/loader.clj::(defn- load-module-fns][src/graphden/packages/loader.clj:152]]
+- same file :: [[file:packages.org::#packages/load-default-packages][load-default-packages]], [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 
 * 9. parse-module
 :PROPERTIES:
@@ -118,6 +126,7 @@ Reads a module's ~fns.edn~ (pure EDN data) via a source-position reader, attachi
 Where an ~fns.edn~ entry becomes ROWS. Two passes: mint the deterministic ids (~name->id~, so the same def yields the same uuid on every sync), then ~parse-fn-def~ each entry with the whole module — plus prior syncs' defs — in hand, because resolving which ancestor a bound arg targets needs to see the ancestors' shapes.
 
 - source :: [[file:../../../src/graphden/packages/records/parse.clj::(defn parse-module][src/graphden/packages/records/parse.clj:1234]]
+- same file :: [[file:packages.org::#packages/parse-composed][parse-composed]]
 
 * 10. parse-composed
 :PROPERTIES:
@@ -130,6 +139,7 @@ Where an ~fns.edn~ entry becomes ROWS. Two passes: mint the deterministic ids (~
 The composed case: ~:parent~ / ~:parents~ become the parent-ids junction, each ~:args~ entry becomes a binding row on the inherited slot it targets — or, when the entry is ~{:type T …}~ with no binding markers, a NEW own slot on top of inheritance. Which of the two, and on which ancestor, is ~resolve-slot-owner~'s call.
 
 - source :: [[file:../../../src/graphden/packages/records/parse.clj::(defn- parse-composed][src/graphden/packages/records/parse.clj:713]]
+- same file :: [[file:packages.org::#packages/parse-module][parse-module]]
 
 * 11. resolve-slot-owner
 :PROPERTIES:
@@ -143,6 +153,7 @@ Given a composed fn and an arg name, find the ancestor that DECLARED the slot �
 
 - source :: [[file:../../../src/graphden/packages/records/slot_resolution.clj::(defn resolve-slot-owner][src/graphden/packages/records/slot_resolution.clj:460]]
 - see also :: [[file:executor.org::#executor/build-lookups][build-lookups]]
+- same file :: [[file:packages.org::#packages/build-rename-slot-records][build-rename-slot-records]]
 
 * 12. build-rename-slot-records
 :PROPERTIES:
@@ -156,6 +167,7 @@ A ~{Y {:as :X}}~ rename is not a binding column — it is a NEW slot owned by th
 
 - source :: [[file:../../../src/graphden/packages/records/slot_resolution.clj::(defn build-rename-slot-records][src/graphden/packages/records/slot_resolution.clj:652]]
 - see also :: [[file:executor.org::#executor/build-ref-renames][build-ref-renames]]
+- same file :: [[file:packages.org::#packages/resolve-slot-owner][resolve-slot-owner]]
 
 * 13. load-impls-via-eval
 :PROPERTIES:
@@ -168,6 +180,7 @@ A ~{Y {:as :X}}~ rename is not a binding column — it is a NEW slot owned by th
 The counterpart to fns.edn: slurp ~impls.clj~, ~eval~ each form in a fresh namespace, and return that namespace's ~impls~ var — the ~{fn-name → impl-fn}~ map. How Clojure code on disk becomes live functions. The ~reuse-loaded-impls?~ arm is why coverage can see this layer at all: evaluating from the resource leaves cloverage with nothing to instrument, so under ~bb coverage~ the already- instrumented namespace is reused instead of re-evaluated.
 
 - source :: [[file:../../../src/graphden/packages/loader.clj::(defn- load-impls-via-eval][src/graphden/packages/loader.clj:211]]
+- same file :: [[file:packages.org::#packages/load-default-packages][load-default-packages]], [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 
 * 14. fn-def->base-fn-def
 :PROPERTIES:
@@ -181,6 +194,7 @@ The glue: marry an fns.edn entry (args, return-type, effects, tags) with its imp
 
 - source :: [[file:../../../src/graphden/packages/loader.clj::(defn- fn-def->base-fn-def][src/graphden/packages/loader.clj:327]]
 - see also :: [[file:executor.org::#executor/resolve-impl][resolve-impl]]
+- same file :: [[file:packages.org::#packages/load-default-packages][load-default-packages]], [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 
 * 15. add
 :PROPERTIES:
@@ -207,6 +221,7 @@ Closes the loop into storage: take the collected namespace paths, build the ~cor
 
 - source :: [[file:../../../src/graphden/packages/loader.clj::(defn sync-namespaces!][src/graphden/packages/loader.clj:668]]
 - see also :: [[file:executor.org::#executor/sync-fns-to-storage!][sync-fns-to-storage!]]
+- same file :: [[file:packages.org::#packages/load-default-packages][load-default-packages]], [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]]
 
 * 17. sync-fn-entities-from-packages!
 :PROPERTIES:
@@ -220,6 +235,7 @@ The other half of every boot, and the one the loader hands off to: sync composed
 
 - source :: [[file:../../../src/graphden/packages/sync.clj::(defn sync-fn-entities-from-packages!][src/graphden/packages/sync.clj:918]]
 - see also :: [[file:types.org::#types/check-all-defs!][check-all-defs!]], [[file:versioning.org::#versioning/repoint-refs!][repoint-refs!]]
+- same file :: [[file:packages.org::#packages/reconcile-bundle-scope!][reconcile-bundle-scope!]]
 - referenced from :: [[file:boot.org::#boot/packages][packages]]
 
 * 18. records->fn-defs
@@ -233,6 +249,7 @@ The other half of every boot, and the one the loader hands off to: sync composed
 The loader's INVERSE: typed graph records back to fns.edn-shaped fn-def maps. Everything distribution-shaped (publish, install, whole-graph download) rides this, and its contract is a fixpoint — ~parse(export(parse(x))) == parse(x)~ — pinned by the corpus-fixpoint test over the real core/web/app packages. Read it as ~process-module~ run backwards.
 
 - source :: [[file:../../../src/graphden/packages/export.clj::(defn records->fn-defs][src/graphden/packages/export.clj:564]]
+- same file :: [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/external-deps][external-deps]], [[file:packages.org::#packages/strip-secret-paths][strip-secret-paths]]
 
 * 19. ref-kw
 :PROPERTIES:
@@ -245,6 +262,7 @@ The loader's INVERSE: typed graph records back to fns.edn-shaped fn-def maps. Ev
 How a ref serializes: BARE keyword when the name is unique (canonical minimal form), namespace-QUALIFIED when it's duplicated across the export set. Qualification never falls back to bare — a version-materialized ~@~-ns qualifies as ~(keyword "lib@1-2-0.sub" n)~ and the root ns as ~(keyword "" n)~, both legal in-memory values even though no EDN reader could parse their printed form.
 
 - source :: [[file:../../../src/graphden/packages/export.clj::(defn- ref-kw][src/graphden/packages/export.clj:108]]
+- same file :: [[file:packages.org::#packages/records->fn-defs][records->fn-defs]], [[file:packages.org::#packages/external-deps][external-deps]], [[file:packages.org::#packages/strip-secret-paths][strip-secret-paths]]
 
 * 20. encode-unreadable-kws
 :PROPERTIES:
@@ -269,6 +287,7 @@ The EDN-TEXT boundary is the one place those unspellable keywords break, so exac
 Scoped export: a namespace SUBTREE becomes a publishable bundle — fns under the root are the package's content, and this analysis pass turns refs pointing OUT of the subtree into its declared ~:dependencies~ (what install must already have) plus the ~:package-dependencies~ those refs' ~@~-versioned namespaces map to. The bundle ASSEMBLY around it is graph composition — the ~:export-namespace~ fn-def in registry/registry/fns.edn. This is the unit the in-graph registry versions.
 
 - source :: [[file:../../../src/graphden/packages/export.clj::(defn external-deps][src/graphden/packages/export.clj:886]]
+- same file :: [[file:packages.org::#packages/records->fn-defs][records->fn-defs]], [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/strip-secret-paths][strip-secret-paths]]
 
 * 22. strip-secret-paths
 :PROPERTIES:
@@ -281,6 +300,7 @@ Scoped export: a namespace SUBTREE becomes a publishable bundle — fns under th
 The share-safety policy: vault paths are STRIPPED from bundles by default (the slot stays a free ~[:secret :text]~ arg) and the ~:secrets~ manifest lists what was affected — the publisher sees the warning, the installer gets a ~:needs-definition~ todo. A bundle is deliberately not a full copy of your secrets.
 
 - source :: [[file:../../../src/graphden/packages/export.clj::(defn strip-secret-paths][src/graphden/packages/export.clj:742]]
+- same file :: [[file:packages.org::#packages/records->fn-defs][records->fn-defs]], [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/external-deps][external-deps]]
 
 * 23. publish-package-apply
 :PROPERTIES:
@@ -293,6 +313,7 @@ The share-safety policy: vault paths are STRIPPED from bundles by default (the s
 Publish lands the bundle IN the graph: an immutable, content-hashed ~:package-version~ row (name + semver + fns + declared deps). Install is its mirror — ~materialize-package-fns~ syncs the pinned version's fns into a version-qualified ~@~-namespace and writes a ~:package-install~ pin; update/rollback rewrites refs between versions; fork copies copy-on-write with no pin.
 
 - source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase publish-package-apply][resources/packages/registry/registry/impls.clj:218]]
+- same file :: [[file:packages.org::#packages/upsert-pin!][upsert-pin!]], [[file:packages.org::#packages/import-bundle!][import-bundle!]]
 
 * 24. upsert-pin!
 :PROPERTIES:
@@ -305,6 +326,7 @@ Publish lands the bundle IN the graph: an immutable, content-hashed ~:package-ve
 Where the marketplace's install COUNT comes from (docs/MARKETPLACE.md). A new pin is an install and bumps the global ~:package-stat~ row with an atomic ~INSERT … ON CONFLICT DO UPDATE~ over the pool — deliberately inside the pin write unit, like the invalidation an entity write owes, because a graph-side 'was it pinned?' probe is an effectful read a later ref would re-run AFTER the pin. Moving a pin (update / rollback) is not an install. Everything else the marketplace needs — listing normalisation, the cards' rating aggregate, the filters, the partials, the review upsert, the storefront bodies — is graph, four modules sharing the ~app.marketplace~ namespace: ~registry/marketplace{,-surface, -storefront,-moderation}/fns.edn~.
 
 - source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defn- upsert-pin!][resources/packages/registry/registry/impls.clj:427]]
+- same file :: [[file:packages.org::#packages/publish-package-apply][publish-package-apply]], [[file:packages.org::#packages/import-bundle!][import-bundle!]]
 
 * 25. moderate-package-version!
 :PROPERTIES:
@@ -342,6 +364,7 @@ The loaded-package ROSTER — recorded by ~load-packages~ itself, so boot and th
 The WRITE half of the export/import pair — ~POST /api/import/graph~ applies an exported bundle to a NAMED branch: resolve/create the target (owner-stamped, ~owner~ write-policy — the push-branch convention), skip package-owned defs, adopt editor-born same-name identities onto their deterministic ids, sync through the SAME path the boot loader uses, optionally prune to snapshot semantics, delta-invalidate that branch. Cross-install push/pull and git-snapshot restores all land here, then ride the normal diff → review → merge flow.
 
 - source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase import-bundle!][resources/packages/registry/registry/impls.clj:788]]
+- same file :: [[file:packages.org::#packages/publish-package-apply][publish-package-apply]], [[file:packages.org::#packages/upsert-pin!][upsert-pin!]]
 
 * 28. reconcile-bundle-scope!
 :PROPERTIES:
@@ -354,6 +377,7 @@ The WRITE half of the export/import pair — ~POST /api/import/graph~ applies an
 Snapshot semantics for a runtime import (~?prune=true~): within exactly the bundle's namespaces, a deterministic-id fn the bundle no longer contains is TOMBSTONED on the branch (a ~:deleted-at~ version — so it hides an INHERITED fn too, not just a branch-local one, and the deletion propagates on merge). Never the boot reconciler's identity-plane purge, which would reach across branches. Referenced removals are kept + reported, loud.
 
 - source :: [[file:../../../src/graphden/packages/sync.clj::(defn reconcile-bundle-scope!][src/graphden/packages/sync.clj:461]]
+- same file :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]]
 
 * 29. bundle->files
 :PROPERTIES:

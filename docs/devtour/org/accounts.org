@@ -18,6 +18,7 @@ The opt-in identity layer (docs/ACCOUNTS.md): one account, many sign-in identiti
 The heart of account-LINKING: a social sign-in resolves to an existing identity, auto-links onto an account that owns the same VERIFIED email, or creates a fresh account — in that order. One person, many sign-in methods, one stable account-id for authz.
 
 - source :: [[file:../../../src/graphden/accounts/core.clj::(defn resolve-social-identity!][src/graphden/accounts/core.clj:169]]
+- same file :: [[file:accounts.org::#accounts/mint-session!][mint-session!]]
 
 * 2. mint-session!
 :PROPERTIES:
@@ -30,6 +31,7 @@ The heart of account-LINKING: a social sign-in resolves to an existing identity,
 Sessions are rows, not JWTs: the raw token exists exactly once (the return value); storage keeps only its SHA-256. ~kind~ overloads the same row for verify links and pending-2FA steps — kinds outside nil/"api" never authenticate, so a verify link can't become a bearer.
 
 - source :: [[file:../../../src/graphden/accounts/core.clj::(defn mint-session!][src/graphden/accounts/core.clj:212]]
+- same file :: [[file:accounts.org::#accounts/resolve-social-identity!][resolve-social-identity!]]
 
 * 3. accounts-provider
 :PROPERTIES:

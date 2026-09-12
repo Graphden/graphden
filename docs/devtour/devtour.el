@@ -174,7 +174,8 @@
         (fill-region start (point-max))
         (devtour--render-markdown start))
       (dolist (pair (list (cons "see also" (plist-get step :see))
-                          (cons "referenced from" (plist-get step :refs))))
+                          (cons "referenced from" (plist-get step :refs))
+                          (cons "same file" (plist-get step :siblings))))
         (when (cdr pair)
           (insert (propertize (format "\n%s: %s\n" (car pair)
                                       (mapconcat #'cdr (cdr pair) ", "))
@@ -289,10 +290,11 @@ With prefix ARG, start from the first step instead."
                  t))
 
 (defun devtour-see-also ()
-  "Follow one of this step's see-also / referenced-from links."
+  "Follow one of this step's see-also / referenced-from / same-file links."
   (interactive)
   (let* ((step (devtour--step))
-         (links (append (plist-get step :see) (plist-get step :refs))))
+         (links (append (plist-get step :see) (plist-get step :refs)
+                        (plist-get step :siblings))))
     (unless links (user-error "devtour: no links on this step"))
     (let* ((pick (if (cdr links)
                      (completing-read "Link: " (mapcar #'cdr links) nil t)

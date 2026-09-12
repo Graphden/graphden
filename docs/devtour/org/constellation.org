@@ -21,6 +21,7 @@ The whole open-core split hangs off ONE environment variable. Core runs as-is wi
 
 - source :: [[file:../../../src/graphden/system/config.clj::(defn addon-config-resources][src/graphden/system/config.clj:57]]
 - see also :: [[file:boot.org::#boot/read-config][read-config]]
+- same file :: [[file:boot.org::#boot/read-config][read-config]], [[file:constellation.org::#constellation/merge-addon][merge-addon]]
 
 * 2. merge-addon
 :PROPERTIES:
@@ -34,6 +35,7 @@ How a fragment attaches: its ~:graphden/require~ directive loads the addon's nam
 
 - source :: [[file:../../../src/graphden/system/config.clj::(defn- merge-addon][src/graphden/system/config.clj:68]]
 - see also :: [[file:boot.org::#boot/context][context]], [[file:boot.org::#boot/dispatch-first][dispatch-first]]
+- same file :: [[file:boot.org::#boot/read-config][read-config]], [[file:constellation.org::#constellation/addon-config-resources][addon-config-resources]]
 
 * 3. install-org-cap-fn!
 :PROPERTIES:
@@ -47,6 +49,7 @@ The only policy seam core exposes as a mutable slot. ~graphden.tenancy.context~ 
 
 - source :: [[file:../../../src/graphden/tenancy/context.clj::(defn install-org-cap-fn!][src/graphden/tenancy/context.clj:130]]
 - see also :: [[file:platform.org::#platform/platform-tier?][platform-tier?]]
+- same file :: [[file:platform.org::#platform/platform-tier?][platform-tier?]], [[file:platform.org::#platform/notify!][notify!]], [[file:constellation.org::#constellation/tenancy-addon-active?][tenancy-addon-active?]]
 
 * 4. tenancy-addon-active?
 :PROPERTIES:
@@ -59,6 +62,7 @@ The only policy seam core exposes as a mutable slot. ~graphden.tenancy.context~ 
 …and the one fact server-rendered copy is allowed to branch on: is the addon installed at all. Not a config flag, not a tier — the installed predicate itself. The editor derives the same answer from capability headers, so nothing is duplicated client-side; a page that says 'organisation' only when there are organisations gets it from here.
 
 - source :: [[file:../../../src/graphden/tenancy/context.clj::(defn tenancy-addon-active?][src/graphden/tenancy/context.clj:138]]
+- same file :: [[file:platform.org::#platform/platform-tier?][platform-tier?]], [[file:platform.org::#platform/notify!][notify!]], [[file:constellation.org::#constellation/install-org-cap-fn!][install-org-cap-fn!]]
 
 * 5. every-addon-facing-var-still-resolves-test
 :PROPERTIES:
@@ -85,6 +89,7 @@ The other kind of sibling: an external Type-2 package (code + fn-defs in its own
 
 - source :: [[file:../../../src/graphden/packages/manifest.clj::(defn read-manifest][src/graphden/packages/manifest.clj:32]]
 - see also :: [[file:boot.org::#boot/packages][packages]], [[file:packages.org::#packages/load-default-packages][load-default-packages]]
+- same file :: [[file:constellation.org::#constellation/extra-deps][extra-deps]]
 
 * 7. extra-deps
 :PROPERTIES:
@@ -98,6 +103,7 @@ Where the manifest meets tools.deps. The ~{lib coord}~ map the build basis adds 
 
 - source :: [[file:../../../src/graphden/packages/manifest.clj::(defn extra-deps][src/graphden/packages/manifest.clj:48]]
 - see also :: [[file:packages.org::#packages/install!][install!]]
+- same file :: [[file:constellation.org::#constellation/read-manifest][read-manifest]]
 
 * 8. -main
 :PROPERTIES:
@@ -111,3 +117,4 @@ Same ~-main~, second reading: graphden-cloud's ~:run~ alias starts THIS namespac
 
 - source :: [[file:../../../src/graphden/executor_runtime/core.clj::(defn -main][src/graphden/executor_runtime/core.clj:187]]
 - see also :: [[file:boot.org::#boot/boot!][boot!]], [[file:boot.org::#boot/read-config][read-config]]
+- same file :: [[file:boot.org::#boot/-main][-main]], [[file:boot.org::#boot/boot!][boot!]]

@@ -149,7 +149,8 @@ function linkBlock(step) {
     ? '<div class=grp><span class=lbl>' + label + '</span>' +
     items.map(x => '<a data-gi="' + x.gi + '">' + esc(x.label) + '</a>').join('') + '</div>'
     : '';
-  const html = grp(T.seeAlso, step.see) + grp(T.refs, step.refs);
+  const html = grp(T.seeAlso, step.see) + grp(T.refs, step.refs)
+    + grp(T.sameFile, step.siblings);
   return html ? '<div class=links>' + html + '</div>' : '';
 }
 

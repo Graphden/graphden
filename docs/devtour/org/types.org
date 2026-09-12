@@ -20,6 +20,7 @@ after: executor
 Start with the leaf vocabulary. This is the flat enum of primitive value-kinds plus the special ~:any~ (top) and ~:never~ (bottom). Every type in the system is built from these, so nothing structural makes sense until you have them.
 
 - source :: [[file:../../../src/graphden/types/core/shapes.clj::(def primitives][src/graphden/types/core/shapes.clj:23]]
+- same file :: [[file:types.org::#types/child-types][child-types]], [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
 * 2. child-types
 :PROPERTIES:
@@ -32,6 +33,7 @@ Start with the leaf vocabulary. This is the flat enum of primitive value-kinds p
 The type grammar in one function: every compound arm — record maps, ~[:list]~, ~[:map]~, ~[:tuple]~, ~[:refine]~, ~[:secret]~, ~[:union]~, ~[:fn]~ — and how each recurses. This doubles as the map of how records / unions / variants / fn-types are represented.
 
 - source :: [[file:../../../src/graphden/types/core/shapes.clj::(defn child-types][src/graphden/types/core/shapes.clj:417]]
+- same file :: [[file:types.org::#types/primitives][primitives]], [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
 * 3. well-formed?
 :PROPERTIES:
@@ -44,6 +46,7 @@ The type grammar in one function: every compound arm — record maps, ~[:list]~,
 The syntactic validity guard at the boundary between user input (fns.edn / the API) and the rest of the module. Reading it cements the exact shape of each type kind: fn args-map, effects set, refine base, secret inner.
 
 - source :: [[file:../../../src/graphden/types/core.clj::(defn well-formed?][src/graphden/types/core.clj:153]]
+- same file :: [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 
 * 4. make-union
 :PROPERTIES:
@@ -56,6 +59,7 @@ The syntactic validity guard at the boundary between user input (fns.edn / the A
 The smart constructor for ~[:union …]~: flatten, dedupe, absorb ~:never~, and drop any member subsumed by another. This canonical union shape is what the rest of the system relies on — and your introduction to sum types.
 
 - source :: [[file:../../../src/graphden/types/core.clj::(defn make-union][src/graphden/types/core.clj:230]]
+- same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 
 * 5. desugar-variant
 :PROPERTIES:
@@ -68,6 +72,7 @@ The smart constructor for ~[:union …]~: flatten, dedupe, absorb ~:never~, and 
 Rewrites ~[:variant tag T …]~ into a structural union of tag-pinned records. Shows how the higher-level variant sugar reduces to the union + refinement machinery you just met — no new runtime concept needed.
 
 - source :: [[file:../../../src/graphden/types/core.clj::(defn desugar-variant][src/graphden/types/core.clj:329]]
+- same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 
 * 6. subtype?
 :PROPERTIES:
@@ -82,6 +87,7 @@ The heart of assignability: reflexive / transitive subtyping across primitives, 
 It is one ~cond~ ladder and the ORDER is the semantics: the universal yes/no arms first (identity, ~:any~, ~:never~, the typevar → ~:jsonb~ escape), then the ~:empty-map~ sentinel, unions (EVERY member on the left, SOME member on the right), primitives, ~:jsonb~, refinements, the structural shapes, and the ~:secret~ marker last. Don't hold the whole ladder in your head — find the arm for the pair of shapes you are asking about and read the comment that argues for it.
 
 - source :: [[file:../../../src/graphden/types/core.clj::(defn subtype?][src/graphden/types/core.clj:1224]]
+- same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 - referenced from :: [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
 * 7. constraint-implies?
@@ -96,6 +102,7 @@ Decides when one refinement constraint entails another (numeric bounds, ~:in~ / 
 
 - source :: [[file:../../../src/graphden/types/core.clj::(defn constraint-implies?][src/graphden/types/core.clj:1160]]
 - see also :: [[file:types.org::#types/subtype?][subtype?]]
+- same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 
 * 8. unify
 :PROPERTIES:
@@ -110,6 +117,7 @@ Robinson unification with occurs-check and subtype-aware leniency, plus a union 
 Same shape as ~subtype?~, so read it the same way: one ~cond~ over the normalised pair — typevar arms bind first (with the occurs check), then structural recursion into fn / list / record shapes, then the union fallback. It returns a substitution map or the ~::fail~ sentinel that ~unify-ok?~ / ~unify-fail?~ just below test for.
 
 - source :: [[file:../../../src/graphden/types/core.clj::(defn unify][src/graphden/types/core.clj:1652]]
+- same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/strip-null][strip-null]]
 
 * 9. strip-null
 :PROPERTIES:
@@ -122,6 +130,7 @@ Same shape as ~subtype?~, so read it the same way: one ~cond~ over the normalise
 The single source of truth for nullability narrowing: remove ~:null~ from a top-level union (bare ~:null~ → ~:never~) while NEVER stripping a ~:secret~. The canonical example of type narrowing, shared by control-flow refinement and the ~:coalesce~ rule.
 
 - source :: [[file:../../../src/graphden/types/core.clj::(defn strip-null][src/graphden/types/core.clj:306]]
+- same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]]
 
 * 10. taint-with-secret-if-tainted
 :PROPERTIES:
@@ -135,6 +144,7 @@ The ~:return-type-rule~ propagator that wraps a fn's return in ~[:secret …]~ w
 
 - source :: [[file:../../../src/graphden/types/core/shapes.clj::(defn taint-with-secret-if-tainted][src/graphden/types/core/shapes.clj:485]]
 - see also :: [[file:types.org::#types/subtype?][subtype?]]
+- same file :: [[file:types.org::#types/primitives][primitives]], [[file:types.org::#types/child-types][child-types]]
 - referenced from :: [[file:crud.org::#crud/create-secret][create-secret]]
 
 * 11. classify-literal
@@ -160,6 +170,7 @@ Infers a structural type from a literal Clojure value (records, header maps, ~[:
 Verifies one binding's ~actual~ ⊆ ~expected~, running ~unify~ when type-vars are present and handling the ~:any~ / ~:never~ / refinement-on-literal escape hatches. The atomic unit of type-checking, tying together ~subtype?~, ~unify~, and ~classify-literal~.
 
 - source :: [[file:../../../src/graphden/types/check.clj::(defn- check-binding!][src/graphden/types/check.clj:490]]
+- same file :: [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 
 * 13. signature-return
 :PROPERTIES:
@@ -172,6 +183,7 @@ Verifies one binding's ~actual~ ⊆ ~expected~, running ~unify~ when type-vars a
 The declared-signature engine: when a root base-fn has no hand ~:return-type-rule~, the polymorphic declaration itself computes the return — unify each var-carrying declared arg against the actual type at the site, resolve the declared return through the substitution. ~:coll [:list a] → [:union :null a]~ IS the rule; the hand-written rules that survive are only those reading literal values, union fan-out, or the registry.
 
 - source :: [[file:../../../src/graphden/types/check.clj::(defn signature-return][src/graphden/types/check.clj:2135]]
+- same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 
 * 14. check-fn-def!
 :PROPERTIES:
@@ -184,6 +196,7 @@ The declared-signature engine: when a root base-fn has no hand ~:return-type-rul
 Type-checks a single fn-def against its (single or multiple- inheritance) parents: resolve parent slots, run the monotonicity / unknown-slot / effect guards, unify bindings, compute the return via type-rules, propagate effects, and snapshot the rich-type into the registry. The per-node checker the sweep repeats.
 
 - source :: [[file:../../../src/graphden/types/check.clj::(defn check-fn-def!][src/graphden/types/check.clj:2418]]
+- same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 - referenced from :: [[file:crud.org::#crud/type-check-fn-after-mutation!][type-check-fn-after-mutation!]]
 
 * 15. check-all-defs!
@@ -197,6 +210,7 @@ Type-checks a single fn-def against its (single or multiple- inheritance) parent
 The whole-graph sweep entry point: fold ~check-fn-def!~ over topologically-ordered fn-defs so each def's computed rich-type is registered before its dependents read it. This is how the entire graph is checked end to end.
 
 - source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2538]]
+- same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 - referenced from :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]]
 
 * 16. record-rich-types!
@@ -211,6 +225,7 @@ Where the sweep's answers are KEPT. The rich-types registry is the in-memory ~{f
 
 - source :: [[file:../../../src/graphden/executor/registry/core.clj::(defn record-rich-types!][src/graphden/executor/registry/core.clj:438]]
 - see also :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:web.org::#web/api-rich-types][api-rich-types]]
+- same file :: [[file:types.org::#types/rich-type-of-id][rich-type-of-id]]
 
 * 17. rich-type-of-id
 :PROPERTIES:
@@ -223,3 +238,4 @@ Where the sweep's answers are KEPT. The rich-types registry is the in-memory ~{f
 …and how it is READ — by fn *id*, not name. Names are per-namespace labels and may repeat; ids cannot (docs/adr/ADR-identity-model.md, enforced in CI by ~id_resolution_guard_test~). The ~:by-name~ index survives only for base-fns and legacy call sites. Before you key any new registry or dispatch by name, read the ADR — this is the mistake it exists to stop.
 
 - source :: [[file:../../../src/graphden/executor/registry/core.clj::(defn rich-type-of-id][src/graphden/executor/registry/core.clj:646]]
+- same file :: [[file:types.org::#types/record-rich-types!][record-rich-types!]]

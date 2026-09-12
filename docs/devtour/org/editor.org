@@ -99,6 +99,7 @@ The pivot from client logic to server-rendered HTML. ONE delegated listener per 
 
 - source :: [[file:../../../resources/packages/web/runtime/graphden-runtime.js::function bindActionDispatch(host) {][resources/packages/web/runtime/graphden-runtime.js:78]]
 - see also :: [[file:web.org::#web/hiccup-element][hiccup-element]]
+- same file :: [[file:editor.org::#editor/loadPartial][loadPartial]]
 - referenced from :: [[file:web.org::#web/hiccup-element][hiccup-element]]
 
 * 8. loadPartial
@@ -112,6 +113,7 @@ The pivot from client logic to server-rendered HTML. ONE delegated listener per 
 Fetch an HTML partial, swap it into a host, re-bind the dispatcher. That is the whole ~/partials/*~ client contract ([[../PARTIALS.md][docs/PARTIALS.md]]) — the migration path by which popovers that used to be hand-built DOM became graph-native fn-defs. The supersession token is the subtle part: two concurrent loads into one host must let the LATEST call win, not the fastest response.
 
 - source :: [[file:../../../resources/packages/web/runtime/graphden-runtime.js::async function loadPartial(host, url, opts) {][resources/packages/web/runtime/graphden-runtime.js:123]]
+- same file :: [[file:editor.org::#editor/bindActionDispatch][bindActionDispatch]]
 - referenced from :: [[file:web.org::#web/hiccup-element][hiccup-element]]
 
 * 9. loadRowActionsContent

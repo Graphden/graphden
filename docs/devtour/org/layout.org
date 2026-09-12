@@ -20,6 +20,7 @@ after: web
 Stage 1's data pull — every fn / slot / fn-slot / binding / list-item row in one branch-cached batch (versioned) or five vanilla queries. The whole pipeline is a pure transform over this snapshot; a per-context graph cache keeps hover-frequency layout requests from re-reading storage.
 
 - source :: [[file:../../../src/graphden/layout/data.clj::(defn load-graph-entities-uncached][src/graphden/layout/data.clj:324]]
+- same file :: [[file:layout.org::#layout/derive-fn-slot-views][derive-fn-slot-views]]
 
 * 2. derive-fn-slot-views
 :PROPERTIES:
@@ -32,6 +33,7 @@ Stage 1's data pull — every fn / slot / fn-slot / binding / list-item row in o
 Synthesizes the per-fn 'arg view' rows the walkers consume: for each fn, its inherited slot surface with bindings overlaid closer-fn-wins, plus the ~:source-id~ chains that let an edge attribute an inherited slot to the ancestor that declared it. The slot/binding model's read-side counterpart.
 
 - source :: [[file:../../../src/graphden/layout/data.clj::(defn derive-fn-slot-views][src/graphden/layout/data.clj:264]]
+- same file :: [[file:layout.org::#layout/load-graph-entities-uncached][load-graph-entities-uncached]]
 - referenced from :: [[file:editor.org::#editor/createFnOverlay][createFnOverlay]]
 
 * 3. build-graph-elements

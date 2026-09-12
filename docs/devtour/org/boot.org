@@ -21,6 +21,7 @@ after: storage, packages
 
 - source :: [[file:../../../src/graphden/executor_runtime/core.clj::(defn -main][src/graphden/executor_runtime/core.clj:187]]
 - see also :: [[file:boot.org::#boot/boot!][boot!]], [[file:services.org::#services/reconcile-once!][reconcile-once!]]
+- same file :: [[file:boot.org::#boot/boot!][boot!]], [[file:constellation.org::#constellation/-main][-main]]
 
 * 2. boot!
 :PROPERTIES:
@@ -33,6 +34,7 @@ after: storage, packages
 Start, or HALT the partial system and exit non-zero. Integrant does NOT auto-halt when an init-key throws, and several components have already spawned non-daemon threads by then — without this the JVM stays half-alive with no shutdown hook and ~/health~ can pass on a boot that actually failed. The partial system rides in the ex-info's ~:system~ key. Read the docstring: it is the incident this function exists for.
 
 - source :: [[file:../../../src/graphden/executor_runtime/core.clj::(defn boot!][src/graphden/executor_runtime/core.clj:167]]
+- same file :: [[file:boot.org::#boot/-main][-main]], [[file:constellation.org::#constellation/-main][-main]]
 - referenced from :: [[file:boot.org::#boot/-main][-main]], [[file:constellation.org::#constellation/-main][-main]]
 
 * 3. read-config
@@ -47,6 +49,7 @@ Configuration is data: Aero reads ~system-<profile>.edn~ (~:dev~ / ~:test~ / ~:p
 
 - source :: [[file:../../../src/graphden/system/config.clj::(defn read-config][src/graphden/system/config.clj:83]]
 - see also :: [[file:platform.org::#platform/platform-tier?][platform-tier?]]
+- same file :: [[file:constellation.org::#constellation/addon-config-resources][addon-config-resources]], [[file:constellation.org::#constellation/merge-addon][merge-addon]]
 - referenced from :: [[file:constellation.org::#constellation/addon-config-resources][addon-config-resources]], [[file:constellation.org::#constellation/-main][-main]]
 
 * 4. start!
@@ -101,6 +104,7 @@ Assembles the one ~ExecutionContext~ the whole process runs against, and it read
 
 - source :: [[file:../../../src/graphden/system/init/exec.clj::(defmethod ig/init-key :exec/context][src/graphden/system/init/exec.clj:125]]
 - see also :: [[file:executor.org::#executor/create-context][create-context]]
+- same file :: [[file:boot.org::#boot/compiled-registry][compiled-registry]]
 - referenced from :: [[file:constellation.org::#constellation/merge-addon][merge-addon]]
 
 * 8. compiled-registry
@@ -115,6 +119,7 @@ Two lines with a ~50s cost: compile every fn in the graph into a closure BEFORE 
 
 - source :: [[file:../../../src/graphden/system/init/exec.clj::(defmethod ig/init-key :exec/compiled-registry ][src/graphden/system/init/exec.clj:240]]
 - see also :: [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:executor.org::#executor/registry][registry]]
+- same file :: [[file:boot.org::#boot/context][context]]
 
 * 9. dispatch-first
 :PROPERTIES:

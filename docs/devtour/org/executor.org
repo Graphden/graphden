@@ -32,6 +32,7 @@ The dispatch heart of the hot path. It checks the cancellation / effect / execut
 
 - source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn execute][src/graphden/executor/compile_runtime.clj:1478]]
 - see also :: [[file:executor.org::#executor/registry][registry]]
+- same file :: [[file:executor.org::#executor/registry][registry]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 
 * 3. create-context
 :PROPERTIES:
@@ -44,6 +45,7 @@ The dispatch heart of the hot path. It checks the cancellation / effect / execut
 Builds the ~ExecutionContext~ the previous step reads from. It carries the storage handle, the ~:base-fns~ impl registry (snapshotted from the global default), a lazily-filled ~:compiled-registry~ holder, the graph/deps caches, and the authz/effect seams. Because scoping (e.g. which branch) lives here, the *same* ~fn-id~ run in two contexts can resolve to different code — this is where that happens.
 
 - source :: [[file:../../../src/graphden/executor/context.clj::(defn create-context][src/graphden/executor/context.clj:406]]
+- same file :: [[file:executor.org::#executor/fill-graph-cache!][fill-graph-cache!]]
 - referenced from :: [[file:executor.org::#executor/execute][execute]], [[file:versioning.org::#versioning/build-branch-ctx][build-branch-ctx]], [[file:boot.org::#boot/context][context]]
 
 * 4. fill-graph-cache!
@@ -57,6 +59,7 @@ Builds the ~ExecutionContext~ the previous step reads from. It carries the stora
 How the graph cache is FILLED on a miss — and why the install is guarded. A write that commits while a loader is reading storage finds an empty cache (nothing to splice) and primes the post-write graph through its delta path; an unguarded loader would then put its pre-write read back over it, and readers would miss the fn they just created until the next write. So a loader takes the ctx's invalidation epoch BEFORE reading and installs under the invalidation lock only while that epoch still holds — a stale read is discarded, never published.
 
 - source :: [[file:../../../src/graphden/executor/context.clj::(defn fill-graph-cache!][src/graphden/executor/context.clj:359]]
+- same file :: [[file:executor.org::#executor/create-context][create-context]]
 
 * 5. registry
 :PROPERTIES:
@@ -70,6 +73,7 @@ Returns the ~{fn-id -> closure}~ map from the context holder. A warm holder is s
 
 - source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn registry][src/graphden/executor/compile_runtime.clj:926]]
 - see also :: [[file:executor.org::#executor/rebuild!][rebuild!]]
+- same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 - referenced from :: [[file:executor.org::#executor/execute~2][execute]], [[file:boot.org::#boot/compiled-registry][compiled-registry]]
 
 * 6. rebuild!
@@ -84,6 +88,7 @@ The compile-at-startup pipeline in one form: ~read-graph~ from storage, then ~bu
 
 - source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn rebuild!][src/graphden/executor/compile_runtime.clj:607]]
 - see also :: [[file:executor.org::#executor/build-lookups][build-lookups]], [[file:executor.org::#executor/compile-all][compile-all]]
+- same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/registry][registry]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 - referenced from :: [[file:executor.org::#executor/registry][registry]], [[file:storage.org::#storage/ExecutionGraph][ExecutionGraph]], [[file:boot.org::#boot/compiled-registry][compiled-registry]]
 
 * 7. sync-fns-to-storage!
@@ -110,6 +115,7 @@ The opposite direction — and the reason there is a graph to read at all. Autho
 Indexes the raw graph rows — fns, slots, fn-slots, bindings, list-items — into the O(1) maps every compile helper consumes (~:fn-map~, ~:slot-map~, ~:bindings-by-fn~, the inheritance-chain cache, …). This is the in-memory materialization of the DB graph that the whole compile pass walks over.
 
 - source :: [[file:../../../src/graphden/executor/compile/lookups.clj::(defn build-lookups][src/graphden/executor/compile/lookups.clj:70]]
+- same file :: [[file:executor.org::#executor/root-fn][root-fn]]
 - referenced from :: [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:packages.org::#packages/resolve-slot-owner][resolve-slot-owner]], [[file:editor.org::#editor/buildLookups][buildLookups]]
 
 * 9. root-fn
@@ -123,6 +129,7 @@ Indexes the raw graph rows — fns, slots, fn-slots, bindings, list-items — in
 Walks a composed fn's ~parent-ids~ inheritance chain up to the parentless *root* that owns the slots and carries a registered impl. This is the base-fn resolution step: how an arbitrary composed ~fn-id~ maps to the primitive whose Clojure impl will actually run.
 
 - source :: [[file:../../../src/graphden/executor/compile/lookups.clj::(defn root-fn][src/graphden/executor/compile/lookups.clj:246]]
+- same file :: [[file:executor.org::#executor/build-lookups][build-lookups]]
 
 * 10. collect-bindings
 :PROPERTIES:
@@ -149,6 +156,7 @@ Topologically orders every impl-backed fn and compiles each in dependency order 
 
 - source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-all][src/graphden/executor/compile_eager.clj:1545]]
 - see also :: [[file:executor.org::#executor/compile-fn][compile-fn]]
+- same file :: [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/call-with-cache][call-with-cache]]
 - referenced from :: [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:types.org::#types/record-rich-types!][record-rich-types!]]
 
 * 12. compile-fn
@@ -163,6 +171,7 @@ Produces one fn's runtime closure ~(fn [fa ctx])~. It turns each classified bind
 
 - source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-fn][src/graphden/executor/compile_eager.clj:1244]]
 - see also :: [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]]
+- same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/call-with-cache][call-with-cache]]
 - referenced from :: [[file:executor.org::#executor/compile-all][compile-all]]
 
 * 13. arg-builder
@@ -177,6 +186,7 @@ Emits the per-binding ~(fn [fa ctx])~: ~:value~ becomes a constant, ~:free~ read
 
 - source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- arg-builder][src/graphden/executor/compile_eager.clj:1031]]
 - see also :: [[file:executor.org::#executor/resolve-arg][resolve-arg]]
+- same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/call-with-cache][call-with-cache]]
 - referenced from :: [[file:executor.org::#executor/collect-bindings][collect-bindings]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/resolve-arg][resolve-arg]], [[file:executor.org::#executor/map-fn][map-fn]]
 
 * 14. resolve-impl
@@ -191,6 +201,7 @@ Looks the base-fn's Clojure impl out of ~lookups[:base-fns]~ by the root fn's na
 
 - source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- resolve-impl][src/graphden/executor/compile_eager.clj:791]]
 - see also :: [[file:executor.org::#executor/defbase][defbase]]
+- same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/call-with-cache][call-with-cache]]
 - referenced from :: [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]]
 
 * 15. defbase
@@ -232,6 +243,7 @@ The read-side of laziness. Inside an impl this forces a ~thunk~ (calling it once
 Closes the loop. Child-callable invocations are memoised for the duration of one top-level ~execute~, keyed by ~[ref-id projected-free-args]~ in a per-call map (with a ~::nil~ sentinel and a size cap). This is how the lazy graph avoids recomputing the same sub-result and delivers a single cached value back up to the caller — the DRY principle, enforced at runtime.
 
 - source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- call-with-cache][src/graphden/executor/compile_eager.clj:704]]
+- same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]]
 
 * 18. map-fn
 :PROPERTIES:
@@ -269,6 +281,7 @@ Recursion. A bare graph cycle through ~ref-fn-id~ is rejected at write time (twi
 Which of a callback's free args are the per-element PARAMETERS and which are captured from the caller (docs/CLOSURE_CAPTURE.md). Resolution order: an authored ~:lambda-params~ on the fn-def (~[]~ = capture everything — handler chains), else the slot's structural ~[:fn {ARGS} RET]~ shape, accepted only when unambiguous. Everything ~hof-wrap~ does at call time was decided here at compile time.
 
 - source :: [[file:../../../src/graphden/executor/compile/renames.clj::(defn hof-lambda-params][src/graphden/executor/compile/renames.clj:1007]]
+- same file :: [[file:executor.org::#executor/build-ref-renames][build-ref-renames]], [[file:executor.org::#executor/compute-rename-aliases][compute-rename-aliases]]
 
 * 21. build-ref-renames
 :PROPERTIES:
@@ -282,6 +295,7 @@ Renames, call-site half. When F renames a slot that its ref R still exposes unde
 
 - source :: [[file:../../../src/graphden/executor/compile/renames.clj::(defn build-ref-renames][src/graphden/executor/compile/renames.clj:1116]]
 - see also :: [[file:crud.org::#crud/public-free-entries][public-free-entries]]
+- same file :: [[file:executor.org::#executor/hof-lambda-params][hof-lambda-params]], [[file:executor.org::#executor/compute-rename-aliases][compute-rename-aliases]]
 - referenced from :: [[file:packages.org::#packages/build-rename-slot-records][build-rename-slot-records]]
 
 * 22. compute-rename-aliases
@@ -295,3 +309,4 @@ Renames, call-site half. When F renames a slot that its ref R still exposes unde
 Renames, inherited half. An own rename slot whose source chain reaches OUTSIDE the root's slot set yields one alias per chain link, so an inner walker reading ~:branch-row~ finds the value the caller passed as ~:item~. Compile-time table, runtime copy — the worked example in the docstring is the one to trace by hand. This 1300-line namespace is the densest in the executor; these two entry points are its map.
 
 - source :: [[file:../../../src/graphden/executor/compile/renames.clj::(defn compute-rename-aliases][src/graphden/executor/compile/renames.clj:1200]]
+- same file :: [[file:executor.org::#executor/hof-lambda-params][hof-lambda-params]], [[file:executor.org::#executor/build-ref-renames][build-ref-renames]]

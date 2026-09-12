@@ -139,6 +139,26 @@ costs a search, but it should not be stale right after a bake)."
       (devtour-see-also))
     (should (/= devtour--pos i))))
 
+(ert-deftest devtour-same-file-links-exist-and-follow ()
+  "Steps sharing a file link to each other, and the picker follows one."
+  (devtour--load)
+  (let ((i (cl-position-if (lambda (s) (plist-get s :siblings))
+                           (append devtour--steps nil))))
+    (should i)
+    (let* ((step (aref devtour--steps i))
+           (sib (car (plist-get step :siblings))))
+      ;; a sibling is another step anchored in the same file
+      (should (equal (plist-get step :file)
+                     (plist-get (aref devtour--steps
+                                      (gethash (car sib) devtour--by-key))
+                                :file)))
+      (devtour--show i)
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_p cands &rest _) (car (last cands)))))
+        (devtour-see-also))
+      (should (/= devtour--pos i)))))
+
+
 (ert-deftest devtour-org-links-open-the-real-form ()
   "The generated org tree must link back into THIS checkout: the relative
 prefix resolves, and org's `::<head>' search lands on the anchored form."

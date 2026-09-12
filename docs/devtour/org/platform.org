@@ -20,6 +20,7 @@ after: services
 The one tenancy namespace that lives in core: ~*current-org*~ is the per-request thread-local the private addon binds, and this predicate is how core code asks ~am I the platform, or a tenant?~ without depending on the policy. Everything org-scoped downstream keys off this seam.
 
 - source :: [[file:../../../src/graphden/tenancy/context.clj::(defn platform-tier?][src/graphden/tenancy/context.clj:43]]
+- same file :: [[file:platform.org::#platform/notify!][notify!]], [[file:constellation.org::#constellation/install-org-cap-fn!][install-org-cap-fn!]], [[file:constellation.org::#constellation/tenancy-addon-active?][tenancy-addon-active?]]
 - referenced from :: [[file:boot.org::#boot/read-config][read-config]], [[file:constellation.org::#constellation/install-org-cap-fn!][install-org-cap-fn!]]
 
 * 2. notify!
@@ -33,6 +34,7 @@ The one tenancy namespace that lives in core: ~*current-org*~ is the per-request
 The notification seam — the same install-a-hook shape as the capability predicates, pointed the other way: core RAISES a domain event (~:package-moderated~ with the decided row) and the addon decides who is told and how (the publishing org's owner, through the accounts Mailer, on the trusted origin). Without an addon the event is dropped, and the sink's result is never inspected — a mail failure is the sender's to log, not the domain write's to undo.
 
 - source :: [[file:../../../src/graphden/tenancy/context.clj::(defn notify!][src/graphden/tenancy/context.clj:176]]
+- same file :: [[file:platform.org::#platform/platform-tier?][platform-tier?]], [[file:constellation.org::#constellation/install-org-cap-fn!][install-org-cap-fn!]], [[file:constellation.org::#constellation/tenancy-addon-active?][tenancy-addon-active?]]
 
 * 3. single-token-provider
 :PROPERTIES:
@@ -57,6 +59,7 @@ Auth is provider-driven: core ships this single-token default behind the ~:auth/
 The effect gate's registry of what a sandboxed graph must NOT do — env / io / network / process / raw-sql — with the docstring explaining why ~:raw-sql~ exists separately from ~:db~. The gate mechanism (~record-effect!~ throwing outside ~*allowed-effects*~) lives in core; the addon only chooses the policy sets.
 
 - source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(def cloud-forbidden-effects][src/graphden/executor/compile_runtime.clj:1217]]
+- same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/registry][registry]], [[file:executor.org::#executor/rebuild!][rebuild!]]
 
 * 5. check-target!
 :PROPERTIES:

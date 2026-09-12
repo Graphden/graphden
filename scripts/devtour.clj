@@ -286,6 +286,7 @@
    :after "after:"
    :seeAlso "see also"
    :refs "referenced from"
+   :sameFile "same file"
    :copyPath "click to copy path:line"
    :copied "copied:"
    :openEmacs "emacs"
@@ -360,10 +361,63 @@
           steps)))
 
 
+(defn- link-steps
+  "Resolve every step's cross-links, in the order they depend on each other:
+   the authored see-also targets first, then the reverse `:refs` backlinks built
+   from them (a step should say who points AT it, not only where it points), and
+   the same-file `:siblings` — what else the tour covers in this file, the
+   question you have while reading one of them. Throws on a see-also target that
+   is missing or ambiguous."
+  [spine]
+  (let [by-gi (into {} (map (juxt :gi identity)) spine)
+        by-key (reduce (fn [m s] (update m [(:block s) (:defn s)] (fnil conj []) (:gi s)))
+                       {} spine)
+        resolve-see
+        (fn [owner raw]
+          (mapv (fn [pair]
+                  (let [k [(name (first pair)) (str (second pair))]
+                        hits (get by-key k)]
+                    (when-not hits
+                      (throw (ex-info (str "see-also target not found: " k
+                                           " (from " owner ")") {})))
+                    (when (> (count hits) 1)
+                      (throw (ex-info (str "see-also ambiguous: " k " (from " owner
+                                           ") — target appears " (count hits) "x") {})))
+                    {:gi (first hits)
+                     :key (:key (by-gi (first hits)))
+                     :label (second k)}))
+                raw))
+        linked (mapv (fn [s]
+                       (cond-> s
+                         (:raw-see s) (assoc :see (resolve-see (:defn s) (:raw-see s)))))
+                     spine)
+        by-file (group-by :file linked)
+        siblings (into {}
+                       (for [s linked
+                             :let [others (remove #(= (:gi %) (:gi s)) (by-file (:file s)))]
+                             :when (seq others)]
+                         [(:gi s) (mapv (fn [o]
+                                          {:gi (:gi o) :key (:key o)
+                                           :label (str (:defn o))})
+                                        (sort-by :gi others))]))
+        refs (reduce (fn [m s]
+                       (reduce (fn [m {:keys [gi]}]
+                                 (update m gi (fnil conj [])
+                                         {:gi (:gi s) :key (:key s) :label (:defn s)}))
+                               m (:see s)))
+                     {} linked)]
+    (mapv (fn [s]
+            (-> s
+                (cond-> (seq (refs (:gi s))) (assoc :refs (vec (refs (:gi s)))))
+                (cond-> (seq (siblings (:gi s))) (assoc :siblings (siblings (:gi s))))
+                (dissoc :raw-see :block)))
+          linked)))
+
+
 (defn- build-model
   "Resolve every toured block's anchors; validate stubs + :after edges; assign
-   each toured step a stable global index, a stable key, and resolve its
-   see-also links (plus the reverse `:refs` backlinks) to those. Steps are
+   each toured step a stable global index and a stable key, then hand the spine
+   to `link-steps` for its cross-links. Steps are
    identified by index, NOT by (block, defn) — a block may legitimately tour
    two forms of the same name (e.g. the executor's two `execute`s). Throws with
    block/step context on any bad anchor, and on a see-also target that is
@@ -394,43 +448,7 @@
                                                              (ex-message e))
                                                         (ex-data e) e)))))))))))
           spine (mapcat #(or (:steps %) []) base)
-          by-gi (into {} (map (juxt :gi identity)) spine)
-          by-key (reduce (fn [m s] (update m [(:block s) (:defn s)] (fnil conj []) (:gi s)))
-                         {} spine)
-          resolve-see
-          (fn [owner raw]
-            (mapv (fn [pair]
-                    (let [k [(name (first pair)) (str (second pair))]
-                          hits (get by-key k)]
-                      (when-not hits
-                        (throw (ex-info (str "see-also target not found: " k
-                                             " (from " owner ")") {})))
-                      (when (> (count hits) 1)
-                        (throw (ex-info (str "see-also ambiguous: " k " (from " owner
-                                             ") — target appears " (count hits) "x") {})))
-                      {:gi (first hits)
-                       :key (:key (by-gi (first hits)))
-                       :label (second k)}))
-                  raw))
-          ;; forward links first, then the reverse index built from them: a
-          ;; step should say who points AT it, not only where it points.
-          linked (mapv (fn [s]
-                         (cond-> s
-                           (:raw-see s) (assoc :see (resolve-see (:defn s) (:raw-see s)))))
-                       spine)
-          refs (reduce (fn [m s]
-                         (reduce (fn [m {:keys [gi]}]
-                                   (update m gi (fnil conj [])
-                                           {:gi (:gi s) :key (:key s) :label (:defn s)}))
-                                 m (:see s)))
-                       {} linked)
-          finalized (into {} (map (fn [s]
-                                    [(:gi s)
-                                     (-> s
-                                         (cond-> (seq (refs (:gi s)))
-                                           (assoc :refs (vec (refs (:gi s)))))
-                                         (dissoc :raw-see :block))]))
-                          linked)
+          finalized (into {} (map (juxt :gi identity)) (link-steps spine))
           blocks' (mapv (fn [b]
                           (cond-> b
                             (:steps b)
@@ -603,6 +621,14 @@
                                                   ".org::#" key "][" label "]]")))
                                       (str/join ", "))
                                  "\n"))
+                          (when (seq (:siblings s))
+                            (str "- " (:sameFile ui) " :: "
+                                 (->> (:siblings s)
+                                      (map (fn [{:keys [key label]}]
+                                             (str "[[file:" (first (str/split key #"/"))
+                                                  ".org::#" key "][" label "]]")))
+                                      (str/join ", "))
+                                 "\n"))
                           (when (seq (:refs s))
                             (str "- " (:refs ui) " :: "
                                  (->> (:refs s)
@@ -692,6 +718,7 @@
                                          " :head " (el-str (:head s))
                                          " :see " (el-links (:see s))
                                          " :refs " (el-links (:refs s))
+                                         " :siblings " (el-links (:siblings s))
                                          "\n     :say " (el-str (plain-prose (:say s))) ")")))
                              (str/join "\n    "))
                         "))")))

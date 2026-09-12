@@ -20,6 +20,7 @@ after: storage, types
 The HTTP boundary where a mutation first becomes structured data: pull ~type~ / ~id~ out of a write request, preferring reitit ~:path-params~ and falling back to raw-URI parsing.
 
 - source :: [[file:../../../src/graphden/crud/request.clj::(defn extract-entity-params][src/graphden/crud/request.clj:128]]
+- same file :: [[file:crud.org::#crud/read-json-body][read-json-body]]
 
 * 2. read-json-body
 :PROPERTIES:
@@ -32,6 +33,7 @@ The HTTP boundary where a mutation first becomes structured data: pull ~type~ / 
 Normalizes the Ring body (string / InputStream / already-parsed) into a keyword-keyed Clojure map — the payload every entity write is built from.
 
 - source :: [[file:../../../src/graphden/crud/request.clj::(defn read-json-body][src/graphden/crud/request.clj:147]]
+- same file :: [[file:crud.org::#crud/extract-entity-params][extract-entity-params]]
 
 * 3. resolve-branch-ref
 :PROPERTIES:
@@ -57,6 +59,7 @@ Resolves the target branch (by UUID or name) so a write lands on the right versi
 The generic single-row write entry point, and the best first stop for the whole write path: it sequences every stage — capability gate, ~write-rej~ validation, ~sp/create-entity~, then invalidate + notify.
 
 - source :: [[file:../../../src/graphden/crud/entities.clj::(defn create-entity][src/graphden/crud/entities.clj:157]]
+- same file :: [[file:crud.org::#crud/apply-create-core][apply-create-core]]
 - referenced from :: [[file:constellation.org::#constellation/every-addon-facing-var-still-resolves-test][every-addon-facing-var-still-resolves-test]]
 
 * 5. write-rej
@@ -83,6 +86,7 @@ The pre-write rejection gate that ~create-entity~ / ~update-entity~ consult. It 
 A multi-row atomic write unit: fn-row + N slot-rows + N fn-slot junctions, appending each success to a shared ~journal~ atom. Shows how one logical create fans out into many graph rows.
 
 - source :: [[file:../../../src/graphden/crud/entities/record_type.clj::(defn apply-create-record-type-body][src/graphden/crud/entities/record_type.clj:94]]
+- same file :: [[file:crud.org::#crud/apply-create-rollback][apply-create-rollback]]
 
 * 7. apply-create-rollback
 :PROPERTIES:
@@ -95,6 +99,7 @@ A multi-row atomic write unit: fn-row + N slot-rows + N fn-slot junctions, appen
 The ~:try~ on-throw partner: replay the ~journal~ in reverse, best-effort deleting each row. This is how atomicity is achieved here WITHOUT a DB transaction — the compensating half of the body above.
 
 - source :: [[file:../../../src/graphden/crud/entities/record_type.clj::(defn apply-create-rollback][src/graphden/crud/entities/record_type.clj:114]]
+- same file :: [[file:crud.org::#crud/apply-create-record-type-body][apply-create-record-type-body]]
 
 * 8. apply-create-core
 :PROPERTIES:
@@ -107,6 +112,7 @@ The ~:try~ on-throw partner: replay the ~journal~ in reverse, best-effort deleti
 The atomic core for generic creates: create-or-humanise-error, a post-create whole-fn type-check, and the rename-slot side-effect. Since error-tolerance Phase 2 an ORDINARY type-check failure no longer rolls the row back — the write is kept and the diagnostics surface as ~:type-warnings~ on the success envelope. One class is carved out: a SECRET-flow diagnostic still deletes the row and returns the legacy ~{:error …}~ (the guarantee must not rest on the derived diagnostics store — docs/SECRETS.md).
 
 - source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:555]]
+- same file :: [[file:crud.org::#crud/create-entity][create-entity]]
 - referenced from :: [[file:web.org::#web/write-rej][write-rej]]
 
 * 9. type-check-fn-after-mutation!
@@ -183,6 +189,7 @@ The ~/api/execute~ orchestrator: resolve fn + version + free-arg slots, acquire 
 Atomically writes the ~:fn-execution~ row plus its per-arg (~:fn-execution-arg~ / ~-item~) rows — the concrete ~an execution becomes persisted graph rows~ step.
 
 - source :: [[file:../../../src/graphden/crud/fn_execution/persist.clj::(defn create-pending-with-args!][src/graphden/crud/fn_execution/persist.clj:340]]
+- same file :: [[file:crud.org::#crud/write-finished!][write-finished!]]
 
 * 15. write-finished!
 :PROPERTIES:
@@ -195,6 +202,7 @@ Atomically writes the ~:fn-execution~ row plus its per-arg (~:fn-execution-arg~ 
 Updates the execution row with the future's terminal outcome (result / error / cancelled, with taint redaction). Closes the loop so a polled execution reflects final persisted state.
 
 - source :: [[file:../../../src/graphden/crud/fn_execution/persist.clj::(defn write-finished!][src/graphden/crud/fn_execution/persist.clj:560]]
+- same file :: [[file:crud.org::#crud/create-pending-with-args!][create-pending-with-args!]]
 
 * 16. render-repr
 :PROPERTIES:
@@ -220,6 +228,7 @@ Typed value representations (docs/EXECUTION.md § Typed value representations) �
 The other direction of ~render-repr~: EDITING a value. A slot's effective type is classified into a form-descriptor tree — record, list, union, or leaf — purely, with aliases resolved and variants desugared, so the editor never has to know the type algebra. A depth guard keeps a recursive record type from unfolding forever.
 
 - source :: [[file:../../../src/graphden/crud/value_form.clj::(defn resolve-form][src/graphden/crud/value_form.clj:399]]
+- same file :: [[file:crud.org::#crud/build-form][build-form]]
 
 * 18. build-form
 :PROPERTIES:
@@ -232,6 +241,7 @@ The other direction of ~render-repr~: EDITING a value. A slot's effective type i
 …and the descriptor becomes hiccup: a record is a labelled fieldset, a union a branch ~<select>~ plus one sub-form per branch (the backend pre-selects the branch the current value fits), a leaf goes through the form-fn registry the ~app/forms~ package populates. This is what ~GET /partials/value-form~ returns and what the Inspector swaps in — server-rendered, HTMX-wired (docs/PARTIALS.md).
 
 - source :: [[file:../../../src/graphden/crud/value_form.clj::(defn build-form][src/graphden/crud/value_form.clj:720]]
+- same file :: [[file:crud.org::#crud/resolve-form][resolve-form]]
 
 * 19. run-captured!
 :PROPERTIES:

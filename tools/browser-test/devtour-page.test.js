@@ -56,7 +56,14 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails.p
 
   // see also + referenced from
   await p.goto(URL + '#executor/create-context'); await p.waitForTimeout(200);
-  ok((await p.locator('.links').innerText()).includes('referenced from'), 'backlinks shown');
+  const links = await p.locator('.links').innerText();
+  ok(links.includes('referenced from'), 'backlinks shown');
+  ok(links.includes('same file'), 'same-file steps shown');
+  const sib = p.locator('.links .grp').last().locator('a').first();
+  const sibName = await sib.innerText();
+  await sib.click(); await p.waitForTimeout(200);
+  ok((await p.locator('#crumb').innerText()).includes(sibName),
+     'same-file chip navigates: ' + sibName);
 
   // search
   await p.keyboard.press('/'); await p.waitForTimeout(120);

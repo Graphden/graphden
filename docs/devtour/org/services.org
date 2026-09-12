@@ -20,6 +20,7 @@ after: executor
 Start with what a service ROW is: this registers the ~:service~ entity plus the ~:restart-policy~ / ~:cardinality~ enums. A service is a desired-state ~keep this fn-id running~ declaration — not versioned, no args table — the thing everything downstream reconciles toward.
 
 - source :: [[file:../../../src/graphden/schema/services/schema.clj::(defn extend-builder][src/graphden/schema/services/schema.clj:299]]
+- same file :: [[file:services.org::#services/effective-pool-size][effective-pool-size]]
 
 * 2. effective-pool-size
 :PROPERTIES:
@@ -32,6 +33,7 @@ Start with what a service ROW is: this registers the ~:service~ entity plus the 
 Resolves a row's cardinality into an advisory-lock slot count: ~:per-pod~ → no lock, ~:singleton~ → 1, ~:pool~ → N. You need this singleton-vs-per-pod-vs-pool model before the reconciler's lock gating makes sense.
 
 - source :: [[file:../../../src/graphden/schema/services/schema.clj::(defn effective-pool-size][src/graphden/schema/services/schema.clj:154]]
+- same file :: [[file:services.org::#services/extend-builder][extend-builder]]
 
 * 3. diff-desired
 :PROPERTIES:
@@ -44,6 +46,7 @@ Resolves a row's cardinality into an advisory-lock slot count: ~:per-pod~ → no
 The pure policy core: given the enabled DB rows (desired) and the in-process ~running~ set (actual), return ~{:to-start :to-stop}~. It isolates the reconcile DECISION from side effects — the cleanest first look at the loop.
 
 - source :: [[file:../../../src/graphden/services/reconciler.clj::(defn diff-desired][src/graphden/services/reconciler.clj:77]]
+- same file :: [[file:services.org::#services/reconcile-once!][reconcile-once!]], [[file:services.org::#services/start-service!][start-service!]], [[file:services.org::#services/endpoint-of][endpoint-of]], [[file:services.org::#services/check-liveness!][check-liveness!]]
 
 * 4. reconcile-once!
 :PROPERTIES:
@@ -56,6 +59,7 @@ The pure policy core: given the enabled DB rows (desired) and the in-process ~ru
 One reconcile pass: read enabled rows, apply ~diff-desired~, detect config drift, and race advisory-lock slots. This is BOTH the edge-triggered handler (fired by ~:service~ CRUD / NOTIFY) and the level-triggered periodic tick — the placeholder it recomputes each pass is exactly what heals a crashed lock-owner on the next tick.
 
 - source :: [[file:../../../src/graphden/services/reconciler.clj::(defn reconcile-once!][src/graphden/services/reconciler.clj:675]]
+- same file :: [[file:services.org::#services/diff-desired][diff-desired]], [[file:services.org::#services/start-service!][start-service!]], [[file:services.org::#services/endpoint-of][endpoint-of]], [[file:services.org::#services/check-liveness!][check-liveness!]]
 - referenced from :: [[file:storage.org::#storage/create-listener][create-listener]], [[file:boot.org::#boot/-main][-main]]
 
 * 5. start-service!
@@ -69,6 +73,7 @@ One reconcile pass: read enabled rows, apply ~diff-desired~, detect config drift
 The supervisor that actually keeps a fn running: invoke the target fn via the executor and, on a startup failure, sleep + retry up to N times per the row's ~:restart-policy~, stamping ~:start-failed-at~ when exhausted so reconcile will not busy-loop. The ~how a service stays up~ answer that closes out the services half.
 
 - source :: [[file:../../../src/graphden/services/reconciler.clj::(defn start-service!][src/graphden/services/reconciler.clj:161]]
+- same file :: [[file:services.org::#services/diff-desired][diff-desired]], [[file:services.org::#services/reconcile-once!][reconcile-once!]], [[file:services.org::#services/endpoint-of][endpoint-of]], [[file:services.org::#services/check-liveness!][check-liveness!]]
 
 * 6. endpoint-of
 :PROPERTIES:
@@ -81,6 +86,7 @@ The supervisor that actually keeps a fn running: invoke the target fn via the ex
 A service that listens somewhere ANSWERS somewhere: the handle ~:http-server~ returns carries ~{:endpoint {:port p}}~ as metadata, and the pod that started it completes that with its own dialable host (the fleet ~:executor-id~, or loopback) before writing this copy's ~:service-instance~ row — host, port, and a heartbeat it refreshes every tick. Read this next because it is the write side of service-to-service — the fact every consumer resolves.
 
 - source :: [[file:../../../src/graphden/services/reconciler.clj::(defn endpoint-of][src/graphden/services/reconciler.clj:261]]
+- same file :: [[file:services.org::#services/diff-desired][diff-desired]], [[file:services.org::#services/reconcile-once!][reconcile-once!]], [[file:services.org::#services/start-service!][start-service!]], [[file:services.org::#services/check-liveness!][check-liveness!]]
 
 * 7. dependency-closure
 :PROPERTIES:
@@ -105,6 +111,7 @@ The write-time cycle check's closure, since a consumer named the editor's own li
 The per-tick liveness pass: a handle may also carry ~:alive?~ and ~:exit~ (http-kit's listener status; a ~:future~'s thread state and how it ended), so a copy that died IN PLACE is caught here — its row deleted, its lock released — and the row's ~:restart-policy~ finally means what it says: ~:always~ restarts any exit, ~:on-failure~ only a throw, ~:never~ parks it. Live copies just get their heartbeat.
 
 - source :: [[file:../../../src/graphden/services/reconciler.clj::(defn- check-liveness!][src/graphden/services/reconciler.clj:457]]
+- same file :: [[file:services.org::#services/diff-desired][diff-desired]], [[file:services.org::#services/reconcile-once!][reconcile-once!]], [[file:services.org::#services/start-service!][start-service!]], [[file:services.org::#services/endpoint-of][endpoint-of]]
 
 * 9. resolve-endpoint
 :PROPERTIES:
@@ -213,6 +220,7 @@ The churn-minimising planner: rather than diff against a fresh pack, do steepest
 The pure brain of one control pass: always emit initial placements for unheld cells, but gate rebalance moves behind ~:sustain-ticks~ so imbalance must PERSIST (not just spike) before cells move. Composes the packer + rebalancer into the actual control policy.
 
 - source :: [[file:../../../src/graphden/fleet/control_loop.clj::(defn plan-tick][src/graphden/fleet/control_loop.clj:63]]
+- same file :: [[file:services.org::#services/run-tick!][run-tick!]]
 
 * 18. run-tick!
 :PROPERTIES:
@@ -225,6 +233,7 @@ The pure brain of one control pass: always emit initial placements for unheld ce
 The side-effecting driver the leader-locked component runs each tick: read live cells + current placement, call ~plan-tick~, then realise each initial placement and sustained move through the ~move-fn~ seam. The loop that ties the whole fleet together.
 
 - source :: [[file:../../../src/graphden/fleet/control_loop.clj::(defn run-tick!][src/graphden/fleet/control_loop.clj:177]]
+- same file :: [[file:services.org::#services/plan-tick][plan-tick]]
 
 * 19. move-cell!
 :PROPERTIES:

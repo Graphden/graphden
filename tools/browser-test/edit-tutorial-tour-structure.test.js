@@ -19,7 +19,7 @@ const {
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, tourTitle,
   bindOptionalArgChip, appendFnRefViaChip, createRecordType,
-  clickTourAdvance,
+  clickTourAdvance, waitTourClosed,
 } = require('./tutorial-tour-helpers');
 
 (async () => {
@@ -283,8 +283,7 @@ const {
     }
     await waitTourTitle(page, "That's recursion", 30000);
     assert(await clickTourButton(page, 'Finish'), 'lesson 10 Finish');
-    await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
-      null, {timeout: 30000, polling: 200});
+    await waitTourClosed(page, 30000);
     console.log('  lesson 10: walked (reading tour — :fix, its step, its :self arm)');
 
     console.log('PASS');

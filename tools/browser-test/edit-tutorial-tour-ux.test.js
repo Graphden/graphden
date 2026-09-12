@@ -15,7 +15,7 @@ const {assert, newContext, api} = require('./edit-test-helpers');
 const {
   hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
   runViaRowActions, tourTitle, extendViaRowActions, bindFirstPlaceholder,
-  bindFnRefPlaceholder, finishAndDelete, runWithEffectAck,
+  bindFnRefPlaceholder, finishAndDelete, runWithEffectAck, waitTourClosed,
 } = require('./tutorial-tour-helpers');
 
 
@@ -67,8 +67,7 @@ const {
     assert(await clickTourButton(page, 'Next'), 'lesson 12 history Next');
     await waitTourTitle(page, "That's the run loop", 150000);
     assert(await clickTourButton(page, 'Finish'), 'lesson 12 Finish');
-    await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
-      null, {timeout: 30000, polling: 200});
+    await waitTourClosed(page, 30000);
     console.log('  lesson 12: walked (nothing created)');
 
     // ---------- Lesson 17 — Explorer and Inspector ----------
@@ -134,8 +133,7 @@ const {
       + await page.evaluate(() => location.hash));
     await waitTourTitle(page, "That's the view layer", 150000);
     assert(await clickTourButton(page, 'Finish'), 'lesson 17 Finish');
-    await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
-      null, {timeout: 30000, polling: 200});
+    await waitTourClosed(page, 30000);
     console.log('  lesson 17: walked (nothing created)');
 
     // ---------- lesson 18 — working without the mouse ----------
@@ -185,8 +183,7 @@ const {
     assert(await clickTourButton(page, 'Next'), 'lesson 18 canvas Next');
     await waitTourTitle(page, "That's the keyboard", 150000);
     assert(await clickTourButton(page, 'Finish'), 'lesson 18 Finish');
-    await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
-      null, {timeout: 30000, polling: 200});
+    await waitTourClosed(page, 30000);
     console.log('  lesson 18: walked (keyboard-only, nothing created)');
 
     // The '/' binding proper — fresh page, no tour in the key path.
@@ -238,8 +235,7 @@ const {
       null, {timeout: 15000, polling: 100});
     await waitTourTitle(page, "That's workspaces");
     assert(await clickTourButton(page, 'Finish'), 'lesson 19 Finish');
-    await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
-      null, {timeout: 30000, polling: 200});
+    await waitTourClosed(page, 30000);
     console.log('  lesson 19: walked (nothing created)');
 
     // ---------- Lesson 09 — in-graph state ----------

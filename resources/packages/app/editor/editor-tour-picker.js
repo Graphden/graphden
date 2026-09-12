@@ -24,13 +24,42 @@ function _tourDoneSet() {
   } catch (_) { return new Set(); }
 }
 
+// The whole history is ONE write, so marking, unmarking and clearing share it
+// — three callers each doing their own read/modify/write is how one of them
+// ends up persisting a Set (`"{}"`) instead of a list.
+function _tourWriteDone(done) {
+  try {
+    if (done.size) localStorage.setItem(TOUR_DONE_KEY, JSON.stringify([...done]));
+    else localStorage.removeItem(TOUR_DONE_KEY);
+  } catch (_) { /* private mode — the catalogue just won't remember */ }
+}
+
 function _tourMarkDone(lessonId) {
   if (!lessonId) return;
-  try {
-    const done = _tourDoneSet();
-    done.add(lessonId);
-    localStorage.setItem(TOUR_DONE_KEY, JSON.stringify([...done]));
-  } catch (_) { /* private mode — the catalogue just won't remember */ }
+  const done = _tourDoneSet();
+  done.add(lessonId);
+  _tourWriteDone(done);
+}
+
+// The ✓ is a claim about the READER, and readers are the only ones who know
+// whether it is still true: a lesson skipped step-by-step to see the end, or
+// one taken so long ago it needs re-reading, is marked done and should not be.
+// Taking the mark off is the same kind of act as putting it on — local, free,
+// and nothing else depends on it.
+function _tourUnmarkDone(lessonId) {
+  if (!lessonId) return false;
+  const done = _tourDoneSet();
+  if (!done.delete(lessonId)) return false;
+  _tourWriteDone(done);
+  return true;
+}
+
+// Start the whole catalogue over — a shared browser, a demo account, or a
+// second read-through of all thirty-nine.
+function _tourClearDone() {
+  const n = _tourDoneSet().size;
+  _tourWriteDone(new Set());
+  return n;
 }
 
 const REQUIRE_SIGNALS = {
@@ -88,6 +117,41 @@ function _tourRequirement(lesson) {
   };
 }
 
+// `id · Title` — the one label the catalogue, the resume row and the
+// end-of-lesson "next up" buttons all use, so a lesson reads the same
+// everywhere it is offered.
+function _tourLessonLabel(lesson) {
+  return lesson ? (lesson.id + ' · ' + (lesson.title || '')) : '';
+}
+
+// What to offer after `lessonId` finishes: `{next, unfinished}`.
+//
+// `next` is the one that comes NEXT in teaching order — the payload's order is
+// the reading order, so this is just the following entry, skipping whatever
+// this session cannot run (offering a locked lesson as the obvious next move
+// is a dead end, and the reader did not choose it from a catalogue this time).
+//
+// `unfinished` is the first one after it the reader has NOT done, and is only
+// returned when it differs from `next` — someone who took 08 out of order gets
+// both "the next one" and "the next NEW one" rather than a single button that
+// silently means one of them. With nothing unfinished left ahead, it wraps to
+// the earliest unfinished lesson instead of going quiet: at the end of a
+// chapter the gap is usually behind you.
+function _tourNextUp(lessonId) {
+  const all = (typeof _tourLessons !== 'undefined' && _tourLessons)
+    ? (_tourLessons.lessons || []) : [];
+  if (!all.length) return { next: null, unfinished: null };
+  const runnable = (l) => _tourRequirement(l).allowed;
+  const idx = all.findIndex((l) => l.id === lessonId);
+  const after = all.slice(idx + 1).filter(runnable);
+  const done = _tourDoneSet();
+  const next = after[0] || null;
+  const unfinished = after.find((l) => !done.has(l.id))
+    || all.filter(runnable).find((l) => !done.has(l.id) && l.id !== lessonId)
+    || null;
+  return { next, unfinished: (unfinished && unfinished !== next) ? unfinished : null };
+}
+
 async function openTutorialMenu() {
   const lessons = await _tourFetchLessons();
   if (!lessons || !(lessons.lessons || []).length) {
@@ -109,7 +173,7 @@ async function openTutorialMenu() {
   pop.style.left = '';
   pop.style.top = '';
 
-  const done = _tourDoneSet();
+  let done = _tourDoneSet();
   const saved = _tourState || _tourLoadState();
 
   const title = document.createElement('div');
@@ -130,7 +194,7 @@ async function openTutorialMenu() {
     const paused = (lessons.lessons || []).find((l) => l.id === saved.lessonId);
     if (paused) {
       const resume = _tourBtn(
-        'Continue ' + paused.id + ' · ' + (paused.title || '')
+        'Continue ' + _tourLessonLabel(paused)
         + ' — step ' + ((saved.step || 0) + 1) + '/' + (paused.steps || []).length,
         'gd-tour-btn-primary gd-tour-btn-resume',
         () => startTutorial(paused.id, saved.step, saved.created));
@@ -161,7 +225,7 @@ async function openTutorialMenu() {
     let chapter = null;
     let shown = 0;
     for (const lesson of lessons.lessons) {
-      const label = lesson.id + ' · ' + (lesson.title || '');
+      const label = _tourLessonLabel(lesson);
       if (q && !label.toLowerCase().includes(q)
           && !(lesson.chapter || '').toLowerCase().includes(q)) continue;
       shown++;
@@ -178,12 +242,35 @@ async function openTutorialMenu() {
       const need = _tourRequirement(lesson);
       const btn = _tourBtn(label, 'gd-tour-btn-primary',
                            () => { if (need.allowed) startTutorialIsolated(lesson.id); });
+      // The row is a CONTAINER, not just the button: a done lesson carries a
+      // second control (take the ✓ off), and a control nested inside a button
+      // is neither valid markup nor reachable by keyboard.
+      const row = document.createElement('div');
+      row.className = 'gd-tour-lesson-row';
+      row.setAttribute('data-lesson-id', lesson.id);
+      row.appendChild(btn);
       if (done.has(lesson.id)) {
+        row.classList.add('gd-tour-lesson-row-done');
         btn.classList.add('gd-tour-btn-done');
         const mark = document.createElement('span');
         mark.className = 'gd-tour-lesson-note';
         mark.textContent = ' ✓ done';
         btn.appendChild(mark);
+        const undo = _tourBtn('↺', 'gd-tour-btn-quiet gd-tour-unmark', () => {
+          if (!_tourUnmarkDone(lesson.id)) return;
+          done = _tourDoneSet();
+          renderFoot(false);
+          render(filter.value);
+          // The re-render threw away the button that had focus; the lesson it
+          // belonged to is still listed, so focus lands back on its row.
+          const back = list.querySelector(
+            '[data-lesson-id="' + lesson.id + '"] .gd-tour-btn');
+          if (back && typeof back.focus === 'function') back.focus();
+          _tourSay('Lesson ' + lesson.id + ' marked as not done');
+        });
+        undo.title = 'Mark lesson ' + lesson.id + ' as not done';
+        undo.setAttribute('aria-label', 'Mark lesson ' + label + ' as not done');
+        row.appendChild(undo);
       }
       if (!need.allowed) {
         btn.classList.add('gd-tour-btn-locked');
@@ -194,7 +281,7 @@ async function openTutorialMenu() {
         note.textContent = ' — needs ' + need.short;
         btn.appendChild(note);
       }
-      list.appendChild(btn);
+      list.appendChild(row);
     }
     if (!shown) {
       const empty = document.createElement('div');
@@ -209,11 +296,55 @@ async function openTutorialMenu() {
   // scrolls off the bottom is no way out.
   const foot = document.createElement('div');
   foot.className = 'gd-tour-foot gd-tour-picker-foot';
-  // Dismissing the catalogue returns to the tour it covered — ARMED. A bare
-  // re-render left a step that polled nothing and ignored Escape.
-  foot.appendChild(_tourBtn('Cancel', 'gd-tour-btn-quiet', () => _tourResume()));
   pop.appendChild(foot);
 
+  // Two footers, one slot. The normal one is Cancel (plus "clear my ✓s" when
+  // there are any); confirming the clear swaps that row rather than opening a
+  // second dialog over the catalogue — the list behind it is the context for
+  // the decision, and a dialog would cover exactly what the reader is deciding
+  // about.
+  const renderFoot = (confirming) => {
+    foot.replaceChildren();
+    if (confirming) {
+      const ask = document.createElement('span');
+      ask.className = 'gd-tour-hint';
+      ask.textContent = 'Clear ' + done.size + ' ✓ mark'
+        + (done.size === 1 ? '' : 's') + '?';
+      foot.appendChild(ask);
+      const yes = _tourBtn('Clear', 'gd-tour-btn-primary gd-tour-clear-confirm', () => {
+        const n = _tourClearDone();
+        done = _tourDoneSet();
+        renderFoot(false);
+        render(filter.value);
+        _tourSay(n + ' lesson mark' + (n === 1 ? '' : 's') + ' cleared');
+        if (typeof gdToast === 'function') {
+          gdToast('Progress cleared — ' + n + ' lesson'
+                  + (n === 1 ? '' : 's') + ' no longer marked done');
+        }
+        const back = foot.querySelector('.gd-tour-btn-quiet');
+        if (back && typeof back.focus === 'function') back.focus();
+      });
+      const no = _tourBtn('Keep them', 'gd-tour-btn-quiet', () => {
+        renderFoot(false);
+        const back = foot.querySelector('.gd-tour-clear');
+        if (back && typeof back.focus === 'function') back.focus();
+      });
+      foot.appendChild(yes);
+      foot.appendChild(no);
+      if (typeof yes.focus === 'function') yes.focus();
+      return;
+    }
+    // Dismissing the catalogue returns to the tour it covered — ARMED. A bare
+    // re-render left a step that polled nothing and ignored Escape.
+    foot.appendChild(_tourBtn('Cancel', 'gd-tour-btn-quiet', () => _tourResume()));
+    if (done.size) {
+      foot.appendChild(_tourBtn(
+        'Clear progress (' + done.size + ')', 'gd-tour-btn-quiet gd-tour-clear',
+        () => renderFoot(true)));
+    }
+  };
+
+  renderFoot(false);
   filter.addEventListener('input', () => render(filter.value));
   // Escape inside the filter clears it rather than ending anything — the
   // catalogue's own Cancel is the way out.

@@ -18,7 +18,7 @@ const {
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, tourTitle,
-  waitUntil,
+  waitUntil, waitTourClosed,
 } = require('./tutorial-tour-helpers');
 
 (async () => {
@@ -198,9 +198,9 @@ const {
     assert(await clickTourButton(page, 'Next'), 'lesson 13 gates Next');
     await waitTourTitle(page, 'Secrets ride the same rails');
     assert(await clickTourButton(page, 'Finish'), 'lesson 13 Finish');
-    // Nothing was created — the tour closes without a cleanup dialog.
-    await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
-      null, {timeout: 30000, polling: 200});
+    // Nothing was created — no cleanup dialog, just the finished card offering
+    // what is next, which `waitTourClosed` dismisses.
+    await waitTourClosed(page, 30000);
     console.log('  lesson 13: walked (no leftovers to clean)');
 
     // ---------- Lesson 14 — tests (ns tests → assert-eq → green dot) -------
@@ -332,6 +332,22 @@ const {
     // Finish → the branch-rollback dialog (not the per-item cleanup).
     assert(await clickTourButton(page, 'Finish'), 'Finish button');
     await waitTourTitle(page, 'Delete the tutorial branch?');
+    // "What now?" is a real question at the end of a lesson, and the dialog
+    // that asks about the branch is where the reader is already looking.
+    const nextUp = await page.evaluate(() => {
+      const box = document.querySelector('.gd-tour-next');
+      return box ? {
+        text: box.textContent,
+        buttons: Array.from(box.querySelectorAll('.gd-tour-btn'))
+          .map((b) => b.textContent.trim()),
+      } : null;
+    });
+    assert(nextUp, 'the rollback dialog offers what to read next');
+    assert((nextUp.buttons || []).some((b) => /^Start 02 · /.test(b)),
+      'naming the lesson that follows (got: '
+      + JSON.stringify(nextUp && nextUp.buttons) + ')');
+    assert(/Deletes this branch first/.test(nextUp.text),
+      'and saying what continuing does to this one');
     assert(await clickTourButton(page, 'Delete branch & return'),
       'Delete branch & return button');
     await page.waitForFunction(() => !/[?&]branch=/.test(location.search),
@@ -350,6 +366,47 @@ const {
       'main never saw the lesson namespace');
     console.log('  branch isolation: rolled back — branch deleted, main clean');
 
+    // ---------- and straight into the next lesson --------------------------
+    // Continuing from that dialog cannot be a function call: the rollback ends
+    // in a branch switch, which RELOADS. The id is parked in
+    // `graphden.tour.next` and picked up on the other side — this is that
+    // other side, the half no unit test can reach (it needs a real load, a
+    // real branch create and the boot hook). The parking half is asserted
+    // above (the button) and in tools/runtime-test/tour-end.test.js.
+    await page.evaluate(() => localStorage.setItem('graphden.tour.next', '02'));
+    await page.goto(BASE + '/');
+    await page.waitForFunction(() => /[?&]branch=tutorial-02-/.test(location.search)
+      && !!document.querySelector('#gd-tour-pop .gd-tour-title'),
+      null, {timeout: 120000, polling: 300});
+    const handoff = await page.evaluate(() => ({
+      branch: new URLSearchParams(location.search).get('branch'),
+      step: document.querySelector('#gd-tour-pop .gd-tour-progress')
+        ?.textContent.trim() || null,
+      queued: localStorage.getItem('graphden.tour.next'),
+    }));
+    assert(handoff.queued === null,
+      'the parked lesson is consumed, not left to re-fire on a later visit'
+      + ' (got: ' + handoff.queued + ')');
+    assert(/^Lesson 02 · step 1\//.test(handoff.step || ''),
+      'and it opens at lesson 02\'s FIRST step (got: ' + handoff.step + ')');
+    // Leave nothing behind: end the tour, drop the branch it made, and take
+    // the browser OFF that branch before the next load — a page booted on a
+    // deleted branch is the 2026-08-20 dead-editor 400, not a test failure
+    // worth debugging twice.
+    await page.keyboard.press('Escape');
+    await api(page, 'DELETE', '/api/branches/' + handoff.branch);
+    await page.evaluate(() => {
+      localStorage.removeItem('graphden.tour');
+      localStorage.removeItem('graphden.tour.done');
+      localStorage.removeItem('graphden.branch');
+    });
+    await page.goto(BASE + '/');
+    const leftOver = await api(page, 'GET', '/api/branches');
+    assert(!(leftOver.branches || []).some((b) => /^tutorial-/.test(b.name || '')),
+      'and the handoff leaks no branch either (got: '
+      + JSON.stringify((leftOver.branches || []).map((b) => b.name)) + ')');
+    console.log('  handoff: a parked lesson opens isolated on the next load, once');
+
     // ---------- picker: a lesson this session cannot run is LOCKED --------
     // The org lessons drive panels that need `manage-users` / `manage-grants`.
     // On this stack (no tenancy addon) the capability probe is absent, so the
@@ -360,10 +417,14 @@ const {
       null, {timeout: 60000, polling: 200});
     await page.evaluate(() => window.openTutorialMenu());
     await page.waitForSelector('.gd-tour-lesson-list', {timeout: 20000});
+    // A lesson row is a CONTAINER since the ✓ became removable: the lesson
+    // button plus, once read, the control that takes the mark off. The state
+    // under test is the button's.
     const locked = await page.evaluate(() => {
       const list = document.querySelector('.gd-tour-lesson-list');
       const row = Array.from(list.children).find((c) => /^24 ·/.test(c.textContent.trim()));
-      return row ? {text: row.textContent.trim(), disabled: row.disabled === true,
+      return row ? {text: row.textContent.trim(),
+                    disabled: row.querySelector('.gd-tour-btn').disabled === true,
                     chapter: !!Array.from(list.children).find(
                       (c) => c.className.includes('gd-tour-chapter')
                           && c.textContent.trim() === 'Your organization')}
@@ -381,7 +442,8 @@ const {
     const orgLocked = await page.evaluate(() => {
       const list = document.querySelector('.gd-tour-lesson-list');
       const row = Array.from(list.children).find((c) => /^30 ·/.test(c.textContent.trim()));
-      return row ? {text: row.textContent.trim(), disabled: row.disabled === true} : null;
+      return row ? {text: row.textContent.trim(),
+                    disabled: row.querySelector('.gd-tour-btn').disabled === true} : null;
     });
     assert(orgLocked, 'lesson 30 is listed');
     assert(orgLocked.disabled, 'it is disabled without organizations');
@@ -394,7 +456,8 @@ const {
     const assetsLesson = await page.evaluate(() => {
       const list = document.querySelector('.gd-tour-lesson-list');
       const row = Array.from(list.children).find((c) => /^22 ·/.test(c.textContent.trim()));
-      return row ? {text: row.textContent.trim(), disabled: row.disabled === true} : null;
+      return row ? {text: row.textContent.trim(),
+                    disabled: row.querySelector('.gd-tour-btn').disabled === true} : null;
     });
     assert(assetsLesson, 'lesson 22 is listed');
     assert(!assetsLesson.disabled,
@@ -429,7 +492,7 @@ const {
       filter.dispatchEvent(new Event('input'));
       // Chapter headings are children too — count the lesson ROWS.
       const filtered = Array.from(list.children)
-        .filter((c) => c.tagName === 'BUTTON')
+        .filter((c) => c.classList.contains('gd-tour-lesson-row'))
         .map((c) => c.textContent.trim());
       filter.value = '';
       filter.dispatchEvent(new Event('input'));
@@ -456,11 +519,85 @@ const {
     assert(cat.doneMarked, 'a finished lesson is marked done');
     assert(cat.chapters.length === new Set(cat.chapters).size,
       'each chapter heading appears once (got: ' + cat.chapters.join(', ') + ')');
+    console.log('  picker: resume + filter + done marks, list scrolls, Cancel pinned');
+
+    // ---------- The ✓ is the reader's, so it comes back off ----------------
+    // A lesson skipped step-by-step to see the end, or read so long ago it
+    // needs re-reading, is marked done and should not be. Both ways out —
+    // one row, or the whole history — go through the SAME localStorage the
+    // marks live in, and the unit test (tools/runtime-test/tour-picker.test.js)
+    // pins their bookkeeping; what only a browser can show is that the
+    // controls are really there, really clickable, and that the list agrees
+    // with storage afterwards.
+    await page.evaluate(() => {
+      localStorage.setItem('graphden.tour.done', JSON.stringify(['01', '02', '03']));
+      localStorage.removeItem('graphden.tour');
+    });
+    await page.goto(BASE + '/');
+    await page.waitForFunction(() => typeof window.openTutorialMenu === 'function',
+      null, {timeout: 60000, polling: 200});
+    await page.evaluate(() => window.openTutorialMenu());
+    await page.waitForSelector('.gd-tour-lesson-list', {timeout: 30000});
+    const unmarked = await page.evaluate(() => {
+      const row = document.querySelector('[data-lesson-id="02"]');
+      const undo = row.querySelector('.gd-tour-unmark');
+      const label = undo?.getAttribute('aria-label') || '';
+      undo.click();
+      const after = document.querySelector('[data-lesson-id="02"]');
+      return {
+        label,
+        stillMarked: /✓ done/.test(after.textContent),
+        controlGone: !after.querySelector('.gd-tour-unmark'),
+        neighbourKept: /✓ done/.test(
+          document.querySelector('[data-lesson-id="01"]').textContent),
+        stored: JSON.parse(localStorage.getItem('graphden.tour.done') || '[]'),
+      };
+    });
+    assert(/not done/.test(unmarked.label),
+      'the un-mark control is labelled for a screen reader (got: '
+      + unmarked.label + ')');
+    assert(!unmarked.stillMarked && unmarked.controlGone,
+      'clicking it takes the ✓ off that row');
+    assert(unmarked.neighbourKept, 'and leaves the rows around it alone');
+    assert(JSON.stringify(unmarked.stored) === '["01","03"]',
+      'the stored history agrees (got: ' + JSON.stringify(unmarked.stored) + ')');
+
+    const cleared = await page.evaluate(() => {
+      const footBtn = (label) => Array.from(
+        document.querySelectorAll('.gd-tour-picker-foot .gd-tour-btn'))
+        .find((b) => b.textContent.trim() === label) || null;
+      footBtn('Clear progress (2)').click();
+      const asked = document.querySelector('.gd-tour-picker-foot').textContent;
+      footBtn('Keep them').click();
+      const afterKeep = JSON.parse(localStorage.getItem('graphden.tour.done') || '[]');
+      footBtn('Clear progress (2)').click();
+      footBtn('Clear').click();
+      return {
+        asked,
+        afterKeep,
+        stored: localStorage.getItem('graphden.tour.done'),
+        marksLeft: document.querySelectorAll('.gd-tour-lesson-row-done').length,
+        offerGone: !footBtn('Clear progress (0)') && !footBtn('Clear progress (2)'),
+        cancelKept: !!footBtn('Cancel'),
+      };
+    });
+    assert(/Clear 2 ✓ marks\?/.test(cleared.asked),
+      'the bulk clear asks first, and says how much goes (got: '
+      + cleared.asked + ')');
+    assert(JSON.stringify(cleared.afterKeep) === '["01","03"]',
+      'backing out of it changes nothing (got: '
+      + JSON.stringify(cleared.afterKeep) + ')');
+    assert(cleared.stored === null,
+      'confirming clears the key outright — a cleared browser reads like one'
+      + ' that never took the tour (got: ' + cleared.stored + ')');
+    assert(cleared.marksLeft === 0, 'and every row loses its ✓');
+    assert(cleared.offerGone, 'the offer goes with them — nothing left to clear');
+    assert(cleared.cancelKept, 'Cancel stays reachable throughout');
     await page.evaluate(() => {
       localStorage.removeItem('graphden.tour.done');
       localStorage.removeItem('graphden.tour');
     });
-    console.log('  picker: resume + filter + done marks, list scrolls, Cancel pinned');
+    console.log('  picker: one ✓ removable, the whole history clearable behind a confirm');
 
     // ---------- Escape belongs to whatever is on TOP ----------
     // Every lesson tells the reader to open something — a picker, a panel, a

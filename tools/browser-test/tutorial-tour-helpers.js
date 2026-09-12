@@ -67,11 +67,15 @@ async function hardCleanup(page) {
                      'tutorial-endpoint', 'tutorial-fetch'];
   // Per-browser view-state the lessons exercise (smart views, recents,
   // last-used ns) — a leftover active view renders the next lesson's
-  // Explorer as somebody else's virtual tree.
+  // Explorer as somebody else's virtual tree. `graphden.tour.next` is the
+  // same class of hazard with teeth: a lesson parked by "start the next one"
+  // and never picked up would open a tour over the FOLLOWING test's page.
   try {
     await page.evaluate(() => {
       for (const k of ['graphden.smartViews', 'graphden.recentFns',
-                       'graphden.lastNs']) localStorage.removeItem(k);
+                       'graphden.lastNs', 'graphden.tour.next']) {
+        localStorage.removeItem(k);
+      }
       if (typeof gdClearSmartView === 'function') gdClearSmartView();
     });
   } catch (_) { /* page may not be on the editor yet */ }
@@ -630,6 +634,23 @@ async function runWithEffectAck(page, formValue) {
 }
 
 
+// A finished lesson no longer just vanishes when it created nothing: the tour
+// says so and offers what to read next (`Next up`). Dismiss that card if it is
+// up — it renders one await AFTER the last step, so this waits for either
+// outcome first — and then for the overlay to actually go.
+async function waitTourClosed(page, ms) {
+  const timeout = ms || 30000;
+  await page.waitForFunction(() => {
+    if (!document.querySelector('#gd-tour-pop')) return true;
+    return Array.from(document.querySelectorAll('#gd-tour-pop .gd-tour-btn'))
+      .some((b) => b.textContent.trim() === 'Close');
+  }, null, {timeout, polling: 200});
+  await clickTourButton(page, 'Close');
+  await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
+    null, {timeout, polling: 200});
+}
+
+
 async function finishAndDelete(page) {
   assert(await clickTourButton(page, 'Finish'), 'Finish button');
   await waitTourTitle(page, 'Clean up tutorial items?');
@@ -1040,7 +1061,7 @@ module.exports = {
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding, waitClickable,
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
-  runWithEffectAck, finishAndDelete, bindFnRefPlaceholder, bindNamedPlaceholder,
-  bindOptionalArgChip, appendFnRefViaChip, renameArgViaEdgeLabel,
+  runWithEffectAck, finishAndDelete, waitTourClosed, bindFnRefPlaceholder,
+  bindNamedPlaceholder, bindOptionalArgChip, appendFnRefViaChip, renameArgViaEdgeLabel,
   createRecordType, openOperateSection, openAccountSettings, openAccountMenu,
 };

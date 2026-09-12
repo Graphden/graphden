@@ -22,7 +22,7 @@ const {
   extendViaRowActions, createRootNamespace, createFnInNamespace,
   setParentViaStrip, finishAndDelete, tourTitle, bindFirstPlaceholder,
   bindFnRefPlaceholder,
-  openOperateSection, waitUntil,
+  openOperateSection, waitUntil, waitTourClosed,
 } = require('./tutorial-tour-helpers');
 
 const ASSET_PATH = 'packages/app/editor/editor-styles.css';
@@ -328,10 +328,10 @@ async function revertAssetViaApi(page, base) {
       null, {timeout: 30000, polling: 300});
     await waitTourTitle(page, 'What this is for', 150000);
     assert(await clickTourButton(page, 'Finish'), 'lesson 22 Finish');
-    await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
-      null, {timeout: 20000, polling: 200});
-    // The lesson creates no graph entities, so there is no cleanup prompt —
-    // the only trace it could leave is the override row, and that is reverted.
+    await waitTourClosed(page, 20000);
+    // The lesson creates no graph entities, so there is no cleanup prompt (the
+    // finished card is dismissed above) — the only trace it could leave is the
+    // override row, and that is reverted.
     const overrideGone = await page.evaluate(async () => {
       const r = await fetch('/version');
       const baked = (await r.json()).frontend.slice(0, 12);

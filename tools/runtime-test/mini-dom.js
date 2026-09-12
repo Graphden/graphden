@@ -11,7 +11,8 @@
 //
 // Supported, because the builders under test use exactly this much:
 //   createElement / createTextNode, appendChild, textContent,
-//   className + classList.add/contains, setAttribute/getAttribute,
+//   className + classList.add/remove/contains/toggle, id (reflected),
+//   setAttribute/getAttribute,
 //   title / href / style.cursor, addEventListener + click(),
 //   querySelector / querySelectorAll over `tag.a.b` selectors with
 //   descendant combinators (`.parent .child`).
@@ -68,7 +69,14 @@ class MiniElement {
     this.children = [];
     this.parentNode = null;
     this.attributes = {};
+    // A plain bag, plus the two CSS-variable methods the editor uses on
+    // `documentElement`. They are non-enumerable so `style` still reads as
+    // "just the properties that were set".
     this.style = {};
+    Object.defineProperty(this.style, 'setProperty',
+      { value(k, v) { this[k] = v; }, enumerable: false });
+    Object.defineProperty(this.style, 'removeProperty',
+      { value(k) { delete this[k]; }, enumerable: false });
     this.listeners = {};
     this._className = '';
     this._text = '';
@@ -84,6 +92,14 @@ class MiniElement {
         self._className = self._classes().filter((c) => !drop.has(c)).join(' ');
       },
       contains(name) { return self._classes().includes(name); },
+      // Real `toggle` semantics incl. the second argument: `toggle(c, cond)`
+      // is how the editor's popovers set a class FROM a boolean, and a stub
+      // without it turns that into a TypeError halfway through a render.
+      toggle(name, force) {
+        const on = force === undefined ? !self._classes().includes(name) : !!force;
+        if (on) this.add(name); else this.remove(name);
+        return on;
+      },
     };
   }
 
@@ -94,6 +110,12 @@ class MiniElement {
   get className() { return this._className; }
 
   set className(v) { this._className = v == null ? '' : String(v); }
+
+  // Reflected, like the real thing: code that sets `el.id = 'x'` must be
+  // findable by `#x` and by `getElementById`.
+  get id() { return this.getAttribute('id') || ''; }
+
+  set id(v) { this.setAttribute('id', v); }
 
   get textContent() {
     if (this.children.length === 0) return this._text;
@@ -239,9 +261,26 @@ class MiniText {
 
 function createDocument() {
   const body = new MiniElement('body');
+  // Document-level listeners: modules that arm a global key handler (the tour
+  // does) must be able to add and REMOVE one without blowing up.
+  const listeners = {};
   return {
     body,
+    addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
+    removeEventListener(type, fn) {
+      listeners[type] = (listeners[type] || []).filter((f) => f !== fn);
+    },
+    dispatch(type, event) {
+      const e = Object.assign({ type, preventDefault() {}, stopPropagation() {} },
+                              event || {});
+      for (const fn of [...(listeners[type] || [])]) fn(e);
+      return e;
+    },
+    documentElement: new MiniElement('html'),
     createElement: (tag) => new MiniElement(tag),
+    // Namespace ignored: nothing under test branches on it, and an SVG node
+    // the code only appends to and sets attributes on behaves like any other.
+    createElementNS: (_ns, tag) => new MiniElement(tag),
     createTextNode: (t) => new MiniText(t),
     createDocumentFragment: () => new MiniElement('#fragment'),
     // Enough of getElementById for modules that sync a chip by id —

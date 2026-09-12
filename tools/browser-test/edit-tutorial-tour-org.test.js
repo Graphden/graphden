@@ -121,18 +121,20 @@ async function nextTimes(page, n, label) {
 
 async function finishTour(page, label) {
   assert(await clickTourButton(page, 'Finish'), label + ' Finish');
-  // Either the tour closes outright (nothing was created) or it offers the
-  // cleanup dialog — both are a finished lesson.
+  // Three shapes, all of them a finished lesson: the tour closes outright, it
+  // offers a cleanup dialog, or — when the lesson created nothing — it says so
+  // and offers the next lesson.
   await page.waitForFunction(() => {
     const pop = document.querySelector('#gd-tour-pop');
     if (!pop) return true;
-    return /Clean up tutorial items|Delete the tutorial branch/
+    return /Clean up tutorial items|Delete the tutorial branch|finished/
       .test(pop.textContent || '');
   }, null, {timeout: 60000, polling: 200});
   if (await page.$('#gd-tour-pop')) {
     const del = await page.evaluate(() => {
       const btn = Array.from(document.querySelectorAll('#gd-tour-pop .gd-tour-btn'))
-        .find((b) => /^(Delete them|Delete branch & return)$/.test(b.textContent.trim()));
+        .find((b) => /^(Delete them|Delete branch & return|Close)$/
+          .test(b.textContent.trim()));
       if (!btn) return false;
       btn.click();
       return true;

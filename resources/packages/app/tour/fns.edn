@@ -104,7 +104,18 @@
             :branch-keep "Keep branch"
             :branch-done "Tutorial branch deleted"
             :branch-failed "Branch “{branch}” could not be deleted — it is still there"
-            :paused "Lesson {lesson} paused — continue it from the account menu"}
+            :paused "Lesson {lesson} paused — continue it from the account menu"
+            ;; What now? — offered under both end-of-lesson dialogs, and on its
+            ;; own when a lesson created nothing to clean up. {lesson} is the
+            ;; catalogue's own label, "07 · Free arguments".
+            :next-label "Next up"
+            :next-start "Start {lesson}"
+            :next-unfinished "Start {lesson} — not done yet"
+            :next-note-branch "Deletes this branch first, then opens the next lesson."
+            :next-note-items "Deletes the items above first, then opens the next lesson."
+            :finished-title "Lesson {lesson} finished"
+            :finished-body "Nothing to clean up — this lesson only looked around."
+            :finished-close "Close"}
            :lessons
            [{:id "01"
              :chapter "Basics"

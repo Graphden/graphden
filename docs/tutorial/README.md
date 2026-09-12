@@ -102,6 +102,15 @@ drift-guarded by `tools/browser-test/edit-tutorial-tour.test.js` —
 keep the written lesson's “Try it” section and the tour steps in
 sync when either changes.
 
+The catalogue remembers what you have read (in your browser, not in the
+graph) and marks it `✓ done`. That mark is yours: the `↺` beside a
+finished lesson takes it back off, and **Clear progress** in the
+catalogue's footer clears the whole history at once, behind a
+confirmation. Finishing a lesson offers what to read next right there —
+the lesson that follows, plus the first one you have not read when that
+is a different lesson — and starting it from the dialog cleans the
+finished lesson up first (deleting its branch, or the rows it created).
+
 Six lessons have no tour: **28** is about files on disk and
 `bb rebuild`, which the editor cannot show; **11** is a route-wiring
 marathon that reads better as text than as thirty steps; **31** is

@@ -184,6 +184,9 @@
     :cleanup-done :cleanup-failed
     :branch-title :branch-body :branch-confirm :branch-keep
     :branch-done :branch-failed
+    :next-label :next-start :next-unfinished
+    :next-note-branch :next-note-items
+    :finished-title :finished-body :finished-close
     :paused})
 
 

@@ -7524,6 +7524,81 @@ body.gd-tour-sheet-open #side-menu {
   opacity: 0.55;
 }
 
+/* A lesson ROW is the button plus, once it is read, the control that takes
+   the ✓ back off. Two elements, because a button inside a button is neither
+   valid markup nor reachable from the keyboard. */
+.gd-tour-lesson-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.gd-tour-lesson-row > .gd-tour-btn-primary {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Quiet until wanted: the ✓ is a fact about the reader, and un-marking is a
+   rare correction — it must be findable without competing with the lesson it
+   sits next to. The hairline stays, though: a bare glyph on the panel reads as
+   decoration, and nobody clicks decoration. */
+.gd-tour-unmark {
+  flex: 0 0 auto;
+  min-width: 30px;
+  padding: 6px 8px;
+  border-color: var(--border);
+  color: var(--muted-fg);
+  line-height: 1;
+}
+
+.gd-tour-unmark:hover,
+.gd-tour-unmark:focus-visible {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+/* "Next up" under an end-of-lesson dialog: below the cleanup decision (that
+   decision is what the dialog is about) and separated from it, so the two are
+   never read as one row of choices. */
+.gd-tour-next {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.gd-tour-next-label {
+  color: var(--muted-fg);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.gd-tour-next .gd-tour-btn { text-align: left; }
+
+/* Outlined, not filled: the cleanup decision above IS the dialog's primary
+   action, and two accent-filled buttons in one card make neither of them the
+   answer. Under a NEXT UP heading an outline is plenty loud. */
+.gd-tour-next .gd-tour-btn-primary {
+  background: var(--card-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.gd-tour-next .gd-tour-btn-primary:hover {
+  background: var(--accent);
+  color: var(--bg);
+  filter: none;
+}
+
+/* The hint is `margin-right: auto` inside a ROW; in this column that pushes
+   nothing and only the size and colour are wanted. */
+.gd-tour-next-note { margin-right: 0; }
+
 /* The row note (“✓ done”, “— needs an organization”) sits INSIDE an
    accent-filled button, where a grey `--muted-fg` is barely legible. Inherit
    the button's own foreground and step it back with opacity instead — quiet

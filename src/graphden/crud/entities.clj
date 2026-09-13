@@ -641,6 +641,40 @@
         (assoc :http-status (:http-status create-result))))))
 
 
+(defn- forward-rename-slot-on-update!
+  "The update-side twin of `forward-rename-slot!`: the binding row
+   already exists, so the fn/slot pair comes from it rather than the
+   form. Returns `ensure-rename-slot!`'s `{:created …}` (nil when it
+   minted nothing or failed — logged, never escalated: the binding is
+   still useful without its rename view)."
+  [storage id-uuid form-data]
+  (try
+    (when-let [existing (sp/read-entity storage :binding id-uuid)]
+      (ensure-rename-slot! storage
+                           (:fn-id existing)
+                           (:slot-id existing)
+                           (when-not (str/blank? (:rename-to form-data))
+                             (str (:rename-to form-data)))))
+    (catch Exception e
+      (log/error e "ensure-rename-slot! failed")
+      nil)))
+
+
+(defn- restore-pre-image!
+  "Secret carve-out rollback for an update: put every field the write
+   touched back to its pre-update value. Logged, not thrown — the
+   rejection itself is what the caller surfaces."
+  [storage entity-type id-uuid pre-row entity-data]
+  (if pre-row
+    (try (sp/update-entity storage entity-type id-uuid
+                           (into {} (map (fn [[k _]] [k (get pre-row k)])) entity-data))
+         (catch Exception e
+           (log/warn e "Rollback restore failed after secret-flow type-check rejection"
+                     {:entity-type entity-type :id id-uuid})))
+    (log/warn "No pre-image to restore after secret-flow type-check rejection"
+              {:entity-type entity-type :id id-uuid})))
+
+
 (defn apply-update-core
   "§3.1 atomic core of the update-apply flow: `sp/update-entity` +
    Phase-6c rename-slot side-effect (binding writes only) + post-write
@@ -696,32 +730,14 @@
             ;; about to record.
             renamed (when (and (= type-str "binding") id-uuid
                                (contains? form-data :rename-to))
-                      (try
-                        (when-let [existing (sp/read-entity storage :binding id-uuid)]
-                          (ensure-rename-slot! storage
-                                               (:fn-id existing)
-                                               (:slot-id existing)
-                                               (when-not (str/blank? (:rename-to form-data))
-                                                 (str (:rename-to form-data)))))
-                        (catch Exception e
-                          (log/error e "ensure-rename-slot! failed")
-                          nil)))
+                      (forward-rename-slot-on-update! storage id-uuid form-data))
             rej (post-write-type-rej storage type-str entity-data id-uuid)]
         (if (:secret? rej)
           ;; Hard reject: restore every field the update touched from
           ;; the pre-image, roll back the renamed-view rows this write
           ;; minted, then surface the diagnostic message.
           (do (rollback-rename-rows! storage (:created renamed))
-              (if pre-row
-                (try (sp/update-entity
-                       storage entity-type id-uuid
-                       (into {} (map (fn [[k _]] [k (get pre-row k)]))
-                             entity-data))
-                     (catch Exception e
-                       (log/warn e "Rollback restore failed after secret-flow type-check rejection"
-                                 {:entity-type entity-type :id id-uuid})))
-                (log/warn "No pre-image to restore after secret-flow type-check rejection"
-                          {:entity-type entity-type :id id-uuid}))
+              (restore-pre-image! storage entity-type id-uuid pre-row entity-data)
               {:error (:reason rej)})
           (cond-> {:updated id-uuid}
             rej (assoc :type-warnings [(:diagnostic rej)])))))))

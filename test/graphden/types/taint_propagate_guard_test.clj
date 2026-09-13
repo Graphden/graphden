@@ -96,6 +96,9 @@
     ;; rows and return bool / count — no caller content in the return.
     :failure-ack :failure-ack-all
     :filter :filter-xf :find-first :fn-signature :fn-type? :first :fix :flatten
+    ;; :candidate-fit ranks a type expression + an arity; :fn-ns-index maps
+    ;; fn-ids to namespace paths — neither passes caller content, no taint.
+    :candidate-fit :fn-ns-index
     :fn-names-with-tag :fn-return-type :form-decode :fn-stats-raw :fn-type-bound-effects
     :fork-package-fns
     :free-arg-entries :free-arg-slot-map :free-memory :future :get :get-entity

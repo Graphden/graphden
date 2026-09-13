@@ -597,7 +597,10 @@ See [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) for detailed specifications.
 - Dynamic vars for configuration: `*query-timeout-ms*`, `*max-graph-iterations*`
 - **New dialog, popover, or keyboard shortcut?** Go through the shared
   primitives, not a fresh listener: dialogs use `installPopoverDismiss`
-  (`trapFocus` / `getReturnFocus`) plus `focusIntoDialog` / `returnFocusTo`;
+  (`trapFocus` / `getReturnFocus`) plus `focusIntoDialog` / `returnFocusTo`,
+  and anything that COVERS content also owes a VISIBLE way out —
+  `ensurePopoverClose` for a popover, the shared `#gd-surface-exit` for a
+  management surface (Escape alone is not on screen);
   shortcuts are declared in `editor-shortcuts.js`, which is what the `Space`
   menu and the `?` cheatsheet render from — a binding declared anywhere else
   is undiscoverable. See [docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md).

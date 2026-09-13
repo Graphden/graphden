@@ -90,6 +90,10 @@ The account button's menu is a menu in the keyboard sense too: it
 opens with focus on the first entry, `↑` `↓` walk the entries, and
 `Escape` puts you back on the button.
 
+`Escape` is the fast way, not the only way: anything that covers what
+you were reading also carries a visible `×` in its top-right corner, so
+you never have to know the key to get out.
+
 ## The other surfaces
 
 Settings, Organization and Platform are behind the leader as well:
@@ -97,7 +101,8 @@ Settings, Organization and Platform are behind the leader as well:
 Organization, `b` straight back to Build. A surface behaves like a
 big dialog: opening one moves the keyboard into its section list,
 everything underneath leaves the tab order, and `Escape` returns you
-to the editor.
+to the editor — as does the **× Close** button in the surface's
+top-right corner, and the Graphden logo in the bar.
 
 ## Seeing everything: `?`
 

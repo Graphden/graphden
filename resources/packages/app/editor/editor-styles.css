@@ -6128,6 +6128,57 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
    Explorer, and the management surfaces overlay the whole #main-container —
    the chrome disappears with the surface it belongs to.) */
 
+/* ---- Shared popover close (×) — `ensurePopoverClose` in
+   web/runtime/graphden-popover.js ----
+   Pinned to the host popover's top-right corner. Every host is already a
+   positioned element (fixed/absolute), so no extra containing block is
+   needed, and it never reflows the content it sits over. */
+.gd-pop-x {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted-fg);
+  font: inherit;
+  font-size: 0.9375rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.gd-pop-x:hover { background: var(--hover-bg); color: var(--fg); }
+.gd-pop-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* .gd-pop scrolls its own content (max-height: 60vh), and an absolutely
+   positioned child of a scroll container scrolls out of the top with it.
+   Sticky keeps the × on screen for the long panels (the packages list is
+   the tall one); floated so the panel's own heading flows beside it. Its
+   hosts get the button PREPENDED (`ensurePopoverClose`'s `prepend` option)
+   — a floated last child would sit at the bottom. */
+.gd-pop > .gd-pop-x { position: sticky; float: right; top: 0; }
+/* Headroom under the × for the popovers that gained one — it is absolutely
+   positioned, so the top row would otherwise run under it. */
+.fn-versions-popover .fn-versions-header,
+.fn-apps-popover .fn-apps-title,
+.gd-views-pop > .gd-views-pop-head:first-child,
+.ns-picker-head { padding-right: 24px; }
+/* Namespace-picker title — the fn-picker's `.fn-picker-expected` look, but
+   it is a name for the picker rather than a type hint, so it reads darker. */
+.ns-picker-head {
+  font-size: 0.6875rem;
+  padding: 2px 4px;
+  line-height: 1.3;
+  color: var(--muted-fg);
+  border-bottom: 1px dashed var(--card-border);
+}
+
 /* ---- Context-bar popover (workspace switcher) ---- */
 .gd-pop-scrim { position: fixed; inset: 0; z-index: 340; }
 .gd-pop {
@@ -6744,9 +6795,18 @@ body.gd-cards-compact .effects-strip { display: none; }
 .gd-surface-back:hover { background: var(--gd-flow-2); }
 .gd-surface-back:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
 
-/* ---- OPERATE surface — relocated ops/admin panels ---- */
+/* ---- MANAGEMENT SURFACES — the full-page covers over Build ----
+   Organization / Platform / Settings / Marketplace are one shape: an
+   absolutely-positioned sheet filling #main-container, over the Build
+   columns (which gdSetBuildInert takes out of the Tab order).
+   ONE rule for that geometry on purpose — it used to be copied per
+   surface, and the copy is exactly what Marketplace shipped without
+   (2026-09-08): #gd-market had only its [hidden] rule, so the surface
+   rendered INLINE in the explorer column instead of covering anything. */
 #gd-operate,
-#gd-platform {
+#gd-platform,
+#gd-settings,
+#gd-market {
   position: absolute;
   inset: 0;
   z-index: 250;
@@ -6755,7 +6815,45 @@ body.gd-cards-compact .effects-strip { display: none; }
   font-family: var(--gd-ui-font);
   background: var(--gd-paper);
 }
-#gd-operate[hidden], #gd-platform[hidden] { display: none; }
+#gd-operate[hidden], #gd-platform[hidden],
+#gd-settings[hidden], #gd-market[hidden] { display: none; }
+
+/* The ONE exit from whichever management surface is open — top-right of the
+   sheet, the place a cover is closed from. Sits outside #main-container (so
+   gdSetBuildInert cannot inert it) and above the surface's z-index: 250.
+   Revealed by the `data-surface` body attribute editor-shell.js maintains;
+   the `[data-surface]` half of the guard keeps it hidden on a page that has
+   not booted the shell yet (no attribute at all). */
+.gd-surface-exit { display: none; }
+body[data-surface]:not([data-surface="build"]) .gd-surface-exit {
+  position: fixed;
+  top: calc(var(--gd-ctxbar-h) + 14px);
+  right: 22px;
+  z-index: 260;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--gd-line-2);
+  border-radius: 8px;
+  background: var(--gd-panel);
+  color: var(--gd-ink-2);
+  font-family: var(--gd-ui-font);
+  font-size: 0.75rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--gd-shadow);
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.gd-surface-exit:hover {
+  background: var(--gd-paper-2);
+  border-color: var(--gd-flow);
+  color: var(--gd-ink);
+}
+.gd-surface-exit:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
+.gd-surface-exit-t { font-weight: 600; letter-spacing: 0.01em; }
+
 /* (The Platform ENTRY is a menu item in the account chip's menu now —
    editor-auth.js gates it on body.gd-platform / the capability probe.) */
 /* Tenancy-adaptive copy: show the org/RBAC wording only when the tenancy addon
@@ -6898,17 +6996,8 @@ body.gd-tenancy .gd-solo-only { display: none; }
 #gd-operate-panels select:focus-visible,
 #gd-platform-panels select:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 1px; }
 
-/* ---- Settings surface (personal editor settings) ---- */
-#gd-settings, #gd-workspaces {
-  position: absolute;
-  inset: 0;
-  z-index: 250;
-  overflow: auto;
-  padding: 26px 30px 60px;
-  font-family: var(--gd-ui-font);
-  background: var(--gd-paper);
-}
-#gd-settings[hidden], #gd-workspaces[hidden] { display: none; }
+/* ---- Settings surface (personal editor settings) ----
+   Geometry comes from the shared management-surface rule above. */
 /* Settings shares the Operate nav+pane shell (.gd-op-body / .gd-op-nav /
    .gd-op-card). Its panes are short rows of copy + one control, so cap the
    line length — a 900px-wide settings row reads like a lost table. */
@@ -7962,7 +8051,6 @@ body.gd-no-write .branch-comment-form { display: none; }
  * (docs/MARKETPLACE.md). The partials are server-rendered; these are the
  * `.mk-*` classes they emit.
  * ========================================================================== */
-#gd-market[hidden] { display: none; }
 .gd-market-root { max-width: 1100px; margin: 0 auto; }
 .mk-root { min-width: 0; }
 .mk-loading, .mk-empty {

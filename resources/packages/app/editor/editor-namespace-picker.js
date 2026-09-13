@@ -64,9 +64,20 @@ function openNamespacePicker(opts) {
 
   const el = document.createElement('div');
   el.className = 'fn-picker-popover';  // reuse fn-picker styling
+  // Named + announced like the other overlays. It had neither, so a screen
+  // reader met an unlabelled box and a sighted reader met a bare filter
+  // field with no title and no way out (see the close button below).
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-modal', 'false');
+  el.setAttribute('aria-label', 'Pick a namespace');
   const rect = opts.anchorEl.getBoundingClientRect();
   el.style.top  = (rect.bottom + 6) + 'px';
   el.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 320)) + 'px';
+
+  const head = document.createElement('div');
+  head.className = 'ns-picker-head';
+  head.textContent = 'Pick a namespace';
+  el.appendChild(head);
 
   const search = document.createElement('input');
   search.type = 'text';
@@ -158,6 +169,18 @@ function openNamespacePicker(opts) {
       if (typeof opts.onCancel === 'function') opts.onCancel();
     }
   });
+
+  // Visible way out. The picker traps Tab and its whole body is a filter
+  // field + a listbox — without this the only exits were Escape and a click
+  // on whatever the popover was covering. (The fn-picker's counterpart is
+  // its Cancel row; this one had neither.) Appended last so it lands at the
+  // end of the trapped tab cycle rather than ahead of the filter field.
+  if (typeof ensurePopoverClose === 'function') {
+    ensurePopoverClose(el, () => {
+      closeNamespacePicker();
+      if (typeof opts.onCancel === 'function') opts.onCancel();
+    }, 'Close namespace picker');
+  }
 
   document.body.appendChild(el);
   nsPickerEl = el;

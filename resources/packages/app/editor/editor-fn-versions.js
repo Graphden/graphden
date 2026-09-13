@@ -50,14 +50,21 @@ function closeFnVersionsPopover() {
   }
 }
 
-// HTMX-aware swap: replace innerHTML and ALSO run htmx.process so the
-// fresh `hx-*` attributes inside the swapped content get bound. Without
-// this, HTMX only auto-binds at page load; subsequent innerHTML writes
-// stay inert until we tell HTMX about them.
-function swapAndProcess(el, html) {
+// The ONE way to write the popover body — every state (loading, error,
+// the rendered history) goes through it.
+//
+// Two things it owns. `process` runs htmx over the fresh `hx-*` attributes
+// in swapped content: htmx only auto-binds at page load, so subsequent
+// innerHTML writes stay inert until we tell it about them. And the close ×
+// is re-attached afterwards, because innerHTML replaces the whole subtree —
+// the button is a child of the popover, so every body write drops it.
+function setFnVersionsBody(el, html, process) {
   el.innerHTML = html;
-  if (window.htmx && typeof window.htmx.process === 'function') {
+  if (process && window.htmx && typeof window.htmx.process === 'function') {
     window.htmx.process(el);
+  }
+  if (typeof ensurePopoverClose === 'function') {
+    ensurePopoverClose(el, closeFnVersionsPopover, 'Close version history');
   }
 }
 
@@ -68,7 +75,7 @@ async function showFnVersionsPopover(fnEntity, anchorEl) {
   _fnVersionsFnId = fnEntity.id;
   _fnVersionsFnEntity = fnEntity;
 
-  popover.innerHTML = '<div class="fn-versions-loading">Loading history…</div>';
+  setFnVersionsBody(popover, '<div class="fn-versions-loading">Loading history…</div>');
   popover.classList.remove('hidden');
   if (typeof anchorBelowClamped === 'function') {
     anchorBelowClamped(popover, anchorEl, { fallbackW: 320, fallbackH: 180 });
@@ -84,25 +91,25 @@ async function showFnVersionsPopover(fnEntity, anchorEl) {
   try {
     const resp = await window.authFetch(url);
     if (resp.status === 401) {
-      popover.innerHTML = '<div class="fn-versions-error">'
-        + 'Sign in to view version history.</div>';
+      setFnVersionsBody(popover, '<div class="fn-versions-error">'
+        + 'Sign in to view version history.</div>');
       return;
     }
     if (!resp.ok) {
-      popover.innerHTML = '<div class="fn-versions-error">HTTP '
-        + resp.status + '</div>';
+      setFnVersionsBody(popover, '<div class="fn-versions-error">HTTP '
+        + resp.status + '</div>');
       return;
     }
     const html = await resp.text();
     // Supersession check BEFORE the swap: opening another fn's history
     // while this fetch was in flight must NOT clobber the newer popover
-    // content. (Previously the guard ran AFTER swapAndProcess, so a slow
+    // content. (Previously the guard ran AFTER the swap, so a slow
     // response overwrote the fast one with wrong rows + dead buttons.)
     if (_fnVersionsFnId !== fnEntity.id) return;
-    swapAndProcess(popover, html);
+    setFnVersionsBody(popover, html, true);
   } catch (err) {
-    popover.innerHTML = '<div class="fn-versions-error">'
-      + 'Failed: ' + (err?.message || 'network error') + '</div>';
+    setFnVersionsBody(popover, '<div class="fn-versions-error">'
+      + 'Failed: ' + (err?.message || 'network error') + '</div>');
     return;
   }
 

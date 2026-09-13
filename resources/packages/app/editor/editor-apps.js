@@ -142,10 +142,21 @@ function ensureFnAppsPopoverEl() {
       }
     });
     if (typeof focusIntoDialog === 'function') focusIntoDialog(el);
+    addFnAppsClose(el);
   });
   document.body.appendChild(el);
   fnAppsPopoverEl = el;
   return el;
+}
+
+// The visible way out. Re-applied after every write to the popover
+// (innerHTML / replaceChildren drop it) and after each htmx swap — the ▣
+// trigger lives in the row-actions popover, which is gone by the time this
+// one is up, so Escape and a blind click outside were the only exits.
+function addFnAppsClose(el) {
+  if (typeof ensurePopoverClose === 'function') {
+    ensurePopoverClose(el, hideFnAppsPopover, 'Close apps');
+  }
 }
 
 function fnAppsPopoverVisible() {
@@ -177,12 +188,14 @@ async function showFnAppsPopover(fnEntity, anchorEl) {
     if (fnAppsPopoverFnId !== fnEntity.id) return; // superseded
     el.innerHTML = html;
     if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(el);
+    addFnAppsClose(el);
   } catch (err) {
     if (fnAppsPopoverFnId !== fnEntity.id) return; // superseded
     const msg = document.createElement('div');
     msg.className = 'fn-apps-error';
     msg.textContent = 'Failed to load apps: ' + (err?.message || 'network error');
     el.replaceChildren(msg);
+    addFnAppsClose(el);
   }
   if (fnAppsPopoverAnchor && fnAppsPopoverAnchor !== anchorEl) {
     try { fnAppsPopoverAnchor.setAttribute('aria-expanded', 'false'); } catch (_) {}

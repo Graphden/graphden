@@ -19,6 +19,7 @@ standalone runtime bundle, so they carry no editor dependencies) and
 | `installTabTrap({getEl, isVisible})` | Keep Tab inside an open dialog. Driven by `isVisible()`, so it needs no open/close notification and is inert while closed |
 | `setSiblingsInert(el, on)` | Make `aria-modal="true"` true — hide everything else from assistive tech and pointer input |
 | `focusableWithin` / `focusSafely` | One definition of "can take focus", instead of the three partial selector lists this codebase used to carry |
+| `ensurePopoverClose(el, onClose, label, {prepend})` | The visible × in a popover's corner. Idempotent and re-callable, so it survives an innerHTML swap; `prepend` puts it first for a host that scrolls its own content |
 | `window.gdAnnounce(msg, {assertive})` | Say something to a screen reader without moving focus |
 
 ## Rules for new code
@@ -30,6 +31,22 @@ handler never sees (a × button, Cancel, submit), and `getAnchor` is not a
 safe stand-in — `editor-secrets.js` deliberately passes a neighbouring
 popover there, and returning focus into a different dialog is worse than
 doing nothing.
+
+**Anything that COVERS content owes a visible way out.** Escape closes
+every overlay in this editor, and outside-pointerdown closes every one
+`installPopoverDismiss` touches — but neither is on screen, and the scrim
+behind the `.gd-pop` family is a transparent click-catcher rather than a
+dimmed backdrop, so it reads as nothing at all. So: a full-page management
+surface is closed by the shared `#gd-surface-exit` control (one button for
+all of them, revealed by `body[data-surface]` — a per-surface copy is the
+thing that gets forgotten), and a popover gets a `×` from
+`ensurePopoverClose` whenever it traps Tab, outlives the trigger that
+opened it, or is a titled panel / form rather than a short menu anchored
+to a chip that is still on screen. A dialog that traps Tab owes a
+FOCUSABLE close in particular: tabbing out is exactly what the trap
+prevents. Pinned by `edit-overlay-close.test.js`, which enumerates the
+surfaces from the DOM so the next one added is covered without editing the
+test.
 
 **A new keyboard shortcut.** Register it in `editor-shortcuts.js`; do not
 add a `keydown` listener. The registry is what `Space` and `?` render
@@ -73,7 +90,7 @@ busy spinner only slows down because it IS the progress signal.
 | Inspector tabs | ARIA tabs — `aria-controls`, one tabpanel, ← → Home End | `editor-shell.js` |
 | Dialogs | Focus enters, Tab is trapped, Escape returns it | `graphden-popover.js` + each dialog |
 | Account chip menu | ARIA menu — focus enters on open, ↑ ↓ Home End walk `menuitem`s, Escape/Tab close and return focus to the chip (`aria-expanded` mirrors state) | `editor-auth.js` |
-| Management surfaces (Settings / Organization / Platform) | Dialog-like entry: `gdAnnounce` names the surface, focus moves to its section nav, the covered Build chrome inside `#main-container` goes `inert` (the top bar stays live — brand/org/chip work from any surface), Escape returns to Build (`window`-level, `defaultPrevented`-guarded so dialogs close first) | `editor-shell.js` |
+| Management surfaces (Settings / Organization / Platform / Marketplace) | Dialog-like entry: `gdAnnounce` names the surface, focus moves to its section nav, the covered Build chrome inside `#main-container` goes `inert` (the top bar stays live — brand/org/chip work from any surface), Escape returns to Build (`window`-level, `defaultPrevented`-guarded so dialogs close first), and the `#gd-surface-exit` button is the pointer counterpart — it lives in the bar, the one region that stays live, and is placed over the sheet's top-right corner by CSS | `editor-shell.js` |
 | Shortcuts | Registry + `Space` leader + `?` cheatsheet; the `Surfaces` group (`Space v …`) reaches Settings / Organization / Platform / Build | `editor-shortcuts.js` |
 
 Two deliberate exceptions, both load-bearing:
@@ -117,6 +134,7 @@ node tools/browser-test/edit-a11y-tree.test.js      # tree navigation, survives 
 node tools/browser-test/edit-a11y-canvas.test.js    # edge-walking, viewport follows
 node tools/browser-test/edit-shortcuts.test.js      # leader, guards, cheatsheet
 node tools/browser-test/edit-a11y-audit.test.js     # structural sweep + contrast
+node tools/browser-test/edit-overlay-close.test.js  # every cover has a visible way out
 ```
 
 The audit sweep runs in the landing gate with the rest of the e2e suite.

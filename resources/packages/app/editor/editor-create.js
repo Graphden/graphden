@@ -289,6 +289,12 @@ function openNsPublishPopover(anchorEl, nsPath) {
     + '<div class="gd-nspub-actions">'
     +   '<button type="button" class="packages-install-btn" id="gd-nspub-go">Publish</button></div>'
     + '<div id="gd-nspub-result" class="gd-nspub-result"></div>';
+  // A form with a Publish button and nothing else: no Cancel, and the scrim
+  // behind it is transparent, so backing out was an unguessable click on
+  // whatever the panel happened to cover.
+  if (typeof ensurePopoverClose === 'function') {
+    ensurePopoverClose(pop, closeNsPublishPopover, 'Close publish form', {prepend: true});
+  }
   pop.querySelector('.gd-nspub-sub').textContent = nsPath;
   const nameInput = pop.querySelector('#gd-nspub-name');
   const versionInput = pop.querySelector('#gd-nspub-version');

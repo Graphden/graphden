@@ -239,3 +239,47 @@ function installTabTrap({ getEl, isVisible }) {
     }
   }, true);
 }
+
+/**
+ * Give a popover a VISIBLE way out: a `×` pinned to its top-right corner.
+ *
+ * Escape and outside-pointerdown already close everything installPopoverDismiss
+ * touches, but neither is on screen. A reader who opens a surface that covers
+ * what they were looking at goes looking for the control that puts it away —
+ * and a dialog that traps Tab (`trapFocus`) owes a keyboard user a focusable
+ * close, since tabbing out is exactly what the trap prevents.
+ *
+ * Idempotent, and re-callable after an innerHTML swap: the button is a direct
+ * child of `el` marked with `data-gd-pop-x`, so a swap drops it and the next
+ * call puts it back. Positioned by `.gd-pop-x` (absolute) — the host popover
+ * only has to be a positioned element, which every one of them already is.
+ *
+ * `opts.prepend` puts the button FIRST instead of last. Pass it when the host
+ * scrolls its own content: an absolutely positioned last child scrolls out of
+ * the top of a scroll container, while a floated sticky first child stays put
+ * (`.gd-pop > .gd-pop-x`). It also puts the close at the head of the tab
+ * cycle, which suits a panel; a form is better served by the default.
+ */
+function ensurePopoverClose(el, onClose, label, opts) {
+  if (!el || typeof onClose !== 'function') return null;
+  const existing = el.querySelector(':scope > [data-gd-pop-x]');
+  if (existing) return existing;
+  const text = label || 'Close';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'gd-pop-x';
+  btn.dataset.gdPopX = '1';
+  btn.title = text;
+  btn.setAttribute('aria-label', text);
+  btn.textContent = '×';
+  btn.addEventListener('click', (e) => {
+    // The hosts sit under document-level click handlers that would read this
+    // as "a click inside, keep me open" or re-open the popover from its anchor.
+    e.preventDefault();
+    e.stopPropagation();
+    onClose();
+  });
+  if (opts?.prepend) el.insertBefore(btn, el.firstChild);
+  else el.appendChild(btn);
+  return btn;
+}

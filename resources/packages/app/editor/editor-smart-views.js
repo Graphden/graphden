@@ -262,6 +262,14 @@ function _renderSmartViewsPop(el) {
   form.appendChild(ruleIn);
   form.appendChild(save);
   el.appendChild(form);
+
+  // Last, so it survives the replaceChildren() at the top of every
+  // re-render: the popover traps Tab, and "× Show the whole tree" is a
+  // filter action that only exists while a view is applied — neither is a
+  // way to put the popover away.
+  if (typeof ensurePopoverClose === 'function') {
+    ensurePopoverClose(el, gdCloseSmartViewsPop, 'Close smart views');
+  }
 }
 
 installPopoverDismiss({

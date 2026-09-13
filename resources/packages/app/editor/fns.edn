@@ -263,7 +263,23 @@
             ;; hits ?scope=search. One search, where the functions are.)
             [:span {:class "gd-bar-spacer"}]
             [:div {:id "org-mount"}]
-            [:div {:id "auth-mount"}]]
+            [:div {:id "auth-mount"}]
+            ;; The way OUT of whichever management surface is open. ONE
+            ;; control for all of them (and for any surface added later)
+            ;; rather than a button per surface head: the per-surface copy
+            ;; is exactly what gets forgotten — Marketplace shipped with no
+            ;; exit at all, so Escape and this brand logo were the only ways
+            ;; back. Sits in the bar (a landmark, and the one region
+            ;; `gdSetBuildInert` leaves live) but is PLACED over the sheet's
+            ;; top-right corner by CSS, where a cover is closed from; the
+            ;; `body[data-surface]` attribute editor-shell.js maintains is
+            ;; what reveals it.
+            [:button {:type "button" :id "gd-surface-exit" :class "gd-surface-exit"
+                      :onclick "gdShellGoHome()"
+                      :title "Close — back to the editor (Esc)"
+                      :aria-label "Close this surface and go back to the editor"}
+             [:span {:aria-hidden "true"} "×"]
+             [:span {:class "gd-surface-exit-t"} "Close"]]]
            [:div {:id "main-container"}
             ;; Side menu \u2014 semantic <aside> + ARIA label since the
             ;; visible <h2>"Graphden" doubles as the app title rather

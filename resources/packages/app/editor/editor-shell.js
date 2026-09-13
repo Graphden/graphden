@@ -807,6 +807,15 @@
           gdWsRepaint(); render();
         });
       });
+      // Inside render(), after the innerHTML: ticking a namespace re-renders
+      // in place, which would otherwise drop the button. The scrim behind
+      // every .gd-pop is a transparent click-catcher, not a dimmed backdrop,
+      // so "click outside" is a move the reader has to guess — the titled
+      // PANELS in this family carry a visible × too. (The plain menus —
+      // branch policy, protection, the diff chip — stay bare.)
+      if (typeof ensurePopoverClose === 'function') {
+        ensurePopoverClose(pop, gdCloseWsPop, 'Close workspace picker', {prepend: true});
+      }
     };
     render();
     document.body.appendChild(pop);
@@ -856,6 +865,9 @@
     pop.className = 'gd-pop';
     pop.innerHTML = '<h5>Packages</h5>'
       + '<div class="ns-children"><div class="loading">Loading…</div></div>';
+    if (typeof ensurePopoverClose === 'function') {
+      ensurePopoverClose(pop, gdClosePkgPop, 'Close packages panel', {prepend: true});
+    }
     const r = chip.getBoundingClientRect();
     pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 468)) + 'px';
     pop.style.top = (r.bottom + 6) + 'px';

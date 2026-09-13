@@ -374,6 +374,19 @@
 (declare json->type)
 
 
+(defn wire-type-var?
+  "Is this wire string a TYPE VARIABLE rather than a type name? The
+   checker's variables are single lowercase letters, optionally
+   `-<n>`-suffixed by `types.core/freshen` — `a`, `b`, `a-4609`. No
+   primitive or shipped alias is one letter long, and a registered
+   alias that happens to be (`:a`) keeps winning: the alias table is
+   consulted first, so a user-defined one-letter type is still a name."
+  [s]
+  (boolean (and (string? s)
+                (re-matches #"[a-z](-\d+)?" s)
+                (not (types/alias-registered? (keyword s))))))
+
+
 (defn- keyword-domain?
   "True when a refinement's (already-decoded) base type bottoms out at
    `:keyword` — meaning its constraint operands are keyword values
@@ -437,10 +450,21 @@
    numbers / booleans / nil pass through — EXCEPT inside a refinement
    constraint, where `json->constraint` uses the refinement base type
    to keep string literal values intact. A blind decode would turn
-   `[:not= \"\"]` into `[:not= :]` and silently break `:non-empty-text`."
+   `[:not= \"\"]` into `[:not= :]` and silently break `:non-empty-text`.
+
+   TYPE VARIABLES are the other place the wire loses information: a
+   var is a SYMBOL in the checker (`'a`, and `'a-17` after freshening)
+   and cheshire writes it as the bare string `\"a\"` — the same shape
+   as a type name. Decoding it as the keyword `:a` made every
+   polymorphic slot RIGID at the API layer: `[:fn {:item a} b]` came
+   back as `[:fn {:item :a} :b]`, no candidate's return could be a
+   subtype of the unknown type `:b`, and the picker's Compatible list
+   on `map`'s `:func` held nothing but never-returning fns (2026-09-13).
+   `wire-type-var?` is the grammar both sides already agree on — the
+   editor's chip text (`compactTypeChipText`) reads the same regex."
   [x]
   (cond
-    (string? x) (keyword x)
+    (string? x) (if (wire-type-var? x) (symbol x) (keyword x))
 
     (map? x)
     (into {}

@@ -222,13 +222,13 @@ The server-side type-picker sweep behind ~/partials/compatible-type-options~. It
 :PROPERTIES:
 :CUSTOM_ID: web/api-rich-types
 :FILE: src/graphden/crud/types_api.clj
-:LINE: 844
+:LINE: 868
 :MINS: 1.4
 :END:
 
 The ~/api/types~ wire-shaping layer the editor loads at boot and after every mutation: the augmented rich-type snapshot with ~bulk-omitted-fields~ stripped from each entry. The old ~?fn=<name>~ per-fn full-entry backfill is gone with its only client consumer — the return-type-rule popover is a server partial now, and the layout strip facts read the raw registry directly. How the type-checker's registry reaches the browser as a lean payload.
 
-- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn api-rich-types][src/graphden/crud/types_api.clj:844]]
+- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn api-rich-types][src/graphden/crud/types_api.clj:868]]
 - same file :: [[file:web.org::#web/compatible-type-names][compatible-type-names]]
 - referenced from :: [[file:types.org::#types/record-rich-types!][record-rich-types!]]
 

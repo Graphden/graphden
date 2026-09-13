@@ -169,7 +169,40 @@
                                              "&rename-to=" renamed)))]
         (is (= 200 (:status resp)))
         (is (some #(= renamed (:name %))
-                  (sp/query-entities storage :slot {})))))))
+                  (sp/query-entities storage :slot {})))))
+
+    (testing "an editor rename reaches the registry under its NEW name"
+      ;; The rename-view slot used to land AFTER the post-write type check,
+      ;; so the checker reconstructed the fn without it and the registry
+      ;; recorded the SOURCE name: a `string → item` rename on a str-upper
+      ;; child never made the fn `(item:a) → …`-shaped, and `map`'s picker
+      ;; never listed it. (`{:as :item}` in fns.edn always did — the sync
+      ;; path sees the rename in the def itself.) 2026-09-13.
+      (let [su-id    (:fn-id (registry/rich-type-of :str-upper))
+            string-slot (->> (sp/query-entities storage :fn-slot {:fn-id su-id})
+                             (map #(sp/read-entity storage :slot (:slot-id %)))
+                             (filter #(= "string" (:name %)))
+                             first)
+            child-name (uniq "pceb-shout")
+            _ (is (some? su-id) "the bootstrapped graph has str-upper")
+            _ (is (some? string-slot) "and its :string slot")
+            created (via-create (form-req "/api/entities/fn"
+                                          (str "name=" child-name "&parent-ids=" su-id)))
+            child (first (filter #(= child-name (:name %))
+                                 (sp/query-entities storage :fn {})))
+            renamed (via-create (form-req "/api/entities/binding"
+                                          (str "fn-id=" (:id child)
+                                               "&slot-id=" (:id string-slot)
+                                               "&override-kind=fixed"
+                                               "&rename-to=item")))
+            args (some-> (registry/rich-type-of-id (:id child)) :args)]
+        (is (= 200 (:status created)))
+        (is (= 200 (:status renamed)))
+        (is (contains? args :item)
+            (str "the registry records the renamed arg (got " (pr-str args) ")"))
+        (is (not (contains? args :string))
+            "and no longer the declared name it was renamed from")
+        (is (types-api/wire-type-var? "a") "sanity: the wire decoder is loaded")))))
 
 
 (deftest binding-on-a-renamed-view-slot-targets-the-declared-slot-test

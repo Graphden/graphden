@@ -489,6 +489,15 @@
    alias-name))
 
 
+(defn alias-registered?
+  "Is `k` a registered type alias (in the active registry — the
+   `*rich-types-override*`-style test view included)? The one question
+   the wire decoder needs: a one-letter string is a type VARIABLE unless
+   someone registered a type of that name."
+  [k]
+  (contains? @(aliases-atom) k))
+
+
 (defn resolve-alias
   "Recursive keyword alias resolution. Primitives pass through;
    registered aliases expand to their structural body; other

@@ -297,8 +297,10 @@
 
    Idempotent: walks the deterministic UUIDv5 scheme for slot-id
    and fn-slot-id, no-ops when the rows already exist (e.g. on
-   repeat PUT). Returns nil; throws on unexpected storage failures
-   so the caller can surface to the user."
+   repeat PUT). Returns `{:created [[:fn-slot id] [:slot id]]}` naming
+   the rows THIS call minted, nil when it minted none (no-op, blank
+   name, base-fn owner); throws on unexpected storage failures so the
+   caller can surface to the user."
   [storage fn-id source-slot-id rename-to]
   (when (and fn-id source-slot-id rename-to (not (str/blank? rename-to)))
     (let [fn-row (sp/read-entity storage :fn fn-id)
@@ -316,15 +318,37 @@
                         :type-fn-id (:type-fn-id source-slot)
                         :required (or (:required source-slot) false)
                         :description nil
-                        :source-slot-id source-slot-id}]
-          (when-not (sp/read-entity storage :slot new-slot-id)
-            (sp/create-entity storage :slot slot-row))
-          (when-not (sp/read-entity storage :fn-slot new-fn-slot-id)
-            (sp/create-entity storage :fn-slot
-                              {:id new-fn-slot-id
-                               :fn-id fn-id
-                               :slot-id new-slot-id
-                               :position 0})))))))
+                        :source-slot-id source-slot-id}
+              ;; Report the rows THIS call created — the secret carve-out in
+              ;; the apply cores rolls exactly those back and leaves a
+              ;; pre-existing view slot (a repeat PUT) alone.
+              slot-created? (when-not (sp/read-entity storage :slot new-slot-id)
+                              (sp/create-entity storage :slot slot-row)
+                              true)
+              fn-slot-created? (when-not (sp/read-entity storage :fn-slot new-fn-slot-id)
+                                 (sp/create-entity storage :fn-slot
+                                                   {:id new-fn-slot-id
+                                                    :fn-id fn-id
+                                                    :slot-id new-slot-id
+                                                    :position 0})
+                                 true)]
+          (when (or slot-created? fn-slot-created?)
+            {:created (cond-> []
+                        fn-slot-created? (conj [:fn-slot new-fn-slot-id])
+                        slot-created? (conj [:slot new-slot-id]))}))))))
+
+
+(defn- rollback-rename-rows!
+  "Delete the renamed-view rows `ensure-rename-slot!` reported creating
+   (fn-slot before slot — the junction references the slot). Logged,
+   never thrown: this runs inside a rejection path that is already
+   returning an error."
+  [storage created]
+  (doseq [[etype id] created]
+    (try (sp/delete-entity storage etype id)
+         (catch Exception e
+           (log/warn e "Rollback of renamed-view row failed after secret-flow type-check rejection"
+                     {:entity-type etype :id id})))))
 
 
 ;; === Action Handlers ===
@@ -491,7 +515,8 @@
 (defn- forward-rename-slot!
   "Phase 6c — forward a form `:rename-to` to the dedicated renamed-view
    slot. A failure here is logged, not fatal — the binding is still
-   useful without the rename slot."
+   useful without the rename slot. Returns `ensure-rename-slot!`'s
+   `{:created …}` (nil on failure) so the caller can roll it back."
   [storage form-data entity-data]
   (try (ensure-rename-slot! storage
                             (:fn-id entity-data)
@@ -582,25 +607,31 @@
                         {:error pkg-reason :http-status 403}
                         (try-create-or-error storage entity-type entity-data type-str))]
     (if (:created create-result)
-      (let [rej (post-write-type-rej storage type-str entity-data
+      ;; The renamed-view slot lands BEFORE the type check. The checker
+      ;; reconstructs the fn-def from storage, and a rename it cannot see
+      ;; yet is recorded in the registry under the SOURCE name — a
+      ;; `string → item` rename never made the fn `(item:a) → …`-shaped,
+      ;; so the picker never listed it for a HOF slot (2026-09-13). The
+      ;; secret carve-out below rolls the view rows back with the binding.
+      (let [renamed (when (and (= type-str "binding")
+                               (contains? form-data :rename-to))
+                      (forward-rename-slot! storage form-data entity-data))
+            rej (post-write-type-rej storage type-str entity-data
                                      (:created create-result))]
         (if (:secret? rej)
           ;; Hard reject: roll back the just-created row (logged, not
           ;; swallowed — an orphan surviving the rejection must be
-          ;; visible) and surface the diagnostic message as the error.
-          ;; The rename-slot side-effect deliberately hasn't run yet,
-          ;; so no orphan renamed-view slot is left behind either.
-          (do (try (sp/delete-entity storage entity-type (:created create-result))
+          ;; visible) and the renamed-view rows this write minted, then
+          ;; surface the diagnostic message as the error.
+          (do (rollback-rename-rows! storage (:created renamed))
+              (try (sp/delete-entity storage entity-type (:created create-result))
                    (catch Exception e
                      (log/warn e "Rollback delete-entity failed after secret-flow type-check rejection"
                                {:entity-type entity-type
                                 :id (:created create-result)})))
               {:error (:reason rej)})
-          (do (when (and (= type-str "binding")
-                         (contains? form-data :rename-to))
-                (forward-rename-slot! storage form-data entity-data))
-              (cond-> create-result
-                rej (assoc :type-warnings [(:diagnostic rej)])))))
+          (cond-> create-result
+            rej (assoc :type-warnings [(:diagnostic rej)]))))
       ;; Preserve the error's :http-status (409 collisions, 403
       ;; capability — the central web.errors mapping) alongside the
       ;; human message.
@@ -660,12 +691,28 @@
     (if-not updated
       (cond-> {:error (or pkg-reason @error-msg "Failed to update entity")}
         pkg-reason (assoc :http-status 403))
-      (let [rej (post-write-type-rej storage type-str entity-data id-uuid)]
+      (let [;; Renamed-view slot BEFORE the type check — same reason as in
+            ;; `apply-create-core`: the checker must see the rename it is
+            ;; about to record.
+            renamed (when (and (= type-str "binding") id-uuid
+                               (contains? form-data :rename-to))
+                      (try
+                        (when-let [existing (sp/read-entity storage :binding id-uuid)]
+                          (ensure-rename-slot! storage
+                                               (:fn-id existing)
+                                               (:slot-id existing)
+                                               (when-not (str/blank? (:rename-to form-data))
+                                                 (str (:rename-to form-data)))))
+                        (catch Exception e
+                          (log/error e "ensure-rename-slot! failed")
+                          nil)))
+            rej (post-write-type-rej storage type-str entity-data id-uuid)]
         (if (:secret? rej)
           ;; Hard reject: restore every field the update touched from
-          ;; the pre-image, then surface the diagnostic message. The
-          ;; rename-slot side-effect below deliberately hasn't run yet.
-          (do (if pre-row
+          ;; the pre-image, roll back the renamed-view rows this write
+          ;; minted, then surface the diagnostic message.
+          (do (rollback-rename-rows! storage (:created renamed))
+              (if pre-row
                 (try (sp/update-entity
                        storage entity-type id-uuid
                        (into {} (map (fn [[k _]] [k (get pre-row k)]))
@@ -676,19 +723,8 @@
                 (log/warn "No pre-image to restore after secret-flow type-check rejection"
                           {:entity-type entity-type :id id-uuid}))
               {:error (:reason rej)})
-          (do (when (and (= type-str "binding") id-uuid
-                         (contains? form-data :rename-to))
-                (try
-                  (when-let [existing (sp/read-entity storage :binding id-uuid)]
-                    (ensure-rename-slot! storage
-                                         (:fn-id existing)
-                                         (:slot-id existing)
-                                         (when-not (str/blank? (:rename-to form-data))
-                                           (str (:rename-to form-data)))))
-                  (catch Exception e
-                    (log/error e "ensure-rename-slot! failed"))))
-              (cond-> {:updated id-uuid}
-                rej (assoc :type-warnings [(:diagnostic rej)]))))))))
+          (cond-> {:updated id-uuid}
+            rej (assoc :type-warnings [(:diagnostic rej)])))))))
 
 
 ;; === Re-exports from sub-namespaces ==========================================

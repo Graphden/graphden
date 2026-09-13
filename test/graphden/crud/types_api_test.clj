@@ -152,6 +152,19 @@
     (is (= 7 (ta/json->type 7)))
     (is (nil? (ta/json->type nil))))
 
+  (testing "type variables come back as SYMBOLS, not keywords"
+    ;; The wire writes `'a` as "a" — indistinguishable from a type name.
+    ;; Decoded as `:a` the variable is rigid, and a polymorphic slot such
+    ;; as map's `[:fn {:item a} b]` accepts nothing but never-returning fns.
+    (is (= '[:fn {:item a} b] (ta/json->type ["fn" {"item" "a"} "b"])))
+    (is (= '[:list a-4609] (ta/json->type ["list" "a-4609"]))
+        "a freshened variable keeps its suffix")
+    (is (= :int (ta/json->type "int")) "a type NAME stays a keyword")
+    (is (= :non-empty-text (ta/json->type "non-empty-text")))
+    (is (true? (ta/wire-type-var? "b")))
+    (is (false? (ta/wire-type-var? "ab")) "two letters is a name, not a variable")
+    (is (false? (ta/wire-type-var? "A")) "variables are lowercase"))
+
   (testing "refinement constraints keep string literal values intact"
     ;; JSON can't tell a keyword from a string; a blind decode once
     ;; keywordized constraint values — `[:not= ""]` → `[:not= :]`,
@@ -457,6 +470,24 @@
             (is (contains? names :tick))
             (is (not (contains? names :counter))
                 "`() → text` rejects a fn returning :int")))
+
+        (testing "a POLYMORPHIC callee fits a polymorphic slot — over the wire too"
+          ;; `map`'s :func is `[:fn {:item a} b]`; the picker posts that slot
+          ;; as JSON. A `(item:a) → [a]` callee (a :repeat child with its
+          ;; count pinned) and a `(item:text) → text` one both belong in it;
+          ;; before the wire decoded variables, only `→ never` fns did.
+          (registry/record-rich-types-raw! :echo {:return '[:list a] :args '{:item a} :effects #{}})
+          (registry/record-rich-types-raw! :shout {:return :text :args {:item :text} :effects #{}})
+          (registry/record-rich-types-raw! :pair {:return :int :args {:x :int :y :int} :effects #{}})
+          (let [names (set (map :name (:candidates
+                                        (types-candidates
+                                          {:body {:expected ["fn" {"item" "a"} "b"]}} c))))]
+            (is (contains? names :echo) "a generic callee is admitted")
+            (is (contains? names :shout) "a concrete one-arg callee is admitted")
+            ;; (a NULLARY fn is admitted too — hof-wrap lets a callable ignore
+            ;; its input; that arm is deliberate and unchanged.)
+            (is (not (contains? names :pair))
+                "a two-arg callee with neither arg named :item does not fit a one-arg slot")))
 
         (testing "a 1-arg callable slot checks the argument contravariantly"
           (let [names (set (map :name (:candidates

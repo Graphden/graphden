@@ -307,6 +307,17 @@ Error example:
 ;; :numeric ≠ :bool → ERROR
 ```
 
+### Type variables on the wire
+
+`/api/types` and the picker's `/api/types/candidates` /
+`/api/types/compatible` carry types as JSON. A variable is a symbol
+in the checker (`'a`, `'a-17` after freshening) and serialises as the
+bare string `"a"`; `crud.types-api/json->type` decodes a one-letter
+(optionally `-<n>`-suffixed) string back to a symbol — the same
+grammar the editor uses to render `'a` on a chip — unless a type
+alias of that exact name is registered. Decoding it as a keyword
+made every polymorphic slot rigid at the API layer (2026-09-13).
+
 ### Free argument type propagation
 
 When a fn-def leaves arguments free, their types propagate to callers:

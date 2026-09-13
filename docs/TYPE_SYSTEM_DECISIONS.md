@@ -191,3 +191,34 @@ open-record polymorphism.
 
 Final state: sweep at zero, allowlist empty, Phase E gate
 armed. No known type-system bugs in production.
+
+## 2026-09-13 — two API-layer defects, closed (not architecture)
+
+Found while making tutorial lesson 06 wire a callback of the reader's
+own into `map`: the picker's Compatible list for `map`'s `:func`
+(`[:fn {:item a} b]`) held nothing but never-returning fns, and an
+edge-label rename of an arg to `item` never made a fn eligible. Both
+looked like checker limits. Neither was — `fn-subtype?` already
+treats a slot-side type variable as "bound at the call site" — and
+neither re-opens β/γ:
+
+- **Type variables lost their identity on the wire.** A variable is a
+  SYMBOL in the checker; cheshire writes it as the bare string `"a"`,
+  and `crud.types-api/json->type` decoded every string as a keyword.
+  `/api/types/compatible`, `/api/types/candidates` and the tighten
+  write therefore reasoned about `[:fn {:item :a} :b]` — two rigid
+  unknown types. `wire-type-var?` now gives `a` / `a-4609` their
+  symbol back (the grammar the editor's chip renderer already used;
+  a registered one-letter alias still wins).
+- **An editor rename landed AFTER the post-write type check.**
+  `apply-create-core` / `apply-update-core` forwarded the `:rename-to`
+  view slot only after `type-check-fn-after-mutation!` had already
+  reconstructed the fn-def and recorded its free args under the
+  DECLARED name. The view slot now lands first, and the secret
+  carve-out rolls it back with the binding. `{:as}` in fns.edn was
+  never affected — the sync path sees the rename in the def.
+
+Neither changes `subtype?`, `unify` or the registry's shape; the
+[inherited-rename ADR](adr/ADR-inherited-rename-surface.md) contract
+("the fn-def `:args` key is a public name") now also holds for renames
+made in the editor.

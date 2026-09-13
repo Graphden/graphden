@@ -73,6 +73,19 @@ positional `{:as :fn-row}` views were the canonical casualty). The
 walker's names are WIRING; the boundary's names are PRESENTATION —
 conflating them is what caused the split-brain in the first place.
 
+## The registry side (2026-09-13)
+
+The registry entry's `:args` map IS one of the public surfaces above
+(the fn-def `:args` key) — `assemble-fn-type` reads it to decide what
+callable shape a fn has, and the picker's Compatible list is that
+question over the wire. For a rename authored in fns.edn (`{:as}`) it
+always carried the public name; for a rename made in the editor it
+carried the DECLARED one, because the write pipeline forwarded the
+rename-view slot only after the post-write type check had already
+recorded the fn. `crud.entities/apply-create-core` / `apply-update-core`
+now mint the view slot first (and roll it back with the binding under
+the secret carve-out), so the contract holds for both authoring worlds.
+
 ## Compatibility
 
 - Raw (source) names remain accepted at every boundary — `{:content

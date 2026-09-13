@@ -81,6 +81,12 @@ abd = "abd"
 # name in `list-item-position-collision-via-ancestor-test`.
 anc = "anc"
 
+# `-passin` — openssl's flag for supplying a private-key
+# passphrase (`openssl smime -sign … -passin pass:…`). Used when
+# signing the Wallet pass in docs/brand/gen_pkpass.py; typos reads
+# it as `passing`.
+passin = "passin"
+
 # `:netowrk` — DELIBERATE typo used in
 # `check-effects-categories-must-be-known-tags-test` to verify
 # the sync-time guard rejects misspelled effect tags.

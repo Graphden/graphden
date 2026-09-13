@@ -89,3 +89,8 @@ tools/browser-test/node_modules/
 # currently just `typos` (typos-cli release tarball). Pinned via
 # version in `bb.edn :typos` task; refetched on bump.
 /.tools/
+
+# Python bytecode cache. docs/brand/gen_pkpass.py imports gen_banners.py
+# as a module, so running it leaves a __pycache__ next to the scripts.
+__pycache__/
+*.pyc

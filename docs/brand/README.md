@@ -100,6 +100,8 @@ is background or text.
 - `gd-banner-linkedin.png` — LinkedIn cover (Soft ground, text-free ambient graph).
 - `gd-banner-youtube.png` — YouTube channel banner, 2560x1440 (Soft ground; everything important inside the desktop-visible middle strip).
 - `gd-social-preview.png` — GitHub repo social preview, 1280x640 (Ink ground, λ mark + wordmark + tagline).
+- `gen_banners.py` / `gen_pkpass.py` — the generators for the text-bearing
+  banners and for the Wallet card (see below).
 - `gd-org-banner-dark.png` / `gd-org-banner-light.png` — GitHub org profile banner, 2400x760, the two `<picture>` colorways. Canonical copies live here; deploy by copying into `Graphden/.github` as `profile/assets/banner-{dark,light}.png`.
 
 The text-bearing images (`boosty`, `youtube`, `social-preview`, both
@@ -110,3 +112,22 @@ edit `TAGLINE` in the script, re-run
 `python3 docs/brand/gen_banners.py docs/brand`, re-upload to each platform,
 and copy the org pair into `Graphden/.github`. The text-free backdrops
 (`x`, `linkedin`) never need regeneration.
+
+## Wallet card
+
+`gen_pkpass.py` builds the Apple Wallet business card: a generic pass on the
+Ink ground whose QR code is `https://graphden.dev`, with the wordmark as the
+logo and the λ tile as icon and thumbnail. It reuses the mark geometry and the
+palette from `gen_banners.py`, so the card is the same identity as the banners.
+
+```bash
+python3 docs/brand/gen_pkpass.py /tmp/gdpass          # unsigned bundle
+python3 docs/brand/gen_pkpass.py /tmp/gdpass --sign \
+    --team <TEAM-ID> --pass-type pass.dev.graphden.card \
+    --cert pass.pem --key key.pem --wwdr AppleWWDRCAG4.pem
+```
+
+Wallet refuses an unsigned pass, so `--sign` needs a Pass Type ID certificate
+from an Apple Developer account. Nothing inside the pass is secret — the
+certificate is, so keep it out of the repo. The built bundle is not committed
+either: it is one command away from this script.

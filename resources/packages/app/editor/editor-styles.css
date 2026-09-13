@@ -2711,6 +2711,10 @@ textarea.value-form-hiccup {
   border-top: 1px solid var(--card-border);
   border-bottom: 1px solid var(--card-border);
   background: var(--card-bg);
+  /* Inside the form now, between the name and the kind fields (the name
+     belongs to the type, not to a tab) — full-bleed across the form's
+     8px padding so it still reads as a divider, not as another field. */
+  margin: 0 -8px;
 }
 .type-create-tab {
   flex: 1;

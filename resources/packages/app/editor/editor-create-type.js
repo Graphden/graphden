@@ -13,6 +13,8 @@
 //        union:      name + comma-separated branch types.
 //        variant:    name + lines of `tag: type`.
 //        record:     name + lines of `field: type`.
+//      The name (and description) is ONE field above the kind tabs; only what
+//      sits below the strip is per kind.
 //   4. Submit POSTs to the right endpoint:
 //        refinement / union / variant → POST /api/entities/fn
 //        list → POST /api/types/list
@@ -146,51 +148,16 @@ function showTypeCreateForm(kind) {
   head.appendChild(close);
   el.appendChild(head);
 
-  // Kind-tab strip — only on the create flow. Editing a refinement
-  // can't switch to "make this a variant" mid-flight without a
-  // separate convert-kind operation; we surface the tabs only when
-  // they actually do something.
-  if (!editing) {
-    const tabs = document.createElement('div');
-    tabs.className = 'type-create-tabs';
-    tabs.setAttribute('role', 'tablist');
-    for (const k of TYPE_KINDS) {
-      const tab = document.createElement('button');
-      tab.type = 'button';
-      tab.className = 'type-create-tab'
-        + (k.key === kind ? ' type-create-tab-active' : '');
-      tab.textContent = k.label;
-      tab.title = k.hint;
-      tab.setAttribute('role', 'tab');
-      tab.setAttribute('aria-selected', k.key === kind ? 'true' : 'false');
-      tab.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (k.key === kind) return;
-        // Carry the in-progress name+description across kind switches
-        // so the user doesn't lose them when exploring options.
-        const nameVal = el.querySelector('.type-create-form input')?.value || '';
-        const descVal = el.querySelector('.type-create-form textarea.type-create-textarea')?.value
-                     || el.querySelector('.type-create-form .type-create-field textarea')?.value
-                     || '';
-        const savedPrefill = typeCreateContext.prefill;
-        typeCreateContext.prefill = Object.assign({}, savedPrefill || {}, {
-          name: nameVal, description: descVal,
-        });
-        showTypeCreateForm(k.key);
-        // Don't keep the bogus prefill after re-render — only the
-        // first showTypeCreateForm pass should see it.
-        typeCreateContext.prefill = savedPrefill;
-      });
-      tabs.appendChild(tab);
-    }
-    el.appendChild(tabs);
-  }
-
   const form = document.createElement('form');
   form.className = 'type-create-form';
   form.addEventListener('submit', (e) => e.preventDefault());
 
-  // Name input — present in every kind.
+  // Name input — present in every kind, and placed ABOVE the kind tabs to
+  // say so. It used to sit under the tab strip like the kind-specific
+  // fields, and read as "each tab has its own name field" (a reader asked
+  // whether that duplication was a bug, 2026-09-13). It is one field: the
+  // name belongs to the type, the tabs only pick its shape. The value is
+  // carried across a tab switch by the re-render below.
   const nameLabel = document.createElement('label');
   nameLabel.className = 'type-create-field';
   const nameSpan = document.createElement('span');
@@ -208,6 +175,50 @@ function showTypeCreateForm(kind) {
   nameLabel.appendChild(nameSpan);
   nameLabel.appendChild(nameIn);
   form.appendChild(nameLabel);
+
+  // Kind-tab strip — only on the create flow. Editing a refinement
+  // can't switch to "make this a variant" mid-flight without a
+  // separate convert-kind operation; we surface the tabs only when
+  // they actually do something. Between the name and the kind fields:
+  // everything BELOW the strip is what the tab decides.
+  if (!editing) {
+    const tabs = document.createElement('div');
+    tabs.className = 'type-create-tabs';
+    tabs.setAttribute('role', 'tablist');
+    for (const k of TYPE_KINDS) {
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = 'type-create-tab'
+        + (k.key === kind ? ' type-create-tab-active' : '');
+      tab.textContent = k.label;
+      tab.title = k.hint;
+      // The kind as data, for the tutorial's step checks and the e2e suite
+      // — matching a tab by its label text is what they had to do before.
+      tab.dataset.kind = k.key;
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-selected', k.key === kind ? 'true' : 'false');
+      tab.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (k.key === kind) return;
+        // Carry the in-progress name+description across kind switches
+        // so the user doesn't lose them when exploring options.
+        const nameVal = nameIn.value || '';
+        const descVal = el.querySelector('.type-create-form textarea.type-create-textarea')?.value
+                     || el.querySelector('.type-create-form .type-create-field textarea')?.value
+                     || '';
+        const savedPrefill = typeCreateContext.prefill;
+        typeCreateContext.prefill = Object.assign({}, savedPrefill || {}, {
+          name: nameVal, description: descVal,
+        });
+        showTypeCreateForm(k.key);
+        // Don't keep the bogus prefill after re-render — only the
+        // first showTypeCreateForm pass should see it.
+        typeCreateContext.prefill = savedPrefill;
+      });
+      tabs.appendChild(tab);
+    }
+    form.appendChild(tabs);
+  }
 
   // Kind-specific fields.
   const extras = buildKindFields(kind, listId, ctx.prefill);

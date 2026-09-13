@@ -384,12 +384,17 @@
                :check {:kind "ns-exists" :name "tutorial"}
                :creates {:type "ns" :name "tutorial"}}
               {:title "New type…"
-               :body "Hover the [[tutorial]] row, click its [[+]], and choose [[New type…]]. The form opens on Refinement — click the Record tab: a record is a fixed set of named fields."
+               :body "Hover the [[tutorial]] row, click its [[+]], and choose [[New type…]]. The form opens on Refinement — click the [[Record]] tab: a record is a fixed set of named fields."
                :target ".ns-header[data-ns-path=\"tutorial\"]"
-               :targets [".ns-header[data-ns-path=\"tutorial\"]" ".create-menu-item[data-type=\"type\"]"]
-               :check {:kind "dom" :selector ".type-create-popover"}}
+               ;; The chain ends on the Record TAB and the check waits for it
+               ;; to be selected — this step used to pass the moment the
+               ;; popover opened, so the next step's "fill the two field
+               ;; rows" met a reader still standing on Refinement, with no
+               ;; field rows and no spotlight on the tab (2026-09-13).
+               :targets [".ns-header[data-ns-path=\"tutorial\"]" ".create-menu-item[data-type=\"type\"]" ".type-create-tab[data-kind=\"record\"]"]
+               :check {:kind "dom" :selector ".type-create-tab[data-kind=\"record\"][aria-selected=\"true\"]"}}
               {:title "Describe the shape"
-               :body "Name it exactly `tutorial-point` — then fill the two field rows: x of type int, and y of type int. Click [[Create]]."
+               :body "You are on the Record tab. Name it exactly `tutorial-point` — the name sits above the tabs because it belongs to the type, whatever its kind — then fill the two field rows: x of type int, and y of type int. Click [[Create]]."
                :target ".type-create-popover"
                :check {:kind "fn-exists" :name "tutorial-point"}
                :creates {:type "fn" :name "tutorial-point"}}

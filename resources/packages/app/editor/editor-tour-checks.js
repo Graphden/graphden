@@ -140,6 +140,21 @@ function _tourCheckPasses(check) {
         return Array.from(document.querySelectorAll('.edge-label-overlay span'))
           .some((sp) => sp.textContent.trim() === check.arg);
       }
+      case 'list-items': {
+        // "the sequence slot `check.slot` holds at least `check.count`
+        // items" — `binding-bound` is true after the FIRST append, so a
+        // lesson that asks for a second number (`:add`'s :nums, 1 + 1)
+        // needs to count the binding-list-item rows, not the binding.
+        const fn = _tourFindFn(check.name);
+        if (!fn || typeof lookups === 'undefined' || !lookups) return false;
+        const list = (lookups.bindingsByFn?.get(fn.id)) || [];
+        return list.some((b) => {
+          const s = lookups.slotMap?.get(b['slot-id']);
+          if (!s || s.name !== check.slot) return false;
+          const items = lookups.itemsByBinding?.get(b.id) || [];
+          return items.length >= (check.count || 1);
+        });
+      }
       case 'bindings-count': {
         // "at least N of this fn's slots are bound" — order-independent,
         // which is what a step asking for two sibling slots needs: the

@@ -42,31 +42,38 @@ executes it with no arguments. A test with unbound args shows up as
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu.
 
-Say you have a fn `slugify` you want to pin down. In the running
-editor:
+The tour builds the smallest honest example — a fn that computes
+`2 + 2`, a test that pins its answer, then a deliberate lie. In the
+running editor:
 
-1. Create a namespace `tests` (or `myproj.tests` under your project's
+1. Something to test: filter `add`, `⋯ → Extend`, name the child
+   `tutorial-sum`. Click the `+` on `:nums`, **Append literal**, `2`;
+   click it again, append a second `2`. `tutorial-sum` now computes
+   `2 + 2` (run it: `4`). In `fns.edn` terms:
+   `{:name :tutorial-sum :parent :add :args {:nums [2 2]}}`.
+2. Create a namespace `tests` (or `myproj.tests` under your project's
    root — that keeps it inside your workspace scope).
-2. Click `+` in it to add a new fn. Name it `slugify-spaces` — the
+3. Click `+` in it to add a new fn. Name it `two-plus-two` — the
    name states the invariant.
-3. Set its parent to `:assert-eq`. The editor shows two free args.
-4. `:actual` wants a ref to the fn under test with its input pinned,
-   so make that fn first: `⋯ → Extend` on `slugify`, name the child
-   `slugify-hello`, then click the `+` on its `:s` placeholder,
-   choose **Bind literal**, enter `Hello World`, Save. (Any fn of
-   your own works; extend `:add` with `:nums` bound to `[2 2]` if you
-   just want to see the machinery.) In `fns.edn` terms that child is
-   `{:name :slugify-hello :parent :slugify :args {:s "Hello World"}}`.
-5. Back on `slugify-spaces`: click the `+` on `:actual`, choose
-   **Bind fn-ref** and pick `slugify-hello`; then the `+` on
-   `:expected`, **Bind literal**, `hello-world` (or `4` for the
-   `:add` variant).
+4. Set its parent to `:assert-eq`. The editor shows two free args.
+5. `:actual` wants a ref to the fn under test: click its `+`, choose
+   **Bind fn-ref** and pick `tutorial-sum`. Then the `+` on
+   `:expected`, **Bind literal**, `4`.
 6. With every free arg bound the write itself triggers the auto-run
-   (see below), so the status dot may already be green by the time
-   you look. Open the row's `⋯` actions popover and ▶ Run it once
-   anyway to see the result — a passing test returns its `:actual`
-   value; a failing one errors with `assert-eq failed` and both
-   operands in the error data.
+   (see below), so the status dot is green by the time you look.
+   Open the row's `⋯` actions popover and ▶ Run it once anyway to
+   see the result — a passing test returns its `:actual` value; a
+   failing one errors with `assert-eq failed` and both operands in
+   the error data.
+7. Now lie to it: click the bound `4` on `:expected`, change it to
+   `5`, **Save**. The dot goes grey the instant you save (this
+   version has not run), then RED — the auto-run compared `4` with
+   `5` and the assertion threw. Change it back to `4`: grey, then
+   green again.
+
+Any fn of your own works as the subject — `slugify` extended as
+`slugify-hello` with its `:s` pinned to `Hello World`, expected
+`hello-world`, is the same shape.
 
 Now the surfaces:
 
@@ -87,11 +94,10 @@ Now the surfaces:
   message on a failure, and **Run this test** runs just this one —
   the section re-renders from the run itself.
 
-Break the test on purpose (change `:expected`) and watch the dot:
-right after the edit it turns grey — the status is keyed to the
-fn's *current version*, so an edited test honestly reads "not run
-yet" instead of showing a stale green. A moment later it turns red
-on its own: see below.
+That grey-then-red (or grey-then-green) in step 7 is the status
+being keyed to the fn's *current version*: an edited test honestly
+reads "not run yet" instead of showing a stale colour, and the
+auto-run below is what settles it a moment later.
 
 ## Auto-run
 

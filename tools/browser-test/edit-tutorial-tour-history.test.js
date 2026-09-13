@@ -342,6 +342,8 @@ async function openVersionHistory(page) {
     assert(runReady.persisted,
       '“Save to history” is ticked — an unticked failure never reaches Errors');
     await page.click('.execute-popover.visible .execute-run-btn');
+    await waitTourTitle(page, 'Read the message', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 16 look-step Next');
     await waitTourTitle(page, 'Find it in the tree', 150000);
     // The failed lens — the chip toggles the focus; the tour's check is the
     // pressed state.

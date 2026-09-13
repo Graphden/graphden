@@ -16,6 +16,7 @@ const {
   filterAndSelect, extendViaRowActions, bindFirstPlaceholder,
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding,
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
+  bindNamedPlaceholder,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, tourTitle,
   bindOptionalArgChip, appendFnRefViaChip, createRecordType,
@@ -91,12 +92,28 @@ const {
     await extendViaRowActions(page, 'tutorial-a', 'str-upper');
     await waitTourTitle(page, 'Bind the inherited slot', 150000);
     await bindFirstPlaceholder(page, 'alpha');
+    await waitTourTitle(page, 'Run tutorial-a', 150000);
+    await runViaRowActions(page);
+    await waitTourTitle(page, 'ALPHA', 150000);
+    assert(await page.waitForFunction(() => /ALPHA/.test(
+      document.querySelector('.execute-result-host')?.textContent || ''), null,
+      {timeout: 60000, polling: 200}).then(() => true, () => false),
+      'tutorial-a ran and the pane shows ALPHA');
+    assert(await clickTourButton(page, 'Next'), 'lesson 03 ALPHA Next');
     await waitTourTitle(page, 'Back to the parent', 150000);
     await filterAndSelect(page, 'str-upper', 'str-upper');
     await waitTourTitle(page, 'Make a second child', 150000);
     await extendViaRowActions(page, 'tutorial-b', 'str-upper');
     await waitTourTitle(page, 'Give it a different value', 150000);
     await bindFirstPlaceholder(page, 'beta');
+    await waitTourTitle(page, 'Run tutorial-b', 150000);
+    await runViaRowActions(page);
+    await waitTourTitle(page, 'BETA', 150000);
+    assert(await page.waitForFunction(() => /BETA/.test(
+      document.querySelector('.execute-result-host')?.textContent || ''), null,
+      {timeout: 60000, polling: 200}).then(() => true, () => false),
+      'tutorial-b ran and the pane shows BETA');
+    assert(await clickTourButton(page, 'Next'), 'lesson 03 BETA Next');
     await waitTourTitle(page, 'One slot, two values', 150000);
     // The point of the lesson, asserted over the API — NOT over `lookups`,
     // which only holds the subtree of the currently selected fn (tutorial-b
@@ -154,10 +171,22 @@ const {
     assert(pickerState.valueForms === 0,
       'a callable slot offered no literal value form');
     await page.keyboard.press('Escape');
+    // A WIRED HOF with a visible transform (2026-09-13): the platform's own
+    // map test, [1 2 3] → [2 3 4]. (Before this the lesson ran
+    // stringify-map-keys over {"a": 1}, whose output is byte-identical to its
+    // input; wiring the reader's own callback is not possible in the editor
+    // yet — the checker admits only never-returning fns into a generic
+    // (item:a) → b slot, see the lesson text.)
     await waitTourTitle(page, 'See one wired up', 150000);
-    await filterAndSelect(page, 'stringify-map-keys', 'stringify-map-keys');
+    await filterAndSelect(page, 'map-applies', 'map-applies-the-callable-to-every-item');
     await waitTourTitle(page, 'Run it', 150000);
-    await runViaRowActions(page, '{"a": 1}');
+    await runViaRowActions(page);
+    await waitTourTitle(page, 'Once per item', 150000);
+    assert(await page.waitForFunction(() => /2\D+3\D+4/.test(
+      (document.querySelector('.execute-result-host')?.textContent || '').replace(/\s+/g, ' ')), null,
+      {timeout: 60000, polling: 200}).then(() => true, () => false),
+      'the pane shows [2 3 4] — the callback ran once per item');
+    assert(await clickTourButton(page, 'Next'), 'lesson 06 look-step Next');
     await waitTourTitle(page, "That's a HOF", 150000);
     await finishAndDelete(page);
     console.log('  lesson 06: walked + cleaned');
@@ -191,6 +220,23 @@ const {
     await bindOptionalArgChip(page, 'label', 'Run');
     await waitTourTitle(page, 'Run it', 150000);
     await runViaRowActions(page);
+    await waitTourTitle(page, 'A real button', 150000);
+    // The preview is a real document with the components stylesheet: the
+    // button inside the frame must carry the sheet's padding, not the
+    // browser default — that is what the reader is told to look at.
+    await page.waitForSelector('iframe.execute-result-component-preview', {timeout: 60000});
+    const previewed = await page.evaluate(() => {
+      const f = document.querySelector('iframe.execute-result-component-preview');
+      return {link: /rel="stylesheet"/.test(f.getAttribute('srcdoc') || ''),
+              button: /<button[^>]*>Run<\/button>/.test(f.getAttribute('srcdoc') || '')};
+    });
+    assert(previewed.link && previewed.button,
+      'the preview frame is a styled document holding the button (got: ' + JSON.stringify(previewed) + ')');
+    assert(await clickTourButton(page, 'Next'), 'lesson 07 button Next');
+    await waitTourTitle(page, 'Style it', 150000);
+    await bindOptionalArgChip(page, 'attrs', '{"class": "primary"}');
+    await waitTourTitle(page, 'Run it again', 150000);
+    await runViaRowActions(page);
     await waitTourTitle(page, 'Now something to put it in', 150000);
     await filterAndSelect(page, 'card', 'card');
     await waitTourTitle(page, 'Extend the card too', 150000);
@@ -200,6 +246,8 @@ const {
     await appendFnRefViaChip(page, 'children', 'tutorial-button');
     await waitTourTitle(page, 'Run the card', 150000);
     await runViaRowActions(page);
+    await waitTourTitle(page, 'Nested — and still your button', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 07 card Next');
     await waitTourTitle(page, "That's a page, in pieces", 150000);
     // The composition itself, asserted over the API — the card's hiccup
     // must nest the button's.
@@ -209,7 +257,7 @@ const {
     assert(cardFn, 'tutorial-card exists');
     const ran = await api(page, 'POST', '/api/execute',
       {'fn-id': cardFn.id, args: {}});
-    assert(JSON.stringify(ran.result) === '["div",{"class":"card"},["button","Run"]]',
+    assert(JSON.stringify(ran.result) === '["div",{"class":"card"},["button",{"class":"primary"},"Run"]]',
       'card renders with the button nested inside (got: '
       + JSON.stringify(ran.result) + ')');
     await finishAndDelete(page);
@@ -229,6 +277,8 @@ const {
                               {code: true});
     await waitTourTitle(page, 'Run it', 150000);
     await runViaRowActions(page);
+    await waitTourTitle(page, 'Source, not a preview', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 08 look-step Next');
     await waitTourTitle(page, 'Know what you gave up', 150000);
     // `?body` is a RENAME of the inherited `:content` slot, and a binding
     // must land on the declared slot — written on the rename view it shows

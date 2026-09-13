@@ -17,6 +17,7 @@ const {
   renameArgViaEdgeLabel,
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding,
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
+  appendSeqItemViaEdge,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, tourTitle,
 } = require('./tutorial-tour-helpers');
@@ -83,57 +84,18 @@ const {
     await waitTourTitle(page, 'Set the parent', 150000);
     console.log('  step 3: fn created, tour advanced');
 
-    // Step 4 — assign :const through the reparent strip + fn picker.
-    await page.waitForSelector('.reparent-strip', {timeout: 15000});
-    await page.click('.reparent-strip');
-    await page.waitForSelector('.fn-picker-popover', {timeout: 10000});
-    await page.fill('.fn-picker-search', 'const');
-    await page.waitForFunction(() => {
-      return Array.from(document.querySelectorAll('.fn-picker-row'))
-        .some((r) => {
-          const main = r.querySelector('.fn-picker-row-main');
-          return main && /(^|\.)const$/.test(main.textContent.trim().replace(/^:/, ''));
-        });
-    }, null, {timeout: 10000, polling: 100});
-    await page.evaluate(() => {
-      const row = Array.from(document.querySelectorAll('.fn-picker-row'))
-        .find((r) => {
-          const main = r.querySelector('.fn-picker-row-main');
-          return main && /(^|\.)const$/.test(main.textContent.trim().replace(/^:/, ''));
-        });
-      row.click();
-    });
-    await waitTourTitle(page, 'Bind :value', 150000);
+    // Step 4 — assign :add through the reparent strip + fn picker.
+    await setParentViaStrip(page, 'add');
+    await waitTourTitle(page, 'The first number', 150000);
     console.log('  step 4: parent set, tour advanced');
 
-    // Step 5 — bind the :value literal.
-    await page.waitForSelector('.placeholder-binder', {timeout: 15000});
-    await page.evaluate(() => {
-      document.querySelector('.placeholder-binder').click();
-    });
-    await page.waitForSelector('.free-arg-bind-chooser', {timeout: 5000});
-    await page.evaluate(() => {
-      Array.from(document.querySelectorAll('.free-arg-bind-chooser button'))
-        .find((b) => /Bind literal/.test(b.textContent || '')).click();
-    });
-    // The value form is a server partial; a plain field mounts async.
-    await page.waitForFunction(() => {
-      const pop = document.querySelector('.arg-value-edit-popover');
-      return pop && (pop.querySelector('.arg-value-edit-input')
-        || pop.querySelector('[data-form-field]'));
-    }, null, {timeout: 10000, polling: 100});
-    await page.evaluate(() => {
-      const pop = document.querySelector('.arg-value-edit-popover');
-      const field = pop.querySelector('.arg-value-edit-input')
-        || pop.querySelector('[data-form-field]');
-      field.value = '{"status": 200, "body": "Hello!"}';
-      field.dispatchEvent(new Event('input', {bubbles: true}));
-      field.dispatchEvent(new Event('change', {bubbles: true}));
-      Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
-        .find((b) => b.textContent.trim() === 'Save').click();
-    });
+    // Steps 5 + 6 — the two numbers: the placeholder `+` appends the first
+    // item, the `+` at the chain's tail on the edge appends the second.
+    await bindFirstPlaceholder(page, '1');
+    await waitTourTitle(page, 'And the second', 150000);
+    await appendSeqItemViaEdge(page, '1');
     await waitTourTitle(page, 'Run it', 150000);
-    console.log('  step 5: value bound, tour advanced');
+    console.log('  steps 5-6: 1, 1 appended, tour advanced');
 
     // Step 6 — run the fn via ⋯ → ▶ → Run.
     await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
@@ -151,8 +113,17 @@ const {
     await page.waitForSelector('.execute-popover.visible .execute-run-btn',
       {timeout: 10000});
     await page.click('.execute-popover.visible .execute-run-btn');
+    // The look-at-it beat: the result stays on screen until the reader
+    // says Next — and it had better say 2.
+    await waitTourTitle(page, 'Two', 150000);
+    const two = await page.waitForFunction(() => {
+      const t = document.querySelector('.execute-result-host')?.textContent || '';
+      return /(^|\D)2(\D|$)/.test(t.replace(/Submitting…/, '')) ? t.trim().slice(0, 80) : false;
+    }, null, {timeout: 60000, polling: 200}).then((h) => h.jsonValue());
+    assert(two, 'the result pane shows 2 (got: ' + two + ')');
+    assert(await clickTourButton(page, 'Next'), 'lesson 01 look-step Next');
     await waitTourTitle(page, "That's the whole loop", 150000);
-    console.log('  step 6: executed, tour advanced');
+    console.log('  steps 7-8: executed, looked at the 2, tour advanced');
 
     // Step 7 — finish → cleanup dialog → delete what the tour created.
     assert(await clickTourButton(page, 'Finish'), 'Finish button');
@@ -183,6 +154,8 @@ const {
     await bindFirstPlaceholder(page, '10');
     await waitTourTitle(page, 'Run the child', 150000);
     await runViaRowActions(page);
+    await waitTourTitle(page, 'Ten', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 02 look-step Next');
     await waitTourTitle(page, 'Now wrap it', 150000);
     // Wrap: ⋯ on the add-10 card → ⬆ Wrap → pick :to-str as the parent.
     await page.waitForFunction(() => {
@@ -246,6 +219,8 @@ const {
     await filterAndSelect(page, 'to-json', 'to-json-string');
     await waitTourTitle(page, 'A free arg becomes a Run field');
     await runViaRowActions(page, '{"a": 1}');
+    await waitTourTitle(page, 'A string came back', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 04 look-step Next');
     await waitTourTitle(page, 'Pin it in a child', 150000);
     await extendViaRowActions(page, 'tutorial-json', 'to-json-string');
     // Selection gate again — "Bind :data in the child" only appears once

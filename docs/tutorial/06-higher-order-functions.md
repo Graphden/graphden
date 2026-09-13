@@ -208,13 +208,26 @@ in your base-fn impl and the dispatch picks the right behavior.
    *Expected: (item:a) → b* and splits candidates into
    **Compatible** and **Other** — a fn qualifies when its FREE
    argument is named `:item`, the name a HOF passes each element
-   under. Press Escape to close it.
-4. Type `stringify-map-keys` in the filter and select it
-   (`core.collections`). Its `:f` slot is already bound to a
-   callback fn — the edge on the canvas is that binding.
-5. `⋯ → ▶ Run`. Its free arg is the map to convert — enter
-   `{"a": 1}` and **Run**. The callback ran once per key, without
-   you ever invoking it yourself.
+   under. Nothing of yours fits yet; press Escape.
+4. Type `map-applies` in the filter and click
+   `map-applies-the-callable-to-every-item` (`core.tests`) —
+   graphden's own test for `map`. Its `:actual` is a `map` whose
+   `:func` is bound to a small fn adding 1 to `:item`, over the list
+   `[1 2 3]`; the edge on the canvas is that binding.
+5. `⋯ → ▶ Run` → **Run** — nothing to fill in, every slot is bound:
+   `[2 3 4]`. `1, 2, 3` went in and each came out one larger: the
+   callback ran once per item, and you never called it — `map` did,
+   handing each element in as `:item`. That is the whole HOF
+   contract: the argument is passed unrun and the impl drives it.
+
+Wiring a callback of your own into `tutorial-map` is a `fns.edn`
+step today (see below): the editor's picker admits only candidates
+whose whole signature the checker can prove fits `(item:a) → b`, and
+a polymorphic result (`[:list a]`, or any `text` for a `b`) is not
+yet proven — the "Compatible" list on a generic HOF slot is
+effectively the never-returning fns. Noted as a type-system gap;
+[docs/TYPE_SYSTEM_DECISIONS.md](../TYPE_SYSTEM_DECISIONS.md) is where
+such changes are argued.
 
 ### Going further (fns.edn / MCP only)
 

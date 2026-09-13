@@ -70,10 +70,14 @@ Create this fn-def (the click-by-click editor version follows):
  :args {:label "Run"}}
 ```
 
-Run it (⋯ → ▶ Run). The result pane shows the hiccup in its
-JSON form — `["button", "Run"]`, keywords come back as strings —
-which as a value is `[:button "Run"]`. You just built your first
-component composition.
+Run it (⋯ → ▶ Run). The Run pane recognises hiccup and renders the
+component in a small frame — a live `<button>`, in the same
+stylesheet a served page loads (`/assets/graphden-components.css`).
+Click it: nothing happens yet, because no handler is bound — that
+comes below. **Raw** under the frame shows the value itself:
+`["button", "Run"]`, keywords come back as strings — which as a
+value is `[:button "Run"]`. You just built your first component
+composition.
 
 In the editor the same thing is two clicks. Select `:button`,
 ⋯ → "Extend", name the child — and look at the two lighter,
@@ -99,7 +103,11 @@ Now extend it with caller attrs:
         :attrs {:class "primary" :data-cy "save"}}}
 ```
 
-Execute. Result: `[:button {:class "primary" :data-cy "save"} "Save"]`.
+Execute. Result: `[:button {:class "primary" :data-cy "save"} "Save"]` —
+and in the frame, the stylesheet's primary look: `button.primary` is
+the same blue as a form's submit button (`graphden-components.css`
+styles it since 2026-09-13; before that the class was data with no
+visible effect).
 
 ## Wiring a click handler
 

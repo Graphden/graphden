@@ -1832,9 +1832,35 @@
                     :args {:candidate {:value :hiccup-node}
                            :expected :_er-declared-return-or-any}}]}}
 
+  ;; The preview is a DOCUMENT, not a bare fragment: the same stylesheet a
+  ;; served page loads (`/assets/graphden-components.css`, hash-busted by
+  ;; `:_graphden-components-css-url`) goes into its head, so a `:button`
+  ;; previews as the button the page will show — not the browser's unstyled
+  ;; default, which is what the srcdoc rendered until 2026-09-13 (lesson 07's
+  ;; "Run" button looked broken, and `:attrs {:class "primary"}` did nothing
+  ;; you could see). The iframe stays `sandbox=""`: a stylesheet fetch is
+  ;; allowed there, scripts are not — the interactive page is the ↗ link.
+  {:name :_er-cp-stylesheet-link
+   :parent :hiccup
+   :args {:tag {:value "link"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :rel} {:value :href}]
+                         :vals [{:value "stylesheet"} :_graphden-components-css-url]}}
+          :children {:value []}}}
+
+  {:name :_er-component-preview-doc
+   :parent :hiccup
+   :args {:tag {:value "html"} :attrs {:value nil}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "head"} :attrs {:value nil}
+                             :children [:_er-cp-stylesheet-link]}}
+                     {:parent :hiccup
+                      :args {:tag {:value "body"} :attrs {:value nil}
+                             :children [:_er-result]}}]}}
+
   {:name :_er-component-preview-html
    :parent :render-hiccup
-   :args {:hiccup :_er-result}}
+   :args {:hiccup :_er-component-preview-doc}}
 
   {:name :_er-component-preview-iframe-attrs
    :parent :assoc

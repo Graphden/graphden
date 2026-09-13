@@ -16,6 +16,7 @@ const {
   filterAndSelect, extendViaRowActions, bindFirstPlaceholder,
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding, waitClickable,
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
+  appendSeqItemViaEdge, bindFnRefPlaceholder,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, tourTitle,
   waitUntil, waitTourClosed,
@@ -194,6 +195,8 @@ const {
     await waitTourTitle(page, 'Open Run');
     // runWithEffectAck asserts the disabled-until-acknowledged gate itself.
     await runWithEffectAck(page, 'PATH');
+    await waitTourTitle(page, 'The value — or the refusal', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 13 look-step Next');
     await waitTourTitle(page, 'Two gates, one vocabulary', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 13 gates Next');
     await waitTourTitle(page, 'Secrets ride the same rails');
@@ -203,25 +206,43 @@ const {
     await waitTourClosed(page, 30000);
     console.log('  lesson 13: walked (no leftovers to clean)');
 
-    // ---------- Lesson 14 — tests (ns tests → assert-eq → green dot) -------
+    // ---------- Lesson 14 — tests (2 + 2 → assert-eq → green → red → green) --
     await page.goto(BASE + '/?tutorial=14');
     await waitTourTitle(page, 'A test is just a fn', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 14 Next');
-    await waitTourTitle(page, 'Create the tests namespace');
+    // The fn under test first — a real 2 + 2, so the assertion compares
+    // something computed rather than a literal with itself.
+    await waitTourTitle(page, 'Something to test');
+    await filterAndSelect(page, 'add', 'add');
+    await extendViaRowActions(page, 'tutorial-sum', 'add');
+    await waitTourTitle(page, 'tutorial-sum is open', 150000);
+    await waitTourTitle(page, 'Two…', 150000);
+    await bindFirstPlaceholder(page, '2');
+    await waitTourTitle(page, '…plus two', 150000);
+    await appendSeqItemViaEdge(page, '2');
+    await waitTourTitle(page, 'Create the tests namespace', 150000);
+    // The filter still says `add` from the step before — and a filtered tree
+    // hides the namespace row the next step clicks into. Clear it, as the
+    // lesson tells the reader to.
+    await page.evaluate(() => document.querySelector('#search-clear')?.click());
+    await page.waitForFunction(() => !(document.querySelector('input[placeholder="Filter..."]')?.value),
+      null, {timeout: 15000, polling: 100});
     await createRootNamespace(page, 'tests');
     await waitTourTitle(page, 'Add the test fn', 150000);
     await createFnInNamespace(page, 'tests', 'two-plus-two');
     await waitTourTitle(page, 'Make it an assertion', 150000);
     await setParentViaStrip(page, 'assert-eq');
-    await waitTourTitle(page, 'Bind one side', 150000);
+    await waitTourTitle(page, 'What it computes', 150000);
     // assert-eq exposes exactly two slots — wait for BOTH placeholders to
     // paint before touching either. (The step's title lands on selection,
-    // which is earlier than the card.)
+    // which is earlier than the card.) The canvas decides which placeholder
+    // is first, and the lesson's checks are order-independent: a fn-ref in
+    // :expected and a 4 in :actual is the same passing test.
     await page.waitForFunction(
       () => document.querySelectorAll('.placeholder-binder').length === 2,
       null, {timeout: 60000, polling: 150});
-    await bindFirstPlaceholder(page, '4');
-    await waitTourTitle(page, 'Bind the other', 150000);
+    await bindFnRefPlaceholder(page, 'tutorial-sum');
+    await waitTourTitle(page, 'What it should be', 150000);
     // The card repaints asynchronously after the first bind. Clicking
     // before it does hits the SAME (now bound) placeholder, and the write
     // collides on `(fn-id, slot-id)` — a genuine 409 that reads as a broken
@@ -251,19 +272,34 @@ const {
     }
     assert(await testsLensOn(), '✓ tests lens switched on');
     // Auto-run is asynchronous (the write returns first) — poll rather than
-    // read once.
-    // `pending` is a status too — poll until the run REACHES a terminal
-    // one, or the assert below reads a test that is still executing.
-    let testRow = null;
-    for (let i = 0; i < 45; i++) {
-      const statuses = await api(page, 'GET', '/api/tests/status');
-      testRow = (Array.isArray(statuses) ? statuses : []).find(
-        (t) => t['fn-name'] === 'two-plus-two');
-      if (testRow && /^(succeeded|failed)$/.test(testRow.status || '')) break;
-      await new Promise((r) => setTimeout(r, 2000));
-    }
+    // read once. `pending` is a status too — poll until the run REACHES a
+    // terminal one.
+    const testStatus = async (want) => {
+      let row = null;
+      for (let i = 0; i < 45; i++) {
+        const statuses = await api(page, 'GET', '/api/tests/status');
+        row = (Array.isArray(statuses) ? statuses : []).find(
+          (t) => t['fn-name'] === 'two-plus-two');
+        if (row && row.status === want) break;
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+      return row;
+    };
+    let testRow = await testStatus('succeeded');
     assert(testRow && testRow.status === 'succeeded',
       'the test auto-ran and passed (got: ' + JSON.stringify(testRow) + ')');
+    // Break it: the bound 4 → 5. The dot goes grey (new version, not run),
+    // then red — the tour's step completes on the red dot.
+    await waitTourTitle(page, 'Break it', 150000);
+    await editBoundValue(page, '5');
+    testRow = await testStatus('failed');
+    assert(testRow && testRow.status === 'failed',
+      'the auto-run caught the lie (got: ' + JSON.stringify(testRow) + ')');
+    await waitTourTitle(page, 'Fix it', 150000);
+    await editBoundValue(page, '4');
+    testRow = await testStatus('succeeded');
+    assert(testRow && testRow.status === 'succeeded',
+      'and the fix turned it green again (got: ' + JSON.stringify(testRow) + ')');
     await waitTourTitle(page, 'Tests are graph, too', 150000);
     await finishAndDelete(page);
     console.log('  lesson 14: walked + cleaned');
@@ -321,11 +357,15 @@ const {
     await waitTourTitle(page, 'Add a function', 150000);
     await createFnInNamespace(page, NS_NAME, FN_NAME);
     await waitTourTitle(page, 'Set the parent', 150000);
-    await setParentViaStrip(page, 'const');
-    await waitTourTitle(page, 'Bind :value', 150000);
-    await bindFirstPlaceholder(page, '{"status": 200, "body": "Hello!"}');
+    await setParentViaStrip(page, 'add');
+    await waitTourTitle(page, 'The first number', 150000);
+    await bindFirstPlaceholder(page, '1');
+    await waitTourTitle(page, 'And the second', 150000);
+    await appendSeqItemViaEdge(page, '1');
     await waitTourTitle(page, 'Run it', 150000);
     await runViaRowActions(page);
+    await waitTourTitle(page, 'Two', 150000);
+    assert(await clickTourButton(page, 'Next'), 'branch isolation: look-step Next');
     await waitTourTitle(page, "That's the whole loop", 150000);
     console.log('  branch isolation: all lesson-01 steps walked on the branch');
 

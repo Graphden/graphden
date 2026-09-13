@@ -11,7 +11,7 @@
 const {assert, api, deleteFnByName} = require('./edit-test-helpers');
 
 const NS_NAME = 'tutorial';
-const FN_NAME = 'hello-handler';
+const FN_NAME = 'one-plus-one';
 
 
 // Retry wrapper for cleanup deletes: a DELETE fired right after a UI write
@@ -53,6 +53,8 @@ async function hardCleanup(page) {
     }
   } catch (_) { /* best-effort */ }
   const leftovers = ['tutorial-versioned', 'tutorial-bad-json',
+                     // lesson 01 (1 + 1), lesson 14's fn under test
+                     'one-plus-one', 'tutorial-sum',
                      'tutorial-b', 'tutorial-a', 'add-10-text', 'add-10',
                      'tutorial-json',
                      'tutorial-typed', 'tutorial-map', 'branch-demo',
@@ -325,6 +327,24 @@ async function bindFirstPlaceholder(page, literalText) {
   await page.evaluate(() => {
     document.querySelector('.placeholder-binder').click();
   });
+  await appendOrBindLiteralFromChooser(page, literalText);
+}
+
+
+// The SECOND (and later) item of a sequence slot: once a list holds an item
+// the placeholder `+` is gone, and the append affordance is the `+` at the
+// tail of the chain on the edge-label overlay (`.arg-seq-btn-add`, "Append
+// a new item"). Lessons 01 (1 + 1) and 14 (2 + 2) take this path.
+async function appendSeqItemViaEdge(page, literalText) {
+  await page.waitForSelector('.arg-seq-btn-add', {timeout: 30000});
+  await page.evaluate(() => document.querySelector('.arg-seq-btn-add').click());
+  await appendOrBindLiteralFromChooser(page, literalText);
+}
+
+
+// Shared tail of the two above: the literal / fn-ref chooser (if the slot
+// offers one), the value form, Save, and the wait for the write to land.
+async function appendOrBindLiteralFromChooser(page, literalText) {
   // Scalar slots offer "Bind literal"; sequence slots offer "Append
   // literal" — accept either.
   await page.waitForFunction(() => {
@@ -566,6 +586,10 @@ async function createFnInNamespace(page, nsName, fnName) {
   }, nsName, {timeout: 15000, polling: 100});
   await page.evaluate((path) => {
     const target = document.querySelector('.ns-header[data-ns-path="' + path + '"]');
+    // A root created after the tree has grown sits at the Explorer's bottom
+    // edge, and the `+` menu opens BELOW its row — off-screen, where a click
+    // waits 45s and fails. Centre the row first; a reader scrolls, so does this.
+    target.scrollIntoView({block: 'center'});
     target.querySelector('.ns-plus-btn').click();
   }, nsName);
   await page.waitForSelector('.create-menu', {timeout: 10000});
@@ -1060,6 +1084,7 @@ module.exports = {
   filterAndSelect, openRowActionsFor, extendViaRowActions, bindFirstPlaceholder,
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding, waitClickable,
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
+  appendSeqItemViaEdge,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, waitTourClosed, bindFnRefPlaceholder,
   bindNamedPlaceholder, bindOptionalArgChip, appendFnRefViaChip, renameArgViaEdgeLabel,

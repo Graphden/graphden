@@ -10,11 +10,18 @@
     [graphden.crud.value-form :as vform]
     [graphden.crud.value-repr :as vrepr]
     [graphden.executor.interface :as exec]
+    [graphden.executor.test-setup :as setup]
     [graphden.test-infra.exec-harness :as harness]
     [graphden.types.core :as types]))
 
 
-(use-fixtures :once (harness/exec-fixture (str (ns-name *ns*))))
+;; The component preview's srcdoc links the components stylesheet by its
+;; hash-busted URL (`:_graphden-components-css-url` → the baked frontend
+;; hash), so this namespace now renders through `:build-hashes` like the
+;; page tests do — and states that precondition itself.
+(use-fixtures :once
+  setup/ensure-build-hashes-fixture
+  (harness/exec-fixture (str (ns-name *ns*))))
 
 
 (defn- in-tree?

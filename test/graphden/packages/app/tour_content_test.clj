@@ -29,7 +29,7 @@
   "Every `:check :kind` `_tourCheckPasses` implements. `manual` is the
    reader's own Next button — no predicate."
   #{"manual" "fn-exists" "fn-parent" "ns-exists" "binding-bound" "binding-value"
-    "bindings-count" "selected" "on-branch" "arg-named" "dom" "dom-absent"})
+    "bindings-count" "list-items" "selected" "on-branch" "arg-named" "dom" "dom-absent"})
 
 
 (def ^:private creates-types
@@ -101,6 +101,10 @@
         ("binding-bound" "binding-value")
         (is (and (some? (get-in s [:check :name])) (some? (get-in s [:check :slot])))
             (str "lesson " (:id l) " / “" (:title s) "”: " kind " needs :name + :slot"))
+        "list-items"
+        (is (and (some? (get-in s [:check :name])) (some? (get-in s [:check :slot]))
+                 (pos-int? (get-in s [:check :count])))
+            (str "lesson " (:id l) " / “" (:title s) "”: list-items needs :name + :slot + :count"))
         ("dom" "dom-absent")
         (is (not (str/blank? (get-in s [:check :selector])))
             (str "lesson " (:id l) " / “" (:title s) "”: " kind " needs :selector"))

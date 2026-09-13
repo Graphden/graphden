@@ -97,17 +97,21 @@ In the running editor:
 1. At the bottom of the Explorer click **New namespace**, type
    `tutorial` and press Enter.
 2. Expand the `tutorial` row, hover it and click its **+**. Choose
-   **New graph…**, type `hello-handler` and press Enter. The new fn
+   **New graph…**, type `one-plus-one` and press Enter. The new fn
    opens on the canvas.
-3. On the card click **set parent…**, type `const` in the picker and
-   pick `core.logic.const`. Inheriting `:const` exposes its `:value`
-   slot as a `+` placeholder.
-4. Click the `+` on `:value`, choose **Bind literal** and enter the
-   JSON `{"status": 200, "body": "Hello!"}` (in `fns.edn` you'd
-   write the same map as EDN), then **Save**.
+3. On the card click **set parent…**, type `add` in the picker and
+   pick `core.arithmetic.add` — the primitive that sums the numbers
+   in its `:nums` list. Inheriting it exposes `:nums` as a `+`
+   placeholder.
+4. `:nums` is a LIST, so the `+` offers **Append literal** rather
+   than a single value: append `1`, **Save**, then click the `+`
+   again and append a second `1`. The card now reads `1, 1` — the
+   whole input of your function, as data on the card. (In `fns.edn`
+   you'd write `:args {:nums [1 1]}`.)
 5. Click the `⋯` button on the card's top row, then **▶ Run**, then
-   **Run** in the Run pane that opens in the right panel — you
-   should see the map come back.
+   **Run** in the Run pane that opens in the right panel: `2`.
+   Nothing was built or deployed — the card IS the program, the pane
+   is its output. Change a number and run again; the answer follows.
 
 The value form takes JSON: a map, a bare number, or plain text. When
 the slot's type is already known it renders one field per key instead,

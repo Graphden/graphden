@@ -179,4 +179,6 @@ falls back to `:atom` behaviour — fresh each call.
 > [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=09)
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu. The tour builds a lighter variant — a list cell plus
-> `:swap-conj`, under its own names — rather than the counter above.
+> `:swap-conj`, under its own names — rather than the counter above,
+> and runs it TWICE: one row after the first run, two after the
+> second, with nothing in the graph changed in between.

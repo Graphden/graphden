@@ -36,6 +36,12 @@ const {
     await filterAndSelect(page, 'str-len', 'str-len');
     await waitTourTitle(page, 'Free args become the form', 150000);
     await runViaRowActions(page, 'hello');
+    await waitTourTitle(page, 'Five', 150000);
+    assert(await page.waitForFunction(() => /(^|\D)5(\D|$)/.test(
+      (document.querySelector('.execute-result-host')?.textContent || '').replace(/Submitting…/, '')), null,
+      {timeout: 60000, polling: 200}).then(() => true, () => false),
+      'the pane shows 5 for hello');
+    assert(await clickTourButton(page, 'Next'), 'lesson 12 look-step Next');
     await waitTourTitle(page, 'Keep the interesting one', 150000);
     // The step now completes on a REAL persisted run (the
     // body[data-gd-persisted-run] marker) — do what the lesson says:
@@ -254,14 +260,19 @@ const {
     await extendViaRowActions(page, 'tutorial-bump', 'swap-conj');
     await waitTourTitle(page, 'Point it at your cell', 150000);
     await bindFnRefPlaceholder(page, 'tutorial-cell');
-    await waitTourTitle(page, 'Run it twice', 150000);
+    await waitTourTitle(page, 'Run it', 150000);
     // Writing to a cell is the :state effect, so Run is gated behind the
     // acknowledgement checkbox — the same gate lesson 13 teaches.
     await runWithEffectAck(page, 'tick');
-    // The lesson's whole claim: the SECOND run sees the first one's value.
-    // Read the result only once it has SETTLED — the host shows
-    // "Submitting…" first, and reading through that compares nothing.
+    // The lesson's whole claim: the SECOND run sees the first one's value —
+    // and since 2026-09-13 the tour makes the reader do that second run
+    // (the old single "Run it twice" step passed on the first).
+    await waitTourTitle(page, 'Run it again', 150000);
+    await page.waitForSelector('.execute-popover.visible .execute-run-btn:not([disabled])', {timeout: 30000});
+    await page.click('.execute-popover.visible .execute-run-btn');
     await waitTourTitle(page, "That's in-graph state", 150000);
+    const rows = await page.evaluate(() => document.querySelectorAll('.execute-result-list > li').length);
+    assert(rows >= 2, 'the pane lists two rows after the second run (got ' + rows + ')');
     // The lesson's whole claim, checked where it is unambiguous: run the
     // fn twice through the API and watch the cell's list GROW. (The result
     // pane renders effects and typed representations, so asserting on its

@@ -166,6 +166,23 @@ test('bindings-count counts BOUND slots, order-independent', () => {
          'the unbound one is not counted');
 });
 
+test('list-items counts the ITEMS under a sequence slot, not the binding', () => {
+  // `binding-bound` is true after the first append — a lesson that asks for
+  // a second number (1 + 1, 2 + 2) needs the binding-list-item rows counted.
+  const s = withFn();
+  s.lookups.bindingsByFn = new Map([[FN.id, [{ id: 'b1', 'slot-id': SLOT.id }]]]);
+  s.lookups.itemsByBinding = new Map([['b1', [{ id: 'i1', value: 1 }]]]);
+  assert(checkIn(s, { kind: 'list-items', name: 'greet', slot: SLOT.name, count: 1 }) === true,
+         'one item meets count 1');
+  assert(checkIn(s, { kind: 'list-items', name: 'greet', slot: SLOT.name, count: 2 }) === false,
+         'one item does not meet count 2');
+  s.lookups.itemsByBinding = new Map([['b1', [{ id: 'i1', value: 1 }, { id: 'i2', value: 1 }]]]);
+  assert(checkIn(s, { kind: 'list-items', name: 'greet', slot: SLOT.name, count: 2 }) === true,
+         'two items meet count 2');
+  assert(checkIn(s, { kind: 'list-items', name: 'greet', slot: 'other', count: 1 }) === false,
+         'a different slot is not counted');
+});
+
 test('selected reads the current selection', () => {
   const s = withFn({ selectedFnId: FN.id });
   assert(checkIn(s, { kind: 'selected', name: 'greet' }) === true, 'selected fn matches');

@@ -142,18 +142,21 @@ One slot, many bindings — prove it with two children of one fn:
    `tutorial-a`, then **Save**. The `:string` row on the new card
    comes from `str-upper`: the slot is INHERITED, not copied.
 3. Click the `+` on `:string`, choose **Bind literal**, type
-   `alpha`, then **Save**.
+   `alpha`, then **Save**. Run it (`⋯` → **▶ Run** → **Run**):
+   `ALPHA` — `str-upper`'s implementation, over the binding that
+   lives on `tutorial-a`.
 4. Select `str-upper` again (filter for it). Its `:string` is still
    unbound — your binding lives on `tutorial-a`, not on the slot.
 5. **⋯ → Extend** again, name this one `tutorial-b`, **Save**. Same
    slot identity as `tutorial-a`'s, and an empty `+` again, because
    `tutorial-b` has no binding of its own yet.
 6. Click the `+` on `:string`, **Bind literal**, type `beta`,
-   **Save**.
+   **Save**. Run it: `BETA`.
 
-`tutorial-a` says `alpha`, `tutorial-b` says `beta`, `str-upper`
-stays open — one slot identity, three independent binding states.
-That separation is why inheritance never copies anything.
+`tutorial-a` says `ALPHA`, `tutorial-b` says `BETA`, `str-upper`
+stays open — one slot identity, three independent binding states,
+and a parent that never changed. That separation is why inheritance
+never copies anything.
 
 ### Going further (fns.edn / MCP only)
 

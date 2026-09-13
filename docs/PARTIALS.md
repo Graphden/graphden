@@ -433,7 +433,7 @@ panels. 32 partials as of 2026-08-18, by consumer surface:
 | `:partial-provenance`                | GET /partials/provenance?binding-id= + optional item-id (public)  | editor-provenance-popover.js |
 | `:partial-return-type-rule`          | GET /partials/return-type-rule?fn= (public)               | editor-provenance-popover.js (Type-rule popover) |
 | `:partial-inspector-detail`          | GET /partials/inspector-detail?fn-id= (public — projects structure already readable via /api/graph/entities) | editor-shell.js (inspector Bindings tab) |
-| `:partial-inspector-overview`        | GET /partials/inspector-overview?fn-id= (public — same rationale as inspector-detail) | editor-shell.js (inspector Overview tab, `gdLoadInspectorOverview` + `formatServerTypeTexts` post-pass) |
+| `:partial-inspector-overview`        | GET /partials/inspector-overview?fn-id= (public — same rationale as inspector-detail) | editor-inspector.js (inspector Overview tab, `gdLoadInspectorOverview` + `formatServerTypeTexts` post-pass) |
 | `:partial-settings-build`            | GET /partials/settings-build (public — same facts as /version) | editor-shell.js (Settings "About this build" hash rows) |
 | `:partial-settings-access`           | GET /partials/settings-access (public — renders the requester's OWN capabilities) | editor-shell.js (Settings access card: ✓/✕ capability chips, or the single-tenant copy) |
 | `:partial-fn-picker-incompat`        | GET /partials/fn-picker-incompat?expected=&candidate-fn-id= (auth) | editor-fn-picker.js |
@@ -523,6 +523,6 @@ showing a panel whose buttons htmx never processed — the HTML is there,
 was absent). For anything the user can re-open, fetch the partial
 explicitly, swap it, then call `htmx.process(mount)` synchronously, and
 drop responses of a superseded open with a sequence counter —
-`gdOpenPkgPop` in `editor-shell.js` is the pattern. Sections that mount
+`gdOpenPkgPop` in `editor-shell-chips.js` is the pattern. Sections that mount
 ONCE (the Operate panes in `editor-sidebar.js`) can keep the declarative
 load.

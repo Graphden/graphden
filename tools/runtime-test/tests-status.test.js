@@ -14,6 +14,14 @@ const rows = [
   { 'fn-id': 't2', 'fn-name': 'fails', status: 'failed', error: 'assert-eq failed' },
   { 'fn-id': 't3', 'fn-name': 'never-ran', status: null },
   { 'fn-id': 't4', 'fn-name': 'also-fails', status: 'failed' },
+  // PLATFORM tests — the shipped packages' own self-tests (`core.tests`, …),
+  // flagged by the server. Listed under the lens with their dots, but the
+  // chip counts the ORG's tests: [Run all] skips them, and the number must
+  // match what [Run all] runs. One passing and one failing, so BOTH counts
+  // are exercised — before these rows the fixture had no platform test and
+  // the exclusion passed by default.
+  { 'fn-id': 'p1', 'fn-name': 'core.tests/add', status: 'succeeded', 'platform?': true },
+  { 'fn-id': 'p2', 'fn-name': 'web.tests/route', status: 'failed', 'platform?': true },
 ];
 const fetched = [];
 let repaints = 0;
@@ -53,8 +61,9 @@ function assert(cond, msg) {
 
   console.log(' loadTestStatuses primes total, failed and per-fn status');
   await ctx.loadTestStatuses();
-  assert(ctx.getTestStatusCount() === 4, 'total counts every test (got ' + ctx.getTestStatusCount() + ')');
-  assert(ctx.getTestFailedCount() === 2, 'failed counts the `failed` rows only (got ' + ctx.getTestFailedCount() + ')');
+  assert(ctx.getTestStatusCount() === 4, 'total counts the org\'s tests, not the 2 platform rows (got ' + ctx.getTestStatusCount() + ')');
+  assert(ctx.getTestFailedCount() === 2, 'failed counts the org\'s `failed` rows only — the failing platform test is not one (got ' + ctx.getTestFailedCount() + ')');
+  assert(ctx.getTestStatusForFnId('p2').status === 'failed', 'a platform test still carries its own status for the row dot');
   assert(ctx.getTestStatusForFnId('t2').error === 'assert-eq failed', 'per-fn row carries the error');
   assert(ctx.getTestStatusForFnId('t3').status === null, 'a never-run test keeps a null status (stale dot)');
 

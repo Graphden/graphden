@@ -394,13 +394,19 @@ const {
     // deleted branch is the 2026-08-20 dead-editor 400, not a test failure
     // worth debugging twice.
     await page.keyboard.press('Escape');
-    await api(page, 'DELETE', '/api/branches/' + handoff.branch);
     await page.evaluate(() => {
       localStorage.removeItem('graphden.tour');
       localStorage.removeItem('graphden.tour.done');
       localStorage.removeItem('graphden.branch');
     });
+    // Off the branch FIRST, delete it SECOND. The other order raced: with the
+    // page still standing on the branch, its next request after the DELETE
+    // came back 400 (dead branch), `maybeRecoverFromDeletedBranch` answered
+    // with its own reload to main, and that reload aborted this goto
+    // (`net::ERR_ABORTED`) — a 1-in-2 flake that blamed nothing real.
     await page.goto(BASE + '/');
+    await page.waitForSelector('#entity-list', {timeout: 20000}).catch(() => {});
+    await api(page, 'DELETE', '/api/branches/' + handoff.branch);
     const leftOver = await api(page, 'GET', '/api/branches');
     assert(!(leftOver.branches || []).some((b) => /^tutorial-/.test(b.name || '')),
       'and the handoff leaks no branch either (got: '

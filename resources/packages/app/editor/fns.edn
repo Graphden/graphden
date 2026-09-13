@@ -69,10 +69,25 @@
                   ;; window.openFeedbackForm at click time.
                   "packages/app/editor/editor-feedback.js"
                   "packages/app/editor/editor-auth.js"
+                  ;; The account chip's menu — reads the auth mode flags at
+                  ;; click time.
+                  "packages/app/editor/editor-shell-menu.js"
                   "packages/app/editor/editor-org-switcher.js"
+                  ;; Branch / org / workspace context + the fetch wrap — the
+                  ;; wrap is installed AT LOAD, so this precedes the chip UI.
+                  "packages/app/editor/editor-branch-context.js"
                   "packages/app/editor/editor-branches.js"
+                  "packages/app/editor/editor-branch-policy.js"
+                  "packages/app/editor/editor-branch-merge.js"
                   "packages/app/editor/editor-diff-render.js"
                   "packages/app/editor/editor-branch-diff.js"
+                  ;; Compare mode: the Explorer decoration, the inspector panel
+                  ;; and the Δ chip load BEFORE the mode file — its boot IIFE
+                  ;; may reach their `let`s synchronously, and a `let` is in
+                  ;; its TDZ until its own line has run.
+                  "packages/app/editor/editor-diff-sidebar.js"
+                  "packages/app/editor/editor-diff-inspector.js"
+                  "packages/app/editor/editor-diff-chip.js"
                   "packages/app/editor/editor-diff-mode.js"
                   "packages/app/editor/editor-diff-ghost.js"
                   "packages/app/editor/editor-create.js"
@@ -102,13 +117,17 @@
                   "packages/web/runtime/graphden-runtime.js"
                   "packages/web/runtime/graphden-actions-builtin.js"
                   "packages/app/editor/editor-row-actions.js"
+                  ;; Its `data-action` handlers — registered at load into the
+                  ;; runtime's dispatcher (graphden-runtime.js, above).
+                  "packages/app/editor/editor-row-actions-handlers.js"
                   "packages/app/editor/editor-drag.js"
                   "packages/app/editor/editor-fn-picker.js"
                   "packages/app/editor/editor-namespace-picker.js"
                   "packages/app/editor/editor-edit-validation.js"
                   "packages/app/editor/editor-edit-modes.js"
-                  ;; fn-level + type-level edit modes (the skeleton lives
-                  ;; in editor-edit-modes.js).
+                  ;; sequence-item, fn-level + type-level edit modes (the
+                  ;; skeleton lives in editor-edit-modes.js).
+                  "packages/app/editor/editor-edit-modes-seq.js"
                   "packages/app/editor/editor-edit-modes-fn.js"
                   "packages/app/editor/editor-edit-modes-type.js"
                   "packages/app/editor/editor-edit-reparent.js"
@@ -170,7 +189,14 @@
                   "packages/app/editor/editor-apps.js"
                   "packages/app/editor/editor-assets.js"
                   "packages/app/editor/editor-queues.js"
+                  ;; Explorer: the lens (kind chips + visibility predicates)
+                  ;; loads first — `lensKinds` / `treeDetails` are read at
+                  ;; build time by the rows; then the row builders, the tree
+                  ;; walk, and the Organization / Platform surface sections.
+                  "packages/app/editor/editor-sidebar-lens.js"
+                  "packages/app/editor/editor-sidebar-rows.js"
                   "packages/app/editor/editor-sidebar.js"
+                  "packages/app/editor/editor-sidebar-ops.js"
                   ;; Keyboard navigation over the rows editor-sidebar.js
                   ;; builds — delegated, so it survives the rebuilds.
                   "packages/app/editor/editor-tree-keys.js"
@@ -185,6 +211,10 @@
                   ;; Loads before main so window.gdShellSurface / the hash
                   ;; router exist for the boot navigation.
                   "packages/app/editor/editor-shell.js"
+                  ;; The right-column inspector and the Workspace / Packages
+                  ;; chips — wired at load, after the shell.
+                  "packages/app/editor/editor-inspector.js"
+                  "packages/app/editor/editor-shell-chips.js"
                   ;; Interactive tutorial overlay — before main so the boot
                   ;; hook (maybeStartTutorial) exists for main's
                   ;; DOMContentLoaded, and in the same lexical scope as
@@ -192,6 +222,10 @@
                   "packages/app/editor/editor-tour-checks.js"
                   "packages/app/editor/editor-tour-cleanup.js"
                   "packages/app/editor/editor-tour.js"
+                  ;; Spotlight geometry + the end-of-lesson dialogs — the
+                  ;; engine's two halves that grew past it.
+                  "packages/app/editor/editor-tour-spot.js"
+                  "packages/app/editor/editor-tour-end.js"
                   "packages/app/editor/editor-tour-picker.js"
                   "packages/app/editor/editor-main.js"]}}
 

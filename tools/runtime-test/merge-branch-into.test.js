@@ -1,4 +1,4 @@
-// `mergeBranchInto` (editor-branches.js) — the merge action's response
+// `mergeBranchInto` (editor-branch-merge.js) — the merge action's response
 // handling, specifically the audit-3 P2 fix: a THROWN fetch (connection
 // dropped by the target's post-commit service restart) means "merge
 // committed, target restarting" → verify /health + reload; but a RECEIVED
@@ -83,9 +83,16 @@ function makeCtx({ authFetch, healthOk = true }) {
     },
     API: { api_branches_ref_merge: (t) => '/api/branches/' + t + '/merge' },
   });
-  vm.runInContext(
-    fs.readFileSync(path.join(EDITOR, 'editor-branches.js'), 'utf8'),
-    ctx, { filename: 'editor-branches.js' });
+  // The four branch files load in the browser's order and share one scope, as
+  // in the bundle: the CONTEXT (current branch, `DEFAULT_BRANCH`, the fetch
+  // wrap that runs at load — hence the window.fetch stub above), the chip +
+  // popover (`branchRefFrom`, `closeBranchPopover` — which also folds the ⚙
+  // menu, `closeProtectionMenu`, from the POLICY file), then the merge action
+  // itself (split out 2026-09-13).
+  for (const f of ['editor-branch-context.js', 'editor-branches.js',
+                   'editor-branch-policy.js', 'editor-branch-merge.js']) {
+    vm.runInContext(fs.readFileSync(path.join(EDITOR, f), 'utf8'), ctx, { filename: f });
+  }
   return { ctx, state };
 }
 

@@ -1,4 +1,4 @@
-// Unit tests for the END of a lesson — `_tourEnd` in editor-tour.js, with the
+// Unit tests for the END of a lesson — `_tourEnd` in editor-tour-end.js, with the
 // catalogue (editor-tour-picker.js) loaded beside it exactly as the browser
 // loads them.
 //
@@ -111,6 +111,10 @@ function makeWorld(opts) {
   ctx.window.gdAnnounce = (m) => calls.push('announce ' + m);
   vm.createContext(ctx);
   vm.runInContext(read('editor-tour.js'), ctx);
+  // The end-of-lesson dialogs and the spotlight geometry they hide moved to
+  // their own files (2026-09-13); the browser loads them right after the engine.
+  vm.runInContext(read('editor-tour-spot.js'), ctx);
+  vm.runInContext(read('editor-tour-end.js'), ctx);
   vm.runInContext(read('editor-tour-picker.js'), ctx);
   // `_tourLessons` / `_tourState` are script-scope `let`s — the browser's tour
   // engine owns them, so a test seeds them the only way anything else can.

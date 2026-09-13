@@ -558,7 +558,7 @@ per version) — the browse `<details>` also carries a **remote-install form**
 graphden.dev → a self-hosted install, § 13) is one form away; the remote
 bearer stays the server's `GRAPHDEN_REGISTRY_TOKEN`, never a browser value.
 Server-rendered via `GET /partials/packages-panel`; the chip +
-popover lifecycle lives in `editor-shell.js` (`gdRevealPkgChip` / `gdOpenPkgPop`,
+popover lifecycle lives in `editor-shell-chips.js` (`gdRevealPkgChip` / `gdOpenPkgPop`,
 gated on the `window.API` registry probe). **Publish is NOT on the chip** — it is
 a namespace authoring action (packages spec §3); its `<details>` is excluded from
 the panel root and the namespace-scoped affordance is the ⬆ on a namespace row

@@ -18,6 +18,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -44,6 +45,9 @@ THUMBS = {"thumbnail.png": 90, "thumbnail@2x.png": 180, "thumbnail@3x.png": 270}
 # lambda tile rides in the icon + thumbnail slots.
 LOGO_BOX = {"logo.png": 1, "logo@2x.png": 2, "logo@3x.png": 3}
 LOGO_PT = (160, 50)
+# Everything a run writes into `outdir` — and the only names a later run may
+# remove from it.
+BUNDLE_FILES = frozenset({*ICONS, *THUMBS, *LOGO_BOX, "pass.json", "manifest.json", "signature"})
 
 
 def logo(scale):
@@ -124,9 +128,14 @@ def sign(out: pathlib.Path, cert, key, wwdr, password):
            "-certfile", wwdr, "-signer", cert, "-inkey", key,
            "-in", str(out / "manifest.json"), "-out", str(out / "signature"),
            "-outform", "DER"]
+    env = None
     if password is not None:
-        cmd += ["-passin", f"pass:{password}"]
-    subprocess.run(cmd, check=True)
+        # Through the environment, not `pass:<pw>` on the command line — an
+        # argv is readable by every user on the machine (`ps`), and this is
+        # the passphrase of the Pass Type ID key.
+        env = {**os.environ, "GD_PKPASS_KEY_PASSWORD": password}
+        cmd += ["-passin", "env:GD_PKPASS_KEY_PASSWORD"]
+    subprocess.run(cmd, check=True, env=env)
 
 
 def package(out: pathlib.Path, dest: pathlib.Path):
@@ -150,8 +159,16 @@ def main():
 
     out = pathlib.Path(a.outdir)
     out.mkdir(parents=True, exist_ok=True)
+    # Clear only what a previous run of THIS script wrote. The first version
+    # unlinked everything in `outdir`, so pointing it at the wrong directory
+    # (`docs/brand`) deleted every file there.
     for stale in out.iterdir():
-        stale.unlink()
+        if stale.name in BUNDLE_FILES:
+            stale.unlink()
+    left = [p.name for p in out.iterdir()]
+    if left:
+        ap.error(f"{out} is not empty ({', '.join(sorted(left)[:5])}"
+                 f"{', …' if len(left) > 5 else ''}) — use a fresh directory")
 
     build_images(out)
     (out / "pass.json").write_text(

@@ -106,7 +106,7 @@ If any of these fail, **fix before reporting**. Don't ship "the build is green" 
 
 Add a new file when the new responsibility is genuinely orthogonal (a new overlay type, a new picker, a new edit mode). Extend an existing file when it's a feature of an existing concern. The file map in `docs/EDITOR_MODULES.md` is the source of truth — keep it updated.
 
-Hard cap: a file > 800 lines is a code smell — split along a concern boundary before a file crosses it (past splits went along natural seams: type resolution vs presentation, fn-level vs type-level edit modes, host lifecycle vs rendering).
+Hard cap: a file > 800 lines is a code smell — split along a concern boundary before a file crosses it (past splits went along natural seams: type resolution vs presentation, fn-level vs type-level edit modes, host lifecycle vs rendering; the 2026-09-13 sweep: lens / rows / ops out of the sidebar, context / policy / merge out of branches, explorer / inspector / chip out of compare mode, geometry / end-dialogs out of the tour, inspector / chips out of the shell). **Enforced** by `tools/runtime-test/module-size.test.js` (in `bb test-js`, so in `bb ci`): every `app/editor/*.js` and `web/runtime/*.js` ≤ 800 lines, or an `ACKNOWLEDGED` entry there with the reason a reader is better off with the file whole — the same contract `large-forms.edn` gives Clojure forms.
 
 ---
 

@@ -120,38 +120,38 @@ Fetch an HTML partial, swap it into a host, re-bind the dispatcher. That is the 
 :PROPERTIES:
 :CUSTOM_ID: editor/loadRowActionsContent
 :FILE: resources/packages/app/editor/editor-row-actions.js
-:LINE: 418
+:LINE: 422
 :MINS: 3.7
 :END:
 
 The migration in the concrete: the ~⋯~ row menu is a server partial in four contexts, and the client only builds the query string, caches the returned HTML per URL, and recomputes the one state that MUST be fresh (add-MI compatibility, against current ~lookups~) — see [[../EDITOR_ROW_ACTIONS.md][docs/EDITOR_ROW_ACTIONS.md]] for why this popover moved and the others stayed JS.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-row-actions.js::async function loadRowActionsContent(host, fnId, context, opts) {][resources/packages/app/editor/editor-row-actions.js:418]]
+- source :: [[file:../../../resources/packages/app/editor/editor-row-actions.js::async function loadRowActionsContent(host, fnId, context, opts) {][resources/packages/app/editor/editor-row-actions.js:422]]
 
 * 10. enterArgValueEditMode
 :PROPERTIES:
 :CUSTOM_ID: editor/enterArgValueEditMode
 :FILE: resources/packages/app/editor/editor-edit-modes.js
-:LINE: 180
+:LINE: 183
 :MINS: 4.6
 :END:
 
 How an edit actually happens. The control is not chosen here: the client POSTs the slot to ~/api/value-form~ and the graph's value-form registry answers with hiccup naming a widget — the editor routes on ~data-form-widget~ and knows no type tags at all. Note ~onSaved~: a value change alters binding rows, so ~lookups~ is stale and the handler re-fetches rather than re-rendering.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-edit-modes.js::function enterArgValueEditMode(arg, anchorEl) {][resources/packages/app/editor/editor-edit-modes.js:180]]
+- source :: [[file:../../../resources/packages/app/editor/editor-edit-modes.js::function enterArgValueEditMode(arg, anchorEl) {][resources/packages/app/editor/editor-edit-modes.js:183]]
 - see also :: [[file:crud.org::#crud/render-repr][render-repr]]
 
 * 11. gdEnterDiffMode
 :PROPERTIES:
 :CUSTOM_ID: editor/gdEnterDiffMode
 :FILE: resources/packages/app/editor/editor-diff-mode.js
-:LINE: 1283
+:LINE: 509
 :MINS: 3.6
 :END:
 
 COMPARE MODE — THE diff surface, entered by picking the second branch (the Δ on a popover row; click again to exit). One fetch of the grouped ~diff-view~ payload, then pure annotation: Explorer rows badge +/±/−, namespace headers aggregate counts, a LENS BAR under the kind chips filters the tree by change type (~gdDiffSetLens~ — only-changed, kind toggles, substantive-only, effects-touched-only), changed fn cards and args ring on the canvas (~gdDiffModeCardInfo~ / ~gdDiffSlotsForFn~), a selected changed fn gets an inspector DIFF PANEL (~gdDiffRenderInspectorSection~ — old → new entries, effects delta, anchored 💬 threads), and the Δ chip persists the mode across reloads. The chip's menu is the review cockpit: Review & comments dialog, propose-current-for-review, merge-compared-in. Fns existing only on the compared branch inject as ghost rows; effect-set deltas come from a FULL per-branch registry comparison (~gdDiffEffectSetDelta~ — the registry is branch-scoped), with the changed-refs signal (~gdDiffEffectsTouched~) as the anonymous-fn fallback. Note what it does NOT do: no data re-routing — every read and write stays on the current branch, so the user keeps editing with the lens on.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-diff-mode.js::async function gdEnterDiffMode(otherBranch) {][resources/packages/app/editor/editor-diff-mode.js:1283]]
+- source :: [[file:../../../resources/packages/app/editor/editor-diff-mode.js::async function gdEnterDiffMode(otherBranch) {][resources/packages/app/editor/editor-diff-mode.js:509]]
 
 * 12. gdApplyThemePayload
 :PROPERTIES:
@@ -181,23 +181,23 @@ A keyboard LAYOUT is an overrides map ~{id {keys leader}}~ over the shortcut reg
 :PROPERTIES:
 :CUSTOM_ID: editor/authFetch
 :FILE: resources/packages/app/editor/editor-auth.js
-:LINE: 144
+:LINE: 148
 :MINS: 1.4
 :END:
 
 Every mutating call in the editor goes through this. It is 12 lines and worth all of them: a 401 clears the stored credential and re-opens the sign-in popover in place. The trap to internalize before you write editor code — ~authFetch~ and ~authMutate~ *resolve* on 4xx, they do not throw. A caller that only wraps them in ~try/catch~ counts a rejected write as a success.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-auth.js::async function authFetch(url, opts = {}) {][resources/packages/app/editor/editor-auth.js:144]]
+- source :: [[file:../../../resources/packages/app/editor/editor-auth.js::async function authFetch(url, opts = {}) {][resources/packages/app/editor/editor-auth.js:148]]
 - referenced from :: [[file:editor.org::#editor/initGraph][initGraph]]
 
 * 15. _tourTick
 :PROPERTIES:
 :CUSTOM_ID: editor/_tourTick
 :FILE: resources/packages/app/editor/editor-tour.js
-:LINE: 677
+:LINE: 302
 :MINS: 3.9
 :END:
 
 Closing the loop back to the user tutorial: the in-editor guided lessons are graph content (~app.tour/_tour-lessons~, served at ~GET /api/tour~) and this file is only the engine that interprets them. Each tick clears the reader-state traps that make a lesson unfinishable — a collapsed Explorer, a kind lens hiding the very fn the step names, a target scrolled out of view — then polls the step's declarative check and advances. A tour that can dead-end is worse than no tour, which is what every guard here is paying for.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-tour.js::function _tourTick() {][resources/packages/app/editor/editor-tour.js:677]]
+- source :: [[file:../../../resources/packages/app/editor/editor-tour.js::function _tourTick() {][resources/packages/app/editor/editor-tour.js:302]]

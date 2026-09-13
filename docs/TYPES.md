@@ -318,6 +318,16 @@ grammar the editor uses to render `'a` on a chip — unless a type
 alias of that exact name is registered. Decoding it as a keyword
 made every polymorphic slot rigid at the API layer (2026-09-13).
 
+Each `/api/types/candidates` row also says how the candidate's WHOLE
+signature sits in the slot — `fit` ∈ `exact` / `captures` / `ignores`
+plus its free-arg `arity` and namespace (`ns`, `ns-id`). That is
+ranking, not admissibility: a `(item:a) → b` slot admits every
+one-free-arg fn positionally AND every nullary one (the input is
+dropped), so the picker leads with the exact fits, lists the rows
+that leave more to wire next, and folds the constants away
+(`crud.types-api/candidate-fit`, mirrored by the graph's
+`:candidate-fit`; 2026-09-14).
+
 ### Free argument type propagation
 
 When a fn-def leaves arguments free, their types propagate to callers:

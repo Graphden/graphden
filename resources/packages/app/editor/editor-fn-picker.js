@@ -98,6 +98,9 @@ function openFnPicker(opts) {
   // as the reader typed its name (tutorial finding 2026-08-26,
   // lesson 32).
   const serverCompat = new Set();
+  // The server's per-name rows (`fit` / `arity` / `ns`) — read by
+  // toCandidate on every rebuild so a filter keystroke keeps the ranking.
+  const serverRows = new Map();
 
   // Map a fn row to a picker candidate. Compatibility check: clientSubtype
   // is the fast local primitive-only fallback; structural cases (records,
@@ -110,12 +113,25 @@ function openFnPicker(opts) {
       ? (serverCompat.has(f.name)
          || (typeof clientSubtype === 'function' ? clientSubtype(info.return, expected) : true))
       : null;   // null = no expectedType supplied; section headers hide
+    // Whole-signature ranking: the registry entry's `args` are the fn's
+    // remaining free args. The server's verdict (loadTypedCandidates)
+    // overrides this per name once it lands.
+    const rich = (typeof richTypeEntryOf === 'function') ? richTypeEntryOf(f) : null;
+    const arity = rich?.args && typeof rich.args === 'object'
+      ? Object.keys(rich.args).length : null;
+    const srv = serverRows.get(f.name);
     return {
       id: f.id,
       name: f.name,
       qualified: (typeof getQualifiedFnName === 'function')
                  ? getQualifiedFnName(f) : f.name,
+      ns: (typeof getFnNamespace === 'function') ? getFnNamespace(f) : null,
       sameNs: wantNs && f['namespace-id'] === wantNs,
+      arity: srv && typeof srv.arity === 'number' ? srv.arity : arity,
+      fit: expected
+        ? (srv?.fit ? srv.fit
+           : (typeof pickerFitTier === 'function' ? pickerFitTier(expected, arity) : 'exact'))
+        : null,
       flatReturn: f['return-type'] || null,
       richReturn: info.return,
       effects: info.effects,
@@ -160,14 +176,24 @@ function openFnPicker(opts) {
     } catch (_) { return; }
     if (!data?.ok || !Array.isArray(data.candidates)) return;
     for (const c of data.candidates) {
-      if (c?.name && !c.name.startsWith('_anon-')) serverCompat.add(c.name);
+      if (c?.name && !c.name.startsWith('_anon-')) {
+        serverCompat.add(c.name);
+        serverRows.set(c.name, c);
+      }
     }
     const compatNames = serverCompat;
     // The server's verdict is authoritative — upgrade any loaded candidate
     // it confirms compatible (beats the client's primitive-only
-    // `clientSubtype` approximation, which can mis-rule structural types).
+    // `clientSubtype` approximation, which can mis-rule structural types),
+    // and take its whole-signature ranking.
     for (const c of candidates) {
-      if (compatNames.has(c.name)) c.compatible = true;
+      if (compatNames.has(c.name)) {
+        c.compatible = true;
+        const srv = serverRows.get(c.name);
+        if (srv?.fit) c.fit = srv.fit;
+        if (typeof srv?.arity === 'number') c.arity = srv.arity;
+        if (!c.ns && srv?.ns) c.ns = srv.ns;
+      }
     }
     const have = new Set(candidates.map(c => c.name));
     const extra = data.candidates
@@ -175,9 +201,12 @@ function openFnPicker(opts) {
       .map(c => ({
         id: null,                       // resolved by name on pick
         name: c.name,
-        qualified: c.name,
-        sameNs: false,
-        flatReturn: c.return || null,
+        qualified: c.ns ? (c.ns + '.' + c.name) : c.name,
+        ns: c.ns || null,
+        sameNs: !!(wantNs && c['ns-id'] && c['ns-id'] === wantNs),
+        arity: typeof c.arity === 'number' ? c.arity : null,
+        fit: c.fit || 'exact',
+        flatReturn: typeof c.return === 'string' ? c.return : null,
         richReturn: c.return || null,
         effects: Array.isArray(c.effects) ? c.effects : [],
         compatible: true,               // the server already type-checked it
@@ -246,6 +275,9 @@ function openFnPicker(opts) {
   // Collapsed-by-default when there's at least one compatible row.
   // Otherwise expanded so the user has SOMETHING to pick from.
   let otherExpanded = !expected;
+  // Per-tier fold state set by hand; unset = the default (`ignores` folded,
+  // the rest open).
+  const tierState = new Map();
   const otherList = document.createElement('div');
   otherList.className = 'fn-picker-list fn-picker-list-other';
   otherList.id = 'fn-picker-list-other';
@@ -363,7 +395,7 @@ function openFnPicker(opts) {
     return wrap;
   }
 
-  function renderRow(c, section, idx) {
+  function renderRow(c, section, idx, bareName) {
     const row = document.createElement('div');
     row.className = 'fn-picker-row'
       + (idx === activeIdx ? ' fn-picker-row-active' : '')
@@ -387,12 +419,12 @@ function openFnPicker(opts) {
     const main = document.createElement('span');
     main.className = 'fn-picker-row-main';
     const lastDot = c.qualified.lastIndexOf('.');
-    const visible = lastDot >= 0
-      ? c.qualified.slice(0, lastDot + 1)
-        + (typeof displayLabel === 'function'
-           ? displayLabel(c.qualified.slice(lastDot + 1))
-           : c.qualified.slice(lastDot + 1))
-      : (typeof displayLabel === 'function' ? displayLabel(c.qualified) : c.qualified);
+    const label = (n) => (typeof displayLabel === 'function' ? displayLabel(n) : n);
+    const visible = bareName
+      ? label(c.name)
+      : (lastDot >= 0
+         ? c.qualified.slice(0, lastDot + 1) + label(c.qualified.slice(lastDot + 1))
+         : label(c.qualified));
     main.textContent = visible;
     row.appendChild(main);
 
@@ -455,36 +487,21 @@ function openFnPicker(opts) {
     };
     const filtered = candidates
       .filter(c => !q || c.qualified.toLowerCase().includes(q)
-                       || c.name.toLowerCase().includes(q))
-      .sort((a, b) => {
-        if (a.sameNs !== b.sameNs) return a.sameNs ? -1 : 1;
-        if (q) {
-          const t = tier(a) - tier(b);
-          if (t !== 0) return t;
-        }
-        return a.qualified.localeCompare(b.qualified);
-      });
+                       || c.name.toLowerCase().includes(q));
 
-    let compat;
-    let incompat;
-    if (expected) {
-      compat = filtered.filter(c => c.compatible === true).slice(0, 50);
-      incompat = filtered.filter(c => c.compatible === false).slice(0, 50);
-    } else {
-      compat = filtered.slice(0, 50);
-      incompat = [];
-    }
+    const compatAll = expected ? filtered.filter(c => c.compatible === true) : filtered;
+    const incompatAll = expected ? filtered.filter(c => c.compatible === false) : [];
 
     // -------- Compat header --------
     if (expected) {
-      compatHeader.textContent = 'Compatible · ' + compat.length;
+      compatHeader.textContent = 'Compatible · ' + compatAll.length;
       compatHeader.style.display = 'block';
     } else {
       compatHeader.style.display = 'none';
     }
 
     // -------- Other header (collapsible) --------
-    if (expected && incompat.length > 0) {
+    if (expected && incompatAll.length > 0) {
       otherHeader.style.display = 'flex';
       otherHeader.textContent = '';
       const arrow = document.createElement('span');
@@ -492,7 +509,7 @@ function openFnPicker(opts) {
       arrow.textContent = otherExpanded ? '▼' : '▶';
       otherHeader.appendChild(arrow);
       const lbl = document.createElement('span');
-      lbl.textContent = ' Other · ' + incompat.length;
+      lbl.textContent = ' Other · ' + incompatAll.length;
       otherHeader.appendChild(lbl);
       otherHeader.setAttribute('aria-expanded', otherExpanded ? 'true' : 'false');
     } else {
@@ -502,9 +519,9 @@ function openFnPicker(opts) {
     // -------- Rows --------
     compatList.innerHTML = '';
     otherList.innerHTML = '';
-
     visibleRows = [];
-    if (compat.length === 0 && incompat.length === 0) {
+
+    if (compatAll.length === 0 && incompatAll.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'fn-picker-empty';
       empty.textContent = 'No matches';
@@ -512,30 +529,87 @@ function openFnPicker(opts) {
       return;
     }
 
-    if (activeIdx >= compat.length + (otherExpanded ? incompat.length : 0)) {
-      activeIdx = 0;
-    }
-
-    compat.forEach(c => {
-      visibleRows.push({ c, section: expected ? 'compat' : 'neutral' });
-    });
-    if (otherExpanded) {
-      incompat.forEach(c => { visibleRows.push({ c, section: 'incompat' }); });
-    }
-    visibleRows.forEach((entry, idx) => {
-      const row = renderRow(entry.c, entry.section, idx);
-      if (entry.section === 'incompat') {
-        otherList.appendChild(row);
-      } else {
-        compatList.appendChild(row);
+    // One tier's rows, grouped by namespace (header per group when the
+    // tier spans several), capped, with a "… N more" tail. Rows land in
+    // `visibleRows` in DOM order so ↑↓ walk exactly what is on screen.
+    const appendGroupedRows = (host, rows, section) => {
+      const grouped = (typeof groupPickerRows === 'function')
+        ? groupPickerRows(rows, { cap: 50, q })
+        : { groups: [{ ns: null, rows: rows.slice(0, 50) }], shown: Math.min(rows.length, 50), total: rows.length };
+      for (const g of grouped.groups) {
+        if (g.ns) {
+          const nsRow = document.createElement('div');
+          nsRow.className = 'fn-picker-ns-header';
+          nsRow.textContent = g.ns;
+          host.appendChild(nsRow);
+        }
+        for (const c of g.rows) {
+          const idx = visibleRows.length;
+          // Under a namespace header the row carries the bare name — the
+          // group already says where it lives.
+          const row = renderRow(c, section, idx, !!g.ns);
+          visibleRows.push({ c, section, rowEl: row });
+          host.appendChild(row);
+        }
       }
-    });
+      if (grouped.shown < grouped.total) {
+        const more = document.createElement('div');
+        more.className = 'fn-picker-more';
+        more.textContent = '… ' + (grouped.total - grouped.shown) + ' more — type to narrow';
+        host.appendChild(more);
+      }
+    };
 
-    if (compat.length === 0 && expected) {
-      const empty = document.createElement('div');
-      empty.className = 'fn-picker-empty';
-      empty.textContent = 'No compatible fns — try "Other" below';
-      compatList.appendChild(empty);
+    if (expected) {
+      // Whole-signature tiers: exact fit first, then rows that leave the
+      // reader more to wire, then callables that drop the slot's input.
+      // The last tier is folded away until asked for — or until a typed
+      // filter says the reader is looking for a name, not browsing.
+      const tiers = (typeof pickerTiersOf === 'function')
+        ? pickerTiersOf(expected, compatAll)
+        : [{ tier: 'exact', label: null, rows: compatAll }];
+      const showHeaders = tiers.length > 1;
+      for (const t of tiers) {
+        const open = tierState.has(t.tier) ? tierState.get(t.tier) : t.tier !== 'ignores';
+        const folded = !q && showHeaders && !open;
+        if (showHeaders) {
+          const th = document.createElement('button');
+          th.type = 'button';
+          th.className = 'fn-picker-tier-header fn-picker-tier-' + t.tier;
+          th.title = t.title || '';
+          th.setAttribute('aria-expanded', folded ? 'false' : 'true');
+          const arrow = document.createElement('span');
+          arrow.className = 'fn-picker-disclosure-arrow';
+          arrow.textContent = folded ? '▶' : '▼';
+          th.appendChild(arrow);
+          const lbl = document.createElement('span');
+          lbl.textContent = ' ' + t.label + ' · ' + t.rows.length;
+          th.appendChild(lbl);
+          th.addEventListener('click', (e) => {
+            e.stopPropagation();
+            tierState.set(t.tier, folded);
+            render();
+          });
+          compatList.appendChild(th);
+        }
+        if (!folded) appendGroupedRows(compatList, t.rows, 'compat');
+      }
+      if (compatAll.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'fn-picker-empty';
+        empty.textContent = 'No compatible fns — try "Other" below';
+        compatList.appendChild(empty);
+      }
+    } else {
+      appendGroupedRows(compatList, compatAll, 'neutral');
+    }
+
+    if (otherExpanded) appendGroupedRows(otherList, incompatAll, 'incompat');
+    if (activeIdx >= visibleRows.length) activeIdx = 0;
+    if (visibleRows[activeIdx]) {
+      visibleRows[activeIdx].rowEl.classList.add('fn-picker-row-active');
+      visibleRows[activeIdx].rowEl.setAttribute('aria-selected', 'true');
+      search.setAttribute('aria-activedescendant', visibleRows[activeIdx].rowEl.id);
     }
 
     otherList.style.display = otherExpanded ? 'block' : 'none';
@@ -577,8 +651,7 @@ function openFnPicker(opts) {
       const entry = visibleRows[activeIdx];
       if (!entry) return;
       if (entry.section === 'incompat') {
-        const row = otherList.children[activeIdx - (visibleRows.length - otherList.children.length)];
-        explainAndOfferAnyway(entry.c, row || el);
+        explainAndOfferAnyway(entry.c, entry.rowEl || el);
       } else {
         pickFn(entry.c);
       }

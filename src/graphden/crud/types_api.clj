@@ -615,6 +615,56 @@
     {:ok false :error "Request body must include 'expected'"}))
 
 
+(defn candidate-fit
+  "How a candidate's WHOLE signature sits in the slot — the picker's
+   ranking, computed from the same registry entry the admissibility
+   check used. `free-arity` is the candidate's remaining free-arg count.
+
+     :exact    fn slot: exactly as many free args as the slot passes
+               per call — nothing captured, nothing dropped. Value
+               slot: a ready value, no free args left to bind.
+     :captures more free args than the slot supplies. Admissible —
+               hof-wrap captures the rest / they surface as free args
+               of the binding fn — but the reader has more to wire.
+     :ignores  fewer than the slot passes (a nullary callee in a
+               1-arg slot): admissible by the positional rule in
+               `fn-args-subtype?`, the per-call value is dropped.
+
+   A `:fn-ref` slot takes an identity — arity is not a question.
+   Ranking only: admissibility stays `subtype?`'s call (2026-09-14)."
+  [expected free-arity]
+  (cond
+    (= :fn-ref expected) :exact
+    (types/fn-type? expected)
+    (let [k (count (types/fn-args expected))]
+      (cond (= free-arity k) :exact
+            (> free-arity k) :captures
+            :else :ignores))
+    :else (if (zero? free-arity) :exact :captures)))
+
+
+(defn candidate-ns-index
+  "fn-id → `{:ns \"dotted.path\" :ns-id \"<uuid>\"}` for every fn the
+   current org can see — the picker's namespace grouping. Best-effort:
+   a storage without the `:ns` table (minimal test fixtures) yields
+   path-less entries. PUBLIC: `:fn-ns-index` (web/crud-types) is the
+   graph's one boundary over it, closure-captured into the per-row
+   candidate callback so the walk pays for the index once."
+  [ctx]
+  (let [ns-paths (try
+                   (ns-path/path-map
+                     (sp/query-entities
+                       (or (:compile-storage ctx) (request/require-storage ctx))
+                       :ns {}))
+                   (catch Exception _ {}))]
+    (into {}
+          (keep (fn [f]
+                  (when-let [ns-id (:namespace-id f)]
+                    [(:id f) (cond-> {:ns-id (str ns-id)}
+                               (get ns-paths ns-id) (assoc :ns (get ns-paths ns-id)))])))
+          (:fns (cached-or-load-graph ctx)))))
+
+
 (defn apply-types-candidates
   "Stage 3 of types-candidates — enumerate matching fns. Reached only
    after `validate-types-candidates` passes."
@@ -634,6 +684,7 @@
         ;; whatever it returns (the same rule the write-time checker
         ;; applies: `check-one-binding`'s `:fn-ref` arm).
         identity-slot? (= :fn-ref expected)
+        ns-index (candidate-ns-index ctx)
         candidates
         (->> registry-snapshot
              (keep (fn [[fn-name {:keys [return effects] row? :type-row?}]]
@@ -650,10 +701,15 @@
                                   (or (nil? name-prefix)
                                       (and name-str
                                            (str/starts-with? name-str name-prefix))))
-                         {:name fn-name
-                          :return return
-                          :args (or (:args (get registry-snapshot fn-name)) {})
-                          :effects (vec (sort eff-set))}))))
+                         (let [args (or (:args (get registry-snapshot fn-name)) {})]
+                           (merge {:name fn-name
+                                   :return return
+                                   :effects (vec (sort eff-set))
+                                   ;; Whole-signature ranking + namespace for
+                                   ;; the picker's tiers and groups.
+                                   :arity (count args)
+                                   :fit (candidate-fit expected (count args))}
+                                  (get ns-index (:fn-id (get registry-snapshot fn-name)))))))))
              (sort-by (fn [c] (some-> c :name name))))]
     {:ok true
      :expected expected

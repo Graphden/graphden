@@ -172,6 +172,21 @@ test('shortTypeLabel is the one compact notation every row uses', () => {
 });
 
 
+// compactTypeChipText — record types render as their field list, never
+// "[object Object]" (the picker's server rows carried the object as `flat`).
+assert(ctx.compactTypeChipText({ status: 'int', body: 'text' }, null) === '{status,body}',
+  'a small record chip lists its fields');
+assert(/^\{…\d+\}$/.test(ctx.compactTypeChipText(
+  { a: 'int', bb: 'int', ccc: 'int', dddd: 'int', eeeee: 'int' }, null)),
+  'a wide record chip abbreviates to a field count');
+assert(ctx.compactTypeChipText(['list', { id: 'text' }], 'sequence') === '[{id}]',
+  'a list of records nests the record chip');
+assert(ctx.compactTypeChipText(['weird'], { not: 'a string' }) === 'weird',
+  'an object handed as `flat` never leaks through — the head names the kind');
+assert(ctx.compactTypeChipText(['union', 'bool', 'float', 'int', 'null', 'text', ['list', 'any']],
+  ['union', 'bool']) === 'union',
+  'a wide union with an array `flat` says "union", not the joined array');
+
 console.log(failures === 0
   ? '✓ type-helpers — ' + passes + ' assertions'
   : '✗ type-helpers — ' + failures + ' failed of ' + (passes + failures));

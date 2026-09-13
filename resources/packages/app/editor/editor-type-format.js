@@ -233,6 +233,20 @@ function formatTypeHint(t) {
 // editor-fn-picker.js and editor-layout.js.
 function compactTypeChipText(rich, flat) {
   if (rich == null) return flat;
+  // The name to fall back on when the structure is too wide for a chip. A
+  // server row hands the structure itself as `flat`, so say what KIND of
+  // type it is rather than stringify the array.
+  const fallback = () => (typeof flat === 'string'
+    ? flat
+    : (Array.isArray(rich) && typeof rich[0] === 'string' ? rich[0] : null));
+  // A record type is a plain field→type object. It has no `flat` name
+  // to fall back on — a server-sourced picker row hands the object
+  // itself as `flat`, which stringified to "[object Object]".
+  if (typeof rich === 'object' && !Array.isArray(rich)) {
+    const keys = Object.keys(rich);
+    const joined = '{' + keys.join(',') + '}';
+    return joined.length <= 16 ? joined : '{…' + keys.length + '}';
+  }
   if (typeof rich === 'string') {
     // Type-var: lowercase letter, optionally "<letter>-<digits>".
     if (/^[a-z](-\d+)?$/.test(rich) && rich !== flat) return "'" + rich.charAt(0);
@@ -244,18 +258,18 @@ function compactTypeChipText(rich, flat) {
     if (head === 'map') {
       const joined = '{' + compactTypeChipText(rich[1], 'any') + '→'
                    + compactTypeChipText(rich[2], 'any') + '}';
-      return joined.length > 14 ? flat : joined;
+      return joined.length > 14 ? fallback() : joined;
     }
     if (head === 'tuple') {
       const joined = '(' + rich.slice(1)
                        .map(t => compactTypeChipText(t, 'any')).join(',') + ')';
-      return joined.length > 16 ? flat : joined;
+      return joined.length > 16 ? fallback() : joined;
     }
     if (head === 'refine') return compactTypeChipText(rich[1], flat);
     if (head === 'union') {
       const parts = rich.slice(1).map(t => compactTypeChipText(t, 'any'));
       const joined = parts.join('|');
-      return joined.length > 12 ? flat : joined;
+      return joined.length > 12 ? fallback() : joined;
     }
     if (head === 'fn') {
       // Two-tier rendering:
@@ -279,10 +293,12 @@ function compactTypeChipText(rich, flat) {
                        ? (rich[2].length > 9 ? rich[2].slice(0, 8) + '…' : rich[2])
                        : '*';
       const terse = argsTerse + '→' + retTerse;
-      return terse.length > 32 ? flat : terse;
+      return terse.length > 32 ? fallback() : terse;
     }
   }
-  return flat;
+  // No name to fall back on (a server row hands the structure itself as
+  // `flat`): say what KIND of type it is rather than stringify the array.
+  return fallback();
 }
 
 

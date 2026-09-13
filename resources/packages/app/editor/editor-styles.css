@@ -3376,6 +3376,31 @@ textarea.value-form-hiccup {
 .fn-picker-empty {
   padding: 8px; font-size: 0.6875rem; opacity: 0.6; text-align: center;
 }
+/* Whole-signature tiers inside Compatible (exact fit / extra inputs /
+   ignores the input) — a lighter header than the section's, foldable. */
+.fn-picker-tier-header {
+  display: flex; align-items: center; gap: 4px;
+  width: 100%;
+  font-family: inherit; font-size: 0.5625rem; font-weight: 600;
+  letter-spacing: 0.4px; text-transform: uppercase;
+  padding: 3px 8px;
+  color: var(--muted-fg);
+  background: var(--bg);
+  border: 0; border-top: 1px dashed var(--card-border);
+  text-align: left; cursor: pointer;
+}
+.fn-picker-tier-header:hover { background: var(--hover-bg); }
+.fn-picker-tier-exact { color: var(--success-fg); }
+/* Namespace group label inside a tier — the dotted path once, so rows
+   below carry the bare name only. */
+.fn-picker-ns-header {
+  font-size: 0.5625rem; padding: 3px 8px 1px;
+  color: var(--muted-fg); opacity: 0.8;
+  font-family: var(--mono, monospace);
+}
+.fn-picker-more {
+  padding: 4px 8px; font-size: 0.625rem; opacity: 0.6; font-style: italic;
+}
 .fn-picker-cancel-row {
   display: flex; justify-content: flex-end;
 }

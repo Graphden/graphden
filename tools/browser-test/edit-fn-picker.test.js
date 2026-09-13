@@ -98,7 +98,9 @@ const {assert, newContext} = require('./edit-test-helpers');
     },null,  {timeout: 2000, polling: 50});
     const filtered = await page.evaluate(() => {
       const p = document.querySelector('.fn-picker-popover');
-      const allRows = Array.from(p?.querySelectorAll('.fn-picker-list > *') || []);
+      // Rows only — the list also holds namespace-group headers (and, with
+      // an expected type, tier headers), which are not candidates.
+      const allRows = Array.from(p?.querySelectorAll('.fn-picker-list .fn-picker-row') || []);
       const visible = allRows.filter((row) => {
         const style = window.getComputedStyle(row);
         return style.display !== 'none' && style.visibility !== 'hidden';
@@ -122,7 +124,7 @@ const {assert, newContext} = require('./edit-test-helpers');
     // ===================================================================
     await page.evaluate(() => {
       const p = document.querySelector('.fn-picker-popover');
-      const row = Array.from(p?.querySelectorAll('.fn-picker-list > *') || [])
+      const row = Array.from(p?.querySelectorAll('.fn-picker-list .fn-picker-row') || [])
         .find((r) => {
           const style = window.getComputedStyle(r);
           return style.display !== 'none' && /identity/i.test(r.textContent || '');

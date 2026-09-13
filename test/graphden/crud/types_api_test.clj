@@ -441,6 +441,39 @@
           (is (true? (:ok res)))
           (is (zero? (:count res)))))
 
+      ;; Ranking rides along with admissibility (2026-09-14): every
+      ;; candidate says how its WHOLE signature sits in the slot, so the
+      ;; picker can lead with the rows that need nothing more and fold
+      ;; away the constants a 1-arg callable slot admits positionally.
+      (testing "candidate-fit: the whole-signature tier"
+        (is (= :exact (ta/candidate-fit '[:fn {:item a} b] 1)) "one free arg for a one-arg call")
+        (is (= :ignores (ta/candidate-fit '[:fn {:item a} b] 0)) "a constant drops the item")
+        (is (= :captures (ta/candidate-fit '[:fn {:item a} b] 3)) "two more are captured")
+        (is (= :exact (ta/candidate-fit '[:fn {:acc a :item b} a] 2)) "by-name slot, both names")
+        (is (= :exact (ta/candidate-fit [:fn {} :any] 0)) "nullary in a nullary slot")
+        (is (= :captures (ta/candidate-fit [:fn {} :any] 2)) "frees in a nullary slot are captured")
+        (is (= :exact (ta/candidate-fit :fn-ref 5)) "an identity slot asks no arity")
+        (is (= :exact (ta/candidate-fit :text 0)) "a finished value is ready")
+        (is (= :captures (ta/candidate-fit :text 2)) "a template with frees needs inputs"))
+
+      (binding [registry/*rich-types-override* (atom {})]
+        (registry/record-rich-types-raw! :shout {:return :text :args {:item :text} :effects #{}})
+        (registry/record-rich-types-raw! :motto {:return :text :args {} :effects #{}})
+        (registry/record-rich-types-raw! :greet {:return :text :args {:who :text :how :text} :effects #{}})
+        (testing "every candidate carries :arity and :fit"
+          (let [res (ta/apply-types-candidates {:expected '[:fn {:item a} b]} c)
+                by-name (into {} (map (juxt :name identity)) (:candidates res))]
+            (is (= [1 :exact] ((juxt :arity :fit) (by-name :shout))))
+            (is (= [0 :ignores] ((juxt :arity :fit) (by-name :motto))))
+            (is (nil? (by-name :greet))
+                "a two-arg fn is not admitted to a one-arg slot without the name — not a ranking question")))
+        (testing "a value slot ranks finished values as :exact and templates as :captures"
+          (let [res (ta/apply-types-candidates {:expected :text} c)
+                by-name (into {} (map (juxt :name identity)) (:candidates res))]
+            (is (= :exact (:fit (by-name :motto))))
+            (is (= :captures (:fit (by-name :greet))))
+            (is (= 2 (:arity (by-name :greet)))))))
+
       ;; A fn-typed slot receives the CALLABLE, not its result — so
       ;; admissibility is "candidate signature ⊆ slot", the rule
       ;; `check-binding!` already applies on write. Comparing the candidate's

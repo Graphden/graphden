@@ -206,12 +206,15 @@ in your base-fn impl and the dispatch picks the right behavior.
    earlier lessons, the fn picker opens straight away: a literal is
    not a thing you can put in a callable slot. The picker states
    *Expected: (item:a) → b* and splits candidates into
-   **Compatible** and **Other**. Compatible holds every fn that
-   takes one value and returns something — for a single-argument
-   callable the argument's NAME does not matter: `map` hands each
-   element to the callee's one free argument, whatever it is
-   called. `str-upper` from lesson 03 is one of them. Type
-   `str-upper` into the picker's filter and click its row.
+   **Compatible** and **Other**. Compatible's first group, **Exact
+   fit**, holds every fn that takes one value and returns something
+   — for a single-argument callable the argument's NAME does not
+   matter: `map` hands each element to the callee's one free
+   argument, whatever it is called. Below it come fns that would
+   leave you more to wire (**Extra inputs**), and, folded away,
+   constants that would ignore the item. `str-upper` from lesson 03
+   is an exact fit. Type `str-upper` into the picker's filter and
+   click its row.
 4. An edge now runs from `str-upper` into `tutorial-map`'s `:func`
    — the callback is wired, and nothing has run. Give it something
    to run over: click the `+` on `:coll`, **Append literal**, type

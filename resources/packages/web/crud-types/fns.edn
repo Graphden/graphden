@@ -70,6 +70,18 @@
    :args {:fn-name {:type :keyword-or-text :description "Name of the candidate fn."}}
    :return-type [:union :null :type-expression]}
 
+  {:name :candidate-fit
+   :description "How a candidate's WHOLE signature sits in the slot — the picker's ranking tier. `:exact` (a callable slot: exactly as many free args as the slot passes per call; a value slot: no free args left), `:captures` (more free args — admissible, they surface as free args of the binding fn), `:ignores` (fewer — a nullary callee in a 1-arg slot, admissible by the positional rule, the input is dropped). A `:fn-ref` slot is always `:exact`. Ranking only: admissibility is `:subtype?`'s call."
+   :args {:expected {:type :type-expression :description "The slot's expected type."}
+          :arity {:type :non-negative-int :description "The candidate's remaining free-arg count."}}
+   :return-type :keyword}
+
+  {:name :fn-ns-index
+   :description "fn-id → `{:ns \"dotted.path\" :ns-id \"<uuid>\"}` for every fn the current org can see. Computed once per request and closure-captured into the per-candidate callback, so grouping the picker's rows by namespace is a map lookup per row."
+   :args {}
+   :return-type [:map :uuid :keyword-map]
+   :effects #{:db}}
+
   {:name :describe-type-mismatch
    :description "One-line human-readable explanation of why `candidate` ⊄ `expected`. Used by the editor's type-picker tooltip."
    :args {:expected {:type :type-expression :description "The expected (slot-side) type expression — atomic (`:int`, `\"int\"`), vector (`[:list :text]`), or record (`{...}`)."}
@@ -331,6 +343,29 @@
   {:name :_types-candidates-type-row?
    :parent :get :args {:coll :_types-candidates-info :key {:value :type-row?} :default false}}
 
+  ;; --- Ranking fields (2026-09-14). The picker leads with the rows
+  ;; that need nothing more and folds away the constants a 1-arg
+  ;; callable slot admits positionally; grouping by namespace needs
+  ;; the fn's ns path. Neither changes WHICH rows are candidates.
+  {:name :_types-candidates-arity
+   :parent :count
+   :args {:coll :_types-candidates-args}}
+
+  {:name :_types-candidates-fit
+   :parent :candidate-fit
+   :args {:expected {:as :expected} :arity :_types-candidates-arity}}
+
+  {:name :_types-candidates-fn-id
+   :parent :get :args {:coll :_types-candidates-info :key {:value :fn-id} :default nil}}
+
+  {:name :_types-candidates-ns-entry
+   :description "`{:ns :ns-id}` for the row's fn, from the request-wide `:ns-index` (closure-captured) — `{}` for a fn without a namespace."
+   :parent :get :args {:coll {:as :ns-index} :key :_types-candidates-fn-id :default {}}}
+
+  {:name :_types-candidates-ns-index
+   :parent :fn-ns-index
+   :args {}}
+
   ;; --- 4 filter predicates ---
   {:name :_types-candidates-not-type-row?
    :parent :not :args {:value :_types-candidates-type-row?}}
@@ -426,11 +461,16 @@
 
   {:name :_types-candidates-row
    :parent :zipmap
-   :args {:keys [{:value :name} {:value :return} {:value :args} {:value :effects}]
+   :description "One wire row. `:args` is deliberately NOT on it — the picker reads name / return / effects plus the ranking fields, and the free-arg map doubled the payload (0.5 MB for a text slot) for nothing; `/api/types` serves the full entry per fn."
+   :args {:keys [{:value :name} {:value :return} {:value :effects}
+                 {:value :arity} {:value :fit} {:value :ns} {:value :ns-id}]
           :vals [{:as :item}
                  :_types-candidates-return
-                 :_types-candidates-args
-                 :_types-candidates-effects-vec]}}
+                 :_types-candidates-effects-vec
+                 :_types-candidates-arity
+                 :_types-candidates-fit
+                 {:parent :get :args {:coll :_types-candidates-ns-entry :key {:value :ns} :default nil}}
+                 {:parent :get :args {:coll :_types-candidates-ns-entry :key {:value :ns-id} :default nil}}]}}
 
   {:name :_types-candidates-row-or-nil
    :description "HOF callback per fn-name — return the reshaped candidate map when filters pass, nil otherwise."
@@ -465,6 +505,7 @@
    :args {:func :_types-candidates-row-or-nil
           :coll :_types-candidates-names
           :snapshot :_types-candidates-snapshot
+          :ns-index :_types-candidates-ns-index
           :expected :_types-candidates-apply-expected
           :allowed-effects :_types-candidates-apply-allowed-effects
           :name-prefix :_types-candidates-apply-name-prefix}}

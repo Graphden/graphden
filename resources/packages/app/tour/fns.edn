@@ -488,7 +488,7 @@
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".fn-picker-popover"]
                :check {:kind "dom" :selector ".fn-picker-popover"}}
               {:title "Compatible means callable-shaped"
-               :body "The picker states Expected: (item:a) → b and splits candidates into Compatible and Other. Compatible holds every fn that takes one value and returns something — for a single-argument callable the argument's NAME does not matter: map hands each element to the callee's one free argument, whatever it is called. str-upper from lesson 03 is one of them. Type `str-upper` into the picker's filter and click the [[str-upper]] row."
+               :body "The picker states Expected: (item:a) → b and splits candidates into Compatible and Other. Compatible's first group, Exact fit, holds every fn that takes one value and returns something — for a single-argument callable the argument's NAME does not matter: map hands each element to the callee's one free argument, whatever it is called. (Below it: fns that would leave you more to wire, and, folded away, constants that would ignore the item.) str-upper from lesson 03 is an exact fit. Type `str-upper` into the picker's filter and click the [[str-upper]] row."
                :target ".fn-picker-search"
                :targets [".fn-picker-search" ".fn-picker-row-compat[data-fn-name$=\"str-upper\"]"]
                :check {:kind "binding-bound" :name "tutorial-map" :slot "func"}}

@@ -74,6 +74,24 @@
   (tcheck/assemble-fn-type fn-name))
 
 
+(defbase candidate-fit-fn
+  "Atomic library boundary over `types-api/candidate-fit` — how a
+   candidate's WHOLE signature sits in the slot: `:exact` / `:captures`
+   / `:ignores` (see the src docstring). Ranking only — admissibility
+   stays `:subtype?`'s call."
+  [expected arity]
+  (types-api/candidate-fit expected arity))
+
+
+(defbase fn-ns-index-fn
+  "Atomic library boundary over `types-api/candidate-ns-index` —
+   fn-id → `{:ns :ns-id}` for every visible fn, computed once per
+   request so the per-candidate callback grouping by namespace is a
+   map lookup."
+  []
+  (types-api/candidate-ns-index ctx))
+
+
 (defbase describe-type-mismatch-fn
   "Atomic library boundary over `types-api/describe-mismatch` —
    one-line human-readable explanation of why `candidate` ⊄ `expected`.
@@ -285,6 +303,8 @@
    :subtype? subtype?-fn
    :fn-type? {:impl fn-type?-fn :taint-propagate? true}
    :fn-signature {:impl fn-signature :taint-propagate? true}
+   :candidate-fit candidate-fit-fn
+   :fn-ns-index fn-ns-index-fn
    :describe-type-mismatch describe-type-mismatch-fn
    :classify-literal classify-literal
    :diff-value-against-type diff-value-against-type

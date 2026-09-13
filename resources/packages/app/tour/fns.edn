@@ -461,7 +461,7 @@
              :title "Higher-order functions"
              :steps
              [{:title "A slot that wants a function"
-               :body "Every slot so far wanted a VALUE. A slot whose TYPE is :fn — the bare primitive, or the structural [:fn args ret] form — wants a CALLABLE instead: the executor hands the fn over unrun, and the impl decides when to invoke it. (It is the type, never the slot's name.) That is how map, filter and friends work. You will meet such a slot on a fn of your own, then watch a wired one run — once per item."
+               :body "Every slot so far wanted a VALUE. A slot whose TYPE is :fn — the bare primitive, or the structural [:fn args ret] form — wants a CALLABLE instead: the executor hands the fn over unrun, and the impl decides when to invoke it. (It is the type, never the slot's name.) That is how map, filter and friends work. You will wire one yourself and watch it run — once per item."
                :target nil
                :check {:kind "manual"}}
               {:title "Find map"
@@ -488,24 +488,33 @@
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".fn-picker-popover"]
                :check {:kind "dom" :selector ".fn-picker-popover"}}
               {:title "Compatible means callable-shaped"
-               :body "The picker states Expected: (item:a) → b and splits candidates into Compatible and Other. A fn qualifies when its FREE argument is named :item — that is the name a HOF passes each element under — and its result fits the slot's. Press [[Escape]] to close the picker; next, a fn where that slot is already wired."
-               :target ".fn-picker-popover"
-               :check {:kind "dom-absent" :selector ".fn-picker-popover"}}
-              {:title "See one wired up"
-               :body "Type `map-applies` in the filter and click the [[map-applies-the-callable-to-every-item]] row (core.tests) — graphden's own test for map. Its :actual is a map whose :func is bound to a small fn that adds 1 to :item, over the list [1 2 3]; the edge on the canvas is that binding."
-               :target "input[placeholder=\"Filter...\"]"
-               :check {:kind "selected" :name "map-applies-the-callable-to-every-item"}}
+               :body "The picker states Expected: (item:a) → b and splits candidates into Compatible and Other. Compatible holds every fn that takes one value and returns something — for a single-argument callable the argument's NAME does not matter: map hands each element to the callee's one free argument, whatever it is called. str-upper from lesson 03 is one of them. Type `str-upper` into the picker's filter and click the [[str-upper]] row."
+               :target ".fn-picker-search"
+               :targets [".fn-picker-search" ".fn-picker-row-compat[data-fn-name$=\"str-upper\"]"]
+               :check {:kind "binding-bound" :name "tutorial-map" :slot "func"}}
+              {:title "The edge is the binding"
+               :body "An edge now runs from str-upper into :func — the callback is wired, and nothing has run. Give it something to run over: click the [[+]] on :coll, [[Append literal]], type `graph`, [[Save]]."
+               ;; The list slot's own anchor, not the first `+` on the card: for a
+               ;; beat after the pick the card still shows :func's placeholder.
+               :target ".placeholder-binder.is-seq-anchor"
+               :targets [".placeholder-binder.is-seq-anchor" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :check {:kind "list-items" :name "tutorial-map" :slot "coll" :count 1}}
+              {:title "And a second item"
+               :body "The first item sits on the edge into the card, with a small [[+]] at its tail — click it, [[Append literal]], `den`, [[Save]]. The card reads graph, den."
+               :target ".arg-seq-btn-add"
+               :targets [".arg-seq-btn-add" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :check {:kind "list-items" :name "tutorial-map" :slot "coll" :count 2}}
               {:title "Run it"
-               :body "[[⋯]] on its row → [[▶ Run]] → [[Run]]. Nothing to fill in — every slot is bound."
+               :body "[[⋯]] on the tutorial-map row → [[▶ Run]] → [[Run]]. Nothing to fill in — every slot is bound."
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
-               :check {:kind "dom" :selector ".execute-result-host > *"}}
+               :check {:kind "dom" :selector ".execute-result-host .execute-result-pane, .execute-result-host .execute-error-pane"}}
               {:title "Once per item"
-               :body "[2 3 4] — 1, 2, 3 went in and each came out one larger: the callback ran once per item, and you never called it. map did, handing each element in as :item. That is the whole HOF contract — the argument is passed unrun and the impl drives it. Click [[Next]]."
+               :body "GRAPH, DEN — two strings went in and each came out upper-cased: str-upper ran once per item, and you never called it. map did, handing each element in as its one argument. That is the whole HOF contract — the argument is passed unrun and the impl drives it. Click [[Next]]."
                :target ".execute-result-host"
                :check {:kind "manual"}}
               {:title "That's a HOF"
-               :body "One slot type (:fn …) changes everything: the argument is passed unrun and the impl drives it. The written lesson 06 goes further — closure capture, lambda-params, and how a callback of your own is declared in fns.edn. Click [[Finish]] to clean up or keep tutorial-map."
+               :body "One slot type (:fn …) changes everything: the argument is passed unrun and the impl drives it. The written lesson 06 goes further — callables that take SEVERAL arguments are matched by NAME, closure capture, lambda-params. Click [[Finish]] to clean up or keep tutorial-map."
                :target nil
                :check {:kind "manual"}}]}
             {:id "07"

@@ -206,28 +206,31 @@ in your base-fn impl and the dispatch picks the right behavior.
    earlier lessons, the fn picker opens straight away: a literal is
    not a thing you can put in a callable slot. The picker states
    *Expected: (item:a) → b* and splits candidates into
-   **Compatible** and **Other** — a fn qualifies when its FREE
-   argument is named `:item`, the name a HOF passes each element
-   under. Nothing of yours fits yet; press Escape.
-4. Type `map-applies` in the filter and click
-   `map-applies-the-callable-to-every-item` (`core.tests`) —
-   graphden's own test for `map`. Its `:actual` is a `map` whose
-   `:func` is bound to a small fn adding 1 to `:item`, over the list
-   `[1 2 3]`; the edge on the canvas is that binding.
+   **Compatible** and **Other**. Compatible holds every fn that
+   takes one value and returns something — for a single-argument
+   callable the argument's NAME does not matter: `map` hands each
+   element to the callee's one free argument, whatever it is
+   called. `str-upper` from lesson 03 is one of them. Type
+   `str-upper` into the picker's filter and click its row.
+4. An edge now runs from `str-upper` into `tutorial-map`'s `:func`
+   — the callback is wired, and nothing has run. Give it something
+   to run over: click the `+` on `:coll`, **Append literal**, type
+   `graph`, **Save**; then the `+` at the tail of the edge, **Append
+   literal**, `den`, **Save**. The card reads `graph, den`.
 5. `⋯ → ▶ Run` → **Run** — nothing to fill in, every slot is bound:
-   `[2 3 4]`. `1, 2, 3` went in and each came out one larger: the
-   callback ran once per item, and you never called it — `map` did,
-   handing each element in as `:item`. That is the whole HOF
-   contract: the argument is passed unrun and the impl drives it.
+   `["GRAPH" "DEN"]`. Two strings went in and each came out
+   upper-cased: `str-upper` ran once per item, and you never called
+   it — `map` did, handing each element in as its one argument.
+   That is the whole HOF contract: the argument is passed unrun and
+   the impl drives it.
 
-Wiring a callback of your own into `tutorial-map` is a `fns.edn`
-step today (see below): the editor's picker admits only candidates
-whose whole signature the checker can prove fits `(item:a) → b`, and
-a polymorphic result (`[:list a]`, or any `text` for a `b`) is not
-yet proven — the "Compatible" list on a generic HOF slot is
-effectively the never-returning fns. Noted as a type-system gap;
-[docs/TYPE_SYSTEM_DECISIONS.md](../TYPE_SYSTEM_DECISIONS.md) is where
-such changes are argued.
+When a callable slot takes SEVERAL arguments — `reduce`'s
+`(acc, item) → acc`, say — the picker matches by name instead, and
+a callee of your own has to expose args of those names; `{:as :item}`
+in `fns.edn` (or a rename on the edge label, lesson 03) is how you
+give it one. graphden's own test for `map`,
+`map-applies-the-callable-to-every-item` (`core.tests`), shows the
+named form: a small fn adding 1 to `:item`, over `[1 2 3]`.
 
 ### Going further (fns.edn / MCP only)
 

@@ -20,7 +20,7 @@ const {
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, tourTitle,
   bindOptionalArgChip, appendFnRefViaChip, createRecordType,
-  clickTourAdvance, waitTourClosed,
+  clickTourAdvance, waitTourClosed, appendSeqItemViaEdge, bindSeqAnchorPlaceholder,
 } = require('./tutorial-tour-helpers');
 
 (async () => {
@@ -170,22 +170,29 @@ const {
       'picker states the callable shape (got: ' + pickerState.expected + ')');
     assert(pickerState.valueForms === 0,
       'a callable slot offered no literal value form');
-    await page.keyboard.press('Escape');
-    // A WIRED HOF with a visible transform (2026-09-13): the platform's own
-    // map test, [1 2 3] → [2 3 4]. (Before this the lesson ran
-    // stringify-map-keys over {"a": 1}, whose output is byte-identical to its
-    // input; wiring the reader's own callback is not possible in the editor
-    // yet — the checker admits only never-returning fns into a generic
-    // (item:a) → b slot, see the lesson text.)
-    await waitTourTitle(page, 'See one wired up', 150000);
-    await filterAndSelect(page, 'map-applies', 'map-applies-the-callable-to-every-item');
+    // The reader wires THEIR OWN callback (2026-09-13): str-upper from lesson
+    // 03 sits in Compatible — a single-argument callable matches positionally,
+    // and a polymorphic (item:a) → b slot is proven over the wire now. Before
+    // this the lesson could only show the platform's own map test; before
+    // THAT it ran stringify-map-keys over {"a": 1}, whose output is
+    // byte-identical to its input.
+    await page.fill('.fn-picker-search', 'str-upper');
+    await page.waitForFunction(() => Array.from(document.querySelectorAll('.fn-picker-row-compat'))
+      .some((r) => /(^|[./])str-upper$/.test(r.dataset.fnName || '')), null,
+      {timeout: 30000, polling: 150});
+    await page.evaluate(() => Array.from(document.querySelectorAll('.fn-picker-row-compat'))
+      .find((r) => /(^|[./])str-upper$/.test(r.dataset.fnName || '')).click());
+    await waitTourTitle(page, 'The edge is the binding', 150000);
+    await bindSeqAnchorPlaceholder(page, 'graph');
+    await waitTourTitle(page, 'And a second item', 150000);
+    await appendSeqItemViaEdge(page, 'den');
     await waitTourTitle(page, 'Run it', 150000);
     await runViaRowActions(page);
     await waitTourTitle(page, 'Once per item', 150000);
-    assert(await page.waitForFunction(() => /2\D+3\D+4/.test(
+    assert(await page.waitForFunction(() => /GRAPH\W+DEN/.test(
       (document.querySelector('.execute-result-host')?.textContent || '').replace(/\s+/g, ' ')), null,
       {timeout: 60000, polling: 200}).then(() => true, () => false),
-      'the pane shows [2 3 4] — the callback ran once per item');
+      'the pane shows ["GRAPH" "DEN"] — str-upper ran once per item');
     assert(await clickTourButton(page, 'Next'), 'lesson 06 look-step Next');
     await waitTourTitle(page, "That's a HOF", 150000);
     await finishAndDelete(page);

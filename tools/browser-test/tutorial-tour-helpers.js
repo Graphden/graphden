@@ -331,6 +331,22 @@ async function bindFirstPlaceholder(page, literalText) {
 }
 
 
+// The FIRST item of a sequence slot when the card carries other `+`s too —
+// or did a beat ago: right after a ref is picked into a sibling slot the card
+// still shows that slot's placeholder until the re-render lands, and "click
+// the first `.placeholder-binder`" opens the fn picker again instead of the
+// chooser (lesson 06, 2026-09-14). Wait for the list slot's own anchor to be
+// the only placeholder left, then take the literal path.
+async function bindSeqAnchorPlaceholder(page, literalText) {
+  await page.waitForFunction(() => {
+    const all = document.querySelectorAll('.placeholder-binder');
+    return all.length === 1 && all[0].classList.contains('is-seq-anchor');
+  }, null, {timeout: 30000, polling: 150});
+  await page.evaluate(() => document.querySelector('.placeholder-binder.is-seq-anchor').click());
+  await appendOrBindLiteralFromChooser(page, literalText);
+}
+
+
 // The SECOND (and later) item of a sequence slot: once a list holds an item
 // the placeholder `+` is gone, and the append affordance is the `+` at the
 // tail of the chain on the edge-label overlay (`.arg-seq-btn-add`, "Append
@@ -1085,6 +1101,7 @@ module.exports = {
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding, waitClickable,
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
   appendSeqItemViaEdge,
+  bindSeqAnchorPlaceholder,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, waitTourClosed, bindFnRefPlaceholder,
   bindNamedPlaceholder, bindOptionalArgChip, appendFnRefViaChip, renameArgViaEdgeLabel,

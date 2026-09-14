@@ -414,6 +414,23 @@ Idempotent — a branch whose `:name` already exists is left untouched.
 Real prod ships with this off; dev/docker enables it so the branch
 picker has content out of the box.
 
+### `:exec/starter-catalogue` (default on)
+
+Publishes the marketplace's starter catalogue — the platform's own
+themes, keyboard layouts and example packages
+([MARKETPLACE.md § 11](MARKETPLACE.md#11-the-starter-catalogue)) — so a
+fresh instance's marketplace is not empty. Runs after the packages sync,
+in the platform tier, through the same row a publish writes; idempotent
+by `(name, version)`, so a restart adds nothing. Skipped when the
+optional `registry` package is not loaded. Set
+`GRAPHDEN_STARTER_CATALOGUE=0` to boot without it.
+
+```clojure
+:exec/starter-catalogue
+{:context #ig/ref :exec/context
+ :enabled? #or [#env GRAPHDEN_STARTER_CATALOGUE "1"]}
+```
+
 ## Environment Variables
 
 The production config reads these via `#env`:
@@ -430,6 +447,7 @@ The production config reads these via `#env`:
 | `GRAPHDEN_SKIP_URL_DRIFT_CHECK` | *(empty)* | `1` to skip the boot URL-drift check |
 | `CLEANUP_PERIOD_MS` | `3600000` | `:fn-execution` TTL sweep period (ms) |
 | `GRAPHDEN_DEMO_BRANCHES_ENABLED` | *(empty)* | Truthy to seed demo branches |
+| `GRAPHDEN_STARTER_CATALOGUE` | `1` | `0` to boot without the marketplace's starter catalogue |
 | `GRAPHDEN_SSE_PORT` | *(unset ⇒ SSE relay off)* | Port for the cross-executor invalidation SSE relay (`:sse/relay`) |
 | `GRAPHDEN_EXECUTOR_ORGS` | *(unset ⇒ all orgs)* | Org-shard predicate for this executor |
 | `GRAPHDEN_BYO_EXECUTOR` | *(empty)* | Truthy marks this pod a BYO executor |

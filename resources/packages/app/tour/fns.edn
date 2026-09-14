@@ -1778,7 +1778,7 @@
                :targets ["#gd-settings-nav [data-section=\"keyboard\"]" "#gd-keymap-root .gd-km-row[data-shortcut=\"graph-fit\"] .gd-km-change"]
                :check {:kind "dom" :selector "#gd-keymap-root .gd-km-row[data-shortcut=\"graph-fit\"] .gd-km-default"}}
               {:title "Browse the Marketplace"
-               :body "Press [[Space]] [[v]] [[m]] (or pick Marketplace in the account menu). The [[Themes]] tab lists your my-board card with its versions and, so far, no reviews. Cards carry the description, category and tags a publisher gave, a rating and an install count."
+               :body "Press [[Space]] [[v]] [[m]] (or pick Marketplace in the account menu). The [[Themes]] tab lists your my-board card with its versions and, so far, no reviews — next to the starter themes the platform ships. Cards carry the description, category and tags a publisher gave, a rating and an install count."
                :target "#gd-market-root .mk-tab[data-mk-tab=\"theme\"]"
                :check {:kind "dom" :selector "#gd-market-root [data-mk-card=\"my-board\"]"}}
               {:title "Review it"

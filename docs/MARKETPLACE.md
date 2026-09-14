@@ -360,7 +360,57 @@ storefront is the cloud's control-plane page.
   no longer be global by omission (the gap that this feature's three new
   entities made visible).
 
-## 11. What is deliberately not here
+## 11. The starter catalogue
+
+A fresh instance's marketplace is empty until someone publishes — and
+nobody publishes into an empty marketplace. So the platform ships a
+**starter catalogue** and publishes it at boot: a handful of editor
+themes (Nord, Solarized light / dark, a WCAG-AAA high-contrast look, a
+sepia reading theme), keyboard layouts (vim-style prefixes, IDE-style
+mnemonic groups, a one-handed left-hand layout) and small example fns
+packages (`starter.text`, `starter.numbers`, `starter.hello-api`) that
+install by reference like any package.
+
+- **The data** is `resources/packages/registry/marketplace/starter-catalogue.edn`
+  — one entry per listing, in the publish route's own fields (`kind`,
+  `name`, `version`, `description`, `category`, `tags`, `payload`; a fns
+  entry carries `ns-root`, `fns` in fns.edn syntax and the `dependencies`
+  `:export-namespace` would have computed). The file's header spells out
+  the three shapes.
+- **The seed** is `graphden.packages.starter-catalogue/seed!`, run by the
+  `:exec/starter-catalogue` init-key ([CONFIGURATION.md](CONFIGURATION.md)).
+  It writes each entry through the SAME row a publish writes
+  (`registry-shared/version-row` + `insert-or-exists!`, under the
+  package-name lock), in the platform tier — so every seeded version is
+  `public? true` / `status approved` and appears on the cards, the
+  storefront and Settings at once, and a later publish under one of its
+  names is refused as `name-taken` like any other public name.
+- **Idempotent by `(name, version)`.** A version already in the registry
+  is skipped — a restart, a second pod, a version the operator withdrew
+  all add nothing. Changing a listing means bumping its `:version` in the
+  file: rows are immutable, so the next boot publishes the new version
+  beside the old one exactly as a publish would.
+- **Never over a tenant.** A name another org already lists publicly is
+  left alone (`:held`, logged) — the platform does not squat a user's
+  public name. The catalogue's own names carry the `graphden.` /
+  `starter.` prefix so the reverse never comes up either.
+- **Off switch.** `GRAPHDEN_STARTER_CATALOGUE=0` boots without it (an
+  instance that wants an empty registry). Without the optional `registry`
+  package the seed is skipped: there is no marketplace to list the rows
+  on.
+
+Two things the catalogue's fns entries taught, both now guarded by
+tests: name a package's free args apart from the base-fn slots they feed
+(a free that shares its name with the slot it flows into resolves to the
+ref's slot instead of the parent's — `resolve-slot-owner`'s type pass —
+and is swallowed on the way out, so a chain of `:string` refs surfaces
+nothing; the catalogue uses `:text`, `:values`), and `sync-bundle!` must
+report the synthetic `_anon-*` rows an inline anonymous fn-def becomes,
+or install's delta invalidation leaves the parent uncompilable until an
+unrelated full rebuild (`registry_test`
+`install-package-with-inline-anonymous-fns-executes`).
+
+## 12. What is deliberately not here
 
 - **No listing history.** A listing edit rewrites the newest version's
   description / category / tags in place (the artifact itself is immutable);
@@ -368,7 +418,7 @@ storefront is the cloud's control-plane page.
 - **No review sync.** A mirror snapshots the origin's numbers once, at pull
   time (§ 7); it does not poll the origin, and nothing flows back.
 
-## 12. Tests
+## 13. Tests
 
 - `test/graphden/packages/marketplace_test.clj` — the normaliser, the
   theme / keymap publish route, cards (semver-ordered versions, rating
@@ -390,6 +440,12 @@ storefront is the cloud's control-plane page.
   decision; every platform-admin the submission; every no-op reason; the
   sink never throws) and `mail_parity_test` (graph templates ≡ Clojure
   copies).
+- `test/graphden/packages/starter_catalogue_test.clj` — the shipped
+  catalogue is well-formed against the editor's vocabularies (categories,
+  the theme token allow-list, the shortcut registry), `seed!` publishes it
+  once as public + approved rows the cards and the storefront list, every
+  fns entry installs and its fns run, and a name another org holds
+  publicly is never squatted.
 - `tools/browser-test/edit-marketplace.test.js` — the surface, apply,
   review, the keymap, and the `#@marketplace/<name>` deep link;
   `tools/runtime-test/marketplace-shell.test.js` (refusal wording, the URL

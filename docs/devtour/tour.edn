@@ -1039,6 +1039,17 @@
            tab lists it through `:loaded-packages`. It is the honest answer
            to 'what does this executor run?' without offering to install a
            Type-2 package, which is code and enters through the build."}
+    {:ns graphden.packages.starter-catalogue :defn seed!
+     :say "Why a fresh marketplace is not empty (docs/MARKETPLACE.md § 11).
+           The starter catalogue — the platform's themes, keyboard layouts
+           and example packages — is DATA (`starter-catalogue.edn`, in the
+           publish route's own fields); this seed publishes each entry at
+           boot through the very row a publish writes
+           (`registry-shared/version-row` + `insert-or-exists!`, moved out
+           of the publish impl so the two can never drift), in the
+           platform tier, so it lands public + approved. Idempotent by
+           (name, version), never over a name another org lists publicly.
+           A change to a listing is a version bump: rows are immutable."}
     {:file "resources/packages/registry/registry/impls.clj" :defn import-bundle!
      :say "The WRITE half of the export/import pair — `POST /api/import/graph`
            applies an exported bundle to a NAMED branch: resolve/create the

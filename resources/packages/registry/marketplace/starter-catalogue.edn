@@ -1,0 +1,298 @@
+;; The STARTER CATALOGUE — what a fresh graphden's marketplace lists before
+;; anyone has published anything (docs/MARKETPLACE.md § 11).
+;;
+;; `graphden.packages.starter-catalogue/seed!` publishes every entry at boot
+;; (init-key `:exec/starter-catalogue`, default ON) through the SAME row the
+;; publish route writes (`registry-shared/version-row`): in the platform
+;; tier, so each is `public? true` / `status approved` and listed at once.
+;; Keyed by `(name, version)` — an entry that already exists is skipped, so a
+;; restart never duplicates and a withdrawn version stays withdrawn until
+;; the catalogue bumps it. To change a listing, bump its `:version`: rows
+;; are immutable (the old version stays, as a publish would leave it).
+;;
+;; Entry shapes (the listing fields are the publish route's):
+;;   theme  — {:kind "theme"  :name :version :description :category :tags :payload}
+;;            payload = {:mode :tokens :fonts :scale} (docs/MARKETPLACE.md § 5);
+;;            token names are the editor's allow-list (`gdThemeTokens`,
+;;            editor-prefs.js), values colour literals — the apply path
+;;            sanitises, `starter-catalogue-test` pins the names.
+;;   keymap — {:kind "keymap" :name :version :description :category :tags :payload}
+;;            payload = {:bindings {id {:keys :leader}}} over the ids
+;;            `editor-shortcuts.js` registers (§ 6).
+;;   fns    — {:kind "fns" :name :version :description :category :tags
+;;             :ns-root :dependencies :fns}
+;;            `:fns` is fns.edn syntax (each def's `:namespace` defaults to
+;;            `:ns-root`); `:dependencies` names the fns referenced from
+;;            OUTSIDE the bundle (what `:export-namespace` would compute) —
+;;            install refuses when one is missing. Every fns entry is
+;;            installed and executed by `starter-catalogue-test`.
+;;
+;; Names carry the `graphden.` / `starter.` prefix on purpose: a public
+;; name is registry-wide and first come first served (§ 2), so the
+;; platform's own listings never squat a name a user would pick.
+[;; ---------------------------------------------------------------- themes
+ {:kind "theme"
+  :name "graphden.nord"
+  :version "1.0.0"
+  :description "The Nord palette on the dark base — frost blues for flow and references, aurora yellow for free args, snow-white ink."
+  :category "dark"
+  :tags ["nord" "dark" "cool" "blue"]
+  :payload {:mode "dark"
+            :scale 100
+            :tokens {"--gd-paper" "#2e3440" "--gd-paper-2" "#3b4252" "--gd-panel" "#434c5e"
+                     "--gd-ink" "#eceff4" "--gd-ink-2" "#d8dee9" "--gd-ink-3" "#a3adc2" "--gd-ink-4" "#6f7a90"
+                     "--gd-line" "#4c566a" "--gd-line-2" "#5a657d" "--gd-grid" "#3b4252"
+                     "--gd-flow" "#88c0d0" "--gd-flow-ink" "#b8e0ec" "--gd-flow-wash" "#3a4f5c" "--gd-flow-2" "#8fbcbb"
+                     "--gd-lit" "#b0b8c8" "--gd-lit-wash" "#3b4252" "--gd-ref" "#88c0d0" "--gd-ref-wash" "#3a4f5c"
+                     "--gd-free" "#ebcb8b" "--gd-free-wash" "#4a4432"
+                     "--gd-ok" "#a3be8c" "--gd-warn" "#d08770" "--gd-crit" "#bf616a" "--gd-crit-wash" "#4a3437"
+                     "--bg" "#2e3440" "--fg" "#eceff4" "--muted-fg" "#a3adc2" "--border" "#4c566a" "--accent" "#88c0d0"
+                     "--card-bg" "#3b4252" "--card-fg" "#eceff4" "--card-border" "#4c566a"
+                     "--card-header-bg" "#5e81ac" "--card-header-fg" "#eceff4"
+                     "--hover-bg" "#3b4252" "--selected-bg" "#434c5e" "--sidebar-bg" "#2b303b"
+                     "--header-bg" "#3b4252" "--header-fg" "#eceff4"}}}
+
+ {:kind "theme"
+  :name "graphden.solarized-light"
+  :version "1.0.0"
+  :description "Solarized on the light base — the warm base3 paper, cyan flow, blue title bands and the classic yellow / orange / red for free args and status."
+  :category "light"
+  :tags ["solarized" "light" "warm"]
+  :payload {:mode "light"
+            :scale 100
+            :tokens {"--gd-paper" "#fdf6e3" "--gd-paper-2" "#f7efd8" "--gd-panel" "#fffbf0"
+                     "--gd-ink" "#002b36" "--gd-ink-2" "#073642" "--gd-ink-3" "#586e75" "--gd-ink-4" "#93a1a1"
+                     "--gd-line" "#e6dfc8" "--gd-line-2" "#d3cbb1" "--gd-grid" "#ece5cf"
+                     "--gd-flow" "#2aa198" "--gd-flow-ink" "#1d7d76" "--gd-flow-wash" "#dcefe9" "--gd-flow-2" "#268bd2"
+                     "--gd-lit" "#586e75" "--gd-lit-wash" "#eee8d5" "--gd-ref" "#2aa198" "--gd-ref-wash" "#dcefe9"
+                     "--gd-free" "#b58900" "--gd-free-wash" "#f3ecd0"
+                     "--gd-ok" "#859900" "--gd-warn" "#cb4b16" "--gd-crit" "#dc322f" "--gd-crit-wash" "#f8ddd8"
+                     "--bg" "#fdf6e3" "--fg" "#002b36" "--muted-fg" "#586e75" "--border" "#d3cbb1" "--accent" "#2aa198"
+                     "--card-bg" "#fffbf0" "--card-fg" "#002b36" "--card-border" "#d3cbb1"
+                     "--card-header-bg" "#268bd2" "--card-header-fg" "#fdf6e3"
+                     "--hover-bg" "#f2ead2" "--selected-bg" "#e8e0c4" "--sidebar-bg" "#f7efd8"
+                     "--header-bg" "#eee8d5" "--header-fg" "#002b36"}}}
+
+ {:kind "theme"
+  :name "graphden.solarized-dark"
+  :version "1.0.0"
+  :description "Solarized on the dark base — the deep base03 paper, cyan flow, blue title bands and the same accent set as its light sibling."
+  :category "dark"
+  :tags ["solarized" "dark"]
+  :payload {:mode "dark"
+            :scale 100
+            :tokens {"--gd-paper" "#002b36" "--gd-paper-2" "#073642" "--gd-panel" "#0a3d4a"
+                     "--gd-ink" "#eee8d5" "--gd-ink-2" "#c8c2b0" "--gd-ink-3" "#93a1a1" "--gd-ink-4" "#657b83"
+                     "--gd-line" "#0f4a57" "--gd-line-2" "#16596a" "--gd-grid" "#06333f"
+                     "--gd-flow" "#2aa198" "--gd-flow-ink" "#7fd5cc" "--gd-flow-wash" "#0b3f43" "--gd-flow-2" "#268bd2"
+                     "--gd-lit" "#a6b0ad" "--gd-lit-wash" "#073642" "--gd-ref" "#2aa198" "--gd-ref-wash" "#0b3f43"
+                     "--gd-free" "#b58900" "--gd-free-wash" "#2f2f12"
+                     "--gd-ok" "#859900" "--gd-warn" "#cb4b16" "--gd-crit" "#dc322f" "--gd-crit-wash" "#3e1a1c"
+                     "--bg" "#002b36" "--fg" "#eee8d5" "--muted-fg" "#93a1a1" "--border" "#16596a" "--accent" "#2aa198"
+                     "--card-bg" "#073642" "--card-fg" "#eee8d5" "--card-border" "#16596a"
+                     "--card-header-bg" "#268bd2" "--card-header-fg" "#fdf6e3"
+                     "--hover-bg" "#073642" "--selected-bg" "#0f4a57" "--sidebar-bg" "#00252f"
+                     "--header-bg" "#073642" "--header-fg" "#eee8d5"}}}
+
+ {:kind "theme"
+  :name "graphden.high-contrast"
+  :version "1.0.0"
+  :description "Black paper, white ink, a yellow accent and 110 % text — every pairing clears WCAG AAA (7:1). For low vision, bright rooms and projectors."
+  :category "high-contrast"
+  :tags ["accessibility" "wcag" "dark" "large-text"]
+  :payload {:mode "dark"
+            :scale 110
+            :tokens {"--gd-paper" "#000000" "--gd-paper-2" "#0a0a0a" "--gd-panel" "#101010"
+                     "--gd-ink" "#ffffff" "--gd-ink-2" "#f0f0f0" "--gd-ink-3" "#d0d0d0" "--gd-ink-4" "#a0a0a0"
+                     "--gd-line" "#6a6a6a" "--gd-line-2" "#8a8a8a" "--gd-grid" "#2a2a2a"
+                     "--gd-flow" "#ffd400" "--gd-flow-ink" "#ffe766" "--gd-flow-wash" "#3a3300" "--gd-flow-2" "#ffea70"
+                     "--gd-lit" "#e0e0e0" "--gd-lit-wash" "#1a1a1a" "--gd-ref" "#ffd400" "--gd-ref-wash" "#3a3300"
+                     "--gd-free" "#7fdbff" "--gd-free-wash" "#00303a"
+                     "--gd-ok" "#5cff8d" "--gd-warn" "#ffb000" "--gd-crit" "#ff5c5c" "--gd-crit-wash" "#3a0000"
+                     "--bg" "#000000" "--fg" "#ffffff" "--muted-fg" "#d0d0d0" "--border" "#8a8a8a" "--accent" "#ffd400"
+                     "--card-bg" "#101010" "--card-fg" "#ffffff" "--card-border" "#8a8a8a"
+                     "--card-header-bg" "#ffd400" "--card-header-fg" "#000000"
+                     "--hover-bg" "#1a1a1a" "--selected-bg" "#2a2a2a" "--sidebar-bg" "#050505"
+                     "--header-bg" "#101010" "--header-fg" "#ffffff"}}}
+
+ {:kind "theme"
+  :name "graphden.sepia"
+  :version "1.0.0"
+  :description "Warm paper, brown ink, a serif UI face — a quiet reading-room look for long sessions in a bright room."
+  :category "minimal"
+  :tags ["sepia" "light" "warm" "serif" "minimal"]
+  :payload {:mode "light"
+            :scale 100
+            :fonts {:ui "Georgia, Times New Roman, serif"}
+            :tokens {"--gd-paper" "#f4ecd8" "--gd-paper-2" "#efe5cc" "--gd-panel" "#faf5e8"
+                     "--gd-ink" "#3b2f23" "--gd-ink-2" "#5c4b3b" "--gd-ink-3" "#705d4b" "--gd-ink-4" "#a08f7a"
+                     "--gd-line" "#dccfb6" "--gd-line-2" "#c9b99b" "--gd-grid" "#e4d9c0"
+                     "--gd-flow" "#8a5a2b" "--gd-flow-ink" "#6b4320" "--gd-flow-wash" "#ecdcc6" "--gd-flow-2" "#a86f38"
+                     "--gd-lit" "#5c4b3b" "--gd-lit-wash" "#e9dfc8" "--gd-ref" "#8a5a2b" "--gd-ref-wash" "#ecdcc6"
+                     "--gd-free" "#9a6f12" "--gd-free-wash" "#efe3bf"
+                     "--gd-ok" "#4f7a3a" "--gd-warn" "#b06a1e" "--gd-crit" "#a9403a" "--gd-crit-wash" "#f0d9d4"
+                     "--bg" "#f4ecd8" "--fg" "#3b2f23" "--muted-fg" "#705d4b" "--border" "#c9b99b" "--accent" "#8a5a2b"
+                     "--card-bg" "#faf5e8" "--card-fg" "#3b2f23" "--card-border" "#c9b99b"
+                     "--card-header-bg" "#8a5a2b" "--card-header-fg" "#faf5e8"
+                     "--hover-bg" "#ede3cb" "--selected-bg" "#e4d7b8" "--sidebar-bg" "#efe5cc"
+                     "--header-bg" "#e9dfc8" "--header-fg" "#3b2f23"}}}
+
+ ;; --------------------------------------------------------------- keymaps
+ ;; Overrides only (§ 6): a command not listed keeps its default keys.
+ ;; `Space` is the leader; `:leader false` makes a key bare.
+ {:kind "keymap"
+  :name "graphden.vim-keys"
+  :version "1.0.0"
+  :description "Vim's two prefixes: `z` for the view (z z fits, z t goes to the root, z p resets positions) and `g` for going places (g e explorer, g b branches, g r runs, g o overview, g t / g x / g y / g w the four lenses). Search stays `/`."
+  :category "vim-like"
+  :tags ["vim" "modal" "keyboard"]
+  :payload {:bindings {"graph-fit" {:keys "z z" :leader true}
+                       "graph-root" {:keys "z t" :leader true}
+                       "graph-reset-positions" {:keys "z p" :leader true}
+                       "sidebar" {:keys "g e" :leader true}
+                       "branches" {:keys "g b" :leader true}
+                       "inspector-runs" {:keys "g r" :leader true}
+                       "inspector-overview" {:keys "g o" :leader true}
+                       "lens-tests" {:keys "g t" :leader true}
+                       "lens-failed" {:keys "g x" :leader true}
+                       "lens-type-errors" {:keys "g y" :leader true}
+                       "lens-lint" {:keys "g w" :leader true}}}}
+
+ {:kind "keymap"
+  :name "graphden.mnemonic-keys"
+  :version "1.0.0"
+  :description "Every command behind the first letter of its group, IDE style: g for Graph, w for Workspace, f for Function, d for Diagnostics, s for Surfaces — Space, the group, the command."
+  :category "ide-like"
+  :tags ["mnemonic" "groups" "keyboard"]
+  :payload {:bindings {"graph-fit" {:keys "g f" :leader true}
+                       "graph-root" {:keys "g r" :leader true}
+                       "graph-reset-positions" {:keys "g p" :leader true}
+                       "branches" {:keys "w b" :leader true}
+                       "sidebar" {:keys "w e" :leader true}
+                       "inspector-runs" {:keys "f r" :leader true}
+                       "inspector-overview" {:keys "f o" :leader true}
+                       "lens-tests" {:keys "d t" :leader true}
+                       "lens-failed" {:keys "d x" :leader true}
+                       "lens-type-errors" {:keys "d y" :leader true}
+                       "lens-lint" {:keys "d l" :leader true}
+                       "surface-build" {:keys "s b" :leader true}
+                       "surface-settings" {:keys "s s" :leader true}
+                       "surface-organization" {:keys "s o" :leader true}
+                       "surface-platform" {:keys "s p" :leader true}
+                       "surface-market" {:keys "s m" :leader true}}}}
+
+ {:kind "keymap"
+  :name "graphden.left-hand"
+  :version "1.0.0"
+  :description "Every command on the left half of the keyboard (q w e r t / a s d f g / z x c v b), all behind Space — one hand on the keys, the other free for the mouse, a pen or a coffee. Zoom moves to Space w / Space q."
+  :category "accessibility"
+  :tags ["one-handed" "accessibility" "left-hand"]
+  :payload {:bindings {"search" {:keys "s" :leader true}
+                       "zoom-in" {:keys "w" :leader true}
+                       "zoom-out" {:keys "q" :leader true}
+                       "graph-fit" {:keys "g f" :leader true}
+                       "graph-root" {:keys "g r" :leader true}
+                       "graph-reset-positions" {:keys "g t" :leader true}
+                       "branches" {:keys "e b" :leader true}
+                       "sidebar" {:keys "e e" :leader true}
+                       "inspector-runs" {:keys "f r" :leader true}
+                       "inspector-overview" {:keys "f a" :leader true}
+                       "lens-tests" {:keys "d t" :leader true}
+                       "lens-failed" {:keys "d x" :leader true}
+                       "lens-type-errors" {:keys "d e" :leader true}
+                       "lens-lint" {:keys "d w" :leader true}
+                       "surface-build" {:keys "v b" :leader true}
+                       "surface-settings" {:keys "v s" :leader true}
+                       "surface-organization" {:keys "v g" :leader true}
+                       "surface-platform" {:keys "v d" :leader true}
+                       "surface-market" {:keys "v c" :leader true}}}}
+
+ ;; ---------------------------------------------------------- fns packages
+ ;; Small, self-contained compositions over `core` / `web` — installed by
+ ;; reference like any package (Lesson 29); the point is a non-empty
+ ;; Packages tab that shows what a listing looks like and installs cleanly.
+ {:kind "fns"
+  :name "starter.text"
+  :version "1.0.0"
+  :description "Two text helpers: `slugify` turns any title into a URL slug (lower-case, dashes, trimmed), `word-count` counts whitespace-separated words (0 for blank input). Both take `:text`."
+  :category "utilities"
+  :tags ["text" "slug" "strings" "starter"]
+  :ns-root "starter.text"
+  :dependencies [:str-lower :re-replace :str-trim :str-split :count :non-blank? :if]
+  ;; The free arg is `:text`, not the base-fns' own `:string`: a free that
+  ;; shares its name with the slot it flows into resolves to the REF's
+  ;; slot instead of the parent's (`resolve-slot-owner`'s type pass) and
+  ;; is swallowed on the way out — a chain of `:string` refs surfaces
+  ;; nothing. Name a package's frees apart from the slots they feed.
+  :fns [{:name :_slug-lower
+         :parent :str-lower
+         :args {:string {:as :text}}}
+        {:name :_slug-dashed
+         :description "Every run of non-alphanumerics becomes one dash."
+         :parent :re-replace
+         :args {:string :_slug-lower :pattern "[^a-z0-9]+" :replacement "-"}}
+        {:name :slugify
+         :description "A URL slug from any title — lower-cased, runs of non-alphanumerics collapsed to a dash, leading / trailing dashes trimmed. `\"Hello, World!\"` → `\"hello-world\"`. Free arg: `:text`."
+         :parent :re-replace
+         :args {:string :_slug-dashed :pattern "^-+|-+$" :replacement ""}}
+        {:name :_wc-trimmed
+         :parent :str-trim
+         :args {:string {:as :text}}}
+        {:name :_wc-parts
+         :parent :str-split
+         :args {:string :_wc-trimmed :separator "\\s+"}}
+        ;; `:non-blank?`, not `:blank?`: a free arg on a `:required false`
+        ;; slot is an optional free, and a blank string must answer 0.
+        {:name :word-count
+         :description "Whitespace-separated words in a string; 0 when blank. Free arg: `:text`."
+         :parent :if
+         :args {:test {:parent :non-blank? :args {:string :_wc-trimmed}}
+                :then {:parent :count :args {:coll :_wc-parts}}
+                :else 0}}]}
+
+ {:kind "fns"
+  :name "starter.numbers"
+  :version "1.0.0"
+  :description "Two number helpers: `mean` of a list of `:values`, and `percent-of` — a `:part` as a percentage of a `:whole`, rounded to one decimal."
+  :category "utilities"
+  :tags ["numbers" "math" "percent" "starter"]
+  :ns-root "starter.numbers"
+  :dependencies [:div :add :count :mul :round]
+  :fns [{:name :mean
+         :description "Arithmetic mean of `:values` (throws on an empty list — division by zero). Free arg: `:values` — named apart from `:div`'s own `:nums`, see starter.text."
+         :parent :div
+         :args {:nums [{:parent :add :args {:nums {:as :values}}}
+                       {:parent :count :args {:coll {:as :values}}}]}}
+        {:name :percent-of
+         :description "`:part` as a percentage of `:whole`, rounded to one decimal — `(percent-of 1 3)` → `33.3`. Free args: `:part`, `:whole`."
+         :parent :round
+         :args {:number {:parent :mul :args {:nums [{:parent :div :args {:nums [{:as :part} {:as :whole}]}} 100]}}
+                :decimals 1}}]}
+
+ {:kind "fns"
+  :name "starter.hello-api"
+  :version "1.0.0"
+  :description "A JSON route to copy from: `GET /hello?name=…` answers `{\"hello\": \"…\"}` (`world` when the parameter is absent). Install it, then reference `hello-route` from your router's routes."
+  :category "web"
+  :tags ["http" "json" "route" "starter"]
+  :ns-root "starter.hello-api"
+  :dependencies [:query-param :coalesce :zipmap :json-handler :get-route]
+  :fns [{:name :_hello-name
+         :parent :query-param
+         :args {:request {:as :request} :param-name "name"}}
+        {:name :_hello-who
+         :description "The `name` query parameter, `world` when absent."
+         :parent :coalesce
+         :args {:value :_hello-name :default "world"}}
+        {:name :_hello-body
+         :parent :zipmap
+         :args {:keys ["hello"] :vals [:_hello-who]}}
+        {:name :hello-handler
+         :lambda-params [:request]
+         :description "Ring handler for GET /hello — `{\"hello\": <name or world>}` as JSON."
+         :parent :json-handler
+         :args {:data :_hello-body}}
+        {:name :hello-route
+         :description "`GET /hello` → `hello-handler`. Add it to a router's `:routes` list."
+         :parent :get-route
+         :args {:path "/hello" :handler :hello-handler}}]}]

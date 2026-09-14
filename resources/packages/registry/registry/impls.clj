@@ -111,53 +111,19 @@
 ;; exists (nil) or another org lists the NAME publicly (`{:refused
 ;; "name-taken"}`), else hash + insert. The existence check stays ADJACENT to the
 ;; insert (one base-fn) to keep the check-then-insert race window
-;; minimal until the DB-level UNIQUE(name, version) hardening noted in
-;; the schema ships. Returns the CREATED ROW (nil = version already
-;; exists) — both result envelopes, like the empty-bundle rejection,
-;; are graph composition (`:_pub-ok` / `:_pub-err-exists` under
-;; `:publish-package`), so the response shape is admin-visible. The
-;; content-hash + `:public?` normalisation stay here: both are STORED
-;; on the row at write time (readers never re-derive them).
-(defn- foreign-public-holder
-  "The OTHER org that already lists `pkg-name` publicly (any moderation
-   status), or nil — a public name is registry-wide, first come first
-   served, the way pypi.org names are (docs/MARKETPLACE.md § 2, Names).
-   Reads the platform-wide storage: the org-scoped view would hide the
-   holder's rows... except its public ones, which is exactly the set that
-   matters, so row level security answers the same question for a tenant."
-  [storage pkg-name]
-  (let [own (str (tc/current-org))]
-    (->> (sp/query-entities (shared/platform-base storage) :package-version {:name pkg-name})
-         (filter #(and (:public? %) (not= own (str (:org-id %)))))
-         first
-         :org-id)))
-
-
-(defn- insert-or-exists!
-  "The publish INSERT under the DB's `UNIQUE (name, version)`: the created
-   row, or nil when the key is already taken — the same answer the
-   pre-check gives, so a race or another org's private row (invisible to
-   an org-scoped read) ends as `version-exists`, not a 500. A pending row
-   (a tenant's public opt-in under moderation) is announced through the
-   notification seam so the operator hears about the queue."
-  [storage row]
-  (try
-    (let [created (sp/create-entity storage :package-version row)]
-      (when (= "pending" (:status created))
-        (tc/notify! :package-submitted created))
-      created)
-    (catch clojure.lang.ExceptionInfo e
-      (when-not (= :unique-violation (:type (ex-data e)))
-        (throw e)))))
-
-
+;; minimal on top of the DB-level UNIQUE(name, version). Returns the
+;; CREATED ROW (nil = version already exists) — both result envelopes,
+;; like the empty-bundle rejection, are graph composition (`:_pub-ok` /
+;; `:_pub-err-exists` under `:publish-package`), so the response shape
+;; is admin-visible. The row itself (content hash, `:public?` / `:status`
+;; normalisation, listing, publisher) is `registry-shared/version-row` —
+;; the same row the boot-time starter catalogue writes.
 (defn- publish-under-lock!
   "The check-then-insert of a publish, run with the package's name lock
    held (`shared/with-package-name-lock`): the version pre-check, the
    public-name holder check, the insert. See `publish-package-apply`."
   [storage pkg-name pkg-version bundle pkg-public listing]
-  (let [fns (:fns bundle)
-        holder (foreign-public-holder storage pkg-name)]
+  (let [holder (shared/foreign-public-holder storage pkg-name)]
     (cond
       (seq (sp/query-entities storage :package-version
                               {:name pkg-name :version pkg-version}))
@@ -169,50 +135,9 @@
       {:refused "name-taken" :holder holder}
 
       :else
-      ;; Public = the explicit opt-in OR a platform-tier publish
-      ;; (single-tenant / operator — the shared registry). Normalised
-      ;; AT WRITE time so readers never re-derive tier from org-id:
-      ;; a row is platform-visible iff `:public?` is true. A tenant
-      ;; publish without the opt-in stays private to its org
-      ;; (`:org-id` stamped by the tenancy decorator, spec §5).
-      (insert-or-exists!
+      (shared/insert-or-exists!
         storage
-        {:name pkg-name
-         :version pkg-version
-         :ns-root (:namespace bundle)
-         :fns fns
-         :dependencies (:dependencies bundle)
-         :package-dependencies (:package-dependencies bundle)
-         :secrets (vec (:secrets bundle))
-         :content-hash (ids/digest-hex "SHA-256" (json/generate-string fns))
-         ;; Same value the tenancy decorator stamps when
-         ;; scoped (it overwrites with `(tc/current-org)`
-         ;; too) — set here as well so SINGLE-TENANT rows
-         ;; carry the public org instead of NULL and the
-         ;; governance catalog's org-equality filter works
-         ;; identically with and without the addon.
-         :org-id (tc/current-org)
-         :public? (boolean (or pkg-public (tc/current-platform-tier?)))
-         ;; Moderation (docs/MARKETPLACE.md § 8): a TENANT's public
-         ;; opt-in on a deployment that runs it waits for the
-         ;; operator; the platform's own and every private
-         ;; publish are listed outright.
-         :status (if (and pkg-public
-                          (shared/moderation-enabled?)
-                          (not (tc/current-platform-tier?)))
-                   "pending"
-                   "approved")
-         :published-at (java.time.Instant/now)
-         ;; marketplace listing (docs/MARKETPLACE.md) — the
-         ;; graph validated + normalised it (`:listing-normalize`);
-         ;; nil listing = a plain fns publish with no metadata
-         :kind (:kind listing)
-         :description (:description listing)
-         :category (:category listing)
-         :tags (some-> (:tags listing) vec)
-         :payload (:payload listing)
-         ;; who to tell about the moderation decision
-         :publisher-id (tc/current-user-id)}))))
+        (shared/version-row pkg-name pkg-version bundle pkg-public listing)))))
 
 
 (defbase publish-package-apply

@@ -14,6 +14,8 @@
     [graphden.executor.interface :as exec]
     [graphden.fleet.command :as fleet-command]
     [graphden.fleet.router :as fleet-router]
+    [graphden.packages.loaded :as loaded]
+    [graphden.packages.starter-catalogue :as starter]
     [graphden.storage.postgres.notify :as pg-notify]
     [graphden.system.api-routes-js :as api-routes-js]
     [graphden.system.api-url-drift :as api-url-drift]
@@ -429,3 +431,33 @@
     ;; future REPL-driven re-seed.
     {:enabled? on?
      :branches (vec (or branches []))}))
+
+
+;; =============================================================================
+;; Starter catalogue — the marketplace's shipped listings
+;; =============================================================================
+;;
+;; A fresh instance's marketplace is empty until someone publishes; the
+;; starter catalogue (docs/MARKETPLACE.md § 11) fills it at boot with the
+;; platform's own themes, keyboard layouts and example packages, published
+;; through the same row a publish writes. Default ON — set
+;; `GRAPHDEN_STARTER_CATALOGUE=0` to boot without it (an instance that
+;; wants an empty registry; a test stack). Idempotent by (name, version):
+;; a restart or a second pod adds nothing, a withdrawn version stays
+;; withdrawn. Needs the optional `registry` package — without it there is
+;; no marketplace to list the rows on, so the seed is skipped, not run
+;; blind.
+
+(defmethod ig/init-key :exec/starter-catalogue [_ {:keys [context enabled?]}]
+  (let [on? (env-truthy? enabled?)
+        registry? (boolean (some #(= "registry" (:name %)) (loaded/read-roster)))]
+    (cond
+      (not on?)
+      (log/info "[starter-catalogue] disabled — GRAPHDEN_STARTER_CATALOGUE is off")
+
+      (not registry?)
+      (log/info "[starter-catalogue] skipped — the registry package is not loaded")
+
+      :else
+      (starter/seed! (:storage context)))
+    {:enabled? on? :registry-loaded? registry?}))

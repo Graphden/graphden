@@ -115,6 +115,16 @@
  {:context #ig/ref :exec/context
   :period-ms 3600000}
 
+ ;; The marketplace's starter catalogue — the platform's own themes,
+ ;; keyboard layouts and example packages, published at boot so a fresh
+ ;; instance's marketplace is not empty (docs/MARKETPLACE.md § 11).
+ ;; Default ON; `GRAPHDEN_STARTER_CATALOGUE=0` boots without it. Idempotent
+ ;; by (name, version) — a restart adds nothing. Skipped when the optional
+ ;; `registry` package is not in `:package-names`.
+ :exec/starter-catalogue
+ {:context #ig/ref :exec/context
+  :enabled? #or [#env GRAPHDEN_STARTER_CATALOGUE "1"]}
+
  ;; Demo branches for the versioning UI. OPT-IN via env — see the
  ;; matching block in system-prod.edn for the full rationale. Dev
  ;; defaults to enabled when the env var is unset (this is dev — if

@@ -7,7 +7,7 @@ How fns.edn + impls.clj become base-fns and fn-defs; the loader, load order, and
 
 after: executor
 
-[[file:index.org][index]] · ~105 min
+[[file:index.org][index]] · ~107 min
 
 * 1. load-default-packages
 :PROPERTIES:
@@ -227,13 +227,13 @@ Closes the loop into storage: take the collected namespace paths, build the ~cor
 :PROPERTIES:
 :CUSTOM_ID: packages/sync-fn-entities-from-packages!
 :FILE: src/graphden/packages/sync.clj
-:LINE: 918
+:LINE: 932
 :MINS: 11.4
 :END:
 
 The other half of every boot, and the one the loader hands off to: sync composed fn-defs to storage, heal namespace-moved identities and reap retired ones nothing live references (~_anon-*~ shapes included; ~{:dry-run? true}~ previews the plan from a REPL), seed each fn-def's rich-type, then run the topological type-check sweep. Read the two long comments — the batch-size binding (a fresh-DB boot writes >10k fn rows past the guard meant for USER writes) and ~:skip-type-check?~ (~15s of sweep the test bootstrap may opt out of, production never does — which is precisely why ~bb type-sweep~ exists: EVERY fixture opts out, so before that check a corpus type regression surfaced only when a real instance booted). This is declarative sync: the packages on disk are the desired state, storage is reconciled toward it.
 
-- source :: [[file:../../../src/graphden/packages/sync.clj::(defn sync-fn-entities-from-packages!][src/graphden/packages/sync.clj:918]]
+- source :: [[file:../../../src/graphden/packages/sync.clj::(defn sync-fn-entities-from-packages!][src/graphden/packages/sync.clj:932]]
 - see also :: [[file:types.org::#types/check-all-defs!][check-all-defs!]], [[file:versioning.org::#versioning/repoint-refs!][repoint-refs!]]
 - same file :: [[file:packages.org::#packages/reconcile-bundle-scope!][reconcile-bundle-scope!]]
 - referenced from :: [[file:boot.org::#boot/packages][packages]]
@@ -306,26 +306,26 @@ The share-safety policy: vault paths are STRIPPED from bundles by default (the s
 :PROPERTIES:
 :CUSTOM_ID: packages/publish-package-apply
 :FILE: resources/packages/registry/registry/impls.clj
-:LINE: 218
+:LINE: 143
 :MINS: 2.1
 :END:
 
 Publish lands the bundle IN the graph: an immutable, content-hashed ~:package-version~ row (name + semver + fns + declared deps). Install is its mirror — ~materialize-package-fns~ syncs the pinned version's fns into a version-qualified ~@~-namespace and writes a ~:package-install~ pin; update/rollback rewrites refs between versions; fork copies copy-on-write with no pin.
 
-- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase publish-package-apply][resources/packages/registry/registry/impls.clj:218]]
+- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase publish-package-apply][resources/packages/registry/registry/impls.clj:143]]
 - same file :: [[file:packages.org::#packages/upsert-pin!][upsert-pin!]], [[file:packages.org::#packages/import-bundle!][import-bundle!]]
 
 * 24. upsert-pin!
 :PROPERTIES:
 :CUSTOM_ID: packages/upsert-pin!
 :FILE: resources/packages/registry/registry/impls.clj
-:LINE: 427
+:LINE: 352
 :MINS: 2.6
 :END:
 
 Where the marketplace's install COUNT comes from (docs/MARKETPLACE.md). A new pin is an install and bumps the global ~:package-stat~ row with an atomic ~INSERT … ON CONFLICT DO UPDATE~ over the pool — deliberately inside the pin write unit, like the invalidation an entity write owes, because a graph-side 'was it pinned?' probe is an effectful read a later ref would re-run AFTER the pin. Moving a pin (update / rollback) is not an install. Everything else the marketplace needs — listing normalisation, the cards' rating aggregate, the filters, the partials, the review upsert, the storefront bodies — is graph, four modules sharing the ~app.marketplace~ namespace: ~registry/marketplace{,-surface, -storefront,-moderation}/fns.edn~.
 
-- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defn- upsert-pin!][resources/packages/registry/registry/impls.clj:427]]
+- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defn- upsert-pin!][resources/packages/registry/registry/impls.clj:352]]
 - same file :: [[file:packages.org::#packages/publish-package-apply][publish-package-apply]], [[file:packages.org::#packages/import-bundle!][import-bundle!]]
 
 * 25. moderate-package-version!
@@ -353,33 +353,45 @@ The loaded-package ROSTER — recorded by ~load-packages~ itself, so boot and th
 - source :: [[file:../../../src/graphden/packages/loaded.clj::(defn install!][src/graphden/packages/loaded.clj:45]]
 - referenced from :: [[file:constellation.org::#constellation/extra-deps][extra-deps]]
 
-* 27. import-bundle!
+* 27. seed!
+:PROPERTIES:
+:CUSTOM_ID: packages/seed!
+:FILE: src/graphden/packages/starter_catalogue.clj
+:LINE: 84
+:MINS: 2.2
+:END:
+
+Why a fresh marketplace is not empty (docs/MARKETPLACE.md § 11). The starter catalogue — the platform's themes, keyboard layouts and example packages — is DATA (~starter-catalogue.edn~, in the publish route's own fields); this seed publishes each entry at boot through the very row a publish writes (~registry-shared/version-row~ + ~insert-or-exists!~, moved out of the publish impl so the two can never drift), in the platform tier, so it lands public + approved. Idempotent by (name, version), never over a name another org lists publicly. A change to a listing is a version bump: rows are immutable.
+
+- source :: [[file:../../../src/graphden/packages/starter_catalogue.clj::(defn seed!][src/graphden/packages/starter_catalogue.clj:84]]
+
+* 28. import-bundle!
 :PROPERTIES:
 :CUSTOM_ID: packages/import-bundle!
 :FILE: resources/packages/registry/registry/impls.clj
-:LINE: 788
+:LINE: 713
 :MINS: 5.2
 :END:
 
 The WRITE half of the export/import pair — ~POST /api/import/graph~ applies an exported bundle to a NAMED branch: resolve/create the target (owner-stamped, ~owner~ write-policy — the push-branch convention), skip package-owned defs, adopt editor-born same-name identities onto their deterministic ids, sync through the SAME path the boot loader uses, optionally prune to snapshot semantics, delta-invalidate that branch. Cross-install push/pull and git-snapshot restores all land here, then ride the normal diff → review → merge flow.
 
-- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase import-bundle!][resources/packages/registry/registry/impls.clj:788]]
+- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase import-bundle!][resources/packages/registry/registry/impls.clj:713]]
 - same file :: [[file:packages.org::#packages/publish-package-apply][publish-package-apply]], [[file:packages.org::#packages/upsert-pin!][upsert-pin!]]
 
-* 28. reconcile-bundle-scope!
+* 29. reconcile-bundle-scope!
 :PROPERTIES:
 :CUSTOM_ID: packages/reconcile-bundle-scope!
 :FILE: src/graphden/packages/sync.clj
-:LINE: 461
+:LINE: 475
 :MINS: 4.6
 :END:
 
 Snapshot semantics for a runtime import (~?prune=true~): within exactly the bundle's namespaces, a deterministic-id fn the bundle no longer contains is TOMBSTONED on the branch (a ~:deleted-at~ version — so it hides an INHERITED fn too, not just a branch-local one, and the deletion propagates on merge). Never the boot reconciler's identity-plane purge, which would reach across branches. Referenced removals are kept + reported, loud.
 
-- source :: [[file:../../../src/graphden/packages/sync.clj::(defn reconcile-bundle-scope!][src/graphden/packages/sync.clj:461]]
+- source :: [[file:../../../src/graphden/packages/sync.clj::(defn reconcile-bundle-scope!][src/graphden/packages/sync.clj:475]]
 - same file :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]]
 
-* 29. bundle->files
+* 30. bundle->files
 :PROPERTIES:
 :CUSTOM_ID: packages/bundle->files
 :FILE: src/graphden/packages/git_format.clj
@@ -391,7 +403,7 @@ The GIT face: a bundle laid out as one module file per namespace (the fns.edn mo
 
 - source :: [[file:../../../src/graphden/packages/git_format.clj::(defn bundle->files][src/graphden/packages/git_format.clj:163]]
 
-* 30. lint
+* 31. lint
 :PROPERTIES:
 :CUSTOM_ID: packages/lint
 :FILE: src/graphden/lint/core.clj
@@ -403,7 +415,7 @@ The graph's own linter, run over the same loader output at CI time (~bb graph-li
 
 - source :: [[file:../../../src/graphden/lint/core.clj::(defn lint][src/graphden/lint/core.clj:741]]
 
-* 31. lint-branch
+* 32. lint-branch
 :PROPERTIES:
 :CUSTOM_ID: packages/lint-branch
 :FILE: src/graphden/lint/graph.clj

@@ -46,6 +46,14 @@ tags; the sort menu orders by rating, installs, recency or name.
 > (`bundled` / `manifest`) so you know what your fns can build on. It is
 > deliberately not an install surface.
 
+A fresh instance is not empty: the platform ships a **starter
+catalogue** — a few themes (Nord, Solarized, a high-contrast look), a
+few keyboard layouts and three small example packages under
+`graphden.` / `starter.` names, published at boot exactly as you would
+publish them. Apply a theme to see the feature before you build one;
+install `starter.hello-api` to see what an installed package looks like
+in your graph.
+
 On the cloud the public catalog is also a page anyone can read without
 signing in — [graphden.dev/marketplace](https://graphden.dev/marketplace):
 the same cards and package pages, with **Sign in to install** where the
@@ -203,7 +211,8 @@ commands, and a layout that moved `Escape` would break every dialog.
 3. Change *Paper* again; save as `1.0.1` (suggested). Now pick
    `my-board@1.0.0` in the select — you rolled back.
 4. Open the **Marketplace** (`Space` `v` `m`), **Themes** tab. Your
-   `my-board` card is there with two versions. Open it, give it five
+   `my-board` card is there with two versions, next to the starter
+   themes. Open it, give it five
    stars and a note, post — the card shows ★ 5.0 (1).
 5. **Settings → Keyboard**: on *Fit the graph in view*, click
    **Change**, press `f` `f`, `Enter`. Press `Space` `f` `f` on the

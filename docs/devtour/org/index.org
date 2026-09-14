@@ -22,7 +22,7 @@ This tour is about the code, not the workflow. For how to BUILD and test it — 
 - [[file:versioning.org][Branches & versioning]] (23 · ~103 min) :: The VersionedStorage decorator, per-branch resolution, diff/merge and branch-local? propagation.
 - [[file:types.org][Type system]] (17 · ~83 min) :: Subtyping, unification, narrowing, refinements, the sweep-at-zero checker, and the :secret information-flow marker.
 - [[file:crud.org][CRUD & the write path]] (23 · ~67 min) :: Entity/branch/secret writes, request parsing, type-check on write, fn-execution lookup + persist.
-- [[file:packages.org][Packages — the graph's content]] (31 · ~105 min) :: How fns.edn + impls.clj become base-fns and fn-defs; the loader, load order, and the first-party package tree — then the inverse: export, the ref wire form, and the publish/install registry.
+- [[file:packages.org][Packages — the graph's content]] (32 · ~107 min) :: How fns.edn + impls.clj become base-fns and fn-defs; the loader, load order, and the first-party package tree — then the inverse: export, the ref wire form, and the publish/install registry.
 - [[file:boot.org][Boot & lifecycle]] (12 · ~24 min) :: How the process starts: the Integrant component graph, the Aero config + addon manifest, and the router seams installed at boot.
 - [[file:web.org][Web — routing & the page runtime]] (19 · ~29 min) :: HTTP from socket to response body: routing, middleware as graph fns, the hiccup page runtime, and the APIs the editor reads.
 - [[file:layout.org][Layout — the editor's graph view]] (6 · ~22 min) :: Turn raw fn/slot/binding rows into the placed cards, edges and server-computed facts the editor renders.

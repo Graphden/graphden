@@ -1,13 +1,21 @@
 (ns graphden.packages.registry-shared
-  "The three conventions the registry package's impls MODULES share
-   (`registry/registry/impls.clj` and `registry/marketplace/impls.clj`).
-   Module impls are evaluated standalone by the package loader — one
-   `impls.clj` cannot `require` another — so what both need lives here:
-   the remote registry's bearer, the moderation deploy flag and the
-   platform-wide storage beneath the org-scoped decorator."
+  "What the registry package's impls MODULES share (`registry/registry/
+   impls.clj` and `registry/marketplace/impls.clj`) and what the boot-time
+   starter catalogue (`graphden.packages.starter-catalogue`) shares with
+   the publish path. Module impls are evaluated standalone by the package
+   loader — one `impls.clj` cannot `require` another — so what both need
+   lives here: the remote registry's bearer, the moderation deploy flag,
+   the platform-wide storage beneath the org-scoped decorator, the
+   package-name lock, and the publish INSERT itself (the row a publish
+   writes + the UNIQUE-tolerant insert), so a seeded listing is exactly
+   the row a `POST /api/marketplace/publish` would have written."
   (:require
+    [cheshire.core :as json]
     [clojure.string :as str]
+    [graphden.packages.records.ids :as ids]
+    [graphden.storage.protocol.core :as sp]
     [graphden.system.deploy-config :as deploy-config]
+    [graphden.tenancy.context :as tc]
     [graphden.versioning.storage.core :as vs]
     [next.jdbc :as jdbc])
   (:import
@@ -86,3 +94,80 @@
                   (throw (ex-info "Another publish of this package name is in progress."
                                   {:type :packages/name-busy :name pkg-name}))))))))
     (f)))
+
+
+;; =============================================================================
+;; The publish INSERT — shared by the publish route and the starter catalogue
+;; =============================================================================
+
+(defn foreign-public-holder
+  "The OTHER org that already lists `pkg-name` publicly (any moderation
+   status), or nil — a public name is registry-wide, first come first
+   served, the way pypi.org names are (docs/MARKETPLACE.md § 2, Names).
+   Reads the platform-wide storage: the org-scoped view would hide the
+   holder's rows... except its public ones, which is exactly the set that
+   matters, so row level security answers the same question for a tenant."
+  [storage pkg-name]
+  (let [own (str (tc/current-org))]
+    (->> (sp/query-entities (platform-base storage) :package-version {:name pkg-name})
+         (filter #(and (:public? %) (not= own (str (:org-id %)))))
+         first
+         :org-id)))
+
+
+(defn version-row
+  "The `:package-version` row a publish writes for `(pkg-name, pkg-version)`
+   — the bundle (`:namespace` / `:fns` / `:dependencies` /
+   `:package-dependencies` / `:secrets`), the listing (`:kind` /
+   `:description` / `:category` / `:tags` / `:payload`; nil = a plain fns
+   publish with no metadata) and the write-time normalisations readers
+   never re-derive: the content hash, `:public?` (the explicit opt-in OR a
+   platform-tier publish — the shared registry), the moderation `:status`
+   (a TENANT's public opt-in waits for the operator when the deployment
+   moderates; the platform's own and every private publish are listed
+   outright, docs/MARKETPLACE.md § 8), `:org-id` (the same value the
+   tenancy decorator stamps — set here too so single-tenant rows carry the
+   public org instead of NULL) and `:publisher-id` (who is told the
+   moderation decision)."
+  [pkg-name pkg-version bundle pkg-public listing]
+  (let [fns (:fns bundle)]
+    {:name pkg-name
+     :version pkg-version
+     :ns-root (:namespace bundle)
+     :fns fns
+     :dependencies (:dependencies bundle)
+     :package-dependencies (:package-dependencies bundle)
+     :secrets (vec (:secrets bundle))
+     :content-hash (ids/digest-hex "SHA-256" (json/generate-string fns))
+     :org-id (tc/current-org)
+     :public? (boolean (or pkg-public (tc/current-platform-tier?)))
+     :status (if (and pkg-public
+                      (moderation-enabled?)
+                      (not (tc/current-platform-tier?)))
+               "pending"
+               "approved")
+     :published-at (java.time.Instant/now)
+     :kind (:kind listing)
+     :description (:description listing)
+     :category (:category listing)
+     :tags (some-> (:tags listing) vec)
+     :payload (:payload listing)
+     :publisher-id (tc/current-user-id)}))
+
+
+(defn insert-or-exists!
+  "The publish INSERT under the DB's `UNIQUE (name, version)`: the created
+   row, or nil when the key is already taken — the same answer the
+   pre-check gives, so a race or another org's private row (invisible to
+   an org-scoped read) ends as `version-exists`, not a 500. A pending row
+   (a tenant's public opt-in under moderation) is announced through the
+   notification seam so the operator hears about the queue."
+  [storage row]
+  (try
+    (let [created (sp/create-entity storage :package-version row)]
+      (when (= "pending" (:status created))
+        (tc/notify! :package-submitted created))
+      created)
+    (catch clojure.lang.ExceptionInfo e
+      (when-not (= :unique-violation (:type (ex-data e)))
+        (throw e)))))

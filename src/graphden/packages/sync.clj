@@ -359,16 +359,30 @@
 
 
 (defn sync-bundle!
-  "Sync a BUNDLE of fn-defs into `storage` and return their deterministic
-   fn-ids: namespace upsert (`pkg/sync-namespaces!`) →
-   `fn-composition/sync-fns-to-storage!` → `records/fn-id` per def. The
-   shared core of the registry's fork/materialize apply-cores and the MCP
-   branch sync (formerly three verbatim copies); each caller owns its
-   divergent tail — ns-rewrite prefix, invalidation target, branch switch."
+  "Sync a BUNDLE of fn-defs into `storage` and return the ids of EVERY
+   fn row the sync wrote: namespace upsert (`pkg/sync-namespaces!`) →
+   `fn-composition/sync-fns-to-storage!`, whose name→id result carries
+   the declared defs AND the synthetic `_anon-*` rows the parser extracts
+   from inline anonymous fn-defs (an `{:parent …}` map bound to a slot or
+   listed in a sequence). Both matter to the caller's delta invalidation:
+   a delta keyed on the declared names alone never tells the registry
+   about the anonymous rows, so a def whose body is an inline anon
+   (`:if :test {:parent :non-blank? …}`, `:div :nums [{:parent :add …} …]`)
+   cannot compile — its child is unknown — and its free args do not
+   surface until some unrelated full rebuild (the boot sync never saw
+   it: boot compiles everything afterwards). The declared defs' own ids
+   (`records/fn-id`) are unioned in for the case two modules of one
+   bundle share a bare name. The shared core of the registry's
+   fork/materialize apply-cores and the MCP branch sync (formerly three
+   verbatim copies); each caller owns its divergent tail — ns-rewrite
+   prefix, invalidation target, branch switch."
   [storage fn-defs]
-  (let [ns-id-map (pkg/sync-namespaces! storage (into #{} (keep :namespace) fn-defs))]
-    (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map)
-    (mapv #(records/fn-id (:namespace %) (:name %)) fn-defs)))
+  (let [ns-id-map (pkg/sync-namespaces! storage (into #{} (keep :namespace) fn-defs))
+        name->id (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map)]
+    (into (mapv #(records/fn-id (:namespace %) (:name %)) fn-defs)
+          (comp (remove (set (map #(records/fn-id (:namespace %) (:name %)) fn-defs)))
+                (distinct))
+          (vals name->id))))
 
 
 (defn- ns-path-index

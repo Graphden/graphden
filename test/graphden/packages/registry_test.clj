@@ -1028,3 +1028,35 @@
       (is (true? (:ok body)))
       (is (seq (sp/query-entities (storage) :fn {:name "my-submit"}))
           "the fn binding the ref-based free-arg slot synced (would throw orphan pre-fix)"))))
+
+
+(deftest install-package-with-inline-anonymous-fns-executes
+  ;; Regression: the sync writes an inline anonymous fn-def (`{:parent …}` bound
+  ;; to a slot or listed in a sequence) as its own synthetic `_anon-*` row, but
+  ;; `sync-bundle!` used to report only the DECLARED defs' ids, so install's
+  ;; delta invalidation never told the registry about the anonymous rows — the
+  ;; parent could not compile (`fn-not-found` on execute) and its free args did
+  ;; not surface until an unrelated full rebuild. Caught by the starter
+  ;; catalogue's `word-count` / `mean` (docs/MARKETPLACE.md § 11).
+  (testing "a bundle whose defs bind inline anon fns installs into a working registry"
+    (let [{:keys [ctx all-name->id] st :storage} *bootstrap*
+          install-id (get all-name->id :install-package)]
+      (sp/create-entity st :package-version
+                        {:name "anon.demo" :version "1.0.0" :ns-root "anondemo"
+                         :fns [{:name :shout :namespace "anondemo"
+                                :parent :if
+                                :args {:test {:parent :non-blank? :args {:string {:as :text}}}
+                                       :then {:parent :str-upper :args {:string {:as :text}}}
+                                       :else "nothing"}}
+                               {:name :avg :namespace "anondemo"
+                                :parent :div
+                                :args {:nums [{:parent :add :args {:nums {:as :values}}}
+                                              {:parent :count :args {:coll {:as :values}}}]}}]
+                         :dependencies [:if :non-blank? :str-upper :div :add :count]
+                         :content-hash "anon-h"})
+      (is (true? (:ok (exec/execute-with-named-args ctx install-id {:pkg-name "anon.demo" :pkg-version "1.0.0"}))))
+      (testing "the slot-bound anon's free arg surfaces and the fn runs"
+        (is (= "HI" (exec/execute-with-named-args ctx (ids/fn-id "anondemo@1-0-0" :shout) {:text "hi"})))
+        (is (= "nothing" (exec/execute-with-named-args ctx (ids/fn-id "anondemo@1-0-0" :shout) {:text " "}))))
+      (testing "the sequence-item anons' free arg surfaces and the fn runs"
+        (is (== 5 (exec/execute-with-named-args ctx (ids/fn-id "anondemo@1-0-0" :avg) {:values [2 4 9]})))))))

@@ -3264,6 +3264,9 @@ textarea.value-form-hiccup {
   z-index: 10002;
   padding: 6px;
   min-width: 280px; max-width: 360px;
+  /* Never taller than the viewport — the sections box shrinks and its
+     open list scrolls instead of the popover running off screen. */
+  max-height: calc(100vh - 16px);
 }
 .fn-picker-search {
   font-family: inherit; font-size: 0.75rem;
@@ -3281,6 +3284,7 @@ textarea.value-form-hiccup {
 .fn-picker-search:focus { box-shadow: 0 0 0 1px var(--fg) inset; }
 .fn-picker-list {
   max-height: 200px; overflow-y: auto;
+  flex: 0 1 auto; min-height: 0;
   background: var(--bg);
 }
 .fn-picker-list-other {
@@ -3350,6 +3354,7 @@ textarea.value-form-hiccup {
    disclosure for the "Other" (incompatible) section. */
 .fn-picker-sections {
   display: flex; flex-direction: column;
+  flex: 0 1 auto; min-height: 0;
   border: 1px solid var(--card-border); border-radius: 3px;
   overflow: hidden;
   background: var(--bg);
@@ -3369,6 +3374,13 @@ textarea.value-form-hiccup {
   text-align: left;
   border: 0; border-top: 1px solid var(--card-border);
   width: 100%;
+  flex: 0 0 auto;
+}
+/* Accordion chrome: the first header sits on the box's own border, and
+   an OPEN header rules itself off from the list it discloses. */
+.fn-picker-section-disclosure:first-child { border-top: 0; }
+.fn-picker-section-disclosure[aria-expanded="true"] {
+  border-bottom: 1px solid var(--card-border);
 }
 .fn-picker-section-disclosure:hover {
   background: var(--hover-bg);

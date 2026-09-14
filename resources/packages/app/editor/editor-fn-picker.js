@@ -224,8 +224,17 @@ function openFnPicker(opts) {
   el.setAttribute('aria-label', expected ? ('Pick a function compatible with ' + (typeof formatTypeHint === 'function' ? formatTypeHint(expected) : 'expected type'))
                                          : 'Pick a function');
   const rect = opts.anchorEl.getBoundingClientRect();
-  el.style.top  = (rect.bottom + 6) + 'px';
   el.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 360)) + 'px';
+  // Below the anchor when it fits, otherwise pushed up so the whole
+  // popover stays on screen — re-run after every render, because
+  // disclosing a section changes the height (the "Other" list used to
+  // run straight off the bottom of the viewport).
+  const place = () => {
+    const h = el.offsetHeight;
+    let top = rect.bottom + 6;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, window.innerHeight - h - 8);
+    el.style.top = top + 'px';
+  };
 
   // Header — when an expectedType is supplied, show it so the user
   // knows what kind of fn they're picking.
@@ -259,8 +268,20 @@ function openFnPicker(opts) {
   sections.className = 'fn-picker-sections';
   el.appendChild(sections);
 
-  const compatHeader = document.createElement('div');
-  compatHeader.className = 'fn-picker-section-header';
+  // Both section headers are disclosures and behave as an ACCORDION:
+  // opening one folds the other, so the popover never stacks two
+  // scrolling lists (`openSection` is the one that is open — null when
+  // the reader folded both). Without an expected type there is a single
+  // headerless section and the state is inert.
+  let openSection = 'compat';
+  const toggleSection = (name) => {
+    openSection = openSection === name ? null : name;
+    render();
+  };
+  const compatHeader = document.createElement('button');
+  compatHeader.type = 'button';
+  compatHeader.className = 'fn-picker-section-header fn-picker-section-disclosure';
+  compatHeader.addEventListener('click', () => toggleSection('compat'));
   const compatList = document.createElement('div');
   compatList.className = 'fn-picker-list';
   compatList.id = 'fn-picker-list-compat';
@@ -272,9 +293,6 @@ function openFnPicker(opts) {
   const otherHeader = document.createElement('button');
   otherHeader.type = 'button';
   otherHeader.className = 'fn-picker-section-header fn-picker-section-disclosure';
-  // Collapsed-by-default when there's at least one compatible row.
-  // Otherwise expanded so the user has SOMETHING to pick from.
-  let otherExpanded = !expected;
   // Per-tier fold state set by hand; unset = the default (`ignores` folded,
   // the rest open).
   const tierState = new Map();
@@ -283,10 +301,7 @@ function openFnPicker(opts) {
   otherList.id = 'fn-picker-list-other';
   otherList.setAttribute('role', 'listbox');
   otherList.setAttribute('aria-label', 'Other functions');
-  otherHeader.addEventListener('click', () => {
-    otherExpanded = !otherExpanded;
-    render();
-  });
+  otherHeader.addEventListener('click', () => toggleSection('other'));
   sections.appendChild(otherHeader);
   sections.appendChild(otherList);
 
@@ -491,27 +506,29 @@ function openFnPicker(opts) {
 
     const compatAll = expected ? filtered.filter(c => c.compatible === true) : filtered;
     const incompatAll = expected ? filtered.filter(c => c.compatible === false) : [];
+    const compatOpen = !expected || openSection === 'compat';
+    const otherExpanded = !!expected && openSection === 'other';
 
-    // -------- Compat header --------
+    // -------- Section headers (accordion disclosures) --------
+    const fillHeader = (header, label, count, open) => {
+      header.textContent = '';
+      const arrow = document.createElement('span');
+      arrow.className = 'fn-picker-disclosure-arrow';
+      arrow.textContent = open ? '▼' : '▶';
+      header.appendChild(arrow);
+      const lbl = document.createElement('span');
+      lbl.textContent = ' ' + label + ' · ' + count;
+      header.appendChild(lbl);
+      header.setAttribute('aria-expanded', open ? 'true' : 'false');
+      header.style.display = 'flex';
+    };
     if (expected) {
-      compatHeader.textContent = 'Compatible · ' + compatAll.length;
-      compatHeader.style.display = 'block';
+      fillHeader(compatHeader, 'Compatible', compatAll.length, compatOpen);
     } else {
       compatHeader.style.display = 'none';
     }
-
-    // -------- Other header (collapsible) --------
     if (expected && incompatAll.length > 0) {
-      otherHeader.style.display = 'flex';
-      otherHeader.textContent = '';
-      const arrow = document.createElement('span');
-      arrow.className = 'fn-picker-disclosure-arrow';
-      arrow.textContent = otherExpanded ? '▼' : '▶';
-      otherHeader.appendChild(arrow);
-      const lbl = document.createElement('span');
-      lbl.textContent = ' Other · ' + incompatAll.length;
-      otherHeader.appendChild(lbl);
-      otherHeader.setAttribute('aria-expanded', otherExpanded ? 'true' : 'false');
+      fillHeader(otherHeader, 'Other', incompatAll.length, otherExpanded);
     } else {
       otherHeader.style.display = 'none';
     }
@@ -526,6 +543,9 @@ function openFnPicker(opts) {
       empty.className = 'fn-picker-empty';
       empty.textContent = 'No matches';
       compatList.appendChild(empty);
+      compatList.style.display = 'block';
+      otherList.style.display = 'none';
+      place();
       return;
     }
 
@@ -560,7 +580,9 @@ function openFnPicker(opts) {
       }
     };
 
-    if (expected) {
+    if (!compatOpen) {
+      // Folded — the header still says how many rows wait behind it.
+    } else if (expected) {
       // Whole-signature tiers: exact fit first, then rows that leave the
       // reader more to wire, then callables that drop the slot's input.
       // The last tier is folded away until asked for — or until a typed
@@ -612,7 +634,9 @@ function openFnPicker(opts) {
       search.setAttribute('aria-activedescendant', visibleRows[activeIdx].rowEl.id);
     }
 
+    compatList.style.display = compatOpen ? 'block' : 'none';
     otherList.style.display = otherExpanded ? 'block' : 'none';
+    place();
   }
   render();
   // Fire-and-forget: augment the loaded candidates with the whole-graph

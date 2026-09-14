@@ -53,7 +53,7 @@
 | `editor-row-actions-handlers.js` | The popover's `data-action="…"` HANDLERS — registered at load into the runtime's dispatcher (`registerActionHandler`, `graphden-runtime.js`) and invoked by `bindActionDispatch` on click: namespace-move / description / peek / open / MI add-remove / use-site × and ✎ / sequence ↑ ↓ insert-before / run / versions / service / apps / rename / wrap / extend / delete. Use-site handlers recover the rich arg from `_rowActionsUseSiteArgs`. |
 | `editor-drag.js` | Drag handle for any overlay |
 | `editor-fn-picker-rank.js` | Picker ranking — whole-signature tiers (exact / extra inputs / ignores input) mirroring `crud.types-api/candidate-fit`, namespace grouping; pure, `fn-picker-rank.test.js` |
-| `editor-fn-picker.js` | Type-aware fn-picker popover |
+| `editor-fn-picker.js` | Type-aware fn-picker popover — Compatible / Other are an accordion (opening one folds the other), and the popover is re-placed after every render so it never runs off the bottom of the viewport |
 | `editor-namespace-picker.js` | Namespace picker popover (ns-move) |
 | `editor-edit-validation.js` | Structural pre-checks: `wouldCycle`, `miCollisionCheck` |
 | `editor-edit-modes.js` | Inline edit popover SKELETON (`openInlineEditPopover`) + value / secret / arg-rename modes + the shared network helpers (`writeBindingFields`, `putSequenceItemValue`, `deleteUseSiteBinding`, `saveArgRef`). Split 2026-09-13: the sequence-item modes moved to `editor-edit-modes-seq.js`. |

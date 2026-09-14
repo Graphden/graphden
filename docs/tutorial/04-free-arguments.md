@@ -252,7 +252,8 @@ rename it in another:
    running into the card, click the arg's NAME (`data`) — not the
    type chip beside it — type `payload`, **Save**. The label on the
    edge changes.
-6. `⋯ → ▶ Run`: the form asks for `payload` now, not `data`. Enter
+6. The Run form on the right asks for `payload` now, not `data`
+   (`⋯ → ▶ Run` opens it if the panel is on another tab). Enter
    `{"a": 1}` and **Run**. A rename is a VIEW over the same slot —
    the parent still knows it as `:data`, your callers see `payload`.
 

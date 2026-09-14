@@ -572,6 +572,38 @@ async function runViaRowActions(page, formValue) {
 }
 
 
+// Run from the pane that is ALREADY open in the inspector (the Runs tab
+// stays selected across selections once used), without going through
+// ⋯ → ▶ Run — the path a reader takes when the form is right there. Returns
+// the parsed `/api/execute` response, so the caller can assert the run was
+// accepted under the fn's CURRENT interface (lesson 04: after a rename the
+// pane must ask for the new name, or the run is rejected with "Unknown
+// arg(s)" — the form was stale until 2026-09-14).
+async function runFromOpenPane(page, formValue, argName) {
+  // The pane is rebuilt asynchronously after the edit that preceded this
+  // call, so wait for the rebuilt one: its arg row names the slot
+  // (`data-slot-name`), and the widget inside it must have mounted.
+  await page.waitForFunction((name) => {
+    const p = document.querySelector('.execute-popover.visible');
+    const row = p && p.querySelector('.execute-arg-form[data-slot-name="' + name + '"]');
+    return !!(row && row.querySelector('[data-form-field]'));
+  }, argName, {timeout: 30000, polling: 100});
+  await page.evaluate(({v, name}) => {
+    const f = document.querySelector('.execute-popover.visible .execute-arg-form[data-slot-name="'
+                                     + name + '"] [data-form-field]');
+    f.value = v;
+    f.dispatchEvent(new Event('input', {bubbles: true}));
+    f.dispatchEvent(new Event('change', {bubbles: true}));
+  }, {v: formValue, name: argName});
+  const [resp] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes('/api/execute') && r.request().method() === 'POST',
+                         {timeout: 30000}),
+    page.click('.execute-popover.visible .execute-run-btn'),
+  ]);
+  return resp.json().catch(() => ({}));
+}
+
+
 // --- lesson 14 (tests) helpers ----------------------------------------------
 // Extracted from lesson 01's inline steps: the ns / fn / set-parent flows are
 // identical, only the names differ.
@@ -1103,7 +1135,7 @@ module.exports = {
   waitUntil, tourProgress, clickTourAdvance,
   filterAndSelect, openRowActionsFor, extendViaRowActions, bindFirstPlaceholder,
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding, waitClickable,
-  createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
+  createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions, runFromOpenPane,
   appendSeqItemViaEdge,
   bindSeqAnchorPlaceholder,
   createRootNamespace, createFnInNamespace, setParentViaStrip,

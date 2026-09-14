@@ -535,7 +535,10 @@ function enterExpectsEffectsEditMode(fn, anchorEl) {
       } catch (_) {}
       return false;
     },
-    onSaved() { if (typeof renderGraph === 'function') renderGraph(false); }
+    // Full refresh — these write the fn ROW, which `lookups.fnMap` and
+    // the inspector's Overview (RETURNS / EFFECTS) read; `renderGraph`
+    // alone left both stale until the next selection.
+    onSaved() { if (typeof loadGraphData === 'function') loadGraphData(); }
   });
 }
 function enterFnReturnTypeEditMode(fn, anchorEl) {
@@ -587,7 +590,10 @@ function enterFnReturnTypeEditMode(fn, anchorEl) {
       } catch (_) {}
       return false;
     },
-    onSaved() { if (typeof renderGraph === 'function') renderGraph(false); }
+    // Full refresh — these write the fn ROW, which `lookups.fnMap` and
+    // the inspector's Overview (RETURNS / EFFECTS) read; `renderGraph`
+    // alone left both stale until the next selection.
+    onSaved() { if (typeof loadGraphData === 'function') loadGraphData(); }
   });
 }
 // --- namespace-move (Phase 5) ---

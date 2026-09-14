@@ -373,7 +373,7 @@
                :target ".edge-label-overlay"
                :check {:kind "arg-named" :arg "payload"}}
               {:title "The new name is the interface"
-               :body "[[⋯]] → [[▶ Run]]. The form asks for payload now, not data — enter `{\"a\": 1}` and [[Run]]: back comes {\"a\":1}. A rename is a VIEW over the same slot — the parent still knows it as :data, your callers see payload. Click [[Next]] when you have run it."
+               :body "The Run form on the right asks for payload now, not data ([[⋯]] → [[▶ Run]] opens it if the panel is on another tab) — enter `{\"a\": 1}` and [[Run]]: back comes {\"a\":1}. A rename is a VIEW over the same slot — the parent still knows it as :data, your callers see payload. Click [[Next]] when you have run it."
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn" ".execute-result-host"]
                :check {:kind "manual"}}

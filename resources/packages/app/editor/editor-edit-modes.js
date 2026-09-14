@@ -478,7 +478,14 @@ function enterArgRenameEditMode(arg, anchorEl, displayLabel) {
       // on a fresh binding row).
       return await writeBindingFields(arg, { 'rename-to': newName });
     },
-    onSaved() { if (typeof renderGraph === 'function') renderGraph(false); }
+    // Full refresh, like the value editor above — a rename writes a
+    // binding row + a rename-view slot, so `lookups` AND the inspector
+    // are stale. `renderGraph` alone redrew the edge label (the layout
+    // is fetched fresh) while the Runs pane kept the OLD field name, and
+    // a Run from it was rejected with "Unknown arg(s)" (lesson 04, step
+    // 13, 2026-09-14). `loadGraphData` re-selects, which re-renders the
+    // inspector — the form asks for the new name.
+    onSaved() { if (typeof loadGraphData === 'function') loadGraphData(); }
   });
 }
 

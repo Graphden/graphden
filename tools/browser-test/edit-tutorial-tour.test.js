@@ -16,7 +16,7 @@ const {
   filterAndSelect, extendViaRowActions, bindFirstPlaceholder,
   renameArgViaEdgeLabel,
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding,
-  createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
+  createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions, runFromOpenPane,
   appendSeqItemViaEdge,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, tourTitle,
@@ -240,7 +240,14 @@ const {
     await waitTourTitle(page, 'The new name is the interface', 150000);
     // The result pane still holds the run from earlier in this lesson, so
     // this step is `manual` — a dom check on it would pass before the user
-    // ran anything.
+    // ran anything. Run the way a reader does: the Runs pane is ALREADY
+    // open from the earlier run, so type into it — its field must be the
+    // renamed `payload`, or the server rejects the run ("Unknown arg(s):
+    // [:data]", the stale-form bug of 2026-09-14). Then the lesson's own
+    // ⋯ → ▶ Run path, which rebuilds the pane.
+    const renamedRun = await runFromOpenPane(page, '{"a": 1}', 'payload');
+    assert(renamedRun.status === 'succeeded' && /"a":\s*1/.test(String(renamedRun.result)),
+           'run from the already-open pane uses the renamed arg: ' + JSON.stringify(renamedRun).slice(0, 160));
     await runViaRowActions(page, '{"a": 1}');
     assert(await clickTourButton(page, 'Next'), 'lesson 04 rename-run Next');
     await waitTourTitle(page, 'Templates, specialized', 150000);

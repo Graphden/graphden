@@ -300,12 +300,12 @@ Builds a fresh live ~ExecutionContext~ whose storage is a ~VersionedStorage~ rew
 :PROPERTIES:
 :CUSTOM_ID: versioning/dispatch*
 :FILE: src/graphden/system/branch_router.clj
-:LINE: 1435
+:LINE: 1451
 :MINS: 8.6
 :END:
 
 The top-level Ring dispatch: extract the branch ref (header or query), resolve it to a branch-id, and route the request to that branch's lazily-built handler (400 on an unknown branch). Where a live request finally lands in the correct per-branch context. Its public wrapper ~dispatch~ first short-circuits ~/livez~ — the one registry-independent liveness path — so a pod busy on a full recompile still answers its probe.
 
-- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- dispatch*][src/graphden/system/branch_router.clj:1435]]
+- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- dispatch*][src/graphden/system/branch_router.clj:1451]]
 - same file :: [[file:versioning.org::#versioning/build-branch-ctx][build-branch-ctx]]
 - referenced from :: [[file:storage.org::#storage/create-listener][create-listener]], [[file:web.org::#web/dispatch-to-branch][dispatch-to-branch]]

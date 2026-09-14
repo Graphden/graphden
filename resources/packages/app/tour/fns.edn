@@ -461,7 +461,7 @@
              :title "Higher-order functions"
              :steps
              [{:title "A slot that wants a function"
-               :body "Every slot so far wanted a VALUE. A slot whose TYPE is :fn — the bare primitive, or the structural [:fn args ret] form — wants a CALLABLE instead: the executor hands the fn over unrun, and the impl decides when to invoke it. (It is the type, never the slot's name.) That is how map, filter and friends work. You will wire one yourself and watch it run — once per item."
+               :body "Every slot so far wanted a VALUE. A slot whose TYPE is :fn — the bare primitive, or the structural [:fn args ret] form — wants a CALLABLE instead: the executor hands the fn over unrun, and the impl decides when to invoke it. (It is the type, never the slot's name.) That is how map, filter and friends work. You will bind the data first, watch the callable slot's expectation tighten by itself, then wire a callback of your own and run it — once per item."
                :target nil
                :check {:kind "manual"}}
               {:title "Find map"
@@ -469,7 +469,7 @@
                :target "input[placeholder=\"Filter...\"]"
                :check {:kind "selected" :name "map"}}
               {:title "Read the two slots"
-               :body "The :coll chip reads ['a] — a list of anything. The :func chip reads (item:'a) → 'b — a callable taking :item and returning something else. Only the second one is a HOF slot."
+               :body "The :coll chip reads ['a] — a list of anything. The :func chip reads (item:'a) → 'b — a callable taking :item and returning something else. Only the second one is a HOF slot. And 'a is the SAME unknown in both: whatever one slot learns about it, the other learns too."
                :target ".arg-type-chip"
                :check {:kind "manual"}}
               {:title "Extend it"
@@ -478,24 +478,8 @@
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-map" :parent "map"}
                :creates {:type "fn" :name "tutorial-map"}}
-              {:title "tutorial-map is open"
-               :body "Both inherited slots show a [[+]] on your card."
-               :target nil
-               :check {:kind "selected" :name "tutorial-map"}}
-              {:title "A callable slot offers no literal"
-               :body "Click the [[+]] on :func. Instead of the value form you saw in earlier lessons, the fn picker opens straight away: a literal is not a thing you can put in a callable slot."
-               :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".fn-picker-popover"]
-               :check {:kind "dom" :selector ".fn-picker-popover"}}
-              {:title "Compatible means callable-shaped"
-               :body "The picker states Expected: (item:a) → b and splits candidates into Compatible and Other. Compatible's first group, Exact fit, holds every fn that takes one value and returns something — for a single-argument callable the argument's NAME does not matter: map hands each element to the callee's one free argument, whatever it is called. (Below it: fns that would leave you more to wire, and, folded away, constants that would ignore the item.) str-upper from lesson 03 is an exact fit. Type `str-upper` into the picker's filter and click the [[str-upper]] row."
-               :target ".fn-picker-search"
-               :targets [".fn-picker-search" ".fn-picker-row-compat[data-fn-name$=\"str-upper\"]"]
-               :check {:kind "binding-bound" :name "tutorial-map" :slot "func"}}
-              {:title "The edge is the binding"
-               :body "An edge now runs from str-upper into :func — the callback is wired, and nothing has run. Give it something to run over: click the [[+]] on :coll, [[Append literal]], type `graph`, [[Save]]."
-               ;; The list slot's own anchor, not the first `+` on the card: for a
-               ;; beat after the pick the card still shows :func's placeholder.
+              {:title "The data first"
+               :body "Both inherited slots show a [[+]] on your card. Bind what you KNOW first — the data. Click the [[+]] on :coll, [[Append literal]], type `graph`, [[Save]]."
                :target ".placeholder-binder.is-seq-anchor"
                :targets [".placeholder-binder.is-seq-anchor" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "list-items" :name "tutorial-map" :slot "coll" :count 1}}
@@ -504,13 +488,27 @@
                :target ".arg-seq-btn-add"
                :targets [".arg-seq-btn-add" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "list-items" :name "tutorial-map" :slot "coll" :count 2}}
+              {:title "Watch the other slot"
+               :body "Look at the :func chip. A moment ago it read (item:'a) → 'b; now it reads (item:text) → 'b — and you never touched it. Two strings went into :coll, so 'a is text, and the type variable carried that across to the slot you have not bound yet. Every value you set narrows the choices left. Click [[Next]]."
+               :target ".arg-type-chip"
+               :check {:kind "manual"}}
+              {:title "A callable slot offers no literal"
+               :body "Click the [[+]] on :func. Instead of the value form you saw in earlier lessons, the fn picker opens straight away: a literal is not a thing you can put in a callable slot."
+               :target ".placeholder-binder"
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".fn-picker-popover"]
+               :check {:kind "dom" :selector ".fn-picker-popover"}}
+              {:title "Narrower already"
+               :body "The picker states Expected: (item:text) → b — not (item:a). Compatible's first group, Exact fit, holds the fns that take exactly one TEXT value: str-upper from lesson 03 qualifies, a fn over numbers does not. (Below it: fns that would leave you more to wire; folded away, constants that would ignore the item.) For a single-argument callable the argument's NAME does not matter — map hands each element to the callee's one free argument. Type `str-upper` into the picker's filter and click the [[str-upper]] row."
+               :target ".fn-picker-search"
+               :targets [".fn-picker-search" ".fn-picker-row-compat[data-fn-name$=\"str-upper\"]"]
+               :check {:kind "binding-bound" :name "tutorial-map" :slot "func"}}
               {:title "Run it"
-               :body "[[⋯]] on the tutorial-map row → [[▶ Run]] → [[Run]]. Nothing to fill in — every slot is bound."
+               :body "An edge now runs from str-upper into :func — the callback is wired, and nothing has run. [[⋯]] on the tutorial-map row → [[▶ Run]] → [[Run]]. Nothing to fill in — every slot is bound."
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                :check {:kind "dom" :selector ".execute-result-host .execute-result-pane, .execute-result-host .execute-error-pane"}}
               {:title "Once per item"
-               :body "GRAPH, DEN — two strings went in and each came out upper-cased: str-upper ran once per item, and you never called it. map did, handing each element in as its one argument. That is the whole HOF contract — the argument is passed unrun and the impl drives it. Click [[Next]]."
+               :body "GRAPH, DEN — two strings went in and each came out upper-cased: str-upper ran once per item, and you never called it. map did, handing each element in as its one argument. That is the whole HOF contract — the argument is passed unrun and the impl drives it. And notice the order you worked in: the data first, the callback last — each value you bound made the next choice smaller. Click [[Next]]."
                :target ".execute-result-host"
                :check {:kind "manual"}}
               {:title "That's a HOF"

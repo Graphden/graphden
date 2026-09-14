@@ -338,9 +338,13 @@ async function bindFirstPlaceholder(page, literalText) {
 // chooser (lesson 06, 2026-09-14). Wait for the list slot's own anchor to be
 // the only placeholder left, then take the literal path.
 async function bindSeqAnchorPlaceholder(page, literalText) {
+  // The anchor itself, whatever else is on the card (lesson 06 binds :coll
+  // while :func's `+` is still there); it just has to be settled — no
+  // placeholder without a node id, which is what a mid-re-render card shows.
   await page.waitForFunction(() => {
-    const all = document.querySelectorAll('.placeholder-binder');
-    return all.length === 1 && all[0].classList.contains('is-seq-anchor');
+    const all = Array.from(document.querySelectorAll('.placeholder-binder'));
+    return all.some((b) => b.classList.contains('is-seq-anchor'))
+      && all.every((b) => b.closest('.node-overlay')?.dataset.nodeId);
   }, null, {timeout: 30000, polling: 150});
   await page.evaluate(() => document.querySelector('.placeholder-binder.is-seq-anchor').click());
   await appendOrBindLiteralFromChooser(page, literalText);

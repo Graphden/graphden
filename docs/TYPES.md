@@ -338,6 +338,28 @@ When a fn-def leaves arguments free, their types propagate to callers:
 ;; Callers of add-10 must provide :b of type :numeric
 ```
 
+### Narrowing as a way of working
+
+Type variables tie a fn's free args together, so every value you bind
+is information about the ones still free. `map` declares
+`:coll [:list a]` and `:func [:fn {:item a} b]`; bind `:coll` to a
+list of text and `a` is `text` — the picker for `:func` now reads
+*Expected: (item:text) → b* and its Exact-fit group holds the
+text-accepting fns instead of every one-argument fn in the graph.
+Bind `:func` and `b` follows: the card's return becomes `[text]`.
+
+So the productive order is **bind what you know first, choose what
+you don't last** — literals and refs with concrete return types
+early, callables and polymorphic refs after them. Each step leaves
+the next picker with fewer, better candidates. What narrows: a
+literal whose type is concrete, a ref whose return type is. What
+does not: a literal typed `:any` / `:jsonb`, a ref returning `:any`
+— they satisfy the variable without binding it. And narrowing never
+admits a callee that demands a NARROWER argument than the slot
+passes: a `(item:int)` slot keeps out a fn that requires
+`:positive-int` (0 would break it) — that is contravariance, and the
+picker files such fns under *Other* with the explainer.
+
 ---
 
 ## Structural Types (Records)

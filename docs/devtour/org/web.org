@@ -7,7 +7,7 @@ HTTP from socket to response body: routing, middleware as graph fns, the hiccup 
 
 after: packages, boot
 
-[[file:index.org][index]] · ~27 min
+[[file:index.org][index]] · ~29 min
 
 * 1. http-server
 :PROPERTIES:
@@ -216,7 +216,7 @@ The outbound finalizer is a graph composition now — ~:process-response~ in web
 The server-side type-picker sweep behind ~/partials/compatible-type-options~. It filters the ~type-name-kinds~ roster to the names that can legally narrow ~expected~ in ONE alias-aware ~subtype?~ pass — replacing the editor's former per-name fan-out of ~50 parallel ~POST /api/types/compatible~ requests per picker open. The graph-first migration's clearest case: a client loop collapses into one server render.
 
 - source :: [[file:../../../src/graphden/crud/types_api.clj::(defn compatible-type-names][src/graphden/crud/types_api.clj:183]]
-- same file :: [[file:web.org::#web/api-rich-types][api-rich-types]]
+- same file :: [[file:web.org::#web/api-rich-types][api-rich-types]], [[file:web.org::#web/candidate-fit][candidate-fit]]
 
 * 17. api-rich-types
 :PROPERTIES:
@@ -229,10 +229,23 @@ The server-side type-picker sweep behind ~/partials/compatible-type-options~. It
 The ~/api/types~ wire-shaping layer the editor loads at boot and after every mutation: the augmented rich-type snapshot with ~bulk-omitted-fields~ stripped from each entry. The old ~?fn=<name>~ per-fn full-entry backfill is gone with its only client consumer — the return-type-rule popover is a server partial now, and the layout strip facts read the raw registry directly. How the type-checker's registry reaches the browser as a lean payload.
 
 - source :: [[file:../../../src/graphden/crud/types_api.clj::(defn api-rich-types][src/graphden/crud/types_api.clj:924]]
-- same file :: [[file:web.org::#web/compatible-type-names][compatible-type-names]]
+- same file :: [[file:web.org::#web/compatible-type-names][compatible-type-names]], [[file:web.org::#web/candidate-fit][candidate-fit]]
 - referenced from :: [[file:types.org::#types/record-rich-types!][record-rich-types!]]
 
-* 18. sync-fn-defs-branch!
+* 18. candidate-fit
+:PROPERTIES:
+:CUSTOM_ID: web/candidate-fit
+:FILE: src/graphden/crud/types_api.clj
+:LINE: 618
+:MINS: 2.7
+:END:
+
+Admissibility and ranking are two questions, and this is the second one. ~subtype?~ decides WHICH fns a slot admits — and for a ~(item:a) → b~ callable slot that is every one-free-arg fn positionally plus every nullary one, thousands of rows. This tells the picker how each candidate's WHOLE signature sits in the slot: ~:exact~ (as many free args as the slot passes), ~:captures~ (more — they surface as free args of the binding fn), ~:ignores~ (fewer — the per-call value is dropped). The graph's ~:candidate-fit~ base-fn calls it per row inside the ~/api/types/candidates~ composition (web/crud-types); the editor's ~pickerFitTier~ mirrors it for rows the server has not classified yet. Ranking never widens or narrows the set.
+
+- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn candidate-fit][src/graphden/crud/types_api.clj:618]]
+- same file :: [[file:web.org::#web/compatible-type-names][compatible-type-names]], [[file:web.org::#web/api-rich-types][api-rich-types]]
+
+* 19. sync-fn-defs-branch!
 :PROPERTIES:
 :CUSTOM_ID: web/sync-fn-defs-branch!
 :FILE: resources/packages/mcp/mcp/impls.clj

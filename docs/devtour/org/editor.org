@@ -7,7 +7,7 @@ The ~25k lines of plain ES that draw the graph, bind the edits and mount the ser
 
 after: web, layout
 
-[[file:index.org][index]] · ~68 min
+[[file:index.org][index]] · ~70 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -128,7 +128,19 @@ The migration in the concrete: the ~⋯~ row menu is a server partial in four co
 
 - source :: [[file:../../../resources/packages/app/editor/editor-row-actions.js::async function loadRowActionsContent(host, fnId, context, opts) {][resources/packages/app/editor/editor-row-actions.js:422]]
 
-* 10. enterArgValueEditMode
+* 10. pickerTiersOf
+:PROPERTIES:
+:CUSTOM_ID: editor/pickerTiersOf
+:FILE: resources/packages/app/editor/editor-fn-picker-rank.js
+:LINE: 112
+:MINS: 1.8
+:END:
+
+What the fn-picker shows FIRST. ~/api/types/candidates~ answers the admissibility question with ~fit~ / ~arity~ / ~ns~ on every row (see ~candidate-fit~ in the crud block); this pure module turns those rows into display tiers — Exact fit, Extra inputs, Ignores the input (folded until a filter is typed) — and ~groupPickerRows~ orders each tier: the reader's own namespace first, then namespace headers with bare names, private ~_~ names last, a cap with an honest "… N more" tail. Nothing here touches the DOM or the network; ~fn-picker-rank.test.js~ pins it in a node vm. The picker proper (~editor-fn-picker.js~) only renders what this returns.
+
+- source :: [[file:../../../resources/packages/app/editor/editor-fn-picker-rank.js::function pickerTiersOf(expected, compatRows) {][resources/packages/app/editor/editor-fn-picker-rank.js:112]]
+
+* 11. enterArgValueEditMode
 :PROPERTIES:
 :CUSTOM_ID: editor/enterArgValueEditMode
 :FILE: resources/packages/app/editor/editor-edit-modes.js
@@ -141,7 +153,7 @@ How an edit actually happens. The control is not chosen here: the client POSTs t
 - source :: [[file:../../../resources/packages/app/editor/editor-edit-modes.js::function enterArgValueEditMode(arg, anchorEl) {][resources/packages/app/editor/editor-edit-modes.js:183]]
 - see also :: [[file:crud.org::#crud/render-repr][render-repr]]
 
-* 11. gdEnterDiffMode
+* 12. gdEnterDiffMode
 :PROPERTIES:
 :CUSTOM_ID: editor/gdEnterDiffMode
 :FILE: resources/packages/app/editor/editor-diff-mode.js
@@ -153,7 +165,7 @@ COMPARE MODE — THE diff surface, entered by picking the second branch (the Δ 
 
 - source :: [[file:../../../resources/packages/app/editor/editor-diff-mode.js::async function gdEnterDiffMode(otherBranch) {][resources/packages/app/editor/editor-diff-mode.js:509]]
 
-* 12. gdApplyThemePayload
+* 13. gdApplyThemePayload
 :PROPERTIES:
 :CUSTOM_ID: editor/gdApplyThemePayload
 :FILE: resources/packages/app/editor/editor-prefs.js
@@ -165,7 +177,7 @@ A THEME (Settings → Appearance, docs/MARKETPLACE.md § 5) is a payload ~{mode 
 
 - source :: [[file:../../../resources/packages/app/editor/editor-prefs.js::function gdApplyThemePayload(payload) {][resources/packages/app/editor/editor-prefs.js:361]]
 
-* 13. gdApplyKeymap
+* 14. gdApplyKeymap
 :PROPERTIES:
 :CUSTOM_ID: editor/gdApplyKeymap
 :FILE: resources/packages/app/editor/editor-shortcuts.js
@@ -177,7 +189,7 @@ A keyboard LAYOUT is an overrides map ~{id {keys leader}}~ over the shortcut reg
 
 - source :: [[file:../../../resources/packages/app/editor/editor-shortcuts.js::function gdApplyKeymap(bindings) {][resources/packages/app/editor/editor-shortcuts.js:81]]
 
-* 14. authFetch
+* 15. authFetch
 :PROPERTIES:
 :CUSTOM_ID: editor/authFetch
 :FILE: resources/packages/app/editor/editor-auth.js
@@ -190,7 +202,7 @@ Every mutating call in the editor goes through this. It is 12 lines and worth al
 - source :: [[file:../../../resources/packages/app/editor/editor-auth.js::async function authFetch(url, opts = {}) {][resources/packages/app/editor/editor-auth.js:148]]
 - referenced from :: [[file:editor.org::#editor/initGraph][initGraph]]
 
-* 15. _tourTick
+* 16. _tourTick
 :PROPERTIES:
 :CUSTOM_ID: editor/_tourTick
 :FILE: resources/packages/app/editor/editor-tour.js

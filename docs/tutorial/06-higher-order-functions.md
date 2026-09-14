@@ -196,36 +196,52 @@ in your base-fn impl and the dispatch picks the right behavior.
    (`core.hof`). Read the two slots: the `:coll` chip reads `['a]`
    — a list of anything; the `:func` chip reads `(item:'a) → 'b` —
    a callable taking `:item` and returning something else. Only the
-   second one is a HOF slot, and the `:item` name is the structural
-   marker that classifies `:map` as iterating.
+   second one is a HOF slot — and `'a` is the SAME unknown in both:
+   whatever one slot learns about it, the other learns too.
 2. Click `⋯` on the `map` row, choose **Extend**, name it
    `tutorial-map`, then **Save**. (`map` itself is package-owned,
    so its own slots are read-only — you customize by extending.)
    Both inherited slots show a `+` on your card.
-3. Click the `+` on `:func`. Instead of the value form you saw in
+3. **Bind what you know first — the data.** Click the `+` on
+   `:coll`, **Append literal**, type `graph`, **Save**; then the `+`
+   at the tail of the edge, **Append literal**, `den`, **Save**. The
+   card reads `graph, den`.
+4. Now look at the `:func` chip: a moment ago it read
+   `(item:'a) → 'b`; it reads `(item:text) → 'b`, and you never
+   touched it. Two strings went into `:coll`, so `'a` is `text`, and
+   the type variable carried that across to the slot you have not
+   bound yet. Every value you set narrows the choices left.
+5. Click the `+` on `:func`. Instead of the value form you saw in
    earlier lessons, the fn picker opens straight away: a literal is
-   not a thing you can put in a callable slot. The picker states
-   *Expected: (item:a) → b* and splits candidates into
-   **Compatible** and **Other**. Compatible's first group, **Exact
-   fit**, holds every fn that takes one value and returns something
-   — for a single-argument callable the argument's NAME does not
-   matter: `map` hands each element to the callee's one free
-   argument, whatever it is called. Below it come fns that would
-   leave you more to wire (**Extra inputs**), and, folded away,
-   constants that would ignore the item. `str-upper` from lesson 03
-   is an exact fit. Type `str-upper` into the picker's filter and
-   click its row.
-4. An edge now runs from `str-upper` into `tutorial-map`'s `:func`
-   — the callback is wired, and nothing has run. Give it something
-   to run over: click the `+` on `:coll`, **Append literal**, type
-   `graph`, **Save**; then the `+` at the tail of the edge, **Append
-   literal**, `den`, **Save**. The card reads `graph, den`.
-5. `⋯ → ▶ Run` → **Run** — nothing to fill in, every slot is bound:
+   not a thing you can put in a callable slot. It states
+   *Expected: (item:text) → b* — not `(item:a)` — and splits
+   candidates into **Compatible** and **Other**. Compatible's first
+   group, **Exact fit**, holds the fns that take exactly one TEXT
+   value: `str-upper` from lesson 03 qualifies, a fn over numbers
+   does not. Below it come fns that would leave you more to wire
+   (**Extra inputs**), and, folded away, constants that would ignore
+   the item. For a single-argument callable the argument's NAME does
+   not matter — `map` hands each element to the callee's one free
+   argument, whatever it is called. Type `str-upper` into the
+   picker's filter and click its row.
+6. An edge now runs from `str-upper` into `tutorial-map`'s `:func`
+   — the callback is wired, and nothing has run. `⋯ → ▶ Run` →
+   **Run** — nothing to fill in, every slot is bound:
    `["GRAPH" "DEN"]`. Two strings went in and each came out
    upper-cased: `str-upper` ran once per item, and you never called
    it — `map` did, handing each element in as its one argument.
    That is the whole HOF contract: the argument is passed unrun and
    the impl drives it.
+
+Notice the order you worked in: the data first, the callback last.
+Each value you bind is information about the slots still free, and
+the picker for the next one reads it — fewer, better candidates every
+step. Had you opened `:func` first, its picker would have said
+*(item:a) → b* and offered every one-argument fn in the graph (the
+reverse works too: binding `str-upper` first would have narrowed
+`:coll` to `[text]`). Bind what you know first, choose what you don't
+last; [docs/TYPES.md § Narrowing as a way of working](../TYPES.md#narrowing-as-a-way-of-working)
+has the rules and the limits.
 
 When a callable slot takes SEVERAL arguments — `reduce`'s
 `(acc, item) → acc`, say — the picker matches by name instead, and

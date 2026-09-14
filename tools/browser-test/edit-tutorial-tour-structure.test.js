@@ -150,15 +150,26 @@ const {
     assert(await clickTourButton(page, 'Next'), 'lesson 06 slots Next');
     await waitTourTitle(page, 'Extend it');
     await extendViaRowActions(page, 'tutorial-map', 'map');
+    // Narrowing (2026-09-14): the data goes in FIRST, so the reader can watch
+    // :func's chip tighten from (item:'a) to (item:text) before the picker
+    // ever opens — and the picker then says so too.
+    await waitTourTitle(page, 'The data first', 150000);
+    await bindSeqAnchorPlaceholder(page, 'graph');
+    await waitTourTitle(page, 'And a second item', 150000);
+    await appendSeqItemViaEdge(page, 'den');
+    await waitTourTitle(page, 'Watch the other slot', 150000);
+    assert(await page.waitForFunction(() => Array.from(document.querySelectorAll('.arg-type-chip'))
+      .some((c) => /item:text/.test((c.textContent || '').replace(/\s+/g, ''))), null,
+      {timeout: 60000, polling: 200}).then(() => true, () => false),
+      ':func\'s chip reads (item:text) once :coll holds text');
+    assert(await clickTourButton(page, 'Next'), 'lesson 06 chip-step Next');
     await waitTourTitle(page, 'A callable slot offers no literal', 150000);
     // Clicking the callable slot's "+" goes straight to the fn picker —
-    // no value form in between. That IS the lesson's claim.
+    // no value form in between. That IS the lesson's claim. :coll is bound,
+    // so the one placeholder left is :func's.
     await page.waitForSelector('.placeholder-binder', {timeout: 30000});
-    await page.evaluate(() => {
-      const binders = Array.from(document.querySelectorAll('.placeholder-binder'));
-      binders[0].click();
-    });
-    await waitTourTitle(page, 'Compatible means callable-shaped', 150000);
+    await page.evaluate(() => document.querySelector('.placeholder-binder').click());
+    await waitTourTitle(page, 'Narrower already', 150000);
     const pickerState = await page.evaluate(() => {
       const pk = document.querySelector('.fn-picker-popover');
       return {
@@ -166,26 +177,16 @@ const {
         valueForms: document.querySelectorAll('.arg-value-edit-popover').length
       };
     });
-    assert(/item/.test(pickerState.expected || ''),
-      'picker states the callable shape (got: ' + pickerState.expected + ')');
+    assert(/item:text/.test((pickerState.expected || '').replace(/\s+/g, '')),
+      'the picker already expects (item:text) — narrowed by the bound list (got: ' + pickerState.expected + ')');
     assert(pickerState.valueForms === 0,
       'a callable slot offered no literal value form');
-    // The reader wires THEIR OWN callback (2026-09-13): str-upper from lesson
-    // 03 sits in Compatible — a single-argument callable matches positionally,
-    // and a polymorphic (item:a) → b slot is proven over the wire now. Before
-    // this the lesson could only show the platform's own map test; before
-    // THAT it ran stringify-map-keys over {"a": 1}, whose output is
-    // byte-identical to its input.
     await page.fill('.fn-picker-search', 'str-upper');
     await page.waitForFunction(() => Array.from(document.querySelectorAll('.fn-picker-row-compat'))
       .some((r) => /(^|[./])str-upper$/.test(r.dataset.fnName || '')), null,
       {timeout: 30000, polling: 150});
     await page.evaluate(() => Array.from(document.querySelectorAll('.fn-picker-row-compat'))
       .find((r) => /(^|[./])str-upper$/.test(r.dataset.fnName || '')).click());
-    await waitTourTitle(page, 'The edge is the binding', 150000);
-    await bindSeqAnchorPlaceholder(page, 'graph');
-    await waitTourTitle(page, 'And a second item', 150000);
-    await appendSeqItemViaEdge(page, 'den');
     await waitTourTitle(page, 'Run it', 150000);
     await runViaRowActions(page);
     await waitTourTitle(page, 'Once per item', 150000);

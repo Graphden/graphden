@@ -18,8 +18,12 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails.p
   await p.waitForTimeout(300);
 
   ok(await p.locator('#map .blk').count() === 14, 'map shows 14 blocks');
-  ok((await p.locator('#map .steps li').count()) === 228, '228 steps in map');
-  ok((await p.locator('.intro').innerText()).includes('228'), 'intro shows budget');
+  // The step count is whatever tour.edn says today — the page, the intro
+  // budget and the progress counter must all agree on it (a hardcoded 228
+  // reddened this test every time a step was added).
+  const steps = await p.locator('#map .steps li').count();
+  ok(steps > 200, steps + ' steps in map');
+  ok((await p.locator('.intro').innerText()).includes(String(steps)), 'intro shows budget');
 
   // spine navigation + hash deep link
   await p.keyboard.press('ArrowRight');
@@ -41,7 +45,7 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails.p
   // progress
   const seen = await p.evaluate(() => JSON.parse(localStorage.getItem('devtour:v1:seen') || '[]').length);
   ok(seen >= 2, 'progress persisted: ' + seen + ' steps');
-  ok((await p.locator('#pnum').innerText()).includes('/228'), 'progress counter rendered');
+  ok((await p.locator('#pnum').innerText()).includes('/' + steps), 'progress counter rendered');
   ok(await p.locator('#map .steps li.seen').count() >= 2, 'ticks in map');
 
   // deep link straight into a step

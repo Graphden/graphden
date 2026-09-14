@@ -123,3 +123,31 @@
         (is (some? orphan))
         ;; the message names the unplaced node
         (is (str/includes? (:message orphan) c))))))
+
+
+(deftest order-children-keeps-a-sequence-group-contiguous-test
+  (testing "plain sort is fn > fixed > free by emission order"
+    (let [order #'graphden.layout.core/order-children
+          data {"ref-x" {:type "fn"}
+                "val-z" {:type "arg"}
+                "free-y" {:isPlaceholder true}}]
+      (is (= ["ref-x" "val-z" "free-y"]
+             (order "p" {"p" ["val-z" "free-y" "ref-x"]} data)))))
+  (testing "a :seqGroup sorts as ONE block where its first member fell,
+            ordered by :seqIndex inside — a literal followed by a ref
+            keeps that order instead of the ref jumping ahead"
+    (let [order #'graphden.layout.core/order-children
+          data {"item0" {:type "arg" :seqGroup "g" :seqIndex 0}
+                "item1" {:type "fn" :seqGroup "g" :seqIndex 1}
+                "tail" {:isPlaceholder true :seqGroup "g" :seqIndex 2}
+                "ref-x" {:type "fn"}
+                "val-z" {:type "arg"}
+                "free-y" {:isPlaceholder true}}]
+      (is (= ["ref-x" "item0" "item1" "tail" "val-z" "free-y"]
+             (order "p" {"p" ["item0" "ref-x" "item1" "val-z" "tail" "free-y"]} data))
+          "the block ranks as its head (an arg → after the lone fn ref)")
+      (is (= ["ref-x" "val-z" "item0" "item1" "tail" "free-y"]
+             (order "p" {"p" ["tail" "val-z" "item1" "item0" "ref-x" "free-y"]} data))
+          "emission order inside the group is ignored in favour of :seqIndex;
+           the block ranks as its earliest-emitted member (here the placeholder
+           tail — free — so the whole list lands among the free args)"))))

@@ -3210,7 +3210,11 @@ textarea.value-form-hiccup {
 }
 .arg-seq-btn:hover { opacity: 1; }
 .arg-seq-btn-remove { color: var(--muted-fg); }
-.arg-seq-btn-add { font-weight: bold; }
+
+/* A list item's own overlay — just the `×`, hugging the item on its
+   branch; the group's one label sits back at the end of the trunk. */
+.edge-label-overlay.edge-seq-item { padding: 0; background: transparent; }
+.edge-label-overlay.edge-seq-item .arg-seq-btn { margin-left: 0; background: var(--bg); }
 
 /* Placeholder binder — the small `+` button that sits at the endpoint
    of an unset edge. Replaces the old dashed type-name card; the

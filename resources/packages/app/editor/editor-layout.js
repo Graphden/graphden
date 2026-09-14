@@ -372,14 +372,18 @@ async function fetchBackendLayout() {
     const CHIP_CHAR_PX     = 6;   // SF Mono 9px ≈ 5.5–6 px per char
     const CHIP_CHROME_PX   = 25;  // padding 8 + border 2 + margin 4 + slack
     const TRIGGER_WIDTH    = 16;  // `▸ / ▾` inline-expand trigger
-    const SEQ_BTN_WIDTH    = 18;  // × or +
     const DESC_BADGE_WIDTH = 19;  // 15 + 4 margin
+    // A sequence group fans out AFTER its label: the branches' bend
+    // (SEQ_FAN_GAP in editor-edges-svg.js), the per-item `×` and its
+    // gap to the item all sit between the label and the column.
+    const SEQ_FAN_EXTRA    = 14 + 18 + 12;
     edges.forEach(e => {
       const srcPos = gridPos[e.data.source];
       const tgtPos = gridPos[e.data.target];
       if (srcPos && tgtPos && e.data.argName) {
         const labelCol = Math.min(srcPos.col, tgtPos.col);
-        const widestLine = e.data.argName.split('\n').reduce(
+        const labelText = e.data.seqGroup ? (e.data.seqLabel || e.data.argName) : e.data.argName;
+        const widestLine = labelText.split('\n').reduce(
           (max, line) => Math.max(max, line.length), 0);
         const editArg = (typeof argRowFromNode === 'function')
                         ? argRowFromNode(e.data) : null;
@@ -404,13 +408,8 @@ async function fetchBackendLayout() {
         const chipChars = (chipText || '').length;
         let chipOverhead = DESC_BADGE_WIDTH
                          + (chipChars * CHIP_CHAR_PX + CHIP_CHROME_PX);
-        if (editable) {
-          chipOverhead += TRIGGER_WIDTH;
-          if (e.data.sourcePrevArgId) {
-            chipOverhead += SEQ_BTN_WIDTH;                              // ×
-            if (!e.data.sourceNextArgId) chipOverhead += SEQ_BTN_WIDTH; // tail +
-          }
-        }
+        if (editable) chipOverhead += TRIGGER_WIDTH;
+        if (e.data.seqGroup) chipOverhead += SEQ_FAN_EXTRA;
         const labelWidth = (widestLine * CHAR_WIDTH + LABEL_PADDING + chipOverhead)
                          * typographyScale();
         const currentGap = colGaps.get(labelCol) || GRID_GAP_X;

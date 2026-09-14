@@ -64,15 +64,33 @@
   "Order a node's children for placement. Per-call-site model: every
    child has exactly one parent, no sharing, so ordering is a simple
    stable sort by type (fn > fixed > free) preserving original index
-   within a type."
+   within a type.
+
+   The items of one sequence slot (`:seqGroup` on the node data, see
+   `group-sequence-edges` in graph.clj) sort as ONE block — ranked and
+   placed where the group's first-emitted member falls, ordered inside
+   by `:seqIndex` — so a list of mixed refs and literals keeps its
+   chain order and the fanned-out branches never cross."
   [parent-id children-map node-data-map]
   (let [type-order {:fn 0 :fixed 1 :free 2}
-        child-ids (get children-map parent-id [])]
+        child-ids (get children-map parent-id [])
+        group-of (fn [cid] (get-in node-data-map [cid :seqGroup]))
+        ;; group → index of its first member in emission order
+        group-head (reduce (fn [acc [i cid]]
+                             (if-let [g (group-of cid)]
+                               (update acc g #(or % i))
+                               acc))
+                           {}
+                           (map-indexed vector child-ids))
+        rank (fn [cid] (get type-order (get-child-type cid node-data-map) 3))]
     (vec
       (sort-by
         (fn [cid]
-          [(get type-order (get-child-type cid node-data-map) 3)
-           (java.util.List/.indexOf child-ids cid)])
+          (if-let [g (group-of cid)]
+            (let [head (get group-head g)]
+              [(rank (nth child-ids head)) head
+               (get-in node-data-map [cid :seqIndex] 0)])
+            [(rank cid) (java.util.List/.indexOf child-ids cid) 0]))
         child-ids))))
 
 

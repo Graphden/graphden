@@ -80,6 +80,21 @@ placeholder node + edge shape by `add-unset-arg-node`, carrying
 (`:optionalArgs` / `:hofCapturedArgs`) are retired; `:deepFreeArgs`
 (the informational ⇣-strip on expanded inner nodes) remains.
 
+Sequence groups (2026-09-14): the items of one list are not N
+look-alike args. `expand-sequence-anchor` emits one entry per chain
+item and then the **append tail** — the anchor's own `:unset` entry,
+`:sequence-anchor? true` (+ `:seq-tail? true` after items), rendered
+as a free `+` placeholder after the last item; `list-closed-upstream?`
+drops the tail when an ancestor sealed the list, so no `+` is offered
+that the API would 409 (an EMPTY chain keeps its sentinel — the slot's
+only presence on the card). The `group-sequence-edges` post-pass then
+stamps every member edge (items + tail) with `:seqGroup` (source node +
+slot), `:seqIndex` (chain order), `:seqCount` and `:seqLabel` (the bare
+slot name), and the same `:seqGroup` / `:seqIndex` on the target nodes.
+The editor draws one labelled **trunk** per group that fans out AFTER
+the type chip — a plain arg splits at the bend before its chip, a list
+element after it — and the per-item `×` moves onto the item's branch.
+
 **Inheritance chain:** `[fn-id, parent-id, grandparent-id, ...]`
 
 When expanding to level N:
@@ -265,6 +280,12 @@ So a node's fn children come first (in their original order), then its
 fixed args, then its free args. There is no divergence/upper-path/lower-path
 ordering — those existed only to route edges into shared nodes, and there
 are no shared nodes here.
+
+One exception: the members of a sequence group (`:seqGroup` on the node
+data) sort as a single block — ranked and placed where the group's
+first-emitted member fell, ordered inside by `:seqIndex` — so a list of
+mixed refs and literals keeps its chain order and the fanned-out
+branches never cross.
 
 ### Stage 4: Place Nodes on the Grid
 

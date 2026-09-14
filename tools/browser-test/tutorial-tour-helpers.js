@@ -351,14 +351,14 @@ async function bindSeqAnchorPlaceholder(page, literalText) {
 }
 
 
-// The SECOND (and later) item of a sequence slot: once a list holds an item
-// the placeholder `+` is gone, and the append affordance is the `+` at the
-// tail of the chain on the edge-label overlay (`.arg-seq-btn-add`, "Append
-// a new item"). Lessons 01 (1 + 1) and 14 (2 + 2) take this path.
+// The SECOND (and later) item of a sequence slot: a list that holds items
+// still ends in a `+` — the append TAIL, the list's next free slot, drawn as
+// the last branch of the fan (`.placeholder-binder.is-seq-anchor`, the same
+// binder the empty list shows). Lessons 01 (1 + 1) and 14 (2 + 2) take this
+// path; it waits for the re-render that follows the previous append to settle
+// so the click lands on the tail and not on a binder about to be replaced.
 async function appendSeqItemViaEdge(page, literalText) {
-  await page.waitForSelector('.arg-seq-btn-add', {timeout: 30000});
-  await page.evaluate(() => document.querySelector('.arg-seq-btn-add').click());
-  await appendOrBindLiteralFromChooser(page, literalText);
+  await bindSeqAnchorPlaceholder(page, literalText);
 }
 
 

@@ -152,10 +152,13 @@
               (and hidden-synth-slot-id
                    (= hidden-synth-slot-id (:slot-id arg))))
 
+            ;; An append tail is an :unset whose slot IS bound (the
+            ;; items precede it) — that is its point, so the bound-slot
+            ;; filter must not swallow it.
             filtered-args
             (filterv (fn [arg]
                        (and (not (synth-slot? arg))
-                            (if (= :unset (:kind arg))
+                            (if (and (= :unset (:kind arg)) (not (:seq-tail? arg)))
                               (not (ancestor-bound? (:arg-id arg)))
                               true)))
                      all-args)]
@@ -422,8 +425,10 @@
 
     (let [;; Stage 1 — classify
           raw-args (bh/collect-expanded-args lookups levels expand-set chain-bindings)
+          ;; (An append tail is an :unset on a BOUND slot by design —
+          ;; it survives the determined-slot filter.)
           all-args (filterv (fn [arg]
-                              (if (= :unset (:kind arg))
+                              (if (and (= :unset (:kind arg)) (not (:seq-tail? arg)))
                                 (not (bh/arg-determined? arg-map parent-bound-terminals (:arg-id arg)))
                                 true))
                             raw-args)
@@ -701,10 +706,15 @@
 ;;      terminal-slot + displayed label) that show up when a level-0
 ;;      :value migrates into a fn-ref-reached child; keep the deepest
 ;;      consumer, drop shallower copies and any edges pointing at them.
+;;   4. group-sequence-edges — stamp the edges (and target nodes) that
+;;      carry one item of a sequence slot with :seqGroup / :seqIndex,
+;;      so the editor draws ONE labelled trunk per list that fans out
+;;      after the type chip, and the placer keeps the items contiguous
+;;      and in chain order.
 ;;
 ;; Splitting these out keeps `build-graph-elements` a thin assembler:
 ;; it constructs ctx, dispatches the walkers, then pipes state through
-;; the three transforms.
+;; the four transforms.
 ;; =============================================================================
 
 (defn- annotate-optionals
@@ -819,6 +829,101 @@
                      edges)}))
 
 
+(defn- group-sequence-edges
+  "Stamp every edge that carries ONE ITEM of a sequence slot — an
+   item row (`:item-id`) or the anchor's own placeholder (the
+   empty-list sentinel / the append tail) — with the list it belongs
+   to, so the editor draws the list as one labelled trunk that fans
+   out after the type chip instead of N look-alike args:
+
+     :seqGroup  \"<source-node>/<slot-id>\" — the list's identity
+     :seqIndex  position in the displayed chain (inherited items
+                first, then the fn's own, then the tail)
+     :seqCount  members in the group
+     :seqLabel  the bare slot name — what the one shared label shows
+                (each member keeps its own :argName)
+
+   The same :seqGroup / :seqIndex land on each TARGET node so
+   `order-children` (core.clj) places the group as one contiguous
+   block in chain order — the plain fn > fixed > free sort would
+   otherwise scatter a list of mixed refs and literals. The index is
+   read off the ROWS, not off emission order (the expanded walker
+   emits unsets before values): an item sorts by the depth of its
+   anchor in the `:source-id` chain (an inherited parent's items come
+   first, as `walk-anchor-chain` shows them) and then by its position
+   along `:prev-arg-id`; the anchor's own placeholder — the tail —
+   sorts last."
+  [{:keys [nodes edges]} arg-map]
+  (let [member-row (fn [e]
+                     (when-let [arg (get arg-map (get-in e [:data :sourceArgId]))]
+                       (when (or (some? (:item-id arg)) (bnd/sequence-anchor? arg))
+                         arg)))
+        group-of (fn [e]
+                   (when-let [arg (member-row e)]
+                     (str (get-in e [:data :source]) "/" (:slot-id arg))))
+        anchor-depth (fn [arg-id]
+                       (loop [cur (get arg-map arg-id), d 0]
+                         (if-let [src (some-> cur :source-id arg-map)]
+                           (recur src (inc d))
+                           d)))
+        chain-pos (fn [item]
+                    (loop [cur item, i 0]
+                      (let [prev (some-> cur :prev-arg-id arg-map)]
+                        (if (and prev (:prev-arg-id prev))
+                          (recur prev (inc i))
+                          i))))
+        chain-key (fn [e]
+                    (let [arg (member-row e)]
+                      (if (some? (:item-id arg))
+                        [(anchor-depth (:source-id arg)) (chain-pos arg)]
+                        [Long/MAX_VALUE 0])))
+        ;; The group's label: the slot's resolved name (an item row
+        ;; resolves one hop up to its anchor), falling back to the
+        ;; edge's own label stripped of the `[idx]` suffix.
+        label-of (fn [e]
+                   (let [arg (get arg-map (get-in e [:data :sourceArgId]))
+                         n (or (bnd/resolve-arg-name arg arg-map)
+                               (get-in e [:data :argName]))]
+                     (some-> n (str/replace #"\[\d+\]$" ""))))
+        ;; Per group: its members in chain order (emission order only
+        ;; breaks ties), from which each edge's index, the count and
+        ;; the label (from the first member) follow.
+        members-by-group (->> (map-indexed vector edges)
+                              (keep (fn [[i e]] (when-let [g (group-of e)] [g i e])))
+                              (group-by first))
+        {:keys [counts labels indices]}
+        (reduce-kv (fn [acc g rows]
+                     (let [ordered (->> rows
+                                        (sort-by (fn [[_ i e]] (conj (chain-key e) i)))
+                                        (map peek))]
+                       (-> acc
+                           (assoc-in [:counts g] (count ordered))
+                           (assoc-in [:labels g] (some label-of ordered))
+                           (update :indices into
+                                   (map-indexed (fn [i e] [(get-in e [:data :id]) [g i]])
+                                                ordered)))))
+                   {:counts {} :labels {} :indices {}}
+                   members-by-group)
+        node-stamps (into {}
+                          (keep (fn [e]
+                                  (when-let [[g i] (get indices (get-in e [:data :id]))]
+                                    [(get-in e [:data :target]) [g i]])))
+                          edges)]
+    {:edges (mapv (fn [e]
+                    (if-let [[g i] (get indices (get-in e [:data :id]))]
+                      (update e :data assoc
+                              :seqGroup g :seqIndex i
+                              :seqCount (get counts g)
+                              :seqLabel (get labels g))
+                      e))
+                  edges)
+     :nodes (mapv (fn [n]
+                    (if-let [[g i] (get node-stamps (get-in n [:data :id]))]
+                      (update n :data assoc :seqGroup g :seqIndex i)
+                      n))
+                  nodes)}))
+
+
 (defn build-graph-elements
   "Build graph elements (nodes, edges) from selected function.
    Returns {:nodes [...] :edges [...]}"
@@ -897,4 +1002,6 @@
           final-edges (migrate-captured-edges
                         (:edges @state)
                         (:captured-edge-migrations @state))]
-      (dedup-overlays final-nodes final-edges (:arg-map lookups)))))
+      (group-sequence-edges
+        (dedup-overlays final-nodes final-edges (:arg-map lookups))
+        (:arg-map lookups)))))

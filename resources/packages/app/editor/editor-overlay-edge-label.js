@@ -1,7 +1,9 @@
 // Editor Edge-Label Overlay — render the inheritance-edge labels
-// that show arg-name + type-chip + description + rename / sequence
-// add-remove affordances when the arg is in the immediate
-// implementation.
+// that show arg-name + type-chip + description + rename affordances
+// when the arg is in the immediate implementation; a SEQUENCE slot
+// gets one such label for the whole list (`createSeqGroupLabelOverlay`)
+// and a small `×` per item (`createSeqItemOverlay`) — appending is the
+// list's trailing placeholder, not a button here.
 //
 // graph-first-exception: the label / type-chip / typeChain rendering
 // stays client-side — every input is either layout-emitted edge data
@@ -28,6 +30,60 @@ function createEdgeLabelOverlay(edge, container) {
   // HOF supplies, visually distinct from the caller's own signature.
   const label = (edge.data('lambdaArg') ? 'λ' : '') + (edge.data('argName') || '');
   if (!label) return;
+  buildEdgeLabelOverlay(edge, container, label, edge.id());
+}
+
+
+/**
+ * The ONE label of a sequence group — the slot's name and its element
+ * type — built from the group's head member and registered under the
+ * trunk's id, so the geometry pass parks it at the end of the trunk
+ * (centred on the items) and fans the branches out from its right edge.
+ */
+function createSeqGroupLabelOverlay(edge, container) {
+  const label = edge.data('seqLabel') || edge.data('argName') || '';
+  if (!label) return;
+  const overlay = buildEdgeLabelOverlay(edge, container, label, seqTrunkId(edge.data('seqGroup')));
+  if (!overlay) return;
+  overlay.classList.add('edge-label-seq');
+  overlay.dataset.seqGroup = edge.data('seqGroup');
+  overlay.dataset.sourceId = edge.source()?.id() || '';
+}
+
+
+/**
+ * A list item's own overlay: the `×` that removes it, hugging the item
+ * on its branch. Only for an editable item (the tail placeholder is the
+ * append affordance, and an inherited item is the ancestor's to edit).
+ */
+function createSeqItemOverlay(edge, container) {
+  if (edge.data('seqTail') || !edge.data('sourcePrevArgId')) return;
+  const editArg = (typeof argRowFromNode === 'function') ? argRowFromNode(edge.data()) : null;
+  const argEditable = editArg && implementationFnIds?.has(editArg['fn-id'])
+                   && (typeof isAuthenticated === 'function' && isAuthenticated());
+  if (!argEditable) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'edge-label-overlay edge-seq-item';
+  overlay.dataset.edgeId = edge.id();
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'arg-seq-btn arg-seq-btn-remove';
+  removeBtn.textContent = '×';
+  removeBtn.title = 'Remove this item from the list';
+  removeBtn.setAttribute('aria-label', removeBtn.title);
+  removeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (typeof removeSequenceItem === 'function') removeSequenceItem(editArg.id);
+  });
+  overlay.appendChild(removeBtn);
+  registerEdgeOverlay(overlay);
+  container.appendChild(overlay);
+  return overlay;
+}
+
+
+function buildEdgeLabelOverlay(edge, container, label, overlayId) {
 
   // Description precedence (closest binding with a non-empty
   // `:description` in the owning fn's parent-ids closure, else the
@@ -51,7 +107,7 @@ function createEdgeLabelOverlay(edge, container) {
 
   const overlay = document.createElement('div');
   overlay.className = 'edge-label-overlay';   // static looks in editor-styles.css
-  overlay.dataset.edgeId = edge.id();
+  overlay.dataset.edgeId = overlayId;
 
   const labelSpan = document.createElement('span');
   labelSpan.textContent = label;
@@ -159,49 +215,8 @@ function createEdgeLabelOverlay(edge, container) {
     // The "change value" affordance lives on the value-fn card's
     // grey use-site header (see `appendUseSiteHeader`) — putting it
     // there scopes the click to "this use-site" instead of cluttering
-    // the edge label with a third action.
-
-    // Sequence-item controls (Phase 5) — render `×` on every item
-    // edge, plus `+` on the chain tail. Detected from the layout-
-    // emitted prev/next-arg-id sibling pointers.
-    const prevArgId = edge.data('sourcePrevArgId');
-    const nextArgId = edge.data('sourceNextArgId');
-    if (prevArgId) {
-      const removeBtn = document.createElement('button');
-      removeBtn.type = 'button';
-      removeBtn.className = 'arg-seq-btn arg-seq-btn-remove';
-      removeBtn.textContent = '×';
-      removeBtn.title = 'Remove this sequence item';
-      removeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (typeof removeSequenceItem === 'function') removeSequenceItem(editArg.id);
-      });
-      overlay.appendChild(removeBtn);
-      // Tail of the chain: also render `+` to append — UNLESS this is
-      // a nav-typed sequence (`:update-in` `:path`) whose live path
-      // already ends at a scalar: there's no valid further segment,
-      // so the `+` is suppressed entirely.
-      if (!nextArgId) {
-        const appendT = (typeof appendNavType === 'function')
-                        ? appendNavType(editArg['fn-id'], editArg['slot-id'])
-                        : undefined;
-        if (appendT !== null) {
-          const addBtn = document.createElement('button');
-          addBtn.type = 'button';
-          addBtn.className = 'arg-seq-btn arg-seq-btn-add';
-          addBtn.textContent = '+';
-          addBtn.title = 'Append a new item';
-          addBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (typeof appendSequenceItem === 'function') {
-              appendSequenceItem(editArg['fn-id'], addBtn, appendT,
-                                 { elemType: (typeof seqElemType === 'function' ? seqElemType(editArg) : null) });
-            }
-          });
-          overlay.appendChild(addBtn);
-        }
-      }
-    }
+    // the edge label with a third action. A list's `×` per item and
+    // its append tail live on the items themselves, not on this label.
 
     // There's no separate λ/() is-fn chip — `type=:fn` IS the HOF
     // marker. Flipping HOF behaviour means flipping the type itself,
@@ -283,4 +298,5 @@ function createEdgeLabelOverlay(edge, container) {
 
   registerEdgeOverlay(overlay);
   container.appendChild(overlay);
+  return overlay;
 }

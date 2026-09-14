@@ -203,9 +203,10 @@ in your base-fn impl and the dispatch picks the right behavior.
    so its own slots are read-only — you customize by extending.)
    Both inherited slots show a `+` on your card.
 3. **Bind what you know first — the data.** Click the `+` on
-   `:coll`, **Append literal**, type `graph`, **Save**; then the `+`
-   at the tail of the edge, **Append literal**, `den`, **Save**. The
-   card reads `graph, den`.
+   `:coll`, **Append literal**, type `graph`, **Save**; the `:coll`
+   edge now fans out after its chip — a branch to `graph` and a branch
+   to a fresh `+`, the list's next free slot. Click it, **Append
+   literal**, `den`, **Save**. The card reads `graph, den`.
 4. Now look at the `:func` chip: a moment ago it read
    `(item:'a) → 'b`; it reads `(item:text) → 'b`, and you never
    touched it. Two strings went into `:coll`, so `'a` is `text`, and

@@ -13,8 +13,9 @@
    - `add-bindings-from-fn` / `build-arg-bindings` — slot→binding
      resolution against a single fn's own binding rows;
    - sequence-anchor helpers (`walk-anchor-chain` / `sequence-anchor?`
-     / `expand-sequence-anchor`) — materialise the per-item synthetic
-     `:ref`/`:value`/`:unset` rows from a sequence-typed anchor;
+     / `list-closed-upstream?` / `expand-sequence-anchor`) — materialise
+     the per-item synthetic `:ref`/`:value`/`:unset` rows from a
+     sequence-typed anchor, plus its append tail;
    - `truncate-label` — small label-shaping primitive shared by the
      builder helpers."
   (:require
@@ -202,29 +203,62 @@
        (nil? (:ref-id arg))))
 
 
+(defn list-closed-upstream?
+  "True when an ANCESTOR of `fn-id` (strictly above it in the
+   parent-ids closure — the fn's own binding never seals its own list)
+   carries `:list-closed true` on `slot-id`. Mirrors the write-side
+   rule `crud.validation/list-closed-rej`, so the layout offers no
+   append tail the API would answer with a 409. A renamed-view slot
+   and its `:source-slot-id` are one list, so both ids are matched."
+  [lookups fn-id slot-id]
+  (let [{:keys [bindings-by-fn slot-map]} lookups
+        canon (fn [sid]
+                (loop [s sid, seen #{}]
+                  (let [src (:source-slot-id (get slot-map s))]
+                    (if (and src (not (contains? seen s)))
+                      (recur src (conj seen s))
+                      s))))
+        target (canon slot-id)]
+    (boolean
+      (some (fn [fid]
+              (some #(and (true? (:list-closed %))
+                          (= target (canon (:slot-id %))))
+                    (get bindings-by-fn fid)))
+            (rest (data/get-inheritance-chain* fn-id lookups))))))
+
+
 (defn expand-sequence-anchor
   "For a sequence anchor, returns a vector of synthetic arg descriptors —
-   one per chain item, labeled `<slot>[idx]`. Anchor itself is not emitted.
-   Items with ref-id become :ref entries, items with value become :value.
+   one per chain item, labeled `<slot>[idx]`, followed by the APPEND
+   TAIL: an `:unset` entry pointing AT the anchor, flagged
+   `:sequence-anchor? true` (plus `:seq-tail? true` when items precede
+   it). The editor draws it as the list's trailing free slot — the
+   dashed `+` after the last item — so appending reads like binding one
+   more argument rather than pressing a button on a chip. Items with
+   ref-id become :ref entries, items with value become :value.
 
-   Empty anchors produce a single sentinel `:unset` entry pointing AT the
-   anchor with `:sequence-anchor? true`, so the frontend can render an
-   empty-chain placeholder whose click fires the sequence-append flow
-   (rather than the regular free-arg binder, which would try to PUT
-   `value=` / `ref-id=` on the anchor itself)."
-  [anchor slot-name arg-map]
-  (let [items (walk-anchor-chain anchor arg-map)]
-    (if (empty? items)
-      ;; Empty-anchor sentinel — marked so the frontend routes click
-      ;; through `appendSequenceItem` instead of the regular binder.
-      [(assoc (unset-item-from-arg anchor slot-name)
-              :sequence-anchor? true)]
-      (into []
-            (map-indexed
-              (fn [idx item]
-                (let [lbl (str slot-name "[" idx "]")]
-                  (cond
-                    (some? (:ref-id item)) (ref-item-from-arg item lbl)
-                    (some? (:value item))  (value-item-from-arg item lbl)
-                    :else                  (unset-item-from-arg item lbl)))))
-            items))))
+   `open?` false (an ancestor sealed the list with `:list-closed`) drops
+   the tail — but never the sentinel of an EMPTY chain, which is the
+   slot's only presence on the card.
+
+   The anchor entry is what makes the frontend route the click through
+   `appendSequenceItem` instead of the regular free-arg binder (which
+   would try to PUT `value=` / `ref-id=` on the anchor itself)."
+  ([anchor slot-name arg-map]
+   (expand-sequence-anchor anchor slot-name arg-map true))
+  ([anchor slot-name arg-map open?]
+   (let [items (walk-anchor-chain anchor arg-map)
+         tail (assoc (unset-item-from-arg anchor slot-name)
+                     :sequence-anchor? true)]
+     (if (empty? items)
+       [tail]
+       (cond-> (into []
+                     (map-indexed
+                       (fn [idx item]
+                         (let [lbl (str slot-name "[" idx "]")]
+                           (cond
+                             (some? (:ref-id item)) (ref-item-from-arg item lbl)
+                             (some? (:value item))  (value-item-from-arg item lbl)
+                             :else                  (unset-item-from-arg item lbl)))))
+                     items)
+         open? (conj (assoc tail :seq-tail? true)))))))

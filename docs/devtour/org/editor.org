@@ -52,7 +52,7 @@ The graph itself: two Maps plus two adjacency indexes and an ~animating~ flag. T
 :CUSTOM_ID: editor/fetchBackendLayout
 :FILE: resources/packages/app/editor/editor-layout.js
 :LINE: 278
-:MINS: 10.9
+:MINS: 10.8
 :END:
 
 The client does NOT lay the graph out. It POSTs the selected root plus the per-node expansion spec to ~/api/graph/layout~ and gets back nodes, edges and a ~nodeId → {x, y, row, col}~ map. This is the wire crossing into the previous block: the server owns grid topology, the client owns pixels.

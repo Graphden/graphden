@@ -130,6 +130,10 @@ function createOverlay(nodeId, options = {}) {
  *
  * Non-editable viewers see no overlay at all (the empty edge endpoint
  * is sufficient signal that the slot is unbound).
+ *
+ * A sequence slot's placeholder is its APPEND TAIL — the empty list's
+ * only member, or the free slot after the last item (`seqTail`) — and
+ * its `+` appends rather than binds.
  */
 function createPlaceholderOverlay(node, container) {
   const arg = (typeof argRowFromNode === 'function')
@@ -189,7 +193,7 @@ function createPlaceholderOverlay(node, container) {
   btn.dataset.nodeId = node.id();
   btn.textContent = '+';
   btn.title = (isSeqAnchor
-              ? 'Add the first item'
+              ? (node.data('seqTail') ? 'Append the next item' : 'Add the first item')
               : 'Bind this slot (literal value or fn-ref)')
     + (node.data('optionalArg') ? ' — optional input, the fn runs without it' : '')
     + (node.data('deepArg') ? ' — propagated from inside the composition; the binding lands on this fn' : '');
@@ -283,9 +287,21 @@ function createNodeOverlays() {
     createPlaceholderOverlay(node, container);
   });
 
-  // Remove any stale edge label overlays then create fresh ones.
+  // Remove any stale edge label overlays then create fresh ones. A
+  // sequence group gets ONE label (built from its head member) plus a
+  // per-item `×` overlay; every other edge labels itself.
   _removeAllEdgeOverlays();
+  const labelledGroups = new Set();
   gv.edges().forEach(edge => {
+    const groupId = edge.data('seqGroup');
+    if (groupId) {
+      if (!labelledGroups.has(groupId)) {
+        labelledGroups.add(groupId);
+        createSeqGroupLabelOverlay(edge, container);
+      }
+      createSeqItemOverlay(edge, container);
+      return;
+    }
     if (edge.data('argName')) createEdgeLabelOverlay(edge, container);
   });
 
@@ -328,9 +344,6 @@ function applyViewportTransform() {
 function syncOverlayGeometry() {
   if (!gv.ready()) return;
 
-  // Edge paths are graph-coordinate geometry too, so they move with the nodes.
-  syncEdgeGeometry();
-
   for (const [nodeId, overlay] of _overlaysByNodeId) {
     const node = gv.node(nodeId);
     if (!node) continue;
@@ -359,6 +372,23 @@ function syncOverlayGeometry() {
   // resolves its geometry; pass 2 only writes.
   const edgeLabelWrites = [];
   for (const [edgeId, overlay] of _edgeOverlaysByEdgeId) {
+    const w = overlay.offsetWidth;
+    const h = overlay.offsetHeight;
+
+    // A sequence group's one label sits at the end of the trunk: just past
+    // the bend, centred on the group's items. Where it lands is where the
+    // branches fan out from, so the edge layer is told.
+    if (isSeqTrunkId(edgeId)) {
+      const groupId = overlay.dataset.seqGroup;
+      const source = gv.node(overlay.dataset.sourceId);
+      const centreY = seqGroupCentreY(groupId);
+      if (!source || centreY === null) continue;
+      const left = taxiBendX(source) + EDGE_LABEL_POST_BEND_GAP;
+      setSeqLabelAnchor(groupId, {left, right: left + w, y: centreY});
+      edgeLabelWrites.push({overlay, left, top: centreY - h / 2});
+      continue;
+    }
+
     const edge = gv.edge(edgeId);
     if (!edge) continue;
     const target = edge.target();
@@ -371,8 +401,12 @@ function syncOverlayGeometry() {
     const tPos = target.position();
     const targetLeft = tPos.x - target.width() / 2;
 
-    const w = overlay.offsetWidth;
-    const h = overlay.offsetHeight;
+    // A list item's own overlay (`×`) hugs the item, on its branch.
+    if (overlay.classList.contains('edge-seq-item')) {
+      edgeLabelWrites.push({overlay, left: targetLeft - EDGE_LABEL_TARGET_GAP - w,
+                            top: tPos.y - h / 2});
+      continue;
+    }
 
     // Anchor strategy. Taxi-style edges leave the source horizontally,
     // bend at a column boundary, then continue vertically + horizontally
@@ -408,6 +442,11 @@ function syncOverlayGeometry() {
     overlay.style.left = left + 'px';
     overlay.style.top = top + 'px';
   }
+
+  // Edge paths are graph-coordinate geometry too, so they move with the
+  // nodes — and a list's branches fan out from wherever its label just
+  // landed, which is why this runs AFTER the labels.
+  syncEdgeGeometry();
 }
 
 /**

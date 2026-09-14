@@ -413,7 +413,8 @@
                  (bnd/expand-sequence-anchor
                    anchor
                    (or (bnd/resolve-arg-name anchor arg-map) "items")
-                   arg-map))
+                   arg-map
+                   (not (bnd/list-closed-upstream? lookups fn-id (:slot-id anchor)))))
                sequence-anchors))
         args (filterv (fn [a]
                         (not (or (contains? anchor-ids (:id a))
@@ -579,8 +580,9 @@
           ;; covered-slots gate the scalar arg loop above uses.
           (doseq [anchor anchors
                   :when (not (contains? @covered-slots (canon-slot (:slot-id anchor))))
-                  :let [slot-name (or (bnd/resolve-arg-name anchor arg-map) "items")]
-                  entry (bnd/expand-sequence-anchor anchor slot-name arg-map)]
+                  :let [slot-name (or (bnd/resolve-arg-name anchor arg-map) "items")
+                        open? (not (bnd/list-closed-upstream? lookups fn-id (:slot-id anchor)))]
+                  entry (bnd/expand-sequence-anchor anchor slot-name arg-map open?)]
             (swap! covered-slots conj (canon-slot (:slot-id anchor)))
             (swap! result conj (assoc entry :from-ancestor from-ancestor))))
         (doseq [a @fn-refs] (swap! result conj a))
@@ -597,11 +599,18 @@
       (into []
             (keep (fn [arg]
                     (let [t (slot-id-of (:arg-id arg))
-                          k (case (:kind arg)
-                              :ref [t :ref (:ref-id arg)]
-                              :value [t :value (:value arg)]
-                              :unset [t :unset]
-                              [t (:kind arg)])]
+                          ;; A list's members all share the slot, and
+                          ;; two of them may well carry the same value
+                          ;; (`[1 1]`) — they dedup by their own row,
+                          ;; never against each other.
+                          seq-member? (or (some? (:item-id arg)) (:sequence-anchor? arg))
+                          k (cond
+                              seq-member? [t :seq (:arg-id arg)]
+                              :else (case (:kind arg)
+                                      :ref [t :ref (:ref-id arg)]
+                                      :value [t :value (:value arg)]
+                                      :unset [t :unset]
+                                      [t (:kind arg)]))]
                       (when-not (contains? @seen k)
                         (swap! seen conj k)
                         arg))))
@@ -881,14 +890,16 @@
       (swap! state update :captured-edge-migrations assoc (:id hof-bound) source-node-id)
       (let [node-id (str "unset-" source-node-id "-" arg-id)
             edge-id (str "e-unset-" source-node-id "-" arg-id)
-            ;; Empty sequence anchor: the arg itself is :sequence-typed
-            ;; and the chain head is nil. Mark the node so the frontend
+            ;; Sequence anchor: the arg itself is :sequence-typed and
+            ;; carries no ref. An anchor row only reaches here as the
+            ;; list's APPEND TAIL — the empty-chain sentinel, or the
+            ;; trailing free slot after the items (`:seqTail`, see
+            ;; `expand-sequence-anchor`). Mark the node so the frontend
             ;; routes the click into `appendSequenceItem` (Phase 5)
             ;; instead of the regular free-arg binder, which would try
             ;; to PUT `value=` on the anchor.
-            empty-seq? (and arg-rec
-                            (= :sequence (:type arg-rec))
-                            (nil? (:next-arg-id arg-rec)))
+            seq-anchor? (and arg-rec (bnd/sequence-anchor? arg-rec))
+            seq-tail? (and seq-anchor? (some? (:next-arg-id arg-rec)))
             flag-fields (cond-> {}
                           optional? (assoc :optionalArg true)
                           lambda?   (assoc :lambdaArg true)
@@ -909,8 +920,9 @@
                                        (when arg-rec
                                          (arg-row->node-id-fields arg-rec)))
                           arg-type  (assoc :argType (name arg-type))
-                          empty-seq? (assoc :isSequenceAnchor true
-                                            :sequenceFnId (str (:fn-id arg-rec))))})
+                          seq-anchor? (assoc :isSequenceAnchor true
+                                             :sequenceFnId (str (:fn-id arg-rec)))
+                          seq-tail? (assoc :seqTail true))})
           (swap! state update :edges conj
                  {:data (merge {:id edge-id
                                 :source source-node-id
@@ -919,6 +931,7 @@
                                 :argName displayed-name
                                 :isUnset true}
                                flag-fields
+                               (when seq-tail? {:seqTail true})
                                ;; Same id-bundle as a bound-arg edge so the
                                ;; edge-label overlay can resolve the slot /
                                ;; fn / type via `argRowFromNode` and render

@@ -273,6 +273,201 @@
 
 
 ;; =============================================================================
+;; SEQUENCE GROUPS — one trunk per list, items fan out, append tail
+;; =============================================================================
+;;
+;; A list's items used to be N look-alike edges (`nums[0]`, `nums[1]`,
+;; …) with a `+` on the tail item's label. Now every member edge — the
+;; items AND the anchor's own placeholder — carries `:seqGroup` /
+;; `:seqIndex`, and the anchor placeholder trails the items as the
+;; APPEND TAIL (`:seqTail`), the list's free slot.
+
+(defn- seq-members
+  "Member edges of the one sequence group in `layout`, in chain order."
+  [layout]
+  (->> (:edges layout)
+       (filter #(get-in % [:data :seqGroup]))
+       (sort-by #(get-in % [:data :seqIndex]))
+       vec))
+
+
+(deftest sequence-items-group-with-an-append-tail
+  (testing "items + the anchor's tail share one :seqGroup in chain order;
+            the tail is the anchor's placeholder flagged :seqTail"
+    (let [base (random-uuid)
+          base-nums (random-uuid)
+          g (random-uuid)
+          inner (random-uuid)
+          anchor (random-uuid)
+          item1 (random-uuid)
+          item2 (random-uuid)
+          fns [(mk-fn base "add") (mk-fn g "g") (mk-fn inner "one" [base])]
+          args [(mk-arg {:id base-nums :fn-id base :name "nums" :type :sequence})
+                ;; anchor rows carry the resolved slot name (derive-fn-slot-views)
+                (mk-arg {:id anchor :fn-id inner :source-id base-nums :name "nums"
+                         :type :sequence :next-arg-id item1})
+                ;; a literal, then a ref — a MIXED list, whose plain
+                ;; fn > fixed > free sort would put the ref first
+                (mk-arg {:id item1 :fn-id inner :source-id anchor :item-id item1
+                         :value 1 :prev-arg-id anchor :next-arg-id item2})
+                (mk-arg {:id item2 :fn-id inner :source-id anchor :item-id item2
+                         :ref-id g :prev-arg-id item1})]
+          bid (random-uuid)
+          ;; The real binding + item rows too: they are what marks the
+          ;; slot BOUND (`make-parent-bound-terminals`), and a bound
+          ;; slot's :unset is normally filtered — the tail must survive.
+          layout (build-graph-elements
+                   inner {}
+                   (build-lookups {:fns fns :args (resolve-slot-ids args)
+                                   :bindings [{:id bid :fn-id inner :slot-id base-nums
+                                               :list-append true}]
+                                   :list-items [{:id item1 :binding-id bid :position 0 :value 1}
+                                                {:id item2 :binding-id bid :position 1 :ref-fn-id g}]}))
+          nodes (:nodes layout)
+          members (seq-members layout)
+          tail (last members)
+          tail-node (node-by-id layout (get-in tail [:data :target]))
+          ref-node (node-by-id layout (get-in (second members) [:data :target]))]
+      (is (= 3 (count members)) "literal, ref, tail")
+      (is (= 1 (count (distinct (map #(get-in % [:data :seqGroup]) members)))))
+      (is (= [0 1 2] (mapv #(get-in % [:data :seqIndex]) members)))
+      (is (every? #(= 3 (get-in % [:data :seqCount])) members))
+      (is (every? #(= "nums" (get-in % [:data :seqLabel])) members)
+          "the group label is the bare slot name")
+      (is (= "nums" (get-in tail [:data :argName])) "the tail is the anchor itself")
+      (is (true? (get-in tail [:data :isUnset])))
+      (is (true? (get-in tail [:data :seqTail])))
+      (is (true? (get-in tail-node [:data :isPlaceholder])))
+      (is (true? (get-in tail-node [:data :isSequenceAnchor])))
+      (is (true? (get-in tail-node [:data :seqTail])))
+      (is (= (str inner) (get-in tail-node [:data :sequenceFnId]))
+          "append lands on the fn that owns the chain")
+      (is (= "fn" (get-in ref-node [:data :type])))
+      (is (= 1 (get-in ref-node [:data :seqIndex]))
+          "the target nodes carry the group stamp for the placer")
+      (is (= 2 (get-in tail-node [:data :seqIndex])))
+      (is (= 1 (count (filter #(get-in % [:data :isPlaceholder]) nodes)))
+          "the tail is the ONLY placeholder — no phantom unset for the anchor"))))
+
+
+(deftest expanded-list-keeps-equal-items-and-its-tail
+  (testing "`[1 1]` seen through an expanded ancestor: both items AND the
+            tail render — the expanded-args dedup keys list members by
+            their own row, not by (slot, value)"
+    (let [base (random-uuid)
+          base-nums (random-uuid)
+          inner (random-uuid)
+          anchor (random-uuid)
+          item1 (random-uuid)
+          item2 (random-uuid)
+          bid (random-uuid)
+          fns [(mk-fn base "add") (mk-fn inner "one-plus-one" [base])]
+          args [(mk-arg {:id base-nums :fn-id base :name "nums" :type :sequence})
+                (mk-arg {:id anchor :fn-id inner :source-id base-nums :name "nums"
+                         :type :sequence :next-arg-id item1})
+                (mk-arg {:id item1 :fn-id inner :source-id anchor :item-id item1
+                         :value 1 :prev-arg-id anchor :next-arg-id item2})
+                (mk-arg {:id item2 :fn-id inner :source-id anchor :item-id item2
+                         :value 1 :prev-arg-id item1})]
+          layout (build-graph-elements
+                   inner {(str "fn-" inner) 1}
+                   (build-lookups {:fns fns :args (resolve-slot-ids args)
+                                   :bindings [{:id bid :fn-id inner :slot-id base-nums
+                                               :list-append true}]
+                                   :list-items [{:id item1 :binding-id bid :position 0 :value 1}
+                                                {:id item2 :binding-id bid :position 1 :value 1}]}))
+          members (seq-members layout)]
+      (is (= 3 (count members)) "1, 1, tail")
+      (is (= [false false true] (mapv #(true? (get-in % [:data :seqTail])) members))))))
+
+
+(deftest empty-sequence-anchor-is-a-group-of-one
+  (testing "an unbound :sequence slot renders as a one-member group whose
+            member is the sentinel — same shape as a populated list"
+    (let [base (random-uuid)
+          base-coll (random-uuid)
+          inner (random-uuid)
+          anchor (random-uuid)
+          fns [(mk-fn base "map") (mk-fn inner "m" [base])]
+          args [(mk-arg {:id base-coll :fn-id base :name "coll" :type :sequence})
+                (mk-arg {:id anchor :fn-id inner :source-id base-coll :name "coll"
+                         :type :sequence})]
+          layout (run inner fns args)
+          [only :as members] (seq-members layout)
+          node (node-by-id layout (get-in only [:data :target]))]
+      (is (= 1 (count members)))
+      (is (= "coll" (get-in only [:data :seqLabel])))
+      (is (zero? (get-in only [:data :seqIndex])))
+      (is (nil? (get-in only [:data :seqTail])) "an empty chain has no items before its tail")
+      (is (true? (get-in node [:data :isSequenceAnchor]))))))
+
+
+(deftest list-closed-ancestor-drops-the-append-tail
+  (testing "an ancestor's :list-closed binding seals the list: the items
+            still group, but no tail is offered (the API would 409)"
+    (let [base (random-uuid)
+          base-nums (random-uuid)
+          mid (random-uuid)
+          mid-anchor (random-uuid)
+          mid-item (random-uuid)
+          inner (random-uuid)
+          anchor (random-uuid)
+          item (random-uuid)
+          fns [(mk-fn base "add") (mk-fn mid "sealed" [base]) (mk-fn inner "leaf" [mid])]
+          args (resolve-slot-ids
+                 [(mk-arg {:id base-nums :fn-id base :name "nums" :type :sequence})
+                  (mk-arg {:id mid-anchor :fn-id mid :source-id base-nums :name "nums"
+                           :type :sequence :next-arg-id mid-item :append? true})
+                  (mk-arg {:id mid-item :fn-id mid :source-id mid-anchor :item-id mid-item
+                           :value 10 :prev-arg-id mid-anchor})
+                  (mk-arg {:id anchor :fn-id inner :source-id mid-anchor :name "nums"
+                           :type :sequence :next-arg-id item :append? true})
+                  (mk-arg {:id item :fn-id inner :source-id anchor :item-id item
+                           :value 1 :prev-arg-id anchor})])
+          ;; the fixture's slot-ids resolve to the defining anchor's id
+          slot-id (:slot-id (some #(when (= item (:id %)) %) args))
+          closed-layout (build-graph-elements
+                          inner {}
+                          (build-lookups {:fns fns :args args
+                                          :bindings [{:id (random-uuid) :fn-id mid :slot-id slot-id
+                                                      :list-append true :list-closed true}]}))
+          open-layout (build-graph-elements
+                        inner {}
+                        (build-lookups {:fns fns :args args
+                                        :bindings [{:id (random-uuid) :fn-id mid :slot-id slot-id
+                                                    :list-append true}]}))]
+      (is (= 2 (count (seq-members closed-layout))) "inherited item, own item, NO tail")
+      (is (not-any? #(get-in % [:data :seqTail]) (:edges closed-layout)))
+      (is (= 3 (count (seq-members open-layout)))
+          "the same chain with an open ancestor keeps its tail")
+      (is (true? (get-in (last (seq-members open-layout)) [:data :seqTail]))))))
+
+
+(deftest own-list-closed-does-not-seal-own-tail
+  (testing "only ANCESTORS seal — the fn's own :list-closed binding still
+            lets it append (mirrors crud.validation/list-closed-rej)"
+    (let [base (random-uuid)
+          base-nums (random-uuid)
+          inner (random-uuid)
+          anchor (random-uuid)
+          item (random-uuid)
+          fns [(mk-fn base "add") (mk-fn inner "own" [base])]
+          args (resolve-slot-ids
+                 [(mk-arg {:id base-nums :fn-id base :name "nums" :type :sequence})
+                  (mk-arg {:id anchor :fn-id inner :source-id base-nums :name "nums"
+                           :type :sequence :next-arg-id item})
+                  (mk-arg {:id item :fn-id inner :source-id anchor :item-id item
+                           :value 1 :prev-arg-id anchor})])
+          slot-id (:slot-id (some #(when (= item (:id %)) %) args))
+          layout (build-graph-elements
+                   inner {}
+                   (build-lookups {:fns fns :args args
+                                   :bindings [{:id (random-uuid) :fn-id inner :slot-id slot-id
+                                               :list-closed true}]}))]
+      (is (some #(get-in % [:data :seqTail]) (:edges layout))))))
+
+
+;; =============================================================================
 ;; MIGRATED BINDINGS INSIDE EXPANDED ANCESTORS  (regression — see e9449aa)
 ;; =============================================================================
 ;;

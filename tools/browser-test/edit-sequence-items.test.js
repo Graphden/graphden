@@ -96,19 +96,19 @@ async function postSequenceAppend(page, fnId, body) {
 
     const initial = await page.evaluate(() => ({
       removeBtnCount: document.querySelectorAll('.arg-seq-btn-remove').length,
-      addBtnCount: document.querySelectorAll('.arg-seq-btn-add').length,
+      addBtnCount: document.querySelectorAll('.placeholder-binder.is-seq-anchor').length,
     }));
     assert(initial.removeBtnCount === 2,
            'two × Remove buttons (one per item): '
            + initial.removeBtnCount);
     assert(initial.addBtnCount === 1,
-           'exactly one + Add button (on the tail item): '
+           'exactly one + (the append tail after the items): '
            + initial.addBtnCount);
 
     // ===================================================================
     // Phase B: click + → "Append literal" / "Append fn-ref" chooser.
     // ===================================================================
-    await page.click('.arg-seq-btn-add');
+    await page.click('.placeholder-binder.is-seq-anchor');
     await page.waitForFunction(
       () => Array.from(document.querySelectorAll('button'))
         .some((b) => /Append literal/.test(b.textContent || '')),
@@ -156,13 +156,13 @@ async function postSequenceAppend(page, fnId, body) {
       {timeout: 10000});
     const afterAppend = await page.evaluate(() => ({
       removeBtnCount: document.querySelectorAll('.arg-seq-btn-remove').length,
-      addBtnCount: document.querySelectorAll('.arg-seq-btn-add').length,
+      addBtnCount: document.querySelectorAll('.placeholder-binder.is-seq-anchor').length,
     }));
     assert(afterAppend.removeBtnCount === 3,
            'three × Remove buttons after append: '
            + afterAppend.removeBtnCount);
     assert(afterAppend.addBtnCount === 1,
-           'still exactly one + Add (moved to new tail): '
+           'still exactly one + (the tail follows the new item): '
            + afterAppend.addBtnCount);
 
     // ===================================================================
@@ -177,7 +177,7 @@ async function postSequenceAppend(page, fnId, body) {
       {timeout: 10000});
     const afterRemove = await page.evaluate(() => ({
       removeBtnCount: document.querySelectorAll('.arg-seq-btn-remove').length,
-      addBtnCount: document.querySelectorAll('.arg-seq-btn-add').length,
+      addBtnCount: document.querySelectorAll('.placeholder-binder.is-seq-anchor').length,
     }));
     assert(afterRemove.removeBtnCount === 2,
            'two × Remove buttons after removing one: '

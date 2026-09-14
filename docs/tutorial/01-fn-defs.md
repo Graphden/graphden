@@ -104,10 +104,13 @@ In the running editor:
    in its `:nums` list. Inheriting it exposes `:nums` as a `+`
    placeholder.
 4. `:nums` is a LIST, so the `+` offers **Append literal** rather
-   than a single value: append `1`, **Save**, then click the `+`
-   again and append a second `1`. The card now reads `1, 1` — the
-   whole input of your function, as data on the card. (In `fns.edn`
-   you'd write `:args {:nums [1 1]}`.)
+   than a single value: append `1`, **Save**. Look at the edge now:
+   one `:nums` label, and after its type chip the line fans out — a
+   branch to the `1` and a branch to a fresh `+`, the list's next
+   free slot (a plain argument splits off *before* its chip; a list
+   element *after* it). Click that `+` and append a second `1`. The
+   card now reads `1, 1` — the whole input of your function, as data
+   on the card. (In `fns.edn` you'd write `:args {:nums [1 1]}`.)
 5. Click the `⋯` button on the card's top row, then **▶ Run**, then
    **Run** in the Run pane that opens in the right panel: `2`.
    Nothing was built or deployed — the card IS the program, the pane

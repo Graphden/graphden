@@ -148,9 +148,9 @@
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "one-plus-one" :slot "nums"}}
               {:title "And the second"
-               :body "A list takes more. The first item now sits on the edge into the card, with a small [[+]] at its tail — click it, [[Append literal]], `1`, [[Save]]. The card reads 1, 1: the whole input of your function, as data on the card."
-               :target ".arg-seq-btn-add"
-               :targets [".arg-seq-btn-add" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :body "A list takes more. Look at the edge now: one :nums label, and after its type chip the line fans out — one branch to the 1, and a second branch to a fresh [[+]], the list's next free slot. Click that [[+]], [[Append literal]], `1`, [[Save]]. The card reads 1, 1: the whole input of your function, as data on the card."
+               :target ".placeholder-binder.is-seq-anchor"
+               :targets [".placeholder-binder.is-seq-anchor" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "list-items" :name "one-plus-one" :slot "nums" :count 2}}
               {:title "Run it"
                :body "Click the [[⋯]] button on the card's top row, then [[▶ Run]], then [[Run]] in the Run pane that opens in the right panel."
@@ -484,9 +484,9 @@
                :targets [".placeholder-binder.is-seq-anchor" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "list-items" :name "tutorial-map" :slot "coll" :count 1}}
               {:title "And a second item"
-               :body "The first item sits on the edge into the card, with a small [[+]] at its tail — click it, [[Append literal]], `den`, [[Save]]. The card reads graph, den."
-               :target ".arg-seq-btn-add"
-               :targets [".arg-seq-btn-add" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :body "The :coll edge now fans out after its chip: a branch to graph, and a branch to a fresh [[+]] — the list's next free slot. Click it, [[Append literal]], `den`, [[Save]]. The card reads graph, den."
+               :target ".placeholder-binder.is-seq-anchor"
+               :targets [".placeholder-binder.is-seq-anchor" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "list-items" :name "tutorial-map" :slot "coll" :count 2}}
               {:title "Watch the other slot"
                :body "Look at the :func chip. A moment ago it read (item:'a) → 'b; now it reads (item:text) → 'b — and you never touched it. Two strings went into :coll, so 'a is text, and the type variable carried that across to the slot you have not bound yet. Every value you set narrows the choices left. Click [[Next]]."
@@ -839,9 +839,9 @@
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-sum" :slot "nums"}}
               {:title "…plus two"
-               :body "The 2 now sits on the edge into the card, with a small [[+]] at its tail — click it, [[Append literal]], `2`, [[Save]]. tutorial-sum computes 2 + 2; run it if you like, the answer is 4."
-               :target ".arg-seq-btn-add"
-               :targets [".arg-seq-btn-add" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :body "The :nums edge fans out after its chip: a branch to the 2, and a branch to a fresh [[+]] — the list's next free slot. Click it, [[Append literal]], `2`, [[Save]]. tutorial-sum computes 2 + 2; run it if you like, the answer is 4."
+               :target ".placeholder-binder.is-seq-anchor"
+               :targets [".placeholder-binder.is-seq-anchor" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "list-items" :name "tutorial-sum" :slot "nums" :count 2}}
               {:title "Create the tests namespace"
                :body "First CLEAR the Explorer filter (the [[×]] next to it — a filtered tree hides everything else). Then, at the bottom of the Explorer, click [[New namespace]], type exactly `tests` — and press [[Enter]]."

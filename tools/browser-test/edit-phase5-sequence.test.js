@@ -117,10 +117,11 @@ const TEST_NAME = 'test-edit-phase5';
     let chain = chainOf(await getEntities(page, created.id));
     assert(JSON.stringify(chain) === '[1]', 'first item appended as value=1');
 
-    // 4. Append a second item via the tail `+` button.
-    await page.waitForSelector('.arg-seq-btn-add', {timeout: 10000});
+    // 4. Append a second item via the append tail — the `+` placeholder
+    //    the fan ends in once the list holds an item.
+    await page.waitForSelector('.placeholder-binder.is-seq-anchor', {timeout: 10000});
     await page.evaluate(() => {
-      document.querySelector('.arg-seq-btn-add').click();
+      document.querySelector('.placeholder-binder.is-seq-anchor').click();
     });
     await page.waitForFunction(
       () => document.querySelector('.free-arg-bind-chooser'),
@@ -160,7 +161,11 @@ const TEST_NAME = 'test-edit-phase5';
     assert(JSON.stringify(chain) === '[1,2]', 'tail-append added value=2');
 
     // 5. Remove one item via `×`. Either 1 or 2 may go (DOM order is
-    //    not guaranteed across the chain) — assert chain shrinks.
+    //    not guaranteed across the chain) — assert chain shrinks. The
+    //    `×` lives on the item's own overlay, rebuilt with the canvas
+    //    after the append — wait for the rebuild rather than click a
+    //    button mid-swap.
+    await page.waitForSelector('.arg-seq-btn-remove', {timeout: 15000});
     await page.evaluate(() => {
       document.querySelector('.arg-seq-btn-remove').click();
     });

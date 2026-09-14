@@ -1,6 +1,6 @@
 // Editor Edges (SVG) — draws the taxi edges and answers hover hit-tests.
 // Depends on: editor-layout.js (taxiBendX), editor-graph-view.js (gv),
-// editor-overlay-manager.js (getGraphLayer).
+// editor-overlay-manager.js (getGraphLayer, EDGE_LABEL_POST_BEND_GAP).
 //
 // The edge layer lives INSIDE `#graph-layer`, so it inherits the viewport
 // transform: paths are emitted in graph coordinates and never re-projected.
@@ -35,6 +35,80 @@ const SOURCE_ENDPOINT_RADIUS = 14;
 
 let _edgeLayer = null;
 const _edgeGroupsByEdgeId = new Map();
+
+// ── Sequence groups ─────────────────────────────────────────────────────────
+//
+// The items of one list (edges sharing a layout-emitted `seqGroup`) are not N
+// look-alike args: they draw as ONE TRUNK — source, bend, the group's single
+// label — that FANS OUT after the label's type chip, one BRANCH per item, the
+// last branch reaching the list's append tail (a free `+` placeholder). So a
+// plain arg splits off at the bend before its chip and a list element splits
+// off after it — the difference the eye is asked to read.
+//
+// The fan-out point is wherever the overlay manager placed the group's label;
+// it reports back through `setSeqLabelAnchor` from the same geometry pass
+// that positions the labels, and the trunk / branches are re-emitted right
+// after. Before a label exists the branches bend at a fallback past the trunk
+// bend, so the first paint is still a fan and not a pile of crossings.
+const SEQ_TRUNK_PREFIX = 'seq:';
+const SEQ_FAN_GAP = 14;             // label's right edge → the branches' bend
+const SEQ_FALLBACK_LABEL_WIDTH = 48; // until the label has been measured
+const _seqGroups = new Map();       // groupId → {sourceId, members: [edgeId…]}
+const _seqLabelAnchors = new Map(); // groupId → {left, right, y}
+
+function seqTrunkId(groupId) { return SEQ_TRUNK_PREFIX + groupId; }
+
+function isSeqTrunkId(id) { return typeof id === 'string' && id.startsWith(SEQ_TRUNK_PREFIX); }
+
+/** Called by the overlay manager once it has placed a group's label. */
+function setSeqLabelAnchor(groupId, anchor) { _seqLabelAnchors.set(groupId, anchor); }
+
+/** Vertical centre of a group's member targets — where its trunk ends and its label sits. */
+function seqGroupCentreY(groupId) {
+  const g = _seqGroups.get(groupId);
+  if (!g) return null;
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const id of g.members) {
+    const t = gv.edge(id)?.target();
+    if (!t) continue;
+    const y = t.position().y;
+    if (y < min) min = y;
+    if (y > max) max = y;
+  }
+  return min === Number.POSITIVE_INFINITY ? null : (min + max) / 2;
+}
+
+function seqAnchorFor(groupId, source) {
+  const placed = _seqLabelAnchors.get(groupId);
+  if (placed) return placed;
+  const left = taxiBendX(source) + EDGE_LABEL_POST_BEND_GAP;
+  return { left, right: left + SEQ_FALLBACK_LABEL_WIDTH,
+           y: seqGroupCentreY(groupId) ?? source.position().y };
+}
+
+/** Source's right edge → the trunk bend → down to the label → its left edge. */
+function seqTrunkPath(source, anchor) {
+  const s = source.position();
+  const srcRight = s.x + source.width() / 2;
+  return 'M' + srcRight + ',' + s.y
+       + 'H' + taxiBendX(source)
+       + 'V' + anchor.y
+       + 'H' + anchor.left;
+}
+
+/** Label's right edge → the fan bend → up/down to the item → its left edge. */
+function seqBranchPath(target, anchor) {
+  const t = target.position();
+  const tgtLeft = t.x - target.width() / 2;
+  // A label wider than the column gap reserved for it would put the fan
+  // bend past the item; never bend backwards.
+  const bendX = Math.min(anchor.right + SEQ_FAN_GAP, tgtLeft - 1);
+  return 'M' + anchor.right + ',' + anchor.y
+       + 'H' + bendX
+       + 'V' + t.y
+       + 'H' + tgtLeft;
+}
 
 
 /** The `<svg>` under `#graph-layer`, created on first use. */
@@ -129,61 +203,95 @@ function taxiPath(source, target) {
 }
 
 
+/** One visible path + its fat hit twin, registered under `id`. */
+function addEdgePaths(svg, id, d, className, markers, entry) {
+  const hit = document.createElementNS(SVG_NS, 'path');
+  hit.setAttribute('class', 'edge-hit');
+  hit.setAttribute('d', d);
+  hit.dataset.edgeId = id;
+  svg.querySelector('#edge-hits').appendChild(hit);
+
+  const line = document.createElementNS(SVG_NS, 'path');
+  line.setAttribute('class', className);
+  line.setAttribute('d', d);
+  if (markers.start) line.setAttribute('marker-start', 'url(#gd-edge-source)');
+  if (markers.end) line.setAttribute('marker-end', 'url(#gd-edge-target)');
+  line.dataset.edgeId = id;
+  svg.querySelector('#edge-lines').appendChild(line);
+
+  _edgeGroupsByEdgeId.set(id, {hit, line, ...entry});
+}
+
+
 /** Rebuild the edge elements from the current graph. */
 function renderEdges() {
   const svg = getEdgeLayer();
   if (!svg) return;
-  const hits = svg.querySelector('#edge-hits');
-  const lines = svg.querySelector('#edge-lines');
-  hits.replaceChildren();
-  lines.replaceChildren();
+  svg.querySelector('#edge-hits').replaceChildren();
+  svg.querySelector('#edge-lines').replaceChildren();
   _edgeGroupsByEdgeId.clear();
+  _seqGroups.clear();
+  _seqLabelAnchors.clear();
 
   for (const edge of gv.edges()) {
     const source = edge.source();
     const target = edge.target();
     if (!source || !target) continue;
     const id = edge.id();
-    const d = taxiPath(source, target);
-
-    const hit = document.createElementNS(SVG_NS, 'path');
-    hit.setAttribute('class', 'edge-hit');
-    hit.setAttribute('d', d);
-    hit.dataset.edgeId = id;
-    hits.appendChild(hit);
-
-    const line = document.createElementNS(SVG_NS, 'path');
     // Unified-arg-edges: every unset arg is an edge; PROVENANCE is a
     // style gradation, not a different UI. Flags come from the layout
     // emitter (add-unset-arg-node).
     const ed = edge.data();
-    line.setAttribute('class', 'edge-line'
-      + (ed.isUnset ? ' edge-unset' : '')
+    const flags = (ed.isUnset ? ' edge-unset' : '')
       + (ed.optionalArg ? ' edge-optional' : '')
       + (ed.lambdaArg ? ' edge-lambda' : '')
-      + (ed.deepArg ? ' edge-deep' : ''));
-    line.setAttribute('d', d);
-    line.setAttribute('marker-start', 'url(#gd-edge-source)');
-    line.setAttribute('marker-end', 'url(#gd-edge-target)');
-    line.dataset.edgeId = id;
-    lines.appendChild(line);
+      + (ed.deepArg ? ' edge-deep' : '');
 
-    _edgeGroupsByEdgeId.set(id, {hit, line, sourceId: source.id()});
+    const groupId = ed.seqGroup;
+    if (groupId) {
+      let g = _seqGroups.get(groupId);
+      if (!g) {
+        g = {sourceId: source.id(), members: []};
+        _seqGroups.set(groupId, g);
+        // The trunk carries the source dot; a solid line even when every
+        // item is still unset — the list itself is bound, its slots are not.
+        addEdgePaths(svg, seqTrunkId(groupId), seqTrunkPath(source, seqAnchorFor(groupId, source)),
+                     'edge-line edge-seq-trunk', {start: true, end: false},
+                     {sourceId: source.id(), groupId});
+      }
+      g.members.push(id);
+      addEdgePaths(svg, id, seqBranchPath(target, seqAnchorFor(groupId, source)),
+                   'edge-line edge-seq-branch' + flags, {start: false, end: true},
+                   {sourceId: source.id(), groupId});
+      continue;
+    }
+
+    addEdgePaths(svg, id, taxiPath(source, target), 'edge-line' + flags,
+                 {start: true, end: true}, {sourceId: source.id()});
   }
   syncEdgeGeometry();
   applyEdgeStrokeWidths();
 }
 
 
-/** Re-emit every `d` after nodes moved. O(edges); animation frames and drags. */
+/** Re-emit every `d` after nodes moved (or labels were placed). O(edges). */
 function syncEdgeGeometry() {
   for (const [edgeId, els] of _edgeGroupsByEdgeId) {
-    const edge = gv.edge(edgeId);
-    if (!edge) continue;
-    const source = edge.source();
-    const target = edge.target();
-    if (!source || !target) continue;
-    const d = taxiPath(source, target);
+    let d;
+    if (isSeqTrunkId(edgeId)) {
+      const source = gv.node(els.sourceId);
+      if (!source) continue;
+      d = seqTrunkPath(source, seqAnchorFor(els.groupId, source));
+    } else {
+      const edge = gv.edge(edgeId);
+      if (!edge) continue;
+      const source = edge.source();
+      const target = edge.target();
+      if (!source || !target) continue;
+      d = els.groupId
+        ? seqBranchPath(target, seqAnchorFor(els.groupId, source))
+        : taxiPath(source, target);
+    }
     els.hit.setAttribute('d', d);
     els.line.setAttribute('d', d);
   }
@@ -208,9 +316,27 @@ function applyEdgeStrokeWidths() {
 
 // ── Hover ───────────────────────────────────────────────────────────────────
 
+/**
+ * A list lights as a whole: hovering a branch lights its trunk, hovering the
+ * trunk lights every branch — the fan IS one edge of the source fn.
+ */
+function withSeqGroupClosure(edgeIds) {
+  const out = new Set(edgeIds);
+  for (const id of edgeIds) {
+    if (isSeqTrunkId(id)) {
+      for (const m of _seqGroups.get(id.slice(SEQ_TRUNK_PREFIX.length))?.members || []) out.add(m);
+    } else {
+      const groupId = _edgeGroupsByEdgeId.get(id)?.groupId;
+      if (groupId) out.add(seqTrunkId(groupId));
+    }
+  }
+  return out;
+}
+
 function setEdgesHovered(edgeIds) {
+  const lit = withSeqGroupClosure(edgeIds);
   for (const [id, els] of _edgeGroupsByEdgeId) {
-    els.line.classList.toggle('edge-hovered', edgeIds.has(id));
+    els.line.classList.toggle('edge-hovered', lit.has(id));
   }
 }
 
@@ -263,8 +389,8 @@ function edgesUnderPointer(clientX, clientY) {
 
   const p = screenToGraph(clientX, clientY);
   for (const id of ids) {
-    const edge = gv.edge(id);
-    const source = edge?.source();
+    // A trunk has no model edge of its own; its source is the group's.
+    const source = gv.node(_edgeGroupsByEdgeId.get(id)?.sourceId);
     if (!source) continue;
     const s = source.position();
     const dx = p.x - (s.x + source.width() / 2);

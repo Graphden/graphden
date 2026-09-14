@@ -40,38 +40,38 @@ Synthesizes the per-fn 'arg view' rows the walkers consume: for each fn, its inh
 :PROPERTIES:
 :CUSTOM_ID: layout/build-graph-elements
 :FILE: src/graphden/layout/graph.clj
-:LINE: 822
-:MINS: 5.4
+:LINE: 927
+:MINS: 5.6
 :END:
 
 Stage 2's orchestrator — dispatches the cycle-guarded ~process-*~ walkers over the expansion spec, then pipes the accumulated state through the post-processing transforms (optional/HOF badges, captured-edge migration, overlay dedup, strip facts). Produces the node/edge element lists the client draws verbatim.
 
-- source :: [[file:../../../src/graphden/layout/graph.clj::(defn build-graph-elements][src/graphden/layout/graph.clj:822]]
+- source :: [[file:../../../src/graphden/layout/graph.clj::(defn build-graph-elements][src/graphden/layout/graph.clj:927]]
 - referenced from :: [[file:editor.org::#editor/fetchBackendLayout][fetchBackendLayout]]
 
 * 4. emit-root-deep-frees!
 :PROPERTIES:
 :CUSTOM_ID: layout/emit-root-deep-frees!
 :FILE: src/graphden/layout/builder_helpers.clj
-:LINE: 932
+:LINE: 945
 :MINS: 6.4
 :END:
 
 After the walkers: the root card's DEEPER holes — a template's frees behind ancestor-bound refs — as ~:deepArg~ placeholders on the root itself, keyed by the inner slot but naming the root fn, so the ~+~ binder writes a closure-capture binding where the Run form lists the hole. The entry set is the SURFACE walk (~compile.renames/deep-free-ext-entries~): it stops at HOF boundaries, so a listener does not sprout every knob of the app it serves.
 
-- source :: [[file:../../../src/graphden/layout/builder_helpers.clj::(defn emit-root-deep-frees!][src/graphden/layout/builder_helpers.clj:932]]
+- source :: [[file:../../../src/graphden/layout/builder_helpers.clj::(defn emit-root-deep-frees!][src/graphden/layout/builder_helpers.clj:945]]
 
 * 5. compute-layout-matrix
 :PROPERTIES:
 :CUSTOM_ID: layout/compute-layout-matrix
 :FILE: src/graphden/layout/core.clj
-:LINE: 288
+:LINE: 306
 :MINS: 1.8
 :END:
 
 Stages 3+ — grid placement: roots at column zero, dependents right of their sources, rows packed to avoid overlap, plus the validation summary. Pixel geometry stays client-side (measured reflow off the real DOM); the server owns the grid topology.
 
-- source :: [[file:../../../src/graphden/layout/core.clj::(defn compute-layout-matrix][src/graphden/layout/core.clj:288]]
+- source :: [[file:../../../src/graphden/layout/core.clj::(defn compute-layout-matrix][src/graphden/layout/core.clj:306]]
 - referenced from :: [[file:editor.org::#editor/fetchBackendLayout][fetchBackendLayout]]
 
 * 6. annotate

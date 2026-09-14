@@ -135,6 +135,17 @@
             "a caller's own binding (the http-server's) is kept, not shadowed")))))
 
 
+(deftest reset-epoch-state-forgets-watermark-and-cached-read
+  ;; The helper `clean-database-fast!` calls after every schema drop:
+  ;; a watermark and a fresh cached read carried over from a previous
+  ;; deftest's DB must not outlive that DB (they read as a sequence
+  ;; regression against the new one, one TTL later).
+  (binding [br/*epoch-state-override*
+            (atom {:w 11 :read {:value 11 :at (System/currentTimeMillis)}})]
+    (br/reset-epoch-state!)
+    (is (= (br/epoch-state-seed) @br/*epoch-state-override*))))
+
+
 (deftest dispatch-falls-back-to-default-branch
   (testing "no header / query → default-branch handler invoked"
     (binding [br/*resolve-branch-id-override* (stub-resolutions {})]

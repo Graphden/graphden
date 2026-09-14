@@ -760,6 +760,22 @@
   (or *epoch-state-override* global-epoch-state))
 
 
+(defn reset-epoch-state!
+  "Forget everything this pod (or, under the parallel test plugin, this
+   NS-thread) knows about the graph-epoch sequence: watermark back to 0,
+   the TTL-cached global read dropped. For the test helper that DROPS
+   the schema between deftests — the sequence restarts at 1 while the
+   thread's state still says `w=11, read=11 (fresh)`, so the NEXT
+   router's first dispatch trusts the cached read, and the one after
+   it (TTL expired) sees a 'regression' and heals — dropping the
+   branch ctx whose handler the test had just swapped in
+   (`dispatch-routes-to-per-branch-ctx-end-to-end-test`, main CI
+   2026-09-14). Never called in production: a real sequence restart is
+   a DB restore, and the regression path is the right answer there."
+  []
+  (reset! (epoch-state) (epoch-state-seed)))
+
+
 (def ^:dynamic *epoch-check-ttl-ms*
   "Floor between two sequence reads — bounds the heal's staleness
    window AND its hot-path cost to one tiny SELECT per TTL. Dynamic so

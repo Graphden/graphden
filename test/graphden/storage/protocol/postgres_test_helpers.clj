@@ -81,7 +81,14 @@
   ;; reference nonexistent ancestors after this point, so even a
   ;; hypothetical miss isn't worth risking.)
   (require 'graphden.versioning.storage.resolution)
-  ((resolve 'graphden.versioning.storage.resolution/invalidate-chain-cache!)))
+  ((resolve 'graphden.versioning.storage.resolution/invalidate-chain-cache!))
+  ;; Same for the router's graph-epoch state: the schema drop restarts
+  ;; the epoch sequence at 1, and a watermark (+ TTL-cached global read)
+  ;; carried over from the previous deftest makes the next router see a
+  ;; sequence REGRESSION one TTL later — a heal mid-test that drops the
+  ;; branch ctx the test is holding. Fresh DB, fresh epoch state.
+  (require 'graphden.system.branch-router)
+  ((resolve 'graphden.system.branch-router/reset-epoch-state!)))
 
 
 (defn clean-database-iterative!

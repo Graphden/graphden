@@ -191,15 +191,19 @@
      `wait_for_server` 90s poll, a restart-window fault recovers
      transparently within ≤ 1 cascade-cap step.
 
-   - `--memory 3g` — bounds the JVM container HARD. With
-     `MaxRAMPercentage=60` (Dockerfile) the JVM gets ~1.8GB heap and the
-     remaining ~1.2GB holds its non-heap footprint (metaspace, code cache,
-     threads — ~700MB by the end of the suite). At the old 75% the heap
-     ceiling plus that footprint EXCEEDED the cap: the cgroup OOM-killer
-     SIGKILLed the JVM late in the suite (2026-09-15, 2948MB of 3072MB on
-     the heartbeat, then `2 startup(s), 0 Terminating` in the post-mortem)
-     and one tour file failed on ERR_EMPTY_RESPONSE — the flake that was
-     'always green on retry' because the fresh JVM starts small.
+   - `--memory 3.5g` — bounds the JVM container HARD. With
+     `MaxRAMPercentage=60` (Dockerfile) the JVM gets ~2.1GB heap and the
+     remaining ~1.4GB holds its non-heap footprint (metaspace, code cache,
+     threads — ~830MB by the end of the suite, measured 2026-09-15 as
+     container usage minus committed heap). At 3g × 75% the heap ceiling
+     plus that footprint EXCEEDED the cap: the cgroup OOM-killer SIGKILLed
+     the JVM late in the suite (2948MB of 3072MB on the heartbeat, then
+     `2 startup(s), 0 Terminating` in the post-mortem) and one tour file
+     failed on ERR_EMPTY_RESPONSE — the flake that was 'always green on
+     retry' because the fresh JVM starts small. At 3g × 60% the suite ran
+     to the end but the ~1.8GB heap was tight for it: 31 G1 evacuation
+     failures against 0 at the old ceiling, the container plateaued at 87%.
+     3.5g × 60% restores the old heap size with ~600MB of cgroup margin.
      COUNTERINTUITIVELY, a TIGHTER cap is better, not looser. The
      dev host has 11GB RAM total but runs in parallel: e2e
      testcontainer JVM + Chrome headless (Playwright) + the
@@ -210,18 +214,20 @@
      killing the biggest tenants — including our JVM AND Chrome.
      Previously we bumped to 5GB thinking more headroom meant
      more stability; instead it let the JVM grow until it competed
-     with Chrome and tripped the host kill. 3GB keeps the JVM
+     with Chrome and tripped the host kill. 3–3.5GB keeps the JVM
      small enough that it stays UNDER the global pressure threshold
-     even when Chrome is loaded. ExitOnOutOfMemoryError +
-     restart-policy handles the rare JVM-side OOM cleanly.
+     even when Chrome is loaded (the demo executor is off by default
+     since 2026-08, which is what makes the extra half-gigabyte fit).
+     ExitOnOutOfMemoryError + restart-policy handles the rare JVM-side
+     OOM cleanly.
 
-   - `--memory-swap 3g` (== `--memory`) — DISABLES container swap. The 3GB
+   - `--memory-swap 3.5g` (== `--memory`) — DISABLES container swap. The
      cap alone still let the kernel page the JVM's idle heap out under host
      cache pressure; when the heavy type-editing test cluster then hit the
      executor it faulted that heap back from swap — a multi-second stall that
      timed out the test's 15s `waitForFunction` (root-caused from the gate
      resource timeline: `swap_used ~2.3GB` during e2e, mem still available).
-     Equal memory/memory-swap pins the heap in RAM; a genuine >3GB burst OOMs
+     Equal memory/memory-swap pins the heap in RAM; a genuine over-cap burst OOMs
      cleanly via ExitOnOutOfMemoryError + restart — a discrete, recoverable
      event, not a swap-stall flake.
 
@@ -244,12 +250,12 @@
     (HostConfig/.withRestartPolicy
       host-cfg (RestartPolicy/onFailureRestart (int 3)))
     (HostConfig/.withMemory
-      host-cfg (long (* 3 1024 1024 1024)))
+      host-cfg (long (* 7 512 1024 1024)))
     ;; == --memory ⇒ no container swap: the executor heap stays resident and
     ;; never swap-faults mid-request under host cache pressure (see the
     ;; --memory-swap docstring bullet above).
     (HostConfig/.withMemorySwap
-      host-cfg (long (* 3 1024 1024 1024)))
+      host-cfg (long (* 7 512 1024 1024)))
     (HostConfig/.withPortBindings
       host-cfg
       (into-array PortBinding
@@ -525,7 +531,7 @@
             ;; run-edit-tests.sh sleeps SWEEP_DELAY (default 2s) between files so the
             ;; DEMO container (:9002, restart:unless-stopped) can GC before its
             ;; restart policy bounces it mid-sweep. This ISOLATED stack has its own
-            ;; 3 GB executor with restart:on-failure — it doesn't bounce, and two
+            ;; 3.5 GB executor with restart:on-failure — it doesn't bounce, and two
             ;; full 55-file runs at 0 were clean (536s / 540s, vs ~640s with 2s),
             ;; so drop the ~110s of dead sleep here. An explicit SWEEP_DELAY still
             ;; wins (it flows through inheritIO), for chasing a load-related flake.

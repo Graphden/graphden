@@ -107,37 +107,55 @@
 
   // ---- the surface ----
   let _mounted = false;
+  // One listing fetch owns the root at a time. `gdMarketOpen` shows the
+  // surface through the shell, whose FIRST mount fetched the default
+  // listing, and then fetched its own kind — two responses for one root,
+  // and the last to answer won: the fns listing (bigger, slower) overwrote
+  // the Themes tab the reader had just asked for, so the card the tour
+  // waits on never showed (lesson 37, flaky in the gate 2026-09-15).
+  // Every fetch takes a generation and lands only while it is the newest;
+  // `gdMarketOpen` also mounts the placeholder BEFORE the shell looks, so
+  // the shell's default mount does not start at all.
+  let _gen = 0;
+  const PLACEHOLDER = '<div data-marketplace="1" class="mk-root mk-loading">Loading the marketplace…</div>';
+  function loadListing(root, url, onFail) {
+    const gen = ++_gen;
+    _mounted = true;
+    fetcher()(url)
+      .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+      .then((html) => {
+        if (gen !== _gen) return;
+        root.innerHTML = html;
+        if (window.htmx) window.htmx.process(root);
+        gdMarketSyncHash();
+      })
+      .catch(() => { if (gen === _gen && onFail) onFail(); });
+  }
   function gdRenderMarket() {
     const root = document.getElementById('gd-market-root');
     if (!root || !gdMarketPresent()) return;
     if (_mounted && root.querySelector('[data-marketplace]')) return;
-    _mounted = true;
-    root.innerHTML = '<div data-marketplace="1" class="mk-root mk-loading">Loading the marketplace…</div>';
-    fetcher()(PARTIAL)
-      .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
-      .then((html) => {
-        root.innerHTML = html;
-        if (window.htmx) window.htmx.process(root);
-      })
-      .catch(() => {
-        _mounted = false;
-        root.innerHTML = '<div data-marketplace="1" class="mk-root mk-empty">The marketplace could not be loaded — are you signed in?</div>';
-      });
+    root.innerHTML = PLACEHOLDER;
+    loadListing(root, PARTIAL, () => {
+      _mounted = false;
+      root.innerHTML = '<div data-marketplace="1" class="mk-root mk-empty">The marketplace could not be loaded — are you signed in?</div>';
+    });
   }
   // Open the surface on a package (from the packages chip's link, Settings).
+  // A `name` opens the item; a `kind` opens the listing on that tab.
   function gdMarketOpen(query) {
-    if (typeof window.gdShellSurface === 'function') window.gdShellSurface('market');
     const root = document.getElementById('gd-market-root');
-    if (!root || !gdMarketPresent() || !query) return;
+    const own = !!(root && gdMarketPresent() && query);
+    if (own && !root.querySelector('[data-marketplace]')) {
+      _mounted = true;
+      root.innerHTML = PLACEHOLDER;
+    }
+    if (typeof window.gdShellSurface === 'function') window.gdShellSurface('market');
+    if (!own) return;
     const url = query.name
       ? PARTIAL_ITEM + '?name=' + encodeURIComponent(query.name)
       : PARTIAL + '?kind=' + encodeURIComponent(query.kind || 'fns');
-    _mounted = true;
-    fetcher()(url).then((r) => (r.ok ? r.text() : Promise.reject(r.status))).then((html) => {
-      root.innerHTML = html;
-      if (window.htmx) window.htmx.process(root);
-      gdMarketSyncHash();
-    }).catch(() => {});
+    loadListing(root, url);
   }
 
   // After ANY swap inside the surface: an apply / install may have changed

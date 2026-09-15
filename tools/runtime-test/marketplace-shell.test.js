@@ -80,5 +80,89 @@ console.log(' the hash mirrors the open item while the surface is up');
   assert(replaced.length === 0, 'another surface up → the hash is left alone');
 }
 
-console.log(passes + ' passed, ' + failures + ' failed');
-process.exit(failures ? 1 : 0);
+
+// The listing race: a root whose innerHTML is real, a shell whose surface
+// switch mounts the default listing, and a fetch whose responses resolve in
+// the order the test picks.
+function loadRace() {
+  const root = {
+    innerHTML: '',
+    dataset: {},
+    querySelector: (sel) => (sel === '[data-marketplace]' && /data-marketplace/.test(root.innerHTML) ? root : null),
+  };
+  const pending = [];
+  const fetch = (url) => new Promise((resolve) => {
+    pending.push({ url, resolve: (html) => resolve({ ok: true, text: () => Promise.resolve(html) }) });
+  });
+  const document = {
+    addEventListener: () => {},
+    body: { getAttribute: () => 'market' },
+    querySelector: (sel) => (sel === '#gd-market-root [data-marketplace]' && /data-marketplace/.test(root.innerHTML) ? root : null),
+    getElementById: (id) => (id === 'gd-market-root' ? root : null),
+  };
+  const window = {
+    location: { hash: '' },
+    history: { replaceState: (_s, _t, url) => { window.location.hash = url; } },
+    API: { api_marketplace: '/api/marketplace' },
+    gdShellSurface: () => window.gdRenderMarket(),
+  };
+  const ctx = vm.createContext({ console, document, window, fetch });
+  vm.runInContext(fs.readFileSync(path.join(EDITOR, 'editor-marketplace.js'), 'utf8'), ctx,
+                  { filename: 'editor-marketplace.js' });
+  return { window, root, pending };
+}
+const settle = () => new Promise((r) => setImmediate(r));
+
+(async () => {
+  console.log(' opening on a kind fetches that kind only — the shell mount does not race it');
+  {
+    const { window, root, pending } = loadRace();
+    window.gdMarketOpen({ kind: 'theme' });
+    assert(/mk-loading/.test(root.innerHTML), 'the placeholder is mounted before the shell looks');
+    assert(pending.length === 1 && /kind=theme$/.test(pending[0].url),
+           'exactly one listing fetch, for the kind asked (got ' + JSON.stringify(pending.map((p) => p.url)) + ')');
+    pending[0].resolve('<div data-marketplace="1">themes</div>');
+    await settle();
+    assert(root.innerHTML === '<div data-marketplace="1">themes</div>', 'the Themes listing lands');
+  }
+
+  console.log(' the newest listing request wins, whatever order the answers come in');
+  {
+    const { window, root, pending } = loadRace();
+    window.gdRenderMarket();                   // the shell mounts the default listing…
+    window.gdMarketOpen({ kind: 'theme' });    // …and the reader switches to Themes
+    assert(pending.length === 2, 'two requests in flight');
+    pending[1].resolve('<div data-marketplace="1">themes</div>');
+    await settle();
+    pending[0].resolve('<div data-marketplace="1">fns</div>');   // the slower default answers last
+    await settle();
+    assert(root.innerHTML === '<div data-marketplace="1">themes</div>',
+           'the stale default listing does not overwrite the Themes tab (got ' + root.innerHTML + ')');
+  }
+  {
+    const { window, root, pending } = loadRace();
+    window.gdMarketOpen({ kind: 'theme' });
+    window.gdMarketOpen({ name: 'acme.theme' });
+    pending[0].resolve('<div data-marketplace="1">themes</div>');
+    await settle();
+    assert(root.innerHTML === '<div data-marketplace="1" class="mk-root mk-loading">Loading the marketplace…</div>',
+           'an older listing answering first leaves the placeholder for the newer request');
+    pending[1].resolve('<div data-marketplace="1" data-marketplace-item="acme.theme">item</div>');
+    await settle();
+    assert(/acme\.theme/.test(root.innerHTML), 'the item lands');
+  }
+
+  console.log(' a second visit to a mounted surface does not refetch');
+  {
+    const { window, root, pending } = loadRace();
+    window.gdRenderMarket();
+    pending[0].resolve('<div data-marketplace="1">fns</div>');
+    await settle();
+    window.gdRenderMarket();
+    assert(pending.length === 1, 'the mounted listing is kept');
+    assert(root.innerHTML === '<div data-marketplace="1">fns</div>', 'and shown as is');
+  }
+
+  console.log(passes + ' passed, ' + failures + ' failed');
+  process.exit(failures ? 1 : 0);
+})();

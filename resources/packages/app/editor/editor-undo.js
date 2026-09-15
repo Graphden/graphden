@@ -47,7 +47,8 @@
 // Mod+z (both registered here; the cheatsheet and the Space menu render
 // them while an entry is live, for the whole 30 s window). Recorders live at the write sites:
 // editor-edit-modes-fn.js (extend / wrap / rename / namespace move),
-// editor-create.js (new graph / new namespace), editor-row-actions-handlers.js
+// editor-create.js (new graph / new namespace, the Explorer's rename and
+// delete of a namespace or a graph), editor-row-actions-handlers.js
 // (⋯ → Delete, undone through the revive endpoint), editor-edit-modes.js (bind /
 // change / unbind a slot) and editor-edit-modes-seq.js (append / remove /
 // edit / move a list item) call the `gdUndoRecord*` builders below.
@@ -330,6 +331,41 @@ function gdUndoRecordDeletedFn(fnId, qualifiedName) {
   });
 }
 
+// A renamed namespace: undo = write the old name again.
+function gdUndoRecordNsRenamed(nsId, oldName, newName) {
+  if (!nsId || !oldName) return;
+  gdUndoRecord({
+    label: 'Renamed namespace ' + oldName + ' → ' + newName,
+    verify: async () => {
+      const cur = (typeof lookups !== 'undefined' && lookups?.nsMap) ? lookups.nsMap.get(nsId) : null;
+      return (cur && cur.name !== newName) ? 'the namespace was renamed again since (now ' + cur.name + ')' : null;
+    },
+    undo: async () => {
+      const r = await authMutate('PUT', API.api_entities_type_id('ns', nsId), { name: oldName });
+      const res = await _gdUndoResult(r);
+      if (res.ok && typeof initGraph === 'function') await initGraph();
+      return res;
+    },
+  });
+}
+
+// A deleted namespace: it had to be EMPTY to go (the server refuses
+// otherwise), so re-creating it under its parent loses nothing but the
+// id — a namespace is not versioned, there is no tombstone to revive.
+function gdUndoRecordDeletedNs(name, parentId) {
+  if (!name) return;
+  gdUndoRecord({
+    label: 'Deleted namespace ' + name,
+    undo: async () => {
+      const r = await authMutate('POST', API.api_entities_type('ns'),
+                                 { name, 'parent-id': parentId || '' });
+      const res = await _gdUndoResult(r);
+      if (res.ok && typeof initGraph === 'function') await initGraph();
+      return res;
+    },
+  });
+}
+
 // A rename: undo = write the old name again, while the fn still carries
 // the new one (someone else's rename in between is theirs to keep).
 function gdUndoRecordRename(fnId, oldName, newName) {
@@ -597,6 +633,8 @@ window.gdUndoLeaveDeleted = _gdUndoLeaveDeleted;
 window.gdUndoRecordCreatedFn = gdUndoRecordCreatedFn;
 window.gdUndoRecordCreatedNs = gdUndoRecordCreatedNs;
 window.gdUndoRecordDeletedFn = gdUndoRecordDeletedFn;
+window.gdUndoRecordNsRenamed = gdUndoRecordNsRenamed;
+window.gdUndoRecordDeletedNs = gdUndoRecordDeletedNs;
 window.gdUndoRecordRename = gdUndoRecordRename;
 window.gdUndoRecordNsMove = gdUndoRecordNsMove;
 window.gdUndoRecordBindingWrite = gdUndoRecordBindingWrite;

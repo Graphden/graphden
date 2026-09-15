@@ -249,6 +249,29 @@ function load(opts = {}) {
     assert(t.toasts.some((x) => x.kind === 'error' && /Nothing to revive/.test(x.msg)), 'the server\'s reason is shown');
   });
 
+  await test('namespace recorders: a rename PUTs the old name back; a delete re-creates it under its parent', async () => {
+    const calls = [];
+    const t = load({
+      lookups: { nsMap: new Map([['ns-1', { id: 'ns-1', name: 'new', 'parent-id': 'ns-0' }]]) },
+      authMutate: async (method, url, body) => { calls.push([method, url, body]); return { status: 200 }; },
+    });
+    t.ctx.gdUndoRecordNsRenamed('ns-1', 'old', 'new');
+    assert(t.ctx.gdUndoLastLabel() === 'Renamed namespace old → new', 'label');
+    assert(await t.ctx.gdUndoLast() === true, 'undone');
+    assert(calls[0][0] === 'PUT' && calls[0][1] === '/api/entities/ns/ns-1' && calls[0][2].name === 'old', 'PUT name=old: ' + JSON.stringify(calls[0]));
+    t.ctx.gdUndoRecordNsRenamed('ns-1', 'a', 'b');
+    t.ctx.lookups.nsMap.set('ns-1', { id: 'ns-1', name: 'c', 'parent-id': 'ns-0' });
+    assert(await t.ctx.gdUndoLast() === false, 'renamed again since → stale');
+    t.ctx.gdUndoRecordDeletedNs('gone', 'ns-0');
+    assert(t.ctx.gdUndoLastLabel() === 'Deleted namespace gone', 'label');
+    assert(await t.ctx.gdUndoLast() === true, 'undone');
+    assert(calls[1][0] === 'POST' && calls[1][1] === '/api/entities/ns' && calls[1][2].name === 'gone' && calls[1][2]['parent-id'] === 'ns-0',
+           'POST re-creates it under its parent: ' + JSON.stringify(calls[1]));
+    t.ctx.gdUndoRecordDeletedNs('root-ns', null);
+    assert(await t.ctx.gdUndoLast() === true, 'undone');
+    assert(calls[2][2]['parent-id'] === '', 'a root namespace re-creates with no parent');
+  });
+
   await test('ns-move recorder: undo PUTs the old namespace; root is the bare key', async () => {
     const puts = [];
     const t = load({

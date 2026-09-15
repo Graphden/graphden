@@ -202,6 +202,21 @@ branch re-uses that identity (`tombstoned-natural-key-id`) and the new
 version is the live one — "unbind, then bind the slot again" used to
 bounce off the index with a 409.
 
+**Undo and branches.** The editor's 30-second Undo (`editor-undo.js`) is a
+per-tab journal of inverse WRITES, and every inverse lands on the branch
+the tab is on — the same branch the gesture landed on, since a branch
+switch is a page load that empties the journal. So an undo never crosses
+branches, never touches a merge that already happened (a fn created on a
+feature branch, merged, then undone is tombstoned on the feature branch
+only — the target keeps its copy, as any branch write would), and on a
+merge-protected branch it is refused like any other write, with the
+reason shown. One consequence worth knowing: deleting an INHERITED
+entity on a branch tombstones it there, and undoing that writes a
+branch-local version from the tombstone's data — content-identical to
+the ancestor's, so `diff-branches` (data-only comparison) does not list
+it and a merge carries nothing new, but the branch now holds its own
+version row of that entity.
+
 The editor does NOT render this flat wire shape. It renders the
 GROUPED display model from
 `graphden.versioning.storage.diff-view/diff-branches-view` (exposed

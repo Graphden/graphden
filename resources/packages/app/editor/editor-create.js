@@ -408,9 +408,20 @@ function buildDeleteButton({ type, id, displayName, blockReason }) {
       if (!ensureAuth()) return;
       if (!confirm('Delete ' + (type === 'ns' ? 'namespace' : 'graph')
                    + ' "' + displayName + '"?')) return;
+      // What a 30-second Undo needs to put it back: a namespace's name +
+      // parent (it is re-created), a graph's qualified name (it is revived).
+      const nsRow = (type === 'ns' && lookups?.nsMap) ? lookups.nsMap.get(id) : null;
+      const fnRow = (type === 'fn' && lookups?.fnMap) ? lookups.fnMap.get(id) : null;
+      const fnQName = fnRow && typeof getQualifiedFnName === 'function' ? getQualifiedFnName(fnRow) : displayName;
       try {
         const response = await deleteEntity(type, id);
         if (response.status >= 200 && response.status < 300) {
+          if (type === 'ns' && typeof gdUndoRecordDeletedNs === 'function') {
+            gdUndoRecordDeletedNs(nsRow?.name || displayName, nsRow?.['parent-id'] || null);
+          } else if (type === 'fn' && typeof gdUndoRecordDeletedFn === 'function') {
+            gdUndoRecordDeletedFn(id, fnQName);
+            if (selectedFnId === id && typeof gdClearSelection === 'function') gdClearSelection();
+          }
           await initGraph();
         } else {
           const text = await response.text().catch(() => '');
@@ -619,6 +630,7 @@ function startNsRename(headerEl, nsId, nsPath) {
       }
       const response = await putEntity('ns', nsId, { name: newName });
       if (response.status >= 200 && response.status < 300) {
+        if (typeof gdUndoRecordNsRenamed === 'function') gdUndoRecordNsRenamed(nsId, currentName, newName);
         await initGraph();
       } else {
         throw new Error(await extractResponseError(response));

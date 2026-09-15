@@ -400,6 +400,15 @@ function writePrefsMirror(map) {
 
 let _prefs = readPrefsMirror();
 const _prefListeners = new Set();
+// Write ordering against a refresh in flight: every local write bumps the
+// generation and stamps its key; a refresh remembers the generation it
+// STARTED at and, when its response lands, keeps any key written since.
+// Without it a slow `GET /api/prefs` (the boot refresh, the marketplace's
+// after-install refresh) answered AFTER the user rebound a key and put the
+// server's older map back — the override vanished, and lesson 37's "Now
+// the keys" step never saw its (default: …) badge (a gate flake, twice).
+let _prefsGen = 0;
+const _prefWrittenGen = {};
 
 function gdPrefRead(key) { return _prefs?.[key] ?? null; }
 
@@ -417,6 +426,8 @@ function gdPrefNotify(key) {
 
 // Write a preference: apply now, mirror locally, persist server-side.
 async function gdPrefWrite(key, value) {
+  _prefsGen += 1;
+  _prefWrittenGen[key] = _prefsGen;
   _prefs = Object.assign({}, _prefs, { [key]: value });
   writePrefsMirror(_prefs);
   gdPrefApply(key);
@@ -436,13 +447,20 @@ async function gdPrefWrite(key, value) {
 async function gdPrefsRefresh() {
   const api = window.API;
   if (!api || typeof api.api_prefs !== 'string') return;
+  const startedAt = _prefsGen;
   try {
     const f = window.authFetch || fetch;
     const r = await f(api.api_prefs);
     if (!r.ok) return;
     const map = await r.json();
     if (!map || typeof map !== 'object') return;
-    _prefs = map;
+    // A key the user wrote while this request was in flight is newer than
+    // the answer — the local value stands.
+    const merged = Object.assign({}, map);
+    for (const [key, gen] of Object.entries(_prefWrittenGen)) {
+      if (gen > startedAt) merged[key] = _prefs?.[key] ?? null;
+    }
+    _prefs = merged;
     writePrefsMirror(_prefs);
     gdPrefApply('theme');
     gdPrefApply('keymap');

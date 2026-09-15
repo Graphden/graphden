@@ -7,6 +7,8 @@
 //   E. A literal bound on a slot → Undo → the slot is free again; an item
 //      appended to a list → Undo → the item is gone.
 //   F. ⋯ → Delete of a fn → Undo → the fn is back, reopened, bindings kept.
+//   G. The Explorer's namespace rename → Undo → old name; its trash on the
+//      namespace → Undo → re-created; its trash on a graph → Undo → revived.
 const {chromium} = require('playwright');
 const {assert, newContext, api, getEntities, deleteFnByName, waitForServerHealthy, BASE}
   = require('./edit-test-helpers');
@@ -18,6 +20,9 @@ const RENAMED = 'undo-renamed' + RUN_ID;
 const USER = 'undo-user' + RUN_ID;
 const SCALAR = 'undo-scalar' + RUN_ID;
 const LISTY = 'undo-listy' + RUN_ID;
+const NS = 'undons' + RUN_ID;
+const NS_RENAMED = 'undonsx' + RUN_ID;
+const NSFN = 'undo-nsfn' + RUN_ID;
 
 // The ids of `fnId`'s own bindings in an entities payload.
 function getEntitiesBindingIds(ents, fnId) {
@@ -25,9 +30,15 @@ function getEntitiesBindingIds(ents, fnId) {
 }
 
 async function cleanup(page) {
-  for (const n of [USER, RENAMED, CHILD, SCALAR, LISTY]) {
+  for (const n of [USER, RENAMED, CHILD, SCALAR, LISTY, NSFN]) {
     try { await deleteFnByName(page, n); } catch (_) {}
   }
+  try {
+    const ents = await getEntities(page);
+    for (const ns of (ents.namespaces || [])) {
+      if (ns.name === NS || ns.name === NS_RENAMED) await api(page, 'DELETE', '/api/entities/ns/' + ns.id);
+    }
+  } catch (_) {}
 }
 
 async function openRowActionsOn(page, ownerName) {
@@ -270,6 +281,81 @@ const undoToast = (page) => page.evaluate(() => {
     assert(await page.evaluate(() => selectedFnId) === scalar.id, 'the revived fn is reopened');
     console.log('  F: ⋯ → Delete → Undo → revived with its binding ✓');
 
+    // ------------------------------------------------------------ G
+    // The Explorer's own rename / trash on a namespace and on a graph.
+    await page.evaluate(() => { if (typeof clearSearch === 'function') clearSearch(); });
+    await api(page, 'POST', '/api/entities/ns', 'name=' + NS);
+    const nsRow = (await getEntities(page)).namespaces.find((n) => n.name === NS && !n['parent-id']);
+    assert(nsRow, 'the namespace was created');
+    await api(page, 'POST', '/api/entities/fn', 'name=' + NSFN + '&namespace-id=' + nsRow.id);
+    // Rows made over the API are not in the tree yet — a hash change
+    // does not reload it; a real navigation does.
+    await page.goto(BASE + '/?x=' + RUN_ID + '#' + NS + '.' + NSFN);
+    await page.waitForFunction((name) => (graphData?.fns || []).some((f) => f.name === name),
+      NSFN, {timeout: 60000, polling: 200});
+    await page.waitForFunction((n) => Array.from(document.querySelectorAll('.ns-header'))
+      .some((x) => x.querySelector('.ns-label')?.textContent.trim() === n), NS, {timeout: 30000, polling: 200});
+    const nsHeader = (name) => page.evaluate((n) => {
+      const h = Array.from(document.querySelectorAll('.ns-header'))
+        .find((x) => x.querySelector('.ns-label')?.textContent.trim() === n);
+      return h ? true : false;
+    }, name);
+    // Rename the namespace through its ✎ …
+    await page.evaluate((n) => {
+      const h = Array.from(document.querySelectorAll('.ns-header'))
+        .find((x) => x.querySelector('.ns-label')?.textContent.trim() === n);
+      h.querySelector('.ns-edit-btn').click();
+    }, NS);
+    await page.waitForSelector('.inline-input-row .inline-input', {timeout: 10000});
+    await page.fill('.inline-input-row .inline-input', NS_RENAMED);
+    await page.click('.inline-input-row .inline-btn-save');
+    await page.waitForFunction((n) => Array.from(document.querySelectorAll('.ns-header'))
+      .some((x) => x.querySelector('.ns-label')?.textContent.trim() === n), NS_RENAMED, {timeout: 30000, polling: 200});
+    toast = await undoToast(page);
+    assert(toast && toast.visible && toast.label === 'Renamed namespace ' + NS + ' → ' + NS_RENAMED,
+      'the toast offers to undo the namespace rename: ' + JSON.stringify(toast));
+    await page.click('#gd-undo-toast .gd-undo-toast-btn');
+    await page.waitForFunction((n) => Array.from(document.querySelectorAll('.ns-header'))
+      .some((x) => x.querySelector('.ns-label')?.textContent.trim() === n), NS, {timeout: 30000, polling: 200});
+    assert(await nsHeader(NS) && !(await nsHeader(NS_RENAMED)), 'the old namespace name is back');
+    console.log('  G1: namespace rename → Undo → old name ✓');
+
+    // … delete its graph through the Explorer's trash (the fn row's ✕) …
+    await page.evaluate((n) => {
+      const row = Array.from(document.querySelectorAll('#entity-list .entity-item'))
+        .find((e) => e.querySelector('.name')?.textContent.trim() === n);
+      row.querySelector('.ns-delete-btn').click();
+    }, NSFN);
+    await page.waitForFunction((n) => !(graphData?.fns || []).some((f) => f.name === n), NSFN, {timeout: 30000, polling: 200});
+    toast = await undoToast(page);
+    assert(toast && toast.visible && /^Deleted /.test(toast.label || ''),
+      'the toast offers to undo the Explorer delete: ' + JSON.stringify(toast));
+    await page.click('#gd-undo-toast .gd-undo-toast-btn');
+    await page.waitForFunction((n) => (graphData?.fns || []).some((f) => f.name === n), NSFN, {timeout: 30000, polling: 200});
+    console.log('  G2: Explorer trash on a graph → Undo → revived ✓');
+
+    // … then empty the namespace for real and delete IT; Undo re-creates it.
+    const nsFn = (await getEntities(page, NSFN)).fns.find((f) => f.name === NSFN);
+    await api(page, 'DELETE', '/api/entities/fn/' + nsFn.id);
+    await page.evaluate(() => { if (typeof initGraph === 'function') return initGraph(); });
+    await page.waitForFunction(() => !document.body.classList.contains('editor-busy'), null, {timeout: 30000, polling: 100});
+    await page.evaluate((n) => {
+      const h = Array.from(document.querySelectorAll('.ns-header'))
+        .find((x) => x.querySelector('.ns-label')?.textContent.trim() === n);
+      h.querySelector('.ns-delete-btn').click();
+    }, NS);
+    await page.waitForFunction((n) => !Array.from(document.querySelectorAll('.ns-header'))
+      .some((x) => x.querySelector('.ns-label')?.textContent.trim() === n), NS, {timeout: 30000, polling: 200});
+    toast = await undoToast(page);
+    assert(toast && toast.visible && toast.label === 'Deleted namespace ' + NS,
+      'the toast offers to undo the namespace delete: ' + JSON.stringify(toast));
+    await page.click('#gd-undo-toast .gd-undo-toast-btn');
+    await page.waitForFunction((n) => Array.from(document.querySelectorAll('.ns-header'))
+      .some((x) => x.querySelector('.ns-label')?.textContent.trim() === n), NS, {timeout: 30000, polling: 200});
+    assert((await getEntities(page)).namespaces.some((n) => n.name === NS && !n['parent-id']),
+      'the namespace is back');
+    console.log('  G3: namespace delete → Undo → re-created ✓');
+
     console.log('PASS');
   } catch (e) {
     console.error('FAIL:', e.message);
@@ -279,6 +365,10 @@ const undoToast = (page) => page.evaluate(() => {
         Array.from(document.querySelectorAll('.node-overlay')).map((o) =>
           [o.dataset.fnName, o.textContent.trim().slice(0, 30), !!o.querySelector('button.more-actions-trigger')]))));
       console.error('  hash: ' + await page.evaluate(() => location.hash));
+      console.error('  ns headers: ' + JSON.stringify(await page.evaluate(() =>
+        Array.from(document.querySelectorAll('.ns-header')).slice(0, 12).map((h) => h.querySelector('.ns-label')?.textContent.trim()))));
+      console.error('  entity rows: ' + JSON.stringify(await page.evaluate(() =>
+        Array.from(document.querySelectorAll('#entity-list .entity-item')).slice(0, 6).map((e) => [e.querySelector('.name')?.textContent.trim(), !!e.querySelector('.ns-delete-btn')]))));
     } catch (_) { /* best effort */ }
     process.exitCode = 1;
   } finally {

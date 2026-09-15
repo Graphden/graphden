@@ -23,9 +23,15 @@ function assert(cond, msg) {
   failures += 1;
   console.error('  ✗ ' + msg);
 }
-function test(name, fn) {
-  console.log(' ' + name);
-  try { fn(); } catch (e) { failures += 1; console.error('  ✗ threw: ' + e.message); }
+// Tests run in order; an async test (a refresh racing a write) is awaited
+// before the next one and before the summary.
+const _tests = [];
+function test(name, fn) { _tests.push({ name, fn }); }
+async function runTests() {
+  for (const { name, fn } of _tests) {
+    console.log(' ' + name);
+    try { await fn(); } catch (e) { failures += 1; console.error('  ✗ threw: ' + e.message); }
+  }
 }
 
 function styleStub() {
@@ -62,6 +68,31 @@ function makeCtx() {
   vm.runInContext(fs.readFileSync(path.join(EDITOR, 'editor-prefs.js'), 'utf8'), ctx, { filename: 'editor-prefs.js' });
   return { ctx, body, html, classes, store };
 }
+
+test('a prefs refresh in flight never clobbers a key written after it started', async () => {
+  // The boot / after-install refresh fetches the server's map; a rebind the
+  // user made while it was in flight is newer than the answer and stands.
+  const { ctx } = makeCtx();
+  let resolveFetch = null;
+  ctx.window.API = { api_prefs: '/api/prefs', api_prefs_key: (k) => '/api/prefs/' + k };
+  ctx.fetch = (url) => (url === '/api/prefs'
+    ? new Promise((res) => { resolveFetch = res; })
+    : Promise.resolve({ ok: true }));
+  const refresh = ctx.window.gdPrefsRefresh();          // started, answer pending
+  ctx.window.gdPrefWrite('keymap', { payload: { bindings: { 'graph-fit': { keys: 'f f', leader: true } } } });
+  resolveFetch({ ok: true, json: async () => ({ keymap: { payload: { bindings: {} } }, theme: { payload: { mode: 'dark' } } }) });
+  await refresh;
+  const keymap = ctx.window.gdPrefRead('keymap');
+  assert(keymap?.payload?.bindings?.['graph-fit']?.keys === 'f f',
+         'the local write survives the older answer: ' + JSON.stringify(keymap));
+  assert(ctx.window.gdPrefRead('theme')?.payload?.mode === 'dark',
+         'keys the user did not touch take the server\'s value');
+  // A refresh that STARTS after the write applies the server's map for it.
+  ctx.fetch = () => Promise.resolve({ ok: true, json: async () => ({ keymap: { payload: { bindings: {} } } }) });
+  await ctx.window.gdPrefsRefresh();
+  assert(!ctx.window.gdPrefRead('keymap')?.payload?.bindings?.['graph-fit'],
+         'a later refresh is the newer truth');
+});
 
 test('the sanitizer keeps allow-listed colour tokens and drops everything else', () => {
   const { ctx } = makeCtx();
@@ -133,5 +164,7 @@ test('the preference store mirrors to localStorage and applies on write', () => 
   assert(ctx.window.gdPrefRead('theme').payload.tokens['--gd-flow'] === '#123456', 'readable back');
 });
 
-console.log(failures ? `\n${failures} failed, ${passes} passed` : `\nall ${passes} passed`);
-process.exit(failures ? 1 : 0);
+runTests().then(() => {
+  console.log(failures ? `\n${failures} failed, ${passes} passed` : `\nall ${passes} passed`);
+  process.exit(failures ? 1 : 0);
+});

@@ -91,6 +91,7 @@ function load(opts = {}) {
     lookups: opts.lookups || null,
     initGraph: async () => { ctx.__inits = (ctx.__inits || 0) + 1; },
     selectFnByName: async (name) => { ctx.__selected = name; },
+    gdClearSelection: () => { ctx.__cleared = (ctx.__cleared || 0) + 1; },
   });
   vm.runInContext(source, ctx);
   return { ctx, clock, toasts, shortcuts, body, timers };
@@ -108,10 +109,27 @@ function load(opts = {}) {
     assert(toast && toast.classes.has('gd-undo-toast-visible'), 'the undo toast is visible');
     assert(toast.querySelector('.gd-undo-toast-label').textContent === 'Created foo',
            'the toast names the gesture');
-    assert(t.timers.some((x) => x.ms === 30000), 'the toast hides itself after the 30 s window');
+    assert(t.timers.some((x) => x.ms === 10000), 'the toast hides itself after 10 s (the entry outlives it)');
     const sc = t.shortcuts.find((s) => s.id === 'undo');
     assert(sc && sc.keys === 'u' && sc.leader !== false, 'Space u is registered behind the leader');
     assert(sc.when() === true, 'the binding is live while an entry is');
+    const chord = t.shortcuts.find((s) => s.id === 'undo-chord');
+    assert(chord && chord.keys === 'Mod+z' && chord.leader === false, 'Mod+z is registered as a bare chord');
+  });
+
+  await test('the toast holds under the pointer and resumes with the time left', () => {
+    const t = load();
+    t.ctx.gdUndoRecord({ label: 'Created foo', undo: async () => ({ ok: true }) });
+    const toast = t.body.children.find((c) => c.classes.has('gd-undo-toast'));
+    assert(t.timers.length === 1 && t.timers[0].ms === 10000, 'armed for 10 s');
+    t.clock.now += 4000;
+    for (const fn of (toast.listeners.mouseenter || [])) fn();
+    assert(t.timers.length === 1, 'pausing arms nothing new');
+    t.clock.now += 60000;
+    for (const fn of (toast.listeners.mouseleave || [])) fn();
+    assert(t.timers.length === 2 && t.timers[1].ms === 6000,
+           'leaving re-arms with the 6 s that were left: ' + JSON.stringify(t.timers.map((x) => x.ms)));
+    assert(toast.classes.has('gd-undo-toast-visible'), 'still visible while held');
   });
 
   await test('entries expire after 30 s', () => {
@@ -205,11 +223,10 @@ function load(opts = {}) {
     assert(t.ctx.__inits === 1 && t.ctx.__selected === 'core.parent',
            'the editor goes back to the parent the child was made from');
     // A fn made from the Explorer has no parent to return to: the selection
-    // is dropped (hash cleared) and the graph reloaded.
-    t.ctx.window.location = { hash: '#x' };
+    // is dropped outright and the graph reloaded.
     t.ctx.gdUndoRecordCreatedFn('foo', 'ns-a');
     assert(await t.ctx.gdUndoLast() === true, 'undone');
-    assert(t.ctx.window.location.hash === '' && t.ctx.__inits === 2, 'no parent → selection cleared + reload');
+    assert(t.ctx.__cleared === 1 && t.ctx.__inits === 2, 'no parent → selection cleared + reload');
     // A fn that is now in use: the server refuses, the entry stays.
     t.ctx.gdUndoRecordCreatedFn('foo', 'ns-b');
     assert(await t.ctx.gdUndoLast() === false, 'refused');

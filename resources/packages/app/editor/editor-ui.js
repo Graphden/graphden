@@ -82,6 +82,26 @@ function selectFn(fnId, updateHistory = true) {
   renderGraph(true);
 }
 
+// No selection at all — the state a fresh load without a hash shows: an
+// empty canvas, the inspector's placeholder, no `.selected` row. This is
+// where the editor goes after the SELECTED fn is deleted (⋯ → Delete, an
+// undone create with no parent to return to); before it, the dead fn's
+// card stayed on the canvas over a selection that no longer existed, and
+// an empty hash could not clear it (a hash that is already empty fires no
+// hashchange). `fetchBackendLayout` answers an empty layout for a null
+// selection, so the plain render removes every node.
+function gdClearSelection() {
+  selectedFnId = null;
+  expansionState.clear();
+  previewState.clear();
+  userMovedNodes.clear();
+  if (graphData && typeof updateEntityList === 'function') updateEntityList(graphData);
+  if (typeof gdInspectorRender === 'function') gdInspectorRender(null);
+  try { window.history.pushState(null, '', '#'); } catch (_) { /* file:// */ }
+  renderGraph(false);
+}
+window.gdClearSelection = gdClearSelection;
+
 /**
  * Select a function by name (simple `add` or qualified `core.arithmetic.add`).
  * Resolves against the loaded fn cache first, then — for a deep-link /

@@ -1592,8 +1592,12 @@
       (with-meta
         (ce/make-shape-callable free-names
                                 (fn [args]
-                                  (closure (translate-named-args
-                                             fn-id (or args {}) lookups)
-                                           ctx)))
+                                  ;; A traced frame per call, as `hof-wrap`'s
+                                  ;; callables record theirs.
+                                  (ce/traced-callable-call
+                                    fn-id nil
+                                    #(closure (translate-named-args
+                                                fn-id (or args {}) lookups)
+                                              ctx))))
         ;; Same identity tag `compile-eager/hof-wrap` puts on its callables.
         {:graphden.executor/fn-id fn-id}))))

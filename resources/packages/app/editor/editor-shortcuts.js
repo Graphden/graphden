@@ -180,7 +180,22 @@ function exactMatch(prefix) {
 function handleKey(e) {
   // Rule 1: someone already consumed this key (a dialog closing on Escape).
   if (e.defaultPrevented) return;
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.altKey) return;
+  // A CHORD — `keys: 'Mod+z'`, Mod = ⌘ on a Mac and Ctrl elsewhere — is the
+  // one modifier combination the registry honours, for the handful of
+  // bindings the whole world already knows (undo). Bare, never behind the
+  // leader; and inert while typing, where the browser's own Mod+z (undo in
+  // a text field) must keep working.
+  if (e.metaKey || e.ctrlKey) {
+    if (isTyping()) return;
+    const combo = 'mod+' + String(e.key).toLowerCase();
+    const hit = activeShortcuts().find((s) => !s.leader && String(s.keys).toLowerCase() === combo);
+    if (hit) {
+      e.preventDefault();
+      runShortcut(hit);
+    }
+    return;
+  }
 
   const key = e.key;
 
@@ -260,10 +275,23 @@ function ensureWhichKeyEl() {
   return el;
 }
 
+// A chord prints the way the platform spells it: `Mod+z` → ⌘Z on a Mac,
+// Ctrl+Z elsewhere.
+function isMacPlatform() {
+  const p = navigator.userAgentData?.platform || navigator.platform || '';
+  return /mac|iphone|ipad/i.test(p);
+}
+
 function keyCap(text) {
   const kbd = document.createElement('kbd');
   kbd.className = 'gd-key-cap';
-  kbd.textContent = text === ' ' ? 'Space' : text;
+  const t = String(text);
+  if (/^mod\+/i.test(t)) {
+    const k = t.slice(4).toUpperCase();
+    kbd.textContent = isMacPlatform() ? '⌘' + k : 'Ctrl+' + k;
+  } else {
+    kbd.textContent = t === ' ' ? 'Space' : t;
+  }
   return kbd;
 }
 

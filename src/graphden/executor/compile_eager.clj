@@ -714,6 +714,25 @@
     (thunk)))
 
 
+(defn traced-callable-call
+  "Run `(thunk)` as a traced frame of `fn-id` when tracing applies to it
+   (`active-path-trace`), bare otherwise — the seam for a CALLABLE handed
+   to a higher-order fn (`:map`'s `:func`, `:filter`'s `:pred`, a
+   handler). Such a call goes through no `:ref` edge — the HOF impl
+   invokes the wrapped closure directly — so before this seam a traced
+   `:map` over `:str-upper` lit `:map` and left `:str-upper` plain, and
+   the tree had no rows for the calls that did the work. Frames nest
+   under whatever frame is open when the HOF loops, so three items give
+   three rows under the mapping fn and a `3×` badge on its card. The
+   same gating and classification as a `:ref` frame; a secret-touching
+   callable hides like any other. Reached from `hof-wrap` (compile-time
+   callables) and `compile-runtime/make-single-arg-callable` (raw ids)."
+  [fn-id fn-name thunk]
+  (if-some [trace (active-path-trace fn-id)]
+    (path-traced-call trace fn-id fn-name thunk)
+    (thunk)))
+
+
 (defn- fresh-call
   "One fresh `(child fa ctx)` invocation — through the path-trace seam
    when capture applies to `ref-id`, bare otherwise. `ref-name` (the
@@ -969,21 +988,28 @@
              ;; (`:call-traced`) can persist the argument under the
              ;; callee's own free-arg name.
              :graphden.executor/lambda-params (vec lambda-params)}]
+    ;; Every invocation of the callable is a traced frame of the wrapped
+    ;; fn (`traced-callable-call`) — the HOF impl calls it directly, so no
+    ;; `:ref` seam would ever see it.
     (if (empty? translation)
       (fn [fa ctx]
         (with-meta
           (make-shape-callable lambda-params
                                (fn [lambda-args]
-                                 (child (if lambda-args (merge fa lambda-args) fa)
-                                        ctx)))
+                                 (traced-callable-call
+                                   ref-id nil
+                                   #(child (if lambda-args (merge fa lambda-args) fa)
+                                           ctx))))
           tag))
       (fn [fa ctx]
         (let [fa* (apply-hof-translation fa translation)]
           (with-meta
             (make-shape-callable lambda-params
                                  (fn [lambda-args]
-                                   (child (if lambda-args (merge fa* lambda-args) fa*)
-                                          ctx)))
+                                   (traced-callable-call
+                                     ref-id nil
+                                     #(child (if lambda-args (merge fa* lambda-args) fa*)
+                                             ctx))))
             tag))))))
 
 

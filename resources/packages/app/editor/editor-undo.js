@@ -42,21 +42,31 @@
 //     If the world moved on, the entry says so and steps aside.
 //
 // Surfaces: the `#gd-undo-toast` (bottom-centre, above the plain toast —
-// "Created foo · Undo · ×", role=status, focus untouched) and the leader
-// key `Space u` (registered here; the cheatsheet and the Space menu render
-// it while an entry is live). Recorders live at the write sites:
+// "Created foo · Undo · ×", role=status, focus untouched, shown for 10 s
+// and held under the pointer), the leader key `Space u` and the chord
+// Mod+z (both registered here; the cheatsheet and the Space menu render
+// them while an entry is live, for the whole 30 s window). Recorders live at the write sites:
 // editor-edit-modes-fn.js (extend / wrap / rename / namespace move),
 // editor-create.js (new graph / new namespace), editor-edit-modes.js (bind /
 // change / unbind a slot) and editor-edit-modes-seq.js (append / remove /
 // edit / move a list item) call the `gdUndoRecord*` builders below.
 
 const GD_UNDO_WINDOW_MS = 30000;
+// The toast shows for a fraction of the window: a dark bar sitting on the
+// canvas for the whole 30 s covered the very thing the reader was working
+// on (and stacked over the path panel and the tour's own toasts). The undo
+// itself stays live for the full window — `Space u` / Mod+z reach it after
+// the toast is gone — and the toast holds while the pointer or focus is on
+// it, so a reader who is reading it never sees it vanish mid-sentence.
+const GD_UNDO_TOAST_MS = 10000;
 
 // { label, undo: async () => {ok, error}, verify?: async () => string|null,
 //   at: ms }  — newest LAST.
 const _gdUndoJournal = [];
 let _gdUndoToastEl = null;
 let _gdUndoToastTimer = null;
+let _gdUndoToastLeft = 0;      // ms of display still owed when paused
+let _gdUndoToastShownAt = 0;
 let _gdUndoBusy = false;
 
 function _gdUndoNow() {
@@ -106,6 +116,14 @@ async function gdUndoLast() {
   _gdUndoHideToast();
   const toast = (msg, kind) => { if (typeof gdToast === 'function') gdToast(msg, kind); };
   try {
+    // The gesture's own follow-up (an extend's reload + select) may still
+    // be in flight — a chord lands fast. Let it settle first, so the
+    // inverse's reload is the LAST word and a stale subtree fetch cannot
+    // re-add the row the inverse just removed.
+    for (let i = 0; i < 50 && typeof document !== 'undefined'
+         && document.body?.classList?.contains('editor-busy'); i++) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
     if (typeof entry.verify === 'function') {
       let stale = null;
       try { stale = await entry.verify(); } catch (_) { stale = null; }
@@ -159,9 +177,37 @@ function _gdUndoEnsureToast() {
   el.appendChild(label);
   el.appendChild(btn);
   el.appendChild(close);
+  // Hold while the reader is on it (pointer or keyboard focus); the clock
+  // resumes with whatever was left when they leave.
+  el.addEventListener('mouseenter', _gdUndoToastPause);
+  el.addEventListener('focusin', _gdUndoToastPause);
+  el.addEventListener('mouseleave', _gdUndoToastResume);
+  el.addEventListener('focusout', (ev) => {
+    if (!el.contains(ev.relatedTarget)) _gdUndoToastResume();
+  });
   document.body.appendChild(el);
   _gdUndoToastEl = el;
   return el;
+}
+
+function _gdUndoToastArm(ms) {
+  if (_gdUndoToastTimer) clearTimeout(_gdUndoToastTimer);
+  _gdUndoToastShownAt = Date.now();
+  _gdUndoToastLeft = ms;
+  _gdUndoToastTimer = setTimeout(_gdUndoHideToast, ms);
+}
+
+function _gdUndoToastPause() {
+  if (!_gdUndoToastTimer) return;
+  clearTimeout(_gdUndoToastTimer);
+  _gdUndoToastTimer = null;
+  _gdUndoToastLeft = Math.max(1000, _gdUndoToastLeft - (Date.now() - _gdUndoToastShownAt));
+}
+
+function _gdUndoToastResume() {
+  if (_gdUndoToastTimer || !_gdUndoToastEl
+      || !_gdUndoToastEl.classList.contains('gd-undo-toast-visible')) return;
+  _gdUndoToastArm(_gdUndoToastLeft || 1000);
 }
 
 function _gdUndoShowToast(label) {
@@ -170,8 +216,7 @@ function _gdUndoShowToast(label) {
   el.querySelector('.gd-undo-toast-btn')
     .setAttribute('aria-label', 'Undo: ' + label);
   el.classList.add('gd-undo-toast-visible');
-  if (_gdUndoToastTimer) clearTimeout(_gdUndoToastTimer);
-  _gdUndoToastTimer = setTimeout(_gdUndoHideToast, GD_UNDO_WINDOW_MS);
+  _gdUndoToastArm(GD_UNDO_TOAST_MS);
 }
 
 function _gdUndoHideToast() {
@@ -226,7 +271,8 @@ async function _gdUndoLeaveDeleted(backTo) {
     await selectFnByName(backTo);
     return;
   }
-  try { if (typeof window !== 'undefined' && window.location) window.location.hash = ''; } catch (_) { /* ignore */ }
+  if (typeof gdClearSelection === 'function') gdClearSelection();
+  else { try { if (typeof window !== 'undefined' && window.location) window.location.hash = ''; } catch (_) { /* ignore */ } }
   if (typeof initGraph === 'function') await initGraph();
 }
 
@@ -505,6 +551,14 @@ function gdUndoRecordSeqMove(itemId, direction) {
 if (typeof registerShortcut === 'function') {
   registerShortcut({
     id: 'undo', keys: 'u', group: 'Edit',
+    description: 'Undo the last change (within 30 s)',
+    when: () => gdUndoAvailable(),
+    run: () => { gdUndoLast(); },
+  });
+  // The chord everyone reaches for first. Bare (not behind the leader), and
+  // the registry leaves it to the browser inside a text field.
+  registerShortcut({
+    id: 'undo-chord', keys: 'Mod+z', leader: false, group: 'Edit',
     description: 'Undo the last change (within 30 s)',
     when: () => gdUndoAvailable(),
     run: () => { gdUndoLast(); },

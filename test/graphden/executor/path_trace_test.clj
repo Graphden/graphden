@@ -36,6 +36,7 @@
 
 
 (def ^:private call-with-cache #'ce/call-with-cache)
+(def ^:private hof-wrap #'ce/hof-wrap)
 
 
 (def ^:private cache-key
@@ -604,3 +605,44 @@
         (is (= :s3cret (ce/traced-root-call root nil (fn [] :s3cret))))))
     (is (= [{:fn-id root :hidden :secret}] (mapv frame-of (entries trace)))
         "a secret-touching root records hidden — its value is never read")))
+
+
+;; -----------------------------------------------------------------------------
+;; traced-callable-call — a callable handed to a HOF records a frame per call
+;; -----------------------------------------------------------------------------
+
+(deftest hof-callable-records-a-frame-per-invocation-test
+  ;; `:map` over a wrapped fn calls the callable once per item, through no
+  ;; `:ref` edge. Each call is a frame of the wrapped fn, nested under the
+  ;; frame that was open (the mapping fn's own `:ref` frame).
+  (let [outer (random-uuid)
+        inner (random-uuid)
+        trace (ce/new-path-trace {:capture-values? true})
+        ;; The child is `(fn [fa ctx])`; the wrap yields `(fn [fa ctx]) → callable`.
+        wrap (hof-wrap (fn [fa _ctx] (str "up:" (get fa "item"))) ["item"] {} inner)]
+    (with-classes {}
+      (binding [cr/*path-trace* trace
+                ce/*traced-fn-ids* (atom ce/trace-all)]
+        (is (= ["up:a" "up:b" "up:c"]
+               (call-with-cache outer #{}
+                                (fn [fa ctx]
+                                  (let [callable (wrap fa ctx)]
+                                    (mapv callable ["a" "b" "c"])))
+                                {} (fresh-ctx))))))
+    (let [es (entries trace)
+          calls (filter #(= inner (:fn-id %)) es)
+          e-outer (first (filter #(= outer (:fn-id %)) es))]
+      (is (= 3 (count calls)) "one frame per item")
+      (is (every? #(false? (:cache-hit? %)) calls) "fresh calls, no cache")
+      (is (= ["up:a" "up:b" "up:c"] (mapv :value calls)) "each call's return is captured")
+      (is (every? #(= (:seq e-outer) (:parent-seq %)) calls)
+          "the calls nest under the mapping fn's frame"))))
+
+
+(deftest hof-callable-silent-when-untraced-test
+  (let [inner (random-uuid)
+        wrap (hof-wrap (fn [fa _ctx] (get fa "item")) ["item"] {} inner)
+        calls (atom 0)]
+    (with-redefs [ce/record-path-entry! (fn [& _] (swap! calls inc))]
+      (is (= ["a"] (mapv (wrap {} {}) ["a"]))))
+    (is (zero? @calls) "no trace bound → the callable runs bare")))

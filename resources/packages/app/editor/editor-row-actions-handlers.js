@@ -330,7 +330,14 @@ registerActionHandler('delete-fn', (btn, e, _host) => {
     try {
       const r = await deleteEntity('fn', fnEntity.id);
       if (r && r.status >= 200 && r.status < 300) {
-        try { window.location.hash = ''; } catch (_) {}
+        // Deleting the SELECTED fn drops the selection outright — an
+        // empty hash alone left its dead card on the canvas whenever the
+        // hash was already empty (no hashchange to route).
+        if (selectedFnId === fnEntity.id && typeof gdClearSelection === 'function') {
+          gdClearSelection();
+        } else {
+          try { window.location.hash = ''; } catch (_) {}
+        }
         if (typeof initGraph === 'function') await initGraph();
       } else {
         const text = r ? await r.text().catch(() => '') : '';

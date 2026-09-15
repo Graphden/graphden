@@ -166,6 +166,26 @@ const undoToast = (page) => page.evaluate(() => {
     assert(!(await getEntities(page, CHILD)).fns.find((f) => f.name === CHILD),
       'Space u undid the create once the reference was gone');
     console.log('  D: Space u ✓');
+    // …and the chord: Ctrl+Z undoes a fresh create from the canvas, while
+    // the same chord inside a text field is left to the browser. (The
+    // create undone above had no parent recorded — the test recorded it by
+    // hand — so the editor is on NO selection now: go back to add first.)
+    await page.goto(BASE + '/#core.arithmetic.add');
+    await page.waitForFunction(() => (graphData?.fns || []).some((f) => f.name === 'add'),
+      null, {timeout: 30000, polling: 100});
+    await extendVia(page, 'add', CHILD);
+    await page.waitForFunction(() => !document.body.classList.contains('editor-busy'),
+      null, {timeout: 30000, polling: 100});
+    await page.focus('#search-input');
+    await page.keyboard.press('Control+z');
+    await new Promise((r) => setTimeout(r, 800));
+    assert(await page.evaluate(() => gdUndoAvailable()) === true,
+      'Ctrl+Z inside a text field does not run the editor undo');
+    await page.evaluate(() => document.activeElement?.blur?.());
+    await page.keyboard.press('Control+z');
+    await page.waitForFunction((name) => !(graphData?.fns || []).some((f) => f.name === name),
+      CHILD, {timeout: 30000, polling: 200});
+    console.log('  D2: Ctrl+Z ✓');
 
     // ------------------------------------------------------------ E
     // Bindings and list items record their inverse too. A child of

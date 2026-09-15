@@ -169,9 +169,9 @@ In the editor:
    another namespace…**, and renamed via **⋯ → ✎ Rename** (both are
    always safe, callers included — everyone references the fn by
    identity, not by its name or namespace). Slipped — wrong name,
-   wrong parent? For 30 seconds a toast offers **Undo** (also
-   **Space, u**): it deletes the fn you just made, or writes the old
-   name back. It is an inverse write, not an erased one — the
+   wrong parent? A toast offers **Undo**, and for 30 seconds the undo
+   stays a keystroke away — **Ctrl+Z** (⌘Z on a Mac) or **Space, u**:
+   it deletes the fn you just made, or writes the old name back. It is an inverse write, not an erased one — the
    Versions tab keeps both — and it refuses, with the reason, once
    something else already depends on the slip.
 3. The editor opens `add-10`: its card shows TWO rows, `add-10` on

@@ -153,7 +153,7 @@ test('a key another handler consumed is left alone', () => {
 });
 
 
-test('modifiers are not ours', () => {
+test('a bare key never fires with a modifier held', () => {
   const { ctx, press, focusOn } = makeCtx();
   let ran = 0;
   ctx.window.registerShortcut({ id: 't-mod', keys: 'k', leader: false, group: 'T',
@@ -162,7 +162,29 @@ test('modifiers are not ours', () => {
   press('k', { metaKey: true });
   press('k', { ctrlKey: true });
   press('k', { altKey: true });
-  assert(ran === 0, 'Cmd/Ctrl/Alt combinations belong to the browser, ran ' + ran);
+  assert(ran === 0, 'Cmd/Ctrl/Alt + a bare key belongs to the browser, ran ' + ran);
+});
+
+
+test('a Mod+key chord fires on Ctrl or Cmd, never on Alt, never while typing', () => {
+  const { ctx, press, focusOn } = makeCtx();
+  let ran = 0;
+  ctx.window.registerShortcut({ id: 't-chord', keys: 'Mod+k', leader: false, group: 'T',
+                         description: 'probe', run: () => { ran += 1; } });
+  focusOn(el('div'));
+  press('k');
+  assert(ran === 0, 'the bare key is not the chord, ran ' + ran);
+  press('k', { ctrlKey: true });
+  assert(ran === 1, 'Ctrl+k fires it, ran ' + ran);
+  press('k', { metaKey: true });
+  assert(ran === 2, 'Cmd+k fires it too, ran ' + ran);
+  press('K', { ctrlKey: true });
+  assert(ran === 3, 'the key compares case-insensitively, ran ' + ran);
+  press('k', { altKey: true, ctrlKey: true });
+  assert(ran === 3, 'Alt in the chord is not ours, ran ' + ran);
+  focusOn(el('input'));
+  press('k', { ctrlKey: true });
+  assert(ran === 3, 'inside a text field the browser keeps its chord, ran ' + ran);
 });
 
 

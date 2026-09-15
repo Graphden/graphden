@@ -383,10 +383,10 @@ const {
     await page.waitForSelector('.execute-show-path-btn', {timeout: 60000});
     await page.evaluate(() => document.querySelector('.execute-show-path-btn').click());
     await waitTourTitle(page, 'Read the path', 150000);
-    // What the reader is told to see: the three fns made here lit, and
-    // the value transforming hop by hop on the chips. str-upper stays
-    // plain: :map runs it as a CALLABLE inside its loop, which the trace
-    // (references followed) does not record — the step says so.
+    // What the reader is told to see: every fn that ran lit — the three
+    // made here plus str-upper with its 3× call count (a callable run by
+    // :map is a traced frame per call) — and the value transforming hop
+    // by hop on the chips.
     const path = await page.evaluate(() => ({
       highlighted: Array.from(document.querySelectorAll('.node-overlay.path-highlighted'))
         .map((el) => el.dataset.fnName),
@@ -395,13 +395,12 @@ const {
       chips: Array.from(document.querySelectorAll('.path-value-badge'))
         .map((el) => el.textContent),
     }));
-    for (const name of ['tutorial-sentence', 'tutorial-shout', 'tutorial-words']) {
+    for (const name of ['tutorial-sentence', 'tutorial-shout', 'tutorial-words', 'str-upper']) {
       assert(path.highlighted.includes(name),
         name + ' is on the drawn path: ' + JSON.stringify(path.highlighted));
     }
-    assert(!path.highlighted.includes('str-upper'),
-      'str-upper (a callable run inside map, not a reference followed) stays plain — '
-      + 'the step text depends on it: ' + JSON.stringify(path.highlighted));
+    assert(path.badges.some(([n, b]) => n === 'str-upper' && /^3× /.test(b || '')),
+      'str-upper ran once per word — its badge counts 3×: ' + JSON.stringify(path.badges));
     assert(path.chips.includes('= "HELLO BIG WORLD"'),
       'the sentence prints on its card: ' + JSON.stringify(path.chips));
     assert(path.chips.some((c) => /^= value$/.test(c) || /HELLO/.test(c)),
@@ -417,8 +416,8 @@ const {
       values: Array.from(document.querySelectorAll('.trace-view-panel .trace-value'))
         .map((v) => v.textContent.replace(/\s+/g, ' ').trim().slice(0, 40)),
     }));
-    assert(tree.rows.length >= 3,
-      'the tree lists the root and its two hops: ' + JSON.stringify(tree.rows));
+    assert(tree.rows.length >= 6,
+      'the tree lists the root, two hops and three str-upper calls: ' + JSON.stringify(tree.rows));
     assert(tree.rows[0].includes('tutorial-sentence'),
       'the run\'s own fn is the tree\'s root: ' + JSON.stringify(tree.rows[0]));
     assert(tree.values.some((v) => /HELLO BIG WORLD/.test(v)),

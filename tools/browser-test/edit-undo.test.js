@@ -320,7 +320,25 @@ const undoToast = (page) => page.evaluate(() => {
     assert(await nsHeader(NS) && !(await nsHeader(NS_RENAMED)), 'the old namespace name is back');
     console.log('  G1: namespace rename → Undo → old name ✓');
 
-    // … delete its graph through the Explorer's trash (the fn row's ✕) …
+    // … delete its graph through the Explorer's trash (the fn row's ✕).
+    // The reload after the undo can leave the namespace folded (its fn
+    // leaves are lazy) — open it, then wait for the row and its trash.
+    const openNsRow = async () => {
+      const visible = await page.evaluate((n) => !!Array.from(document.querySelectorAll('#entity-list .entity-item'))
+        .find((e) => e.querySelector('.name')?.textContent.trim() === n)?.querySelector('.ns-delete-btn'), NSFN);
+      if (visible) return;
+      await page.evaluate((n) => {
+        const h = Array.from(document.querySelectorAll('.ns-header'))
+          .find((x) => x.querySelector('.ns-label')?.textContent.trim() === n);
+        h?.querySelector('.ns-label')?.click();
+      }, NS);
+    };
+    await page.waitForFunction((n) => Array.from(document.querySelectorAll('.ns-header'))
+      .some((x) => x.querySelector('.ns-label')?.textContent.trim() === n), NS, {timeout: 30000, polling: 200});
+    await openNsRow();
+    await page.waitForFunction((n) => !!Array.from(document.querySelectorAll('#entity-list .entity-item'))
+      .find((e) => e.querySelector('.name')?.textContent.trim() === n)?.querySelector('.ns-delete-btn'),
+    NSFN, {timeout: 30000, polling: 200});
     await page.evaluate((n) => {
       const row = Array.from(document.querySelectorAll('#entity-list .entity-item'))
         .find((e) => e.querySelector('.name')?.textContent.trim() === n);

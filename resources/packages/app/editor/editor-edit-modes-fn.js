@@ -17,23 +17,37 @@
 // is the legitimate place for new args / renames). After save, the
 // editor navigates to the new fn so the user can immediately add
 // `:as` renames + value bindings to extend its interface.
-// Which namespace should a fresh child land in? The parent's — when the
-// parent is the user's own fn (extending your module keeps the module
-// together). A PACKAGE (or foreign-org) parent is different: dropping
-// add-10 into core.arithmetic pollutes a module the user doesn't own and
-// hides the child from their workspace scope — default to the user's
-// last-used namespace instead, falling back to the parent's when there
-// is no memory yet. The popover shows the choice either way ("in <ns>").
+// Which namespace should a fresh child land in? The PARENT's, always
+// (decision 2026-09-15). The earlier rule — "a package parent defaults to
+// your last-used namespace" — read as "the first namespace in the list"
+// whenever the remembered one was stale, and a child that lands next to
+// its parent is the one place the reader looks for it first. The popover
+// shows the choice either way ("in <ns>"), with ↑ and + to leave it.
 function extendDefaultNsId(fn) {
-  const pkg = (typeof isPackageOwnedFn === 'function') && isPackageOwnedFn(fn.id);
-  const owned = (typeof graphdenIsFnOwned !== 'function') || graphdenIsFnOwned(fn);
-  if (!pkg && owned) return fn['namespace-id'] || null;
-  const last = (typeof gdLastUsedNs === 'function') ? gdLastUsedNs() : undefined;
-  return last === undefined ? (fn['namespace-id'] || null) : last;
+  return fn['namespace-id'] || null;
 }
 
-// The "(root)" + every-namespace option list, sorted by dotted path.
-function buildNsSelect(defaultNsId, ariaLabel) {
+// The parent namespace of `nsId` (null for a root namespace / the root).
+function nsParentIdOf(nsId) {
+  if (!nsId || typeof lookups === 'undefined' || !lookups?.nsMap) return null;
+  const ns = lookups.nsMap.get(nsId);
+  return ns?.['parent-id'] || null;
+}
+
+// The "in <namespace>" chooser: the "(root)" + every-namespace select,
+// sorted by dotted path, plus two ways OUT of the list — `↑` moves the
+// choice one level up (core.arithmetic → core → (root)), `+` opens an
+// inline row for a NEW sub-namespace under the current choice, typed as
+// a single segment (the prefix is shown, never retyped). The sub-namespace
+// is created on Save, right before the fn, by `chooser.resolve()`.
+// Inline rather than a nested picker: a nested popover fights the
+// inline-editor's outside-click dismissal.
+function buildNsChooser(defaultNsId, ariaLabel) {
+  const row = document.createElement('label');
+  row.className = 'extend-ns-row';
+  const cap = document.createElement('span');
+  cap.className = 'extend-ns-cap';
+  cap.textContent = 'in';
   const sel = document.createElement('select');
   sel.className = 'extend-ns-select';
   sel.setAttribute('aria-label', ariaLabel);
@@ -53,13 +67,99 @@ function buildNsSelect(defaultNsId, ariaLabel) {
     sel.appendChild(opt);
   }
   sel.value = defaultNsId || '';
-  return sel;
+  if (sel.value !== (defaultNsId || '')) sel.value = '';
+
+  const up = document.createElement('button');
+  up.type = 'button';
+  up.className = 'extend-ns-btn extend-ns-up';
+  up.textContent = '↑';
+  up.title = 'Up one level — the parent namespace';
+  up.setAttribute('aria-label', 'Up one level — the parent namespace');
+  const plus = document.createElement('button');
+  plus.type = 'button';
+  plus.className = 'extend-ns-btn extend-ns-plus';
+  plus.textContent = '+';
+  plus.title = 'New sub-namespace under this one';
+  plus.setAttribute('aria-label', 'New sub-namespace under this one');
+
+  // The inline "new sub-namespace" row: `<prefix>.` + one segment.
+  const sub = document.createElement('div');
+  sub.className = 'extend-ns-new';
+  sub.hidden = true;
+  const subCap = document.createElement('span');
+  subCap.className = 'extend-ns-cap';
+  subCap.textContent = 'new';
+  const subPrefix = document.createElement('span');
+  subPrefix.className = 'extend-ns-new-prefix';
+  const subInput = document.createElement('input');
+  subInput.type = 'text';
+  subInput.className = 'extend-ns-new-input';
+  subInput.placeholder = 'name';
+  subInput.setAttribute('aria-label', 'New sub-namespace name');
+  sub.appendChild(subCap);
+  sub.appendChild(subPrefix);
+  sub.appendChild(subInput);
+
+  const pathOf = (id) => (id && typeof lookups !== 'undefined' && lookups?.nsPathMap)
+    ? (lookups.nsPathMap.get(id) || '') : '';
+  const refresh = () => {
+    up.disabled = !sel.value;
+    subPrefix.textContent = sel.value ? pathOf(sel.value) + '.' : '';
+  };
+  sel.addEventListener('change', refresh);
+  up.addEventListener('click', () => {
+    sel.value = nsParentIdOf(sel.value) || '';
+    refresh();
+  });
+  plus.addEventListener('click', () => {
+    sub.hidden = !sub.hidden;
+    refresh();
+    if (!sub.hidden) subInput.focus();
+  });
+  // Enter in the segment field must not submit the popover with a
+  // half-typed name; it just returns to the fn-name field.
+  subInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); }
+  });
+  refresh();
+
+  row.appendChild(cap);
+  row.appendChild(sel);
+  row.appendChild(up);
+  row.appendChild(plus);
+
+  return {
+    row, sub, select: sel,
+    // The namespace the fn should land in, creating the pending
+    // sub-namespace first: `{ok, nsId}` or `{ok:false, error}`.
+    async resolve() {
+      const seg = sub.hidden ? '' : (subInput.value || '').trim();
+      if (!seg) return { ok: true, nsId: sel.value || '' };
+      if (seg.includes('.') || /\s/.test(seg)) {
+        return { ok: false, error: 'A sub-namespace name is one segment — no dots or spaces.' };
+      }
+      const parentId = sel.value || '';
+      const r = await postEntity('ns', { name: seg, 'parent-id': parentId });
+      if (!(r && r.status >= 200 && r.status < 300)) {
+        let error = 'Could not create the namespace.';
+        try {
+          if (typeof extractResponseError === 'function') error = await extractResponseError(r);
+        } catch (_) { /* generic */ }
+        return { ok: false, error };
+      }
+      const nsId = (typeof gdUndoFindNsId === 'function')
+        ? await gdUndoFindNsId(seg, parentId || null) : null;
+      if (!nsId) return { ok: false, error: 'Created ' + seg + ', but could not find it — reload and retry.' };
+      if (typeof gdUndoRecordCreatedNs === 'function') gdUndoRecordCreatedNs(seg, parentId || null);
+      return { ok: true, nsId };
+    },
+  };
 }
 
 function enterExtendEditMode(fn, anchorEl) {
   if (!fn) return;
   let pendingName = '';
-  let nsSelect = null;
+  let nsChooser = null;
   openInlineEditPopover({
     anchorEl,
     ariaLabel: 'Extend (create child fn)',
@@ -72,15 +172,9 @@ function enterExtendEditMode(fn, anchorEl) {
       input.type = 'text';
       input.className = 'arg-value-edit-input';
       input.placeholder = 'New fn name';
-      const nsRow = document.createElement('label');
-      nsRow.className = 'extend-ns-row';
-      const nsCap = document.createElement('span');
-      nsCap.className = 'extend-ns-cap';
-      nsCap.textContent = 'in';
-      nsSelect = buildNsSelect(extendDefaultNsId(fn), 'Namespace for the new fn');
-      nsRow.appendChild(nsCap);
-      nsRow.appendChild(nsSelect);
-      root.insertBefore(nsRow, root.firstChild);
+      nsChooser = buildNsChooser(extendDefaultNsId(fn), 'Namespace for the new fn');
+      root.insertBefore(nsChooser.sub, root.firstChild);
+      root.insertBefore(nsChooser.row, root.firstChild);
       root.insertBefore(input, root.firstChild);
       root.insertBefore(hint, root.firstChild);
       return input;
@@ -91,13 +185,20 @@ function enterExtendEditMode(fn, anchorEl) {
       const opKey = 'extend:' + fn.id + ':' + newName;
       if (typeof isOpInflight === 'function' && isOpInflight(opKey)) return false;
       pendingName = newName;
-      const nsId = nsSelect ? nsSelect.value : (fn['namespace-id'] || '');
-      const fields = { name: newName, 'parent-ids': fn.id, 'namespace-id': nsId };
       const work = async () => {
+        const ns = nsChooser ? await nsChooser.resolve()
+                             : { ok: true, nsId: fn['namespace-id'] || '' };
+        if (!ns.ok) return ns;
+        const nsId = ns.nsId;
+        const fields = { name: newName, 'parent-ids': fn.id, 'namespace-id': nsId };
         try {
           const r = await postEntity('fn', fields);
           if (r && r.status >= 200 && r.status < 300) {
             if (typeof gdRememberLastNs === 'function') gdRememberLastNs(nsId || null);
+            if (typeof gdUndoRecordCreatedFn === 'function') {
+              const backTo = (typeof getQualifiedFnName === 'function') ? getQualifiedFnName(fn) : fn.name;
+              gdUndoRecordCreatedFn(newName, nsId || null, backTo);
+            }
             return true;
           }
         } catch (_) {}
@@ -212,7 +313,7 @@ function enterWrapEditMode(fn, anchorEl) {
 
 function promptWrapDetails(fn, parent, anchorEl) {
   let pendingName = '';
-  let nsSelect = null;
+  let nsChooser = null;
   let slotSelect = null;
   let slotsReady = null;
   let takeOverBox = null;
@@ -260,14 +361,8 @@ function promptWrapDetails(fn, parent, anchorEl) {
         takeRow.appendChild(takeOverBox);
         takeRow.appendChild(takeCap);
       }
-      const nsRow = document.createElement('label');
-      nsRow.className = 'extend-ns-row';
-      const nsCap = document.createElement('span');
-      nsCap.className = 'extend-ns-cap';
-      nsCap.textContent = 'in';
-      nsSelect = buildNsSelect(extendDefaultNsId(fn), 'Namespace for the wrapper fn');
-      nsRow.appendChild(nsCap);
-      nsRow.appendChild(nsSelect);
+      nsChooser = buildNsChooser(extendDefaultNsId(fn), 'Namespace for the wrapper fn');
+      const nsRow = nsChooser.row;
       const slotRow = document.createElement('label');
       slotRow.className = 'extend-ns-row';
       const slotCap = document.createElement('span');
@@ -305,6 +400,7 @@ function promptWrapDetails(fn, parent, anchorEl) {
       }).catch(() => { slotSelect.replaceChildren(); return []; });
       root.insertBefore(slotRow, root.firstChild);
       root.insertBefore(nsRow, root.firstChild);
+      nsRow.insertAdjacentElement('afterend', nsChooser.sub);
       if (takeRow) root.insertBefore(takeRow, root.firstChild);
       root.insertBefore(input, root.firstChild);
       root.insertBefore(hint, root.firstChild);
@@ -320,7 +416,9 @@ function promptWrapDetails(fn, parent, anchorEl) {
       const opKey = 'wrap:' + fn.id + ':' + newName;
       if (typeof isOpInflight === 'function' && isOpInflight(opKey)) return false;
       pendingName = newName;
-      const nsId = nsSelect ? nsSelect.value : '';
+      const nsPick = nsChooser ? await nsChooser.resolve() : { ok: true, nsId: '' };
+      if (!nsPick.ok) return nsPick;
+      const nsId = nsPick.nsId;
       const work = async () => {
         try {
           if (takeOver) {
@@ -375,6 +473,33 @@ function promptWrapDetails(fn, parent, anchorEl) {
                                        'ref-fn-id': fn.id });
           if (b?.ok) {
             if (typeof gdRememberLastNs === 'function') gdRememberLastNs(nsId || null);
+            // Undo = drop the wrapper; a take-over also gives the original
+            // its name back once the wrapper (its only new referrer) is gone.
+            if (typeof gdUndoRecord === 'function') {
+              const originalName = fn.name;
+              gdUndoRecord({
+                label: 'Wrapped ' + originalName + ' in ' + newName,
+                undo: async () => {
+                  const id = await gdUndoFindFnId(newName, nsId || null);
+                  if (!id) return { ok: false, error: 'the wrapper is already gone' };
+                  const d = await authMutate('DELETE', API.api_entities_type_id('fn', id));
+                  if (!(d && d.status >= 200 && d.status < 300)) {
+                    let error = 'the server refused';
+                    try { error = await extractResponseError(d); } catch (_) { /* generic */ }
+                    return { ok: false, error };
+                  }
+                  if (takeOver) {
+                    await authMutate('PUT', API.api_entities_type_id('fn', fn.id),
+                                     { name: originalName }).catch(() => {});
+                  }
+                  const backTo = (typeof getQualifiedFnName === 'function')
+                    ? getQualifiedFnName({ ...fn, name: originalName }) : originalName;
+                  if (typeof gdUndoLeaveDeleted === 'function') await gdUndoLeaveDeleted(backTo);
+                  else if (typeof initGraph === 'function') await initGraph();
+                  return { ok: true };
+                },
+              });
+            }
             return true;
           }
         } catch (_) {}
@@ -421,7 +546,12 @@ function enterFnRenameEditMode(fn, anchorEl) {
         const r = await authMutate('PUT',
                                    API.api_entities_type_id('fn', fn.id),
                                    { name: newName });
-        if (r?.ok) return true;
+        if (r?.ok) {
+          if (newName !== fn.name && typeof gdUndoRecordRename === 'function') {
+            gdUndoRecordRename(fn.id, fn.name, newName);
+          }
+          return true;
+        }
       } catch (_) {}
       return false;
     },
@@ -621,6 +751,9 @@ function enterNamespaceMoveEditMode(fn, anchorEl) {
                                    body);
         if (r?.ok) {
           if (typeof gdRememberLastNs === 'function') gdRememberLastNs(picked.id || null);
+          if (typeof gdUndoRecordNsMove === 'function') {
+            gdUndoRecordNsMove(fn.id, fn.name, fn['namespace-id'] || null, picked.id || null);
+          }
           if (typeof initGraph === 'function') initGraph();
         }
       } catch (_) {}

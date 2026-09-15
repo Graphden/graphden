@@ -2230,6 +2230,36 @@ body.gd-no-execute .execute-cancel-btn {
   border: 1px solid var(--card-border); border-radius: 6px;
 }
 .extend-ns-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The two ways out of the list: ↑ (parent namespace) and + (a new
+   sub-namespace under the choice, typed inline as one segment). */
+.extend-ns-btn {
+  flex: none;
+  width: 24px; height: 24px;
+  font-size: 0.8125rem; line-height: 1;
+  background: var(--card-bg); color: var(--fg);
+  border: 1px solid var(--card-border); border-radius: 6px;
+  cursor: pointer;
+}
+.extend-ns-btn:hover { background: var(--hover-bg); }
+.extend-ns-btn:disabled { opacity: 0.4; cursor: default; }
+.extend-ns-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.extend-ns-new {
+  display: flex; align-items: center; gap: 6px;
+  padding: 2px 0 4px;
+}
+.extend-ns-new-prefix {
+  font-family: var(--mono); font-size: 0.75rem; color: var(--muted-fg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 45%;
+}
+.extend-ns-new-input {
+  flex: 1; min-width: 0;
+  font-family: var(--mono); font-size: 0.75rem;
+  padding: 3px 4px;
+  background: var(--card-bg); color: var(--fg);
+  border: 1px solid var(--card-border); border-radius: 6px;
+}
+.extend-ns-new-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* Live-validation status line below the input. ✓ / ✗ + short
    message; mirrors what the backend would say on save. */
@@ -4529,6 +4559,51 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   text-align: left;
   line-height: 1.45;
 }
+
+/* The Undo toast (editor-undo.js) — "Created foo · Undo · ×". Sits just
+   above the plain toast so a "Step complete ✓" never paints over the one
+   button the reader may want next; interactive, so pointer events stay on. */
+.gd-undo-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 64px;
+  transform: translateX(-50%) translateY(8px);
+  z-index: 10010;
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 8px 6px 14px;
+  border-radius: 8px;
+  background: var(--gd-ink);
+  color: var(--gd-paper);
+  font-size: 0.7812rem;
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s, transform 0.18s;
+}
+.gd-undo-toast-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+.gd-undo-toast-btn {
+  font: inherit; font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--gd-paper);
+  background: transparent; color: var(--gd-paper);
+  cursor: pointer;
+}
+.gd-undo-toast-btn:hover { background: var(--gd-paper); color: var(--gd-ink); }
+.gd-undo-toast-btn:focus-visible,
+.gd-undo-toast-close:focus-visible { outline: 2px solid var(--gd-paper); outline-offset: 1px; }
+.gd-undo-toast-close {
+  font: inherit; font-size: 1rem; line-height: 1;
+  padding: 2px 6px;
+  border: 0; border-radius: 6px;
+  background: transparent; color: var(--gd-paper);
+  opacity: 0.7; cursor: pointer;
+}
+.gd-undo-toast-close:hover { opacity: 1; }
 
 /* "internal N" — the per-namespace collapse for `_`-private and
    anonymous fns in the explorer tree (editor-sidebar.js). Styled as a

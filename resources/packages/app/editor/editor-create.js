@@ -568,8 +568,14 @@ function buildCreateRow(indent) {
         : { name, 'namespace-id': activeCreate.parentNsId || '' };
       const response = await postEntity(createType, fields);
       if (response.status >= 200 && response.status < 300) {
+        const parentNsId = activeCreate.parentNsId || null;
         if (createType !== 'ns' && typeof gdRememberLastNs === 'function') {
-          gdRememberLastNs(activeCreate.parentNsId || null);
+          gdRememberLastNs(parentNsId);
+        }
+        if (createType === 'ns' && typeof gdUndoRecordCreatedNs === 'function') {
+          gdUndoRecordCreatedNs(name, parentNsId);
+        } else if (createType === 'fn' && typeof gdUndoRecordCreatedFn === 'function') {
+          gdUndoRecordCreatedFn(name, parentNsId);
         }
         activeCreate = null;
         await initGraph();

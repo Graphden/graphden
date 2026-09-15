@@ -181,7 +181,7 @@
                :target "input[placeholder=\"Filter...\"]"
                :check {:kind "selected" :name "add"}}
               {:title "Extend it"
-               :body "Click the [[⋯]] button on the add row, choose [[Extend]], type exactly `add-10`. The [[in]] line shows which namespace the child will live in — extending someone else's fn defaults to YOUR last-used namespace, and you can change it right there. Then [[Save]]: a child fn whose :parent is add; the editor opens it."
+               :body "Click the [[⋯]] button on the add row, choose [[Extend]], type exactly `add-10`. The [[in]] line shows which namespace the child will live in — the parent's, by default; [[↑]] goes one level up, [[+]] makes a new sub-namespace right there. Then [[Save]]: a child fn whose :parent is add; the editor opens it. (Wrong name or wrong parent? A toast offers [[Undo]] for 30 seconds — so does Space, u.)"
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "add-10" :parent "add"}

@@ -203,6 +203,10 @@
                   "packages/app/editor/editor-tree-keys.js"
                   "packages/app/editor/editor-expansion.js"
                   "packages/app/editor/editor-ui.js"
+                  ;; The 30-second Undo journal + toast — after editor-ui
+                  ;; (gdToast) and the shortcut registry; the write sites
+                  ;; that record into it call it through window at runtime.
+                  "packages/app/editor/editor-undo.js"
                   "packages/app/editor/editor-render.js"
                   ;; Account section on the Settings surface (the merged /account
                   ;; page) — loads before shell so gdRenderSettings can call

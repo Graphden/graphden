@@ -22,13 +22,21 @@ const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
 const CHILD_OF_PKG = 'extns-child-pkg' + RUN_ID;
 const OWN_FN = 'extns-own' + RUN_ID;
 const CHILD_OF_OWN = 'extns-child-own' + RUN_ID;
+const SUB_NS = 'extnssub' + RUN_ID;
+const CHILD_IN_SUB = 'extns-child-sub' + RUN_ID;
 
 const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 
 async function cleanup(page) {
-  for (const n of [CHILD_OF_OWN, CHILD_OF_PKG, OWN_FN]) {
+  for (const n of [CHILD_IN_SUB, CHILD_OF_OWN, CHILD_OF_PKG, OWN_FN]) {
     try { await deleteFnByName(page, n); } catch (_) {}
   }
+  // The sub-namespace phase D creates — emptied above, so the delete lands.
+  try {
+    const ents = await getEntities(page);
+    const sub = (ents.namespaces || []).find((n) => n.name === SUB_NS);
+    if (sub) await api(page, 'DELETE', '/api/entities/ns/' + sub.id);
+  } catch (_) {}
 }
 
 // Open the Extend popover on the CARD of `ownerName` (must be the
@@ -72,23 +80,43 @@ async function openExtendPopover(page, ownerName) {
     assert(appNs && coreNs, 'baseline namespaces resolved (:app + :core)');
 
     // ================================================================
-    // Phase A: package parent + remembered ns → child lands in MY ns.
+    // Phase A: package parent → the child defaults to the PARENT's ns
+    // (core.arithmetic), whatever namespace was used last.
     // ================================================================
     await page.goto(BASE + '/#core.arithmetic.add');
     await page.waitForFunction(
       () => typeof graphData !== 'undefined'
         && (graphData?.fns || []).some((f) => f.name === 'add'),
       null, {timeout: 30000, polling: 100});
-    // Remember :app as the last-used namespace, as if the user had
-    // just created something there.
+    // A remembered last-used namespace must NOT win over the parent's.
     await page.evaluate((nsId) => gdRememberLastNs(nsId), appNs.id);
+    const arithNs = (await getEntities(page)).namespaces
+      .find((n) => n.name === 'arithmetic' && n['parent-id'] === coreNs.id);
+    assert(arithNs, 'core.arithmetic resolved');
 
     await openExtendPopover(page, 'add');
     const pkgDefault = await page.evaluate(() =>
       document.querySelector('.arg-value-edit-popover .extend-ns-select').value);
-    assert(pkgDefault === appNs.id,
-      'package parent defaults to the LAST-USED ns, not core.arithmetic'
+    assert(pkgDefault === arithNs.id,
+      "package parent defaults to the PARENT's ns (core.arithmetic), not the last-used one"
       + ' (got ' + pkgDefault + ')');
+    // ↑ walks up the path: core.arithmetic → core → (root), then disables.
+    await page.click('.arg-value-edit-popover .extend-ns-up');
+    const afterUp = await page.evaluate(() => ({
+      value: document.querySelector('.arg-value-edit-popover .extend-ns-select').value,
+      disabled: document.querySelector('.arg-value-edit-popover .extend-ns-up').disabled,
+    }));
+    assert(afterUp.value === coreNs.id && !afterUp.disabled,
+      '↑ moves the choice to the parent namespace (core): ' + JSON.stringify(afterUp));
+    await page.click('.arg-value-edit-popover .extend-ns-up');
+    const atRoot = await page.evaluate(() => ({
+      value: document.querySelector('.arg-value-edit-popover .extend-ns-select').value,
+      disabled: document.querySelector('.arg-value-edit-popover .extend-ns-up').disabled,
+    }));
+    assert(atRoot.value === '' && atRoot.disabled,
+      '↑ reaches (root) and disables: ' + JSON.stringify(atRoot));
+    // The test's child goes to :app, chosen by hand — the select still works.
+    await page.selectOption('.arg-value-edit-popover .extend-ns-select', appNs.id);
     await page.evaluate((name) => {
       const pop = document.querySelector('.arg-value-edit-popover');
       const input = pop.querySelector('.arg-value-edit-input');
@@ -104,7 +132,7 @@ async function openExtendPopover(page, ownerName) {
       (f) => f.name === CHILD_OF_PKG);
     assert(pkgChild && pkgChild['namespace-id'] === appNs.id,
       'child of the package fn landed in :app');
-    console.log('  phase A: package-parent extend defaulted to :app ✓');
+    console.log("  phase A: package-parent extend defaulted to the parent's ns; ↑ walks up ✓");
 
     // ================================================================
     // Phase B: own parent → child defaults to the PARENT's ns.
@@ -135,6 +163,42 @@ async function openExtendPopover(page, ownerName) {
       (graphData?.fns || []).some((f) => f.name === name),
       CHILD_OF_OWN, {timeout: 30000, polling: 200});
     console.log('  phase B: own-parent extend defaulted to :core ✓');
+
+    // ================================================================
+    // Phase D: `+` creates a NEW sub-namespace under the choice, typed
+    // as one segment, and the child lands in it — one Save.
+    // ================================================================
+    await page.goto(BASE + '/#core.' + OWN_FN);
+    await page.waitForFunction((name) =>
+      (graphData?.fns || []).some((f) => f.name === name),
+      OWN_FN, {timeout: 30000, polling: 200});
+    await openExtendPopover(page, OWN_FN);
+    await page.click('.arg-value-edit-popover .extend-ns-plus');
+    const subRow = await page.evaluate(() => ({
+      hidden: document.querySelector('.arg-value-edit-popover .extend-ns-new').hidden,
+      prefix: document.querySelector('.arg-value-edit-popover .extend-ns-new-prefix').textContent,
+    }));
+    assert(!subRow.hidden && subRow.prefix === 'core.',
+      '+ opens the sub-namespace row with the parent path as prefix: ' + JSON.stringify(subRow));
+    await page.fill('.arg-value-edit-popover .extend-ns-new-input', SUB_NS);
+    await page.evaluate((name) => {
+      const pop = document.querySelector('.arg-value-edit-popover');
+      const input = pop.querySelector('.arg-value-edit-input');
+      input.value = name;
+      input.dispatchEvent(new Event('input', {bubbles: true}));
+      Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
+        .find((b) => b.textContent.trim() === 'Save').click();
+    }, CHILD_IN_SUB);
+    await page.waitForFunction((name) =>
+      (graphData?.fns || []).some((f) => f.name === name),
+      CHILD_IN_SUB, {timeout: 30000, polling: 200});
+    const all = await getEntities(page, CHILD_IN_SUB);
+    const subNs = (all.namespaces || []).find((n) => n.name === SUB_NS && n['parent-id'] === coreNs.id);
+    const subChild = (all.fns || []).find((f) => f.name === CHILD_IN_SUB);
+    assert(subNs, 'the sub-namespace core.' + SUB_NS + ' was created');
+    assert(subChild && subChild['namespace-id'] === subNs.id,
+      'the child landed in the new sub-namespace');
+    console.log('  phase D: + created core.' + SUB_NS + ' and the child landed there ✓');
 
     // ================================================================
     // Phase C: OWN_FN now has a child — its ⋯ → Namespace menu must

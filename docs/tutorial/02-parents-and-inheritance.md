@@ -160,16 +160,20 @@ In the editor:
     :args  {:nums [10]}}
    ```
 
-   The popover's **in** line picks the child's namespace. Extending
-   your own fn defaults to the parent's namespace (the module
-   stays together); extending a *platform* fn defaults to your
-   last-used namespace — a child of `:add` belongs to your
-   project, not to `core.arithmetic`. Change it right there if
-   you want it elsewhere; a fn can also be moved later via
-   **⋯ → Namespace → Move to another namespace…**, and renamed via
-   **⋯ → ✎ Rename** (both are always safe, callers included —
-   everyone references the fn by identity, not by its name or
-   namespace).
+   The popover's **in** line picks the child's namespace — the
+   parent's by default, so a child lands next to what it extends.
+   **↑** moves the choice one level up (`core.arithmetic` → `core`
+   → root); **+** opens a one-segment field for a NEW sub-namespace
+   under the current choice, created together with the fn on Save.
+   A fn can also be moved later via **⋯ → Namespace → Move to
+   another namespace…**, and renamed via **⋯ → ✎ Rename** (both are
+   always safe, callers included — everyone references the fn by
+   identity, not by its name or namespace). Slipped — wrong name,
+   wrong parent? For 30 seconds a toast offers **Undo** (also
+   **Space, u**): it deletes the fn you just made, or writes the old
+   name back. It is an inverse write, not an erased one — the
+   Versions tab keeps both — and it refuses, with the reason, once
+   something else already depends on the slip.
 3. The editor opens `add-10`: its card shows TWO rows, `add-10` on
    top and `add` below it. `add-10` inherited `add`'s `:nums` slot —
    a sequence. Click the `+` placeholder on `:nums`, choose

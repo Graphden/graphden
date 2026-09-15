@@ -431,6 +431,19 @@ node tour-spotlight-report.js /tmp/audit 15   # one lesson, flags: AMBIGUOUS×N,
 `AMBIGUOUS×N` means the ring landed on "the first match" — pin the step's
 target to the card its text names (`.node-overlay[data-fn-name="…"] …`).
 
+**The gate runs this audit on every lesson walk** (`run-edit-tests.sh` sets
+the directory per attempt and reads back the attempts that passed) and reds
+the run on a **NEVER-RINGED** step: one that names a target (its own, or a
+`:targets` stage) and had no element on screen for it at any sample of the
+walk — the reader would sit through that step with no ring, and the walk
+itself cannot notice (it clicks by its own selectors). A step that starts
+ringless because its target lives in a menu the reader opens is fine — it is
+ringed the moment the menu opens. AMBIGUOUS / POPOVER-COVERS-TARGET stay
+report-only. Under the audit `waitTourTitle` settles like a reader (target on
+screen + one tour tick) before the walk acts, so a step whose action removes
+its target still gets its ring sampled. `GRAPHDEN_TOUR_AUDIT_GATE=0` keeps the
+report and drops the red.
+
 ## Architecture Overview
 
 Classical Clojure monorepo. Top namespace: `graphden`. Where a module exposes an `interface.clj` (today: `executor/`, `system/`, `executor_runtime/`) that is its public API; most modules have none yet and are reached through their `core.clj` / named namespaces directly. The boundary is a convention, not lint-enforced.

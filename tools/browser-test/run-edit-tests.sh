@@ -66,6 +66,18 @@ fi
 SWEEP_DELAY="${SWEEP_DELAY:-2}"
 URL="${GRAPHDEN_URL:-http://localhost:9002}"
 
+# Every lesson walk in this run doubles as a SPOTLIGHT AUDIT
+# (`installSpotlightAudit` in tutorial-tour-helpers.js): each attempt of each
+# file writes to its own directory under AUDIT_ROOT, and only the attempt that
+# PASSED is read back — a failed attempt stops mid-lesson and would report the
+# steps it never reached as never ringed. The verdict runs after the loop
+# (`tour-spotlight-report.js --gate`): a step whose target was never on
+# screen for the whole walk is a red, because the reader would sit through
+# that step with no ring and the walk itself cannot notice (it clicks by its
+# own selectors). GRAPHDEN_TOUR_AUDIT_GATE=0 keeps the report, drops the red.
+AUDIT_ROOT="${GRAPHDEN_TOUR_AUDIT:-$(mktemp -d /tmp/tour-audit.XXXXXX)}"
+AUDIT_DIRS=""
+
 # Health probe — block until the executor responds 200. Used between
 # tests because docker's `restart: unless-stopped` policy bounces the
 # container mid-sweep on cumulative load; without this, every test
@@ -332,9 +344,12 @@ for f in $FILES; do
       wait_for_server || break
     fi
     attempt_out="$(mktemp)"
+    GRAPHDEN_TOUR_AUDIT="$AUDIT_ROOT/${f%.test.js}.attempt$attempt"
+    export GRAPHDEN_TOUR_AUDIT
     if timeout -k 5 "${PER_TEST_TIMEOUT:-300}" node "$f" >"$attempt_out" 2>&1; then
       cat "$attempt_out"; rm -f "$attempt_out"
       passed=1
+      [ -d "$GRAPHDEN_TOUR_AUDIT" ] && AUDIT_DIRS="$AUDIT_DIRS $GRAPHDEN_TOUR_AUDIT"
       break
     else
       # Capture node's exit code HERE (inside the else) — after the `fi` it
@@ -498,8 +513,27 @@ if [ -n "$STRICT_FLAKES$STRICT_LEAKS" ]; then
   fi
 fi
 
+# --- the spotlight verdict over every lesson walk that passed ---
+TOUR_AUDIT_NOTE=""
+if [ -n "$AUDIT_DIRS" ]; then
+  echo
+  echo "── tour spotlight audit ──"
+  # shellcheck disable=SC2086  # AUDIT_DIRS is a space-separated list of paths
+  if node tour-spotlight-report.js --gate $AUDIT_DIRS; then
+    TOUR_AUDIT_NOTE="every ringed step had its target on screen"
+  elif [ "${GRAPHDEN_TOUR_AUDIT_GATE:-1}" = "0" ]; then
+    TOUR_AUDIT_NOTE="never-ringed step(s) above — REPORT-ONLY (GRAPHDEN_TOUR_AUDIT_GATE=0)"
+  else
+    TOUR_AUDIT_NOTE="never-ringed step(s) above — counted as a FAILURE"
+    FAILED_NAMES="$FAILED_NAMES tour-spotlight(never-ringed-step)"
+    WORST=1
+  fi
+  echo "  full report: node tour-spotlight-report.js $AUDIT_ROOT/<file>.attemptN"
+fi
+
 echo "============================================================"
 echo "edit suite: $PASS pass / $FAIL fail / $((PASS+FAIL)) total"
+[ -n "$TOUR_AUDIT_NOTE" ] && echo "  tour spotlight: $TOUR_AUDIT_NOTE"
 if [ -n "$FLAKED" ]; then
   if [ "${WTQ_FLAKE_STRICT:-0}" = "1" ] && [ "$DEGRADED" != 1 ]; then
     echo "  FLAKED (failed once, passed on retry — counted as FAILURES):$FLAKED" >&2

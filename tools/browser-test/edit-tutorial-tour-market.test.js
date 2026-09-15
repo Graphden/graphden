@@ -72,7 +72,14 @@ const {waitTourTitle, clickTourButton, finishAndDelete} = require('./tutorial-to
     console.log('  step 6: graph-fit rebound');
 
     // --- Browse the Marketplace: Themes tab with the my-board card.
-    await page.evaluate(() => window.gdMarketOpen({kind: 'theme'}));
+    // The reader's path: open the surface (it lands on Packages), then click
+    // the Themes tab the step rings — opening straight on the theme kind
+    // would pass the step's check at the very instant its target appeared,
+    // and the spotlight audit would rightly report the tab as never ringed.
+    await page.evaluate(() => window.gdShellSurface('market'));
+    await page.waitForSelector('#gd-market-root .mk-tab[data-mk-tab="theme"]', {timeout: 30000});
+    await new Promise((r) => setTimeout(r, 700));
+    await page.click('#gd-market-root .mk-tab[data-mk-tab="theme"]');
     await waitTourTitle(page, 'Review it', 60000);
     console.log('  step 7: marketplace lists my-board');
 

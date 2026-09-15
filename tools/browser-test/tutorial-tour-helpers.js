@@ -194,12 +194,16 @@ function tourTitle(page) {
 // element under the ring's centre, how many visible elements the selector
 // matched (an ambiguous selector rings "the first one"), the ring rect and
 // whether the step popover covers its own target. Written to
-// `<dir>/spotlight-audit.json`; `node tour-spotlight-report.js <dir>`
-// prints it per step. With `GRAPHDEN_TOUR_AUDIT_SHOTS=1` a screenshot is
-// taken at every change too. This is how the 2026-09-15 lesson-15 audit
-// found the ⋯ ring on the wrong card — the e2e walk drives by selector and
-// never notices where the ring is; a person cannot miss it.
+// `<dir>/spotlight-audit-<pid>-<page>.json` — one file per page, so every
+// walk of a run can share one directory; `node tour-spotlight-report.js
+// <dir>` prints it per step, `--gate` reds a step whose target was never
+// ringed. With `GRAPHDEN_TOUR_AUDIT_SHOTS=1` a screenshot is taken at every
+// change too. This is how the 2026-09-15 lesson-15 audit found the ⋯ ring
+// on the wrong card — the e2e walk drives by selector and never notices
+// where the ring is; a person cannot miss it. run-edit-tests.sh sets the
+// directory for every file it runs, so the gate audits every lesson walk.
 const _tourAuditState = new WeakMap();
+let _tourAuditPages = 0;
 
 async function installSpotlightAudit(page) {
   const dir = process.env.GRAPHDEN_TOUR_AUDIT;
@@ -207,12 +211,13 @@ async function installSpotlightAudit(page) {
   const fs = require('node:fs');
   const path = require('node:path');
   fs.mkdirSync(dir, {recursive: true});
-  const state = {records: [], n: 0};
+  _tourAuditPages += 1;
+  const state = {records: [], n: 0,
+    file: path.join(dir, 'spotlight-audit-' + process.pid + '-' + _tourAuditPages + '.json')};
   _tourAuditState.set(page, state);
   const flush = () => {
     try {
-      fs.writeFileSync(path.join(dir, 'spotlight-audit.json'),
-        JSON.stringify(state.records, null, 1));
+      fs.writeFileSync(state.file, JSON.stringify(state.records, null, 1));
     } catch (_) { /* best effort */ }
   };
   await page.exposeFunction('__gdTourAuditSink', async (rec) => {
@@ -301,6 +306,22 @@ async function waitTourTitle(page, title, timeoutMs) {
     const t = document.querySelector('#gd-tour-pop .gd-tour-title');
     return t && t.textContent.trim() === expected;
   }, title, {timeout: timeoutMs || 120000, polling: 150});
+  // Under the audit, settle like a reader: a walk acts within milliseconds
+  // of the title, and on a step whose action REMOVES its target (Uninstall,
+  // Revert, the diff chip's ×, a Save that closes its popover) the ring
+  // never holds the two samples the audit records — the 2026-09-16 baseline
+  // flagged seven such steps, every one of them fine for a person. Wait for
+  // the step's effective target to be on screen (bounded — a target that
+  // never comes is exactly what the gate should then report), then one tour
+  // tick so the sampler sees the ring on it.
+  if (process.env.GRAPHDEN_TOUR_AUDIT) {
+    await page.waitForFunction(() => {
+      if (typeof _tourStep !== 'function' || typeof _tourEffTarget !== 'function') return true;
+      const eff = _tourEffTarget(_tourStep());
+      return !eff || !!document.querySelector(eff);
+    }, null, {timeout: 5000, polling: 100}).catch(() => {});
+    await new Promise((r) => setTimeout(r, 650));
+  }
 }
 
 

@@ -412,7 +412,11 @@ runtime recompile and force a slower cold boot. See docs/OPERATIONS.md
 The Docker image runs the jar with these JVM settings:
 
 - `-XX:+UseContainerSupport` — respect container CPU/memory limits
-- `-XX:MaxRAMPercentage=75.0` — use 75% of container memory for heap
+- `-XX:MaxRAMPercentage=60.0` — use 60% of container memory for heap. The
+  other 40% is for what the JVM keeps outside the heap (metaspace, code
+  cache, threads — ~700 MB on a busy executor); at 75% the two together
+  exceeded a 3 GB container and the cgroup OOM-killer SIGKILLed the JVM,
+  which `ExitOnOutOfMemoryError` cannot catch
 - `-XX:+ExitOnOutOfMemoryError` — exit cleanly on heap OOM so the
   restart policy brings up a fresh JVM
 - `-XX:+HeapDumpOnOutOfMemoryError` / `-XX:HeapDumpPath=/tmp/heap-dump.hprof`

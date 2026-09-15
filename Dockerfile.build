@@ -44,5 +44,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
 # Run the application
 CMD ["java", \
      "-XX:+UseContainerSupport", \
-     "-XX:MaxRAMPercentage=75.0", \
+     "-XX:MaxRAMPercentage=60.0", \
      "-jar", "/app/executor-server.jar"]

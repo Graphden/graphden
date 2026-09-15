@@ -310,8 +310,8 @@ instance_env() {
   export GD_PORT_USERPG=$((base + 4))
   export GD_PORT_BAO=$((base + 5))
   # Bound the throwaway instance. Without a container limit the JVM's
-  # MaxRAMPercentage=75 measures against the HOST, so every agent instance
-  # would size its heap for 75% of the whole box and they would fight. The
+  # MaxRAMPercentage=60 measures against the HOST, so every agent instance
+  # would size its heap for 60% of the whole box and they would fight. The
   # executor boots and serves in well under 1 GB.
   export GD_MEM_LIMIT="${GD_MEM_LIMIT:-2g}"
 }

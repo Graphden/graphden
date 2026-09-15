@@ -192,7 +192,14 @@
      transparently within ≤ 1 cascade-cap step.
 
    - `--memory 3g` — bounds the JVM container HARD. With
-     `MaxRAMPercentage=75` (Dockerfile) the JVM gets ~2.25GB heap.
+     `MaxRAMPercentage=60` (Dockerfile) the JVM gets ~1.8GB heap and the
+     remaining ~1.2GB holds its non-heap footprint (metaspace, code cache,
+     threads — ~700MB by the end of the suite). At the old 75% the heap
+     ceiling plus that footprint EXCEEDED the cap: the cgroup OOM-killer
+     SIGKILLed the JVM late in the suite (2026-09-15, 2948MB of 3072MB on
+     the heartbeat, then `2 startup(s), 0 Terminating` in the post-mortem)
+     and one tour file failed on ERR_EMPTY_RESPONSE — the flake that was
+     'always green on retry' because the fresh JVM starts small.
      COUNTERINTUITIVELY, a TIGHTER cap is better, not looser. The
      dev host has 11GB RAM total but runs in parallel: e2e
      testcontainer JVM + Chrome headless (Playwright) + the

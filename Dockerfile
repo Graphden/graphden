@@ -89,6 +89,20 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=90s --retries=3 \
 # while the LIVE SET was 125 MB. Not a leak — collectable the whole time, and
 # nothing ever asked. `docker-compose.yml` now sets the limit; that bounds it.
 #
+# WHY 60 AND NOT 75: the percentage only sizes the HEAP, and the container
+# limit also has to hold everything the JVM keeps OUTSIDE it — metaspace for
+# every compiled fn class, the JIT code cache, thread stacks, GC bookkeeping.
+# Measured on the e2e stack (3 GB cap, 2026-09-15): once G1 had grown the heap
+# to its 2304 MB ceiling the container sat at 2948 MB, i.e. ~700 MB non-heap,
+# and the next burst tipped it over — the kernel's cgroup OOM-killer SIGKILLed
+# the JVM (no Java-side OOM, no heap dump, no Terminating line: 2 startups,
+# 0 terminations in the post-mortem) and the suite failed on ERR_EMPTY_RESPONSE.
+# 75% leaves 25% for non-heap, and 25% of 3 GB is exactly the ~700 MB it needs
+# — no margin. 60% leaves 40%: 1843 MB heap (2x the ~870 MB live set the suite
+# reaches) and ~1.2 GB for the rest. `ExitOnOutOfMemoryError` only helps when
+# the JVM itself runs out of HEAP; a cgroup kill never reaches it, so the heap
+# ceiling has to be set so the cgroup is never the thing that fires.
+#
 # WHAT DOES NOT WORK — do not re-add it: `-XX:G1PeriodicGCInterval`. It is the
 # documented answer (JEP 346, "promptly return unused memory"), and on this
 # service it fires exactly never. The periodic GC is skipped if ANY collection
@@ -108,7 +122,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=90s --retries=3 \
 # would be solving. Rejected.
 CMD ["java", \
      "-XX:+UseContainerSupport", \
-     "-XX:MaxRAMPercentage=75.0", \
+     "-XX:MaxRAMPercentage=60.0", \
      "-XX:+ExitOnOutOfMemoryError", \
      "-XX:+HeapDumpOnOutOfMemoryError", \
      "-XX:HeapDumpPath=/tmp/heap-dump.hprof", \

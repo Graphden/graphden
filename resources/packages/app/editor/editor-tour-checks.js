@@ -184,6 +184,27 @@ function _tourCheckPasses(check) {
                     && String(b.value) === String(check.value));
         });
       }
+      case 'expanded': {
+        // "the card of fn `name` is unfolded to at least `depth`" — read
+        // from the COMMITTED expansion (`expansionState`), never the hover
+        // preview: pointing at a parent row already renders the cards it
+        // would reveal, so a `dom` check on the revealed card passed while
+        // the reader was only reading the row, and the card folded away
+        // under them the moment the cursor left. The overlay carries the
+        // node id the expansion state is keyed by; several copies of the
+        // fn may share a canvas, any unfolded one counts.
+        if (typeof expansionState === 'undefined' || !expansionState) return false;
+        const depth = check.depth || 1;
+        const sel = '.node-overlay[data-fn-name="' + check.name + '"]';
+        return Array.from(document.querySelectorAll(sel)).some((ov) => {
+          const spec = ov.dataset?.nodeId ? expansionState.get(ov.dataset.nodeId) : null;
+          if (!spec) return false;
+          const full = spec.fullDepth || 0;
+          // A partial expansion at the next level counts for that level.
+          return full >= depth
+            || (full === depth - 1 && (spec.partialFns?.size || 0) > 0);
+        });
+      }
       case 'dom':
         return _tourDomVisible(check.selector);
       case 'dom-absent':

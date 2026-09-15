@@ -77,10 +77,18 @@ function openLiteralVsRefChooser({ anchorEl, ariaLabel, litLabel, refLabel,
 // (`slotRichType`'s `[:list T]` elem). It types the "New from
 // template…" picker so e.g. a hiccup :children chain offers the
 // component library.
+// `opts.wholeSlotArg` (optional) — the synth arg of the slot itself,
+// passed for an EMPTY list's first `+` only. It adds "Bind fn-ref (whole
+// list)": the slot takes one fn's RESULT as the entire list — `:coll` of
+// `:map` fed by a `:str-split`, the pipeline shape every fns.edn
+// composes with `:coll :other-fn` and the canvas could not express at
+// all (its `+` only ever appended items). Offered on an empty list only:
+// once items exist the list IS the items.
 async function appendSequenceItem(fnId, anchorEl, expectedType, opts) {
   if (!fnId) return;
   const position = (opts && typeof opts.position === 'number') ? opts.position : null;
   const elemType = (opts && opts.elemType !== undefined) ? opts.elemType : null;
+  const wholeSlotArg = (opts && position === null) ? (opts.wholeSlotArg || null) : null;
   const verb = position === null ? 'Append' : 'Insert';
   closeInlineEdit();
   // Two-step UX mirroring free-arg binding: pick "Literal" / "Fn-ref" /
@@ -106,12 +114,28 @@ async function appendSequenceItem(fnId, anchorEl, expectedType, opts) {
         });
       }
     },
-    extraButtons: [{
-      label: 'New from template…',
-      handler: () => promptTemplateInstanceInsert(fnId, anchorEl,
-                                                  expectedType || elemType,
-                                                  position)
-    }]
+    extraButtons: [
+      ...(wholeSlotArg ? [{
+        label: 'Bind fn-ref (whole list)',
+        handler: () => {
+          if (typeof openFnPicker !== 'function') return;
+          openFnPicker({
+            anchorEl: anchorEl || document.body,
+            excludeIds: [fnId],
+            expectedType: (typeof expectedSlotType === 'function')
+              ? expectedSlotType(wholeSlotArg) : undefined,
+            onPick: async (fn) => {
+              if (typeof saveArgRef === 'function') await saveArgRef(wholeSlotArg, fn.id);
+            }
+          });
+        }
+      }] : []),
+      {
+        label: 'New from template…',
+        handler: () => promptTemplateInstanceInsert(fnId, anchorEl,
+                                                    expectedType || elemType,
+                                                    position)
+      }]
   });
 }
 
@@ -256,6 +280,7 @@ async function postSequenceAppend(fnId, body) {
       body: JSON.stringify(body)
     });
     if (r?.ok) {
+      if (typeof gdUndoRecordSeqAppend === 'function') gdUndoRecordSeqAppend(fnId, body);
       // Sequence edits change binding-list-item rows, not fn structure/
       // value-kinds — the lighter `loadGraphData` (index + subtree +
       // rich-types) reflects them without the `initGraph` graph re-render.
@@ -277,6 +302,7 @@ async function moveSequenceItem(itemId, direction) {
       body: JSON.stringify({ direction: direction })
     });
     if (r?.ok) {
+      if (typeof gdUndoRecordSeqMove === 'function') gdUndoRecordSeqMove(itemId, direction);
       if (typeof loadGraphData === 'function') loadGraphData();
       return true;
     }
@@ -286,10 +312,12 @@ async function moveSequenceItem(itemId, direction) {
 
 async function removeSequenceItem(itemId) {
   if (!itemId) return false;
+  const prev = lookups?.itemByItemId ? (lookups.itemByItemId.get(itemId) || null) : null;
   try {
     const r = await authMutate('DELETE',
                                API.api_sequence_item_item_id(itemId));
     if (r?.ok) {
+      if (prev && typeof gdUndoRecordSeqRemoved === 'function') gdUndoRecordSeqRemoved(prev);
       if (typeof loadGraphData === 'function') loadGraphData();
       return true;
     }

@@ -36,11 +36,15 @@ function test(name, fn) {
 function checkIn(state, check) {
   const labels = state.edgeLabels || [];
   const domHits = state.dom || {};
+  // `state.overlays` — canvas cards by fn name: `{name: [nodeId, …]}`, each
+  // rendered as a `.node-overlay[data-fn-name=…]` carrying its node id.
+  const overlays = state.overlays || {};
   const ctx = vm.createContext({
     console,
     graphData: state.graphData || null,
     lookups: state.lookups || null,
     selectedFnId: state.selectedFnId || null,
+    expansionState: state.expansionState || new Map(),
     window: { location: { search: state.search || '' } },
     URLSearchParams,
     document: {
@@ -52,6 +56,10 @@ function checkIn(state, check) {
       querySelectorAll: (sel) => {
         if (sel === '.edge-label-overlay span') {
           return labels.map((t) => ({ textContent: t }));
+        }
+        const card = /^\.node-overlay\[data-fn-name="([^"]+)"\]$/.exec(sel);
+        if (card) {
+          return (overlays[card[1]] || []).map((nodeId) => ({ dataset: { nodeId } }));
         }
         const hit = domHits[sel];
         if (!hit) return [];
@@ -164,6 +172,26 @@ test('bindings-count counts BOUND slots, order-independent', () => {
          'one bound slot meets count 1');
   assert(checkIn(s, { kind: 'bindings-count', name: 'greet', count: 2 }) === false,
          'the unbound one is not counted');
+});
+
+test('expanded reads the COMMITTED expansion of the named card, not the preview', () => {
+  const s = withFn();
+  s.overlays = { greet: ['fn-root_fn-1'] };
+  assert(checkIn(s, { kind: 'expanded', name: 'greet', depth: 1 }) === false,
+         'a card with no committed expansion is folded');
+  s.expansionState = new Map([['fn-root_fn-1', { fullDepth: 1, partialFns: new Set() }]]);
+  assert(checkIn(s, { kind: 'expanded', name: 'greet', depth: 1 }) === true,
+         'fullDepth 1 unfolds depth 1');
+  assert(checkIn(s, { kind: 'expanded', name: 'greet', depth: 2 }) === false,
+         'depth 2 asks for more than is unfolded');
+  s.expansionState = new Map([['fn-root_fn-1', { fullDepth: 0, partialFns: new Set(['fn-parent']) }]]);
+  assert(checkIn(s, { kind: 'expanded', name: 'greet', depth: 1 }) === true,
+         'a partial expansion at the next level counts for that level');
+  s.expansionState = new Map([['some-other-node', { fullDepth: 3, partialFns: new Set() }]]);
+  assert(checkIn(s, { kind: 'expanded', name: 'greet', depth: 1 }) === false,
+         'another card\'s expansion does not count');
+  assert(checkIn(s, { kind: 'expanded', name: 'nobody', depth: 1 }) === false,
+         'no such card on the canvas');
 });
 
 test('list-items counts the ITEMS under a sequence slot, not the binding', () => {

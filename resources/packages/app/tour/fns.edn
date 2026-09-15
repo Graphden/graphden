@@ -53,6 +53,9 @@
 ;;                                                    rename-only binding has no
 ;;                                                    value for the other checks
 ;;                                                    to see)
+;;                      {:kind "expanded" :name N :depth D}   N's card is unfolded
+;;                                                    to depth D (committed,
+;;                                                    not the hover preview)
 ;;                      {:kind "selected" :name N}            fn selected on canvas
 ;;                      {:kind "on-branch" :name B}           "main" = default
 ;;                      {:kind "dom" :selector SEL}           element appears
@@ -893,64 +896,88 @@
              :title "Tracing a run"
              :steps
              [{:title "What actually ran?"
-               :body "A result tells you the answer; a trace tells you the path. Ask for one at run time and the editor draws it back onto the canvas — which fns ran, how long each took, and what each one returned. You will build a two-hop chain — a literal, upper-cased, then counted — so the path has values worth reading."
+               :body "A result tells you the answer; a trace tells you the path. Ask for one at run time and the editor draws it back onto the canvas — which fns ran, how often, how long each took, and what each one returned. You will build a small pipeline — split a sentence into words, upper-case every word, join it back — so each hop does real work worth tracing."
                :target nil
                :check {:kind "manual"}}
-              {:title "Start with a transformation"
-               :body "Type `str-upper` in the filter, click the [[str-upper]] row, then [[⋯]] → [[Extend]] and name it `tutorial-upper` — [[Save]]."
+              {:title "Split the sentence"
+               :body "Type `str-split` in the filter, click the [[str-split]] row, then [[⋯]] → [[Extend]] and name it `tutorial-words` — [[Save]]."
                :target "input[placeholder=\"Filter...\"]"
                :targets ["input[placeholder=\"Filter...\"]" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
-               :check {:kind "fn-parent" :name "tutorial-upper" :parent "str-upper"}
-               :creates {:type "fn" :name "tutorial-upper"}}
-              {:title "Give it an input"
-               :body "On the tutorial-upper card click the [[+]] on :string, choose [[Bind literal]], type `hello world` — then [[Save]]."
+               :check {:kind "fn-parent" :name "tutorial-words" :parent "str-split"}
+               :creates {:type "fn" :name "tutorial-words"}}
+              {:title "Give it text"
+               :body "Click the [[+]] on :string, choose [[Bind literal]], type `hello,big,world` — [[Save]]. Then the [[+]] on :separator: [[Bind literal]], type `,` — [[Save]]. A sentence in, three words out."
                :target ".placeholder-binder"
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
-               :check {:kind "binding-bound" :name "tutorial-upper" :slot "string"}}
-              {:title "Now the second hop"
-               :body "A trace shows REFERENCES followed during a run, so the second fn will call the first. Type `str-len` in the filter, click the [[str-len]] row, then [[⋯]] → [[Extend]] and name it `tutorial-len` — [[Save]]. It returns a NUMBER: this hop changes the value's type, not just its letters."
+               :check {:kind "bindings-count" :name "tutorial-words" :count 2}}
+              {:title "Transform every word"
+               :body "map applies a function to each item of a list. Type `map` in the filter, click the [[map]] row, then [[⋯]] → [[Extend]] and name it `tutorial-shout` — [[Save]]."
                :target "input[placeholder=\"Filter...\"]"
                :targets ["input[placeholder=\"Filter...\"]" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
-               :check {:kind "fn-parent" :name "tutorial-len" :parent "str-len"}
-               :creates {:type "fn" :name "tutorial-len"}}
+               :check {:kind "fn-parent" :name "tutorial-shout" :parent "map"}
+               :creates {:type "fn" :name "tutorial-shout"}}
               ;; Selection gate before the bind.
-              {:title "tutorial-len is open"
-               :body "Its :string slot is free — and this time you will fill it with another FN rather than a literal."
+              {:title "tutorial-shout is open"
+               :body "Two free slots: :coll, the list to walk, and :func, the function to apply."
                :target nil
-               :check {:kind "selected" :name "tutorial-len"}}
-              {:title "Chain them"
-               :body "Click the [[+]] on :string, choose [[Bind fn-ref]], type `tutorial` in the picker and click the [[tutorial-upper]] row. The canvas draws the edge: len now calls upper, and upper reads the literal — three nodes, two hops."
+               :check {:kind "selected" :name "tutorial-shout"}}
+              {:title "Feed it and pick the function"
+               :body "Click the [[+]] on :coll and choose [[Bind fn-ref (whole list)]] — the list is not typed in, it is the RESULT of another fn — then pick [[tutorial-words]]. Now the [[+]] on :func opens the picker directly: pick [[str-upper]]."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-upper\"]"]
-               :check {:kind "bindings-count" :name "tutorial-len" :count 1}}
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".fn-picker-popover"]
+               :check {:kind "bindings-count" :name "tutorial-shout" :count 2}}
+              {:title "Join it back"
+               :body "Type `str-join` in the filter, click the [[str-join]] row, then [[⋯]] → [[Extend]] and name it `tutorial-sentence` — [[Save]]."
+               :target "input[placeholder=\"Filter...\"]"
+               :targets ["input[placeholder=\"Filter...\"]" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "fn-parent" :name "tutorial-sentence" :parent "str-join"}
+               :creates {:type "fn" :name "tutorial-sentence"}}
+              ;; Selection gate before the bind.
+              {:title "tutorial-sentence is open"
+               :body ":coll is free again, and :separator is optional — it joins with nothing unless you say otherwise."
+               :target nil
+               :check {:kind "selected" :name "tutorial-sentence"}}
+              {:title "Close the pipeline"
+               :body "[[+]] on :coll → [[Bind fn-ref (whole list)]] → [[tutorial-shout]]. Then the [[+]] on :separator: [[Bind literal]], type a single space — [[Save]]. Three fns, two references: text goes in, becomes a list, comes back as text."
+               :target ".placeholder-binder"
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".fn-picker-popover" ".arg-value-edit-popover"]
+               :check {:kind "bindings-count" :name "tutorial-sentence" :count 2}}
               {:title "Peek inside without leaving"
-               :body "tutorial-upper sits on this canvas as a closed card — names are boundaries. To read it WITHOUT jumping: click [[⋯]] on the tutorial-upper card, choose [[👁 Peek bindings]] — its slot table opens in a floating panel, straight from the same server render the Inspector uses."
-               :target ".node-overlay[data-fn-name=\"tutorial-upper\"] button.more-actions-trigger"
-               :targets [".node-overlay[data-fn-name=\"tutorial-upper\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"peek-fn\"]" ".fn-peek-panel"]
+               :body "tutorial-shout sits on this canvas as a closed card — names are boundaries. To read it WITHOUT jumping: click [[⋯]] on the tutorial-shout card, choose [[👁 Peek bindings]] — its slot table opens in a floating panel, straight from the same server render the Inspector uses."
+               :target ".node-overlay[data-fn-name=\"tutorial-shout\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-shout\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"peek-fn\"]" ".fn-peek-panel"]
                :check {:kind "dom" :selector ".fn-peek-panel"}}
-              {:title "Close the peek"
-               :body "[[Open]] in its header would jump to tutorial-upper; you want to stay. Press [[Esc]] (or the [[×]]) — the panel closes and the canvas is untouched."
-               :target ".fn-peek-panel"
-               :check {:kind "dom-absent" :selector ".fn-peek-panel"}}
+              {:title "Unfold the inner hop"
+               :body "Press [[Esc]] to close the peek. The canvas draws one hop of references: tutorial-words and str-upper live inside tutorial-shout's card. Click the [[map]] row on the tutorial-shout card — it unfolds one level, and both appear with their edges. Now the whole pipeline is on the canvas."
+               :target ".node-overlay[data-fn-name=\"tutorial-shout\"] .ancestor-line[data-level=\"1\"]"
+               :check {:kind "expanded" :name "tutorial-shout" :depth 1}}
               {:title "Run it with a trace"
-               :body "[[⋯]] on tutorial-len → [[▶ Run]]. Tick [[Trace path]], then [[+ capture values]] and accept the cost estimate — then [[Run]]. The answer is 11, and under it a new button appears: [[Show path on canvas]]."
-               :target ".node-overlay[data-fn-name=\"tutorial-len\"] button.more-actions-trigger"
-               :targets [".node-overlay[data-fn-name=\"tutorial-len\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
+               :body "[[⋯]] on tutorial-sentence → [[▶ Run]]. Tick [[Save to history]], [[Trace path]], then [[+ capture values]] and accept the cost estimate — then [[Run]]. The answer is HELLO BIG WORLD, and under it a new button appears: [[Show path on canvas]]."
+               :target ".node-overlay[data-fn-name=\"tutorial-sentence\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-sentence\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
                :check {:kind "dom" :selector ".execute-show-path-btn"}}
               {:title "Draw the path"
                :body "Click [[Show path on canvas]]."
                :target ".execute-show-path-btn"
                :check {:kind "dom" :selector ".path-view-panel"}}
               {:title "Read the path"
-               :body "Both fn cards light up and the rest of the canvas dims — the literal is the input, not a call, so it stays plain. Each card's footer now reads like a run log, the time it took on the left and what it returned on the right: `\"hello world\"` goes into tutorial-upper and comes out as `\"HELLO WORLD\"`; tutorial-len turns that into `11`. The value transforms hop by hop, read straight off the cards (the root's time includes everything under it). Click a chip for the full value; [[✕ clear]] in the panel at the bottom restores the view. Click [[Next]]."
+               :body "Your three fns light up and the rest dims. str-upper stays plain: map received it as a callable and ran it once per word inside its own loop — the trace records references FOLLOWED, and that call never went through one. The unfolded pipeline is wide, so zoom in — the wheel, or [[+]] at the bottom right — and each lit footer reads like a run log, time on the left and the return on the right: the list of words, the list upper-cased, the sentence. [[✕ clear]] in the panel at the bottom restores the view. Click [[Next]]."
                :target ".node-overlay.path-highlighted"
                :check {:kind "manual"}}
+              {:title "Open the call tree"
+               :body "The same record as a list. In the Inspector's Runs tab the saved run sits under the form with a [[tree]] button — click it."
+               :target ".execute-history-tree-btn"
+               :check {:kind "dom" :selector ".trace-view-panel .trace-row"}}
+              {:title "Read the tree"
+               :body "One row per call, in call order, indented by who called whom: tutorial-sentence on top, tutorial-shout under it, tutorial-words under that — each with the value it returned, open right under its row, so the sentence's whole journey reads top to bottom. Click a row and its card highlights on the canvas; ◀ ▶ step through. Press [[Esc]] to close it, then [[Next]]."
+               :target ".trace-view-panel"
+               :check {:kind "manual"}}
               {:title "Your trail"
-               :body "You have hopped between str-upper, str-len and your two fns — the Explorer keeps that trail. Clear the filter (the [[×]] next to it): the Recent list appears just above the tree."
+               :body "You have hopped between str-split, map, str-join and your three fns — the Explorer keeps that trail. Clear the filter (the [[×]] next to it): the Recent list appears just above the tree."
                :target "#search-clear"
                :check {:kind "dom" :selector "#gd-recent-fns:not([hidden]) .gd-recent-row"}}
               {:title "That's debugging in place"
-               :body "No log statements, no rebuild: the run you just did carries its own map of what it touched and what each hop returned — and peek + Recent (any row takes you straight back) keep the reading itself in one place. The written lesson 15 adds the call-tree view and catching a live HTTP request. Click [[Finish]] to clean up or keep the two fns."
+               :body "No log statements, no rebuild: the run you just did carries its own map of what it touched, how often, and what each hop returned — on the canvas and as a tree — and peek + Recent (any row takes you straight back) keep the reading itself in one place. The written lesson 15 adds catching a live HTTP request. Click [[Finish]] to clean up or keep the three fns."
                :target "#gd-recent-fns"
                :check {:kind "manual"}}]}
             {:id "16"

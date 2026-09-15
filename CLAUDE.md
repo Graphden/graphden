@@ -410,6 +410,27 @@ test `graphden.packages.app.rule-narratives-test`.)
 Each `*.test.js` file is a standalone Node script — exit code 0 = PASS,
 1 = FAIL. Run individually or via `./run-edit-tests.sh`.
 
+**Tour spotlight audit.** The lesson walks (`edit-tutorial-tour*.test.js`)
+drive the tutorial by selector and never look at where the spotlight ring
+is — a person cannot miss it. `GRAPHDEN_TOUR_AUDIT=<dir>` makes every walk
+record, at each change of the ringed element (a new step, a `:targets`
+chain advancing to a menu item / chooser / picker row), what is actually in
+the ring: the selector, the element and the card it belongs to, what sits
+under the ring's centre, how many visible elements the selector matched,
+and whether the step popover covers its target. Add
+`GRAPHDEN_TOUR_AUDIT_SHOTS=1` for a screenshot per change.
+
+```bash
+cd tools/browser-test
+GRAPHDEN_TOUR_AUDIT=/tmp/audit GRAPHDEN_URL=http://localhost:9100 \
+  node edit-tutorial-tour-ux.test.js          # lessons 12 / 17 / 18 / 09 / 15
+node tour-spotlight-report.js /tmp/audit 15   # one lesson, flags: AMBIGUOUS×N,
+                                              # NO-ELEMENT, POPOVER-COVERS-TARGET
+```
+
+`AMBIGUOUS×N` means the ring landed on "the first match" — pin the step's
+target to the card its text names (`.node-overlay[data-fn-name="…"] …`).
+
 ## Architecture Overview
 
 Classical Clojure monorepo. Top namespace: `graphden`. Where a module exposes an `interface.clj` (today: `executor/`, `system/`, `executor_runtime/`) that is its public API; most modules have none yet and are reached through their `core.clj` / named namespaces directly. The boundary is a convention, not lint-enforced.

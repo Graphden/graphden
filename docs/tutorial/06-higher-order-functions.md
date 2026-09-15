@@ -206,7 +206,11 @@ in your base-fn impl and the dispatch picks the right behavior.
    `:coll`, **Append literal**, type `graph`, **Save**; the `:coll`
    edge now fans out after its chip — a branch to `graph` and a branch
    to a fresh `+`, the list's next free slot. Click it, **Append
-   literal**, `den`, **Save**. The card reads `graph, den`.
+   literal**, `den`, **Save**. The card reads `graph, den`. (An
+   empty list's first `+` also offers **Bind fn-ref (whole list)**:
+   the slot then takes one fn's *result* as the entire list — how a
+   pipeline feeds `:map` with the output of `:str-split`; lesson 15
+   builds one.)
 4. Now look at the `:func` chip: a moment ago it read
    `(item:'a) → 'b`; it reads `(item:text) → 'b`, and you never
    touched it. Two strings went into `:coll`, so `'a` is `text`, and

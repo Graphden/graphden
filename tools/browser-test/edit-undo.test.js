@@ -4,17 +4,27 @@
 //   C. Extend, then reference the child from another fn → Undo is REFUSED
 //      with the server's reason (409 in use) and the entry stays.
 //   D. `Space u` runs the newest entry from the keyboard.
+//   E. A literal bound on a slot → Undo → the slot is free again; an item
+//      appended to a list → Undo → the item is gone.
 const {chromium} = require('playwright');
 const {assert, newContext, api, getEntities, deleteFnByName, waitForServerHealthy, BASE}
   = require('./edit-test-helpers');
+const {bindNamedPlaceholder} = require('./tutorial-tour-helpers');
 
 const RUN_ID = String(Date.now()).slice(-6);
 const CHILD = 'undo-child' + RUN_ID;
 const RENAMED = 'undo-renamed' + RUN_ID;
 const USER = 'undo-user' + RUN_ID;
+const SCALAR = 'undo-scalar' + RUN_ID;
+const LISTY = 'undo-listy' + RUN_ID;
+
+// The ids of `fnId`'s own bindings in an entities payload.
+function getEntitiesBindingIds(ents, fnId) {
+  return (ents.bindings || []).filter((b) => b['fn-id'] === fnId).map((b) => b.id);
+}
 
 async function cleanup(page) {
-  for (const n of [USER, RENAMED, CHILD]) {
+  for (const n of [USER, RENAMED, CHILD, SCALAR, LISTY]) {
     try { await deleteFnByName(page, n); } catch (_) {}
   }
 }
@@ -85,14 +95,11 @@ const undoToast = (page) => page.evaluate(() => {
 
     // ------------------------------------------------------------ B
     await extendVia(page, 'add', CHILD);
-    console.log('  B1 extended; href=' + await page.evaluate(() => location.href));
     // Rename through the ⋯ → ✎ Rename popover on the child's own card.
     await page.goto(BASE + '/#core.arithmetic.' + CHILD);
     await page.waitForFunction((name) => (graphData?.fns || []).some((f) => f.name === name),
       CHILD, {timeout: 30000, polling: 200});
-    console.log('  B2 goto done; href=' + await page.evaluate(() => location.href));
     await openRowActionsOn(page, CHILD);
-    console.log('  B3 row actions open');
     await page.waitForSelector('.row-actions-popover [data-action="rename-fn"]', {timeout: 15000});
     await page.evaluate(() => document.querySelector('.row-actions-popover [data-action="rename-fn"]')
       .dispatchEvent(new MouseEvent('click', {bubbles: true})));
@@ -104,7 +111,6 @@ const undoToast = (page) => page.evaluate(() => {
       input.dispatchEvent(new Event('input', {bubbles: true}));
       Array.from(pop.querySelectorAll('.arg-value-edit-btn')).find((b) => b.textContent.trim() === 'Save').click();
     }, RENAMED);
-    console.log('  B4 rename saved');
     await page.waitForFunction((name) => (graphData?.fns || []).some((f) => f.name === name),
       RENAMED, {timeout: 30000, polling: 200});
     toast = await undoToast(page);
@@ -160,6 +166,49 @@ const undoToast = (page) => page.evaluate(() => {
     assert(!(await getEntities(page, CHILD)).fns.find((f) => f.name === CHILD),
       'Space u undid the create once the reference was gone');
     console.log('  D: Space u ✓');
+
+    // ------------------------------------------------------------ E
+    // Bindings and list items record their inverse too. A child of
+    // str-upper has one scalar slot (:string); a child of add has a list
+    // slot (:nums) whose `+` appends items.
+    await page.goto(BASE + '/#core.strings.str-upper');
+    await page.waitForFunction(() => (graphData?.fns || []).some((f) => f.name === 'str-upper'),
+      null, {timeout: 30000, polling: 100});
+    await extendVia(page, 'str-upper', SCALAR);
+    await bindNamedPlaceholder(page, 'string', 'literal', 'abc');
+    await page.waitForFunction(() => (typeof gdUndoLastLabel === 'function') && gdUndoLastLabel() === 'Bound :string',
+      null, {timeout: 15000, polling: 100});
+    const scalar = (await getEntities(page, SCALAR)).fns.find((f) => f.name === SCALAR);
+    const boundBefore = (await getEntities(page, SCALAR)).bindings.filter((b) => b['fn-id'] === scalar.id);
+    assert(boundBefore.length === 1, 'the literal landed as one binding');
+    await page.evaluate(() => gdUndoLast());
+    await page.waitForFunction((id) => !(lookups?.bindingsByFn?.get(id) || []).length, scalar.id,
+      {timeout: 30000, polling: 200});
+    const boundAfter = (await getEntities(page, SCALAR)).bindings.filter((b) => b['fn-id'] === scalar.id);
+    assert(boundAfter.length === 0, 'Undo removed the binding — the slot is free again');
+    console.log('  E1: bound :string → Undo → free ✓');
+
+    await page.goto(BASE + '/#core.arithmetic.add');
+    await page.waitForFunction(() => (graphData?.fns || []).some((f) => f.name === 'add'),
+      null, {timeout: 30000, polling: 100});
+    await extendVia(page, 'add', LISTY);
+    await bindNamedPlaceholder(page, 'nums', 'literal', '7');
+    await page.waitForFunction(() => (typeof gdUndoLastLabel === 'function') && gdUndoLastLabel() === 'Appended an item',
+      null, {timeout: 15000, polling: 100});
+    const listyEnts = await getEntities(page, LISTY);
+    const listy = listyEnts.fns.find((f) => f.name === LISTY);
+    const listyBindings = getEntitiesBindingIds(listyEnts, listy.id);
+    const itemsBefore = (listyEnts['list-items'] || [])
+      .filter((it) => listyBindings.includes(it['binding-id']));
+    assert(itemsBefore.length === 1, 'the literal landed as one list item');
+    await page.evaluate(() => gdUndoLast());
+    await page.waitForFunction((id) => {
+      for (const b of (lookups?.bindingsByFn?.get(id) || [])) {
+        if ((lookups.itemsByBinding?.get(b.id) || []).length) return false;
+      }
+      return true;
+    }, listy.id, {timeout: 30000, polling: 200});
+    console.log('  E2: appended to :nums → Undo → item gone ✓');
 
     console.log('PASS');
   } catch (e) {

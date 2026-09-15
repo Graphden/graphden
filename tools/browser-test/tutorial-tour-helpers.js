@@ -64,7 +64,7 @@ async function hardCleanup(page) {
                      'tutorial-tick', 'review-demo',
                      // lesson 15's chain — a crash between its create and
                      // finishAndDelete 409s the next run's create.
-                     'tutorial-len', 'tutorial-upper',
+                     'tutorial-sentence', 'tutorial-shout', 'tutorial-words',
                      // lesson 35's consumer.
                      'tutorial-endpoint', 'tutorial-fetch'];
   // Per-browser view-state the lessons exercise (smart views, recents,
@@ -183,7 +183,112 @@ function tourTitle(page) {
 // plus GC churn (observed 2026-08-19: three 45s branch-wait timeouts and
 // one 60s seed-step timeout in one gate run). Polling keeps the success
 // path fast — a generous ceiling only slows the FAILURE case.
+// --- spotlight audit -------------------------------------------------------
+//
+// `GRAPHDEN_TOUR_AUDIT=<dir>` makes every lesson walk in this suite double
+// as a SPOTLIGHT AUDIT: a sampler in the page watches the tour engine
+// (`_tourStep` / `_tourEffTarget`) and, whenever the ringed element changes
+// — a new step, or a `:targets` chain advancing to a menu item, a chooser,
+// a picker row — records what is actually in the ring: the effective
+// selector, the element (tag / class / text / the card it belongs to), the
+// element under the ring's centre, how many visible elements the selector
+// matched (an ambiguous selector rings "the first one"), the ring rect and
+// whether the step popover covers its own target. Written to
+// `<dir>/spotlight-audit.json`; `node tour-spotlight-report.js <dir>`
+// prints it per step. With `GRAPHDEN_TOUR_AUDIT_SHOTS=1` a screenshot is
+// taken at every change too. This is how the 2026-09-15 lesson-15 audit
+// found the ⋯ ring on the wrong card — the e2e walk drives by selector and
+// never notices where the ring is; a person cannot miss it.
+const _tourAuditState = new WeakMap();
+
+async function installSpotlightAudit(page) {
+  const dir = process.env.GRAPHDEN_TOUR_AUDIT;
+  if (!dir || _tourAuditState.has(page)) return;
+  const fs = require('node:fs');
+  const path = require('node:path');
+  fs.mkdirSync(dir, {recursive: true});
+  const state = {records: [], n: 0};
+  _tourAuditState.set(page, state);
+  const flush = () => {
+    try {
+      fs.writeFileSync(path.join(dir, 'spotlight-audit.json'),
+        JSON.stringify(state.records, null, 1));
+    } catch (_) { /* best effort */ }
+  };
+  await page.exposeFunction('__gdTourAuditSink', async (rec) => {
+    state.n += 1;
+    rec.n = state.n;
+    state.records.push(rec);
+    if (process.env.GRAPHDEN_TOUR_AUDIT_SHOTS) {
+      try {
+        await page.screenshot({path: path.join(dir,
+          String(state.n).padStart(3, '0') + '-' + String(rec.lesson || '').replace(/\W+/g, '')
+          + '-' + String(rec.step || 0) + '.png')});
+      } catch (_) { /* mid-navigation */ }
+    }
+    flush();
+  });
+  const sampler = () => {
+    if (window.__gdTourAuditTimer) return;
+    const desc = (el) => {
+      if (!el) return null;
+      const owner = el.closest('.node-overlay');
+      const within = el.closest('.row-actions-popover, .arg-value-edit-popover, .free-arg-bind-chooser, .fn-picker-popover, .execute-popover, .fn-peek-panel, .trace-view-panel, #gd-inspector, #side-menu');
+      const cls = el.className && el.className.baseVal !== undefined ? el.className.baseVal : (el.className || '');
+      return {
+        tag: el.tagName.toLowerCase(), id: el.id || null, cls: String(cls).slice(0, 80),
+        text: (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60),
+        card: owner ? (owner.dataset.fnName || owner.textContent.trim().replace(/\s+/g, ' ').slice(0, 40)) : null,
+        within: within ? (within.id ? '#' + within.id : '.' + String(within.className).split(' ')[0]) : null,
+      };
+    };
+    const rr = (el) => {
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
+    };
+    window.__gdTourAuditTimer = setInterval(() => {
+      try {
+        if (typeof _tourStep !== 'function' || typeof _tourEffTarget !== 'function') return;
+        const step = _tourStep();
+        const lesson = (typeof _tourLesson === 'function') ? _tourLesson() : null;
+        const pop = document.getElementById('gd-tour-pop');
+        if (!step || !pop) return;
+        const eff = _tourEffTarget(step);
+        const el = eff ? document.querySelector(eff) : null;
+        const spot = document.getElementById('gd-tour-spot');
+        const spotVis = !!spot && spot.classList.contains('gd-tour-visible');
+        const key = [lesson?.id, step.title, eff, spotVis, el ? 1 : 0].join('|');
+        if (key === window.__gdTourAuditKey) return;
+        window.__gdTourAuditKey = key;
+        const sr = spotVis ? rr(spot) : null;
+        let under = null;
+        if (sr) {
+          const hits = document.elementsFromPoint(sr[0] + sr[2] / 2, sr[1] + sr[3] / 2)
+            .filter((e) => !['gd-tour-spot', 'gd-tour-dim', 'gd-tour-pop'].includes(e.id));
+          under = desc(hits[0]);
+        }
+        const pr = rr(pop);
+        const tr = rr(el);
+        const overlap = (a, b) => !!(a && b && a[0] < b[0] + b[2] && a[0] + a[2] > b[0]
+          && a[1] < b[1] + b[3] && a[1] + a[3] > b[1]);
+        const matches = eff ? Array.from(document.querySelectorAll(eff))
+          .filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; }).length : 0;
+        window.__gdTourAuditSink({
+          lesson: lesson?.id || null, step: (typeof _tourState !== 'undefined' && _tourState) ? _tourState.step + 1 : null,
+          title: step.title, target: step.target || null, eff,
+          el: desc(el), elRect: tr, ring: sr, under, matches,
+          centered: pop.classList.contains('gd-tour-centered'), popOverTarget: overlap(pr, tr),
+        });
+      } catch (_) { /* keep sampling */ }
+    }, 250);
+  };
+  await page.addInitScript(sampler);
+  try { await page.evaluate(sampler); } catch (_) { /* no document yet */ }
+}
+
 async function waitTourTitle(page, title, timeoutMs) {
+  await installSpotlightAudit(page);
   await page.waitForFunction((expected) => {
     const t = document.querySelector('#gd-tour-pop .gd-tour-title');
     return t && t.textContent.trim() === expected;
@@ -1075,17 +1180,21 @@ async function bindNamedPlaceholder(page, argName, kind, text) {
     return true;
   }, argName);
   assert(found, 'a placeholder binder next to the "' + argName + '" label');
-  if (kind === 'fn-ref') {
-    await page.waitForFunction(() => {
+  // `whole-list` — an EMPTY list slot's `+` offers "Bind fn-ref (whole
+  // list)": the slot takes one fn's result as the entire list (lesson 15's
+  // pipeline feeds :map's :coll with a :str-split that way).
+  if (kind === 'fn-ref' || kind === 'whole-list') {
+    const btnLabel = kind === 'whole-list' ? 'Bind fn-ref (whole list)' : 'Bind fn-ref';
+    await page.waitForFunction((label) => {
       return !!document.querySelector('.fn-picker-popover')
         || Array.from(document.querySelectorAll('button'))
-          .some((b) => b.textContent.trim() === 'Bind fn-ref');
-    }, null, {timeout: 15000, polling: 100});
-    await page.evaluate(() => {
+          .some((b) => b.textContent.trim() === label);
+    }, btnLabel, {timeout: 15000, polling: 100});
+    await page.evaluate((label) => {
       if (document.querySelector('.fn-picker-popover')) return;
       Array.from(document.querySelectorAll('button'))
-        .find((b) => b.textContent.trim() === 'Bind fn-ref').click();
-    });
+        .find((b) => b.textContent.trim() === label).click();
+    }, btnLabel);
     await page.waitForSelector('.fn-picker-popover', {timeout: 15000});
     await page.fill('.fn-picker-popover input', text);
     await page.waitForFunction((n) => {
@@ -1133,6 +1242,7 @@ module.exports = {
   NS_NAME, FN_NAME,
   retryingDelete, hardCleanup, tourTitle, waitTourTitle, clickTourButton,
   waitUntil, tourProgress, clickTourAdvance,
+  installSpotlightAudit,
   filterAndSelect, openRowActionsFor, extendViaRowActions, bindFirstPlaceholder,
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding, waitClickable,
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions, runFromOpenPane,

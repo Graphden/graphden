@@ -29,7 +29,8 @@
   "Every `:check :kind` `_tourCheckPasses` implements. `manual` is the
    reader's own Next button — no predicate."
   #{"manual" "fn-exists" "fn-parent" "ns-exists" "binding-bound" "binding-value"
-    "bindings-count" "list-items" "selected" "on-branch" "arg-named" "dom" "dom-absent"})
+    "bindings-count" "list-items" "selected" "on-branch" "arg-named" "expanded"
+    "dom" "dom-absent"})
 
 
 (def ^:private creates-types
@@ -92,7 +93,7 @@
                " is not implemented by _tourCheckPasses " (pr-str check-kinds)))
       ;; A check that needs an argument and doesn't get one can never pass.
       (case kind
-        ("fn-exists" "selected" "on-branch")
+        ("fn-exists" "selected" "on-branch" "expanded")
         (is (some? (get-in s [:check :name]))
             (str "lesson " (:id l) " / “" (:title s) "”: " kind " needs :name"))
         "fn-parent"

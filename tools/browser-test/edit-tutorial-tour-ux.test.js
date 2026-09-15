@@ -16,7 +16,7 @@ const {
   hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
   runViaRowActions, tourTitle, extendViaRowActions, bindFirstPlaceholder,
   bindFnRefPlaceholder, finishAndDelete, runWithEffectAck, waitTourClosed,
-  openRowActionsFor,
+  openRowActionsFor, bindNamedPlaceholder,
 } = require('./tutorial-tour-helpers');
 
 
@@ -301,20 +301,27 @@ const {
     await page.goto(BASE + '/?tutorial=15');
     await waitTourTitle(page, 'What actually ran?', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 15 Next');
-    await waitTourTitle(page, 'Start with a transformation');
-    await filterAndSelect(page, 'str-upper', 'str-upper');
-    await extendViaRowActions(page, 'tutorial-upper', 'str-upper');
-    await waitTourTitle(page, 'Give it an input', 150000);
-    await bindFirstPlaceholder(page, 'hello world');
-    await waitTourTitle(page, 'Now the second hop', 150000);
-    await filterAndSelect(page, 'str-len', 'str-len');
-    await extendViaRowActions(page, 'tutorial-len', 'str-len');
-    await waitTourTitle(page, 'Chain them', 150000);
-    await bindFnRefPlaceholder(page, 'tutorial-upper');
+    await waitTourTitle(page, 'Split the sentence');
+    await filterAndSelect(page, 'str-split', 'str-split');
+    await extendViaRowActions(page, 'tutorial-words', 'str-split');
+    await waitTourTitle(page, 'Give it text', 150000);
+    await bindNamedPlaceholder(page, 'string', 'literal', 'hello,big,world');
+    await bindNamedPlaceholder(page, 'separator', 'literal', ',');
+    await waitTourTitle(page, 'Transform every word', 150000);
+    await filterAndSelect(page, 'map', 'map');
+    await extendViaRowActions(page, 'tutorial-shout', 'map');
+    await waitTourTitle(page, 'Feed it and pick the function', 150000);
+    // :coll is a LIST slot — its empty `+` offers the whole-list fn-ref.
+    await bindNamedPlaceholder(page, 'coll', 'whole-list', 'tutorial-words');
+    await bindNamedPlaceholder(page, 'func', 'fn-ref', 'str-upper');
+    await waitTourTitle(page, 'Join it back', 150000);
+    await filterAndSelect(page, 'str-join', 'str-join');
+    await extendViaRowActions(page, 'tutorial-sentence', 'str-join');
+    await waitTourTitle(page, 'Close the pipeline', 150000);
+    await bindNamedPlaceholder(page, 'coll', 'whole-list', 'tutorial-shout');
+    await bindNamedPlaceholder(page, 'separator', 'literal', ' ');
     await waitTourTitle(page, 'Peek inside without leaving', 150000);
-    // The step pins its ring to the tutorial-upper CARD's ⋯ (not the
-    // root's, which is first in the DOM) — open that one and peek.
-    await openRowActionsFor(page, 'tutorial-upper');
+    await openRowActionsFor(page, 'tutorial-shout');
     await page.waitForSelector('.row-actions-popover [data-action="peek-fn"]',
       {timeout: 15000});
     await page.evaluate(() => {
@@ -326,20 +333,35 @@ const {
       title: document.querySelector('.fn-peek-title')?.textContent,
       hasBody: !!document.querySelector('.fn-peek-body'),
     }));
-    assert(peek.title === 'tutorial-upper',
+    assert(peek.title === 'tutorial-shout',
       'peek panel names the peeked fn (got ' + peek.title + ')');
-    await waitTourTitle(page, 'Close the peek', 150000);
+    await waitTourTitle(page, 'Unfold the inner hop', 150000);
     await page.keyboard.press('Escape');
     await page.waitForFunction(() => !document.querySelector('.fn-peek-panel'),
       null, {timeout: 15000, polling: 100});
     // Escape must have been CONSUMED by the panel — the tour survives.
-    const tourAlive = await page.evaluate(() => !!document.querySelector('#gd-tour-pop'));
-    assert(tourAlive, 'closing the peek with Escape does not end the tour');
+    assert(await page.evaluate(() => !!document.querySelector('#gd-tour-pop')),
+      'closing the peek with Escape does not end the tour');
+    // Unfold tutorial-shout's parent row: the step's check reads the
+    // COMMITTED expansion, so a hover alone must not advance it.
+    await page.hover('.node-overlay[data-fn-name="tutorial-shout"] .ancestor-line[data-level="1"]');
+    await new Promise((r) => setTimeout(r, 1500));
+    assert(await tourTitle(page) === 'Unfold the inner hop',
+      'hovering the parent row (the preview) does not pass the unfold step');
+    await page.click('.node-overlay[data-fn-name="tutorial-shout"] .ancestor-line[data-level="1"]',
+      {position: {x: 40, y: 8}});
+    await page.waitForSelector('.node-overlay[data-fn-name="tutorial-words"]', {timeout: 30000});
+    // …and the auto-fit after an expansion brings the revealed card on screen.
+    await page.waitForFunction(() => {
+      const r = document.querySelector('.node-overlay[data-fn-name="tutorial-words"]').getBoundingClientRect();
+      const surface = document.getElementById('graph-surface').getBoundingClientRect();
+      return r.width > 0 && r.right <= surface.right + 8 && r.left >= surface.left - 8;
+    }, null, {timeout: 15000, polling: 100});
     await waitTourTitle(page, 'Run it with a trace', 150000);
-    // Run the ROOT with trace + capture values — the values are what
-    // the path view then prints on the cards. The capture confirm is a
-    // native dialog; the page-level handler above accepts it.
-    await openRowActionsFor(page, 'tutorial-len');
+    // Run the ROOT with history + trace + capture values — the values are
+    // what the path view prints on the cards and the tree lists. The
+    // capture confirm is a native dialog; the page-level handler accepts it.
+    await openRowActionsFor(page, 'tutorial-sentence');
     await page.evaluate(() => {
       Array.from(document.querySelectorAll('.row-actions-popover button'))
         .find((b) => b.textContent.trim() === '▶')
@@ -347,35 +369,64 @@ const {
     });
     await page.waitForSelector('.execute-popover.visible .execute-run-btn', {timeout: 15000});
     await page.evaluate(() => {
-      const tr = document.querySelector('.execute-trace-checkbox');
-      if (tr && !tr.checked) tr.click();
+      for (const sel of ['.execute-persist-checkbox', '.execute-trace-checkbox']) {
+        const cb = document.querySelector('.execute-popover.visible ' + sel);
+        if (cb && !cb.checked) cb.click();
+      }
     });
     await page.click('.execute-popover.visible .execute-capture-values-checkbox');
-    const captureOn = await page.evaluate(() =>
-      document.querySelector('.execute-popover.visible .execute-capture-values-checkbox').checked);
-    assert(captureOn, 'capture values stays ticked after the confirm');
+    assert(await page.evaluate(() =>
+      document.querySelector('.execute-popover.visible .execute-capture-values-checkbox').checked),
+      'capture values stays ticked after the confirm');
     await page.evaluate(() => document.querySelector('.execute-run-btn').click());
     await waitTourTitle(page, 'Draw the path', 150000);
     await page.waitForSelector('.execute-show-path-btn', {timeout: 60000});
     await page.evaluate(() => document.querySelector('.execute-show-path-btn').click());
     await waitTourTitle(page, 'Read the path', 150000);
-    // What the reader is told to see: both fn cards lit — the run's own
-    // fn included — and the value transforming hop by hop on the chips.
+    // What the reader is told to see: the three fns made here lit, and
+    // the value transforming hop by hop on the chips. str-upper stays
+    // plain: :map runs it as a CALLABLE inside its loop, which the trace
+    // (references followed) does not record — the step says so.
     const path = await page.evaluate(() => ({
       highlighted: Array.from(document.querySelectorAll('.node-overlay.path-highlighted'))
         .map((el) => el.dataset.fnName),
+      badges: Array.from(document.querySelectorAll('.node-overlay.path-highlighted'))
+        .map((el) => [el.dataset.fnName, el.querySelector('.path-trace-badge')?.textContent]),
       chips: Array.from(document.querySelectorAll('.path-value-badge'))
         .map((el) => el.textContent),
     }));
-    for (const name of ['tutorial-len', 'tutorial-upper']) {
+    for (const name of ['tutorial-sentence', 'tutorial-shout', 'tutorial-words']) {
       assert(path.highlighted.includes(name),
         name + ' is on the drawn path: ' + JSON.stringify(path.highlighted));
     }
-    for (const chip of ['= "HELLO WORLD"', '= 11']) {
-      assert(path.chips.includes(chip),
-        'value chip ' + chip + ' printed on its card: ' + JSON.stringify(path.chips));
-    }
+    assert(!path.highlighted.includes('str-upper'),
+      'str-upper (a callable run inside map, not a reference followed) stays plain — '
+      + 'the step text depends on it: ' + JSON.stringify(path.highlighted));
+    assert(path.chips.includes('= "HELLO BIG WORLD"'),
+      'the sentence prints on its card: ' + JSON.stringify(path.chips));
+    assert(path.chips.some((c) => /^= value$/.test(c) || /HELLO/.test(c)),
+      'the list hops carry value chips: ' + JSON.stringify(path.chips));
     assert(await clickTourButton(page, 'Next'), 'Read the path Next');
+    await waitTourTitle(page, 'Open the call tree', 150000);
+    await page.waitForSelector('#gd-insp-runs .execute-history-tree-btn', {timeout: 30000});
+    await page.click('#gd-insp-runs .execute-history-tree-btn');
+    await waitTourTitle(page, 'Read the tree', 150000);
+    const tree = await page.evaluate(() => ({
+      rows: Array.from(document.querySelectorAll('.trace-view-panel .trace-row'))
+        .map((r) => r.textContent.replace(/\s+/g, ' ').trim().slice(0, 60)),
+      values: Array.from(document.querySelectorAll('.trace-view-panel .trace-value'))
+        .map((v) => v.textContent.replace(/\s+/g, ' ').trim().slice(0, 40)),
+    }));
+    assert(tree.rows.length >= 3,
+      'the tree lists the root and its two hops: ' + JSON.stringify(tree.rows));
+    assert(tree.rows[0].includes('tutorial-sentence'),
+      'the run\'s own fn is the tree\'s root: ' + JSON.stringify(tree.rows[0]));
+    assert(tree.values.some((v) => /HELLO BIG WORLD/.test(v)),
+      'the tree carries the captured values: ' + JSON.stringify(tree.values));
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('.trace-view-panel'),
+      null, {timeout: 15000, polling: 100});
+    assert(await clickTourButton(page, 'Next'), 'Read the tree Next');
     await waitTourTitle(page, 'Your trail', 150000);
     // The filter is still holding the last search — clear it for real,
     // as the step instructs; the Recent list only shows outside search.
@@ -400,7 +451,7 @@ const {
     console.log('  lesson 15: Recent row navigated to '
       + await page.evaluate(() => location.hash));
     await finishAndDelete(page);
-    console.log('  lesson 15: walked + cleaned (path + values + peek + trail)');
+    console.log('  lesson 15: walked + cleaned (pipeline + path + tree + peek + trail)');
 
     console.log('PASS');
   } catch (err) {

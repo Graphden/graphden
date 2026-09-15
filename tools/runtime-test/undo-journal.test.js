@@ -86,6 +86,7 @@ function load(opts = {}) {
     authMutate: opts.authMutate,
     extractResponseError: async (r) => r?.error || 'refused',
     API: { api_graph_entities: '/api/graph/entities',
+           api_entities_type: (t) => '/api/entities/' + t,
            api_entities_type_id: (t, id) => '/api/entities/' + t + '/' + id },
     lookups: opts.lookups || null,
     initGraph: async () => { ctx.__inits = (ctx.__inits || 0) + 1; },
@@ -231,6 +232,89 @@ function load(opts = {}) {
     t.ctx.gdUndoRecordNsMove('f1', 'foo', null, 'ns-a');
     assert(await t.ctx.gdUndoLast() === true, 'undone');
     assert(puts[1] === 'namespace-id=', 'root spelled as the bare key: ' + JSON.stringify(puts[1]));
+  });
+
+  await test('binding write recorder: POST → DELETE the row; PUT → the pre-image back, both columns', async () => {
+    const calls = [];
+    const slot = { id: 's1', name: 'string' };
+    const bindingRow = { id: 'b1', 'fn-id': 'f1', 'slot-id': 's1', value: 'old', 'ref-fn-id': null };
+    const t = load({
+      lookups: { slotMap: new Map([['s1', slot]]),
+                 bindingByFnSlot: new Map([['f1|s1', bindingRow]]),
+                 bindingMap: new Map([['b1', bindingRow]]) },
+      authMutate: async (method, url, body) => { calls.push([method, url, body]); return { status: 200 }; },
+    });
+    t.ctx.loadGraphData = async () => { t.ctx.__loads = (t.ctx.__loads || 0) + 1; };
+    // A fresh binding (no pre-image): undo deletes it.
+    t.ctx.gdUndoRecordBindingWrite({ 'fn-id': 'f1', 'slot-id': 's1' }, { value: '"x"' }, null);
+    assert(t.ctx.gdUndoLastLabel() === 'Bound :string', 'label names the slot');
+    assert(await t.ctx.gdUndoLast() === true, 'undone');
+    assert(calls[0][0] === 'DELETE' && calls[0][1] === '/api/entities/binding/b1', 'the binding row was deleted: ' + JSON.stringify(calls[0]));
+    assert(t.ctx.__loads === 1, 'bindings reload (loadGraphData) after the inverse');
+    // A changed binding: verify against the live row, then PUT value + ref back.
+    bindingRow.value = 'new';
+    t.ctx.gdUndoRecordBindingWrite({ 'fn-id': 'f1', 'slot-id': 's1', 'binding-id': 'b1' }, { value: '"new"' },
+                                   { id: 'b1', 'fn-id': 'f1', 'slot-id': 's1', value: 'old', 'ref-fn-id': null });
+    assert(t.ctx.gdUndoLastLabel() === 'Changed :string', 'label');
+    assert(await t.ctx.gdUndoLast() === true, 'undone');
+    const put = calls[1];
+    assert(put[0] === 'PUT' && put[1] === '/api/entities/binding/b1' && /value=%22old%22/.test(put[2]) && /ref-fn-id=(&|$)/.test(put[2]),
+           'PUT restores the old value and clears the ref: ' + JSON.stringify(put));
+    // Changed again by someone else → stale, no write.
+    t.ctx.gdUndoRecordBindingWrite({ 'fn-id': 'f1', 'slot-id': 's1', 'binding-id': 'b1' }, { value: '"new"' },
+                                   { id: 'b1', 'fn-id': 'f1', 'slot-id': 's1', value: 'old' });
+    bindingRow.value = 'newer';
+    assert(await t.ctx.gdUndoLast() === false, 'stale');
+    assert(calls.length === 2, 'no write for a stale entry');
+  });
+
+  await test('deleted-binding recorder: undo re-creates it with its value or ref', async () => {
+    const calls = [];
+    const t = load({
+      lookups: { slotMap: new Map([['s1', { id: 's1', name: 'x' }]]) },
+      authMutate: async (method, url, body) => { calls.push([method, url, body]); return { status: 200 }; },
+    });
+    t.ctx.loadGraphData = async () => {};
+    t.ctx.gdUndoRecordBindingDeleted({ id: 'b1', 'fn-id': 'f1', 'slot-id': 's1', value: 42 });
+    assert(t.ctx.gdUndoLastLabel() === 'Unbound :x', 'label');
+    assert(await t.ctx.gdUndoLast() === true, 'undone');
+    assert(calls[0][0] === 'POST' && calls[0][2] === 'fn-id=f1&slot-id=s1&value=42', 'POST with the value: ' + calls[0][2]);
+    t.ctx.gdUndoRecordBindingDeleted({ id: 'b2', 'fn-id': 'f1', 'slot-id': 's1', 'ref-fn-id': 'other' });
+    assert(await t.ctx.gdUndoLast() === true, 'undone');
+    assert(calls[1][2] === 'fn-id=f1&slot-id=s1&ref-fn-id=other', 'POST with the ref: ' + calls[1][2]);
+  });
+
+  await test('sequence recorders: append → delete the matching item; remove → append back; value; move', async () => {
+    const calls = [];
+    const items = [{ id: 'i1', 'binding-id': 'b1', position: 0, value: 1 }, { id: 'i2', 'binding-id': 'b1', position: 1, value: 7 }];
+    const t = load({
+      lookups: { bindingsByFn: new Map([['f1', [{ id: 'b1', 'fn-id': 'f1', 'slot-id': 's1' }]]]),
+                 itemsByBinding: new Map([['b1', items]]),
+                 itemByItemId: new Map(items.map((it) => [it.id, it])),
+                 bindingMap: new Map([['b1', { id: 'b1', 'fn-id': 'f1', 'slot-id': 's1' }]]) },
+      authMutate: async (method, url, body) => { calls.push([method, url, body]); return { status: 200 }; },
+      authFetch: async (url, opts) => { calls.push([opts?.method || 'GET', url, opts?.body]); return { status: 200 }; },
+    });
+    t.ctx.API.api_sequence_item_item_id = (id) => '/api/sequence/item/' + id;
+    t.ctx.API.api_sequence_append_fn_id = (id) => '/api/sequence/append/' + id;
+    t.ctx.API.api_sequence_move_item_id = (id) => '/api/sequence/move/' + id;
+    t.ctx.loadGraphData = async () => {};
+    t.ctx.gdUndoRecordSeqAppend('f1', { value: 7 });
+    assert(await t.ctx.gdUndoLast() === true, 'undone');
+    assert(calls[0][0] === 'DELETE' && calls[0][1] === '/api/sequence/item/i2', 'the newest item carrying 7 is deleted: ' + JSON.stringify(calls[0]));
+    t.ctx.gdUndoRecordSeqAppend('f1', { value: 99 });
+    assert(await t.ctx.gdUndoLast() === false, 'no item carries 99 → refused');
+    t.ctx.gdUndoRecordSeqRemoved({ id: 'i1', 'binding-id': 'b1', position: 0, value: 1 });
+    assert(await t.ctx.gdUndoLast() === true, 'undone');
+    assert(calls[1][0] === 'POST' && calls[1][1] === '/api/sequence/append/f1' && JSON.parse(calls[1][2]).position === 0,
+           'appended back at its old position: ' + JSON.stringify(calls[1]));
+    t.ctx.gdUndoRecordSeqValue('i1', 1, 5);
+    items[0].value = 5;
+    assert(await t.ctx.gdUndoLast() === true, 'undone');
+    assert(calls[2][0] === 'PUT' && JSON.parse(calls[2][2]).value === 1, 'old item value written back: ' + JSON.stringify(calls[2]));
+    t.ctx.gdUndoRecordSeqMove('i2', 'up');
+    assert(await t.ctx.gdUndoLast() === true, 'undone');
+    assert(calls[3][1] === '/api/sequence/move/i2' && JSON.parse(calls[3][2]).direction === 'down', 'moved back down: ' + JSON.stringify(calls[3]));
   });
 
   console.log(failures === 0

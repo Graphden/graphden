@@ -45,8 +45,10 @@
 // "Created foo · Undo · ×", role=status, focus untouched) and the leader
 // key `Space u` (registered here; the cheatsheet and the Space menu render
 // it while an entry is live). Recorders live at the write sites:
-// editor-edit-modes-fn.js (extend / wrap / rename / namespace move) and
-// editor-create.js (new graph / new namespace) call `gdUndoRecord`.
+// editor-edit-modes-fn.js (extend / wrap / rename / namespace move),
+// editor-create.js (new graph / new namespace), editor-edit-modes.js (bind /
+// change / unbind a slot) and editor-edit-modes-seq.js (append / remove /
+// edit / move a list item) call the `gdUndoRecord*` builders below.
 
 const GD_UNDO_WINDOW_MS = 30000;
 
@@ -302,6 +304,202 @@ function gdUndoRecordNsMove(fnId, fnName, oldNsId, newNsId) {
   });
 }
 
+// --- bindings and sequence items --------------------------------------------
+//
+// The write sites (editor-edit-modes.js `writeBindingFields` /
+// `deleteUseSiteBinding`, editor-edit-modes-seq.js) call these with the
+// PRE-IMAGE they read from `lookups` before writing. A binding's wire form
+// is what the value form sends: `value=<JSON>`, `ref-fn-id=<uuid>`; an empty
+// value clears the column (the same spelling the namespace move uses).
+
+function _gdUndoSlotLabel(slotId) {
+  const s = (typeof lookups !== 'undefined' && lookups?.slotMap) ? lookups.slotMap.get(slotId) : null;
+  return s?.name ? ':' + s.name : 'the slot';
+}
+
+// Bindings and items change rows below the fn, not its structure — the
+// lighter `loadGraphData` (index + subtree + rich-types) reflects them.
+async function _gdUndoReloadBindings() {
+  if (typeof loadGraphData === 'function') await loadGraphData();
+  else if (typeof initGraph === 'function') await initGraph();
+}
+
+function _gdUndoWireValue(v) {
+  return (v === undefined || v === null) ? '' : JSON.stringify(v);
+}
+
+// The current binding of `(fnId, slotId)` — read fresh, falling back to a
+// subtree fetch when the lexical cache does not hold the fn.
+async function _gdUndoBindingOf(fnId, slotId) {
+  const cached = (typeof lookups !== 'undefined' && lookups?.bindingByFnSlot)
+    ? lookups.bindingByFnSlot.get(fnId + '|' + slotId) : null;
+  if (cached) return cached;
+  try {
+    const r = await authFetch(API.api_graph_entities
+      + '?scope=subtree&root-id=' + encodeURIComponent(fnId));
+    const payload = await r.json();
+    return (payload.bindings || []).find((b) => b['fn-id'] === fnId && b['slot-id'] === slotId) || null;
+  } catch (_) { return null; }
+}
+
+// A binding write: POST (no `prev`) → undo deletes the row; PUT → undo
+// writes the pre-image of every column the write touched, plus value /
+// ref (switching a literal to a ref clears the other column, so both are
+// restored together).
+function gdUndoRecordBindingWrite(arg, fields, prev) {
+  const fnId = arg?.['fn-id'];
+  const slotId = arg?.['slot-id'];
+  if (!fnId || !slotId || !fields) return;
+  const slot = _gdUndoSlotLabel(slotId);
+  if (!prev) {
+    gdUndoRecord({
+      label: 'Bound ' + slot,
+      undo: async () => {
+        const b = await _gdUndoBindingOf(fnId, slotId);
+        if (!b?.id) return { ok: false, error: 'the binding is already gone' };
+        const r = await authMutate('DELETE', API.api_entities_type_id('binding', b.id));
+        const res = await _gdUndoResult(r);
+        if (res.ok) await _gdUndoReloadBindings();
+        return res;
+      },
+    });
+    return;
+  }
+  const keys = new Set(Object.keys(fields));
+  if (keys.has('value') || keys.has('ref-fn-id')) { keys.add('value'); keys.add('ref-fn-id'); }
+  const body = [...keys].map((k) => k + '=' + encodeURIComponent(
+    k === 'value' ? _gdUndoWireValue(prev.value) : (prev[k] ?? ''))).join('&');
+  gdUndoRecord({
+    label: 'Changed ' + slot,
+    verify: async () => {
+      const cur = await _gdUndoBindingOf(fnId, slotId);
+      if (!cur || cur.id !== prev.id) return 'the binding was replaced since';
+      if ('value' in fields && _gdUndoWireValue(cur.value) !== String(fields.value)) return 'the value changed again since';
+      if ('ref-fn-id' in fields && (cur['ref-fn-id'] || '') !== String(fields['ref-fn-id'] || '')) return 'the reference changed again since';
+      return null;
+    },
+    undo: async () => {
+      const r = await authMutate('PUT', API.api_entities_type_id('binding', prev.id), body);
+      const res = await _gdUndoResult(r);
+      if (res.ok) await _gdUndoReloadBindings();
+      return res;
+    },
+  });
+}
+
+// A removed binding: undo re-creates it with its value / ref.
+function gdUndoRecordBindingDeleted(prev) {
+  if (!prev?.['fn-id'] || !prev['slot-id']) return;
+  const slot = _gdUndoSlotLabel(prev['slot-id']);
+  gdUndoRecord({
+    label: 'Unbound ' + slot,
+    undo: async () => {
+      const parts = ['fn-id=' + encodeURIComponent(prev['fn-id']),
+                     'slot-id=' + encodeURIComponent(prev['slot-id'])];
+      if (prev['ref-fn-id']) parts.push('ref-fn-id=' + encodeURIComponent(prev['ref-fn-id']));
+      else if (prev.value !== undefined && prev.value !== null) parts.push('value=' + encodeURIComponent(_gdUndoWireValue(prev.value)));
+      const r = await authMutate('POST', API.api_entities_type('binding'), parts.join('&'));
+      const res = await _gdUndoResult(r);
+      if (res.ok) await _gdUndoReloadBindings();
+      return res;
+    },
+  });
+}
+
+// The items of every sequence binding of `fnId`, position-sorted.
+function _gdUndoSeqItems(fnId) {
+  if (typeof lookups === 'undefined' || !lookups?.bindingsByFn) return [];
+  const out = [];
+  for (const b of (lookups.bindingsByFn.get(fnId) || [])) {
+    for (const it of (lookups.itemsByBinding?.get(b.id) || [])) out.push(it);
+  }
+  return out.sort((a, b) => (a.position || 0) - (b.position || 0));
+}
+
+function _gdUndoSameItem(it, body) {
+  if (body.ref) return it['ref-fn-id'] === body.ref;
+  return _gdUndoWireValue(it.value) === _gdUndoWireValue(body.value);
+}
+
+// An appended (or inserted) item: undo deletes the item that carries what
+// was appended, at the position it went to (the newest match otherwise).
+function gdUndoRecordSeqAppend(fnId, body) {
+  if (!fnId || !body) return;
+  gdUndoRecord({
+    label: 'Appended an item',
+    undo: async () => {
+      const items = _gdUndoSeqItems(fnId);
+      const at = (typeof body.position === 'number') ? items[body.position] : null;
+      const hit = (at && _gdUndoSameItem(at, body)) ? at
+        : [...items].reverse().find((it) => _gdUndoSameItem(it, body));
+      if (!hit?.id) return { ok: false, error: 'the list changed since' };
+      const r = await authMutate('DELETE', API.api_sequence_item_item_id(hit.id));
+      const res = await _gdUndoResult(r);
+      if (res.ok) await _gdUndoReloadBindings();
+      return res;
+    },
+  });
+}
+
+// A removed item: undo appends it back at its old position.
+function gdUndoRecordSeqRemoved(item) {
+  if (!item) return;
+  const binding = (typeof lookups !== 'undefined' && lookups?.bindingMap)
+    ? lookups.bindingMap.get(item['binding-id']) : null;
+  const fnId = binding?.['fn-id'];
+  if (!fnId) return;
+  const body = item['ref-fn-id'] ? { ref: item['ref-fn-id'] } : { value: item.value };
+  if (typeof item.position === 'number') body.position = item.position;
+  gdUndoRecord({
+    label: 'Removed an item',
+    undo: async () => {
+      const r = await authFetch(API.api_sequence_append_fn_id(fnId), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body) });
+      const res = await _gdUndoResult(r);
+      if (res.ok) await _gdUndoReloadBindings();
+      return res;
+    },
+  });
+}
+
+// An item's value edit: undo writes the old value back.
+function gdUndoRecordSeqValue(itemId, oldValue, newValue) {
+  if (!itemId) return;
+  gdUndoRecord({
+    label: 'Changed an item',
+    verify: async () => {
+      const cur = (typeof lookups !== 'undefined' && lookups?.itemByItemId) ? lookups.itemByItemId.get(itemId) : null;
+      return (cur && _gdUndoWireValue(cur.value) !== _gdUndoWireValue(newValue)) ? 'the item changed again since' : null;
+    },
+    undo: async () => {
+      const r = await authFetch(API.api_sequence_item_item_id(itemId), {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: oldValue }) });
+      const res = await _gdUndoResult(r);
+      if (res.ok) await _gdUndoReloadBindings();
+      return res;
+    },
+  });
+}
+
+// A move: undo moves the item back the other way.
+function gdUndoRecordSeqMove(itemId, direction) {
+  if (!itemId || !direction) return;
+  const back = direction === 'up' ? 'down' : 'up';
+  gdUndoRecord({
+    label: 'Moved an item ' + direction,
+    undo: async () => {
+      const r = await authFetch(API.api_sequence_move_item_id(itemId), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ direction: back }) });
+      const res = await _gdUndoResult(r);
+      if (res.ok) await _gdUndoReloadBindings();
+      return res;
+    },
+  });
+}
+
 // --- keyboard ---------------------------------------------------------------
 
 if (typeof registerShortcut === 'function') {
@@ -322,3 +520,9 @@ window.gdUndoRecordCreatedFn = gdUndoRecordCreatedFn;
 window.gdUndoRecordCreatedNs = gdUndoRecordCreatedNs;
 window.gdUndoRecordRename = gdUndoRecordRename;
 window.gdUndoRecordNsMove = gdUndoRecordNsMove;
+window.gdUndoRecordBindingWrite = gdUndoRecordBindingWrite;
+window.gdUndoRecordBindingDeleted = gdUndoRecordBindingDeleted;
+window.gdUndoRecordSeqAppend = gdUndoRecordSeqAppend;
+window.gdUndoRecordSeqRemoved = gdUndoRecordSeqRemoved;
+window.gdUndoRecordSeqValue = gdUndoRecordSeqValue;
+window.gdUndoRecordSeqMove = gdUndoRecordSeqMove;

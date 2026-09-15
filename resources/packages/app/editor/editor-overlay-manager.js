@@ -203,7 +203,10 @@ function createPlaceholderOverlay(node, container) {
     e.stopPropagation();
     if (isSeqAnchor && typeof appendSequenceItem === 'function') {
       appendSequenceItem(seqFnId, btn, appendT,
-                         { elemType: (typeof seqElemType === 'function' ? seqElemType(arg) : null) });
+                         { elemType: (typeof seqElemType === 'function' ? seqElemType(arg) : null),
+                           // An EMPTY list's first `+` may also take a fn's
+                           // result as the whole list (see appendSequenceItem).
+                           wholeSlotArg: node.data('seqTail') ? null : arg });
     } else if (typeof enterFreeArgBindEditMode === 'function') {
       enterFreeArgBindEditMode(arg, btn);
     }

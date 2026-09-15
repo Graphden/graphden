@@ -411,6 +411,9 @@ async function writeBindingFields(arg, fields) {
   const body = Object.entries(fields)
     .map(([k, v]) => k + '=' + encodeURIComponent(v == null ? '' : v))
     .join('&');
+  // The pre-image, read BEFORE the write, is what a 30-second Undo puts
+  // back (editor-undo.js).
+  const prev = (bindingId && lookups?.bindingMap) ? (lookups.bindingMap.get(bindingId) || null) : null;
   try {
     const r = bindingId
       ? await authMutate('PUT',
@@ -420,6 +423,9 @@ async function writeBindingFields(arg, fields) {
                           'fn-id=' + encodeURIComponent(fnId) +
                           '&slot-id=' + encodeURIComponent(slotId) +
                           (body ? '&' + body : ''));
+    if (r?.ok && typeof gdUndoRecordBindingWrite === 'function') {
+      gdUndoRecordBindingWrite(arg, fields, bindingId ? prev : null);
+    }
     return r?.ok ? { ok: true } : { ok: false, error: await responseError(r) };
   } catch (err) {
     console.error('binding save fetch threw', err);
@@ -432,12 +438,16 @@ async function writeBindingFields(arg, fields) {
 // `{ok, error?}`.
 async function putSequenceItemValue(itemId, value) {
   if (!itemId) return { ok: false, error: 'No sequence item.' };
+  const prev = lookups?.itemByItemId ? (lookups.itemByItemId.get(itemId) || null) : null;
   try {
     const r = await authFetch(API.api_sequence_item_item_id(itemId), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ value: value })
     });
+    if (r?.ok && prev && typeof gdUndoRecordSeqValue === 'function') {
+      gdUndoRecordSeqValue(itemId, prev.value, value);
+    }
     return r?.ok ? { ok: true } : { ok: false, error: await responseError(r) };
   } catch (err) {
     console.error('binding save fetch threw', err);
@@ -511,10 +521,12 @@ async function deleteUseSiteBinding(arg) {
   if (!bindingId) return false;
   if (!confirm('Remove this value? The slot will revert to a free-arg '
                + '(default value, or pick a new one).')) return false;
+  const prev = lookups?.bindingMap ? (lookups.bindingMap.get(bindingId) || null) : null;
   try {
     const r = await authMutate('DELETE',
                                API.api_entities_type_id('binding', bindingId));
     if (r?.ok) {
+      if (prev && typeof gdUndoRecordBindingDeleted === 'function') gdUndoRecordBindingDeleted(prev);
       if (typeof initGraph === 'function') initGraph();
       return true;
     }

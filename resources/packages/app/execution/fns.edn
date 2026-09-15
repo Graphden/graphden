@@ -3430,13 +3430,26 @@
    :parent :to-json-pretty
    :args {:data {:parent :get
                  :args {:coll {:as :item} :key {:value :value} :default {:value nil}}}}}
+  ;; A SHORT value (one line of JSON — a word list, a sentence, a number)
+  ;; opens by itself: the tree is read for its values, and a viewer that
+  ;; has to be clicked on every row hid the very thing the reader came for
+  ;; (lesson 15, 2026-09-15). Long values stay folded.
+  {:name :_ptrace-r-value-short?
+   :parent :lte
+   :args {:nums [{:parent :str-len :args {:string :_ptrace-r-value-str}}
+                 80]}}
+  {:name :_ptrace-r-value-attrs
+   :parent :if
+   :args {:test :_ptrace-r-value-short?
+          :then {:value {:class "trace-value" :open "open"}}
+          :else {:value {:class "trace-value"}}}}
   {:name :_ptrace-r-value
-   :description "Collapsed captured-value viewer; absent value renders nothing."
+   :description "Captured-value viewer — open when the value is short, collapsed otherwise; absent value renders nothing."
    :parent :if
    :args {:test :_ptrace-r-has-value?
           :then {:parent :hiccup
                  :args {:tag {:value "details"}
-                        :attrs {:value {:class "trace-value"}}
+                        :attrs :_ptrace-r-value-attrs
                         :children [{:parent :hiccup
                                     :args {:tag {:value "summary"} :attrs {:value {}}
                                            :children ["value"]}}

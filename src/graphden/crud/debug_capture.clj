@@ -75,10 +75,13 @@
   [branch-id {:keys [path-prefix capture-values? ttl-ms]}]
   (let [k [(tc/current-org) branch-id]
         ttl (-> (or ttl-ms default-ttl-ms) long (max 1000) (min max-ttl-ms))
+        ;; ONE clock read: two reads straddling a millisecond boundary made
+        ;; the window a millisecond longer than the TTL (a gate flake).
+        armed-at (now-ms)
         trap {:path-prefix (when-not (str/blank? path-prefix) path-prefix)
               :capture-values? (boolean capture-values?)
-              :armed-at-ms (now-ms)
-              :expires-at-ms (+ (now-ms) ttl)}]
+              :armed-at-ms armed-at
+              :expires-at-ms (+ armed-at ttl)}]
     (swap! traps assoc k trap)
     trap))
 

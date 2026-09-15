@@ -129,13 +129,13 @@ The read side: a consumer names a service through a ~:fn-ref~ slot (~:service-en
 :PROPERTIES:
 :CUSTOM_ID: services/run-traced!
 :FILE: src/graphden/crud/fn_execution/trace.clj
-:LINE: 103
+:LINE: 104
 :MINS: 1.7
 :END:
 
 A call across the wire stays one tree: a persisted run's ~:service-get~ sends ~X-Graphden-Trace~ (trace id + its own execution id), and the listener runs the request through this — a fresh execution id bound for the handler's own outbound calls, a path trace, and the outcome persisted as an execution of the handler fn linked to the caller. No header, no row: ordinary traffic pays nothing. ~get-execution~ then lists a run's ~:children~.
 
-- source :: [[file:../../../src/graphden/crud/fn_execution/trace.clj::(defn run-traced!][src/graphden/crud/fn_execution/trace.clj:103]]
+- source :: [[file:../../../src/graphden/crud/fn_execution/trace.clj::(defn run-traced!][src/graphden/crud/fn_execution/trace.clj:104]]
 
 * 11. extend-builder
 :PROPERTIES:

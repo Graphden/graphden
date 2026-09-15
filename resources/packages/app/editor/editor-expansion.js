@@ -156,10 +156,18 @@ function applyClickSpec(nodeId, depth, fnId, allFnsAtDepth) {
         || (newSpec.fullDepth || 0) > (currentSpec.fullDepth || 0)
         || (newSpec.partialFns?.size || 0)
            > (currentSpec.partialFns?.size || 0));
-  renderGraph(false);
+  const rendered = renderGraph(false);
   if (grew && typeof fitGraphIfOverflowing === 'function') {
-    // Double-rAF: the measured layout settles positions after render.
-    requestAnimationFrame(() => requestAnimationFrame(fitGraphIfOverflowing));
+    // Fit once the render has LANDED. `renderGraph` awaits the backend
+    // layout, so a fit scheduled on the next frames measured the OLD graph
+    // and found it fitting — the card the click had just revealed sat
+    // off-screen under the inspector, exactly the dead end this guard is
+    // for (lesson 15's unfolded hop, 2026-09-15). New nodes jump straight
+    // to their place; the survivors tween for ANIM_DURATION, so measure
+    // after the tween.
+    Promise.resolve(rendered).then(() => {
+      setTimeout(fitGraphIfOverflowing, ANIM_DURATION + 30);
+    });
   }
   anchorNodeId = null;
 }

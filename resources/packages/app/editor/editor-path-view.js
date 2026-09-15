@@ -106,6 +106,24 @@ function pathBadgeTitle(agg) {
 }
 
 
+// --- Captured-value chip (Debug P3) ---------------------------------------
+//
+// The chip prints a SHORT value itself — `= "HI"`, `= 11` — so a traced
+// run's values can be read straight off the cards, hop by hop, which is
+// the point of capturing them (a chip that only said "= value" made the
+// reader click every node to see nothing had changed). Anything longer
+// keeps the generic label; the popover below is the full view either way.
+const PATH_INLINE_VALUE_MAX_CHARS = 24;
+
+function pathValueChipText(agg) {
+  if (!agg.hasValue) return '= 4KB+';
+  let text;
+  try { text = JSON.stringify(agg.lastValue); } catch (_) { text = undefined; }
+  if (text === undefined) text = 'null';
+  return text.length <= PATH_INLINE_VALUE_MAX_CHARS ? '= ' + text : '= value';
+}
+
+
 // --- Captured-value popover (Debug P3) ------------------------------------
 //
 // Singleton popover opened from a node's value badge — shows the LAST
@@ -282,7 +300,7 @@ function showExecutionPathView(pathTrace) {
       const valBadge = document.createElement('button');
       valBadge.type = 'button';
       valBadge.className = 'path-value-badge';
-      valBadge.textContent = agg.hasValue ? '= value' : '= 4KB+';
+      valBadge.textContent = pathValueChipText(agg);
       valBadge.title = agg.hasValue
         ? 'Show this fn\'s captured return value'
         : 'Value not captured — over the 4 KB per-value cap';
@@ -325,6 +343,7 @@ function appendPathViewAffordance(hostEl, pathTrace) {
 }
 
 
+window.pathValueChipText = pathValueChipText;
 window.showExecutionPathView = showExecutionPathView;
 window.clearExecutionPathView = clearExecutionPathView;
 window.appendPathViewAffordance = appendPathViewAffordance;

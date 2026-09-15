@@ -64,7 +64,7 @@ async function hardCleanup(page) {
                      'tutorial-tick', 'review-demo',
                      // lesson 15's chain — a crash between its create and
                      // finishAndDelete 409s the next run's create.
-                     'tutorial-outer', 'tutorial-inner',
+                     'tutorial-len', 'tutorial-upper',
                      // lesson 35's consumer.
                      'tutorial-endpoint', 'tutorial-fetch'];
   // Per-browser view-state the lessons exercise (smart views, recents,

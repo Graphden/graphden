@@ -87,7 +87,8 @@
               cr/*path-trace* trace
               cr/*effect-trace* effect-trace
               ce/*traced-fn-ids* (atom ce/trace-all)]
-      (let [outcome (try {:status :succeeded :result (thunk)}
+      (let [outcome (try {:status :succeeded
+                          :result (ce/traced-root-call fn-id nil thunk)}
                          (catch Exception t {:status :failed :throwable t}))]
         (capture/persist-captured! branch-id ctx fn-id nil
                                    trace effect-trace outcome t0

@@ -299,7 +299,9 @@
       ;; Exception, not Throwable: an Error (OOM, StackOverflow)
       ;; propagates uncaptured — persisting it matters less than not
       ;; interfering with the JVM's error path.
-      (let [outcome (try {:status :succeeded :result (thunk)}
+      ;; The handler is the hop's root frame — the tree has a top.
+      (let [outcome (try {:status :succeeded
+                          :result (ce/traced-root-call handler-fn-id nil thunk)}
                          (catch Exception t {:status :failed :throwable t}))]
         (persist-captured! branch-id branch-ctx handler-fn-id request
                            trace effect-trace outcome t0)

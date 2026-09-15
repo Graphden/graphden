@@ -41,8 +41,10 @@ Take any composed fn of yours (something with a few refs — the
    cost estimate (values are stored with the run, up to 4 KB per
    node).
 3. Run. The result pane now offers **Show path on canvas** — every
-   traversed fn card gets a timing badge (`3× 12ms`, `cache`,
-   `secret`), and with values captured, an `= value` chip.
+   traversed fn card, the one you ran included, gets a timing badge
+   (`3× 12ms`, `cache`, `secret`), and with values captured, a chip
+   with its return: short values print right on the card (`= "HI"`,
+   `= 11`), longer ones read `= value` and open on click.
 4. In the history list under the form, the traced row carries two
    extra buttons:
    - **path** — the same aggregate canvas highlight;

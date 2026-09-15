@@ -543,3 +543,64 @@
     (testing "ordinary sub-1.0 rates need no confirm"
       (ce/set-trace-sampling! 0.25)
       (is (= 0.25 @ce/*trace-sample-rate*)))))
+
+
+;; -----------------------------------------------------------------------------
+;; traced-root-call — the run's own fn as the OUTERMOST frame
+;; -----------------------------------------------------------------------------
+
+(deftest traced-root-call-records-outermost-frame-test
+  (let [root (random-uuid)
+        child (random-uuid)
+        trace (ce/new-path-trace {:capture-values? true})]
+    (with-classes {}
+      (binding [cr/*path-trace* trace
+                ce/*traced-fn-ids* (atom ce/trace-all)]
+        (is (= 5 (ce/traced-root-call
+                   root nil
+                   (fn [] (call-with-cache child #{} (fn [_fa _ctx] 5) {} (fresh-ctx)))))
+            "the thunk's value is returned untouched")))
+    (testing "the root lands as a fresh frame with the ref nested under it"
+      (let [[e-child e-root] (entries trace)]
+        (is (= child (:fn-id e-child)))
+        (is (= root (:fn-id e-root)))
+        (is (zero? (:seq e-root)) "root frame entered first")
+        (is (not (contains? e-root :parent-seq)) "root has no parent")
+        (is (zero? (:parent-seq e-child)) "the ref nests under the root")
+        (is (false? (:cache-hit? e-root)))
+        (is (nat-int? (:duration-ms e-root)))
+        (is (= 5 (:value e-root)) "capture mode records the root's return too")))))
+
+
+(deftest traced-root-call-silent-outside-selective-set-test
+  ;; Ambient sampling binds the var but gates by the SELECTIVE set — a
+  ;; root outside it records nothing, and the ref frame stays a root.
+  (let [root (random-uuid)
+        child (random-uuid)
+        trace (ce/new-path-trace)]
+    (with-classes {}
+      (binding [cr/*path-trace* trace
+                ce/*traced-fn-ids* (atom #{child})]
+        (is (= 7 (ce/traced-root-call
+                   root nil
+                   (fn [] (call-with-cache child #{} (fn [_fa _ctx] 7) {} (fresh-ctx))))))))
+    (is (= [child] (mapv :fn-id (entries trace))))
+    (is (not (contains? (first (entries trace)) :parent-seq)))))
+
+
+(deftest traced-root-call-zero-work-when-var-unbound-test
+  (let [calls (atom 0)]
+    (with-redefs [ce/record-path-entry! (fn [& _] (swap! calls inc))]
+      (is (= :v (ce/traced-root-call (random-uuid) nil (fn [] :v)))))
+    (is (zero? @calls) "no trace bound → the thunk runs bare")))
+
+
+(deftest traced-root-call-secret-root-hides-test
+  (let [root (random-uuid)
+        trace (ce/new-path-trace {:capture-values? true})]
+    (with-classes {root :secret-output}
+      (binding [cr/*path-trace* trace
+                ce/*traced-fn-ids* (atom ce/trace-all)]
+        (is (= :s3cret (ce/traced-root-call root nil (fn [] :s3cret))))))
+    (is (= [{:fn-id root :hidden :secret}] (mapv frame-of (entries trace)))
+        "a secret-touching root records hidden — its value is never read")))

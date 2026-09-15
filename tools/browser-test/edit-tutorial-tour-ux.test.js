@@ -16,6 +16,7 @@ const {
   hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
   runViaRowActions, tourTitle, extendViaRowActions, bindFirstPlaceholder,
   bindFnRefPlaceholder, finishAndDelete, runWithEffectAck, waitTourClosed,
+  openRowActionsFor,
 } = require('./tutorial-tour-helpers');
 
 
@@ -300,30 +301,20 @@ const {
     await page.goto(BASE + '/?tutorial=15');
     await waitTourTitle(page, 'What actually ran?', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 15 Next');
-    await waitTourTitle(page, 'Build something with a step in it');
-    await filterAndSelect(page, 'const', 'const');
-    await extendViaRowActions(page, 'tutorial-inner', 'const');
-    await waitTourTitle(page, 'Give the inner fn a value', 150000);
-    await bindFirstPlaceholder(page, '"hi"');
-    await waitTourTitle(page, 'Now the outer fn', 150000);
+    await waitTourTitle(page, 'Start with a transformation');
     await filterAndSelect(page, 'str-upper', 'str-upper');
-    await extendViaRowActions(page, 'tutorial-outer', 'str-upper');
+    await extendViaRowActions(page, 'tutorial-upper', 'str-upper');
+    await waitTourTitle(page, 'Give it an input', 150000);
+    await bindFirstPlaceholder(page, 'hello world');
+    await waitTourTitle(page, 'Now the second hop', 150000);
+    await filterAndSelect(page, 'str-len', 'str-len');
+    await extendViaRowActions(page, 'tutorial-len', 'str-len');
     await waitTourTitle(page, 'Chain them', 150000);
-    await bindFnRefPlaceholder(page, 'tutorial-inner');
+    await bindFnRefPlaceholder(page, 'tutorial-upper');
     await waitTourTitle(page, 'Peek inside without leaving', 150000);
-    // Open the ⋯ on the tutorial-inner NODE (not the root card) and peek.
-    await page.waitForFunction(() => {
-      return Array.from(document.querySelectorAll('.node-overlay')).some((ov) =>
-        ov.textContent.trim().startsWith('tutorial-inner')
-        && ov.querySelector('button.more-actions-trigger'));
-    }, null, {timeout: 60000, polling: 200});
-    await page.evaluate(() => {
-      const ov = Array.from(document.querySelectorAll('.node-overlay')).find((o) =>
-        o.textContent.trim().startsWith('tutorial-inner')
-        && o.querySelector('button.more-actions-trigger'));
-      ov.querySelector('button.more-actions-trigger')
-        .dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
-    });
+    // The step pins its ring to the tutorial-upper CARD's ⋯ (not the
+    // root's, which is first in the DOM) — open that one and peek.
+    await openRowActionsFor(page, 'tutorial-upper');
     await page.waitForSelector('.row-actions-popover [data-action="peek-fn"]',
       {timeout: 15000});
     await page.evaluate(() => {
@@ -335,7 +326,7 @@ const {
       title: document.querySelector('.fn-peek-title')?.textContent,
       hasBody: !!document.querySelector('.fn-peek-body'),
     }));
-    assert(peek.title === 'tutorial-inner',
+    assert(peek.title === 'tutorial-upper',
       'peek panel names the peeked fn (got ' + peek.title + ')');
     await waitTourTitle(page, 'Close the peek', 150000);
     await page.keyboard.press('Escape');
@@ -345,11 +336,10 @@ const {
     const tourAlive = await page.evaluate(() => !!document.querySelector('#gd-tour-pop'));
     assert(tourAlive, 'closing the peek with Escape does not end the tour');
     await waitTourTitle(page, 'Run it with a trace', 150000);
-    // Run WITH the trace box ticked — that is what makes the path button
-    // appear at all (an untraced run has no entries to draw).
-    await page.waitForSelector('button.more-actions-trigger', {timeout: 30000});
-    await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-    await page.waitForSelector('.row-actions-popover button', {timeout: 15000});
+    // Run the ROOT with trace + capture values — the values are what
+    // the path view then prints on the cards. The capture confirm is a
+    // native dialog; the page-level handler above accepts it.
+    await openRowActionsFor(page, 'tutorial-len');
     await page.evaluate(() => {
       Array.from(document.querySelectorAll('.row-actions-popover button'))
         .find((b) => b.textContent.trim() === '▶')
@@ -360,10 +350,32 @@ const {
       const tr = document.querySelector('.execute-trace-checkbox');
       if (tr && !tr.checked) tr.click();
     });
+    await page.click('.execute-popover.visible .execute-capture-values-checkbox');
+    const captureOn = await page.evaluate(() =>
+      document.querySelector('.execute-popover.visible .execute-capture-values-checkbox').checked);
+    assert(captureOn, 'capture values stays ticked after the confirm');
     await page.evaluate(() => document.querySelector('.execute-run-btn').click());
     await waitTourTitle(page, 'Draw the path', 150000);
     await page.waitForSelector('.execute-show-path-btn', {timeout: 60000});
     await page.evaluate(() => document.querySelector('.execute-show-path-btn').click());
+    await waitTourTitle(page, 'Read the path', 150000);
+    // What the reader is told to see: both fn cards lit — the run's own
+    // fn included — and the value transforming hop by hop on the chips.
+    const path = await page.evaluate(() => ({
+      highlighted: Array.from(document.querySelectorAll('.node-overlay.path-highlighted'))
+        .map((el) => el.dataset.fnName),
+      chips: Array.from(document.querySelectorAll('.path-value-badge'))
+        .map((el) => el.textContent),
+    }));
+    for (const name of ['tutorial-len', 'tutorial-upper']) {
+      assert(path.highlighted.includes(name),
+        name + ' is on the drawn path: ' + JSON.stringify(path.highlighted));
+    }
+    for (const chip of ['= "HELLO WORLD"', '= 11']) {
+      assert(path.chips.includes(chip),
+        'value chip ' + chip + ' printed on its card: ' + JSON.stringify(path.chips));
+    }
+    assert(await clickTourButton(page, 'Next'), 'Read the path Next');
     await waitTourTitle(page, 'Your trail', 150000);
     // The filter is still holding the last search — clear it for real,
     // as the step instructs; the Recent list only shows outside search.
@@ -379,6 +391,7 @@ const {
     }));
     assert(recents.hidden === false && recents.rows.length > 0,
       'Recent list is visible with rows (' + JSON.stringify(recents.rows) + ')');
+    await waitTourTitle(page, "That's debugging in place", 150000);
     // A recent row navigates — the trail is the way back.
     const trailHash = await page.evaluate(() => location.hash);
     await page.evaluate(() => document.querySelector('.gd-recent-row').click());
@@ -386,9 +399,8 @@ const {
       {timeout: 30000, polling: 200});
     console.log('  lesson 15: Recent row navigated to '
       + await page.evaluate(() => location.hash));
-    await waitTourTitle(page, "That's debugging in place", 150000);
     await finishAndDelete(page);
-    console.log('  lesson 15: walked + cleaned (path + peek + trail)');
+    console.log('  lesson 15: walked + cleaned (path + values + peek + trail)');
 
     console.log('PASS');
   } catch (err) {

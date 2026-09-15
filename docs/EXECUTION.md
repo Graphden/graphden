@@ -490,12 +490,14 @@ Tests: `graphden.packages.app.value-repr-test`,
 
 ## Path trace — the call tree
 
-A `trace?` submission records one entry per `:ref` invocation into
-the row's `:path-trace` jsonb (`capture-values?` additionally stores
-each non-hidden frame's return, 4 KB/entry). Every entry carries
-`:seq` (entry-order frame number) and `:parent-seq` (the frame that
-forced it), so the completion-ordered flat vector reassembles into
-the **call tree**.
+A `trace?` submission records one entry for the run's own fn — the
+**outermost frame** (`compile-eager/traced-root-call`, applied by
+`run-future`, the request trap and the cross-service hop alike) — plus
+one per `:ref` invocation, into the row's `:path-trace` jsonb
+(`capture-values?` additionally stores each non-hidden frame's return,
+4 KB/entry). Every entry carries `:seq` (entry-order frame number) and
+`:parent-seq` (the frame that forced it), so the completion-ordered
+flat vector reassembles into the **call tree**, the root at its top.
 
 - `GET /partials/execute-trace?id=X` renders the tree server-side —
   one row per frame in depth-first order, fn names joined on the

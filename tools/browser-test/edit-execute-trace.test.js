@@ -157,6 +157,10 @@ async function openExecutePopoverForCard(page, fnId) {
     }));
     assert(view.highlighted.includes(probeConst.id),
            'traversed card highlighted: ' + JSON.stringify(view.highlighted));
+    // The run's own fn is the trace's outermost frame — the card that
+    // was run lights up too, never the one dimmed card on its own path.
+    assert(view.highlighted.includes(probeWrap.id),
+           'the run\'s root card highlighted: ' + JSON.stringify(view.highlighted));
     assert(view.badges.some((t) => /ms|cache/.test(t)),
            'badge shows duration or cache-hit: ' + JSON.stringify(view.badges));
     assert(view.layerActive, 'graph layer dims non-path cards');
@@ -276,7 +280,8 @@ async function openExecutePopoverForCard(page, fnId) {
       badge.click();
       return badge.textContent;
     });
-    assert(/value/.test(valBadge), 'value badge rendered: ' + valBadge);
+    // A short value prints inline on the chip; the popover is the full view.
+    assert(/= (value|41)/.test(valBadge), 'value badge rendered: ' + valBadge);
     await page.waitForSelector('.path-value-popover', {timeout: 5000});
     const popText = await page.evaluate(() =>
       document.querySelector('.path-value-popover').textContent);

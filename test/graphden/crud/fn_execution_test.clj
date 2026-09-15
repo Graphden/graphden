@@ -1594,7 +1594,15 @@
       (is (= 11 (:result result)))
       (is (some? entry) (pr-str (:path-trace result)))
       (is (false? (:cache-hit? entry)))
-      (is (nat-int? (:duration-ms entry))))))
+      (is (nat-int? (:duration-ms entry))))
+    (testing "the run's own fn is the outermost frame — the ref nests under it"
+      (let [root (->> (:entries (:path-trace result))
+                      (filter #(= (str (:id wrapped)) (:fn-id %)))
+                      first)]
+        (is (some? root) (pr-str (:path-trace result)))
+        (is (not (contains? root :parent-seq)))
+        (is (false? (:cache-hit? root)))
+        (is (= (:seq root) (:parent-seq entry)))))))
 
 
 (deftest apply-capture-values-persists-values-test

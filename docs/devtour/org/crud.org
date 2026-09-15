@@ -248,7 +248,7 @@ The other direction of ~render-repr~: EDITING a value. A slot's effective type i
 :CUSTOM_ID: crud/run-captured!
 :FILE: src/graphden/crud/debug_capture.clj
 :LINE: 285
-:MINS: 2.3
+:MINS: 2.4
 :END:
 
 The «catch next request» debugger entry (docs/EXECUTION.md § Debug): a one-shot, TTL-bounded, org+branch-keyed trap consumed in ~branch-router/ring-callable-for-ctx~ runs the next matching HTTP request through this wrapper — Debug path-trace bound, sanitized request + response persisted as a standard ~:fn-execution~ row — so a live handler run replays through the same call-tree UI as a traced ~/api/execute~.

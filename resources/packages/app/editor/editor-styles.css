@@ -5426,15 +5426,18 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   box-shadow: 0 0 0 3px var(--accent);
 }
 /* Per-fn aggregate badge — count × total duration / "cache" / "secret".
-   Sits INSIDE the card (overlays clip via overflow:hidden), top-right
-   over the header band, so it carries its own opaque ground for
-   contrast. */
+   Sits INSIDE the card (overlays clip via overflow:hidden), bottom-LEFT
+   over the drag-handle band — the one strip of a card that carries no
+   name, no ⋯ and no chip. Top-right sat on the name row: "tutorial-le"
+   with the ⋯ under the badge, and the value chip below it covered the
+   parent row. With the value chip bottom-right the band reads as the
+   run's footer: `39ms … = 11`. Own opaque ground for contrast. */
 .path-trace-badge {
   position: absolute;
-  top: 2px; right: 2px;
+  bottom: 1px; left: 2px;
   z-index: 6;
   font-size: 0.625rem;
-  line-height: 1.4;
+  line-height: 1.25;
   padding: 0 5px;
   border-radius: 8px;
   background: var(--bg);
@@ -5496,14 +5499,15 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .execute-show-path-btn:hover,
 .execute-show-path-btn:focus-visible { background: var(--hover-bg); outline: 2px solid var(--gd-flow); outline-offset: 1px; }
 
-/* Captured-value affordance (Debug P3) — a small "= value" chip under
-   the timing badge; opens the singleton value popover. */
+/* Captured-value affordance (Debug P3) — the value itself when short
+   (`= "HI"`, `= 11`), else "= value"; bottom-right of the footer band,
+   opposite the timing badge; opens the singleton value popover. */
 .path-value-badge {
   position: absolute;
-  top: 20px; right: 2px;
+  bottom: 1px; right: 2px;
   z-index: 6;
   font-family: inherit; font-size: 0.625rem;
-  line-height: 1.4;
+  line-height: 1.25;
   padding: 0 5px;
   border-radius: 8px;
   background: var(--bg);

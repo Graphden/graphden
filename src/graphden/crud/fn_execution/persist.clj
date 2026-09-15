@@ -849,15 +849,19 @@
         (cond
           ;; Explicit trace?/capture-values? submit — the run's own
           ;; traversal is the selected subtree (trace-all sentinel).
+          ;; The run's own fn is the trace's OUTERMOST frame
+          ;; (`ce/traced-root-call`) — the call tree has a top and
+          ;; the path view lights the card that was actually run.
           (and path-trace explicit?)
           (binding [cr/*path-trace* path-trace
                     ce/*traced-fn-ids* (atom ce/trace-all)]
-            (cr/execute ctx fn-id args))
+            (ce/traced-root-call fn-id nil #(cr/execute ctx fn-id args)))
           ;; Ambient-sampled — the selective set keeps gating which
-          ;; frames record; only the per-execution var binds.
+          ;; frames record (the root included); only the
+          ;; per-execution var binds.
           path-trace
           (binding [cr/*path-trace* path-trace]
-            (cr/execute ctx fn-id args))
+            (ce/traced-root-call fn-id nil #(cr/execute ctx fn-id args)))
           :else
           (cr/execute ctx fn-id args))))))
 

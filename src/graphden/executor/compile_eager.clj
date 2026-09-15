@@ -605,8 +605,8 @@
           (record-path-entry! trace (assoc base :hidden (hidden-entry-kind cls)))))))
 
 
-(defn- path-traced-fresh-call
-  "Invoke `(child fa ctx)` recording a fresh-call entry into `trace`:
+(defn- path-traced-call
+  "Invoke `(thunk)` recording a fresh-call entry into `trace`:
    `{:fn-id … :cache-hit? false :duration-ms <wall ms>}`. A THROWING
    frame still lands in the trace (the failing call is the one being
    debugged) — recorded on the `finally` path, without a value.
@@ -639,7 +639,7 @@
    rescue a stale/abandoned identity id — without it a historical id
    whose secret rich-type lives under its current name reads as
    non-secret and its return would be captured (a narrow trace leak)."
-  [trace ref-id ref-name child fa ctx]
+  [trace ref-id ref-name thunk]
   (let [cls (@trace-capture-class-fn ref-id ref-name)]
     (if (not= :plain cls)
       ;; Hidden frame (secret-touching, or fail-closed unknown): the
@@ -655,7 +655,7 @@
                                      :hidden (hidden-entry-kind cls)}
                               (some? parent) (assoc :parent-seq parent)))
         (try
-          (child fa ctx)
+          (thunk)
           (finally (exit-frame! trace))))
       (let [capture? (:capture-values? @trace)
             [n parent] (enter-frame! trace)
@@ -672,7 +672,7 @@
                                  (some? parent) (assoc :parent-seq parent))
                                value-fields)))]
         (try
-          (let [v (child fa ctx)]
+          (let [v (thunk)]
             (vreset! recorded? true)
             (let [frame (exit-frame! trace)]
               (record! (cond
@@ -688,6 +688,30 @@
             (when-not @recorded?
               (exit-frame! trace)
               (record! nil))))))))
+
+
+(defn- path-traced-fresh-call
+  "`path-traced-call` for one `:ref` frame — `(child fa ctx)` is the
+   thunk."
+  [trace ref-id ref-name child fa ctx]
+  (path-traced-call trace ref-id ref-name #(child fa ctx)))
+
+
+(defn traced-root-call
+  "Run `(thunk)` as the OUTERMOST frame of the current path trace — the
+   run's own fn. A trace records `:ref` invocations, so without this
+   frame the fn the reader actually ran was the one card the path view
+   dimmed (\"Execution path: 1 fn highlighted\" with the root greyed
+   out), and the call tree had no top. The root records under exactly
+   the gating a `:ref` frame gets (`active-path-trace`: the var bound
+   AND the fn in the traced set / the trace-all sentinel), through the
+   same classification — a secret-touching root hides like any other
+   frame — so an untraced run pays the nil-check and nothing else.
+   `fn-name` is the stale-id rescue (`nil` is fine for a current id)."
+  [fn-id fn-name thunk]
+  (if-some [trace (active-path-trace fn-id)]
+    (path-traced-call trace fn-id fn-name thunk)
+    (thunk)))
 
 
 (defn- fresh-call

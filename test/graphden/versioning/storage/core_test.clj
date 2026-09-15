@@ -669,6 +669,59 @@
       (finally (sp/close base)))))
 
 
+(deftest revive-tombstoned-entity-test
+  ;; The undo of a user-facing delete: the tombstone's own data comes back
+  ;; as a fresh live version; a live entity has nothing to revive; a name
+  ;; reused since the delete is refused like a create would be.
+  (let [base (base-storage)
+        v (vs/wrap-with-versioning base)]
+    (try
+      (let [f (sp/create-entity v :fn {:name "rv-fn" :parent-ids [] :description "before"})]
+        (sp/update-entity v :fn (:id f) {:description "latest"})
+        (binding [vs/*tombstone-delete?* true]
+          (sp/delete-entity v :fn (:id f)))
+        (is (nil? (sp/read-entity v :fn (:id f))) "tombstoned → absent")
+        (testing "revive brings the pre-delete row back, latest data included"
+          (is (true? (vs/revive-entity! v :fn (:id f))))
+          (is (= "latest" (:description (sp/read-entity v :fn (:id f))))))
+        (testing "a live entity has nothing to revive"
+          (is (false? (vs/revive-entity! v :fn (:id f)))))
+        (testing "an id that never existed has nothing to revive"
+          (is (false? (vs/revive-entity! v :fn (random-uuid)))))
+        (testing "a reused name refuses the revival like a create"
+          (binding [vs/*tombstone-delete?* true]
+            (sp/delete-entity v :fn (:id f)))
+          (sp/create-entity v :fn {:name "rv-fn" :parent-ids [] :description "the newcomer"})
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"already exists"
+                (vs/revive-entity! v :fn (:id f))))))
+      (finally (sp/close base)))))
+
+
+(deftest rebind-after-unbind-revives-the-natural-key-identity-test
+  ;; A binding's identity is its `(fn-id, slot-id)` — UNIQUE at the base
+  ;; table. Unbinding tombstones the version and leaves the identity, so
+  ;; binding the same slot again used to insert a SECOND identity for the
+  ;; key and bounce off the index (409). The create now re-uses the dead
+  ;; identity: same id, a fresh live version with the new value.
+  (let [base (base-storage)
+        v (vs/wrap-with-versioning base)]
+    (try
+      (let [owner (sp/create-entity v :fn {:name "rebind-fn" :parent-ids [] :description "h"})
+            slot (sp/create-entity v :slot {:name "x" :type-fn-id (:id owner)})
+            first-b (sp/create-entity v :binding {:fn-id (:id owner) :slot-id (:id slot) :value "one"})]
+        (binding [vs/*tombstone-delete?* true]
+          (sp/delete-entity v :binding (:id first-b)))
+        (is (nil? (sp/read-entity v :binding (:id first-b))) "unbound → absent")
+        (let [again (sp/create-entity v :binding {:fn-id (:id owner) :slot-id (:id slot) :value "two"})]
+          (is (= (:id first-b) (:id again)) "the dead identity is re-used, not duplicated")
+          (is (= "two" (:value (sp/read-entity v :binding (:id again))))
+              "with the new value as its live version"))
+        (testing "a LIVE duplicate is still refused"
+          (is (thrown? Exception
+                (sp/create-entity v :binding {:fn-id (:id owner) :slot-id (:id slot) :value "three"})))))
+      (finally (sp/close base)))))
+
+
 (deftest tombstone-delete-propagates-on-merge-test
   ;; Deleting an entity on a source branch then merging that branch into a
   ;; target must delete it on the target too — the tombstone version travels

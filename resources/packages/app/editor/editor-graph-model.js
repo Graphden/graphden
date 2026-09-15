@@ -122,13 +122,18 @@ function graphNodeIds() {
 }
 
 /** Bounding box of every node, in graph coordinates. Empty graph → null. */
-function graphBoundingBox() {
+// `only` (optional) — a Set of node ids: the box of just those nodes (the
+// path view fits the lit cards); null when none of them is on the graph.
+function graphBoundingBox(only) {
   if (graph.nodes.size === 0) return null;
   let x1 = Number.POSITIVE_INFINITY;
   let y1 = Number.POSITIVE_INFINITY;
   let x2 = Number.NEGATIVE_INFINITY;
   let y2 = Number.NEGATIVE_INFINITY;
-  for (const node of graph.nodes.values()) {
+  let any = false;
+  for (const [id, node] of graph.nodes) {
+    if (only && !only.has(id)) continue;
+    any = true;
     const w = nodeWidth(node);
     const h = nodeHeight(node);
     x1 = Math.min(x1, node.x - w / 2);
@@ -136,6 +141,7 @@ function graphBoundingBox() {
     x2 = Math.max(x2, node.x + w / 2);
     y2 = Math.max(y2, node.y + h / 2);
   }
+  if (!any) return null;
   return {x1, y1, x2, y2, w: x2 - x1, h: y2 - y1};
 }
 

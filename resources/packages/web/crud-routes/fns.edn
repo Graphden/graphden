@@ -253,6 +253,12 @@
    :parent :html-action-response
    :args {:result :process-delete-entity}}
 
+  {:name :revive-entity-handler
+   :lambda-params [:request]
+   :description "Ring handler for `POST /api/entities/:type/:id/revive` — runs `process-revive-entity` (the undo of a delete) and wraps the result via `html-action-response`."
+   :parent :html-action-response
+   :args {:result :process-revive-entity}}
+
   {:name :sequence-append-handler
    :lambda-params [:request :default]
    :description "Ring handler for `POST /api/sequence/append/:fn-id` — appends an item to the named sequence-arg."

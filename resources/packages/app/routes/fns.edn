@@ -376,10 +376,15 @@
    :parent :list
    :args {:items ["/:type/:id" :_entity-by-id-methods]}}
 
+  {:name :entity-revive
+   :description "POST /api/entities/:type/:id/revive — the undo of a delete: re-creates the tombstoned version on this branch. Auth-required."
+   :parent :post
+   :args {:path "/:type/:id/revive" :handler :revive-entity-handler}}
+
   {:name :entity-routes
    :description "/api/entities/* sub-group — POST `/:type` (create) and PUT/DELETE `/:type/:id` (update/delete). New methods on /:type/:id go into `:_entity-by-id-methods`; new sub-paths get listed here directly."
    :parent :list
-   :args {:items ["/entities" :entity-create :entity-by-id]}}
+   :args {:items ["/entities" :entity-create :entity-by-id :entity-revive]}}
 
   ;; --- /api/assets — frontend-asset overrides (UI Step 1) ---
 

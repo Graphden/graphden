@@ -234,6 +234,21 @@ function load(opts = {}) {
     assert(t.toasts.some((x) => x.kind === 'error' && /in use/.test(x.msg)), 'reason shown');
   });
 
+  await test('deleted-fn recorder: undo POSTs the revive and reopens the fn', async () => {
+    const calls = [];
+    const t = load({
+      authMutate: async (method, url) => { calls.push([method, url]); return { status: url.endsWith('/gone/revive') ? 404 : 200, error: 'Nothing to revive' }; },
+    });
+    t.ctx.gdUndoRecordDeletedFn('f1', 'core.foo');
+    assert(t.ctx.gdUndoLastLabel() === 'Deleted core.foo', 'label names the fn');
+    assert(await t.ctx.gdUndoLast() === true, 'undone');
+    assert(calls[0][0] === 'POST' && calls[0][1] === '/api/entities/fn/f1/revive', 'POST …/revive: ' + JSON.stringify(calls[0]));
+    assert(t.ctx.__inits === 1 && t.ctx.__selected === 'core.foo', 'the graph reloads and the fn is reopened');
+    t.ctx.gdUndoRecordDeletedFn('gone', 'core.gone');
+    assert(await t.ctx.gdUndoLast() === false, 'a purged tombstone is a refusal');
+    assert(t.toasts.some((x) => x.kind === 'error' && /Nothing to revive/.test(x.msg)), 'the server\'s reason is shown');
+  });
+
   await test('ns-move recorder: undo PUTs the old namespace; root is the bare key', async () => {
     const puts = [];
     const t = load({

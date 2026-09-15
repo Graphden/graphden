@@ -184,7 +184,7 @@
                :target "input[placeholder=\"Filter...\"]"
                :check {:kind "selected" :name "add"}}
               {:title "Extend it"
-               :body "Click the [[⋯]] button on the add row, choose [[Extend]], type exactly `add-10`. The [[in]] line shows which namespace the child will live in — the parent's, by default; [[↑]] goes one level up, [[+]] makes a new sub-namespace right there. Then [[Save]]: a child fn whose :parent is add; the editor opens it. (Wrong name or wrong parent? A toast offers [[Undo]], and for 30 seconds so do [[Ctrl+Z]] and Space, u.)"
+               :body "Click the [[⋯]] button on the add row, choose [[Extend]], type exactly `add-10`. The [[in]] line shows which namespace the child will live in — the parent's, by default; [[↑]] goes one level up, [[+]] makes a new sub-namespace right there. Then [[Save]]: a child fn whose :parent is add; the editor opens it. (Wrong name or wrong parent — or deleted the wrong fn? A toast offers [[Undo]], and for 30 seconds so do [[Ctrl+Z]] and Space, u.)"
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "add-10" :parent "add"}
@@ -961,7 +961,7 @@
                :target ".execute-show-path-btn"
                :check {:kind "dom" :selector ".path-view-panel"}}
               {:title "Read the path"
-               :body "Every fn that ran lights up and the rest dims: your three fns, and str-upper, whose badge counts its calls — 3×, once per word, because map ran it inside its own loop. The unfolded pipeline is wide, so zoom in — the wheel, or [[+]] at the bottom right — and each lit footer reads like a run log, time on the left and the return on the right: the list of words, the list upper-cased, the sentence. [[✕ clear]] in the panel at the bottom restores the view. Click [[Next]]."
+               :body "Every fn that ran lights up and the rest dims: your three fns, and str-upper, whose badge counts its calls — 3×, once per word, because map ran it inside its own loop. The view zooms to the lit cards, and each footer reads like a run log, time on the left and the return on the right: the list of words, the list upper-cased, the sentence. [[✕ clear]] in the panel at the bottom restores the view. Click [[Next]]."
                :target ".node-overlay.path-highlighted"
                :check {:kind "manual"}}
               {:title "Open the call tree"

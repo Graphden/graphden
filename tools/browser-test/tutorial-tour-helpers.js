@@ -260,6 +260,14 @@ async function installSpotlightAudit(page) {
         const spotVis = !!spot && spot.classList.contains('gd-tour-visible');
         const key = [lesson?.id, step.title, eff, spotVis, el ? 1 : 0].join('|');
         if (key === window.__gdTourAuditKey) return;
+        // A ring is reported once it has HELD for two samples (~500 ms, a
+        // tour tick): the first sample after a popover opens sees the step
+        // popover where the tour is about to move it off the new target,
+        // and that instant read as POPOVER-COVERS-TARGET on every chooser.
+        if (key !== window.__gdTourAuditPending) {
+          window.__gdTourAuditPending = key;
+          return;
+        }
         window.__gdTourAuditKey = key;
         const sr = spotVis ? rr(spot) : null;
         let under = null;

@@ -209,6 +209,28 @@
           result)))))
 
 
+(defn revive-entity
+  "Undo a user-facing delete: re-create the tombstoned version of
+   `entity-type`/`id` on this branch (`vcore/revive-entity!`) and treat the
+   result like a create — invalidate the compiled registry from the row,
+   re-run the fn's own type-check so its diagnostics come back with it,
+   NOTIFY the fleet. Returns the live row, or nil when there was nothing
+   tombstoned to revive (already live, never existed, or purged by the
+   tombstone GC)."
+  [entity-type id ctx]
+  (shield/run!
+    (fn []
+      (let [storage (request/require-storage ctx)
+            et (keyword entity-type)]
+        (when (vcore/revive-entity! storage et id)
+          (let [row (sp/read-entity storage et id)]
+            (when (= et :fn)
+              (tc/type-check-fn-after-mutation! storage id))
+            (inval/invalidate! ctx storage et row)
+            (inval/notify-after-write! ctx storage et :write (assoc row :id id))
+            row))))))
+
+
 (defn delete-entity
   [entity-type id ctx]
   ;; Abort-shielded: the whole bump->write->invalidate->note pipeline

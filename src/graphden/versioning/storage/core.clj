@@ -433,6 +433,30 @@
 
 ;; === VersionedStorage Record ===
 
+(defn- tombstoned-natural-key-id
+  "For an entity whose identity is a NATURAL key — `:binding` and
+   `:fn-slot` are `(fn-id, slot-id)`, UNIQUE at the base table — the id
+   of the identity row that already holds that key while being DEAD on
+   this branch (tombstoned, or never versioned here), else nil. A
+   user-facing delete leaves the identity behind, so \"bind the slot
+   again\" after \"unbind it\" used to insert a second identity for the
+   same key and bounce off the UNIQUE index with a 409 (`binding already
+   exists with these fields`) — the same trap the retired `fn (namespace,
+   name)` index set for names, met one layer down. Re-using the dead
+   identity turns the create into a revival: the version written on top
+   is the new live one. A LIVE identity is left alone, so a genuine
+   duplicate still hits the index and the 409 it deserves."
+  [base-storage branch-id entity-name data]
+  (when (and (contains? #{:binding :fn-slot} entity-name)
+             (:fn-id data) (:slot-id data))
+    (let [rows (sp/query-entities base-storage entity-name
+                                  {:fn-id (:fn-id data) :slot-id (:slot-id data)})
+          row (first rows)]
+      (when (and row
+                 (nil? (res/resolve-version base-storage entity-name (:id row) branch-id)))
+        (:id row)))))
+
+
 (defn- create-entity-versioned!
   "Create one versioned entity: identity row + version row."
   [base-storage branch-id entity-name data]
@@ -454,7 +478,9 @@
   ;; created literal-bound arg disappeared from arg-overlays in the
   ;; editor (the layout walker classifies `value-present=nil` as
   ;; `:free`, no value-node).
-  (let [id (or (:id data) (random-uuid))
+  (let [id (or (:id data)
+               (tombstoned-natural-key-id base-storage branch-id entity-name data)
+               (random-uuid))
         normalized (sp/standard-crud-normalize-data entity-name
                                                     (assoc data :id id))
         do-create!
@@ -1566,3 +1592,35 @@
      :bindings   (vec (res/resolve-all-entities base-storage :binding branch-id {}))
      :list-items (vec (res/resolve-all-entities base-storage :binding-list-item
                                                 branch-id {}))}))
+
+
+(defn revive-entity!
+  "Bring back an entity a user-facing delete tombstoned on THIS branch:
+   write a fresh live version from the tombstone's own data (the pre-delete
+   row — `tombstone-version!` copied the current data into it, so nothing
+   has to be remembered elsewhere). The undo of ⋯ → Delete. Append-only
+   like every other write here: the tombstone stays in history, the
+   revival is one more version on top. Returns true when a version was
+   written, false when nothing was tombstoned (the entity is live, never
+   existed, or the tombstone GC already purged it — a 404 to the caller).
+
+   A revived fn goes through the same name-collision check as a create:
+   the name may have been reused since (the index that once blocked that
+   was retired precisely so a deleted name could be reused), and two live
+   fns of one name in one namespace is what the check exists to refuse."
+  [storage entity-name id]
+  (let [base (unwrap storage)
+        branch-id (current-branch-id storage)]
+    (assert-not-merge-protected! base branch-id entity-name)
+    (with-bump* base entity-name
+      (fn []
+        (if-let [tomb (res/resolve-tombstone base entity-name id branch-id)]
+          (let [{:keys [version-id-field]} (get res/entity-config entity-name)
+                data (res/extract-version-data tomb version-id-field)]
+            (when (= :fn entity-name)
+              (let [ident (sp/read-entity base :fn id)]
+                (uniq/check-fn-name-collision! base branch-id :fn
+                                               (merge ident data {:id id}))))
+            (create-version-record! base entity-name id branch-id data)
+            true)
+          false)))))

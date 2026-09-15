@@ -6,6 +6,7 @@
 //   D. `Space u` runs the newest entry from the keyboard.
 //   E. A literal bound on a slot → Undo → the slot is free again; an item
 //      appended to a list → Undo → the item is gone.
+//   F. ⋯ → Delete of a fn → Undo → the fn is back, reopened, bindings kept.
 const {chromium} = require('playwright');
 const {assert, newContext, api, getEntities, deleteFnByName, waitForServerHealthy, BASE}
   = require('./edit-test-helpers');
@@ -229,6 +230,45 @@ const undoToast = (page) => page.evaluate(() => {
       return true;
     }, listy.id, {timeout: 30000, polling: 200});
     console.log('  E2: appended to :nums → Undo → item gone ✓');
+
+    // ------------------------------------------------------------ F
+    // The fn with the bound :string from E1 is deleted through its own
+    // ⋯ → Delete (native confirm accepted) — then revived by Undo with
+    // its binding intact, and reopened.
+    await page.goto(BASE + '/#core.strings.' + SCALAR);
+    await page.waitForFunction((name) => (graphData?.fns || []).some((f) => f.name === name),
+      SCALAR, {timeout: 30000, polling: 200});
+    await bindNamedPlaceholder(page, 'string', 'literal', 'kept');
+    await page.waitForFunction(() => !document.body.classList.contains('editor-busy'),
+      null, {timeout: 30000, polling: 100});
+    const keptBefore = (await getEntities(page, SCALAR)).bindings
+      .filter((b) => b['fn-id'] === scalar.id).map((b) => [b.id, b.value]);
+    assert(keptBefore.some(([, v]) => v === 'kept'),
+      'the binding landed before the delete: ' + JSON.stringify(keptBefore));
+    await openRowActionsOn(page, SCALAR);
+    await page.waitForSelector('.row-actions-popover [data-action="delete-fn"]', {timeout: 15000});
+    await page.evaluate(() => document.querySelector('.row-actions-popover [data-action="delete-fn"]')
+      .dispatchEvent(new MouseEvent('click', {bubbles: true})));
+    await page.waitForFunction((name) => !(graphData?.fns || []).some((f) => f.name === name),
+      SCALAR, {timeout: 30000, polling: 200});
+    assert(!(await getEntities(page, SCALAR)).fns.find((f) => f.name === SCALAR), 'the fn is gone');
+    toast = await undoToast(page);
+    assert(toast && toast.visible && /^Deleted /.test(toast.label || ''),
+      'the toast offers to undo the delete: ' + JSON.stringify(toast));
+    assert(await page.evaluate(() => document.querySelectorAll('.node-overlay[data-original-fn-id]').length) === 0,
+      'deleting the selected fn leaves no card behind');
+    await page.click('#gd-undo-toast .gd-undo-toast-btn');
+    await page.waitForFunction((name) => (graphData?.fns || []).some((f) => f.name === name),
+      SCALAR, {timeout: 30000, polling: 200});
+    const revivedEnts = await getEntities(page, SCALAR);
+    const revived = revivedEnts.fns.find((f) => f.name === SCALAR);
+    assert(revived && revived.id === scalar.id, 'the SAME fn is back (its identity, not a new row)');
+    assert(revivedEnts.bindings.some((b) => b['fn-id'] === scalar.id && b.value === 'kept'),
+      'its binding came back with it: ' + JSON.stringify(revivedEnts.bindings
+        .filter((b) => b['fn-id'] === scalar.id).map((b) => [b.id, b.value])));
+    await page.waitForFunction((id) => selectedFnId === id, scalar.id, {timeout: 30000, polling: 200});
+    assert(await page.evaluate(() => selectedFnId) === scalar.id, 'the revived fn is reopened');
+    console.log('  F: ⋯ → Delete → Undo → revived with its binding ✓');
 
     console.log('PASS');
   } catch (e) {

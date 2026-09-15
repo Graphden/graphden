@@ -330,6 +330,7 @@ registerActionHandler('delete-fn', (btn, e, _host) => {
     try {
       const r = await deleteEntity('fn', fnEntity.id);
       if (r && r.status >= 200 && r.status < 300) {
+        if (typeof gdUndoRecordDeletedFn === 'function') gdUndoRecordDeletedFn(fnEntity.id, display);
         // Deleting the SELECTED fn drops the selection outright — an
         // empty hash alone left its dead card on the canvas whenever the
         // hash was already empty (no hashchange to route).

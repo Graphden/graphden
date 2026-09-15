@@ -991,6 +991,42 @@
    :args {:status {:value 403}
           :reason {:as :pkg-guard-reason}}}
 
+  ;; --- POST /api/entities/:type/:id/revive — the undo of a delete ---
+  ;; Same parse as the delete (reitit's :path-params carry :type + :id;
+  ;; the extra `/revive` segment is the route's, not the parser's).
+  {:name :_revive-apply-result
+   :description "The revived row, or nil when nothing was tombstoned to revive."
+   :parent :revive-entity
+   :args {:entity-type :_delete-apply-entity-type-str
+          :id :_delete-target-id}}
+
+  {:name :_revive-nothing?
+   :parent :nil? :args {:value {:as :revived}}}
+
+  {:name :_revive-err-nothing
+   :parent :html-error-response
+   :args {:status {:value 404}
+          :reason {:parent :str
+                   :args {:parts ["Nothing to revive: "
+                                  :_delete-apply-entity-type-str
+                                  " "
+                                  :_delete-target-id
+                                  " is live, never existed, or its tombstone was already purged"]}}}}
+
+  {:name :_revive-apply
+   :parent :if
+   :args {:test :_revive-nothing?
+          :then :_revive-err-nothing
+          :else :_apply-ok-empty-response
+          :revived :_revive-apply-result}}
+
+  {:name :process-revive-entity
+   :description "POST /api/entities/:type/:id/revive — `[invalid-request? → 400, true → revive]`; the revive answers 404 when nothing was tombstoned, 409 (via the shared error mapping) when the fn's name was reused since, 200 otherwise. The undo of a user-facing delete."
+   :parent :cond
+   :args {:clauses [:_delete-request-invalid? :_delete-err-invalid-request
+                    {:value true}             :_revive-apply]
+          :parsed :_delete-parsed}}
+
   {:name :process-delete-entity
    :description "DELETE /api/entities/:type/:id — flat `:cond` of `[invalid-request? → 400, secret-fn? → 409, pkg-owned? → 403, fn-in-use? → 409, ns-non-empty? → 409, true → apply]`. `:cond` is lazy, so the delete + invalidate (and the secret-shape DB lookup) only run when every guard up to that point passes. `parsed`, `pkg-guard-reason`, `fn-in-use-reason`, `ns-non-empty-reason` are shared sub-results bound once at the `:cond` fn-def — the dynamic-reason error builders consume the same reason their predicate observed."
    :parent :cond

@@ -187,6 +187,21 @@ editor therefore phrases those as "only on <branch>" (the − badge /
 ghost-row tooltip), which is always true, instead of "added", which
 sometimes isn't.
 
+**Reviving a tombstone.** `core/revive-entity!` (HTTP: `POST
+/api/entities/:type/:id/revive`, the editor's undo of ⋯ → Delete) writes
+a fresh live version from the tombstone's own data — the row
+`tombstone-version!` copied the pre-delete state into — on the current
+branch. Append-only like every write: the tombstone stays in history and
+the revival is one more version on top. A revived fn passes the same
+`(namespace, name)` collision check as a create (the name may have been
+reused since), and once the tombstone GC has purged the row there is
+nothing to revive (404). Natural-key entities revive on their own: a
+`:binding` / `:fn-slot` is identified by `(fn-id, slot-id)`, UNIQUE at
+the base table, so creating one whose identity is tombstoned on the
+branch re-uses that identity (`tombstoned-natural-key-id`) and the new
+version is the live one — "unbind, then bind the slot again" used to
+bounce off the index with a 409.
+
 The editor does NOT render this flat wire shape. It renders the
 GROUPED display model from
 `graphden.versioning.storage.diff-view/diff-branches-view` (exposed

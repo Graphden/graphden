@@ -203,7 +203,7 @@
             (rest records))))
 
 
-(defn- extract-version-data
+(defn extract-version-data
   "Extracts data fields from a version record, stripping version
    metadata. `:deleted-at` is version-plane bookkeeping too (nil on
    every live version — tombstones never reach this fn): leaving it on
@@ -276,6 +276,20 @@
                       (rest candidates)))))
 
 
+(defn resolve-latest-version
+  "The version row that WINS for `entity-id` on `branch-id` — live or
+   tombstone — or nil when no chain level holds one. `resolve-version` is
+   this minus tombstones; `resolve-tombstone` is this minus live rows."
+  [base-storage entity-name entity-id branch-id]
+  (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
+        {:keys [versions-by-id merges-by-target branch-chain]}
+        (load-merge-aware-cache base-storage version-entity version-id-field
+                                [entity-id] branch-id)]
+    (resolve-version-from-cache base-storage entity-name
+                                versions-by-id merges-by-target
+                                entity-id branch-chain)))
+
+
 (defn resolve-version
   "Resolves the current version of an entity on a branch.
 
@@ -291,16 +305,21 @@
 
    Returns the version record or nil."
   [base-storage entity-name entity-id branch-id]
-  (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
-        {:keys [versions-by-id merges-by-target branch-chain]}
-        (load-merge-aware-cache base-storage version-entity version-id-field
-                                [entity-id] branch-id)
-        version (resolve-version-from-cache base-storage entity-name
-                                            versions-by-id merges-by-target
-                                            entity-id branch-chain)]
+  (let [version (resolve-latest-version base-storage entity-name entity-id branch-id)]
     ;; A tombstone-winner means the entity is deleted on this branch — the
     ;; public API treats it as absent (nil), same as no version at all.
     (when-not (tombstone? version) version)))
+
+
+(defn resolve-tombstone
+  "The tombstone that currently hides `entity-id` on `branch-id`, or nil
+   when the entity is live (or never existed) there. The read side of a
+   revive: `core/revive-entity!` re-creates the version from exactly this
+   row's data, so an undone delete brings back what was deleted, not what
+   an ancestor branch happens to hold."
+  [base-storage entity-name entity-id branch-id]
+  (let [version (resolve-latest-version base-storage entity-name entity-id branch-id)]
+    (when (tombstone? version) version)))
 
 
 ;; === High-Level Resolution Functions ===

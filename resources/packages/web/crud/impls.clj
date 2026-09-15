@@ -32,6 +32,12 @@
   (entities/delete-entity entity-type id ctx))
 
 
+(defbase revive-entity
+  [entity-type id]
+  (cr/record-effect! :db)
+  (entities/revive-entity entity-type id ctx))
+
+
 (defbase query-entities-fn
   [entity-type where]
   (cr/record-effect! :db)
@@ -312,6 +318,7 @@
 (def impls
   {:get-entity get-entity
    :delete-entity delete-entity
+   :revive-entity revive-entity
    :query-entities query-entities-fn
    :create-entity create-entity-fn
    :update-entity update-entity-fn

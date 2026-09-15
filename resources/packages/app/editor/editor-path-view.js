@@ -317,6 +317,22 @@ function showExecutionPathView(pathTrace) {
 
   const offCanvasIds = [...byFn.keys()].filter((id) => !matched.has(id));
   layer.classList.add('path-view-active');
+  // Bring the LIT cards into view: a pipeline unfolded a hop deep is fitted
+  // so small that its footers cannot be read, and the path is what the
+  // reader asked to see — fit the highlighted cards, not the whole graph.
+  // Still a fit (never a zoom-in past 1), so a single lit card does not
+  // balloon; the ✕ clear leaves the viewport where the reader put it.
+  const litNodeIds = new Set(Array.from(layer.querySelectorAll('.node-overlay.path-highlighted'))
+    .map((el) => el.dataset.nodeId).filter(Boolean));
+  if (litNodeIds.size && typeof graphBoundingBox === 'function'
+      && typeof fitInVisibleArea === 'function') {
+    const bb = graphBoundingBox(litNodeIds);
+    if (bb) {
+      fitInVisibleArea(60, bb);
+      if (typeof applyViewportTransform === 'function') applyViewportTransform();
+      if (typeof updateZoomSlider === 'function') updateZoomSlider();
+    }
+  }
   _showPathViewPanel(matched.size, offCanvasIds, !!pathTrace['path-truncated?'],
                      !!pathTrace['values-dropped?']);
 }

@@ -105,13 +105,13 @@ The ~:try~ on-throw partner: replay the ~journal~ in reverse, best-effort deleti
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-core
 :FILE: src/graphden/crud/entities.clj
-:LINE: 580
+:LINE: 602
 :MINS: 5.0
 :END:
 
 The atomic core for generic creates: create-or-humanise-error, a post-create whole-fn type-check, and the rename-slot side-effect. Since error-tolerance Phase 2 an ORDINARY type-check failure no longer rolls the row back — the write is kept and the diagnostics surface as ~:type-warnings~ on the success envelope. One class is carved out: a SECRET-flow diagnostic still deletes the row and returns the legacy ~{:error …}~ (the guarantee must not rest on the derived diagnostics store — docs/SECRETS.md).
 
-- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:580]]
+- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:602]]
 - same file :: [[file:crud.org::#crud/create-entity][create-entity]]
 - referenced from :: [[file:web.org::#web/write-rej][write-rej]]
 

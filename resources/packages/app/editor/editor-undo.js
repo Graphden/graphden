@@ -47,7 +47,8 @@
 // Mod+z (both registered here; the cheatsheet and the Space menu render
 // them while an entry is live, for the whole 30 s window). Recorders live at the write sites:
 // editor-edit-modes-fn.js (extend / wrap / rename / namespace move),
-// editor-create.js (new graph / new namespace), editor-edit-modes.js (bind /
+// editor-create.js (new graph / new namespace), editor-row-actions-handlers.js
+// (⋯ → Delete, undone through the revive endpoint), editor-edit-modes.js (bind /
 // change / unbind a slot) and editor-edit-modes-seq.js (append / remove /
 // edit / move a list item) call the `gdUndoRecord*` builders below.
 
@@ -301,6 +302,29 @@ function gdUndoRecordCreatedNs(name, parentId) {
       const r = await authMutate('DELETE', API.api_entities_type_id('ns', id));
       const res = await _gdUndoResult(r);
       if (res.ok && typeof initGraph === 'function') await initGraph();
+      return res;
+    },
+  });
+}
+
+// A deleted fn: undo = revive it (`POST /api/entities/fn/:id/revive` — the
+// tombstone's own data comes back as a fresh version), then reopen it.
+// The server answers 404 once the tombstone GC has purged the row and 409
+// when the name was reused since; both reach the toast as the reason.
+function gdUndoRecordDeletedFn(fnId, qualifiedName) {
+  if (!fnId) return;
+  gdUndoRecord({
+    label: 'Deleted ' + (qualifiedName || 'fn'),
+    undo: async () => {
+      const url = (typeof API !== 'undefined' && typeof API.api_entities_type_id_revive === 'function')
+        ? API.api_entities_type_id_revive('fn', fnId)
+        : API.api_entities_type_id('fn', fnId) + '/revive';
+      const r = await authMutate('POST', url);
+      const res = await _gdUndoResult(r);
+      if (res.ok) {
+        if (typeof initGraph === 'function') await initGraph();
+        if (qualifiedName && typeof selectFnByName === 'function') await selectFnByName(qualifiedName);
+      }
       return res;
     },
   });
@@ -572,6 +596,7 @@ window.gdUndoLastLabel = gdUndoLastLabel;
 window.gdUndoLeaveDeleted = _gdUndoLeaveDeleted;
 window.gdUndoRecordCreatedFn = gdUndoRecordCreatedFn;
 window.gdUndoRecordCreatedNs = gdUndoRecordCreatedNs;
+window.gdUndoRecordDeletedFn = gdUndoRecordDeletedFn;
 window.gdUndoRecordRename = gdUndoRecordRename;
 window.gdUndoRecordNsMove = gdUndoRecordNsMove;
 window.gdUndoRecordBindingWrite = gdUndoRecordBindingWrite;

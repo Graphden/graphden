@@ -17,8 +17,10 @@ let _viewportBound = false;
  * (surfaceWidth − sidebarWidth − 2*padding), then pan so the box's centre lands
  * at the centre of what the user can actually see.
  */
-function fitInVisibleArea(padding) {
-  const bb = graphBoundingBox();
+// `box` (optional) — fit THIS bounding box instead of the whole graph's
+// (the path view fits the lit cards).
+function fitInVisibleArea(padding, box) {
+  const bb = box || graphBoundingBox();
   if (!bb || bb.w <= 0 || bb.h <= 0) return;
   const surface = viewportContainer();
   if (!surface) return;

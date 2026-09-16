@@ -130,6 +130,7 @@
                   ;; skeleton lives in editor-edit-modes.js).
                   "packages/app/editor/editor-edit-modes-seq.js"
                   "packages/app/editor/editor-edit-modes-fn.js"
+                  "packages/app/editor/editor-edit-modes-wrap.js"
                   "packages/app/editor/editor-edit-modes-type.js"
                   "packages/app/editor/editor-edit-reparent.js"
                   "packages/app/editor/editor-execute-result.js"

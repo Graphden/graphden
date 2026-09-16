@@ -942,6 +942,19 @@
                                (edge-narrowing-fields lookups arg-id expanded-fns))}))))))
 
 
+(defn- deep-free-arg-row
+  "The `[arg-id arg-rec]` that lends a root deep-free hole its TYPE /
+   description, out of every arg row on the slot: one the root's own
+   chain owns when there is one, else an UNBOUND row — never simply the
+   first binding some unrelated fn put on this slot (`const`'s :value has
+   hundreds; the first used to be a package fn's, and the `+` then edited
+   THAT binding — a 400, 2026-09-16)."
+  [rows root-chain]
+  (or (some (fn [[_ a :as row]] (when (contains? root-chain (:fn-id a)) row)) rows)
+      (some (fn [[_ a :as row]] (when (nil? (:binding-id a)) row)) rows)
+      (first rows)))
+
+
 (defn emit-root-deep-frees!
   "The holes of the ROOT card that live deeper than its visible slot
    surface — a template's free args reached through ancestor-bound
@@ -979,28 +992,19 @@
                             (when (get-in n [:data :isPlaceholder])
                               (some-> (get-in n [:data :slotId]) parse-uuid root-of))))
                     (:nodes @state))
+        root-chain (set (data/get-inheritance-chain* root-fn-id lookups))
         chain-bound (into #{}
                           (comp (mapcat #(get (:bindings-by-fn lookups) %))
                                 (filter #(or (true? (:value-present %))
                                              (some? (:ref-fn-id %))
                                              (true? (:list-append %))))
                                 (map (comp root-of :slot-id)))
-                          (data/get-inheritance-chain* root-fn-id lookups))]
+                          root-chain)]
     (doseq [{:keys [ext-name slot-id captured? optional?]} (surface/public-free-entries root-fn-id lookups)
             :when (and slot-id
                        (not (contains? shown (root-of slot-id)))
                        (not (contains? chain-bound (root-of slot-id))))
-            ;; The arg row that lends the hole its TYPE / description: one
-            ;; the root's own chain owns when there is one, else an UNBOUND
-            ;; row — never the first binding some unrelated fn put on this
-            ;; slot (`const`'s :value has hundreds; the first used to be a
-            ;; package fn's, and the `+` then edited THAT binding — a 400,
-            ;; 2026-09-16).
-            :let [root-chain (set (data/get-inheritance-chain* root-fn-id lookups))
-                  rows (get args-by-slot slot-id)
-                  [arg-id arg-rec] (or (some (fn [[_ a :as row]] (when (contains? root-chain (:fn-id a)) row)) rows)
-                                       (some (fn [[_ a :as row]] (when (nil? (:binding-id a)) row)) rows)
-                                       (first rows))
+            :let [[arg-id arg-rec] (deep-free-arg-row (get args-by-slot slot-id) root-chain)
                   ;; The surface's own `:optional?` (the executor's
                   ;; effective-required at the slot's owner), so the card
                   ;; and the Run form cannot disagree on what is a knob.

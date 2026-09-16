@@ -117,7 +117,10 @@ const LIST_CHILD = 'eip-button';
     console.error('FAIL:', err.message || err);
   } finally {
     try { await hardCleanup(page); } catch (_) { /* best effort */ }
-    for (const n of [CHILD, OWNER, LIST_CHILD, LIST_OWNER]) {
+    // OWNERS first: the server refuses to delete a fn something still
+    // references, so a child deleted before its owner is the entity the
+    // gate's leak check then finds.
+    for (const n of [OWNER, CHILD, LIST_OWNER, LIST_CHILD]) {
       try {
         const ents = await getEntities(page, n);
         const f = (ents.fns || []).find((x) => x.name === n);

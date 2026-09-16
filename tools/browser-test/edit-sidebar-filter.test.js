@@ -22,21 +22,25 @@ const {assert, newContext} = require('./edit-test-helpers');
 
   try {
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#identity');
-    await page.waitForSelector('#search-input', {timeout: 15000});
+    await page.waitForSelector('#search-input', {timeout: 60000});
     // Wait for the sidebar to be populated (at least a few entity-items)
     // and the namespace headers (≥3) the baseline assertion expects.
+    // 60 s, like every other initial load in this suite: the first tree
+    // render sits behind the page's layout POSTs, and under the gate's
+    // load 15 s flaked here (2026-09-16, green on retry) — a slow-stack
+    // deadline, not a race (project_e2e_slow_stack_deadlines).
     await page.waitForFunction(
       () => document.querySelectorAll('.entity-item').length >= 1
             && document.querySelectorAll('.ns-header').length >= 3,
       null,
-      {timeout: 15000, polling: 100});
+      {timeout: 60000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     // Wait again after initGraph rebuilds the tree.
     await page.waitForFunction(
       () => document.querySelectorAll('.entity-item').length >= 1
             && document.querySelectorAll('.ns-header').length >= 3,
       null,
-      {timeout: 15000, polling: 100});
+      {timeout: 60000, polling: 100});
 
     // ===================================================================
     // Phase A: baseline — sidebar shows at least one fn-row + several

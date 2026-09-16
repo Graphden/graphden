@@ -527,9 +527,39 @@ cmd_doctor() {
   say "  to your leftovers. Check the pid, then kill it yourself."
 }
 
+# What a gate run leaves on the host besides the image it built, and what
+# `gc` (and every green landing) reclaims. Measured 2026-09-16 after a week
+# of gates: 57 anonymous volumes (1.1 GB) — exactly two per gate, the e2e
+# stack's two Postgres containers each get one from the image's VOLUME
+# instruction and Testcontainers' stop leaves it behind; 3 GB of build cache
+# no build had touched in days; a handful of Playwright temp dirs from
+# crashed walks. Every removal here is of something nothing references:
+# a dangling anonymous volume is by definition attached to no container
+# (a stopped stack's volumes are named and stay), a dangling image has no
+# tag, build cache unused for 3 days is rebuilt on demand.
+gc_gate_leftovers() {
+  local removed n
+  info "Removing anonymous volumes no container references (the e2e stack's Postgres data) ..."
+  removed="$(docker volume ls -q -f dangling=true | grep -E '^[0-9a-f]{64}$' | xargs -r docker volume rm 2>/dev/null || true)"
+  n="$(printf '%s' "$removed" | grep -c . || true)"
+  [ "$n" -gt 0 ] && ok "  removed $n"
+
+  info "Reclaiming dangling image layers ..."
+  docker image prune -f >/dev/null 2>&1 || true
+
+  info "Dropping build cache unused for 3 days ..."
+  docker builder prune -f --filter unused-for=72h 2>/dev/null | tail -1 || true
+
+  info "Removing stale test temp dirs (Playwright crash artifacts, tour audits older than a day) ..."
+  find /tmp -maxdepth 1 \( -name 'playwright-artifacts-*' -o -name 'tour-audit.*' \) -mtime +1 \
+    -exec rm -rf {} + 2>/dev/null || true
+}
+
 cmd_gc() {
   info "Reclaiming superseded executor layers (label graphden.image=executor) ..."
   docker image prune -f --filter label=graphden.image=executor || true
+
+  gc_gate_leftovers
 
   info "Removing agent images whose worktree is gone ..."
   local img name
@@ -547,11 +577,20 @@ cmd_gc() {
   # left behind by worktrees that predate the explicit GD_IMAGE tag. Never -f:
   # docker refuses to drop an image a container still uses, which is exactly the
   # protection we want against a false positive on someone else's image.
+  # And never a tag some container RUNS ON: `image rm` without -f still
+  # UNTAGS a multi-tagged image (the same build is also graphden-executor:latest),
+  # so the container keeps running while its compose file points at a name that
+  # no longer exists — the 2026-09-16 gc did exactly that to gd-izpa's
+  # graphden-izpa-executor:latest (restored by hand; the personal instance is
+  # not a worktree and is not ours to sweep).
   info "Removing legacy directory-derived executor images ..."
+  local in_use
+  in_use="$(docker ps -a --format '{{.Image}}' | sort -u)"
   while IFS= read -r img; do
     name="${img%-executor:latest}"
     case "$name" in
-      graphden)     continue ;;   # the canonical image — keep
+      graphden)      continue ;;  # the canonical image — keep
+      graphden-izpa) continue ;;  # the personal instance's tag (docs: project_izpa_personal_instance)
       graphden-wt-*) continue ;;  # ours, and ALREADY handled by the sweep above,
                                   # which strips the prefix before checking the
                                   # worktree. Falling through to here would test
@@ -562,6 +601,7 @@ cmd_gc() {
                                   # exactly what happened to sidebar-filters.
     esac
     [ -d "$WTQ_ROOT/$name" ] && continue         # a live worktree's own build
+    printf '%s\n' "$in_use" | grep -qxF "$img" && continue   # a container runs on this tag
     docker image rm "$img" >/dev/null 2>&1 && ok "  removed legacy $img"
   done < <(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^[a-z0-9._-]+-executor:latest$' || true)
 
@@ -1181,8 +1221,9 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
       ( cd "$MAIN_WT" && bb instance-up ) || { echo "FAIL(post-land): instance-up (LANDED, but the demo is stale)"; return 4; }
     fi
 
-    step "gc: reclaim the executor layers this build superseded"
+    step "gc: reclaim the executor layers this build superseded + what the run left on the host"
     docker image prune -f --filter label=graphden.image=executor || true
+    gc_gate_leftovers
 
     echo; echo "=== GREEN: $branch landed on $TARGET ==="
     return 0

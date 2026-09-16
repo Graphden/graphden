@@ -75,6 +75,11 @@ URL="${GRAPHDEN_URL:-http://localhost:9002}"
 # screen for the whole walk is a red, because the reader would sit through
 # that step with no ring and the walk itself cannot notice (it clicks by its
 # own selectors). GRAPHDEN_TOUR_AUDIT_GATE=0 keeps the report, drops the red.
+# An auto-created root is DELETED after a green verdict (nothing to read;
+# every gate would otherwise leave one behind) and kept, with its path
+# printed, after a red one. A root the caller named is theirs and stays.
+AUDIT_AUTO=0
+if [ -z "${GRAPHDEN_TOUR_AUDIT:-}" ]; then AUDIT_AUTO=1; fi
 AUDIT_ROOT="${GRAPHDEN_TOUR_AUDIT:-$(mktemp -d /tmp/tour-audit.XXXXXX)}"
 AUDIT_DIRS=""
 
@@ -521,6 +526,7 @@ if [ -n "$AUDIT_DIRS" ]; then
   # shellcheck disable=SC2086  # AUDIT_DIRS is a space-separated list of paths
   if node tour-spotlight-report.js --gate $AUDIT_DIRS; then
     TOUR_AUDIT_NOTE="every ringed step had its target on screen"
+    if [ "$AUDIT_AUTO" = 1 ]; then rm -rf "$AUDIT_ROOT"; AUDIT_ROOT="(removed — green)"; fi
   elif [ "${GRAPHDEN_TOUR_AUDIT_GATE:-1}" = "0" ]; then
     TOUR_AUDIT_NOTE="never-ringed step(s) above — REPORT-ONLY (GRAPHDEN_TOUR_AUDIT_GATE=0)"
   else
@@ -528,7 +534,9 @@ if [ -n "$AUDIT_DIRS" ]; then
     FAILED_NAMES="$FAILED_NAMES tour-spotlight(never-ringed-step)"
     WORST=1
   fi
-  echo "  full report: node tour-spotlight-report.js $AUDIT_ROOT/<file>.attemptN"
+  if [ -d "$AUDIT_ROOT" ]; then
+    echo "  full report: node tour-spotlight-report.js $AUDIT_ROOT/<file>.attemptN"
+  fi
 fi
 
 echo "============================================================"

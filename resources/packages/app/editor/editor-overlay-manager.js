@@ -195,8 +195,14 @@ function createPlaceholderOverlay(node, container) {
   // ring THE placeholder its text names when a card shows several:
   // `.placeholder-binder[data-arg-name="separator"]`. Without it a
   // selector can only say "the first +", which is whichever the canvas
-  // painted first, not the lesson's choice.
+  // painted first, not the lesson's choice. And the fn the binding lands
+  // ON, by name — the binder overlay is a sibling of the cards, not nested
+  // in one, so when two cards on the canvas expose the same slot (:coll
+  // on a pipeline's outer AND inner fn) `[data-fn-name="X"]` is the only
+  // way to say which.
   if (arg?.name) btn.dataset.argName = arg.name;
+  const ownerName = lookups?.fnMap?.get(arg?.['fn-id'])?.name;
+  if (ownerName) btn.dataset.fnName = ownerName;
   btn.textContent = '+';
   btn.title = (isSeqAnchor
               ? (node.data('seqTail') ? 'Append the next item' : 'Add the first item')

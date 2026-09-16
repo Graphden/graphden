@@ -771,6 +771,57 @@
         (is (= 2 (count nodes)))))))
 
 
+(deftest layout-leaf-empty-list-slot-is-the-leaf-own-hole-test
+  (testing "a named leaf bound straight from the root draws its EMPTY list slot as
+            its own `+` (the sequence-anchor sentinel), not as a deep closure
+            capture on the root — so a pipeline built from the outside in binds
+            the inner list on the card that owns it"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [outer (setup/create-base-fn! storage "lg-leaf-outer")
+              coll  (setup/create-slot! storage "coll" :sequence)
+              _     (setup/attach-slot! storage (:id outer) (:id coll) 0)
+              inner (setup/create-base-fn! storage "lg-leaf-inner")
+              items (setup/create-slot! storage "items" :sequence)
+              f     (setup/create-slot! storage "f" :any)
+              _     (setup/attach-slot! storage (:id inner) (:id items) 0)
+              _     (setup/attach-slot! storage (:id inner) (:id f) 1)
+              leaf  (setup/create-composed-fn! storage "lg-leaf-shout" (:id inner))
+              root  (setup/create-composed-fn! storage "lg-leaf-sentence" (:id outer))
+              _     (setup/bind-ref! storage (:id root) (:id coll) (:id leaf))
+              result (layout storage (:id root))
+              leaf-node-id (some (fn [n]
+                                   (when (= (str (:id leaf)) (:originalFnId (:data n)))
+                                     (:id (:data n))))
+                                 (:nodes result))
+              unset-edges (filter #(:isUnset (:data %)) (:edges result))
+              by-name (fn [nm] (filter #(= nm (:argName (:data %))) unset-edges))
+              items-edge (first (by-name "items"))
+              items-node (when items-edge
+                           (some (fn [n] (when (= (:target (:data items-edge)) (:id (:data n))) (:data n)))
+                                 (:nodes result)))]
+          (is leaf-node-id "the leaf is on the canvas (one hop from the root)")
+          (is (= 1 (count (by-name "items"))) "exactly one hole for the leaf's list slot")
+          (is (= leaf-node-id (:source (:data items-edge)))
+              "…hanging off the LEAF's card")
+          (is (not (:deepArg (:data items-edge))) "…and not flagged as the root's deep capture")
+          (is (:isSequenceAnchor items-node) "the node is the list's append/whole-list sentinel")
+          (is (= (str (:id leaf)) (:sequenceFnId items-node))
+              "its `+` writes on the leaf")
+          (is (= leaf-node-id (:source (:data (first (by-name "f")))))
+              "the scalar hole sits on the leaf as before")
+          (testing "once the leaf's list has an item, the closed card folds it away"
+            (let [b (sp/create-entity storage :binding {:fn-id (:id leaf) :slot-id (:id items)
+                                                        :list-append true})
+                  _ (sp/create-entity storage :binding-list-item
+                                      {:binding-id (:id b) :position 0 :value 1})
+                  again (layout storage (:id root))]
+              (is (empty? (filter #(and (:isUnset (:data %)) (= "items" (:argName (:data %))))
+                                  (:edges again)))
+                  "no sentinel for a chain with items on a closed leaf"))))
+        (finally (sp/close storage))))))
+
+
 (deftest layout-root-deep-free-placeholders-test
   (testing "a template's deeper holes surface as placeholders on the ROOT card:
             an extension of T (which binds x → F, F leaving svc free) shows
@@ -784,6 +835,10 @@
               svc  (setup/create-slot! storage "svc" :text)
               _    (setup/attach-slot! storage (:id b2) (:id svc) 0)
               f    (setup/create-composed-fn! storage "lg-deep-f" (:id b2))
+              ;; An unrelated fn that binds the same slot — its binding row
+              ;; must NOT leak into the root's placeholder.
+              other (setup/create-composed-fn! storage "lg-deep-other" (:id b2))
+              _    (setup/bind-value! storage (:id other) (:id svc) "theirs")
               t    (setup/create-composed-fn! storage "lg-deep-t" (:id b1))
               _    (setup/bind-ref! storage (:id t) (:id x) (:id f))
               r    (setup/create-composed-fn! storage "lg-deep-r" (:id t))
@@ -804,6 +859,8 @@
           (is (= (str (:id r)) (:fnId node))
               "the + binder writes the binding on the ROOT fn (closure capture)…")
           (is (= (str (:id svc)) (:slotId node)) "…keyed by the inner slot")
+          (is (nil? (:bindingId node))
+              "…and carries NO binding id: the `+` creates the root's binding, it does not edit another fn's")
           (testing "once bound on the root, the placeholder is gone"
             (setup/bind-value! storage (:id r) (:id svc) "orders")
             (let [again (layout storage (:id r))]

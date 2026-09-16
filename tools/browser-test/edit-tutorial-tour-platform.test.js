@@ -21,7 +21,7 @@ const {
   hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
   extendViaRowActions, createRootNamespace, createFnInNamespace,
   setParentViaStrip, finishAndDelete, tourTitle, bindFirstPlaceholder,
-  bindFnRefPlaceholder,
+  bindFnRefPlaceholder, bindPlaceholderOn, extendInPlace,
   openOperateSection, waitUntil, waitTourClosed,
 } = require('./tutorial-tour-helpers');
 
@@ -52,23 +52,23 @@ async function revertAssetViaApi(page, base) {
     await page.goto(BASE + '/?tutorial=32');
     await waitTourTitle(page, 'Fns that keep running', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 32 Next');
-    await waitTourTitle(page, 'A thunk to run');
-    await filterAndSelect(page, 'const', 'const');
-    await waitTourTitle(page, 'Extend it', 150000);
-    await extendViaRowActions(page, 'tutorial-tick', 'const');
-    await waitTourTitle(page, 'tutorial-tick is open', 150000);
-    await waitTourTitle(page, 'Give it something to return', 150000);
-    await filterAndSelect(page, 'tutorial-tick', 'tutorial-tick');
-    // `:any` slots parse the literal as JSON — a bare word is rejected.
-    await bindFirstPlaceholder(page, '"tick"');
-    await waitTourTitle(page, 'Find future', 150000);
+    // Built from the outside in (2026-09-16): the daemon first; its body
+    // is the base fn bound into :body and EXTENDED IN PLACE from its card.
+    await waitTourTitle(page, 'Find future');
     await filterAndSelect(page, 'future', 'future');
-    await waitTourTitle(page, 'Wrap it in a future', 150000);
+    await waitTourTitle(page, 'The daemon', 150000);
     await extendViaRowActions(page, 'tutorial-daemon', 'future');
     await waitTourTitle(page, 'tutorial-daemon is open', 150000);
-    await waitTourTitle(page, 'Point it at the thunk', 150000);
-    await filterAndSelect(page, 'tutorial-daemon', 'tutorial-daemon');
-    await bindFnRefPlaceholder(page, 'tutorial-tick');
+    await waitTourTitle(page, 'Give it a body', 150000);
+    // A callable slot — the `+` opens the picker straight away.
+    await bindPlaceholderOn(page, 'tutorial-daemon', 'body', 'fn-ref', 'const');
+    await waitTourTitle(page, 'Make the thunk yours, in place', 150000);
+    await extendInPlace(page, 'const', 'tutorial-tick');
+    await waitTourTitle(page, 'Give it something to return', 150000);
+    // `:any` slots parse the literal as JSON — a bare word is rejected. The
+    // `+` hangs off tutorial-tick's card but WRITES on the daemon: a
+    // callable's open input is a closure capture at the call site.
+    await bindPlaceholderOn(page, 'tutorial-daemon', 'value', 'literal', '"tick"');
     // The step gates on SELECTION, not on a button — the bind already leaves
     // the daemon selected, so this only waits for the gate to clear.
     await waitTourTitle(page, 'Where a fn becomes a service', 150000);
@@ -77,8 +77,11 @@ async function revertAssetViaApi(page, base) {
     // ⋯ → ⚙. The gear is server-rendered in the row-actions partial, and a
     // blocked one is aria-disabled — NOT `button.disabled` — so a plain
     // `.click()` on it silently does nothing. Assert the enabled shape.
-    await page.waitForSelector('button.more-actions-trigger', {timeout: 30000});
-    await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
+    // Pinned to the DAEMON's own row: tutorial-tick's card is on this canvas
+    // too, and its use-site ⋯ has no ⚙.
+    const daemonTrig = '.node-overlay[data-fn-name="tutorial-daemon"] .ancestor-line[data-level="0"] button.more-actions-trigger';
+    await page.waitForSelector(daemonTrig, {timeout: 30000});
+    await page.dispatchEvent(daemonTrig, 'mousedown');
     await page.waitForSelector('.row-actions-popover button', {timeout: 15000});
     const gear = await page.evaluate(() => {
       const btn = Array.from(document.querySelectorAll('.row-actions-popover button'))
@@ -120,7 +123,7 @@ async function revertAssetViaApi(page, base) {
     await waitTourTitle(page, 'What the row means', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 32 row-means Next');
     await waitTourTitle(page, 'Remove it');
-    await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
+    await page.dispatchEvent(daemonTrig, 'mousedown');
     await page.waitForSelector('.row-actions-popover button', {timeout: 15000});
     await page.evaluate(() => {
       Array.from(document.querySelectorAll('.row-actions-popover button'))

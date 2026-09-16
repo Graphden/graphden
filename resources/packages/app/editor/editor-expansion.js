@@ -173,6 +173,38 @@ function applyClickSpec(nodeId, depth, fnId, allFnsAtDepth) {
 }
 
 /**
+ * Unfold the card of `fnId` so what hangs off it is drawn — the STATE half
+ * of a click on its first parent row, without the render: the caller is
+ * about to trigger one anyway (a write → `loadGraphData`), and the
+ * expansion must be in place before it so that single render shows the
+ * new hop. Used when a ref is bound or appended on a child card: the
+ * reader is building here, so the canvas shows what they just wired
+ * instead of leaving it folded inside a closed card (reopening the fn
+ * later shows closed cards again — names are boundaries). A nav-root card
+ * draws its own refs already — nothing to do (null). Returns a token for
+ * `refoldNodeForBuild` when the state changed.
+ */
+function unfoldNodeForBuild(fnId) {
+  if (!fnId) return null;
+  const overlay = document.querySelector('.node-overlay[data-original-fn-id="' + fnId + '"]');
+  const nodeId = overlay?.dataset?.nodeId;
+  if (!nodeId || nodeId === 'fn-' + fnId) return null;
+  const current = expansionState.get(nodeId);
+  if ((current?.fullDepth || 0) >= 1) return null;
+  expansionState.set(nodeId, { fullDepth: 1, partialFns: new Set() });
+  previewState.delete(nodeId);
+  savedUserPositions.clear();
+  return { nodeId, previous: current || null };
+}
+
+// Put back what `unfoldNodeForBuild` changed — for a write that then failed.
+function refoldNodeForBuild(token) {
+  if (!token?.nodeId) return;
+  if (token.previous) expansionState.set(token.nodeId, token.previous);
+  else expansionState.delete(token.nodeId);
+}
+
+/**
  * Set preview spec (hover). Uses debouncing to avoid flicker.
  *
  * IMPORTANT: clicks are bound to `mousedown` (not `click`) so that the

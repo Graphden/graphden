@@ -811,9 +811,15 @@ async function setParentViaStrip(page, parentName) {
 
 // --- lesson 13 (effects) helper ---------------------------------------------
 // Run a fn whose effects force the acknowledgement checkbox first.
-async function runWithEffectAck(page, formValue) {
-  await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
-  await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
+// `ownerName` (optional) pins the ⋯ to THAT card's own row — with a child
+// card on the canvas (a fn built from the outside in) the first ⋯ in the
+// DOM may be the child's use-site menu, which has no ▶ Run.
+async function runWithEffectAck(page, formValue, ownerName) {
+  const trig = ownerName
+    ? '.node-overlay[data-fn-name="' + ownerName + '"] .ancestor-line[data-level="0"] button.more-actions-trigger'
+    : 'button.more-actions-trigger';
+  await page.waitForSelector(trig, {timeout: 15000});
+  await page.dispatchEvent(trig, 'mousedown');
   await page.waitForSelector('.row-actions-popover button', {timeout: 15000});
   await page.evaluate(() => {
     Array.from(document.querySelectorAll('.row-actions-popover button'))
@@ -1272,6 +1278,107 @@ async function bindNamedPlaceholder(page, argName, kind, text) {
     null, {timeout: 30000, polling: 150}).catch(() => {});
 }
 
+// The `+` of ONE card's slot — pinned by the fn the binding lands on AND
+// the slot, because the outer and inner fn of a pipeline often expose the
+// same slot name (:coll on both). `kind` as in `bindNamedPlaceholder`:
+// 'literal' (then `text` is typed), 'fn-ref' / 'whole-list' (then `text`
+// is the fn to pick; a callable slot skips the chooser and opens the
+// picker directly — accepted either way).
+async function bindPlaceholderOn(page, ownerName, argName, kind, text) {
+  const sel = '.placeholder-binder[data-fn-name="' + ownerName + '"][data-arg-name="' + argName + '"]';
+  await page.waitForSelector(sel, {timeout: 60000});
+  await page.click(sel);
+  if (kind === 'fn-ref' || kind === 'whole-list') {
+    const btnLabel = kind === 'whole-list' ? 'Bind fn-ref (whole list)' : 'Bind fn-ref';
+    await page.waitForFunction((label) => {
+      return !!document.querySelector('.fn-picker-popover')
+        || Array.from(document.querySelectorAll('.free-arg-bind-chooser button'))
+          .some((b) => b.textContent.trim() === label);
+    }, btnLabel, {timeout: 15000, polling: 100});
+    await page.evaluate((label) => {
+      if (document.querySelector('.fn-picker-popover')) return;
+      Array.from(document.querySelectorAll('.free-arg-bind-chooser button'))
+        .find((b) => b.textContent.trim() === label).click();
+    }, btnLabel);
+    await page.waitForSelector('.fn-picker-popover', {timeout: 15000});
+    await page.fill('.fn-picker-popover input', text);
+    // The row whose NAME is `text` — a bare-name filter also lists fns that
+    // merely contain it (`cell` → `tutorial-cell`), so match the row's
+    // qualified name's last segment, not a substring.
+    const rowSel = '.fn-picker-popover .fn-picker-row[data-fn-name$=".' + text + '"], '
+                 + '.fn-picker-popover .fn-picker-row[data-fn-name="' + text + '"]';
+    await page.waitForSelector(rowSel, {timeout: 30000});
+    await page.click(rowSel);
+    await page.waitForFunction(() => !document.querySelector('.fn-picker-popover'),
+      null, {timeout: 30000, polling: 150});
+    return;
+  }
+  await page.waitForFunction(() => {
+    return Array.from(document.querySelectorAll('.free-arg-bind-chooser button'))
+      .some((b) => /^(Bind|Append) literal$/.test((b.textContent || '').trim()));
+  }, null, {timeout: 8000, polling: 100});
+  await page.evaluate(() => {
+    Array.from(document.querySelectorAll('.free-arg-bind-chooser button'))
+      .find((b) => /^(Bind|Append) literal$/.test((b.textContent || '').trim())).click();
+  });
+  await page.waitForFunction(() => {
+    const pops = document.querySelectorAll('.arg-value-edit-popover');
+    const pop = pops[pops.length - 1];
+    return pop && (pop.querySelector('.arg-value-edit-input')
+      || pop.querySelector('[data-form-field]'));
+  }, null, {timeout: 10000, polling: 100});
+  await page.evaluate((t) => {
+    const pops = document.querySelectorAll('.arg-value-edit-popover');
+    const pop = pops[pops.length - 1];
+    const field = pop.querySelector('.arg-value-edit-input')
+      || pop.querySelector('[data-form-field]');
+    field.value = t;
+    field.dispatchEvent(new Event('input', {bubbles: true}));
+    field.dispatchEvent(new Event('change', {bubbles: true}));
+    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
+      .find((b) => b.textContent.trim() === 'Save').click();
+  }, text);
+  await page.waitForFunction(() => !document.querySelector('.arg-value-edit-popover'),
+    null, {timeout: 30000, polling: 150}).catch(() => {});
+}
+
+
+// ⋯ → Extend on the card of `cardName` — a fn that sits on the canvas
+// because a slot binds it — naming the child `childName`. Extend IN PLACE:
+// the child takes the card's place in that slot and the editor stays on
+// the canvas it is on, so the helper waits for the CHILD's card, not for a
+// navigation. Pinned to the card's own (depth-0) ⋯, not the first ⋯ painted.
+async function extendInPlace(page, cardName, childName) {
+  const trig = '.node-overlay[data-fn-name="' + cardName + '"] .ancestor-line[data-level="0"] button.more-actions-trigger';
+  await page.waitForSelector(trig, {timeout: 60000});
+  await page.evaluate((sel) => {
+    document.querySelector(sel).dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+  }, trig);
+  await page.waitForSelector('.row-actions-popover [data-action="extend-fn"]', {timeout: 15000});
+  const hash = await page.evaluate(() => location.hash);
+  await page.evaluate(() => {
+    document.querySelector('.row-actions-popover [data-action="extend-fn"]')
+      .dispatchEvent(new MouseEvent('click', {bubbles: true}));
+  });
+  await page.waitForSelector('.arg-value-edit-popover .arg-value-edit-input', {timeout: 10000});
+  const hint = await page.evaluate(() => document.querySelector('.arg-value-edit-popover .arg-value-edit-hint')?.textContent || '');
+  assert(/in place of/.test(hint), 'the Extend popover on a bound card says it extends in place: ' + hint);
+  await page.evaluate((name) => {
+    const pop = document.querySelector('.arg-value-edit-popover');
+    const input = pop.querySelector('.arg-value-edit-input');
+    input.value = name;
+    input.dispatchEvent(new Event('input', {bubbles: true}));
+    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
+      .find((b) => b.textContent.trim() === 'Save').click();
+  }, childName);
+  await page.waitForFunction(() => !document.querySelector('.arg-value-edit-popover'),
+    null, {timeout: 30000, polling: 100});
+  await page.waitForSelector('.node-overlay[data-fn-name="' + childName + '"]', {timeout: 60000});
+  assert(await page.evaluate(() => location.hash) === hash,
+    'extending in place stays on the canvas (hash ' + hash + ')');
+}
+
+
 module.exports = {
   NS_NAME, FN_NAME,
   retryingDelete, hardCleanup, tourTitle, waitTourTitle, clickTourButton,
@@ -1284,6 +1391,7 @@ module.exports = {
   bindSeqAnchorPlaceholder,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, waitTourClosed, bindFnRefPlaceholder,
-  bindNamedPlaceholder, bindOptionalArgChip, appendFnRefViaChip, renameArgViaEdgeLabel,
+  bindNamedPlaceholder, bindPlaceholderOn, extendInPlace,
+  bindOptionalArgChip, appendFnRefViaChip, renameArgViaEdgeLabel,
   createRecordType, openOperateSection, openAccountSettings, openAccountMenu,
 };

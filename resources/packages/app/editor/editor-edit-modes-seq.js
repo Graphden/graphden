@@ -281,6 +281,9 @@ async function postSequenceAppend(fnId, body) {
     });
     if (r?.ok) {
       if (typeof gdUndoRecordSeqAppend === 'function') gdUndoRecordSeqAppend(fnId, body);
+      // A ref appended on a CHILD card is drawn only while that card is
+      // unfolded — unfold it before the render (see `saveArgRef`).
+      if (body.ref && typeof unfoldNodeForBuild === 'function') unfoldNodeForBuild(fnId);
       // Sequence edits change binding-list-item rows, not fn structure/
       // value-kinds — the lighter `loadGraphData` (index + subtree +
       // rich-types) reflects them without the `initGraph` graph re-render.

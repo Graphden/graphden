@@ -402,7 +402,10 @@ async function responseError(r) {
 // — those come from the synth-arg adapter, populated server-side from
 // the slot/binding rows. Returns `{ok, error?}` — `error` carries the
 // server's rejection reason for the popover to display.
-async function writeBindingFields(arg, fields) {
+// `opts.undo === false` skips the binding's own undo entry — for a caller
+// that records a COMBINED inverse of a larger gesture (extend in place:
+// rebind back, then tombstone the child), so one Undo reverts all of it.
+async function writeBindingFields(arg, fields, opts) {
   if (!arg) return { ok: false, error: 'No target binding.' };
   const fnId = arg['fn-id'];
   const slotId = arg['slot-id'];
@@ -423,7 +426,7 @@ async function writeBindingFields(arg, fields) {
                           'fn-id=' + encodeURIComponent(fnId) +
                           '&slot-id=' + encodeURIComponent(slotId) +
                           (body ? '&' + body : ''));
-    if (r?.ok && typeof gdUndoRecordBindingWrite === 'function') {
+    if (r?.ok && opts?.undo !== false && typeof gdUndoRecordBindingWrite === 'function') {
       gdUndoRecordBindingWrite(arg, fields, bindingId ? prev : null);
     }
     return r?.ok ? { ok: true } : { ok: false, error: await responseError(r) };
@@ -539,6 +542,11 @@ async function saveArgRef(arg, refFnId) {
   // `:ref-fn-id` directly via the slot/binding API.
   if (!arg) return false;
   if ((await writeBindingFields(arg, { 'ref-fn-id': refFnId })).ok) {
+    // A ref bound on a CHILD card is drawn only while that card is
+    // unfolded — so unfold it (state only, before the render below), or
+    // the reader who just bound `str-split` there sees nothing appear and
+    // cannot reach its ⋯ to extend it in place (editor-expansion.js).
+    if (typeof unfoldNodeForBuild === 'function') unfoldNodeForBuild(arg['fn-id']);
     // ref-fn-id change can shift the arg's inferred type — `loadGraphData`
     // refreshes rich-types + subtree, so the chip updates without initGraph.
     if (typeof loadGraphData === 'function') loadGraphData();

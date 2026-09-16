@@ -990,7 +990,17 @@
             :when (and slot-id
                        (not (contains? shown (root-of slot-id)))
                        (not (contains? chain-bound (root-of slot-id))))
-            :let [[arg-id arg-rec] (first (get args-by-slot slot-id))
+            ;; The arg row that lends the hole its TYPE / description: one
+            ;; the root's own chain owns when there is one, else an UNBOUND
+            ;; row — never the first binding some unrelated fn put on this
+            ;; slot (`const`'s :value has hundreds; the first used to be a
+            ;; package fn's, and the `+` then edited THAT binding — a 400,
+            ;; 2026-09-16).
+            :let [root-chain (set (data/get-inheritance-chain* root-fn-id lookups))
+                  rows (get args-by-slot slot-id)
+                  [arg-id arg-rec] (or (some (fn [[_ a :as row]] (when (contains? root-chain (:fn-id a)) row)) rows)
+                                       (some (fn [[_ a :as row]] (when (nil? (:binding-id a)) row)) rows)
+                                       (first rows))
                   ;; The surface's own `:optional?` (the executor's
                   ;; effective-required at the slot's owner), so the card
                   ;; and the Run form cannot disagree on what is a knob.
@@ -1014,7 +1024,12 @@
                                         :isPlaceholder true
                                         :argId (str arg-id)}
                                        flag-fields
-                                       (arg-row->node-id-fields (assoc arg-rec :fn-id root-fn-id)))
+                                       ;; The ROOT's hole has no binding row yet — the
+                                       ;; `+` must POST a new one on the root, not PUT
+                                       ;; whichever binding `arg-rec` came from.
+                                       (arg-row->node-id-fields (-> arg-rec
+                                                                    (assoc :fn-id root-fn-id)
+                                                                    (dissoc :binding-id :item-id))))
                           arg-type (assoc :argType (name arg-type)))})
           (swap! state update :edges conj
                  {:data (merge {:id edge-id

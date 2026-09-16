@@ -197,6 +197,16 @@ In the editor:
    binding wins over the parent's (closer wins, as above). That is
    how you add a step on top of existing logic without
    re-assembling it by hand.
+
+   And **Extend has an in-place form** for building the other way,
+   from the outside in. On `add-10-text`'s canvas, `add-10` sits as
+   a card because `:value` binds it. `⋯ → + Extend` on THAT card
+   (not on the root) creates the child and puts it in `:value` in
+   place of `add-10` — you stay on `add-10-text`'s canvas, and the
+   new card's own `+` placeholders are right there to bind. So a
+   pipeline is built top-down: bind the base fn a slot needs, extend
+   it where it sits, bind the child's slots on its card, repeat.
+   Lessons 09, 15 and 32 build their fns this way.
 6. Try writing a multiple-inheritance fn-def over the two real
    response axes:
 

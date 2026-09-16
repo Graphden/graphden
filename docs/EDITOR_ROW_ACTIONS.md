@@ -18,8 +18,18 @@ were deliberately left in JS.
 |---|---|---|
 | `col-header` | ancestor column header; read-only fall-through rows | ns / i / ↗ / 👁 Peek |
 | `cell` | MI cell; parent-edit row | ns / i / ↗ / 👁 Peek / × Remove-MI / + Add-MI (last two when `editable=true`) |
-| `use-site-arg` | argument at a use-site | ns / i / ↗ / 👁 Peek / × Remove-binding / ✎ Change-value (last two when `editable=true`) |
+| `use-site-arg` | argument at a use-site | ns / i / ↗ / 👁 Peek / × Remove-binding / ✎ Change-value / + Extend-in-place (last three when `editable=true`) |
 | `root-row` | the selected fn's root row | ns / i / ↗ / ▶ Run / ⌛ History / ⚙ Service / ▣ Apps / ✎ Rename / + Extend / ⬆ Wrap / ✕ Delete |
+
+`+ Extend` at a use-site is the SAME `extend-fn` action the root row has;
+the dispatcher sees `data-binding-id` on the host and `enterExtendEditMode`
+runs **in place** — the child is created AND put in that slot where its
+parent was, and the editor stays on the current canvas
+(`editor-edit-modes-fn.js`). That is how a composition is built from the
+outside in: bind the base fn a slot needs, extend it right there, bind the
+child's slots on its card. For a list item the use-site is the item
+(`PUT /api/sequence/item/:id {ref}`), for a slot it is the binding's
+`ref-fn-id`; one Undo reverts both writes.
 
 Disabled-with-reason: `edit-block-reason` is a client-passed query param; the
 ⚙ reason is computed INSIDE the partial from `:service-blocking-free-args`

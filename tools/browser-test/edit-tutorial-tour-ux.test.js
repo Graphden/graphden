@@ -16,7 +16,7 @@ const {
   hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
   runViaRowActions, tourTitle, extendViaRowActions, bindFirstPlaceholder,
   bindFnRefPlaceholder, finishAndDelete, runWithEffectAck, waitTourClosed,
-  openRowActionsFor, bindNamedPlaceholder,
+  openRowActionsFor, bindNamedPlaceholder, bindPlaceholderOn, extendInPlace,
 } = require('./tutorial-tour-helpers');
 
 
@@ -249,22 +249,35 @@ const {
     await page.goto(BASE + '/?tutorial=09');
     await waitTourTitle(page, 'A graph can remember', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 09 Next');
-    await waitTourTitle(page, 'Find cell');
-    await filterAndSelect(page, 'cell', 'cell');
-    await waitTourTitle(page, 'Make your own', 150000);
-    await extendViaRowActions(page, 'tutorial-cell', 'cell');
-    await waitTourTitle(page, 'Seed it with an empty list', 150000);
-    await bindFirstPlaceholder(page, '[]');
-    await waitTourTitle(page, 'Now something that writes to it', 150000);
+    // Built from the outside in (2026-09-16): the writer first, then the
+    // cell it needs is bound as the base fn and EXTENDED IN PLACE from its
+    // card — no trip through the Explorer, no retyping its name.
+    await waitTourTitle(page, 'Find swap-conj');
     await filterAndSelect(page, 'swap-conj', 'swap-conj');
-    await waitTourTitle(page, 'Extend it too', 150000);
+    await waitTourTitle(page, 'Extend it', 150000);
     await extendViaRowActions(page, 'tutorial-bump', 'swap-conj');
-    await waitTourTitle(page, 'Point it at your cell', 150000);
-    await bindFnRefPlaceholder(page, 'tutorial-cell');
+    await waitTourTitle(page, 'tutorial-bump is open', 150000);
+    await waitTourTitle(page, 'Point it at a cell', 150000);
+    await bindPlaceholderOn(page, 'tutorial-bump', 'a', 'fn-ref', 'cell');
+    await waitTourTitle(page, 'Make it yours, in place', 150000);
+    await extendInPlace(page, 'cell', 'tutorial-cell');
+    await waitTourTitle(page, 'Seed it with an empty list', 150000);
+    await bindPlaceholderOn(page, 'tutorial-cell', 'initial-value', 'literal', '[]');
+    // The slot points at the CHILD now, not at the base fn.
+    const bumpBinds = await page.evaluate(async () => {
+      const r = await authFetch(API.api_graph_entities + '?scope=search&q=tutorial-');
+      const d = await r.json();
+      const bump = (d.fns || []).find((f) => f.name === 'tutorial-bump');
+      const cell = (d.fns || []).find((f) => f.name === 'tutorial-cell');
+      const sub = await (await authFetch(API.api_graph_entities + '?scope=subtree&root-id=' + bump.id)).json();
+      return (sub.bindings || []).filter((b) => b['fn-id'] === bump.id).map((b) => b['ref-fn-id'] === cell.id);
+    });
+    assert(bumpBinds.length === 1 && bumpBinds[0] === true,
+      'tutorial-bump :a now references tutorial-cell (' + JSON.stringify(bumpBinds) + ')');
     await waitTourTitle(page, 'Run it', 150000);
     // Writing to a cell is the :state effect, so Run is gated behind the
     // acknowledgement checkbox — the same gate lesson 13 teaches.
-    await runWithEffectAck(page, 'tick');
+    await runWithEffectAck(page, 'tick', 'tutorial-bump');
     // The lesson's whole claim: the SECOND run sees the first one's value —
     // and since 2026-09-13 the tour makes the reader do that second run
     // (the old single "Run it twice" step passed on the first).
@@ -301,36 +314,47 @@ const {
     await page.goto(BASE + '/?tutorial=15');
     await waitTourTitle(page, 'What actually ran?', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 15 Next');
-    // One ring per action: find → extend → (gate) → bind, bind — each its
-    // own step, so the walk waits for every title a reader would see.
-    await waitTourTitle(page, 'Find str-split');
-    await filterAndSelect(page, 'str-split', 'str-split');
-    await waitTourTitle(page, 'Split the sentence', 150000);
-    await extendViaRowActions(page, 'tutorial-words', 'str-split');
-    await waitTourTitle(page, 'tutorial-words is open', 150000);
-    await waitTourTitle(page, 'Give it text', 150000);
-    await bindNamedPlaceholder(page, 'string', 'literal', 'hello,big,world');
-    await waitTourTitle(page, 'And where to cut', 150000);
-    await bindNamedPlaceholder(page, 'separator', 'literal', ',');
-    await waitTourTitle(page, 'Find map', 150000);
-    await filterAndSelect(page, 'map', 'map');
-    await waitTourTitle(page, 'Transform every word', 150000);
-    await extendViaRowActions(page, 'tutorial-shout', 'map');
-    await waitTourTitle(page, 'tutorial-shout is open', 150000);
-    await waitTourTitle(page, 'Feed it', 150000);
-    // :coll is a LIST slot — its empty `+` offers the whole-list fn-ref.
-    await bindNamedPlaceholder(page, 'coll', 'whole-list', 'tutorial-words');
-    await waitTourTitle(page, 'Pick the function', 150000);
-    await bindNamedPlaceholder(page, 'func', 'fn-ref', 'str-upper');
-    await waitTourTitle(page, 'Find str-join', 150000);
+    // Built from the OUTSIDE IN (2026-09-16): the outer fn is extended from
+    // the Explorer once; every inner fn is the base fn bound into a slot and
+    // then EXTENDED IN PLACE from its card — the reader never leaves
+    // tutorial-sentence's canvas and never retypes a name. One ring per
+    // action: each bind / extend is its own step, so the walk waits for
+    // every title a reader would see.
+    await waitTourTitle(page, 'Find str-join');
     await filterAndSelect(page, 'str-join', 'str-join');
-    await waitTourTitle(page, 'Join it back', 150000);
+    await waitTourTitle(page, 'The outer fn', 150000);
     await extendViaRowActions(page, 'tutorial-sentence', 'str-join');
     await waitTourTitle(page, 'tutorial-sentence is open', 150000);
-    await waitTourTitle(page, 'Close the pipeline', 150000);
-    await bindNamedPlaceholder(page, 'coll', 'whole-list', 'tutorial-shout');
     await waitTourTitle(page, 'Spaces between the words', 150000);
-    await bindNamedPlaceholder(page, 'separator', 'literal', ' ');
+    await bindPlaceholderOn(page, 'tutorial-sentence', 'separator', 'literal', ' ');
+    await waitTourTitle(page, 'Feed it a list', 150000);
+    // :coll is a LIST slot — its empty `+` offers the whole-list fn-ref.
+    await bindPlaceholderOn(page, 'tutorial-sentence', 'coll', 'whole-list', 'map');
+    await waitTourTitle(page, 'Extend it in place', 150000);
+    await extendInPlace(page, 'map', 'tutorial-shout');
+    await waitTourTitle(page, 'Pick the function', 150000);
+    // The child's own `+`s are on THIS canvas — a one-hop ref child draws
+    // its unbound slots.
+    await bindPlaceholderOn(page, 'tutorial-shout', 'func', 'fn-ref', 'str-upper');
+    await waitTourTitle(page, 'And the words', 150000);
+    await bindPlaceholderOn(page, 'tutorial-shout', 'coll', 'whole-list', 'str-split');
+    // Binding a ref on a CHILD card unfolds it, so the bound fn is drawn —
+    // the reader must be able to reach its ⋯ for the next step.
+    await page.waitForSelector('.node-overlay[data-fn-name="str-split"]', {timeout: 60000});
+    await waitTourTitle(page, 'Extend that one too', 150000);
+    await extendInPlace(page, 'str-split', 'tutorial-words');
+    await waitTourTitle(page, 'The whole pipeline, unfolded', 150000);
+    // …and the fit after the in-place extend brings the new card on screen.
+    await page.waitForFunction(() => {
+      const r = document.querySelector('.node-overlay[data-fn-name="tutorial-words"]').getBoundingClientRect();
+      const surface = document.getElementById('graph-surface').getBoundingClientRect();
+      return r.width > 0 && r.right <= surface.right + 8 && r.left >= surface.left - 8;
+    }, null, {timeout: 15000, polling: 100});
+    assert(await clickTourButton(page, 'Next'), 'pipeline look-step Next');
+    await waitTourTitle(page, 'Give it text', 150000);
+    await bindPlaceholderOn(page, 'tutorial-words', 'string', 'literal', 'hello,big,world');
+    await waitTourTitle(page, 'And where to cut', 150000);
+    await bindPlaceholderOn(page, 'tutorial-words', 'separator', 'literal', ',');
     await waitTourTitle(page, 'Peek inside without leaving', 150000);
     await openRowActionsFor(page, 'tutorial-shout');
     await page.waitForSelector('.row-actions-popover [data-action="peek-fn"]',
@@ -346,29 +370,18 @@ const {
     }));
     assert(peek.title === 'tutorial-shout',
       'peek panel names the peeked fn (got ' + peek.title + ')');
-    await waitTourTitle(page, 'Unfold the inner hop', 150000);
+    await waitTourTitle(page, 'Run it with a trace', 150000);
     await page.keyboard.press('Escape');
     await page.waitForFunction(() => !document.querySelector('.fn-peek-panel'),
       null, {timeout: 15000, polling: 100});
     // Escape must have been CONSUMED by the panel — the tour survives.
     assert(await page.evaluate(() => !!document.querySelector('#gd-tour-pop')),
       'closing the peek with Escape does not end the tour');
-    // Unfold tutorial-shout's parent row: the step's check reads the
-    // COMMITTED expansion, so a hover alone must not advance it.
-    await page.hover('.node-overlay[data-fn-name="tutorial-shout"] .ancestor-line[data-level="1"]');
-    await new Promise((r) => setTimeout(r, 1500));
-    assert(await tourTitle(page) === 'Unfold the inner hop',
-      'hovering the parent row (the preview) does not pass the unfold step');
-    await page.click('.node-overlay[data-fn-name="tutorial-shout"] .ancestor-line[data-level="1"]',
-      {position: {x: 40, y: 8}});
-    await page.waitForSelector('.node-overlay[data-fn-name="tutorial-words"]', {timeout: 30000});
-    // …and the auto-fit after an expansion brings the revealed card on screen.
-    await page.waitForFunction(() => {
-      const r = document.querySelector('.node-overlay[data-fn-name="tutorial-words"]').getBoundingClientRect();
-      const surface = document.getElementById('graph-surface').getBoundingClientRect();
-      return r.width > 0 && r.right <= surface.right + 8 && r.left >= surface.left - 8;
-    }, null, {timeout: 15000, polling: 100});
-    await waitTourTitle(page, 'Run it with a trace', 150000);
+    // The pipeline the reader built is still unfolded on this canvas.
+    for (const name of ['tutorial-sentence', 'tutorial-shout', 'tutorial-words', 'str-upper']) {
+      assert(await page.evaluate((n) => !!document.querySelector('.node-overlay[data-fn-name="' + n + '"]'), name),
+        name + ' is on the canvas before the run');
+    }
     // Run the ROOT with history + trace + capture values — the values are
     // what the path view prints on the cards and the tree lists. The
     // capture confirm is a native dialog; the page-level handler accepts it.

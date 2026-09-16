@@ -393,6 +393,28 @@
           :then :_partial-row-actions-change-use-site-button
           :else {:value nil}}}
 
+  ;; + Extend IN PLACE — the same `extend-fn` action the root row has,
+  ;; but at a use-site the dispatcher finds `data-binding-id` on the host
+  ;; and `enterExtendEditMode` puts the CHILD in this slot in place of the
+  ;; fn, staying on the canvas (editor-edit-modes-fn.js). Gated like × / ✎:
+  ;; it rewrites the card's binding.
+  {:name :_partial-row-actions-extend-use-site-button
+   :description "`<button data-action=\"extend-fn\" …>+</button>` at a use-site — the dispatcher reads `data-binding-id` from the host and calls `enterExtendEditMode(fn, btn, {useSiteArg})`: the new child takes this fn's place in the slot; no navigation."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "extend-fn"
+                          :title "Extend in place — a new child of this fn takes its place in this slot; you stay on this canvas"
+                          :aria-label "Extend in place"}}
+          :children [{:value "+"}]}}
+
+  {:name :_partial-row-actions-extend-use-site-button-or-nil
+   :parent :if
+   :args {:test :_partial-row-actions-editable?
+          :then :_partial-row-actions-extend-use-site-button
+          :else {:value nil}}}
+
   ;; --- sequence-item ordering buttons (↑ / ↓ / +) ---
   ;; Rendered only for a sequence-item row (`seq-item=true`) when
   ;; editable. The dispatcher recovers the rich arg (item-id,
@@ -491,7 +513,7 @@
           :else {:value nil}}}
 
   {:name :_partial-row-actions-use-site-children-raw
-   :description "Raw button list for the use-site-arg context: ns / i / ↗ (always) + (when editable) × Remove-binding + ✎ Change-value + (sequence items only) ↑ / ↓ / + Insert-before. Matches the legacy `useSiteArg` branch of `buildPopoverContent` in editor-overlay-fn.js, plus the always-on shared head from the line context."
+   :description "Raw button list for the use-site-arg context: ns / i / ↗ (always) + (when editable) × Remove-binding + ✎ Change-value + + Extend-in-place + (sequence items only) ↑ / ↓ / + Insert-before. Matches the legacy `useSiteArg` branch of `buildPopoverContent` in editor-overlay-fn.js, plus the always-on shared head from the line context."
    :parent :list
    :args {:items [:_partial-row-actions-ns-button
                   :_partial-row-actions-i-button
@@ -501,7 +523,8 @@
                   :_partial-row-actions-seq-down-button-or-nil
                   :_partial-row-actions-seq-insert-button-or-nil
                   :_partial-row-actions-remove-use-site-button-or-nil
-                  :_partial-row-actions-change-use-site-button-or-nil]}}
+                  :_partial-row-actions-change-use-site-button-or-nil
+                  :_partial-row-actions-extend-use-site-button-or-nil]}}
 
   {:name :_partial-row-actions-use-site-children
    :parent :filter
@@ -524,7 +547,7 @@
           :value :_partial-row-actions-binding-id-str}}
 
   {:name :_partial-row-actions-use-site
-   :description "use-site-arg context toolbar — 3 read-only buttons (ns/i/↗) + 2 editable (× Remove-binding / ✎ Change-value) when `editable=true`. Host attrs carry `data-fn-id` + `data-binding-id`; the dispatcher uses binding-id to recover the rich `useSiteArg` object."
+   :description "use-site-arg context toolbar — 3 read-only buttons (ns/i/↗) + 3 editable (× Remove-binding / ✎ Change-value / + Extend-in-place) when `editable=true`. Host attrs carry `data-fn-id` + `data-binding-id`; the dispatcher uses binding-id to recover the rich `useSiteArg` object."
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs :_partial-row-actions-use-site-attrs

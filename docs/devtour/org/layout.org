@@ -40,13 +40,13 @@ Synthesizes the per-fn 'arg view' rows the walkers consume: for each fn, its inh
 :PROPERTIES:
 :CUSTOM_ID: layout/build-graph-elements
 :FILE: src/graphden/layout/graph.clj
-:LINE: 927
+:LINE: 944
 :MINS: 5.6
 :END:
 
 Stage 2's orchestrator — dispatches the cycle-guarded ~process-*~ walkers over the expansion spec, then pipes the accumulated state through the post-processing transforms (optional/HOF badges, captured-edge migration, overlay dedup, strip facts). Produces the node/edge element lists the client draws verbatim.
 
-- source :: [[file:../../../src/graphden/layout/graph.clj::(defn build-graph-elements][src/graphden/layout/graph.clj:927]]
+- source :: [[file:../../../src/graphden/layout/graph.clj::(defn build-graph-elements][src/graphden/layout/graph.clj:944]]
 - referenced from :: [[file:editor.org::#editor/fetchBackendLayout][fetchBackendLayout]]
 
 * 4. emit-root-deep-frees!

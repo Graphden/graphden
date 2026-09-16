@@ -675,7 +675,24 @@
                     (when (mark-once! [terminal :unset])
                       (bh/add-unset-arg-node state lookups inverse-source-map
                                              (bnd/resolve-arg-name arg arg-map)
-                                             (:type arg) (:id arg) node-id #{fn-id} is-hof))))))
+                                             (:type arg) (:id arg) node-id #{fn-id} is-hof)))))
+              ;; An EMPTY list slot is a hole like any scalar one — draw its
+              ;; `+` on the leaf too (the sentinel node, `isSequenceAnchor`),
+              ;; so a fn built from the outside in can be bound — and then
+              ;; extended in place — on the card that OWNS the slot, not as a
+              ;; closure capture on the root (which is where
+              ;; `emit-root-deep-frees!` would otherwise surface it,
+              ;; 2026-09-16). A chain WITH items stays folded: the items are
+              ;; the closed card's body, unfold to see them.
+              (doseq [anchor seq-anchors
+                      :let [terminal (bh/terminal-source-of arg-map (:id anchor))]
+                      :when (and (empty? (bnd/walk-anchor-chain anchor arg-map))
+                                 (not (find-migrated (:id anchor)))
+                                 (not (bh/arg-determined? arg-map parent-bound-terminals (:id anchor)))
+                                 (mark-once! [terminal :unset]))]
+                (bh/add-unset-arg-node state lookups inverse-source-map
+                                       (bnd/resolve-arg-name anchor arg-map)
+                                       (:type anchor) (:id anchor) node-id #{fn-id} is-hof)))
             node-id)
           ;; Normal processing
           (if (bh/spec-trivial? spec)

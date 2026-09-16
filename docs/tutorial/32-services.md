@@ -50,17 +50,22 @@ etc.) …* — and goes on to suggest wrapping a one-shot fn in
 
 The in-editor tour builds the same two fns, so the names match it.
 
-1. Type `const` in the Explorer filter, click the `const` row, then
-   `⋯` → **Extend**; name it `tutorial-tick`, **Save**. On its card
-   click the `+` on the `:value` slot, **Bind literal**, and type
-   `"tick"` — with the quotes; the slot is `:any`, read as JSON. This
-   is the work the service will keep doing: the smallest stand-in for
-   a listener or a cron loop.
-2. Clear the filter, type `future`, click the `future` row, `⋯` →
-   **Extend**; name it `tutorial-daemon`. On its card click the `+`
-   on the `:body` slot and pick `tutorial-tick` — a callable slot, so
-   the picker opens straight away. The fn now has no free arguments
-   AND carries `:process`: the two conditions for a service.
+1. Type `future` in the Explorer filter, click the `future` row, then
+   `⋯` → **Extend**; name it `tutorial-daemon`, **Save**. On its card
+   click the `+` on the `:body` slot — a callable slot, so the picker
+   opens straight away — type `const` and pick the `const` row. Its
+   card appears under yours, wired into `:body`.
+2. `⋯` → **+ Extend** on the `const` card; name it `tutorial-tick`,
+   **Save**. The child takes `const`'s place in `:body` and you stay
+   on the daemon's canvas (extend in place, lesson 02). The card's
+   `:value` edge runs on to a dashed `+` — a callable's open input is
+   supplied by its caller, so this binding is written on the daemon
+   (lesson 06). Click it, **Bind literal**, and type `"tick"` — with
+   the quotes; the slot is `:any`, read as JSON. This is the work the
+   service will keep doing: the smallest
+   stand-in for a listener or a cron loop. `tutorial-daemon` now has
+   no free arguments AND carries `:process`: the two conditions for a
+   service.
 3. `⋯` → `⚙` on `tutorial-daemon`. The popover reads "Make service:
    :tutorial-daemon" and shows:
    - **Branch** picker (default = your current branch)

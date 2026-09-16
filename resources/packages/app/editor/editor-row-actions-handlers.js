@@ -304,8 +304,14 @@ registerActionHandler('extend-fn', (btn, e, _host) => {
   e.stopPropagation();
   const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
   const fnEntity = lookups?.fnMap?.get(fnId);
+  // At a USE-SITE (the ⋯ of a card that is on the canvas because a slot
+  // binds it) the host carries `data-binding-id`: Extend there creates
+  // the child AND puts it in that slot, in place of this fn, without
+  // leaving the canvas — the same binding-id-keyed registry × / ✎ use.
+  const bindingId = btn.closest('[data-binding-id]')?.dataset.bindingId;
+  const useSiteArg = bindingId ? _rowActionsUseSiteArgs.get(bindingId) : null;
   if (fnEntity && typeof enterExtendEditMode === 'function') {
-    enterExtendEditMode(fnEntity, btn);
+    enterExtendEditMode(fnEntity, btn, useSiteArg ? { useSiteArg } : undefined);
   }
 });
 

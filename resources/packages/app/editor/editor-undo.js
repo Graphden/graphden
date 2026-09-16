@@ -278,6 +278,44 @@ async function _gdUndoLeaveDeleted(backTo) {
   if (typeof initGraph === 'function') await initGraph();
 }
 
+// Extend IN PLACE (editor-edit-modes-fn.js): a child of `parentId` was
+// created and put in the use-site `arg` (a binding or a list item) where
+// its parent was — one gesture, so one Undo: point the use-site back at
+// the parent first (the server refuses to tombstone a referenced fn), then
+// tombstone the child. The canvas stays where it is: the gesture never
+// left it.
+function gdUndoRecordExtendInPlace(name, nsId, arg, parentId) {
+  if (!name || !arg || !parentId) return;
+  const slot = arg['slot-id'] ? _gdUndoSlotLabel(arg['slot-id']) : 'the slot';
+  gdUndoRecord({
+    label: 'Extended in place: ' + name + ' into ' + slot,
+    undo: async () => {
+      const id = await gdUndoFindFnId(name, nsId);
+      if (!id) return { ok: false, error: 'the fn is already gone' };
+      let back;
+      if (arg['item-id']) {
+        const item = lookups?.itemByItemId?.get(arg['item-id']);
+        if (item && item['ref-fn-id'] !== id) return { ok: false, error: 'the item was rebound since' };
+        back = await authFetch(API.api_sequence_item_item_id(arg['item-id']), {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ref: parentId }) });
+      } else {
+        const b = await _gdUndoBindingOf(arg['fn-id'], arg['slot-id']);
+        if (!b?.id) return { ok: false, error: 'the binding is already gone' };
+        if (b['ref-fn-id'] !== id) return { ok: false, error: 'the slot was rebound since' };
+        back = await authMutate('PUT', API.api_entities_type_id('binding', b.id),
+                                'ref-fn-id=' + encodeURIComponent(parentId));
+      }
+      const u = await _gdUndoResult(back);
+      if (!u.ok) return u;
+      const r = await authMutate('DELETE', API.api_entities_type_id('fn', id));
+      const res = await _gdUndoResult(r);
+      await _gdUndoReloadBindings();
+      return res;
+    },
+  });
+}
+
 // A fresh fn (extend / wrap / new graph): undo = tombstone it. The server
 // refuses while something references it (409), which is the right answer.
 function gdUndoRecordCreatedFn(name, nsId, backTo) {

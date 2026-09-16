@@ -17,6 +17,18 @@
 // is the legitimate place for new args / renames). After save, the
 // editor navigates to the new fn so the user can immediately add
 // `:as` renames + value bindings to extend its interface.
+//
+// EXTEND IN PLACE (2026-09-16, from a reader walking lesson 15). At a
+// USE-SITE — the ⋯ of a card that sits on the canvas because a slot of
+// the fn being built binds it (`opts.useSiteArg`, the binding or list
+// item that put it there) — Extend does one more thing and one less:
+// the child TAKES THIS FN'S PLACE in that slot, and the editor stays on
+// the canvas it is on. That is how a composition is built from the
+// outside in: bind the base fn a slot needs (`map`), then extend it
+// right there — the child appears where `map` was, with its own `+`s,
+// and the next inner fn is made the same way from the child's card.
+// Before, every inner fn meant Explorer → ⋯ → Extend (which opens the
+// child) → back to the outer fn → find the child again by name.
 // Which namespace should a fresh child land in? The PARENT's, always
 // (decision 2026-09-15). The earlier rule — "a package parent defaults to
 // your last-used namespace" — read as "the first namespace in the list"
@@ -156,18 +168,32 @@ function buildNsChooser(defaultNsId, ariaLabel) {
   };
 }
 
-function enterExtendEditMode(fn, anchorEl) {
+function enterExtendEditMode(fn, anchorEl, opts) {
   if (!fn) return;
   let pendingName = '';
+  let pendingNsId = null;
   let nsChooser = null;
+  // The binding / list item this card is on the canvas THROUGH — set
+  // only at a use-site (see the header above). Its owner is the fn whose
+  // slot the child will fill.
+  const useSiteArg = opts?.useSiteArg || null;
+  const siteOwner = useSiteArg ? lookups?.fnMap?.get(useSiteArg['fn-id']) : null;
+  const siteSlot = useSiteArg?.name ? ':' + useSiteArg.name : 'the slot';
   openInlineEditPopover({
     anchorEl,
-    ariaLabel: 'Extend (create child fn)',
+    ariaLabel: useSiteArg
+      ? 'Extend ' + (fn.name || 'this fn') + ' in place — the child takes its place in ' + siteSlot
+      : 'Extend (create child fn)',
     makeControl(root) {
       const hint = document.createElement('div');
       hint.className = 'arg-value-edit-hint';
-      hint.textContent = 'Creates a new fn with :parent '
-        + (fn.name || '(this fn)') + '. Open it to add new bindings or renames.';
+      hint.textContent = useSiteArg
+        ? ('Creates a new fn with :parent ' + (fn.name || '(this fn)')
+           + ' and puts it in ' + siteSlot
+           + (siteOwner?.name ? ' of ' + siteOwner.name : '')
+           + ' in place of ' + (fn.name || 'this fn') + ' — you stay on this canvas.')
+        : ('Creates a new fn with :parent '
+           + (fn.name || '(this fn)') + '. Open it to add new bindings or renames.');
       const input = document.createElement('input');
       input.type = 'text';
       input.className = 'arg-value-edit-input';
@@ -190,17 +216,37 @@ function enterExtendEditMode(fn, anchorEl) {
                              : { ok: true, nsId: fn['namespace-id'] || '' };
         if (!ns.ok) return ns;
         const nsId = ns.nsId;
+        pendingNsId = nsId || null;
         const fields = { name: newName, 'parent-ids': fn.id, 'namespace-id': nsId };
         try {
           const r = await postEntity('fn', fields);
-          if (r && r.status >= 200 && r.status < 300) {
-            if (typeof gdRememberLastNs === 'function') gdRememberLastNs(nsId || null);
+          if (!(r && r.status >= 200 && r.status < 300)) return false;
+          if (typeof gdRememberLastNs === 'function') gdRememberLastNs(nsId || null);
+          if (!useSiteArg) {
             if (typeof gdUndoRecordCreatedFn === 'function') {
               const backTo = (typeof getQualifiedFnName === 'function') ? getQualifiedFnName(fn) : fn.name;
               gdUndoRecordCreatedFn(newName, nsId || null, backTo);
             }
             return true;
           }
+          // In place: the child takes this fn's place in the slot. The
+          // create answered HTML, not an id — resolve the child by
+          // (namespace-qualified) name, with retries for read-after-write
+          // lag (the same reality selectJustCreatedFn handles).
+          const child = await resolveJustCreatedFn(newName, nsId);
+          if (!child?.id) {
+            return { ok: false, error: 'Created ' + newName
+              + ', but could not find it to bind — reload and bind by hand.' };
+          }
+          const rebound = await rebindUseSite(useSiteArg, child.id);
+          if (!rebound.ok) {
+            return { ok: false, error: 'Created ' + newName + ', but could not put it in '
+              + siteSlot + ': ' + (rebound.error || 'the server refused') };
+          }
+          if (typeof gdUndoRecordExtendInPlace === 'function') {
+            gdUndoRecordExtendInPlace(newName, nsId || null, useSiteArg, fn.id);
+          }
+          return true;
         } catch (_) {}
         return false;
       };
@@ -209,6 +255,23 @@ function enterExtendEditMode(fn, anchorEl) {
         : await work();
     },
     onSaved() {
+      // In place: stay here. The slot now points at the child, so the
+      // lighter `loadGraphData` redraws the canvas with the child's card
+      // where this fn's was — then fit, so the new card (and its `+`s)
+      // is on screen, not under the Inspector.
+      if (useSiteArg) {
+        const opKey = 'extend-in-place-finalise:' + fn.id;
+        const redraw = async () => {
+          if (typeof loadGraphData === 'function') await loadGraphData();
+          if (typeof fitGraphIfOverflowing === 'function') {
+            const wait = (typeof ANIM_DURATION === 'number' ? ANIM_DURATION : 300) + 30;
+            setTimeout(fitGraphIfOverflowing, wait);
+          }
+        };
+        if (typeof withBusy === 'function') withBusy(opKey, 'Loading ' + (pendingName || 'new fn') + '…', redraw);
+        else redraw();
+        return;
+      }
       // Refetch + auto-select the new fn so the user sees its empty
       // body and can start adding bindings via the existing edit
       // affordances. The whole "init + select" sequence runs under
@@ -229,6 +292,43 @@ function enterExtendEditMode(fn, anchorEl) {
     }
   });
 }
+// The row a create just wrote, by (name, namespace) through the search
+// scope — retried for read-after-write lag. Shared by extend-in-place and
+// wrap, which both need the id the HTML-answering create endpoint omits.
+async function resolveJustCreatedFn(name, nsId, tries = 10, gapMs = 300) {
+  for (let i = 0; i < tries; i++) {
+    await new Promise((res) => setTimeout(res, gapMs));
+    try {
+      const sr = await fetch(API.api_graph_entities
+        + '?scope=search&q=' + encodeURIComponent(name));
+      const sd = sr.ok ? await sr.json() : null;
+      const hit = (sd?.fns || []).find((f) => f.name === name
+        && String(f['namespace-id'] || '') === String(nsId || ''));
+      if (hit) return hit;
+    } catch (_) { /* retry */ }
+  }
+  return null;
+}
+
+// Point the use-site at `newFnId`: a binding's `ref-fn-id`, or a list
+// item's `ref` (PUT /api/sequence/item/:id, the same body append takes).
+// No per-write undo entry — the caller records the combined inverse.
+async function rebindUseSite(arg, newFnId) {
+  if (arg?.['item-id']) {
+    try {
+      const r = await authFetch(API.api_sequence_item_item_id(arg['item-id']), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ref: newFnId })
+      });
+      return r?.ok ? { ok: true } : { ok: false, error: await responseError(r) };
+    } catch (_) {
+      return { ok: false, error: 'network error' };
+    }
+  }
+  return await writeBindingFields(arg, { 'ref-fn-id': newFnId }, { undo: false });
+}
+
 // --- Wrap in new fn (graph refactoring) ---
 //
 // "Add a step ABOVE the current fn" had no affordance: building
@@ -447,19 +547,8 @@ function promptWrapDetails(fn, parent, anchorEl) {
             return false;
           }
           // The create endpoint answers HTML, not the new id — resolve it
-          // by (name, ns) through the search scope, with retries for
-          // read-after-write lag (same reality selectJustCreatedFn handles).
-          let newId = null;
-          for (let i = 0; i < 10 && !newId; i++) {
-            await new Promise((res) => setTimeout(res, 300));
-            try {
-              const sr = await fetch(API.api_graph_entities
-                + '?scope=search&q=' + encodeURIComponent(newName));
-              const sd = sr.ok ? await sr.json() : null;
-              newId = (sd?.fns || []).find((f) => f.name === newName
-                && String(f['namespace-id'] || '') === String(nsId || ''))?.id || null;
-            } catch (_) { /* retry */ }
-          }
+          // by (name, ns) through the search scope (`resolveJustCreatedFn`).
+          const newId = (await resolveJustCreatedFn(newName, nsId))?.id || null;
           if (!newId) {
             if (takeOver) {
               await authMutate('PUT', API.api_entities_type_id('fn', fn.id),

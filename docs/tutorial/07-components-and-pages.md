@@ -48,7 +48,11 @@ hiccup `:children` chain, the `+` button's chooser offers
 **"New from template…"** — pick a component from the
 type-filtered palette, name the instance, and it is created
 (with the component as its parent) and appended in one step;
-its free args then show on the canvas ready to bind.
+its free args then show on the canvas ready to bind. The same
+result in two moves that work on ANY slot, not just a list:
+**Append fn-ref** (or **Bind fn-ref**) the component itself, then
+`⋯ → + Extend` on its card — the child takes the component's place
+in the slot, and you stay on the page's canvas (lesson 02).
 
 `:attrs` is the inherited slot from `:hiccup`. Bind it to a
 keyword-map to add `:class` / `:id` / `:placeholder` / etc.

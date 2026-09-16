@@ -15,6 +15,14 @@
       Files)))
 
 
+;; Every test that lays a snapshot out on disk gets its own temp dir — and
+;; used to leave it there: four per `bb ci`, 1260 under /tmp on the dev host
+;; by 2026-09-16. Deleted in each test's `finally`, deepest files first.
+(defn- delete-tree!
+  [dir]
+  (run! java.io.File/.delete (reverse (file-seq (io/file dir)))))
+
+
 (deftest parse-opts-handles-flags-values-and-positionals
   (is (= {:args ["DIR"] :url "http://x" :token "t" :target "b" :create true :prune true}
          (#'cli/parse-opts ["DIR" "--url" "http://x" "--token" "t"
@@ -90,7 +98,7 @@
         (is (zero? (cli/export! {:url url :token "tok" :out dir})))
         (is (not (java.io.File/.exists (io/file dir "fns/ghost.edn")))
             "export = the snapshot; deleted namespaces become git deletions"))
-      (finally (stop)))))
+      (finally (stop) (delete-tree! dir)))))
 
 
 (deftest import-propagates-a-server-refusal
@@ -103,7 +111,7 @@
       (spit (io/file dir "fns/cli.demo.edn") "{:namespace \"cli.demo\" :fns []}")
       (is (= 1 (cli/import! {:args [dir] :url url :token "t" :target "x"}))
           "a non-200 from the server is exit code 1")
-      (finally (stop)))))
+      (finally (stop) (delete-tree! dir)))))
 
 
 (deftest push-and-pull-transfer-between-two-stub-instances
@@ -181,13 +189,14 @@
                                              :target "main" :dry-run true}))))]
           (is (str/includes? out "diff vs branch 'main':"))))
       (is (zero? @imports) "no write ever reached /api/import/graph")
-      (finally (stop)))))
+      (finally (stop) (delete-tree! dir)))))
 
 
 (deftest import-from-an-empty-dir-is-a-usage-error
   (let [dir (str (Files/createTempDirectory "gd-cli-empty" (make-array java.nio.file.attribute.FileAttribute 0)))
         e (try (cli/import! {:args [dir] :url "http://unused" :token "t" :target "b"})
-               (catch clojure.lang.ExceptionInfo e e))]
+               (catch clojure.lang.ExceptionInfo e e)
+               (finally (delete-tree! dir)))]
     (is (= :cli/usage (:type (ex-data e))))
     (is (str/includes? (ex-message e) "no snapshot under"))))
 

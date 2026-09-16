@@ -44,15 +44,14 @@ For example, a two-level page skeleton:
 ```
 
 You don't have to type these compositions by hand: on any
-hiccup `:children` chain, the `+` button's chooser offers
-**"New from template…"** — pick a component from the
-type-filtered palette, name the instance, and it is created
-(with the component as its parent) and appended in one step;
-its free args then show on the canvas ready to bind. The same
-result in two moves that work on ANY slot, not just a list:
-**Append fn-ref** (or **Bind fn-ref**) the component itself, then
-`⋯ → + Extend` on its card — the child takes the component's place
-in the slot, and you stay on the page's canvas (lesson 02).
+hiccup `:children` chain, the `+` button's **Append fn-ref** opens
+the picker filtered by the chain's element type — the component
+library is its Compatible section. Append the component itself,
+then `⋯ → + Extend` on its card: a named instance (with the
+component as its parent) takes the component's place in the chain,
+you stay on the page's canvas, and the instance's free args show on
+its card ready to bind (extend in place, lesson 02). The same two
+moves work on ANY slot, not just a list.
 
 `:attrs` is the inherited slot from `:hiccup`. Bind it to a
 keyword-map to add `:class` / `:id` / `:placeholder` / etc.

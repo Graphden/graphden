@@ -30,7 +30,7 @@
    reader's own Next button — no predicate."
   #{"manual" "fn-exists" "fn-parent" "ns-exists" "binding-bound" "binding-value"
     "bindings-count" "list-items" "selected" "on-branch" "arg-named" "expanded"
-    "dom" "dom-absent"})
+    "dom" "dom-absent" "input-value"})
 
 
 (def ^:private creates-types
@@ -109,10 +109,46 @@
         ("dom" "dom-absent")
         (is (not (str/blank? (get-in s [:check :selector])))
             (str "lesson " (:id l) " / “" (:title s) "”: " kind " needs :selector"))
+        "input-value"
+        (is (and (not (str/blank? (get-in s [:check :selector])))
+                 (string? (get-in s [:check :value])))
+            (str "lesson " (:id l) " / “" (:title s) "”: input-value needs :selector + a string :value"))
         "arg-named"
         (is (some? (get-in s [:check :arg]))
             (str "lesson " (:id l) " / “" (:title s) "”: arg-named needs :arg"))
         nil))))
+
+
+(deftest one-ring-per-action-and-every-typed-name-is-a-chip
+  ;; From a reader walking lesson 15 (2026-09-16): a step that passed
+  ;; through the Explorer filter, the row AND the row's ⋯ menu left the ring
+  ;; on the filter — the spotlight has one place to be. The header of
+  ;; fns.edn spells the conventions out; this pins them so the next compound
+  ;; step or unpinned ⋯ fails here, not in front of a reader.
+  (doseq [l (lessons), s (:steps l)
+          :let [where (str "lesson " (:id l) " / “" (:title s) "”: ")
+                target (:target s)
+                body (:body s)]]
+    (testing "a filter-anchored step does not also open the ⋯ menu"
+      (is (not (and (string? target)
+                    (str/includes? target "placeholder=\"Filter...\"")
+                    (str/includes? body "[[⋯]]")))
+          (str where "split it — “Find X” (selected check) then “Extend it” (the ⋯ of X's row)")))
+    (testing "a ⋯ target names its card — a bare one rings the first ⋯ painted"
+      (is (not= target "button.more-actions-trigger")
+          (str where "pin it: .node-overlay[data-fn-name=\"X\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger")))
+    (testing "a picker step names what to TYPE as a copy chip, not only the [[row]]"
+      ;; "pick [[str-upper]]" alone leaves the reader typing the name by hand;
+      ;; "type `add` in the picker and pick [[core.arithmetic.add]]" is fine.
+      (is (not (and (or (str/includes? body "picker")
+                        (some #(str/includes? % "fn-picker") (:targets s)))
+                    (re-find #"\bpick \[\[" body)
+                    (not (re-find #"`[^`]+`" body))))
+          (str where "say: type `x` in the picker's filter and click the [[x]] row")))
+    (testing "a :targets chain starts at :target"
+      (when-let [chain (:targets s)]
+        (is (= (first chain) target)
+            (str where "stage 1 of :targets must equal :target"))))))
 
 
 (deftest created-rows-are-of-a-type-cleanup-handles

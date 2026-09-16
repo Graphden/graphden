@@ -28,7 +28,9 @@ const {
 
     await waitTourTitle(page, 'A consumer');
     await filterAndSelect(page, 'service-get', 'service-get');
+    await waitTourTitle(page, 'Extend it', 150000);
     await extendViaRowActions(page, 'tutorial-fetch', 'service-get');
+    await waitTourTitle(page, 'tutorial-fetch is open', 150000);
 
     await waitTourTitle(page, 'Which service', 150000);
     await filterAndSelect(page, 'tutorial-fetch', 'tutorial-fetch');

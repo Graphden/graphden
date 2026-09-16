@@ -191,6 +191,12 @@ function createPlaceholderOverlay(node, container) {
     + (node.data('optionalArg') ? ' is-optional' : '')
     + (node.data('deepArg') ? ' is-deep' : '');
   btn.dataset.nodeId = node.id();
+  // The slot this `+` binds, by arg NAME — so a tour step (or a test) can
+  // ring THE placeholder its text names when a card shows several:
+  // `.placeholder-binder[data-arg-name="separator"]`. Without it a
+  // selector can only say "the first +", which is whichever the canvas
+  // painted first, not the lesson's choice.
+  if (arg?.name) btn.dataset.argName = arg.name;
   btn.textContent = '+';
   btn.title = (isSeqAnchor
               ? (node.data('seqTail') ? 'Append the next item' : 'Add the first item')

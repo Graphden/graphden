@@ -52,11 +52,12 @@ const {
     await waitTourTitle(page, 'Clear it');
     await removeUseSiteBinding(page, 'str-len');
     // --- the "author your own type" arc ---
-    await waitTourTitle(page, 'Types are things you MAKE, too', 150000);
     // The filter still holds `str-len` from earlier in this lesson, and a
     // filtered tree hides every other row — including the namespace the
-    // next steps need. The step text tells the reader to clear it.
-    await page.fill('input[placeholder="Filter..."]', '');
+    // next steps need. Clearing it is a step of its own, ringed on the ×.
+    await waitTourTitle(page, 'Clear the filter', 150000);
+    await page.evaluate(() => document.querySelector('#search-clear')?.click());
+    await waitTourTitle(page, 'Types are things you MAKE, too', 150000);
     // The filter is debounced; the next steps need the unfiltered tree back,
     // so wait for rows beyond the single filtered match to be visible again
     // rather than for 600ms.

@@ -92,7 +92,9 @@ const {
     assert(await clickTourButton(page, 'Next'), 'lesson 21 Next');
     await waitTourTitle(page, 'Something to change');
     await filterAndSelect(page, 'const', 'const');
+    await waitTourTitle(page, 'Extend it', 150000);
     await extendViaRowActions(page, 'review-demo', 'const');
+    await waitTourTitle(page, 'review-demo is open', 150000);
     await waitTourTitle(page, 'Give it a value', 150000);
     await bindFirstPlaceholder(page, '1');
     await waitTourTitle(page, 'A release branch', 150000);
@@ -214,19 +216,21 @@ const {
     // something computed rather than a literal with itself.
     await waitTourTitle(page, 'Something to test');
     await filterAndSelect(page, 'add', 'add');
+    await waitTourTitle(page, 'Extend it', 150000);
     await extendViaRowActions(page, 'tutorial-sum', 'add');
     await waitTourTitle(page, 'tutorial-sum is open', 150000);
     await waitTourTitle(page, 'Two…', 150000);
     await bindFirstPlaceholder(page, '2');
     await waitTourTitle(page, '…plus two', 150000);
     await appendSeqItemViaEdge(page, '2');
-    await waitTourTitle(page, 'Create the tests namespace', 150000);
     // The filter still says `add` from the step before — and a filtered tree
-    // hides the namespace row the next step clicks into. Clear it, as the
-    // lesson tells the reader to.
+    // hides the namespace row the next step clicks into. Clearing it is a
+    // step of its own now, ringed on the ×; the check reads the input.
+    await waitTourTitle(page, 'Clear the filter', 150000);
     await page.evaluate(() => document.querySelector('#search-clear')?.click());
     await page.waitForFunction(() => !(document.querySelector('input[placeholder="Filter..."]')?.value),
       null, {timeout: 15000, polling: 100});
+    await waitTourTitle(page, 'Create the tests namespace', 150000);
     await createRootNamespace(page, 'tests');
     await waitTourTitle(page, 'Add the test fn', 150000);
     await createFnInNamespace(page, 'tests', 'two-plus-two');

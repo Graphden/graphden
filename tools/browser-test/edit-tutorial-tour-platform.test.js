@@ -54,20 +54,24 @@ async function revertAssetViaApi(page, base) {
     assert(await clickTourButton(page, 'Next'), 'lesson 32 Next');
     await waitTourTitle(page, 'A thunk to run');
     await filterAndSelect(page, 'const', 'const');
+    await waitTourTitle(page, 'Extend it', 150000);
     await extendViaRowActions(page, 'tutorial-tick', 'const');
+    await waitTourTitle(page, 'tutorial-tick is open', 150000);
     await waitTourTitle(page, 'Give it something to return', 150000);
     await filterAndSelect(page, 'tutorial-tick', 'tutorial-tick');
     // `:any` slots parse the literal as JSON — a bare word is rejected.
     await bindFirstPlaceholder(page, '"tick"');
-    await waitTourTitle(page, 'Wrap it in a future', 150000);
+    await waitTourTitle(page, 'Find future', 150000);
     await filterAndSelect(page, 'future', 'future');
+    await waitTourTitle(page, 'Wrap it in a future', 150000);
     await extendViaRowActions(page, 'tutorial-daemon', 'future');
+    await waitTourTitle(page, 'tutorial-daemon is open', 150000);
     await waitTourTitle(page, 'Point it at the thunk', 150000);
     await filterAndSelect(page, 'tutorial-daemon', 'tutorial-daemon');
     await bindFnRefPlaceholder(page, 'tutorial-tick');
     // The step gates on SELECTION, not on a button — the bind already leaves
     // the daemon selected, so this only waits for the gate to clear.
-    await waitTourTitle(page, 'tutorial-daemon is open', 150000);
+    await waitTourTitle(page, 'Where a fn becomes a service', 150000);
     await filterAndSelect(page, 'tutorial-daemon', 'tutorial-daemon');
     await waitTourTitle(page, 'Open the service settings', 150000);
     // ⋯ → ⚙. The gear is server-rendered in the row-actions partial, and a

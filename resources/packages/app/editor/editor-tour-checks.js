@@ -212,6 +212,16 @@ function _tourCheckPasses(check) {
         // type-error badge cleared by the fixing edit), which for a reader
         // includes "is still in the DOM but hidden".
         return !_tourDomVisible(check.selector);
+      case 'input-value': {
+        // A form control's CURRENT value — what `dom` cannot see, because a
+        // live `value` is a property, not an attribute a selector can match.
+        // The one use so far: "clear the Explorer filter" as a step of its
+        // own (`#search-input` reads ""), so the ring sits on the × the
+        // reader is told to press instead of on whatever comes after it.
+        const el = document.querySelector(check.selector);
+        if (!el) return false;
+        return String(el.value ?? '') === String(check.value ?? '');
+      }
       default:
         return false;
     }

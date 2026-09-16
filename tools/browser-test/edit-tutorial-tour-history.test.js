@@ -208,6 +208,7 @@ async function openVersionHistory(page) {
 
     await waitTourTitle(page, 'Something to edit', 30000);
     await filterAndSelect(page, 'const', 'const');
+    await waitTourTitle(page, 'Extend it', 150000);
     await extendViaRowActions(page, 'tutorial-versioned');
     await waitTourTitle(page, 'Give it a description', 150000);
 
@@ -344,6 +345,10 @@ async function openVersionHistory(page) {
     await page.click('.execute-popover.visible .execute-run-btn');
     await waitTourTitle(page, 'Read the message', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 16 look-step Next');
+    // The filter still says `parse-json` — clearing it is a step of its own,
+    // ringed on the ×, so the failed lens is read over the whole tree.
+    await waitTourTitle(page, 'Clear the filter', 150000);
+    await page.evaluate(() => document.querySelector('#search-clear')?.click());
     await waitTourTitle(page, 'Find it in the tree', 150000);
     // The failed lens — the chip toggles the focus; the tour's check is the
     // pressed state.

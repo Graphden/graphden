@@ -48,7 +48,11 @@ function checkIn(state, check) {
     window: { location: { search: state.search || '' } },
     URLSearchParams,
     document: {
-      querySelector: (sel) => (domHits[sel] ? {} : null),
+      // A hit may carry the element itself (`{ value: 'add' }` for a form
+      // control) — `input-value` reads that; the boolean form is the bare
+      // "it exists" the other kinds need.
+      querySelector: (sel) => (domHits[sel]
+        ? (typeof domHits[sel] === 'object' ? domHits[sel] : {}) : null),
       // A `dom` check measures its matches — `state.dom[sel]` is `true` for a
       // visible element and `'hidden'` for one that is in the document at
       // zero size (a mounted-but-closed surface, which is how the editor
@@ -247,6 +251,21 @@ test('dom means VISIBLE — a mounted-but-hidden surface is not "open"', () => {
          'a zero-sized match does not count as shown');
   assert(checkIn(hidden, { kind: 'dom-absent', selector: '#gd-operate-nav button' }) === true,
          'and for the reader it is absent — which is what dom-absent means');
+});
+
+test('input-value reads a control\'s LIVE value — what no selector can match', () => {
+  // "Clear the filter" completes when #search-input reads "": the value is a
+  // property, not an attribute, so `dom` could never see it change.
+  const typed = { dom: { '#search-input': { value: 'str-len' } } };
+  const clear = { dom: { '#search-input': { value: '' } } };
+  assert(checkIn(typed, { kind: 'input-value', selector: '#search-input', value: '' }) === false,
+         'a filter still holding text is not clear');
+  assert(checkIn(clear, { kind: 'input-value', selector: '#search-input', value: '' }) === true,
+         'an emptied filter passes');
+  assert(checkIn(typed, { kind: 'input-value', selector: '#search-input', value: 'str-len' }) === true,
+         'and the same kind can wait for a specific text');
+  assert(checkIn({}, { kind: 'input-value', selector: '#search-input', value: '' }) === false,
+         'no such control — never passes, rather than passing on an accident');
 });
 
 test('arg-named reads the edge label — the rename has no other client trace', () => {

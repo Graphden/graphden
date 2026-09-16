@@ -301,24 +301,35 @@ const {
     await page.goto(BASE + '/?tutorial=15');
     await waitTourTitle(page, 'What actually ran?', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 15 Next');
-    await waitTourTitle(page, 'Split the sentence');
+    // One ring per action: find → extend → (gate) → bind, bind — each its
+    // own step, so the walk waits for every title a reader would see.
+    await waitTourTitle(page, 'Find str-split');
     await filterAndSelect(page, 'str-split', 'str-split');
+    await waitTourTitle(page, 'Split the sentence', 150000);
     await extendViaRowActions(page, 'tutorial-words', 'str-split');
+    await waitTourTitle(page, 'tutorial-words is open', 150000);
     await waitTourTitle(page, 'Give it text', 150000);
     await bindNamedPlaceholder(page, 'string', 'literal', 'hello,big,world');
+    await waitTourTitle(page, 'And where to cut', 150000);
     await bindNamedPlaceholder(page, 'separator', 'literal', ',');
-    await waitTourTitle(page, 'Transform every word', 150000);
+    await waitTourTitle(page, 'Find map', 150000);
     await filterAndSelect(page, 'map', 'map');
+    await waitTourTitle(page, 'Transform every word', 150000);
     await extendViaRowActions(page, 'tutorial-shout', 'map');
-    await waitTourTitle(page, 'Feed it and pick the function', 150000);
+    await waitTourTitle(page, 'tutorial-shout is open', 150000);
+    await waitTourTitle(page, 'Feed it', 150000);
     // :coll is a LIST slot — its empty `+` offers the whole-list fn-ref.
     await bindNamedPlaceholder(page, 'coll', 'whole-list', 'tutorial-words');
+    await waitTourTitle(page, 'Pick the function', 150000);
     await bindNamedPlaceholder(page, 'func', 'fn-ref', 'str-upper');
-    await waitTourTitle(page, 'Join it back', 150000);
+    await waitTourTitle(page, 'Find str-join', 150000);
     await filterAndSelect(page, 'str-join', 'str-join');
+    await waitTourTitle(page, 'Join it back', 150000);
     await extendViaRowActions(page, 'tutorial-sentence', 'str-join');
+    await waitTourTitle(page, 'tutorial-sentence is open', 150000);
     await waitTourTitle(page, 'Close the pipeline', 150000);
     await bindNamedPlaceholder(page, 'coll', 'whole-list', 'tutorial-shout');
+    await waitTourTitle(page, 'Spaces between the words', 150000);
     await bindNamedPlaceholder(page, 'separator', 'literal', ' ');
     await waitTourTitle(page, 'Peek inside without leaving', 150000);
     await openRowActionsFor(page, 'tutorial-shout');

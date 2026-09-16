@@ -1153,6 +1153,11 @@ async function createRecordType(page, nsPath, typeName, fields) {
   await page.waitForFunction(
     () => document.querySelectorAll('.type-create-pair-key').length >= 2,
     null, {timeout: 15000, polling: 100});
+  // The step's check is the RECORD tab being selected — so the same contract
+  // holds here: a fill-and-Create inside the next 600ms hides the selected
+  // tab from the tour's poll, and the lesson sticks on "New type…" with the
+  // type already made (seen 2026-09-16).
+  await page.waitForTimeout(1000);
   await page.evaluate(({name, pairs}) => {
     const pop = document.querySelector('.type-create-popover');
     const set = (el, v) => {

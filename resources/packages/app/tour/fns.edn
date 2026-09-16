@@ -60,6 +60,10 @@
 ;;                      {:kind "on-branch" :name B}           "main" = default
 ;;                      {:kind "dom" :selector SEL}           element appears
 ;;                      {:kind "dom-absent" :selector SEL}    element gone
+;;                      {:kind "input-value" :selector SEL :value V}  a form
+;;                                                    control's CURRENT value is V
+;;                                                    ("" = the Explorer filter
+;;                                                    is clear)
 ;;   :creates       — {:type "ns"|"fn" :name N} — tracked for the end-of-tour
 ;;                    cleanup offer (soft-deletes, nothing is lost).
 ;;
@@ -72,6 +76,23 @@
 ;;   - a named SIGNAL for needs that aren't capabilities at all
 ;;     (`REQUIRE_SIGNALS` in editor-tour.js): `services` = the dedicated plan
 ;;     (or a platform / self-host instance), `org` = organizations exist here.
+;;
+;; ONE ACTION PER RING (2026-09-16, from a reader walking lesson 15): the
+;; spotlight can only sit on one thing, so a step whose text passes through
+;; several PERSISTENT surfaces ("type in the filter, click the row, then ⋯
+;; → Extend") strands the ring on the first of them — the ⋯ never lights up.
+;; Split such a step at every persistent hop: "Find X" (filter, `selected`
+;; check) then "Extend it" (the ⋯ of X's own row). `:targets` covers only
+;; the TRANSIENT hops in between. Two conventions make the ring exact:
+;;   - a card's ⋯ is `.node-overlay[data-fn-name="X"]
+;;     .ancestor-line[data-level="0"] button.more-actions-trigger` — X's own
+;;     row (level 0), not the first ⋯ the canvas painted (a parent row has
+;;     one too);
+;;   - a `+` is `.placeholder-binder[data-arg-name="slot"]` whenever the card
+;;     shows more than one.
+;; And every name the reader must TYPE — in the Explorer filter, the fn
+;; picker's filter, a form field — is a `copy chip`; the [[row]] they then
+;; click is a UI chip. "pick [[str-upper]]" alone leaves the reader typing.
 ;;
 ;; SELECTION GATE (2026-08-20, hard-won): a step that says "click the +"
 ;; MUST be preceded by a `selected`-checked step naming the fn that owns
@@ -157,8 +178,8 @@
                :check {:kind "list-items" :name "one-plus-one" :slot "nums" :count 2}}
               {:title "Run it"
                :body "Click the [[⋯]] button on the card's top row, then [[▶ Run]], then [[Run]] in the Run pane that opens in the right panel."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :target ".node-overlay[data-fn-name=\"one-plus-one\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"one-plus-one\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                ;; A SETTLED result — the pane class a rendered value carries, or the
                ;; client's error pane. `> *` also matched the "Submitting…" spinner,
                ;; so the run steps used to advance before anything had come back.
@@ -185,8 +206,8 @@
                :check {:kind "selected" :name "add"}}
               {:title "Extend it"
                :body "Click the [[⋯]] button on the add row, choose [[Extend]], type exactly `add-10`. The [[in]] line shows which namespace the child will live in — the parent's, by default; [[↑]] goes one level up, [[+]] makes a new sub-namespace right there. Then [[Save]]: a child fn whose :parent is add; the editor opens it. (Wrong name or wrong parent — or deleted the wrong fn? A toast offers [[Undo]], and for 30 seconds so do [[Ctrl+Z]] and Space, u.)"
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :target ".node-overlay[data-fn-name=\"add\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"add\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "add-10" :parent "add"}
                :creates {:type "fn" :name "add-10"}}
               ;; Selection gate — auto-advances the instant the editor's
@@ -208,8 +229,8 @@
                :check {:kind "binding-bound" :name "add-10" :slot "nums"}}
               {:title "Run the child"
                :body "Click [[⋯]] on the add-10 row, then [[▶ Run]], then [[Run]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :target ".node-overlay[data-fn-name=\"add-10\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"add-10\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                ;; A SETTLED result — the pane class a rendered value carries, or the
                ;; client's error pane. `> *` also matched the "Submitting…" spinner,
                ;; so the run steps used to advance before anything had come back.
@@ -220,8 +241,8 @@
                :check {:kind "manual"}}
               {:title "Now wrap it"
                :body "Extend went DOWN — a child under add. Wrap goes UP: a new fn that CALLS add-10 and does something with its result. Click [[⋯]] on the add-10 row, choose [[⬆ Wrap in new fn]], type `to-str` in the picker and pick [[core.strings.to-str]] — the wrapper's parent."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"wrap-fn\"]" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"to-str\"]"]
+               :target ".node-overlay[data-fn-name=\"add-10\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"add-10\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"wrap-fn\"]" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"to-str\"]"]
                :check {:kind "dom" :selector ".arg-value-edit-popover .extend-ns-select"}}
               {:title "Name the wrapper"
                :body "Name it `add-10-text`, leave the into slot on :value — then [[Save]]. The editor creates the wrapper with add-10 already bound into it and opens it: your sum, stringified, in two clicks."
@@ -246,8 +267,8 @@
                :check {:kind "selected" :name "str-upper"}}
               {:title "Make the first child"
                :body "Click [[⋯]] on the str-upper row, choose [[Extend]], name it `tutorial-a` — then [[Save]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :target ".node-overlay[data-fn-name=\"str-upper\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"str-upper\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-a" :parent "str-upper"}
                :creates {:type "fn" :name "tutorial-a"}}
               ;; Selection gate before every bind — see the header note.
@@ -263,8 +284,8 @@
                        :slot "string" :value "alpha"}}
               {:title "Run tutorial-a"
                :body "Click [[⋯]] on the tutorial-a row, then [[▶ Run]], then [[Run]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :target ".node-overlay[data-fn-name=\"tutorial-a\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-a\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                ;; A SETTLED result — the pane class a rendered value carries, or the
                ;; client's error pane. `> *` also matched the "Submitting…" spinner,
                ;; so the run steps used to advance before anything had come back.
@@ -279,8 +300,8 @@
                :check {:kind "selected" :name "str-upper"}}
               {:title "Make a second child"
                :body "Click [[⋯]] → [[Extend]] again, name this one `tutorial-b` — then [[Save]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :target ".node-overlay[data-fn-name=\"str-upper\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"str-upper\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-b" :parent "str-upper"}
                :creates {:type "fn" :name "tutorial-b"}}
               {:title "tutorial-b is open"
@@ -295,8 +316,8 @@
                        :slot "string" :value "beta"}}
               {:title "Run tutorial-b"
                :body "Click [[⋯]] on the tutorial-b row, then [[▶ Run]], then [[Run]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :target ".node-overlay[data-fn-name=\"tutorial-b\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-b\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                ;; A SETTLED result — the pane class a rendered value carries, or the
                ;; client's error pane. `> *` also matched the "Submitting…" spinner,
                ;; so the run steps used to advance before anything had come back.
@@ -323,8 +344,8 @@
                :check {:kind "selected" :name "to-json-string"}}
               {:title "A free arg becomes a Run field"
                :body "Click [[⋯]] on the to-json-string row, then [[▶ Run]]. The Run pane opens in the right panel with a data field — the free slot surfaced as your input. Enter `{\"a\": 1}` and [[Run]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :target ".node-overlay[data-fn-name=\"to-json-string\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"to-json-string\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                ;; A SETTLED result — the pane class a rendered value carries, or the
                ;; client's error pane. `> *` also matched the "Submitting…" spinner,
                ;; so the run steps used to advance before anything had come back.
@@ -335,8 +356,8 @@
                :check {:kind "manual"}}
               {:title "Pin it in a child"
                :body "Now the other direction: click [[⋯]] again, choose [[Extend]], name it `tutorial-json` — then [[Save]]. The editor opens your new child fn."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :target ".node-overlay[data-fn-name=\"to-json-string\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"to-json-string\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-json" :parent "to-json-string"}
                :creates {:type "fn" :name "tutorial-json"}}
               ;; Same selection gate as lesson 02 — binding :data before the
@@ -353,8 +374,8 @@
                :check {:kind "binding-bound" :name "tutorial-json" :slot "data"}}
               {:title "Bound beats free"
                :body "Run tutorial-json ([[⋯]] → [[▶ Run]] → [[Run]]): no fields this time — the binding closed the slot, so callers have nothing left to supply — and the greeting comes back as a string. Free args propagate UP until someone pins them. Click [[Next]] when you have run it."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn" ".execute-result-host"]
+               :target ".node-overlay[data-fn-name=\"tutorial-json\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-json\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn" ".execute-result-host"]
                :check {:kind "manual"}}
               {:title "A free arg can also be RENAMED"
                :body "A template's slot name is its public label, and borrowed from a primitive it rarely reads well. Type `to-json` in the filter and click the [[to-json-string]] row again — we will make a second child."
@@ -362,8 +383,8 @@
                :check {:kind "selected" :name "to-json-string"}}
               {:title "A second child"
                :body "Click [[⋯]] on the to-json-string row, choose [[Extend]], name it `tutorial-renamed` — then [[Save]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :target ".node-overlay[data-fn-name=\"to-json-string\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"to-json-string\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-renamed" :parent "to-json-string"}
                :creates {:type "fn" :name "tutorial-renamed"}}
               ;; Selection gate — the rename must land on the child.
@@ -377,8 +398,8 @@
                :check {:kind "arg-named" :arg "payload"}}
               {:title "The new name is the interface"
                :body "The Run form on the right asks for payload now, not data ([[⋯]] → [[▶ Run]] opens it if the panel is on another tab) — enter `{\"a\": 1}` and [[Run]]: back comes {\"a\":1}. A rename is a VIEW over the same slot — the parent still knows it as :data, your callers see payload. Click [[Next]] when you have run it."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn" ".execute-result-host"]
+               :target ".node-overlay[data-fn-name=\"tutorial-renamed\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-renamed\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn" ".execute-result-host"]
                :check {:kind "manual"}}
               {:title "Templates, specialized"
                :body "That is the whole free-argument mechanism: leave slots open to make a template, bind them to specialize, rename them to give the template its own vocabulary. The written lesson 04 adds deep propagation through several levels. Click [[Finish]] to clean up or keep both children."
@@ -402,8 +423,8 @@
                :check {:kind "manual"}}
               {:title "Extend it"
                :body "Click [[⋯]] on the str-len row, choose [[Extend]], name it `tutorial-typed` — then [[Save]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :target ".node-overlay[data-fn-name=\"str-len\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"str-len\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-typed" :parent "str-len"}
                :creates {:type "fn" :name "tutorial-typed"}}
               ;; Selection gate — see the header note. The next step clicks a
@@ -413,7 +434,7 @@
                :target nil
                :check {:kind "selected" :name "tutorial-typed"}}
               {:title "Ask for a fn the slot cannot take"
-               :body "Click the [[+]] on :string and choose [[Bind fn-ref]]. The picker states Expected: text and splits candidates into Compatible and Other. Expand [[Other]], then click the [[str-len]] row there — it returns an int, not text."
+               :body "Click the [[+]] on :string and choose [[Bind fn-ref]]. The picker states Expected: text and splits candidates into Compatible and Other. Type `str-len` in the picker's filter, expand [[Other]], then click the [[str-len]] row there — it returns an int, not text."
                :target ".placeholder-binder"
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"str-len\"]"]
                :check {:kind "dom" :selector ".mismatch-explainer.visible [data-pick-fn-id]"}}
@@ -427,11 +448,15 @@
                :check {:kind "manual"}}
               {:title "Clear it"
                :body "Click [[⋯]] on the str-len value node (the one hanging under :string), choose [[×]] to remove the binding and confirm. The slot goes back to free — and the ⚠ disappears."
-               :target ".node-overlay[data-fn-name=\"str-len\"] button.more-actions-trigger"
-               :targets [".node-overlay[data-fn-name=\"str-len\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"remove-use-site-binding\"]"]
+               :target ".node-overlay[data-fn-name=\"str-len\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"str-len\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"remove-use-site-binding\"]"]
                :check {:kind "dom-absent" :selector ".type-error-badge"}}
+              {:title "Clear the filter"
+               :body "The filter still says str-len — and a filtered tree hides everything else. Clear it with the [[×]] next to it."
+               :target "#search-clear"
+               :check {:kind "input-value" :selector "#search-input" :value ""}}
               {:title "Types are things you MAKE, too"
-               :body "So far you only used types the packages ship; your own are the same kind of row. First CLEAR the Explorer filter (it still says str-len, and a filtered tree hides everything else). Then, if there is no [[tutorial]] namespace, click [[New namespace]] at the bottom and type exactly `tutorial` — if it is already there, this step passes by itself."
+               :body "So far you only used types the packages ship; your own are the same kind of row. If there is no [[tutorial]] namespace, click [[New namespace]] at the bottom of the Explorer, type exactly `tutorial` — and press [[Enter]]. If it is already there, this step passes by itself."
                :target ".create-root-ns-btn"
                :targets [".create-root-ns-btn" ".inline-input"]
                :check {:kind "ns-exists" :name "tutorial"}
@@ -447,7 +472,7 @@
                :targets [".ns-header[data-ns-path=\"tutorial\"]" ".create-menu-item[data-type=\"type\"]" ".type-create-tab[data-kind=\"record\"]"]
                :check {:kind "dom" :selector ".type-create-tab[data-kind=\"record\"][aria-selected=\"true\"]"}}
               {:title "Describe the shape"
-               :body "You are on the Record tab. Name it exactly `tutorial-point` — the name sits above the tabs because it belongs to the type, whatever its kind — then fill the two field rows: x of type int, and y of type int. Click [[Create]]."
+               :body "You are on the Record tab. Name it exactly `tutorial-point` — the name sits above the tabs because it belongs to the type, whatever its kind — then fill the two field rows: `x` of type `int`, and `y` of type `int`. Click [[Create]]."
                :target ".type-create-popover"
                :check {:kind "fn-exists" :name "tutorial-point"}
                :creates {:type "fn" :name "tutorial-point"}}
@@ -477,8 +502,8 @@
                :check {:kind "manual"}}
               {:title "Extend it"
                :body "Click [[⋯]] on the map row, choose [[Extend]], name it `tutorial-map` — then [[Save]]. (map itself is package-owned, so its own slots are read-only — you customize by extending.)"
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :target ".node-overlay[data-fn-name=\"map\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"map\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-map" :parent "map"}
                :creates {:type "fn" :name "tutorial-map"}}
               {:title "The data first"
@@ -507,8 +532,8 @@
                :check {:kind "binding-bound" :name "tutorial-map" :slot "func"}}
               {:title "Run it"
                :body "An edge now runs from str-upper into :func — the callback is wired, and nothing has run. [[⋯]] on the tutorial-map row → [[▶ Run]] → [[Run]]. Nothing to fill in — every slot is bound."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :target ".node-overlay[data-fn-name=\"tutorial-map\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-map\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                :check {:kind "dom" :selector ".execute-result-host .execute-result-pane, .execute-result-host .execute-error-pane"}}
               {:title "Once per item"
                :body "GRAPH, DEN — two strings went in and each came out upper-cased: str-upper ran once per item, and you never called it. map did, handing each element in as its one argument. That is the whole HOF contract — the argument is passed unrun and the impl drives it. And notice the order you worked in: the data first, the callback last — each value you bound made the next choice smaller. Click [[Next]]."
@@ -532,8 +557,8 @@
                :check {:kind "selected" :name "button"}}
               {:title "Make it yours"
                :body "Click [[⋯]] on the button row, choose [[Extend]], name it `tutorial-button` — then [[Save]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :target ".node-overlay[data-fn-name=\"button\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"button\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-button" :parent "button"}
                :creates {:type "fn" :name "tutorial-button"}}
               ;; Selection gate — the next step binds on the child.
@@ -543,13 +568,13 @@
                :check {:kind "selected" :name "tutorial-button"}}
               {:title "Give it a label"
                :body "Click the [[+]] at the end of the label edge, choose [[Bind literal]], type exactly `Run` — then [[Save]]. The dashed edge turns into a bound value: that input is pinned now."
-               :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :target ".placeholder-binder[data-arg-name=\"label\"]"
+               :targets [".placeholder-binder[data-arg-name=\"label\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-button" :slot "label"}}
               {:title "Run it"
                :body "[[⋯]] → [[▶ Run]] → [[Run]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :target ".node-overlay[data-fn-name=\"tutorial-button\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-button\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                ;; A SETTLED result — the pane class a rendered value carries, or the
                ;; client's error pane. `> *` also matched the "Submitting…" spinner,
                ;; so the run steps used to advance before anything had come back.
@@ -560,13 +585,13 @@
                :check {:kind "manual"}}
               {:title "Style it"
                :body "The other dashed edge, attrs, is the tag's attribute map — a class is data too. Click the [[+]] at its end, choose [[Bind literal]], enter `{\"class\": \"primary\"}` — then [[Save]]."
-               :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :target ".placeholder-binder[data-arg-name=\"attrs\"]"
+               :targets [".placeholder-binder[data-arg-name=\"attrs\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-button" :slot "attrs"}}
               {:title "Run it again"
                :body "[[⋯]] → [[▶ Run]] → [[Run]]. The same button, in the stylesheet's primary look — the class landed on the tag, and [[Raw]] now reads [\"button\" {\"class\" \"primary\"} \"Run\"]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn" ".execute-result-html-preview"]
+               :target ".node-overlay[data-fn-name=\"tutorial-button\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-button\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn" ".execute-result-html-preview"]
                :check {:kind "dom" :selector "iframe.execute-result-component-preview[srcdoc*=\"primary\"]"}}
               {:title "Now something to put it in"
                :body "Type `card` in the filter and click the [[card]] row (web.components) — a <div class=\"card\"> whose :children is a LIST of hiccup nodes."
@@ -574,8 +599,8 @@
                :check {:kind "selected" :name "card"}}
               {:title "Extend the card too"
                :body "Click [[⋯]] on the card row, choose [[Extend]], name it `tutorial-card` — then [[Save]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :target ".node-overlay[data-fn-name=\"card\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"card\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-card" :parent "card"}
                :creates {:type "fn" :name "tutorial-card"}}
               ;; Selection gate — the next step appends on the child.
@@ -590,8 +615,8 @@
                :check {:kind "bindings-count" :name "tutorial-card" :count 1}}
               {:title "Run the card"
                :body "[[⋯]] → [[▶ Run]] → [[Run]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :target ".node-overlay[data-fn-name=\"tutorial-card\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-card\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                ;; A SETTLED result — the pane class a rendered value carries, or the
                ;; client's error pane. `> *` also matched the "Submitting…" spinner,
                ;; so the run steps used to advance before anything had come back.
@@ -618,8 +643,8 @@
                :check {:kind "selected" :name "wrap-custom-script"}}
               {:title "Extend it"
                :body "Click [[⋯]] on the wrap-custom-script row, choose [[Extend]], name it `tutorial-script` — then [[Save]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :target ".node-overlay[data-fn-name=\"wrap-custom-script\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"wrap-custom-script\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-script" :parent "wrap-custom-script"}
                :creates {:type "fn" :name "tutorial-script"}}
               ;; Selection gate — the next step binds on the child.
@@ -634,8 +659,8 @@
                :check {:kind "binding-bound" :name "tutorial-script" :slot "content"}}
               {:title "Run it"
                :body "[[⋯]] → [[▶ Run]] → [[Run]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :target ".node-overlay[data-fn-name=\"tutorial-script\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-script\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                :check {:kind "dom" :selector ".execute-result-repr .repr-source"}}
               {:title "Source, not a preview"
                :body "The result pane says ‹script› tag and shows your JS source — the return type is :script-tag, so the editor knows this is a page asset and shows its code instead of previewing it as a component. The value underneath is hiccup ([\"script\" {} …]), ready to sit in a page's scripts list; the JS itself runs in the BROWSER when that page loads. Click [[Next]]."
@@ -659,8 +684,8 @@
                :check {:kind "selected" :name "cell"}}
               {:title "Make your own"
                :body "Click [[⋯]] on the cell row, choose [[Extend]], name it `tutorial-cell` — then [[Save]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :target ".node-overlay[data-fn-name=\"cell\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"cell\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-cell" :parent "cell"}
                :creates {:type "fn" :name "tutorial-cell"}}
               ;; Selection gate — the next step binds on the child.
@@ -679,8 +704,8 @@
                :check {:kind "selected" :name "swap-conj"}}
               {:title "Extend it too"
                :body "Click [[⋯]] on the swap-conj row, choose [[Extend]], name it `tutorial-bump` — then [[Save]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :target ".node-overlay[data-fn-name=\"swap-conj\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"swap-conj\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-bump" :parent "swap-conj"}
                :creates {:type "fn" :name "tutorial-bump"}}
               {:title "tutorial-bump is open"
@@ -694,8 +719,8 @@
                :check {:kind "bindings-count" :name "tutorial-bump" :count 1}}
               {:title "Run it"
                :body "[[⋯]] → [[▶ Run]]. Writing to a cell is the :state effect, so the Run pane asks you to acknowledge it first (lesson 13's gate). Tick the box, type `tick` in the field and [[Run]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-effects-warning" ".execute-run-btn"]
+               :target ".node-overlay[data-fn-name=\"tutorial-bump\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-bump\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-effects-warning" ".execute-run-btn"]
                :check {:kind "dom" :selector ".execute-result-list > li"}}
               {:title "Run it again"
                :body "One row — tick — the list the cell holds now. Click [[Run]] once more, same field: TWO rows. Nothing in the graph changed between the runs; the cell kept the value, and [[Raw]] reads [\"tick\" \"tick\"]."
@@ -756,8 +781,8 @@
                :check {:kind "selected" :name "str-len"}}
               {:title "Free args become the form"
                :body "Click [[⋯]] on the row, then [[▶ Run]]. The Run pane opens in the right panel — one field, named after the free slot. Type `hello` and click [[Run]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :target ".node-overlay[data-fn-name=\"str-len\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"str-len\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                ;; A SETTLED result — the pane class a rendered value carries, or the
                ;; client's error pane. `> *` also matched the "Submitting…" spinner,
                ;; so the run steps used to advance before anything had come back.
@@ -796,8 +821,8 @@
                :check {:kind "manual"}}
               {:title "Open Run"
                :body "Click [[⋯]] on the env row, then [[▶ Run]]. Before the fields, the popover states “side effects: env” — and the Run button is DISABLED."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]"]
+               :target ".node-overlay[data-fn-name=\"env\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"env\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]"]
                :check {:kind "dom" :selector ".execute-effects-warning"}}
               {:title "Acknowledge, then run"
                :body "Tick [[I understand this will produce side effects]], enter `PATH` in the name field, and click [[Run]]."
@@ -827,9 +852,13 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Something to test"
-               :body "Type `add` in the Explorer filter and click the [[add]] row, then [[⋯]] → [[Extend]] and name it `tutorial-sum` — the [[in]] line shows the namespace it will live in; any is fine except tests, which we make next — then [[Save]]. This is the fn under test."
+               :body "Type `add` in the Explorer filter and click the [[add]] row (core.arithmetic) — the primitive your fn under test will build on."
                :target "input[placeholder=\"Filter...\"]"
-               :targets ["input[placeholder=\"Filter...\"]" "button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "selected" :name "add"}}
+              {:title "Extend it"
+               :body "Click [[⋯]] on the add row, choose [[Extend]] and name it `tutorial-sum` — the [[in]] line shows the namespace it will live in; any is fine except tests, which we make next — then [[Save]]. This is the fn under test."
+               :target ".node-overlay[data-fn-name=\"add\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"add\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-sum" :parent "add"}
                :creates {:type "fn" :name "tutorial-sum"}}
               {:title "tutorial-sum is open"
@@ -846,14 +875,18 @@
                :target ".placeholder-binder.is-seq-anchor"
                :targets [".placeholder-binder.is-seq-anchor" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "list-items" :name "tutorial-sum" :slot "nums" :count 2}}
-              {:title "Create the tests namespace"
-               :body "First CLEAR the Explorer filter (the [[×]] next to it — a filtered tree hides everything else). Then, at the bottom of the Explorer, click [[New namespace]], type exactly `tests` — and press [[Enter]]."
+              {:title "Clear the filter"
+               :body "The filter still says add — and a filtered tree hides everything else. Clear it with the [[×]] next to it."
                :target "#search-clear"
-               :targets ["#search-clear" ".create-root-ns-btn" ".inline-input"]
+               :check {:kind "input-value" :selector "#search-input" :value ""}}
+              {:title "Create the tests namespace"
+               :body "At the bottom of the Explorer click [[New namespace]], type exactly `tests` — and press [[Enter]]."
+               :target ".create-root-ns-btn"
+               :targets [".create-root-ns-btn" ".inline-input"]
                :check {:kind "ns-exists" :name "tests"}
                :creates {:type "ns" :name "tests"}}
               {:title "Add the test fn"
-               :body "Expand the [[tests]] namespace, click its [[+]] and create a fn named `two-plus-two` — the name states the invariant it pins."
+               :body "Click the [[tests]] row to expand it, then hover it and click its [[+]]. Choose [[New graph…]], type exactly `two-plus-two` — and press [[Enter]]. The name states the invariant it pins."
                :target ".ns-header[data-ns-path=\"tests\"]"
                :targets [".ns-header[data-ns-path=\"tests\"]" ".create-menu-item[data-type=\"fn\"]" ".inline-input"]
                :check {:kind "fn-exists" :name "two-plus-two"}
@@ -864,14 +897,14 @@
                :targets [".reparent-strip" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"assert-eq\"]"]
                :check {:kind "fn-parent" :name "two-plus-two" :parent "assert-eq"}}
               {:title "What it computes"
-               :body "The card shows two [[+]] placeholders, :actual and :expected. Click the one on :actual, choose [[Bind fn-ref]], type `tutorial-sum` in the picker and click its row — the test will run YOUR fn and compare its answer."
-               :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".fn-picker-popover"]
+               :body "The card shows two [[+]] placeholders, :actual and :expected. Click the one on :actual, choose [[Bind fn-ref]], type `tutorial-sum` in the picker and click the [[tutorial-sum]] row — the test will run YOUR fn and compare its answer."
+               :target ".placeholder-binder[data-arg-name=\"actual\"]"
+               :targets [".placeholder-binder[data-arg-name=\"actual\"]" ".free-arg-bind-chooser" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-sum\"]"]
                :check {:kind "bindings-count" :name "two-plus-two" :count 1}}
               {:title "What it should be"
                :body "Now the [[+]] on :expected: [[Bind literal]], enter `4` — [[Save]]. With every free arg bound the test becomes runnable, and graphden runs it FOR you on the write."
-               :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :target ".placeholder-binder[data-arg-name=\"expected\"]"
+               :targets [".placeholder-binder[data-arg-name=\"expected\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "bindings-count" :name "two-plus-two" :count 2}}
               {:title "See it pass"
                :body "In the Explorer's filter bar click the [[✓ tests]] chip. The tree focuses on your tests and two-plus-two carries a green dot — nobody pressed Run: the write itself triggered the auto-run. With the lens on, [[▶ Run all]] appears next to the chips."
@@ -899,21 +932,39 @@
                :body "A result tells you the answer; a trace tells you the path. Ask for one at run time and the editor draws it back onto the canvas — which fns ran, how often, how long each took, and what each one returned. You will build a small pipeline — split a sentence into words, upper-case every word, join it back — so each hop does real work worth tracing."
                :target nil
                :check {:kind "manual"}}
-              {:title "Split the sentence"
-               :body "Type `str-split` in the filter, click the [[str-split]] row, then [[⋯]] → [[Extend]] and name it `tutorial-words` — [[Save]]."
+              {:title "Find str-split"
+               :body "Type `str-split` in the Explorer filter and click the [[str-split]] row (core.strings) — it cuts a string wherever a separator occurs."
                :target "input[placeholder=\"Filter...\"]"
-               :targets ["input[placeholder=\"Filter...\"]" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "selected" :name "str-split"}}
+              {:title "Split the sentence"
+               :body "Click [[⋯]] on the str-split row, choose [[Extend]] and name it `tutorial-words` — then [[Save]]."
+               :target ".node-overlay[data-fn-name=\"str-split\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"str-split\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-words" :parent "str-split"}
                :creates {:type "fn" :name "tutorial-words"}}
+              ;; Selection gate before the bind.
+              {:title "tutorial-words is open"
+               :body "Two free slots on your card: :string, the text to cut, and :separator, where to cut it."
+               :target nil
+               :check {:kind "selected" :name "tutorial-words"}}
               {:title "Give it text"
-               :body "Click the [[+]] on :string, choose [[Bind literal]], type `hello,big,world` — [[Save]]. Then the [[+]] on :separator: [[Bind literal]], type `,` — [[Save]]. A sentence in, three words out."
-               :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :body "Click the [[+]] on :string, choose [[Bind literal]], type `hello,big,world` — then [[Save]]."
+               :target ".placeholder-binder[data-arg-name=\"string\"]"
+               :targets [".placeholder-binder[data-arg-name=\"string\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :check {:kind "binding-value" :name "tutorial-words" :slot "string" :value "hello,big,world"}}
+              {:title "And where to cut"
+               :body "Now the [[+]] on :separator: [[Bind literal]], type `,` — then [[Save]]. A sentence in, three words out."
+               :target ".placeholder-binder[data-arg-name=\"separator\"]"
+               :targets [".placeholder-binder[data-arg-name=\"separator\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "bindings-count" :name "tutorial-words" :count 2}}
-              {:title "Transform every word"
-               :body "map applies a function to each item of a list. Type `map` in the filter, click the [[map]] row, then [[⋯]] → [[Extend]] and name it `tutorial-shout` — [[Save]]."
+              {:title "Find map"
+               :body "map applies a function to each item of a list. Type `map` in the Explorer filter and click the [[map]] row (core.hof)."
                :target "input[placeholder=\"Filter...\"]"
-               :targets ["input[placeholder=\"Filter...\"]" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "selected" :name "map"}}
+              {:title "Transform every word"
+               :body "Click [[⋯]] on the map row, choose [[Extend]] and name it `tutorial-shout` — then [[Save]]."
+               :target ".node-overlay[data-fn-name=\"map\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"map\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-shout" :parent "map"}
                :creates {:type "fn" :name "tutorial-shout"}}
               ;; Selection gate before the bind.
@@ -921,15 +972,24 @@
                :body "Two free slots: :coll, the list to walk, and :func, the function to apply."
                :target nil
                :check {:kind "selected" :name "tutorial-shout"}}
-              {:title "Feed it and pick the function"
-               :body "Click the [[+]] on :coll and choose [[Bind fn-ref (whole list)]] — the list is not typed in, it is the RESULT of another fn — then pick [[tutorial-words]]. Now the [[+]] on :func opens the picker directly: pick [[str-upper]]."
-               :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".fn-picker-popover"]
+              {:title "Feed it"
+               :body "Click the [[+]] on :coll and choose [[Bind fn-ref (whole list)]] — the list is not typed in, it is the RESULT of another fn. Type `tutorial-words` in the picker's filter and click the [[tutorial-words]] row."
+               :target ".placeholder-binder[data-arg-name=\"coll\"]"
+               :targets [".placeholder-binder[data-arg-name=\"coll\"]" ".free-arg-bind-chooser" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-words\"]"]
+               :check {:kind "bindings-count" :name "tutorial-shout" :count 1}}
+              {:title "Pick the function"
+               :body "Now the [[+]] on :func — a callable slot, so the picker opens directly. Type `str-upper` in its filter and click the [[str-upper]] row."
+               :target ".placeholder-binder[data-arg-name=\"func\"]"
+               :targets [".placeholder-binder[data-arg-name=\"func\"]" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"str-upper\"]"]
                :check {:kind "bindings-count" :name "tutorial-shout" :count 2}}
-              {:title "Join it back"
-               :body "Type `str-join` in the filter, click the [[str-join]] row, then [[⋯]] → [[Extend]] and name it `tutorial-sentence` — [[Save]]."
+              {:title "Find str-join"
+               :body "Type `str-join` in the Explorer filter and click the [[str-join]] row (core.strings) — the inverse of str-split."
                :target "input[placeholder=\"Filter...\"]"
-               :targets ["input[placeholder=\"Filter...\"]" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "selected" :name "str-join"}}
+              {:title "Join it back"
+               :body "Click [[⋯]] on the str-join row, choose [[Extend]] and name it `tutorial-sentence` — then [[Save]]."
+               :target ".node-overlay[data-fn-name=\"str-join\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"str-join\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-sentence" :parent "str-join"}
                :creates {:type "fn" :name "tutorial-sentence"}}
               ;; Selection gate before the bind.
@@ -938,14 +998,19 @@
                :target nil
                :check {:kind "selected" :name "tutorial-sentence"}}
               {:title "Close the pipeline"
-               :body "[[+]] on :coll → [[Bind fn-ref (whole list)]] → [[tutorial-shout]]. Then the [[+]] on :separator: [[Bind literal]], type a single space — [[Save]]. Three fns, two references: text goes in, becomes a list, comes back as text."
-               :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".fn-picker-popover" ".arg-value-edit-popover"]
+               :body "Click the [[+]] on :coll, choose [[Bind fn-ref (whole list)]], type `tutorial-shout` in the picker's filter and click the [[tutorial-shout]] row. Three fns, two references: text goes in, becomes a list, comes back as text."
+               :target ".placeholder-binder[data-arg-name=\"coll\"]"
+               :targets [".placeholder-binder[data-arg-name=\"coll\"]" ".free-arg-bind-chooser" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-shout\"]"]
+               :check {:kind "bindings-count" :name "tutorial-sentence" :count 1}}
+              {:title "Spaces between the words"
+               :body "Now the [[+]] on :separator: [[Bind literal]], type a single space — then [[Save]]. Without it the three words would run together."
+               :target ".placeholder-binder[data-arg-name=\"separator\"]"
+               :targets [".placeholder-binder[data-arg-name=\"separator\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "bindings-count" :name "tutorial-sentence" :count 2}}
               {:title "Peek inside without leaving"
                :body "tutorial-shout sits on this canvas as a closed card — names are boundaries. To read it WITHOUT jumping: click [[⋯]] on the tutorial-shout card, choose [[👁 Peek bindings]] — its slot table opens in a floating panel, straight from the same server render the Inspector uses."
-               :target ".node-overlay[data-fn-name=\"tutorial-shout\"] button.more-actions-trigger"
-               :targets [".node-overlay[data-fn-name=\"tutorial-shout\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"peek-fn\"]" ".fn-peek-panel"]
+               :target ".node-overlay[data-fn-name=\"tutorial-shout\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-shout\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"peek-fn\"]" ".fn-peek-panel"]
                :check {:kind "dom" :selector ".fn-peek-panel"}}
               {:title "Unfold the inner hop"
                :body "Press [[Esc]] to close the peek. The canvas draws one hop of references: tutorial-words and str-upper live inside tutorial-shout's card. Click the [[map]] row on the tutorial-shout card — it unfolds one level, and both appear with their edges. Now the whole pipeline is on the canvas."
@@ -953,8 +1018,8 @@
                :check {:kind "expanded" :name "tutorial-shout" :depth 1}}
               {:title "Run it with a trace"
                :body "[[⋯]] on tutorial-sentence → [[▶ Run]]. Tick [[Save to history]], [[Trace path]], then [[+ capture values]] and accept the cost estimate — then [[Run]]. The answer is HELLO BIG WORLD, and under it a new button appears: [[Show path on canvas]]."
-               :target ".node-overlay[data-fn-name=\"tutorial-sentence\"] button.more-actions-trigger"
-               :targets [".node-overlay[data-fn-name=\"tutorial-sentence\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
+               :target ".node-overlay[data-fn-name=\"tutorial-sentence\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-sentence\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
                :check {:kind "dom" :selector ".execute-show-path-btn"}}
               {:title "Draw the path"
                :body "Click [[Show path on canvas]]."
@@ -994,14 +1059,14 @@
                :check {:kind "selected" :name "parse-json"}}
               {:title "Make it yours"
                :body "Click [[⋯]] on the row, choose [[Extend]], name it `tutorial-bad-json` — then [[Save]]. Extending gives you a fn of your own to break; the package fn itself is read-only."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :target ".node-overlay[data-fn-name=\"parse-json\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"parse-json\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-bad-json" :parent "parse-json"}
                :creates {:type "fn" :name "tutorial-bad-json"}}
               {:title "Break it on purpose"
                :body "Click [[⋯]] → [[▶ Run]]. Type `not json at all` into the string field, TICK [[Save to history]], and [[Run]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :target ".node-overlay[data-fn-name=\"tutorial-bad-json\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-bad-json\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                ;; A SETTLED result — the pane class a rendered value carries, or the
                ;; client's error pane. `> *` also matched the "Submitting…" spinner,
                ;; so the run steps used to advance before anything had come back.
@@ -1010,8 +1075,12 @@
                :body "“Malformed JSON.” — the fn threw, and the pane shows the error instead of a value. Because you ticked Save to history, that failure is now a ROW in the graph; an unticked run would have left no trace, and the next two lenses read exactly these rows. Click [[Next]]."
                :target ".execute-result-host"
                :check {:kind "manual"}}
+              {:title "Clear the filter"
+               :body "The filter still says parse-json — and a filtered tree hides everything else. Clear it with the [[×]] next to it."
+               :target "#search-clear"
+               :check {:kind "input-value" :selector "#search-input" :value ""}}
               {:title "Find it in the tree"
-               :body "First clear the filter (the [[×]] next to it — a filtered tree hides everything else), then click the [[✕ failed]] chip under it. The tree narrows to fns with UNRESOLVED failures from the last 7 days — yours, with a ✕1 on its row, its namespace counting it, the chip counting the runs. A failure clears when you fix the fn, when the same version later succeeds, or when you dismiss it."
+               :body "Click the [[✕ failed]] chip under the filter. The tree narrows to fns with UNRESOLVED failures from the last 7 days — yours, with a ✕1 on its row, its namespace counting it, the chip counting the runs. A failure clears when you fix the fn, when the same version later succeeds, or when you dismiss it."
                :target "#kind-filters .kind-toggle[data-kind=\"failed\"]"
                :check {:kind "dom" :selector "#kind-filters .kind-toggle[data-kind=\"failed\"][aria-pressed=\"true\"]"}}
               {:title "Read the failure"
@@ -1055,7 +1124,7 @@
                :target ".kind-toggle.kind-all"
                :check {:kind "manual"}}
               {:title "Select something"
-               :body "Type `str-len` in the filter and click the row. The Inspector fills in: name, kind, namespace, description."
+               :body "Type `str-len` in the filter and click the [[str-len]] row. The Inspector fills in: name, kind, namespace, description."
                :target "input[placeholder=\"Filter...\"]"
                :check {:kind "selected" :name "str-len"}}
               {:title "The Inspector's tabs"
@@ -1172,8 +1241,8 @@
                :check {:kind "selected" :name "str-upper"}}
               {:title "Extend it"
                :body "Click [[⋯]] on the str-upper row, choose [[Extend]], name it `branch-demo` — then [[Save]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :target ".node-overlay[data-fn-name=\"str-upper\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"str-upper\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "branch-demo" :parent "str-upper"}
                :creates {:type "fn" :name "branch-demo"}}
               ;; Selection gate — the next step binds a value.
@@ -1241,11 +1310,20 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Something to change"
-               :body "Type `const` in the Explorer filter and click the [[const]] row, then [[⋯]] → [[Extend]] and name it `review-demo` — [[Save]]."
+               :body "Type `const` in the Explorer filter and click the [[const]] row (core.logic) — the primitive that returns its :value."
                :target "input[placeholder=\"Filter...\"]"
-               :targets ["input[placeholder=\"Filter...\"]" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "selected" :name "const"}}
+              {:title "Extend it"
+               :body "Click [[⋯]] on the const row, choose [[Extend]] and name it `review-demo` — then [[Save]]."
+               :target ".node-overlay[data-fn-name=\"const\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"const\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "review-demo" :parent "const"}
                :creates {:type "fn" :name "review-demo"}}
+              ;; Selection gate — the bind must land on the child.
+              {:title "review-demo is open"
+               :body "It inherited :value from const — the [[+]] on your card is the one to bind."
+               :target nil
+               :check {:kind "selected" :name "review-demo"}}
               {:title "Give it a value"
                :body "Click the [[+]] on :value, choose [[Bind literal]], enter `1` — then [[Save]]. This is the state your “release” will hold."
                :target ".placeholder-binder"
@@ -1321,7 +1399,7 @@
                :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"assets\"]:not([hidden])"}}
               {:title "Open the stylesheet"
                :body "Find packages/app/editor/editor-styles.css in the list and click its [[edit]]. The file opens in a code editor — the same one a :js-source slot gets."
-               :target "[data-section=\"assets\"] .gd-asset-edit-btn"
+               :target "[data-section=\"assets\"] .gd-asset-edit-btn[value=\"packages/app/editor/editor-styles.css\"]"
                :check {:kind "dom" :selector ".gd-asset-save-btn"}}
               {:title "Change something you will notice"
                :body "Scroll to the very end of the file and append exactly `.gd-tour-title { letter-spacing: 0.08em; }` — then click [[Save override]]. The file's chip flips from baseline to override."
@@ -1334,7 +1412,7 @@
               {:title "See exactly what you changed"
                :body "The reload closed the panel: open it again (account button → [[Organization]] → [[Assets]]), click [[edit]] on the editor-styles.css row and press [[Diff vs baseline]]. The override is a row, not a patch: the shipped file is untouched underneath, which is what makes the next step total."
                :target "#auth-lock-btn, .auth-avatar"
-               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Organization\"]" "#gd-operate-nav button[data-section=\"assets\"]" "[data-section=\"assets\"] .gd-asset-edit-btn" ".gd-asset-diff-btn"]
+               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Organization\"]" "#gd-operate-nav button[data-section=\"assets\"]" "[data-section=\"assets\"] .gd-asset-edit-btn[value=\"packages/app/editor/editor-styles.css\"]" ".gd-asset-diff-btn"]
                :check {:kind "manual"}}
               {:title "Put it back"
                :body "Click [[Revert to baseline]] and confirm. The row is deleted, the shipped file serves again, and the chip reads baseline — reload once more to run it."
@@ -1353,25 +1431,29 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Something to edit"
-               :body "Type `const` in the Explorer filter and click the [[const]] row, then [[⋯]] → [[Extend]], name it `tutorial-versioned` — a fn of your own to build a history on."
+               :body "Type `const` in the Explorer filter and click the [[const]] row (core.logic)."
                :target "input[placeholder=\"Filter...\"]"
-               :targets ["input[placeholder=\"Filter...\"]" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "selected" :name "const"}}
+              {:title "Extend it"
+               :body "Click [[⋯]] on the const row, choose [[Extend]], name it `tutorial-versioned` — then [[Save]]. A fn of your own to build a history on."
+               :target ".node-overlay[data-fn-name=\"const\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"const\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-versioned" :parent "const"}
                :creates {:type "fn" :name "tutorial-versioned"}}
               {:title "Give it a description"
                :body "Click [[⋯]] on the tutorial-versioned row and choose [[i]] (Description). A small note opens — click its [[✎ Edit]], type `first draft` and [[Save]]. That write appends a version row — the fn now has two."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"description\"]" ".description-tooltip" ".description-tooltip-textarea"]
+               :target ".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"description\"]" ".description-tooltip" ".description-tooltip-textarea"]
                :check {:kind "manual"}}
               {:title "And another"
                :body "Do it once more: [[⋯]] → [[i]] → [[✎ Edit]], this time `second draft`, [[Save]]. Three version rows now — the create and two edits. Nothing was replaced."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"description\"]" ".description-tooltip" ".description-tooltip-textarea"]
+               :target ".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"description\"]" ".description-tooltip" ".description-tooltip-textarea"]
                :check {:kind "manual"}}
               {:title "Open the history"
                :body "Click [[⋯]] and then [[⌛]] — version history. Every version row for this fn, newest first, ACROSS BRANCHES: each row names the branch it was written on, so a fn you edited on a fork shows both timelines here."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"fn-versions\"]"]
+               :target ".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"fn-versions\"]"]
                :check {:kind "dom" :selector ".fn-versions-popover .fn-versions-row"}}
               {:title "Restore the first draft"
                :body "Click [[restore]] on the row that says first draft and confirm. Read the confirm text as you accept it: it writes a NEW version row carrying the historic fields. Nothing after it is deleted."
@@ -1379,8 +1461,8 @@
                :check {:kind "manual"}}
               {:title "History is append-only"
                :body "Reopen [[⌛]]. There are FOUR rows now — the restore is itself a version. That is what makes this button safe: restoring the row you were on before puts you back, and no state exists in which the button lost your work."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"fn-versions\"]"]
+               :target ".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"fn-versions\"]"]
                :check {:kind "manual"}}
               {:title "What restore does not touch"
                :body "Only the fn's own fields travel: description, return type, constraint (never the name). Bindings have their OWN version rows (lesson 03), so a value you rebound stays rebound. Reverting those silently, from a fn-level button, would undo edits you never named."
@@ -1507,8 +1589,8 @@
                :check {:kind "selected" :name "const"}}
               {:title "Make it yours"
                :body "Click [[⋯]] on the const row, choose [[Extend]], name it `tutorial-page` — then [[Save]]."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :target ".node-overlay[data-fn-name=\"const\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"const\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-page" :parent "const"}
                :creates {:type "fn" :name "tutorial-page"}}
               ;; Selection gate — the bind must land on the child.
@@ -1517,14 +1599,14 @@
                :target nil
                :check {:kind "selected" :name "tutorial-page"}}
               {:title "Answer like a web server"
-               :body "Click the [[+]] on :value, choose [[Bind literal]], and enter exactly: {\"status\": 200, \"headers\": {\"Content-Type\": \"text/html\"}, \"body\": \"<h1>Hello from my app</h1>\"} — then [[Save]]."
+               :body "Click the [[+]] on :value, choose [[Bind literal]], and enter exactly `{\"status\": 200, \"headers\": {\"Content-Type\": \"text/html\"}, \"body\": \"<h1>Hello from my app</h1>\"}` — then [[Save]]."
                :target ".placeholder-binder"
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-page" :slot "value"}}
               {:title "Open its Apps"
                :body "Publishing starts from the fn, like declaring a service does. Click [[⋯]] on the tutorial-page row and choose [[Apps]] — the popover lists the hosts this fn serves (none yet) and a form to add one."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"apps\"]" ".fn-apps-popover.visible"]
+               :target ".node-overlay[data-fn-name=\"tutorial-page\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-page\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"apps\"]" ".fn-apps-popover.visible"]
                :check {:kind "dom" :selector ".fn-apps-popover.visible [data-fn-apps]"}}
               {:title "Publish it"
                :body "Type the subdomain `tutorial` — the fn is already this one, nothing to copy — and click [[+ Add app]]. The host appears in the list, the row gets a ▣ marker in the Explorer, and the app is live immediately — the host answers from the graph as it stands."
@@ -1625,36 +1707,54 @@
                :target nil
                :check {:kind "manual"}}
               {:title "A thunk to run"
-               :body "Type `const` in the Explorer filter and click the [[const]] row, then [[⋯]] → [[Extend]] and name it `tutorial-tick` — [[Save]]. This is the work the service will keep doing; the smallest possible stand-in for a listener or a cron loop."
+               :body "Type `const` in the Explorer filter and click the [[const]] row (core.logic) — the primitive that returns its :value."
                :target "input[placeholder=\"Filter...\"]"
-               :targets ["input[placeholder=\"Filter...\"]" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "selected" :name "const"}}
+              {:title "Extend it"
+               :body "Click [[⋯]] on the const row, choose [[Extend]] and name it `tutorial-tick` — then [[Save]]. This is the work the service will keep doing; the smallest possible stand-in for a listener or a cron loop."
+               :target ".node-overlay[data-fn-name=\"const\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"const\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-tick" :parent "const"}
                :creates {:type "fn" :name "tutorial-tick"}}
+              ;; Selection gate — the bind must land on the child.
+              {:title "tutorial-tick is open"
+               :body "It inherited :value — the [[+]] on your card is where the return value goes."
+               :target nil
+               :check {:kind "selected" :name "tutorial-tick"}}
               {:title "Give it something to return"
                :body "On the tutorial-tick card click the [[+]] on the :value slot, choose [[Bind literal]] and type exactly `\"tick\"` — with the quotes, because the slot's type is :any and the editor reads it as JSON. A service has no caller to pass arguments in, so a fn with free args can never become one."
                :target ".placeholder-binder"
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-tick" :slot "value"}}
-              {:title "Wrap it in a future"
-               :body "Clear the filter, type `future`, click the [[future]] row, then [[⋯]] → [[Extend]] and name it `tutorial-daemon`. :future is the fn that declares the :process effect — the marker for “spawns supervised background work”. Without it in the parent chain the server refuses to make a service, by design."
+              {:title "Find future"
+               :body "Replace the filter text with `future` and click the [[future]] row (core.concurrency). :future is the fn that declares the :process effect — the marker for “spawns supervised background work”. Without it in the parent chain the server refuses to make a service, by design."
                :target "input[placeholder=\"Filter...\"]"
-               :targets ["input[placeholder=\"Filter...\"]" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "selected" :name "future"}}
+              {:title "Wrap it in a future"
+               :body "Click [[⋯]] on the future row, choose [[Extend]] and name it `tutorial-daemon` — then [[Save]]."
+               :target ".node-overlay[data-fn-name=\"future\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"future\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-daemon" :parent "future"}
                :creates {:type "fn" :name "tutorial-daemon"}}
+              ;; Selection gate — the bind must land on the child.
+              {:title "tutorial-daemon is open"
+               :body ":body is a callable slot — the [[+]] on your card opens the fn picker straight away; a literal cannot go there."
+               :target nil
+               :check {:kind "selected" :name "tutorial-daemon"}}
               {:title "Point it at the thunk"
-               :body "On the tutorial-daemon card click the [[+]] on the :body slot and pick [[tutorial-tick]]. :body is a callable slot, so the picker opens straight away — a literal cannot go there — and the ref is passed in as the daemon's body instead of being executed here. The fn now has no free arguments AND carries :process: the two conditions for a service."
-               :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-tick\"]"]
+               :body "Click the [[+]] on :body, type `tutorial-tick` in the picker's filter and click the [[tutorial-tick]] row. The ref is passed in as the daemon's body instead of being executed here. The fn now has no free arguments AND carries :process: the two conditions for a service."
+               :target ".placeholder-binder[data-arg-name=\"body\"]"
+               :targets [".placeholder-binder[data-arg-name=\"body\"]" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-tick\"]"]
                :check {:kind "binding-bound" :name "tutorial-daemon" :slot "body"}}
               ;; Selection gate — the \u2699 must belong to the daemon.
-              {:title "tutorial-daemon is open"
+              {:title "Where a fn becomes a service"
                :body "The gear on a card's [[⋯]] menu is where a fn becomes a service. It is a per-fn setting, not a deploy screen."
                :target nil
                :check {:kind "selected" :name "tutorial-daemon"}}
               {:title "Open the service settings"
                :body "Click [[⋯]] on the card, then the [[⚙]] button."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"service-settings\"]"]
+               :target ".node-overlay[data-fn-name=\"tutorial-daemon\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-daemon\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"service-settings\"]"]
                :check {:kind "dom" :selector ".service-popover"}}
               {:title "Create it — switched OFF"
                :body "UNTICK [[Enabled]], leave the restart policy on Always, and click [[Create & reconcile]]. The popover closes as soon as the row is written — a disabled row is the desired state “this exists but should not be running”, worth writing on purpose, and what keeps this tour from spawning a daemon on your instance."
@@ -1666,8 +1766,8 @@
                :check {:kind "manual"}}
               {:title "Remove it"
                :body "Open [[⋯]] → [[⚙]] once more: the popover now reads “Service: :tutorial-daemon” and carries the row’s state. Click [[Delete service]]. Deleting the row is how you stop a service for good — the fn itself is untouched."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"service-settings\"]" ".service-popover"]
+               :target ".node-overlay[data-fn-name=\"tutorial-daemon\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-daemon\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"service-settings\"]" ".service-popover"]
                :check {:kind "manual"}}
               {:title "That's supervision"
                :body "A service is desired state, not a deployment: you write the row, the reconciler makes it true. The written lesson 32 builds a real one — a :future-parented thunk, then a scheduled job — and covers cardinality and the dedicated-tier isolation this runs under. Click [[Finish]] to clean up."
@@ -1743,25 +1843,34 @@
                :target nil
                :check {:kind "manual"}}
               {:title "A consumer"
-               :body "Type `service-get` in the Explorer filter, click the [[service-get]] row, then [[⋯]] → [[Extend]] and name it `tutorial-fetch` — [[Save]]. :service-get is :http-get whose URL is built from a SERVICE's recorded address plus a path. Look at the card: :service and :path are dashed placeholders — holes that live deeper in the template, drawn on your card all the same."
+               :body "Type `service-get` in the Explorer filter and click the [[service-get]] row (web.service). :service-get is :http-get whose URL is built from a SERVICE's recorded address plus a path."
                :target "input[placeholder=\"Filter...\"]"
-               :targets ["input[placeholder=\"Filter...\"]" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "selected" :name "service-get"}}
+              {:title "Extend it"
+               :body "Click [[⋯]] on the service-get row, choose [[Extend]] and name it `tutorial-fetch` — then [[Save]]."
+               :target ".node-overlay[data-fn-name=\"service-get\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"service-get\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-parent" :name "tutorial-fetch" :parent "service-get"}
                :creates {:type "fn" :name "tutorial-fetch"}}
+              ;; Selection gate — the binds must land on the child.
+              {:title "tutorial-fetch is open"
+               :body "Look at the card: :service and :path are dashed placeholders — holes that live deeper in the template, drawn on your card all the same."
+               :target nil
+               :check {:kind "selected" :name "tutorial-fetch"}}
               {:title "Which service"
-               :body "Click the [[+]] on the :service placeholder, choose [[Bind fn-ref]] and pick [[web-server]]. The slot's type badge says fn-ref — the fn's IDENTITY. Every fn is Compatible here, whatever it returns, because the bound fn is never run: binding the listener does not start a second one; the consumer receives its id and asks the reconciler where it answers."
-               :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"web-server\"]"]
+               :body "Click the [[+]] on the :service placeholder, choose [[Bind fn-ref]], type `web-server` in the picker's filter and click the [[web-server]] row. The slot's type badge says fn-ref — the fn's IDENTITY. Every fn is Compatible here, whatever it returns, because the bound fn is never run: binding the listener does not start a second one; the consumer receives its id and asks the reconciler where it answers."
+               :target ".placeholder-binder[data-arg-name=\"service\"]"
+               :targets [".placeholder-binder[data-arg-name=\"service\"]" ".free-arg-bind-chooser" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"web-server\"]"]
                :check {:kind "bindings-count" :name "tutorial-fetch" :count 1}}
               {:title "Which path"
                :body "Click the [[+]] on the :path placeholder, choose [[Bind literal]] and type `/version` — the slot is text, no quotes — then [[Save]]. That is the contract's other half; between your own services the path is a shared constant both sides reference."
-               :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :target ".placeholder-binder[data-arg-name=\"path\"]"
+               :targets [".placeholder-binder[data-arg-name=\"path\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "bindings-count" :name "tutorial-fetch" :count 2}}
               {:title "Ask it"
                :body "Click [[⋯]] → [[▶]], tick the effects box and [[Run]]. The result is the web-server's /version answer — status 200 and the build hashes in the body. Nothing named a host or a port: the reconciler recorded the listener's instance, :service-endpoint read it back, :http-get did the rest — and the request carried your run's trace, so a persisted run would list this hop under Downstream calls. Click [[Next]] when you have read it."
-               :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-effects-warning" ".execute-run-btn" ".execute-result-host"]
+               :target ".node-overlay[data-fn-name=\"tutorial-fetch\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-fetch\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-effects-warning" ".execute-run-btn" ".execute-result-host"]
                :check {:kind "manual"}}
               {:title "Your own services"
                :body "Point :service at any listener you make a service of (lesson 32) and it resolves the same way; disable that service and the call answers `service/not-running` instead of guessing. The written lesson 35 builds a producer, shows its running copy in the ⚙ popover, and follows the call across the wire."
@@ -1785,8 +1894,8 @@
                :check {:kind "manual"}}
               {:title "Open the theme editor"
                :body "Open the account menu, choose [[Settings]] — Appearance is the first section. Click [[Customize…]] to open the token editor."
-               :target "#gd-theme-edit"
-               :targets ["#auth-lock-btn" "#gd-theme-edit"]
+               :target "#auth-lock-btn, .auth-avatar"
+               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Settings\"]" "#gd-theme-edit"]
                :check {:kind "dom" :selector "#gd-theme-editor"}}
               {:title "Pick a paper"
                :body "Under Grounds click the [[Paper]] swatch and choose any colour — the editor follows at once, and the choice is already saved as your preference. The contrast line tells you when ink on paper drops under 4.5:1."
@@ -1803,7 +1912,7 @@
                :target "#gd-theme-select"
                :check {:kind "manual"}}
               {:title "Now the keys"
-               :body "Close the token editor and the save dialog with their [[×]], then open [[Keyboard]] in the Settings nav. Every command behind Space is listed with its keys. On “Fit the graph in view” click [[Change]], press `f` `f`, then [[Enter]]."
+               :body "Close the token editor and the save dialog with their [[×]], then open [[Keyboard]] in the Settings nav. Every command behind Space is listed with its keys. On “Fit the graph in view” click [[Change]], press [[f]] [[f]], then [[Enter]]."
                :target "#gd-settings-nav [data-section=\"keyboard\"]"
                :targets ["#gd-settings-nav [data-section=\"keyboard\"]" "#gd-keymap-root .gd-km-row[data-shortcut=\"graph-fit\"] .gd-km-change"]
                :check {:kind "dom" :selector "#gd-keymap-root .gd-km-row[data-shortcut=\"graph-fit\"] .gd-km-default"}}

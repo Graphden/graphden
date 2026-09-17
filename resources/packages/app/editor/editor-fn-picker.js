@@ -1,7 +1,6 @@
-// Editor Fn-Picker — type-aware popover for picking a fn from
-// graphData.fns. Used by Phase 2's arg-type flip (literal → :fn) and
-// reused by Phase 3-4 for re-parent / MI-add. Mounts as an
-// absolutely-positioned overlay anchored to a caller-supplied DOM
+// Editor Fn-Picker — type-aware popover for picking a fn from the graph.
+// Opened by a slot's `+` (bind / append a fn-ref), by re-parent / MI-add
+// and by Wrap. Mounts as a fixed overlay anchored to a caller-supplied
 // element.
 //
 // Public API:
@@ -9,26 +8,35 @@
 //                 expectedType, onPick(fn), onCancel?})
 //   closeFnPicker()
 //
-// `excludeIds` is a Set/Array of fn-ids to omit (e.g. self +
-// descendants when re-parenting to avoid cycles). `fnNamespaceId`
-// boosts fns sharing that namespace to the top of each section.
-// `expectedType` (optional) is the slot type the picked fn will be
-// bound to — type-compatible fns appear in the "Compatible" section
-// at the top; the rest are in a collapsible "Other" section.
+// `excludeIds` is a Set/Array of fn-ids to omit (e.g. self + descendants
+// when re-parenting to avoid cycles). `fnNamespaceId` is the namespace of
+// the fn being edited — its group lists first. `expectedType` (optional)
+// is the slot type the picked fn will be bound to: every row then carries
+// the checker's verdict (✓ compatible, or dimmed with the mismatch
+// explainer a click away) and its fit tier.
 //
-// Phase 3 changes vs the previous flat-list design:
-//   - Two sections (Compatible / Other) instead of mixed sort with
-//     per-row dimming. The compat group is a clean white-list; users
-//     no longer have to scroll past dimmed rows to find their target.
-//   - Each row shows return-type chip + effect badges (db, env, …)
-//     so the user can spot pure-only / effectful candidates at a
-//     glance.
-//   - Click on an incompatible row opens a mismatch explainer
-//     popover (with a "Pick anyway" override) instead of silently
-//     picking — closes the "why is this dimmed?" loop without forcing
-//     the user back to the type-edit popover.
-//   - Touch-target friendly: rows have min-height: 32px; sections are
-//     keyboard-navigable across.
+// THE LIST IS THE EXPLORER'S SEARCH (2026-09-16). One scrolling list:
+//   - typing a name shows EVERY fn whose name or namespace contains it —
+//     an "Exact match" block first (the row the reader typed the full
+//     name of is always on top), then the rest grouped under namespace
+//     headers, compatible rows before incompatible ones inside a group,
+//     the incompatible ones dimmed rather than hidden;
+//   - with nothing typed the list is a browsable tree of compatible fns:
+//     namespace groups that fold and unfold like the Explorer's (the fn's
+//     own namespace open, the rest folded unless the whole list is short),
+//     with one toggle at the bottom to also show the fns of other types.
+// A fit tier (exact / needs inputs / ignores the input) is an ORDER and a
+// small chip on the row, not a fold — nothing the reader is looking for
+// is ever behind a header. The previous accordion (Compatible / Other,
+// each cut into collapsible tiers) hid the exact-name hit under six test
+// fns and folded one section when the other opened; see the header of
+// editor-fn-picker-rank.js for the whole story.
+//
+// The candidate set: the loaded cache (graphData.fns) + the server's
+// whole-graph compatible set for the slot type (/api/types/candidates,
+// authoritative once it lands) + a debounced server name search while
+// the reader types, so a fn outside the loaded cache is one keystroke
+// away. Rows that arrive by name only are resolved to an id on pick.
 
 let fnPickerEl = null;
 let fnPickerOutsideHandler = null;
@@ -87,46 +95,54 @@ function openFnPicker(opts) {
   if (!graphData || !Array.isArray(graphData.fns)) return;
 
   const excludeSet = new Set(opts.excludeIds || []);
-  const wantNs = opts.fnNamespaceId || null;
+  // The namespace whose group lists (and, in browse mode, opens) first:
+  // the caller's `fnNamespaceId`, else the namespace of the first excluded
+  // fn — the slot binders exclude exactly the fn being edited, which is
+  // where a reader's own fns live.
+  const firstExcluded = (opts.excludeIds || [])[0];
+  const wantNs = opts.fnNamespaceId
+    || (firstExcluded && typeof lookups !== 'undefined' ? lookups?.fnMap?.get(firstExcluded)?.['namespace-id'] : null)
+    || null;
   const expected = opts.expectedType || null;
-  // Names the server (/api/types/candidates) confirmed compatible.
-  // Held at picker scope so a filter keystroke — which REBUILDS the
-  // candidate list from graphData — cannot downgrade them back to the
-  // client's primitive-only approximation: a fully-bound fn offered to
-  // a callable slot classified compatible on open, then fell into
-  // "Other" with a false ":text is not a subtype of [:fn …]" as soon
-  // as the reader typed its name (tutorial finding 2026-08-26,
-  // lesson 32).
+  // The server's whole-graph verdict, keyed by QUALIFIED name (two fns may
+  // share a bare name across namespaces). `serverLoaded` flips when the
+  // fetch lands: from then on the verdict is authoritative both ways — a
+  // row the server did not list is incompatible, whatever the client's
+  // primitive-only approximation guessed on the first paint.
   const serverCompat = new Set();
-  // The server's per-name rows (`fit` / `arity` / `ns`) — read by
-  // toCandidate on every rebuild so a filter keystroke keeps the ranking.
   const serverRows = new Map();
+  let serverLoaded = false;
+  // …and until it lands no row wears a verdict at all. The client's
+  // `clientSubtype` is primitive-only — it judges a fn by its RETURN type,
+  // so for a callable slot it called `str-upper` (→ text) incompatible with
+  // `(item:a) → b`, and a reader who typed the name and clicked in that
+  // first second got the mismatch explainer for a perfectly good pick
+  // (lesson 15 walk, 2026-09-17). Pending rows render neutral; a click on
+  // one waits for the verdict, then picks or explains.
+  let serverFailed = false;
+  let loadPromise = null;
 
-  // Map a fn row to a picker candidate. Compatibility check: clientSubtype
-  // is the fast local primitive-only fallback; structural cases (records,
-  // fn-types, refinements) defer to the row-tap explainer that calls
-  // /api/types/compatible. Unknown-structural is treated as "compatible"
-  // (best-effort) on the initial render; a stricter fetch refines it.
+  const qualifiedOf = (f) => (typeof getQualifiedFnName === 'function')
+    ? getQualifiedFnName(f) : f.name;
+
+  // Map a fn row to a picker candidate.
   function toCandidate(f) {
     const info = fnRichInfo(f);
-    const compatible = expected && info.return
-      ? (serverCompat.has(f.name)
-         || (typeof clientSubtype === 'function' ? clientSubtype(info.return, expected) : true))
-      : null;   // null = no expectedType supplied; section headers hide
-    // Whole-signature ranking: the registry entry's `args` are the fn's
-    // remaining free args. The server's verdict (loadTypedCandidates)
-    // overrides this per name once it lands.
+    const qualified = qualifiedOf(f);
+    // null = no verdict: an untyped picker, or a typed one whose server
+    // verdict has not landed yet (or never will — then it stays neutral and
+    // a click simply picks, the post-write type check being the safety net).
+    const compatible = (expected && serverLoaded) ? serverCompat.has(qualified) : null;
     const rich = (typeof richTypeEntryOf === 'function') ? richTypeEntryOf(f) : null;
     const arity = rich?.args && typeof rich.args === 'object'
       ? Object.keys(rich.args).length : null;
-    const srv = serverRows.get(f.name);
+    const srv = serverRows.get(qualified);
     return {
       id: f.id,
       name: f.name,
-      qualified: (typeof getQualifiedFnName === 'function')
-                 ? getQualifiedFnName(f) : f.name,
+      qualified,
       ns: (typeof getFnNamespace === 'function') ? getFnNamespace(f) : null,
-      sameNs: wantNs && f['namespace-id'] === wantNs,
+      sameNs: !!(wantNs && f['namespace-id'] === wantNs),
       arity: srv && typeof srv.arity === 'number' ? srv.arity : arity,
       fit: expected
         ? (srv?.fit ? srv.fit
@@ -135,7 +151,7 @@ function openFnPicker(opts) {
       flatReturn: f['return-type'] || null,
       richReturn: info.return,
       effects: info.effects,
-      compatible: compatible,
+      compatible,
       // Surface the type-row kind so the row can carry a small annotation
       // ("refinement", "record", …). "composed" fns leave it null — the
       // return-type chip already says what a regular fn returns.
@@ -144,64 +160,21 @@ function openFnPicker(opts) {
   }
 
   // Candidates come from the loaded fn cache (current subtree + expanded
-  // namespaces + prior searches). Only globally-named fns are eligible —
-  // anonymous locals can't be referenced by id from another fn's binding
-  // graph anyway. Typing in the filter box fetches more via the server
-  // (searchFns) and rebuilds this list — see the input handler below.
+  // namespaces + prior searches) plus the server's compatible set. Only
+  // globally-named fns are eligible — anonymous locals can't be referenced
+  // by id from another fn's binding graph anyway.
   function buildCandidates() {
-    return (graphData.fns || [])
+    const local = (graphData.fns || [])
       .filter(f => f?.name && !excludeSet.has(f.id))
       .map(toCandidate);
-  }
-  let candidates = buildCandidates();
-
-  // When a type is expected, pull the WHOLE-GRAPH type-compatible set from
-  // the server (/api/types/candidates) so the picker isn't limited to the
-  // loaded cache — this is the server-side type filter (SCALING §6.1). The
-  // rows carry name / return / effects but no id (resolved on pick);
-  // anonymous locals are dropped (not referenceable from another fn). Names
-  // already present in the loaded candidates are skipped so we don't
-  // double-list (and keep the richer, id-bearing local row).
-  async function loadTypedCandidates() {
-    if (!expected || typeof authFetch !== 'function' || !API?.api_types_candidates) return;
-    let data;
-    try {
-      const r = await authFetch(API.api_types_candidates, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ expected }),
-      });
-      if (!r.ok) return;
-      data = await r.json();
-    } catch (_) { return; }
-    if (!data?.ok || !Array.isArray(data.candidates)) return;
-    for (const c of data.candidates) {
-      if (c?.name && !c.name.startsWith('_anon-')) {
-        serverCompat.add(c.name);
-        serverRows.set(c.name, c);
-      }
-    }
-    const compatNames = serverCompat;
-    // The server's verdict is authoritative — upgrade any loaded candidate
-    // it confirms compatible (beats the client's primitive-only
-    // `clientSubtype` approximation, which can mis-rule structural types),
-    // and take its whole-signature ranking.
-    for (const c of candidates) {
-      if (compatNames.has(c.name)) {
-        c.compatible = true;
-        const srv = serverRows.get(c.name);
-        if (srv?.fit) c.fit = srv.fit;
-        if (typeof srv?.arity === 'number') c.arity = srv.arity;
-        if (!c.ns && srv?.ns) c.ns = srv.ns;
-      }
-    }
-    const have = new Set(candidates.map(c => c.name));
-    const extra = data.candidates
-      .filter(c => c?.name && !c.name.startsWith('_anon-') && !have.has(c.name))
-      .map(c => ({
+    const have = new Set(local.map(c => c.qualified));
+    const extra = [];
+    for (const [qualified, c] of serverRows) {
+      if (have.has(qualified) || !c?.name || c.name.startsWith('_anon-')) continue;
+      extra.push({
         id: null,                       // resolved by name on pick
         name: c.name,
-        qualified: c.ns ? (c.ns + '.' + c.name) : c.name,
+        qualified,
         ns: c.ns || null,
         sameNs: !!(wantNs && c['ns-id'] && c['ns-id'] === wantNs),
         arity: typeof c.arity === 'number' ? c.arity : null,
@@ -211,24 +184,59 @@ function openFnPicker(opts) {
         effects: Array.isArray(c.effects) ? c.effects : [],
         compatible: true,               // the server already type-checked it
         kind: null,
-      }));
-    candidates = candidates.concat(extra);
+      });
+    }
+    return local.concat(extra);
+  }
+  let candidates = buildCandidates();
+
+  // When a type is expected, pull the WHOLE-GRAPH type-compatible set from
+  // the server (/api/types/candidates) so the picker isn't limited to the
+  // loaded cache — this is the server-side type filter (SCALING §6.1). The
+  // rows carry name / ns / return / effects / fit but no id.
+  async function loadTypedCandidates() {
+    if (!expected) return;
+    const giveUp = () => { serverFailed = true; if (fnPickerEl) render(); };
+    if (typeof authFetch !== 'function' || !API?.api_types_candidates) { giveUp(); return; }
+    let data;
+    try {
+      const r = await authFetch(API.api_types_candidates, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expected }),
+      });
+      if (!r.ok) { giveUp(); return; }
+      data = await r.json();
+    } catch (_) { giveUp(); return; }
+    if (!data?.ok || !Array.isArray(data.candidates)) { giveUp(); return; }
+    if (!fnPickerEl) return;   // closed while the fetch was in flight
+    for (const c of data.candidates) {
+      if (!c?.name || c.name.startsWith('_anon-')) continue;
+      const qualified = c.ns ? (c.ns + '.' + c.name) : c.name;
+      serverCompat.add(qualified);
+      serverRows.set(qualified, c);
+    }
+    serverLoaded = true;
+    candidates = buildCandidates();
+    // The verdicts are final from here — a hook for tests and tour steps
+    // that must not read the first, approximate paint.
+    list.dataset.loaded = 'true';
     render();
   }
 
-  // Build the popup.
+  // -------- Build the popup --------
   const el = document.createElement('div');
   el.className = 'fn-picker-popover';
   el.setAttribute('role', 'dialog');
   el.setAttribute('aria-modal', 'false');
-  el.setAttribute('aria-label', expected ? ('Pick a function compatible with ' + (typeof formatTypeHint === 'function' ? formatTypeHint(expected) : 'expected type'))
-                                         : 'Pick a function');
+  el.setAttribute('aria-label', expected
+    ? ('Pick a function compatible with ' + (typeof formatTypeHint === 'function' ? formatTypeHint(expected) : 'expected type'))
+    : 'Pick a function');
   const rect = opts.anchorEl.getBoundingClientRect();
-  el.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 360)) + 'px';
+  el.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 380)) + 'px';
   // Below the anchor when it fits, otherwise pushed up so the whole
-  // popover stays on screen — re-run after every render, because
-  // disclosing a section changes the height (the "Other" list used to
-  // run straight off the bottom of the viewport).
+  // popover stays on screen — re-run after every render, because folding
+  // a group changes the height.
   const place = () => {
     const h = el.offsetHeight;
     let top = rect.bottom + 6;
@@ -236,8 +244,6 @@ function openFnPicker(opts) {
     el.style.top = top + 'px';
   };
 
-  // Header — when an expectedType is supplied, show it so the user
-  // knows what kind of fn they're picking.
   if (expected && typeof formatTypeHint === 'function') {
     const header = document.createElement('div');
     header.className = 'fn-picker-expected';
@@ -250,60 +256,28 @@ function openFnPicker(opts) {
   search.className = 'fn-picker-search';
   search.placeholder = 'Filter fns…';
   search.setAttribute('aria-label', 'Filter functions in picker');
-  // Combobox: focus stays here while ↑↓ move the highlight in the lists
+  // Combobox: focus stays here while ↑↓ move the highlight in the list
   // below. `aria-activedescendant` is what makes a screen reader read out
-  // the highlighted row — without it the arrows are silent, which is the
-  // whole point of the pattern.
+  // the highlighted row — without it the arrows are silent.
   search.setAttribute('role', 'combobox');
   search.setAttribute('aria-expanded', 'true');
   search.setAttribute('aria-autocomplete', 'list');
-  search.setAttribute('aria-controls', 'fn-picker-list-compat fn-picker-list-other');
+  search.setAttribute('aria-controls', 'fn-picker-list');
   el.appendChild(search);
 
-  // Two list containers — compatible first, "Other" as a collapsible
-  // disclosure below. When no expectedType is set, only one section
-  // renders and the disclosure is unused (everything goes into the
-  // "compat" container without a header).
-  const sections = document.createElement('div');
-  sections.className = 'fn-picker-sections';
-  el.appendChild(sections);
+  // One list. Groups fold and unfold inside it; nothing else is stacked.
+  const list = document.createElement('div');
+  list.className = 'fn-picker-list';
+  list.id = 'fn-picker-list';
+  list.setAttribute('role', 'listbox');
+  list.setAttribute('aria-label', expected ? 'Functions, compatible first' : 'Functions');
+  el.appendChild(list);
 
-  // Both section headers are disclosures and behave as an ACCORDION:
-  // opening one folds the other, so the popover never stacks two
-  // scrolling lists (`openSection` is the one that is open — null when
-  // the reader folded both). Without an expected type there is a single
-  // headerless section and the state is inert.
-  let openSection = 'compat';
-  const toggleSection = (name) => {
-    openSection = openSection === name ? null : name;
-    render();
-  };
-  const compatHeader = document.createElement('button');
-  compatHeader.type = 'button';
-  compatHeader.className = 'fn-picker-section-header fn-picker-section-disclosure';
-  compatHeader.addEventListener('click', () => toggleSection('compat'));
-  const compatList = document.createElement('div');
-  compatList.className = 'fn-picker-list';
-  compatList.id = 'fn-picker-list-compat';
-  compatList.setAttribute('role', 'listbox');
-  compatList.setAttribute('aria-label', 'Compatible functions');
-  sections.appendChild(compatHeader);
-  sections.appendChild(compatList);
-
-  const otherHeader = document.createElement('button');
-  otherHeader.type = 'button';
-  otherHeader.className = 'fn-picker-section-header fn-picker-section-disclosure';
-  // Per-tier fold state set by hand; unset = the default (`ignores` folded,
-  // the rest open).
-  const tierState = new Map();
-  const otherList = document.createElement('div');
-  otherList.className = 'fn-picker-list fn-picker-list-other';
-  otherList.id = 'fn-picker-list-other';
-  otherList.setAttribute('role', 'listbox');
-  otherList.setAttribute('aria-label', 'Other functions');
-  otherHeader.addEventListener('click', () => toggleSection('other'));
-  sections.appendChild(otherHeader);
-  sections.appendChild(otherList);
+  // A one-line summary under the list: how many rows, how many hidden.
+  const status = document.createElement('div');
+  status.className = 'fn-picker-status';
+  status.setAttribute('aria-live', 'polite');
+  el.appendChild(status);
 
   // Cancel button row — outside-click and Esc also dismiss.
   const cancelRow = document.createElement('div');
@@ -324,15 +298,29 @@ function openFnPicker(opts) {
 
   // -------- Pick / explainer wiring --------
 
+  // The reader chose a row: pick it, or — for a row the checker rejects —
+  // open the explainer. While the server verdict is still in flight the
+  // choice WAITS for it (the row is neutral on screen; the candidate is
+  // re-read afterwards, since the list was rebuilt), so a fast reader can
+  // never be told a good fn is a mismatch.
+  async function choose(c, rowEl) {
+    let cur = c;
+    if (expected && !serverLoaded && !serverFailed && loadPromise) {
+      await loadPromise;
+      if (!fnPickerEl) return;
+      cur = candidates.find((x) => x.qualified === c.qualified) || c;
+    }
+    if (expected && serverLoaded && cur.compatible === false) explainAndOfferAnyway(cur, rowEl);
+    else pickFn(cur);
+  }
+
   async function pickFn(c) {
     let fn = c.id ? (graphData.fns || []).find(f => f.id === c.id) : null;
-    // A server-sourced typed candidate carries a name but no id yet
-    // (it may be outside the loaded set) — resolve it by name on pick.
-    if (!fn && !c.id && c.name && typeof resolveFnByName === 'function') {
-      // Pass the candidate's name WHOLE — the resolver handles
-      // qualified (slash or legacy dotted) and bare forms; stripping
-      // to the last segment defeated disambiguation for duplicates.
-      try { fn = await resolveFnByName(c.name); } catch (_) { /* fall through */ }
+    // A server-sourced candidate carries a name but no id yet (it may be
+    // outside the loaded set) — resolve it by QUALIFIED name on pick, so
+    // two fns sharing a bare name cannot be confused.
+    if (!fn && !c.id && c.qualified && typeof resolveFnByName === 'function') {
+      try { fn = await resolveFnByName(c.qualified); } catch (_) { /* fall through */ }
     }
     closeFnPicker();
     if (typeof opts.onPick === 'function') {
@@ -340,16 +328,15 @@ function openFnPicker(opts) {
     }
   }
 
-  // Open the server-rendered explainer popover. Fetches
-  // `/partials/fn-picker-incompat` with the slot's expected type +
+  // Open the server-rendered explainer popover for an incompatible row.
+  // Fetches `/partials/fn-picker-incompat` with the slot's expected type +
   // the candidate fn-id; the partial calls `:describe-type-mismatch`
   // server-side so the reason text matches the backend's own
-  // `/api/types/compatible` verdict (no client-only "best-effort
-  // reason" drift anymore). Mounts into the singleton `.mismatch-
-  // explainer` element so dismissal + anchor positioning reuse the
-  // mismatch-explainer machinery.
+  // `/api/types/compatible` verdict. Mounts into the singleton
+  // `.mismatch-explainer` element so dismissal + anchor positioning reuse
+  // the mismatch-explainer machinery. Offers "Pick anyway".
   async function explainAndOfferAnyway(c, anchorRow) {
-    if (!expected) { pickFn(c); return; }
+    if (!expected || !c.id) { pickFn(c); return; }
     const params = new URLSearchParams({
       expected: JSON.stringify(expected),
       'candidate-fn-id': c.id,
@@ -363,21 +350,19 @@ function openFnPicker(opts) {
       pickFn(c);
       return;
     }
-    const el = (typeof ensureMismatchExplainerEl === 'function')
+    const ex = (typeof ensureMismatchExplainerEl === 'function')
                ? ensureMismatchExplainerEl()
                : null;
-    if (!el) { pickFn(c); return; }
-    el.innerHTML = html;
-    // Close button
-    const close = el.querySelector('[data-explainer-close]');
+    if (!ex) { pickFn(c); return; }
+    ex.innerHTML = html;
+    const close = ex.querySelector('[data-explainer-close]');
     if (close && typeof hideMismatchExplainer === 'function') {
       close.addEventListener('click', (e) => {
         e.stopPropagation();
         hideMismatchExplainer();
       });
     }
-    // Pick-anyway button — bind to the picker's pickFn closure.
-    const pickBtn = el.querySelector('[data-pick-fn-id]');
+    const pickBtn = ex.querySelector('[data-pick-fn-id]');
     if (pickBtn) {
       pickBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -385,17 +370,22 @@ function openFnPicker(opts) {
         pickFn(c);
       });
     }
-    el.classList.add('visible');
-    el.style.display = '';
+    ex.classList.add('visible');
+    ex.style.display = '';
     if (typeof anchorBelowClamped === 'function') {
-      anchorBelowClamped(el, anchorRow);
+      anchorBelowClamped(ex, anchorRow);
     }
   }
 
   // -------- Render --------
 
-  let activeIdx = 0;     // global index across visible (filtered) rows
-  let visibleRows = [];  // flat array of {c, section} for keyboard nav
+  let activeIdx = 0;     // index into visibleRows
+  let visibleRows = [];  // [{c, rowEl}] in DOM order — ↑↓ walk exactly this
+  // Browse-mode state the reader changes by hand: groups toggled open /
+  // closed, and whether fns of other types are listed too.
+  const openGroups = new Set();
+  const closedGroups = new Set();
+  let showOther = false;
 
   function buildEffectsBadges(effects) {
     if (!effects || effects.length === 0) return null;
@@ -410,42 +400,71 @@ function openFnPicker(opts) {
     return wrap;
   }
 
-  function renderRow(c, section, idx, bareName) {
+  const setActive = (idx) => {
+    if (!visibleRows.length) return;
+    idx = Math.max(0, Math.min(idx, visibleRows.length - 1));
+    if (visibleRows[activeIdx]) {
+      visibleRows[activeIdx].rowEl.classList.remove('fn-picker-row-active');
+      visibleRows[activeIdx].rowEl.setAttribute('aria-selected', 'false');
+    }
+    activeIdx = idx;
+    const row = visibleRows[activeIdx].rowEl;
+    row.classList.add('fn-picker-row-active');
+    row.setAttribute('aria-selected', 'true');
+    search.setAttribute('aria-activedescendant', row.id);
+  };
+
+  // `bareName` — under a namespace header the row carries the bare name (the
+  // group already says where it lives); the Exact-match block spells the
+  // namespace out, because that block mixes namespaces.
+  function renderRow(c, idx, bareName) {
+    const compat = (expected && serverLoaded) ? (c.compatible !== false) : null;
     const row = document.createElement('div');
     row.className = 'fn-picker-row'
-      + (idx === activeIdx ? ' fn-picker-row-active' : '')
-      + (section === 'incompat' ? ' fn-picker-row-incompat' : '')
-      + (section === 'compat' ? ' fn-picker-row-compat' : '');
+      + (compat === true ? ' fn-picker-row-compat' : '')
+      + (compat === false ? ' fn-picker-row-incompat' : '');
     row.setAttribute('role', 'option');
     row.id = 'fn-picker-opt-' + idx;
-    row.setAttribute('aria-selected', idx === activeIdx ? 'true' : 'false');
-    if (idx === activeIdx) search.setAttribute('aria-activedescendant', row.id);
+    row.setAttribute('aria-selected', 'false');
     // Stable hook for the tutorial spotlight (and tests): which fn this row is.
     row.dataset.fnName = c.qualified;
 
-    if (section === 'compat') {
-      const ok = document.createElement('span');
-      ok.className = 'fn-picker-row-ok';
-      ok.textContent = '✓';
-      ok.setAttribute('aria-hidden', 'true');
-      row.appendChild(ok);
-    }
+    const mark = document.createElement('span');
+    mark.className = compat === false ? 'fn-picker-row-no' : 'fn-picker-row-ok';
+    mark.textContent = compat === true ? '✓' : (compat === false ? '✗' : '');
+    mark.setAttribute('aria-hidden', 'true');
+    if (compat !== null) row.appendChild(mark);
 
     const main = document.createElement('span');
     main.className = 'fn-picker-row-main';
     const lastDot = c.qualified.lastIndexOf('.');
     const label = (n) => (typeof displayLabel === 'function' ? displayLabel(n) : n);
-    const visible = bareName
+    main.textContent = bareName
       ? label(c.name)
       : (lastDot >= 0
          ? c.qualified.slice(0, lastDot + 1) + label(c.qualified.slice(lastDot + 1))
          : label(c.qualified));
-    main.textContent = visible;
     row.appendChild(main);
 
+    // The fit tier as a chip — only when it is NOT the expectation: an
+    // exact fit is what the ✓ already says.
+    if (compat === true && typeof pickerTierOf === 'function') {
+      const tier = pickerTierOf(expected, c);
+      if (tier !== 'exact') {
+        const chip = document.createElement('span');
+        chip.className = 'fn-picker-row-fit fn-picker-fit-' + tier;
+        chip.textContent = (typeof pickerTierLabel === 'function') ? pickerTierLabel(expected, tier) : tier;
+        chip.title = (typeof pickerTierTitle === 'function') ? pickerTierTitle(expected, tier) : '';
+        row.appendChild(chip);
+      }
+    }
+    if (compat === false) {
+      row.title = 'Not a subtype of the expected type — click to see why (and pick anyway)';
+    }
+
     // Kind annotation pill — refinement / record / union / variant /
-    // list / fn-type / base-fn / primitive. Lets the user
-    // disambiguate type-rows from regular fns at a glance.
+    // list / fn-type / base-fn / primitive, so type-rows read apart from
+    // regular fns at a glance.
     if (c.kind) {
       const kindEl = document.createElement('span');
       kindEl.className = 'fn-picker-row-kind fn-picker-row-kind-' + c.kind;
@@ -465,25 +484,31 @@ function openFnPicker(opts) {
       row.appendChild(rtEl);
     }
 
-    row.addEventListener('mouseenter', () => {
-      activeIdx = idx;
-      sections.querySelectorAll('.fn-picker-row-active')
-              .forEach(r => {
-                r.classList.remove('fn-picker-row-active');
-                r.setAttribute('aria-selected', 'false');
-              });
-      row.classList.add('fn-picker-row-active');
-      row.setAttribute('aria-selected', 'true');
-      search.setAttribute('aria-activedescendant', row.id);
-    });
-    row.addEventListener('click', () => {
-      if (section === 'incompat') {
-        explainAndOfferAnyway(c, row);
-      } else {
-        pickFn(c);
-      }
-    });
+    row.addEventListener('mouseenter', () => setActive(idx));
+    row.addEventListener('click', () => { choose(c, row); });
     return row;
+  }
+
+  function renderHeader(text, count, extra, opts2) {
+    const h = document.createElement(opts2?.button ? 'button' : 'div');
+    if (opts2?.button) h.type = 'button';
+    h.className = 'fn-picker-ns-header' + (opts2?.button ? ' fn-picker-ns-toggle' : '');
+    if (opts2?.button) {
+      h.setAttribute('aria-expanded', opts2.open ? 'true' : 'false');
+      const arrow = document.createElement('span');
+      arrow.className = 'fn-picker-disclosure-arrow';
+      arrow.textContent = opts2.open ? '▼' : '▶';
+      h.appendChild(arrow);
+    }
+    const name = document.createElement('span');
+    name.className = 'fn-picker-ns-name';
+    name.textContent = text;
+    h.appendChild(name);
+    const n = document.createElement('span');
+    n.className = 'fn-picker-ns-count';
+    n.textContent = ' · ' + count + (extra ? ' · ' + extra : '');
+    h.appendChild(n);
+    return h;
   }
 
   function render() {
@@ -491,157 +516,99 @@ function openFnPicker(opts) {
     // prints the canonical `ns.path/name` spelling everywhere — accept
     // a pasted qualified name in either form.
     const q = search.value.trim().toLowerCase().replace(/\//g, '.');
-    // Mirror the server's ranking: exact name, then name-substring, then
-    // qualified-only — so an exact hit isn't crowded below a namespace's
-    // worth of qualified matches before the 50-row cap.
-    const tier = (c) => {
-      const n = c.name.toLowerCase();
-      if (n === q) return 0;
-      if (n.includes(q)) return 1;
-      return 2;
-    };
-    const filtered = candidates
-      .filter(c => !q || c.qualified.toLowerCase().includes(q)
-                       || c.name.toLowerCase().includes(q));
+    const arranged = (typeof pickerArrange === 'function')
+      ? pickerArrange(candidates, { q, expected, openGroups, closedGroups, showOther })
+      : { exact: [], groups: [{ ns: null, rows: candidates.slice(0, 120), open: true }], shown: 0, total: candidates.length, hiddenOther: 0 };
 
-    const compatAll = expected ? filtered.filter(c => c.compatible === true) : filtered;
-    const incompatAll = expected ? filtered.filter(c => c.compatible === false) : [];
-    const compatOpen = !expected || openSection === 'compat';
-    const otherExpanded = !!expected && openSection === 'other';
-
-    // -------- Section headers (accordion disclosures) --------
-    const fillHeader = (header, label, count, open) => {
-      header.textContent = '';
-      const arrow = document.createElement('span');
-      arrow.className = 'fn-picker-disclosure-arrow';
-      arrow.textContent = open ? '▼' : '▶';
-      header.appendChild(arrow);
-      const lbl = document.createElement('span');
-      lbl.textContent = ' ' + label + ' · ' + count;
-      header.appendChild(lbl);
-      header.setAttribute('aria-expanded', open ? 'true' : 'false');
-      header.style.display = 'flex';
-    };
-    if (expected) {
-      fillHeader(compatHeader, 'Compatible', compatAll.length, compatOpen);
-    } else {
-      compatHeader.style.display = 'none';
-    }
-    if (expected && incompatAll.length > 0) {
-      fillHeader(otherHeader, 'Other', incompatAll.length, otherExpanded);
-    } else {
-      otherHeader.style.display = 'none';
-    }
-
-    // -------- Rows --------
-    compatList.innerHTML = '';
-    otherList.innerHTML = '';
+    list.innerHTML = '';
     visibleRows = [];
+    const addRow = (host, c, bareName) => {
+      const idx = visibleRows.length;
+      const row = renderRow(c, idx, bareName);
+      visibleRows.push({ c, rowEl: row });
+      host.appendChild(row);
+    };
 
-    if (compatAll.length === 0 && incompatAll.length === 0) {
+    if (arranged.total === 0) {
       const empty = document.createElement('div');
       empty.className = 'fn-picker-empty';
-      empty.textContent = 'No matches';
-      compatList.appendChild(empty);
-      compatList.style.display = 'block';
-      otherList.style.display = 'none';
-      place();
-      return;
+      empty.textContent = q ? 'No fn is named like that' : (expected ? 'No compatible fns yet' : 'No fns');
+      list.appendChild(empty);
     }
 
-    // One tier's rows, grouped by namespace (header per group when the
-    // tier spans several), capped, with a "… N more" tail. Rows land in
-    // `visibleRows` in DOM order so ↑↓ walk exactly what is on screen.
-    const appendGroupedRows = (host, rows, section) => {
-      const grouped = (typeof groupPickerRows === 'function')
-        ? groupPickerRows(rows, { cap: 50, q })
-        : { groups: [{ ns: null, rows: rows.slice(0, 50) }], shown: Math.min(rows.length, 50), total: rows.length };
-      for (const g of grouped.groups) {
-        if (g.ns) {
-          const nsRow = document.createElement('div');
-          nsRow.className = 'fn-picker-ns-header';
-          nsRow.textContent = g.ns;
-          host.appendChild(nsRow);
-        }
-        for (const c of g.rows) {
-          const idx = visibleRows.length;
-          // Under a namespace header the row carries the bare name — the
-          // group already says where it lives.
-          const row = renderRow(c, section, idx, !!g.ns);
-          visibleRows.push({ c, section, rowEl: row });
-          host.appendChild(row);
-        }
-      }
-      if (grouped.shown < grouped.total) {
-        const more = document.createElement('div');
-        more.className = 'fn-picker-more';
-        more.textContent = '… ' + (grouped.total - grouped.shown) + ' more — type to narrow';
-        host.appendChild(more);
-      }
-    };
+    if (arranged.exact.length) {
+      const sec = document.createElement('div');
+      sec.className = 'fn-picker-exact';
+      sec.appendChild(renderHeader('Exact match', arranged.exact.length, null, null));
+      for (const c of arranged.exact) addRow(sec, c, false);
+      list.appendChild(sec);
+    }
 
-    if (!compatOpen) {
-      // Folded — the header still says how many rows wait behind it.
-    } else if (expected) {
-      // Whole-signature tiers: exact fit first, then rows that leave the
-      // reader more to wire, then callables that drop the slot's input.
-      // The last tier is folded away until asked for — or until a typed
-      // filter says the reader is looking for a name, not browsing.
-      const tiers = (typeof pickerTiersOf === 'function')
-        ? pickerTiersOf(expected, compatAll)
-        : [{ tier: 'exact', label: null, rows: compatAll }];
-      const showHeaders = tiers.length > 1;
-      for (const t of tiers) {
-        const open = tierState.has(t.tier) ? tierState.get(t.tier) : t.tier !== 'ignores';
-        const folded = !q && showHeaders && !open;
-        if (showHeaders) {
-          const th = document.createElement('button');
-          th.type = 'button';
-          th.className = 'fn-picker-tier-header fn-picker-tier-' + t.tier;
-          th.title = t.title || '';
-          th.setAttribute('aria-expanded', folded ? 'false' : 'true');
-          const arrow = document.createElement('span');
-          arrow.className = 'fn-picker-disclosure-arrow';
-          arrow.textContent = folded ? '▶' : '▼';
-          th.appendChild(arrow);
-          const lbl = document.createElement('span');
-          lbl.textContent = ' ' + t.label + ' · ' + t.rows.length;
-          th.appendChild(lbl);
-          th.addEventListener('click', (e) => {
+    for (const g of arranged.groups) {
+      const sec = document.createElement('div');
+      sec.className = 'fn-picker-group' + (g.open ? '' : ' fn-picker-group-folded');
+      if (g.ns !== null || arranged.groups.length > 1 || arranged.exact.length) {
+        const extra = (expected && g.other > 0) ? (g.other + ' other') : null;
+        const label = g.ns || '(root)';
+        if (!q) {
+          // Browse: a fold, like the Explorer's namespace rows.
+          const h = renderHeader(label, expected ? g.compat : g.rows.length, extra, { button: true, open: g.open });
+          h.addEventListener('click', (e) => {
             e.stopPropagation();
-            tierState.set(t.tier, folded);
+            const key = g.ns || '';
+            if (g.open) { openGroups.delete(key); closedGroups.add(key); }
+            else { closedGroups.delete(key); openGroups.add(key); }
             render();
           });
-          compatList.appendChild(th);
+          sec.appendChild(h);
+        } else {
+          sec.appendChild(renderHeader(label, g.rows.length, extra, null));
         }
-        if (!folded) appendGroupedRows(compatList, t.rows, 'compat');
       }
-      if (compatAll.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'fn-picker-empty';
-        empty.textContent = 'No compatible fns — try "Other" below';
-        compatList.appendChild(empty);
+      if (g.open) for (const c of g.rows) addRow(sec, c, true);
+      if (g.open && g.truncated) {
+        const more = document.createElement('div');
+        more.className = 'fn-picker-more';
+        more.textContent = '… more — type to narrow';
+        sec.appendChild(more);
       }
-    } else {
-      appendGroupedRows(compatList, compatAll, 'neutral');
+      list.appendChild(sec);
     }
 
-    if (otherExpanded) appendGroupedRows(otherList, incompatAll, 'incompat');
-    if (activeIdx >= visibleRows.length) activeIdx = 0;
-    if (visibleRows[activeIdx]) {
-      visibleRows[activeIdx].rowEl.classList.add('fn-picker-row-active');
-      visibleRows[activeIdx].rowEl.setAttribute('aria-selected', 'true');
-      search.setAttribute('aria-activedescendant', visibleRows[activeIdx].rowEl.id);
+    // Browse mode, typed slot: the fns of other types wait behind ONE
+    // toggle at the end — never an accordion that folds the good rows.
+    if (expected && !q && (arranged.hiddenOther > 0 || showOther)) {
+      const t = document.createElement('button');
+      t.type = 'button';
+      t.className = 'fn-picker-other-toggle';
+      t.setAttribute('aria-pressed', showOther ? 'true' : 'false');
+      t.textContent = showOther
+        ? 'Hide fns of other types'
+        : ('Show ' + arranged.hiddenOther + ' fns of other types');
+      t.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showOther = !showOther;
+        render();
+      });
+      list.appendChild(t);
     }
 
-    compatList.style.display = compatOpen ? 'block' : 'none';
-    otherList.style.display = otherExpanded ? 'block' : 'none';
+    const hidden = arranged.total - arranged.shown;
+    const pending = expected && !serverLoaded && !serverFailed;
+    status.textContent = (arranged.total === 0 ? ''
+      : (arranged.shown + ' of ' + arranged.total
+         + (hidden > 0 ? (q ? ' — type more to narrow' : ' — open a namespace or type a name') : '')))
+      + (pending ? ' · checking types…' : '');
+
+    activeIdx = Math.min(activeIdx, Math.max(0, visibleRows.length - 1));
+    if (visibleRows[activeIdx]) setActive(activeIdx);
+    else search.removeAttribute('aria-activedescendant');
     place();
   }
   render();
-  // Fire-and-forget: augment the loaded candidates with the whole-graph
-  // type-compatible set (no-op unless an expected type was supplied).
-  loadTypedCandidates();
+  // Augment the loaded candidates with the whole-graph type-compatible set
+  // (no-op unless an expected type was supplied); `choose` awaits it.
+  loadPromise = loadTypedCandidates();
 
   // Instant client-side filter over the loaded candidates, PLUS a debounced
   // server search so a fn outside the loaded set becomes pickable by typing
@@ -657,7 +624,7 @@ function openFnPicker(opts) {
     clearTimeout(_pickerSearchTimer);
     _pickerSearchTimer = setTimeout(() => {
       searchFns(q).then(() => {
-        if (seq !== _pickerSearchSeq) return;   // superseded by a later keystroke
+        if (seq !== _pickerSearchSeq || !fnPickerEl) return;   // superseded, or closed
         candidates = buildCandidates();
         render();
       }).catch((err) => { console.error('fn-picker search failed', err); });
@@ -666,19 +633,17 @@ function openFnPicker(opts) {
   search.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      if (activeIdx < visibleRows.length - 1) { activeIdx++; render(); }
+      setActive(activeIdx + 1);
+      visibleRows[activeIdx]?.rowEl.scrollIntoView({ block: 'nearest' });
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      if (activeIdx > 0) { activeIdx--; render(); }
+      setActive(activeIdx - 1);
+      visibleRows[activeIdx]?.rowEl.scrollIntoView({ block: 'nearest' });
     } else if (e.key === 'Enter') {
       e.preventDefault();
       const entry = visibleRows[activeIdx];
       if (!entry) return;
-      if (entry.section === 'incompat') {
-        explainAndOfferAnyway(entry.c, entry.rowEl || el);
-      } else {
-        pickFn(entry.c);
-      }
+      choose(entry.c, entry.rowEl);
     } else if (e.key === 'Escape') {
       e.preventDefault();
       closeFnPicker();

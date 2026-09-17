@@ -445,7 +445,7 @@
                :target nil
                :check {:kind "selected" :name "tutorial-typed"}}
               {:title "Ask for a fn the slot cannot take"
-               :body "Click the [[+]] on :string and choose [[Bind fn-ref]]. The picker states Expected: text and splits candidates into Compatible and Other. Type `str-len` in the picker's filter, expand [[Other]], then click the [[str-len]] row there — it returns an int, not text."
+               :body "Click the [[+]] on :string and choose [[Bind fn-ref]]. The picker states Expected: text; every fn whose name matches what you type is listed, and the ones this slot cannot take are dimmed with a ✗. Type `str-len` in the picker's filter and click the dimmed [[str-len]] row — it returns an int, not text."
                :target ".placeholder-binder"
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"str-len\"]"]
                :check {:kind "dom" :selector ".mismatch-explainer.visible [data-pick-fn-id]"}}
@@ -537,7 +537,7 @@
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".fn-picker-popover"]
                :check {:kind "dom" :selector ".fn-picker-popover"}}
               {:title "Narrower already"
-               :body "The picker states Expected: (item:text) → b — not (item:a). Compatible's first group, Exact fit, holds the fns that take exactly one TEXT value: str-upper from lesson 03 qualifies, a fn over numbers does not. (Below it: fns that would leave you more to wire; folded away, constants that would ignore the item.) For a single-argument callable the argument's NAME does not matter — map hands each element to the callee's one free argument. Type `str-upper` into the picker's filter and click the [[str-upper]] row."
+               :body "The picker states Expected: (item:text) → b — not (item:a). Every fn the slot can take wears a ✓, and the ones that take exactly one TEXT value come first in their namespace: str-upper from lesson 03 qualifies, a fn over numbers does not. Fns that would leave you more to wire carry an Extra inputs chip; constants that would ignore the item, an Ignores the input chip. For a single-argument callable the argument's NAME does not matter — map hands each element to the callee's one free argument. Type `str-upper` into the picker's filter and click the [[str-upper]] row."
                :target ".fn-picker-search"
                :targets [".fn-picker-search" ".fn-picker-row-compat[data-fn-name$=\"str-upper\"]"]
                :check {:kind "binding-bound" :name "tutorial-map" :slot "func"}}

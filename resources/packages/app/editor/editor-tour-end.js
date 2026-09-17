@@ -190,7 +190,8 @@ function _tourDialog({ title, body, primary, quiet, next }) {
   const { pop } = _tourEnsureEls();
   _tourSpotHide();
   pop.replaceChildren();
-  pop.classList.add('gd-tour-visible', 'gd-tour-centered');
+  pop.classList.add('gd-tour-visible');
+  _tourCenterPop(pop);
   // Same rule as a step: on a phone this is a bottom sheet, not a 360px box
   // floating in a 390px window.
   pop.classList.toggle('gd-tour-sheet', _tourNarrow());

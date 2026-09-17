@@ -243,10 +243,20 @@ function _tourPosition() {
     pop.classList.remove('gd-tour-centered');
   } else {
     _tourSpotHide();
-    pop.classList.add('gd-tour-centered');
-    pop.style.left = '';
-    pop.style.top = '';
+    _tourCenterPop(pop);
   }
+}
+
+// Centre the popover as a dialog. A STEP places the popover with inline
+// `left` / `top`; those must be cleared here, or `.gd-tour-centered`'s
+// `left: 50%` loses to the inline value and its `translateX(-50%)` then
+// shifts the box half its width from wherever the last step left it —
+// the end-of-lesson "Clean up?" card half off the left edge when the last
+// step pointed at the Explorer (2026-09-16).
+function _tourCenterPop(pop) {
+  pop.classList.add('gd-tour-centered');
+  pop.style.left = '';
+  pop.style.top = '';
 }
 
 // Every bright region of the current step: each VISIBLE stage of the

@@ -1,6 +1,9 @@
-// Editor Fn-Picker — ranking. Pure helpers behind the picker's list:
-// how a candidate's WHOLE signature sits in the slot (tier), and how a
-// tier's rows are grouped for reading (namespace, private-last, cap).
+// Editor Fn-Picker — ranking + arrangement. Pure helpers behind the
+// picker's list: how a candidate's WHOLE signature sits in the slot (its
+// fit tier), and how the candidates are laid out for reading — the
+// Explorer's search shape (an "Exact match" block, then namespace groups)
+// with the type verdict as a per-row mark, never as a section that hides
+// what the reader typed.
 //
 // Nothing here touches the DOM or the network, so
 // tools/runtime-test/fn-picker-rank.test.js exercises it directly.
@@ -20,6 +23,20 @@
 // Admissibility itself stays the checker's call (`subtype?`, via
 // /api/types/candidates + clientSubtype); ranking never widens or narrows
 // the Compatible set, it orders it.
+//
+// WHY THIS SHAPE (2026-09-16, a reader on lesson 15 typing `map`): the
+// previous list was an accordion — Compatible / Other — with the
+// compatible half cut into collapsible tiers (Ready / Needs inputs /
+// Ignores). Typing `map` put six test fns whose names merely contain
+// "map" under "Ready" ABOVE `core.hof.map` (which sat first in "Needs
+// inputs", one header down) — the exact-name hit the reader typed. And
+// the accordion folded one section when the other opened, so "Other"
+// seemed to swallow "Compatible". Now: an exact-name match is always the
+// first row; a typed filter shows EVERY name match, compatible or not
+// (the incompatible ones dimmed, with the explainer a click away); tiers
+// are a sort order plus a small chip, not a fold; namespaces group the
+// rows the way the Explorer's tree does, and only the BROWSE view (no
+// filter) collapses groups — because 900 rows are not something to scroll.
 
 const PICKER_TIERS = ['exact', 'captures', 'ignores'];
 
@@ -41,7 +58,7 @@ function pickerFitTier(expected, arity) {
   return arity > k ? 'captures' : 'ignores';
 }
 
-// Header text per tier. A value slot has no "input" to ignore, so its
+// Chip text per tier. A value slot has no "input" to ignore, so its
 // vocabulary is ready-vs-needs; a callable slot's is call-shaped.
 function pickerTierLabel(expected, tier) {
   const callable = pickerSlotArity(expected) !== null || expected === 'fn-ref';
@@ -63,64 +80,134 @@ function pickerTierTitle(expected, tier) {
   return 'Takes no argument — the value the slot passes per call is dropped';
 }
 
-// Group one tier's rows for display: same-namespace rows first, then by
-// namespace path, private (`_`-prefixed) names after public ones within a
-// namespace, names alphabetical. Returns `{groups, shown, total}` where
-// `groups` is `[{ns, rows}]` in display order and `shown` ≤ `cap`. A
-// single-namespace tier gets one group with `ns: null` — no header worth
-// drawing. `q` (the typed filter, lowercased) keeps the name-match tiering
-// the flat list had: exact name, name-substring, qualified-only.
-function groupPickerRows(rows, opts) {
-  const cap = opts?.cap || 50;
-  const q = opts?.q || '';
-  const nameTier = (c) => {
-    if (!q) return 0;
-    const n = (c.name || '').toLowerCase();
-    if (n === q) return 0;
-    if (n.includes(q)) return 1;
-    return 2;
-  };
-  const isPrivate = (c) => typeof c.name === 'string' && c.name.startsWith('_');
-  const nsOf = (c) => c.ns || '';
-  const sorted = rows.slice().sort((a, b) => {
-    if (!!a.sameNs !== !!b.sameNs) return a.sameNs ? -1 : 1;
-    const t = nameTier(a) - nameTier(b);
-    if (t !== 0) return t;
-    const n = nsOf(a).localeCompare(nsOf(b));
-    if (n !== 0) return n;
-    if (isPrivate(a) !== isPrivate(b)) return isPrivate(a) ? 1 : -1;
-    return (a.name || '').localeCompare(b.name || '');
-  });
-  const shown = sorted.slice(0, cap);
-  const distinct = new Set(shown.map(nsOf));
-  const groups = [];
-  if (distinct.size <= 1) {
-    groups.push({ ns: null, rows: shown });
-  } else {
-    for (const c of shown) {
-      const ns = nsOf(c) || null;
-      const last = groups[groups.length - 1];
-      if (last && last.ns === ns) last.rows.push(c);
-      else groups.push({ ns, rows: [c] });
-    }
-  }
-  return { groups, shown: shown.length, total: rows.length };
+// The candidate's tier: the server's verdict when it spoke, else the local
+// arity approximation.
+function pickerTierOf(expected, c) {
+  return PICKER_TIERS.includes(c.fit) ? c.fit : pickerFitTier(expected, c.arity);
 }
 
-// Split compatible rows into display tiers, in PICKER_TIERS order, dropping
-// empty ones. Each entry: `{tier, label, title, rows}`.
-function pickerTiersOf(expected, compatRows) {
-  const byTier = new Map(PICKER_TIERS.map((t) => [t, []]));
-  for (const c of compatRows) {
-    const t = PICKER_TIERS.includes(c.fit) ? c.fit : pickerFitTier(expected, c.arity);
-    byTier.get(t).push(c);
+// A `tests` namespace segment marks the platform's own test fns — real fns,
+// but rarely what a slot wants; they sort after everything else.
+function pickerIsTestNs(ns) {
+  return typeof ns === 'string' && ns.split('.').includes('tests');
+}
+
+// Arrange candidates for display.
+//
+//   candidates  [{name, qualified, ns, sameNs, compatible, fit, arity, …}]
+//   opts.q      the typed filter, lowercased, `/`→`.` (empty = browse)
+//   opts.expected  the slot type (null = untyped picker: no verdicts)
+//   opts.openGroups   Set of namespace paths the reader toggled OPEN
+//   opts.closedGroups Set of namespace paths the reader toggled CLOSED
+//   opts.showOther  browse mode: also list the incompatible rows (dimmed)
+//   opts.cap    most rows rendered in total (default 120)
+//   opts.autoOpenUnder  browse mode: when the row total is at or under
+//               this, every group starts open (default 60)
+//
+// Returns `{exact, groups, shown, total, hiddenOther}`:
+//   exact   rows whose bare name IS the query (query mode only) — the
+//           Explorer's "Exact match" block; compatible first, then
+//           non-test before test, public before private, alphabetical
+//   groups  [{ns, rows, open, compat, other, truncated}] in display order:
+//           the owner's own namespace first, then alphabetical, `tests`
+//           namespaces last; rows within a group: compatible before
+//           incompatible, then by tier (exact → captures → ignores),
+//           public before private, alphabetical. In query mode every group
+//           is open. In browse mode a group is open when the reader toggled
+//           it, else when the whole list is small (≤ autoOpenUnder) or it is
+//           the owner's own namespace.
+//   shown / total  rows rendered vs rows that matched (the cap)
+//   hiddenOther  browse mode: incompatible rows left out because
+//           `showOther` is off — the count the toggle advertises
+function pickerArrange(candidates, opts) {
+  const q = opts?.q || '';
+  const expected = opts?.expected || null;
+  const openGroups = opts?.openGroups || new Set();
+  const closedGroups = opts?.closedGroups || new Set();
+  const showOther = !!opts?.showOther;
+  const cap = opts?.cap || 120;
+  const autoOpenUnder = (typeof opts?.autoOpenUnder === 'number') ? opts.autoOpenUnder : 60;
+  const typed = !!expected;
+  const isPrivate = (c) => typeof c.name === 'string' && c.name.startsWith('_');
+  const nsOf = (c) => c.ns || '';
+  const isCompat = (c) => !typed || c.compatible !== false;
+  const tierRank = (c) => (typed && isCompat(c)) ? PICKER_TIERS.indexOf(pickerTierOf(expected, c)) : 0;
+  const rowOrder = (a, b) =>
+    (Number(!isCompat(a)) - Number(!isCompat(b)))
+    || (tierRank(a) - tierRank(b))
+    || (Number(isPrivate(a)) - Number(isPrivate(b)))
+    || (a.name || '').localeCompare(b.name || '');
+
+  let matched = candidates;
+  if (q) {
+    matched = candidates.filter((c) => (c.qualified || '').toLowerCase().includes(q)
+                                     || (c.name || '').toLowerCase().includes(q));
   }
-  return PICKER_TIERS
-    .filter((t) => byTier.get(t).length > 0)
-    .map((t) => ({
-      tier: t,
-      label: pickerTierLabel(expected, t),
-      title: pickerTierTitle(expected, t),
-      rows: byTier.get(t),
-    }));
+  let hiddenOther = 0;
+  if (!q && typed && !showOther) {
+    const before = matched.length;
+    matched = matched.filter(isCompat);
+    hiddenOther = before - matched.length;
+  }
+
+  // Exact-name hits leave the groups for the block on top (query mode).
+  const exact = [];
+  const rest = [];
+  for (const c of matched) {
+    if (q && (c.name || '').toLowerCase() === q) exact.push(c);
+    else rest.push(c);
+  }
+  exact.sort((a, b) =>
+    (Number(!isCompat(a)) - Number(!isCompat(b)))
+    || (Number(pickerIsTestNs(nsOf(a))) - Number(pickerIsTestNs(nsOf(b))))
+    || (Number(isPrivate(a)) - Number(isPrivate(b)))
+    || (a.qualified || '').localeCompare(b.qualified || ''));
+
+  const byNs = new Map();
+  for (const c of rest) {
+    const ns = nsOf(c);
+    if (!byNs.has(ns)) byNs.set(ns, []);
+    byNs.get(ns).push(c);
+  }
+  const nsOrder = (a, b) => {
+    const [na, ra] = a;
+    const [nb, rb] = b;
+    const sameA = ra.some((c) => c.sameNs) ? 0 : 1;
+    const sameB = rb.some((c) => c.sameNs) ? 0 : 1;
+    if (sameA !== sameB) return sameA - sameB;
+    const tA = pickerIsTestNs(na) ? 1 : 0;
+    const tB = pickerIsTestNs(nb) ? 1 : 0;
+    if (tA !== tB) return tA - tB;
+    return na.localeCompare(nb);
+  };
+  const groups = [...byNs.entries()].sort(nsOrder).map(([ns, rows]) => {
+    rows.sort(rowOrder);
+    const compat = typed ? rows.filter(isCompat).length : rows.length;
+    return { ns: ns || null, rows, compat, other: rows.length - compat, open: true, truncated: false };
+  });
+
+  const total = exact.length + rest.length;
+  if (!q) {
+    const smallList = total <= autoOpenUnder;
+    for (const g of groups) {
+      const key = g.ns || '';
+      if (openGroups.has(key)) g.open = true;
+      else if (closedGroups.has(key)) g.open = false;
+      else g.open = smallList || g.rows.some((c) => c.sameNs);
+    }
+  }
+
+  // Cap what is rendered (the exact block + rows inside open groups),
+  // group by group, so a runaway filter ("a") stays a readable list.
+  let budget = cap;
+  const exactShown = exact.slice(0, Math.min(exact.length, budget));
+  budget -= exactShown.length;
+  let shown = exactShown.length;
+  for (const g of groups) {
+    if (!g.open) continue;
+    if (g.rows.length > budget) { g.rows = g.rows.slice(0, Math.max(0, budget)); g.truncated = true; }
+    budget -= g.rows.length;
+    shown += g.rows.length;
+  }
+  return { exact: exactShown, groups, shown, total, hiddenOther };
 }

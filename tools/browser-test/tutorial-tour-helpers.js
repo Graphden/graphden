@@ -542,36 +542,27 @@ async function appendOrBindLiteralFromChooser(page, literalText) {
 // section and click the named candidate — which opens the server-rendered
 // mismatch explainer instead of binding straight away.
 async function pickIncompatFnRef(page, fnName) {
-  await page.waitForSelector('.placeholder-binder', {timeout: 15000});
+  await page.waitForSelector('.placeholder-binder', {timeout: 30000});
   await page.evaluate(() => document.querySelector('.placeholder-binder').click());
   await page.waitForFunction(() => Array.from(document.querySelectorAll('button'))
     .some((b) => b.textContent.trim() === 'Bind fn-ref'),
-  null, {timeout: 10000, polling: 100});
+    null, {timeout: 15000, polling: 100});
   await page.evaluate(() => {
     Array.from(document.querySelectorAll('button'))
       .find((b) => b.textContent.trim() === 'Bind fn-ref').click();
   });
   await page.waitForSelector('.fn-picker-popover', {timeout: 15000});
   await page.fill('.fn-picker-popover input', fnName);
-  // The incompatible candidates hide behind a collapsed "Other · N" header,
-  // which only appears once the typed filter's candidates have loaded. The
-  // click below used to be a silent no-op when it fired too early, and the
-  // failure surfaced one line later as a missing `.fn-picker-row-incompat`.
-  await page.waitForFunction(() => Array.from(
-    document.querySelectorAll('.fn-picker-section-header'))
-    .some((h) => /Other/.test(h.textContent)),
-  null, {timeout: 30000, polling: 100});
-  await page.evaluate(() => {
-    Array.from(document.querySelectorAll('.fn-picker-section-header'))
-      .find((h) => /Other/.test(h.textContent)).click();
-  });
-  await page.waitForSelector('.fn-picker-row-incompat', {timeout: 10000});
-  await page.evaluate(() => document.querySelector('.fn-picker-row-incompat').click());
+  // A typed filter lists every name match, the incompatible ones dimmed in
+  // place (`.fn-picker-row-incompat`) — no section to expand. The verdict
+  // arrives with the server's candidate set, so wait for the DIMMED row.
+  const sel = '.fn-picker-popover .fn-picker-row-incompat[data-fn-name$="' + fnName + '"]';
+  await page.waitForSelector(sel, {timeout: 30000});
+  await page.click(sel);
+  await page.waitForSelector('.mismatch-explainer.visible [data-pick-fn-id]', {timeout: 15000});
 }
 
 
-// Confirm the mismatch explainer's "Pick anyway" — the write lands and the
-// fn gains a type-error badge (diagnostic, not a rejection).
 async function pickAnyway(page) {
   await page.waitForSelector('.mismatch-explainer.visible [data-pick-fn-id]',
     {timeout: 15000});

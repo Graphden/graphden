@@ -67,21 +67,29 @@ const {assert, newContext} = require('./edit-test-helpers');
     await page.waitForSelector('.fn-picker-popover', {timeout: 5000});
     const initial = await page.evaluate(() => {
       const p = document.querySelector('.fn-picker-popover');
-      const rows = p?.querySelectorAll('.fn-picker-list > *');
+      const rows = p?.querySelectorAll('.fn-picker-row');
+      const groups = p?.querySelectorAll('.fn-picker-ns-toggle');
       const search = p?.querySelector('.fn-picker-search');
       return {
         visible: !!p,
         hasSearch: !!search,
         searchPlaceholder: search?.placeholder,
         rowCount: rows?.length || 0,
+        groupCount: groups?.length || 0,
+        status: p?.querySelector('.fn-picker-status')?.textContent || '',
       };
     });
     assert(initial.visible, 'fn-picker-popover renders');
     assert(initial.hasSearch,
            'search input present: '
            + JSON.stringify(initial.searchPlaceholder));
-    assert(initial.rowCount > 10,
-           'picker lists many candidate fns: ' + initial.rowCount);
+    // Browse mode is the Explorer's tree: many fns → namespace groups, most
+    // folded (the status line says how many rows wait); a short graph → rows.
+    assert(initial.rowCount > 10 || initial.groupCount > 3,
+           'picker browses the graph as rows or folded namespace groups: '
+           + JSON.stringify(initial));
+    assert(/\d+ of \d+/.test(initial.status),
+           'the status line counts shown / total: ' + initial.status);
 
     // ===================================================================
     // Phase B: type filter "identity" → only matching rows visible.
@@ -112,8 +120,9 @@ const {assert, newContext} = require('./edit-test-helpers');
     });
     assert(filtered.visibleCount > 0,
            '≥ 1 row matches "identity": ' + filtered.visibleCount);
-    assert(filtered.visibleCount < initial.rowCount,
-           'filter narrows the list (was ' + initial.rowCount
+    const initialTotal = Number((initial.status.match(/of (\d+)/) || [])[1] || 0);
+    assert(filtered.visibleCount < initialTotal,
+           'filter narrows the list (was ' + initialTotal
            + ', now ' + filtered.visibleCount + ')');
     assert(filtered.anyText.every((t) => /identity/i.test(t)),
            'every visible row mentions "identity": '

@@ -7,7 +7,7 @@ The ~25k lines of plain ES that draw the graph, bind the edits and mount the ser
 
 after: web, layout
 
-[[file:index.org][index]] · ~70 min
+[[file:index.org][index]] · ~74 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -128,17 +128,17 @@ The migration in the concrete: the ~⋯~ row menu is a server partial in four co
 
 - source :: [[file:../../../resources/packages/app/editor/editor-row-actions.js::async function loadRowActionsContent(host, fnId, context, opts) {][resources/packages/app/editor/editor-row-actions.js:422]]
 
-* 10. pickerTiersOf
+* 10. pickerArrange
 :PROPERTIES:
-:CUSTOM_ID: editor/pickerTiersOf
+:CUSTOM_ID: editor/pickerArrange
 :FILE: resources/packages/app/editor/editor-fn-picker-rank.js
-:LINE: 112
-:MINS: 1.8
+:LINE: 122
+:MINS: 5.7
 :END:
 
-What the fn-picker shows FIRST. ~/api/types/candidates~ answers the admissibility question with ~fit~ / ~arity~ / ~ns~ on every row (see ~candidate-fit~ in the crud block); this pure module turns those rows into display tiers — Exact fit, Extra inputs, Ignores the input (folded until a filter is typed) — and ~groupPickerRows~ orders each tier: the reader's own namespace first, then namespace headers with bare names, private ~_~ names last, a cap with an honest "… N more" tail. Nothing here touches the DOM or the network; ~fn-picker-rank.test.js~ pins it in a node vm. The picker proper (~editor-fn-picker.js~) only renders what this returns.
+What the fn-picker shows, and in what order. ~/api/types/candidates~ answers the admissibility question with ~fit~ / ~arity~ / ~ns~ on every row (see ~candidate-fit~ in the crud block); this pure module lays those rows out the way the Explorer's search does — an "Exact match" block whenever the reader typed a full name, then namespace groups (the fn's own first, ~tests~ namespaces last), compatible rows before incompatible ones inside a group, ordered by fit tier, public before private. The tier is an ORDER plus a chip on the row, never a fold; only browse mode (nothing typed) folds groups, and a typed filter shows every match, the incompatible ones dimmed. It replaced a Compatible / Other accordion with collapsible tiers that buried the exact-name hit (2026-09-16). Nothing here touches the DOM or the network; ~fn-picker-rank.test.js~ pins it in a node vm. The picker proper (~editor-fn-picker.js~) only renders what this returns.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-fn-picker-rank.js::function pickerTiersOf(expected, compatRows) {][resources/packages/app/editor/editor-fn-picker-rank.js:112]]
+- source :: [[file:../../../resources/packages/app/editor/editor-fn-picker-rank.js::function pickerArrange(candidates, opts) {][resources/packages/app/editor/editor-fn-picker-rank.js:122]]
 
 * 11. enterArgValueEditMode
 :PROPERTIES:

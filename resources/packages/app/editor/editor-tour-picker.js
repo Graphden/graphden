@@ -161,17 +161,12 @@ async function openTutorialMenu() {
   const { pop } = _tourEnsureEls();
   _tourSpotHide();   // both spotlight layers — the ring AND the scrim
   pop.replaceChildren();
-  pop.classList.add('gd-tour-visible', 'gd-tour-centered');
+  pop.classList.add('gd-tour-visible');
+  _tourCenterPop(pop);
   // On a phone the catalogue is a bottom sheet like every other tour surface
   // — `_tourPosition` sets this while a lesson RUNS, and the catalogue can be
   // opened without one.
   pop.classList.toggle('gd-tour-sheet', _tourNarrow());
-  // Opened MID-LESSON the popover still carries the last step's anchored
-  // position as inline styles, which beat the centered class — the catalogue
-  // then hangs off wherever that step's target was, and its capped height runs
-  // past the bottom of the window.
-  pop.style.left = '';
-  pop.style.top = '';
 
   let done = _tourDoneSet();
   const saved = _tourState || _tourLoadState();

@@ -219,16 +219,19 @@ in your base-fn impl and the dispatch picks the right behavior.
 5. Click the `+` on `:func`. Instead of the value form you saw in
    earlier lessons, the fn picker opens straight away: a literal is
    not a thing you can put in a callable slot. It states
-   *Expected: (item:text) → b* — not `(item:a)` — and splits
-   candidates into **Compatible** and **Other**. Compatible's first
-   group, **Exact fit**, holds the fns that take exactly one TEXT
-   value: `str-upper` from lesson 03 qualifies, a fn over numbers
-   does not. Below it come fns that would leave you more to wire
-   (**Extra inputs**), and, folded away, constants that would ignore
-   the item. For a single-argument callable the argument's NAME does
-   not matter — `map` hands each element to the callee's one free
-   argument, whatever it is called. Type `str-upper` into the
-   picker's filter and click its row.
+   *Expected: (item:text) → b* — not `(item:a)`. Every fn the slot
+   can take wears a ✓, grouped by namespace like the Explorer's tree,
+   and the ones that take exactly one TEXT value come first in their
+   group: `str-upper` from lesson 03 qualifies, a fn over numbers
+   does not. Fns that would leave you more to wire carry an **Extra
+   inputs** chip; constants that would ignore the item, an **Ignores
+   the input** chip. Fns of other types are one toggle away at the
+   bottom — and the moment you type a name, every match is listed,
+   the incompatible ones dimmed with a ✗ (click one and the checker
+   explains why). For a single-argument callable the argument's NAME
+   does not matter — `map` hands each element to the callee's one
+   free argument, whatever it is called. Type `str-upper` into the
+   picker's filter: it is the **Exact match** on top; click its row.
 6. An edge now runs from `str-upper` into `tutorial-map`'s `:func`
    — the callback is wired, and nothing has run. `⋯ → ▶ Run` →
    **Run** — nothing to fill in, every slot is bound:

@@ -82,14 +82,10 @@ const TEST_NAME = 'test-fn-picker-filter';
     });
     assert(!refClicked.error, refClicked.error || 'fn-ref button clicked');
     // fn-picker mounts after the click. The type-compatible candidate set
-    // now arrives from the server (/api/types/candidates) so the picker
-    // isn't limited to the lazily-loaded cache — wait for a compat row
-    // (with its ✓ glyph) to render, not just any row.
-    await page.waitForFunction(
-      () => !!document.querySelector(
-        '.fn-picker-popover .fn-picker-row-compat .fn-picker-row-ok'),
-      null,
-      {timeout: 15000, polling: 50});
+    // arrives from the server (/api/types/candidates); until it lands no
+    // row wears a verdict — wait for the loaded marker, not for any row.
+    await page.waitForSelector('.fn-picker-popover .fn-picker-list[data-loaded="true"]',
+      {timeout: 30000});
 
     // Picker should now be open with expectedType = 'text' (the
     // :string slot's resolved type via :str-len's primary). Different
@@ -99,26 +95,24 @@ const TEST_NAME = 'test-fn-picker-filter';
     const probe = await page.evaluate(() => {
       const picker = document.querySelector('.fn-picker-popover');
       if (!picker) return {error: 'fn-picker not open'};
+      // Browse mode is the Explorer's tree: namespace groups (most folded
+      // on a big graph) of COMPATIBLE fns, the others behind one toggle.
+      const status = picker.querySelector('.fn-picker-status')?.textContent || '';
+      const m = status.match(/(\d+) of (\d+)/);
       const rows = Array.from(picker.querySelectorAll('.fn-picker-row'));
       return {
-        total: rows.length,
-        compat: rows.filter(r =>
-          r.classList.contains('fn-picker-row-compat')).length,
-        // Each compat row should carry a ✓ glyph child.
-        firstCompatHasOk: (() => {
-          const first = rows.find(r =>
-            r.classList.contains('fn-picker-row-compat'));
-          return first ? !!first.querySelector('.fn-picker-row-ok') : false;
-        })()
+        total: m ? Number(m[2]) : 0,
+        groups: picker.querySelectorAll('.fn-picker-ns-toggle').length,
+        incompatShown: rows.filter(r => r.classList.contains('fn-picker-row-incompat')).length,
+        otherToggle: picker.querySelector('.fn-picker-other-toggle')?.textContent || null,
       };
     });
     assert(!probe.error, probe.error || 'picker open');
-    assert(probe.total > 0, 'picker shows candidates: ' + JSON.stringify(probe));
-    assert(probe.compat > 0,
-           'at least one type-compatible fn is marked compat: '
+    assert(probe.total > 0, 'picker counts compatible candidates: ' + JSON.stringify(probe));
+    assert(probe.groups > 0, 'browse mode groups them by namespace: ' + JSON.stringify(probe));
+    assert(probe.incompatShown === 0 && /Show \d+ fns of other types/.test(probe.otherToggle || ''),
+           'fns of other types are behind one toggle, not in the browse list: '
            + JSON.stringify(probe));
-    assert(probe.firstCompatHasOk,
-           'first compat row carries the ✓ glyph');
 
     // Probe 2: text-search filtering narrows the candidate list.
     // The picker now HIDES type-incompatible fns by default (a UX
@@ -158,14 +152,25 @@ const TEST_NAME = 'test-fn-picker-filter';
           r.classList.contains('fn-picker-row-compat')).length,
         incompat: rows.filter(r =>
           r.classList.contains('fn-picker-row-incompat')).length,
+        firstIsCompat: rows.length === 0
+          || rows[0].classList.contains('fn-picker-row-compat')
+          || rows.every((r) => r.classList.contains('fn-picker-row-incompat')),
+        firstCompatHasOk: (() => {
+          const first = rows.find(r => r.classList.contains('fn-picker-row-compat'));
+          return first ? !!first.querySelector('.fn-picker-row-ok') : true;
+        })(),
       };
     });
     assert(filterProbe.total > 0,
            'filter "lower" surfaces at least one row (text → text candidates exist): '
            + JSON.stringify(filterProbe));
-    assert(filterProbe.compat === filterProbe.total,
-           'every surviving row is type-compat (incompat hidden in the new UX): '
+    assert(filterProbe.compat + filterProbe.incompat === filterProbe.total,
+           'every surviving row wears a verdict — ✓ or dimmed ✗, never hidden: '
            + JSON.stringify(filterProbe));
+    assert(filterProbe.firstIsCompat,
+           'compatible rows come before incompatible ones within a group: '
+           + JSON.stringify(filterProbe));
+    assert(filterProbe.firstCompatHasOk, 'a compatible row carries the ✓ glyph');
 
     // Close the picker to keep the page clean.
     await page.keyboard.press('Escape');

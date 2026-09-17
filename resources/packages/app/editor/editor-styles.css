@@ -3293,9 +3293,9 @@ textarea.value-form-hiccup {
      list itself fills the body. */
   z-index: 10002;
   padding: 6px;
-  min-width: 280px; max-width: 360px;
-  /* Never taller than the viewport — the sections box shrinks and its
-     open list scrolls instead of the popover running off screen. */
+  min-width: 300px; max-width: 380px;
+  /* Never taller than the viewport — the list shrinks and scrolls instead
+     of the popover running off screen. */
   max-height: calc(100vh - 16px);
 }
 .fn-picker-search {
@@ -3313,15 +3313,55 @@ textarea.value-form-hiccup {
 }
 .fn-picker-search:focus { box-shadow: 0 0 0 1px var(--fg) inset; }
 .fn-picker-list {
-  max-height: 200px; overflow-y: auto;
+  /* One scrolling list — Exact match block, then namespace groups. Tall
+     enough to browse, never taller than the popover's share of the
+     viewport (the popover itself is capped below). */
+  max-height: min(380px, 60vh); overflow-y: auto;
   flex: 0 1 auto; min-height: 0;
   background: var(--bg);
+  border: 1px solid var(--card-border); border-radius: 3px;
 }
-.fn-picker-list-other {
-  /* slightly dimmer background so the disclosed incompat section
-     reads as "secondary" without relying on row-level opacity */
-  background: color-mix(in srgb, var(--bg) 96%, var(--fg) 4%);
+.fn-picker-status {
+  font-size: 0.5625rem; color: var(--muted-fg); opacity: 0.8;
+  padding: 0 4px; min-height: 0.75rem;
 }
+/* A namespace group header — a fold in browse mode (button), a plain label
+   under a typed filter (div). Same look as the Explorer's tree rows: mono,
+   quiet, the count after the name. */
+.fn-picker-ns-toggle {
+  display: flex; align-items: center; gap: 4px; width: 100%;
+  font-family: var(--mono, monospace);
+  border: 0; text-align: left; cursor: pointer;
+  background: var(--sidebar-bg);
+}
+.fn-picker-ns-toggle:hover { background: var(--hover-bg); }
+.fn-picker-ns-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.fn-picker-ns-count { opacity: 0.7; }
+.fn-picker-group + .fn-picker-group,
+.fn-picker-exact + .fn-picker-group { border-top: 1px dashed var(--card-border); }
+.fn-picker-exact .fn-picker-ns-header { color: var(--success-fg); opacity: 1; }
+/* The fit-tier chip on a compatible row that is NOT an exact fit. */
+.fn-picker-row-fit {
+  flex-shrink: 0;
+  font-size: 0.5625rem; line-height: 0.875rem;
+  padding: 0 4px; border-radius: 3px;
+  border: 1px dashed var(--input-border);
+  color: var(--muted-fg);
+  white-space: nowrap;
+}
+.fn-picker-row-no {
+  color: var(--muted-fg); flex-shrink: 0;
+}
+/* Browse mode: the one toggle for fns of other types. */
+.fn-picker-other-toggle {
+  display: block; width: 100%;
+  font-family: inherit; font-size: 0.625rem;
+  padding: 5px 8px;
+  color: var(--muted-fg); background: var(--sidebar-bg);
+  border: 0; border-top: 1px dashed var(--card-border);
+  text-align: left; cursor: pointer;
+}
+.fn-picker-other-toggle:hover { background: var(--hover-bg); }
 .fn-picker-row {
   display: flex; align-items: center; gap: 6px;
   padding: 5px 8px; cursor: pointer;
@@ -3382,39 +3422,8 @@ textarea.value-form-hiccup {
 
 /* Section grouping — sticky-ish headers above each list, plus a
    disclosure for the "Other" (incompatible) section. */
-.fn-picker-sections {
-  display: flex; flex-direction: column;
-  flex: 0 1 auto; min-height: 0;
-  border: 1px solid var(--card-border); border-radius: 3px;
-  overflow: hidden;
-  background: var(--bg);
-}
-.fn-picker-section-header {
-  font-size: 0.625rem; font-weight: 600;
-  letter-spacing: 0.5px; text-transform: uppercase;
-  padding: 4px 8px;
-  color: var(--muted-fg);
-  background: var(--sidebar-bg);
-  border-bottom: 1px solid var(--card-border);
-  display: flex; align-items: center; gap: 4px;
-}
-.fn-picker-section-disclosure {
-  cursor: pointer;
-  font-family: inherit;
-  text-align: left;
-  border: 0; border-top: 1px solid var(--card-border);
-  width: 100%;
-  flex: 0 0 auto;
-}
 /* Accordion chrome: the first header sits on the box's own border, and
    an OPEN header rules itself off from the list it discloses. */
-.fn-picker-section-disclosure:first-child { border-top: 0; }
-.fn-picker-section-disclosure[aria-expanded="true"] {
-  border-bottom: 1px solid var(--card-border);
-}
-.fn-picker-section-disclosure:hover {
-  background: var(--hover-bg);
-}
 .fn-picker-disclosure-arrow {
   font-size: 0.5rem; opacity: 0.6;
   display: inline-block; min-width: 8px;
@@ -3424,24 +3433,11 @@ textarea.value-form-hiccup {
 }
 /* Whole-signature tiers inside Compatible (exact fit / extra inputs /
    ignores the input) — a lighter header than the section's, foldable. */
-.fn-picker-tier-header {
-  display: flex; align-items: center; gap: 4px;
-  width: 100%;
-  font-family: inherit; font-size: 0.5625rem; font-weight: 600;
-  letter-spacing: 0.4px; text-transform: uppercase;
-  padding: 3px 8px;
-  color: var(--muted-fg);
-  background: var(--bg);
-  border: 0; border-top: 1px dashed var(--card-border);
-  text-align: left; cursor: pointer;
-}
-.fn-picker-tier-header:hover { background: var(--hover-bg); }
-.fn-picker-tier-exact { color: var(--success-fg); }
 /* Namespace group label inside a tier — the dotted path once, so rows
    below carry the bare name only. */
 .fn-picker-ns-header {
-  font-size: 0.5625rem; padding: 3px 8px 1px;
-  color: var(--muted-fg); opacity: 0.8;
+  font-size: 0.5625rem; padding: 3px 8px 2px;
+  color: var(--muted-fg); opacity: 0.85;
   font-family: var(--mono, monospace);
 }
 .fn-picker-more {

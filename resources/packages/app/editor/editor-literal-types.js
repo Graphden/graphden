@@ -692,3 +692,26 @@ function validateLiteralAgainstType(parsed, expected) {
   // in scalars; defer.
   return { ok: true, message: '' };
 }
+
+
+// The canvas text for a literal's label (the layout's `pr-str`, already
+// cut at 30 chars). A string made only of whitespace — the `" "` a
+// str-join separator is bound to — used to render as two bare quotes
+// with an invisible gap, and wrapped into two LINES of quotes on a
+// narrow card (a reader on lesson 15, 2026-09-17). Each whitespace
+// character becomes a visible glyph (␣ space, ⇥ tab, ⏎ newline) and
+// the title says what it is; every other label passes through. Returns
+// `{text, title}` — `title` is null when nothing was substituted.
+function displayLiteralLabel(label) {
+  const raw = String(label ?? '');
+  const m = /^"(\s+)"$/.exec(raw);
+  if (!m) return { text: raw, title: null };
+  const glyph = { ' ': '\u2423', '\t': '\u21e5', '\n': '\u23ce', '\r': '\u23ce' };
+  const names = { ' ': 'space', '\t': 'tab', '\n': 'newline', '\r': 'newline' };
+  const chars = [...m[1]];
+  const text = '"' + chars.map((c) => glyph[c] || '\u2423').join('') + '"';
+  const counts = new Map();
+  for (const c of chars) counts.set(names[c] || 'space', (counts.get(names[c] || 'space') || 0) + 1);
+  const desc = [...counts].map(([n, k]) => (k === 1 ? 'a single ' + n : k + ' ' + n + 's')).join(', ');
+  return { text, title: 'A string of whitespace only: ' + desc };
+}

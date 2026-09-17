@@ -58,14 +58,20 @@
                            "data-form-field" ""
                            "data-field-kind" "keyword"}]}}
 
+  ;; `data-field-kind="any"` is the SMART parse (graphden-forms.js): JSON
+  ;; when it parses, the raw text otherwise — so a reader binding a word
+  ;; to a `:const` types `tick`, not `"tick"` (lesson 32 used to teach the
+  ;; quotes), while `42`, `true`, `[]` and `{"a": 1}` still land typed.
+  ;; Strict JSON (`json`) is what the "as: JSON" choice in the editor asks
+  ;; for explicitly.
   {:name :_form-json
-   :description "Multi-line JSON textarea — the fallback form for `:jsonb` / `:any` and any type with no more specific form-fn. `data-lang` upgrades it to a CodeMirror editor client-side (editor-code.js)."
+   :description "Multi-line smart-parse textarea — the fallback form for `:jsonb` / `:any` and any type with no more specific form-fn: JSON when it parses, text otherwise. `data-lang` upgrades it to a CodeMirror editor client-side (editor-code.js)."
    :parent :const
    :args {:value ["textarea" {"class" "arg-value-edit-input"
                               "rows" 6
                               "data-form-field" ""
                               "data-lang" "json"
-                              "data-field-kind" "json"}]}}
+                              "data-field-kind" "any"}]}}
 
   ;; JS source body textarea. Same shape as `:_form-json`
   ;; but `data-field-kind="text"` so the value round-trips as a
@@ -432,9 +438,22 @@
                  :_value-form-hiccup
                  :_value-form-current]}}
 
-  {:name :_value-form-eff-type
+  ;; The editor's "as:" chooser on a wide (`:any` / `:jsonb`) slot asks
+  ;; for a NARROWER type's form by name — `:resolve-form` reads a text
+  ;; alias as a type, so the name passes straight through. Absent (the
+  ;; normal case), the slot's own effective type decides. Read off the
+  ;; request body directly: the parsed record is the slot ADDRESS the
+  ;; provenance partial synthesises too, and `as` is not part of it.
+  {:name :_value-form-as
+   :parent :get
+   :args {:coll :_value-form-body :key {:value :as} :default nil}}
+  {:name :_value-form-slot-type
    :parent :resolve-slot-effective-type
    :args {:parsed {:as :parsed}}}
+  {:name :_value-form-eff-type
+   :parent :coalesce
+   :args {:value :_value-form-as
+          :default :_value-form-slot-type}}
 
   {:name :_value-form-current
    :parent :current-slot-value

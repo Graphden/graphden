@@ -412,7 +412,11 @@
    `depth` guards a pathologically deep / recursive record type."
   ([t] (resolve-form t 0))
   ([t depth]
-   (let [s0 (types/resolve-alias t)
+   ;; A text alias (`"text"` — the editor's "as:" chooser sends the type
+   ;; NAME; older wire shapes did too) is the keyword it names. Left as a
+   ;; string it slid past `subtype?` into the registry's structural rows.
+   (let [t  (if (string? t) (keyword t) t)
+         s0 (types/resolve-alias t)
          s  (if (and (vector? s0) (= :variant (first s0)))
               (types/desugar-variant s0)
               s0)]
@@ -542,7 +546,10 @@
     {:binding-id (request/parse-uuid-or-clear (:binding-id body))
      :fn-id      (request/parse-uuid-or-clear (:fn-id body))
      :slot-id    (request/parse-uuid-or-clear (:slot-id body))
-     :item-id    (request/parse-uuid-or-clear (:item-id body))}))
+     :item-id    (request/parse-uuid-or-clear (:item-id body))
+     ;; Optional: the type NAME the editor's "as:" chooser wants the
+     ;; form for (a wide `:any` slot edited as text / int / …).
+     :as         (let [a (:as body)] (when (string? a) (not-empty a)))}))
 
 
 (defn validate-value-form
@@ -811,7 +818,9 @@
    `validate-value-form` passes."
   [parsed ctx]
   (let [storage  (request/require-storage ctx)
-        eff-type (or (resolve-slot-effective-type storage parsed) :any)
+        eff-type (or (:as parsed)
+                     (resolve-slot-effective-type storage parsed)
+                     :any)
         cur-val  (current-value storage parsed)
         control  (build-form ctx (resolve-form eff-type) "" nil cur-val)
         root     (cond-> {"data-form-root" ""}

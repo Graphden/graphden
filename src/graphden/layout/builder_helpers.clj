@@ -216,7 +216,10 @@
       ;; relies on the leading `:` to recognise keywords; without this
       ;; fixup a literal `:headers` bound to a `[:list :keyword]` slot
       ;; would mismatch as `text ⊄ keyword` and render the red ring.
-      (let [display-value (bnd/truncate-label (pr-str value) 20)
+      ;; 30 chars — the SAME cut the canvas overlay applies, so what the
+      ;; card shows is what was measured for it (a 20-char cut here left
+      ;; a map reading `{:n 12, :s "text", …` and the card sized for it).
+      (let [display-value (bnd/truncate-label (pr-str value) 30)
             wire-value (if (keyword? value) (str value) value)
             id-fields (arg-row->node-id-fields arg)]
         (swap! state update :nodes conj

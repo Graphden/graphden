@@ -7,7 +7,7 @@ The ~25k lines of plain ES that draw the graph, bind the edits and mount the ser
 
 after: web, layout
 
-[[file:index.org][index]] · ~74 min
+[[file:index.org][index]] · ~76 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -51,7 +51,7 @@ The graph itself: two Maps plus two adjacency indexes and an ~animating~ flag. T
 :PROPERTIES:
 :CUSTOM_ID: editor/fetchBackendLayout
 :FILE: resources/packages/app/editor/editor-layout.js
-:LINE: 278
+:LINE: 308
 :MINS: 10.8
 :END:
 
@@ -59,7 +59,7 @@ The client does NOT lay the graph out. It POSTs the selected root plus the per-n
 
 Most of its length is the sizing pass that runs AFTER the response: per-column widths, then per-column gaps computed from the widest edge label plus the type chips and badges the overlays render beside it. That is the client's one real layout responsibility — making the server's grid fit the pixels its own cards actually occupy. Read the POST at the top, then jump to the comment blocks that explain each gap term.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-layout.js::async function fetchBackendLayout() {][resources/packages/app/editor/editor-layout.js:278]]
+- source :: [[file:../../../resources/packages/app/editor/editor-layout.js::async function fetchBackendLayout() {][resources/packages/app/editor/editor-layout.js:308]]
 - see also :: [[file:layout.org::#layout/build-graph-elements][build-graph-elements]], [[file:layout.org::#layout/compute-layout-matrix][compute-layout-matrix]]
 
 * 5. renderGraph
@@ -144,13 +144,13 @@ What the fn-picker shows, and in what order. ~/api/types/candidates~ answers the
 :PROPERTIES:
 :CUSTOM_ID: editor/enterArgValueEditMode
 :FILE: resources/packages/app/editor/editor-edit-modes.js
-:LINE: 183
-:MINS: 4.6
+:LINE: 196
+:MINS: 6.8
 :END:
 
 How an edit actually happens. The control is not chosen here: the client POSTs the slot to ~/api/value-form~ and the graph's value-form registry answers with hiccup naming a widget — the editor routes on ~data-form-widget~ and knows no type tags at all. Note ~onSaved~: a value change alters binding rows, so ~lookups~ is stale and the handler re-fetches rather than re-rendering.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-edit-modes.js::function enterArgValueEditMode(arg, anchorEl) {][resources/packages/app/editor/editor-edit-modes.js:183]]
+- source :: [[file:../../../resources/packages/app/editor/editor-edit-modes.js::function enterArgValueEditMode(arg, anchorEl) {][resources/packages/app/editor/editor-edit-modes.js:196]]
 - see also :: [[file:crud.org::#crud/render-repr][render-repr]]
 
 * 12. gdEnterDiffMode

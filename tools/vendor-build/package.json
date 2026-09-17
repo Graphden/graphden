@@ -16,6 +16,7 @@
     "@codemirror/search": "6.5.11",
     "@codemirror/state": "6.5.2",
     "@codemirror/view": "6.38.1",
+    "@lezer/highlight": "1.2.1",
     "@nextjournal/lang-clojure": "1.0.0"
   },
   "devDependencies": {

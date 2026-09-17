@@ -7,7 +7,7 @@ Entity/branch/secret writes, request parsing, type-check on write, fn-execution 
 
 after: storage, types
 
-[[file:index.org][index]] · ~67 min
+[[file:index.org][index]] · ~68 min
 
 * 1. extract-entity-params
 :PROPERTIES:
@@ -222,7 +222,7 @@ Typed value representations (docs/EXECUTION.md § Typed value representations) �
 :CUSTOM_ID: crud/resolve-form
 :FILE: src/graphden/crud/value_form.clj
 :LINE: 399
-:MINS: 3.3
+:MINS: 3.6
 :END:
 
 The other direction of ~render-repr~: EDITING a value. A slot's effective type is classified into a form-descriptor tree — record, list, union, or leaf — purely, with aliases resolved and variants desugared, so the editor never has to know the type algebra. A depth guard keeps a recursive record type from unfolding forever.
@@ -234,13 +234,13 @@ The other direction of ~render-repr~: EDITING a value. A slot's effective type i
 :PROPERTIES:
 :CUSTOM_ID: crud/build-form
 :FILE: src/graphden/crud/value_form.clj
-:LINE: 720
+:LINE: 727
 :MINS: 6.0
 :END:
 
 …and the descriptor becomes hiccup: a record is a labelled fieldset, a union a branch ~<select>~ plus one sub-form per branch (the backend pre-selects the branch the current value fits), a leaf goes through the form-fn registry the ~app/forms~ package populates. This is what ~GET /partials/value-form~ returns and what the Inspector swaps in — server-rendered, HTMX-wired (docs/PARTIALS.md).
 
-- source :: [[file:../../../src/graphden/crud/value_form.clj::(defn build-form][src/graphden/crud/value_form.clj:720]]
+- source :: [[file:../../../src/graphden/crud/value_form.clj::(defn build-form][src/graphden/crud/value_form.clj:727]]
 - same file :: [[file:crud.org::#crud/resolve-form][resolve-form]]
 
 * 19. run-captured!

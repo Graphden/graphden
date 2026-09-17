@@ -43,7 +43,16 @@ function createArgOverlay(node, container) {
   // critical for read-only rows that have no edit popover at all.
   const rawLabel = node.data('label') || '';
   const isTruncated = rawLabel.length > 30;
-  content.textContent = truncateLabel(rawLabel, 30);
+  // One line, always: the card was measured for this text (see
+  // `calculateNodeSize`), and a wrapped literal — `"big` over `world"`,
+  // or two bare quotes for a lone space — misreads as two values.
+  // Whitespace-only strings print their characters as glyphs.
+  const shown = (typeof displayLiteralLabel === 'function')
+    ? displayLiteralLabel(truncateLabel(rawLabel, 30))
+    : { text: truncateLabel(rawLabel, 30), title: null };
+  content.textContent = shown.text;
+  content.classList.add('arg-value-text');
+  if (shown.title) content.title = shown.title;
   row.appendChild(content);
 
   // Persistent mismatch indicator. If this arg's literal value would
@@ -159,7 +168,7 @@ function createArgOverlay(node, container) {
   const editable = inImpl && signedIn && owned;
   if (editable) {
     content.style.cursor = 'pointer';
-    content.title = isTruncated ? rawLabel : 'Click to edit value';
+    content.title = shown.title || (isTruncated ? rawLabel : 'Click to edit value');
     // Visible affordance on hover (CSS ::after ✎) — click-to-edit was
     // pure cursor+title before, i.e. invisible until stumbled upon.
     content.classList.add('arg-value-editable');

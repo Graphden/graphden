@@ -7,7 +7,8 @@ import {defaultKeymap, history, historyKeymap, indentWithTab} from '@codemirror/
 import {css} from '@codemirror/lang-css';
 import {javascript} from '@codemirror/lang-javascript';
 import {json} from '@codemirror/lang-json';
-import {bracketMatching, defaultHighlightStyle, indentOnInput, syntaxHighlighting} from '@codemirror/language';
+import {HighlightStyle, bracketMatching, defaultHighlightStyle, indentOnInput, syntaxHighlighting} from '@codemirror/language';
+import {tags} from '@lezer/highlight';
 import {MergeView} from '@codemirror/merge';
 import {highlightSelectionMatches, search, searchKeymap} from '@codemirror/search';
 import {EditorState} from '@codemirror/state';
@@ -33,5 +34,10 @@ window.CM = {
   indentOnInput,
   syntaxHighlighting,
   defaultHighlightStyle,
+  // Token styling the editor themes itself (editor-code.js builds a
+  // class-based HighlightStyle; colours come from CSS tokens, so the
+  // dark theme is not left with defaultHighlightStyle's #a11 strings).
+  HighlightStyle,
+  tags,
   langs: {javascript, css, json, clojure},
 };

@@ -65,10 +65,10 @@ async function revertAssetViaApi(page, base) {
     await waitTourTitle(page, 'Make the thunk yours, in place', 150000);
     await extendInPlace(page, 'const', 'tutorial-tick');
     await waitTourTitle(page, 'Give it something to return', 150000);
-    // `:any` slots parse the literal as JSON — a bare word is rejected. The
+    // A wide (`:any`) slot smart-parses: a bare word lands as text. The
     // `+` hangs off tutorial-tick's card but WRITES on the daemon: a
     // callable's open input is a closure capture at the call site.
-    await bindPlaceholderOn(page, 'tutorial-daemon', 'value', 'literal', '"tick"');
+    await bindPlaceholderOn(page, 'tutorial-daemon', 'value', 'literal', 'tick');
     // The step gates on SELECTION, not on a button — the bind already leaves
     // the daemon selected, so this only waits for the gate to clear.
     await waitTourTitle(page, 'Where a fn becomes a service', 150000);

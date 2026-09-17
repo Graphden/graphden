@@ -181,6 +181,21 @@ function metadataStripsHeight(nodeData) {
  * Returns exactly 1 at the default root size, so the geometry is
  * unchanged for everyone who has not touched the setting.
  */
+// Text width in CSS pixels for `font` (a CSS font shorthand), through an
+// offscreen canvas — the only way to size a node for the exact string
+// its overlay will print. Falls back to 6px per character without a
+// canvas (a headless test vm).
+let _measureCtx = null;
+function measureCanvasText(text, font) {
+  try {
+    if (!_measureCtx) _measureCtx = document.createElement('canvas').getContext('2d');
+    _measureCtx.font = font;
+    return _measureCtx.measureText(text).width;
+  } catch (_) {
+    return String(text).length * 6;
+  }
+}
+
 function typographyScale() {
   try {
     const px = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
@@ -203,18 +218,33 @@ function calculateNodeSize(nodeData) {
   }
 
   if (type === 'arg') {
-    const maxLen = 30;
-    const effectiveLen = Math.min(label.length, maxLen);
-    // arg-overlay is column-flex: row of (value text + type-chip +
-    // inline-expand trigger + optional mismatch badge), then the
-    // drag handle below. The horizontal budget only needs to cover
-    // the inline row; the drag handle's height already lives in
-    // DRAG_HANDLE_HEIGHT.
-    const chipBudget = 38;     // `int` / `text` / `bool` etc.
-    const triggerBudget = 14;  // `▸/▾` trigger
+    // arg-overlay is column-flex: a row of (value text + type-chip +
+    // provenance ↖), then the drag handle below. Size the row from what
+    // it will actually render, MEASURED in the overlay's own font — the
+    // old 6px-per-character guess under-budgeted the chip's margins and
+    // the ↖, and the text then wrapped onto a second line (`"big` /
+    // `world"`; a lone space as two bare quotes), 2026-09-17. The
+    // overlay is fixed to this width (`syncOverlayGeometry`) and its text
+    // is `white-space: pre`, so the two must agree.
     const argScale = typographyScale();
+    const shown = (typeof displayLiteralLabel === 'function')
+      ? displayLiteralLabel(truncateLabel(label, 30)).text
+      : truncateLabel(label, 30);
+    const textW = measureCanvasText(shown, (10 * argScale) + 'px "SF Mono", Monaco, monospace');
+    // The chip shows the slot's short type label; a hidden chip still
+    // takes its width (it fades in on hover). Its font is 0.5625rem.
+    const chipLabel = nodeData.argType ? String(nodeData.argType).replace(/^:/, '') : '';
+    const chipW = chipLabel
+      ? measureCanvasText(chipLabel, (9 * argScale) + 'px "SF Mono", Monaco, monospace') + 8 + 2 + 4
+      : 0;
+    const linkW = Array.isArray(nodeData.sourceChain) && nodeData.sourceChain.length ? 15 * argScale + 4 : 0;
+    // The ✎ hover glyph is a `::after` that always takes its width (only
+    // its opacity changes) — measure it too, or the closing quote is what
+    // the ellipsis eats. 16 = the text's own 8px side padding.
+    const pencilW = measureCanvasText(' \u270e', (10 * argScale) + 'px "SF Mono", Monaco, monospace');
+    const width = Math.ceil(Math.max(40 * argScale, textW + pencilW + 16 + chipW + linkW + 6));
     return {
-      width: Math.round(Math.max(40, effectiveLen * 6 + 16 + chipBudget + triggerBudget) * argScale),
+      width,
       height: Math.round((22 + DRAG_HANDLE_HEIGHT) * argScale)  // content (padding 4+4 + line 14) + drag handle
     };
   }

@@ -187,6 +187,16 @@ assert(ctx.compactTypeChipText(['union', 'bool', 'float', 'int', 'null', 'text',
   ['union', 'bool']) === 'union',
   'a wide union with an array `flat` says "union", not the joined array');
 
+// --- displayLiteralLabel: whitespace-only strings print their characters ---
+assert(ctx.displayLiteralLabel('" "').text === '"\u2423"', 'a lone space prints as ␣');
+assert(/single space/.test(ctx.displayLiteralLabel('" "').title || ''), '…and says so in the title');
+assert(ctx.displayLiteralLabel('"   "').text === '"\u2423\u2423\u2423"', 'three spaces, three glyphs');
+assert(ctx.displayLiteralLabel('"\t"').text === '"\u21e5"', 'a tab prints as ⇥');
+assert(ctx.displayLiteralLabel('"big world"').text === '"big world"' && ctx.displayLiteralLabel('"big world"').title === null,
+  'a string WITH words is untouched (its inner space stays a space)');
+assert(ctx.displayLiteralLabel('42').text === '42' && ctx.displayLiteralLabel('{:n 12}').title === null,
+  'non-string labels pass through');
+
 console.log(failures === 0
   ? '✓ type-helpers — ' + passes + ' assertions'
   : '✗ type-helpers — ' + failures + ' failed of ' + (passes + failures));

@@ -25,6 +25,16 @@
      (execute popover, lens active chip, focus rings) stop reading as
      a foreign blue island. Keep in sync with --gd-flow below. */
   --accent: #137c74;
+  /* Code-editor token colours (CodeMirror via editor-code.js) — one set
+     per theme, all legible on --card-bg. */
+  --tok-string: #0a6e3a;
+  --tok-number: #8a4b00;
+  --tok-atom: #7a2fb5;
+  --tok-key: #1b4fa0;
+  --tok-keyword: #9a1f6a;
+  --tok-comment: #6b7280;
+  --tok-fn: #1b4fa0;
+  --tok-type: #0b6b7a;
   --soft-tint: #eef4ff;
   /* Graph node ("card") palette — keeps the same visual hierarchy in both
      themes (slightly-raised body + distinct header band + visible outline)
@@ -183,6 +193,14 @@ body.theme-dark {
   --header-fg: #e6edf3;
   /* Legacy accent — dark-theme flow teal (see the light-theme note). */
   --accent: #37c9bb;
+  --tok-string: #7ee2a8;
+  --tok-number: #f0b36a;
+  --tok-atom: #d2a8ff;
+  --tok-key: #79c0ff;
+  --tok-keyword: #ff8fc2;
+  --tok-comment: #8b949e;
+  --tok-fn: #79c0ff;
+  --tok-type: #56d4dd;
   --soft-tint: #182130;
   /* Card body slightly raised vs Ink body; the focused/root card keeps the
      Graphden-Blue title band (brand colour reads on dark too); outline
@@ -4626,7 +4644,9 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
    noise on every literal. Keep it as a hover / expanded affordance
    (it's still the inline type-expand anchor). */
 .arg-overlay-row .arg-type-chip {
-  opacity: 0;
+  /* Quiet, not invisible: the card is measured with the chip's width, and a
+     fully hidden chip left an unexplained gap between the value and ↖. */
+  opacity: 0.35;
   transition: opacity 0.12s;
 }
 .arg-overlay-row:hover .arg-type-chip,
@@ -4637,6 +4657,12 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 
 /* Editable literal — reveal a ✎ on row hover so click-to-edit is
    discoverable, not a cursor-only secret. */
+/* The literal's text on a value card: one line, exactly what the card
+   was measured for — never wrap (`"big` / `world"`), clip with … if the
+   theme's font runs wider than the measurement. */
+.arg-value-text {
+  white-space: pre; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
 .arg-value-editable::after {
   content: " ✎";
   opacity: 0;
@@ -5339,6 +5365,25 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   max-height: 420px; overflow: auto; }
 .gd-code-editor .cm-gutters { background: var(--card-row-highlight);
   color: var(--muted-fg); border-right: 1px solid var(--light-border); }
+/* Syntax tokens — classes from editor-code.js's HighlightStyle, colours
+   from the theme tokens above (defaultHighlightStyle's fixed light colours
+   were unreadable on the dark popover). */
+.gd-tok-string { color: var(--tok-string); }
+.gd-tok-number { color: var(--tok-number); }
+.gd-tok-atom { color: var(--tok-atom); }
+.gd-tok-key { color: var(--tok-key); }
+.gd-tok-keyword { color: var(--tok-keyword); }
+.gd-tok-comment { color: var(--tok-comment); font-style: italic; }
+.gd-tok-var { color: var(--fg); }
+.gd-tok-fn { color: var(--tok-fn); }
+.gd-tok-type { color: var(--tok-type); }
+.gd-tok-punct { color: var(--muted-fg); }
+.gd-tok-invalid { color: var(--error-fg); text-decoration: underline wavy; }
+.gd-code-editor .cm-cursor { border-left-color: var(--fg); }
+.gd-code-editor .cm-activeLine { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.gd-code-editor .cm-selectionBackground, .gd-code-editor .cm-content ::selection {
+  background: color-mix(in srgb, var(--accent) 30%, transparent) !important; }
+.gd-code-editor .cm-matchingBracket { outline: 1px solid var(--accent); background: transparent; }
 
 /* Phase C stats sidebar section — org-scoped run rollups. */
 .stats-panel { padding: 4px 8px 8px; font-size: 0.6875rem;

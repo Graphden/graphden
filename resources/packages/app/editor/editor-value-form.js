@@ -167,12 +167,15 @@ function installRawToggle(hostEl, payloadValue) {
 // POST the slot identifiers to /api/value-form. Read-only endpoint —
 // plain fetch, no auth. Returns the `{ok, form, value}` payload, or
 // null on any network / HTTP failure (caller falls back).
-async function fetchValueForm(arg) {
+// `as` (optional) — a type NAME: the form for that narrower type instead
+// of the slot's own (the "as:" chooser on a wide slot).
+async function fetchValueForm(arg, as) {
   const body = {};
   if (arg['binding-id']) body['binding-id'] = arg['binding-id'];
   if (arg['fn-id'])      body['fn-id']      = arg['fn-id'];
   if (arg['slot-id'])    body['slot-id']    = arg['slot-id'];
   if (arg['item-id'])    body['item-id']    = arg['item-id'];
+  if (as)                body.as            = as;
   try {
     const r = await fetch(API.api_value_form, {
       method: 'POST',
@@ -248,7 +251,13 @@ function renderValueForm(hostEl, payload, opts) {
 // helpers — composite literal → one `binding.value`, sequence item →
 // its own endpoint. The value is already typed by `data-field-kind`,
 // so it is NOT re-smart-parsed before the write.
-async function saveFormValue(arg, hostEl) {
+// `opts.as` — the type name the reader chose for a wide slot: the value
+// is written together with the binding's `type-override-fn-id`, so the
+// slot is NARROWED at this use-site (TYPES.md § Type Narrowing Through
+// Inheritance — the `:refine {slot {:type T}}` an fns.edn author writes)
+// and the next edit opens the typed form straight away. Items have no
+// per-item type — `as` only shaped the parse there.
+async function saveFormValue(arg, hostEl, opts) {
   const root = hostEl.querySelector('[data-form-root]') || hostEl;
   // Guard the gap between popover-open and the form arriving — a Save
   // click while only the spinner is mounted must not persist `{}`.
@@ -267,7 +276,12 @@ async function saveFormValue(arg, hostEl) {
     return { ok: false, error: 'Cannot save — editor not ready.' };
   }
   if (typeof writeBindingFields === 'function') {
-    return await writeBindingFields(arg, { value: JSON.stringify(value) });
+    const fields = { value: JSON.stringify(value) };
+    if (opts?.as && typeof resolveTypeFnIdByName === 'function') {
+      const overrideId = await resolveTypeFnIdByName(opts.as);
+      if (overrideId) fields['type-override-fn-id'] = overrideId;
+    }
+    return await writeBindingFields(arg, fields);
   }
   return { ok: false, error: 'Cannot save — editor not ready.' };
 }

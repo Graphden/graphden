@@ -59,6 +59,24 @@ async function populateCompatibleTypes(arg, select, cur, loadingOpt) {
                                   { current: cur, includePrimitives: true });
   if (loadingOpt) loadingOpt.remove();
 }
+// The id of the PARENT-LESS fn named `typeName` — a primitive (`text`,
+// `int`) or a refinement (`port`) — the only legal targets of a binding's
+// `type-override-fn-id`. '' when there is none. Shared by the chip's
+// "Change type" popover and the literal editor's "as:" chooser.
+async function resolveTypeFnIdByName(typeName) {
+  if (!typeName || !graphData) return '';
+  const parentLess = f => !f['parent-ids'] || f['parent-ids'].length === 0;
+  // Fast path: an already-loaded parent-less type-fn.
+  let fn = (graphData.fns || []).find(f => f.name === typeName && parentLess(f));
+  // Slow path: the type-fn (primitive / refinement) may not be loaded —
+  // it lives in the root bucket. Resolve it by name via the server.
+  if (!fn && typeof resolveFnByName === 'function') {
+    const resolved = await resolveFnByName(typeName);
+    if (resolved && parentLess(resolved)) fn = resolved;
+  }
+  return fn ? fn.id : '';
+}
+
 function enterArgTypeEditMode(arg, anchorEl) {
   if (!arg) return;
   // Capture pre-edit binding state so we can roll back if the user
@@ -119,19 +137,7 @@ function enterArgTypeEditMode(arg, anchorEl) {
       // filter (`!base-fn-id && !element-fn-id`) rejected
       // refinements which the picker happily listed, leaving the
       // user staring at a silent 400 from `writeBindingFields`.
-      const overrideFnId = await (async () => {
-        if (!newType || !graphData) return '';
-        const parentLess = f => !f['parent-ids'] || f['parent-ids'].length === 0;
-        // Fast path: an already-loaded parent-less type-fn.
-        let fn = (graphData.fns || []).find(f => f.name === newType && parentLess(f));
-        // Slow path: the type-fn (primitive / refinement) may not be loaded —
-        // it lives in the root bucket. Resolve it by name via the server.
-        if (!fn && typeof resolveFnByName === 'function') {
-          const resolved = await resolveFnByName(newType);
-          if (resolved && parentLess(resolved)) fn = resolved;
-        }
-        return fn ? fn.id : '';
-      })();
+      const overrideFnId = await resolveTypeFnIdByName(newType);
       if (!(await writeBindingFields(arg, {
         'type-override-fn-id': overrideFnId,
         value: '',

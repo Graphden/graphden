@@ -692,3 +692,17 @@
           (is (= (str (:id b)) (get attrs "data-binding-id")))
           (is (in-tree? control "number")))
         (finally (sp/close storage))))))
+
+
+(deftest parse-value-form-request-as-test
+  (testing "the optional `as` (a type NAME from the editor's \"as:\" chooser) rides along; blank / non-string is dropped"
+    (is (= "text" (:as (vf/parse-value-form-request {:body {:fn-id (str (random-uuid)) :as "text"}}))))
+    (is (nil? (:as (vf/parse-value-form-request {:body {:fn-id (str (random-uuid))}}))))
+    (is (nil? (:as (vf/parse-value-form-request {:body {:fn-id (str (random-uuid)) :as ""}}))))
+    (is (nil? (:as (vf/parse-value-form-request {:body {:fn-id (str (random-uuid)) :as 7}}))))))
+
+
+(deftest resolve-form-text-alias-test
+  (testing "a type NAME as a string (the editor's \"as:\" chooser) classifies like the keyword"
+    (is (= (vf/resolve-form :text) (vf/resolve-form "text")))
+    (is (= :leaf (:kind (vf/resolve-form "int"))))))

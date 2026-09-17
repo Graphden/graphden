@@ -360,6 +360,29 @@ passes: a `(item:int)` slot keeps out a fn that requires
 `:positive-int` (0 would break it) — that is contravariance, and the
 picker files such fns under *Other* with the explainer.
 
+### Narrowing at a use-site vs a typed child fn
+
+A slot typed `:any` / `:jsonb` (`:const`'s `:value`, a cell's
+`:initial-value`) accepts anything, so its literal editor cannot know
+what you mean by `42` or `tick`. It smart-parses — JSON when the text
+parses, plain text otherwise — and offers an **as** chooser (text /
+int / float / bool / keyword / JSON). Picking one does two things at
+once: the form becomes that type's control with its validation, and
+**Save narrows the binding** — `binding.type-override-fn-id` on
+this `(fn, slot)`, exactly what an fns.edn author writes as
+`:refine {value {:type :text}}` (§ Type Narrowing Through
+Inheritance). The type chip's "Change type" popover is the same
+narrowing without a value.
+
+So the rule of thumb: **narrow where you bind** when the narrower type
+is a fact about *this* use — the daemon's thunk returns text, this
+cell holds a list. **Make a typed child fn** when the narrower
+interface is something others will *reuse* — a `:const` that always
+returns text is a fn (`:text-const`) other fns should extend, not a
+one-off override. Both are monotone (a child can only narrow further),
+both are visible on the canvas (the chip shows the narrowed type with
+its provenance), and neither requires touching the base fn.
+
 ---
 
 ## Structural Types (Records)

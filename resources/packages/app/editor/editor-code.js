@@ -22,6 +22,33 @@
     return l ? l() : null;
   }
 
+  // Token colours as CSS CLASSES (`.gd-tok-*`, editor-styles.css), so they
+  // follow the editor's own light / dark tokens. `defaultHighlightStyle`
+  // hard-codes light-theme colours — #a11 strings, #164 numbers — that
+  // vanished on the dark popover (2026-09-17). Falls back to it when the
+  // vendored bundle predates the HighlightStyle / tags exports.
+  let _gdStyle = null;
+  function gdHighlightStyle() {
+    const CM = window.CM;
+    if (_gdStyle) return _gdStyle;
+    if (!CM.HighlightStyle || !CM.tags) return CM.defaultHighlightStyle;
+    const t = CM.tags;
+    _gdStyle = CM.HighlightStyle.define([
+      { tag: t.string, class: 'gd-tok-string' },
+      { tag: [t.number, t.integer, t.float], class: 'gd-tok-number' },
+      { tag: [t.bool, t.null, t.atom], class: 'gd-tok-atom' },
+      { tag: [t.propertyName, t.definition(t.propertyName)], class: 'gd-tok-key' },
+      { tag: [t.keyword, t.modifier, t.controlKeyword, t.operatorKeyword], class: 'gd-tok-keyword' },
+      { tag: [t.comment, t.lineComment, t.blockComment], class: 'gd-tok-comment' },
+      { tag: [t.variableName, t.definition(t.variableName)], class: 'gd-tok-var' },
+      { tag: [t.function(t.variableName), t.function(t.propertyName)], class: 'gd-tok-fn' },
+      { tag: [t.typeName, t.className, t.tagName], class: 'gd-tok-type' },
+      { tag: [t.operator, t.punctuation, t.bracket, t.separator], class: 'gd-tok-punct' },
+      { tag: t.invalid, class: 'gd-tok-invalid' },
+    ]);
+    return _gdStyle;
+  }
+
   function baseExtensions(ta) {
     const CM = window.CM;
     return [
@@ -33,7 +60,7 @@
       CM.highlightActiveLine(),
       CM.highlightSelectionMatches(),
       CM.search(),
-      CM.syntaxHighlighting(CM.defaultHighlightStyle, { fallback: true }),
+      CM.syntaxHighlighting(gdHighlightStyle(), { fallback: true }),
       CM.keymap.of([...CM.defaultKeymap, ...CM.historyKeymap, ...CM.searchKeymap, CM.indentWithTab]),
       CM.EditorView.updateListener.of((u) => {
         if (u.docChanged) ta.value = u.state.doc.toString();

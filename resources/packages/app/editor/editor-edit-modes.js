@@ -180,10 +180,32 @@ function openInlineEditPopover(opts) {
 // formatTypeHint, NUMERIC_SUPERS) live in editor-literal-types.js —
 // loaded into the bundle before this file.
 
+// The narrower types a WIDE slot (`:any` / `:jsonb`) can be edited — and
+// narrowed to — from the literal editor. Kept to the primitives every
+// deployment has; a refinement or record is what the chip's "Change
+// type" popover (or a fn-def's `:refine`) is for.
+const WIDE_SLOT_AS_CHOICES = [
+  ['', 'auto (JSON or text)'], ['text', 'text'], ['int', 'int'], ['float', 'float'],
+  ['bool', 'bool'], ['keyword', 'keyword'], ['jsonb', 'JSON'],
+];
+
+function isWideSlotType(expected) {
+  return expected == null || expected === 'any' || expected === 'jsonb';
+}
+
 function enterArgValueEditMode(arg, anchorEl) {
   if (!arg) return;
   const expected = (typeof expectedSlotType === 'function')
                    ? expectedSlotType(arg) : null;
+  // "as:" — on a wide slot the reader may say what the value IS (text,
+  // int, …): the form becomes the typed control with its validation,
+  // and Save narrows the binding to that type (`type-override-fn-id`),
+  // so the slot stops being `any` at this use-site. The same narrowing
+  // an fns.edn author writes as `:refine {slot {:type :text}}`; making a
+  // typed child fn is for when the narrower interface is to be REUSED.
+  // Not offered on a list item (items share the slot's type).
+  let chosenAs = '';
+  const offerAs = isWideSlotType(expected) && !arg['item-id'];
   openInlineEditPopover({
     anchorEl,
     ariaLabel: 'Edit arg value',
@@ -195,6 +217,27 @@ function enterArgValueEditMode(arg, anchorEl) {
         hint.className = 'arg-value-edit-hint';
         hint.textContent = 'Expected: ' + formatTypeHint(expected);
         root.appendChild(hint);
+      }
+      let asSelect = null;
+      if (offerAs) {
+        const asRow = document.createElement('label');
+        asRow.className = 'extend-ns-row value-form-as-row';
+        const cap = document.createElement('span');
+        cap.className = 'extend-ns-cap';
+        cap.textContent = 'as';
+        asSelect = document.createElement('select');
+        asSelect.className = 'extend-ns-select value-form-as-select';
+        asSelect.setAttribute('aria-label', 'Edit this value as a narrower type — Save narrows the slot to it');
+        asSelect.title = 'The slot takes anything. Pick what this value is: the form and its validation follow, and Save narrows the slot to that type here.';
+        for (const [v, label] of WIDE_SLOT_AS_CHOICES) {
+          const o = document.createElement('option');
+          o.value = v;
+          o.textContent = label;
+          asSelect.appendChild(o);
+        }
+        asRow.appendChild(cap);
+        asRow.appendChild(asSelect);
+        root.appendChild(asRow);
       }
       // The form is fetched async, but `makeControl` must return a
       // control synchronously — so it returns a host div (with a
@@ -215,35 +258,49 @@ function enterArgValueEditMode(arg, anchorEl) {
       // The backend resolves the slot type and serves the matching
       // control as hiccup. If the endpoint is unreachable, fall back
       // to a legacy single-line input so value-editing never breaks.
-      fetchValueForm(arg).then((payload) => {
-        // The user may have dismissed the popover mid-fetch — `root`
-        // is then detached from the document.
-        if (!root.isConnected) return;
-        if (!payload) {
-          makeLegacyControl(host, arg, expected, status);
-          return;
-        }
-        // Marker-typed slot (server-dispatched — the graph's
-        // value-form registry mapped the slot's marker type to the
-        // `secret-binding` widget; the editor knows no tag names):
-        // creating a NEW binding routes to the path+value popover
-        // that writes a resolver binding via POST /api/secrets/binding.
-        // An EXISTING binding keeps the legacy control (same UX as
-        // before server dispatch — inspect/replace the raw value).
-        if (formWidgetName(payload.form) === 'secret-binding') {
-          if (!arg['binding-id']) {
-            enterSecretBindingEditMode(arg, anchorEl);
+      // Re-run whenever the "as:" choice changes — the form for the
+      // chosen type replaces the wide one, and the validator's
+      // expected type follows the choice.
+      let fetchSeq = 0;
+      const load = () => {
+        const seq = ++fetchSeq;
+        host.replaceChildren(loading);
+        fetchValueForm(arg, chosenAs || undefined).then((payload) => {
+          // The user may have dismissed the popover mid-fetch — `root`
+          // is then detached from the document — or changed the choice.
+          if (!root.isConnected || seq !== fetchSeq) return;
+          if (!payload) {
+            makeLegacyControl(host, arg, expected, status);
             return;
           }
-          makeLegacyControl(host, arg, expected, status);
-          return;
-        }
-        renderValueForm(host, payload, { expected, statusEl: status });
-      });
+          // Marker-typed slot (server-dispatched — the graph's
+          // value-form registry mapped the slot's marker type to the
+          // `secret-binding` widget; the editor knows no tag names):
+          // creating a NEW binding routes to the path+value popover
+          // that writes a resolver binding via POST /api/secrets/binding.
+          // An EXISTING binding keeps the legacy control (same UX as
+          // before server dispatch — inspect/replace the raw value).
+          if (formWidgetName(payload.form) === 'secret-binding') {
+            if (!arg['binding-id']) {
+              enterSecretBindingEditMode(arg, anchorEl);
+              return;
+            }
+            makeLegacyControl(host, arg, expected, status);
+            return;
+          }
+          renderValueForm(host, payload, { expected: chosenAs || expected, statusEl: status });
+        });
+      };
+      if (asSelect) {
+        asSelect.addEventListener('change', () => { chosenAs = asSelect.value; load(); });
+        asSelect.addEventListener('keydown', (e) => { e.stopPropagation(); });
+      }
+      load();
       return host;
     },
     async doSave(control) {
-      return saveFormValue(arg, control);
+      // "JSON" is the wide type itself — a parse choice, not a narrowing.
+      return saveFormValue(arg, control, { as: (chosenAs && chosenAs !== 'jsonb') ? chosenAs : '' });
     },
     // Full refresh, not `renderGraph` — a value change alters binding/
     // item rows, leaving `lookups` stale. `loadGraphData` re-fetches the

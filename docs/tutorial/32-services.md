@@ -60,8 +60,11 @@ The in-editor tour builds the same two fns, so the names match it.
    on the daemon's canvas (extend in place, lesson 02). The card's
    `:value` edge runs on to a dashed `+` — a callable's open input is
    supplied by its caller, so this binding is written on the daemon
-   (lesson 06). Click it, **Bind literal**, and type `"tick"` — with
-   the quotes; the slot is `:any`, read as JSON. This is the work the
+   (lesson 06). Click it, **Bind literal**, and type `tick` — the
+   slot is `:any`, so a bare word is stored as text (`42`, `true` or
+   `[…]` would land as a number, a boolean, a list; the **as** chooser
+   above the field says so explicitly and narrows the slot to that
+   type). This is the work the
    service will keep doing: the smallest
    stand-in for a listener or a cron loop. `tutorial-daemon` now has
    no free arguments AND carries `:process`: the two conditions for a

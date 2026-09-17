@@ -615,6 +615,15 @@
                                   {:parent :str-join :args {:coll ["a" "b"] :separator ""}}]}}
           :expected ["1-a" "ab"]}}
 
+  {:name :rows->csv-quotes-commas-quotes-and-newlines
+   :description "`:rows->csv` writes the header from the column names, one line per row in column order, an absent key as an empty cell, and quotes a field holding a comma or a quote (quotes doubled)."
+   :parent :assert-eq
+   :args {:actual {:parent :rows->csv
+                   :args {:rows {:value [{:org "acme" :runs 3 :note "a, \"quoted\" one"}
+                                         {:org "beta" :runs 0}]}
+                          :columns {:value [:org :runs :note]}}}
+          :expected "org,runs,note\nacme,3,\"a, \"\"quoted\"\" one\"\nbeta,0,"}}
+
   {:name :keyword-and-string-convert-both-ways
    :description "`:str-to-keyword` `\"foo\"` is `:foo`; `:keyword-to-str` and `:name` give `\"foo\"` back; `:to-str` keeps the colon."
    :parent :assert-eq

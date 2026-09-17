@@ -17,8 +17,10 @@ not traffic; 90-day retention. Surfaced three ways: the `7d: N runs
 table, top-fns table; each org sees only its own workspace, except
 that a platform-tier principal or a `:view-all-stats` capability
 delegate additionally gets the cross-org by-org rollup —
-`usage-all-org-stats` returns `[]` for everyone else); and
-`org-stats` / `org-totals` for tooling. See
+`usage-all-org-stats` returns `[]` for everyone else); `org-stats` /
+`org-totals` for tooling; and `GET /api/orgs/usage.csv?days=30` — the
+same by-org rollup as CSV, the operator's report for invoices and the
+founding-orgs register (a tenant context gets the header only). See
 [EXECUTION.md § Usage rollups](EXECUTION.md).
 
 ### Tutorial funnel (always on, aggregate only)

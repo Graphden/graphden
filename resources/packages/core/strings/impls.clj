@@ -149,6 +149,21 @@
   (str/join separator coll))
 
 
+(defbase rows->csv-fn [rows columns]
+  ;; RFC 4180: a field holding a comma, a quote or a newline is quoted,
+  ;; quotes doubled. Rows are maps keyed by keyword OR string (a literal row
+  ;; travelling through JSONB arrives string-keyed).
+  (let [cell (fn [v]
+               (let [s (str (if (nil? v) "" v))]
+                 (if (re-find #"[,\"\n]" s)
+                   (str "\"" (str/replace s "\"" "\"\"") "\"")
+                   s)))
+        col-name (fn [c] (if (keyword? c) (name c) (str c)))
+        line (fn [vals] (str/join "," (map cell vals)))]
+    (str/join "\n" (cons (line (map col-name columns))
+                         (map (fn [row] (line (map #(or (get row %) (get row (col-name %))) columns))) rows)))))
+
+
 (defbase str-to-keyword-fn [string]
   (keyword string))
 
@@ -320,6 +335,7 @@
    :str-trim           {:impl str-trim-fn           :taint-propagate? true}
    :str-split          {:impl str-split-fn          :taint-propagate? true}
    :str-join           {:impl str-join-fn           :taint-propagate? true}
+   :rows->csv          {:impl rows->csv-fn          :taint-propagate? true}
    :str-to-keyword     {:impl str-to-keyword-fn     :return-type-rule str-to-keyword-return-rule :taint-propagate? true}
    :keyword-to-str     {:impl keyword-to-str-fn     :taint-propagate? true}
    :pr-str             {:impl pr-str-fn             :taint-propagate? true}

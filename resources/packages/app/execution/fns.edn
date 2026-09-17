@@ -749,6 +749,33 @@
    :parent :json-handler
    :args {:data :_api-failures-ack-all-data}}
 
+  ;; --- GET /api/orgs/usage.csv?days=30 — the operator's usage report:
+  ;; every org's runs / failures / summed duration over the trailing
+  ;; window as CSV, for invoices and the founding-orgs register
+  ;; (docs/PLANS.md § The billing seam). Composition over the
+  ;; operator-only `:usage-all-org-stats` (a tenant context gets [] →
+  ;; the header only, never another org's numbers) and the pure
+  ;; `:rows->csv`. `days` defaults to 30; the cap is a report's, not a
+  ;; page's.
+  {:name :_usage-csv-days-param
+   :parent :query-param :args {:param-name {:value "days"}}}
+  {:name :_usage-csv-days
+   :parent :if
+   :args {:test {:parent :nil? :args {:value :_usage-csv-days-param}}
+          :then {:value 30}
+          :else {:parent :parse-int :args {:s :_usage-csv-days-param}}}}
+  {:name :_usage-csv-rows
+   :parent :usage-all-org-stats
+   :args {:days :_usage-csv-days :limit {:value 10000}}}
+  {:name :_usage-csv-text
+   :parent :rows->csv
+   :args {:rows :_usage-csv-rows :columns {:value [:org :runs :failed :duration-ms-sum]}}}
+  {:name :api-usage-csv-handler
+   :lambda-params [:request]
+   :description "Ring handler for GET /api/orgs/usage.csv — per-org usage over `?days=` (default 30) as text/plain CSV."
+   :parent :text-ok-response
+   :args {:body :_usage-csv-text}}
+
   {:name :failure-ack
    :description "Dismiss ONE failed execution from the Failed runs panel — sets `:acknowledged-at` on the row (org-guarded; the audit row itself stays for its TTL). Returns true when a row was updated, false for an unknown/foreign/already-acked id."
    :args {:execution-id {:type :nullable-text :description "The `:execution-id` of the failure row to dismiss (uuid text; nil/malformed → false)."}}

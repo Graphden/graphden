@@ -657,6 +657,11 @@
    :parent :get-auth-required
    :args {:path "/failures" :handler :api-failures-handler}}
 
+  {:name :api-usage-csv
+   :description "GET /api/orgs/usage.csv?days=30 — every org's runs / failures / summed duration over the trailing window as CSV, the operator's usage report (a tenant context gets the header only). Auth-required."
+   :parent :get-auth-required
+   :args {:path "/orgs/usage.csv" :handler :api-usage-csv-handler}}
+
   {:name :api-failures-ack-all
    :description "POST /api/failures/ack-all — dismiss every unresolved failure the current branch view lists (the failed lens's Dismiss all); `{acknowledged: n}`. Auth-required."
    :parent :post
@@ -917,6 +922,7 @@
                   :api-tests-run
                   :api-tests-status
                   :api-failures
+                  :api-usage-csv
                   :api-lint
                   :api-failures-ack-all
                   :api-services-reconcile

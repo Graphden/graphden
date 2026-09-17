@@ -56,7 +56,7 @@
     ;; server-derived; :round / :url-encode / :semver-latest / :ui-pref-write!
     ;; return caller content and carry :taint-propagate?.
     :current-instant :current-user-id :current-user-label :loaded-packages
-    :round :semver-latest :semver-rank :ui-pref-write! :ui-prefs-read :url-encode
+    :round :rows->csv :semver-latest :semver-rank :ui-pref-write! :ui-prefs-read :url-encode
     ;; the origin's marketplace card — remote, server-derived data, not the
     ;; caller's content
     :remote-package-card
@@ -195,7 +195,7 @@
     :parse-int :parse-json :parse-uuid :platform-owned-def-names
     :position-in :postwalk :pprint-str :pr-str
     :quot :range
-    :re-find? :re-replace :reduce :render-hiccup :render-value-repr :repeat :reset :rest :reverse :select-keys :digest-hex
+    :re-find? :re-replace :reduce :render-hiccup :render-value-repr :repeat :reset :rest :reverse :rows->csv :select-keys :digest-hex
     :slurp :some :some? :sort :sort-by :str :str-clip :str-contains? :str-join :str-len :str-lower
     :swap
     :str-replace :str-split :str-starts-with? :str-to-keyword :str-trim

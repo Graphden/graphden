@@ -64,6 +64,12 @@
           :separator {:required false :type :text :value "" :description "Inserted between every pair. Defaults to empty."}}
    :return-type :text}
 
+  {:name :rows->csv
+   :description "Maps → one CSV text: a header line of `:columns` (keyword names) then one line per row, RFC 4180 quoting (a field holding a comma, a quote or a newline is quoted, quotes doubled). Rows may be keyword- or string-keyed."
+   :args {:rows {:type [:list :any] :description "The rows — maps, read by the column keys."}
+          :columns {:type [:list :any] :description "Column keys in order; their names form the header."}}
+   :return-type :text}
+
   {:name :str-to-keyword
    :description "Coerce a string into a keyword (Clojure's `keyword`). Nil-safe — returns nil for nil input."
    :args {:string {:type :nullable-text :description "String to convert (nil-safe)."}}

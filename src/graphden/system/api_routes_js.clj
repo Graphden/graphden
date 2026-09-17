@@ -62,10 +62,14 @@
   (let [segs (rest (str/split path #"/"))
         params (vec (for [s segs :when (str/starts-with? s ":")]
                       (-> s (subs 1) (str/replace #"-" "_"))))
+        ;; The key must be a JS identifier: every non-word char (a `/`,
+        ;; a `-`, the `.` of `/api/orgs/usage.csv`) becomes `_` — an
+        ;; unescaped `.` made the whole module a syntax error and killed
+        ;; the editor (2026-09-17).
         key (-> path
                 (str/replace #"^/" "")
                 (str/replace #":" "")
-                (str/replace #"[/-]" "_")
+                (str/replace #"[^A-Za-z0-9_]" "_")
                 (#(if (str/blank? %) "root" %)))]
     (if (empty? params)
       (str "  " key ": " (pr-str path) ",")

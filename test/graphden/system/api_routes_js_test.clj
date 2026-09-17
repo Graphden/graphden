@@ -42,6 +42,15 @@
       (is (str/includes? out "\"/api/fns\"")))))
 
 
+(deftest routes->js-bundle-key-is-a-js-identifier
+  (testing "a path with a dot (`/api/orgs/usage.csv`) keys as `api_orgs_usage_csv` — a `.` in an
+            object key is a syntax error that would kill every consumer of window.API"
+    (let [out (api-js/routes->js-bundle ["/api/orgs/usage.csv"])]
+      (is (str/includes? out "api_orgs_usage_csv: \"/api/orgs/usage.csv\","))
+      (is (not (re-find #"(?m)^\s+[A-Za-z0-9_]*\.[A-Za-z0-9_.]*:" out))
+          "no dotted key on any entry line"))))
+
+
 (deftest routes->js-bundle-trailing-static-after-param
   (testing "static after param — `/api/branches/:ref/conflicts` does NOT leak trailing slash"
     (let [out (api-js/routes->js-bundle ["/api/branches/:ref/conflicts"])]

@@ -1185,6 +1185,49 @@
            (println "5. Restarting container + waiting for server...")
            (instance-up!))}
 
+  support-bundle
+  {:doc "Collect diagnosis material for a support request (SUPPORT.md): /version + /health of a running instance, git revision, docker containers + the executor's recent log, GRAPHDEN_* environment and .env with secrets MASKED. Writes target/support-bundle-<ts>.tgz. Usage: bb support-bundle [http://host:port]"
+   :requires ([babashka.http-client :as http]
+              [babashka.process :as p]
+              [clojure.java.io :as io]
+              [clojure.string :as str])
+   :task
+   (let [raw-url (or (first *command-line-args*) "http://localhost:9002")
+         base-url (if (str/ends-with? raw-url "/") (subs raw-url 0 (dec (count raw-url))) raw-url)
+         ts (.format (java.time.LocalDateTime/now) (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss"))
+         dir (io/file "target" (str "support-bundle-" ts))
+         secret-key? (fn [k] (re-find (re-pattern "(?i)token|secret|password|passwd|key|jdbc|dsn|credential") k))
+         mask-line (fn [line]
+                     (if-let [[_ k v] (re-matches (re-pattern "([^=# ][^=]*)=(.*)") line)]
+                       (if (secret-key? k) (str k "=<masked>") (str k "=" v))
+                       line))
+         sh (fn [& args]
+              (try (let [{:keys [out err]} (p/sh {:out :string :err :string :continue true} args)]
+                     (str out (when (seq err) (str "\n[stderr]\n" err))))
+                   (catch Exception e (str "<unavailable: " (ex-message e) ">"))))
+         fetch (fn [path]
+                 (try (:body (http/get (str base-url path) {:throw false :timeout 5000}))
+                      (catch Exception e (str "<unreachable: " (ex-message e) ">"))))
+         write! (fn [name content] (spit (io/file dir name) (str content)))]
+     (.mkdirs dir)
+     (write! "version.json" (fetch "/version"))
+     (write! "health.txt" (fetch "/health"))
+     (write! "git.txt" (str (sh "git" "rev-parse" "HEAD") (sh "git" "describe" "--tags" "--always")))
+     (write! "runtime.txt" (str (sh "java" "-version") (sh "uname" "-a") (sh "docker" "--version")))
+     (write! "docker-ps.txt" (sh "docker" "ps" "--format" "{{.Names}}\t{{.Image}}\t{{.Status}}" "--filter" "name=graphden"))
+     (write! "executor.log" (sh "docker" "logs" "--tail" "300" "graphden-executor"))
+     (write! "env.txt" (->> (System/getenv)
+                            (filter (fn [[k _]] (str/starts-with? k "GRAPHDEN_")))
+                            (sort-by key)
+                            (map (fn [[k v]] (mask-line (str k "=" v))))
+                            (str/join "\n")))
+     (when (.exists (io/file ".env"))
+       (write! "dotenv.txt" (->> (str/split-lines (slurp ".env")) (map mask-line) (str/join "\n"))))
+     (let [tgz (io/file "target" (str "support-bundle-" ts ".tgz"))]
+       (p/shell "tar" "-czf" (str tgz) "-C" "target" (.getName dir))
+       (println "support bundle:" (str tgz))
+       (println "review env.txt / dotenv.txt before sending — masking is by key name only")))}
+
   smoke
   {:doc "Run smoke tests against a running instance: editor page, graph layout (collapsed + expanded), auth challenge. Usage: bb smoke [http://host:port]"
    :requires ([babashka.http-client :as http]

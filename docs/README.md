@@ -24,7 +24,8 @@ records — ADRs, RFCs, perf notes, migration ledgers.)
 | Accounts & sign-in (the opt-in identity module) | [ACCOUNTS.md](ACCOUNTS.md) |
 | Keyboard & screen-reader use, and the contract for new UI | [ACCESSIBILITY.md](ACCESSIBILITY.md) |
 | Security & tenant isolation | [SECURITY_MODEL.md](SECURITY_MODEL.md) |
-| Plans & tiers (what each includes) | [PLANS.md](PLANS.md) |
+| Plans & tiers (what each includes), and where funding goes | [PLANS.md](PLANS.md) |
+| Support lanes, implementation work, commercial licence | [SUPPORT.md](../SUPPORT.md) · [COMMERCIAL.md](../COMMERCIAL.md) |
 | Scaling & the executor fleet | [SCALING.md](SCALING.md) · [FLEET_DEPLOY.md](FLEET_DEPLOY.md) |
 | BYO executor — run your own executor against the hub | [BYO_RUNBOOK.md](BYO_RUNBOOK.md) |
 | What's shipped vs planned | [ROADMAP.md](ROADMAP.md) |

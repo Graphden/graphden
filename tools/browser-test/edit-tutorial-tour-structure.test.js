@@ -148,6 +148,10 @@ const {
     await waitTourTitle(page, 'Find map');
     await filterAndSelect(page, 'map', 'map');
     await waitTourTitle(page, 'Read the two slots', 150000);
+    // A reader reads the two chips before moving on — and the step's ring
+    // sits on them, so the audit must see them (map's canvas is a big one;
+    // under gate load the chips land after the title does).
+    await page.waitForSelector('.arg-type-chip', {timeout: 60000});
     assert(await clickTourButton(page, 'Next'), 'lesson 06 slots Next');
     await waitTourTitle(page, 'Extend it');
     await extendViaRowActions(page, 'tutorial-map', 'map');

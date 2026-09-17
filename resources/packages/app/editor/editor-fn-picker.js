@@ -380,7 +380,13 @@ function openFnPicker(opts) {
   // -------- Render --------
 
   let activeIdx = 0;     // index into visibleRows
-  let visibleRows = [];  // [{c, rowEl}] in DOM order — ↑↓ walk exactly this
+  // Everything ↑↓ can land on, in DOM order: a fn row (`{c, rowEl}`) or a
+  // FOLDABLE namespace header in browse mode (`{group, rowEl}`) — so a
+  // keyboard reader can open a folded group with Enter / → and close it
+  // with ←, the way the Explorer's tree works, without leaving the filter
+  // field. The header is an option of the listbox for that purpose (its
+  // `aria-expanded` says which kind it is).
+  let visibleRows = [];
   // Browse-mode state the reader changes by hand: groups toggled open /
   // closed, and whether fns of other types are listed too.
   const openGroups = new Set();
@@ -490,10 +496,11 @@ function openFnPicker(opts) {
   }
 
   function renderHeader(text, count, extra, opts2) {
-    const h = document.createElement(opts2?.button ? 'button' : 'div');
-    if (opts2?.button) h.type = 'button';
+    const h = document.createElement('div');
     h.className = 'fn-picker-ns-header' + (opts2?.button ? ' fn-picker-ns-toggle' : '');
     if (opts2?.button) {
+      h.setAttribute('role', 'option');
+      h.setAttribute('aria-selected', 'false');
       h.setAttribute('aria-expanded', opts2.open ? 'true' : 'false');
       const arrow = document.createElement('span');
       arrow.className = 'fn-picker-disclosure-arrow';
@@ -509,6 +516,15 @@ function openFnPicker(opts) {
     n.textContent = ' · ' + count + (extra ? ' · ' + extra : '');
     h.appendChild(n);
     return h;
+  }
+
+  function toggleGroup(g, force) {
+    const key = g.ns || '';
+    const open = (force === undefined) ? !g.open : force;
+    if (open === g.open) return;
+    if (open) { closedGroups.delete(key); openGroups.add(key); }
+    else { openGroups.delete(key); closedGroups.add(key); }
+    render();
   }
 
   function render() {
@@ -551,14 +567,16 @@ function openFnPicker(opts) {
         const extra = (expected && g.other > 0) ? (g.other + ' other') : null;
         const label = g.ns || '(root)';
         if (!q) {
-          // Browse: a fold, like the Explorer's namespace rows.
+          // Browse: a fold, like the Explorer's namespace rows — and a stop
+          // for ↑↓, so the keyboard can open it.
           const h = renderHeader(label, expected ? g.compat : g.rows.length, extra, { button: true, open: g.open });
+          const idx = visibleRows.length;
+          h.id = 'fn-picker-opt-' + idx;
+          visibleRows.push({ group: g, rowEl: h });
+          h.addEventListener('mouseenter', () => setActive(idx));
           h.addEventListener('click', (e) => {
             e.stopPropagation();
-            const key = g.ns || '';
-            if (g.open) { openGroups.delete(key); closedGroups.add(key); }
-            else { closedGroups.delete(key); openGroups.add(key); }
-            render();
+            toggleGroup(g);
           });
           sec.appendChild(h);
         } else {
@@ -631,6 +649,7 @@ function openFnPicker(opts) {
     }, 180);
   });
   search.addEventListener('keydown', (e) => {
+    const entry = visibleRows[activeIdx];
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       setActive(activeIdx + 1);
@@ -639,11 +658,17 @@ function openFnPicker(opts) {
       e.preventDefault();
       setActive(activeIdx - 1);
       visibleRows[activeIdx]?.rowEl.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'ArrowRight' && entry?.group) {
+      e.preventDefault();
+      toggleGroup(entry.group, true);
+    } else if (e.key === 'ArrowLeft' && entry?.group) {
+      e.preventDefault();
+      toggleGroup(entry.group, false);
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const entry = visibleRows[activeIdx];
       if (!entry) return;
-      choose(entry.c, entry.rowEl);
+      if (entry.group) toggleGroup(entry.group);
+      else choose(entry.c, entry.rowEl);
     } else if (e.key === 'Escape') {
       e.preventDefault();
       closeFnPicker();

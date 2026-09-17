@@ -3333,9 +3333,10 @@ textarea.value-form-hiccup {
   font-family: var(--mono, monospace);
   border: 0; text-align: left; cursor: pointer;
   background: var(--sidebar-bg);
+  box-sizing: border-box;
 }
-.fn-picker-ns-toggle:hover { background: var(--hover-bg); }
-.fn-picker-ns-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.fn-picker-ns-toggle:hover,
+.fn-picker-ns-toggle.fn-picker-row-active { background: var(--hover-bg); }
 .fn-picker-ns-count { opacity: 0.7; }
 .fn-picker-group + .fn-picker-group,
 .fn-picker-exact + .fn-picker-group { border-top: 1px dashed var(--card-border); }

@@ -106,6 +106,30 @@ Until billing ships, paid tiers are granted **by hand** and never sold:
 - The first org that wants to *pay* triggers the billing work: a pilot on a
   free tier meanwhile, then it converts first.
 
+### The billing seam — invoices today, a provider later
+
+Whatever bills, the org row ends up carrying three fields, written only
+through the operator route (`POST /api/orgs/plan`, or Operate → Orgs):
+
+| Field | Meaning |
+|---|---|
+| `:plan` | the tier slug |
+| `:plan-until` | when the plan ends (a `YYYY-MM-DD` day, inclusive); nil = open-ended (a founding grant, a hand-set tier) |
+| `:plan-note` | operator free text — the invoice number, the founding-beta promise, later a provider subscription id |
+
+The reaper (`:tenancy/demo-gc`) is the clock: a paid org past
+`:plan-until` drops to `free` on the next sweep (nothing is deleted — the
+free ceilings apply from its next request), its people are emailed, and the
+note keeps the history (`… · network ended 2026-12-31`); a week before the
+end they get one warning. So an invoice paid through a freelance platform
+is `plan=network, until=<period end>, note=<invoice>` today, and a payment
+provider's webhook tomorrow is a handler that calls the same route with the
+period end it was told — the provider never reaches the schema.
+
+For invoices and the founding-orgs register, `GET /api/orgs/usage.csv?days=30`
+answers every org's runs / failures / summed duration over the window as
+CSV (operator context only; a tenant gets the header).
+
 ## Suspending an org (abuse kill-switch)
 
 `suspended` is a special tier — not something a tenant buys, but an operator's

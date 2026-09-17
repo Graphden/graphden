@@ -1,0 +1,7 @@
+# Funding links shown by GitHub's "Sponsor" button (README § Funding).
+# The collective is the only channel that funds the OPEN-SOURCE project;
+# donations there never buy a cloud tier (docs/PLANS.md § Founding beta).
+open_collective: graphden
+# github: [Graphden]   # enabled once GitHub Sponsors is set up through the
+#                      # fiscal host (docs/PLANS.md § Funding).
+custom: ["https://boosty.to/graphden"]

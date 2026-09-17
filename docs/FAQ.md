@@ -330,3 +330,33 @@ the runtime are exit-safe, the program shape is a commitment.
 **Strength:** Strong on data/runtime exits (verifiable, structural). The
 paradigm-commitment concession must stay in — dropping it turns a credible
 answer into marketing.
+
+---
+
+## 10. "We can't use AGPL — what are our options?"
+
+**Short answer:** Most objections to the AGPL do not apply to *using*
+Graphden; for the cases that remain there is a commercial licence.
+
+**Detail — three cases:**
+
+- **You run it, self-host it, build on it.** Nothing to publish. Your
+  packages and the pages you compose are yours (the
+  [Package and Embedding Exception](../LICENSE-EXCEPTIONS.md) says so
+  explicitly); the AGPL binds the *core* you received, not the programs
+  you store in it.
+- **You modify the core and offer it as a service.** AGPL section 13 asks
+  you to offer the modified source to your users. Either do that — the
+  usual open-source route — or take a commercial licence for the core:
+  [COMMERCIAL.md](../COMMERCIAL.md).
+- **Policy says "no AGPL at all".** The commercial licence exists for this
+  case; it is the same code under a second grant, possible because
+  contributions are assigned under the [CLA](../CLA.md).
+
+**What stays true in every case:** the AGPL grant is never withdrawn, the
+public repository is the only codebase, and the hosted cloud runs that same
+core with a proprietary multi-tenant addon that is not for sale.
+
+**Strength:** Strong; it is the standard open-core answer (Metabase,
+MongoDB before SSPL). Keep the "same code, second grant" framing — a
+"different enterprise edition" would be a different, weaker answer.

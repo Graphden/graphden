@@ -268,8 +268,20 @@ and [NOTICE](NOTICE). Copyright (c) 2026 Artem Markov.
 - **Contributions** are accepted under the [CLA](CLA.md), enforced by a bot
   on every pull request — see [CONTRIBUTING.md](CONTRIBUTING.md).
 - **Commercial licensing** for organisations that cannot accept the AGPL:
-  licensing@graphden.dev.
+  [COMMERCIAL.md](COMMERCIAL.md), licensing@graphden.dev.
+- **Support** — community and paid lanes: [SUPPORT.md](SUPPORT.md).
 
 The multi-tenant cloud policy layer (`graphden-tenancy`) and the cloud
 control plane (`graphden-cloud`) are separate proprietary works and are not
 part of this repository.
+
+## Funding
+
+The open-source project is funded through its
+[Open Collective](https://opencollective.com/graphden) — donations and
+grants, spent only on the open-source work (contributor time at a
+published rate; the ledger is public). The hosted cloud is a separate,
+self-funded activity: a donation never buys a cloud tier, and cloud revenue
+never flows through the collective. Russian-speaking supporters can use
+[Boosty](https://boosty.to/graphden). How each source is used is written
+down in [docs/PLANS.md](docs/PLANS.md#funding).

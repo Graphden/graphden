@@ -130,6 +130,21 @@ For invoices and the founding-orgs register, `GET /api/orgs/usage.csv?days=30`
 answers every org's runs / failures / summed duration over the window as
 CSV (operator context only; a tenant gets the header).
 
+## Funding
+
+Where each kind of money goes, so the lanes never mix:
+
+| Source | Goes to | Pays for |
+|---|---|---|
+| Donations, GitHub Sponsors, grants | the project's [Open Collective](https://opencollective.com/graphden) (fiscal host: Open Source Europe; public ledger) | contributor work on the open-source repository, against invoices at the published rate; community expenses |
+| Cloud subscriptions, implementation work, paid support, commercial licences | the maintainer's own business | servers, the hosted service, the maintainer's time |
+
+Rules that follow: the collective never pays for the servers that run the
+hosted service (they are shared with the free tier); a donation never buys
+a cloud tier; cloud revenue never flows through the collective. Support
+and implementation are described in [SUPPORT.md](../SUPPORT.md), the
+commercial licence in [COMMERCIAL.md](../COMMERCIAL.md).
+
 ## Suspending an org (abuse kill-switch)
 
 `suspended` is a special tier — not something a tenant buys, but an operator's

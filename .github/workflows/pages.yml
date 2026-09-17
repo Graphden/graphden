@@ -1,0 +1,68 @@
+# docs/ → GitHub Pages (docs.graphden.dev). The open-source documentation is
+# hosted here, on GitHub's infrastructure, so it is physically and
+# financially separate from the hosted cloud (docs/PLANS.md § Funding).
+#
+# Build = the stock GitHub Pages Jekyll (jekyll-build-pages), which brings
+# the auto plugins the docs rely on: README.md → index, .md links → .html
+# (relative-links), no front matter needed. The source is a COPY of docs/
+# with one rewrite: links from docs/*.md up to repository files
+# (`../README.md`, `../CLA.md`, …) point at GitHub instead of a page that
+# would not exist on the site. Nothing in the repository is modified.
+name: docs-pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Stage docs/ for the site
+        run: |
+          set -euo pipefail
+          rm -rf _site_src
+          cp -r docs _site_src
+          # Top-level docs link to repository files one level up; on the site
+          # those live on GitHub. Only docs/*.md are rewritten — inside
+          # docs/tutorial/ and docs/adr/ a `../X.md` is another doc page.
+          for f in _site_src/*.md; do
+            sed -E -i 's#\]\(\.\./([^)#]+)(#[^)]*)?\)#](https://github.com/Graphden/graphden/blob/main/\1\2)#g' "$f"
+          done
+          # Generated emacs/org bakes are not pages.
+          rm -f _site_src/devtour/tour.eld
+          rm -rf _site_src/devtour/org
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./_site_src
+          destination: ./_site
+
+      - uses: actions/upload-pages-artifact@v4
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

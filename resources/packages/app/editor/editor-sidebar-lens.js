@@ -455,6 +455,9 @@ function applyLensVisibility() {
   } else if (hint) {
     hint.hidden = true;
   }
+  // The Recent trail steps aside while a lens owns the tree (editor-recents.js
+  // decides); this in-place path never repaints the tree, so tell it here.
+  if (typeof renderRecentFns === 'function') renderRecentFns();
 }
 
 // Sync the lens chips to the persisted state (active = in the lens; "All"

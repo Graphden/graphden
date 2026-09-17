@@ -274,6 +274,13 @@ async function openVersionHistory(page) {
     console.log('  lesson 23: walked — two edits, restore, and the extra row it wrote');
 
     // ---------- Lesson 16 — the three diagnostics panels ----------
+    // A reader arrives from lesson 15 with a Recent trail; the ✕ lens must
+    // read right under the chips, not under that trail.
+    await page.goto(BASE + '/');
+    await page.waitForFunction(() => typeof graphData !== 'undefined' && graphData
+      && document.querySelector('#entity-list [role="treeitem"]'), null, {timeout: 90000});
+    await filterAndSelect(page, 'str-join', 'str-join');
+    await filterAndSelect(page, 'str-len', 'str-len');
     await page.goto(BASE + '/?tutorial=16');
     await waitTourTitle(page, 'Three kinds of wrong', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 16 opening Next');
@@ -342,8 +349,30 @@ async function openVersionHistory(page) {
       'the arg field carries the malformed input (got: ' + runReady.value + ')');
     assert(runReady.persisted,
       '“Save to history” is ticked — an unticked failure never reaches Errors');
+    // An UNTICKED run shows the same error pane but leaves no audit row — the
+    // step must hold (a reader who missed the tick would otherwise reach the
+    // ✕ lens with a chip that never moved). Untick, run, watch it hold; then
+    // tick again for the real run.
+    await page.evaluate(() => document.querySelector('.execute-popover.visible .execute-persist-checkbox').click());
+    await page.click('.execute-popover.visible .execute-run-btn');
+    await page.waitForSelector('.execute-popover.visible .execute-result-host .execute-error-pane', {timeout: 30000});
+    await page.waitForTimeout(2500);
+    const heldTitle = await page.evaluate(() => document.querySelector('#gd-tour-pop .gd-tour-title')?.textContent?.trim());
+    assert(heldTitle === 'Break it on purpose',
+      'an unticked failed run does not complete the run step (title: ' + heldTitle + ')');
+    const chipBefore = await page.evaluate(() => document.querySelector('#kind-filters .kind-toggle[data-kind="failed"] .kind-count')?.textContent);
+    await page.evaluate(() => document.querySelector('.execute-popover.visible .execute-persist-checkbox').click());
     await page.click('.execute-popover.visible .execute-run-btn');
     await waitTourTitle(page, 'Read the message', 150000);
+    // The failed chip re-reads after a persisted run — no reload, no lens
+    // click needed.
+    await waitUntil(page, (before) => {
+      const t = document.querySelector('#kind-filters .kind-toggle[data-kind="failed"] .kind-count')?.textContent;
+      return t && t !== before && parseInt(t, 10) === parseInt(before || '0', 10) + 1;
+    }, chipBefore, 20000);
+    const chipAfter = await page.evaluate(() => document.querySelector('#kind-filters .kind-toggle[data-kind="failed"] .kind-count')?.textContent);
+    assert(parseInt(chipAfter, 10) === parseInt(chipBefore || '0', 10) + 1,
+      'the ✕ failed chip counts the saved run (' + chipBefore + ' → ' + chipAfter + ')');
     assert(await clickTourButton(page, 'Next'), 'lesson 16 look-step Next');
     // The filter still says `parse-json` — clearing it is a step of its own,
     // ringed on the ×, so the failed lens is read over the whole tree.
@@ -354,6 +383,22 @@ async function openVersionHistory(page) {
     // pressed state.
     await page.evaluate(() => toggleKind('failed'));
     await waitTourTitle(page, 'Read the failure', 60000);
+    // Under the lens: the row carries ✕1, Dismiss all is offered, and the
+    // Recent trail (seeded above) steps aside so the match list sits right
+    // under the chips.
+    const lensView = await page.evaluate(() => ({
+      ackAllHidden: document.getElementById('failed-ack-all-btn')?.hidden,
+      ackAllText: document.getElementById('failed-ack-all-btn')?.textContent?.trim(),
+      recentHidden: document.getElementById('gd-recent-fns')?.hidden,
+      rowMarked: Array.from(document.querySelectorAll('#entity-list [role="treeitem"]'))
+        .some((r) => /tutorial-bad-json/.test(r.textContent) && /✕\s*1/.test(r.textContent)),
+    }));
+    assert(lensView.ackAllHidden === false, 'Dismiss all is offered under the ✕ lens');
+    // textContent joins the glyph and label spans without the CSS gap.
+    assert(/^✕\s*Dismiss all$/.test(lensView.ackAllText || ''),
+      'Dismiss all reads without a stray glyph (got: ' + lensView.ackAllText + ')');
+    assert(lensView.recentHidden === true, 'the Recent trail hides while the ✕ lens owns the tree');
+    assert(lensView.rowMarked, 'the tree row carries ✕1 under the lens');
     // The Runs tab of the (still selected) fn lists the unresolved failure.
     // The cache behind the failed lens re-primes after the run; the tab's
     // partial reads storage directly, so it shows the row as soon as the
@@ -373,6 +418,12 @@ async function openVersionHistory(page) {
     }
     assert(/Malformed JSON/i.test(failText),
       'the Runs tab lists the unresolved failure with its message (got: ' + failText.slice(0, 160) + ')');
+    const dismissBtn = await page.evaluate(() => {
+      const b = document.querySelector('#gd-insp-runs .execute-history-failure button.error-log-ack');
+      return b ? { text: b.textContent.trim(), w: b.getBoundingClientRect().width } : null;
+    });
+    assert(dismissBtn && dismissBtn.text === '✕ Dismiss' && dismissBtn.w > 30,
+      'the failure row carries a legible "✕ Dismiss" (got: ' + JSON.stringify(dismissBtn) + ')');
     await waitTourTitle(page, 'Now a static mistake', 60000);
     assert(await clickTourButton(page, 'Next'), 'lesson 16 static Next');
     await waitTourTitle(page, 'Focus on type errors', 30000);

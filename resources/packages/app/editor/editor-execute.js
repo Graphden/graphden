@@ -166,6 +166,9 @@ async function pollOnce(execId, resultHostEl) {
       if (typeof appendPathViewAffordance === 'function') {
         appendPathViewAffordance(resultHostEl, row['path-trace']);
       }
+      // The submit-time re-read ran while this row was still pending —
+      // the failed lens's counts only know the outcome from here.
+      if (typeof window.refreshProblemCaches === 'function') window.refreshProblemCaches();
       stopPolling();
       return;
     }
@@ -265,6 +268,10 @@ async function submitExecution(fnEntity, args, persist, trace, captureValues,
                                resultHostEl, cancelBtn) {
   resultHostEl.textContent = '';
   resultHostEl.appendChild(renderSubmitSpinner('Submitting…'));
+  // The marker below describes THIS run: a lesson-09 persisted run
+  // earlier in the same page-load must not vouch for an unticked one
+  // now (lesson 16 gates its "Break it on purpose" step on it).
+  delete document.body.dataset.gdPersistedRun;
   try {
     const r = await authFetch(API.api_execute, {
       method: 'POST',

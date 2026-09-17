@@ -299,7 +299,7 @@ counts the lens, the namespace rows and the fn cards read
 (`editor-problems.js`); the Runs tab's block renders the rows. Privacy
 holds because the write path already sanitised each row: `redact-outcome`
 hides secret-tainted bodies, `scrub-outcome` replaces internal error types
-with an opaque `ref:` on the cloud. A row carries a ✕ dismiss button, the
+with an opaque `ref:` on the cloud. A row carries a **✕ Dismiss** button, the
 finish time, the error text and a collapsible ex-data block; the lens's
 chip row carries **Dismiss all**.
 

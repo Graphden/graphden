@@ -737,7 +737,7 @@
           :children [:_peh-stats-text :_peh-hash-filter-chip :_peh-secrets-toggle]}}
 
   ;; --- unresolved failures (the Failed runs panel's rows, this fn only) —
-  ;;     message + ✕ dismiss, above the history. The ✕ POSTs to the
+  ;;     message + "✕ Dismiss", above the history. The button POSTs to the
   ;;     inspector's own ack route, which renders this block back
   ;;     (swap target `.execute-history-failures`).
   {:name :_peh-fail-fn-id-str
@@ -764,7 +764,7 @@
                   {:value "&id="} :_peh-fail-exec-id]}}
   {:name :_peh-fail-ack-btn
    :parent :hx-button
-   :args {:label {:value "✕"}
+   :args {:label {:value "✕ Dismiss"}
           :url :_peh-fail-ack-url
           :target {:value "closest .execute-history-failures"}
           :swap {:value "outerHTML"}

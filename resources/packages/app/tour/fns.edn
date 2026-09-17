@@ -1049,13 +1049,17 @@
                :check {:kind "fn-parent" :name "tutorial-bad-json" :parent "parse-json"}
                :creates {:type "fn" :name "tutorial-bad-json"}}
               {:title "Break it on purpose"
-               :body "Click [[⋯]] → [[▶ Run]]. Type `not json at all` into the string field, TICK [[Save to history]], and [[Run]]."
+               :body "Click [[⋯]] → [[▶ Run]]. Type `not json at all` into the string field, TICK [[Save to history]], and [[Run]]. The step completes only for a SAVED run — an unticked one shows the same error and leaves no trace for the lenses to count."
                :target ".node-overlay[data-fn-name=\"tutorial-bad-json\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
                :targets [".node-overlay[data-fn-name=\"tutorial-bad-json\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                ;; A SETTLED result — the pane class a rendered value carries, or the
                ;; client's error pane. `> *` also matched the "Submitting…" spinner,
                ;; so the run steps used to advance before anything had come back.
-               :check {:kind "dom" :selector ".execute-result-host .execute-result-pane, .execute-result-host .execute-error-pane"}}
+               ;; AND a persisted one: the body marker names the LAST run of this
+               ;; page-load (editor-execute.js clears it on every submit), so an
+               ;; unticked run — same error pane, no audit row, nothing for the
+               ;; ✕ lens to count — holds the step instead of teaching a stale chip.
+               :check {:kind "dom" :selector "body[data-gd-persisted-run] .execute-result-host .execute-error-pane"}}
               {:title "Read the message"
                :body "“Malformed JSON.” — the fn threw, and the pane shows the error instead of a value. Because you ticked Save to history, that failure is now a ROW in the graph; an unticked run would have left no trace, and the next two lenses read exactly these rows. Click [[Next]]."
                :target ".execute-result-host"
@@ -1065,11 +1069,11 @@
                :target "#search-clear"
                :check {:kind "input-value" :selector "#search-input" :value ""}}
               {:title "Find it in the tree"
-               :body "Click the [[✕ failed]] chip under the filter. The tree narrows to fns with UNRESOLVED failures from the last 7 days — yours, with a ✕1 on its row, its namespace counting it, the chip counting the runs. A failure clears when you fix the fn, when the same version later succeeds, or when you dismiss it."
+               :body "Click the [[✕ failed]] chip under the filter. The tree narrows to fns with UNRESOLVED failures from the last 7 days — yours, with a ✕1 on its row, its namespace counting it, the chip counting the runs (the Recent trail steps aside while a lens is on). A failure clears when you fix the fn, when the same version later succeeds, or when you dismiss it — [[✕ Dismiss all]], next to the chips while this lens is on, dismisses every failure listed."
                :target "#kind-filters .kind-toggle[data-kind=\"failed\"]"
                :check {:kind "dom" :selector "#kind-filters .kind-toggle[data-kind=\"failed\"][aria-pressed=\"true\"]"}}
               {:title "Read the failure"
-               :body "With tutorial-bad-json selected, open the Inspector's [[Runs]] tab. Its unresolved failures sit at the top — the message, and ✕ to dismiss. The error DATA was scrubbed when the row was written, not when it is shown, so nothing secret-tainted is waiting here for a teammate."
+               :body "With tutorial-bad-json selected, open the Inspector's [[Runs]] tab. Its unresolved failures sit at the top — when, the message, and [[✕ Dismiss]] for that one failure. The error DATA was scrubbed when the row was written, not when it is shown, so nothing secret-tainted is waiting here for a teammate."
                :target "[data-insp-tab=\"stats\"]"
                :check {:kind "dom" :selector "#gd-insp-runs .execute-history-failures:not([hidden])"}}
               {:title "Now a static mistake"
@@ -1089,7 +1093,7 @@
                :target nil
                :check {:kind "manual"}}
               {:title "What each surface answers"
-               :body "The lenses answer WHERE: which fns, which namespaces, how many. The Inspector answers WHAT: the failure's message and ✕, the diagnostic under its argument, the finding with your say. The trace tree answers why (lesson 15), and Monitoring (account menu → [[Organization]]) answers how often. Click [[◍ all]] to clear the lens, then [[Finish]] — the tour offers to delete tutorial-bad-json."
+               :body "The lenses answer WHERE: which fns, which namespaces, how many. The Inspector answers WHAT: the failure's message and its ✕ Dismiss, the diagnostic under its argument, the finding with your say. The trace tree answers why (lesson 15), and Monitoring (account menu → [[Organization]]) answers how often. Click [[◍ all]] to clear the lens, then [[Finish]] — the tour offers to delete tutorial-bad-json."
                :target "#kind-filters .kind-toggle[data-kind=\"all\"]"
                :check {:kind "manual"}}]}
             {:id "17"

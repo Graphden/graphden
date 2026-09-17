@@ -529,7 +529,9 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   border: 1px solid var(--accent); border-radius: 8px;
   font: inherit; font-size: 0.6875rem; font-weight: 600; cursor: pointer;
 }
-.gd-secret-add::before { content: "+"; font-weight: 600; }
+/* The "+" is the CREATE verb's — "✕ Dismiss all" / "▶ Run all" share the
+   skin, not the glyph. */
+#secret-add-btn::before { content: "+"; font-weight: 600; }
 .gd-secret-add:hover { background: var(--selected-bg); }
 .gd-secret-add[hidden] { display: none; }
 #search-input {

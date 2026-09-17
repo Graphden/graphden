@@ -497,8 +497,8 @@
               [:span {:class "kind-label"} "views"]]
              ;; Recent fns — the navigation trail. renderRecentFns
              ;; (editor-sidebar.js) fills it from localStorage on every
-             ;; tree update; hidden while empty or while the filter is
-             ;; active (search owns that space).
+             ;; tree update; hidden while empty or while a filter, smart
+             ;; view or lens owns the tree.
              [:div {:id "gd-recent-fns" :hidden "hidden"
                     :aria-label "Recently selected functions"}]
              ;; role="tree": the rows inside are treeitems with an

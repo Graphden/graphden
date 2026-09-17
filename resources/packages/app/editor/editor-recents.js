@@ -6,8 +6,8 @@
 // tree, each navigating back via gdNavigateToFn (by id when loaded, by
 // qualified name when not). localStorage-persisted like every other
 // view pref. `renderRecentFns` is called by updateEntityList on every
-// tree paint; the list hides while a filter or a smart view owns the
-// tree.
+// tree paint; the list hides while a filter, a smart view or a lens
+// owns the tree.
 
 const RECENT_FNS_KEY = 'graphden.recentFns';
 const RECENT_FNS_MAX = 6;
@@ -102,8 +102,13 @@ function renderRecentFns() {
   const rows = gdReadRecentFns()
     .filter((r) => r.id !== selected && !pinnedIds.has(r.id))
     .slice(0, RECENT_FNS_MAX - 1);
+  // A filter, a smart view or a kind/problem LENS owns the tree — each
+  // narrows it to a match list the reader is scanning, and the trail
+  // above it only pushes that list down (lesson 16 reads the ✕ lens
+  // right under the chips).
   const searching = !!searchFilter
-    || ((typeof gdActiveSmartView === 'function') && !!gdActiveSmartView());
+    || ((typeof gdActiveSmartView === 'function') && !!gdActiveSmartView())
+    || (typeof lensKinds !== 'undefined' && lensKinds.size > 0);
   host.replaceChildren();
   if ((!rows.length && !pins.length) || searching) {
     host.hidden = true;

@@ -52,8 +52,8 @@ failures at the top:
 
 ```text
 Unresolved failures
-✕  2026-08-22 09:49:35   Malformed JSON.     ← dismiss · when · the message
-7d: 4 runs · 1 failed · avg 12 ms            ← the usual history follows
+✕ Dismiss  2026-08-22 09:49:35   Malformed JSON.   ← dismiss · when · the message
+7d: 4 runs · 1 failed · avg 12 ms                  ← the usual history follows
 ```
 
 It is a worklist, not a permanent scar — a failure leaves it as soon
@@ -66,10 +66,10 @@ as any of these happens:
 - **A clean re-run.** If the same version later runs to success (the
   failure was transient — a network blip, a bad input), the failure
   clears without an edit.
-- **You dismiss it.** The ✕ on the row in the Runs tab (or **✕ Dismiss
-  all**, the button that appears under the chips while the ✕ lens is
-  on) acknowledges the failure and hides it everywhere; the audit row
-  itself stays for its retention window.
+- **You dismiss it.** **✕ Dismiss** on the row in the Runs tab (or
+  **✕ Dismiss all**, the button that appears under the chips while the
+  ✕ lens is on) acknowledges the failure and hides it everywhere; the
+  audit row itself stays for its retention window.
 
 Failures follow branches the way code does: a branch **sees its
 ancestors' failures** (it resolves the same broken version they ran),
@@ -204,9 +204,11 @@ The ✕ lens answers *what broke and where*, the trace tree *why*, ⚐
    to history”** before pressing Run. The result pane shows
    `Malformed JSON.`
 3. Click the **✕ failed** chip under the Explorer's filter. The tree
-   narrows to `tutorial-bad-json`, `✕1` on its row and on its card.
-   Select it and open the Inspector's **Runs** tab: the failure is at
-   the top with `Malformed JSON.`
+   narrows to `tutorial-bad-json`, `✕1` on its row and on its card,
+   the chip reads `1`, and **✕ Dismiss all** appears next to the chips
+   (the Recent trail steps aside while a lens is on). Select the fn
+   and open the Inspector's **Runs** tab: the failure is at the top
+   with `Malformed JSON.` and its own **✕ Dismiss**.
 4. Watch the mark resolve itself: run `tutorial-bad-json` again, this
    time with `string` = `{}` (valid JSON), "Save to history" ticked.
    The chip reads nothing and the Runs tab's failures block is gone:

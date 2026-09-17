@@ -89,6 +89,9 @@ function makeWorld(opts) {
     _tourEnsureEls: () => ({ pop }),
     _tourSpotHide: () => {},
     _tourNarrow: () => false,
+    // editor-tour-spot.js's centring helper — the catalogue calls it instead
+    // of clearing the step's inline position itself (2026-09-17).
+    _tourCenterPop: (p) => { p.classList.add('gd-tour-centered'); p.style.left = ''; p.style.top = ''; },
     _tourResume: () => {},
     _tourSay: (m) => said.push(m),
     gdToast: (m) => toasts.push(m),

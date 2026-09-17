@@ -42,7 +42,7 @@ jobs:
           # those live on GitHub. Only docs/*.md are rewritten — inside
           # docs/tutorial/ and docs/adr/ a `../X.md` is another doc page.
           for f in _site_src/*.md; do
-            sed -E -i 's#\]\(\.\./([^)#]+)(#[^)]*)?\)#](https://github.com/Graphden/graphden/blob/main/\1\2)#g' "$f"
+            sed -E -i 's|\]\(\.\./([^)#]+)(#[^)]*)?\)|](https://github.com/Graphden/graphden/blob/main/\1\2)|g' "$f"
           done
           # Generated emacs/org bakes are not pages.
           rm -f _site_src/devtour/tour.eld

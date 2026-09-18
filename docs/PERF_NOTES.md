@@ -10,7 +10,7 @@ attempted-fix lessons from the 2026-05 perf investigation,
 preserved for the next time we need to push further on the
 executor hot path.
 
-## Current state (2026-06-16)
+## Current state
 
 | path | wall | size | notes |
 |---|---|---|---|
@@ -223,7 +223,7 @@ DB + DRY memo + rich-types snapshot fix brought walls to
 900 s. The `bb test-parallel 4` worker-isolation workaround
 is no longer needed.
 
-### Finding H — test-JVM live-set growth is NOT a leak (2026-07-15)
+### Finding H — test-JVM live-set growth is NOT a leak
 
 A prior handoff flagged "~177 MB of live-set growth over a
 suite run (95 → 272 MB after a full GC), unexplained." It is
@@ -315,7 +315,7 @@ re-instrumenting.
 The perf trend (advisory) had `graph-entities-tree` at ~4× its 2026-08-27
 units while every other scenario held. Not the database (one round trip, as
 budgeted): the sidebar's per-namespace kind counts — `:type-count` /
-`:fn-count`, added 2026-08-29 so the fn / types lenses keep unloaded
+`:fn-count`, so the fn / types lenses keep unloaded
 namespaces visible — were computed by annotating the ROLE of every fn on
 every paint (`roled-fns` in `crud.entities.list`, ~5k `compute-fn-role`
 calls). The counts are a pure function of the graph snapshot and the

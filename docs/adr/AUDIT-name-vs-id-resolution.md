@@ -320,7 +320,7 @@ benefit.
   Boundary stays name-authored ("alice may write ns X") — only the
   STORED + ENFORCED subject flips to the resolved id.
 
-  **✅ IMPLEMENTED + fully verified (2026-07-11) — full `bb test` green
+  **✅ IMPLEMENTED + fully verified — full `bb test` green
   (1897 tests, 0 failures).** All 10 steps below landed. The one design
   refinement made during implementation: the `:subject-id`/`:user-id`
   columns are `:text` carrying the id's STRING form (`(str id)`), not

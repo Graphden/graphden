@@ -167,7 +167,7 @@ dispatcher. It reads the slot's structural shape (via
   is R's OWN declared arg is accepted; anything else throws
   **`:compile/ambiguous-lambda-params`**, naming the candidates. The
   legacy one-shot guess (candidates all env-binding names somewhere →
-  variadic-ignore) is RETIRED (2026-07-23): every callable the
+  variadic-ignore) is RETIRED: every callable the
   packaged graph landed on it with — 72, almost all route/partial
   handlers — now declares `:lambda-params` explicitly (values baked
   from the guess's own output, so compiled behaviour is unchanged;

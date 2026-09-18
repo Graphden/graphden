@@ -408,7 +408,7 @@ The full registry lives in `resources/packages/app/routes/fns.edn`
 `app/editor/fns.edn` (`;; HTMX PARTIALS` and the sections after it),
 `app/execution/fns.edn` (execute-result / service-popover /
 execute-history) and `app/{branches,secrets,registry}` for their
-panels. 32 partials as of 2026-08-18, by consumer surface:
+panels. 32 partials, by consumer surface:
 
 | Partial (route name)                | Path (+key params)                                        | JS consumer |
 |-------------------------------------|-----------------------------------------------------------|-------------|

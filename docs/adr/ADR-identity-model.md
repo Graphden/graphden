@@ -1,6 +1,6 @@
 # ADR: fn identity — ids are identity, names are per-namespace labels
 
-**Status:** ACCEPTED (2026-07-22) · direction set by the project owner
+**Status:** ACCEPTED · direction set by the project owner
 **Companion audit:** [AUDIT-name-vs-id-resolution.md](AUDIT-name-vs-id-resolution.md)
 
 ## Decision
@@ -74,7 +74,7 @@ Stage 1 (this branch): registry re-key (above). Remaining, in order:
   entries. Synthetic anon names (and their derived ids) changed once
   as a consequence — old anon rows in long-lived dev DBs become
   unreferenced (harmless; clean deploys unaffected).
-- **Stage 3b — anonymous identity per org: DONE (2026-09-06).**
+- **Stage 3b — anonymous identity per org: DONE.**
   `records.ids/anonymous-fn-id` mixes the CURRENT ORG into the
   shape-keyed id on a tenant path (empty segment on the platform
   tier, so package-sync ids are unchanged), and `fn` is
@@ -116,7 +116,7 @@ Stage 1 (this branch): registry re-key (above). Remaining, in order:
     wins, else a loud `:packages/ambiguous-ref` demands qualification;
   - the exporter emits qualified refs for duplicated names (round-trip
     proof: `roundtrip-per-ns-duplicates`). Namespaces that can't be
-    SPELLED as readable keyword namespaces still qualify (2026-07-24):
+    SPELLED as readable keyword namespaces still qualify:
     a version-materialized `@`-ns as `(keyword "lib@1-2-0.sub" n)`,
     the ROOT (nil) ns as `(keyword "" n)` - both legal in-memory/JSONB
     values; the EDN-TEXT boundary spells them `#graphden/ref
@@ -131,7 +131,7 @@ Stage 1 (this branch): registry re-key (above). Remaining, in order:
   - the registry's name-view keys duplicated entries by their
     qualified form (search/candidates show `:ns/name` — the natural
     disambiguation display).
-  Residual CLOSED (2026-07-23): the type-ALIAS registry registers
+  Residual CLOSED: the type-ALIAS registry registers
   bare + qualified `:ns.path/name` keys per type-row
   (`register-type-alias!` 4-arity; `alias-qualified` side-table);
   an ambiguous bare name throws at `resolve-alias` with the
@@ -139,7 +139,7 @@ Stage 1 (this branch): registry re-key (above). Remaining, in order:
   qualified keyword in the `:type` position — no context-aware
   resolution needed (`@`-versioned namespaces register bare-only,
   mirroring export's EDN-keyword guard).
-- **Stage 6 — UI disambiguation: DONE (2026-07-23).** The sidebar
+- **Stage 6 — UI disambiguation: DONE.** The sidebar
   search renders results inside the namespace TREE, so duplicated
   names are visually distinct by construction; `resolveFnByName`
   accepts qualified `ns.path/name` input, and a bare name matching

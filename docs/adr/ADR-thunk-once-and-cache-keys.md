@@ -1,6 +1,6 @@
 # ADR: once-semantics for ref thunks, and the identity-keyed call-cache
 
-> Status: **ACCEPTED** (once-thunks shipped 2026-08-24, commit
+> Status: **ACCEPTED** (once-thunks shipped, commit
 > `3c38e090`). The residual-window section is a documented
 > NON-decision — revisit only with evidence.
 
@@ -25,7 +25,7 @@ maintains: env-bindings (`env-arg-builder`) mint a fresh thunk per
 parent run, and an unrelated graph edit can change how many parent
 runs happen.
 
-**Observed failure (2026-08-24):** an inline-anon `:cond` added in
+**Observed failure:** an inline-anon `:cond` added in
 `app/branches` shifted thunk identities in the response-cache/encode
 wrap chain of `web/http`; a projected key diverged, `:response` was
 re-forced, and the candidates POST handler **executed twice inside
@@ -63,7 +63,7 @@ Explicitly NOT changed:
   delay from the same thread recurses (mid-computation), so copying
   env thunks under slot-id keys is still forbidden.
 
-## Audit of the wider pattern (2026-08-24)
+## Audit of the wider pattern
 
 Every deferred-construction site in the executor was reviewed after
 the fix:

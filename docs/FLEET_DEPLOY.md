@@ -204,7 +204,7 @@ tenant-mode browser e2e need this dedicated stack live and are deferred to it.
 ## Local verification with kind
 
 The chart + fleet mechanics were validated end-to-end on a local
-[kind](https://kind.sigs.k8s.io/) cluster (2026-07-12). To reproduce:
+[kind](https://kind.sigs.k8s.io/) cluster. To reproduce:
 
 ```bash
 kind create cluster --name gfleet

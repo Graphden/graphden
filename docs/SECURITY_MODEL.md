@@ -36,7 +36,7 @@ so a gap in one does not by itself cross tenants:
    grants — to a user, to a role (a team: its members hold the grant), or to
    the whole org — gate WHO edits WHAT, and a branch's `write-policy` (protected
    branches — owner / org admins) gates writes and merges per branch
-   ([VERSIONING.md § Protected branches](VERSIONING.md#protected-branches-stage-1-2026-08-15)).
+   ([VERSIONING.md § Protected branches](VERSIONING.md#protected-branches)).
    The same owner/admin gate covers ALL of a branch's protection knobs —
    `write-policy`, `require-merge?`, and the review policy
    (`required-approvals` / `approver-ids` / `allow-self-approval?`) — so a

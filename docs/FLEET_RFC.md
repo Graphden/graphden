@@ -495,7 +495,7 @@ bound both capability and resources.
     `GRAPHDEN_EXECUTOR_ID` is its FQDN; the controller runs in-app (no separate
     operator/CRD). See [FLEET_DEPLOY.md](FLEET_DEPLOY.md).
   - **T5.3 (DEMONSTRATED end-to-end on KEDA+CRaC; substrate = KEDA, not Knative)**
-    scale-to-zero for the idle tail. Two substrates verified on kind (2026-07-12):
+    scale-to-zero for the idle tail. Two substrates verified on kind:
     - **Knative** (deploy/kind/knative/): the app as a ksvc scales to **0 pods**
       idle, a request cold-starts one (activator buffers) — but the cold-start was
       **115 s** (the compute-bound boot). AND stock Knative **cannot** front this
@@ -589,7 +589,7 @@ is the foundation this RFC reuses — not new work.**
   memoization collapsed both dominant costs — `compile-all` ~60 s → ~1.2 s
   (memoize `fn-typed-fn-ids` + env-bindings) and the type-check sweep
   ~141 s → ~24 s (memoize `effective-ref-return` across passes) — so the earlier
-  clean measurement (2026-07-12: ~141 s, decomposed as sweep + eager-compile) no
+  clean measurement no
   longer holds; the **sweep now dominates** what little remains. It is still
   **compute-bound**, not dependency-reconnect or class-loading, so AppCDS barely
   helps; CRaC (which captures the whole compiled registry) is still the lever for
@@ -622,7 +622,7 @@ is the foundation this RFC reuses — not new work.**
   CRaC JDK; checkpoint of a ~300 MB heap succeeds). The gate moves from
   environment feasibility to the `Resource`-handler integration + measuring the
   real ~655 MB image.
-- 2026-07-12: **CRaC full-system checkpoint MEASURED end-to-end; DECISION =
+- **CRaC full-system checkpoint MEASURED end-to-end; DECISION =
   ADOPT.** The real warm image (4085 fns compiled + web-server up) checkpoints to
   219 MB and restores to serving in ~178 ms vs a ~141 s cold boot (~780×). Three
   `graphden.crac` quiesce/resume blockers were found + fixed (lazy class-init on

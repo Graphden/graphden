@@ -310,7 +310,7 @@ reconciler's periodic graph reads. They fragment the heap into compaction Full
 GCs. The pressure is **aggregate** — the sum of many normal-sized-but-humongous
 responses across the suite — not one dominant endpoint.
 
-**The flake is NOT a single-endpoint over-fetch (measured 2026-07-16).** An
+**The flake is NOT a single-endpoint over-fetch.** An
 earlier version of this section claimed "the e2e flake and finding K are the same
 bug" and pointed at `/api/types`. Direct measurement refuted it, so nobody
 re-attempts scoping `/api/types` as the flake fix:
@@ -391,7 +391,7 @@ dogpile, growing the compile cache — measured as noise or worse.
 `docs/PERF_NOTES.md` lists `?scope=tree` at ~15 ms. That number cannot be a
 baseline (and the trend has already earned its keep once: it flagged
 `graph-entities-tree` at 4× its 2026-08-27 units, which was the per-namespace
-kind counts — added 2026-08-29 — annotating every fn's role on every sidebar
+kind counts — annotating every fn's role on every sidebar
 paint; the counts are memoised per snapshot now and `:sidebar/tree-kinds-
 computed` gates the memo): it describes the box it was measured on. So `graphden.perf.calibrate`
 measures a **reference workload in the same run, against the same pool** — one

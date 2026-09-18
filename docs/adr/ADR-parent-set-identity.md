@@ -1,6 +1,6 @@
 # ADR: the parent-set is structural identity, not versioned state
 
-**Status: decided (2026-07-23). Option (b) — identity + gate — is the
+**Status: decided. Option (b) — identity + gate — is the
 permanent semantic; option (a) — versioning `:parent-ids` — is
 REJECTED, not deferred.**
 

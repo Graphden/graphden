@@ -91,7 +91,7 @@ This matches CLAUDE.md principle: *Slots are global identities (one-shot creatio
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## 5. Why incremental dual-key failed (old branch, 2026-06-24)
+## 5. Why incremental dual-key failed
 
 The dropped `refactor/slot-id-runtime-fa` tried to write slot-id keys ALONGSIDE name keys, so old name readers and new slot-id readers could coexist during transition. Three problems killed it:
 
@@ -144,7 +144,7 @@ Acceptance: no code added.
 
 **Phase 4 — Rename-aware slot-id readers (hybrid fa)**
 
-Implemented 2026-06-25 (commit `b446f3c7`).
+Implemented.
 
 First attempt at Phase 4 used the chain-leaf slot-id as the reader's `fa` key. That failed because chain-leaf ids are GLOBAL through their base-fn — every fn composed on `:assoc` shares the same UUID for `:value`, every `:get` shares the same `:m`/`:k`/`:default`. The `:image` test (with two inline-anon `:assoc` calls each with their own `{:as :src}` / `{:as :alt}` renames) and `ex-pair-greet` cleanly surfaced the bug.
 
@@ -172,7 +172,7 @@ Acceptance: bb test 1591 / 6334 green; the `:image`, `ex-pair-greet`, `refinemen
 
 **Phase 5 — HOF wrap-time slot-id translation (conservative)**
 
-Implemented 2026-06-25.
+Implemented.
 
 Diagnosis from the Phase 4 page-body bug attempt: removing the `:as :page-body` rename surfaces #104 at runtime even though parser-side disambiguation (commit `38c3fc6e`) routes the bindings to the right slots at sync time. Mechanism:
 
@@ -221,7 +221,7 @@ An alternative was considered (env-builder slot-id-only + cross-fn rename slot-i
 - Multi-rename slots, parser changes — none
 - Public API signature changes — none (callers continue to pass names; translation is internal)
 
-## 9. Addendum (2026-08-27) — inherited renames
+## 9. Addendum — inherited renames
 
 Two facts established while closing the lesson-13 `:wrap-custom-script`
 descendant-binding bug (a value bound as `:body` silently vanished):

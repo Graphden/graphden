@@ -109,7 +109,7 @@ create a namespace cycle back through the versioned-storage stack that
 - One new leaf ns + two edits (`lookup`, `context`). No semantic change
   to the free-arg computation itself.
 
-## Verification results (2026-07-11, live on the 4085-fn graph)
+## Verification results
 
 **Speed + correctness** — `free-arg-slot-map-cached` on the production
 container, per fn, cold (miss) vs warm (hit), output compared to a

@@ -12,7 +12,7 @@
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {
-  NS_NAME, FN_NAME, hardCleanup, waitTourTitle, clickTourButton,
+  NS_NAME, FN_NAME, hardCleanup, waitTourTitle, settleTourRing, clickTourButton,
   filterAndSelect, extendViaRowActions, bindFirstPlaceholder,
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding,
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
@@ -152,6 +152,10 @@ const {
     // sits on them, so the audit must see them (map's canvas is a big one;
     // under gate load the chips land after the title does).
     await page.waitForSelector('.arg-type-chip', {timeout: 60000});
+    // …and let the ring settle on them: the audit records a ring only once
+    // it has held a tick, and a Next pressed the instant the chips appear
+    // reads as NEVER-RINGED.
+    await settleTourRing(page, 10000);
     assert(await clickTourButton(page, 'Next'), 'lesson 06 slots Next');
     await waitTourTitle(page, 'Extend it');
     await extendViaRowActions(page, 'tutorial-map', 'map');

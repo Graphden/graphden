@@ -313,15 +313,29 @@ async function waitTourTitle(page, title, timeoutMs) {
   // flagged seven such steps, every one of them fine for a person. Wait for
   // the step's effective target to be on screen (bounded — a target that
   // never comes is exactly what the gate should then report), then one tour
-  // tick so the sampler sees the ring on it.
+  // tick so the sampler sees the ring on it. The bound is generous: under
+  // gate load a big canvas (map's, lesson 06) took over 5 s to land its
+  // type chips, and the walk's own selector wait then found them and
+  // pressed Next inside the ring's hold window — NEVER-RINGED for a step a
+  // person reads for ten seconds.
   if (process.env.GRAPHDEN_TOUR_AUDIT) {
-    await page.waitForFunction(() => {
-      if (typeof _tourStep !== 'function' || typeof _tourEffTarget !== 'function') return true;
-      const eff = _tourEffTarget(_tourStep());
-      return !eff || !!document.querySelector(eff);
-    }, null, {timeout: 5000, polling: 100}).catch(() => {});
-    await new Promise((r) => setTimeout(r, 650));
+    await settleTourRing(page, 20000);
   }
+}
+
+// Wait (bounded) for the current step's effective target to be on screen,
+// then one tour tick so the audit's sampler records the ring on it. Walks
+// call it after their own "wait for X to render" when X is the step's
+// target — the title arrived before X did, so waitTourTitle's settle could
+// not see it.
+async function settleTourRing(page, timeoutMs) {
+  if (!process.env.GRAPHDEN_TOUR_AUDIT) return;
+  await page.waitForFunction(() => {
+    if (typeof _tourStep !== 'function' || typeof _tourEffTarget !== 'function') return true;
+    const eff = _tourEffTarget(_tourStep());
+    return !eff || !!document.querySelector(eff);
+  }, null, {timeout: timeoutMs || 5000, polling: 100}).catch(() => {});
+  await new Promise((r) => setTimeout(r, 650));
 }
 
 
@@ -1372,7 +1386,7 @@ async function extendInPlace(page, cardName, childName) {
 
 module.exports = {
   NS_NAME, FN_NAME,
-  retryingDelete, hardCleanup, tourTitle, waitTourTitle, clickTourButton,
+  retryingDelete, hardCleanup, tourTitle, waitTourTitle, settleTourRing, clickTourButton,
   waitUntil, tourProgress, clickTourAdvance,
   installSpotlightAudit,
   filterAndSelect, openRowActionsFor, extendViaRowActions, bindFirstPlaceholder,

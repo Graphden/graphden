@@ -493,17 +493,21 @@ jobs:
   hadolint:
     name: hadolint (Dockerfile)
     runs-on: ubuntu-latest
+    # The image comes from GHCR, not Docker Hub: two consecutive main
+    # runs (2026-09-18) died on `auth.docker.io` timeouts pulling
+    # hadolint/hadolint — an unauthenticated Hub pull from a shared
+    # Actions egress is rate-limited and flaky, GHCR is neither.
     steps:
       - uses: actions/checkout@v7
 
       - name: Lint Dockerfile
-        run: docker run --rm -i hadolint/hadolint:v2.12.0-debian < Dockerfile
+        run: docker run --rm -i ghcr.io/hadolint/hadolint:v2.12.0-debian < Dockerfile
 
       - name: Lint Dockerfile.build
-        run: docker run --rm -i hadolint/hadolint:v2.12.0-debian < Dockerfile.build
+        run: docker run --rm -i ghcr.io/hadolint/hadolint:v2.12.0-debian < Dockerfile.build
 
       - name: Lint Dockerfile.crac
-        run: docker run --rm -i hadolint/hadolint:v2.12.0-debian < Dockerfile.crac
+        run: docker run --rm -i ghcr.io/hadolint/hadolint:v2.12.0-debian < Dockerfile.crac
 
   gitleaks:
     name: gitleaks (secrets)

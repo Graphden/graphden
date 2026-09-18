@@ -237,13 +237,25 @@ const {
     await page.evaluate(() => document.getElementById('gd-views-btn').click());
     await page.waitForSelector('.gd-views-pop', {timeout: 15000});
     await waitTourTitle(page, 'Save a rule', 150000);
-    await page.evaluate(() => {
-      const pop = document.querySelector('.gd-views-pop');
-      const [nameIn, ruleIn] = pop.querySelectorAll('.gd-views-input');
-      nameIn.value = 'on-const';
-      ruleIn.value = 'uses:core.logic.const';
-      pop.querySelector('.gd-views-save').click();
-    });
+    // Like a reader: type the rule, forget the name, click Save — the form
+    // must SAY what is missing (a silent no-op read as a broken button),
+    // keep the popover, and put the keyboard on the empty field.
+    const [nameIn, ruleIn] = await page.$$('.gd-views-pop .gd-views-input');
+    await ruleIn.click();
+    await page.keyboard.type('uses:core.logic.const');
+    await page.click('.gd-views-pop .gd-views-save');
+    const missing = await page.evaluate(() => ({
+      popOpen: !!document.querySelector('.gd-views-pop'),
+      msg: document.querySelector('.gd-views-pop .gd-views-form-msg:not([hidden])')?.textContent || '',
+      focusOnName: document.activeElement === document.querySelector('.gd-views-pop .gd-views-input'),
+      active: document.getElementById('gd-views-btn').classList.contains('gd-views-active'),
+    }));
+    assert(missing.popOpen && !missing.active, 'Save with no name does not apply and keeps the popover');
+    assert(/name/i.test(missing.msg), 'Save with no name says so (got: ' + missing.msg + ')');
+    assert(missing.focusOnName, 'Save with no name puts the keyboard on the name field');
+    // Now the name, and Enter saves — no reach for the button.
+    await page.keyboard.type('on-const');
+    await page.keyboard.press('Enter');
     await page.waitForSelector('#gd-views-btn.gd-views-active', {timeout: 30000});
     // The tree is now the computed membership — non-empty for :const.
     await page.waitForFunction(() =>

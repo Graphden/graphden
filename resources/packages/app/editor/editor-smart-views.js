@@ -45,7 +45,7 @@ function gdApplySmartView(view) {
   if (typeof updateEntityList === 'function') updateEntityList(graphData);
   const doFetch = (typeof authFetch === 'function') ? authFetch : fetch;
   doFetch(API.api_graph_entities + '?scope=view&q=' + encodeURIComponent(view.rule))
-    .then((r) => (r.ok ? r.json() : null))
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
     .then((d) => {
       // A newer apply/clear won the race — drop this response.
       if (_activeSmartView !== view) return;
@@ -64,6 +64,9 @@ function gdApplySmartView(view) {
     .catch(() => {
       if (_activeSmartView !== view) return;
       _smartViewResults = [];
+      // An empty tree with no word is indistinguishable from "the rule
+      // matched nothing" — say that the rule was never evaluated.
+      if (typeof gdToast === 'function') gdToast('View "' + view.name + '" could not be evaluated — check the rule or your connection');
       if (typeof updateEntityList === 'function') updateEntityList(graphData);
     });
 }
@@ -248,18 +251,44 @@ function _renderSmartViewsPop(el) {
   save.type = 'button';
   save.className = 'gd-views-save';
   save.textContent = 'Save view';
-  save.addEventListener('click', () => {
+  // What the click is waiting for. A Save that silently did nothing on an
+  // empty field read as "the button is broken" (lesson 19, step 6) — the
+  // reader had pasted the rule and not the name, or vice versa. The
+  // message names the missing half and the keyboard goes to it.
+  const msg = document.createElement('div');
+  msg.className = 'gd-views-form-msg';
+  msg.setAttribute('role', 'status');
+  msg.hidden = true;
+  const trySave = () => {
     const name = nameIn.value.trim();
     const rule = ruleIn.value.trim();
-    if (!name || !rule) return;
+    if (!name || !rule) {
+      msg.textContent = !name && !rule ? 'Type a name and a rule first'
+        : !name ? 'Give the view a name' : 'Type a rule — e.g. uses:core.logic.const';
+      msg.hidden = false;
+      (!name ? nameIn : ruleIn).focus();
+      return;
+    }
     const views2 = gdReadSmartViews().filter((x) => x.name !== name);
     views2.unshift({ name, rule });
     gdWriteSmartViews(views2);
     gdApplySmartView({ name, rule });
     gdCloseSmartViewsPop();
-  });
+  };
+  save.addEventListener('click', trySave);
+  // Enter in either field saves — a two-field form with no submit key
+  // left the reader pressing Enter and watching nothing happen.
+  for (const input of [nameIn, ruleIn]) {
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      trySave();
+    });
+    input.addEventListener('input', () => { msg.hidden = true; });
+  }
   form.appendChild(nameIn);
   form.appendChild(ruleIn);
+  form.appendChild(msg);
   form.appendChild(save);
   el.appendChild(form);
 

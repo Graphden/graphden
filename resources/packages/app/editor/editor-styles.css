@@ -6780,6 +6780,8 @@ body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
   font-size: 0.75rem; padding: 3px 10px; cursor: pointer;
 }
 .gd-views-save:hover { background: var(--hover-bg); }
+.gd-views-form-msg { font-size: 0.6875rem; color: var(--error-fg-strong); }
+.gd-views-form-msg[hidden] { display: none; }
 .gd-views-apply:focus-visible,
 .gd-views-del:focus-visible,
 .gd-views-row-clear:focus-visible,

@@ -30,7 +30,7 @@
   ;; okhttp 5.x is Kotlin-multiplatform — the bare `okhttp` coord is Gradle
   ;; module metadata; Maven/tools.deps consumers need the -jvm artifact.)
   com.squareup.okhttp3/okhttp-jvm {:mvn/version "5.5.0"}
-  metosin/reitit {:mvn/version "0.10.1"}
+  metosin/reitit {:mvn/version "0.11.0"}
   ;; HTML templating
   hiccup/hiccup {:mvn/version "2.0.0"}
   ;; System lifecycle

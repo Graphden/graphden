@@ -1205,7 +1205,7 @@
                :targets ["#gd-views-btn" ".gd-views-pop"]
                :check {:kind "dom" :selector ".gd-views-pop"}}
               {:title "Save a rule"
-               :body "Name it `on-const`, rule `uses:core.logic.const` — then [[Save view]]. The tree becomes exactly the fns that transitively use :const — a namespace nobody maintains by hand. Rules AND-combine: uses:<fn>, effect:<kind>, name:<text>."
+               :body "Name it `on-const`, rule `uses:core.logic.const` — then [[Save view]] (or [[Enter]] in either field). The tree becomes exactly the fns that transitively use :const — a namespace nobody maintains by hand. Rules AND-combine: uses:<fn>, effect:<kind>, name:<text>."
                :target ".gd-views-pop"
                :check {:kind "dom" :selector "#gd-views-btn.gd-views-active"}}
               {:title "Back to the whole tree"

@@ -1159,13 +1159,20 @@
                :target ".gd-which-key"
                :check {:kind "dom-absent" :selector ".gd-which-key"}}
               {:title "Jump to the filter"
-               :body "Press [[/]] — focus lands in the Explorer filter, ready to type a name. From there: arrows walk the tree, [[Enter]] opens a row."
+               :body "Press [[/]] — focus lands in the Explorer filter, ready to type a name. While a text field has the keyboard, the bare keys type instead of running — so every field has a way out."
                :target "input[placeholder=\"Filter...\"]"
                :check {:kind "dom" :selector "#search-input:focus"}}
-              {:title "The canvas walks by edges"
-               :body "On the canvas, arrows (or hjkl) follow the graph itself: [[→]] moves to an argument, [[←]] to the consumer, [[Enter]] steps INTO a card's rows, [[Esc]] backs out, [[Shift]]+arrows move the node. Try it after the tour — with a fn selected, [[Tab]] into the canvas and walk."
+              {:title "Onto the tree"
+               :body "Press [[Esc]] (or [[↓]]) — the keyboard leaves the field for the tree, with whatever you typed still filtering it. Here arrows walk the rows, [[Enter]] opens one, and [[.]] reaches a row's own buttons (← → between them, [[Esc]] back to the row)."
+               :target "#entity-list"
+               ;; A tree row has the keyboard — the exit worked. `:focus` is the
+               ;; reader's own state, so a click on a row would pass too; the
+               ;; step's text says which key gets there.
+               :check {:kind "dom" :selector "#entity-list [role=\"treeitem\"]:focus"}}
+              {:title "Into the graph"
+               :body "Press [[Space]] [[g]] [[g]] — the keyboard moves into the graph. On the canvas, arrows (or hjkl) follow the graph itself: [[→]] moves to an argument, [[←]] to the consumer, [[Enter]] steps INTO a card's rows, [[Esc]] backs out, [[Shift]]+arrows move the node."
                :target nil
-               :check {:kind "manual"}}
+               :check {:kind "dom" :selector "#graph-container:focus, #graph-container :focus"}}
               {:title "That's the keyboard"
                :body "Leader menu for discovery, cheatsheet for the map, tree and canvas as first-class widgets. If the text is small — scale your browser font, the editor is sized in rem and grows with it. Click [[Finish]]."
                :target nil

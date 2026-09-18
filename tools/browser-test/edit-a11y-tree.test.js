@@ -75,6 +75,51 @@ const rowInfo = () => {
     assert(structure.itemCount > 3, 'it has rows: ' + structure.itemCount);
     assert(structure.tabStops === 1,
            'exactly one row is a tab stop (roving tabindex), got ' + structure.tabStops);
+    // The rows' own buttons are not tab stops either — Tab from the row
+    // LEAVES the tree (four buttons per namespace header once made it walk
+    // every row's controls before reaching the canvas).
+    const tabOut = await page.evaluate(() => {
+      const tree = document.getElementById('entity-list');
+      // Only the ROWS' controls — "+ New namespace" below the rows is a
+      // real action and a real tab stop.
+      const tabbableControls = tree.querySelectorAll('[role="treeitem"] button:not([tabindex="-1"]), [role="treeitem"] a[href]:not([tabindex="-1"])').length;
+      return { tabbableControls };
+    });
+    assert(tabOut.tabbableControls === 0,
+           'no row control is a tab stop, got ' + tabOut.tabbableControls);
+    await page.evaluate(() => document.querySelector('#entity-list [role="treeitem"][tabindex="0"]').focus());
+    await page.keyboard.press('Tab');
+    // Off the rows in one Tab ("+ New namespace" sits below them, then the
+    // canvas) — not through every row's buttons.
+    const leftRows = await page.evaluate(() => !document.activeElement?.closest('[role="treeitem"]'));
+    assert(leftRows, 'Tab from the tree row leaves the rows');
+    await page.evaluate(() => document.querySelector('#entity-list [role="treeitem"][tabindex="0"]').focus());
+    await page.keyboard.press(' ');
+    await page.waitForTimeout(300);
+    const leaderFromRow = await page.evaluate(() => !!document.querySelector('.gd-which-key'));
+    assert(leaderFromRow, 'Space on a tree row opens the leader menu, not the row');
+    await page.keyboard.press('Escape');
+    // …and the row's controls are reached through the row: `.` then ← →,
+    // Escape back.
+    await page.evaluate(() => document.querySelector('#entity-list [role="treeitem"][tabindex="0"]').focus());
+    await page.keyboard.press('.');
+    const onControl = await page.evaluate(() => {
+      const a = document.activeElement;
+      return a?.tagName === 'BUTTON' && !!a.closest('#entity-list [role="treeitem"]');
+    });
+    assert(onControl, '`.` on a row focuses its first button');
+    await page.keyboard.press('Escape');
+    const backOnRow = await page.evaluate(() => document.activeElement?.getAttribute('role') === 'treeitem');
+    assert(backOnRow, 'Escape from a row button returns to the row');
+    // The filter field exits onto the tree with Escape / ArrowDown.
+    await page.focus('#search-input');
+    await page.keyboard.press('Escape');
+    const filterExit = await page.evaluate(() => document.activeElement?.getAttribute('role') === 'treeitem');
+    assert(filterExit, 'Escape in the filter field moves onto the tree');
+    await page.focus('#search-input');
+    await page.keyboard.press('ArrowDown');
+    const filterDown = await page.evaluate(() => document.activeElement?.getAttribute('role') === 'treeitem');
+    assert(filterDown, 'ArrowDown in the filter field moves onto the tree');
     assert(structure.allLevelled,
            'every row states its depth — the tree renders flat, so depth cannot be inferred');
     assert(structure.nsHaveExpanded, 'namespace rows expose aria-expanded');

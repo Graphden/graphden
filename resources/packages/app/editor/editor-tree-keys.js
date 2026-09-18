@@ -123,14 +123,57 @@ function activate(el) {
   el.click();
 }
 
+// A row's own controls (rename, +, publish, hide, delete, the ⚙ toggle).
+// They are NOT tab stops — with four per namespace header, Tab from the
+// tree never reached the canvas — so they are reached THROUGH the row:
+// `.` / `m` (the canvas rows' actions key) moves onto the first, ← → walk
+// them, Escape returns to the row. `stampRowControls` re-applies the
+// tabindex after every rebuild, whichever module built the buttons.
+function rowControls(row) {
+  return Array.from(row.querySelectorAll('button, a[href]'))
+    .filter((el) => !el.disabled && el.closest('[role="treeitem"]') === row);
+}
+
+function stampRowControls(root) {
+  for (const el of root.querySelectorAll('[role="treeitem"] button, [role="treeitem"] a[href]')) {
+    if (el.getAttribute('tabindex') !== '-1') el.setAttribute('tabindex', '-1');
+  }
+}
+
+function onControlKeydown(e, row, control) {
+  const controls = rowControls(row);
+  const idx = controls.indexOf(control);
+  switch (e.key) {
+    case 'ArrowRight':
+    case 'ArrowLeft': {
+      e.preventDefault();
+      const next = controls[e.key === 'ArrowRight' ? idx + 1 : idx - 1];
+      if (next) focusSafely(next);
+      break;
+    }
+    case 'Escape':
+      e.preventDefault();
+      e.stopPropagation();
+      focusItem(row);
+      break;
+    default:
+      break;
+  }
+}
+
 function onKeydown(e) {
   const root = treeEl();
   if (!root) return;
   const current = e.target.closest?.('[role="treeitem"]');
   if (!current || !root.contains(current)) return;
-  // A keystroke aimed at one of the row's own buttons (rename, delete) is
-  // that button's business.
-  if (e.target !== current && e.target.closest('button, a[href], input')) return;
+  // A keystroke aimed at one of the row's own controls: ← → Escape move
+  // between them and back to the row; anything else (Enter, Space) is the
+  // control's business. An inline INPUT (rename / create) owns every key.
+  if (e.target !== current && e.target.closest('button, a[href], input')) {
+    const control = e.target.closest('button, a[href]');
+    if (control && !e.target.closest('input')) onControlKeydown(e, current, control);
+    return;
+  }
 
   const items = treeItems();
   const idx = items.indexOf(current);
@@ -171,10 +214,19 @@ function onKeydown(e) {
       focusItem(items[items.length - 1]);
       break;
     case 'Enter':
-    case ' ':
+      // Enter alone activates. Space is the LEADER (editor-shortcuts.js):
+      // a tree that swallowed it left the reader with no way to open the
+      // menu from a row — `Space g g` into the graph never fired.
       e.preventDefault();
       activate(current);
       break;
+    case '.':
+    case 'm': {
+      // The row's actions — same key as a canvas row's ⋯ menu.
+      const first = rowControls(current)[0];
+      if (first) { e.preventDefault(); focusSafely(first); }
+      break;
+    }
     default:
       break;
   }
@@ -201,6 +253,7 @@ function restoreAfterRebuild() {
   const items = treeItems();
   if (items.length === 0) return;
 
+  stampRowControls(root);
   const wanted = elementFor(_activeKey);
   const tabbable = root.querySelector('[role="treeitem"][tabindex="0"]');
   if (!tabbable) setActive(wanted || items[0]);
@@ -213,12 +266,43 @@ function restoreAfterRebuild() {
   _hadFocus = false;
 }
 
+// Put the keyboard on the tree: the roving row, else the first row. The
+// leader's `Space j e` and the filter field's exit both land here.
+function focusTree() {
+  const root = treeEl();
+  if (!root) return false;
+  const target = root.querySelector('[role="treeitem"][tabindex="0"]') || treeItems()[0];
+  if (!target) return false;
+  focusItem(target);
+  return true;
+}
+window.gdFocusTree = focusTree;
+
+// The Explorer filter is the tree's entry field, and it was a dead end:
+// while a text field has focus the bare keys (`/`, `?`, `Space`) type,
+// so a reader who pressed `/` had no key that led anywhere — Escape did
+// nothing and Tab walked a dozen chips. ↓ (the combobox convention) and
+// Escape both move onto the tree; the typed filter stays applied, so the
+// rows under the keyboard are the matches. With no rows to land on
+// (nothing matched) Escape still leaves the field, so the bare keys work.
+function installFilterExit() {
+  const input = document.getElementById('search-input');
+  if (!input) return;
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' && e.key !== 'ArrowDown') return;
+    if (e.key === 'ArrowDown' && !treeItems().length) return;
+    e.preventDefault();
+    if (!focusTree()) input.blur();
+  });
+}
+
 function installTreeKeys() {
   const root = treeEl();
   if (!root) return;
 
   // Delegated: the rows themselves are replaced constantly.
   root.addEventListener('keydown', onKeydown);
+  installFilterExit();
   // Clicking a row makes it the tab stop too, so mouse and keyboard agree on
   // where "here" is.
   root.addEventListener('focusin', (e) => {

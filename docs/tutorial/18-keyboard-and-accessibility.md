@@ -35,8 +35,10 @@ the next key does. You never have to memorise anything — press
 
 1. Press `/`. The Explorer's filter field takes focus.
 2. Type part of a function name, e.g. `web`.
-3. Press `Escape` to leave the field, then `Tab` until the Explorer
-   tree has focus.
+3. Press `↓` (or `Escape`) — the keyboard leaves the field for the
+   Explorer tree, and what you typed keeps filtering it. Every text
+   field has such an exit: while one has the keyboard, the bare keys
+   (`/`, `?`, `Space`) type instead of running.
 
 The tree is one tab stop, not hundreds: `Tab` puts you *in* it, and
 from there the arrows move:
@@ -48,6 +50,7 @@ from there the arrows move:
 | `←` | collapse it, or step out to its parent |
 | `Enter` | open the function on the canvas |
 | `Home` `End` | first / last row |
+| `.` or `m` | the row's own buttons (rename, +, publish, hide); `←` `→` between them, `Escape` back to the row |
 
 Open a function with `Enter`. The tree rebuilds itself when you do —
 but your place in it does not move.

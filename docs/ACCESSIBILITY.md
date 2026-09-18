@@ -84,7 +84,7 @@ busy spinner only slows down because it IS the progress signal.
 
 | Surface | Pattern | Module |
 |---------|---------|--------|
-| Explorer tree | ARIA tree — arrows, Right/Left expand/collapse, Enter opens, roving tabindex | `editor-tree-keys.js` |
+| Explorer tree | ARIA tree — arrows, Right/Left expand/collapse, Enter opens, roving tabindex. A row's own buttons are NOT tab stops (four per namespace header once made Tab walk the whole tree): `.` / `m` reach them, ← → walk them, Escape returns to the row. The filter field above it exits with ↓ / Escape onto the tree — every always-present text field owes a key out, since the bare keys type while it has focus | `editor-tree-keys.js` |
 | Graph canvas | Roving tabindex; arrows/hjkl follow EDGES (→ argument, ← consumer). Two levels: `Enter` steps INTO a card's rows, `Escape` backs out; `Shift`+arrows move the node itself | `editor-canvas-keys.js` |
 | Pickers (fn, namespace) | Combobox — focus stays in the filter field, `aria-activedescendant` names the highlighted row | `editor-fn-picker.js`, `editor-namespace-picker.js` |
 | Inspector tabs | ARIA tabs — `aria-controls`, one tabpanel, ← → Home End | `editor-shell.js` |

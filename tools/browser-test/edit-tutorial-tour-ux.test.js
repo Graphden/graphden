@@ -17,6 +17,7 @@ const {
   runViaRowActions, tourTitle, extendViaRowActions, bindFirstPlaceholder,
   bindFnRefPlaceholder, finishAndDelete, runWithEffectAck, waitTourClosed,
   openRowActionsFor, bindNamedPlaceholder, bindPlaceholderOn, extendInPlace,
+  waitUntil,
 } = require('./tutorial-tour-helpers');
 
 
@@ -186,8 +187,26 @@ const {
     // keypress races the step re-render and flakes, and pinning the
     // binding twice buys nothing.
     await page.focus('#search-input');
-    await waitTourTitle(page, 'The canvas walks by edges', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 18 canvas Next');
+    await waitTourTitle(page, 'Onto the tree', 150000);
+    // The field's exit: Escape puts the keyboard on a tree row (the reader
+    // used to be stuck — Escape did nothing, `?` and Space typed).
+    await page.focus('#search-input');
+    await page.keyboard.press('Escape');
+    const afterEsc = await page.evaluate(() => {
+      const a = document.activeElement;
+      return { row: !!a?.closest('#entity-list [role="treeitem"]'), tag: a?.tagName };
+    });
+    assert(afterEsc.row, 'Escape in the filter lands on a tree row (got ' + JSON.stringify(afterEsc) + ')');
+    await waitTourTitle(page, 'Into the graph', 150000);
+    // Space g g from the tree row — the keyboard reaches the canvas.
+    await page.keyboard.press(' ');
+    await page.waitForSelector('.gd-which-key', {timeout: 10000});
+    await page.keyboard.press('g');
+    await page.keyboard.press('g');
+    await waitUntil(page, () => !!document.activeElement?.closest('#graph-container')
+      || document.activeElement === document.getElementById('graph-container'), null, 5000);
+    const onCanvas = await page.evaluate(() => !!document.activeElement?.closest('#graph-container'));
+    assert(onCanvas, 'Space g g moves the keyboard into the graph');
     await waitTourTitle(page, "That's the keyboard", 150000);
     assert(await clickTourButton(page, 'Finish'), 'lesson 18 Finish');
     await waitTourClosed(page, 30000);

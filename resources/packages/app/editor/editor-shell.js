@@ -399,12 +399,27 @@ document.addEventListener('keydown', (e) => {
 // rationale as the shortcut dispatcher) and only for an unconsumed key: any
 // dialog or popover that closed on this Escape has already preventDefault-ed,
 // so a stack of "close the topmost thing" semantics falls out naturally.
-// Skipped while typing — Escape in a text field means "leave the field",
-// never "throw me off the page".
+// Two stages while typing — Escape in a text field means "leave the
+// field", never "throw me off the page": the first Escape puts the
+// keyboard on the surface's exit button (the visible way out, in the live
+// top bar — Enter or a second Escape then leaves). Ignoring the key
+// instead left the Marketplace search a dead end — no key led anywhere and
+// that button was 23 Tabs away, and "the surface's first focusable" is no
+// better a target: on Marketplace the search field IS the first. A field
+// inside a dialog on the surface never reaches here: the dialog's own
+// Escape consumed it.
 window.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || e.defaultPrevented) return;
-  if (document.body.getAttribute('data-surface') === 'build') return;
-  if (typeof isTyping === 'function' && isTyping()) return;
+  const surface = document.body.getAttribute('data-surface');
+  if (surface === 'build') return;
+  if (typeof isTyping === 'function' && isTyping()) {
+    e.preventDefault();
+    const exit = document.getElementById('gd-surface-exit');
+    if (!(exit && !exit.hidden && typeof focusSafely === 'function' && focusSafely(exit))) {
+      document.activeElement?.blur?.();
+    }
+    return;
+  }
   e.preventDefault();
   if (typeof window.gdShellSurface === 'function') window.gdShellSurface('build');
 });

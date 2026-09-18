@@ -318,6 +318,27 @@ const ACTIVE = () => {
     assert(surfBack.inertCleared, 'surface: leaving lifts inert from the Build chrome');
     assert(surfBack.focusHomed, 'surface: focus re-homes on the canvas, not <body>');
 
+    // Phase H — a text field on a surface is not a dead end. The Marketplace
+    // search field once swallowed every key (Escape ignored while typing, the
+    // exit button 23 Tabs away): the first Escape leaves the field for the
+    // exit button, the second leaves the surface.
+    await page.evaluate(() => gdShellSurface('market'));
+    await page.waitForSelector('#gd-market input.mk-search', {timeout: 15000});
+    await page.waitForTimeout(500);
+    await page.evaluate(() => document.querySelector('#gd-market input.mk-search').focus());
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(150);
+    const fieldEsc = await page.evaluate(() => ({
+      surface: document.body.getAttribute('data-surface'),
+      onExit: document.activeElement?.id === 'gd-surface-exit',
+    }));
+    assert(fieldEsc.surface === 'market', 'surface field: the first Escape stays on the surface');
+    assert(fieldEsc.onExit,
+      'surface field: the first Escape puts the keyboard on the surface exit button (' + JSON.stringify(fieldEsc) + ')');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.body.getAttribute('data-surface') === 'build',
+      null, {timeout: 5000, polling: 50});
+
     assert(pageErrors.length === 0, 'no page errors: ' + JSON.stringify(pageErrors));
     console.log('a11y-dialogs — PASS');
   } finally {

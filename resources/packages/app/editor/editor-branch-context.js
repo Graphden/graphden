@@ -1,7 +1,7 @@
 // Editor Branch CONTEXT — which branch (and org, workspace, capabilities)
 // every request carries.
 //
-// Split out of editor-branches.js (2026-09-13). State sources (read
+// State sources (read
 // precedence): URL `?branch=<name>` → localStorage → 'main'. Switching
 // (`switchToBranch`) mutates BOTH and reloads the page — reload is the
 // simplest "invalidate everything": the editor caches graph data, layout,

@@ -1,6 +1,6 @@
 // Editor Sidebar — the Organization / Platform surface SECTIONS.
 //
-// Split out of editor-sidebar.js (2026-09-13): nothing here is the Explorer
+// Nothing here is the Explorer
 // tree. `mountAdminSection` / `activateOpSection` wrap each admin builder
 // (grants / users / roles / packages / stats / assets → #gd-operate-panels;
 // orgs / platform-access → #gd-platform-panels) as a selectable `gd-op-card`
@@ -165,7 +165,7 @@ function buildPackagesGovernanceSection() {
 // the operate pane isn't on the page. Cross-org / platform panels go to the
 // PLATFORM surface; everything else (org RBAC + the org's operational
 // panels) to Organization. (Code diagnostics are Explorer lenses + Inspector
-// sections; the diagnostics drawer under the canvas was retired 2026-09-04.)
+// sections; the diagnostics drawer under the canvas was retired.)
 //
 // Lifted out of `updateEntityList`, which had ninety lines of this in the
 // middle of building the namespace tree — two surfaces, one function.
@@ -222,7 +222,7 @@ function mountOpsSections(fallbackList, searchMode) {
   }
   // (No Apps section: publishing a fn as an app is the ▣ row action on the
   // fn itself — editor-apps.js showFnAppsPopover; the apps LENS is the
-  // org-wide overview. The Organization panel was retired 2026-08-30.)
+  // org-wide overview. The Organization panel was retired.)
   if (typeof buildAssetsSection === 'function') {
     // Frontend-asset overrides — self-host only (the builder returns null
     // under an active tenancy addon; writes there are system-only).

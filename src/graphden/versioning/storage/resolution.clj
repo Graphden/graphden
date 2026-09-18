@@ -522,7 +522,7 @@
      `latest-by-created-at`. Without this dedup the full version
      history is materialised per call; on a long-running executor
      `/api/graph/entities` and friends OOM the cheshire-encode step
-     (root cause of the 2026-06-20 e2e cascade).
+     (root cause of the e2e cascade).
    * Source-merge branches: full history fetch with `query-entities`.
      `merge-candidates-from-cache` needs every version with
      `created-at <= merge.source-timestamp` per merge; if two merges
@@ -694,7 +694,7 @@
    entities the resolved LIST reads never return;
    `VersionedStorage.update-entities` forces a version for them so a
    content-equal re-write becomes visible on this branch (the
-   2026-07-20 shrink-regrow incident class — a version on an unrelated
+   shrink-regrow incident class — a version on an unrelated
    branch must NOT satisfy this branch's visibility). Tombstone-winners
    count as versioned: they resolve, to a deletion, and the update path
    handles them via its own not-found check."

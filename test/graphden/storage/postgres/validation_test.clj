@@ -224,4 +224,4 @@
 ;; This namespace boots a real PostgreSQL container. Five pure unit tests
 ;; used to sit here paying for it and duplicating `util-test` /
 ;; `protocol.naming-test` / `protocol.config-test` under colliding names;
-;; the 2026-08-22 audit moved them out. What stays needs the database.
+;; the audit moved them out. What stays needs the database.

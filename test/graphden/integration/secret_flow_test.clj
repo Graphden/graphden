@@ -1,7 +1,7 @@
 (ns ^:integration graphden.integration.secret-flow-test
   "End-to-end integration tests for the `:secret` type-system pipeline
 
-   Parallel-safe (un-pinned 2026-08-04): the registry mutations the
+   Parallel-safe (un-pinned): the registry mutations the
    old `^:serial` cited are both thread-locally scoped now —
    `with-clean-registry` writes through `*registry-override*` and
    `check-fn-def!`'s rich-type writes go through

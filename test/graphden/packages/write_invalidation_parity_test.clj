@@ -6,7 +6,7 @@
    restarts cron/loop services holding the pre-edit compiled closure AND emits
    the cross-pod NOTIFY. The bare `:invalidate-graph-cache` base-fn does ONLY
    the cache drop. Sequence-append once parented on the bare one and left
-   services firing the stale graph (fixed 2026-08-25); the fix routed it through
+   services firing the stale graph (fixed); the fix routed it through
    `:invalidate-after-write`.
 
    This pins that NO graph-write fn-def reintroduces the bare invalidator, so a

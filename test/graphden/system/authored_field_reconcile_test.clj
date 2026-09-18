@@ -1,7 +1,7 @@
 (ns graphden.system.authored-field-reconcile-test
   "P0.3 regression — a declarative re-sync that DROPS an authored
    version-data field (`:lambda-params`, `:expects-effects`) must clear
-   the stale value WITHOUT a DB reset. This is the 2026-08-06 outage
+   the stale value WITHOUT a DB reset. This is the outage
    mechanism: a handler's `:lambda-params [:request :limit]` was removed
    from the EDN, but the versioned upsert's `merge current data` kept the
    old value — so the fixed image kept compiling the stale params until a

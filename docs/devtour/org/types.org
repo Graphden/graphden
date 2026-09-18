@@ -7,7 +7,7 @@ Subtyping, unification, narrowing, refinements, the sweep-at-zero checker, and t
 
 after: executor
 
-[[file:index.org][index]] · ~83 min
+[[file:index.org][index]] · ~82 min
 
 * 1. primitives
 :PROPERTIES:
@@ -218,10 +218,10 @@ The whole-graph sweep entry point: fold ~check-fn-def!~ over topologically-order
 :CUSTOM_ID: types/record-rich-types!
 :FILE: src/graphden/executor/registry/core.clj
 :LINE: 438
-:MINS: 10.4
+:MINS: 10.3
 :END:
 
-Where the sweep's answers are KEPT. The rich-types registry is the in-memory ~{fn → {:return :args :effects …}}~ map every downstream consumer reads: the compiler's HOF-wrap decision, the executor's effect gate, secret redaction on persist, the editor's type chips. BRANCH-SCOPED since 2026-08-31: writes land on the ACTIVE atom — the global for the default branch, a per-ctx fork for every other (bound by the branch router at build + dispatch), so ~/api/types~ answers per branch instead of last-compile-wins. Aliases resolve to their structural body here, so everyone downstream sees one canonical shape.
+Where the sweep's answers are KEPT. The rich-types registry is the in-memory ~{fn → {:return :args :effects …}}~ map every downstream consumer reads: the compiler's HOF-wrap decision, the executor's effect gate, secret redaction on persist, the editor's type chips. BRANCH-SCOPED: writes land on the ACTIVE atom — the global for the default branch, a per-ctx fork for every other (bound by the branch router at build + dispatch), so ~/api/types~ answers per branch instead of last-compile-wins. Aliases resolve to their structural body here, so everyone downstream sees one canonical shape.
 
 - source :: [[file:../../../src/graphden/executor/registry/core.clj::(defn record-rich-types!][src/graphden/executor/registry/core.clj:438]]
 - see also :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:web.org::#web/api-rich-types][api-rich-types]]

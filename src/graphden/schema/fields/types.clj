@@ -67,7 +67,7 @@
   "Postgres column type per abstract type — REFERENCE data documenting
    how each type is stored (the DDL layer keeps its own runtime map in
    `storage/postgres/util`). The former :datomic/:memory columns were
-   dropped 2026-08-15: those backends never existed in this repo and
+   dropped: those backends never existed in this repo and
    the only accessor parameterised by backend was itself dead."
   {:uuid        "UUID"
    :text        "TEXT"

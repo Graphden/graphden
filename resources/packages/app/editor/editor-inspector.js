@@ -1,7 +1,7 @@
 // Editor INSPECTOR — the right column: head + Overview / Bindings / Runs /
 // Versions.
 //
-// Split out of editor-shell.js (2026-09-13). `window.gdInspectorRender(fnId)`
+// `window.gdInspectorRender(fnId)`
 // paints the persistent HEAD (name / namespace / description + the 2-field
 // kind classifier `gdFnKind`) client-side from the lookups cache — the
 // sub-100ms selection path — and every tab body is a server partial: Overview

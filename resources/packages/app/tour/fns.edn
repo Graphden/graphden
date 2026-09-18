@@ -77,7 +77,7 @@
 ;;     (`REQUIRE_SIGNALS` in editor-tour.js): `services` = the dedicated plan
 ;;     (or a platform / self-host instance), `org` = organizations exist here.
 ;;
-;; ONE ACTION PER RING (2026-09-16, from a reader walking lesson 15): the
+;; ONE ACTION PER RING (from a reader walking lesson 15): the
 ;; spotlight can only sit on one thing, so a step whose text passes through
 ;; several PERSISTENT surfaces ("type in the filter, click the row, then ⋯
 ;; → Extend") strands the ring on the first of them — the ⋯ never lights up.
@@ -94,7 +94,7 @@
 ;; picker's filter, a form field — is a `copy chip`; the [[row]] they then
 ;; click is a UI chip. "pick [[str-upper]]" alone leaves the reader typing.
 ;;
-;; BUILD FROM THE OUTSIDE IN (2026-09-16, the same reader): a lesson that
+;; BUILD FROM THE OUTSIDE IN (the same reader): a lesson that
 ;; needs an inner fn does NOT send the reader to the Explorer to make it
 ;; first and find it again by name. From the `+` that needs it: bind the
 ;; BASE fn (`map`) — its card appears on this canvas — then [[⋯]] on THAT
@@ -105,7 +105,7 @@
 ;; as well as slot — the outer and inner fn often expose the same slot
 ;; name: `.placeholder-binder[data-fn-name="X"][data-arg-name="coll"]`.
 ;;
-;; SELECTION GATE (2026-08-20, hard-won): a step that says "click the +"
+;; SELECTION GATE (hard-won): a step that says "click the +"
 ;; MUST be preceded by a `selected`-checked step naming the fn that owns
 ;; that +. Without it the spotlight can ring the PARENT's placeholder while
 ;; the editor is still re-selecting, and the write lands on a PACKAGE fn —
@@ -226,7 +226,7 @@
               ;; NEXT step's [[+]] spotlight can ring the PARENT's own
               ;; placeholder while add is still the selected fn, and the
               ;; click then appends the literal to :add itself — a write
-              ;; every descendant of :add inherits (2026-08-20 incident:
+              ;; every descendant of :add inherits (incident:
               ;; that stray item broke the delete guard, /api/execute and
               ;; URI parsing platform-wide until a package re-sync).
               {:title "The editor opened add-10"
@@ -479,7 +479,7 @@
                ;; to be selected — this step used to pass the moment the
                ;; popover opened, so the next step's "fill the two field
                ;; rows" met a reader still standing on Refinement, with no
-               ;; field rows and no spotlight on the tab (2026-09-13).
+               ;; field rows and no spotlight on the tab.
                :targets [".ns-header[data-ns-path=\"tutorial\"]" ".create-menu-item[data-type=\"type\"]" ".type-create-tab[data-kind=\"record\"]"]
                :check {:kind "dom" :selector ".type-create-tab[data-kind=\"record\"][aria-selected=\"true\"]"}}
               {:title "Describe the shape"

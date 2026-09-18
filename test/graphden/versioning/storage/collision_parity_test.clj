@@ -6,7 +6,7 @@
    the same per-branch resolved-view collisions — a duplicate live
    `(namespace-id, name)` fn, or two list-items at the same `(binding-id,
    position)`. The batch path once ran ONLY the list-item check and no fn-name
-   check (fixed 2026-08-25: it now shares `batch-collision-guard!`); this matrix
+   check (fixed: it now shares `batch-collision-guard!`); this matrix
    pins that every write path stays in lock-step, so a future refactor that
    drops a check on one path reddens CI here rather than corrupting the graph."
   (:require

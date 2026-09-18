@@ -1,6 +1,6 @@
 // Editor Row-Actions — the `data-action` HANDLERS behind the popover's buttons.
 //
-// Split out of editor-row-actions.js (2026-09-13). Each `registerActionHandler`
+// Each `registerActionHandler`
 // call below runs at load and is invoked by the runtime's `bindActionDispatch`
 // when the user clicks an enabled button in the server-rendered popover
 // (`:partial-row-actions`, docs/EDITOR_ROW_ACTIONS.md). Handlers take

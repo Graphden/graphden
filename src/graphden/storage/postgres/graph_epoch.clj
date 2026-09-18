@@ -222,7 +222,7 @@
    global state, advances it and pruned the shared ledger to ITS global;
    the test thread's state, still behind, then found its own noted
    bumps gone from the ledger and classified them foreign → a spurious
-   heal mid-test (the background rebuilds behind two 2026-09-08 flakes).
+   heal mid-test (the background rebuilds behind two flakes).
    Keeping entries for a retention window lets a state that is behind
    still classify them — five minutes covers a test namespace's whole
    bootstrap + first compile before its first request; production,

@@ -39,7 +39,7 @@ function selectFn(fnId, updateHistory = true) {
   // Re-selecting the SAME root — what every write's `loadGraphData` does —
   // keeps the canvas as the reader left it: unfolded cards stay unfolded,
   // dragged cards stay put. Only a change of root folds everything
-  // (2026-09-16: binding a ref on a child card unfolds it so the ref is
+  // (binding a ref on a child card unfolds it so the ref is
   // drawn; the refresh right after used to fold it straight back).
   const sameRoot = selectedFnId === fnId;
   selectedFnId = fnId;

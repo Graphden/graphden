@@ -146,7 +146,7 @@
 
 ;; === Destructive changes tests ===
 
-;; === Rollback-tolerant removal contract (P0.1 / 2026-08-06 outage class) ===
+;; === Rollback-tolerant removal contract (P0.1 / outage class) ===
 ;;
 ;; An item the DB knows that the current schema no longer declares is LEFT in
 ;; place and LOGGED, never thrown on — otherwise an OLD image booting against a

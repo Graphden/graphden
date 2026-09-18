@@ -17,7 +17,7 @@
 
 ;; Every test that lays a snapshot out on disk gets its own temp dir — and
 ;; used to leave it there: four per `bb ci`, 1260 under /tmp on the dev host
-;; by 2026-09-16. Deleted in each test's `finally`, deepest files first.
+;; Deleted in each test's `finally`, deepest files first.
 (defn- delete-tree!
   [dir]
   (run! java.io.File/.delete (reverse (file-seq (io/file dir)))))

@@ -177,7 +177,7 @@
 
 
 ;; The GC's inbound-ref guard is the FULL ref surface, not just parent-ids
-;; (the 2026-08-25 finding: it purged a fn still referenced by a
+;; (the finding: it purged a fn still referenced by a
 ;; binding/slot/type-FK, dangling the ref forever — an editor random-id can't
 ;; be re-minted). These three pin the non-parent families the old guard missed.
 

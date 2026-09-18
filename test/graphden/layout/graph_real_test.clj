@@ -187,7 +187,7 @@
   ;; regression-migrate-on-fn-ref.test.js` held the real assertion and could
   ;; never run (the `examples` package is dev-only and absent from
   ;; graphden-executor, so the e2e stack has no such graph); it was deleted
-  ;; 2026-08-22 and its assertion moved here, where the fixture DOES load
+  ;; The assertion moved here, where the fixture DOES load
   ;; `examples`.
   (doseq [nm ["ex-outer" "_ex-pair-with-first" "_ex-pair-like" "_ex-wrap-pair"]]
     (when-let [id (fn-id nm)]
@@ -237,7 +237,7 @@
 ;; doesn't appear in any ancestor-ref's inheritance chain on expand,
 ;; so the slot-owner migration path stays silent. The CORRECT
 ;; behaviour (see memory `expansion_substitution_model.md`,
-;; concrete failure pattern 2026-06-19):
+;; concrete failure pattern):
 ;;
 ;;   - `:base-handler` is consumed inside `_fresh-with-maybe-store`'s
 ;;     body (the cache-miss path actually invokes the handler).

@@ -120,7 +120,7 @@
 
 
 (deftest one-ring-per-action-and-every-typed-name-is-a-chip
-  ;; From a reader walking lesson 15 (2026-09-16): a step that passed
+  ;; From a reader walking lesson 15: a step that passed
   ;; through the Explorer filter, the row AND the row's ⋯ menu left the ring
   ;; on the filter — the spotlight has one place to be. The header of
   ;; fns.edn spells the conventions out; this pins them so the next compound

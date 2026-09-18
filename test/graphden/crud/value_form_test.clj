@@ -525,7 +525,7 @@
 
 
 (deftest resolve-slot-effective-type-identity-keyed-test
-  ;; Regression (2026-08-26): tier-2 (backward-unified slot-types) must
+  ;; Regression: tier-2 (backward-unified slot-types) must
   ;; be keyed by fn IDENTITY, not by name — a leftover same-named fn
   ;; (e.g. from a deleted tutorial-branch run) used to dictate another
   ;; fn's value-form shape through the name-keyed registry lookup.

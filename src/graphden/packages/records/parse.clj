@@ -818,7 +818,7 @@
    overwrites the stale value instead of leaking it into every compiled
    context. (Empirically confirmed: a declarative re-sync that dropped a
    handler's `:lambda-params` left the old `[:request :limit]` compiling
-   until a DB reset — the 2026-08-06 outage class.) The cleared value is
+   until a DB reset — the outage class.) The cleared value is
    `nil` for BOTH fields: for `:expects-effects` the empty vector is NOT
    an absent form but a meaningful contract (`[]` = pinned purity — the
    drift checker rejects every computed effect; `nil` = no contract,

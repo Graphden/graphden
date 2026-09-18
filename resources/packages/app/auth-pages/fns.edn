@@ -171,7 +171,7 @@
    :return-type :text}
 
   ;; =====================================================================
-  ;; /account — MOVED into the editor (2026-08-15): the Settings surface's
+  ;; /account — MOVED into the editor: the Settings surface's
   ;; Account section (deep link `/#@settings/account`) owns identities / 2FA /
   ;; API tokens now. This graph page ships with the app package — the editor
   ;; is always present alongside it — so it redirects; the BUILT-IN fallback

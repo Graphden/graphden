@@ -144,7 +144,7 @@
    ;; convention: the impl calls `(reducer [acc item])`, ONE argument
    ;; holding the pair. The slot used to be typed `[:fn {:acc a :item b}
    ;; a #{}]`, a 2-arg shape the impl never produces: no corpus fn-def
-   ;; used `:transduce`, so the first caller to try (core.tests, 2026-09-11)
+   ;; used `:transduce`, so the first caller to try (core.tests)
    ;; was also the first to be rejected — a correct reducer could not be
    ;; written past the checker. The pair widens to `[:list :any]` for the
    ;; same reason as `:reduce`: graphden lists are homogeneous and the two

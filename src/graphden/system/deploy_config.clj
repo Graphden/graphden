@@ -8,7 +8,7 @@
    (`cloud-request-allowed-effects`, docs/TENANCY_SEAM.md § Effect gate),
    and `:env` is outside it by design — the process environment holds
    secrets. A platform partial that reached `:env` therefore answered 500
-   for every tenant (the 2026-09-02 branch-popover / feedback incident).
+   for every tenant (the branch-popover / feedback incident).
    The fix is structural: the operator DECLARES which settings are public
    by listing them under `:exec/deploy-config` in the system config (Aero
    `#env` resolves them once at boot, in the platform process, under no

@@ -75,8 +75,8 @@
 ;; plugin-load time (the parallel-suite -run dispatch needs to
 ;; complete `try-load-third-party-lib` first).
 ;;
-;; 2026-06-15 audit of `src/`-side process-global atoms (re-audited
-;; 2026-08-04) — the entries below cover every test-contaminator
+;; Audit of `src/`-side process-global atoms (re-audited)
+;; — the entries below cover every test-contaminator
 ;; surface. The other defonce atoms are safe under parallel by
 ;; construction:
 ;;   - `executor.compile.lookups/cached-build-lookups-state`
@@ -150,7 +150,7 @@
     graphden.executor.registry.core/*rich-types-override*
     ;; The base-fn IMPLS registry override. Historically "covered via
     ;; `exec/with-clean-registry` instead of this list" — but that only
-    ;; holds for NSes that remember the fixture: the 2026-08-04 audit
+    ;; holds for NSes that remember the fixture: the audit
     ;; found two non-serial NSes (`executor.registry.core-test`'s
     ;; register-base-fns-test, `crud.fn-execution-test`'s ten
     ;; register-base-fn! sites) writing the ROOT atom directly with no

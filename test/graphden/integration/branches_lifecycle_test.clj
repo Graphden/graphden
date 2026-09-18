@@ -104,7 +104,7 @@
 
 (defn- ok-200
   "Assert a 200 and, on anything else, show the STATUS AND BODY — a bare
-   `(is (= 200 (:status resp)))` left the 2026-09-10 GH-runner flake
+   `(is (= 200 (:status resp)))` left the GH-runner flake
    (a 400 on a step that passes everywhere else) with no diagnosis at all."
   [resp step]
   (is (= 200 (:status resp))
@@ -707,7 +707,7 @@
 
 
 (deftest rich-types-registry-branch-scope-test
-  ;; 2026-08-31: the rich-types registry used to be process-global and
+  ;; The rich-types registry used to be process-global and
   ;; last-compile-wins — compiling a branch ctx overwrote the base's
   ;; entries, so `/api/types` answered with a cross-branch union (a fn
   ;; existing only on a branch showed up under main) and effect sets
@@ -758,7 +758,7 @@
         ;; recompute lands: drop the cached entry (what a heal or an
         ;; eviction does), switch the background recompute OFF so the
         ;; read cannot win by luck, and read straight away. main CI
-        ;; 2026-09-08 lost this race on a slow runner — the build now
+        ;; A run lost this race on a slow runner — the build now
         ;; records the branch's own fns synchronously.
         (let [feat-id (:id (some #(when (= feat (:name %)) %)
                                  (:branches (parse-json (dispatch {:method :get :path "/api/branches"})))))]

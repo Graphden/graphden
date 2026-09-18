@@ -487,7 +487,7 @@
 
    FAST PATH first: the diff is a full resolved-view comparison of both
    branches — O(every entity), 1.5 s of a 1.6 s merge on a 5k-fn graph and
-   ~6 s of the cloud demo's 7 s (2026-09-03) — yet its answer is provably
+   ~6 s of the cloud demo's 7 s — yet its answer is provably
    empty whenever every branch the SOURCE sees by inheritance is one the
    TARGET sees too: an inherited entity then resolves from the same rows on
    both sides (the target's view is at least as new), so nothing the source

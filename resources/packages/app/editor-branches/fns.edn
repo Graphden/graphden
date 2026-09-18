@@ -391,7 +391,7 @@
    :args {:body :_partial-fnv-exec-html}}
 
   ;; ---------------------------------------------------------------------
-  ;; (The branch-diff modal partial lived here until UX-v3, 2026-08-31:
+  ;; (The branch-diff modal partial lived here until UX-v3:
   ;; Δ now toggles COMPARE MODE — the diff renders in the Explorer /
   ;; canvas / inspector from the `/api/branches/:ref/diff-view` JSON,
   ;; and the review dialog builds its change list client-side from the

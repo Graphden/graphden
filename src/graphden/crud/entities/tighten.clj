@@ -42,7 +42,7 @@
   [storage binding-id b new-c _effects-vec]
   (let [hash-hex (records/digest-hex "SHA-1" (pr-str new-c))
         ;; The row's identity is its (org, hash): reuse the id this org
-        ;; already holds for the shape (a pre-2026-09-06 row keeps its
+        ;; already holds for the shape (a earlier row keeps its
         ;; old id), else the deterministic id for a new one.
         new-id (or (some->> (sp/query-entities storage :fn {:anonymous-hash hash-hex})
                             (filter #(= (tenancy/current-org) (:org-id %)))

@@ -8,7 +8,7 @@
 // Globals consumed: graphData, lookups, navigateToFn, filterText,
 // selectedFnId, sidebarCollapsed.
 //
-// Split 2026-09-13: the lens (kind chips, visibility predicates, prime-once
+// The lens (kind chips, visibility predicates, prime-once
 // caches) is editor-sidebar-lens.js, the row builders (fn item / namespace
 // node / child group) are editor-sidebar-rows.js, and the Organization /
 // Platform surface sections are editor-sidebar-ops.js. This file is the
@@ -437,7 +437,7 @@ function updateEntityList(data) {
   // Search: pin EXACT name matches above the tree. Substring matching
   // alone buried `core.arithmetic.add` under dozens of `app.editor`
   // internals that merely contain "add" — the row the reader typed the
-  // full name of must be first (tutorial finding 2026-08-26). Internals
+  // full name of must be first (tutorial finding). Internals
   // (`_`-private / anon) sort after public exact matches.
   if (searchMode && searchFilter) {
     const q = searchFilter.trim().toLowerCase();

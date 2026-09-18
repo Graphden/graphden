@@ -1,6 +1,6 @@
 (ns ^:serial graphden.crud.package-guard-test
   "The package-owned write guard — the server-side answer to the
-   2026-08-20 :add poisoning: one editor click appended a literal onto
+   :add poisoning: one editor click appended a literal onto
    a PACKAGE fn's own slot chain and every descendant in the
    installation inherited it until a restart's re-sync. These tests pin
    the membership contract (the `packages.owned` registry the boot sync

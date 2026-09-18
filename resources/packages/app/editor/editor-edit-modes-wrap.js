@@ -1,7 +1,7 @@
 // Editor Edit Modes — WRAP in a new fn (graph refactoring): a new CALLER
 // that receives this fn's result in a slot of a picked parent.
 //
-// Split out of editor-edit-modes-fn.js (2026-09-16, the module passed the
+// The module passed the
 // 800-line seam when Extend learned to run in place). Uses that file's
 // `buildNsChooser`, `extendDefaultNsId` and `resolveJustCreatedFn`; loads
 // right after it.

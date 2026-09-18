@@ -20,7 +20,7 @@
 // matching authFetch in editor-auth.js stacks Authorization on top
 // of this wrapped fetch.
 //
-// Split 2026-09-13: branch/org/workspace CONTEXT + the fetch wrap are
+// Branch/org/workspace CONTEXT + the fetch wrap are
 // editor-branch-context.js (loads before this file), the ⛨ policy and ⚙
 // protection menus are editor-branch-policy.js, merge + the conflict modal
 // are editor-branch-merge.js. This file is the CHIP and its POPOVER: the

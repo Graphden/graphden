@@ -18,7 +18,7 @@
 // compare mode changes ANNOTATIONS only, never data routing, so you
 // keep working (editing, running) with the lens on.
 //
-// Split 2026-09-13: the Explorer decoration + lens bar is
+// The Explorer decoration + lens bar is
 // editor-diff-sidebar.js, the inspector panel + card marks are
 // editor-diff-inspector.js, the Δ chip + its menu is editor-diff-chip.js
 // (all three load before this file). This file is the MODE itself: state,
@@ -282,7 +282,7 @@ function gdDiffSummaryParts(g) {
 
 // --- effect deltas ----------------------------------------------------------
 
-// The registry is branch-scoped as of 2026-08-31 (per-ctx slices bound
+// The registry is branch-scoped (per-ctx slices bound
 // at dispatch), so `/api/types` finally answers PER BRANCH and a full
 // effect-set comparison is honest: fetch both branches' registries and
 // diff each changed fn's `:effects`. For fns without a stable name on

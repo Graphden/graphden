@@ -214,7 +214,7 @@
 
 
 (deftest reconcile-pass-pins-the-platform-org-test
-  ;; Regression for the 2026-08-05 prod outage window: the edge-triggered
+  ;; Regression for the prod outage window: the edge-triggered
   ;; pass fires from CRUD writes on an abort-shield thread that CONVEYS
   ;; the requester's `*current-org*`. Under a tenant binding the
   ;; OrgScoped `:service` read returns [] (`:service` is

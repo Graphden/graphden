@@ -855,7 +855,7 @@
 
 (defn add-unset-arg-node
   "Emit a placeholder for an unset arg. Since the unified-arg-edges
-   redesign (2026-08-26) every unset arg renders as the SAME shape — a
+   redesign every unset arg renders as the SAME shape — a
    placeholder node + edge — with FLAGS the client styles by, instead
    of the three former compact badge strips. One rule for the reader:
    an argument is an edge; where it came from is a style gradation +
@@ -951,7 +951,7 @@
    chain owns when there is one, else an UNBOUND row — never simply the
    first binding some unrelated fn put on this slot (`const`'s :value has
    hundreds; the first used to be a package fn's, and the `+` then edited
-   THAT binding — a 400, 2026-09-16)."
+   THAT binding — a 400)."
   [rows root-chain]
   (or (some (fn [[_ a :as row]] (when (contains? root-chain (:fn-id a)) row)) rows)
       (some (fn [[_ a :as row]] (when (nil? (:binding-id a)) row)) rows)

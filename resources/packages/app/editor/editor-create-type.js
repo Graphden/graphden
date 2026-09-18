@@ -155,7 +155,7 @@ function showTypeCreateForm(kind) {
   // Name input — present in every kind, and placed ABOVE the kind tabs to
   // say so. It used to sit under the tab strip like the kind-specific
   // fields, and read as "each tab has its own name field" (a reader asked
-  // whether that duplication was a bug, 2026-09-13). It is one field: the
+  // whether that duplication was a bug). It is one field: the
   // name belongs to the type, the tabs only pick its shape. The value is
   // carried across a tab switch by the re-render below.
   const nameLabel = document.createElement('label');

@@ -267,7 +267,7 @@
 (deftest inbound-refs-many-sees-fn-version-type-refs
   ;; The :fn-version mirror carries VERSIONED fn-type refs that can
   ;; diverge from the identity row on a branch — a removed type-row
-  ;; pinned only by such a row must still be reported (2026-08-31
+  ;; pinned only by such a row must still be reported (
   ;; audit hole: no scanner read this plane).
   (let [db (atom {:binding {}
                   :binding-list-item {}
@@ -287,7 +287,7 @@
 
 
 (deftest purge-many-protects-slots-sourced-by-survivors
-  ;; F3 of the 2026-09-01 audit: a RENAME-VIEW slot outside the purge
+  ;; F3 of the audit: a RENAME-VIEW slot outside the purge
   ;; set points at a declaring slot inside it via `source-slot-id`.
   ;; The orphan sweep must not delete the source out from under the
   ;; surviving view (the rename-root walk would dangle).
@@ -333,7 +333,7 @@
 
 
 (deftest inbound-refs-many-live-only-follows-the-current-graph
-  ;; `:live-only?` — the reconciler's removal view (2026-09-04): a ref counts
+  ;; `:live-only?` — the reconciler's removal view: a ref counts
   ;; from the newest non-deleted version of its row on a branch that still
   ;; exists; a create-time identity row counts only while the row has no
   ;; versions at all; superseded versions, tombstoned newest versions and

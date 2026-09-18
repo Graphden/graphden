@@ -5,7 +5,7 @@
    explicit `epoch/bump!` anywhere else is a bump nobody notes: it ages
    past the heal grace and costs a spurious heal 45 s later — four such
    calls in the branch dials (policy / require-merge / review-state /
-   review-policy) were the e2e suite's residual heals until 2026-09-07."
+   review-policy) were the e2e suite's residual heals."
   (:require
     [clojure.java.io :as io]
     [clojure.string :as str]

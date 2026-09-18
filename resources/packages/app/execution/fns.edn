@@ -1863,7 +1863,7 @@
   ;; served page loads (`/assets/graphden-components.css`, hash-busted by
   ;; `:_graphden-components-css-url`) goes into its head, so a `:button`
   ;; previews as the button the page will show — not the browser's unstyled
-  ;; default, which is what the srcdoc rendered until 2026-09-13 (lesson 07's
+  ;; default, which is what the srcdoc rendered previously (lesson 07's
   ;; "Run" button looked broken, and `:attrs {:class "primary"}` did nothing
   ;; you could see). The iframe stays `sandbox=""`: a stylesheet fetch is
   ;; allowed there, scripts are not — the interactive page is the ↗ link.
@@ -3460,7 +3460,7 @@
   ;; A SHORT value (one line of JSON — a word list, a sentence, a number)
   ;; opens by itself: the tree is read for its values, and a viewer that
   ;; has to be clicked on every row hid the very thing the reader came for
-  ;; (lesson 15, 2026-09-15). Long values stay folded.
+  ;; (lesson 15). Long values stay folded.
   {:name :_ptrace-r-value-short?
    :parent :lte
    :args {:nums [{:parent :str-len :args {:string :_ptrace-r-value-str}}
@@ -3597,7 +3597,7 @@
   ;; (`app.editor-execute/_peh-trap-block`); editor-debug.js owns
   ;; arm/cancel POSTs + the refresh cycle, re-fetching this partial into
   ;; the block. (Was the diagnostics drawer's Debug panel until
-  ;; 2026-09-04, when the drawer was retired.)
+  ;; when the drawer was retired.)
   ;; ---------------------------------------------------------------------
 
   {:name :_pdbg-status

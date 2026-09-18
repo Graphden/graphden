@@ -397,7 +397,7 @@
 
 (deftest layout-optional-arg-test
   (testing "an unbound optional slot renders as a uniform placeholder
-            edge flagged :optionalArg (unified-arg-edges 2026-08-26 —
+            edge flagged :optionalArg (unified-arg-edges —
             the compact badge strip is gone; provenance is a style
             gradation on the SAME shape every argument gets)"
     (let [storage (setup/create-test-storage)]

@@ -8,7 +8,7 @@
    other test NSes clear it as a side effect (context invalidation,
    entity writes). Under the parallel pool such a clear can land between
    this file's insert and its repeat-is-a-hit assertion — seen as the
-   2026-08-28 main-CI seed flake (expected 4 computes, got 5)."
+   main-CI seed flake (expected 4 computes, got 5)."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.fn-execution.free-arg-cache :as fac]))

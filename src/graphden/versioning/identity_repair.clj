@@ -3,7 +3,7 @@
    package fn's deterministic id is `uuid-v5(ns-path, name)`, so a
    namespace move / rename mints a NEW id and abandons the old row —
    with every pre-move ref still pointing at it (the live-demo outage
-   class, 2026-07-23).
+   class).
 
    Two primitives, shared by the sync-time reconciler
    (`system.core/reconcile-moved-identities!` — the ROOT fix: heal at
@@ -44,7 +44,7 @@
    ;; The :fn-version mirror carries VERSIONED fn-type refs that can
    ;; diverge from the identity row on a branch — without this row a
    ;; branch-divergent return/element/base ref was invisible to every
-   ;; scanner here (2026-08-31 audit hole).
+   ;; scanner here (audit hole).
    :fn-version [:base-fn-id :element-fn-id :return-type-fn-id]
    :slot [:type-fn-id]})
 
@@ -189,7 +189,7 @@
    call: a boot that reconciles N removed package fns paid N full
    scans (~1 s each against a remote managed PG), which blew the
    deploy health window when a large fn-def section was retired
-   (2026-08-31). Same conservative surface as `inbound-refs`.
+   . Same conservative surface as `inbound-refs`.
 
    `opts` `:live-only?` — count only refs the CURRENT graph can still
    follow: for the versioned planes, the newest non-deleted version of
@@ -199,8 +199,7 @@
    Identity rows are create-time values (a re-sync writes a new version
    and leaves them), and superseded versions are history: both kept
    every retired package fn a live fn had EVER referenced alive, so the
-   boot reconciler's removal set stayed pinned for good (the 2026-09-04
-   lint sweep: 472 retired identities on a two-month-old instance, 175
+   boot reconciler's removal set stayed pinned for good (the lint sweep: 472 retired identities on a two-month-old instance, 175
    of them «referenced» only through such rows). `:parent-ids` (an
    unversioned junction) and `:slot` type refs always count."
   ([storage fn-ids] (inbound-refs-many storage fn-ids nil))
@@ -253,7 +252,7 @@
    instead of four unfiltered scans per fn (the per-fn cascade re-read
    :binding-list-item(-version)/:binding-version/:fn-slot-version in
    full for every removal — ~4×N scans on the first boot after a large
-   retirement, the same class as the 2026-08-31 deploy blowup).
+   retirement, the same class as the deploy blowup).
    Returns the number of rows removed. Also removes slots that the
    purge fully ORPHANS (every fn-slot exposing the slot belonged to
    the set AND no surviving binding/binding-version row references it)

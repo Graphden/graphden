@@ -72,7 +72,7 @@
 ;; (Postgres) and that impl validating its own pool options through
 ;; the manual chain in `storage/postgres/pool/validate-pool-options!`,
 ;; nothing reached these definitions in production. Tests existed but
-;; covered the unused surface only. Removed 2026-06-17.
+;; covered the unused surface only. Removed.
 
 (def positive-int
   "Positive integer (> 0)."

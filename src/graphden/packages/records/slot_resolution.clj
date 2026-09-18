@@ -565,7 +565,7 @@
 
    KNOWN-LATENT (audit-5): the last-write bare key silently
    mis-resolves the day a bare lookup hits a duplicated name.
-   Removing the colliding key was tried (2026-07-24) and REVERTED —
+   Removing the colliding key was tried and REVERTED —
    parse resolves a def's OWN name through this map on the binding
    emission path, so an absent key drops the duplicated defs'
    bindings from the round-trip. The real fix is qualified own-name

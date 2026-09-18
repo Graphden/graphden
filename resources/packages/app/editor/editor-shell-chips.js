@@ -1,6 +1,6 @@
 // Editor Shell CHIPS — the Explorer's Workspace and Packages popovers.
 //
-// Split out of editor-shell.js (2026-09-13). Two of the three Explorer
+// Two of the three Explorer
 // context-row chips (the branch chip is editor-branches.js): the WORKSPACE chip
 // (`#gd-ws-chip` → `gdOpenWsPop`, a multi-select checklist of root-namespace
 // "projects" plus restore of ⊘-hidden namespaces; the store itself is

@@ -53,7 +53,7 @@ function anchorBelowClamped(el, anchorEl, opts) {
 // Every installed popover, so a CONTEXT SWITCH can sweep them: surface
 // navigation (Build -> Organization, hash deep-links) fires no
 // outside-pointerdown, and a popover that survives it floats over the new
-// surface and blocks it (tutorial finding 2026-08-26: the Run popover sat
+// surface and blocks it (tutorial finding: the Run popover sat
 // on top of the Organization panel).
 const _popoverRegistry = [];
 

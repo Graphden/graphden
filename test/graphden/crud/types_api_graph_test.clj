@@ -8,7 +8,7 @@
    `ta/apply-types-candidates`) that share the parse/validate stages
    but bypass the graph composition.
 
-   Regression caught at 2026-06-25 (commit `dcc11101`): Phase 5
+   Regression caught: Phase 5
    `apply-hof-translation` copying env-binding `rt/thunk`s to slot-id
    keys triggered a `call-with-cache` recursion on every
    `POST /api/types/candidates`. `bb test` was green because the

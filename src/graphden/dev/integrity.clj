@@ -1,7 +1,7 @@
 (ns graphden.dev.integrity
   "Graph integrity checker — detectors for the LEGACY-SHAPE classes a
    long-lived database accumulates and fresh test DBs never see
-   (audit-3, 2026-07-24). The live-demo outage shape motivating this:
+   (audit-3). The live-demo outage shape motivating this:
    fn identity rows abandoned by historical namespace moves (a new
    deterministic id is minted; the old row and every resolved ref to
    it survive un-tombstoned), with the rich-types registry keyed

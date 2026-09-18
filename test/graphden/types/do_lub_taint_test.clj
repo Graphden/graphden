@@ -1,5 +1,5 @@
 (ns graphden.types.do-lub-taint-test
-  "Regression tests for two taint-model holes closed 2026-08-17
+  "Regression tests for two taint-model holes closed
    (pre-release security audit):
 
    1. `:do` silently DECLASSIFIED a secret. It returns its last step's

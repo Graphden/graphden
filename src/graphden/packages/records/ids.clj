@@ -61,7 +61,7 @@
    rows are org-scoped rows (stamped, RLS-filtered), so the SAME shape in
    two orgs must be two rows: with one shape-keyed id, org B's create
    collided with org A's invisible row (the `:ns` class of cross-org
-   oracle, 2026-09-06)."
+   oracle)."
   []
   (let [org (tc/current-org)]
     (if (tc/platform-tier? org) "" (str org "/"))))

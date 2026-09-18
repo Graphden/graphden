@@ -65,7 +65,7 @@
         ;; The key must be a JS identifier: every non-word char (a `/`,
         ;; a `-`, the `.` of `/api/orgs/usage.csv`) becomes `_` — an
         ;; unescaped `.` made the whole module a syntax error and killed
-        ;; the editor (2026-09-17).
+        ;; the editor.
         key (-> path
                 (str/replace #"^/" "")
                 (str/replace #":" "")

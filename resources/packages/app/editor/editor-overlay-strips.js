@@ -30,7 +30,7 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
   // EXCEPT the bare draft: a fresh sidebar "New graph…" fn has the exact
   // primitive shape (no parents, no impl, no structure) and used to be
   // swallowed by this guard, leaving NO affordance to assign its first
-  // parent (the 2026-08-19 tutorial-tour finding). The discriminator is
+  // parent (the tutorial-tour finding). The discriminator is
   // the namespace: stdlib primitives are namespace-less, drafts are
   // created inside one — and real type-rows classify as refinement/
   // union/record/…, never `primitive`, so they keep hiding the strip.

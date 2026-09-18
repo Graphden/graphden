@@ -74,7 +74,7 @@
    that the current schema does NOT declare is LOGGED and LEFT in place,
    never thrown on.
 
-   Rationale (2026-08-06 outage class): the diff `old-uuids - new-uuids`
+   Rationale (outage class): the diff `old-uuids - new-uuids`
    cannot tell an intentional forward removal apart from an OLD image
    booting against a DB a NEWER image already migrated (e.g. a rolled-back
    deploy where the newer code had added `token.label`). Throwing crashed
@@ -269,7 +269,7 @@
    Why not throw: the old-vs-new diff cannot distinguish an intentional
    forward removal from an OLD image booting against a DB a NEWER image
    already migrated. Throwing crashed boot on any rollback and forced a
-   `DROP SCHEMA` recovery (the 2026-08-06 outage). Leaving the unknown
+   `DROP SCHEMA` recovery (the outage). Leaving the unknown
    object is harmless — the additive migration never drops it; only an
    explicit `retire-field` issues a DROP COLUMN.
 

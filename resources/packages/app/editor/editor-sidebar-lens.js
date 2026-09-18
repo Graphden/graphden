@@ -1,6 +1,6 @@
 // Editor Sidebar — the LENS: which kinds of rows the Explorer shows.
 //
-// Split out of editor-sidebar.js (2026-09-13). The kind-chip bar
+// The kind-chip bar
 // (`#kind-filters`): `loadLens` / `saveLens` persist the focused kinds in
 // localStorage (`graphden.sidebarLens`; empty set = All), `toggleKind` flips a
 // chip, `applyLensVisibility` applies the lens as an in-place `hidden` overlay

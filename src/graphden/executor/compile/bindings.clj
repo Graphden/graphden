@@ -207,7 +207,7 @@
    type-check sweep writes the inherited type back. Deciding \"produces
    a callable\" from that seed compiled the ref as a HOF wrap — a
    `_router` extension answered a Ring request with a FUNCTION (the
-   perf fixture without the sweep, 2026-09-06; an editor-authored fn
+   perf fixture without the sweep; an editor-authored fn
    between its write and its post-write check is the same window)."
   [ref-fn-id lookups]
   (let [fn-map (:fn-map lookups)]

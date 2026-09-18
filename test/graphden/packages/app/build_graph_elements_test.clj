@@ -157,7 +157,7 @@
 
 (deftest hof-lambda-param-renders-as-lambda-edge
   (testing "free arg below an is-fn boundary surfaces as a λ-flagged
-            placeholder edge (unified-arg-edges 2026-08-26 — the compact
+            placeholder edge (unified-arg-edges the compact
             λ badge array is retired; same shape as every argument, the
             :lambdaArg flag styles it as a non-bindable ghost)"
     (let [;; base-outer has :f :fn primary

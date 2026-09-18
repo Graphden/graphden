@@ -535,7 +535,7 @@
 
   ;; Platform-guard: the editor API refuses writes against package-synced
   ;; fns (crud.package-guard); this sync path must not stay the one write
-  ;; route around that protection (the 2026-08-20 :add-poisoning class).
+  ;; route around that protection (the :add-poisoning class).
   {:name :_mcp-upsert-allow-platform?
    :parent :get
    :args {:coll :_mcp-tool-args :key {:value :allow-platform-overwrite} :default {:value false}}}

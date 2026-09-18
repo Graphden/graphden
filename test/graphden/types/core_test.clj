@@ -997,7 +997,7 @@
                         ;; with-redefs'd GLOBAL log* poisons parallel
                         ;; NSes that assert on a `log/warn` caller's
                         ;; return (a deps-test log-assertion
-                        ;; gate flake, 2026-08-02; that deftest is
+                        ;; gate flake; that deftest is
                         ;; since deleted, the leak class remains).
                         nil)]
           (t/register-type-alias! :collide-probe :text owner-a)

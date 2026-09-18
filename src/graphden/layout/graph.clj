@@ -238,7 +238,7 @@
 (defn- migration-via-free-arg-name
   "FREE-ARG / use-site fallback (see memory
    `expansion_substitution_model.md`, concrete failure pattern
-   2026-06-19). The slot-id-based paths only find a target when the
+   ). The slot-id-based paths only find a target when the
    arg's slot is also a slot of an ancestor-ref. This branch
    instead matches by NAME: if the arg's name appears in some
    ancestor-ref's `deep-free-ext-names`, that ref is consuming the
@@ -681,8 +681,8 @@
               ;; so a fn built from the outside in can be bound — and then
               ;; extended in place — on the card that OWNS the slot, not as a
               ;; closure capture on the root (which is where
-              ;; `emit-root-deep-frees!` would otherwise surface it,
-              ;; 2026-09-16). A chain WITH items stays folded: the items are
+              ;; `emit-root-deep-frees!` would otherwise surface it).
+              ;; A chain WITH items stays folded: the items are
               ;; the closed card's body, unfold to see them.
               (doseq [anchor seq-anchors
                       :let [terminal (bh/terminal-source-of arg-map (:id anchor))]

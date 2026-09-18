@@ -1,6 +1,6 @@
 (ns ^:integration graphden.integration.heal-recompile-repro-test
   "Regression guard for the graph-epoch HEAL thread's registry
-   isolation (2026-08-23): a heal fired from an isolated test thread
+   isolation: a heal fired from an isolated test thread
    used to rebuild ctxs against an EMPTY rich-types registry — base-fn
    markers (`:lazy-seq-args` on `:cond`) vanished, the recompiled
    router evaluated cond clauses EAGERLY, and every later dispatch

@@ -16,7 +16,7 @@
    Each test uses its own key namespace so the shared cell can't cross-
    talk between deftests.
 
-   BLIND SPOT (measured 2026-07-17): these execute `put-if!` and `get`
+   BLIND SPOT (measured): these execute `put-if!` and `get`
    BY NAME, so both resolve to compile-all's SINGLE shared bake of
    `:response-cache-cell` and the roundtrip always works. They do NOT
    compile the composed handler wrap (`:_app-cached` = cache→encode→

@@ -1,6 +1,6 @@
 // Editor COMPARE MODE — the `Δ vs <branch> · N` CHIP and its review cockpit.
 //
-// Split out of editor-diff-mode.js (2026-09-13). `gdDiffModeRenderChip` puts
+// `gdDiffModeRenderChip` puts
 // the chip beside the branch chip (count = changed fns, `visible/total` while a
 // lens filter is on); `gdOpenDiffChipMenu` is the menu behind it — 💬 Review &
 // comments, 📤 propose the current branch, ⇢ merge the compared one in, × exit.

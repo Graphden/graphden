@@ -4,7 +4,7 @@
    (pattern of `logic_test.clj`).
 
    `:round` is here because of a live bug the registry platform tests
-   surfaced 2026-09-10: a Ratio from `:div` over longs (14/3 — three
+   surfaced: a Ratio from `:div` over longs (14/3 — three
    ratings summing to 14) has no exact BigDecimal, and `(bigdec 14/3)`
    threw \"Non-terminating decimal expansion\" — every marketplace
    card whose ratings did not divide evenly broke."

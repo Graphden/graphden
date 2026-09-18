@@ -1,7 +1,7 @@
 // Editor COMPARE MODE — the NODE half: the inspector diff panel and the marks
 // drawn on a card.
 //
-// Split out of editor-diff-mode.js (2026-09-13). `gdDiffRenderInspectorSection`
+// `gdDiffRenderInspectorSection`
 // (called by the inspector after every render) shows old → new entries, the
 // effects delta and anchored 💬 threads; `gdDiffModeCardInfo` /
 // `gdDiffInsideBadgeEl` / `gdDiffRevealVia` drive the card ring and the ∿

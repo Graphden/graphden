@@ -1321,7 +1321,7 @@
           (sp/close storage))))))
 
 
-;; 2026-08-15 fresh-boot killer: JDBC PreparedStatements cap at 65,535
+;; Fresh-boot killer: JDBC PreparedStatements cap at 65,535
 ;; bind params, and params scale rows × columns — a row-count cap can't
 ;; guard it. The batch ops chunk by parameter budget; this drives each op
 ;; past the budget (12k rows × 6 cols = 72k params) and asserts the full

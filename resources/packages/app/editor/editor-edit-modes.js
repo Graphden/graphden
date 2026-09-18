@@ -11,7 +11,7 @@
 // initGraph/renderGraph. fn-level and type-level modes live in
 // editor-edit-modes-fn.js / editor-edit-modes-type.js.
 //
-// Split 2026-09-13: the sequence-item modes (chooser, append / insert,
+// The sequence-item modes (chooser, append / insert,
 // move, remove) are editor-edit-modes-seq.js, loaded right after this file.
 
 // ============================================================================
@@ -102,7 +102,7 @@ function openInlineEditPopover(opts) {
   save.textContent = 'Save';
   // A CHOOSER stage (bind literal | bind fn-ref) commits nothing — a
   // Save button there was inert and read as "something is missing"
-  // (tutorial finding 2026-08-26). `noSave` renders Cancel only.
+  // (tutorial finding). `noSave` renders Cancel only.
   if (opts.noSave) save.style.display = 'none';
   const doSave = async () => {
     if (opts.noSave) return;
@@ -553,7 +553,7 @@ function enterArgRenameEditMode(arg, anchorEl, displayLabel) {
     // are stale. `renderGraph` alone redrew the edge label (the layout
     // is fetched fresh) while the Runs pane kept the OLD field name, and
     // a Run from it was rejected with "Unknown arg(s)" (lesson 04, step
-    // 13, 2026-09-14). `loadGraphData` re-selects, which re-renders the
+    // 13). `loadGraphData` re-selects, which re-renders the
     // inspector — the form asks for the new name.
     onSaved() { if (typeof loadGraphData === 'function') loadGraphData(); }
   });

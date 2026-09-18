@@ -367,7 +367,7 @@
 ;; -----------------------------------------------------------------
 ;; Regression — /api/secrets must return each secret's OWN :path.
 ;; -----------------------------------------------------------------
-;; Production bug (2026-06-15): with N≥2 secret-leaf fn-rows in
+;; Production bug: with N≥2 secret-leaf fn-rows in
 ;; storage, `GET /api/secrets` returned every row with the FIRST
 ;; secret's `:path`. Root cause: `compile-eager`'s per-execute
 ;; call-cache projects `fa` to `r/deep-free-ext-names`'s output, and

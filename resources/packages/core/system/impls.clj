@@ -75,7 +75,7 @@
 (defbase platform-owned-def-names
   "Names among `fn-defs` whose deterministic `(namespace, name)` fn-id was
    written by the package sync this boot — the fns the editor API's
-   package-guard refuses to touch (`crud.package-guard`, the 2026-08-20
+   package-guard refuses to touch (`crud.package-guard`, the
    `:add`-poisoning class). The MCP upsert guard and the registry's fork
    consult this so no bundle-sync path stays a write route around that
    protection. Moved here from the optional mcp package when the registry

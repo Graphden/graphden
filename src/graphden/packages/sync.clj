@@ -678,7 +678,7 @@
    `:live-only?` view — the newest version of each row on a live branch,
    never a create-time identity row or a superseded version (those kept
    every retired chain a live fn had ever referenced pinned forever, the
-   2026-09-04 lint sweep's 472 leftovers). Synthetic `_anon-*` rows
+   lint sweep's 472 leftovers). Synthetic `_anon-*` rows
    (inline defs lifted by the parser under a shape-hash name) join the
    removal set when their shape is gone from the packages — they are
    never a MOVE (the name embeds the shape) and, left behind, their own
@@ -782,7 +782,7 @@
     ;; MOVES are batched: one repoint pass over the ref surface with
     ;; the whole old→new map + one table-scan purge cascade — a bulk
     ;; namespace relocation used to pay a full repoint scan PER moved
-    ;; fn (the same N-scans shape as the 2026-08-31 removal blowup).
+    ;; fn (the same N-scans shape as the removal blowup).
     (let [move-row? (fn [row]
                       (let [cs (get synced-by-name (:name row))]
                         (and (not (anon-name? row))
@@ -834,7 +834,7 @@
     ;; fn-def chain referencing itself) resolve by purging referrers
     ;; before referees — that is why this runs as a SET: the per-row
     ;; `inbound-refs` loop paid a full ref-surface scan per fn
-    ;; (~1 s × N against a managed PG — the 2026-08-31 deploy-health
+    ;; (~1 s × N against a managed PG — the deploy-health
     ;; blowup) and still left whole retired chains behind as
     ;; "referenced" by their own siblings.
     ;; Safe against a false positive: package fns carry a
@@ -964,7 +964,7 @@
                           (:base-fn-defs packages))
          ;; The bundled-package bulk sync writes every fn/slot/binding row
          ;; of the whole graph in single batches — 10485 fn rows as of
-         ;; 2026-08-15, past the 10000 `*max-batch-size*` cap, which
+         ;; past the 10000 `*max-batch-size*` cap, which
          ;; guards USER-submitted writes, not this trusted bootstrap path
          ;; (its own docstring says so). Fresh-DB boots (a new deployment,
          ;; `bb deploy`, the golden test bootstrap) died on

@@ -167,7 +167,7 @@
 
 
 ;; ============================================================================
-;; Shrink → regrow across syncs on VERSIONED storage (2026-07-20 incident)
+;; Shrink → regrow across syncs on VERSIONED storage (incident)
 ;; ============================================================================
 
 (deftest reconcile-shrink-then-regrow-versioned-test

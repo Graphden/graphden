@@ -204,7 +204,7 @@
   ;; seed: captured args resolve ONCE per wrap (once-thunks,
   ;; docs/adr/ADR-thunk-once-and-cache-keys.md), so a long-lived stream
   ;; would render the same tree forever — which is exactly what happened
-  ;; after 2026-08-24: the Tests panel's ping and the demo clock froze on
+  ;; the Tests panel's ping and the demo clock froze on
   ;; their first value, every tick hashed equal, nothing was ever pushed.
   ;; Calling the fragment fn per tick is what "re-executed as a fresh
   ;; logical execution" means.

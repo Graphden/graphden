@@ -1,7 +1,7 @@
 (ns graphden.system.branch-router-test
   "Tests for `graphden.system.branch-router`.
 
-   Parallel-safe (un-pinned 2026-08-04): the resolution stubs that
+   Parallel-safe (un-pinned): the resolution stubs that
    used to be process-global `with-redefs` of `br/resolve-branch-id`
    / `br/resolve-branch-id-uncached` now go through the per-thread
    seams `br/*resolve-branch-id-override*` (dispatch suite) and

@@ -423,7 +423,7 @@
   ;; The tenancy addon's `:datasource-wrap` seam hands `:db/postgres` a
   ;; `reify DataSource` around the Hikari pool, and THAT is what halt passes
   ;; to `close-pool`. The cast to HikariDataSource threw out of the shutdown
-  ;; hook in production (2026-09-03) and the pool was never closed. The
+  ;; hook in production and the pool was never closed. The
   ;; contract is the JDBC `Wrapper` protocol, so a wrap that delegates it
   ;; closes through; one that does not is left open (and warned about),
   ;; never cast.

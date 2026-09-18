@@ -85,7 +85,7 @@
 ;; `protocol.config` and `protocol.graph` and are pinned in THEIR tests. This
 ;; file used to re-test all four through the `protocol.core` facade — four
 ;; deftests whose names collided with the ones that own the subject, so a
-;; failure sent you to the wrong file. Removed by the 2026-08-22 audit; the
+;; failure sent you to the wrong file. Removed by the audit; the
 ;; assertions those copies had and the originals did not (binding restoration
 ;; on the normal path and on a throw) were moved, not dropped.
 

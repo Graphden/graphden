@@ -24,7 +24,7 @@
    single-tenant executor ctx carries NO `:pg-storage`, which left
    every rollup surface (the 7d history strip, the Stats/Errors
    panels) reading zeros while the write-side bump landed rows
-   (tutorial finding 2026-08-26)."
+   (tutorial finding)."
   [ctx]
   (or (:pool (:pg-storage ctx))
       (:pool (vs/unwrap (:storage ctx)))))

@@ -450,4 +450,4 @@
 ;; Redaction lives in `protocol.redaction` and is pinned by `redact-test`,
 ;; which also covers the sensitive-field REGISTRY the redactors consult.
 ;; This file used to carry a second, name-colliding copy of both — dropped
-;; by the 2026-08-22 test audit.
+;; by the test audit.

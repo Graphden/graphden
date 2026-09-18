@@ -132,7 +132,7 @@
    so a later regrow of the same deterministic id (list shrink ->
    regrow across syncs) flows through create-entities and gets a
    version row instead of reviving a versionless ghost (the
-   2026-07-20 route-vanish incident)."
+   route-vanish incident)."
   [storage synced-fn-ids declared-fn-slots declared-bindings declared-items]
   (when (seq synced-fn-ids)
     (let [declared-fn-slot-ids (into #{} (map :id) declared-fn-slots)
@@ -177,7 +177,7 @@
 
    Identity of an anonymous row is its `(org, hash)` — the deterministic
    id is only the PREFERRED id for a NEW row. Rows written before the id
-   mixed the org in (2026-09-06) keep their old ids, and a re-sync of
+   mixed the org in keep their old ids, and a re-sync of
    the same shape must land on them rather than trip the
    `(org-id, anonymous-hash)` unique key."
   [records existing-by-hash]
@@ -198,7 +198,7 @@
 
 (defn- org-anonymous-rows-by-hash
   "`{hash fn-id}` of the anonymous rows THIS org already holds for the
-   batch's shapes. Platform-tier writes keep the pre-2026-09-06 ids, so
+   batch's shapes. Platform-tier writes keep the earlier ids, so
    the batch's ids already ARE the existing ids — nothing to remap."
   [storage records]
   (let [hashes (into [] (comp (filter #(= :fn (:kind %))) (keep :anonymous-hash) (distinct)) records)]

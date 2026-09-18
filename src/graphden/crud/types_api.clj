@@ -459,7 +459,7 @@
    polymorphic slot RIGID at the API layer: `[:fn {:item a} b]` came
    back as `[:fn {:item :a} :b]`, no candidate's return could be a
    subtype of the unknown type `:b`, and the picker's Compatible list
-   on `map`'s `:func` held nothing but never-returning fns (2026-09-13).
+   on `map`'s `:func` held nothing but never-returning fns.
    `wire-type-var?` is the grammar both sides already agree on — the
    editor's chip text (`compactTypeChipText`) reads the same regex."
   [x]
@@ -631,7 +631,7 @@
                `fn-args-subtype?`, the per-call value is dropped.
 
    A `:fn-ref` slot takes an identity — arity is not a question.
-   Ranking only: admissibility stays `subtype?`'s call (2026-09-14)."
+   Ranking only: admissibility stays `subtype?`'s call."
   [expected free-arity]
   (cond
     (= :fn-ref expected) :exact
@@ -909,7 +909,7 @@
    sources descriptions from graph rows), `:resolved-bindings` and
    `:primary-parent` (their former readers moved server-side — the
    return-type-rule partial and the layout strip facts read the RAW
-   registry directly). Measured 2026-07-16: these
+   registry directly). Measured: these
    were ~57% of the 2.4 MB decoded payload, re-fetched on every mutation,
    to paint chips for the handful of fns on screen. Kept in bulk:
    `:return` / `:args` / `:effects` / `:slot-types` / `:nav-types` /

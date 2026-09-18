@@ -163,7 +163,7 @@
    measured at 4137 fns (2026-07), a `:fn` create spent 477 ms of its 918 ms right
    here, with a blast radius of one fn; on the cloud, where the database
    is a network away, the same read was 1.7 s of a 1.85 s merge
-   (2026-09-03) — and it ran on EVERY write there, because this used to
+   — and it ran on EVERY write there, because this used to
    demand `(:storage ctx)` and `compile-storage` be the same object,
    which the tenancy addon's org-scoped runtime handle never is.
 
@@ -186,7 +186,7 @@
         ;; The read IS the cache's fill (same handle, same shape): prime
         ;; it, or a ctx nothing has compiled yet — a fresh pod, a cold
         ;; branch — pays this read on EVERY write until something else
-        ;; fills the cache (prod after the 2026-09-03 deploy: 1.6 s per
+        ;; fills the cache (prod after the deploy: 1.6 s per
         ;; merge, cold path each time). Unsharded only — the cache
         ;; contract is the full org-agnostic graph.
         (when (nil? (:executor-orgs ctx)) (prime-graph-cache! ctx graph))
@@ -466,7 +466,7 @@
   ;; several of them running together: the per-branch build monitor dedupes
   ;; one branch only, so two cold branches, or a cold-branch build racing
   ;; the epoch heal's `heal-stale-ctxs!`, each ran their own compile-all.
-  ;; Two such working sets exhausted the prod heap on 2026-08-05
+  ;; Two such working sets exhausted the prod heap
   ;; (ExitOnOutOfMemoryError, ~20 min outage). One permit serializes them;
   ;; queued compiles just wait — correctness is unaffected.
   ;; `GRAPHDEN_MAX_CONCURRENT_COMPILES` widens it for hosts with heap to
@@ -701,8 +701,8 @@
                     (finally (reset! inflight false))))]
         (if *stale-revalidate-sync?*
           (run)
-          ;; Bind the CTX'S OWN rich-types slice (branch-scoped registry,
-          ;; 2026-08-31) — falling back to the ambient override for
+          ;; Bind the CTX'S OWN rich-types slice (branch-scoped registry)
+          ;; — falling back to the ambient override for
           ;; untagged ctxs (test-isolation fixtures). Without this a
           ;; revalidate kicked from a NON-dispatch thread (a service /
           ;; cron execution on a branch ctx carries no binding) compiled

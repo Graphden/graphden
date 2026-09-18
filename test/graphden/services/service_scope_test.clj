@@ -19,7 +19,7 @@
    the parallel plugin a sibling namespace's start ran while the
    throwing seam of `seam-that-throws-propagates-fail-closed-test` was
    installed (`reconciler-test/nil-returning-service…` failed with `bad
-   install` on the main coverage run, 2026-09-10). The fixture restores
+   install` on the main coverage run). The fixture restores
    whatever was installed before each test; serial keeps the window
    from overlapping anyone else's service start."
   (:require

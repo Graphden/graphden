@@ -14,7 +14,7 @@
    arrived months later, attached to a complaint.
 
    For a while this file named three such regressions and measured two: the
-   `list-secrets` scenario below was added by the 2026-08-22 test audit, which
+   `list-secrets` scenario below was added by the test audit, which
    noticed that the one endpoint whose fix is quantified in the docstring
    (~9x) had no reading of its own. The layout scenario joins it because
    `POST /api/graph/layout` is what every card expansion in the editor costs,
@@ -65,7 +65,7 @@
            ;; off for the whole run: the budgets are about the operation.
            ;;
            ;; Same reason for the test auto-run, and it became real on
-           ;; 2026-09-11: the shipped packages now carry their own tests,
+           ;; The shipped packages now carry their own tests,
            ;; so a scenario that WRITES schedules a debounced background
            ;; pass, and that pass resolves branch chains ~500 ms later —
            ;; inside whichever scenario is measuring by then. It surfaced
@@ -163,7 +163,7 @@
           "measured no SQL at all — pg_stat_statements is not seeing this DB")
       (is (seq statements))
       ;; The budget is 1. When something else lands in the window (gate 19,
-      ;; 2026-09-03: 2 / max 1, green on the seven gates before it), the
+      ;; 2 / max 1, green on the seven gates before it), the
       ;; budget report cannot say WHAT fired — this can.
       (when (> queries 1)
         (println "perf: scope=tree fired" queries "statements:")
@@ -175,7 +175,7 @@
   ;; The Run form's shell for the APP ROOT — the fn whose reachable closure
   ;; is the whole application. Its `:free-arg-slot-map` used to BFS that
   ;; closure with four queries per level (~30–50 s on a real graph — the
-  ;; inspector's Runs tab looked hung, 2026-09-02); now it rides the
+  ;; inspector's Runs tab looked hung); now it rides the
   ;; storage's own graph resolver, a constant handful of round trips. The
   ;; count is what this scenario watches: a regression to per-level
   ;; querying moves it first, long before anyone times the tab.
@@ -198,7 +198,7 @@
       ;; The statement list travels with the count as a NOTE in the perf
       ;; report (`psql/record-measured!`), and `bb perf` prints it under a
       ;; breached budget — not to stderr: kaocha swallows both streams of a
-      ;; green test, and the 2026-09-06 breach (22 / max 18) left nothing
+      ;; green test, and the breach (22 / max 18) left nothing
       ;; to read back.
       (is (some? fn-id) "web-server resolved in the golden bootstrap")
       (is (= 200 (:status result))
@@ -288,7 +288,7 @@
 
 (deftest ^:perf merge-fork-sql-cost
   ;; Merging a branch forked off `main` back into it — lesson 20's flow and
-  ;; every review's last click. Before 2026-09-03 the merge ran a full
+  ;; every review's last click. Previously the merge ran a full
   ;; resolved-view diff of both branches (`untransferable-inherited-entities`)
   ;; and scanned every version row on main for conflicts: 1.6 s on this
   ;; graph, ~7 s on the cloud. Now the fork case decides from the branch
@@ -299,8 +299,7 @@
   ;; LAST in this file on purpose: the merge's post-commit invalidates the
   ;; compile cache, and `graph-layout-sql-cost` is budgeted at ZERO round
   ;; trips precisely because it reads the graph that cache already holds —
-  ;; run before it, this scenario handed layout one cold read (gate,
-  ;; 2026-09-03).
+  ;; run before it, this scenario handed layout one cold read (gate).
   (testing "POST /api/branches/main/merge for a fork carrying one new fn"
     (let [feat (str "perf-merge-" (random-uuid))
           created (setup/via-graph *graph* :create-branch-handler

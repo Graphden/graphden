@@ -3,7 +3,7 @@
    `:_sse-fragment-rendered` → `:sse-stream`) re-renders its fragment on
    EVERY tick. The impl-level tests (`packages.web.sse-stream-test`) hand
    the base-fn a raw Clojure render fn; this one drives the real GRAPH
-   handler through a live httpkit server, because the 2026-09-02 freeze
+   handler through a live httpkit server, because the freeze
    was in the composition, not the impl: `:fragment` was a captured
    hiccup VALUE, and captured args resolve once per wrap (once-thunks,
    ADR-thunk-once-and-cache-keys), so every tick rendered the first

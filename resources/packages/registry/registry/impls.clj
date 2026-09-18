@@ -719,7 +719,7 @@
    write-policy — the push-branch convention); split out defs whose
    deterministic id is PACKAGE-OWNED (skipped + reported — the boot sync
    would restore them anyway, and silently repointing platform fns is the
-   2026-08-20 incident class); sync the rest through the SAME
+   incident class); sync the rest through the SAME
    `sync-bundle!` path the package loader uses (name collisions, cycles,
    type-check all apply — a rejection surfaces as an error the caller can
    act on); optionally prune (`reconcile-bundle-scope!` — snapshot

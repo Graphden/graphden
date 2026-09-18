@@ -210,7 +210,7 @@
 
 ;; How many pods run this service when `:cardinality` is `:pool`. Nullable
 ;; (only meaningful for `:pool`; nil / non-positive degrades to 1 via
-;; `effective-pool-size`). Adding it needs no backfill — legacy rows read
+;; `effective-pool-size`). Adding it needs no backfill — rows without it read
 ;; nil, and only `:pool` rows consult it.
 (def ^:private service-pool-size-field-uuid
   #uuid "a1f9d3c7-6b28-4e05-9c14-3d7e8f2b0a56")
@@ -239,10 +239,6 @@
 ;; service by it.
 (def ^:private service-org-id-field-uuid
   #uuid "b2e6f1a4-3c7d-4e58-9a1b-6f0c2d8e4b73")
-
-
-(def ^:private service-endpoint-field-uuid
-  #uuid "7d4c2e91-5a3b-4f68-9c07-2e8b1f6a3d54")
 
 
 ;; --- :service-instance — one row per RUNNING copy -------------------------
@@ -340,9 +336,7 @@
                       :org-id {:uuid service-org-id-field-uuid
                                :type :text
                                :nullable? true}})
-      ;; `:endpoint` lived one release (72ad4710) as a jsonb on the service
-      ;; row; superseded by `:service-instance` (one row per running copy).
-      (ds/retire-field :service :endpoint service-endpoint-field-uuid)
+
       (ds/add-entity :service-instance service-instance-entity-uuid
                      {:service-id {:uuid service-instance-service-id-field-uuid
                                    :type :ref

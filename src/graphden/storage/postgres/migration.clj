@@ -200,32 +200,21 @@
 ;; name explicitly. Keep this list small; each entry corresponds to a
 ;; documented retirement in the schema files.
 
-(def ^:private retired-indexes
+(def ^:dynamic *retired-indexes*
   "Indexes that the schema USED to declare and no longer does. Dropped
-   idempotently on every migration pass so cross-version dev DBs stay
-   clean. See the matching `NOTE — … was retired` comment in the
-   schema file for each entry."
-  ["idx_binding_list_item_binding_id_position_unique"
-   ;; Retired 2026-07: soft-deleted fn identities occupied (ns, name)
-   ;; forever; per-branch live-view uniqueness moved to VersionedStorage's
-   ;; check-fn-name-collision!. See the NOTE in schema/graph/schema.clj.
-   "idx_fn_namespace_id_name_unique"
-   ;; Retired: `:ns` uniqueness is per ORG now —
-   ;; `(org-id, parent-id, name) NULLS NOT DISTINCT` (see the comment at the
-   ;; constraint in schema/graph/schema.clj); `ensure-unique-indexes!`
-   ;; lands the new key on a migrated DB.
-   "idx_ns_parent_id_name_unique"
-   ;; Retired: anonymous fn rows dedupe per ORG —
-   ;; `(org-id, anonymous-hash) NULLS NOT DISTINCT`.
-   "idx_fn_anonymous_hash_unique"])
+   idempotently on every migration pass so a DB from before the
+   retirement stays clean. Add an entry when a UNIQUE is retired; remove
+   it once every deployment is past that release. Dynamic so the
+   migration test can exercise the drop without a real retirement."
+  [])
 
 
 (defn- drop-retired-indexes!
-  "Issue `DROP INDEX IF EXISTS` for every entry in `retired-indexes`.
+  "Issue `DROP INDEX IF EXISTS` for every entry in `*retired-indexes*`.
    Safe on a fresh DB (the index doesn't exist), safe on a migrated DB
    that already dropped it (idempotent)."
   [tx]
-  (doseq [idx-name retired-indexes]
+  (doseq [idx-name *retired-indexes*]
     (util/exec! tx [(str "DROP INDEX IF EXISTS \"" idx-name "\"")] {})))
 
 

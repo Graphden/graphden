@@ -634,7 +634,7 @@
    `scope` controls payload size — one `list-scope-*` projection per
    shape over the shared lazy `graph-list-env`:
 
-   - `nil` / `:full` (default, backward compatible) — every
+   - `nil` / `:full` (default) — every
      `{:fns :slots :fn-slots :bindings :list-items :namespaces}`.
      ~4.5 MB on a 3000-fn graph; the editor's initial load.
    - `:tree` — `{:namespaces :counts}` only (O(namespaces) sidebar init).

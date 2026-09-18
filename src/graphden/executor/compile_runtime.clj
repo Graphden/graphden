@@ -1388,8 +1388,8 @@
    the run is SUBMITTED to it — pass the shared bounded execution pool
    (`persist/current-execution-pool`) so the FaaS app-router / BYO handler
    paths QUEUE under load and shed with `::rejected` → 503 instead of piling
-   unbounded soloExecutor threads (P1.3). When nil (the default), the legacy
-   unbounded `future` (Clojure's soloExecutor) runs it — back-compatible for
+   unbounded soloExecutor threads (P1.3). When nil (the default), the
+   unbounded `future` (Clojure's soloExecutor) runs it — the right choice for
    existing callers, which never see `::rejected`.
 
    CALLER CONTRACT: the sentinels are keywords in THIS namespace —

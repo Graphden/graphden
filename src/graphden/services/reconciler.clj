@@ -608,7 +608,7 @@
   "The branch `svc` runs on: its own `:branch-id`, or the active
    router's default branch when the row pre-dates the field / the
    admin left the branch unset. Normalizing here — the single point
-   desired-state rows enter the reconciler — makes a legacy nil-branch
+   desired-state rows enter the reconciler — makes a nil-branch
    row indistinguishable from an explicit default-branch row, so drift
    detection and `restart-services-on-branch!` treat them alike
    (before this, a nil-branch service silently missed the post-merge
@@ -628,7 +628,7 @@
    back to the reconciler's base `ctx` only when no router is
    registered — tests that bypass the router. For a default-branch
    service `br/ctx-for` returns the router's seeded entry, which IS
-   the base ctx, so the legacy nil-branch behavior is preserved
+   the base ctx, so the nil-branch behavior is preserved
    exactly.
 
    Lazy: `br/ctx-for` builds the per-branch ctx on first request
@@ -838,7 +838,7 @@
                     (swap! not-our-lock conj sid)
                     (swap! running-atom assoc sid ::start-failed))
                 ;; Record the EFFECTIVE :branch-id (row's, or the router's
-                ;; default for legacy nil-branch rows) so stop time and
+                ;; default for nil-branch rows) so stop time and
                 ;; `restart-services-on-branch!` can tell which branch this
                 ;; run belonged to. :cardinality mirrors the row so drift
                 ;; detection sees an admin flipping it. :locked? = THIS pod
@@ -876,7 +876,7 @@
 
    `running-atom` carries `:branch-id` on each entry (set by
    `reconcile-once!` from the row's EFFECTIVE branch — a nil-branch
-   row is normalized to the router's default branch, so legacy rows
+   row is normalized to the router's default branch, so nil-branch rows
    participate in a default-branch restart instead of silently
    running stale closures). Entries without a recorded branch only
    occur when no router is registered (tests that bypass branch

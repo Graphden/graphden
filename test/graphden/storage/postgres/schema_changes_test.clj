@@ -4,6 +4,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.protocol :as ds]
+    [graphden.storage.postgres.migration :as migration]
     [graphden.storage.postgres.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.test-helpers :as th]
@@ -325,26 +326,24 @@
 
 
 (deftest retired-index-dropped-on-migration-test
-  (testing "an index named in migration/retired-indexes is dropped by the next
-            initialize pass, idempotently"
+  (testing "an index named in migration/*retired-indexes* is dropped by the
+            next initialize pass, idempotently"
     (let [storage (setup/create-test-storage)
           schema (th/make-schema)]
       (try
         (sp/initialize storage schema)
-        ;; Simulate a cross-version dev DB: the retired NAME exists (its
-        ;; definition is irrelevant — the drop is by name only).
+        ;; Simulate a DB from before a retirement: the retired NAME exists
+        ;; (its definition is irrelevant — the drop is by name only).
         (jdbc/execute! (:pool storage)
-                       ["CREATE INDEX \"idx_fn_namespace_id_name_unique\" ON \"user\" (name)"])
-        (is (contains? (index-names-on storage "user")
-                       "idx_fn_namespace_id_name_unique"))
-        (sp/initialize storage schema)
-        (is (not (contains? (index-names-on storage "user")
-                            "idx_fn_namespace_id_name_unique"))
-            "the migration pass drops the retired index")
-        (sp/initialize storage schema)
-        (is (not (contains? (index-names-on storage "user")
-                            "idx_fn_namespace_id_name_unique"))
-            "a further pass with the index already gone stays clean")
+                       ["CREATE INDEX \"idx_user_name_retired_test\" ON \"user\" (name)"])
+        (is (contains? (index-names-on storage "user") "idx_user_name_retired_test"))
+        (binding [migration/*retired-indexes* ["idx_user_name_retired_test"]]
+          (sp/initialize storage schema)
+          (is (not (contains? (index-names-on storage "user") "idx_user_name_retired_test"))
+              "the migration pass drops the retired index")
+          (sp/initialize storage schema)
+          (is (not (contains? (index-names-on storage "user") "idx_user_name_retired_test"))
+              "a further pass with the index already gone stays clean"))
         (finally
           (sp/close storage))))))
 

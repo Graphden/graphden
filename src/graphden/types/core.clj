@@ -1047,7 +1047,7 @@
   [t]
   (let [t (cond
             (= t :sequence) [:list :any]
-            ;; Canonicalise the legacy 3-element fn-type form to 4-element
+            ;; Canonicalise the 3-element fn-type form (the authoring shorthand) to 4-element
             ;; with `:any` (unconstrained slot). Internal code can rely on
             ;; the 4th slot always being present.
             (and (vector? t) (= :fn (first t)) (= 3 (count t)))
@@ -1174,7 +1174,7 @@
 
    Recurses through `[:and …]` (intersection — narrower than any
    branch) and `[:or …]` (union — wider than every branch). Falls
-   back to structural equality for unknown shapes so legacy
+   back to structural equality for unknown shapes so older
    refinements with custom constraints behave as before."
   [a b]
   (cond

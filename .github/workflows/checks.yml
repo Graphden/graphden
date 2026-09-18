@@ -526,7 +526,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: crate-ci/typos@v1.50.1
+      - uses: crate-ci/typos@v1.50.2
 
   markdownlint:
     name: markdownlint (.md)

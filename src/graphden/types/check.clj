@@ -2579,7 +2579,7 @@
 ;; Adding a name = a known new debt the type-system can't yet
 ;; express; MUST be co-justified with a roadmap update.
 ;;
-;; Post-Phase-α' (2026-06-16). The original 10 entries (the
+;; Post-Phase-α'. The original 10 entries (the
 ;; `:_X-apply-result/-do-invalidate/-do-notify` family that read
 ;; `(:name (:get :parsed :entity-type :default nil))`) CLOSED when
 ;; α' Pass-2/3 caller-context propagation landed alongside the
@@ -2593,12 +2593,12 @@
 ;; narrowing through `:if`/`:cond` guards OR per-fn-def
 ;; `:assert-some` annotations.
 (def allowed-type-check-failures
-  ;; Closed 2026-06-16 — sweep down to 0 after applying author
+  ;; Closed — sweep down to 0 after applying author
   ;; type-assertions for runtime-guaranteed nullability narrowings
   ;; that the type-checker can't (yet) see through control-flow
   ;; guards.
   ;;
-  ;; 2026-06-19 — Phase #170 extended to recognize `:is-a?` predicates
+  ;; Phase #170 extended to recognize `:is-a?` predicates
   ;; in `:if` / `:cond` clauses (`direct-predicate-of-ref` +
   ;; `is-a-tag->structural-type` + `narrowed-type-for-predicate`).
   ;; Plumbed through bare-keyword ref-bindings in `binding-info-entry`

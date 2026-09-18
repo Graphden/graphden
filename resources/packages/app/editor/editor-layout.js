@@ -223,7 +223,7 @@ function calculateNodeSize(nodeData) {
     // it will actually render, MEASURED in the overlay's own font — the
     // old 6px-per-character guess under-budgeted the chip's margins and
     // the ↖, and the text then wrapped onto a second line (`"big` /
-    // `world"`; a lone space as two bare quotes), 2026-09-17. The
+    // `world"`; a lone space as two bare quotes). The
     // overlay is fixed to this width (`syncOverlayGeometry`) and its text
     // is `white-space: pre`, so the two must agree.
     const argScale = typographyScale();

@@ -497,7 +497,7 @@
    marker if we looked at `:type` alone. A content-passing base-fn
    (`:str` concat, `:add`, …) that consumes such a list DOES fold the
    secret element into its result, so the per-element types must be
-   scanned or the taint leaks (pre-2026-08-17 bug: mixed-list secret
+   scanned or the taint leaks (earlier bug: mixed-list secret
    silently declassified).
 
    Base-fns with no other return-type-rule opt into propagation by

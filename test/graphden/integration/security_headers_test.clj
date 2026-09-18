@@ -48,7 +48,7 @@
         (is (= "nosniff" (get-in resp [:headers :X-Content-Type-Options])))
         (is (= "strict-origin-when-cross-origin"
                (get-in resp [:headers :Referrer-Policy])))
-        ;; CSP + HSTS added 2026-08-17 (pre-release hardening). CSP is
+        ;; CSP + HSTS added (pre-release hardening). CSP is
         ;; script-source-agnostic on purpose (inline editor scripts) —
         ;; assert the clickjacking/embedding directives are present.
         (is (= "frame-ancestors 'none'; object-src 'none'; base-uri 'self'"

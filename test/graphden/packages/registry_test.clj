@@ -1,5 +1,5 @@
 (ns ^:serial graphden.packages.registry-test
-  "`^:serial` — installs process-global seams (`tc/install-*-fn!` / `deploy-config/install!`) for the length of a test; under kaocha's parallel plugin another namespace's `finally` reset them mid-test (the CI perf job, 2026-09-09).
+  "`^:serial` — installs process-global seams (`tc/install-*-fn!` / `deploy-config/install!`) for the length of a test; under kaocha's parallel plugin another namespace's `finally` reset them mid-test (the CI perf job).
    Tests for the package registry — the `:package-version` entity that
    stores immutable published bundles."
   (:require
@@ -489,7 +489,7 @@
       (is (true? (:ok body)))
       (is (= "demo.pkg" (:name body)))
       (is (pos? (:fn-count body)))
-      ;; the row-derived fields — nil until 2026-09-08, when the envelope re-ran
+      ;; the row-derived fields — nil until the envelope re-ran
       ;; the effectful apply for each field it read
       (is (re-matches #"[0-9a-f-]{36}" (str (:id body))) "the created row's id")
       (is (true? (:public body)) "a platform-tier publish is public")

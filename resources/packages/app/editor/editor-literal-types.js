@@ -698,7 +698,7 @@ function validateLiteralAgainstType(parsed, expected) {
 // cut at 30 chars). A string made only of whitespace — the `" "` a
 // str-join separator is bound to — used to render as two bare quotes
 // with an invisible gap, and wrapped into two LINES of quotes on a
-// narrow card (a reader on lesson 15, 2026-09-17). Each whitespace
+// narrow card (a reader on lesson 15). Each whitespace
 // character becomes a visible glyph (␣ space, ⇥ tab, ⏎ newline) and
 // the title says what it is; every other label passes through. Returns
 // `{text, title}` — `title` is null when nothing was substituted.

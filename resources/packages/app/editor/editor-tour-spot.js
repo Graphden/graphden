@@ -1,6 +1,6 @@
 // editor-tour-spot.js — where the spotlight and the step popover GO.
 //
-// Split out of editor-tour.js (2026-09-13): the geometry. `_tourEnsureEls`
+// The geometry. `_tourEnsureEls`
 // builds the three overlay elements once (`#gd-tour-dim` scrim at z-index 290,
 // `#gd-tour-spot` ring at 10050, the popover); `_tourSpotRect` / `_tourDimHoles`
 // cut the target out of the scrim; `_tourPosition` places the popover clear of
@@ -252,7 +252,7 @@ function _tourPosition() {
 // `left: 50%` loses to the inline value and its `translateX(-50%)` then
 // shifts the box half its width from wherever the last step left it —
 // the end-of-lesson "Clean up?" card half off the left edge when the last
-// step pointed at the Explorer (2026-09-16).
+// step pointed at the Explorer.
 function _tourCenterPop(pop) {
   pop.classList.add('gd-tour-centered');
   pop.style.left = '';
@@ -372,7 +372,7 @@ function _tourFloatingRects() {
 // nodes, [[+]] placeholder binders). On canvas lessons these ARE the step's
 // subject: without them in the avoid list the popover repeatedly parked on
 // the selected fn's card, covering the ⋯ / [[+]] the step asks to press
-// (lessons 05/15/27/29 in the 2026-08-26 walkthrough). Scored SOFT, like
+// (lessons 05/15/27/29 in the walkthrough). Scored SOFT, like
 // the floating surfaces — a crowded canvas still yields the least-covering
 // corner instead of no position at all.
 function _tourNodeRects() {

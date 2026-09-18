@@ -22,7 +22,7 @@ actually is.
 
 ## The marker
 
-**Generalized (2026-07-22):** `:secret` is now the SEEDED instance of a
+**Generalized:** `:secret` is now the SEEDED instance of a
 registry-driven marker engine (`types.core.shapes/register-marker!`).
 Any `[<tag> <inner>]` with a registered tag gets the same asymmetric
 subtyping, the same jsonb-sink laundering guard, and — because the
@@ -143,7 +143,7 @@ diagnostic's type-carrying keys (`:expected`/`:actual`/`:declared`/
 | `core/logic` | All 15 fns propagate (passthrough / conditional). |
 | `core/arithmetic` | All 14 fns propagate (`:add` `:sub` `:mul` `:div` `:mod` `:quot` `:neg` `:abs` `:eq` `:neq` `:lt` `:lte` `:gt` `:gte`). `(eq secret 42)` leaks; `:lt` / `:gt` / `:eq` / `:neq` included. |
 | `core/system` | 15 fns propagate. Bare environment readers (`:jvm-version`, `:env`, etc.) take no user input so taint can't enter — left bare. |
-| `core/hof` | All 13 fns propagate (content-passing by construction: `coll` elements / `init` / the captured `value` flow into the result). Pre-2026-08-19 the package was unflagged — `(:map f secret-coll)` statically laundered the marker (result typed from `f`'s plain return). |
+| `core/hof` | All 13 fns propagate (content-passing by construction: `coll` elements / `init` / the captured `value` flow into the result). |
 | `core/refinements` | The `:ensure-*` narrowers (`:ensure-positive-int`, `:ensure-non-empty-text`) preserve taint structurally — refinement impls carry no `:taint-propagate?` flag. |
 | `web/html` | `:render-hiccup` / `:hiccup` propagate — they serialize/assemble a tree whose `[:list :any]` arm (and `:hiccup`'s `:any` attr values) can carry a secret. `:h-raw` is bare — its `:string` input can't accept a `[:secret :text]`. |
 | `web/vault` | `:secret-leaf` declares `[:secret :text]` return directly. |
@@ -179,7 +179,7 @@ not in the browser — by the time a body reaches any renderer the secret
 value is already gone (`:result nil`, `:error-data {:reason :tainted}`),
 so there is no client-side "is this tainted?" branch to get wrong. The
 former editor-side path (`isTaintedExecuteResponse` / `renderTaintedPane`
-in `editor-execute-result.js`) was **removed 2026-06-18**.
+in `editor-execute-result.js`) was removed.
 
 Rendering is now a **server-rendered graph partial**: `/partials/execute-result`
 (GET by `id`) and `/partials/execute-result-inline` (POST the non-persisted
@@ -409,7 +409,7 @@ layered redaction:
    list-of-secrets can reach a jsonb sink through an `:any`-widened
    intermediate even though the direct `[:list [:secret :text]] ⊆
    :jsonb` step is refused (`contains-marker?` guard, in BOTH
-   `subtype?` and `unify` since 2026-08-15). Label tracking ends
+   `subtype?` and `unify`). Label tracking ends
    where `:any` begins — that is the price of having a top type. A
    future audit pass could narrow specific `:any` slots to refuse
    secrets.
@@ -471,7 +471,7 @@ Three pieces:
     `:vault-get` — the generic value-resolver mechanism
     (`schema/graph/schema.clj`). The old `:override-kind
     :secret-path` enum marker is fully RETIRED: stage 1
-    (2026-07-23) switched writers to the resolver form with an
+    switched writers to the resolver form with an
     idempotent boot migration for legacy rows, and stage 2b has
     since **dropped the column** (`ds/retire-field :binding
     :override-kind` in `schema/graph/schema.clj`) — there is no
@@ -571,7 +571,7 @@ re-open to bind the secret. Rotation of an inline-bound secret is
 covered by `PUT /api/secrets/:fn-id/value` for the wrapper-fn-def
 shape only — inline rotation is followup work.
 
-Verified end-to-end in 2026-05-29 smoke:
+Verified end-to-end:
 
 - Gate-reject: a legacy `:override-kind` write → `:constraint-violation/override-kind-retired`; a `:vault-get`-resolver write into a non-secret slot → `:capability/resolver-marker-laundering`, vault rolled back (subsequent read 404).
 - Positive bind on `:sql-exec/:password` of a freshly-created composed fn → `binding` row with the `:vault-get` resolver + `:value` path, vault holds the value at the path.

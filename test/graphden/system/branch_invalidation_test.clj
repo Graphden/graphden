@@ -72,7 +72,7 @@
    runs — which is exactly the observed symptom. So the next occurrence
    should say whether the delta ran, instead of starting this over.
 
-   FOUND (2026-09-07, `the cached branch recompiles` read 1, twice in
+   FOUND (`the cached branch recompiles` read 1, twice in
    five local runs with the coverage job's seed): an ASYNC graph-epoch
    heal. `clean-database-fast!` restarts the epoch sequence between
    deftests while the NS-thread's epoch state keeps the old watermark,

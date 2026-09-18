@@ -17,7 +17,7 @@
 //     trap is short-lived by design, polling every few seconds for
 //     its TTL is cheaper than a stream).
 // (The drawer's Debug panel this module used to host was retired
-// 2026-09-04 with the drawer.)
+// with the drawer.)
 //
 // Globals consumed: authFetch, openTraceView.
 

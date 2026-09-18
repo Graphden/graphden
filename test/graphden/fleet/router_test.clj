@@ -88,7 +88,7 @@
   ;; it is `<org>.<base-domain>`, the routing key the holder's app-router
   ;; resolves the org from. Dropping it (plain reverse-proxy convention) made the
   ;; holder see its own FQDN, fail to resolve the org, and serve the apex editor
-  ;; instead of the tenant's app (found on a kind cluster, 2026-07-12).
+  ;; instead of the tenant's app (found on a kind cluster).
   (let [storage (storage-with-placement!)
         entry (setup/create-base-fn! storage "cell-root-host" :any)
         eid (:id entry)

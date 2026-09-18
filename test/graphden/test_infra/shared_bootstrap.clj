@@ -79,7 +79,7 @@
   []
   ;; `:stats?` — the usage rollups the Runs tab's partial reads; without
   ;; the table the whole `/partials/execute-history` handler could not be
-  ;; exercised against the golden (2026-09-06).
+  ;; exercised against the golden.
   (schemas/full-schema {:packages? true :stats? true}))
 
 

@@ -380,7 +380,7 @@
         ;; the target branch: on the cloud every org's `main` IS the shared
         ;; main, so a tenant merging a probe fn restarted the platform's own
         ;; `web-server` — the merger got a 502 (its socket died with the
-        ;; listener) and everybody else a blip (prod log, 2026-09-03).
+        ;; listener) and everybody else a blip (prod log).
         (when (seq affected)
           (recon/restart-services-depending-on! ctx recon/running (set affected)
                                                 target-branch-id))
@@ -450,7 +450,7 @@
         ;; thread has its own, and a raw thread validating against the
         ;; GLOBAL one advanced + pruned the shared ledger from a watermark
         ;; the NS thread had not reached — phantom foreign gaps, a heal
-        ;; per merge (2026-09-08). Carrying the state closes that split at
+        ;; per merge. Carrying the state closes that split at
         ;; its source; the ledger's retention window is the backstop.
         epoch-state br/*epoch-state-override*
         post-commit!
@@ -502,7 +502,7 @@
   ;; straight off the row on every use, nothing compiled or cached
   ;; depends on them, and a bump nobody notes ages past grace into a
   ;; spurious heal 45 s after every flip (the e2e suite's residual
-  ;; heals, 2026-09-07 — one per merge, from stage 2b's review-state
+  ;; heals, one per merge, from stage 2b's review-state
   ;; clear, and one per propose / protect click).
   (let [policy (normalize-write-policy write-policy)]
     (sp/update-entity (branches/base-storage ctx) :branch branch-id

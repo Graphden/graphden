@@ -3,7 +3,7 @@
 
    The 400 replaced the HTML document, so the editor never booted — no
    scripts, no explanation, nothing to click; a user whose branch was
-   merged-and-deleted in another tab was simply stuck (found 2026-08-20
+   merged-and-deleted in another tab was simply stuck (found
    walking the tutorial guard). Navigations now redirect to the same URL
    without the stale `?branch=`; API/XHR callers keep the 400, which is
    what they can act on."

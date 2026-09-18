@@ -281,7 +281,7 @@
             ;; trusted system path (public org, no principal), and the
             ;; tenancy decorator keeps an EXPLICIT `:org-id` for that path
             ;; instead of stamping `public` over it — a public-stamped copy
-            ;; was readable by every org (2026-09-06).
+            ;; was readable by every org.
             org-id (:org-id (sp/read-entity storage :service service-id))]
         (:id (sp/create-entity storage :service-instance
                                (cond-> {:service-id service-id
@@ -391,7 +391,7 @@
   ;; immediate every pass: a `:restart-policy :always` service whose fn
   ;; returns at once (`:exit :done` — a one-shot that should have been
   ;; an `:interval`) restarted on EVERY liveness tick forever, a WARN
-  ;; per tick (7 restarts in 15 s in the e2e gate, 2026-09-07). Now the
+  ;; per tick (7 restarts in 15 s in the e2e gate). Now the
   ;; first restart is immediate and the delay doubles per further
   ;; short-lived exit — 1 s, 2 s, … `*exit-backoff-cap-ms*` — while a
   ;; run that lasted `*exit-stable-ms*` resets it.
@@ -715,7 +715,7 @@
    ;; the requester's `*current-org*`; under a TENANT binding the
    ;; `:service` read below returns [] (`:service` is tenant-forbidden in
    ;; OrgScopedStorage), so desired = ∅ and the pass STOPPED every
-   ;; running service — on prod (2026-08-05) a demo org's fn create shut
+   ;; running service — on prod a demo org's fn create shut
    ;; down the platform web-server until the next periodic tick (which
    ;; runs unbound = platform) restarted it: a ~15 s total outage any
    ;; tenant write could trigger. Binding here makes every trigger path

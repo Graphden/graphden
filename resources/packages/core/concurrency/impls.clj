@@ -349,7 +349,7 @@
 
 
 (def impls
-  ;; `:taint-propagate? true` (2026-08-17 security fix): `:do` returns
+  ;; `:taint-propagate? true` (security fix): `:do` returns
   ;; its last step's value — a content-passing `:any`-slot fn. Without
   ;; the flag it silently DECLASSIFIED a secret (`(:do :steps [1
   ;; secret-ref])` returned the real secret with a registered type of
@@ -371,7 +371,7 @@
    :start-all {:impl start-all-fn :lazy-seq-args #{:triggers}}
    :cron-parse cron-parse-fn
    :cron-fire-after cron-fire-after-fn
-   ;; Cell taint (2026-08-17): a secret stored in an atom/cell must stay
+   ;; Cell taint: a secret stored in an atom/cell must stay
    ;; redacted when read back. Without propagation, `:atom`/`:cell` return
    ;; `:any` and `:deref` returns `:any`, so `(deref (atom secret))` typed
    ;; `:any` → tainted-fn? false → the Run pane shows the secret. With the

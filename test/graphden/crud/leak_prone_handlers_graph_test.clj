@@ -1,5 +1,5 @@
 (ns ^:integration graphden.crud.leak-prone-handlers-graph-test
-  "`^:serial` pin LIFTED (2026-08-07) after 8cbd2c6f gave the
+  "`^:serial` pin LIFTED after 8cbd2c6f gave the
   compile-all cache a rich-types-aware key. The pin was defensive: an
   intermittent nil-callable NPE (`invoke-fn` `(func arg)`, func=nil)
   only under the parallel runner, root cause never found (memory
@@ -26,7 +26,7 @@
    These tests exercise the production GRAPH fn-def chain (not the
    Clojure helpers `bb test` historically covered), so a future pin
    removal triggers `bb test` instead of only `bb test-e2e`. See the
-   2026-06-25 update in `feedback_optional_slot_free_arg_leak.md`."
+   update in `feedback_optional_slot_free_arg_leak.md`."
   (:require
     [cheshire.core :as cheshire]
     [clojure.string :as str]
@@ -47,7 +47,7 @@
 ;; GET /api/secrets  (:list-secrets-handler)
 ;; =============================================================================
 ;;
-;; Exercised the original failure during 2026-06-25 `bb test-e2e`:
+;; Exercised the original failure during `bb test-e2e`:
 ;;
 ;;   Unknown field 'request-method' in where clause for entity 'fn'
 ;;   {:type :validation-error/unknown-field, :entity :fn,
@@ -119,8 +119,8 @@
 
 
 (deftest api-failures-handler-renders-test
-  ;; The failed-runs LENS's read (the Failed runs panel's successor,
-  ;; 2026-09-04): renders end-to-end through the production graph chain
+  ;; The failed-runs LENS's read (the Failed runs panel's successor)
+  ;; renders end-to-end through the production graph chain
   ;; — an empty JSON list on a fresh DB (the row tally is covered by the
   ;; fn-execution roundtrip).
   (testing "GET /api/failures renders (empty on a fresh DB)"
@@ -134,7 +134,7 @@
 
 
 (deftest inspector-detail-renders-arg-diagnostic-test
-  ;; Error-tolerance Phase 3 → the Inspector (2026-09-04): a recorded
+  ;; Error-tolerance Phase 3 → the Inspector: a recorded
   ;; diagnostic renders UNDER the argument it objects to in the fn's
   ;; Bindings detail, through the production graph chain. Records into
   ;; the (per-NS-thread isolated) diagnostics store directly — the
@@ -373,8 +373,8 @@
 
 (deftest runs-tab-carries-the-trap-block-for-a-service-fn-test
   ;; The «catch next request» trap moved from the (retired) diagnostics
-  ;; drawer to the Runs tab of a fn that is a SERVICE on the branch
-  ;; (2026-09-04): the history partial composes `:_peh-trap-block` —
+  ;; drawer to the Runs tab of a fn that is a SERVICE on the branch:
+  ;; the history partial composes `:_peh-trap-block` —
   ;; the block for such a fn, nothing for any other. The block fn-def is
   ;; exercised directly (the whole history partial also reads the usage
   ;; rollup table, which this harness does not carry).

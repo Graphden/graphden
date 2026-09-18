@@ -1,6 +1,6 @@
 // editor-tour-end.js — the END of a lesson: cleanup offer, "next up", the card.
 //
-// Split out of editor-tour.js (2026-09-13). `_tourEnd` stops the poll, reads
+// `_tourEnd` stops the poll, reads
 // what the lesson created ONCE and asks one question per run shape: a
 // branch-isolated lesson offers to delete its branch (full rollback — created
 // namespaces first, while the branch still resolves), an in-place lesson

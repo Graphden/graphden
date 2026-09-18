@@ -31,7 +31,7 @@
    locks are DB-wide and a mixed fleet's releases share one Postgres, so a
    constant key made two releases' controllers contend for ONE lock — the
    winner saw only its own SRV membership and tried to place every org onto
-   its own pods (the 2026-08-23 audit's mixed-fleet wedge). The key is now
+   its own pods (the audit's mixed-fleet wedge). The key is now
    derived from `scope` — the release identity (`GRAPHDEN_FLEET_LOCK_SCOPE`,
    defaulting to `GRAPHDEN_FLEET_DNS`, which is per-release by construction:
    each release has its own headless Service). Same scope → same lock

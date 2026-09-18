@@ -1,7 +1,7 @@
 (ns graphden.test-hygiene-guard-test
   "Mechanical rules about the TESTS themselves, enforced by reading them.
 
-   Two rules today, both from the 2026-08-22 test audit.
+   Two rules today, both from the test audit.
 
    ## 1. An asserting `catch` must be insured against a silent no-throw
 
@@ -15,7 +15,7 @@
    When the expression stops throwing, the `catch` never runs, the `is`
    inside it never executes, and `clojure.test` reports a PASS. The test
    whose entire job is to notice that regression is the one thing that
-   cannot. A 2026-08-22 audit found 31 of these, all in error-path tests.
+   cannot. An audit found 31 of these, all in error-path tests.
 
    The fix is one line — an assertion in the `try` BODY that only runs
    when nothing was thrown:

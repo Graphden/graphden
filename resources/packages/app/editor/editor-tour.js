@@ -14,7 +14,7 @@
 // State survives reloads in localStorage (the create-fn flow re-runs
 // initGraph, not a page reload, but a mid-lesson F5 must not lose the tour).
 //
-// Split 2026-09-13: spotlight / popover GEOMETRY is editor-tour-spot.js,
+// Spotlight / popover GEOMETRY is editor-tour-spot.js,
 // the end-of-lesson dialogs are editor-tour-end.js (both load right after
 // this file). This file is the ENGINE: state + persistence, step rendering,
 // the check poll (`_tourTick`), Back / Pause / Escape, and the entry points.

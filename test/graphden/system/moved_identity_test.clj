@@ -169,7 +169,7 @@
   ;; A retired fn-def SECTION references itself (parent chains, arg
   ;; refs). Per-row reconciling left every non-leaf member behind as
   ;; "still referenced" — by its own removed siblings — while paying a
-  ;; full ref-surface scan per row (the 2026-08-31 deploy-health
+  ;; full ref-surface scan per row (the deploy-health
   ;; blowup). The set-aware pass must purge the whole chain in ONE
   ;; boot, and still keep a member referenced from OUTSIDE the set.
   (let [storage (setup/create-test-storage)]
@@ -377,7 +377,7 @@
 
 
 (deftest kept-members-slot-keeps-its-type-row
-  ;; F1 of the 2026-09-01 audit: a retired fn that stays KEPT (still
+  ;; F1 of the audit: a retired fn that stays KEPT (still
   ;; referenced from live graph) exposes a slot typed by a retired
   ;; type-row. Keptness must flow THROUGH the slot: purging the
   ;; type-row would dangle the surviving fn's slot.type-fn-id, and the
@@ -485,7 +485,7 @@
 
 
 (deftest a-removal-referenced-only-by-history-is-purged
-  ;; The 2026-09-04 lint sweep: a two-month-old instance carried 472
+  ;; The lint sweep: a two-month-old instance carried 472
   ;; retired package identities; 175 were "referenced" — through the
   ;; create-time identity row of a binding a re-sync had since repointed,
   ;; or through a superseded version. Neither is a ref the current graph

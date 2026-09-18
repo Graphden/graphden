@@ -8,12 +8,12 @@ inlined. It runs over EDN-shape fn-defs — the form the package loader
 produces and `crud/type-check/reconstruct-fn-def` rebuilds from DB
 rows — so one engine serves both authoring worlds.
 
-| Where | What | Since |
-|-------|------|-------|
-| `src/graphden/lint/core.clj` | the pure engine — `lint` over a fn-def seq | 2026-09-03 |
-| `src/graphden/lint/corpus.clj` | `bb graph-lint` — the first-party fns.edn corpus, no DB, ~10 s | 2026-09-03 |
-| `src/graphden/lint/graph.clj` | the live branch — graph snapshot → fn-defs → `lint`, memoised per snapshot | 2026-09-03 |
-| editor **⚐ lint** lens + Inspector **Lint** section | `GET /api/lint` primes the lens; `POST /partials/inspector-lint/{suppress,restore}` — "Not an issue" / "Restore" write the branch's `lint-suppressions` const | 2026-09-04 |
+| Where | What |
+|-------|------|
+| `src/graphden/lint/core.clj` | the pure engine — `lint` over a fn-def seq |
+| `src/graphden/lint/corpus.clj` | `bb graph-lint` — the first-party fns.edn corpus, no DB, ~10 s |
+| `src/graphden/lint/graph.clj` | the live branch — graph snapshot → fn-defs → `lint`, memoised per snapshot |
+| editor **⚐ lint** lens + Inspector **Lint** section | `GET /api/lint` primes the lens; `POST /partials/inspector-lint/{suppress,restore}` — "Not an issue" / "Restore" write the branch's `lint-suppressions` const |
 
 ## Rules
 
@@ -40,7 +40,7 @@ per code path, not copy-paste, and is not filed.
 ask the author to act on: a "lighter" tier of matches nobody should
 extract would be a false recommendation, and the first-party corpus
 must pass its own linters outright — `bb graph-lint` is green at zero
-findings, not zero warnings. (Until 2026-09-10 the sub-line matches
+findings, not zero warnings. (Previously the sub-line matches
 were filed as *info* "for calibration"; 517 of them sat there, and the
 calibration they offered was that the line was right.) There is no `private-alias` rule: a private fn-def that only
 renames its parent is the let-rule's "separate child per code path",
@@ -87,7 +87,7 @@ the same verdict:
   of `[:secret T]` ([SECRETS.md](SECRETS.md)), a type error, not a style
   finding.
 
-The 2026-09-03 sweep that shipped the lint brought the corpus from
+The sweep that shipped the lint brought the corpus from
 131 warnings to zero. The shapes it found, for calibration:
 
 - the per-day / top-fns / by-org usage tables each carried their own
@@ -100,7 +100,7 @@ The 2026-09-03 sweep that shipped the lint brought the corpus from
 - five `<span hidden>` placeholders, two `deploy-config :hub-url`
   reads, three "`(str (:name body))`" wrappers per handler.
 
-The 2026-09-09 sweep that shipped the fan-in rule found 24 warning
+The sweep that shipped the fan-in rule found 24 warning
 groups (0 after): mostly `:zipmap` record constructors written per
 site with the same `:keys` (error envelopes in branches / secrets /
 prefs / registry, the execute and value-form parse records shared by
@@ -180,7 +180,7 @@ which BFS-walks from the same registry.
 ## The editor: lens + Inspector
 
 Findings reach the author as an Explorer **lens** and an Inspector
-**section** (the Lint tab shipped 2026-09-03 in a drawer under the
+**section** (the Lint tab shipped in a drawer under the
 canvas and was retired the next day, once the lenses landed; the Tests
 and Debug panels followed the same day and the drawer is gone).
 

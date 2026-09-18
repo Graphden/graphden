@@ -308,7 +308,7 @@ as `:namespace` on each fn-def, reconstructed on install).
   merge to main.
 - **Rollback**: repoint the pin to the older version and rewrite refs back, or
   `git revert` the merge on main. Reuses branch/merge/revert wholesale.
-- **Update available** (shipped 2026-09-10): the packages panel compares each
+- **Update available**: the packages panel compares each
   pin against the registry's highest published version on render — a
   `↑ <latest> available` badge on the row, and the ↑ input prefilled with it,
   so the update is one click. No periodic job and nothing stored: the panel

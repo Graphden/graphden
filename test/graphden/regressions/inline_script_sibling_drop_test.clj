@@ -1,5 +1,5 @@
 (ns ^:integration graphden.regressions.inline-script-sibling-drop-test
-  "Regression test for the 2026-06-23 editor-page bug:
+  "Regression test for the editor-page bug:
 
    When the editor page's `:_editor-scripts` list had an inline
    `<script>` (`:_editor-api-routes-script-tag` carrying the
@@ -67,7 +67,7 @@
   (testing "editor.js <script src> tag must appear — otherwise the editor never bootstraps and the page is blank"
     (let [html (render-editor-page)]
       (is (str/includes? html "src=\"/assets/editor.js")
-          "the editor.js <script src> tag is the single load-bearing line — its absence is the 2026-06-23 blank-page regression"))))
+          "the editor.js <script src> tag is the single load-bearing line — its absence is the blank-page regression"))))
 
 
 (deftest editor-page-renders-api-routes-script-tag-test

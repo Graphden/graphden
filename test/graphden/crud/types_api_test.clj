@@ -441,7 +441,7 @@
           (is (true? (:ok res)))
           (is (zero? (:count res)))))
 
-      ;; Ranking rides along with admissibility (2026-09-14): every
+      ;; Ranking rides along with admissibility: every
       ;; candidate says how its WHOLE signature sits in the slot, so the
       ;; picker can lead with the rows that need nothing more and fold
       ;; away the constants a 1-arg callable slot admits positionally.

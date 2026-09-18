@@ -1,6 +1,6 @@
 (ns graphden.packages.web.vault-impls-test
   "Unit tests for the `web.vault` base-fn impls — the operator-only gate on
-   the RAW vault ops (P3, 2026-08-07). A restricted (tenant) graph execution
+   the RAW vault ops (P3). A restricted (tenant) graph execution
    must not read/write arbitrary secret paths against the JVM-wide platform
    token (the KV namespace is flat). Slurp+eval the impls via the loader's
    `load-module-impls`, then poke each `(fn [__args ctx])` directly — no full

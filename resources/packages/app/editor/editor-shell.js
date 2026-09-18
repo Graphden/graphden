@@ -1,8 +1,8 @@
 // Editor Shell — redesign 2026-08. Owns the surface switching.
 //
 // Build is the graph editor; Operate (labeled "Organization") / Platform /
-// Settings are real <section>s (see REAL_SURFACES). The RAIL is retired
-// (2026-08-15): surface ENTRY is the account chip's menu (editor-auth.js) +
+// Settings are real <section>s (see REAL_SURFACES). The RAIL is retired.
+// Surface ENTRY is the account chip's menu (editor-auth.js) +
 // the deep-link hashes below; the brand button in the top bar is the way
 // back to Build. Review and Workspaces were retired as surfaces earlier: a
 // branch diff is the Δ button in the branch switcher, a workspace is the
@@ -27,7 +27,7 @@
     }
   } catch (_) { document.body.classList.add('gd-cards-compact'); }
 //
-// Split 2026-09-13: the right-column INSPECTOR is editor-inspector.js and
+// The right-column INSPECTOR is editor-inspector.js and
 // the Workspace / Packages chips are editor-shell-chips.js (both load right
 // after this file). This file is the SURFACES: switching, deep-link hashes,
 // inert-ing the covered Build, the Settings surface, compact cards.

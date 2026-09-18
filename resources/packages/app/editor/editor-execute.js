@@ -5,7 +5,7 @@
 // Runs tab. It used to be a floating anchored popover; that shape
 // fought the canvas it reports on — it parked over the very nodes a
 // traced run highlights, could not be moved, and the first canvas pan
-// dismissed it (2026-08-27 lesson-27 finding). The inspector is a
+// dismissed it (lesson-27 finding). The inspector is a
 // fixed column, so the canvas stays fully visible and pannable while
 // a run session is open — finishing the 2026-08 shell redesign that
 // already retired the Run surface in favour of "▶ action + inspector".

@@ -151,7 +151,7 @@
    `isWrapperFor` / `unwrap` (as Hikari itself does) closes through; one
    that does not is left alone, with a warning, rather than cast — the
    cast is what threw `ClassCastException` out of the shutdown hook and
-   aborted the rest of the halt (prod, 2026-09-03)."
+   aborted the rest of the halt (prod)."
   ^HikariDataSource [pool]
   (cond
     (nil? pool) nil

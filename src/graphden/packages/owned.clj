@@ -6,7 +6,7 @@
    plus the 14 primitives) on every boot — exactly the set that the
    declarative sync would restore on the next restart. Consulted by
    `crud.package-guard` to refuse editor-API writes against those fns
-   (the 2026-08-20 :add poisoning class).
+   (the :add poisoning class).
 
    Deliberately in-memory, not a DB column: membership is a property
    of THIS deployment's bundled packages, re-derived each boot; a

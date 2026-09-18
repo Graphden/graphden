@@ -113,7 +113,7 @@
   ;; flushes the body, then closes the channel and releases its
   ;; write-queue byte[] buffers. WITHOUT this, default HTTP/1.1
   ;; keep-alive leaves the channel + buffers in the server's tracking
-  ;; HashMap until idle-timeout. Heap dump 2026-06-21 showed 27,955
+  ;; HashMap until idle-timeout. A heap dump showed 27,955
   ;; byte[] (1.7 GB) across ~969 long-lived channels — 90.83% of heap.
   ;; Tradeoff: per-request TCP handshake. A smarter policy (close only
   ;; after heavy endpoints) is now a graph edit: swap this node in a

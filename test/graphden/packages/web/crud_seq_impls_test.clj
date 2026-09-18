@@ -1,7 +1,7 @@
 (ns ^:serial graphden.packages.web.crud-seq-impls-test
   "Unit tests for the `web/crud-seq` base-fn impls.
 
-   `:pkg-delete-guard-reason` is the server half of the 2026-08-20
+   `:pkg-delete-guard-reason` is the server half of the
    incident fix: one stray API write against a PACKAGE-SYNCED fn
    (`:add`) changed the behaviour of every descendant in the
    installation until the next boot reverted it. The guard has to

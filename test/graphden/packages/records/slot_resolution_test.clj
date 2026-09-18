@@ -150,7 +150,7 @@
       (is (= [:base :x] (sr/resolve-slot-owner :child :x defs)))))
 
   (testing "an unresolvable arg throws orphan-slot-binding when parent is in defs"
-    ;; Pre-2026-06-12 this silently fell back to [:base :unknown] and
+    ;; Pre-this silently fell back to [:base :unknown] and
     ;; emitted a binding row targeting a non-existent slot — exactly
     ;; the `:n` vs `:take`'s `:count` class of footgun. The throw makes
     ;; sync fail loudly instead.

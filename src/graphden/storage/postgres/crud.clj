@@ -45,7 +45,7 @@
    parameters. Parameters scale with rows × columns, so a ROW-count cap
    can't guard this: the bundled-package bootstrap legitimately writes
    10k+ `:binding-version` rows × 7 columns = 70k+ params in one batch
-   (2026-08-15, the fresh-DB boot killer). Budget kept under the cap
+   (the fresh-DB boot killer). Budget kept under the cap
    with headroom."
   60000)
 

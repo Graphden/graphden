@@ -7,7 +7,7 @@
    (docs/TENANCY_SEAM.md § Effect gate). A platform partial / API whose
    effect closure reaches outside that set answers 403 for every tenant,
    which is exactly how the branch popover (`GRAPHDEN_HUB_URL` via `:env`,
-   2026-08-28) and the feedback probe + intake (2026-08-29) broke in
+   ) and the feedback probe + intake broke in
    production for five days with every single-tenant test green: nothing
    ran a platform handler under the restricted set.
 

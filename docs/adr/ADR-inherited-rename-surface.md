@@ -1,6 +1,6 @@
 # ADR — the inherited-rename SURFACE contract
 
-Status: ACCEPTED (2026-08-27). Closes the residual gap recorded in
+Status: ACCEPTED. Closes the residual gap recorded in
 [RUNTIME_SLOT_ID_REFACTOR § 9](../RUNTIME_SLOT_ID_REFACTOR.md).
 
 ## The contract
@@ -73,7 +73,7 @@ positional `{:as :fn-row}` views were the canonical casualty). The
 walker's names are WIRING; the boundary's names are PRESENTATION —
 conflating them is what caused the split-brain in the first place.
 
-## The registry side (2026-09-13)
+## The registry side
 
 The registry entry's `:args` map IS one of the public surfaces above
 (the fn-def `:args` key) — `assemble-fn-type` reads it to decide what

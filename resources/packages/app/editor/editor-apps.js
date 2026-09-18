@@ -10,7 +10,7 @@
 //     hiccup; create/delete are real <form hx-post>s swapping the refreshed
 //     block back into [data-fn-apps]).
 //
-// The old Organization "Apps" panel is retired (2026-08-30): publishing
+// The old Organization "Apps" panel is retired: publishing
 // starts from the fn — same model as declaring a :service — and the lens is
 // the org-wide overview.
 //

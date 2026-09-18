@@ -2,7 +2,7 @@
 // lands in: a fn created under the wrong parent, a mistyped name, a fn moved
 // into the wrong namespace, a namespace created by accident.
 //
-// THE MODEL, and why it is this one (decided 2026-09-15):
+// THE MODEL, and why it is this one (decided):
 //
 //   * An undo is an INVERSE WRITE, never an erased one. The store is
 //     append-only per entity (docs/VERSIONING.md): a rename is a new

@@ -14,7 +14,7 @@
 //     re-prime after the Inspector's [Run this test] (a server-rendered
 //     htmx section — app/editor-provenance `_insp-test-*`).
 // The drawer's Tests panel this module used to host was retired
-// 2026-09-04: the lens + Inspector are the surface.
+// The lens + Inspector are the surface.
 //
 // Globals consumed: isAuthenticated, authFetch, window.API, lensKinds,
 // repaintAfterPrime, loadProblemCaches.

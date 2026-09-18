@@ -316,7 +316,7 @@ bare string `"a"`; `crud.types-api/json->type` decodes a one-letter
 (optionally `-<n>`-suffixed) string back to a symbol — the same
 grammar the editor uses to render `'a` on a chip — unless a type
 alias of that exact name is registered. Decoding it as a keyword
-made every polymorphic slot rigid at the API layer (2026-09-13).
+made every polymorphic slot rigid at the API layer.
 
 Each `/api/types/candidates` row also says how the candidate's WHOLE
 signature sits in the slot — `fit` ∈ `exact` / `captures` / `ignores`

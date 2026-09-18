@@ -268,12 +268,12 @@ core's `case` matcher.
 |------------|-------|--------------|
 | Branch chip | context bar (`#gd-ctxbar` → `#branch-mount`, between the workspace chip and the packages chip) | Shows current branch. Inverted style when off main. |
 | Branch popover | click chip | Branch list + inline create; branches already merged into their base sit under a collapsed "Merged · N" group at the bottom (auto-archived by the merge — a merge source cannot be deleted; clicking one reopens it). Per row: Δ compare, ✅ approve (on proposed rows) and ⇢ merge inline (instant `data-tip` tooltips), everything administrative under the row's ⋯ menu with text labels — 📤 propose/withdraw, 📦 Archive / Reopen (fold a finished branch into the Merged group by hand, or bring one back; reopening from the group's row asks first), ⚙ Protection (require-merge + required-approvals 0…3 segmented control + count-self-approval), ⛨ write-policy (tenancy only), × delete; a 🔒 marks write-policy-protected rows, an accented ⋯ marks a proposed / protected row. Propose/approve/require-merge/required-approvals are all open-core |
-| Compare mode | Δ on a branch row (lit on the picked one; click again = exit) | THE diff surface (`editor-diff-mode.js`) — there is no diff modal. Explorer rows badge +/−/± vs the compared branch (namespace headers aggregate counts), changed fn CARDS and their args ring on the canvas — and (UX-v4, 2026-09-03) the diff reads as a GRAPH: fns whose own rows are equal but which inherit a change (an ancestor, a ref target or a type in the diff — the server's `:affected` walk over the compiler's reverse-deps index) carry a dashed CHANGED-INSIDE ring with a `∿` badge that reveals the ancestor in the card (or opens the ref target); a changed value / type / description is written ON the node (`there: 2`, struck through — also on a placeholder the other branch binds), a rename shows the other name on the card, an arg bound only here rings green; and a REPLACED REF draws the compared branch's side beside the card as a dashed GHOST SUBTREE (its root and what it composes, read-only, foldable, dashed elbow from the arg) so "this branch of the graph was swapped for that one" is a picture. Each changed Explorer row carries a one-line digest (`a: 1 (there 2) · b → :x (there :y)`; `∿ via <fn>` on changed-inside rows; namespaces add `∿n`). A `Δ vs <branch> · N` chip counts the changed fns and marks the mode (`visible/total` while filtered; its × exits). A LENS BAR under the Explorer kind-chips filters the tree by change type: "only changed" (changed-inside rows included) plus added / modified / only-there / `∿ inside` toggles, "substantive only" (hides name/description-only edits), "effects touched only" and "💬 notes" (mark fns whose changes carry anchored review comments) — persisted as `graphden.diffLens`; any active lens dashes the chip and switches its count to `visible/total`. Selecting a changed fn shows an inspector DIFF PANEL: change marker, per-field `old → new` entries (client-rendered from `/api/branches/:ref/diff-view?against=`), an effects-delta chip, 📍 branch-local badge, and per-element 💬 anchored-comment threads inline. Groups whose effect SET differs are annotated "effects: pure here · time there" (full per-branch registry comparison — the registry is branch-scoped; anonymous fns fall back to a structural "effects touched: +x" signal). Fns existing only on the compared branch render as dimmed GHOST ROWS in expanded Explorer groups (click = switch there). The chip menu is the review cockpit — 💬 Review & comments, 📤 propose-current-for-review, ⇢ merge-compared-in. Mode persists across reloads (localStorage). Annotations only — reads/writes stay on the current branch |
+| Compare mode | Δ on a branch row (lit on the picked one; click again = exit) | THE diff surface (`editor-diff-mode.js`) — there is no diff modal. Explorer rows badge +/−/± vs the compared branch (namespace headers aggregate counts), changed fn CARDS and their args ring on the canvas — and the diff reads as a GRAPH: fns whose own rows are equal but which inherit a change (an ancestor, a ref target or a type in the diff — the server's `:affected` walk over the compiler's reverse-deps index) carry a dashed CHANGED-INSIDE ring with a `∿` badge that reveals the ancestor in the card (or opens the ref target); a changed value / type / description is written ON the node (`there: 2`, struck through — also on a placeholder the other branch binds), a rename shows the other name on the card, an arg bound only here rings green; and a REPLACED REF draws the compared branch's side beside the card as a dashed GHOST SUBTREE (its root and what it composes, read-only, foldable, dashed elbow from the arg) so "this branch of the graph was swapped for that one" is a picture. Each changed Explorer row carries a one-line digest (`a: 1 (there 2) · b → :x (there :y)`; `∿ via <fn>` on changed-inside rows; namespaces add `∿n`). A `Δ vs <branch> · N` chip counts the changed fns and marks the mode (`visible/total` while filtered; its × exits). A LENS BAR under the Explorer kind-chips filters the tree by change type: "only changed" (changed-inside rows included) plus added / modified / only-there / `∿ inside` toggles, "substantive only" (hides name/description-only edits), "effects touched only" and "💬 notes" (mark fns whose changes carry anchored review comments) — persisted as `graphden.diffLens`; any active lens dashes the chip and switches its count to `visible/total`. Selecting a changed fn shows an inspector DIFF PANEL: change marker, per-field `old → new` entries (client-rendered from `/api/branches/:ref/diff-view?against=`), an effects-delta chip, 📍 branch-local badge, and per-element 💬 anchored-comment threads inline. Groups whose effect SET differs are annotated "effects: pure here · time there" (full per-branch registry comparison — the registry is branch-scoped; anonymous fns fall back to a structural "effects touched: +x" signal). Fns existing only on the compared branch render as dimmed GHOST ROWS in expanded Explorer groups (click = switch there). The chip menu is the review cockpit — 💬 Review & comments, 📤 propose-current-for-review, ⇢ merge-compared-in. Mode persists across reloads (localStorage). Annotations only — reads/writes stay on the current branch |
 | Review dialog | ⋯ menu → 💬 Review & comments (also the compare-mode chip menu) | The CONVERSATION surface for a branch, framed source → its base: a collapsible "What changed" summary (same grouped renderer, read-only), a "Verified on <branch>" digest (`GET /partials/branch-verification?branch=` — the branch's test statuses and its newest runs, ✓/✗ per run, `traced` when the call tree was captured; evidence of what the author actually executed, not a claim), the general comment thread (anchored orphans get an `[on fn …]` chip), and Suggestions — proposed CHILD branches of the source with a lazy Δ preview + one-click apply (= merge into the proposal), plus "+ Suggest a change" (fork-and-switch) |
 | Conflict modal | merge fails with `:reason :merge-conflict` | Per-entity source/target radio, retry merge with `:conflict-resolutions` |
 | Fn-card ⌛ action | per fn-card row-actions | Version timeline + per-version `(N runs)` badge; click a row → inline-expand its executions (lazy fetch); `switch` button jumps to that version's branch |
 
-## Push branches (cross-install review, 2026-08-23)
+## Push branches (cross-install review)
 
 A branch is also the unit of CROSS-INSTALL flow: a local (offline)
 instance pushes a snapshot of its work to the hub as a branch named
@@ -302,7 +302,7 @@ not new entities:
   the merge, so local runtime wiring can't leak into the hub's main —
   exactly the same guarantee in-instance branches already have.
 
-## Protected branches (Stage 1, 2026-08-15)
+## Protected branches
 
 A branch may carry a `write-policy` (nullable text on the `:branch`
 identity row, next to `owner-id` — the creating principal's stable
@@ -325,7 +325,7 @@ which is why the editor shows the ⛨ / Advanced affordances only under
 `body.gd-tenancy`. Flipping a policy (or deleting a protected branch)
 is itself gated on owner / `:manage-grants`.
 
-## Protected branches (Stage 2 — push only via merge, 2026-08-23)
+## Protected branches: push only via merge
 
 `write-policy` above answers **who** may write a branch and is
 enforced by the tenancy addon. Its sibling `require-merge?` (nullable
@@ -359,7 +359,7 @@ create time with `POST /api/branches` `{require-merge: true}`.
 > branch becomes visible immediately — see
 > `merge-post-commit!` in `app/branches/impls.clj`.
 
-## Change proposals (Phase A — review handoff, 2026-08-23)
+## Change proposals (review handoff)
 
 `require-merge?` above forces changes onto a *side* branch; a **proposal**
 is how that side branch is handed to a reviewer. A nullable `:review-state`
@@ -377,7 +377,7 @@ simply the branches whose `:review-state` is `"proposed"`.
 - Editor: an always-visible 📤 toggle per branch row in the branch popover
   (accented when proposed), hidden only for a read-only viewer.
 
-## Review policy (Phase C — configurable approvals, 2026-08-23)
+## Review policy (configurable approvals)
 
 A proposal is *reviewed* by recording approvals against it and gating the
 merge on their count — configurable per **target** branch, GitHub-style.
@@ -612,7 +612,7 @@ branch-specific bindings (dev port + prod port live side-by-side).
   closures. The branch-WIDE `restart-services-on-branch!` is reserved
   for branch delete — on the cloud every org's `main` is the shared
   main, so a branch-wide restart on merge bounced the platform's own
-  `web-server` (2026-09-03).
+  `web-server`.
 - Legacy rows without `:branch-id` fall back to the reconciler's
   base ctx (= main behavior), so the migration is transparent.
 
@@ -720,10 +720,9 @@ The shape is forward-compatible: new categories
 post-merge alert summarises the skipped count; the inspector diff
 panel keeps its inline 📍 badge on the same rows.
 
-## Known gaps
+## Known gaps and non-obvious invariants
 
-- ~~The rich-types registry is process-global~~ — **FIXED 2026-08-31**:
-  the registry is branch-scoped via per-ctx slices. The default branch
+- The rich-types registry is branch-scoped via per-ctx slices. The default branch
   keeps the boot-populated global atom; every other branch ctx forks a
   private copy at build (`registry-core/fork-rich-types-atom`, seeded
   from its base's view) and both the ctx BUILD and every dispatched
@@ -731,12 +730,12 @@ panel keeps its inline 📍 badge on the same rows.
   type-check writes and effect-gate lookups all answer per branch
   (covered by `rich-types-registry-branch-scope-test`). The
   per-ORG rich-types cousin (`per-org-rich-types`) is branch-scoped the
-  same way since 2026-09-01: branch ctxs fork it at build
+  same way : branch ctxs fork it at build
   (`fork-per-org-rich-atom`) and every bind site pairs the two
   overrides, so a tenant's same-named fns on two branches keep separate
   per-org name indexes (`per-org-rich-slice-is-branch-scoped-test`).
 
-- ~~Merge is one-hop (non-transitive)~~ — **transitive since 2026-09-10.** A
+- ~~Merge is one-hop (non-transitive)~~ — **transitive.** A
   merge record transfers only the versions the source OWNS, so a stacked /
   cross-base / chained source (`S.base = R`, `R` edited) used to be refused
   with `:merge/inherited-content-not-transferable` and a plan to click
@@ -771,7 +770,7 @@ panel keeps its inline 📍 badge on the same rows.
   seen (entry dropped, nil/new id returned); one landing after it sees
   the now-present entry and sweeps it. Covered by the
   `ref-cache-toctou-*` tests in `branch_router_test`.
-- (Closed, kept for the map.) The `:exec/branch-router` is unit-tested at
+- The `:exec/branch-router` is unit-tested at
   the dispatcher level (`branch-router-test`: header / query parsing,
   default fallback, unknown-ref rejection, invalidate) AND the full
   middleware-through-storage path — a request through the wrap into a

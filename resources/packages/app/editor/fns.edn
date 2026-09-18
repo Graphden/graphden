@@ -275,7 +275,7 @@
            ;; otherwise tab through all of them. Visually hidden until
            ;; focused (see `.gd-skip-link` in editor-styles.css).
            [:a {:href "#graph-container" :class "gd-skip-link"} "Skip to graph"]
-           ;; TOP BAR (redesign 2026-08-15 — the rail is retired). The editor
+           ;; TOP BAR (redesign the rail is retired). The editor
            ;; vs everything-else split is GLOBAL now: you live on Build; the
            ;; management screens (Settings / Organization / Platform) are rare
            ;; destinations reached through the account chip's menu, not
@@ -638,7 +638,7 @@
                [:section {:class "gd-op-card gd-set-pane gd-set-pane-wide" :data-section "keyboard" :hidden "hidden"}
                 [:h2 {:class "gd-op-card-title"} "Keyboard"]
                 [:div {:id "gd-keymap-root" :class "gd-keymap-root"}]]
-               ;; ACCOUNT — the /account page merged in (2026-08-15): sign-in
+               ;; ACCOUNT — the /account page merged in: sign-in
                ;; methods, 2FA, API tokens, the verify-email banner. Shown only
                ;; under the open accounts addon (editor-account.js unhides its
                ;; nav button after the /auth/me boot probe answers); the

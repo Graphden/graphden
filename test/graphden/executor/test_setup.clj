@@ -60,7 +60,7 @@
 
 
 (defn create-container-fixture
-  "The shared-container `:once` fixture — and, since 2026-09-07, the
+  "The shared-container `:once` fixture — and, the
    place every container-backed NS gets INLINE graph-epoch heals
    (`inline-heal-fixture`'s `alter-var-root`, applied here so no NS has
    to remember to compose it). An async heal races the NS's own
@@ -115,7 +115,7 @@
   []
   ;; `:stats?` — the usage rollups the Runs tab's partial reads; without
   ;; the table the whole `/partials/execute-history` handler could not be
-  ;; exercised against the golden (2026-09-06).
+  ;; exercised against the golden.
   (schemas/full-schema {:packages? true :stats? true}))
 
 

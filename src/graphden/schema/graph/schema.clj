@@ -708,7 +708,7 @@
       ;; against the live branch view (`check-fn-name-collision!`), advisory-
       ;; lock-serialized; the raw index is dropped via `retired-indexes` in
       ;; storage/postgres/migration.clj.
-      ;; Per ORG (2026-09-06): a tenant's anonymous rows are org-scoped, and
+      ;; Per ORG: a tenant's anonymous rows are org-scoped, and
       ;; the deterministic id mixes the org in (`records.ids/anonymous-fn-id`),
       ;; so two orgs holding the same inline shape are two rows. NULL org
       ;; (the platform's package anons) stays unique by hash alone. The old

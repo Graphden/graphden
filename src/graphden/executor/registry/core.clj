@@ -235,7 +235,7 @@
   "Fresh atom seeded from `base-atom`'s current state. Branch-ctx
    creation: the branch starts from its base's view and then diverges
    PRIVATELY — its compiles/type-checks no longer clobber the base's
-   entries (the pre-2026-08-31 global registry was last-compile-wins
+   entries (the earlier global registry was last-compile-wins
    across branches; see VERSIONING.md § Known gaps)."
   [base-atom]
   (atom @base-atom))

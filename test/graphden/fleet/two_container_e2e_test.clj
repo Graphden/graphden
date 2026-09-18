@@ -19,7 +19,7 @@
    image (`GD_IMAGE`) whenever the diff touches the cross-pod control plane —
    `src/graphden/{fleet,system,storage/remote}`, `byo.clj`, `crac.clj`, this
    directory, `Dockerfile*`, `docker-compose*`, `deps.edn`, `build.clj` — see
-   `classify_changes` in `dev/wtq/wt`. Until 2026-08-22 it ran NOWHERE: the
+   `classify_changes` in `dev/wtq/wt`. Previously it ran NOWHERE: the
    suite existed, the bb task existed, and neither the gate nor GitHub CI ever
    invoked it, so the only assertion the project owned about multi-pod
    behaviour in real containers was never evaluated.

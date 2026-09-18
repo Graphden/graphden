@@ -1,6 +1,6 @@
 // Editor COMPARE MODE — the EXPLORER half: badges, ghosts, the diff lens bar.
 //
-// Split out of editor-diff-mode.js (2026-09-13). `gdDiffModeDecorateSidebar`
+// `gdDiffModeDecorateSidebar`
 // re-applies `.gd-diff-badge` +/−/± on changed fn rows, `.gd-diff-ns-badge`
 // aggregate counts on namespace headers, 💬 markers for anchored review
 // comments and the per-fn digest (`gdDiffSummaryParts`), and injects GHOST rows

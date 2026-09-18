@@ -55,7 +55,7 @@
 ;; =============================================================================
 
 (deftest stats-pool-falls-back-to-the-branch-storage-when-no-pg-storage
-  ;; Regression guard for the 2026-08-26 tutorial finding: the
+  ;; Regression guard for the tutorial finding: the
   ;; single-tenant executor ctx carries NO `:pg-storage`, so a
   ;; pg-storage-only lookup left the 7d history strip and the
   ;; Stats/Errors panels reading zeros while the write side happily

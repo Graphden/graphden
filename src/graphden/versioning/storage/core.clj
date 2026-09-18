@@ -128,7 +128,7 @@
    so a refused write — a name collision, a protection or constraint
    violation, a tenant gate — changed nothing; left un-noted, its bump aged
    past the grace into an `:aborted` heal, i.e. a full base rebuild per
-   user error (three per e2e run on 2026-09-07). A bump that never happened
+   user error (three per e2e run on). A bump that never happened
    (no pool, no sequence) needs no note; an Error (not an Exception) leaves
    the bump un-noted on purpose — the heal is the right answer to a JVM
    that may not have rolled back."
@@ -200,7 +200,7 @@
 
 
 (defn- purgeable-identity-ids
-  "GHOST-IDENTITY prevention (the 2026-07-20 shrink-regrow class): the
+  "GHOST-IDENTITY prevention (the shrink-regrow class): the
    subset of hard-deleted `ids` whose identity rows can be removed
    outright — no OTHER branch retains a version row (per-branch
    isolation: a diverged branch's view must survive this branch's
@@ -855,7 +855,7 @@
         ;; (binding, position), so an older, longer list leaves identity
         ;; rows that a later sync re-touches. Growing a package list
         ;; through one silently dropped a route from the live demo's
-        ;; router (2026-07-20) while a fresh-DB run stayed green.
+        ;; router while a fresh-DB run stayed green.
         ;; So: force a version for any id that has none, whatever the
         ;; diff. The hard-delete path now purges a sole-branch identity
         ;; outright (see `delete-entities` :else), so this is the

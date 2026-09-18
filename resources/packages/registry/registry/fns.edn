@@ -339,7 +339,7 @@
   ;;     `:_pub-apply` would run the publish AGAIN and answer
   ;;     `version-exists` against its own first write — which is exactly
   ;;     what the JSON response's `id` / `public` / `status` did (nil) until
-  ;;     2026-09-08. The bundle-derived fields keep reading the captured
+  ;;   The bundle-derived fields keep reading the captured
   ;;     `:bundle`. ---
 
   {:name :_pub-dup?

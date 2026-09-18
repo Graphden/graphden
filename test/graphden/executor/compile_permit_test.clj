@@ -1,6 +1,6 @@
 (ns graphden.executor.compile-permit-test
   "The process-wide full-compile permit (`call-with-compile-permit`) —
-   the 2026-08-05 OOM fix: a full read-graph + compile-all working set
+   the OOM fix: a full read-graph + compile-all working set
    is heap-heavy, and nothing bounded how many ran at once (the
    per-branch build monitor dedupes ONE branch; two cold branches, or a
    cold build racing the epoch heal, each ran their own). These tests

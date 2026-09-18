@@ -72,7 +72,7 @@ For each function, determine its "display level":
 - Level 0: Show function as single node with direct children (refs, values, unset args)
 - Level N > 0: Show function with N ancestors expanded (inheritance chain visible)
 
-Unified arg edges (2026-08-26): EVERY unset arg — required, optional,
+Unified arg edges: EVERY unset arg — required, optional,
 ref-propagated (deep), or a HOF lambda-param — is emitted as the same
 placeholder node + edge shape by `add-unset-arg-node`, carrying
 `:optionalArg` / `:deepArg` / `:lambdaArg` flags the client styles by
@@ -80,7 +80,7 @@ placeholder node + edge shape by `add-unset-arg-node`, carrying
 (`:optionalArgs` / `:hofCapturedArgs`) are retired; `:deepFreeArgs`
 (the informational ⇣-strip on expanded inner nodes) remains.
 
-Sequence groups (2026-09-14): the items of one list are not N
+Sequence groups: the items of one list are not N
 look-alike args. `expand-sequence-anchor` emits one entry per chain
 item and then the **append tail** — the anchor's own `:unset` entry,
 `:sequence-anchor? true` (+ `:seq-tail? true` after items), rendered

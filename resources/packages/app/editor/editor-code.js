@@ -25,7 +25,7 @@
   // Token colours as CSS CLASSES (`.gd-tok-*`, editor-styles.css), so they
   // follow the editor's own light / dark tokens. `defaultHighlightStyle`
   // hard-codes light-theme colours — #a11 strings, #164 numbers — that
-  // vanished on the dark popover (2026-09-17). Falls back to it when the
+  // vanished on the dark popover. Falls back to it when the
   // vendored bundle predates the HighlightStyle / tags exports.
   let _gdStyle = null;
   function gdHighlightStyle() {

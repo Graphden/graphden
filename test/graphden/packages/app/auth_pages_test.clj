@@ -13,7 +13,7 @@
    the classpath, so that half can no longer drift. What this test still
    guards is the HTML STRUCTURE and the email copy — the graph assembles
    them from `:str` parts, Clojure from `str`, and there is no shared
-   artifact for that short of a template language. /account DIVERGES BY DESIGN (2026-08-15): the graph
+   artifact for that short of a template language. /account DIVERGES BY DESIGN: the graph
    page (editor always present alongside it) redirects into the editor's
    Settings → Account card, while the built-in fallback keeps the full
    standalone page for headless deployments."

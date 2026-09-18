@@ -99,7 +99,7 @@ time — see [FLEET_RFC.md](FLEET_RFC.md) §5.1).
 
 > **Cold-boot cost (canonical figure).** A cold start — package load, the
 > type-check sweep, then eager-compile of every fn-def — takes **~30–40 s to
-> serving** (measured 2026-08-17, after the compile/sweep memoization that cut
+> serving** (measured, after the compile/sweep memoization that cut
 > `compile-all` from ~60 s to ~1.2 s; the sweep now dominates). Size the
 > Dockerfile healthcheck `start-period` and any k8s startup probe against this.
 > Other docs reference THIS number rather than restating it. A *runtime*

@@ -1,7 +1,7 @@
 // Editor Sidebar — building the ROWS: one fn item, one namespace node, one
 // child group.
 //
-// Split out of editor-sidebar.js (2026-09-13): `buildFnItem` (the fn row with
+// `buildFnItem` (the fn row with
 // its kind glyph, badges, test dot, `fx` mark and ⋯ trigger), `renderNsNode`
 // (a namespace header + lazy children — `loadNamespaceFns` → `?scope=namespace`
 // on first expand) and `buildNsChildGroup` (the `.ns-children` container the

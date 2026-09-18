@@ -1,6 +1,6 @@
 // Editor REVIEW dialog — the merge-request conversation surface.
 //
-// UX-v3 (2026-08-31): the old full-diff modal is gone. Δ on a branch
+// UX-v3: the old full-diff modal is gone. Δ on a branch
 // row now toggles COMPARE MODE (editor-diff-mode.js) — the diff is
 // read in the Explorer (lenses + badges + ghosts), on the canvas
 // (rings) and in the inspector (per-fn details + anchored threads).

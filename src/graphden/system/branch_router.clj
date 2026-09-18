@@ -275,7 +275,7 @@
   ;; service reconciler (`init/services`): a running per-branch service
   ;; holds its ctx by reference, so dropping the router's entry left the
   ;; service on a registry nobody refreshes while every request built a
-  ;; second, divergent ctx for the same branch (2026-09-07). nil = no pins.
+  ;; second, divergent ctx for the same branch. nil = no pins.
   (atom nil))
 
 
@@ -632,7 +632,7 @@
           ;; served. The async recompute below covers the rest, but it
           ;; used to cover these too — so the first `/api/types` after a
           ;; rebuild (a heal, an eviction) could miss a branch-authored
-          ;; fn until the future landed (main-CI flake, 2026-09-08:
+          ;; fn until the future landed (main-CI flake:
           ;; `rich-types-registry-branch-scope-test` on a slow runner).
           ;; Bounded like the sweep; a wider divergence stays async.
           (when (and *recheck-user-fns?*
@@ -770,7 +770,7 @@
    it (TTL expired) sees a 'regression' and heals — dropping the
    branch ctx whose handler the test had just swapped in
    (`dispatch-routes-to-per-branch-ctx-end-to-end-test`, main CI
-   2026-09-14). Never called in production: a real sequence restart is
+   ). Never called in production: a real sequence restart is
    a DB restore, and the regression path is the right answer there."
   []
   (reset! (epoch-state) (epoch-state-seed)))
@@ -794,7 +794,7 @@
    merely SLOW — still inside its request, its note still to come — must
    never read as aborted, because the heal it would trigger stalls the
    next writes past the budget, whose un-noted bumps trigger the next
-   heal (the 2026-09-07 e2e heal storm: one 27 s namespace move, then a
+   heal (the e2e heal storm: one 27 s namespace move, then a
    heal every 30 s until the stack died)."
   45000)
 
@@ -905,7 +905,7 @@
    branches stay forever (main resolves through them), so an e2e run
    or a busy workspace holds dozens of them, and one heal became
    minutes of compile that stalled writes past the abort budget,
-   whose un-noted bumps triggered the next heal (2026-09-07).
+   whose un-noted bumps triggered the next heal.
 
    Base first, then drop the rest — including entries installed while
    the base rebuilt (they copied the pre-swap base). Serialized on a
@@ -949,7 +949,7 @@
               ;; rebuilt ctxs against an EMPTY rich-types registry: base-fn
               ;; markers (`:lazy-seq-args` on `:cond` &c.) vanished and the
               ;; recompiled closures evaluated cond clauses EAGERLY — the
-              ;; 2026-08-23 "/api" update-keys ClassCast poisoning. In
+              ;; the "/api" update-keys ClassCast poisoning. In
               ;; production the per-ctx binding below (each ctx's own
               ;; rich-types slice) overrides these ambient captures anyway —
               ;; they matter only for ctxs built before slice-tagging.
@@ -1438,7 +1438,7 @@
    drains an unbound log into nothing — so every such write aged into
    an \"aborted\" epoch 45 s later and a heal dropped every cached
    branch ctx mid-suite: the background rebuilds behind two flakes of
-   2026-09-08 (`branch-invalidation-test`,
+   (`branch-invalidation-test`,
    `rich-types-registry-branch-scope-test`)."
   [router request]
   (cond

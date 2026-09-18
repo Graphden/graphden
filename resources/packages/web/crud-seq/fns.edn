@@ -198,7 +198,7 @@
    :effects #{:db}}
 
   {:name :pkg-delete-guard-reason
-   :description "Reason string when deleting `row` of `entity-type` would damage a PACKAGE-SYNCED fn — the fn row itself, or a binding-family row it owns. nil when the delete is fine. Package fns are declaratively re-synced on boot, so an API delete against one silently mutates every descendant until the next restart (the 2026-08-20 :add poisoning class). Shared by the generic entity-delete flow and sequence-remove."
+   :description "Reason string when deleting `row` of `entity-type` would damage a PACKAGE-SYNCED fn — the fn row itself, or a binding-family row it owns. nil when the delete is fine. Package fns are declaratively re-synced on boot, so an API delete against one silently mutates every descendant until the next restart (the :add poisoning class). Shared by the generic entity-delete flow and sequence-remove."
    :args {:entity-type {:type :text
                         :description "Entity-type name (\"fn\", \"binding\", \"binding-list-item\", \"fn-slot\")."}
           :row {:type :nullable-keyword-map

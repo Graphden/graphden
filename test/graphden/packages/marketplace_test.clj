@@ -1,5 +1,5 @@
 (ns ^:serial graphden.packages.marketplace-test
-  "`^:serial` — installs process-global seams (`tc/install-*-fn!` / `deploy-config/install!`) for the length of a test; under kaocha's parallel plugin another namespace's `finally` reset them mid-test (the CI perf job, 2026-09-09).
+  "`^:serial` — installs process-global seams (`tc/install-*-fn!` / `deploy-config/install!`) for the length of a test; under kaocha's parallel plugin another namespace's `finally` reset them mid-test (the CI perf job).
    The marketplace over the registry (docs/MARKETPLACE.md): listing
    normalisation, the non-fns publish route, cards (latest / versions /
    rating / installs), reviews, apply-a-theme → preference, the install

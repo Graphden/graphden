@@ -112,7 +112,7 @@
   // listing, and then fetched its own kind — two responses for one root,
   // and the last to answer won: the fns listing (bigger, slower) overwrote
   // the Themes tab the reader had just asked for, so the card the tour
-  // waits on never showed (lesson 37, flaky in the gate 2026-09-15).
+  // waits on never showed (lesson 37, flaky in the gate).
   // Every fetch takes a generation and lands only while it is the newest;
   // `gdMarketOpen` also mounts the placeholder BEFORE the shell looks, so
   // the shell's default mount does not start at all.

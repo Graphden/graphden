@@ -1,6 +1,6 @@
 // Editor Branches — MERGE, and what happens when it does not go through.
 //
-// Split out of editor-branches.js (2026-09-13). `mergeBranchInto` submits the
+// `mergeBranchInto` submits the
 // merge and reads the response in two halves (a fetch REJECTION means the
 // merge committed and the target's post-commit service restart severed the
 // response — `waitForServerBack` polls /health before reloading); a

@@ -15,7 +15,7 @@
 // the checker's verdict (✓ compatible, or dimmed with the mismatch
 // explainer a click away) and its fit tier.
 //
-// THE LIST IS THE EXPLORER'S SEARCH (2026-09-16). One scrolling list:
+// THE LIST IS THE EXPLORER'S SEARCH. One scrolling list:
 //   - typing a name shows EVERY fn whose name or namespace contains it —
 //     an "Exact match" block first (the row the reader typed the full
 //     name of is always on top), then the rest grouped under namespace
@@ -117,7 +117,7 @@ function openFnPicker(opts) {
   // so for a callable slot it called `str-upper` (→ text) incompatible with
   // `(item:a) → b`, and a reader who typed the name and clicked in that
   // first second got the mismatch explainer for a perfectly good pick
-  // (lesson 15 walk, 2026-09-17). Pending rows render neutral; a click on
+  // (lesson 15 walk). Pending rows render neutral; a click on
   // one waits for the verdict, then picks or explains.
   let serverFailed = false;
   let loadPromise = null;

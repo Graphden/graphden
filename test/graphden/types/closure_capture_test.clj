@@ -1,5 +1,5 @@
 (ns graphden.types.closure-capture-test
-  "Parallel-safe (un-pinned 2026-08-04; the old serial reason was
+  "Parallel-safe (un-pinned; the old serial reason was
    stale): every alias mutator writes through `(aliases-atom)` =
    `(or *type-aliases-override* type-aliases)`, and the global
    side-tables (`alias-owners` / `alias-qualified`) are only touched
@@ -243,7 +243,7 @@
           (is (not (contains? free :original))
               "the ref-walk's :original exposure collapses into :renamed —
                one slot identity must not surface as two arg names
-               (tutorial finding 2026-08-26: Run form showed data+payload
+               (tutorial finding: Run form showed data+payload
                after a rename)")))
       (testing "binding the RENAME slot closes both names"
         (setup/bind-value! storage (:id outer-fn) (:id rename-slot) 7)
@@ -254,7 +254,7 @@
 
 
 (deftest same-chain-rename-shadows-source-name-test
-  ;; Tutorial finding 2026-08-26 (lessons 04/06/15): within ONE
+  ;; Tutorial finding (lessons 04/06/15): within ONE
   ;; inheritance chain, a rename-view slot and its source both counted
   ;; as direct free args — the Run form on a fn extending `:swap-conj`
   ;; showed `coll`+`item` (source names) next to `value` (the rename),

@@ -265,7 +265,7 @@
                     ;; nothing; counted apart so the budget gates the real
                     ;; thing. Seeded = the caller named its fns but no index /
                     ;; registry was there to patch, not a write of unknown
-                    ;; shape. The 2026-09-10 attribution of the unit suite's
+                    ;; shape. The attribution of the unit suite's
                     ;; "17 full clears" found every CRUD-path one cold+seeded
                     ;; (docs/PERF_NOTES.md).
                     (let [h (:compiled-registry ctx)

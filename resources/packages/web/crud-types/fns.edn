@@ -343,7 +343,7 @@
   {:name :_types-candidates-type-row?
    :parent :get :args {:coll :_types-candidates-info :key {:value :type-row?} :default false}}
 
-  ;; --- Ranking fields (2026-09-14). The picker leads with the rows
+  ;; --- Ranking fields. The picker leads with the rows
   ;; that need nothing more and folds away the constants a 1-arg
   ;; callable slot admits positionally; grouping by namespace needs
   ;; the fn's ns path. Neither changes WHICH rows are candidates.

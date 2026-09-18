@@ -155,7 +155,7 @@
   ;; enough that `:response-cache-cell` (a `:cell`, compile-time-value-
   ;; baked) compiles to TWO atoms — the store subtree resets one, the
   ;; lookup subtree derefs the other — so the cache never hits and every
-  ;; asset re-encodes on every request. Measured 2026-07-17: original
+  ;; asset re-encodes on every request. Measured: original
   ;; 2→0→0 process-response across three identical asset requests (miss
   ;; then hit then hit); both "dedup" variants 1→1→1 (miss every time).
   ;; The redundant encode is the price of keeping the cell atom shared

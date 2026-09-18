@@ -633,7 +633,7 @@
       ;; reconstructs the fn-def from storage, and a rename it cannot see
       ;; yet is recorded in the registry under the SOURCE name — a
       ;; `string → item` rename never made the fn `(item:a) → …`-shaped,
-      ;; so the picker never listed it for a HOF slot (2026-09-13). The
+      ;; so the picker never listed it for a HOF slot. The
       ;; secret carve-out below rolls the view rows back with the binding.
       (let [renamed (when (and (= type-str "binding")
                                (contains? form-data :rename-to))

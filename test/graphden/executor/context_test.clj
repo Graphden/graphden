@@ -5,7 +5,7 @@
   ;; `cold-ctx-type-refresh-primes-the-graph-cache` assert DELTAS of the
   ;; process-global `:registry/*` counters (`counters/snapshot`). Under the
   ;; parallel runner any concurrent test's recompile bumps the same counters
-  ;; — the gate saw `delta-recompile` 2 for an expected 1 (2026-09-05).
+  ;; — the gate saw `delta-recompile` 2 for an expected 1.
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.context :as ctx]
@@ -307,7 +307,7 @@
 
 
 (deftest delta-recompile-takes-the-cache-on-a-cloud-shaped-ctx
-  (testing "a delta recompile uses the primed `:graph-cache` instead of re-reading the whole graph — ALSO when `(:storage ctx)` is the addon's org-scoped handle and not the privileged `:compile-storage`. The cache is the full org-agnostic graph on every deployment (`splice-reads-through-the-privileged-handle`), so demanding the two handles be the same object only made every cloud write pay a full graph read: 1.7 s of a 1.85 s merge on production, 2026-09-03."
+  (testing "a delta recompile uses the primed `:graph-cache` instead of re-reading the whole graph — ALSO when `(:storage ctx)` is the addon's org-scoped handle and not the privileged `:compile-storage`. The cache is the full org-agnostic graph on every deployment (`splice-reads-through-the-privileged-handle`), so demanding the two handles be the same object only made every cloud write pay a full graph read: 1.7 s of a 1.85 s merge on production."
     (let [storage (setup/create-test-storage)]
       (try
         (let [{:keys [composed-fn]} (setup/setup-add-function! storage)
@@ -334,7 +334,7 @@
 
 
 (deftest cold-ctx-type-refresh-primes-the-graph-cache
-  (testing "a full-clear invalidation on a ctx nothing has compiled reads the graph once for the type refresh — and that read primes `:graph-cache`, so the NEXT write takes the cache instead of reading again (a fresh pod paid the read on every merge, 2026-09-03)."
+  (testing "a full-clear invalidation on a ctx nothing has compiled reads the graph once for the type refresh — and that read primes `:graph-cache`, so the NEXT write takes the cache instead of reading again (a fresh pod paid the read on every merge)."
     (let [storage (setup/create-test-storage)]
       (try
         (let [{:keys [composed-fn]} (setup/setup-add-function! storage)

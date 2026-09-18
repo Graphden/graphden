@@ -160,7 +160,7 @@ The same resolved-view doctrine applied to the newest versioned entity: ~:resour
 :MINS: 3.8
 :END:
 
-Delete has TWO modes, and this guard is the heart of the hard one. User-facing deletes tombstone (a version row with ~:deleted-at~, so descendants hide the entity too); sync + rollback hard-delete. A hard delete used to drop only the branch's version rows — the surviving versionless identity became a GHOST that a later re-mint of the same deterministic id revived through the update path, content-equal, invisible on every list read (the 2026-07-20 route-vanish incident). Now the identity row goes too, but ONLY when no other branch retains a version and no child identity still references it — per-branch isolation stays intact.
+Delete has TWO modes, and this guard is the heart of the hard one. User-facing deletes tombstone (a version row with ~:deleted-at~, so descendants hide the entity too); sync + rollback hard-delete. A hard delete used to drop only the branch's version rows — the surviving versionless identity became a GHOST that a later re-mint of the same deterministic id revived through the update path, content-equal, invisible on every list read (the route-vanish incident). Now the identity row goes too, but ONLY when no other branch retains a version and no child identity still references it — per-branch isolation stays intact.
 
 - source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn- purgeable-identity-ids][src/graphden/versioning/storage/core.clj:202]]
 - same file :: [[file:versioning.org::#versioning/wrap-with-versioning][wrap-with-versioning]], [[file:versioning.org::#versioning/VersionedStorage][VersionedStorage]], [[file:versioning.org::#versioning/create-entity-versioned!][create-entity-versioned!]]
@@ -173,7 +173,7 @@ Delete has TWO modes, and this guard is the heart of the hard one. User-facing d
 :MINS: 3.8
 :END:
 
-The identity-plane repair primitives for the OTHER ghost source: a package fn's id is ~uuid-v5(ns-path, name)~, so a namespace move mints a new id and abandons the old row with every ref still aimed at it. ~repoint-refs!~ fills refs in place across BOTH planes (identity and every branch's version rows); ~purge-fn-subgraph!~ below then removes the abandoned subgraph. The sync-time reconciler (~packages.sync/reconcile-moved-identities!~) runs them after every package sync, and the operator tool ~graphden.dev.integrity~ delegates to the same two. Its REMOVAL side asks ~inbound-refs-many~ with ~:live-only?~ — only the newest version of a row on a live branch counts as a ref, never the create-time identity row or a superseded version — because those two kept every retired chain a live fn had ever referenced pinned forever (472 leftovers on a two-month-old instance, 2026-09-04).
+The identity-plane repair primitives for the OTHER ghost source: a package fn's id is ~uuid-v5(ns-path, name)~, so a namespace move mints a new id and abandons the old row with every ref still aimed at it. ~repoint-refs!~ fills refs in place across BOTH planes (identity and every branch's version rows); ~purge-fn-subgraph!~ below then removes the abandoned subgraph. The sync-time reconciler (~packages.sync/reconcile-moved-identities!~) runs them after every package sync, and the operator tool ~graphden.dev.integrity~ delegates to the same two. Its REMOVAL side asks ~inbound-refs-many~ with ~:live-only?~ — only the newest version of a row on a live branch counts as a ref, never the create-time identity row or a superseded version — because those two kept every retired chain a live fn had ever referenced pinned forever (472 leftovers on a two-month-old instance).
 
 - source :: [[file:../../../src/graphden/versioning/identity_repair.clj::(defn repoint-refs!][src/graphden/versioning/identity_repair.clj:52]]
 - referenced from :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]]
@@ -290,7 +290,7 @@ The graph EPOCH — freshness as a comparison, not an imperative. Every graph-sh
 :MINS: 4.3
 :END:
 
-Builds a fresh live ~ExecutionContext~ whose storage is a ~VersionedStorage~ rewrapped at the requested branch, with its own compiled-registry and graph-cache atoms — and (2026-08-31) its own RICH-TYPES SLICE, forked from the base's view at build time and bound as the registry override for the ctx's compiles and every request dispatched to it. This is how a branch gets its own executor without re-sharding the graph.
+Builds a fresh live ~ExecutionContext~ whose storage is a ~VersionedStorage~ rewrapped at the requested branch, with its own compiled-registry and graph-cache atoms — and its own RICH-TYPES SLICE, forked from the base's view at build time and bound as the registry override for the ctx's compiles and every request dispatched to it. This is how a branch gets its own executor without re-sharding the graph.
 
 - source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- build-branch-ctx][src/graphden/system/branch_router.clj:134]]
 - see also :: [[file:executor.org::#executor/create-context][create-context]]

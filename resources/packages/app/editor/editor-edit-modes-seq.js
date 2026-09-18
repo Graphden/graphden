@@ -1,6 +1,6 @@
 // Editor Edit Modes — SEQUENCE items: add, insert, move, remove.
 //
-// Split out of editor-edit-modes.js (2026-09-13). `openLiteralVsRefChooser` is
+// `openLiteralVsRefChooser` is
 // the two-way chooser a `+` opens (a literal value → `promptLiteralForAppend`
 // with the type-aware form, or a fn reference → the fn picker, typed by the
 // list's element type so a hiccup :children chain offers the component
@@ -80,7 +80,7 @@ function openLiteralVsRefChooser({ anchorEl, ariaLabel, litLabel, refLabel,
 // there too: append the component itself, then ⋯ → Extend on its card
 // puts a child in its place (extend in place, editor-edit-modes-fn.js) —
 // which retired the chooser's separate "New from template…" button
-// (2026-09-16): one path for "the fn this list needs does not exist yet".
+// One path for "the fn this list needs does not exist yet".
 // `opts.wholeSlotArg` (optional) — the synth arg of the slot itself,
 // passed for an EMPTY list's first `+` only. It adds "Bind fn-ref (whole
 // list)": the slot takes one fn's RESULT as the entire list — `:coll` of

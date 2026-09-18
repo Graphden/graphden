@@ -9,7 +9,7 @@
    ghost-repair ref map, the hard-delete child-ref map, and package export — must
    chase ALL THREE, or it drops part of the dependency closure (fn-not-found on
    compile / install / export). `:resolver-fn-id` was silently missed by the
-   execution-graph resolvers (fixed 2026-08-25), then again by package export.
+   execution-graph resolvers (fixed), then again by package export.
 
    This test pins the canonical set and asserts every KNOWN walker covers it, so
    a walker that drifts — or a newly-added binding fn-ref field left out of one —

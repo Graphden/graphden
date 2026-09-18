@@ -5,7 +5,7 @@
    `resources/packages/`) are declaratively synced from `fns.edn` on
    every boot — an API write against one is silently reverted by the
    next sync, and until that sync it mutates the behaviour of every
-   descendant in the whole installation (2026-08-20 incident: one
+   descendant in the whole installation (incident: one
    stray sequence-append onto `:add` broke the delete guard,
    `/api/execute` and URI parsing platform-wide). So the editor API
    refuses binding-family writes whose OWNER fn is package-synced,

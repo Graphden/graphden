@@ -177,7 +177,7 @@
       ;; recorded the SOURCE name: a `string → item` rename on a str-upper
       ;; child never made the fn `(item:a) → …`-shaped, and `map`'s picker
       ;; never listed it. (`{:as :item}` in fns.edn always did — the sync
-      ;; path sees the rename in the def itself.) 2026-09-13.
+      ;; path sees the rename in the def itself.)
       (let [su-id    (:fn-id (registry/rich-type-of :str-upper))
             string-slot (->> (sp/query-entities storage :fn-slot {:fn-id su-id})
                              (map #(sp/read-entity storage :slot (:slot-id %)))

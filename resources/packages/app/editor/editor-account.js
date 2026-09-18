@@ -1,4 +1,4 @@
-// Editor Account — the /account page merged into Settings (2026-08-15).
+// Editor Account — the /account page merged into Settings.
 //
 // Fills the #gd-set-account card on the Settings surface with the account
 // sections the standalone page used to own: identity + verify-email banner,

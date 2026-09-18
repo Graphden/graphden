@@ -1,6 +1,6 @@
 // Editor Shell MENU — the account chip's menu.
 //
-// Split out of editor-auth.js (2026-09-13). `openShellMenu` is the single
+// `openShellMenu` is the single
 // entry to Settings / Organization / Platform (capability-gated), the
 // interactive tutorial, feedback, and the session actions for every auth mode
 // (sign in / out, sign out everywhere — `logoutEverywhere`). A real ARIA menu:
@@ -9,7 +9,7 @@
 // `aria-expanded`. Reads the auth mode flags (`accountsMode`, `authServedMode`,
 // …) from editor-auth.js at click time; loads right after it.
 
-// The account chip's menu — the SETTINGS HUB (redesign 2026-08-15, the rail
+// The account chip's menu — the SETTINGS HUB (redesign, the rail
 // is retired). One menu for every auth mode: identity head (when known), the
 // management destinations (Settings always — appearance works signed-out too;
 // Organization always; Platform behind the platform right), then the session

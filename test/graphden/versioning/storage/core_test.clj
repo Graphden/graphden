@@ -1567,7 +1567,7 @@
   ;; deterministic per (binding, position), so they come back), the diff ran
   ;; against the identity itself, came out empty, and no version row was
   ;; written — while the read path needs one, so the item stayed INVISIBLE.
-  ;; Live consequence (2026-07-20): appending a route mid-list dropped
+  ;; Live consequence: appending a route mid-list dropped
   ;; `:api-routes` from the demo's route list and every /api/* 404'd.
   (let [base (base-storage)
         v    (vs/wrap-with-versioning base)]
@@ -1659,7 +1659,7 @@
 ;; ============================================================================
 
 (deftest hard-delete-purges-sole-branch-identity-test
-  ;; The 2026-07-20 shrink-regrow class at its root: a sync hard delete
+  ;; The shrink-regrow class at its root: a sync hard delete
   ;; used to drop only this branch's version rows, leaving a versionless
   ;; identity that a later regrow of the same deterministic id revived
   ;; through the update path — content-equal, no version written,

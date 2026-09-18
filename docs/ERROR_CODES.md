@@ -56,7 +56,7 @@ sync),
 `:merge-conflict`, `:vault/not-configured`, `:refinement/violated`,
 `:capability/secret-leaf-restricted`, `:authz/forbidden`,
 `:authz/branch-protected` (a write to a branch whose `write-policy`
-excludes the principal — see [VERSIONING.md § Protected branches](VERSIONING.md#protected-branches-stage-1-2026-08-15)),
+excludes the principal — see [VERSIONING.md § Protected branches](VERSIONING.md#protected-branches)),
 `:branch-router/handler-not-found`, `:storage-error/unsupported-opts`
 (500 — internal misuse), `:packages/unresolved-ref`,
 421 `misdirected-request` (off-shard, tenancy), execute

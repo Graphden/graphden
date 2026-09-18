@@ -303,4 +303,4 @@
 ;; `composition.deps`; their edge cases are pinned by `core-test` and
 ;; `deps-test`. This file used to carry a second copy of each under the same
 ;; deftest name — the cases those copies had and the originals did not were
-;; merged there by the 2026-08-22 audit.
+;; merged there by the audit.

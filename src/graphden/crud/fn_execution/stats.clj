@@ -77,7 +77,7 @@
           ;; fn-id off a query param as a STRING; binding it raw against
           ;; the uuid column threw `uuid = character varying` and the
           ;; history strip silently degraded to zeros (tutorial finding
-          ;; 2026-08-26, "7d: 0 runs" over a populated list).
+          ;; "7d: 0 runs" over a populated list).
           fn-id (cond-> fn-id (string? fn-id) parse-uuid)
           row (jdbc/execute-one!
                 pool

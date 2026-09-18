@@ -1,6 +1,6 @@
 // Editor Branches — the two governance MENUS on a branch row.
 //
-// Split out of editor-branches.js (2026-09-13). `openBranchPolicyMenu` is the
+// `openBranchPolicyMenu` is the
 // protected-branch ⛨ mini-menu (→ POST `/api/branches/:ref/policy`, options in
 // `BRANCH_POLICY_OPTIONS`); `openProtectionMenu` is the ⚙ menu with its 0…3
 // segmented required-approvals control (`postBranchProtection`). Both are

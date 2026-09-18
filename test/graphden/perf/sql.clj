@@ -144,7 +144,7 @@
     ;; The breakdown rides into the report as a NOTE, so a breach reads
     ;; back as "which statement fired" — kaocha swallows a green test's
     ;; stdout AND stderr, and the gate log kept a bare count until
-    ;; 2026-09-06 (22 / max 18, nothing to read).
+    ;; (22 / max 18, nothing to read).
     (counters/note! event (mapv #(select-keys % [:calls :rows :query]) statements))
     (when-let [u (cal/units elapsed-ns db-ref)]
       (counters/observe! (keyword "trend" (name event)) u))

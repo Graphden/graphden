@@ -115,7 +115,7 @@
    them costs four round trips (fn, fn_version, fn_parent_ids, the
    branch chain) on top of the resolver's constant handful — the
    `:sql/execute-popover-app-root` budget is what noticed (22 / 18,
-   2026-09-06). Read directly off the atom: `executor.context` requires
+   ). Read directly off the atom: `executor.context` requires
    `compile-runtime`, which requires this ns."
   [ctx storage root-fn-id]
   (let [g (try

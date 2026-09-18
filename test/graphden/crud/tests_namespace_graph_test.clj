@@ -137,7 +137,7 @@
 
 
 (deftest inspector-test-section-renders-and-runs-test
-  ;; The Inspector's Test section (2026-09-04, the drawer's Tests panel
+  ;; The Inspector's Test section (the drawer's Tests panel
   ;; retired): a test fn's detail carries the section with [Run this
   ;; test]; the inspector-side run route renders it back from the run's
   ;; own result — deterministic, where a re-read of the status join

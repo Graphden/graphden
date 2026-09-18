@@ -98,7 +98,7 @@
 
 
 (def ^:private branch-require-merge-field-uuid
-  ;; Protected branches (Stage 2, 2026-08-23) — GitHub-style "push only
+  ;; Protected branches (Stage 2) — GitHub-style "push only
   ;; via merge request". When true, DIRECT writes to this branch's graph
   ;; (editor CRUD + bundle import) are refused (`:branch/merge-required`,
   ;; 409); the only way a change lands is a MERGE from another branch.
@@ -110,7 +110,7 @@
 
 
 (def ^:private branch-archived-at-field-uuid
-  ;; Merged-and-done (2026-09-07): stamped on the SOURCE when a merge
+  ;; Merged-and-done: stamped on the SOURCE when a merge
   ;; lands it into its own base. A merged source cannot be deleted (the
   ;; target resolves through its rows), so without this the popover
   ;; filled with finished branches. Archived = folded into the popover's
@@ -119,7 +119,7 @@
 
 
 (def ^:private branch-review-state-field-uuid
-  ;; Change proposals (2026-08-23) — the async review handoff. nil ≡ an
+  ;; Change proposals — the async review handoff. nil ≡ an
   ;; ordinary working branch; "proposed" ≡ its owner asked for this
   ;; branch to be reviewed and merged into its base. The reviewer list
   ;; is just the branches carrying "proposed". OPEN CORE (no principals
@@ -153,7 +153,7 @@
 
 
 (def ^:private branch-owner-id-field-uuid
-  ;; Protected branches (Stage 1, 2026-08-15) — the creating principal's
+  ;; Protected branches (Stage 1) — the creating principal's
   ;; STABLE user id (`:user-id`, not the mutable username), stamped at
   ;; create when a principal is bound. nil in single-tenant / system
   ;; writes. Same nullable-text shape as `:org-id`.

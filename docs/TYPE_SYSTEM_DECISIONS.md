@@ -12,7 +12,7 @@ one click away.
 For how the type system works in practice, see
 [TYPES.md](TYPES.md).
 
-## Current state — 2026-06-16
+## Current state
 
 - **Sweep at zero** across all fn-defs.
 - Allowlist (`allowed-type-check-failures` in
@@ -57,7 +57,7 @@ Neither is sound + complete. The honest answer: types must be
 | β | Caller-context propagation (downward type-flow second pass) | mid | high in theory | **ATTEMPTED + REVERTED** — see below |
 | γ | True row polymorphism (HM-style row variables) | high | highest | **REJECTED** — see below |
 
-## β attempt (2026-06-16) — REVERTED
+## β attempt — REVERTED
 
 A first prototype of β was implemented and reverted in the same
 session. The core insight that killed it:
@@ -96,7 +96,7 @@ For Pass-2 propagation across the ref-graph it ISN'T fine —
 the AS-NAME's TYPE flows through distinct slot-ids that may
 need different types.
 
-**Revisited and REJECTED** (2026-07-11): the slot-id-keyed
+**Revisited and REJECTED**: the slot-id-keyed
 sketch (thread slot-id through the parser's pre-pass and the
 registry's `:args` map, match the BFS walker on slot-id) was
 evaluated in full and found infeasible-for-payoff — see
@@ -175,7 +175,7 @@ Why not pursued:
 performance problem, OR (b) a queued feature genuinely needs
 open-record polymorphism.
 
-## Outcome — 2026-06-16 closure
+## Outcome
 
 | Phase | Status |
 |-------|--------|

@@ -19,7 +19,7 @@
 //
 // Depends on: editor-state.js (for shared singletons / dom utilities).
 //
-// Split 2026-09-13: the `data-action` handler registrations are
+// The `data-action` handler registrations are
 // editor-row-actions-handlers.js, loaded right after this file. This file
 // is the popover LIFECYCLE (show / pin / fade / re-anchor) and the loader.
 

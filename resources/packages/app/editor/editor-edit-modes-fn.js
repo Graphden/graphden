@@ -20,7 +20,7 @@
 // editor navigates to the new fn so the user can immediately add
 // `:as` renames + value bindings to extend its interface.
 //
-// EXTEND IN PLACE (2026-09-16, from a reader walking lesson 15). At a
+// EXTEND IN PLACE (from a reader walking lesson 15). At a
 // USE-SITE — the ⋯ of a card that sits on the canvas because a slot of
 // the fn being built binds it (`opts.useSiteArg`, the binding or list
 // item that put it there) — Extend does one more thing and one less:
@@ -32,7 +32,7 @@
 // Before, every inner fn meant Explorer → ⋯ → Extend (which opens the
 // child) → back to the outer fn → find the child again by name.
 // Which namespace should a fresh child land in? The PARENT's, always
-// (decision 2026-09-15). The earlier rule — "a package parent defaults to
+// (decision). The earlier rule — "a package parent defaults to
 // your last-used namespace" — read as "the first namespace in the list"
 // whenever the remembered one was stale, and a child that lands next to
 // its parent is the one place the reader looks for it first. The popover

@@ -1,8 +1,10 @@
 (ns graphden.crud.entities.list
   "The graph READ side of `/api/graph/entities` — the five scopes the
    editor pulls (tree / namespace / search / index / subtree), the
-   light-row projection they share, and the view-impl filter the
-   tenancy addon installs over the dump.
+   light-row projection they share, the Explorer's structured filter
+   evaluation (`view-members` — the ad-hoc chip set and the views saved
+   in the graph as `:explorer-view` fn-defs), and the view-impl filter
+   the tenancy addon installs over the dump.
 
    Split out of `crud.entities` as the one purely-read topic in that
    tree: no write path calls into it and it calls into none of them."
@@ -504,24 +506,242 @@
   500)
 
 
+(defn- secret-shaped-pred
+  "`(fn [f] bool)` — a secret-shaped fn (parents = exactly a
+   `:secret-shape`-tagged base-fn); the same rule `ns-kind-counts` uses,
+   with the leaf ids resolved once."
+  [base]
+  (let [names (into #{} (map name) (registry/fn-names-with-tag :secret-shape))
+        leaf-ids (into #{}
+                       (comp (filter (comp names str :name)) (map :id))
+                       (:fns base))]
+    (fn [f] (boolean (some #(secret-shape/secret-fn? f %) leaf-ids)))))
+
+
+(defn- ns-path-pred
+  "`(fn [path] bool)` — `path` is one of `wants` or under it (segment
+   match: `core` covers `core.strings`, not `coreutils`). `wants` are
+   dotted paths; `/` is accepted as a separator too."
+  [wants]
+  (let [wants (into #{} (map #(str/replace (str/lower-case (str %)) "/" ".")) wants)]
+    (fn [path]
+      (let [p (some-> path str/lower-case)]
+        (boolean (and p (some #(or (= p %) (str/starts-with? p (str % "."))) wants)))))))
+
+
+(defn- kind-preds
+  "The Explorer's KIND classification, server-side: `{kind (fn [f] bool)}`
+   over roled rows. `:apps` (a tenancy notion) is unknown here and
+   matches nothing — the editor applies it as its own overlay."
+  [{:keys [base namespaces]} storage]
+  (let [paths (ns-path/path-map @namespaces)
+        secret? (secret-shaped-pred base)
+        type? (fn [f] (boolean (types-api/type-lens-roles (:role f))))
+        test-ns? (fn [f] (boolean (some #{"tests"} (str/split (str (get paths (:namespace-id f))) #"\."))))
+        service-ids (delay (into #{} (map :fn-id) (sp/query-entities storage :service {})))]
+    {:types type?
+     :secrets secret?
+     :tests test-ns?
+     :services (fn [f] (contains? @service-ids (:id f)))
+     :fn (fn [f] (not (or (type? f) (secret? f) (test-ns? f))))
+     :apps (constantly false)}))
+
+
+(defn- normalise-filters
+  "The wire/impl shape of an Explorer filter set → the internal one:
+   `{:name text :uses [uuid…] :effects [kw…] :kinds [kw…]
+     :namespaces [path…] :exclude [path…] :unused bool}`. Accepts
+   strings or keywords for kinds/effects, strings or uuids for ids,
+   nil / missing for \"no filter on this axis\"."
+  [filters]
+  (let [kw (fn [v] (when v (keyword (str/replace (name (if (keyword? v) v (str v))) #"^:" ""))))
+        ->uuid (fn [v]
+                 (cond (uuid? v) v
+                       (string? v) (try (java.util.UUID/fromString v) (catch Exception _ nil))
+                       :else nil))
+        vec-of (fn [f xs] (into [] (comp (map f) (remove nil?)) (if (sequential? xs) xs (when xs [xs]))))
+        text (fn [v] (let [t (some-> v str str/trim)] (when (seq t) t)))]
+    {:name (text (:name filters))
+     :uses (vec-of ->uuid (:uses filters))
+     :effects (vec-of kw (:effects filters))
+     :kinds (vec-of kw (:kinds filters))
+     :namespaces (vec-of text (:namespaces filters))
+     :exclude (vec-of text (:exclude filters))
+     :unused (boolean (:unused filters))}))
+
+
+(defn- view-filter-preds
+  "One `(fn [f] bool)` per active axis of a normalised filter set.
+   Axes AND; within `:kinds` and `:namespaces` the values OR (a row is
+   one of the kinds / under one of the roots); `:uses` and `:effects`
+   AND (uses ALL of, carries ALL of) — the chips-AND rule, one chip per
+   fn / effect."
+  [{:keys [base rich-snapshot] :as env} storage
+   {:keys [name uses effects kinds namespaces exclude unused]}]
+  (let [paths (delay (ns-path/path-map @(:namespaces env)))
+        qualified (fn [f]
+                    (let [p (get @paths (:namespace-id f))]
+                      (if (seq p) (str p "." (:name f)) (:name f))))
+        adj (delay (reverse-ref-adjacency base))
+        kinds-of (delay (kind-preds env storage))]
+    (cond-> []
+      name (conj (let [needle (str/lower-case name)]
+                   (fn [f] (str/includes? (str/lower-case (qualified f)) needle))))
+      (seq uses) (into (map (fn [target]
+                              (let [users (transitive-user-ids base target)]
+                                (fn [f] (contains? users (:id f)))))
+                            uses))
+      (seq effects) (into (map (fn [kind]
+                                 (fn [f]
+                                   (contains? (set (:effects (get @rich-snapshot (keyword (:name f)))))
+                                              kind)))
+                               effects))
+      (seq kinds) (conj (let [preds (keep @kinds-of kinds)]
+                          (fn [f] (boolean (some #(% f) preds)))))
+      (seq namespaces) (conj (let [in? (ns-path-pred namespaces)]
+                               (fn [f] (in? (get @paths (:namespace-id f))))))
+      (seq exclude) (conj (let [out? (ns-path-pred exclude)]
+                            (fn [f] (not (out? (get @paths (:namespace-id f)))))))
+      unused (conj (fn [f] (empty? (get @adj (:id f))))))))
+
+
+(defn- view-members*
+  "Light rows for every NAMED fn matching ALL axes of `filters` (see
+   `view-filter-preds`), capped at `view-result-cap`. An EMPTY filter
+   set is an empty view — the Explorer never asks for \"everything\"
+   this way (that is the lazy tree), and a view that means everything
+   is a bug on the caller's side, not a 500-row dump."
+  [{:keys [rev-index] :as env} storage filters]
+  (let [filters (normalise-filters filters)
+        preds (view-filter-preds env storage filters)
+        ;; Named rows only, and not the `_anon-<hash>` auto-names the
+        ;; parser gives inline fn-defs — the tree never shows those as
+        ;; leaves, so a view must not either.
+        shown? (fn [f] (and (:name f) (not (str/starts-with? (:name f) "_anon-"))))
+        matches (if (empty? preds)
+                  []
+                  (->> @(:roled-fns env)
+                       (filterv (fn [f]
+                                  (and (shown? f)
+                                       (every? #(% f) preds))))))
+        limited (into [] (take view-result-cap) matches)]
+    {:fns (mapv (partial light-fn-row @rev-index) limited)
+     :truncated? (> (count matches) view-result-cap)}))
+
+
+(defn view-members
+  "The Explorer's structured filter evaluation — `filters` is a map
+   `{:name :uses :effects :kinds :namespaces :exclude :unused}` (every
+   key optional; see `normalise-filters`), the answer `{:fns :truncated?}`
+   in the `:search` light-row shape. One projection behind BOTH
+   `POST /api/views/members` (an ad-hoc chip set) and the
+   `:explorer-view` base-fn (a view saved IN the graph as a fn-def)."
+  [ctx filters]
+  (let [storage (:storage ctx)]
+    (view-members* (graph-list-env ctx storage) storage filters)))
+
+
+;; ---------------------------------------------------------------------------
+;; Views saved in the graph — fn-defs extending the `:explorer-view`
+;; base-fn. Listing them (with their bound filters decoded) is a READ
+;; projection over the cached graph, like every other scope here.
+;; ---------------------------------------------------------------------------
+
+(def explorer-view-base-name
+  "Name of the base-fn a graph-saved view extends. Base-fn names are
+   globally unique (name-keyed impls registry), so the id is resolved
+   over the in-memory graph without a query."
+  "explorer-view")
+
+
+(defn- closest-binding
+  "The effective binding of `slot-id` for `fn-id`: the fn's own row,
+   else the nearest ancestor's (BFS over `parent-ids`, closer wins)."
+  [bindings-by-fn parents-of fn-id slot-id]
+  (loop [queue [fn-id] seen #{}]
+    (when-let [fid (first queue)]
+      (if (seen fid)
+        (recur (subvec queue 1) seen)
+        (if-let [b (get-in bindings-by-fn [fid slot-id])]
+          b
+          (recur (into (subvec queue 1) (get parents-of fid)) (conj seen fid)))))))
+
+
+(defn- decode-view-filters
+  "Read a graph-saved view's bound slots back into a filter map (the
+   shape `view-members` takes, plus `:also` — the ids of the views it
+   intersects with). Unbound slots are absent."
+  [{:keys [slots-by-name bindings-by-fn parents-of items-by-binding]} fn-id]
+  (let [bound (fn [slot-name]
+                (when-let [sid (get slots-by-name slot-name)]
+                  (closest-binding bindings-by-fn parents-of fn-id sid)))
+        items (fn [b] (->> (get items-by-binding (:id b)) (sort-by :position)))
+        lit-list (fn [slot-name]
+                   (when-let [b (bound slot-name)]
+                     (let [vs (into [] (keep :value) (items b))]
+                       (when (seq vs) vs))))]
+    (cond-> {}
+      (some-> (bound :name) :value) (assoc :name (:value (bound :name)))
+      (some-> (bound :uses) :ref-fn-id) (assoc :uses [(:ref-fn-id (bound :uses))])
+      (true? (:value (bound :unused))) (assoc :unused true)
+      (lit-list :effects) (assoc :effects (lit-list :effects))
+      (lit-list :kinds) (assoc :kinds (lit-list :kinds))
+      (lit-list :namespaces) (assoc :namespaces (lit-list :namespaces))
+      (lit-list :exclude) (assoc :exclude (lit-list :exclude))
+      (some-> (bound :also) items seq) (assoc :also (into [] (keep :ref-fn-id) (items (bound :also)))))))
+
+
+(defn list-explorer-views
+  "Every NAMED fn that extends the `:explorer-view` base-fn (any depth),
+   with its filters decoded — `[{:id :name :namespace-id :filters} …]`,
+   the Explorer's \"views saved in the graph\" list. Empty when the
+   base-fn isn't loaded (no `app/views` module) or nothing extends it."
+  [ctx]
+  (let [base (types-api/cached-or-load-graph ctx)
+        fns (:fns base)
+        base-id (some #(when (and (= explorer-view-base-name (:name %))
+                                  (empty? (:parent-ids %)))
+                         (:id %))
+                      fns)]
+    (if-not base-id
+      []
+      (let [children-of (reduce (fn [m f] (reduce #(update %1 %2 (fnil conj []) (:id f)) m (:parent-ids f)))
+                                {} fns)
+            by-id (into {} (map (juxt :id identity)) fns)
+            view-ids (loop [queue (vec (get children-of base-id)) seen #{}]
+                       (if-let [id (first queue)]
+                         (if (seen id)
+                           (recur (subvec queue 1) seen)
+                           (recur (into (subvec queue 1) (get children-of id)) (conj seen id)))
+                         seen))
+            slot-ids (into #{} (comp (filter #(= base-id (:fn-id %))) (map :slot-id)) (:fn-slots base))
+            slots-by-name (into {} (comp (filter #(slot-ids (:id %)))
+                                         (map (fn [s] [(keyword (:name s)) (:id s)])))
+                                (:slots base))
+            env {:slots-by-name slots-by-name
+                 :bindings-by-fn (reduce (fn [m b] (assoc-in m [(:fn-id b) (:slot-id b)] b)) {} (:bindings base))
+                 :parents-of (into {} (map (juxt :id :parent-ids)) fns)
+                 :items-by-binding (group-by :binding-id (:list-items base))}]
+        (->> view-ids
+             (keep by-id)
+             (filter :name)
+             (sort-by :name)
+             (mapv (fn [f]
+                     {:id (:id f)
+                      :name (:name f)
+                      :namespace-id (:namespace-id f)
+                      :filters (decode-view-filters env (:id f))})))))))
+
+
 (defn- list-scope-view
-  "Smart-view scope: light rows for every named fn matching ALL rule
-   tokens in `q` (see `view-rule-tokens`):
-
-   - `uses:<name>`   — the fn transitively references / extends the
-                       named fn (bare or qualified name; the editor's
-                       \"virtual namespace\" of everything built on it).
-   - `effect:<kind>` — the fn's computed effect footprint carries the
-                       kind (`io`, `db`, `state`, …) — same registry
-                       data the sidebar's fx marks read.
-   - `name:<sub>`    — case-insensitive substring on the qualified name
-                       (bare tokens parse as this).
-
-   Powers the Explorer's saved views (editor-smart-views.js). Same
-   light-row shape as `:search`, capped at `view-result-cap`."
-  [{:keys [base rev-index role-of namespaces]} q]
-  (let [rules (view-rule-tokens q)
-        paths (ns-path/path-map @namespaces)
+  "LEGACY `?scope=view&q=<rule string>` — the text rule the editor's
+   smart-views popover still sends until the filters/views redesign
+   lands its frontend half. Tokens map onto the structured filter set
+   (`uses:<name>` resolved to an id over the graph, bare or qualified),
+   then `view-members*` answers. Removed with `view-rule-tokens` once
+   nothing sends a rule string."
+  [{:keys [base namespaces] :as env} storage q]
+  (let [paths (ns-path/path-map @namespaces)
         qualified (fn [f]
                     (let [p (get paths (:namespace-id f))]
                       (if (seq p) (str p "." (:name f)) (:name f))))
@@ -532,39 +752,20 @@
                                                  (= (str/lower-case (qualified %)) needle)))
                                     (:id %))
                                  (:fns base))))
-        snapshot (registry/rich-types-snapshot)
-        rule-pred (fn [[k v]]
-                    (case k
-                      :uses (let [target (resolve-target v)
-                                  users (when target (transitive-user-ids base target))]
-                              (fn [f] (contains? (or users #{}) (:id f))))
-                      :effect (let [kind (keyword v)]
-                                (fn [f]
-                                  (contains? (set (:effects (get snapshot (keyword (:name f)))))
-                                             kind)))
-                      :name (let [needle (str/lower-case v)]
-                              (fn [f] (str/includes? (str/lower-case (qualified f)) needle)))
-                      :ns (let [want (str/replace (str/lower-case v) "/" ".")]
-                            (fn [f]
-                              (let [p (some-> (get paths (:namespace-id f))
-                                              str/lower-case)]
-                                (boolean (and p (or (= p want)
-                                                    (str/starts-with? p (str want "."))))))))
-                      :unused (if (contains? #{"true" "yes" "1"} (str/lower-case v))
-                                (let [adj (reverse-ref-adjacency base)]
-                                  (fn [f] (empty? (get adj (:id f)))))
-                                (constantly false))
-                      (constantly false)))
-        preds (mapv rule-pred rules)
-        matches (if (empty? preds)
-                  []
-                  (->> (:fns base)
-                       (filterv (fn [f]
-                                  (and (:name f)
-                                       (every? #(% f) preds))))))
-        limited (into [] (take view-result-cap) matches)]
-    {:fns (mapv (comp (partial light-fn-row @rev-index) role-of) limited)
-     :truncated? (> (count matches) view-result-cap)}))
+        rules (view-rule-tokens q)
+        unknown? (some (fn [[k _]] (not (#{:uses :effect :name :ns :unused} k))) rules)
+        ;; A `uses:` naming nothing matches nothing (as before) — an
+        ;; unresolvable id filters everything out.
+        uses (mapv (fn [[_ v]] (or (resolve-target v) (java.util.UUID/randomUUID)))
+                   (filter (comp #{:uses} first) rules))
+        filters {:name (some->> rules (filter (comp #{:name} first)) (map second) seq (str/join " "))
+                 :uses uses
+                 :effects (mapv second (filter (comp #{:effect} first) rules))
+                 :namespaces (mapv second (filter (comp #{:ns} first) rules))
+                 :unused (some (fn [[k v]] (and (= k :unused) (contains? #{"true" "yes" "1"} (str/lower-case v)))) rules)}]
+    (if (or unknown? (empty? rules))
+      {:fns [] :truncated? false}
+      (view-members* env storage filters))))
 
 
 (defn- list-scope-index
@@ -658,7 +859,7 @@
        (= scope :namespace)          (list-scope-namespace env namespace-id)
        (= scope :search)             (list-scope-search env q false)
        (= scope :search-text)        (list-scope-search env q true)
-       (= scope :view)               (list-scope-view env q)
+       (= scope :view)               (list-scope-view env storage q)
        (= scope :index)              (list-scope-index env)
        (and (= scope :subtree) root-id) (list-scope-subtree env root-id)
        :else

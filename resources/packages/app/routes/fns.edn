@@ -955,4 +955,7 @@
                   ;; per-user editor preferences (app-base/prefs — themes, keymaps)
                   :api-prefs-get
                   :api-prefs-put
+                  ;; Explorer views (app/views — filters saved in the graph)
+                  :api-views
+                  :api-view-members
                   :auth-check]}}]}

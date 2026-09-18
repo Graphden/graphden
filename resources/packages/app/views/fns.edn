@@ -1,0 +1,119 @@
+;; Explorer views — the ONE evaluator behind every way the editor narrows
+;; its tree by graph facts.
+;;
+;; A FILTER is one typed predicate (a chip in the Explorer): by name, by
+;; the fn it transitively uses, by effect kind, by row kind, by namespace
+;; (include roots / exclude paths), or "unused". A VIEW is a named set of
+;; filters. The editor keeps personal views in the browser; a view worth
+;; sharing is saved IN THE GRAPH as an fn-def extending `:explorer-view`
+;; — versioned, branch-scoped, id-keyed (the `uses` slot is a `:fn-ref`,
+;; so a rename never empties it), runnable (▶ gives the member list), and
+;; listed back to every editor by `GET /api/views`.
+;;
+;; Both the ad-hoc endpoint and the base-fn answer through
+;; `crud.entities.list/view-members`; the shape of a member row is the
+;; `:search` light row.
+{:namespace "app.views"
+ :description "Explorer views — structured filter evaluation (`POST /api/views/members`), views saved in the graph as `:explorer-view` fn-defs, and their listing (`GET /api/views`)."
+ :fns
+ [;; ---------------------------------------------------------------------
+  ;; Base-fns
+  ;; ---------------------------------------------------------------------
+
+  {:name :view-members
+   :description "Light rows (`{:fns :truncated?}`, the `:search` shape, capped at 500) for every named fn of the current branch view matching ALL the given axes. Axes AND; `kinds` / `namespaces` OR within; `uses` / `effects` AND within (uses ALL of, carries ALL of). An empty filter set is an empty answer. `kinds` known here: fn / types / secrets / services / tests (`apps` is the tenancy addon's notion and matches nothing — the editor overlays it)."
+   :args {:name {:required false :type :nullable-text
+                 :description "Case-insensitive substring of the qualified name."}
+          :uses {:required false :type [:list :uuid] :value []
+                 :description "Fn ids; a member transitively extends or references every one of them."}
+          :effects {:required false :type [:list :keyword] :value []
+                    :description "Effect kinds (`io`, `db`, `state`, …) the member's computed footprint carries — all of them."}
+          :kinds {:required false :type [:list :keyword] :value []
+                  :description "Row kinds — a member is ONE of: `fn`, `types`, `secrets`, `services`, `tests`."}
+          :namespaces {:required false :type [:list :text] :value []
+                       :description "Dotted namespace paths; a member lives in one of them or below (segment match)."}
+          :exclude {:required false :type [:list :text] :value []
+                    :description "Dotted namespace paths a member must NOT live in or below."}
+          :unused {:required false :type :bool :value false
+                   :description "Only fns nothing references or extends."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  {:name :explorer-view
+   :description "A view SAVED IN THE GRAPH — extend this and bind the axes you mean; the Explorer lists every such fn-def (`GET /api/views`) and applies it like a personal view, and ▶ Run answers the member list (`{:fns :truncated?}`). Same evaluation as `:view-members`, with `uses` a single `:fn-ref` (the fn's IDENTITY — a rename never empties the view, and the edge is not a dependency) and `also` a list of OTHER views to intersect with (compose views in the graph instead of repeating chips)."
+   :args {:name {:required false :type :nullable-text
+                 :description "Case-insensitive substring of the qualified name."}
+          :uses {:required false :type :fn-ref
+                 :description "The fn every member transitively extends or references — bound by reference; the impl receives its id."}
+          :effects {:required false :type [:list :keyword] :value []
+                    :description "Effect kinds the member's footprint carries — all of them."}
+          :kinds {:required false :type [:list :keyword] :value []
+                  :description "Row kinds — ONE of `fn`, `types`, `secrets`, `services`, `tests`."}
+          :namespaces {:required false :type [:list :text] :value []
+                       :description "Dotted namespace paths; in one of them or below."}
+          :exclude {:required false :type [:list :text] :value []
+                    :description "Dotted namespace paths NOT in or below."}
+          :unused {:required false :type :bool :value false
+                   :description "Only fns nothing references or extends."}
+          :also {:required false :type [:list :any] :value []
+                 :description "Other `:explorer-view` fn-defs (fn-refs); the member set is intersected with each of theirs."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  {:name :explorer-views
+   :description "Every named fn-def extending `:explorer-view` on the current branch view, with its bound axes decoded — `[{:id :name :namespace-id :filters} …]`, `:filters` in the `:view-members` argument shape plus `:also` (view ids). The Explorer's \"views in the graph\" list."
+   :args {}
+   :return-type [:list :keyword-map]
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /api/views — the views saved in the graph
+  ;; ---------------------------------------------------------------------
+
+  {:name :api-views-handler
+   :lambda-params []
+   :description "Ring handler for GET /api/views — `[{id name namespace-id filters} …]` as JSON."
+   :parent :json-handler
+   :args {:data :explorer-views}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/views/members — evaluate an ad-hoc filter set
+  ;;   body: {name, uses:[id…], effects:[…], kinds:[…], namespaces:[…],
+  ;;          exclude:[…], unused}
+  ;; ---------------------------------------------------------------------
+
+
+  {:name :_vm-field
+   :description "One axis of the parsed JSON body, `:default` when the body or the key is missing."
+   :parent :get
+   :args {:coll :parse-json-body}}
+
+  {:name :_vm-members
+   :parent :view-members
+   :args {:name {:parent :_vm-field :args {:key {:value :name} :default nil}}
+          :uses {:parent :_vm-field :args {:key {:value :uses} :default []}}
+          :effects {:parent :_vm-field :args {:key {:value :effects} :default []}}
+          :kinds {:parent :_vm-field :args {:key {:value :kinds} :default []}}
+          :namespaces {:parent :_vm-field :args {:key {:value :namespaces} :default []}}
+          :exclude {:parent :_vm-field :args {:key {:value :exclude} :default []}}
+          :unused {:parent :_vm-field :args {:key {:value :unused} :default false}}}}
+
+  {:name :api-view-members-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /api/views/members — the members of an ad-hoc filter set, `{fns truncated?}` as JSON."
+   :parent :json-handler
+   :args {:data :_vm-members}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Routes (joined into `:api-routes` by app.routes)
+  ;; ---------------------------------------------------------------------
+
+  {:name :api-views
+   :description "GET /api/views — the views saved in the graph. Auth-required (projects tenant-private structure, like `/api/graph/entities`)."
+   :parent :get-auth-required
+   :args {:path "/views" :handler :api-views-handler}}
+
+  {:name :api-view-members
+   :description "POST /api/views/members — evaluate an ad-hoc Explorer filter set; body `{name uses effects kinds namespaces exclude unused}`. Auth-required."
+   :parent :post
+   :args {:path "/views/members" :handler :api-view-members-handler}}]}

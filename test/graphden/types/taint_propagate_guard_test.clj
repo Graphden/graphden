@@ -108,6 +108,10 @@
     :invalidate-after-write :invalidate-graph-cache :invoke :is-a?
     :json-to-type :jvm-uptime-ms :keys
     :keyword-to-str :list :list-all-graph-entities :graph-fn-defs-subtree :fn-unread-bindings :log-warn
+    ;; app/views — the Explorer's filter evaluation: light fn rows (ids,
+    ;; names, roles) projected off the graph-cache, never the caller's
+    ;; content. Same class as :list-all-graph-entities.
+    :view-members :explorer-view :explorer-views
     :loop-until-interrupted :lt :lte :map :map-xf
     :materialize-package-fns :max-memory :merge :merge-branch!
     :merge-post-commit! :merge-skipped-branch-local

@@ -534,67 +534,114 @@
           (let [dump (entities/list-all-graph-entities c :search nil nil "widget")]
             (is (= 1 (count (:fns dump))) "result capped at the limit")
             (is (true? (:truncated? dump)) "more matched than were returned"))))
-      (testing "scope :view — smart-view rule tokens over the graph"
-        ;; A grandchild extends child-of-a1, so `uses:` must walk
+      (testing "view-members — the Explorer's structured filter set over the graph"
+        ;; A grandchild extends child-of-a1, so `:uses` must walk
         ;; TRANSITIVELY, not one hop.
-        (let [grand (java.util.UUID/randomUUID)]
+        (let [grand (java.util.UUID/randomUUID)
+              members (fn [filters]
+                        (into #{} (map :id) (:fns (entities/view-members c filters))))]
           (sp/create-entity storage :fn {:id grand :name "grand-of-a1"
                                          :parent-ids [child]})
           (ctx/invalidate-graph-cache! c)
-          (testing "uses:<bare name> — the reverse transitive closure"
-            (is (= #{child grand}
-                   (into #{} (map :id)
-                         (:fns (entities/list-all-graph-entities
-                                 c :view nil nil "uses:alpha-widget"))))
-                "the child extending a1 AND the grandchild through it"))
-          (testing "uses:<qualified name> resolves through the ns path"
-            (is (= #{child grand}
-                   (into #{} (map :id)
-                         (:fns (entities/list-all-graph-entities
-                                 c :view nil nil "uses:alpha.alpha-widget"))))))
-          (testing "uses: through a ref binding, not only parent-ids"
-            (is (contains? (into #{} (map :id)
-                                 (:fns (entities/list-all-graph-entities
-                                         c :view nil nil "uses:alpha-gadget")))
-                           child)
+          (testing ":uses [id] — the reverse transitive closure, by IDENTITY"
+            (is (= #{child grand} (members {:uses [a1]}))
+                "the child extending a1 AND the grandchild through it")
+            (is (= #{child grand} (members {:uses [(str a1)]}))
+                "ids arrive as strings over the wire"))
+          (testing ":uses through a ref binding, not only parent-ids"
+            (is (contains? (members {:uses [a2]}) child)
                 "the fn holding the ref binding counts as a user"))
-          (testing "rules AND-combine"
-            (is (= #{child}
-                   (into #{} (map :id)
-                         (:fns (entities/list-all-graph-entities
-                                 c :view nil nil "uses:alpha-widget name:child"))))))
-          (testing "bare token = name substring; unknown target = empty view"
-            (is (= #{a1 b1}
-                   (into #{} (map :id)
-                         (:fns (entities/list-all-graph-entities
-                                 c :view nil nil "widget")))))
-            (is (empty? (:fns (entities/list-all-graph-entities
-                                c :view nil nil "uses:no-such-fn")))))
-          (testing "blank rule string is an empty view, not everything"
-            (is (empty? (:fns (entities/list-all-graph-entities
-                                c :view nil nil "  ")))))
-          (testing "ns:<path> — the fn's namespace, or anything under it"
-            (is (= #{a1 a2}
-                   (into #{} (map :id)
-                         (:fns (entities/list-all-graph-entities
-                                 c :view nil nil "ns:alpha"))))
+          (testing "axes AND-combine; :uses values AND too"
+            (is (= #{child} (members {:uses [a1] :name "child"})))
+            (is (= #{child grand} (members {:uses [a1 a2]}))
+                "both use a1 AND (transitively, via child's ref binding) a2")
+            (is (empty? (members {:uses [a1 b1]}))
+                "nothing uses both a1 and b1"))
+          (testing ":name is a case-insensitive substring of the qualified name"
+            (is (= #{a1 b1} (members {:name "WIDGET"}))))
+          (testing "an empty / unknown-id filter set is an empty view, not everything"
+            (is (empty? (members {})))
+            (is (empty? (members {:name "  "})))
+            (is (empty? (members {:uses [(java.util.UUID/randomUUID)]}))))
+          (testing ":namespaces — in one of the paths or under it (segments)"
+            (is (= #{a1 a2} (members {:namespaces ["alpha"]}))
                 "named fns of :alpha (anon excluded); :beta's stay out")
-            (is (empty? (:fns (entities/list-all-graph-entities
-                                c :view nil nil "ns:al")))
-                "a namespace PREFIX is not a match — segments only"))
-          (testing "unused:true — the dead-code view"
-            (is (= #{bcomp}
+            (is (= #{a1 a2 b1 bcomp} (members {:namespaces ["alpha" "beta"]}))
+                "roots OR")
+            (is (empty? (members {:namespaces ["al"]}))
+                "a namespace PREFIX is not a match"))
+          (testing ":exclude — NOT in or under the paths (composes with :namespaces)"
+            (is (= #{b1 bcomp} (members {:namespaces ["alpha" "beta"] :exclude ["alpha"]}))))
+          (testing ":unused — the dead-code view"
+            (is (= #{bcomp} (members {:unused true :namespaces ["beta"]}))
+                "beta-composed has no users; beta-widget is extended by it")
+            (is (empty? (members {:unused true :namespaces ["alpha"]}))
+                "both alpha fns are used (parented / ref'd) — not dead"))
+          (testing ":kinds — the Explorer's row kinds, the tree's own classification"
+            ;; A parentless, slot-less named row IS a primitive type-row
+            ;; (`types-api/type-lens-roles`), exactly as the `:tree`
+            ;; counts classify it; the composed one is a plain fn.
+            (is (= #{bcomp} (members {:kinds ["fn"] :namespaces ["alpha" "beta"]}))
+                "the composed fn is the only plain fn here")
+            (is (= #{a1 a2 b1} (members {:kinds [:types] :namespaces ["alpha" "beta"]}))
+                "the three parentless rows are type-rows")
+            (is (= #{a1 a2 b1 bcomp} (members {:kinds ["fn" "types"] :namespaces ["alpha" "beta"]}))
+                "kinds OR")
+            (is (empty? (members {:kinds ["apps"] :namespaces ["alpha"]}))
+                "apps is the addon's notion — matches nothing here"))
+          (testing "the legacy rule string still answers through the same evaluator"
+            (is (= #{child grand}
                    (into #{} (map :id)
                          (:fns (entities/list-all-graph-entities
-                                 c :view nil nil "unused:true ns:beta"))))
-                "beta-composed has no users; beta-widget is extended by it")
-            (is (empty? (:fns (entities/list-all-graph-entities
-                                c :view nil nil "unused:true ns:alpha")))
-                "both alpha fns are used (parented / ref'd) — not dead")
-            (is (empty? (:fns (entities/list-all-graph-entities
-                                c :view nil nil "unused:banana")))
-                "a non-true value matches nothing, not everything"))))
+                                 c :view nil nil "uses:alpha.alpha-widget")))))
+            (is (empty? (:fns (entities/list-all-graph-entities c :view nil nil "  ")))))))
       (finally (sp/close storage)))))
+
+
+(deftest list-explorer-views-test
+  ;; A view SAVED IN THE GRAPH is an fn-def extending the `explorer-view`
+  ;; base-fn; the listing decodes its bound slots back into the filter
+  ;; map — `uses` by IDENTITY (a ref binding), list slots from their
+  ;; item rows, an inherited binding through a parent view.
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)
+        ns-a (java.util.UUID/randomUUID)
+        target (java.util.UUID/randomUUID)]
+    (sp/create-entity storage :ns {:id ns-a :name "alpha"})
+    (sp/create-entity storage :fn {:id target :name "the-target" :namespace-id ns-a :parent-ids []})
+    (let [base (setup/create-base-fn! storage entity-list/explorer-view-base-name)
+          s-name (setup/create-slot! storage "name" :text)
+          s-uses (setup/create-slot! storage "uses" :fn-ref)
+          s-ns (setup/create-slot! storage "namespaces" :sequence)
+          s-unused (setup/create-slot! storage "unused" :bool)
+          _ (setup/attach-slot! storage (:id base) (:id s-name) 0)
+          _ (setup/attach-slot! storage (:id base) (:id s-uses) 1)
+          _ (setup/attach-slot! storage (:id base) (:id s-ns) 2)
+          _ (setup/attach-slot! storage (:id base) (:id s-unused) 3)
+          parent-view (setup/create-composed-fn! storage "alpha-only" (:id base))
+          child-view (setup/create-composed-fn! storage "alpha-on-target" (:id parent-view))
+          anon-view (sp/create-entity storage :fn {:name nil :parent-ids [(:id base)]})
+          ns-bind (sp/create-entity storage :binding {:fn-id (:id parent-view) :slot-id (:id s-ns) :list-append true})]
+      (sp/create-entity storage :binding-list-item {:binding-id (:id ns-bind) :position 0 :value "alpha"})
+      (sp/create-entity storage :binding {:fn-id (:id child-view) :slot-id (:id s-uses) :ref-fn-id target})
+      (sp/create-entity storage :binding {:fn-id (:id child-view) :slot-id (:id s-unused) :value true})
+      (ctx/invalidate-graph-cache! c)
+      (try
+        (let [views (entities/list-explorer-views c)
+              by-name (into {} (map (juxt :name identity)) views)]
+          (is (= #{"alpha-only" "alpha-on-target"} (set (keys by-name)))
+              "every NAMED descendant of the base-fn, anonymous ones skipped")
+          (is (= {:namespaces ["alpha"]} (:filters (by-name "alpha-only"))))
+          (is (= {:namespaces ["alpha"] :uses [target] :unused true}
+                 (:filters (by-name "alpha-on-target")))
+              "own ref + own bool, the list inherited from the parent view")
+          (is (= (:id child-view) (:id (by-name "alpha-on-target"))))
+          (is (some? (:id anon-view)) "guard: the anonymous row exists and was skipped")
+          (testing "no base-fn → no views, not an error"
+            (sp/delete-entity storage :fn (:id base))
+            (ctx/invalidate-graph-cache! c)
+            (is (= [] (entities/list-explorer-views c)))))
+        (finally (sp/close storage))))))
 
 
 ;; ============================================================================

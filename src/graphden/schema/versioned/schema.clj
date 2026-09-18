@@ -295,10 +295,6 @@
   #uuid "23242526-2728-4123-0e1f-2a3b4c5d6e7f")
 
 
-(def ^:private fn-version-impl-hash-field-uuid
-  #uuid "26272829-3031-4456-3b4c-5d6e7f8a9b0c")
-
-
 (def ^:private fn-version-created-at-field-uuid
   #uuid "27282930-3132-4567-4c5d-6e7f8a9b0c1d")
 
@@ -406,14 +402,6 @@
 
 (def ^:private binding-version-ref-fn-id-field-uuid
   #uuid "276ddd7a-4caa-4280-98b0-8fca584c3367")
-
-
-(def ^:private binding-version-override-kind-field-uuid
-  #uuid "3680c037-849c-46cb-a20c-d14680ea2435")
-
-
-(def ^:private binding-version-rename-to-field-uuid
-  #uuid "ca54868a-50f6-4aec-9d7b-518cb604c812")
 
 
 (def ^:private binding-version-type-override-fn-id-field-uuid
@@ -915,8 +903,6 @@
       ;; -----------------------------------------------------------------
       ;; binding-version
       ;; -----------------------------------------------------------------
-      ;; `:rename-to` retired in Phase 6e (mirror of the main binding
-      ;; entity) — see retire-field call below.
       (ds/add-entity :binding-version binding-version-entity-uuid
                      (mirror-fields :binding-version))
       (ds/add-constraint :binding-version
@@ -936,19 +922,7 @@
       (ds/add-entity :resource-override-version resource-override-version-entity-uuid
                      (mirror-fields :resource-override-version))
       (ds/add-constraint :resource-override-version
-                         {:type :unique :fields [:override-id :branch-id :created-at]})
-
-      ;; -----------------------------------------------------------------
-      ;; Retired fields (Phase 6e)
-      ;; -----------------------------------------------------------------
-      (ds/retire-field :binding-version :rename-to binding-version-rename-to-field-uuid)
-      ;; `fn-version.impl-hash` retired — mirror of the main `:fn`
-      ;; entity. The base-fn discriminator is now `return-type-fn-id`
-      ;; presence; the column was always NULL. See retire-field on `:fn`.
-      (ds/retire-field :fn-version :impl-hash fn-version-impl-hash-field-uuid)
-      ;; Mirror of the retired binding.override-kind (audit-2 2b).
-      (ds/retire-field :binding-version :override-kind
-                       binding-version-override-kind-field-uuid)))
+                         {:type :unique :fields [:override-id :branch-id :created-at]})))
 
 
 (defn build-schema

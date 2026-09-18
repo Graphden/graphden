@@ -502,7 +502,7 @@
   "Normalise `package.edn` `:dependencies` into a seq of
    `{:name \"core\" :constraint \">=1.5.0\"|nil}`.
 
-   Accepted shapes (backward-compatible):
+   Accepted shapes:
    - bare name list      `[\"core\" \"web\"]`         → no constraints
    - map name→constraint `{\"core\" \">=1.5.0\"}`     → constraints (canonical)
    - mixed list entry    `[\"core\" [\"web\" \">=2.0\"]]` → per-entry pair ok
@@ -531,7 +531,7 @@
   "Given `{package-name -> package.edn-meta}` for every loaded package,
    throw `:packages/version-conflict` if a declared version constraint is
    not satisfied by the version PRESENT on the classpath. Constraint-free
-   deps (legacy bare names) are skipped. Pure over its argument so it is
+   deps (bare names) are skipped. Pure over its argument so it is
    unit-testable without classpath fixtures."
   [metas]
   (doseq [[pkg pkg-meta] metas

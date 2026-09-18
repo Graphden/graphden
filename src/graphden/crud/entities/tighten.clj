@@ -182,7 +182,7 @@
 
 
 (defn tighten-effects-impl!
-  "Backwards-compatible thin wrapper — `tighten-fn-type-impl!` with
+  "Thin wrapper — `tighten-fn-type-impl!` with
    only the `:effects` delta filled in. Tests load this symbol
    directly; production callers go through the form-driven defbase."
   [storage binding-id effects-vec]

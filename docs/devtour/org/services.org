@@ -7,19 +7,19 @@ Desired-state service registry, the reconciler/supervisor, and the dynamic multi
 
 after: executor
 
-[[file:index.org][index]] · ~52 min
+[[file:index.org][index]] · ~51 min
 
 * 1. extend-builder
 :PROPERTIES:
 :CUSTOM_ID: services/extend-builder
 :FILE: src/graphden/schema/services/schema.clj
-:LINE: 299
-:MINS: 5.8
+:LINE: 295
+:MINS: 5.6
 :END:
 
 Start with what a service ROW is: this registers the ~:service~ entity plus the ~:restart-policy~ / ~:cardinality~ enums. A service is a desired-state ~keep this fn-id running~ declaration — not versioned, no args table — the thing everything downstream reconciles toward.
 
-- source :: [[file:../../../src/graphden/schema/services/schema.clj::(defn extend-builder][src/graphden/schema/services/schema.clj:299]]
+- source :: [[file:../../../src/graphden/schema/services/schema.clj::(defn extend-builder][src/graphden/schema/services/schema.clj:295]]
 - same file :: [[file:services.org::#services/effective-pool-size][effective-pool-size]]
 
 * 2. effective-pool-size

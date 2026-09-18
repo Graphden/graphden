@@ -7,7 +7,7 @@ How the graph is stored and traversed — Postgres, recursive CTEs, the StorageC
 
 after: executor
 
-[[file:index.org][index]] · ~62 min
+[[file:index.org][index]] · ~61 min
 
 * 1. Storage
 :PROPERTIES:
@@ -79,15 +79,15 @@ What a schema exposes: the entities, their fields, and the field types (~:ref~, 
 :PROPERTIES:
 :CUSTOM_ID: storage/extend-builder
 :FILE: src/graphden/schema/graph/schema.clj
-:LINE: 651
-:MINS: 11.7
+:LINE: 637
+:MINS: 10.4
 :END:
 
 Where the graph model is actually declared: the ~ns~ / ~fn~ / ~slot~ / ~binding~ / ~binding-list-item~ entities and the ~:ref~ edges between them. This is the concrete table + foreign-key layout that every traversal walks.
 
 Long, but it is one ~->~ pipeline rather than an algorithm: an ~add-entity~ per table with its fields inline, the ~add-constraint~ calls that become real UNIQUE indexes, and at the end the ~retire-field~ entries that keep dropped columns (~binding.rename-to~, ~fn.impl-hash~) from being resurrected. Skim it entity by entity — this is DDL that happens to be data.
 
-- source :: [[file:../../../src/graphden/schema/graph/schema.clj::(defn extend-builder][src/graphden/schema/graph/schema.clj:651]]
+- source :: [[file:../../../src/graphden/schema/graph/schema.clj::(defn extend-builder][src/graphden/schema/graph/schema.clj:637]]
 
 * 7. valid-type?
 :PROPERTIES:
@@ -186,13 +186,13 @@ Its length is protocol SURFACE, not logic: one record implementing ~Storage~, ~S
 :PROPERTIES:
 :CUSTOM_ID: storage/do-initialize
 :FILE: src/graphden/storage/postgres/migration.clj
-:LINE: 297
+:LINE: 286
 :MINS: 3.2
 :END:
 
 Nobody hand-writes DDL here: the schema of the previous steps is DATA, and this diffs it against the metadata table to emit exactly the changes needed — first-init or migration, all in one transaction. Read the docstring for the fleet property that makes it safe: a transaction-scoped advisory lock taken BEFORE the state read, so N pods booting against one database serialize, and the second one computes a no-op instead of re-planning against pre-DDL state. This is why a graphden upgrade needs no DB reset (docs/OPERATIONS.md).
 
-- source :: [[file:../../../src/graphden/storage/postgres/migration.clj::(defn do-initialize][src/graphden/storage/postgres/migration.clj:297]]
+- source :: [[file:../../../src/graphden/storage/postgres/migration.clj::(defn do-initialize][src/graphden/storage/postgres/migration.clj:286]]
 
 * 15. reachable-fns-sql
 :PROPERTIES:

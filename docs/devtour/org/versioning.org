@@ -66,13 +66,13 @@ The authoritative map of WHICH entities are versioned (fn / fn-slot / binding / 
 :PROPERTIES:
 :CUSTOM_ID: versioning/derive-version-fields
 :FILE: src/graphden/schema/versioned/schema.clj
-:LINE: 559
+:LINE: 547
 :MINS: 4.1
 :END:
 
 Where the ~-version~ mirror entities come from: derived from the base entity's field map (refs demote to bare uuids, framework columns spliced in), never hand-copied. A new base column without a pinned mirror uuid or an identity-level declaration fails the build loudly — the old failure mode was the decorator silently dropping that column's writes. ~version-data-fields~ above derives from the same source, so the two can never disagree.
 
-- source :: [[file:../../../src/graphden/schema/versioned/schema.clj::(defn derive-version-fields][src/graphden/schema/versioned/schema.clj:559]]
+- source :: [[file:../../../src/graphden/schema/versioned/schema.clj::(defn derive-version-fields][src/graphden/schema/versioned/schema.clj:547]]
 
 * 6. resolve-version
 :PROPERTIES:

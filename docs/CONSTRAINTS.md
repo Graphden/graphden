@@ -113,7 +113,8 @@ migrated DB by `ensure-unique-indexes!` on every migration pass
 (`CREATE UNIQUE INDEX IF NOT EXISTS`); existing rows that violate the
 new key leave a boot-time warning naming the index, never a broken boot —
 clean the duplicates and the next pass lands it. A retired key is dropped
-by name via `retired-indexes` in `storage/postgres/migration.clj`.
+by name via `*retired-indexes*` in `storage/postgres/migration.clj` (an entry
+is added at retirement and removed once every deployment is past it).
 
 Two former base-table `UNIQUE` keys were retired because their
 invariant is a property of the per-branch RESOLVED VIEW, not of the

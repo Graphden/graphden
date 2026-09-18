@@ -139,7 +139,7 @@
        `#{:io :time}` read-only system state, …) — the bound fn's
        `:effects` must be a subset.
 
-   `[:fn args ret]` — legacy three-element form, equivalent to the
+   `[:fn args ret]` — the three-element authoring shorthand, equivalent to the
    four-element form with `:any` as the 4th element. Accepted on
    read (storage / EDN authors may still write it); `normalise`
    canonicalises to four-element before any subtype/unify check."
@@ -359,7 +359,7 @@
 (defn fn-effects
   "Slot-level effect constraint of a fn-type. Always returns a value
    for fn-types: the declared 4th element if present, else `:any`
-   (the legacy three-element form is treated as the canonical
+   (the three-element shorthand is treated as the canonical
    four-element form with `:any` as the slot meaning — unconstrained,
    any callable passes). nil for non-fn-types.
 

@@ -163,10 +163,6 @@
   #uuid "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d")
 
 
-(def ^:private fn-impl-hash-field-uuid
-  #uuid "f6a7b8c9-d0e1-4f2a-3b4c-5d6e7f8a9b0c")
-
-
 (def ^:private fn-description-field-uuid
   #uuid "1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e")
 
@@ -332,14 +328,6 @@
   #uuid "d16294e8-cc37-4a74-9a75-d8e865a9660a")
 
 
-(def ^:private binding-override-kind-field-uuid
-  #uuid "4c41a63b-c4cb-47e0-818a-bf7d129a5066")
-
-
-(def ^:private binding-rename-to-field-uuid
-  #uuid "db3f560b-4b5b-4486-bd72-3cb4626d73d7")
-
-
 (def ^:private binding-type-override-fn-id-field-uuid
   #uuid "fb360739-96aa-46cf-878a-c53398460a72")
 
@@ -367,7 +355,7 @@
   ;; Generic value-resolver: when set, the executor treats the binding's
   ;; stored :value as the INPUT to this graph fn at arg-resolution time
   ;; ("stored value → runtime value"). `:override-kind :secret-path` is
-  ;; the legacy special case (resolver ≡ :vault-get). SECRETS.md
+  ;; the special case (resolver ≡ :vault-get). SECRETS.md
   ;; § generalization.
   #uuid "3b7a9c15-4e2d-4f86-9a01-6c8d2e5b7f13")
 
@@ -526,8 +514,6 @@
                :type :ref
                :ref-entity :fn
                :nullable? true}
-   ;; `:rename-to` retired in Phase 6e — see retire-field call after the
-   ;; entity declaration. The text was replaced by slot.source-slot-id (FK).
    :type-override-fn-id {:uuid binding-type-override-fn-id-field-uuid
                          :type :ref
                          :ref-entity :fn
@@ -795,28 +781,7 @@
       ;; (`check-resource-override-path-collision!`), not a base index.
       ;; -----------------------------------------------------------------
       (ds/add-entity :resource-override resource-override-entity-uuid
-                     resource-override-fields)
-
-      ;; -----------------------------------------------------------------
-      ;; Retired fields (Phase 6e — drop binding.rename-to)
-      ;; -----------------------------------------------------------------
-      ;; The `slot.source-slot-id` FK is the canonical home for renames
-      ;; now. The legacy text column has had no readers since Phase 6c
-      ;; and no writers since Phase 6d; mark it retired so the migration
-      ;; framework issues DROP COLUMN on next deploy.
-      (ds/retire-field :binding :rename-to binding-rename-to-field-uuid)
-      ;; `fn.impl-hash` retired — the base-fn discriminator is now the
-      ;; presence of `return-type-fn-id` (a type-row never has one). The
-      ;; column was always NULL in storage; mark it retired so the
-      ;; migration framework issues DROP COLUMN on next deploy.
-      (ds/retire-field :fn :impl-hash fn-impl-hash-field-uuid)
-      ;; `binding.override-kind` retired (audit-2 stage 2b): :fixed was
-      ;; superseded by :terminal, :default was write-only, :secret-path
-      ;; became the :vault-get resolver form (stage 1 writers + stage 2a
-      ;; boot migration converted every row before this drop). The
-      ;; :override-kind ENUM declaration stays until a retire-enum
-      ;; mechanism exists — an unused pg enum type is inert.
-      (ds/retire-field :binding :override-kind binding-override-kind-field-uuid)))
+                     resource-override-fields)))
 
 
 (defn build-schema

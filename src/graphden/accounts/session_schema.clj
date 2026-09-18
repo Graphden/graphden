@@ -21,7 +21,7 @@
                     only thing a listing can show since the hash never leaves
                     the server. Nullable.
    - `scopes`     — space-separated scope names (\"write execute merge\") for a
-                    `kind` \"api\" bearer. NULL = unscoped (a legacy or
+                    `kind` \"api\" bearer. NULL = unscoped (a
                     browser session; the POLICY layer decides what that
                     means — accounts only stores and surfaces it). The open
                     core does not enforce scopes; the tenancy addon applies

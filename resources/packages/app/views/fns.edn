@@ -24,6 +24,8 @@
    :description "Light rows (`{:fns :truncated?}`, the `:search` shape, capped at 500) for every named fn of the current branch view matching ALL the given axes. Axes AND; `kinds` / `namespaces` OR within; `uses` / `effects` AND within (uses ALL of, carries ALL of). An empty filter set is an empty answer. `kinds` known here: fn / types / secrets / services / tests (`apps` is the tenancy addon's notion and matches nothing — the editor overlays it)."
    :args {:name {:required false :type :nullable-text
                  :description "Case-insensitive substring of the qualified name."}
+          :views {:required false :type [:list :uuid] :value []
+                  :description "Ids of `:explorer-view` fn-defs; a member is in every one of them too (their axes, recursively through their own `also`)."}
           :uses {:required false :type [:list :uuid] :value []
                  :description "Fn ids; a member transitively extends or references every one of them."}
           :effects {:required false :type [:list :text] :value []
@@ -40,7 +42,7 @@
    :effects #{:db}}
 
   {:name :explorer-view
-   :description "A view SAVED IN THE GRAPH — extend this and bind the axes you mean; the Explorer lists every such fn-def (`GET /api/views`) and applies it like a personal view, and ▶ Run answers the member list (`{:fns :truncated?}`). Same evaluation as `:view-members`, with `uses` a single `:fn-ref` (the fn's IDENTITY — a rename never empties the view, and the edge is not a dependency) and `also` a list of OTHER views to intersect with (compose views in the graph instead of repeating chips)."
+   :description "A view SAVED IN THE GRAPH — extend this and bind the axes you mean; the Explorer lists every such fn-def (`GET /api/views`) and applies it like a personal view, and ▶ Run answers the member list (`{:fns :truncated?}`). Same evaluation as `:view-members`, with `uses` a single `:fn-ref` (the fn's IDENTITY — a rename never empties the view, and the edge is not a dependency) and `also` another view to intersect with (compose views in the graph instead of repeating chips; chain for more)."
    :args {:name {:required false :type :nullable-text
                  :description "Case-insensitive substring of the qualified name."}
           :uses {:required false :type :fn-ref
@@ -55,8 +57,8 @@
                     :description "Dotted namespace paths NOT in or below."}
           :unused {:required false :type :bool :value false
                    :description "Only fns nothing references or extends."}
-          :also {:required false :type [:list :any] :value []
-                 :description "Other `:explorer-view` fn-defs (fn-refs); the member set is intersected with each of theirs."}}
+          :also {:required false :type :fn-ref
+                 :description "Another `:explorer-view` fn-def, bound by reference — the member set is intersected with its members (that view may `also` a third, and so on: compose views by chaining)."}}
    :return-type :keyword-map
    :effects #{:db}}
 
@@ -96,7 +98,8 @@
           :kinds {:parent :_vm-field :args {:key {:value :kinds} :default []}}
           :namespaces {:parent :_vm-field :args {:key {:value :namespaces} :default []}}
           :exclude {:parent :_vm-field :args {:key {:value :exclude} :default []}}
-          :unused {:parent :_vm-field :args {:key {:value :unused} :default false}}}}
+          :unused {:parent :_vm-field :args {:key {:value :unused} :default false}}
+          :views {:parent :_vm-field :args {:key {:value :views} :default []}}}}
 
   {:name :api-view-members-handler
    :lambda-params [:request]
@@ -114,6 +117,6 @@
    :args {:path "/views" :handler :api-views-handler}}
 
   {:name :api-view-members
-   :description "POST /api/views/members — evaluate an ad-hoc Explorer filter set; body `{name uses effects kinds namespaces exclude unused}`. Auth-required."
+   :description "POST /api/views/members — evaluate an ad-hoc Explorer filter set; body `{name uses effects kinds namespaces exclude unused views}`. Auth-required."
    :parent :post
    :args {:path "/views/members" :handler :api-view-members-handler}}]}

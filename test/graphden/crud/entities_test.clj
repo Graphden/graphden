@@ -610,14 +610,21 @@
           s-uses (setup/create-slot! storage "uses" :fn-ref)
           s-ns (setup/create-slot! storage "namespaces" :sequence)
           s-unused (setup/create-slot! storage "unused" :bool)
+          s-also (setup/create-slot! storage "also" :fn-ref)
           _ (setup/attach-slot! storage (:id base) (:id s-name) 0)
           _ (setup/attach-slot! storage (:id base) (:id s-uses) 1)
           _ (setup/attach-slot! storage (:id base) (:id s-ns) 2)
           _ (setup/attach-slot! storage (:id base) (:id s-unused) 3)
+          _ (setup/attach-slot! storage (:id base) (:id s-also) 4)
           parent-view (setup/create-composed-fn! storage "alpha-only" (:id base))
           child-view (setup/create-composed-fn! storage "alpha-on-target" (:id parent-view))
+          ;; A third view: `also` the parent view (intersection), plus its
+          ;; own name axis — the composition the evaluator must resolve.
+          also-view (setup/create-composed-fn! storage "targets-in-alpha" (:id base))
           anon-view (sp/create-entity storage :fn {:name nil :parent-ids [(:id base)]})
           ns-bind (sp/create-entity storage :binding {:fn-id (:id parent-view) :slot-id (:id s-ns) :list-append true})]
+      (sp/create-entity storage :binding {:fn-id (:id also-view) :slot-id (:id s-also) :ref-fn-id (:id parent-view)})
+      (sp/create-entity storage :binding {:fn-id (:id also-view) :slot-id (:id s-name) :value "target"})
       (sp/create-entity storage :binding-list-item {:binding-id (:id ns-bind) :position 0 :value "alpha"})
       (sp/create-entity storage :binding {:fn-id (:id child-view) :slot-id (:id s-uses) :ref-fn-id target})
       (sp/create-entity storage :binding {:fn-id (:id child-view) :slot-id (:id s-unused) :value true})
@@ -627,8 +634,22 @@
       (try
         (let [views (entities/list-explorer-views c)
               by-name (into {} (map (juxt :name identity)) views)]
-          (is (= #{"alpha-only" "alpha-on-target"} (set (keys by-name)))
+          (is (= #{"alpha-only" "alpha-on-target" "targets-in-alpha"} (set (keys by-name)))
               "every NAMED descendant of the base-fn, anonymous ones skipped")
+          (is (= {:name "target" :also [(:id parent-view)]} (:filters (by-name "targets-in-alpha")))
+              "`also` decodes as the referenced view's id")
+          (testing "the :views axis — intersect with a graph view's members, recursively"
+            (let [members (fn [f] (into #{} (map :id) (:fns (entities/view-members c f))))]
+              (is (= #{target} (members {:name "target" :views [(:id parent-view)]}))
+                  "the-target is in alpha AND matches the name")
+              (is (= #{target} (members {:views [(:id also-view)]}))
+                  "a view that `also`s another resolves through it")
+              (is (empty? (members {:name "nope" :views [(:id parent-view)]})))
+              (is (= (members {:views [(:id also-view)]})
+                     (members {:views [(:id also-view) (:id also-view)]}))
+                  "a view on the path twice is one view (cycle guard)")
+              (is (empty? (members {:views [(java.util.UUID/randomUUID)]}))
+                  "an unknown view id is an empty axis, not everything")))
           (is (= {:namespaces ["alpha"]} (:filters (by-name "alpha-only"))))
           (is (= {:namespaces ["alpha" "beta"] :uses [target] :unused true}
                  (:filters (by-name "alpha-on-target")))

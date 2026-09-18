@@ -10,30 +10,25 @@
 
 
 (defbase view-members
-  [name uses effects kinds namespaces exclude unused]
+  [name uses effects kinds namespaces exclude unused views]
   ;; An ad-hoc chip set from the editor — every axis a plain value.
   (cr/record-effect! :db)
   (entities/view-members ctx {:name name :uses uses :effects effects :kinds kinds
-                              :namespaces namespaces :exclude exclude :unused unused}))
+                              :namespaces namespaces :exclude exclude :unused unused
+                              :views views}))
 
 
 (defbase explorer-view
   [name uses effects kinds namespaces exclude unused also]
   ;; A view SAVED IN THE GRAPH: `uses` arrives as the bound fn's id (a
-  ;; `:fn-ref` slot — identity, never evaluated), `also` as callables
-  ;; over other views whose members this one intersects with.
+  ;; `:fn-ref` slot — identity, never evaluated), `also` as another view's
+  ;; id (`:fn-ref` too) whose members this one intersects with; the
+  ;; evaluator resolves it through its decoded slots, recursively
+  ;; through ITS `also`, cycle-guarded.
   (cr/record-effect! :db)
-  (let [own (entities/view-members ctx {:name name :uses (when uses [uses]) :effects effects
-                                        :kinds kinds :namespaces namespaces :exclude exclude
-                                        :unused unused})
-        keep (reduce (fn [ids view-fn]
-                       (let [theirs (into #{} (map :id) (:fns (view-fn nil)))]
-                         (into #{} (filter theirs) ids)))
-                     (into #{} (map :id) (:fns own))
-                     (or also []))]
-    (if (seq also)
-      (assoc own :fns (filterv (comp keep :id) (:fns own)))
-      own)))
+  (entities/view-members ctx {:name name :uses (when uses [uses]) :effects effects
+                              :kinds kinds :namespaces namespaces :exclude exclude
+                              :unused unused :views (when also [also])}))
 
 
 (defbase explorer-views

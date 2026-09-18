@@ -158,6 +158,20 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
     assert(JSON.parse(store.get('graphden.explorer.filters')).view === null, 'no dangling view name');
   });
 
+  await test('name + views axes: chips, server body, a graph view\'s `also` becomes a "view" chip', async () => {
+    const { ctx, chips, fetches } = filtersCtx();
+    ctx.gdSetName('handler');
+    ctx.gdAddView({ id: 'v1', name: 'api-surface' });
+    ctx.gdToggleKind('apps');
+    await tick(); await tick();
+    const labels = chips.children.map((c) => c.children.find((x) => String(x.className).includes('kind-label')).textContent);
+    assert(labels.join('|') === 'name handler|view api-surface', 'chips for the two axes: ' + labels.join('|'));
+    const call = fetches.filter((f) => f.url === '/api/views/members').pop();
+    assert(call && call.body.name === 'handler' && call.body.views.join() === 'v1', 'posted name + view ids: ' + JSON.stringify(call?.body));
+    assert(call && !call.body.kinds.includes('apps'), 'apps stays a client overlay — never sent to the server');
+    assert(ctx.gdFilterCount() === 3, 'counted: ' + ctx.gdFilterCount());
+  });
+
   console.log(failures === 0 ? 'PASS: ' + passes + ' assertions' : 'FAIL: ' + failures + ' of ' + (passes + failures));
   process.exit(failures === 0 ? 0 : 1);
 })();

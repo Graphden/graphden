@@ -534,7 +534,9 @@
 (defn- normalise-filters
   "The wire/impl shape of an Explorer filter set → the internal one:
    `{:name text :uses [uuid…] :effects [kw…] :kinds [kw…]
-     :namespaces [path…] :exclude [path…] :unused bool}`. Accepts
+     :namespaces [path…] :exclude [path…] :unused bool :views [uuid…]}`
+   (`:views` — ids of `:explorer-view` fn-defs whose members this set
+   intersects with; the `also` slot on the wire). Accepts
    strings or keywords for kinds/effects, strings or uuids for ids,
    nil / missing for \"no filter on this axis\"."
   [filters]
@@ -551,7 +553,8 @@
      :kinds (vec-of kw (:kinds filters))
      :namespaces (vec-of text (:namespaces filters))
      :exclude (vec-of text (:exclude filters))
-     :unused (boolean (:unused filters))}))
+     :unused (boolean (:unused filters))
+     :views (vec-of ->uuid (:views filters))}))
 
 
 (defn- view-filter-preds
@@ -587,42 +590,6 @@
       (seq exclude) (conj (let [out? (ns-path-pred exclude)]
                             (fn [f] (not (out? (get @paths (:namespace-id f)))))))
       unused (conj (fn [f] (empty? (get @adj (:id f))))))))
-
-
-(defn- view-members*
-  "Light rows for every NAMED fn matching ALL axes of `filters` (see
-   `view-filter-preds`), capped at `view-result-cap`. An EMPTY filter
-   set is an empty view — the Explorer never asks for \"everything\"
-   this way (that is the lazy tree), and a view that means everything
-   is a bug on the caller's side, not a 500-row dump."
-  [{:keys [rev-index] :as env} storage filters]
-  (let [filters (normalise-filters filters)
-        preds (view-filter-preds env storage filters)
-        ;; Named rows only, and not the `_anon-<hash>` auto-names the
-        ;; parser gives inline fn-defs — the tree never shows those as
-        ;; leaves, so a view must not either.
-        shown? (fn [f] (and (:name f) (not (str/starts-with? (:name f) "_anon-"))))
-        matches (if (empty? preds)
-                  []
-                  (->> @(:roled-fns env)
-                       (filterv (fn [f]
-                                  (and (shown? f)
-                                       (every? #(% f) preds))))))
-        limited (into [] (take view-result-cap) matches)]
-    {:fns (mapv (partial light-fn-row @rev-index) limited)
-     :truncated? (> (count matches) view-result-cap)}))
-
-
-(defn view-members
-  "The Explorer's structured filter evaluation — `filters` is a map
-   `{:name :uses :effects :kinds :namespaces :exclude :unused}` (every
-   key optional; see `normalise-filters`), the answer `{:fns :truncated?}`
-   in the `:search` light-row shape. One projection behind BOTH
-   `POST /api/views/members` (an ad-hoc chip set) and the
-   `:explorer-view` base-fn (a view saved IN the graph as a fn-def)."
-  [ctx filters]
-  (let [storage (:storage ctx)]
-    (view-members* (graph-list-env ctx storage) storage filters)))
 
 
 ;; ---------------------------------------------------------------------------
@@ -677,17 +644,14 @@
       (lit-list :kinds) (assoc :kinds (lit-list :kinds))
       (lit-list :namespaces) (assoc :namespaces (lit-list :namespaces))
       (lit-list :exclude) (assoc :exclude (lit-list :exclude))
-      (some-> (bound :also) items seq) (assoc :also (into [] (keep :ref-fn-id) (items (bound :also)))))))
+      (some-> (bound :also) :ref-fn-id) (assoc :also [(:ref-fn-id (bound :also))]))))
 
 
-(defn list-explorer-views
-  "Every NAMED fn that extends the `:explorer-view` base-fn (any depth),
-   with its filters decoded — `[{:id :name :namespace-id :filters} …]`,
-   the Explorer's \"views saved in the graph\" list. Empty when the
-   base-fn isn't loaded (no `app/views` module) or nothing extends it."
-  [ctx]
-  (let [base (types-api/cached-or-load-graph ctx)
-        fns (:fns base)
+(defn- explorer-views-decoded
+  "`list-explorer-views` over an already-built list env (the base graph
+   it holds) — what `view-members*` reads for the `:views` axis."
+  [{:keys [base]}]
+  (let [fns (:fns base)
         base-id (some #(when (and (= explorer-view-base-name (:name %))
                                   (empty? (:parent-ids %)))
                          (:id %))
@@ -720,6 +684,70 @@
                       :name (:name f)
                       :namespace-id (:namespace-id f)
                       :filters (decode-view-filters env (:id f))})))))))
+
+
+(defn list-explorer-views
+  "Every NAMED fn that extends the `:explorer-view` base-fn (any depth),
+   with its filters decoded — `[{:id :name :namespace-id :filters} …]`,
+   the Explorer's \"views saved in the graph\" list (`:filters` carries
+   `:also`, the ids of the views it intersects with). Empty when the
+   base-fn isn't loaded (no `app/views` module) or nothing extends it."
+  [ctx]
+  (explorer-views-decoded {:base (types-api/cached-or-load-graph ctx)}))
+
+
+(defn- view-members*
+  "Light rows for every NAMED fn matching ALL axes of `filters` (see
+   `view-filter-preds`), capped at `view-result-cap`. An EMPTY filter
+   set is an empty view — the Explorer never asks for \"everything\"
+   this way (that is the lazy tree), and a view that means everything
+   is a bug on the caller's side, not a 500-row dump."
+  ([env storage filters] (view-members* env storage filters #{}))
+  ([{:keys [rev-index] :as env} storage filters seen]
+   (let [filters (normalise-filters filters)
+         preds (view-filter-preds env storage filters)
+         ;; `:views` — intersect with each referenced graph view's OWN
+         ;; members (its decoded axes, recursively through its `also`).
+         ;; A view already on the path is skipped: a cycle through
+         ;; `also` must not recurse forever, and "X also X" means X.
+         in-views (when (seq (:views filters))
+                    (let [by-id (into {} (map (juxt :id identity)) (explorer-views-decoded env))]
+                      (reduce (fn [acc vid]
+                                (if (or (seen vid) (not (get by-id vid)))
+                                  acc
+                                  (let [theirs (view-members* env storage
+                                                              (let [f (:filters (get by-id vid))]
+                                                                (assoc f :views (:also f)))
+                                                              (conj seen vid))
+                                        ids (into #{} (map :id) (:fns theirs))]
+                                    (if acc (into #{} (filter ids) acc) ids))))
+                              nil (:views filters))))
+         preds (cond-> preds in-views (conj (fn [f] (contains? in-views (:id f)))))
+         ;; Named rows only, and not the `_anon-<hash>` auto-names the
+         ;; parser gives inline fn-defs — the tree never shows those as
+         ;; leaves, so a view must not either.
+         shown? (fn [f] (and (:name f) (not (str/starts-with? (:name f) "_anon-"))))
+         matches (if (empty? preds)
+                   []
+                   (->> @(:roled-fns env)
+                        (filterv (fn [f]
+                                   (and (shown? f)
+                                        (every? #(% f) preds))))))
+         limited (into [] (take view-result-cap) matches)]
+     {:fns (mapv (partial light-fn-row @rev-index) limited)
+      :truncated? (> (count matches) view-result-cap)})))
+
+
+(defn view-members
+  "The Explorer's structured filter evaluation — `filters` is a map
+   `{:name :uses :effects :kinds :namespaces :exclude :unused :views}`
+   (every key optional; see `normalise-filters`), the answer `{:fns :truncated?}`
+   in the `:search` light-row shape. One projection behind BOTH
+   `POST /api/views/members` (an ad-hoc chip set) and the
+   `:explorer-view` base-fn (a view saved IN the graph as a fn-def)."
+  [ctx filters]
+  (let [storage (:storage ctx)]
+    (view-members* (graph-list-env ctx storage) storage filters)))
 
 
 (defn- list-scope-index

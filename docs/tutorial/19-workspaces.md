@@ -48,6 +48,10 @@ ADD A FILTER
     + pick a fn — only what is built on it
   Effect
     io  db  network  state  time  random  env  process  raw-sql
+  In a graph view
+    ☐ api-surface                   ← the views saved in the graph
+  Name contains
+    [ part of a name ]
   ☐ Unused — nothing references or extends it
 ```
 
@@ -61,6 +65,10 @@ ADD A FILTER
   by hand. Pick a second fn and members must use both.
 - **Effect** — every fn whose computed effect footprint carries the
   kind; two kinds means both.
+- **In a graph view** — every fn that is *also* a member of a view
+  saved in the graph (below): the chip reads `view api-surface`.
+- **Name contains** — the saved form of the filter box: a `name …`
+  chip that stays on and can be part of a view.
 - **Unused** — nothing in the graph extends, references or resolves
   the fn: the dead-code view. Combine it with a namespace — package
   leaves are public API and "unused in this graph" by design.
@@ -117,8 +125,9 @@ device starts at **All functions**, signing out does not clear them.
 `explorer-view` is a base-fn whose slots are the filter axes —
 `name`, `uses` (a `:fn-ref`: the fn's *identity*, so a rename never
 empties the view and the edge is not a dependency), `effects`,
-`kinds`, `namespaces`, `exclude`, `unused`, and `also` (other views
-to intersect with — compose views instead of repeating chips). A
+`kinds`, `namespaces`, `exclude`, `unused`, and `also` (another view,
+also by reference — members must be in it too; that view may `also` a
+third, so views compose by chaining instead of repeating chips). A
 view fn is versioned, branch-scoped and reviewable like any other
 change; every editor on the branch lists it under **In the graph**;
 **↗** opens it on the canvas; **▶ Run** answers the member list. The

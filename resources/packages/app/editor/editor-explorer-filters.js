@@ -9,7 +9,9 @@
 //   uses        the fn every member transitively extends/references (AND)
 //   effects     effect kinds the member's footprint carries (AND)
 //   unused      nothing references or extends it
-//   name        the filter box (substring of the qualified name)
+//   name        substring of the qualified name (a saved view's `name` axis;
+//               the filter box is the live, unsaved form of the same thing)
+//   views       graph views the member is also in (a view's `also`)
 // Axes AND. A VIEW is a named, saved filter set — personal (this browser)
 // or SAVED IN THE GRAPH as an fn-def extending `:explorer-view`, which the
 // server lists back (`GET /api/views`).
@@ -44,7 +46,8 @@ const KIND_AXIS = ['fn', 'types', 'secrets', 'services', 'apps', 'tests'];
 const PROBLEM_AXIS = ['failed', 'type-errors', 'lint'];
 
 function gdEmptyFilters() {
-  return { kinds: [], problems: [], namespaces: [], exclude: [], uses: [], effects: [], unused: false };
+  return { kinds: [], problems: [], namespaces: [], exclude: [], uses: [], effects: [], unused: false,
+           name: '', views: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -70,6 +73,12 @@ function _normFilters(raw) {
     .map((u) => ({ id: u.id, name: String(u.name || u.id) }));
   f.effects = arr(raw.effects);
   f.unused = !!raw.unused;
+  f.name = typeof raw.name === 'string' ? raw.name.trim() : '';
+  // `views` — graph views this set intersects with (a view's `also`, or a
+  // "view <name>" chip the reader added): `{id, name}`, like `uses`.
+  f.views = (Array.isArray(raw.views) ? raw.views : [])
+    .filter((v) => v && typeof v.id === 'string')
+    .map((v) => ({ id: v.id, name: String(v.name || v.id) }));
   return f;
 }
 
@@ -169,14 +178,14 @@ function gdActiveViewName() { return _viewName; }
 // Chip-level count and "anything on?" for the trail / clear button.
 function gdFilterCount(f = _filters) {
   return f.kinds.length + f.problems.length + f.namespaces.length + f.exclude.length
-    + f.uses.length + f.effects.length + (f.unused ? 1 : 0);
+    + f.uses.length + f.effects.length + (f.unused ? 1 : 0) + (f.name ? 1 : 0) + f.views.length;
 }
 function gdFiltersActive() { return gdFilterCount() > 0; }
 
 // The axes the SERVER evaluates; when any is on, the tree is the member
 // list (`gdViewMembers`) rendered force-expanded, like a search.
 function gdServerAxesActive(f = _filters) {
-  return f.uses.length > 0 || f.effects.length > 0 || !!f.unused;
+  return f.uses.length > 0 || f.effects.length > 0 || !!f.unused || !!f.name || f.views.length > 0;
 }
 function gdViewMembers() { return _viewMembers; }
 
@@ -277,6 +286,25 @@ function gdToggleEffect(kind) {
   _afterChange(null);
 }
 
+function gdSetName(text) {
+  _filters.name = String(text || '').trim();
+  _detachView();
+  _afterChange(_filters.name ? 'Only names containing ' + _filters.name : null);
+}
+
+function gdAddView(view) {
+  if (!view?.id || _filters.views.some((v) => v.id === view.id)) return;
+  _filters.views.push({ id: view.id, name: view.name || view.id });
+  _detachView();
+  _afterChange('Only fns in view ' + _filters.views[_filters.views.length - 1].name);
+}
+
+function gdRemoveView(id) {
+  _filters.views = _filters.views.filter((v) => v.id !== id);
+  _detachView();
+  _afterChange(null);
+}
+
 function gdToggleUnused() {
   _filters.unused = !_filters.unused;
   _detachView();
@@ -350,9 +378,13 @@ function _fetchViewMembers() {
     uses: _filters.uses.map((u) => u.id),
     effects: _filters.effects,
     unused: _filters.unused,
+    name: _filters.name || null,
+    views: _filters.views.map((v) => v.id),
     // The client already narrows by these; sending them too keeps the
     // member list (and its truncation) honest about what is on screen.
-    kinds: _filters.kinds,
+    // `apps` is the tenancy addon's notion — the server matches nothing
+    // for it, so it stays a client overlay (fnKindVisible) only.
+    kinds: _filters.kinds.filter((k) => k !== 'apps'),
     namespaces: _filters.namespaces,
     exclude: _filters.exclude,
   };
@@ -406,12 +438,19 @@ async function gdFetchSharedViews(force) {
       f.exclude = (src.exclude || []).map(String);
       f.effects = (src.effects || []).map(String);
       f.unused = !!src.unused;
+      f.name = typeof src.name === 'string' ? src.name : '';
       f.uses = (src.uses || []).map((id) => {
         const fn = (typeof lookups !== 'undefined') ? lookups?.fnMap?.get(id) : null;
         return { id, name: fn ? ((typeof getQualifiedFnName === 'function' ? getQualifiedFnName(fn) : fn.name) || id) : id };
       });
       return { name: v.name, id: v.id, filters: f, shared: true, also: src.also || [] };
     });
+    // A view's `also` names another graph view — it applies as a
+    // "view <name>" chip (the `views` axis), resolved against the list.
+    const nameOf = new Map(_sharedViews.map((v) => [v.id, v.name]));
+    for (const v of _sharedViews) {
+      v.filters.views = (v.also || []).map((id) => ({ id, name: nameOf.get(id) || id }));
+    }
   } catch (_) { _sharedViews = []; }
   return _sharedViews;
 }
@@ -446,6 +485,9 @@ window.gdAddUses = gdAddUses;
 window.gdRemoveUses = gdRemoveUses;
 window.gdToggleEffect = gdToggleEffect;
 window.gdToggleUnused = gdToggleUnused;
+window.gdSetName = gdSetName;
+window.gdAddView = gdAddView;
+window.gdRemoveView = gdRemoveView;
 window.gdClearFilters = gdClearFilters;
 window.gdApplyView = gdApplyView;
 window.gdSaveView = gdSaveView;

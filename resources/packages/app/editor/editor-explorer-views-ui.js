@@ -50,6 +50,8 @@ function gdRenderFilterChips() {
   for (const u of gdFilters().uses) host.appendChild(_chip('uses ' + u.name, 'Only fns using ' + u.name, () => gdRemoveUses(u.id)));
   for (const e of gdFilters().effects) host.appendChild(_chip('fx ' + e, 'Only fns with effect ' + e, () => gdToggleEffect(e)));
   if (gdFilters().unused) host.appendChild(_chip('unused', 'Only unused fns', () => gdToggleUnused()));
+  if (gdFilters().name) host.appendChild(_chip('name ' + gdFilters().name, 'Only names containing ' + gdFilters().name, () => gdSetName('')));
+  for (const v of gdFilters().views) host.appendChild(_chip('view ' + v.name, 'Only fns in view ' + v.name, () => gdRemoveView(v.id)));
   const addBtn = document.getElementById('gd-filter-add');
   if (addBtn) addBtn.hidden = false;
 }
@@ -195,6 +197,51 @@ function _renderFilterAdd(el, anchorEl) {
   }
   el.appendChild(fxRow);
 
+  // Views saved in the graph — "also in view X". Loaded once per open;
+  // the section appears when the fetch lands.
+  const shared = (typeof gdSharedViewsCached === 'function') ? gdSharedViewsCached() : null;
+  if (shared === null && typeof gdFetchSharedViews === 'function') {
+    gdFetchSharedViews().then(() => { if (_addPopEl === el) _renderFilterAdd(el, anchorEl); });
+  }
+  if (shared?.length) {
+    _section(el, 'In a graph view');
+    for (const v of shared) {
+      const on = gdFilters().views.some((x) => x.id === v.id);
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'gd-views-row' + (on ? ' sel' : '');
+      b.setAttribute('role', 'checkbox');
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+      b.dataset.view = v.id;
+      b.title = _summarise(v.filters);
+      b.textContent = (on ? '☑ ' : '☐ ') + v.name;
+      b.addEventListener('click', () => {
+        if (on) gdRemoveView(v.id); else gdAddView(v);
+        _renderFilterAdd(el, anchorEl);
+      });
+      el.appendChild(b);
+    }
+  }
+
+  // Name — the saved form of the filter box.
+  _section(el, 'Name contains');
+  const nameRow = document.createElement('div');
+  nameRow.className = 'gd-views-form';
+  const nameIn = document.createElement('input');
+  nameIn.type = 'text';
+  nameIn.className = 'gd-views-input';
+  nameIn.placeholder = 'part of a name — Enter to add the chip';
+  nameIn.setAttribute('aria-label', 'Only names containing');
+  nameIn.value = gdFilters().name || '';
+  nameIn.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    gdSetName(nameIn.value);
+    _renderFilterAdd(el, anchorEl);
+  });
+  nameRow.appendChild(nameIn);
+  el.appendChild(nameRow);
+
   // Unused
   const un = document.createElement('button');
   un.type = 'button';
@@ -251,6 +298,8 @@ function _summarise(f) {
   for (const u of f.uses) parts.push('uses ' + u.name);
   for (const e of f.effects) parts.push('fx ' + e);
   if (f.unused) parts.push('unused');
+  if (f.name) parts.push('name ' + f.name);
+  for (const v of f.views || []) parts.push('view ' + v.name);
   return parts.join(' · ') || 'everything';
 }
 
@@ -409,6 +458,13 @@ async function gdShareViewToGraph(name) {
     if (gdFilters().namespaces.length) await bind('namespaces', { value: JSON.stringify(gdFilters().namespaces) });
     if (gdFilters().exclude.length) await bind('exclude', { value: JSON.stringify(gdFilters().exclude) });
     if (gdFilters().unused) await bind('unused', { value: 'true' });
+    if (gdFilters().name) await bind('name', { value: JSON.stringify(gdFilters().name) });
+    if (gdFilters().views.length) {
+      await bind('also', { 'ref-fn-id': gdFilters().views[0].id });
+      if (gdFilters().views.length > 1 && typeof gdToast === 'function') {
+        gdToast('A graph view holds ONE "also" — the first was kept; chain views for more');
+      }
+    }
     gdInvalidateSharedViews();
     gdMarkViewApplied(nm);
     if (typeof gdToast === 'function') gdToast('View "' + nm + '" saved in the graph');

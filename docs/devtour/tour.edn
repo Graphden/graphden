@@ -849,9 +849,10 @@
     {:ns graphden.crud.entities.list :defn view-members
      :say "The Explorer's one evaluator for narrowing by GRAPH FACTS — a
            filter set `{:name :uses :effects :kinds :namespaces :exclude
-           :unused}` answered as light rows. Axes AND; `:uses` is by fn ID
-           over the reverse transitive closure (a rename never empties a
-           saved view). Two callers, one projection: the editor's ad-hoc
+           :unused :views}` answered as light rows. Axes AND; `:uses` is by
+           fn ID over the reverse transitive closure (a rename never empties
+           a saved view); `:views` intersects with other graph views'
+           members, recursing through their own `also`, cycle-guarded. Two callers, one projection: the editor's ad-hoc
            chip set (`POST /api/views/members`) and the `:explorer-view`
            base-fn — a view saved IN the graph as an fn-def, listed back by
            `list-explorer-views` with its bound slots decoded."}]}

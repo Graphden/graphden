@@ -1,34 +1,38 @@
-# Lesson 17 — Finding your way: the lens and the Inspector
+# Lesson 17 — Finding your way: kind filters and the Inspector
 
 **Goal**: by the end of this lesson you can narrow the Explorer to
-one *kind* of entity with the lens chips, and read everything
-about a selected fn — bindings, runs, versions — in the right-hand
+one *kind* of entity with the kind chips, and read everything about
+a selected fn — bindings, runs, versions — in the right-hand
 Inspector without opening a single popover.
 
-**Concepts introduced**: the **lens** (kind-focus chips), **kind
-markers**, and the **Inspector** panel with its four tabs.
+**Concepts introduced**: the **kind filters** (the chips under the
+filter box), **kind markers**, and the **Inspector** panel with its
+four tabs.
 
-## The lens — focus the tree on a kind
+## The kind chips — one row of filters
 
-Under the Explorer's search box sits a row of **kind chips**:
+Under the Explorer's filter box sits a row of **kind chips**:
 
 ```text
 ◍ all   λ fn   T types   🔒 secrets   ⚙ services 2   ▣ apps 1   ✓ tests 3
 ✕ failed 1   ⚠ type errors 2   ⚐ lint 1
++ filter
 ```
 
 Click a chip and the tree narrows to rows of that kind — services
-under the **services** chip, type definitions under **types**, and
-so on. The chips are a *lens*, not a search: the tree keeps its
-namespace shape, it just hides rows that don't match. **all**
-clears the focus.
+under **services**, type definitions under **types**, and so on.
+A chip is a **filter**, not a search: the tree keeps its namespace
+shape, it just hides rows that don't match. A second chip adds to
+the selection (services *or* apps); clicking a pressed chip removes
+it; **◍ all** clears *every* filter at once — the one gesture that
+always brings the whole tree back.
 
 Details worth knowing:
 
 - A fn can be several kinds at once (an app's handler may also be
-  a service) — it matches *any* focused chip, and its row carries
-  a marker per kind (⚙, ▣, 🔒).
-- The trailing `fx marks` chip is a *detail* toggle, not a lens:
+  a service) — it matches *any* pressed kind chip, and its row
+  carries a marker per kind (⚙, ▣, 🔒).
+- The trailing `fx marks` chip is a *detail* toggle, not a filter:
   it marks every fn whose execution carries effects with a small
   `fx` (hover it for the exact footprint — `io`, `time`, …)
   without hiding anything. Off by default; flip it on to see the
@@ -36,26 +40,31 @@ Details worth knowing:
 - **services** and **apps** show a live count; the **apps** chip
   appears only when the deployment has app routing at all
   (Lesson 27).
-- Focusing **secrets** also reveals the **+ New secret** button
-  (signed-in only) — creating secrets lives behind the lens that
+- Pressing **secrets** also reveals the **+ New secret** button
+  (signed-in only) — creating secrets lives behind the filter that
   shows them (Lesson 13).
 - The fn you currently have **selected** is never hidden, whatever
-  the lens — if you can open it, it stays in the tree.
-- Your lens choice is a per-browser preference (like the workspace
-  scope from Lesson 19); it survives reload and affects nobody
-  else.
+  the filters — if you can open it, it stays in the tree.
+- Your filters are a per-browser preference; they survive reload
+  and affect nobody else. The chip top-left that reads
+  **All functions** counts them (`2 filters`) — Lesson 19 makes it
+  a named **view**.
 
-### Problem lenses
+### Problem chips
 
-The second row of chips — **✕ failed**, **⚠ type errors**, **⚐ lint** —
-focuses on what needs attention rather than on what a row *is*; it
-overlays the kind chips (a failing fn is still a fn). The counts, the
-marks on rows and cards, and where each mark leads in the Inspector are
-[lesson 16](16-errors-and-diagnostics.md)'s subject.
+The second row — **✕ failed**, **⚠ type errors**, **⚐ lint** —
+filters on what needs attention rather than on what a row *is*; it
+composes with the kind chips (a failing fn is still a fn). The counts,
+the marks on rows and cards, and where each mark leads in the
+Inspector are [lesson 16](16-errors-and-diagnostics.md)'s subject.
 
-The lens composes with the workspace (Lesson 19): the workspace
-picks *which projects* you see, the lens picks *which kind of
-rows* within them.
+### The other filters
+
+Kinds are the fixed half of the row. **+ filter** opens the rest —
+*only these namespaces*, *only what is built on this fn*, *only fns
+with this effect*, *unused* — each of which appears as its own chip
+with an ×. Those, and saving a set of chips as a **view**, are
+[lesson 19](19-workspaces.md).
 
 ## The Inspector — the right panel
 
@@ -117,7 +126,7 @@ The Inspector is the "read" side of the editor: popovers are for
 
 1. Click the **⚙ services** chip — the tree collapses to service
    fns; note the count on the chip. Click **◍ all** to clear.
-2. Focus **🔒 secrets** — the **+ New secret** button appears
+2. Press **🔒 secrets** — the **+ New secret** button appears
    under the chips (signed-in only).
 3. Select any fn and walk the Inspector tabs: **Bindings** shows
    the same slot table you'd assemble by hand from Lesson 03;
@@ -125,7 +134,8 @@ The Inspector is the "read" side of the editor: popovers are for
 4. Select `const` (core.logic) and open **Overview**: the Used-by
    section lists the crowd of fns that pin constants through it,
    "Extended by" first. Click a row — the editor jumps there.
-5. Reload the page — your lens choice sticks.
+5. Reload the page — your chips stick, and the chip top-left counts
+   them.
 6. Build Lesson 16's duplicate pair (`tutorial-page-attrs` /
    `tutorial-row-attrs`) and click **⚐ lint**: the tree collapses to
    the two rows, each with `⚐1`, their namespace row with `⚐ 2`, the

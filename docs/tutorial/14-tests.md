@@ -7,7 +7,7 @@ them for you automatically.
 
 **Concepts introduced**: the `tests` namespace segment, `:assert`,
 `:assert-eq`, test statuses ("stale by construction"), the `tests`
-lens with its **▶ Run all** action, the Inspector's **Test** section,
+filter chip with its **▶ Run all** action, the Inspector's **Test** section,
 auto-run on writes.
 
 ## What a test is
@@ -52,7 +52,7 @@ running editor:
    `2 + 2` (run it: `4`). In `fns.edn` terms:
    `{:name :tutorial-sum :parent :add :args {:nums [2 2]}}`.
 2. Create a namespace `tests` (or `myproj.tests` under your project's
-   root — that keeps it inside your workspace scope).
+   root — that keeps it inside a namespace filter you may have on).
 3. Click `+` in it to add a new fn. Name it `two-plus-two` — the
    name states the invariant.
 4. Set its parent to `:assert-eq`. The editor shows two free args.
@@ -80,13 +80,13 @@ Now the surfaces:
 - In the Explorer's filter bar click the **✓ tests** chip — the tree
   focuses on your tests, each with a status dot: **green** passed,
   **red** failed, **grey** not run since its last edit.
-- With the lens on, the chip row shows **▶ Run all** — every test
+- With the ✓ tests chip on, the chip row shows **▶ Run all** — every test
   on the branch runs, and the dots update one by one as each run
-  lands (the lens keeps a live signal open, so nothing needs a
+  lands (the chip keeps a live signal open, so nothing needs a
   refresh). The chip's number is how many tests of YOURS the branch
   has — and, in red, how many of them failed. The platform ships its
   own self-tests too (`core.tests`, `web.tests`, …): they show under
-  the lens with their dots and run one at a time from the Inspector,
+  the tree with their dots and run one at a time from the Inspector,
   but Run all leaves them out — they are graphden's tests, not your
   project's.
 - Select a test and open the Inspector's **Bindings** tab: a

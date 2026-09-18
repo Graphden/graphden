@@ -57,15 +57,15 @@ of order.
 | 13 | [Effects and the `:secret` type-marker](13-effects-and-secrets.md) | ✅ written · ▶ interactive |
 | 14 | [Tests — the `tests` namespace](14-tests.md) | ✅ written · ▶ interactive |
 | 15 | [Debugging: traces, the call tree, and catching a request](15-debugging-traces.md) | ✅ written · ▶ interactive |
-| 16 | [When something breaks, and when it just repeats: the problem lenses](16-errors-and-diagnostics.md) | ✅ written · ▶ interactive |
+| 16 | [When something breaks, and when it just repeats: the problem filters](16-errors-and-diagnostics.md) | ✅ written · ▶ interactive |
 
 ### The editor
 
 | # | Lesson | Status |
 |---|---|---|
-| 17 | [Finding your way: the lens and the Inspector](17-explorer-and-inspector.md) | ✅ written · ▶ interactive |
+| 17 | [Finding your way: kind filters and the Inspector](17-explorer-and-inspector.md) | ✅ written · ▶ interactive |
 | 18 | [Working without the mouse — keyboard & accessibility](18-keyboard-and-accessibility.md) | ✅ written · ▶ interactive |
-| 19 | [Workspaces — scope the editor to your projects](19-workspaces.md) | ✅ written · ▶ interactive |
+| 19 | [Filters and views — look at the part of the graph you mean](19-workspaces.md) | ✅ written · ▶ interactive |
 | 20 | [Branches — fork, edit, diff, merge](20-branches.md) | ✅ written · ▶ interactive |
 | 21 | [Review — propose, approve, protected merge](21-review.md) | ✅ written · ▶ interactive |
 | 22 | [Editing the editor: asset overrides](22-asset-overrides.md) | ✅ written · ▶ interactive |

@@ -149,7 +149,7 @@ approvals on the target, comment threads and suggestions — is
      `∿ via <fn>`). Click the badge: an ancestor is revealed inside
      the card, at the level that holds it, so you see its `Δ` rows
      in the context of THIS graph; a referenced fn opens as the root.
-     The `∿ inside` lens chip turns these marks off.
+     The `∿ inside` chip turns these marks off.
    - **A replaced branch of the graph.** When an arg points at one
      fn here and another there (`⋯-bind` it to a different fn on
      your branch), the canvas shows both: your side is the real
@@ -157,7 +157,7 @@ approvals on the target, comment threads and suggestions — is
      dashed, dimmed GHOST — that fn and what it composes, read-only,
      joined to the arg by a dashed elbow. Click its head to fold it.
 
-7. Under the kind chips the Explorer gains a **diff lens row**:
+7. Under the kind chips the Explorer gains a **diff chip row**:
    `Δ changed` (show only what differs, auto-expanding the groups
    that hold them), `+`/`±`/`−` by change type, `Aa core` (hide
    edits that touch nothing but names and descriptions), `💬 notes`
@@ -165,9 +165,9 @@ approvals on the target, comment threads and suggestions — is
    next to the badge) and `fx` (only changes whose EFFECT SET
    differs — those carry an `effects: pure here · time there`
    mark, the strongest "this affects behaviour" signal). While any
-   lens filter is on, the chip turns dashed and counts
+   diff chip is on, the chip turns dashed and counts
    `visible/total` (say `· 1/3`) — a reminder that "no badges"
-   means "hidden by the lens", not "no changes".
+   means "hidden by the chip", not "no changes".
 8. The diff isn't only about values — it shows the graph's SHAPE
    changing too. Each entry kind reads differently:
 
@@ -284,7 +284,7 @@ curl -X POST "$BASE/api/branches" \
 ```
 
 While either the SOURCE or the TARGET branch carries recorded
-type diagnostics (what the Explorer's ⚠ type errors lens marks — Lesson 16),
+type diagnostics (what the Explorer's ⚠ type errors filter marks — Lesson 16),
 merging INTO such a branch is refused with a 409
 (`:merge-protection-violation`) whose message names the broken
 fns: "Merge blocked: target branch forbids invalid fns —

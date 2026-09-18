@@ -1,138 +1,22 @@
-// Editor Shell CHIPS — the Explorer's Workspace and Packages popovers.
+// Editor Shell CHIPS — the Explorer's Packages popover.
 //
-// Two of the three Explorer
-// context-row chips (the branch chip is editor-branches.js): the WORKSPACE chip
-// (`#gd-ws-chip` → `gdOpenWsPop`, a multi-select checklist of root-namespace
-// "projects" plus restore of ⊘-hidden namespaces; the store itself is
-// editor-branch-context.js) and the PACKAGES chip (`#gd-pkg-chip`, Build
-// surface only): `gdRevealPkgChip` shows it only when the optional `registry`
-// package is present (`window.API.api_packages_installed` probe, never a name),
-// `gdOpenPkgPop` opens the `#gd-pkg-pop` panel that lazy-loads
-// `GET /partials/packages-panel`. Install is a BUILD act, so it lives here and
-// not on the Organization pane. Both are `.gd-pop`s over a transparent scrim
-// and carry the shared × (`ensurePopoverClose`). Wires the chips at load.
+// Of the three Explorer context-row chips, the branch chip is
+// editor-branches.js and the VIEW chip (`#gd-ws-chip`) is
+// editor-explorer-filters.js; this module owns the PACKAGES chip
+// (`#gd-pkg-chip`, Build surface only): `gdRevealPkgChip` shows it only when
+// the optional `registry` package is present (`window.API.api_packages_installed`
+// probe, never a name), `gdOpenPkgPop` opens the `#gd-pkg-pop` panel that
+// lazy-loads `GET /partials/packages-panel`. Install is a BUILD act, so it
+// lives here and not on the Organization pane. A `.gd-pop` over a transparent
+// scrim with the shared × (`ensurePopoverClose`). Wires the chip at load.
 
 (() => {
 
-  // ---- Workspace switcher --------------------------------------------------
-  // The context-bar chip scopes the explorer to a namespace root (a "workspace"
-  // is just a set of namespace roots — see editor-branches.js). "All functions"
-  // clears the focus. Reuses the existing lazy tree; no new entity, no backend.
-  function gdWsChipLabel() {
-    const b = document.querySelector('#gd-ws-chip b');
-    if (b && typeof graphdenWorkspaceLabel === 'function') b.textContent = graphdenWorkspaceLabel();
-  }
-  function gdCloseWsPop() {
-    const p = document.getElementById('gd-ws-pop');
-    if (p) p.remove();
-    const s = document.getElementById('gd-ws-scrim');
-    if (s) s.remove();
-  }
-  // Root namespaces = the "ready-made projects" you pick from (name → description).
-  function gdWsRoots() {
-    const out = [];
-    try {
-      const nss = (typeof graphData !== 'undefined' && graphData) ? (graphData.namespaces || []) : [];
-      nss.forEach((n) => { if (!n['parent-id'] && n.name) out.push({ name: n.name, desc: n.description || '' }); });
-    } catch (_) { /* ignore */ }
-    out.sort((a, b) => a.name.localeCompare(b.name));
-    return out;
-  }
-  function gdWsRepaint() {
-    gdWsChipLabel();
-    if (typeof updateEntityList === 'function' && typeof graphData !== 'undefined') updateEntityList(graphData);
-  }
-  function gdOpenWsPop() {
-    gdCloseWsPop();
-    const chip = document.getElementById('gd-ws-chip');
-    if (!chip) return;
-    const scrim = document.createElement('div');
-    scrim.id = 'gd-ws-scrim';
-    scrim.className = 'gd-pop-scrim';
-    scrim.addEventListener('click', gdCloseWsPop);
-    document.body.appendChild(scrim);
+  // ---- View chip --------------------------------------------------------
+  // `#gd-ws-chip` is the VIEW chip — the active filter set's name (a saved
+  // view, "N filters" or "All functions") and the popover of saved views.
+  // Owned by editor-explorer-filters.js; nothing to wire here.
 
-    const pop = document.createElement('div');
-    pop.id = 'gd-ws-pop';
-    pop.className = 'gd-pop';
-    const r = chip.getBoundingClientRect();
-    pop.style.left = r.left + 'px';
-    pop.style.top = (r.bottom + 6) + 'px';
-
-    // Re-rendered in place on every toggle so you can compose a workspace
-    // without the popover closing (multi-select checklist).
-    const render = () => {
-      const roots = gdWsRoots();
-      // window-qualified: the bare identifier is shadowed by editor-branches.js's
-      // top-level `let graphdenWorkspaceRoots` (the backing ARRAY), so only the
-      // window property reaches the () accessor that returns a copy.
-      const current = (typeof window.graphdenWorkspaceRoots === 'function') ? window.graphdenWorkspaceRoots() : [];
-      const hidden = (typeof graphdenHiddenList === 'function') ? graphdenHiddenList() : [];
-      const active = current.length > 0;
-      let html = '<h5>Workspace — choose what you see</h5>'
-        + '<button type="button" class="gd-pop-item' + (active ? '' : ' sel') + '" data-ws-all="1">'
-        + '<span class="gd-pi">◍</span>All functions</button>'
-        + '<div class="gd-pop-div"></div>'
-        + '<div class="gd-pop-cap">Projects — tick the namespaces you work in</div>';
-      roots.forEach((n) => {
-        const on = current.indexOf(n.name) >= 0;
-        html += '<button type="button" class="gd-pop-item gd-ws-opt' + (on ? ' sel' : '') + '"'
-          + ' role="checkbox" aria-checked="' + (on ? 'true' : 'false') + '" data-ws="' + gdEscHtml(n.name) + '"'
-          + (n.desc ? ' title="' + gdEscHtml(n.desc) + '"' : '') + '>'
-          + '<span class="gd-pi">' + (on ? '☑' : '☐') + '</span>'
-          + '<span class="gd-ws-nm">' + gdEscHtml(n.name) + '</span>'
-          + (n.desc ? '<span class="gd-ws-desc">' + gdEscHtml(n.desc) + '</span>' : '')
-          + '</button>';
-      });
-      if (hidden.length) {
-        html += '<div class="gd-pop-div"></div>'
-          + '<div class="gd-pop-cap">Hidden by you — restore to your view</div>';
-        hidden.slice().sort((a, b) => a.localeCompare(b)).forEach((h) => {
-          html += '<div class="gd-pop-row">'
-            + '<span class="gd-pop-item gd-ws-hidden" title="Hidden from your explorer">'
-            +   '<span class="gd-pi">⦸</span>' + gdEscHtml(h) + '</span>'
-            + '<button type="button" class="gd-pop-pin" data-restore="' + gdEscHtml(h) + '"'
-            +   ' title="Restore to view">↺</button></div>';
-        });
-      }
-      html += '<div class="gd-pop-hint">Personal + per-browser (like your branch choice). '
-        + 'Hide a namespace from its ⊘ in the tree. Nothing here changes the shared graph.</div>';
-      pop.innerHTML = html;
-
-      pop.querySelector('[data-ws-all]').addEventListener('click', () => {
-        if (typeof setGraphdenWorkspace === 'function') setGraphdenWorkspace(null);
-        gdWsRepaint(); gdCloseWsPop();
-      });
-      pop.querySelectorAll('.gd-ws-opt').forEach((it) => {
-        it.addEventListener('click', () => {
-          if (typeof graphdenToggleWorkspaceRoot === 'function') graphdenToggleWorkspaceRoot(it.getAttribute('data-ws'));
-          gdWsRepaint(); render();   // keep open, reflect the tick
-        });
-      });
-      pop.querySelectorAll('[data-restore]').forEach((rb) => {
-        rb.addEventListener('click', (e) => {
-          e.stopPropagation();
-          if (typeof graphdenToggleHidden === 'function') graphdenToggleHidden(rb.getAttribute('data-restore'));
-          gdWsRepaint(); render();
-        });
-      });
-      // Inside render(), after the innerHTML: ticking a namespace re-renders
-      // in place, which would otherwise drop the button. The scrim behind
-      // every .gd-pop is a transparent click-catcher, not a dimmed backdrop,
-      // so "click outside" is a move the reader has to guess — the titled
-      // PANELS in this family carry a visible × too. (The plain menus —
-      // branch policy, protection, the diff chip — stay bare.)
-      if (typeof ensurePopoverClose === 'function') {
-        ensurePopoverClose(pop, gdCloseWsPop, 'Close workspace picker', {prepend: true});
-      }
-    };
-    render();
-    document.body.appendChild(pop);
-  }
-
-  const wsChip = document.getElementById('gd-ws-chip');
-  if (wsChip) wsChip.addEventListener('click', gdOpenWsPop);
-  gdWsChipLabel();
 
   // ---- Packages (build-surface: browse + install) --------------------------
   // Install is a BUILD act (add a dependency to your project), so it lives with

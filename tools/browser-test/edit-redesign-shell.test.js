@@ -98,54 +98,58 @@ const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
     assert(deepLinked, '@settings/build deep-links the About-this-build section');
     await page.evaluate(() => window.gdShellSurface('build'));
 
-    // --- 3. Workspace switcher scopes the explorer to a namespace root ---
-    await page.click('#gd-ws-chip');
-    await page.waitForSelector('#gd-ws-pop .gd-pop-item[data-ws]', {timeout: 5000});
-    // Pick a top-level namespace that is NOT the selected fn's (core), so the
+    // --- 3. A namespace filter scopes the explorer to a root ---
+    // Through the "+ filter" menu (the namespaces checklist), like a reader.
+    await page.click('#gd-filter-add');
+    await page.waitForSelector('.gd-filter-add-pop .gd-ws-opt[data-ws]', {timeout: 5000});
+    // Pick a top-level namespace that is NOT the selected fn's (app), so the
     // filter visibly drops the others.
     const picked = await page.evaluate(() => {
-      const items = [...document.querySelectorAll('#gd-ws-pop .gd-pop-item[data-ws]')]
+      const items = [...document.querySelectorAll('.gd-filter-add-pop .gd-ws-opt[data-ws]')]
         .map((i) => i.getAttribute('data-ws')).filter(Boolean);
       return items.find((n) => n !== 'app') || items[0];
     });
-    assert(picked, 'workspace popover lists namespace roots');
-    await page.click('#gd-ws-pop .gd-pop-item[data-ws="' + picked + '"]');
-    await page.waitForFunction((nm) => {
+    assert(picked, 'the add-filter menu lists namespace roots');
+    await page.click('.gd-filter-add-pop .gd-ws-opt[data-ws="' + picked + '"]');
+    await page.waitForFunction(() => {
       const b = document.querySelector('#gd-ws-chip b');
-      return b && b.textContent === nm;
-    }, picked, {timeout: 5000});
-    const scoped = await page.evaluate((nm) => {
+      return b && b.textContent === '1 filter';
+    }, null, {timeout: 5000});
+    const scoped = await page.evaluate(() => {
       const headers = [...document.querySelectorAll('#entity-list [data-ns-path]')]
+        .filter((h) => !h.hidden)
         .map((h) => h.getAttribute('data-ns-path'));
       // Every top-level namespace header shown must be the picked root (or its
       // descendant); "app" (the other root) must be gone.
       const topLevel = headers.filter((p) => p && p.indexOf('.') === -1);
       return { chip: (document.querySelector('#gd-ws-chip b') || {}).textContent,
+               chips: [...document.querySelectorAll('#gd-filter-chips .kind-label')].map((e) => e.textContent),
                topLevel, appGone: !topLevel.includes('app') };
-    }, picked);
-    assert(scoped.chip === picked, 'chip shows the scoped workspace (' + scoped.chip + ')');
-    assert(scoped.appGone, 'scoping hid the out-of-workspace "app" namespace');
+    });
+    assert(scoped.chip === '1 filter', 'the view chip counts the filter (' + scoped.chip + ')');
+    assert(scoped.chips.join() === 'in ' + picked, 'an "in <root>" chip appeared (' + scoped.chips.join() + ')');
+    assert(scoped.appGone, 'scoping hid the out-of-scope "app" namespace');
 
-    // Workspaces are a multi-select included-roots set (the old focus/pins
-    // split is gone — 96e54f95): adding "app" as a second project root
-    // brings it back under the scope.
+    // Namespaces OR within the axis: ticking "app" as a second root (the
+    // menu stays open — a multi-select) brings it back under the scope.
+    await page.click('.gd-filter-add-pop .gd-ws-opt[data-ws="app"]');
     const appBack = await page.evaluate(() => {
-      window.graphdenToggleWorkspaceRoot('app');  // include app as a 2nd root
-      updateEntityList(graphData);
       const top = [...document.querySelectorAll('#entity-list [data-ns-path]')]
+        .filter((h) => !h.hidden)
         .map((h) => h.getAttribute('data-ns-path'))
         .filter((p) => p && p.indexOf('.') === -1);
-      window.graphdenToggleWorkspaceRoot('app');  // remove (leave clean state)
-      return top.includes('app');
+      return { back: top.includes('app'), chip: document.querySelector('#gd-ws-chip b').textContent };
     });
-    assert(appBack, 'including "app" as a second root shows it under the scope');
-    // The multi-select checklist stays open (no auto-close on pick) — close
-    // it via its scrim so later clicks aren't intercepted, then reset scope.
-    await page.evaluate(() => {
-      const s = document.getElementById('gd-ws-scrim');
-      if (s) s.click();
-      if (window.setGraphdenWorkspace) window.setGraphdenWorkspace(null);
-    });
+    assert(appBack.back, 'ticking "app" as a second root shows it under the scope');
+    assert(appBack.chip === '2 filters', 'the chip counts both (' + appBack.chip + ')');
+    // Close the menu (Escape) and clear — the × on a chip, then ◍ all.
+    await page.keyboard.press('Escape');
+    await page.click('#gd-filter-chips .gd-filter-chip');
+    assert(await page.evaluate(() => document.querySelectorAll('#gd-filter-chips .gd-filter-chip').length === 1),
+      'a chip\'s × removes that one filter');
+    await page.evaluate(() => toggleKind('all'));
+    assert(await page.evaluate(() => document.querySelector('#gd-ws-chip b').textContent === 'All functions'),
+      '◍ all clears the rest');
 
     // --- 4. Details toggle reveals / hides the card metadata strips ---
     // The test env opts into full cards, so a strip is present + visible now.

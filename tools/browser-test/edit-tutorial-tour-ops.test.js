@@ -730,9 +730,9 @@ const {
     await page.goto(BASE + '/');
     await page.evaluate(() => {
       localStorage.removeItem('graphden.tour');
-      // Lesson 14's walk switched the ✓ tests lens on and it persists; with
-      // the lesson's tests namespace cleaned up, that lens hides EVERY row.
-      localStorage.removeItem('graphden.sidebarLens');
+      // Lesson 14's walk switched the ✓ tests filter on and it persists; with
+      // the lesson's tests namespace cleaned up, that filter hides EVERY row.
+      localStorage.removeItem('graphden.explorer.filters');
     });
     await page.goto(BASE + '/');
     await page.waitForSelector('.kind-toggle', {timeout: 60000});

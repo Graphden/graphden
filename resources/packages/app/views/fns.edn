@@ -26,10 +26,10 @@
                  :description "Case-insensitive substring of the qualified name."}
           :uses {:required false :type [:list :uuid] :value []
                  :description "Fn ids; a member transitively extends or references every one of them."}
-          :effects {:required false :type [:list :keyword] :value []
-                    :description "Effect kinds (`io`, `db`, `state`, …) the member's computed footprint carries — all of them."}
-          :kinds {:required false :type [:list :keyword] :value []
-                  :description "Row kinds — a member is ONE of: `fn`, `types`, `secrets`, `services`, `tests`."}
+          :effects {:required false :type [:list :text] :value []
+                    :description "Effect kinds (`" io "`, `" db "`, `" state "`, …) the member's computed footprint carries — all of them. Text, as they arrive over JSON; the evaluator keywordizes."}
+          :kinds {:required false :type [:list :text] :value []
+                  :description "Row kinds (text) — a member is ONE of: `" fn "`, `" types "`, `" secrets "`, `" services "`, `" tests "`."}
           :namespaces {:required false :type [:list :text] :value []
                        :description "Dotted namespace paths; a member lives in one of them or below (segment match)."}
           :exclude {:required false :type [:list :text] :value []
@@ -45,9 +45,9 @@
                  :description "Case-insensitive substring of the qualified name."}
           :uses {:required false :type :fn-ref
                  :description "The fn every member transitively extends or references — bound by reference; the impl receives its id."}
-          :effects {:required false :type [:list :keyword] :value []
+          :effects {:required false :type [:list :text] :value []
                     :description "Effect kinds the member's footprint carries — all of them."}
-          :kinds {:required false :type [:list :keyword] :value []
+          :kinds {:required false :type [:list :text] :value []
                   :description "Row kinds — ONE of `fn`, `types`, `secrets`, `services`, `tests`."}
           :namespaces {:required false :type [:list :text] :value []
                        :description "Dotted namespace paths; in one of them or below."}

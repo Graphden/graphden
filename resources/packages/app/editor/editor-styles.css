@@ -6420,25 +6420,6 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   letter-spacing: 0.04em;
   color: var(--gd-ink-4);
 }
-/* Bound the workspace popover so long namespace descriptions ellipsize inside
-   it instead of stretching the whole panel wide. */
-#gd-ws-pop { max-width: 340px; }
-.gd-ws-opt { min-width: 0; }
-.gd-ws-opt .gd-ws-nm { flex: 0 0 auto; }
-.gd-ws-opt .gd-ws-desc {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: right;
-  font-size: 0.6562rem;
-  color: var(--gd-ink-4);
-}
-.gd-ws-opt.sel .gd-ws-desc { color: var(--gd-flow-ink); }
-.gd-ws-hidden { flex: 1 1 auto; color: var(--gd-ink-3); cursor: default; }
-.gd-ws-hidden .gd-pi { color: var(--gd-ink-4); }
-
 /* ---- Explorer slim head (brand + mounts moved to the rail / context bar) ---- */
 .gd-exp-head {
   display: flex;
@@ -6724,6 +6705,21 @@ body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
 .gd-views-chip.gd-views-active {
   border-style: solid; border-color: var(--accent); color: var(--fg);
 }
+/* The DYNAMIC filter chips (namespace / uses / effect / unused) — same skin
+   as the kind chips, always pressed, with an × that reads as "remove". */
+#gd-filter-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px; }
+#gd-filter-chips:empty { display: none; }
+.gd-filter-chip { max-width: 100%; }
+.gd-filter-chip .kind-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14rem; }
+.gd-filter-chip-x { margin-left: 2px; opacity: 0.7; }
+.gd-filter-chip:hover .gd-filter-chip-x { opacity: 1; }
+.gd-ctx-chip.gd-ctx-chip-active .gd-ctx-dot { background: var(--accent); }
+.gd-views-pop-cap {
+  font-size: 0.625rem; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--muted-fg); margin: 8px 0 2px;
+}
+.gd-filter-fx-row { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 6px; }
+.gd-views-share { align-self: flex-start; }
 .gd-views-pop {
   position: fixed;
   z-index: 10003;
@@ -6746,6 +6742,18 @@ body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
 }
 .gd-views-list { display: flex; flex-direction: column; margin-bottom: 8px; }
 .gd-views-row { display: flex; align-items: center; gap: 4px; }
+/* A row that IS a button (the All-functions row, a namespace tick, the
+   uses / unused / restore rows of the add-filter menu) — the popover's
+   row skin, not the browser's button. */
+button.gd-views-row {
+  width: 100%; border: 0; border-radius: 4px; padding: 3px 6px; margin: 0;
+  background: transparent; color: var(--fg); cursor: pointer;
+  font-family: var(--gd-mono); font-size: 0.75rem; text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+button.gd-views-row:hover { background: var(--hover-bg); }
+button.gd-views-row.sel { color: var(--fg); font-weight: 600; }
+button.gd-views-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .gd-views-apply {
   flex: 1; min-width: 0; text-align: left;
   border: 0; border-radius: 4px; padding: 3px 6px; margin: 0;
@@ -7264,36 +7272,6 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
 }
 .gd-cap-on { background: var(--gd-flow-wash); color: var(--gd-flow-ink); }
 .gd-cap-off { background: var(--gd-crit-wash); color: var(--gd-crit); }
-
-/* ---- Workspaces surface ---- */
-.gd-ws-grid {
-  max-width: 1100px; margin: 0 auto;
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 16px; align-items: start;
-}
-.gd-ws-summary { font-size: 0.7812rem; color: var(--gd-ink-2); margin: 4px 0 12px; }
-.gd-ws-summary b { color: var(--gd-ink); }
-.gd-ws-nslist { display: flex; flex-direction: column; gap: 4px; }
-.gd-ws-nsrow { display: flex; align-items: center; gap: 6px; }
-.gd-ws-nsbtn {
-  flex: 1 1 auto; min-width: 0; text-align: left;
-  display: inline-flex; align-items: center; gap: 6px;
-  font-family: var(--gd-mono); font-size: 0.75rem;
-  padding: 6px 10px; cursor: pointer;
-  background: var(--gd-panel); color: var(--gd-ink);
-  border: 1px solid var(--gd-line-2); border-radius: var(--gd-r-sm);
-}
-.gd-ws-nsbtn .gd-pi { color: var(--gd-ink-3); }
-.gd-ws-nsbtn:hover { border-color: var(--gd-flow); }
-.gd-ws-nsbtn.active { background: var(--gd-flow-wash); color: var(--gd-flow-ink); border-color: var(--gd-flow); font-weight: 600; }
-.gd-ws-nsbtn.active .gd-pi { color: var(--gd-flow); }
-.gd-ws-pin {
-  flex: none; width: 30px; height: 30px; cursor: pointer;
-  background: none; border: 1px solid transparent; border-radius: var(--gd-r-sm);
-  opacity: 0.4; font-size: 0.8125rem;
-}
-.gd-ws-pin:hover { opacity: 0.8; }
-.gd-ws-pin.pinned { opacity: 1; background: var(--gd-flow-wash); border-color: var(--gd-flow); }
 
 /* ---- Responsive: iPad / narrow — inspector becomes a bottom sheet.
  *      Below the sidebar breakpoint the explorer auto-collapses (handled

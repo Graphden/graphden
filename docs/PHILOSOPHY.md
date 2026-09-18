@@ -547,7 +547,7 @@ the main list and tools can run them in batch. We reject that:
   (`tests.parser`, `myproj.tests.api`) is a test. Zero schema change.
   (Shipped as any-segment rather than the root-only prefix first
   sketched here: a project's tests then live inside the project's own
-  root namespace, where the workspace chip's scoping can see them.
+  root namespace, where a namespace filter on that root still sees them.
   Matched by segment, never substring — `testsuite` is not a test
   namespace. `_`-prefixed fns are the tests namespace's private
   scaffolding, not tests.)
@@ -560,21 +560,29 @@ the main list and tools can run them in batch. We reject that:
 - Shipped: [TESTS.md](TESTS.md) — `:assert` / `:assert-eq`, the
   runner + statuses, the editor surfaces, auto-run on writes.
 
-#### Workspaces / projects are not a new entity
+#### Explorer views are fn-defs, not a new entity
 
-A workspace is **a set of namespaces visible together**. The
-temptation is to add a `workspace` entity + `fn↔workspace` M:N
-junction. We reject that:
+"The part of the graph I look at" — a set of namespaces, everything
+built on a fn, everything with an effect — is a **filter set**, and a
+named one is a **view**. The temptation is a `workspace` / `view`
+entity with a `fn↔view` M:N junction, or a text rule language the
+server parses. We reject both:
 
-- **Marker**: namespace becomes **M:N self-referential** — `namespace`
-  gets a `parent_namespace_ids` junction, mirroring how `fn` already
-  has `parent-ids`. A "workspace" is just a namespace whose role is
-  to pull in other namespaces.
-- **One fn visible in multiple workspaces** = the fn's namespace has
-  multiple parent namespaces. No edge from fn itself to workspace.
-- **What this loses**: per-user "show me only these workspaces in
-  the sidebar" is a UI/user concern, NOT a graph property — it lives
-  in user prefs, not in graph entities.
+- **Personal views** are a UI/user concern, NOT a graph property —
+  they live in the browser's prefs (`graphden.explorer.filters` /
+  `.views`), exactly like the branch choice.
+- **A shared view is an fn-def** extending the `:explorer-view`
+  base-fn, its axes bound as slots — `uses` a `:fn-ref` (identity, so a
+  rename never empties it and the edge is not a dependency), `also`
+  other views to intersect with. Versioned, branch-scoped, runnable
+  (▶ = the member list), listed back by `GET /api/views`. Zero schema
+  change, no DSL: the graph IS the rule.
+- **One fn in many views** = it satisfies many filter sets — membership
+  is computed on read (`crud.entities.list/view-members`), never
+  maintained by hand.
+- **What this loses**: nothing a namespace hierarchy would have given
+  — a namespace filter still picks roots, and the ⊘ on a row is the
+  same axis's `exclude`.
 
 #### Per-fn debug/trace toggles are not a stored field
 

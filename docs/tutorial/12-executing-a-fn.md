@@ -140,7 +140,7 @@ arguments" note) with Run enabled.
 
 The effect gate's sibling: a fn whose current branch carries
 recorded TYPE diagnostics (the ⚠ badge / the Explorer's ⚠ type
-errors lens — Lesson 03) is refused at submit. The run comes back rejected
+errors filter — Lesson 03) is refused at submit. The run comes back rejected
 with a clear message — "Execution refused: fn '…' has unresolved
 type errors — …" — naming the fn and the first error. There's
 nothing to acknowledge away here: fix the fn or its bindings

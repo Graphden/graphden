@@ -1179,42 +1179,38 @@
                :check {:kind "manual"}}]}
             {:id "19"
              :chapter "The editor"
-             :title "Workspaces"
+             :title "Filters and views"
              :steps
-             [{:title "Your slice of a shared graph"
-               :body "A workspace is a personal scope: pick the namespace roots you work in and the Explorer shows those. It lives in your browser, not in the graph — nobody else's view changes."
-               :target nil
+             [{:title "One way to narrow the tree"
+               :body "Everything that narrows the Explorer is a FILTER — a chip under the filter box: a kind (you met those in lesson 17), a namespace, a fn something is built on, an effect, unused. Filters combine. A saved set of them is a VIEW. Nothing here changes the graph — only what you look at."
+               :target "#kind-filters"
                :check {:kind "manual"}}
-              {:title "Open the workspace chip"
-               :body "At the top of the Explorer, click the chip that reads [[workspace — All functions]]."
+              {:title "Add a namespace filter"
+               :body "Click [[+ filter]] under the chips, then tick [[core]] under Namespaces. The tree collapses to that subtree and an [[in core]] chip appears — its × is the way back."
+               :target "#gd-filter-add"
+               :targets ["#gd-filter-add" ".gd-filter-add-pop .gd-ws-opt[data-ws=\"core\"]"]
+               :check {:kind "dom" :selector "#gd-filter-chips .gd-filter-chip"}}
+              {:title "The view chip"
+               :body "Top left, the chip that read [[All functions]] now reads [[1 filter]] — it always names what you are looking at. Press [[Esc]] to close the menu, then click [[◍ all]]: every filter goes, the whole tree returns. Your filters are remembered per browser, so a scope you leave on is there after a reload."
                :target "#gd-ws-chip"
-               :check {:kind "dom" :selector "#gd-ws-pop, .gd-ws-pop, [class*=\"ws-pop\"]"}}
-              {:title "Pick a root"
-               :body "Tick one namespace — say [[core]]. The Explorer collapses to that subtree; the chip now names your scope instead of [[All functions]]."
+               :targets ["#gd-ws-chip" "#kind-filters .kind-toggle[data-kind=\"all\"]"]
+               :check {:kind "dom-absent" :selector "#gd-filter-chips .gd-filter-chip"}}
+              {:title "A filter the graph answers"
+               :body "A namespace is a PHYSICAL home. Sometimes the set you care about is computed — every fn built on a given primitive, wherever it lives. Click [[+ filter]] → [[+ pick a fn]], type `const` and pick [[const]] (core.logic). The tree becomes exactly the fns that transitively use it — a group nobody maintains by hand."
+               :target "#gd-filter-add"
+               :targets ["#gd-filter-add" ".gd-filter-add-pop [data-action=\"add-uses\"]" ".fn-picker-popover"]
+               :check {:kind "dom" :selector "#gd-filter-chips .gd-filter-chip[title^=\"Only fns using\"]"}}
+              {:title "Save it as a view"
+               :body "Click the view chip ([[1 filter]]), name the set `on-const` and press [[Enter]]. The chip now reads [[on-const]]; the view is yours, in this browser. The same popover holds [[Save in the graph…]] — that makes the view an fn extending explorer-view, versioned and shared with everyone on the branch, with the fn it uses bound by identity, so a rename never empties it."
                :target "#gd-ws-chip"
-               :targets ["#gd-ws-chip" "#gd-ws-pop"]
-               :check {:kind "manual"}}
-              {:title "And back"
-               :body "Reopen the chip and choose [[All functions]] to clear the scope. Reloading the page would have kept it — the choice is yours per browser, and it survives."
-               :target "#gd-ws-chip"
-               :targets ["#gd-ws-chip" "#gd-ws-pop"]
-               :check {:kind "manual"}}
-              {:title "Virtual groups"
-               :body "A workspace scopes by PHYSICAL root namespace. Sometimes the set you care about is computed — say, every fn built on a given primitive, wherever it lives. Click [[✦ views]] under the filter box."
-               :target "#gd-views-btn"
-               :targets ["#gd-views-btn" ".gd-views-pop"]
-               :check {:kind "dom" :selector ".gd-views-pop"}}
-              {:title "Save a rule"
-               :body "Name it `on-const`, rule `uses:core.logic.const` — then [[Save view]]. The tree becomes exactly the fns that transitively use :const — a namespace nobody maintains by hand. Rules AND-combine: uses:<fn>, effect:<kind>, name:<text>."
-               :target ".gd-views-pop"
-               :check {:kind "dom" :selector "#gd-views-btn.gd-views-active"}}
+               :targets ["#gd-ws-chip" "#gd-ws-pop .gd-views-input"]
+               :check {:kind "dom" :selector "#gd-ws-chip[data-view=\"on-const\"]"}}
               {:title "Back to the whole tree"
-               :body "The chip carries the view's name while it is active. Click [[✦ on-const]] again and choose [[× Show the whole tree]] — the physical tree returns; the view stays saved for next time."
-               :target "#gd-views-btn"
-               :targets ["#gd-views-btn" ".gd-views-pop"]
-               :check {:kind "dom-absent" :selector ".gd-views-active"}}
-              {:title "That's workspaces"
-               :body "Scope is a view, not a permission: everything stays reachable, you just stop looking at it. The written lesson 19 adds per-namespace hiding (⊘) and the shared smart-views fn. Click [[Finish]]."
+               :body "Click [[◍ all]]. The filters go, the view stays saved — reopen the view chip any time and pick [[on-const]] to get it back."
+               :target "#kind-filters .kind-toggle[data-kind=\"all\"]"
+               :check {:kind "dom-absent" :selector "#gd-filter-chips .gd-filter-chip"}}
+              {:title "That's filters and views"
+               :body "One idea, three depths: a chip narrows the tree, a set of chips is what you are looking at, a named set is a view — yours in this browser, or an fn in the graph when the team should have it too. The ⊘ on a namespace row is a filter as well (a [[not …]] chip). The written lesson 19 walks the graph-saved view and composing views with `also`. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
             {:id "20"

@@ -288,19 +288,19 @@ operator tooling. Retention: the cleanup scheduler sweeps buckets older than
 90 days (`sweep-stats!`) — trends outlive the raw `:fn-execution` TTLs, which
 is the point.
 
-## Unresolved failures (`GET /api/failures`, the ✕ lens)
+## Unresolved failures (`GET /api/failures`, the ✕ failed chip)
 
-The editor's **✕ failed** lens (Explorer) focuses on, and the Inspector's
+The editor's **✕ failed** filter chip (Explorer) focuses on, and the Inspector's
 **Runs** tab lists, the current branch view's **unresolved** recent
 failures (newest first) straight off the `:fn-execution` audit rows — no
 new storage beyond two columns (`:branch-id` stamped at create,
 `:acknowledged-at` set by dismiss). `GET /api/failures` returns the per-fn
-counts the lens, the namespace rows and the fn cards read
+counts the chip, the namespace rows and the fn cards read
 (`editor-problems.js`); the Runs tab's block renders the rows. Privacy
 holds because the write path already sanitised each row: `redact-outcome`
 hides secret-tainted bodies, `scrub-outcome` replaces internal error types
 with an opaque `ref:` on the cloud. A row carries a **✕ Dismiss** button, the
-finish time, the error text and a collapsible ex-data block; the lens's
+finish time, the error text and a collapsible ex-data block; the chip's
 chip row carries **Dismiss all**.
 
 A failure counts as unresolved only while ALL of these hold (the panel is a
@@ -558,7 +558,7 @@ routes an org's requests to its own pod, so arming editor and
 captured request meet on one process by construction.
 
 Editor surface: the **Runs** tab of a fn that is a service on the
-branch (the ⚙ lens) opens with the trap block (`/partials/debug-catch`
+branch (the ⚙ services chip) opens with the trap block (`/partials/debug-catch`
 composed into the history partial + `editor-debug.js`) — arm form
 (path prefix, capture-values behind the explicit confirm), armed
 status with Cancel, «open last captured trace»; when the capture

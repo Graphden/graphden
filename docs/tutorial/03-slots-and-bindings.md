@@ -119,7 +119,7 @@ the inherited type) — "you can't promise less than your parent
 did." A widening is a type ERROR, but it does not block the
 save: the write succeeds and the failure is recorded as a
 per-branch type diagnostic. The fn's card gets a ⚠ badge, the
-fn shows up under the Explorer's **⚠ type errors** lens (its row
+fn shows up under the Explorer's **⚠ type errors** filter (its row
 marked `⚠1`, the message under the argument in the Inspector's
 Bindings tab), and trying to EXECUTE it is refused until you fix
 the type. (Structural
@@ -180,7 +180,7 @@ To see a type diagnostic land the way it actually happens — with a
 value — extend `:http-server` as `:tutorial-bad-port` and bind its
 `:port` (type `port`, a refined `:int`, 1..65535) to `-1`. The live
 status flips to ✗, but Save still LANDS: the card root row gains a
-⚠ badge, the Explorer's **⚠ type errors** lens counts it, the
+⚠ badge, the Explorer's **⚠ type errors** filter counts it, the
 Inspector's Bindings tab shows the diagnostic under `port`, and
 **▶ Run** is REFUSED with "unresolved type errors". Bind `:port`
 to `8081` and the fixing save clears all of it.

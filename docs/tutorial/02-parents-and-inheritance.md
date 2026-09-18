@@ -124,9 +124,9 @@ Two failure modes guard an MI parent set:
   incompatible types (neither a subtype of the other). This is a
   TYPE error: at package sync it fails the load; in the editor it
   is a recorded diagnostic — the fn saves, gets a ⚠ badge and shows
-  under the Explorer's **⚠ type errors** lens, and refuses to
+  under the Explorer's **⚠ type errors** filter, and refuses to
   execute until one side backs off (the doctrine is in
-  [Lesson 05](05-types.md), the lens in
+  [Lesson 05](05-types.md), the filter in
   [Lesson 16](16-errors-and-diagnostics.md)).
 
 ## The fn-card as a chain visualizer

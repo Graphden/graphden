@@ -276,7 +276,7 @@ The write path that must not leak (docs/SECRETS.md): one ~POST /api/secrets~ ato
 :MINS: 4.2
 :END:
 
-The tests subsystem (docs/TESTS.md) rides everything above: a test is a fn in a ~tests~-segment namespace, executed through ~apply-execute~ with ~{}~ args (pass = no throw), its status the newest execution of its CURRENT version — so an edited test reads ~stale~ by construction, no bookkeeping. After EACH test it nudges the ~test:updated~ NOTIFY, which is what moves the Explorer's dots one by one under the ✓ tests lens (its SSE ping stream). Note the ~platform?~ arm: the SHIPPED packages carry their own ~*.tests~ modules (~core.tests~, ~web.tests~, …), and a default all-tests run skips them — the rule is OWNERSHIP (~packages.owned/owned-fn-id?~, package-synced this boot), not intent, so a tenant's Run all spends its budget on its own tests. The platform set is gated by its own Clojure anchor instead.
+The tests subsystem (docs/TESTS.md) rides everything above: a test is a fn in a ~tests~-segment namespace, executed through ~apply-execute~ with ~{}~ args (pass = no throw), its status the newest execution of its CURRENT version — so an edited test reads ~stale~ by construction, no bookkeeping. After EACH test it nudges the ~test:updated~ NOTIFY, which is what moves the Explorer's dots one by one under the ✓ tests filter chip (its SSE ping stream). Note the ~platform?~ arm: the SHIPPED packages carry their own ~*.tests~ modules (~core.tests~, ~web.tests~, …), and a default all-tests run skips them — the rule is OWNERSHIP (~packages.owned/owned-fn-id?~, package-synced this boot), not intent, so a tenant's Run all spends its budget on its own tests. The platform set is gated by its own Clojure anchor instead.
 
 - source :: [[file:../../../src/graphden/crud/test_runs.clj::(defn run-tests!][src/graphden/crud/test_runs.clj:193]]
 
@@ -296,24 +296,24 @@ Auto-run on writes: from ~invalidate!~'s seeds, walk the compile-deps REVERSE cl
 :PROPERTIES:
 :CUSTOM_ID: crud/list-all-graph-entities
 :FILE: src/graphden/crud/entities/list.clj
-:LINE: 825
-:MINS: 3.6
+:LINE: 779
+:MINS: 3.4
 :END:
 
 The read side the editor lives on. One call, one shared lazy ~graph-list-env~ over the graph-cache, and a ~scope~ that picks a projection: the sidebar tree (namespaces + counts, O(namespaces)), one namespace's leaves, a search, a subtree, or the full dump. Every fn row is tagged with a ~:role~ so Types vs Functions is decided server-side. When the editor feels slow after a write, this is where to look — it is what every refresh re-reads.
 
-- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn list-all-graph-entities][src/graphden/crud/entities/list.clj:825]]
+- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn list-all-graph-entities][src/graphden/crud/entities/list.clj:779]]
 - same file :: [[file:crud.org::#crud/view-members][view-members]]
 
 * 24. view-members
 :PROPERTIES:
 :CUSTOM_ID: crud/view-members
 :FILE: src/graphden/crud/entities/list.clj
-:LINE: 632
+:LINE: 616
 :MINS: 1.5
 :END:
 
 The Explorer's one evaluator for narrowing by GRAPH FACTS — a filter set ~{:name :uses :effects :kinds :namespaces :exclude :unused}~ answered as light rows. Axes AND; ~:uses~ is by fn ID over the reverse transitive closure (a rename never empties a saved view). Two callers, one projection: the editor's ad-hoc chip set (~POST /api/views/members~) and the ~:explorer-view~ base-fn — a view saved IN the graph as an fn-def, listed back by ~list-explorer-views~ with its bound slots decoded.
 
-- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn view-members][src/graphden/crud/entities/list.clj:632]]
+- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn view-members][src/graphden/crud/entities/list.clj:616]]
 - same file :: [[file:crud.org::#crud/list-all-graph-entities][list-all-graph-entities]]

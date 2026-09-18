@@ -221,45 +221,74 @@ const {
       null, {timeout: 15000, polling: 100});
     console.log("  '/' shortcut focuses the Explorer filter");
 
-    // ---------- lesson 19 — workspaces ----------
+    // ---------- lesson 19 — filters and views ----------
+    // A reader arrives with the filters a previous lesson left on; the
+    // lesson starts from a clean slate the way the tour's own cleanup does.
+    await page.evaluate(() => { if (typeof gdClearFilters === 'function') gdClearFilters(); });
     await page.goto(BASE + '/?tutorial=19');
-    await waitTourTitle(page, 'Your slice of a shared graph', 150000);
+    await waitTourTitle(page, 'One way to narrow the tree', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 19 Next');
-    await waitTourTitle(page, 'Open the workspace chip');
-    await page.waitForSelector('#gd-ws-chip', {timeout: 30000});
-    await page.evaluate(() => document.getElementById('gd-ws-chip').click());
-    await waitTourTitle(page, 'Pick a root', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 19 root Next');
-    await waitTourTitle(page, 'And back');
-    assert(await clickTourButton(page, 'Next'), 'lesson 19 back Next');
-    await waitTourTitle(page, 'Virtual groups', 150000);
-    await page.waitForSelector('#gd-views-btn', {timeout: 15000});
-    await page.evaluate(() => document.getElementById('gd-views-btn').click());
-    await page.waitForSelector('.gd-views-pop', {timeout: 15000});
-    await waitTourTitle(page, 'Save a rule', 150000);
-    await page.evaluate(() => {
-      const pop = document.querySelector('.gd-views-pop');
-      const [nameIn, ruleIn] = pop.querySelectorAll('.gd-views-input');
-      nameIn.value = 'on-const';
-      ruleIn.value = 'uses:core.logic.const';
-      pop.querySelector('.gd-views-save').click();
-    });
-    await page.waitForSelector('#gd-views-btn.gd-views-active', {timeout: 30000});
+    await waitTourTitle(page, 'Add a namespace filter');
+    await page.waitForSelector('#gd-filter-add', {timeout: 30000});
+    await page.click('#gd-filter-add');
+    await page.waitForSelector('.gd-filter-add-pop .gd-ws-opt[data-ws="core"]', {timeout: 15000});
+    await page.click('.gd-filter-add-pop .gd-ws-opt[data-ws="core"]');
+    await waitTourTitle(page, 'The view chip', 150000);
+    const scoped = await page.evaluate(() => ({
+      chip: document.querySelector('#gd-ws-chip b')?.textContent,
+      chips: Array.from(document.querySelectorAll('#gd-filter-chips .kind-label')).map((e) => e.textContent),
+      roots: Array.from(document.querySelectorAll('#entity-list .ns-header[aria-level="1"]')).filter((e) => !e.hidden).map((e) => e.dataset.nsPath),
+    }));
+    assert(scoped.chip === '1 filter', 'the view chip counts the filter (got: ' + scoped.chip + ')');
+    assert(scoped.chips.join() === 'in core', 'an "in core" chip appeared (got: ' + scoped.chips.join() + ')');
+    assert(scoped.roots.join() === 'core', 'the tree collapsed to core (got: ' + scoped.roots.join() + ')');
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => toggleKind('all'));
+    await waitTourTitle(page, 'A filter the graph answers', 150000);
+    const cleared = await page.evaluate(() => ({
+      chip: document.querySelector('#gd-ws-chip b')?.textContent,
+      chips: document.querySelectorAll('#gd-filter-chips .gd-filter-chip').length,
+    }));
+    assert(cleared.chip === 'All functions' && cleared.chips === 0, '◍ all clears every filter (got: ' + JSON.stringify(cleared) + ')');
+    // uses: through the + filter menu and the fn picker.
+    await page.click('#gd-filter-add');
+    await page.waitForSelector('.gd-filter-add-pop [data-action="add-uses"]', {timeout: 15000});
+    await page.click('.gd-filter-add-pop [data-action="add-uses"]');
+    await page.waitForSelector('.fn-picker-popover .fn-picker-search', {timeout: 15000});
+    await page.type('.fn-picker-popover .fn-picker-search', 'const');
+    await page.waitForSelector('.fn-picker-popover .fn-picker-row[data-fn-name="core.logic.const"]', {timeout: 20000});
+    await page.click('.fn-picker-popover .fn-picker-row[data-fn-name="core.logic.const"]');
+    await waitTourTitle(page, 'Save it as a view', 150000);
     // The tree is now the computed membership — non-empty for :const.
     await page.waitForFunction(() =>
       document.querySelectorAll('#entity-list .entity-item').length > 0,
       null, {timeout: 30000, polling: 200});
-    const viewRows = await page.evaluate(() =>
-      document.querySelectorAll('#entity-list .entity-item').length);
-    assert(viewRows > 0, 'smart view renders members (' + viewRows + ' rows)');
+    const viewRows = await page.evaluate(() => ({
+      rows: document.querySelectorAll('#entity-list .entity-item').length,
+      chips: Array.from(document.querySelectorAll('#gd-filter-chips .kind-label')).map((e) => e.textContent),
+    }));
+    assert(viewRows.rows > 0, 'the uses filter renders members (' + viewRows.rows + ' rows)');
+    assert(viewRows.chips.join() === 'uses core.logic.const', 'a "uses" chip names the fn (got: ' + viewRows.chips.join() + ')');
+    await page.click('#gd-ws-chip');
+    await page.waitForSelector('#gd-ws-pop .gd-views-input', {timeout: 15000});
+    await page.fill('#gd-ws-pop .gd-views-input', 'on-const');
+    await page.keyboard.press('Enter');
     await waitTourTitle(page, 'Back to the whole tree', 150000);
-    await page.evaluate(() => document.getElementById('gd-views-btn').click());
-    await page.waitForSelector('.gd-views-pop .gd-views-row-clear', {timeout: 15000});
-    await page.evaluate(() =>
-      document.querySelector('.gd-views-pop .gd-views-row-clear').click());
-    await page.waitForFunction(() => !document.querySelector('.gd-views-active'),
-      null, {timeout: 15000, polling: 100});
-    await waitTourTitle(page, "That's workspaces");
+    assert(await page.evaluate(() => document.querySelector('#gd-ws-chip b')?.textContent === 'on-const'
+      && gdReadViews().some((v) => v.name === 'on-const')), 'the view is saved and named on the chip');
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => toggleKind('all'));
+    await waitTourTitle(page, "Back to the whole tree");
+    await page.waitForFunction(() => !document.querySelector('#gd-filter-chips .gd-filter-chip'), null, {timeout: 15000, polling: 100});
+    // …and the saved view comes back from the chip's popover.
+    await page.click('#gd-ws-chip');
+    await page.waitForSelector('#gd-ws-pop .gd-views-apply[aria-label="Apply view on-const"]', {timeout: 15000});
+    await page.click('#gd-ws-pop .gd-views-apply[aria-label="Apply view on-const"]');
+    await page.waitForFunction(() => document.querySelector('#gd-ws-chip b')?.textContent === 'on-const'
+      && document.querySelectorAll('#entity-list .entity-item').length > 0, null, {timeout: 30000, polling: 200});
+    console.log('  lesson 19: the saved view re-applies from the chip');
+    await page.evaluate(() => { toggleKind('all'); gdDeleteView('on-const'); });
+    await waitTourTitle(page, "That's filters and views", 60000);
     assert(await clickTourButton(page, 'Finish'), 'lesson 19 Finish');
     await waitTourClosed(page, 30000);
     console.log('  lesson 19: walked (nothing created)');

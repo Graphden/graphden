@@ -1,95 +1,132 @@
-# Lesson 19 — Workspaces: scope the editor to your projects
+# Lesson 19 — Filters and views: look at the part of the graph you mean
 
-**Goal**: by the end of this lesson you can scope the Explorer to
-just the projects you're working in, hide namespaces you never
-touch, and get the full list back — all without changing anything
-for anyone else.
+**Goal**: by the end of this lesson you can narrow the Explorer to
+the namespaces you work in, to everything built on a given fn, to
+fns with a given effect, or to what nothing uses — combine those,
+save the set as a **view**, and share a view with your team as an
+fn in the graph. All without changing anything for anyone else.
 
-**Concepts introduced**: **workspace** (a personal view scope),
-**projects** (root namespaces as ready-made scopes), the
-**personal hide** (`⊘` / restore `↺`), and **All functions**.
+**Concepts introduced**: **filter** (one chip, one predicate),
+**view** (a named set of filters), the **view chip**, **+ filter**,
+the **personal hide** (`⊘`), and a view **saved in the graph**
+(the `explorer-view` fn).
 
-## The problem
+## One idea, three depths
 
 The Explorer shows the *whole* graph — every namespace, every fn.
-On a fresh install that's fine; on a real shared graph with many
-projects it's overwhelming, and most of it isn't yours. A
-**workspace** narrows what *you* see to the namespaces you
-actually work in.
+On a real shared graph that is overwhelming, and most of it isn't
+yours. Everything that narrows the tree is the same thing at three
+depths:
 
-One thing to hold on to: a workspace is a **view**, not an entity.
-There is no workspace row in the graph, nothing to create or
-administer, and nothing you do here is visible to anyone else —
-it's a personal preference, stored in your browser (like your
-branch choice).
+- a **filter** is one predicate, shown as a chip under the filter
+  box — lesson 17's kind chips are filters, and so is `in core`,
+  `uses core.logic.const`, `fx io`, `unused`;
+- the **active set** is the chips that are on — filters combine
+  (AND), and the chip top-left names the set: **All functions**,
+  `2 filters`, or a view's name;
+- a **view** is a named, saved set — yours in this browser, or an
+  fn in the graph when the team should have it too.
 
-## The workspace chip
+Nothing here changes the graph. A filter is about what is *listed*,
+never about what is *reachable*: fns outside the set still exist,
+still run, and references to them still resolve. Search always looks
+across the whole graph, so a filtered-out fn is still findable by
+name.
 
-In the **Build** surface's context bar — alongside the *branch*
-and *packages* chips (Lessons 20 and 29) — sits the **workspace
-chip**, showing your current scope. Click it:
+## + filter — the axes that take a value
+
+Under the kind chips sits **+ filter**. It opens the menu of filters
+that need a value:
 
 ```text
-Workspace — choose what you see
-  ◍ All functions                       ← the unscoped default
-  ──────────────────────────────
-  Projects — tick the namespaces you work in
-  ☑ mycorp        Our internal tools    ← root namespaces,
-  ☐ demo          Example compositions     with their descriptions
-  ──────────────────────────────
-  Hidden by you — restore to your view
-  ⦸ demo.scratch                 ↺
+ADD A FILTER
+  Namespaces — only these
+    ☑ core     ☐ app     ☐ web      ← the graph's root namespaces
+  Hidden by you — restore
+    ↺ core.tests
+  Uses a function
+    + pick a fn — only what is built on it
+  Effect
+    io  db  network  state  time  random  env  process  raw-sql
+  ☐ Unused — nothing references or extends it
 ```
 
-The **Projects** checklist is the graph's **root namespaces** —
-each with its description, so a well-described namespace reads
-like a project card. You don't *build* a workspace from scratch;
-you **adopt** one or more existing projects by ticking them. The
-popover stays open while you compose a multi-project scope — each
-tick re-scopes the Explorer immediately.
+- **Namespaces** — tick the roots you work in; the tree shows those
+  and their descendants and the namespace-less **(primitives)**
+  bucket steps aside. Several roots OR together. The menu stays open
+  while you compose a set.
+- **Uses a function** — the fn picker (the Explorer's own search,
+  with type hints). The tree becomes every fn that *transitively*
+  extends or references the one you pick — a group nobody maintains
+  by hand. Pick a second fn and members must use both.
+- **Effect** — every fn whose computed effect footprint carries the
+  kind; two kinds means both.
+- **Unused** — nothing in the graph extends, references or resolves
+  the fn: the dead-code view. Combine it with a namespace — package
+  leaves are public API and "unused in this graph" by design.
 
-## What "scoped" means
+Each becomes a chip with an **×**; the × is the way back. **◍ all**
+clears every filter at once.
 
-With at least one project ticked:
+## The personal hide — ⊘
 
-- the Explorer tree shows only the ticked namespaces **and their
-  descendants** — everything else disappears from it;
-- the namespace-less **"(primitives)"** bucket (base fns that live
-  in no namespace) is hidden too — under a workspace you see
-  *your* code, not the standard library;
-- **search escapes the scope**: typing in the sidebar search
-  always looks across the whole graph, so a scoped-out (or hidden)
-  fn is still findable by name;
-- nothing else changes: fns outside the scope still exist, still
-  run, and references to them still resolve. Scope is about what's
-  *listed*, never about what's *reachable*.
+Sometimes the noise is one namespace inside your scope — a scratch
+area, an archive. Hover any namespace row and click its **⊘** (next
+to rename / add / publish): the namespace vanishes from *your* tree
+at any depth, and a `not core.tests` chip appears. Remove the chip
+(or **↺** it in the + filter menu) to restore. It is a filter like
+the others: the shared graph is untouched, teammates still see the
+namespace, no permission is needed.
 
-**All functions** clears the scope and returns the full view.
+## The view chip
 
-## Personal hide — the `⊘`
+Top-left in the Build context bar — alongside the *branch* and
+*packages* chips (Lessons 20 and 29) — the **view chip** names what
+you are looking at. Click it:
 
-Sometimes the noise isn't a whole project but one namespace inside
-your scope — a scratch area, an archive. Hover any namespace row
-in the Explorer and click its **⊘** action (next to rename / add /
-publish): the namespace vanishes from *your* view, at any depth.
+```text
+VIEWS
+  ◍ All functions — no filters
+  Your views
+    ● on-const                ×
+    web-services              ×
+  In the graph
+    api-surface               ↗
+  Save the current filters
+    [ View name ]  Save view   Save in the graph…
+```
 
-Hidden namespaces are listed in the workspace popover under
-**"Hidden by you"** — click a row's **↺** to restore it. Think of
-it as a `.gitignore` for your Explorer: the shared graph is
-untouched, teammates still see the namespace, and no permission is
-needed to hide (it's your view, not their data).
+**Save view** names the active set; the chip reads the name from
+then on, and editing the set (any chip on or off) detaches it — the
+chip reads `3 filters` until you save again. Pick a saved view to
+get its set back. Views and the active set are per browser: another
+device starts at **All functions**, signing out does not clear them.
 
-## Personal + per-browser
+## A view saved in the graph
 
-Both the ticked projects and the hidden list live in your
-browser's local storage. Consequences worth knowing:
+**Save in the graph…** turns the active set into an ordinary fn:
 
-- another browser or device starts back at **All functions**
-  (there's no cross-device sync);
-- signing out doesn't clear it — it's keyed to the browser, not
-  the session;
-- nothing about your workspace is stored in the graph, so branch
-  merges, packages, and other members are entirely unaffected.
+```clojure
+{:name :api-surface
+ :parent :explorer-view
+ :args {:namespaces ["web" "app"]
+        :effects ["network"]
+        :uses :http-server}}
+```
+
+`explorer-view` is a base-fn whose slots are the filter axes —
+`name`, `uses` (a `:fn-ref`: the fn's *identity*, so a rename never
+empties the view and the edge is not a dependency), `effects`,
+`kinds`, `namespaces`, `exclude`, `unused`, and `also` (other views
+to intersect with — compose views instead of repeating chips). A
+view fn is versioned, branch-scoped and reviewable like any other
+change; every editor on the branch lists it under **In the graph**;
+**↗** opens it on the canvas; **▶ Run** answers the member list. The
+problem chips (failed / type errors / lint) are this branch's live
+state, not a definition, and are not saved.
+
+You can write one by hand too — extend `explorer-view` like any
+base-fn, from the editor or an `fns.edn`.
 
 ## Try it
 
@@ -98,49 +135,26 @@ browser's local storage. Consequences worth knowing:
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu.
 
-1. Open the **workspace chip** in the Build context bar. Tick
-   `core` — the Explorer collapses to `core.*` and the
-   "(primitives)" bucket disappears.
-2. Tick a second project — the popover stays open; both trees are
-   now in scope.
-3. Hover `core.strings` in the Explorer, click **⊘** — it's gone
-   from your tree. Reopen the chip: it's listed under **Hidden by
-   you**; click **↺** to bring it back.
-4. Reload the page — your scope survives.
-5. Click **All functions** — the full graph is back.
-
-## Smart views — the virtual namespaces
-
-A workspace scopes by *physical* root namespace. The set you care
-about while working is often computed instead: "everything that
-talks HTTP under the hood", "everything built on `:render-hiccup`".
-The **✦ views** chip under the Explorer filter holds those as
-**smart views** — a named rule the server evaluates over the whole
-graph and renders as a force-expanded tree (the same pipeline
-search uses):
-
-- `uses:<fn>` — every fn that *transitively* extends or references
-  the named fn (bare or qualified name);
-- `effect:<kind>` — every fn whose computed effect footprint
-  carries the kind (`io`, `db`, `state`, …);
-- `name:<text>` — qualified-name substring;
-- `ns:<path>` — the fn lives in that namespace or under it;
-- `unused:true` — nothing in the graph extends, references or
-  resolves the fn — the dead-code view (combine with `ns:` — package
-  leaves are public API and "unused in this graph" by design).
-
-Rules AND-combine (`uses:core.web.http-get effect:io`). A fn can
-belong to any number of views — membership is computed, never
-maintained by hand. Views are personal (stored in your browser,
-like workspaces and lenses); the active view shows its name on the
-chip, and "× Show the whole tree" returns to the physical tree.
-
-Views can also be **published to the whole deployment**: create a fn
-named `smart-views` (parent `:const`) whose `:value` is a JSON list
-of `{"name": …, "rule": …}` objects — the ✦ popover shows them in a
-"Shared (from the graph)" section for every editor. Being an ordinary
-fn, the list is versioned, branch-scoped and reviewable like any
-other change.
+1. Click **+ filter**, tick `core` — the Explorer collapses to
+   `core.*`, an `in core` chip appears, the view chip reads
+   `1 filter`, and the "(primitives)" bucket disappears.
+2. Tick a second root — the menu stays open; both trees are in
+   scope, the chip reads `2 filters`.
+3. Hover `core.strings` in the Explorer, click **⊘** — a
+   `not core.strings` chip appears and the namespace is gone from
+   your tree. Click the chip's × to bring it back.
+4. Reload the page — your chips survive.
+5. Click **◍ all** — the full graph is back.
+6. **+ filter** → **+ pick a fn**, type `const`, pick `const`
+   (core.logic). The tree is now the fns built on `:const`. Open the
+   view chip, name it `on-const`, press **Enter**: the chip reads
+   `on-const`.
+7. In the same popover, **Save in the graph…** — accept the name.
+   A fn `on-const` (parent `explorer-view`) appears in the graph; the
+   popover lists it under **In the graph**, and **▶ Run** on its
+   card answers the member list.
+8. **◍ all**, then reopen the view chip and pick `on-const` again —
+   the set comes back.
 
 ## Next
 

@@ -45,9 +45,9 @@ link, with a **×** to remove it — and a form to add a new one.
 > own reverse proxy at the fn they want to serve.
 
 Apps also show up in the Explorer itself: a fn that serves an app
-carries a **▣** marker on its tree row, and the **apps** lens chip
+carries a **▣** marker on its tree row, and the **apps** chip
 under the sidebar search (Lesson 17) narrows the tree to just
-those fns — that lens is the org-wide overview of everything
+those fns — that chip is the org-wide overview of everything
 published. The chip shows a count and appears only when the
 deployment has app routing at all.
 
@@ -135,7 +135,7 @@ the routing, not your code.
   address.
 - The fn's **▣ Apps** action maps a globally-unique **label** →
   `<label>.graphden.app` → the fn you opened it on; custom domains
-  point at the same app once DNS-verified. The **apps** lens is the
+  point at the same app once DNS-verified. The **apps** filter is the
   org-wide overview.
 - Apps live on `graphden.app`, isolated from the editor's
   `graphden.dev` origin, and run in the effect-gated FaaS sandbox.

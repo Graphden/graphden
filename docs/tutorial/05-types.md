@@ -270,7 +270,7 @@ form by hand: hover a namespace row, click its `+`, choose
 **New type…** and pick a kind (Refinement, Record, Union, Variant
 or List). The arg-type **chips**, the compatible-type **select**
 behind them (only types that legally narrow the slot), the `↳`
-"Type rule" popover and the **⚠ type errors** lens are the
+"Type rule" popover and the **⚠ type errors** filter are the
 editor's type surface — described in
 [Lesson 17](17-explorer-and-inspector.md) and
 [Lesson 16](16-errors-and-diagnostics.md).

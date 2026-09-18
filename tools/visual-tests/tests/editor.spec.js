@@ -297,22 +297,35 @@ test.describe('Editor — visual baselines', () => {
   });
 
   // -- Redesign 2026-08 rail surfaces -------------------------------------
-  // Workspaces is a real surface; cover it so a re-skin can't silently
-  // regress. Crop to the inner container (the surface is position:absolute
-  // inset:0 with lots of empty ground otherwise). (The Run surface was
-  // removed — running is the ▶ node action + the inspector Runs tab.)
-
-  // The workspaces SURFACE was folded into the context-bar chip during the
-  // redesign — the scope list (All functions + namespace roots + pins) lives
-  // in the #gd-ws-pop popover the chip opens.
-  test('workspaces popover — scope roots + pins', async ({ page }) => {
+  // The Explorer's VIEW chip popover (saved filter sets — All functions +
+  // your views + the ones saved in the graph + the save form) and the
+  // "+ filter" menu (namespaces checklist, uses, effects, unused). Cover
+  // both so a re-skin can't silently regress the filter row. A namespace
+  // filter is switched on first so the save form is present; it is
+  // cleared after — the baselines must be instance-independent.
+  test('views popover — saved filter sets + save form', async ({ page }) => {
     await page.goto('/#web-server');
     await waitForGraphRendered(page);
     await setTheme(page, 'light');
+    await page.evaluate(() => { gdClearFilters(); gdToggleNamespace('web'); });
     await domClick(page.locator('#gd-ws-chip'));
-    await page.waitForSelector('#gd-ws-pop .gd-pop-item',
+    await page.waitForSelector('#gd-ws-pop .gd-views-input',
                               { state: 'visible', timeout: 10000 });
     await page.evaluate(() => new Promise(requestAnimationFrame));
-    await expect(page.locator('#gd-ws-pop')).toHaveScreenshot('05-workspaces-popover.png');
+    await expect(page.locator('#gd-ws-pop')).toHaveScreenshot('05-views-popover.png');
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => gdClearFilters());
+  });
+
+  test('add-filter menu — namespaces / uses / effects / unused', async ({ page }) => {
+    await page.goto('/#web-server');
+    await waitForGraphRendered(page);
+    await setTheme(page, 'light');
+    await page.evaluate(() => gdClearFilters());
+    await domClick(page.locator('#gd-filter-add'));
+    await page.waitForSelector('.gd-filter-add-pop [data-action="add-uses"]',
+                              { state: 'visible', timeout: 10000 });
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    await expect(page.locator('.gd-filter-add-pop')).toHaveScreenshot('05b-add-filter-menu.png');
   });
 });

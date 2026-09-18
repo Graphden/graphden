@@ -73,7 +73,7 @@ them).
 ## Step 2 — Credential lookups (2 secret fn-defs)
 
 Secrets are created through **one** UI path: the Secrets panel. If
-you're signed in, focus the **secrets** lens chip under the sidebar
+you're signed in, press the **secrets** chip under the sidebar
 search — the tree narrows to 🔒 rows and a **+ New secret** button
 appears. It asks for `{name, path, value}`: it writes `value` to
 OpenBao at `secret/<path>`, and creates a fn-def whose `parent` is

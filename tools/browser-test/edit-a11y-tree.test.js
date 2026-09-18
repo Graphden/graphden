@@ -324,7 +324,7 @@ const rowInfo = () => {
       const visible = () => [...document.querySelectorAll('#entity-list .entity-item[data-fn-id]')]
         .filter((el) => !el.hidden && el.offsetParent !== null).length;
       if (typeof toggleKind !== 'function') return {skip: true};
-      toggleKind('type');
+      toggleKind('types');
       await new Promise((r) => setTimeout(r, 500));
       const narrowed = {said: read(), visible: visible()};
       toggleKind('all');
@@ -335,14 +335,14 @@ const rowInfo = () => {
     if (lens.skip) {
       console.log('  – lens probe skipped: toggleKind unavailable');
     } else {
-      assert(/lens/i.test(lens.narrowed.said),
-             'a lens change is announced: "' + lens.narrowed.said + '"');
+      assert(/only types/i.test(lens.narrowed.said),
+             'a kind filter change is announced: "' + lens.narrowed.said + '"');
       const n = parseInt((lens.narrowed.said.match(/(\d+) of/) || [])[1], 10);
       assert(Number.isFinite(n) && n === lens.narrowed.visible,
              'and its count matches what is on screen (' + n + ' announced, '
              + lens.narrowed.visible + ' visible)');
-      assert(/all kinds/i.test(lens.cleared.said),
-             'clearing the lens is announced too: "' + lens.cleared.said + '"');
+      assert(/all functions/i.test(lens.cleared.said),
+             'clearing the filters is announced too: "' + lens.cleared.said + '"');
     }
 
     const search = await page.evaluate(async () => {

@@ -78,12 +78,12 @@ per-branch routing) and auth-required. Core:
 
 ## Editor surfaces
 
-- **Explorer `tests` lens** (the ✓ chip, shortcut `t`) — filters the
+- **Explorer `tests` filter** (the ✓ chip, shortcut `t`) — filters the
   tree to tests; test namespaces stay visible even before their
   leaves lazy-load. The chip counts the branch's tests (and, in red,
   the failed ones); each test row
   carries a status dot: green passed, red failed, grey stale/not-run
-  (primed from `/api/tests/status`). With the lens active the chip
+  (primed from `/api/tests/status`). With the chip on it
   row reveals **▶ Run all** (`POST /api/tests/run`), and the editor
   keeps a LIVE signal open: `GET /partials/tests-stream` pushes a
   server-time PING on write wakes and a 30 s keepalive (`run-tests!`
@@ -151,7 +151,7 @@ Clojure test pins the impl, a platform test pins the COMPOSITION a
 package builds on it.
 
 Platform tests are tests like any other — discovered, listed under
-the ✓ lens with their status dots, runnable one at a time from the
+the ✓ tests filter with their status dots, runnable one at a time from the
 Inspector — with one explicit difference: **an all-tests run skips
 them unless asked.** `POST /api/tests/run` (and the MCP `run-tests`
 tool) take `platform?`; without it only the org's own tests run, so a

@@ -168,20 +168,24 @@ const VISIBLE_PROBE = () => {
            'namespace picker: the × cancels the FLOW, not just the popover — '
            + 'the caller has an edit strip waiting on onCancel');
 
-    // ── smart views ───────────────────────────────────────────────────
-    const views = await page.evaluate(() => {
-      if (typeof gdOpenSmartViewsPop !== 'function') return {skip: true};
-      gdOpenSmartViewsPop(document.getElementById('gd-brand-home'));
-      const el = document.querySelector('.gd-views-pop');
-      const x = el ? el.querySelector(':scope > [data-gd-pop-x]') : null;
-      const seen = window.__gdVisible(x);
-      if (x) x.click();
-      return {seen, closed: !document.querySelector('.gd-views-pop')};
-    });
-
-    assert(!views.skip, 'smart views: the popover API is in the bundle');
-    assert(views.seen, 'smart views: a visible ×');
-    assert(views.closed, 'smart views: the × closes it');
+    // ── views (the view chip's popover) + the "+ filter" menu ─────────
+    for (const [label, opener, sel] of [
+      ['views', 'gdOpenViewPop', '#gd-ws-pop'],
+      ['add-filter menu', 'gdOpenFilterAdd', '.gd-filter-add-pop'],
+    ]) {
+      const got = await page.evaluate(([fn, s]) => {
+        if (typeof window[fn] !== 'function') return {skip: true};
+        window[fn](document.getElementById('gd-brand-home'));
+        const el = document.querySelector(s);
+        const x = el ? el.querySelector(':scope > [data-gd-pop-x]') : null;
+        const seen = window.__gdVisible(x);
+        if (x) x.click();
+        return {seen, closed: !document.querySelector(s)};
+      }, [opener, sel]);
+      assert(!got.skip, label + ': the popover API is in the bundle');
+      assert(got.seen, label + ': a visible ×');
+      assert(got.closed, label + ': the × closes it');
+    }
 
     // ===================================================================
     // Phase C — the scrim-backed `.gd-pop` PANELS
@@ -191,7 +195,6 @@ const VISIBLE_PROBE = () => {
     // plain menus — branch policy, protection, the diff chip — do not, and
     // are deliberately not listed here).
     const panels = [
-      {label: 'workspace picker', chip: '#gd-ws-chip', pop: '#gd-ws-pop'},
       {label: 'packages panel', chip: '#gd-pkg-chip', pop: '#gd-pkg-pop'},
     ];
     for (const panel of panels) {

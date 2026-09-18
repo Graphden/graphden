@@ -184,18 +184,18 @@ function buildNsRowButtons(actionsEl, nsId, nsPath) {
     });
   }
 
-  // Personal "hide from my view" (⊘) — a workspace overlay, NOT a graph edit:
-  // removes this namespace from THIS browser's explorer only (restore from the
-  // workspace chip). No auth needed — it's a view preference, works signed-out.
+  // Personal "hide from my view" (⊘) — a FILTER (the `exclude` axis of
+  // editor-explorer-filters.js), NOT a graph edit: removes this namespace
+  // from THIS browser's explorer only; the chip it adds is the way back.
+  // No auth needed — it's a view preference, works signed-out.
   const hideBtn = document.createElement('button');
   hideBtn.className = 'create-btn create-btn-inline ns-hide-btn';
-  hideBtn.title = 'Hide from my view (personal — restore from the workspace chip)';
+  hideBtn.title = 'Hide from my view — a "not " filter chip appears; remove it to restore';
   hideBtn.setAttribute('aria-label', 'Hide ' + nsPath + ' from my view');
   hideBtn.textContent = '⊘';
   hideBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (typeof window.graphdenToggleHidden === 'function') window.graphdenToggleHidden(nsPath);
-    if (typeof updateEntityList === 'function' && typeof graphData !== 'undefined') updateEntityList(graphData);
+    if (typeof window.gdToggleExclude === 'function') window.gdToggleExclude(nsPath);
   });
 
   actionsEl.appendChild(editBtn);

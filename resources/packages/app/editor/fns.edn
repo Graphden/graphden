@@ -147,7 +147,6 @@
                   "packages/app/editor/editor-fn-versions.js"
                   "packages/app/editor/editor-fn-usages.js"
                   "packages/app/editor/editor-fn-peek.js"
-                  "packages/app/editor/editor-smart-views.js"
                   "packages/app/editor/editor-recents.js"
                   "packages/app/editor/editor-service-popover.js"
                   "packages/app/editor/editor-mismatch-explainer.js"
@@ -196,6 +195,11 @@
                   ;; build time by the rows; then the row builders, the tree
                   ;; walk, and the Organization / Platform surface sections.
                   "packages/app/editor/editor-sidebar-lens.js"
+                  ;; The Explorer's FILTER model (kinds + namespaces + uses +
+                  ;; effects + unused, saved views) — after sidebar-lens
+                  ;; (mirrors kinds into `lensKinds`), before the rows.
+                  "packages/app/editor/editor-explorer-filters.js"
+                  "packages/app/editor/editor-explorer-views-ui.js"
                   "packages/app/editor/editor-sidebar-rows.js"
                   "packages/app/editor/editor-sidebar.js"
                   "packages/app/editor/editor-sidebar-ops.js"
@@ -351,10 +355,15 @@
              ;; grows a branch badge so the write-context never becomes
              ;; invisible (editor-prefs.js/gdSyncEdgeBranchBadge).
              [:div {:id "gd-exp-ctx"}
+              ;; The VIEW chip — the active filter set by name (a saved view,
+              ;; "N filters", or All functions); its popover lists saved
+              ;; views (yours + those saved in the graph) and saves the
+              ;; current set (editor-explorer-filters.js). Keeps the id
+              ;; the tour / e2e address.
               [:button {:type "button" :id "gd-ws-chip" :class "gd-ctx-chip"
-                        :title "Switch workspace scope"}
+                        :title "Views — saved filter sets"}
                [:span {:class "gd-ctx-dot"}]
-               [:span {:class "gd-ctx-k"} "workspace"]
+               [:span {:class "gd-ctx-k"} "view"]
                [:b "All functions"]]
               [:div {:id "branch-mount"}]
               ;; Packages (dependencies) — a BUILD-surface act (add building
@@ -370,21 +379,19 @@
                        :aria-label "Filter functions"
                        :oninput "onSearchInput(this.value)"}]
               [:button {:id "search-clear" :onclick "clearSearch()" :aria-label "Clear filter"} "\u00D7"]
-              ;; The LENS — kind chips with FOCUS semantics ("show only this
-              ;; kind"), replacing the old hide-semantics eyes. "All" (empty
-              ;; lens) shows everything with per-row kind markers; clicking a
-              ;; kind chip focuses the tree on that kind (structure/expansion
-              ;; kept, client-side filter, no reload); a further chip adds to
-              ;; the selection; re-clicking (or "All") returns. State persists
-              ;; in localStorage; syncKindFilterBar (editor-sidebar.js) syncs
-              ;; aria-pressed, fills the services/apps counts and hides the
-              ;; apps chip when the deployment has no app routing. The
-              ;; trailing `+` opens the New-secret form (authed only).
+              ;; The KIND chips — the fixed half of the Explorer's FILTER row
+              ;; ("show only this kind"; a further chip adds to the
+              ;; selection; re-clicking removes it). "◍ all" clears EVERY
+              ;; filter — the one gesture that always brings the whole tree
+              ;; back. The set is one axis of the filter model
+              ;; (editor-explorer-filters.js, persisted per browser);
+              ;; syncKindFilterBar syncs aria-pressed, fills the counts and
+              ;; hides the apps chip when the deployment has no app routing.
               [:div {:id "kind-filters" :role "group"
-                     :aria-label "Focus the tree on an entity kind"}
+                     :aria-label "Filter the tree by kind"}
                [:button {:type "button" :class "kind-toggle kind-all" :data-kind "all"
                          :aria-pressed "true" :onclick "toggleKind('all')"
-                         :title "Show everything"}
+                         :title "Show everything — clears every filter"}
                 [:span {:class "kind-glyph" :aria-hidden "true"} "◍"]
                 [:span {:class "kind-label"} "all"]]
                [:button {:type "button" :class "kind-toggle" :data-kind "fn"
@@ -485,20 +492,22 @@
                        :onclick "gdRunAllTests(this)"}
               [:span {:class "kind-glyph" :aria-hidden "true"} "▶"]
               [:span {:class "kind-label"} "Run all"]]
-             ;; Smart views — saved virtual groupings (editor-smart-views.js).
-             ;; NOT a kind lens, so it sits outside the kind-filters group,
-             ;; next to the secret-add action.
-             [:button {:id "gd-views-btn" :type "button" :class "gd-views-chip"
-                       :aria-pressed "false"
-                       :title "Smart views — saved virtual groupings of the tree"
-                       :aria-label "Smart views"
-                       :onclick "gdOpenSmartViewsPop(this)"}
-              [:span {:class "kind-glyph" :aria-hidden "true"} "✦"]
-              [:span {:class "kind-label"} "views"]]
+             ;; The DYNAMIC filter chips — one per active namespace / uses /
+             ;; effect / unused filter, each with its × (editor-explorer-
+             ;; filters.js gdRenderFilterChips) — and "+ filter", the menu
+             ;; for the axes that take a value (namespaces checklist, the
+             ;; fn picker for "uses", effects, unused). The kind chips
+             ;; above are the fixed half of the same row.
+             [:div {:id "gd-filter-chips" :role "group" :aria-label "Active filters"}]
+             [:button {:id "gd-filter-add" :type "button" :class "gd-views-chip"
+                       :title "Add a filter — namespaces, a fn it uses, an effect, unused"
+                       :aria-label "Add a filter"}
+              [:span {:class "kind-glyph" :aria-hidden "true"} "+"]
+              [:span {:class "kind-label"} "filter"]]
              ;; Recent fns — the navigation trail. renderRecentFns
              ;; (editor-sidebar.js) fills it from localStorage on every
-             ;; tree update; hidden while empty or while a filter, smart
-             ;; view or lens owns the tree.
+             ;; tree update; hidden while empty or while a search or any
+             ;; filter owns the tree.
              [:div {:id "gd-recent-fns" :hidden "hidden"
                     :aria-label "Recently selected functions"}]
              ;; role="tree": the rows inside are treeitems with an

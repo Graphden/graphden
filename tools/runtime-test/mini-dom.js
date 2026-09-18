@@ -283,6 +283,11 @@ function createDocument() {
     createElementNS: (_ns, tag) => new MiniElement(tag),
     createTextNode: (t) => new MiniText(t),
     createDocumentFragment: () => new MiniElement('#fragment'),
+    // Document-level selectors delegate to the body: `#x b` and
+    // `.gd-ctx-k` style lookups a module does at load time.
+    querySelector(sel) { return body.querySelector(sel); },
+    querySelectorAll(sel) { return body.querySelectorAll(sel); },
+    readyState: 'complete',
     // Enough of getElementById for modules that sync a chip by id —
     // walks the body tree.
     getElementById(id) {

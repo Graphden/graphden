@@ -1,11 +1,11 @@
-# Lesson 16 — When something breaks, and when it just repeats: the problem lenses
+# Lesson 16 — When something breaks, and when it just repeats: the problem filters
 
 **Goal**: know where to look when a run fails, when an edit doesn't
 type-check, and when a composition already exists somewhere else —
 and know why those are three different kinds of problem.
 
 **Concepts**: the Explorer's **✕ failed**, **⚠ type errors** and
-**⚐ lint** lenses (with counts on the chip, the namespace and the
+**⚐ lint** filters (with counts on the chip, the namespace and the
 fn), the Inspector's **Runs** / **Bindings** / **Lint** details,
 runtime failure vs static diagnostic vs lint finding, error-tolerant
 writes, marking a finding as not an issue.
@@ -17,7 +17,7 @@ writes, marking a finding as not an issue.
 
 ## Three kinds of wrong
 
-Graphden separates them on purpose, and each has its own lens:
+Graphden separates them on purpose, and each has its own filter chip:
 
 | | **✕ failed** | **⚠ type errors** | **⚐ lint** |
 |---|---|---|---|
@@ -37,7 +37,7 @@ the graph simply already contains what you just built, or holds a
 private helper that no longer earns its place. It is advice, so it is
 the one list where you get to disagree.
 
-All three are **lenses** in the Explorer (Lesson 17): click a chip
+All three are **filter chips** in the Explorer (Lesson 17): click a chip
 and the tree narrows to the fns involved, each namespace row counting
 what is inside it and each fn row carrying its own mark — so the tree
 answers *where*, and the Inspector, on the selected fn, answers *what*.
@@ -68,7 +68,7 @@ as any of these happens:
   clears without an edit.
 - **You dismiss it.** **✕ Dismiss** on the row in the Runs tab (or
   **✕ Dismiss all**, the button that appears under the chips while the
-  ✕ lens is on) acknowledges the failure and hides it everywhere; the
+  ✕ failed chip is on) acknowledges the failure and hides it everywhere; the
   audit row itself stays for its retention window.
 
 Failures follow branches the way code does: a branch **sees its
@@ -80,7 +80,7 @@ Three more things worth knowing about that list:
 
 **It only counts runs you asked to keep.** A transient run — the plain
 ▶ with "Save to history" unticked (lesson 12) — leaves no audit row, so
-a failure you did not persist never reaches the lens. Effectful runs
+a failure you did not persist never reaches the ✕ failed filter. Effectful runs
 persist by themselves; pure ones are yours to keep.
 
 **The mark is where you work.** The `✕1` sits on the fn's row and on
@@ -110,14 +110,14 @@ Type-check failed in fn-def :tprobe
 ```
 
 That is the same text lesson 05 showed you on a single card's badge.
-The lens is the branch-wide view of it: every mismatch that survived a
+The ⚠ type errors filter is the branch-wide view of it: every mismatch that survived a
 write, marked where it lives, including the ones on fns you are not
 currently looking at.
 
 Why the writes were allowed at all is lesson 05's point, worth
 restating here: an editor that refuses a half-finished edit forces you
 to construct changes in an order the type-checker approves of. Graphden
-takes the diagnostic instead — so this lens is a **worklist**, and it
+takes the diagnostic instead — so this filter is a **worklist**, and it
 is expected to be non-empty while you are mid-change.
 
 Marks leave when the mismatch is fixed. Nothing to acknowledge, no
@@ -180,14 +180,14 @@ branch, merges with it, and you can open it on the canvas and edit or
 delete it like any other fn. Nothing in graphden's diagnostics is
 stored state except what you explicitly said.
 
-## The lens next door
+## The filter next door
 
-Tests are the fourth lens — **✓ tests** (lesson 14) — and the trace
+Tests are the fourth problem-style filter — **✓ tests** (lesson 14) — and the trace
 tree with the «catch next request» trap (lesson 15) live on the
 **Runs** tab. Nothing sits under the canvas: every diagnostic is a
-lens in the Explorer and a section in the Inspector.
+filter chip in the Explorer and a section in the Inspector.
 
-The ✕ lens answers *what broke and where*, the trace tree *why*, ⚐
+The ✕ failed filter answers *what broke and where*, the trace tree *why*, ⚐
 *where this already is*. In that order, most of the time.
 
 ## Try it
@@ -206,7 +206,7 @@ The ✕ lens answers *what broke and where*, the trace tree *why*, ⚐
 3. Click the **✕ failed** chip under the Explorer's filter. The tree
    narrows to `tutorial-bad-json`, `✕1` on its row and on its card,
    the chip reads `1`, and **✕ Dismiss all** appears next to the chips
-   (the Recent trail steps aside while a lens is on). Select the fn
+   (the Recent trail steps aside while any filter is on). Select the fn
    and open the Inspector's **Runs** tab: the failure is at the top
    with `Malformed JSON.` and its own **✕ Dismiss**.
 4. Watch the mark resolve itself: run `tutorial-bad-json` again, this
@@ -265,7 +265,7 @@ operator's channel ([MONITORING.md § 3b](../MONITORING.md)).
 
 ## Organization → Monitoring
 
-How often things break is not a lens: it is a report. The account
+How often things break is not a filter: it is a report. The account
 menu's **Organization** surface has a **Monitoring** section — your
 org's last seven days as headline totals, a per-day trend table and
 the busiest fns, every number a usage rollup (run counts and
@@ -277,12 +277,12 @@ ceilings are measured against ([MONITORING.md § 1](../MONITORING.md)).
 ## Where this shows up next
 
 - **Tests** (lesson 14) — a failing test is a failed run like any
-  other, so the ✕ lens marks it too, with its assertion message in
+  other, so the ✕ failed filter marks it too, with its assertion message in
   the Runs tab.
 - **Debugging** (lesson 15) — from a failed row, the next question is
   usually "which node threw?", which is what the trace tree answers.
 - **Plans** (lesson 34) — the same audit rows feed the usage counters;
-  a plan's retention is what decides how far back the ✕ lens can look.
+  a plan's retention is what decides how far back the ✕ failed filter can look.
 - **Packages** (lesson 28) — the same lint runs over graphden's own
   package corpus in CI (`bb graph-lint`); the rules and their
   calibration are in [GRAPH_LINT.md](../GRAPH_LINT.md).

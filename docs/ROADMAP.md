@@ -18,7 +18,7 @@ and service-to-service endpoints ([SERVICES.md](SERVICES.md)), org
 sharding, quotas and a BYO executor ([SCALING.md](SCALING.md)).
 
 The surfaces: the visual editor with a server-computed layout, compare
-mode as the diff surface, workspaces, lenses for failed runs, type errors
+mode as the diff surface, Explorer filters and views (kinds, namespaces, uses, effects, unused; views saved in the graph), chips for failed runs, type errors
 and graph lint, an inspector with run history, path traces and a
 step-through call tree; the REST API; the `/mcp` endpoint that lets an AI
 client author graphs ([MCP_CLIENTS.md](MCP_CLIENTS.md)); the package

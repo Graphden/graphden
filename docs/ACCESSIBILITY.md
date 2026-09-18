@@ -61,7 +61,7 @@ Escape / Enter — because a layout that moved Escape would break every
 dismiss contract on this page.
 
 **Any state that changes without moving focus** — a selection, a branch
-switch, a lens toggle — calls `gdAnnounce`. A screen reader has no other
+switch, a filter chip toggle — calls `gdAnnounce`. A screen reader has no other
 way to notice.
 
 **A new interactive element** must be reachable and visible when focused.
@@ -87,6 +87,7 @@ busy spinner only slows down because it IS the progress signal.
 | Explorer tree | ARIA tree — arrows, Right/Left expand/collapse, Enter opens, roving tabindex. A row's own buttons are NOT tab stops (four per namespace header once made Tab walk the whole tree): `.` / `m` reach them, ← → walk them, Escape returns to the row. The filter field above it exits with ↓ / Escape onto the tree — every always-present text field owes a key out, since the bare keys type while it has focus | `editor-tree-keys.js` |
 | Graph canvas | Roving tabindex; arrows/hjkl follow EDGES (→ argument, ← consumer). Two levels: `Enter` steps INTO a card's rows, `Escape` backs out; `Shift`+arrows move the node itself | `editor-canvas-keys.js` |
 | Pickers (fn, namespace) | Combobox — focus stays in the filter field, `aria-activedescendant` names the highlighted row | `editor-fn-picker.js`, `editor-namespace-picker.js` |
+| Explorer filters | The kind chips are a `role=group` of `aria-pressed` toggles; every dynamic chip (`#gd-filter-chips`) is a pressed toggle whose accessible name says *Remove filter: …*; `◍ all` clears everything. The **+ filter** menu and the view chip's popover are non-modal dialogs (`installPopoverDismiss` + `ensurePopoverClose`, focus in on open, Escape / × out, focus back to the chip); the namespaces rows are `role=checkbox` with `aria-checked`. Every change calls `gdAnnounce` — *Only types — 12 of 40 shown*, *Only core*, *core.tests hidden*, *View on-const*, *N functions match*, *All functions*. Leader: `Space f f` add a filter, `Space f v` views, `Space f a` all. | `editor-explorer-filters.js`, `editor-explorer-views-ui.js`, `editor-sidebar-lens.js` |
 | Inspector tabs | ARIA tabs — `aria-controls`, one tabpanel, ← → Home End | `editor-shell.js` |
 | Dialogs | Focus enters, Tab is trapped, Escape returns it | `graphden-popover.js` + each dialog |
 | Account chip menu | ARIA menu — focus enters on open, ↑ ↓ Home End walk `menuitem`s, Escape/Tab close and return focus to the chip (`aria-expanded` mirrors state) | `editor-auth.js` |

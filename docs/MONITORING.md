@@ -51,13 +51,13 @@ memory-growth vector).
 
 ## 2. Error log — unresolved failures viewer (always on)
 
-The editor's **✕ failed** lens (Explorer) focuses on, and the Inspector's **Runs** tab lists, the current branch view's
+The editor's **✕ failed** filter chip (Explorer) focuses on, and the Inspector's **Runs** tab lists, the current branch view's
 UNRESOLVED failures (`:unresolved-failure-counts` → `GET /api/failures`
-for the lens; `:recent-failures` for the Runs tab's block), reading the
+for the chip; `:recent-failures` for the Runs tab's block), reading the
 already-scrubbed `:error`/`:error-data` off the audit rows. A failure
 clears when the fn ships a new version, when the same version later runs
 to success, or when it's dismissed (**✕ Dismiss** in the Runs tab →
-`POST /partials/execute-history/ack`; **Dismiss all** under the lens →
+`POST /partials/execute-history/ack`; **Dismiss all** under the chip →
 `POST /api/failures/ack-all`; `:failure-ack` / `:failure-ack-all`);
 visibility is branch-chain-scoped.
 See [EXECUTION.md § Error log](EXECUTION.md).

@@ -825,7 +825,7 @@
            newest execution of its CURRENT version — so an edited test reads
            `stale` by construction, no bookkeeping. After EACH test it nudges
            the `test:updated` NOTIFY, which is what moves the Explorer's
-           dots one by one under the ✓ tests lens (its SSE ping stream).
+           dots one by one under the ✓ tests filter chip (its SSE ping stream).
            Note the `platform?` arm: the SHIPPED packages carry their own
            `*.tests` modules (`core.tests`, `web.tests`, …), and a default
            all-tests run skips them — the rule is OWNERSHIP
@@ -1096,7 +1096,7 @@
      :say "The editor's side of the same engine: the per-ctx graph snapshot
            (org-sliced, branch-resolved) is rebuilt into loader-shaped
            fn-defs and linted, memoised per branch while that branch's
-           snapshot object is unchanged. The ⚐ lens and the Inspector's Lint
+           snapshot object is unchanged. The ⚐ lint chip and the Inspector's Lint
            section share this one call; the suppressions it subtracts live in
            the graph as a `:const`."}]}
 
@@ -1543,7 +1543,7 @@
            changed-refs signal (`gdDiffEffectsTouched`) as the anonymous-fn
            fallback. Note what it does NOT do: no data re-routing — every
            read and write stays on the current branch, so the user keeps
-           editing with the lens on."}
+           editing with the filter on."}
 
     {:file "resources/packages/app/editor/editor-prefs.js" :defn gdApplyThemePayload
      :say "A THEME (Settings → Appearance, docs/MARKETPLACE.md § 5) is a payload
@@ -1575,7 +1575,7 @@
            lessons are graph content (`app.tour/_tour-lessons`, served at
            `GET /api/tour`) and this file is only the engine that interprets
            them. Each tick clears the reader-state traps that make a lesson
-           unfinishable — a collapsed Explorer, a kind lens hiding the very fn
+           unfinishable — a collapsed Explorer, a kind filter hiding the very fn
            the step names, a target scrolled out of view — then polls the
            step's declarative check and advances. A tour that can dead-end is
            worse than no tour, which is what every guard here is paying for."}]}

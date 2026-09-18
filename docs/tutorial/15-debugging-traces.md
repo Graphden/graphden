@@ -99,7 +99,7 @@ For a **web handler** you usually want the real thing: the actual
 HTTP request, with its params and headers. That's the trap:
 
 1. Select your web server — the fn that runs as a service (the
-   **⚙ services** lens finds it) — and open the Inspector's **Runs**
+   **⚙ services** chip finds it) — and open the Inspector's **Runs**
    tab. It opens with the trap block above the run history.
 2. Optionally type a path prefix (e.g. `/shop`) — empty catches the
    next request to any app path (the editor's own `/api/…` and

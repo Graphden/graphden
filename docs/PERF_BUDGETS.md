@@ -87,7 +87,7 @@ The invariants that are gated today:
 | `:fixture/golden-bootstrap` | 3 | a namespace inventing a new package set (~14 s each); three are sanctioned — `[core web app]`, `[core web app registry mcp]` (registry/export/mcp suites), and the cheap `[core]` (~3 s, pure-core NSes) |
 | `:fixture/type-check-sweep` | 0 | the ~24 s sweep leaking into the unit suite (was ~40 s before the 2026-08-17 `effective-ref-return` memoization) |
 | `:registry/delta-fell-back-to-rebuild` | 0 | a delta silently becoming a full rebuild |
-| `:registry/delta-read-graph` | 26 | a delta (or type refresh) reading the whole graph out of Postgres instead of the primed cache — on the cloud that read was 1.7 s per write |
+| `:registry/delta-read-graph` | 27 | a delta (or type refresh) reading the whole graph out of Postgres instead of the primed cache — on the cloud that read was 1.7 s per write |
 | `:registry/invalidate-full` | 5 | a WARM full clear (a compiled registry dropped; the next request compiles the whole graph). Warm-only since 2026-09-10 — the cold no-ops are `:registry/invalidate-cold`, trend-only — and every event carries an attribution note (frames + write shape). The 5 are tests calling the 1-arity on purpose; the CRUD path produces zero |
 | `:sql/graph-entities-tree` | 1 | the sidebar's first paint reading rows it doesn't paint |
 | `:sidebar/tree-kinds-computed` | 1 | the sidebar's per-namespace kind counts recomputed on a paint whose snapshot did not change — the memo missed and every paint annotates every fn again (the 4× trend drift of 2026-09) |

@@ -315,7 +315,7 @@ re-instrumenting.
 The perf trend (advisory) had `graph-entities-tree` at ~4× its 2026-08-27
 units while every other scenario held. Not the database (one round trip, as
 budgeted): the sidebar's per-namespace kind counts — `:type-count` /
-`:fn-count`, so the fn / types lenses keep unloaded
+`:fn-count`, so the fn / types filters keep unloaded
 namespaces visible — were computed by annotating the ROLE of every fn on
 every paint (`roled-fns` in `crud.entities.list`, ~5k `compute-fn-role`
 calls). The counts are a pure function of the graph snapshot and the

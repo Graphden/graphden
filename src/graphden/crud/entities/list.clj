@@ -447,22 +447,6 @@
      :truncated? (boolean (and needle (> (count matches) *default-search-limit*)))}))
 
 
-(defn- view-rule-tokens
-  "Parse the smart-view rule string — space-separated `key:value`
-   tokens (`uses:core.strings.to-str effect:io name:handler`). A bare
-   token is a `name:` substring. Unknown keys are kept (and match
-   nothing) rather than silently dropped — a typo should read as an
-   empty view, not as \"everything\"."
-  [q]
-  (->> (str/split (str/trim (or q "")) #"\s+")
-       (remove str/blank?)
-       (mapv (fn [tok]
-               (let [[_ k v] (re-matches #"([a-z-]+):(.*)" tok)]
-                 (if (and k (seq v))
-                   [(keyword k) v]
-                   [:name tok]))))))
-
-
 (defn- reverse-ref-adjacency
   "target-fn-id → [user-fn-ids] over EVERY composition edge: parent-ids,
    binding ref/resolver, list-item refs (through their owner binding).
@@ -676,10 +660,15 @@
                 (when-let [sid (get slots-by-name slot-name)]
                   (closest-binding bindings-by-fn parents-of fn-id sid)))
         items (fn [b] (->> (get items-by-binding (:id b)) (sort-by :position)))
+        ;; A list slot is bound either as item rows (`:list-append`, the
+        ;; fns.edn / sequence-API way) or as one `:value` vector (the
+        ;; editor's binding form) — read both.
         lit-list (fn [slot-name]
                    (when-let [b (bound slot-name)]
-                     (let [vs (into [] (keep :value) (items b))]
-                       (when (seq vs) vs))))]
+                     (let [vs (if (sequential? (:value b))
+                                (vec (:value b))
+                                (into [] (keep :value) (items b)))]
+                       (when (seq vs) (mapv str vs)))))]
     (cond-> {}
       (some-> (bound :name) :value) (assoc :name (:value (bound :name)))
       (some-> (bound :uses) :ref-fn-id) (assoc :uses [(:ref-fn-id (bound :uses))])
@@ -731,41 +720,6 @@
                       :name (:name f)
                       :namespace-id (:namespace-id f)
                       :filters (decode-view-filters env (:id f))})))))))
-
-
-(defn- list-scope-view
-  "LEGACY `?scope=view&q=<rule string>` — the text rule the editor's
-   smart-views popover still sends until the filters/views redesign
-   lands its frontend half. Tokens map onto the structured filter set
-   (`uses:<name>` resolved to an id over the graph, bare or qualified),
-   then `view-members*` answers. Removed with `view-rule-tokens` once
-   nothing sends a rule string."
-  [{:keys [base namespaces] :as env} storage q]
-  (let [paths (ns-path/path-map @namespaces)
-        qualified (fn [f]
-                    (let [p (get paths (:namespace-id f))]
-                      (if (seq p) (str p "." (:name f)) (:name f))))
-        resolve-target (fn [nm]
-                         (let [needle (str/replace (str/lower-case nm) "/" ".")]
-                           (some #(when (and (:name %)
-                                             (or (= (str/lower-case (:name %)) needle)
-                                                 (= (str/lower-case (qualified %)) needle)))
-                                    (:id %))
-                                 (:fns base))))
-        rules (view-rule-tokens q)
-        unknown? (some (fn [[k _]] (not (#{:uses :effect :name :ns :unused} k))) rules)
-        ;; A `uses:` naming nothing matches nothing (as before) — an
-        ;; unresolvable id filters everything out.
-        uses (mapv (fn [[_ v]] (or (resolve-target v) (java.util.UUID/randomUUID)))
-                   (filter (comp #{:uses} first) rules))
-        filters {:name (some->> rules (filter (comp #{:name} first)) (map second) seq (str/join " "))
-                 :uses uses
-                 :effects (mapv second (filter (comp #{:effect} first) rules))
-                 :namespaces (mapv second (filter (comp #{:ns} first) rules))
-                 :unused (some (fn [[k v]] (and (= k :unused) (contains? #{"true" "yes" "1"} (str/lower-case v)))) rules)}]
-    (if (or unknown? (empty? rules))
-      {:fns [] :truncated? false}
-      (view-members* env storage filters))))
 
 
 (defn- list-scope-index
@@ -843,8 +797,6 @@
    - `:search` with `q` — capped light rows by name substring.
    - `:search-text` with `q` — as `:search`, plus description matches
      ranked last (the MCP `search-fns` tool).
-   - `:view` with `q` — smart-view rules (`uses:` / `effect:` /
-     `name:` tokens, AND-combined) — the Explorer's saved views.
    - `:index` — `{:fns :namespaces}`, nil fields dropped (CLI/batch).
    - `:subtree` with `root-id` — the fn-view slice; falls back to
      `:full` shape when `root-id` is nil / unresolved."
@@ -859,7 +811,6 @@
        (= scope :namespace)          (list-scope-namespace env namespace-id)
        (= scope :search)             (list-scope-search env q false)
        (= scope :search-text)        (list-scope-search env q true)
-       (= scope :view)               (list-scope-view env storage q)
        (= scope :index)              (list-scope-index env)
        (and (= scope :subtree) root-id) (list-scope-subtree env root-id)
        :else

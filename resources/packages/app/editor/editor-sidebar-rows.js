@@ -180,11 +180,11 @@ function buildFnItem(fn, level = 1) {
 
 function renderNsNode(container, name, node, path, searchMode) {
   const nsPath = path ? path + '.' + name : name;
-  // Personal workspace hide (redesign 2026-08): a namespace the user removed
-  // from their view is structurally skipped at every depth (so hiding a
-  // sub-namespace inside an in-scope project works too). Search spans all.
-  if (!searchMode && typeof window.graphdenIsHidden === 'function'
-      && window.graphdenIsHidden(nsPath)) {
+  // A namespace the reader excluded (the ⊘ on its row — the `exclude` axis
+  // of the filter set) is structurally skipped at every depth, so hiding a
+  // sub-namespace inside a picked root works too. Search spans all.
+  if (!searchMode && typeof window.gdNsExcluded === 'function'
+      && window.gdNsExcluded(nsPath)) {
     return;
   }
   // Search mode force-expands every matched branch so results are visible

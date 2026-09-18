@@ -241,11 +241,10 @@ function refreshRootNode() {
 // is visible. Reuses the expandedNamespaces machinery via a synthesised
 // path key.
 function renderRootNode(list, rootFns, searchMode) {
-  // Under an active workspace the namespace-less "(primitives)" bucket is out of
-  // any project scope — skip it so a scoped explorer shows only the picked
-  // projects. Search always spans everything.
-  if (!searchMode && typeof window.graphdenWorkspaceActive === 'function'
-      && window.graphdenWorkspaceActive()) {
+  // Under a namespace filter the namespace-less "(primitives)" bucket is
+  // outside every picked root — skip it. Search always spans everything.
+  if (!searchMode && typeof window.gdNsFiltersActive === 'function'
+      && window.gdNsFiltersActive()) {
     return;
   }
   const visible = [...rootFns].filter(fnKindVisible)
@@ -407,11 +406,12 @@ function updateEntityList(data) {
   primeTestStatusesOnce();
   primeProblemsOnce();
 
-  // A smart view (editor-smart-views.js) renders through the same
-  // force-expanded pipeline as search; a typed search takes precedence
-  // while it lasts, the view resumes when the filter clears.
+  // A server-evaluated filter (uses / effect / unused —
+  // editor-explorer-filters.js) renders through the same force-expanded
+  // pipeline as search: the tree IS the member list. A typed search takes
+  // precedence while it lasts; the members resume when it clears.
   const viewActive = !searchFilter
-    && (typeof gdActiveSmartView === 'function') && !!gdActiveSmartView();
+    && (typeof gdServerAxesActive === 'function') && gdServerAxesActive();
   const searchMode = !!searchFilter || viewActive;
 
   // While a search query is in flight (debounce + round-trip) there are no
@@ -420,8 +420,8 @@ function updateEntityList(data) {
     list.innerHTML = '<div class="loading">Searching…</div>';
     return;
   }
-  if (viewActive && gdSmartViewResults() === null) {
-    list.innerHTML = '<div class="loading">Computing view…</div>';
+  if (viewActive && gdViewMembers() === null) {
+    list.innerHTML = '<div class="loading">Applying filters…</div>';
     return;
   }
 
@@ -429,7 +429,7 @@ function updateEntityList(data) {
   // normal (lazy) tree is built from whatever fn leaves have been loaded.
   const tree = searchMode
     ? buildNsTree({ namespaces: data.namespaces,
-                    fns: (searchFilter ? _searchResults : gdSmartViewResults()) || [] })
+                    fns: (searchFilter ? _searchResults : gdViewMembers()) || [] })
     : buildNsTree(data);
 
   mountOpsSections(list, searchMode);
@@ -477,34 +477,31 @@ function updateEntityList(data) {
   // place. Workspace-focus IS a structural skip — it's lens-independent (a lens
   // toggle never changes workspace scope), so out-of-scope namespaces need not
   // be in the DOM.
-  // Search escapes the workspace scope on purpose (finding IS the
-  // point) — but YOUR namespaces still deserve the top: results from
-  // in-workspace roots sort before the rest, alphabetical within each
-  // half. Outside search the order stays purely alphabetical (the
-  // workspace already scopes structurally there).
-  const wsRank = (name) => {
-    if (!searchMode || typeof window.graphdenWorkspaceActive !== 'function'
-        || !window.graphdenWorkspaceActive()) return 0;
-    return (typeof window.graphdenInWorkspaceScope === 'function'
-            && window.graphdenInWorkspaceScope(name)) ? 0 : 1;
+  // Search escapes the namespace filters on purpose (finding IS the
+  // point) — but YOUR namespaces still deserve the top: results under the
+  // picked roots sort before the rest, alphabetical within each half.
+  // Outside search the order stays purely alphabetical (the filters
+  // already narrow structurally there).
+  const nsFiltered = typeof window.gdNsFiltersActive === 'function' && window.gdNsFiltersActive();
+  const nsRank = (name) => {
+    if (!searchMode || !nsFiltered) return 0;
+    return (typeof window.gdNsIncluded === 'function' && window.gdNsIncluded(name)) ? 0 : 1;
   };
   const sortedNs = [...tree.children.entries()].sort((a, b) =>
-    (wsRank(a[0]) - wsRank(b[0])) || a[0].localeCompare(b[0]));
-  const wsActive = !searchMode && typeof window.graphdenWorkspaceActive === 'function'
-    && window.graphdenWorkspaceActive();
+    (nsRank(a[0]) - nsRank(b[0])) || a[0].localeCompare(b[0]));
   for (const [name, node] of sortedNs) {
-    // Search: matched-only structural tree (no lens flip) → keep the skip.
-    // Non-search: build all, lens is a `hidden` overlay set in renderNsNode.
+    // Search: matched-only structural tree (no kind flip) → keep the skip.
+    // Non-search: build all, kinds are a `hidden` overlay set in renderNsNode.
     if (searchMode && !nodeShouldShow(node, searchMode)) continue;
-    // Workspaces (redesign 2026-08): when a workspace is active, show only its
-    // included top-level roots; always drop personally-hidden namespaces. Both
-    // are structural skips (lens-independent). Search spans everything (above).
-    if (!searchMode && typeof window.graphdenIsHidden === 'function'
-        && window.graphdenIsHidden(name)) {
+    // Namespace filters (editor-explorer-filters.js): show only the picked
+    // roots; always drop excluded paths. Both are structural skips
+    // (kind-independent). Search spans everything (above).
+    if (!searchMode && typeof window.gdNsExcluded === 'function'
+        && window.gdNsExcluded(name)) {
       continue;
     }
-    if (wsActive && typeof window.graphdenInWorkspaceScope === 'function'
-        && !window.graphdenInWorkspaceScope(name)) {
+    if (!searchMode && typeof window.gdNsIncluded === 'function'
+        && !window.gdNsIncluded(name)) {
       continue;
     }
     renderNsNode(list, name, node, '', searchMode);

@@ -589,12 +589,8 @@
                 "kinds OR")
             (is (empty? (members {:kinds ["apps"] :namespaces ["alpha"]}))
                 "apps is the addon's notion — matches nothing here"))
-          (testing "the legacy rule string still answers through the same evaluator"
-            (is (= #{child grand}
-                   (into #{} (map :id)
-                         (:fns (entities/list-all-graph-entities
-                                 c :view nil nil "uses:alpha.alpha-widget")))))
-            (is (empty? (:fns (entities/list-all-graph-entities c :view nil nil "  ")))))))
+          (testing "the retired `?scope=view` rule string is no scope at all — the full dump, like any unknown scope"
+            (is (contains? (entities/list-all-graph-entities c :view nil nil "uses:alpha-widget") :bindings)))))
       (finally (sp/close storage)))))
 
 
@@ -625,6 +621,8 @@
       (sp/create-entity storage :binding-list-item {:binding-id (:id ns-bind) :position 0 :value "alpha"})
       (sp/create-entity storage :binding {:fn-id (:id child-view) :slot-id (:id s-uses) :ref-fn-id target})
       (sp/create-entity storage :binding {:fn-id (:id child-view) :slot-id (:id s-unused) :value true})
+      ;; The editor's binding form writes a list slot as ONE :value vector.
+      (sp/create-entity storage :binding {:fn-id (:id child-view) :slot-id (:id s-ns) :value ["alpha" "beta"]})
       (ctx/invalidate-graph-cache! c)
       (try
         (let [views (entities/list-explorer-views c)
@@ -632,9 +630,9 @@
           (is (= #{"alpha-only" "alpha-on-target"} (set (keys by-name)))
               "every NAMED descendant of the base-fn, anonymous ones skipped")
           (is (= {:namespaces ["alpha"]} (:filters (by-name "alpha-only"))))
-          (is (= {:namespaces ["alpha"] :uses [target] :unused true}
+          (is (= {:namespaces ["alpha" "beta"] :uses [target] :unused true}
                  (:filters (by-name "alpha-on-target")))
-              "own ref + own bool, the list inherited from the parent view")
+              "own ref + own bool + own :value-vector list (closer than the parent's items)")
           (is (= (:id child-view) (:id (by-name "alpha-on-target"))))
           (is (some? (:id anon-view)) "guard: the anonymous row exists and was skipped")
           (testing "no base-fn → no views, not an error"

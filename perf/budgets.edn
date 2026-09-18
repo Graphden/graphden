@@ -44,9 +44,9 @@
    :why
    "A WARM full clear: a compiled registry was dropped because a write could not say what it changed, and the next request pays a whole-graph compile (~5 s at 6.5k fns; 49.8 s measured in 2026-07). Since 2026-09-10 the counter is warm-only (the cold no-ops are :registry/invalidate-cold, reported as trend) and every event carries an attribution note (frames + write shape, perf/runs/unit.edn). The unit suite's product path — crud.entities/invalidate! — produces ZERO; the 5 are tests calling the 1-arity on purpose (entities-test, fn-execution-test, compile-runtime-test) plus the shared-container fixture. A sixth is a write whose affected-fn-ids answered nil on a warm ctx — read the note, name the shape in affected-fn-ids."},
   :registry/delta-read-graph
-  {:max 26,
+  {:max 27,
    :why
-   "A delta recompile (or a type-registry refresh) that read the WHOLE graph out of Postgres instead of taking the primed :graph-cache. The cache is the full org-agnostic graph on every deployment, so only a cold cache or a sharded (:executor-orgs) pod should ever read here. On the cloud that read was 1.7 s of a 1.85 s merge and ran on EVERY write (2026-09-03) — a timing could not tell it from a slow database. 26 = the suite's cold-cache cases at the time the counter was added."}},
+   "A delta recompile (or a type-registry refresh) that read the WHOLE graph out of Postgres instead of taking the primed :graph-cache. The cache is the full org-agnostic graph on every deployment, so only a cold cache or a sharded (:executor-orgs) pod should ever read here. On the cloud that read was 1.7 s of a 1.85 s merge and ran on EVERY write (2026-09-03) — a timing could not tell it from a slow database. 26 = the suite's cold-cache cases at the time the counter was added; 27 since 2026-09-18 — entities-test/list-explorer-views-test is one more fresh-storage case of the same shape (create rows through sp/, invalidate, read)."}},
  :perf
  {:sidebar/tree-kinds-computed
   {:max 1,

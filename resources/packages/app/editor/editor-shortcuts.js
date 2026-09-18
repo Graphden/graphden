@@ -509,6 +509,25 @@ function registerBuiltinShortcuts() {
     description: 'Explorer (show / hide)',
     run: () => clickIfPresent('#sidebar-collapse-btn, #sidebar-expand-floating'),
   });
+  // The Explorer's FILTERS (editor-explorer-filters.js): the saved views
+  // under the view chip, the "+ filter" menu, and clear-all.
+  registerShortcut({
+    id: 'filter-add', keys: 'f f', group: 'Filters',
+    description: 'Add a filter (namespace / uses / effect / unused)',
+    run: () => clickIfPresent('#gd-filter-add'),
+    when: () => !!document.getElementById('gd-filter-add'),
+  });
+  registerShortcut({
+    id: 'views', keys: 'f v', group: 'Filters',
+    description: 'Views — saved filter sets',
+    run: () => clickIfPresent('#gd-ws-chip'),
+    when: () => !!document.getElementById('gd-ws-chip'),
+  });
+  registerShortcut({
+    id: 'filters-clear', keys: 'f a', group: 'Filters',
+    description: 'All functions — clear every filter',
+    run: () => clickIfPresent('#kind-filters .kind-toggle[data-kind="all"]'),
+  });
   registerShortcut({
     id: 'inspector-runs', keys: 'r', group: 'Function',
     description: 'Runs tab',
@@ -521,26 +540,27 @@ function registerBuiltinShortcuts() {
     run: () => clickIfPresent('[data-insp-tab="overview"]'),
     when: () => !!document.querySelector('[data-insp-tab="overview"]'),
   });
-  // The LENSES — the Explorer focus that replaced the Tests / Failed runs /
-  // Type errors / Lint drawer tabs.
+  // The problem / tests FILTERS — the Explorer chips that replaced the
+  // Tests / Failed runs / Type errors / Lint drawer tabs. Ids keep the
+  // `lens-` prefix: a user's keymap may rebind them by id.
   registerShortcut({
     id: 'lens-tests', keys: 't', group: 'Diagnostics',
-    description: 'Tests lens',
+    description: 'Only tests',
     run: () => clickIfPresent('#kind-filters .kind-toggle[data-kind="tests"]'),
   });
   registerShortcut({
     id: 'lens-failed', keys: 'x', group: 'Diagnostics',
-    description: 'Failed-runs lens',
+    description: 'Only fns with failed runs',
     run: () => clickIfPresent('#kind-filters .kind-toggle[data-kind="failed"]'),
   });
   registerShortcut({
     id: 'lens-type-errors', keys: 'y', group: 'Diagnostics',
-    description: 'Type-errors lens',
+    description: 'Only fns with type errors',
     run: () => clickIfPresent('#kind-filters .kind-toggle[data-kind="type-errors"]'),
   });
   registerShortcut({
     id: 'lens-lint', keys: 'w', group: 'Diagnostics',
-    description: 'Lint lens',
+    description: 'Only fns with lint findings',
     run: () => clickIfPresent('#kind-filters .kind-toggle[data-kind="lint"]'),
   });
   // Surfaces — the management destinations otherwise reachable only through

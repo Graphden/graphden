@@ -1,20 +1,23 @@
-// Editor Sidebar — the LENS: which kinds of rows the Explorer shows.
+// Editor Sidebar — KIND visibility: which kinds of rows the Explorer shows.
 //
-// The kind-chip bar
-// (`#kind-filters`): `loadLens` / `saveLens` persist the focused kinds in
-// localStorage (`graphden.sidebarLens`; empty set = All), `toggleKind` flips a
-// chip, `applyLensVisibility` applies the lens as an in-place `hidden` overlay
-// over the already-built tree (no teardown — only an active search rebuilds),
-// `syncKindFilterBar` mirrors the state onto the chips and the
-// `nodeShouldShow` / `fnKindVisible` / `nsHoldsLensKind` predicates are what
-// the tree builders in editor-sidebar-rows.js consult per row. The `prime*Once`
-// helpers warm the caches the problem lenses read (services / apps / tests /
-// failed runs / lint / secrets) once per graph load. The trailing `fx marks`
-// chip is a DETAIL toggle, not a lens (`toggleTreeDetail`, `graphden.treeDetails`).
+// The kind-chip bar (`#kind-filters`) is the fixed half of the Explorer's
+// FILTER row (editor-explorer-filters.js owns the model — persistence,
+// the namespace / uses / effect / unused axes and saved views — and
+// mirrors the kinds + problems into `lensKinds` here). `toggleKind` flips
+// a chip through the model, `applyKindFilters` / `applyLensVisibility`
+// apply the set as an in-place `hidden` overlay over the already-built
+// tree (no teardown — only an active search or a server-evaluated filter
+// rebuilds), `syncKindFilterBar` mirrors the state onto the chips and the
+// `nodeShouldShow` / `fnKindVisible` / `nsHoldsLensKind` predicates are
+// what the tree builders in editor-sidebar-rows.js consult per row. The
+// `prime*Once` helpers warm the caches the problem kinds read (services /
+// apps / tests / failed runs / lint / secrets) once per graph load. The
+// trailing `fx marks` chip is a DETAIL toggle, not a filter
+// (`toggleTreeDetail`, `graphden.treeDetails`).
 //
 // Loads BEFORE editor-sidebar.js: `lensKinds` / `treeDetails` are read at
 // build time by the rows. Tree memo state (`_lastTree`, `treeNodeAt`) stays in
-// editor-sidebar.js — it belongs to the render, the lens only reads it.
+// editor-sidebar.js — it belongs to the render, this module only reads it.
 
 // ── Per-kind visibility ────────────────────────────────────────────────
 // Every entity is classified into EXACTLY ONE kind by priority
@@ -26,30 +29,15 @@
 // its namespace). State persists in localStorage.
 const TYPE_ROLES = new Set(['refinement', 'list', 'union', 'variant',
                             'record', 'fn-type', 'primitive']);
-// The LENS — focus-semantics kind filter (replaces the old hide-semantics
-// eyes). Empty set = "All" (everything shows, rows carry kind markers);
-// non-empty = show ONLY fns matching a selected kind. One click focuses a
-// kind, a second click on it (or on "All") returns to everything; clicking
-// further chips adds them to the selection (services+apps together, etc.).
-// Tree structure, expansion and scroll position are untouched — the lens is
-// the same client-side row filter the eyes used, with the semantics the
-// actual task ("show me all my services / apps, let me click through them")
-// needs.
-const LENS_STORAGE = 'graphden.sidebarLens';
-
-function loadLens() {
-  try {
-    const raw = localStorage.getItem(LENS_STORAGE);
-    if (raw) return new Set(JSON.parse(raw));
-  } catch (_) { /* private-mode / corrupt → All */ }
-  return new Set();
-}
-const lensKinds = loadLens();
-
-function saveLens() {
-  try { localStorage.setItem(LENS_STORAGE, JSON.stringify([...lensKinds])); }
-  catch (_) { /* best-effort */ }
-}
+// The kind + problem half of the Explorer's FILTER set, as the row overlays
+// read it: empty = everything shows (rows carry kind markers); non-empty =
+// show ONLY rows of a selected kind. Tree structure, expansion and scroll
+// position are untouched — an in-place `hidden` flip. The set is DERIVED:
+// editor-explorer-filters.js owns the filter model (persistence, the other
+// axes, saved views) and mirrors kinds + problems in here on every change;
+// this module never writes storage. (Loads before that module — it fills
+// the set on its own load.)
+const lensKinds = new Set();
 
 // EVERY kind a fn-row belongs to. A fn can be several at once (an app's
 // handler may also be a service), so membership is a set — the lens matches
@@ -313,28 +301,38 @@ window.toggleTreeDetail = toggleTreeDetail;
 window.toggleKindLens = (kind) => toggleKind(kind);
 
 function toggleKind(kind) {
-  if (kind === 'all') lensKinds.clear();
-  else if (lensKinds.has(kind)) lensKinds.delete(kind);
-  else lensKinds.add(kind);
-  saveLens();
+  // The filter model owns the set: "all" clears EVERY filter (the one
+  // gesture that always brings the whole tree back); a kind / problem chip
+  // toggles its axis. The model mirrors kinds + problems into `lensKinds`
+  // and calls back into `applyKindFilters` below.
+  if (kind === 'all') {
+    if (typeof gdClearFilters === 'function') gdClearFilters();
+    return;
+  }
+  if (typeof gdToggleKind === 'function') gdToggleKind(kind);
+}
+
+// The visibility pass a kinds/problems change needs. A kind change is a
+// VISIBILITY change only (the loaded set is identical), so flip `hidden`
+// over the existing DOM instead of tearing down + rebuilding the whole
+// tree — the sidebar's top scale cost (~2.4ms/row rebuilt). Parity with a
+// full rebuild is guaranteed: the tree is built kind-independently and
+// both paths decide visibility with the same nodeShouldShow /
+// fnKindVisible. A search or a server-evaluated filter is active → fall
+// back to a rebuild (that tree is a different, server-fed structure).
+// Before the first graph load there is no tree to flip: the chips are
+// synced; the boot's own render applies the set.
+function applyKindFilters() {
   syncKindFilterBar();
-  // A lens change is a VISIBILITY change only (the loaded set is identical), so
-  // flip `hidden` over the existing DOM instead of tearing down + rebuilding the
-  // whole tree — the sidebar's top scale cost (~2.4ms/row rebuilt). Parity with
-  // a full rebuild is guaranteed: the tree is built lens-independently and both
-  // paths decide visibility with the same nodeShouldShow / fnKindVisible. A
-  // search box is active → fall back to a rebuild (the search tree is a
-  // different, server-fed structure, not a lens overlay).
-  // Before the first graph load there is no tree to flip: the lens is
-  // saved and the chips are synced; the boot's own render applies it.
-  // (A click here used to throw on `null.namespaces` from buildNsTree.)
   if (!graphData) return;
-  if (searchFilter) updateEntityList(graphData);
+  const serverMode = typeof gdServerAxesActive === 'function' && gdServerAxesActive();
+  if (searchFilter || serverMode) updateEntityList(graphData);
   else applyLensVisibility();
   announceLens(lensKinds.size === 0
     ? 'All kinds'
-    : 'Lens: ' + Array.from(lensKinds).join(', '));
+    : 'Only ' + Array.from(lensKinds).join(', '));
 }
+window.applyKindFilters = applyKindFilters;
 
 /**
  * Say what just happened to the tree.
@@ -449,8 +447,8 @@ function applyLensVisibility() {
       list.appendChild(hint);
     }
     hint.textContent = lensSet.has('secrets')
-      ? 'No secrets yet — create one with “+ New secret” above. (The selected fn stays visible regardless of the lens.)'
-      : 'Nothing matches this lens yet. (The selected fn stays visible regardless.)';
+      ? 'No secrets yet — create one with “+ New secret” above. (The selected fn stays visible regardless of the filters.)'
+      : 'Nothing matches these filters yet. (The selected fn stays visible regardless.)';
     hint.hidden = false;
   } else if (hint) {
     hint.hidden = true;

@@ -67,18 +67,18 @@ async function hardCleanup(page) {
                      'tutorial-sentence', 'tutorial-shout', 'tutorial-words',
                      // lesson 35's consumer.
                      'tutorial-endpoint', 'tutorial-fetch'];
-  // Per-browser view-state the lessons exercise (smart views, recents,
-  // last-used ns) — a leftover active view renders the next lesson's
-  // Explorer as somebody else's virtual tree. `graphden.tour.next` is the
+  // Per-browser view-state the lessons exercise (filters / views,
+  // recents, last-used ns) — a leftover filter renders the next lesson's
+  // Explorer as somebody else's narrowed tree. `graphden.tour.next` is the
   // same class of hazard with teeth: a lesson parked by "start the next one"
   // and never picked up would open a tour over the FOLLOWING test's page.
   try {
     await page.evaluate(() => {
-      for (const k of ['graphden.smartViews', 'graphden.recentFns',
-                       'graphden.lastNs', 'graphden.tour.next']) {
+      for (const k of ['graphden.explorer.filters', 'graphden.explorer.views',
+                       'graphden.recentFns', 'graphden.lastNs', 'graphden.tour.next']) {
         localStorage.removeItem(k);
       }
-      if (typeof gdClearSmartView === 'function') gdClearSmartView();
+      if (typeof gdClearFilters === 'function') gdClearFilters();
     });
   } catch (_) { /* page may not be on the editor yet */ }
   for (let pass = 0; pass < 2; pass++) {

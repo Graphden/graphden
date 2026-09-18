@@ -13,7 +13,7 @@ rows — so one engine serves both authoring worlds.
 | `src/graphden/lint/core.clj` | the pure engine — `lint` over a fn-def seq |
 | `src/graphden/lint/corpus.clj` | `bb graph-lint` — the first-party fns.edn corpus, no DB, ~10 s |
 | `src/graphden/lint/graph.clj` | the live branch — graph snapshot → fn-defs → `lint`, memoised per snapshot |
-| editor **⚐ lint** lens + Inspector **Lint** section | `GET /api/lint` primes the lens; `POST /partials/inspector-lint/{suppress,restore}` — "Not an issue" / "Restore" write the branch's `lint-suppressions` const |
+| editor **⚐ lint** filter chip + Inspector **Lint** section | `GET /api/lint` primes the chip; `POST /partials/inspector-lint/{suppress,restore}` — "Not an issue" / "Restore" write the branch's `lint-suppressions` const |
 
 ## Rules
 
@@ -82,7 +82,7 @@ the same verdict:
   service-create time (`schema/services`, [SERVICES.md](SERVICES.md));
 - **effects the closure produces that `:expects-effects` does not
   declare** — `:types/expects-effects-drift`, a hard reject at package
-  sync and a recorded diagnostic (the ⚠ lens) on a user write;
+  sync and a recorded diagnostic (the ⚠ type errors chip) on a user write;
 - **a secret flowing into a plain-text sink** — the asymmetric subtyping
   of `[:secret T]` ([SECRETS.md](SECRETS.md)), a type error, not a style
   finding.
@@ -177,14 +177,14 @@ which BFS-walks from the same registry.
   branch alike; a SQL twin would be a second implementation of the
   same rules.
 
-## The editor: lens + Inspector
+## The editor: filter chip + Inspector
 
-Findings reach the author as an Explorer **lens** and an Inspector
+Findings reach the author as an Explorer **filter chip** and an Inspector
 **section** (the Lint tab shipped in a drawer under the
-canvas and was retired the next day, once the lenses landed; the Tests
+canvas and was retired the next day, once the problem chips landed; the Tests
 and Debug panels followed the same day and the drawer is gone).
 
-- **⚐ lint lens** — `GET /api/lint` is the JSON read (same base-fn as
+- **⚐ lint chip** — `GET /api/lint` is the JSON read (same base-fn as
   the section), cached client-side (`editor-problems.js`)
   and re-primed per graph load, after runs and after an Inspector
   action; the chip counts findings, a namespace row counts its fns

@@ -14,7 +14,7 @@ after: web, layout
 :CUSTOM_ID: editor/initGraph
 :FILE: resources/packages/app/editor/editor-main.js
 :LINE: 222
-:MINS: 5.5
+:MINS: 5.7
 :END:
 
  *Start here for anything you can click.* The editor is ~75 plain ~.js~ files concatenated into one bundle in a fixed order (no imports, no build step — the per-module map is in [[../EDITOR_MODULES.md][docs/EDITOR_MODULES.md]]), and this is the boot. Note the shape of the fetches: the namespace TREE goes out alone first, because its status answers the auth question for everyone — only a non-401 fires the three secondary loads. Fn leaves and per-fn slots/bindings arrive lazily; a 401 sends the user to sign in rather than into a red fatal banner.

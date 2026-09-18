@@ -290,7 +290,12 @@ async function initGraph() {
   // Resolve the secret-leaf base-fn id once so isSecretFn() stays
   // synchronous without a full-fns mirror to scan.
   if (typeof primeSecretLeafId === 'function') primeSecretLeafId();
+  // The Explorer's filters: a graph write can change who uses what / the
+  // views saved in the graph — drop the graph-views cache and re-evaluate
+  // an active server-side filter set (editor-explorer-filters.js).
+  if (typeof gdInvalidateSharedViews === 'function') gdInvalidateSharedViews();
   updateEntityList(graphData);
+  if (typeof gdRefreshViewMembers === 'function') gdRefreshViewMembers();
   // Proactive plan-usage badge — the fn count just (re)loaded, so refresh it
   // after every graph mutation (create / delete / rename all call initGraph).
   if (typeof refreshQuotaBadge === 'function') refreshQuotaBadge();
@@ -372,7 +377,9 @@ async function loadGraphData() {
       console.error('loadGraphData subtree refresh failed', err);
     }
   }
+  if (typeof gdInvalidateSharedViews === 'function') gdInvalidateSharedViews();
   updateEntityList(graphData);
+  if (typeof gdRefreshViewMembers === 'function') gdRefreshViewMembers();
 
   // Exactly one render: `selectFnByName` → `selectFn` → `renderGraph`
   // when a hash is present, else `renderGraph` directly. An earlier

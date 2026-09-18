@@ -3,7 +3,7 @@
 ;; Consumed by docs/devtour/devtour.el; every step carries the anchor
 ;; (:file + :head) rather than baked source, so emacs shows live code.
 (:title "Graphden — developer tour"
- :mins 765.0
+ :mins 765.2
  :blocks
  ((:id "executor" :title "Executor — how a fn runs" :status "toured" :mins 85.7 :summary "The spine: turn a graph 'description of a computation' into a value."
    :steps
@@ -388,10 +388,10 @@ Same shape as `subtype?`, so read it the same way: one `cond` over the normalise
      :say "Stages 3+ — grid placement: roots at column zero, dependents right of their sources, rows packed to avoid overlap, plus the validation summary. Pixel geometry stays client-side (measured reflow off the real DOM); the server owns the grid topology.")
     (:key "layout/annotate" :n 6 :gi 172 :defn "annotate" :ns "graphden.layout.strip-facts" :file "src/graphden/layout/strip_facts.clj" :line 60 :lang "clj" :mins 2.3 :head "(defn annotate" :see (("versioning/effective-branch-local?" . "effective-branch-local?")) :refs nil :siblings nil
      :say "The editor-facing tail: attach server-computed FACTS to each fn-node — the inherited return-type alias, the rule-owning base-fn (`registry/rule-owner-of`), and the transitive branch-local seed (`branch-local/branch-local-seed`). These replaced three hand-written client mirrors of the same walks; the client renders facts, it doesn't re-derive them.")))
-  (:id "editor" :title "Editor frontend — the browser half" :status "toured" :mins 75.8 :summary "The ~25k lines of plain ES that draw the graph, bind the edits
+  (:id "editor" :title "Editor frontend — the browser half" :status "toured" :mins 76.0 :summary "The ~25k lines of plain ES that draw the graph, bind the edits
              and mount the server's partials. No build step, no framework."
    :steps
-   ((:key "editor/initGraph" :n 1 :gi 173 :defn "initGraph" :ns "resources/packages/app/editor/editor-main.js" :file "resources/packages/app/editor/editor-main.js" :line 222 :lang "js" :mins 5.5 :head "async function initGraph() {" :see (("editor/authFetch" . "authFetch")) :refs nil :siblings nil
+   ((:key "editor/initGraph" :n 1 :gi 173 :defn "initGraph" :ns "resources/packages/app/editor/editor-main.js" :file "resources/packages/app/editor/editor-main.js" :line 222 :lang "js" :mins 5.7 :head "async function initGraph() {" :see (("editor/authFetch" . "authFetch")) :refs nil :siblings nil
      :say "**Start here for anything you can click.** The editor is ~75 plain `.js` files concatenated into one bundle in a fixed order (no imports, no build step — the per-module map is in [docs/EDITOR_MODULES.md](../EDITOR_MODULES.md)), and this is the boot. Note the shape of the fetches: the namespace TREE goes out alone first, because its status answers the auth question for everyone — only a non-401 fires the three secondary loads. Fn leaves and per-fn slots/bindings arrive lazily; a 401 sends the user to sign in rather than into a red fatal banner.")
     (:key "editor/buildLookups" :n 2 :gi 174 :defn "buildLookups" :ns "resources/packages/app/editor/editor-data.js" :file "resources/packages/app/editor/editor-data.js" :line 115 :lang "js" :mins 6.8 :head "function buildLookups(data) {" :see (("executor/build-lookups" . "build-lookups")) :refs nil :siblings nil
      :say "The client mirror of the compile layer's `build-lookups`: the same raw fn / slot / fn-slot / binding / list-item rows, indexed into the O(1) Maps every render path reads (`fnMap`, `slotByFnAndName`, `bindingByFnSlot`, `itemsByBinding`, the namespace-path map). Every comment here is a fixed O(N×M) scan — this function runs on every mutation, so it is where client-side graph work gets slow.")

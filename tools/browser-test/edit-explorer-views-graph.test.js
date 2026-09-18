@@ -109,7 +109,10 @@ const VIEW_B = 'e2e-app-on-const-handlers';
     const expectedIds = (expected.fns || []).map((f) => f.id).sort();
     assert(expectedIds.length > 0 && expectedIds.length < before.length,
       'the intersection is a strict, non-empty subset (' + expectedIds.length + ' of ' + before.length + ')');
-    await page.evaluate(() => { gdClearFilters(); gdInvalidateSharedViews(); });
+    // The graph changed under the editor — a reload of the graph (what
+    // every editor write ends in) must drop the graph-views cache: no
+    // manual invalidation here.
+    await page.evaluate(async () => { gdClearFilters(); await initGraph(); });
     await page.click('#gd-ws-chip');
     await page.waitForSelector('#gd-ws-pop .gd-views-apply[aria-label="Apply view ' + VIEW_B + ' from the graph"]', {timeout: 15000});
     await page.click('#gd-ws-pop .gd-views-apply[aria-label="Apply view ' + VIEW_B + ' from the graph"]');
@@ -128,6 +131,28 @@ const VIEW_B = 'e2e-app-on-const-handlers';
     assert(JSON.stringify(ranB) === JSON.stringify(expectedIds),
       '▶ Run of the composed view fn agrees (' + runB.status + ', ' + ranB.length + ')');
 
+    // A graph write while a server-side filter is on re-evaluates the
+    // members (quietly — the list never blanks): add a fn that uses const
+    // in app, reload the graph, the count grows by one.
+    await page.evaluate(() => gdClearFilters());
+    // (uses const · in app alone is over the 500 cap — the effect keeps it
+    // small enough for a +1 to be visible.)
+    await page.evaluate((id) => { gdAddUses({id, name: 'const'}); gdToggleNamespace('app'); gdToggleEffect('network'); }, constId);
+    await page.waitForFunction(() => Array.isArray(gdViewMembers()) && gdViewMembers().length > 0,
+      null, {timeout: 30000, polling: 200});
+    const n0 = await page.evaluate(() => gdViewMembers().length);
+    const appNsId = await page.evaluate(() => graphData.namespaces.find((n) => n.name === 'app' && !n['parent-id'])?.id);
+    // A child of a network-effect fn that itself uses const: extend one of
+    // the current members, so the new fn inherits both the use and the effect.
+    const memberId = await page.evaluate(() => gdViewMembers()[0].id);
+    await api(page, 'POST', '/api/entities/fn', 'name=e2e-uses-const-probe&parent-ids=' + memberId + '&namespace-id=' + appNsId);
+    await page.evaluate(async () => { await initGraph(); });
+    await page.waitForFunction((n) => Array.isArray(gdViewMembers()) && gdViewMembers().length === n + 1,
+      n0, {timeout: 30000, polling: 200});
+    const blanked = await page.evaluate(() => !!document.querySelector('#entity-list .loading'));
+    assert(!blanked, 'the member list re-evaluated after the write without blanking (' + n0 + ' → ' + (n0 + 1) + ')');
+    await deleteFnByName(page, 'e2e-uses-const-probe').catch(() => {});
+
     await page.evaluate(() => gdClearFilters());
     console.log('explorer-views-graph — PASS');
   } catch (err) {
@@ -136,7 +161,7 @@ const VIEW_B = 'e2e-app-on-const-handlers';
     await page.screenshot({path: '/tmp/edit-explorer-views-graph-fail.png'}).catch(() => {});
   } finally {
     await page.close().catch(() => {});
-    for (const n of [VIEW_B, VIEW_A]) await deleteFnByName(page, n).catch(() => {});
+    for (const n of ['e2e-uses-const-probe', VIEW_B, VIEW_A]) await deleteFnByName(page, n).catch(() => {});
     await browser.close();
   }
   process.exit(failed ? 1 : 0);

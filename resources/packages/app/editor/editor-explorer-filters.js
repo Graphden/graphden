@@ -367,11 +367,15 @@ function gdDeleteView(name) {
 // Server axes — POST /api/views/members
 // ---------------------------------------------------------------------------
 
-function _fetchViewMembers() {
+// `quiet` — a re-evaluation after a graph write: keep the current list on
+// screen until the new one lands (no "Applying filters…" flash).
+function _fetchViewMembers(quiet) {
   const seq = ++_viewSeq;
-  _viewMembers = null;
-  if (typeof graphData !== 'undefined' && graphData && typeof updateEntityList === 'function') {
-    updateEntityList(graphData);   // "Computing view…"
+  if (!quiet) {
+    _viewMembers = null;
+    if (typeof graphData !== 'undefined' && graphData && typeof updateEntityList === 'function') {
+      updateEntityList(graphData);   // "Applying filters…"
+    }
   }
   if (!(window.API && API.api_views_members) || typeof authFetch !== 'function') { _viewMembers = []; return; }
   const body = {
@@ -401,7 +405,7 @@ function _fetchViewMembers() {
       if (d?.['truncated?'] && typeof gdToast === 'function') {
         gdToast('More than 500 fns match — add a filter to narrow it');
       }
-      if (typeof window.gdAnnounce === 'function') {
+      if (!quiet && typeof window.gdAnnounce === 'function') {
         window.gdAnnounce(_viewMembers.length + ' functions match');
       }
       if (typeof updateEntityList === 'function') updateEntityList(graphData);
@@ -417,7 +421,7 @@ function _fetchViewMembers() {
 // Re-evaluate after a graph write while server axes are on (a new fn may
 // now use the target).
 function gdRefreshViewMembers() {
-  if (gdServerAxesActive()) _fetchViewMembers();
+  if (gdServerAxesActive()) _fetchViewMembers(true);
 }
 
 // ---------------------------------------------------------------------------

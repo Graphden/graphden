@@ -559,7 +559,7 @@ const {
           .map((c) => c.textContent.trim()),
       };
     });
-    assert(/^Continue 03 · Slots and bindings — step 3\//.test(cat.resume || ''),
+    assert(/^Continue 04 · Slots and bindings — step 3\//.test(cat.resume || ''),
       'a paused lesson resumes from where it stopped (got: ' + cat.resume + ')');
     assert(cat.fitsViewport, 'the catalogue fits the window');
     assert(cat.listScrolls, 'and the LIST scrolls rather than squeezing its rows');

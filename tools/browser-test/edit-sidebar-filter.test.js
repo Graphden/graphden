@@ -8,6 +8,9 @@
 //   • Type a no-match query → list collapses (no entity-items).
 //   • Clear the input (Esc / manual blank) → full tree restored.
 //   • The query is case-insensitive.
+//   • A graph refresh (initGraph) racing an in-flight lazy namespace load
+//     keeps that namespace's leaves on screen (the fresh shell is hydrated
+//     from the fn cache).
 //
 // Run from this directory:  node edit-sidebar-filter.test.js
 // Exit code 0 = PASS, 1 = FAIL.
@@ -26,14 +29,19 @@ const {assert, newContext} = require('./edit-test-helpers');
     // Wait for the sidebar to be populated (at least a few entity-items)
     // and the namespace headers (≥3) the baseline assertion expects.
     // 60 s, like every other initial load in this suite: the first tree
-    // render sits behind the page's layout POSTs, and under the gate's
-    // load 15 s flaked here (2026-09-16, green on retry) — a slow-stack
-    // deadline, not a race (project_e2e_slow_stack_deadlines).
+    // render sits behind the page's layout POSTs (project_e2e_slow_stack_deadlines).
     await page.waitForFunction(
       () => document.querySelectorAll('.entity-item').length >= 1
             && document.querySelectorAll('.ns-header').length >= 3,
       null,
       {timeout: 60000, polling: 100});
+    // A second `initGraph` on top of a boot that may still be settling —
+    // this is the shape that flaked (2026-09-19, twice, green on retry): the
+    // refresh reset the fn cache, the boot's lazy namespace load landed while
+    // the new tree was in flight and synced its rows into the OLD graphData,
+    // and the fresh shell rendered that namespace as loaded-with-no-leaves.
+    // Phase F below pins the invariant directly; this call keeps the original
+    // reproduction in the walk.
     await page.evaluate(() => initGraph && initGraph());
     // Wait again after initGraph rebuilds the tree.
     await page.waitForFunction(
@@ -132,7 +140,55 @@ const {assert, newContext} = require('./edit-test-helpers');
            'clearing the filter restores the entity list: '
            + restored + ' (baseline ' + baseline.entityCount + ')');
 
-    console.log('✓ sidebar filter verified — match / case-insensitive / no-match / clear');
+    // ===================================================================
+    // Phase F: a graph refresh racing a lazy namespace load. `initGraph`
+    // resets the fn cache and awaits the tree; a `loadNamespaceFns` that
+    // was already in flight lands in that window, marks its namespace
+    // loaded and syncs its rows — into the graphData that is about to be
+    // replaced. Unless the fresh shell is hydrated from the cache, the
+    // tree then renders that namespace as loaded-with-no-leaves and nothing
+    // refetches it: an expanded namespace with zero rows (the 2026-09-19
+    // flake — twice in one day, green on retry, because the ordering is
+    // the network's). The ordering is pinned here by holding the tree
+    // response back, so the leaves always land inside the window.
+    // ===================================================================
+    await page.route('**/api/graph/entities?scope=tree*', async (route) => {
+      await new Promise((r) => setTimeout(r, 400));
+      await route.continue();
+    });
+    const race = await page.evaluate(async () => {
+      const fn = lookups.fnMap.get(selectedFnId);
+      const nsId = fn ? (fn['namespace-id'] || '') : '';
+      const nsPath = lookups.nsPathMap.get(nsId);
+      const out = [];
+      for (let i = 0; i < 2; i++) {
+        _loadedNamespaceIds.delete(nsId);           // force a real leaf fetch …
+        const leaves = loadNamespaceFns(nsId);      // … in flight …
+        const refresh = initGraph();                // … when the refresh resets the cache
+        await leaves;
+        await refresh;
+        await new Promise((r) => requestAnimationFrame(() => r()));
+        const grp = document.querySelector('.ns-children[data-ns-children="' + nsPath + '"]');
+        out.push({
+          loaded: _loadedNamespaceIds.has(nsId),
+          leaves: grp ? grp.querySelectorAll('.entity-item').length : -1,
+          inGraph: graphData.fns.filter((f) => (f['namespace-id'] || '') === nsId).length,
+        });
+      }
+      return {nsPath, rounds: out};
+    });
+    await page.unroute('**/api/graph/entities?scope=tree*');
+    for (const [i, r] of race.rounds.entries()) {
+      assert(r.loaded, 'round ' + i + ': the namespace is marked loaded after the race');
+      assert(r.inGraph >= 1,
+             'round ' + i + ': the refreshed graph carries the namespace rows that landed mid-refresh ('
+             + r.inGraph + ')');
+      assert(r.leaves >= 1,
+             'round ' + i + ': the expanded namespace ' + race.nsPath
+             + ' shows its leaves right after the racing refresh (got ' + r.leaves + ')');
+    }
+
+    console.log('✓ sidebar filter verified — match / case-insensitive / no-match / clear / refresh race');
   } catch (e) {
     process.exitCode = 1;
     console.error('✗ test failed:', e.message);

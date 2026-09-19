@@ -267,7 +267,15 @@ async function initGraph() {
     return;
   }
   graphData = graphShellFromTree(await entResp.json());
-  lookups = buildLookups(graphData);
+  // Hydrate the fresh shell from the fn cache, not `buildLookups` alone:
+  // the cache was reset at the top of this function, so whatever it holds
+  // now arrived DURING the awaits above — a lazy `loadNamespaceFns` the
+  // previous render started, whose fetch landed while the tree was in
+  // flight. It marked its namespace loaded and synced its rows into the
+  // OLD graphData; a shell built without them rendered that namespace as
+  // "loaded, no leaves" and never refetched (the edit-sidebar-filter
+  // flake: `initGraph` on top of a still-settling boot, 2026-09-19).
+  syncKnownFnsIntoGraph();
   if (typeResp?.ok) {
     try { richTypes = await typeResp.json(); } catch (err) {
       console.error(API.api_types + ' JSON parse failed — type tooltips will be empty', err);
@@ -356,7 +364,9 @@ async function loadGraphData() {
     return;
   }
   graphData = graphShellFromTree(await treeResp.json());
-  lookups = buildLookups(graphData);
+  // Same hydration as initGraph: a namespace load that landed during the
+  // tree fetch already lives in the (reset) cache — the shell must carry it.
+  syncKnownFnsIntoGraph();
   if (typeResp?.ok) {
     try { richTypes = await typeResp.json(); }
     catch (_) { /* keep prior richTypes rather than blanking chips */ }

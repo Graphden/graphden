@@ -374,8 +374,12 @@ function _tourAdvance(skipped) {
   if (_tourState.step >= lesson.steps.length) {
     // Reaching the last step IS finishing it, whatever the reader decides
     // about the rows afterwards — the catalogue's ✓ marks reading, not
-    // cleanup.
-    if (typeof _tourMarkDone === 'function') _tourMarkDone(lesson.id);
+    // cleanup. Recorded WITH the edition walked, so a later `:version` bump
+    // shows in the catalogue as "updated" rather than as plain done.
+    if (typeof _tourMarkDone === 'function') {
+      _tourMarkDone(lesson.id,
+        (typeof _tourVersionOf === 'function') ? _tourVersionOf(lesson) : 1);
+    }
     _tourCount('finished', lesson.id, _tourState.step);
     _tourEnd();
   } else {

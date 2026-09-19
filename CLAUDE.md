@@ -807,6 +807,14 @@ landed change.
 - Performance work, caching, infra.
 - Anything happening only behind a feature flag or only in tests.
 
+**Tour lessons have editions.** Each lesson in `app/tour/fns.edn` carries
+`:version`; readers' browsers record which edition they finished, and a
+bump chips the lesson "updated" for them. `bb tour-versions-check` (in
+`bb ci`) fails when a lesson's steps changed but its version did not —
+bump it when the FLOW changed (a step added / removed / reordered, a
+check or target asking for something else), or run `bb tour-versions`
+to refresh the fingerprint when the edit was cosmetic.
+
 **The hard bar stays:** every lesson step must be paste-into-the-editor
 correct against the tree it lands with. Never document a **partially**
 landed feature — keep its lesson ⏳ planned and write it only when the

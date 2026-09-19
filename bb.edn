@@ -357,6 +357,14 @@
   {:doc "Regenerate the developer code-tour docs/devtour/index.html from docs/devtour/tour.edn. Anchors resolve by symbol (ns + defn); the anchored form's real source is baked in. Run after editing tour.edn or a toured form."
    :task (binding [*command-line-args* ["build"]] (load-file "scripts/devtour.clj"))}
 
+  tour-versions
+  {:doc "Rewrite test/resources/tour-versions.edn — per interactive-tutorial lesson, its :version and a digest of its steps. Run after bumping a lesson's :version, or after a cosmetic step edit that deliberately keeps it."
+   :task (binding [*command-line-args* ["write"]] (load-file "scripts/tour_versions.clj"))}
+
+  tour-versions-check
+  {:doc "CI guard for lesson editions: every lesson in app/tour/fns.edn has a positive-integer :version, and a lesson whose steps changed since test/resources/tour-versions.edn was recorded carries a NEW version. Fix by bumping :version, or `bb tour-versions` for a cosmetic edit."
+   :task (binding [*command-line-args* ["check"]] (load-file "scripts/tour_versions.clj"))}
+
   graph-lint
   {:doc "Graph linters over the first-party package corpus (no DB): duplicate definitions (exact and after private-helper expansion), unreferenced / unreachable private fn-defs, shadowed overrides, siblings to extract a parent from, over-deep chains. Warnings fail unless allowlisted in graphden.lint.corpus/allowed-warnings; a stale allowlist entry fails too. ~10s."
    :task (clojure "-M:dev -m graphden.lint.corpus")}

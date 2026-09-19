@@ -63,6 +63,7 @@ function openShellMenu() {
     b.textContent = label;
     b.addEventListener('click', onClick);
     menu.appendChild(b);
+    return b;
   };
   const divider = () => {
     const d = document.createElement('div');
@@ -86,10 +87,28 @@ function openShellMenu() {
   }
   // Interactive tutorial — guided in-editor lessons (editor-tour.js).
   if (typeof window.openTutorialMenu === 'function') {
-    item('Interactive tutorial', () => {
+    const tutorial = item('Interactive tutorial', () => {
       closeAuthPopover();
       window.openTutorialMenu();
     });
+    // Lessons added, or changed since the reader finished them, since they
+    // last opened the catalogue (editor-tour-picker.js). The scripts are
+    // fetched once per page, so the row renders at once and the count lands
+    // a beat later on the first open — or not at all, when there is none.
+    if (typeof window.gdTourNews === 'function') {
+      window.gdTourNews().then((news) => {
+        if (!news?.count || !tutorial.isConnected) return;
+        const count = document.createElement('span');
+        count.className = 'auth-menu-count';
+        count.textContent = String(news.count);
+        const what = [];
+        if (news.fresh.length) what.push(news.fresh.length + ' new');
+        if (news.updated.length) what.push(news.updated.length + ' updated');
+        count.title = what.join(', ') + ' since you last opened the catalogue';
+        count.setAttribute('aria-label', what.join(', ') + ' lessons');
+        tutorial.appendChild(count);
+      }).catch(() => { /* no scripts, no count */ });
+    }
   }
   divider();
 

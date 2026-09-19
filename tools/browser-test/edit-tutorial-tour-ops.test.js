@@ -600,7 +600,7 @@ const {
         controlGone: !after.querySelector('.gd-tour-unmark'),
         neighbourKept: /✓ done/.test(
           document.querySelector('[data-lesson-id="01"]').textContent),
-        stored: JSON.parse(localStorage.getItem('graphden.tour.done') || '[]'),
+        stored: JSON.parse(localStorage.getItem('graphden.tour.done') || '{}'),
       };
     });
     assert(/not done/.test(unmarked.label),
@@ -609,8 +609,11 @@ const {
     assert(!unmarked.stillMarked && unmarked.controlGone,
       'clicking it takes the ✓ off that row');
     assert(unmarked.neighbourKept, 'and leaves the rows around it alone');
-    assert(JSON.stringify(unmarked.stored) === '["01","03"]',
-      'the stored history agrees (got: ' + JSON.stringify(unmarked.stored) + ')');
+    // The history was seeded in its pre-edition LIST shape; the first write
+    // carries it over to `{id: edition}` (editions, 2026-09-19).
+    assert(JSON.stringify(unmarked.stored) === '{"01":1,"03":1}',
+      'the stored history agrees, in the edition shape (got: '
+      + JSON.stringify(unmarked.stored) + ')');
 
     const cleared = await page.evaluate(() => {
       const footBtn = (label) => Array.from(
@@ -619,7 +622,7 @@ const {
       footBtn('Clear progress (2)').click();
       const asked = document.querySelector('.gd-tour-picker-foot').textContent;
       footBtn('Keep them').click();
-      const afterKeep = JSON.parse(localStorage.getItem('graphden.tour.done') || '[]');
+      const afterKeep = JSON.parse(localStorage.getItem('graphden.tour.done') || '{}');
       footBtn('Clear progress (2)').click();
       footBtn('Clear').click();
       return {
@@ -634,7 +637,7 @@ const {
     assert(/Clear 2 ✓ marks\?/.test(cleared.asked),
       'the bulk clear asks first, and says how much goes (got: '
       + cleared.asked + ')');
-    assert(JSON.stringify(cleared.afterKeep) === '["01","03"]',
+    assert(JSON.stringify(cleared.afterKeep) === '{"01":1,"03":1}',
       'backing out of it changes nothing (got: '
       + JSON.stringify(cleared.afterKeep) + ')');
     assert(cleared.stored === null,
@@ -648,6 +651,83 @@ const {
       localStorage.removeItem('graphden.tour');
     });
     console.log('  picker: one ✓ removable, the whole history clearable behind a confirm');
+
+    // ---------- Editions: the menu count, the chips, the counters ----------
+    // A lesson's `:version` is bumped when its flow changes; the reader's ✓
+    // records the edition they finished. What only a browser can show: the
+    // count really lands on the account menu's row, the chips really sit on
+    // the rows, and the header's counters agree with storage. The last look
+    // listed 01–03 only, so every other lesson is "new"; no shipped lesson is
+    // past edition 1 yet, so the bump is staged in the fetched scripts.
+    await page.evaluate(() => {
+      localStorage.setItem('graphden.tour.done', JSON.stringify({'01': 1, '02': 1}));
+      localStorage.setItem('graphden.tour.seen', JSON.stringify({'01': 1, '02': 1, '03': 1}));
+      localStorage.removeItem('graphden.tour');
+    });
+    await page.goto(BASE + '/');
+    await page.waitForFunction(() => typeof window.openTutorialMenu === 'function',
+      null, {timeout: 60000, polling: 200});
+    const staged = await page.evaluate(async () => {
+      const ls = await _tourFetchLessons();
+      ls.lessons.find((l) => l.id === '02').version = 2;
+      return ls.lessons.length;
+    });
+    await page.click('#auth-lock-btn');
+    await page.waitForFunction(
+      () => !document.getElementById('auth-popover')?.classList.contains('hidden'),
+      null, {timeout: 5000});
+    await page.waitForSelector('#auth-popover .auth-menu-count', {timeout: 5000});
+    const menuCount = await page.evaluate(() => {
+      const row = Array.from(document.querySelectorAll('#auth-popover .auth-menu-item'))
+        .find((b) => b.dataset.item === 'Interactive tutorial');
+      const c = row?.querySelector('.auth-menu-count');
+      return {onRow: !!c, text: c?.textContent, title: c?.title || ''};
+    });
+    assert(menuCount.onRow, 'the count sits on the Interactive tutorial row');
+    assert(menuCount.text === String(staged - 3 + 1),
+      'and counts the lessons not listed last time plus the finished one that moved'
+      + ' (got: ' + menuCount.text + ', expected ' + (staged - 3 + 1) + ')');
+    assert(/new/.test(menuCount.title) && /1 updated/.test(menuCount.title),
+      'its tooltip says which is which (got: ' + menuCount.title + ')');
+    await page.evaluate(() => window.openTutorialMenu());
+    await page.waitForSelector('.gd-tour-lesson-list', {timeout: 30000});
+    const chipped = await page.evaluate(() => {
+      const counts = Array.from(document.querySelectorAll('.gd-tour-counts .gd-tour-count'))
+        .map((c) => c.textContent);
+      const row = (id) => document.querySelector('[data-lesson-id="' + id + '"]');
+      return {
+        counts,
+        updated02: !!row('02').querySelector('.gd-tour-lesson-badge-updated'),
+        stillDone02: /✓ done/.test(row('02').textContent),
+        plain01: !row('01').querySelector('.gd-tour-lesson-badge'),
+        plain03: !row('03').querySelector('.gd-tour-lesson-badge'),
+        new04: !!row('04').querySelector('.gd-tour-lesson-badge-new'),
+        newRows: document.querySelectorAll('.gd-tour-lesson-row-new').length,
+        seen: Object.keys(JSON.parse(localStorage.getItem('graphden.tour.seen') || '{}')).length,
+      };
+    });
+    assert(chipped.updated02 && chipped.stillDone02,
+      'the finished lesson whose edition moved is chipped "updated" and keeps its ✓');
+    assert(chipped.plain01 && chipped.plain03,
+      'a lesson finished at its edition, or unread and unchanged, carries no chip');
+    assert(chipped.new04 && chipped.newRows === staged - 3,
+      'every lesson the last look did not list is chipped "new" (got: '
+      + chipped.newRows + ' of ' + (staged - 3) + ')');
+    assert(chipped.counts[0] === '2 done' && chipped.counts[2] === staged + ' lessons',
+      'the header counts done and listed (got: ' + JSON.stringify(chipped.counts) + ')');
+    assert(/^\d+ available$/.test(chipped.counts[1] || ''),
+      'and what this session can run (got: ' + JSON.stringify(chipped.counts) + ')');
+    assert(chipped.counts.includes((staged - 3) + ' new') && chipped.counts.includes('1 updated'),
+      'plus the news (got: ' + JSON.stringify(chipped.counts) + ')');
+    assert(chipped.seen === staged,
+      'opening the catalogue records the look — the menu goes quiet next time'
+      + ' (got: ' + chipped.seen + ' seen)');
+    await page.evaluate(() => {
+      localStorage.removeItem('graphden.tour.done');
+      localStorage.removeItem('graphden.tour.seen');
+      localStorage.removeItem('graphden.tour');
+    });
+    console.log('  editions: menu count, new/updated chips, done/available/total counters');
 
     // ---------- Escape belongs to whatever is on TOP ----------
     // Every lesson tells the reader to open something — a picker, a panel, a

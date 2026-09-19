@@ -96,6 +96,12 @@
  {:name "type-sweep"    :bb "type-sweep"    :timeout 240000 :group :post-test
   :relevant ["fns\\.edn$" "^src/graphden/types/" "^src/graphden/packages/"
              "^tools/type_sweep\\.clj$" "^bb\\.edn$"]}
+ ;; Lesson editions: a tour lesson whose steps changed must carry a new
+ ;; :version, or readers who finished it are never told it changed
+ ;; (scripts/tour_versions.clj; the record is test/resources/tour-versions.edn).
+ {:name "tour-versions" :bb "tour-versions-check" :timeout 30000 :group :docs
+  :relevant ["^resources/packages/app/tour/fns\\.edn$" "^test/resources/tour-versions\\.edn$"
+             "^scripts/tour_versions\\.clj$"]}
  {:name "devtour"       :bb "devtour-check" :timeout  60000 :group :docs
   ;; `resources/packages/**/impls.clj` IS toured (~15 steps anchor on
   ;; base-fn impls like :add / :http-server / publish-package-apply), so

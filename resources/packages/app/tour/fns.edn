@@ -14,6 +14,20 @@
 ;; The `:id` stays the WRITTEN lesson's number (docs/tutorial/NN-*.md) — it is
 ;; the deep link (`?tutorial=08`), not a position.
 ;;
+;; `:version` is the lesson's EDITION — a positive integer, 1 when the lesson
+;; was written. The browser remembers which edition the reader finished
+;; (`graphden.tour.done` = `{id: version}`), so bumping it tells everyone who
+;; finished the old edition that there is something new to re-read: the
+;; account menu's "Interactive tutorial" row carries a count, and the row in
+;; the catalogue is chipped "updated" until they finish it again. Bump it when
+;; the FLOW changes — a step added, removed or reordered, a check or target
+;; that now asks for something else — not for a typo. `bb tour-versions-check`
+;; (in `bb ci`) compares every lesson's steps against the fingerprint in
+;; test/resources/tour-versions.edn and fails when the steps changed but the
+;; version did not: decide (bump), or refresh the fingerprint with
+;; `bb tour-versions` when the edit was cosmetic. A lesson whose id the reader's
+;; last catalogue view did not list is "new" — that needs no field.
+;;
 ;; Each step:
 ;;   :title / :body — popover copy. The body supports two inline marks
 ;;                    (`_tourRenderBody` in editor-tour.js):
@@ -156,6 +170,7 @@
            :lessons
            [{:id "01"
              :chapter "Basics"
+             :version 1
              :title "Your first function"
              :steps
              [{:title "Welcome to the interactive tutorial"
@@ -207,6 +222,7 @@
                :check {:kind "manual"}}]}
             {:id "02"
              :chapter "Basics"
+             :version 1
              :title "Reading a card"
              ;; A LOOK-ONLY lesson (no :creates): the reader learns to read
              ;; what the canvas draws before lesson 03 starts building on it.
@@ -255,6 +271,7 @@
                :check {:kind "manual"}}]}
             {:id "03"
              :chapter "Basics"
+             :version 1
              :title "Parents and inheritance"
              :steps
              [{:title "Inheritance, hands on"
@@ -316,6 +333,7 @@
                :check {:kind "manual"}}]}
             {:id "04"
              :chapter "Basics"
+             :version 1
              :title "Slots and bindings"
              :steps
              [{:title "One slot, many bindings"
@@ -393,6 +411,7 @@
                :check {:kind "manual"}}]}
             {:id "05"
              :chapter "Basics"
+             :version 1
              :title "Free arguments"
              :steps
              [{:title "Free args: the template mechanism"
@@ -468,6 +487,7 @@
                :check {:kind "manual"}}]}
             {:id "06"
              :chapter "Basics"
+             :version 1
              :title "Types"
              :steps
              [{:title "Types are fn-rows too"
@@ -547,6 +567,7 @@
                :check {:kind "manual"}}]}
             {:id "07"
              :chapter "Composing"
+             :version 1
              :title "Higher-order functions"
              :steps
              [{:title "A slot that wants a function"
@@ -606,6 +627,7 @@
                :check {:kind "manual"}}]}
             {:id "08"
              :chapter "Composing"
+             :version 1
              :title "Components"
              :steps
              [{:title "A page is a function"
@@ -692,6 +714,7 @@
                :check {:kind "manual"}}]}
             {:id "09"
              :chapter "Composing"
+             :version 1
              :title "The escape hatch"
              :steps
              [{:title "When no component fits"
@@ -733,6 +756,7 @@
                :check {:kind "manual"}}]}
             {:id "10"
              :chapter "Composing"
+             :version 1
              :title "State: cells"
              :steps
              [{:title "A graph can remember"
@@ -786,6 +810,7 @@
                :check {:kind "manual"}}]}
             {:id "11"
              :chapter "Composing"
+             :version 1
              :title "Recursion"
              :steps
              [{:title "Loops, where cycles are forbidden"
@@ -822,6 +847,7 @@
                :check {:kind "manual"}}]}
             {:id "13"
              :chapter "Running it"
+             :version 1
              :title "Executing a fn"
              :steps
              [{:title "Running is part of editing"
@@ -858,6 +884,7 @@
                :check {:kind "manual"}}]}
             {:id "14"
              :chapter "Running it"
+             :version 1
              :title "Effects"
              :steps
              [{:title "Effects are declared, then they spread"
@@ -898,6 +925,7 @@
                :check {:kind "manual"}}]}
             {:id "15"
              :chapter "Running it"
+             :version 1
              :title "Tests"
              :steps
              [{:title "A test is just a fn"
@@ -979,6 +1007,7 @@
                :check {:kind "manual"}}]}
             {:id "16"
              :chapter "Running it"
+             :version 1
              :title "Tracing a run"
              :steps
              [{:title "What actually ran?"
@@ -1082,6 +1111,7 @@
                :check {:kind "manual"}}]}
             {:id "17"
              :chapter "Running it"
+             :version 1
              :title "When something breaks"
              :steps
              [{:title "Three kinds of wrong"
@@ -1148,6 +1178,7 @@
                :check {:kind "manual"}}]}
             {:id "18"
              :chapter "The editor"
+             :version 1
              :title "Explorer and Inspector"
              :steps
              [{:title "Two panes, one graph"
@@ -1186,6 +1217,7 @@
                :check {:kind "manual"}}]}
             {:id "19"
              :chapter "The editor"
+             :version 1
              :title "Working without the mouse"
              :steps
              [{:title "Hands off the mouse"
@@ -1229,6 +1261,7 @@
                :check {:kind "manual"}}]}
             {:id "20"
              :chapter "The editor"
+             :version 1
              :title "Filters and views"
              :steps
              [{:title "One way to narrow the tree"
@@ -1265,6 +1298,7 @@
                :check {:kind "manual"}}]}
             {:id "21"
              :chapter "The editor"
+             :version 1
              :title "Branches"
              ;; This lesson MANAGES branches itself (fork, edit, return to
              ;; main) — running it inside a tour scratch branch broke its
@@ -1338,6 +1372,7 @@
                :check {:kind "manual"}}]}
             {:id "22"
              :chapter "The editor"
+             :version 1
              :title "Review: propose and approve"
              ;; Like lesson 21 this lesson MANAGES branches itself — a
              ;; protected release branch plus a feature branch proposed
@@ -1427,6 +1462,7 @@
                :check {:kind "manual"}}]}
             {:id "23"
              :chapter "The editor"
+             :version 1
              :requires "assets"
              :title "Editing the editor"
              :steps
@@ -1466,6 +1502,7 @@
                :check {:kind "manual"}}]}
             {:id "24"
              :chapter "The editor"
+             :version 1
              :title "Version history"
              :steps
              [{:title "Every edit writes a row"
@@ -1516,6 +1553,7 @@
                :check {:kind "manual"}}]}
             {:id "25"
              :chapter "Your organization"
+             :version 1
              :requires "manage-users"
              :title "Members"
              :steps
@@ -1554,6 +1592,7 @@
                :check {:kind "manual"}}]}
             {:id "26"
              :chapter "Your organization"
+             :version 1
              :requires "manage-grants"
              :title "Grants"
              :steps
@@ -1584,6 +1623,7 @@
                :check {:kind "manual"}}]}
             {:id "27"
              :chapter "Your organization"
+             :version 1
              :requires "manage-roles"
              :title "Roles"
              :steps
@@ -1618,6 +1658,7 @@
                :check {:kind "manual"}}]}
             {:id "28"
              :chapter "Your organization"
+             :version 1
              :requires "manage-apps"
              :title "Apps"
              :steps
@@ -1660,6 +1701,7 @@
                :check {:kind "manual"}}]}
             {:id "30"
              :chapter "Your organization"
+             :version 1
              :requires "publish-packages"
              :title "Packages"
              :steps
@@ -1710,6 +1752,7 @@
                :check {:kind "manual"}}]}
             {:id "31"
              :chapter "Your organization"
+             :version 1
              :requires "org"
              :title "Across organizations"
              :steps
@@ -1741,6 +1784,7 @@
                :check {:kind "manual"}}]}
             {:id "33"
              :chapter "Your organization"
+             :version 1
              :requires "services"
              :title "Services"
              :steps
@@ -1808,6 +1852,7 @@
                :check {:kind "manual"}}]}
             {:id "34"
              :chapter "Your organization"
+             :version 1
              :requires "org"
              :title "Your account"
              :steps
@@ -1842,6 +1887,7 @@
                :check {:kind "manual"}}]}
             {:id "35"
              :chapter "Your organization"
+             :version 1
              :requires "org"
              :title "Plans and limits"
              :steps
@@ -1868,6 +1914,7 @@
                :check {:kind "manual"}}]}
             {:id "36"
              :chapter "Your organization"
+             :version 1
              :requires "own-web-server"
              :title "Services talking to services"
              :steps
@@ -1918,6 +1965,7 @@
             ;; (publish-packages under tenancy — the same gate as lesson 30).
             {:id "38"
              :chapter "Your organization"
+             :version 1
              :requires "publish-packages"
              :title "Marketplace, themes & keymaps"
              :steps

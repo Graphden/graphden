@@ -107,7 +107,13 @@ The catalogue remembers what you have read (in your browser, not in the
 graph) and marks it `✓ done`. That mark is yours: the `↺` beside a
 finished lesson takes it back off, and **Clear progress** in the
 catalogue's footer clears the whole history at once, behind a
-confirmation. Finishing a lesson offers what to read next right there —
+confirmation. Lessons have editions (`:version` in the tour script,
+bumped when a lesson's flow changes): a lesson you finished that has
+since changed is chipped **updated** until you take it again, a lesson
+that was not in the catalogue the last time you opened it is chipped
+**new**, and the account-chip menu counts both on its “Interactive
+tutorial” row. The catalogue's header counts what you have done, what
+this session can run, and how many lessons there are. Finishing a lesson offers what to read next right there —
 the lesson that follows, plus the first one you have not read when that
 is a different lesson — and starting it from the dialog cleans the
 finished lesson up first (deleting its branch, or the rows it created).

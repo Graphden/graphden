@@ -71,10 +71,15 @@
       (is (every? :id ls) "every lesson has an id")
       (is (= (count ls) (count (distinct (map :id ls)))) "ids are unique"))
 
-    (testing "every lesson has a title, a chapter and at least one step"
+    (testing "every lesson has a title, a chapter, an edition and at least one step"
       (doseq [l ls]
         (is (not (str/blank? (:title l))) (str "lesson " (:id l) " has a title"))
         (is (not (str/blank? (:chapter l))) (str "lesson " (:id l) " has a chapter"))
+        ;; The edition is what tells a reader who finished the lesson that it
+        ;; changed under them (the catalogue's "updated" chip, the menu count);
+        ;; `bb tour-versions-check` makes sure it MOVES when the steps do.
+        (is (and (integer? (:version l)) (pos? (:version l)))
+            (str "lesson " (:id l) " has a positive-integer :version"))
         (is (seq (:steps l)) (str "lesson " (:id l) " has steps"))))
 
     (testing "every step has prose — an empty popover is a dead end"

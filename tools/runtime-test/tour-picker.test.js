@@ -6,8 +6,16 @@
 //
 //   * the ✓ is the reader's own claim, so it can be taken back — one row at a
 //     time, or all of them. Both write through `_tourWriteDone`; an empty
-//     history REMOVES the key rather than storing `"[]"`, so a browser that
+//     history REMOVES the key rather than storing `"{}"`, so a browser that
 //     never took the tour and one that cleared it read the same.
+//   * the history records the EDITION finished (`{id: version}`), and still
+//     reads the list it used to be. A lesson whose `:version` moved on after
+//     the reader finished it is "updated" — chipped on its row, counted in
+//     the account menu — and a lesson their last look at the catalogue did
+//     not list is "new". The first look sets the baseline and announces
+//     nothing.
+//   * the catalogue's header counts what the reader has done, what this
+//     session can run, and what is listed — and follows every un-mark.
 //   * a done row carries a second control. It is a SIBLING of the lesson
 //     button, never a child: a button inside a button is invalid markup the
 //     keyboard cannot reach, and the e2e guards read `list.children` for the
@@ -65,7 +73,11 @@ const LESSONS = {
 function makeWorld(opts) {
   const o = Object.assign({ done: [], caps: [], lessons: LESSONS }, opts);
   const store = new Map();
-  if (o.done.length) store.set('graphden.tour.done', JSON.stringify(o.done));
+  // `done` as a list is the pre-edition shape; as an object it is the current
+  // `{id: version}` one — the catalogue must read both.
+  const doneEmpty = Array.isArray(o.done) ? !o.done.length : !Object.keys(o.done).length;
+  if (!doneEmpty) store.set('graphden.tour.done', JSON.stringify(o.done));
+  if (o.seen) store.set('graphden.tour.seen', JSON.stringify(o.seen));
   const document = createDocument();
   const pop = document.createElement('div');
   document.body.appendChild(pop);
@@ -114,6 +126,12 @@ function makeWorld(opts) {
       const raw = store.get('graphden.tour.done');
       return raw === undefined ? null : JSON.parse(raw);
     },
+    seen: () => {
+      const raw = store.get('graphden.tour.seen');
+      return raw === undefined ? null : JSON.parse(raw);
+    },
+    counts: () => (pop.querySelector('div.gd-tour-counts') || { children: [] }).children
+      .map((c) => c.textContent),
     rows: () => pop.querySelector('div.gd-tour-lesson-list').children
       .filter((c) => c.classList.contains('gd-tour-lesson-row')),
     row: (id) => pop.querySelector('div.gd-tour-lesson-list')
@@ -127,15 +145,18 @@ function makeWorld(opts) {
 // --- the reading history ----------------------------------------------------
 
 (async () => {
-  await test('the history is written as a list, and an empty one is no key at all', () => {
+  await test('the history records the edition finished, and an empty one is no key at all', () => {
     const w = makeWorld();
-    w.ctx._tourMarkDone('01');
-    w.ctx._tourMarkDone('03');
-    assert(JSON.stringify(w.stored()) === '["01","03"]',
-      'marking appends (got: ' + JSON.stringify(w.stored()) + ')');
+    w.ctx._tourMarkDone('01', 1);
+    w.ctx._tourMarkDone('03', 2);
+    assert(JSON.stringify(w.stored()) === '{"01":1,"03":2}',
+      'marking records id → edition (got: ' + JSON.stringify(w.stored()) + ')');
+    w.ctx._tourMarkDone('05');
+    assert(w.stored()['05'] === 1, 'an edition nobody named is 1');
     assert(w.ctx._tourUnmarkDone('01') === true, 'un-marking a done lesson reports it');
-    assert(JSON.stringify(w.stored()) === '["03"]',
+    assert(JSON.stringify(w.stored()) === '{"03":2,"05":1}',
       'and removes only that one (got: ' + JSON.stringify(w.stored()) + ')');
+    assert(w.ctx._tourUnmarkDone('05') === true, 'un-marking the other');
     assert(w.ctx._tourUnmarkDone('01') === false,
       'un-marking what is not marked reports nothing happened');
     assert(w.ctx._tourClearDone() === 1, 'clearing answers how many marks went');
@@ -143,6 +164,146 @@ function makeWorld(opts) {
       'an empty history REMOVES the key — a browser that cleared reads like one'
       + ' that never took the tour (got: ' + JSON.stringify(w.stored()) + ')');
     assert(w.ctx._tourDoneSet().size === 0, 'and the set reads back empty');
+  });
+
+  await test('the pre-edition list is still read, as edition 1, and rewritten on the next change', () => {
+    const w = makeWorld({ done: ['01', '03'] });
+    assert([...w.ctx._tourDoneSet()].join() === '01,03',
+      'a list of ids reads as done (got: ' + [...w.ctx._tourDoneSet()].join() + ')');
+    assert(w.ctx._tourDoneMap().get('03') === 1,
+      'finished when 1 was the only edition there was');
+    w.ctx._tourMarkDone('02', 1);
+    assert(JSON.stringify(w.stored()) === '{"01":1,"03":1,"02":1}',
+      'the next write carries everything over in the new shape (got: '
+      + JSON.stringify(w.stored()) + ')');
+  });
+
+  // --- editions and news ---------------------------------------------------
+
+  const VERSIONED = {
+    lessons: [
+      { id: '01', chapter: 'Basics', title: 'First fn', steps: [{}], version: 1 },
+      { id: '02', chapter: 'Basics', title: 'Slots', steps: [{}], version: 2 },
+      { id: '03', chapter: 'Basics', title: 'Free args', steps: [{}], version: 1 },
+      { id: '04', chapter: 'Org', title: 'Invites', steps: [{}], requires: 'manage-users' },
+      { id: '05', chapter: 'Org', title: 'Wrap up', steps: [{}], version: 1 },
+    ],
+  };
+
+  await test('a lesson finished at an older edition is stale; one finished at the current is not', () => {
+    const w = makeWorld({ lessons: VERSIONED, done: { '01': 1, '02': 1, '03': 1 } });
+    const by = (id) => VERSIONED.lessons.find((l) => l.id === id);
+    assert(w.ctx._tourVersionOf(by('02')) === 2 && w.ctx._tourVersionOf(by('04')) === 1,
+      'the edition is :version, 1 when the script says nothing');
+    assert(w.ctx._tourStale(by('02')) === true, '02 moved to 2 after a finish at 1');
+    assert(w.ctx._tourStale(by('01')) === false, '01 is where it was finished');
+    assert(w.ctx._tourStale(by('05')) === false, 'an unread lesson is not stale, whatever its edition');
+    // The pre-edition list reads as 1 everywhere — so lesson 02 is stale for
+    // a reader who finished it before editions existed, which is the truth.
+    const legacy = makeWorld({ lessons: VERSIONED, done: ['02'] });
+    assert(legacy.ctx._tourStale(by('02')) === true,
+      'a list-shaped history finished 02 at edition 1');
+  });
+
+  await test('the first look sets the baseline and is not news', () => {
+    const w = makeWorld({ lessons: VERSIONED });
+    const news = w.ctx._tourNews(VERSIONED);
+    assert(news.count === 0 && !news.fresh.length && !news.updated.length,
+      'nothing is new to someone who has never looked (got: ' + JSON.stringify(news) + ')');
+    assert(JSON.stringify(w.seen()) === '{"01":1,"02":2,"03":1,"04":1,"05":1}',
+      'and the catalogue as it stands becomes the baseline (got: '
+      + JSON.stringify(w.seen()) + ')');
+  });
+
+  await test('news = lessons not listed last time + finished lessons whose edition moved', () => {
+    // Last look: 01 at 1, 02 at 1, 03 at 1 — no 04, no 05. Finished 02 (at 1)
+    // and 03 (at 1). Now 02 is at 2, 04 and 05 are listed.
+    const w = makeWorld({
+      lessons: VERSIONED,
+      seen: { '01': 1, '02': 1, '03': 1 },
+      done: { '02': 1, '03': 1, '05': 1 },
+    });
+    const news = w.ctx._tourNews(VERSIONED);
+    assert(JSON.stringify(news.fresh) === '["04"]',
+      '04 is new — 05 is not listed last time either, but the reader already'
+      + ' finished it (got: ' + JSON.stringify(news.fresh) + ')');
+    assert(JSON.stringify(news.updated) === '["02"]',
+      '02 moved to edition 2 after the reader finished 1 (got: '
+      + JSON.stringify(news.updated) + ')');
+    assert(news.count === 2, 'the menu count is both together (got: ' + news.count + ')');
+    assert(JSON.stringify(w.seen()) === '{"01":1,"02":1,"03":1}',
+      'asking does not record a look — only opening the catalogue does');
+
+    // An UNREAD lesson whose edition moved is nobody's news.
+    const unread = makeWorld({ lessons: VERSIONED, seen: { '01': 1, '02': 1, '03': 1, '04': 1, '05': 1 } });
+    const quiet = unread.ctx._tourNews(VERSIONED);
+    assert(quiet.count === 0,
+      'a bump on a lesson the reader never finished counts for nothing (got: '
+      + JSON.stringify(quiet) + ')');
+
+    // Once the reader has SEEN the bump listed, it stops counting — the row
+    // keeps its chip (the ✓ is still stale), the menu goes quiet.
+    const looked = makeWorld({ lessons: VERSIONED, seen: { '01': 1, '02': 2, '03': 1, '04': 1, '05': 1 }, done: { '02': 1 } });
+    assert(looked.ctx._tourNews(VERSIONED).count === 0,
+      'a bump already seen in the catalogue is no longer news');
+    assert(looked.ctx._tourStale(VERSIONED.lessons[1]) === true,
+      'but the lesson is still stale until finished again');
+  });
+
+  await test('gdTourNews answers the menu from the fetched scripts', async () => {
+    const w = makeWorld({ lessons: VERSIONED, seen: { '01': 1 } });
+    const news = await w.ctx.gdTourNews();
+    assert(news.count === 4 && JSON.stringify(news.fresh) === '["02","03","04","05"]',
+      'everything listed since the baseline is new (got: ' + JSON.stringify(news) + ')');
+  });
+
+  await test('the catalogue chips new and updated rows, records the look, and counts', async () => {
+    const w = makeWorld({
+      lessons: VERSIONED, caps: ['manage-users'],
+      seen: { '01': 1, '02': 1, '03': 1, '04': 1 },
+      done: { '01': 1, '02': 1 },
+    });
+    await w.ctx.openTutorialMenu();
+    assert(w.row('05').classList.contains('gd-tour-lesson-row-new')
+           && /new/.test(w.row('05').querySelector('.gd-tour-lesson-badge-new')?.textContent || ''),
+      'the lesson the last look did not list is chipped "new"');
+    assert(w.row('02').classList.contains('gd-tour-lesson-row-updated')
+           && /updated/.test(w.row('02').querySelector('.gd-tour-lesson-badge-updated')?.textContent || ''),
+      'the lesson finished at an older edition is chipped "updated"');
+    assert(/✓ done/.test(w.row('02').textContent) && !!w.row('02').querySelector('button.gd-tour-unmark'),
+      'and stays done — the ✓ and its un-mark control are still there');
+    assert(!w.row('01').querySelector('.gd-tour-lesson-badge')
+           && !w.row('03').querySelector('.gd-tour-lesson-badge'),
+      'a lesson finished at its current edition, or unread and unchanged, carries no chip');
+    assert(JSON.stringify(w.seen()) === '{"01":1,"02":2,"03":1,"04":1,"05":1}',
+      'opening the catalogue records the look (got: ' + JSON.stringify(w.seen()) + ')');
+    assert(JSON.stringify(w.counts()) === '["2 done","5 available","5 lessons","1 new","1 updated"]',
+      'the header counts done / available / listed, plus what is news (got: '
+      + JSON.stringify(w.counts()) + ')');
+
+    // A second look: the same catalogue is no longer news — the "new" chip is
+    // gone, the "updated" one stays with the stale ✓.
+    await w.ctx.openTutorialMenu();
+    assert(!w.row('05').querySelector('.gd-tour-lesson-badge'),
+      'seen once, a new lesson is just a lesson');
+    assert(!!w.row('02').querySelector('.gd-tour-lesson-badge-updated'),
+      'a stale ✓ is chipped until the lesson is finished again');
+    assert(JSON.stringify(w.counts()) === '["2 done","5 available","5 lessons","1 updated"]',
+      'and the header says so (got: ' + JSON.stringify(w.counts()) + ')');
+  });
+
+  await test('the counts follow the session\'s capabilities and the reader\'s un-marks', async () => {
+    const w = makeWorld({ done: { '01': 1, '02': 1 } });
+    await w.ctx.openTutorialMenu();
+    assert(JSON.stringify(w.counts()) === '["2 done","4 available","5 lessons"]',
+      'a locked lesson is listed but not available (got: ' + JSON.stringify(w.counts()) + ')');
+    w.row('02').querySelector('button.gd-tour-unmark').click();
+    assert(w.counts()[0] === '1 done',
+      'un-marking one lesson moves the count (got: ' + JSON.stringify(w.counts()) + ')');
+    w.footBtn('Clear progress (1)').click();
+    w.footBtn('Clear').click();
+    assert(w.counts()[0] === '0 done',
+      'clearing the history zeroes it (got: ' + JSON.stringify(w.counts()) + ')');
   });
 
   // --- what to offer next ---------------------------------------------------
@@ -214,7 +375,7 @@ function makeWorld(opts) {
     const w = makeWorld({ done: ['01', '02'] });
     await w.ctx.openTutorialMenu();
     w.row('02').querySelector('button.gd-tour-unmark').click();
-    assert(JSON.stringify(w.stored()) === '["01"]',
+    assert(JSON.stringify(w.stored()) === '{"01":1}',
       'only that lesson loses its ✓ (got: ' + JSON.stringify(w.stored()) + ')');
     assert(!/✓ done/.test(w.row('02').textContent),
       'the row re-renders without the mark');
@@ -240,7 +401,7 @@ function makeWorld(opts) {
       'that says how much is about to go (got: ' + w.foot().textContent + ')');
     w.footBtn('Keep them').click();
     assert(JSON.stringify(w.stored()) === '["01","02","03"]',
-      'backing out changes nothing');
+      'backing out changes nothing — not even the shape of a pre-edition history');
     assert(w.footBtn('Clear progress (3)'), 'and restores the footer');
 
     w.footBtn('Clear progress (3)').click();

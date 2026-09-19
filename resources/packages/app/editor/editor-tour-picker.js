@@ -14,53 +14,147 @@
 // reading history, personal to the browser, not graph data. `:requires` is the
 // gate: usually a capability, sometimes a named condition (a plan tier, an
 // organization) resolved through REQUIRE_SIGNALS below.
+//
+// Lessons have EDITIONS (`:version` in the script, bumped when the flow
+// changes — see app/tour/fns.edn). The history records which edition the
+// reader finished, so a lesson that moved on after they did is told apart
+// from one they simply finished: the catalogue chips it "updated", and the
+// account menu counts it — together with lessons that were not in the
+// catalogue the last time they looked ("new").
 
+// `{id: version finished}` — as JSON. Before editions it was a list of ids;
+// that shape is still READ (those lessons were finished when 1 was the only
+// edition there was) and written back in the new one at the next change.
 const TOUR_DONE_KEY = 'graphden.tour.done';
+// The catalogue as the reader last saw it — `{id: version}`. What the menu's
+// count is measured against: absent = never looked, and the first look sets
+// the baseline without announcing every lesson as new.
+const TOUR_SEEN_KEY = 'graphden.tour.seen';
 
+// A lesson's edition: `:version` from the script, 1 when it says nothing.
+function _tourVersionOf(lesson) {
+  const v = lesson ? Number(lesson.version) : Number.NaN;
+  return (Number.isInteger(v) && v > 0) ? v : 1;
+}
+
+function _tourReadMap(key, legacyListVersion) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return legacyListVersion == null
+        ? null
+        : new Map(parsed.map((id) => [String(id), legacyListVersion]));
+    }
+    if (parsed && typeof parsed === 'object') {
+      return new Map(Object.entries(parsed).map(([id, v]) => {
+        const n = Number(v);
+        return [id, (Number.isInteger(n) && n > 0) ? n : 1];
+      }));
+    }
+    return null;
+  } catch (_) { return null; }
+}
+
+function _tourWriteMap(key, map) {
+  try {
+    if (map?.size) localStorage.setItem(key, JSON.stringify(Object.fromEntries(map)));
+    else localStorage.removeItem(key);
+  } catch (_) { /* private mode — the catalogue still works, the mark just won't stick */ }
+}
+
+// The reading history: `Map id → edition finished`.
+function _tourDoneMap() {
+  return _tourReadMap(TOUR_DONE_KEY, 1) || new Map();
+}
+
+// The ids alone — what most callers ask ("has the reader finished 05?").
 function _tourDoneSet() {
-  try {
-    const raw = localStorage.getItem(TOUR_DONE_KEY);
-    return new Set(raw ? JSON.parse(raw) : []);
-  } catch (_) { return new Set(); }
+  return new Set(_tourDoneMap().keys());
 }
 
-// The whole history is ONE write, so marking, unmarking and clearing share it
-// — three callers each doing their own read/modify/write is how one of them
-// ends up persisting a Set (`"{}"`) instead of a list.
 function _tourWriteDone(done) {
-  try {
-    if (done.size) localStorage.setItem(TOUR_DONE_KEY, JSON.stringify([...done]));
-    else localStorage.removeItem(TOUR_DONE_KEY);
-  } catch (_) { /* private mode — the catalogue just won't remember */ }
+  _tourWriteMap(TOUR_DONE_KEY, done);
 }
 
-function _tourMarkDone(lessonId) {
+// Called by the engine when the last step is reached — with the edition the
+// reader just walked, so a later bump is visible as "finished at 1, now 2".
+function _tourMarkDone(lessonId, version) {
   if (!lessonId) return;
-  const done = _tourDoneSet();
-  done.add(lessonId);
+  const done = _tourDoneMap();
+  done.set(lessonId, (Number.isInteger(version) && version > 0) ? version : 1);
   _tourWriteDone(done);
 }
 
-// The ✓ is a claim about the READER, and readers are the only ones who know
-// whether it is still true: a lesson skipped step-by-step to see the end, or
-// one taken so long ago it needs re-reading, is marked done and should not be.
-// Taking the mark off is the same kind of act as putting it on — local, free,
-// and nothing else depends on it.
+// Finished, but at an OLDER edition than the script now carries.
+function _tourStale(lesson, done) {
+  const at = (done || _tourDoneMap()).get(lesson.id);
+  return at != null && at < _tourVersionOf(lesson);
+}
+
+// The ✓ is the reader's claim, so it is theirs to take back — one lesson (a
+// skipped-through walk, a lesson from long ago that needs re-reading) or the
+// whole history. Answers whether anything changed, so the caller can leave the
+// list alone when the reader un-marks what was not marked.
 function _tourUnmarkDone(lessonId) {
   if (!lessonId) return false;
-  const done = _tourDoneSet();
+  const done = _tourDoneMap();
   if (!done.delete(lessonId)) return false;
   _tourWriteDone(done);
   return true;
 }
 
-// Start the whole catalogue over — a shared browser, a demo account, or a
-// second read-through of all thirty-nine.
+// Everything at once — the count is what the confirmation and the toast say.
 function _tourClearDone() {
-  const n = _tourDoneSet().size;
-  _tourWriteDone(new Set());
+  const n = _tourDoneMap().size;
+  _tourWriteDone(new Map());
   return n;
 }
+
+// Record the catalogue as it stands — every listed lesson at its edition.
+function _tourWriteSeen(lessons) {
+  _tourWriteMap(TOUR_SEEN_KEY,
+    new Map((lessons || []).map((l) => [l.id, _tourVersionOf(l)])));
+}
+
+// What changed since the reader last looked at the catalogue —
+// `{fresh: [id…], updated: [id…], count}`:
+//   fresh   — listed now, not listed then, and not finished (a lesson they
+//             took from a deep link without ever opening the catalogue is not
+//             news to them);
+//   updated — finished at an older edition, and the bump is one they have not
+//             seen listed yet. An unread lesson's bump is nobody's news.
+// No baseline yet → this look BECOMES it, and nothing is news: to a first-time
+// reader the whole catalogue is new, and a count saying so would say nothing.
+function _tourNews(lessons) {
+  const all = lessons?.lessons || [];
+  const seen = _tourReadMap(TOUR_SEEN_KEY, null);
+  if (!seen) {
+    if (all.length) _tourWriteSeen(all);
+    return { fresh: [], updated: [], count: 0 };
+  }
+  const done = _tourDoneMap();
+  const fresh = [];
+  const updated = [];
+  for (const l of all) {
+    const v = _tourVersionOf(l);
+    if (!seen.has(l.id)) {
+      if (!done.has(l.id)) fresh.push(l.id);
+    } else if (seen.get(l.id) !== v && _tourStale(l, done)) {
+      updated.push(l.id);
+    }
+  }
+  return { fresh, updated, count: fresh.length + updated.length };
+}
+
+// For the account menu: the count on the "Interactive tutorial" row. Fetches
+// the scripts if this page has not yet (cached after the first time).
+async function gdTourNews() {
+  const lessons = (typeof _tourFetchLessons === 'function') ? await _tourFetchLessons() : null;
+  return lessons ? _tourNews(lessons) : { fresh: [], updated: [], count: 0 };
+}
+window.gdTourNews = gdTourNews;
 
 const REQUIRE_SIGNALS = {
   // The dedicated tier (or a platform / single-tenant instance) — services run
@@ -168,8 +262,12 @@ async function openTutorialMenu() {
   // opened without one.
   pop.classList.toggle('gd-tour-sheet', _tourNarrow());
 
-  let done = _tourDoneSet();
+  let done = _tourDoneMap();
   const saved = _tourState || _tourLoadState();
+  // What is news THIS time — measured before the look is recorded, so the
+  // chips show once, on the look that answers the menu's count.
+  const news = _tourNews(lessons);
+  _tourWriteSeen(lessons.lessons);
 
   const title = document.createElement('div');
   title.className = 'gd-tour-title';
@@ -181,6 +279,35 @@ async function openTutorialMenu() {
     + ' back in one step.';
   pop.appendChild(title);
   pop.appendChild(body);
+
+  // Where the reader stands, in one line: finished / runnable here / listed.
+  // "Available" is the session's, not the reader's — a locked lesson is still
+  // listed (that is the point of a catalogue) but cannot be counted as a move.
+  const counts = document.createElement('div');
+  counts.className = 'gd-tour-counts';
+  counts.setAttribute('role', 'status');
+  pop.appendChild(counts);
+  const renderCounts = () => {
+    counts.replaceChildren();
+    const all = lessons.lessons;
+    const finished = all.filter((l) => done.has(l.id)).length;
+    const available = all.filter((l) => _tourRequirement(l).allowed).length;
+    const seg = (text, cls) => {
+      const el = document.createElement('span');
+      el.className = 'gd-tour-count' + (cls ? ' ' + cls : '');
+      el.textContent = text;
+      counts.appendChild(el);
+    };
+    seg(finished + ' done', 'gd-tour-count-done');
+    seg(available + ' available', 'gd-tour-count-available');
+    seg(all.length + ' lesson' + (all.length === 1 ? '' : 's'), 'gd-tour-count-total');
+    // "new" is this look's news; "updated" is STATE — every ✓ the script has
+    // since moved past, chipped on its row until the lesson is finished again.
+    const stale = all.filter((l) => _tourStale(l, done)).length;
+    if (news.fresh.length) seg(news.fresh.length + ' new', 'gd-tour-count-new');
+    if (stale) seg(stale + ' updated', 'gd-tour-count-updated');
+  };
+  renderCounts();
 
   // An unfinished lesson is the single most likely reason the catalogue is
   // open at all, so it goes first, with the step count it stopped at — the
@@ -244,6 +371,21 @@ async function openTutorialMenu() {
       row.className = 'gd-tour-lesson-row';
       row.setAttribute('data-lesson-id', lesson.id);
       row.appendChild(btn);
+      // A lesson the reader's last look did not list is chipped once, on the
+      // look that follows the menu's count; a lesson they finished at an
+      // older edition stays chipped until they finish it again — the ✓ is
+      // still theirs, the chip says what it no longer vouches for.
+      const chip = (text, cls, title) => {
+        const c = document.createElement('span');
+        c.className = 'gd-tour-lesson-badge ' + cls;
+        c.textContent = text;
+        if (title) c.title = title;
+        btn.appendChild(c);
+      };
+      if (news.fresh.includes(lesson.id)) {
+        row.classList.add('gd-tour-lesson-row-new');
+        chip('new', 'gd-tour-lesson-badge-new', 'Added since you last opened the catalogue');
+      }
       if (done.has(lesson.id)) {
         row.classList.add('gd-tour-lesson-row-done');
         btn.classList.add('gd-tour-btn-done');
@@ -251,10 +393,17 @@ async function openTutorialMenu() {
         mark.className = 'gd-tour-lesson-note';
         mark.textContent = ' ✓ done';
         btn.appendChild(mark);
+        if (_tourStale(lesson, done)) {
+          row.classList.add('gd-tour-lesson-row-updated');
+          chip('updated', 'gd-tour-lesson-badge-updated',
+               'Changed since you finished it (edition ' + done.get(lesson.id)
+               + ' → ' + _tourVersionOf(lesson) + ') — worth taking again');
+        }
         const undo = _tourBtn('↺', 'gd-tour-btn-quiet gd-tour-unmark', () => {
           if (!_tourUnmarkDone(lesson.id)) return;
-          done = _tourDoneSet();
+          done = _tourDoneMap();
           renderFoot(false);
+          renderCounts();
           render(filter.value);
           // The re-render threw away the button that had focus; the lesson it
           // belonged to is still listed, so focus lands back on its row.
@@ -308,8 +457,9 @@ async function openTutorialMenu() {
       foot.appendChild(ask);
       const yes = _tourBtn('Clear', 'gd-tour-btn-primary gd-tour-clear-confirm', () => {
         const n = _tourClearDone();
-        done = _tourDoneSet();
+        done = _tourDoneMap();
         renderFoot(false);
+        renderCounts();
         render(filter.value);
         _tourSay(n + ' lesson mark' + (n === 1 ? '' : 's') + ' cleared');
         if (typeof gdToast === 'function') {

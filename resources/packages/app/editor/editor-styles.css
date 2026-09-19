@@ -707,6 +707,22 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   text-align: left; background: transparent; border: none; cursor: pointer;
   font-size: 0.8125rem; padding: 7px 8px; border-radius: 4px; color: var(--fg);
 }
+/* Unread count on a menu row (“Interactive tutorial” — lessons new or changed
+   since the catalogue was last opened). A pill at the row's right edge, in
+   the same accent as the identity badge above it. */
+.auth-menu-count {
+  float: right;
+  min-width: 1.25em;
+  margin-left: 10px;
+  padding: 0 5px;
+  border-radius: 8px;
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+  background: var(--gd-flow, #06c);
+  color: var(--gd-on-accent, #fff);
+}
 .auth-menu-item:hover { background: var(--bg); }
 .auth-menu-div { height: 1px; margin: 4px 2px; background: var(--border); }
 /* Community footer — support link (self-host only) + social row. Quiet by
@@ -7846,6 +7862,47 @@ body.gd-tour-sheet-open #side-menu {
   opacity: 0.85;
   font-style: italic;
 }
+
+/* Edition chips on a catalogue row (“new” — not listed the last time the
+   reader looked; “updated” — finished at an older `:version`). Inside the
+   accent-filled button like the note, so they carry their own ground: the
+   on-accent colour as a translucent pill, readable on either theme's accent. */
+.gd-tour-lesson-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+  color: var(--gd-on-accent, #fff);
+  background: var(--gd-warn);
+}
+
+.gd-tour-lesson-badge-new { background: var(--gd-ok); }
+
+/* Done/available/total under the catalogue's intro — the same quiet register
+   as the step counter in a running lesson (`.gd-tour-progress`). */
+.gd-tour-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 0;
+  margin: -2px 0 6px;
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-fg);
+}
+
+.gd-tour-count + .gd-tour-count::before {
+  content: "·";
+  margin: 0 6px;
+}
+
+.gd-tour-count-new { color: var(--gd-ok); }
+.gd-tour-count-updated { color: var(--gd-warn); }
 
 /* Review-comment thread under the branch-diff modal. */
 .branch-comments { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 8px; }

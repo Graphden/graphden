@@ -424,9 +424,9 @@ function buildDeleteButton({ type, id, displayName, blockReason }) {
           }
           await initGraph();
         } else {
-          const text = await response.text().catch(() => '');
-          alert('Delete failed (' + response.status + '): '
-                + text.replace(/<[^>]+>/g, '').trim().slice(0, 200));
+          const text = (typeof extractResponseError === 'function')
+            ? await extractResponseError(response) : ('HTTP ' + response.status);
+          alert('Delete failed (' + response.status + '): ' + String(text).slice(0, 200));
         }
       } catch (err) {
         alert('Network error: ' + err.message);

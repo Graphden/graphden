@@ -1,5 +1,11 @@
 name: CI
 
+# Least privilege for the job token: every job here only reads the
+# checkout (the security job talks to the Advisory DB with the same
+# read-only token). A job that needs more declares it itself.
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main, develop]

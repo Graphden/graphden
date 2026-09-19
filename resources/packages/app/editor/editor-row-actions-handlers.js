@@ -347,9 +347,9 @@ registerActionHandler('delete-fn', (btn, e, _host) => {
         }
         if (typeof initGraph === 'function') await initGraph();
       } else {
-        const text = r ? await r.text().catch(() => '') : '';
-        alert('Delete failed (' + (r?.status) + '): '
-              + text.replace(/<[^>]+>/g, '').trim().slice(0, 200));
+        const text = (r && typeof extractResponseError === 'function')
+          ? await extractResponseError(r) : ('HTTP ' + (r?.status));
+        alert('Delete failed (' + (r?.status) + '): ' + String(text).slice(0, 200));
       }
     } catch (err) {
       alert('Network error: ' + err.message);

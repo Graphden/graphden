@@ -508,9 +508,9 @@ function wireServicePopoverHandlers(el, fnEntity) {
         return;
       }
       if (!resp?.ok) {
-        const text = resp ? await resp.text().catch(() => '') : 'network error';
-        alert('Save failed (' + (resp?.status) + '): '
-              + text.replace(/<[^>]+>/g, '').trim().slice(0, 300));
+        const text = (resp && typeof extractResponseError === 'function')
+          ? await extractResponseError(resp) : 'network error';
+        alert('Save failed (' + (resp?.status) + '): ' + String(text).slice(0, 300));
         saveBtn.disabled = false;
         saveBtn.textContent = originalLabel;
         return;

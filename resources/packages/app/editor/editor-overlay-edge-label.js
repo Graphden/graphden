@@ -108,6 +108,10 @@ function buildEdgeLabelOverlay(edge, container, label, overlayId) {
   const overlay = document.createElement('div');
   overlay.className = 'edge-label-overlay';   // static looks in editor-styles.css
   overlay.dataset.edgeId = overlayId;
+  // The arg's NAME, so a tour step can ring one label among several by the
+  // name its text uses (`.edge-label-overlay[data-arg-name="method"] …`) —
+  // the same convention as `data-fn-name` on a card.
+  overlay.dataset.argName = label;
 
   const labelSpan = document.createElement('span');
   labelSpan.textContent = label;

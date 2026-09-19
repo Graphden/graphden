@@ -1,0 +1,340 @@
+# Lesson 14 — Effects and the `:secret` type-marker
+
+**Goal**: by the end of this lesson you understand how effects
+get declared and propagate, what `:expects-effects` is for, and
+how the `:secret` type-marker prevents secret values from
+leaking into non-secret sinks.
+
+**Concepts introduced**: `effect category`, `:effects` (computed),
+`:expects-effects` (declared), `effect drift`, `:secret` type-
+marker, `taint propagation`, `return-type-rule`, `executor hide
+on :secret`.
+
+## The ten effect categories
+
+```text
+:db        Reads or writes graphden's storage
+:network   Outbound HTTP / TCP
+:io        Disk / filesystem
+:env       Reads OS environment variables
+:time      Reads wall-clock time
+:random    Non-deterministic input
+:process   Spawns supervised background work (service-eligibility marker)
+:state     Mutates in-graph state (`:swap` / `:reset` on a `:cell` / `:atom`)
+:raw-sql   Arbitrary SQL bypassing org-scoped storage (cloud-blocked)
+:cross-org Runs a fn in another org's context (platform-only)
+```
+
+`:cross-org` is a **platform-only** category: it's declarable (so the
+checker admits and propagates it), but every tenant `:allowed-effects`
+set forbids it — a tenant graph that references it gets
+`:execution/forbidden-effect`. On a self-hosted single-tenant install
+it's inert. So for tenant authoring you work with the first nine; the
+tenth exists for the cloud platform router.
+
+Each category is a single keyword. Effects are EXPLICIT — there's
+no "effectful? true" generic flag. If you write
+`:effects #{:do}`, the validator rejects: `:do` isn't in the
+vocabulary.
+
+Why so few? Because each category corresponds to a real
+property a caller might care about:
+
+- "is this pure?" → check `:effects` is empty
+- "does this hit the DB?" → check `:effects` contains `:db`
+- "can this fn be a service?" → check it has `:process`
+
+The category set is closed by design (see [docs/TYPES.md
+§ Effect Categories](../TYPES.md#effect-categories)).
+
+## Where effects come from
+
+Base-fns DECLARE their effects in `fns.edn`:
+
+```edn
+{:name :pg-query
+ :args {:hsql {:type :keyword-map}}   ; a HoneySQL map, not raw text
+ :return-type [:list :text-keyed-map]
+ :effects #{:db :raw-sql}}
+
+{:name :digest-hex
+ :args {:algorithm {:type :non-blank-text}   ; "SHA-256", "SHA-512", …
+        :s {:type :text}}
+ :return-type :text
+ :effects #{}}   ; pure
+```
+
+(`:sha256-hex` — the everyday hashing fn — is not a base-fn but a
+one-line fn-def preset over `:digest-hex` pinning `:algorithm`;
+presets inherit computed effects like any composed fn.)
+
+Composed fn-defs DON'T declare their own effects — the type-
+checker COMPUTES them from the parent chain + every ref in
+their bindings. So:
+
+```edn
+{:name :user-query
+ :parent :pg-query
+ :args  {:hsql {:select [:id :name] :from :users}}}
+```
+
+`:user-query`'s computed effects are `:pg-query`'s effects:
+`#{:db :raw-sql}`. If `:user-query` also ref'd `:current-time-ms`
+(which has `:effects #{:time}`), the computed set would be
+`#{:db :raw-sql :time}`.
+
+The editor's effects-strip on each fn-card shows the computed
+set as colored chips — one per category.
+
+## `:expects-effects` — the author's contract
+
+Optionally, the author can DECLARE what effects they expect
+their fn to have:
+
+```edn
+{:name :user-query
+ :parent :pg-query
+ :args  {:hsql {:select [:id :name] :from :users}}
+ :expects-effects #{:db :raw-sql}}
+```
+
+The type-checker compares declared vs computed and surfaces
+DRIFT:
+
+- **Computed ⊃ declared** — the fn produces an effect the
+  author didn't expect. Likely a bug (a hidden ref pulled in
+  something). Editor draws a red outline on the drift chip.
+- **Computed ⊂ declared** — declared an effect that never
+  actually fires. Harmless but stale; editor draws the chip as
+  a ghost (outlined).
+
+`:expects-effects` is OPTIONAL. Most fn-defs don't bother — the
+computed set is enough. The cases where you'd add it:
+
+- A library-boundary fn-def where you want the contract pinned
+  (so a future ref-edit doesn't silently add a network call).
+- A service-eligible fn where `:process` MUST be present (the
+  service-create guard asserts this from rich-types).
+
+## Editing the contract from the card (✎)
+
+You don't have to touch `fns.edn` to manage `:expects-effects` —
+the effects strip at the bottom of a fn-card carries a `✎`
+pencil (visible when you're signed in and the card is the
+selected fn). Clicking it opens a small server-rendered form:
+
+- Two radio modes: **no contract** ("Drift checker is off for
+  this fn") and **explicit contract** ("Drift checker compares
+  computed effects against the ticked set").
+- Under them, one checkbox per declarable category — the full
+  canonical set of ten, including `:process`, `:state`, `:raw-sql`,
+  and the platform-only `:cross-org` (inert for tenant graphs).
+  The checkboxes stay disabled until you pick *explicit
+  contract*.
+- **Pinned purity**: pick *explicit contract* and tick NOTHING.
+  That saves an EMPTY declared set — "I assert this fn is
+  pure" — so any effect that later creeps in via a ref edit
+  lights up as drift.
+
+Save writes the fn row's `:expects-effects`; switching back to
+*no contract* and saving clears it (the drift checker turns
+off). The checkbox roster comes from the same server-side set
+that sync-time validation accepts, so the form can never offer
+an undeclarable category.
+
+### Try it
+
+1. Select any pure fn-def of yours (e.g. the `:greet` from
+   lesson 01) and click `✎` on its (empty) effects strip.
+2. Pick *explicit contract*, tick nothing, Save. You've pinned
+   purity.
+3. Now bind one of its args to a ref that reaches `:env` or
+   `:pg-query`. The computed effect appears as a chip with a
+   red outline — drift against your pinned-pure contract.
+4. Reopen `✎` — the form comes back pre-filled from the saved
+   contract. Tick the offending category (or switch to *no
+   contract*) and Save to clear the drift.
+
+## Effect propagation through HOFs
+
+When a HOF takes a `:fn`-typed callback, the callback's effects
+lift onto the HOF's effective set. So:
+
+```edn
+{:name :map-and-save
+ :parent :map
+ :args  {:func :save-record  ; :save-record has :effects #{:db}
+         :coll :all-users}}
+```
+
+`:map`'s OWN declared effects are `#{}` (the impl is pure — it
+just iterates). But `:map-and-save`'s computed effects include
+`:db` because the callback ref'd from `:func` has `:db`.
+
+The propagation is automatic. The type-checker walks `:fn`-
+typed bindings and unions in the referenced fn's effect set.
+
+## The `:secret` type-marker
+
+`:secret` is a TYPE-LEVEL marker — not an effect, not a field.
+It wraps an existing type to mark "this value is sensitive":
+
+```edn
+{:name :secret-leaf
+ :args {:in {:type [:secret :text]}}
+ :return-type [:secret :text]
+ :tags #{:admin-only-vault :secret-shape}}
+```
+
+`[:secret :text]` is a structural type (lesson 06). Its key
+property is **asymmetric subtyping**:
+
+- `:text` ⊆ `[:secret :text]` — a plain text VALUE
+  flows into a secret slot (the slot wraps the value with
+  taint).
+- `[:secret :text]` ⊄ `:text` — a secret value REFUSES to
+  flow into a plain text slot. Sync-time type-check rejects.
+
+The asymmetry is the security property. Once a value is
+secret-tainted, it can ONLY land in slots that are also
+typed `[:secret …]`. Plain `:text` sinks (like a log statement
+or a response body) are sync-time errors.
+
+> **Deliberately exempt from Error Tolerance.** Ordinary type
+> mismatches save anyway with a recorded diagnostic and only
+> refuse to execute (Lessons 04 / 06). Secret-flow violations are
+> a SECURITY class and keep the hard save-time reject: the write
+> is rolled back and the API answers 400 — the guarantee must not
+> depend on the derived diagnostics store. [docs/SECRETS.md](../SECRETS.md)
+> has the flow-protection rules in full.
+
+### Per-base-fn `:taint-propagate?`
+
+For base-fns that handle user data (e.g. `:str`,
+`:get`), taint propagation is a declarative FLAG at the
+impl-side registration — `:taint-propagate? true` — applied
+centrally by the type-checker: if ANY input carries `[:secret T]`
+(or any hide-result marker), the return is lifted into the
+marker too. So `(str "Hello " username)` where
+`username` is secret produces a secret string. Base-fns whose
+RETURN is inherently secret (`:vault-get`) simply declare
+`[:secret :text]` as their return type.
+
+The flags live in each base-fn's `impls.clj` map (see
+`docs/SECRETS.md` § Propagation for the audit of which base-fns
+propagate). You don't write them; library authors do. As a
+fn-def author, you just see the chip turn `[:secret :text]` and
+know "this value is now tainted."
+
+## The executor hides secret returns
+
+When a fn's return type is `[:secret T]`, `/api/execute` redacts
+the result at the sink (`redact-outcome`): the value is replaced
+with `nil` and a `tainted?` flag is set. The succeeded response is:
+
+```json
+{
+  "status": "succeeded",
+  "result": null,
+  "tainted?": true
+}
+```
+
+(A persisted row stores `:result null` and an `:error-data {:reason
+:tainted}` sidecar.) There is no `result-hidden` / `result-type`
+key — the value simply never leaves the server. The editor's
+result pane renders the redacted body as a **Result hidden** notice
+with a 🔒 in place of a value; a persisted row stores `:result null`,
+so the Runs list has nothing to preview for it either.
+
+This applies AT THE BOUNDARY (HTTP response). Inside the
+graph, secret values flow freely between fn-defs — they're
+just typed.
+
+## The admin secrets UX
+
+The **Secrets** rows in the explorer (toggle the **secrets**
+filter) are the canonical admin flow:
+
+1. Admin clicks `+` on the secrets section.
+2. Form asks for name, vault path, value, description.
+3. Submit writes:
+   - The secret VALUE to OpenBao at the given path.
+   - A fn-def parented from `:secret-leaf` with a **resolver
+     binding** — `:resolver-fn-id` pointing at `:vault-get`, the
+     vault path stored in the binding's `:value`. In `fns.edn` this
+     is written as `{:resolver :vault-get :value "kv/path"}`, or the
+     `{:secret-path "kv/path"}` sugar.
+4. Other fn-defs ref the new secret-leaf fn-def. At execute
+   time, the executor reads the vault path from OpenBao,
+   binds the value to the slot, runs the rest of the graph.
+
+The graphden DB never holds the secret value. Only the path.
+
+## Try it
+
+> Prefer to be shown? This lesson exists as a guided in-editor tour:
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=14)
+> (no sign-up), or pick “Interactive tutorial” in the editor's
+> account menu.
+
+1. Find `:current-time-ms` in the editor. Its effects strip
+   shows ONE chip: `:time`. Click the chip — the explainer
+   popover gives the plain-English description.
+
+2. Build a fn-def with deliberate drift:
+
+   ```edn
+   {:name :tutorial-pure-claim
+    :parent :env
+    :args  {:name {:value "AUTH_TOKEN"}}
+    :expects-effects #{}}
+   ```
+
+   `:env` has `:effects #{:env}`. You declared `#{}`. Save —
+   the chip strip shows a RED `:env` chip (drift: undeclared).
+   The hover-title says "Drift (undeclared)".
+
+3. Find any `:secret-leaf`-parented fn-def. Try feeding it into
+   a plain `:text` sink that does NOT propagate taint — `:h-raw`,
+   whose `:string` slot is typed `:text`:
+
+   ```edn
+   {:name :tutorial-secret-leak
+    :parent :h-raw
+    :args  {:string :my-secret-leaf}}
+   ```
+
+   Save — the type-checker rejects: `[:secret :text]` ⊄ `:text`
+   for slot `:string`. The error explains the asymmetric
+   subtyping rule.
+
+   Now contrast a taint-*propagating* base-fn. `:str` carries the
+   `:taint-propagate? true` flag, so binding the same secret into
+   it is ACCEPTED:
+
+   ```edn
+   {:name :tutorial-secret-str
+    :parent :str
+    :args  {:parts ["token=" :my-secret-leaf]}}
+   ```
+
+   The bind passes — but the RETURN type becomes `[:secret :text]`:
+   the poison spreads upward through the flag instead of leaking
+   out, which is the intended behavior.
+
+## What we glossed over
+
+- **Effect drift logging at execute time** — the runtime ALSO
+  observes which effects actually fired and logs drift against
+  the declared set. So `:expects-effects #{}` for a fn that
+  hits the network at runtime gets a drift log entry, not just
+  the editor red outline.
+- **`:effects #{:do}` and other invalid tags** — the validator
+  rejects unknown categories at sync time. See `types.check`.
+- **Taint-flow audit** — which base-fns currently propagate
+  taint vs which don't (and why). See [docs/SECRETS.md](../SECRETS.md).
+
+## Next
+
+[Lesson 15 — Tests: the `tests` namespace](15-tests.md)

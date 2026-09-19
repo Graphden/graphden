@@ -552,7 +552,7 @@ function enterArgRenameEditMode(arg, anchorEl, displayLabel) {
     // binding row + a rename-view slot, so `lookups` AND the inspector
     // are stale. `renderGraph` alone redrew the edge label (the layout
     // is fetched fresh) while the Runs pane kept the OLD field name, and
-    // a Run from it was rejected with "Unknown arg(s)" (lesson 04, step
+    // a Run from it was rejected with "Unknown arg(s)" (lesson 05, step
     // 13). `loadGraphData` re-selects, which re-renders the
     // inspector — the form asks for the new name.
     onSaved() { if (typeof loadGraphData === 'function') loadGraphData(); }

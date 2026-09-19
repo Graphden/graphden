@@ -198,6 +198,25 @@ test('expanded reads the COMMITTED expansion of the named card, not the preview'
          'no such card on the canvas');
 });
 
+test('expanded depth 0 is the FOLDED card — on the canvas, nothing committed', () => {
+  const s = withFn();
+  s.overlays = { greet: ['fn-root_fn-1'] };
+  assert(checkIn(s, { kind: 'expanded', name: 'greet', depth: 0 }) === true,
+         'no committed expansion = folded');
+  s.expansionState = new Map([['fn-root_fn-1', { fullDepth: 1, partialFns: new Set() }]]);
+  assert(checkIn(s, { kind: 'expanded', name: 'greet', depth: 0 }) === false,
+         'an unfolded card is not folded');
+  s.expansionState = new Map([['fn-root_fn-1', { fullDepth: 0, partialFns: new Set(['fn-parent']) }]]);
+  assert(checkIn(s, { kind: 'expanded', name: 'greet', depth: 0 }) === false,
+         'a partial MI expansion is not folded either');
+  s.expansionState = new Map([['fn-root_fn-1', { fullDepth: 0, partialFns: new Set() }]]);
+  assert(checkIn(s, { kind: 'expanded', name: 'greet', depth: 0 }) === true,
+         'an emptied spec counts as folded');
+  s.overlays = {};
+  assert(checkIn(s, { kind: 'expanded', name: 'greet', depth: 0 }) === false,
+         'a card that is not on the canvas is not "folded" — the step wants it drawn');
+});
+
 test('list-items counts the ITEMS under a sequence slot, not the binding', () => {
   // `binding-bound` is true after the first append — a lesson that asks for
   // a second number (1 + 1, 2 + 2) needs the binding-list-item rows counted.
@@ -244,7 +263,7 @@ test('dom / dom-absent are each other\'s inverse', () => {
 
 test('dom means VISIBLE — a mounted-but-hidden surface is not "open"', () => {
   // The editor keeps the Organization panels mounted from boot. Matching on
-  // presence alone completed lesson 24's "open the Organization surface"
+  // presence alone completed lesson 25's "open the Organization surface"
   // before the reader touched anything, and the tour walked on without them.
   const hidden = { dom: { '#gd-operate-nav button': 'hidden' } };
   assert(checkIn(hidden, { kind: 'dom', selector: '#gd-operate-nav button' }) === false,

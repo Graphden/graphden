@@ -84,7 +84,7 @@ belongs in `tools/runtime-test/` under `bb test-js`.
 
 ## Organization lessons (needs a tenancy stack)
 
-`edit-tutorial-tour-org.test.js` walks tutorial lessons 23 / 24 / 26 / 29 / 32 / 33
+`edit-tutorial-tour-org.test.js` walks tutorial lessons 24 / 25 / 27 / 30 / 33 / 34
 — Members, Grants, Apps, cross-org, account Settings, plans. Those surfaces
 exist only under the tenancy addon, so the file SKIPS (exit 0, loudly) unless
 you point it at a stack that has one:

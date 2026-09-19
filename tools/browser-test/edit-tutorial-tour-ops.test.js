@@ -1,4 +1,4 @@
-// Lessons 13, 19, 20, 14 — effects, branches, review, tests (+ branch isolation)
+// Lessons 14, 20, 21, 15 — effects, branches, review, tests (+ branch isolation)
 //
 // Part of the interactive-tutorial drift guard: walks every step of its
 // lessons by doing the real UI actions, so a renamed class or a changed
@@ -25,15 +25,15 @@ const {
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-ops — lessons 13 / 19 / 20 / 14 + branch isolation');
+  console.log('edit-tutorial-tour-ops — lessons 14 / 20 / 21 / 15 + branch isolation');
   let failed = false;
   try {
     await hardCleanup(page);
     const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
-    // ---------- lesson 20 — branches (fork, edit, come back) ----------
-    await page.goto(BASE + '/?tutorial=20');
+    // ---------- lesson 21 — branches (fork, edit, come back) ----------
+    await page.goto(BASE + '/?tutorial=21');
     await waitTourTitle(page, 'Branches are views, not copies', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 20 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 21 Next');
     await waitTourTitle(page, 'Find str-upper');
     await filterAndSelect(page, 'str-upper', 'str-upper');
     await waitTourTitle(page, 'Extend it', 150000);
@@ -56,7 +56,7 @@ const {
     });
     assert(mainValue.includes('main version'),
       'main still reads "main version" after the branch edit');
-    assert(await clickTourButton(page, 'Next'), 'lesson 20 back-on-main Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 21 back-on-main Next');
     await waitTourTitle(page, 'Compare the branches', 150000);
     // Δ on the tutorial-branch row → COMPARE MODE (UX-v3): the Δ chip
     // appears by the branch chip and the tour's dom-check passes.
@@ -75,7 +75,7 @@ const {
     await page.waitForFunction(() => !document.getElementById('gd-diff-chip'),
       null, {timeout: 15000});
     await waitTourTitle(page, 'When both sides touched the same thing', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 20 conflict-notes Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 21 conflict-notes Next');
     await waitTourTitle(page, "That's branching", 150000);
     await finishAndDelete(page);
     // The cleanup must have removed the lesson's BRANCH too, not just the fn.
@@ -84,12 +84,12 @@ const {
       .map((b) => b.name);
     assert(!names.includes('tutorial-branch'),
       'tour cleanup deleted the lesson branch');
-    console.log('  lesson 20: walked + cleaned (branch too, compare mode entered)');
+    console.log('  lesson 21: walked + cleaned (branch too, compare mode entered)');
 
-    // ---------- lesson 21 — review: refusal → propose → approve → land ----------
-    await page.goto(BASE + '/?tutorial=21');
+    // ---------- lesson 22 — review: refusal → propose → approve → land ----------
+    await page.goto(BASE + '/?tutorial=22');
     await waitTourTitle(page, "Review is the target's policy", 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 21 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 22 Next');
     await waitTourTitle(page, 'Something to change');
     await filterAndSelect(page, 'const', 'const');
     await waitTourTitle(page, 'Extend it', 150000);
@@ -166,7 +166,7 @@ const {
       '.branch-row-approve[data-approve-branch="tutorial-feature"]').click());
     await page.waitForSelector('.branch-appr-count.ok', {timeout: 30000});
     await waitTourTitle(page, 'Ready to land — and why we stop', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 21 ready-to-land Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 22 ready-to-land Next');
     await waitTourTitle(page, 'Back to main', 150000);
     await switchBranchViaChip(page, 'main');
     await waitTourTitle(page, "That's review", 150000);
@@ -177,12 +177,12 @@ const {
     assert(!reviewNames.includes('tutorial-release')
            && !reviewNames.includes('tutorial-feature'),
       'tour cleanup deleted both review branches');
-    console.log('  lesson 21: walked + cleaned (refused → proposed → approved; branches cleaned)');
+    console.log('  lesson 22: walked + cleaned (refused → proposed → approved; branches cleaned)');
 
-    // ---------- Lesson 13 — effects (chip, ack gate, run) ----------
-    await page.goto(BASE + '/?tutorial=13');
+    // ---------- Lesson 14 — effects (chip, ack gate, run) ----------
+    await page.goto(BASE + '/?tutorial=14');
     await waitTourTitle(page, 'Effects are declared, then they spread', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 13 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 14 Next');
     await waitTourTitle(page, 'Find env');
     await filterAndSelect(page, 'env', 'env');
     await waitTourTitle(page, 'Read the effect chip', 150000);
@@ -193,25 +193,25 @@ const {
       () => document.querySelector('.effects-chip')?.className);
     assert(/effects-chip-env/.test(effChip || ''),
       'the env card carries an :env effect chip (got: ' + effChip + ')');
-    assert(await clickTourButton(page, 'Next'), 'lesson 13 chip Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 14 chip Next');
     await waitTourTitle(page, 'Open Run');
     // runWithEffectAck asserts the disabled-until-acknowledged gate itself.
     await runWithEffectAck(page, 'PATH');
     await waitTourTitle(page, 'The value — or the refusal', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 13 look-step Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 14 look-step Next');
     await waitTourTitle(page, 'Two gates, one vocabulary', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 13 gates Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 14 gates Next');
     await waitTourTitle(page, 'Secrets ride the same rails');
-    assert(await clickTourButton(page, 'Finish'), 'lesson 13 Finish');
+    assert(await clickTourButton(page, 'Finish'), 'lesson 14 Finish');
     // Nothing was created — no cleanup dialog, just the finished card offering
     // what is next, which `waitTourClosed` dismisses.
     await waitTourClosed(page, 30000);
-    console.log('  lesson 13: walked (no leftovers to clean)');
+    console.log('  lesson 14: walked (no leftovers to clean)');
 
-    // ---------- Lesson 14 — tests (2 + 2 → assert-eq → green → red → green) --
-    await page.goto(BASE + '/?tutorial=14');
+    // ---------- Lesson 15 — tests (2 + 2 → assert-eq → green → red → green) --
+    await page.goto(BASE + '/?tutorial=15');
     await waitTourTitle(page, 'A test is just a fn', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 14 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 15 Next');
     // The fn under test first — a real 2 + 2, so the assertion compares
     // something computed rather than a literal with itself.
     await waitTourTitle(page, 'Something to test');
@@ -306,10 +306,10 @@ const {
       'and the fix turned it green again (got: ' + JSON.stringify(testRow) + ')');
     await waitTourTitle(page, 'Tests are graph, too', 150000);
     await finishAndDelete(page);
-    console.log('  lesson 14: walked + cleaned');
+    console.log('  lesson 15: walked + cleaned');
 
     // ---------- Branch isolation × LESSON STEPS ----------
-    // The intersection the reparent bug and the lesson-08 breakage both
+    // The intersection the reparent bug and the lesson-09 breakage both
     // escaped through: branch-mode e2e used to be env-gated
     // (GRAPHDEN_TOUR_BRANCH_E2E=1) and covered only entry/exit, while
     // the step walks all ran in-place on main. The historic reason for
@@ -397,7 +397,7 @@ const {
     await page.waitForFunction(() => !/[?&]branch=/.test(location.search),
       null, {timeout: 120000, polling: 300});
 
-    // Rollback is COMPLETE: no tutorial-* branch survives (the lesson-08
+    // Rollback is COMPLETE: no tutorial-* branch survives (the lesson-09
     // leak class), and main never saw the lesson's rows.
     const branchesAfter = await api(page, 'GET', '/api/branches');
     const leakedTutorial = (branchesAfter.branches || [])
@@ -480,7 +480,7 @@ const {
                           && c.textContent.trim() === 'Your organization')}
                  : null;
     });
-    assert(locked, 'lesson 24 is listed in the picker');
+    assert(locked, 'lesson 25 is listed in the picker');
     assert(locked.chapter, 'its chapter heading is rendered');
     assert(locked.disabled, 'it is disabled where the capability is missing');
     assert(/needs manage-users/.test(locked.text),
@@ -495,12 +495,12 @@ const {
       return row ? {text: row.textContent.trim(),
                     disabled: row.querySelector('.gd-tour-btn').disabled === true} : null;
     });
-    assert(orgLocked, 'lesson 30 is listed');
+    assert(orgLocked, 'lesson 31 is listed');
     assert(orgLocked.disabled, 'it is disabled without organizations');
     assert(/needs an organization/.test(orgLocked.text),
       'the row names the CONDITION, not a capability (got: ' + orgLocked.text + ')');
     // The mirror case: a condition that HOLDS here. This stack is
-    // single-tenant, so the Assets panel exists and lesson 22 must be
+    // single-tenant, so the Assets panel exists and lesson 23 must be
     // OFFERED, not locked — an inverted `assets` signal would hide the
     // lesson from the only sessions that can run it.
     const assetsLesson = await page.evaluate(() => {
@@ -509,9 +509,9 @@ const {
       return row ? {text: row.textContent.trim(),
                     disabled: row.querySelector('.gd-tour-btn').disabled === true} : null;
     });
-    assert(assetsLesson, 'lesson 22 is listed');
+    assert(assetsLesson, 'lesson 23 is listed');
     assert(!assetsLesson.disabled,
-      'lesson 22 is offered on a single-tenant stack (got: ' + assetsLesson.text + ')');
+      'lesson 23 is offered on a single-tenant stack (got: ' + assetsLesson.text + ')');
     console.log('  picker: org lessons locked, the assets lesson offered');
 
     // ---------- The catalogue as a catalogue ----------
@@ -524,7 +524,7 @@ const {
     const shape = await page.evaluate(async () => {
       localStorage.setItem('graphden.tour.done', JSON.stringify(['01']));
       localStorage.setItem('graphden.tour',
-        JSON.stringify({lessonId: '03', step: 2, created: []}));
+        JSON.stringify({lessonId: '04', step: 2, created: []}));
       location.reload();
     });
     await page.waitForFunction(() => typeof window.openTutorialMenu === 'function',
@@ -564,7 +564,7 @@ const {
     assert(cat.fitsViewport, 'the catalogue fits the window');
     assert(cat.listScrolls, 'and the LIST scrolls rather than squeezing its rows');
     assert(cat.cancelReachable, 'Cancel stays reachable at any scroll position');
-    assert(cat.filtered.length === 1 && /^20 · Branches/.test(cat.filtered[0]),
+    assert(cat.filtered.length === 1 && /^21 · Branches/.test(cat.filtered[0]),
       'the filter narrows to one lesson (got: ' + JSON.stringify(cat.filtered) + ')');
     assert(cat.doneMarked, 'a finished lesson is marked done');
     assert(cat.chapters.length === new Set(cat.chapters).size,
@@ -655,8 +655,8 @@ const {
     // Escape, so "dismissed the panel" must not read as "quit the lesson".
     // It regressed once already: the Packages panel closes through the shared
     // popover helper and was missing from the tour's list of dismissible
-    // surfaces, so closing it killed lesson 29 mid-walk.
-    await page.goto(BASE + '/?tutorial=29');
+    // surfaces, so closing it killed lesson 30 mid-walk.
+    await page.goto(BASE + '/?tutorial=30');
     await waitTourTitle(page, 'Sharing more than one fn', 150000);
     await page.waitForSelector('#gd-pkg-chip', {timeout: 30000});
     await page.evaluate(() => document.getElementById('gd-pkg-chip').click());
@@ -730,7 +730,7 @@ const {
     await page.goto(BASE + '/');
     await page.evaluate(() => {
       localStorage.removeItem('graphden.tour');
-      // Lesson 14's walk switched the ✓ tests filter on and it persists; with
+      // Lesson 15's walk switched the ✓ tests filter on and it persists; with
       // the lesson's tests namespace cleaned up, that filter hides EVERY row.
       localStorage.removeItem('graphden.explorer.filters');
     });
@@ -747,7 +747,7 @@ const {
         .find((c) => /all/.test(c.textContent));
       return all && all.getAttribute('aria-pressed') === 'false';
     }, null, {timeout: 15000, polling: 200});
-    await page.goto(BASE + '/?tutorial=05');
+    await page.goto(BASE + '/?tutorial=06');
     await waitTourTitle(page, 'Types are fn-rows too', 150000);
     assert(await clickTourButton(page, 'Next'), 'lens probe: opening Next');
     await waitTourTitle(page, 'Find str-len', 30000);

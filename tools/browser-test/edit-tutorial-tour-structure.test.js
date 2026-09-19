@@ -1,4 +1,4 @@
-// Lessons 03, 05, 06, 07, 08 — slots/bindings, types, HOFs, components, escape hatch
+// Lessons 04, 06, 07, 08, 09 — slots/bindings, types, HOFs, components, escape hatch
 //
 // Part of the interactive-tutorial drift guard: walks every step of its
 // lessons by doing the real UI actions, so a renamed class or a changed
@@ -25,30 +25,30 @@ const {
 
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
-  // Lesson 05's "remove this binding" step fires a native confirm().
+  // Lesson 06's "remove this binding" step fires a native confirm().
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-structure — lessons 03 / 05 / 06 / 07 / 08');
+  console.log('edit-tutorial-tour-structure — lessons 04 / 06 / 07 / 08 / 09');
   let failed = false;
   try {
     await hardCleanup(page);
     const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
-    // ---------- Lesson 05 — types (mismatch explainer + diagnostic) ----------
-    await page.goto(BASE + '/?tutorial=05');
+    // ---------- Lesson 06 — types (mismatch explainer + diagnostic) ----------
+    await page.goto(BASE + '/?tutorial=06');
     await waitTourTitle(page, 'Types are fn-rows too', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 05 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 06 Next');
     await waitTourTitle(page, 'Find str-len');
     await filterAndSelect(page, 'str-len', 'str-len');
     await waitTourTitle(page, 'Read the chips', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 05 chips Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 06 chips Next');
     await waitTourTitle(page, 'Extend it');
     await extendViaRowActions(page, 'tutorial-typed', 'str-len');
-    // Selection gate — the "+" must be the CHILD's (see lesson 02's note).
+    // Selection gate — the "+" must be the CHILD's (see lesson 03's note).
     await waitTourTitle(page, 'Ask for a fn the slot cannot take', 150000);
     await pickIncompatFnRef(page, 'str-len');
     await waitTourTitle(page, 'The server explains the mismatch', 150000);
     await pickAnyway(page);
     await waitTourTitle(page, 'A diagnostic, not a wall', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 05 diagnostic Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 06 diagnostic Next');
     await waitTourTitle(page, 'Clear it');
     await removeUseSiteBinding(page, 'str-len');
     // --- the "author your own type" arc ---
@@ -81,12 +81,12 @@ const {
     assert(typeFn.role === 'record',
       'the server classifies it as a record (got: ' + typeFn.role + ')');
     await finishAndDelete(page);
-    console.log('  lesson 05: walked + cleaned');
+    console.log('  lesson 06: walked + cleaned');
 
-    // ---------- Lesson 03 — slots and bindings (two children, one slot) ----
-    await page.goto(BASE + '/?tutorial=03');
+    // ---------- Lesson 04 — slots and bindings (two children, one slot) ----
+    await page.goto(BASE + '/?tutorial=04');
     await waitTourTitle(page, 'One slot, many bindings', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 03 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 04 Next');
     await waitTourTitle(page, 'Find str-upper');
     await filterAndSelect(page, 'str-upper', 'str-upper');
     await waitTourTitle(page, 'Make the first child', 150000);
@@ -100,7 +100,7 @@ const {
       document.querySelector('.execute-result-host')?.textContent || ''), null,
       {timeout: 60000, polling: 200}).then(() => true, () => false),
       'tutorial-a ran and the pane shows ALPHA');
-    assert(await clickTourButton(page, 'Next'), 'lesson 03 ALPHA Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 04 ALPHA Next');
     await waitTourTitle(page, 'Back to the parent', 150000);
     await filterAndSelect(page, 'str-upper', 'str-upper');
     await waitTourTitle(page, 'Make a second child', 150000);
@@ -114,7 +114,7 @@ const {
       document.querySelector('.execute-result-host')?.textContent || ''), null,
       {timeout: 60000, polling: 200}).then(() => true, () => false),
       'tutorial-b ran and the pane shows BETA');
-    assert(await clickTourButton(page, 'Next'), 'lesson 03 BETA Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 04 BETA Next');
     await waitTourTitle(page, 'One slot, two values', 150000);
     // The point of the lesson, asserted over the API — NOT over `lookups`,
     // which only holds the subtree of the currently selected fn (tutorial-b
@@ -139,12 +139,12 @@ const {
     assert(twoChildren.a[0].value === 'alpha' && twoChildren.b[0].value === 'beta',
       'the two children hold independent values');
     await finishAndDelete(page);
-    console.log('  lesson 03: walked + cleaned');
+    console.log('  lesson 04: walked + cleaned');
 
-    // ---------- Lesson 06 — higher-order functions ----------
-    await page.goto(BASE + '/?tutorial=06');
+    // ---------- Lesson 07 — higher-order functions ----------
+    await page.goto(BASE + '/?tutorial=07');
     await waitTourTitle(page, 'A slot that wants a function', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 06 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 07 Next');
     await waitTourTitle(page, 'Find map');
     await filterAndSelect(page, 'map', 'map');
     await waitTourTitle(page, 'Read the two slots', 150000);
@@ -156,7 +156,7 @@ const {
     // it has held a tick, and a Next pressed the instant the chips appear
     // reads as NEVER-RINGED.
     await settleTourRing(page, 10000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 06 slots Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 07 slots Next');
     await waitTourTitle(page, 'Extend it');
     await extendViaRowActions(page, 'tutorial-map', 'map');
     // Narrowing (2026-09-14): the data goes in FIRST, so the reader can watch
@@ -171,7 +171,7 @@ const {
       .some((c) => /item:text/.test((c.textContent || '').replace(/\s+/g, ''))), null,
       {timeout: 60000, polling: 200}).then(() => true, () => false),
       ':func\'s chip reads (item:text) once :coll holds text');
-    assert(await clickTourButton(page, 'Next'), 'lesson 06 chip-step Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 07 chip-step Next');
     await waitTourTitle(page, 'A callable slot offers no literal', 150000);
     // Clicking the callable slot's "+" goes straight to the fn picker —
     // no value form in between. That IS the lesson's claim. :coll is bound,
@@ -203,15 +203,15 @@ const {
       (document.querySelector('.execute-result-host')?.textContent || '').replace(/\s+/g, ' ')), null,
       {timeout: 60000, polling: 200}).then(() => true, () => false),
       'the pane shows ["GRAPH" "DEN"] — str-upper ran once per item');
-    assert(await clickTourButton(page, 'Next'), 'lesson 06 look-step Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 07 look-step Next');
     await waitTourTitle(page, "That's a HOF", 150000);
     await finishAndDelete(page);
-    console.log('  lesson 06: walked + cleaned');
+    console.log('  lesson 07: walked + cleaned');
 
-    // ---------- Lesson 07 — components (free-arg chips + list append) ------
-    await page.goto(BASE + '/?tutorial=07');
+    // ---------- Lesson 08 — components (free-arg chips + list append) ------
+    await page.goto(BASE + '/?tutorial=08');
     await waitTourTitle(page, 'A page is a function', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 07 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 08 Next');
     await waitTourTitle(page, 'Find button');
     await filterAndSelect(page, 'button', 'button');
     await waitTourTitle(page, 'Make it yours', 150000);
@@ -249,7 +249,7 @@ const {
     });
     assert(previewed.link && previewed.button,
       'the preview frame is a styled document holding the button (got: ' + JSON.stringify(previewed) + ')');
-    assert(await clickTourButton(page, 'Next'), 'lesson 07 button Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 08 button Next');
     await waitTourTitle(page, 'Style it', 150000);
     await bindOptionalArgChip(page, 'attrs', '{"class": "primary"}');
     await waitTourTitle(page, 'Run it again', 150000);
@@ -264,7 +264,7 @@ const {
     await waitTourTitle(page, 'Run the card', 150000);
     await runViaRowActions(page);
     await waitTourTitle(page, 'Nested — and still your button', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 07 card Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 08 card Next');
     await waitTourTitle(page, "That's a page, in pieces", 150000);
     // The composition itself, asserted over the API — the card's hiccup
     // must nest the button's.
@@ -278,12 +278,12 @@ const {
       'card renders with the button nested inside (got: '
       + JSON.stringify(ran.result) + ')');
     await finishAndDelete(page);
-    console.log('  lesson 07: walked + cleaned');
+    console.log('  lesson 08: walked + cleaned');
 
-    // ---------- Lesson 08 — the escape hatch (code editor + rename) --------
-    await page.goto(BASE + '/?tutorial=08');
+    // ---------- Lesson 09 — the escape hatch (code editor + rename) --------
+    await page.goto(BASE + '/?tutorial=09');
     await waitTourTitle(page, 'When no component fits', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 08 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 09 Next');
     await waitTourTitle(page, 'Find wrap-custom-script');
     await filterAndSelect(page, 'custom-script', 'wrap-custom-script');
     await waitTourTitle(page, 'Extend it', 150000);
@@ -295,7 +295,7 @@ const {
     await waitTourTitle(page, 'Run it', 150000);
     await runViaRowActions(page);
     await waitTourTitle(page, 'Source, not a preview', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 08 look-step Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 09 look-step Next');
     await waitTourTitle(page, 'Know what you gave up', 150000);
     // `?body` is a RENAME of the inherited `:content` slot, and a binding
     // must land on the declared slot — written on the rename view it shows
@@ -313,18 +313,18 @@ const {
       'the JS reached the rendered tag (got: '
       + JSON.stringify(scriptRan.result) + ')');
     await finishAndDelete(page);
-    console.log('  lesson 08: walked + cleaned');
+    console.log('  lesson 09: walked + cleaned');
 
-    // ---------- Lesson 10 — recursion (a READING tour) ----------
+    // ---------- Lesson 11 — recursion (a READING tour) ----------
     // The only lesson that asks the reader to READ a fn rather than build
     // one: `:fix` needs ~7 fn-defs, which is a written lesson, not twenty
     // steps of clicking. What the tour must prove is that the fn it points
     // at is really there and really recursive — a renamed step or a
     // re-parented `:branch-chain` would leave the lesson describing a graph
     // that no longer exists.
-    await page.goto(BASE + '/?tutorial=10');
+    await page.goto(BASE + '/?tutorial=11');
     await waitTourTitle(page, 'Loops, where cycles are forbidden', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 10 opening Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 11 opening Next');
     await waitTourTitle(page, 'Find a real one', 30000);
     await filterAndSelect(page, 'branch-chain', 'branch-chain');
     await waitTourTitle(page, 'Its parent is :fix', 150000);
@@ -346,12 +346,12 @@ const {
       'and so is the arm that invokes :self — the recursion the lesson reads');
 
     for (let i = 0; i < 5; i++) {
-      assert(await clickTourAdvance(page, 'Next'), 'lesson 10 Next #' + (i + 1));
+      assert(await clickTourAdvance(page, 'Next'), 'lesson 11 Next #' + (i + 1));
     }
     await waitTourTitle(page, "That's recursion", 30000);
-    assert(await clickTourButton(page, 'Finish'), 'lesson 10 Finish');
+    assert(await clickTourButton(page, 'Finish'), 'lesson 11 Finish');
     await waitTourClosed(page, 30000);
-    console.log('  lesson 10: walked (reading tour — :fix, its step, its :self arm)');
+    console.log('  lesson 11: walked (reading tour — :fix, its step, its :self arm)');
 
     console.log('PASS');
   } catch (err) {

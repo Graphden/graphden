@@ -194,9 +194,19 @@ function _tourCheckPasses(check) {
         // node id the expansion state is keyed by; several copies of the
         // fn may share a canvas, any unfolded one counts.
         if (typeof expansionState === 'undefined' || !expansionState) return false;
-        const depth = check.depth || 1;
+        const depth = (check.depth == null) ? 1 : check.depth;
         const sel = '.node-overlay[data-fn-name="' + check.name + '"]';
-        return Array.from(document.querySelectorAll(sel)).some((ov) => {
+        const overlays = Array.from(document.querySelectorAll(sel));
+        // `:depth 0` is the FOLDED card — "click the top row to fold it back"
+        // done: the card is on the canvas and no copy of it keeps a
+        // committed expansion (a hover preview never reaches this map).
+        if (depth === 0) {
+          return overlays.length > 0 && overlays.every((ov) => {
+            const spec = ov.dataset?.nodeId ? expansionState.get(ov.dataset.nodeId) : null;
+            return !spec || (!(spec.fullDepth > 0) && !(spec.partialFns?.size > 0));
+          });
+        }
+        return overlays.some((ov) => {
           const spec = ov.dataset?.nodeId ? expansionState.get(ov.dataset.nodeId) : null;
           if (!spec) return false;
           const full = spec.fullDepth || 0;

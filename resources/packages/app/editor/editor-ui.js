@@ -120,7 +120,7 @@ window.gdClearSelection = gdClearSelection;
 // miss here is a stale read — not a wrong name: the org-scoped read path can
 // trail its own write by a few hundred milliseconds, and a single attempt
 // turned "created" into the toast “Function not found: <the name you just
-// typed>”. Reproduced on a tenancy stack while walking tutorial lesson 27,
+// typed>”. Reproduced on a tenancy stack while walking tutorial lesson 28,
 // where it also stalled the lesson: the tour was waiting for the fn to be
 // selected. Retry briefly, then fall through to the normal select so a
 // genuine miss still reports itself.

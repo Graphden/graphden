@@ -22,7 +22,7 @@
 Read them top to bottom — the table is in **teaching order**, in the same
 five chapters the in-editor picker uses, and the numbering is
 **sequential in that order**: the number is the file name, the deep link
-(`?tutorial=13`), and the tour's `:id`. Inserting a lesson mid-sequence
+(`?tutorial=14`), and the tour's `:id`. Inserting a lesson mid-sequence
 renumbers everything after it — that is a mechanical, repo-wide
 search-and-replace (ids appear only in file names, links, tour `:id`s and
 prose references), so keep the numbers honest rather than appending out
@@ -33,64 +33,65 @@ of order.
 | # | Lesson | Status |
 |---|---|---|
 | 01 | [Anatomy of a fn-def](01-fn-defs.md) | ✅ written · ▶ interactive |
-| 02 | [Parents and inheritance — single parent, then multiple](02-parents-and-inheritance.md) | ✅ written · ▶ interactive |
-| 03 | [Slots and bindings — what they are at the data level](03-slots-and-bindings.md) | ✅ written · ▶ interactive |
-| 04 | [Free arguments and how they propagate](04-free-arguments.md) | ✅ written · ▶ interactive |
-| 05 | [Types — atomic, refinement, record, union, variant, list](05-types.md) | ✅ written · ▶ interactive |
+| 02 | [Reading a card — rows, unfolding, closed cards, descriptions](02-reading-a-card.md) | ✅ written · ▶ interactive |
+| 03 | [Parents and inheritance — single parent, then multiple](03-parents-and-inheritance.md) | ✅ written · ▶ interactive |
+| 04 | [Slots and bindings — what they are at the data level](04-slots-and-bindings.md) | ✅ written · ▶ interactive |
+| 05 | [Free arguments and how they propagate](05-free-arguments.md) | ✅ written · ▶ interactive |
+| 06 | [Types — atomic, refinement, record, union, variant, list](06-types.md) | ✅ written · ▶ interactive |
 
 ### Composing
 
 | # | Lesson | Status |
 |---|---|---|
-| 06 | [Higher-order functions and `:fn`-typed slots](06-higher-order-functions.md) | ✅ written · ▶ interactive |
-| 07 | [Composing pages from components](07-components-and-pages.md) | ✅ written · ▶ interactive |
-| 08 | [The `:custom-script` escape hatch](08-custom-script-escape-hatch.md) | ✅ written · ▶ interactive |
-| 09 | [State — cells, swap, and a graph-native cache](09-state-cells-and-caches.md) | ✅ written · ▶ interactive |
-| 10 | [Recursion: loops without cycles](10-recursion.md) | ✅ written · ▶ interactive |
-| 11 | [Live fragments: htmx from the graph](11-htmx-fragments.md) | ✅ written |
+| 07 | [Higher-order functions and `:fn`-typed slots](07-higher-order-functions.md) | ✅ written · ▶ interactive |
+| 08 | [Composing pages from components](08-components-and-pages.md) | ✅ written · ▶ interactive |
+| 09 | [The `:custom-script` escape hatch](09-custom-script-escape-hatch.md) | ✅ written · ▶ interactive |
+| 10 | [State — cells, swap, and a graph-native cache](10-state-cells-and-caches.md) | ✅ written · ▶ interactive |
+| 11 | [Recursion: loops without cycles](11-recursion.md) | ✅ written · ▶ interactive |
+| 12 | [Live fragments: htmx from the graph](12-htmx-fragments.md) | ✅ written |
 
 ### Running it
 
 | # | Lesson | Status |
 |---|---|---|
-| 12 | [Executing a fn — free-arg form, history, cancel](12-executing-a-fn.md) | ✅ written · ▶ interactive |
-| 13 | [Effects and the `:secret` type-marker](13-effects-and-secrets.md) | ✅ written · ▶ interactive |
-| 14 | [Tests — the `tests` namespace](14-tests.md) | ✅ written · ▶ interactive |
-| 15 | [Debugging: traces, the call tree, and catching a request](15-debugging-traces.md) | ✅ written · ▶ interactive |
-| 16 | [When something breaks, and when it just repeats: the problem filters](16-errors-and-diagnostics.md) | ✅ written · ▶ interactive |
+| 13 | [Executing a fn — free-arg form, history, cancel](13-executing-a-fn.md) | ✅ written · ▶ interactive |
+| 14 | [Effects and the `:secret` type-marker](14-effects-and-secrets.md) | ✅ written · ▶ interactive |
+| 15 | [Tests — the `tests` namespace](15-tests.md) | ✅ written · ▶ interactive |
+| 16 | [Debugging: traces, the call tree, and catching a request](16-debugging-traces.md) | ✅ written · ▶ interactive |
+| 17 | [When something breaks, and when it just repeats: the problem filters](17-errors-and-diagnostics.md) | ✅ written · ▶ interactive |
 
 ### The editor
 
 | # | Lesson | Status |
 |---|---|---|
-| 17 | [Finding your way: kind filters and the Inspector](17-explorer-and-inspector.md) | ✅ written · ▶ interactive |
-| 18 | [Working without the mouse — keyboard & accessibility](18-keyboard-and-accessibility.md) | ✅ written · ▶ interactive |
-| 19 | [Filters and views — look at the part of the graph you mean](19-workspaces.md) | ✅ written · ▶ interactive |
-| 20 | [Branches — fork, edit, diff, merge](20-branches.md) | ✅ written · ▶ interactive |
-| 21 | [Review — propose, approve, protected merge](21-review.md) | ✅ written · ▶ interactive |
-| 22 | [Editing the editor: asset overrides](22-asset-overrides.md) | ✅ written · ▶ interactive |
-| 23 | [Version history: what changed, and going back](23-version-history.md) | ✅ written · ▶ interactive |
+| 18 | [Finding your way: kind filters and the Inspector](18-explorer-and-inspector.md) | ✅ written · ▶ interactive |
+| 19 | [Working without the mouse — keyboard & accessibility](19-keyboard-and-accessibility.md) | ✅ written · ▶ interactive |
+| 20 | [Filters and views — look at the part of the graph you mean](20-workspaces.md) | ✅ written · ▶ interactive |
+| 21 | [Branches — fork, edit, diff, merge](21-branches.md) | ✅ written · ▶ interactive |
+| 22 | [Review — propose, approve, protected merge](22-review.md) | ✅ written · ▶ interactive |
+| 23 | [Editing the editor: asset overrides](23-asset-overrides.md) | ✅ written · ▶ interactive |
+| 24 | [Version history: what changed, and going back](24-version-history.md) | ✅ written · ▶ interactive |
 
 ### Your organization
 
 | # | Lesson | Status |
 |---|---|---|
-| 24 | [Members — managing who is in your org](24-users-admin.md) | ✅ written · ▶ interactive |
-| 25 | [Grants — who may touch what](25-grants.md) | ✅ written · ▶ interactive |
-| 26 | [Roles — capabilities as a bundle](26-roles.md) | ✅ written · ▶ interactive |
-| 27 | [Apps — publishing a fn as a public site](27-apps.md) | ✅ written · ▶ interactive |
-| 28 | [Packages — namespaces, fns.edn, impls.clj, deps](28-packages.md) | ✅ written |
-| 29 | [Distributing packages — publish, install, update, fork](29-distributing-packages.md) | ✅ written · ▶ interactive |
-| 30 | [Working across organizations](30-working-across-orgs.md) | ✅ written · ▶ interactive |
-| 31 | [Working offline: a local instance, git snapshots, push/pull](31-offline-and-push.md) | ✅ written |
-| 32 | [Services — long-running fns supervised by graphden](32-services.md) | ✅ written · ▶ interactive |
-| 33 | [Signing up & signing in: your account](33-signing-up-and-in.md) | ✅ written · ▶ interactive |
-| 34 | [Plans & tiers — what the cloud grants each account](34-plans-and-tiers.md) | ✅ written · ▶ interactive |
-| 35 | [Services talking to services — the contract lives in the graph](35-services-talking-to-services.md) | ✅ written · ▶ interactive |
-| 36 | [Queues — asynchronous work between services](36-queues.md) | ✅ written |
-| 37 | [The Marketplace: themes, keyboard layouts, and what others published](37-marketplace-themes-keymaps.md) | ✅ written · ▶ interactive |
-| 38 | [The package lifecycle — both sides of a version](38-package-lifecycle.md) | ✅ written |
-| 39 | [AI clients and API tokens: the graph over `/mcp`](39-ai-clients-and-api-tokens.md) | ✅ written |
+| 25 | [Members — managing who is in your org](25-users-admin.md) | ✅ written · ▶ interactive |
+| 26 | [Grants — who may touch what](26-grants.md) | ✅ written · ▶ interactive |
+| 27 | [Roles — capabilities as a bundle](27-roles.md) | ✅ written · ▶ interactive |
+| 28 | [Apps — publishing a fn as a public site](28-apps.md) | ✅ written · ▶ interactive |
+| 29 | [Packages — namespaces, fns.edn, impls.clj, deps](29-packages.md) | ✅ written |
+| 30 | [Distributing packages — publish, install, update, fork](30-distributing-packages.md) | ✅ written · ▶ interactive |
+| 31 | [Working across organizations](31-working-across-orgs.md) | ✅ written · ▶ interactive |
+| 32 | [Working offline: a local instance, git snapshots, push/pull](32-offline-and-push.md) | ✅ written |
+| 33 | [Services — long-running fns supervised by graphden](33-services.md) | ✅ written · ▶ interactive |
+| 34 | [Signing up & signing in: your account](34-signing-up-and-in.md) | ✅ written · ▶ interactive |
+| 35 | [Plans & tiers — what the cloud grants each account](35-plans-and-tiers.md) | ✅ written · ▶ interactive |
+| 36 | [Services talking to services — the contract lives in the graph](36-services-talking-to-services.md) | ✅ written · ▶ interactive |
+| 37 | [Queues — asynchronous work between services](37-queues.md) | ✅ written |
+| 38 | [The Marketplace: themes, keyboard layouts, and what others published](38-marketplace-themes-keymaps.md) | ✅ written · ▶ interactive |
+| 39 | [The package lifecycle — both sides of a version](39-package-lifecycle.md) | ✅ written |
+| 40 | [AI clients and API tokens: the graph over `/mcp`](40-ai-clients-and-api-tokens.md) | ✅ written |
 
 ▶ interactive — the lesson also exists as a guided in-editor tour:
 open the editor with `?tutorial=NN` (the landing demo link does this for
@@ -111,13 +112,13 @@ the lesson that follows, plus the first one you have not read when that
 is a different lesson — and starting it from the dialog cleans the
 finished lesson up first (deleting its branch, or the rows it created).
 
-Six lessons have no tour: **28** is about files on disk and
-`bb rebuild`, which the editor cannot show; **11** is a route-wiring
-marathon that reads better as text than as thirty steps; **31** is
+Six lessons have no tour: **29** is about files on disk and
+`bb rebuild`, which the editor cannot show; **12** is a route-wiring
+marathon that reads better as text than as thirty steps; **32** is
 about running a second, local instance — something one editor session
-cannot demonstrate; **36** needs a second service running while the
-tour would hold the page; **38** is a two-role loop that a tour cannot
-play from one seat without inventing the other person; and **39** is
+cannot demonstrate; **37** needs a second service running while the
+tour would hold the page; **39** is a two-role loop that a tour cannot
+play from one seat without inventing the other person; and **40** is
 mostly set-up in a terminal and an AI client, outside the editor. All
 six sit in the chapter their subject belongs to, which is why the ▶
 column is worth reading.
@@ -134,7 +135,7 @@ fails — the public demo, a free-plan org, a self-hosted instance with no
 tenancy addon — the picker still lists the lesson, disabled, with the
 reason on the row.
 
-Lesson 22 is written **self-host-only** and its tour declares that
+Lesson 23 is written **self-host-only** and its tour declares that
 (`:requires "assets"`): the Assets panel is hidden under the cloud
 tenancy addon and its writes are platform-only, because an editable
 shared frontend would be a stored-XSS surface across tenants. On a
@@ -147,7 +148,7 @@ it's described, it stays ⏳ planned until the gap closes.
 ## End-to-end worked example
 
 Once you've worked through the Basics and Composing chapters
-(lessons 01–11) plus Services (lesson 32),
+(lessons 01–12) plus Services (lesson 33),
 [**Building an API-poller**](../TUTORIAL_API_POLL.md) puts it all
 together: a scheduled service that calls an external HTTP API with a
 vault-backed bearer token and writes each result into your own Postgres

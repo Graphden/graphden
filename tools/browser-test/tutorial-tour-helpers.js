@@ -38,12 +38,12 @@ async function hardCleanup(page) {
   // ns-subtree walk below would miss it and the next run's create 409s.
   await retryingDelete(() => deleteFnByName(page, FN_NAME));
   // CHILDREN BEFORE PARENTS, and twice: a crashed run can leave
-  // tutorial-b parented on tutorial-a (the pre-fix lesson-03 failure),
+  // tutorial-b parented on tutorial-a (the pre-fix lesson-04 failure),
   // and a fn that is still someone's parent refuses to delete (409). One
   // ordered pass clears the normal case; the second pass collects
   // whatever the first pass unblocked.
   // A service row pins its fn: `tutorial-daemon` refuses to delete while
-  // lesson 32's row still points at it, so the row goes first.
+  // lesson 33's row still points at it, so the row goes first.
   try {
     const svcs = await api(page, 'GET', '/api/services');
     for (const s of (svcs.services || [])) {
@@ -53,7 +53,7 @@ async function hardCleanup(page) {
     }
   } catch (_) { /* best-effort */ }
   const leftovers = ['tutorial-versioned', 'tutorial-bad-json',
-                     // lesson 01 (1 + 1), lesson 14's fn under test
+                     // lesson 01 (1 + 1), lesson 15's fn under test
                      'one-plus-one', 'tutorial-sum',
                      'tutorial-b', 'tutorial-a', 'add-10-text', 'add-10',
                      'tutorial-json',
@@ -62,10 +62,10 @@ async function hardCleanup(page) {
                      'tutorial-card', 'tutorial-button', 'tutorial-script',
                      'tutorial-renamed', 'tutorial-point', 'tutorial-daemon',
                      'tutorial-tick', 'review-demo',
-                     // lesson 15's chain — a crash between its create and
+                     // lesson 16's chain — a crash between its create and
                      // finishAndDelete 409s the next run's create.
                      'tutorial-sentence', 'tutorial-shout', 'tutorial-words',
-                     // lesson 35's consumer.
+                     // lesson 36's consumer.
                      'tutorial-endpoint', 'tutorial-fetch'];
   // Per-browser view-state the lessons exercise (filters / views,
   // recents, last-used ns) — a leftover filter renders the next lesson's
@@ -86,7 +86,7 @@ async function hardCleanup(page) {
       await retryingDelete(() => deleteFnByName(page, nm));
     }
   }
-  // lesson 29's pin has to go before its namespaces: uninstall leaves the
+  // lesson 30's pin has to go before its namespaces: uninstall leaves the
   // MATERIALISED `mycorp@1-0-0` copy behind by design, and deleting `greet`
   // by name (as this sweep once did) gutted that copy — the next install
   // then answered 404 "Entities not found" for a package that looked fine
@@ -118,7 +118,7 @@ async function hardCleanup(page) {
     }
   } catch (_) { /* best-effort */ }
   // A published package-version whose namespace is gone answers 404 on
-  // install ("entities not found"), so a crashed lesson-14 run would poison
+  // install ("entities not found"), so a crashed lesson-15 run would poison
   // the next one. The tour withdraws its own release; this is the belt.
   try {
     const rows = await api(page, 'GET', '/api/packages');
@@ -160,7 +160,7 @@ async function hardCleanup(page) {
     const branches = await api(page, 'GET', '/api/branches');
     for (const b of (Array.isArray(branches) ? branches : (branches.branches || []))) {
       // tutorial-NN-xxxx = an isolation branch; tutorial-branch /
-      // tutorial-release / tutorial-feature are the ones lessons 19 + 20
+      // tutorial-release / tutorial-feature are the ones lessons 20 + 20
       // fork by hand.
       if (/^tutorial-(\d\d[a-z]?-|branch$|release$|feature$)/.test(b.name || '')) {
         await api(page, 'DELETE', '/api/branches/' + encodeURIComponent(b.name));
@@ -198,7 +198,7 @@ function tourTitle(page) {
 // walk of a run can share one directory; `node tour-spotlight-report.js
 // <dir>` prints it per step, `--gate` reds a step whose target was never
 // ringed. With `GRAPHDEN_TOUR_AUDIT_SHOTS=1` a screenshot is taken at every
-// change too. This is how the 2026-09-15 lesson-15 audit found the ⋯ ring
+// change too. This is how the 2026-09-15 lesson-16 audit found the ⋯ ring
 // on the wrong card — the e2e walk drives by selector and never notices
 // where the ring is; a person cannot miss it. run-edit-tests.sh sets the
 // directory for every file it runs, so the gate audits every lesson walk.
@@ -314,7 +314,7 @@ async function waitTourTitle(page, title, timeoutMs) {
   // the step's effective target to be on screen (bounded — a target that
   // never comes is exactly what the gate should then report), then one tour
   // tick so the sampler sees the ring on it. The bound is generous: under
-  // gate load a big canvas (map's, lesson 06) took over 5 s to land its
+  // gate load a big canvas (map's, lesson 07) took over 5 s to land its
   // type chips, and the walk's own selector wait then found them and
   // pressed Next inside the ring's hold window — NEVER-RINGED for a step a
   // person reads for ten seconds.
@@ -375,7 +375,7 @@ function tourProgress(page) {
 
 
 // Click a tour button and wait for the popover to ACTUALLY move on. The
-// header's step counter ("lesson 26 · step 4/9") is the observable; a
+// header's step counter ("lesson 27 · step 4/9") is the observable; a
 // finished lesson swaps the step popover for a centered dialog with no
 // counter, which counts as advancing too.
 //
@@ -410,13 +410,13 @@ async function filterAndSelect(page, filterText, fnName) {
 
 // `expectOwner` (optional) — the fn whose row the ⋯ must belong to. The
 // canvas re-renders asynchronously after a selection change, so clicking
-// the FIRST ⋯ can hit the previous card: in lesson 03 that silently
+// the FIRST ⋯ can hit the previous card: in lesson 04 that silently
 // extended tutorial-a instead of str-upper, and the step's fn-parent
 // check (correctly) never passed.
 // Open the ⋯ of the card whose text starts with `ownerName` — not "the first
 // ⋯ in the document", which is whatever the layout placed first: a parent
 // row, an execute-result host, the card that was selected BEFORE the create
-// the step just made. Lesson 23's description edit once fired against
+// the step just made. Lesson 24's description edit once fired against
 // `const`'s ⋯ that way (the canvas had not re-rendered with the new child
 // yet) — a PUT on the package-owned parent, 400, and a version that never
 // existed. The canvas may take a while to grow the card under load, hence
@@ -483,10 +483,10 @@ async function bindFirstPlaceholder(page, literalText) {
 // or did a beat ago: right after a ref is picked into a sibling slot the card
 // still shows that slot's placeholder until the re-render lands, and "click
 // the first `.placeholder-binder`" opens the fn picker again instead of the
-// chooser (lesson 06, 2026-09-14). Wait for the list slot's own anchor to be
+// chooser (lesson 07, 2126-09-14). Wait for the list slot's own anchor to be
 // the only placeholder left, then take the literal path.
 async function bindSeqAnchorPlaceholder(page, literalText) {
-  // The anchor itself, whatever else is on the card (lesson 06 binds :coll
+  // The anchor itself, whatever else is on the card (lesson 07 binds :coll
   // while :func's `+` is still there); it just has to be settled — no
   // placeholder without a node id, which is what a mid-re-render card shows.
   await page.waitForFunction(() => {
@@ -550,7 +550,7 @@ async function appendOrBindLiteralFromChooser(page, literalText) {
 }
 
 
-// --- lesson 05 (types) helpers ----------------------------------------------
+// --- lesson 06 (types) helpers ----------------------------------------------
 
 // Open the "+" binder, switch to fn-ref, expand the incompatible "Other"
 // section and click the named candidate — which opens the server-rendered
@@ -607,7 +607,7 @@ async function removeUseSiteBinding(page, ownerText) {
 }
 
 
-// --- lesson 20 (branches) helpers -------------------------------------------
+// --- lesson 21 (branches) helpers -------------------------------------------
 
 // The tour popover repositions on a tick; clicking the chip the instant a
 // step renders can land on the popover instead. Wait until the chip is the
@@ -715,7 +715,7 @@ async function runViaRowActions(page, formValue) {
 // stays selected across selections once used), without going through
 // ⋯ → ▶ Run — the path a reader takes when the form is right there. Returns
 // the parsed `/api/execute` response, so the caller can assert the run was
-// accepted under the fn's CURRENT interface (lesson 04: after a rename the
+// accepted under the fn's CURRENT interface (lesson 05: after a rename the
 // pane must ask for the new name, or the run is rejected with "Unknown
 // arg(s)" — the form was stale until 2026-09-14).
 async function runFromOpenPane(page, formValue, argName) {
@@ -743,7 +743,7 @@ async function runFromOpenPane(page, formValue, argName) {
 }
 
 
-// --- lesson 14 (tests) helpers ----------------------------------------------
+// --- lesson 15 (tests) helpers ----------------------------------------------
 // Extracted from lesson 01's inline steps: the ns / fn / set-parent flows are
 // identical, only the names differ.
 
@@ -814,7 +814,7 @@ async function setParentViaStrip(page, parentName) {
 }
 
 
-// --- lesson 13 (effects) helper ---------------------------------------------
+// --- lesson 14 (effects) helper ---------------------------------------------
 // Run a fn whose effects force the acknowledgement checkbox first.
 // `ownerName` (optional) pins the ⋯ to THAT card's own row — with a child
 // card on the canvas (a fn built from the outside in) the first ⋯ in the
@@ -926,7 +926,7 @@ async function bindFnRefPlaceholder(page, fnName) {
 }
 
 
-// --- lesson 07 (components) helpers -----------------------------------------
+// --- lesson 08 (components) helpers -----------------------------------------
 // A component's inputs arrive as propagated FREE args. Since the
 // unified-arg-edges redesign they render as ordinary placeholder EDGES
 // from the card (lighter/dashed, `+` on the placeholder node) — the
@@ -1074,7 +1074,7 @@ async function renameArgViaEdgeLabel(page, currentName, newName) {
 // The account button is an AVATAR chip in accounts mode and a LOCK icon on a
 // token deployment — same menu, different trigger. A helper (or a lesson)
 // that names only the avatar silently excludes every self-hosted instance,
-// which is exactly where lesson 22 lives.
+// which is exactly where lesson 23 lives.
 async function openAccountMenu(page) {
   await page.waitForSelector('.auth-avatar, #auth-lock-btn', {timeout: 30000});
   await page.evaluate(() => {
@@ -1118,7 +1118,7 @@ async function openOperateSection(page, section) {
 }
 
 
-// Avatar → “Settings” — the account surface lessons 32 and 16 point at.
+// Avatar → “Settings” — the account surface lessons 33 and 17 point at.
 async function openAccountSettings(page) {
   await openAccountMenu(page);
   await page.evaluate(() => {
@@ -1226,7 +1226,7 @@ async function bindNamedPlaceholder(page, argName, kind, text) {
   }, argName);
   assert(found, 'a placeholder binder next to the "' + argName + '" label');
   // `whole-list` — an EMPTY list slot's `+` offers "Bind fn-ref (whole
-  // list)": the slot takes one fn's result as the entire list (lesson 15's
+  // list)": the slot takes one fn's result as the entire list (lesson 16's
   // pipeline feeds :map's :coll with a :str-split that way).
   if (kind === 'fn-ref' || kind === 'whole-list') {
     const btnLabel = kind === 'whole-list' ? 'Bind fn-ref (whole list)' : 'Bind fn-ref';

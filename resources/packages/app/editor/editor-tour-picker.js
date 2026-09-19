@@ -71,7 +71,7 @@ const REQUIRE_SIGNALS = {
     phrase: 'the dedicated plan (or your own instance)',
     short: 'the dedicated plan',
   },
-  // Lesson 35 names the editor's OWN web-server as the service it calls. A
+  // Lesson 36 names the editor's OWN web-server as the service it calls. A
   // cloud organization has no such service of its own (the platform's row is
   // not the tenant's to resolve — the run answers an internal error), so the
   // tour needs both services and a single-tenant instance.

@@ -969,7 +969,7 @@
   ;; ids. A namespace the loader synced from disk on this instance owns
   ;; those ids: the fork would land on platform rows, the "copies" would
   ;; stay read-only behind crud.package-guard, and the next boot's sync
-  ;; would overwrite them (the written lesson 29 used to promise editable
+  ;; would overwrite them (the written lesson 30 used to promise editable
   ;; copies here). The graph guard refuses the whole fork with the owned
   ;; names — the same predicate the MCP upsert guard consults.
   (let [{:keys [ctx all-name->id]} *bootstrap*

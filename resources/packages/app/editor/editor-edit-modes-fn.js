@@ -20,7 +20,7 @@
 // editor navigates to the new fn so the user can immediately add
 // `:as` renames + value bindings to extend its interface.
 //
-// EXTEND IN PLACE (from a reader walking lesson 15). At a
+// EXTEND IN PLACE (from a reader walking lesson 16). At a
 // USE-SITE — the ⋯ of a card that sits on the canvas because a slot of
 // the fn being built binds it (`opts.useSiteArg`, the binding or list
 // item that put it there) — Extend does one more thing and one less:

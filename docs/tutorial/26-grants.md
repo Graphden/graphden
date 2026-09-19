@@ -1,0 +1,163 @@
+# Lesson 26 — Grants: who may touch what
+
+**Goal**: by the end of this lesson you can read the **Grants**
+panel, add and revoke a grant, and predict which editor
+operations a given user can perform — because you'll know the
+seven capabilities, how namespace scope works, and where the
+checks actually fire.
+
+**Concepts introduced**: the `:grant` entity, the capability
+vocabulary, capability implication, namespace-scoped
+authorization, default-deny, personal namespaces.
+
+## The model in one paragraph
+
+A grant is a row: **subject** (a member's email, stored as their stable account id) + **capability** +
+**namespace**. Authorization is default-deny: an operation is
+allowed iff some grant covers it. "Covers" is generous in two
+directions — a grant on a parent namespace covers all its
+descendants (a grant on `acme` covers `acme.billing.invoices`;
+a blank namespace is a root grant covering everything), and
+some capabilities imply others.
+
+## The seven capabilities
+
+The closed vocabulary (anything else is rejected at create time
+with a 400):
+
+| Capability | Lets the subject… |
+|---|---|
+| `read` | discover a fn + see its SIGNATURE (slots, types, return) |
+| `view-impl` | see a fn's INTERNAL COMPOSITION (parent chain + bindings) — withhold it and the fn stays executable but its impl is hidden |
+| `write` | create / move / edit fns there |
+| `execute` | run fns there |
+| `admin` | everything above, within the scope |
+| `bind-args` | edit only a binding's VALUE (not structure) |
+| `append-list` | append items to list-typed bindings |
+
+Implication: `admin` implies all of them; `write` implies
+`view-impl` (you can't edit a fn you can't see) plus the two
+narrow edit caps (`bind-args`, `append-list`). The narrow
+caps exist so you can hand someone "tune the parameters of my
+app" without handing them "restructure my app".
+
+One freebie needs no grant row at all: every user implicitly
+holds `admin` over their **personal namespace**
+(`<prefix>.<account-id>` — built from the stable id, so it survives an email change).
+
+## Where the checks fire
+
+Three enforcement layers read the same grant table:
+
+- **Write gate** — creating a fn or moving it into a namespace
+  needs `write` there; a value-only binding edit passes with
+  `bind-args`; appending a list item with `append-list`.
+- **Execute gate** — running a fn needs `execute` on its
+  namespace.
+- **Request gate** — a cheap per-request check: reads pass,
+  mutations require the subject to hold SOME write-family
+  capability, `/api/execute` requires `execute`.
+
+The editor also *reads* the grant table indirectly: the
+`X-Graphden-Capabilities` header (Lesson 25) that unlocks
+tenant-mode UI is computed from these same rows.
+
+You can read your *own* answer without opening any admin panel:
+avatar → **Settings** → **Access** lists the capabilities you hold
+in this org, under a tenancy addon — the same fact every response
+carries in that header. It is a readout, not a control: who may
+touch what is enforced by the server, and the admin panels stay on
+the Organization surface.
+
+## The panel
+
+Expand **Grants** on the **Organization** surface (open it from the
+account menu; same gating as Members: signed in + tenancy addon). The partial (`GET /partials/grants-admin`)
+renders:
+
+```text
+Subject | Capability | Namespace     |
+alice   | write      | acme.billing  |  ×
+bob     | execute    | acme          |  ×
+```
+
+Below it, the add form: a `subject` input (a member's email, or a
+**role name** — see below; with type-ahead over the org's members),
+a capability `<select>` (all seven), a `namespace` input, and
+**+ Add grant**
+(`POST /api/grants`).
+
+One subtlety worth knowing: the form takes an *email*, but
+enforcement keys on the account's stable id — the create handler
+resolves the email to that id at write time and stores only the
+id (the email is re-joined from the account row for display).
+Typo the email and you get a "dead" grant that matches no one —
+its subject cell renders the raw id — but it doesn't throw.
+
+**A team as the subject.** Type the name of one of the org's roles
+([Lesson 27](27-roles.md)) instead of an email and the grant is
+stored with subject-kind `role`: everyone who is a member of that
+role holds it, and adding someone to the role (or removing them) is
+the only thing you edit later. That is how two teams sharing one
+org keep their namespaces apart — `backend` gets `admin` on
+`svc-a`, `frontend` gets `admin` on `svc-b`, and the contract
+namespace both read stays under whichever team owns it. The row
+shows the role's name in the subject cell. Resolution order for a
+typed subject: a known member's email → a role name → a pending
+email (a dormant grant, claimed on first sign-in).
+
+One special capability rides the same rows: `require-2fa`.
+Granted to a user (or, with subject-kind `org`, to a whole org)
+it doesn't *allow* anything — it *requires* the subject to enroll
+two-factor authentication before any other request passes
+([Lesson 34](34-signing-up-and-in.md) shows enrollment).
+
+Revoke is the row's `×` (confirm: *"Delete this grant?"*) —
+this one goes through the generic entity endpoint
+(`DELETE /api/entities/grant/:id`), and the row just drops out
+of the table.
+
+## Who may manage grants
+
+Grants are **org-scoped RBAC**, administered from WITHIN the org —
+not by the platform operator. The **Grants** panel mounts, and its
+create / revoke endpoints authorize, only for a user who may hand
+out grants in their own org: the org **owner**, or a holder of the
+`manage-grants` org-management capability. Every other member sees
+no panel. (The operator, on the public platform org, holds no
+`manage-grants` and does not administer a tenant's grants.) Tenants
+are both the *subjects* AND the *administrators* of grants within
+their org.
+
+Handing several members the same org-management capability as one
+row is a **role** — the next lesson, [Lesson 27](27-roles.md).
+
+## Try it
+
+(An org owner — or a `manage-grants` holder — on a tenancy-addon
+instance.)
+
+1. Add `carol` to your org `acme` (Lesson 25).
+2. In **Grants**, grant `carol` / `bind-args` / `acme.settings`. As
+   carol: editing a binding VALUE under `acme.settings` works;
+   renaming the fn or changing its parent is denied — that needs
+   `write`.
+3. Replace it with `write` on `acme` — now structural edits pass
+   anywhere under `acme`, including `acme.settings` (parent-path
+   coverage).
+4. Remove carol (Lesson 25) and watch her grant rows vanish with
+   her — the cascade from the other side.
+
+## What we glossed over
+
+- **How `can?` composes implication + scope** — the pure
+  decision function and its default-deny shape
+  (`graphden.tenancy.grant`, in the private `graphden-tenancy` repo).
+- **The two-layer tenant effect gate** — grants say *who may*,
+  the effect gate says *what kinds of side effects* cloud code
+  may perform at all
+  ([docs/TENANCY_SEAM.md § Effect gate](../TENANCY_SEAM.md#effect-gate)).
+
+## Next
+
+[lesson 27 — Roles](27-roles.md): capabilities as a bundle.

@@ -209,7 +209,7 @@
 
  ;; ---------------------------------------------------------- fns packages
  ;; Small, self-contained compositions over `core` / `web` — installed by
- ;; reference like any package (Lesson 29); the point is a non-empty
+ ;; reference like any package (Lesson 30); the point is a non-empty
  ;; Packages tab that shows what a listing looks like and installs cleanly.
  {:kind "fns"
   :name "starter.text"

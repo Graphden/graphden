@@ -217,7 +217,7 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/PLANS.md](docs/PLANS.md) | Cloud tiers/quotas reference — what each plan grants | When touching tier ceilings, quota, or the demo flow |
 | [docs/FAQ.md](docs/FAQ.md) | Honest positioning Q&A about the project | When writing outward-facing copy about graphden |
 | [docs/README.md](docs/README.md) | The reader-facing doc index (composes with this map) | When adding/renaming a doc — keep both indexes current |
-| [docs/TUTORIAL_API_POLL.md](docs/TUTORIAL_API_POLL.md) | End-to-end worked example: scheduled API poller built from fn-defs | After tutorial lessons 01–10, or as a template for a real integration |
+| [docs/TUTORIAL_API_POLL.md](docs/TUTORIAL_API_POLL.md) | End-to-end worked example: scheduled API poller built from fn-defs | After tutorial lessons 01–11, or as a template for a real integration |
 | [docs/RUNTIME_SLOT_ID_REFACTOR.md](docs/RUNTIME_SLOT_ID_REFACTOR.md) | The name→slot-id key-space refactor ledger — which runtime spaces are id-keyed vs name-keyed and why the remainder stays hybrid | Before re-keying any runtime map keyed by arg NAME |
 | [docs/adr/ADR-free-arg-slot-map-perf.md](docs/adr/ADR-free-arg-slot-map-perf.md) | Why `free-arg-slot-map` is cached the way it is (VERIFIED) | Before touching free-arg caching |
 | [docs/adr/ADR-inherited-rename-surface.md](docs/adr/ADR-inherited-rename-surface.md) | The inherited-rename SURFACE contract — public names are the closest-chain rename, applied at the boundary; the walker/HOF internals stay per-fid | Before touching free-arg NAMING (`surface-entries`, `rename-for-slot`, `public-free-entries`) or proposing rename semantics changes |
@@ -423,7 +423,7 @@ and whether the step popover covers its target. Add
 ```bash
 cd tools/browser-test
 GRAPHDEN_TOUR_AUDIT=/tmp/audit GRAPHDEN_URL=http://localhost:9100 \
-  node edit-tutorial-tour-ux.test.js          # lessons 12 / 17 / 18 / 09 / 15
+  node edit-tutorial-tour-ux.test.js          # lessons 13 / 18 / 19 / 10 / 16
 node tour-spotlight-report.js /tmp/audit 15   # one lesson, flags: AMBIGUOUS×N,
                                               # NO-ELEMENT, POPOVER-COVERS-TARGET
 ```

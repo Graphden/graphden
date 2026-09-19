@@ -270,7 +270,7 @@ async function submitExecution(fnEntity, args, persist, trace, captureValues,
   resultHostEl.appendChild(renderSubmitSpinner('Submitting…'));
   // The marker below describes THIS run: a lesson-09 persisted run
   // earlier in the same page-load must not vouch for an unticked one
-  // now (lesson 16 gates its "Break it on purpose" step on it).
+  // now (lesson 17 gates its "Break it on purpose" step on it).
   delete document.body.dataset.gdPersistedRun;
   try {
     const r = await authFetch(API.api_execute, {

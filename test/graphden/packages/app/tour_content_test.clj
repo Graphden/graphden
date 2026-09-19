@@ -120,7 +120,7 @@
 
 
 (deftest one-ring-per-action-and-every-typed-name-is-a-chip
-  ;; From a reader walking lesson 15: a step that passed
+  ;; From a reader walking lesson 16: a step that passed
   ;; through the Explorer filter, the row AND the row's ⋯ menu left the ring
   ;; on the filter — the spotlight has one place to be. The header of
   ;; fns.edn spells the conventions out; this pins them so the next compound
@@ -180,7 +180,7 @@
 (deftest chapters-are-contiguous-in-reading-order
   ;; The picker emits a heading whenever the chapter CHANGES, so a lesson
   ;; filed under an earlier chapter but placed later prints that heading a
-  ;; second time. That shipped once (lesson 21 sat after “Your organization”
+  ;; second time. That shipped once (lesson 22 sat after “Your organization”
   ;; carrying “The editor”).
   (let [order (map :chapter (lessons))
         runs (map first (partition-by identity order))]

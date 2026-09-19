@@ -287,7 +287,7 @@
 
 
 (deftest ^:perf merge-fork-sql-cost
-  ;; Merging a branch forked off `main` back into it — lesson 20's flow and
+  ;; Merging a branch forked off `main` back into it — lesson 21's flow and
   ;; every review's last click. Previously the merge ran a full
   ;; resolved-view diff of both branches (`untransferable-inherited-entities`)
   ;; and scanned every version row on main for conflicts: 1.6 s on this

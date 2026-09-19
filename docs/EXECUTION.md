@@ -682,8 +682,8 @@ records. Tracing continues the tree across the wire:
    under the handler's own name (`message`).
 
 Rows of a whole trace: `GET /api/entities/fn-execution?trace-id=…` (or
-query the column). Tutorial: [lesson 35](tutorial/35-services-talking-to-services.md)
-and [lesson 36](tutorial/36-queues.md).
+query the column). Tutorial: [lesson 36](tutorial/36-services-talking-to-services.md)
+and [lesson 37](tutorial/37-queues.md).
 
 ## Tests
 

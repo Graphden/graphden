@@ -1,4 +1,4 @@
-// Lessons 01, 02, 04 — the basic loop, inheritance, free args
+// Lessons 01, 02, 03, 05 — the basic loop, reading a card, inheritance, free args
 //
 // Part of the interactive-tutorial drift guard: walks every step of its
 // lessons by doing the real UI actions, so a renamed class or a changed
@@ -19,12 +19,12 @@ const {
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions, runFromOpenPane,
   appendSeqItemViaEdge,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
-  runWithEffectAck, finishAndDelete, tourTitle,
+  runWithEffectAck, finishAndDelete, tourTitle, waitTourClosed,
 } = require('./tutorial-tour-helpers');
 
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
-  // Lesson 05's "remove this binding" step fires a native confirm(); with no
+  // Lesson 06's "remove this binding" step fires a native confirm(); with no
   // handler Playwright auto-dismisses it and the step would never complete.
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
   console.log('edit-tutorial-tour — lesson 01 walked end-to-end');
@@ -138,10 +138,83 @@ const {
     assert(!(tree.namespaces || []).some((n) => n.name === NS_NAME),
       'tutorial namespace deleted by the tour cleanup');
 
-    // ---------- Lesson 02 — parents & inheritance (extend flow) ----------
+    // ---------- Lesson 02 — reading a card (look-only, platform fn) ----------
+    // The lesson unfolds / folds ancestor rows on app.routes' health and its
+    // handler card, and reads three descriptions. Nothing is created, so it
+    // ends on the small "finished" card. The walk asserts what the reader
+    // is told to see — the method edge appearing and folding away — not
+    // merely that each step advanced.
     await page.goto(BASE + '/?tutorial=02');
-    await waitTourTitle(page, 'Inheritance, hands on', 150000);
+    await waitTourTitle(page, 'Reading a card', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 02 Next');
+    await waitTourTitle(page, 'Open a real route');
+    await filterAndSelect(page, 'health', 'health');
+    await waitTourTitle(page, 'What the fn is for', 150000);
+    const inspDesc = await page.evaluate(() =>
+      document.querySelector('.gd-insp-head .gd-insp-desc')?.textContent.trim() || '');
+    assert(/^GET \/health/.test(inspDesc),
+      'the Inspector head shows health\'s description (got: ' + inspDesc + ')');
+    assert(await clickTourButton(page, 'Next'), 'lesson 02 inspector Next');
+    await waitTourTitle(page, 'What the canvas drew');
+    const drawn = await page.evaluate(() => ({
+      rows: Array.from(document.querySelectorAll(
+        '.node-overlay[data-fn-name="health"] .ancestor-line[data-level]'))
+        .map((l) => l.textContent.replace(/⋯/g, '').trim()),
+      handlerCard: !!document.querySelector('.node-overlay[data-fn-name="_health-handler"]'),
+      edges: Array.from(document.querySelectorAll('.edge-label-overlay'))
+        .map((e) => e.dataset.argName),
+    }));
+    assert(drawn.rows.join(',') === 'health,get-route,route,list',
+      'the health card shows its four ancestry rows (got: ' + drawn.rows.join(',') + ')');
+    assert(drawn.handlerCard, 'the handler ref is drawn as a (closed) card');
+    assert(drawn.edges.includes('path') && drawn.edges.includes('handler')
+      && !drawn.edges.includes('method'),
+      'only what health binds itself is drawn — no method edge yet (got: '
+      + drawn.edges.join(',') + ')');
+    assert(await clickTourButton(page, 'Next'), 'lesson 02 canvas Next');
+    await waitTourTitle(page, 'Unfold one row');
+    await page.click('.node-overlay[data-fn-name="health"] .ancestor-line[data-level="1"]');
+    await page.mouse.move(5, 5);
+    await waitTourTitle(page, 'What a slot means', 150000);
+    await page.waitForSelector('.edge-label-overlay[data-arg-name="method"] .description-badge',
+      {timeout: 30000});
+    const methodValue = await page.evaluate(() => Array.from(
+      document.querySelectorAll('.node-overlay .arg-value-text'))
+      .map((v) => v.textContent.trim()));
+    assert(methodValue.some((v) => v === '"get"'),
+      'unfolding get-route drew the inherited method value (got: '
+      + methodValue.join(' | ') + ')');
+    await page.hover('.edge-label-overlay[data-arg-name="method"] .description-badge');
+    await waitTourTitle(page, 'Fold it back', 150000);
+    const slotDesc = await page.evaluate(() =>
+      document.querySelector('.description-tooltip')?.textContent || '');
+    assert(/HTTP method literal/.test(slotDesc),
+      'the slot\'s description is what the tooltip shows (got: ' + slotDesc.slice(0, 60) + ')');
+    await page.click('.node-overlay[data-fn-name="health"] .ancestor-line[data-level="0"]');
+    await page.mouse.move(5, 5);
+    await waitTourTitle(page, 'Open a closed card', 150000);
+    await page.waitForFunction(() => !document.querySelector(
+      '.edge-label-overlay[data-arg-name="method"]'), null, {timeout: 30000, polling: 100});
+    await page.click('.node-overlay[data-fn-name="_health-handler"] .ancestor-line[data-level="1"]');
+    await page.mouse.move(5, 5);
+    await waitTourTitle(page, 'A namespace has one too', 150000);
+    await page.waitForSelector('.node-overlay[data-fn-name="_health-json-body"]', {timeout: 30000});
+    await page.hover('.ns-header[data-ns-path="app.routes"]');
+    await page.hover('.ns-header[data-ns-path="app.routes"] .description-badge');
+    const nsDesc = await page.evaluate(() =>
+      document.querySelector('.description-tooltip')?.textContent || '');
+    assert(/Application routes/.test(nsDesc),
+      'the namespace\'s description shows on its i (got: ' + nsDesc.slice(0, 60) + ')');
+    assert(await clickTourButton(page, 'Next'), 'lesson 02 namespace Next');
+    await waitTourTitle(page, 'You can read any card now', 150000);
+    assert(await clickTourButton(page, 'Finish'), 'lesson 02 Finish');
+    await waitTourClosed(page, 30000);
+    console.log('  lesson 02: walked (nothing created)');
+
+    // ---------- Lesson 03 — parents & inheritance (extend flow) ----------
+    await page.goto(BASE + '/?tutorial=03');
+    await waitTourTitle(page, 'Inheritance, hands on', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 03 Next');
     await waitTourTitle(page, 'Find :add');
     await filterAndSelect(page, 'add', 'add');
     await waitTourTitle(page, 'Extend it');
@@ -155,7 +228,7 @@ const {
     await waitTourTitle(page, 'Run the child', 150000);
     await runViaRowActions(page);
     await waitTourTitle(page, 'Ten', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 02 look-step Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 03 look-step Next');
     await waitTourTitle(page, 'Now wrap it', 150000);
     // Wrap: ⋯ on the add-10 card → ⬆ Wrap → pick :to-str as the parent.
     await page.waitForFunction(() => {
@@ -209,18 +282,18 @@ const {
     assert(wrapped && wrapped.parents === 1,
       'wrapper created and loaded (' + JSON.stringify(wrapped) + ')');
     await finishAndDelete(page);
-    console.log('  lesson 02: walked + cleaned (extend + wrap)');
+    console.log('  lesson 03: walked + cleaned (extend + wrap)');
 
-    // ---------- Lesson 04 — free arguments ----------
-    await page.goto(BASE + '/?tutorial=04');
+    // ---------- Lesson 05 — free arguments ----------
+    await page.goto(BASE + '/?tutorial=05');
     await waitTourTitle(page, 'Free args: the template mechanism', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 04 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 05 Next');
     await waitTourTitle(page, 'Find to-json-string');
     await filterAndSelect(page, 'to-json', 'to-json-string');
     await waitTourTitle(page, 'A free arg becomes a Run field');
     await runViaRowActions(page, '{"a": 1}');
     await waitTourTitle(page, 'A string came back', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 04 look-step Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 05 look-step Next');
     await waitTourTitle(page, 'Pin it in a child', 150000);
     await extendViaRowActions(page, 'tutorial-json', 'to-json-string');
     // Selection gate again — "Bind :data in the child" only appears once
@@ -228,7 +301,7 @@ const {
     await waitTourTitle(page, 'Bind :data in the child', 150000);
     await bindFirstPlaceholder(page, '{"greeting": "hello"}');
     await waitTourTitle(page, 'Bound beats free', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 04 step-5 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 05 step-5 Next');
     // --- the rename arc ---
     await waitTourTitle(page, 'A free arg can also be RENAMED', 150000);
     await filterAndSelect(page, 'to-json', 'to-json-string');
@@ -249,7 +322,7 @@ const {
     assert(renamedRun.status === 'succeeded' && /"a":\s*1/.test(String(renamedRun.result)),
            'run from the already-open pane uses the renamed arg: ' + JSON.stringify(renamedRun).slice(0, 160));
     await runViaRowActions(page, '{"a": 1}');
-    assert(await clickTourButton(page, 'Next'), 'lesson 04 rename-run Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 05 rename-run Next');
     await waitTourTitle(page, 'Templates, specialized', 150000);
     // The rename must be a VIEW over the same slot, so the value has to
     // arrive under the NEW name — a binding written on the view slot
@@ -265,7 +338,7 @@ const {
       'the value arrives under the new name (got: '
       + JSON.stringify(renamedRan.result) + ')');
     await finishAndDelete(page);
-    console.log('  lesson 04: walked + cleaned');
+    console.log('  lesson 05: walked + cleaned');
 
     console.log('PASS');
   } catch (err) {

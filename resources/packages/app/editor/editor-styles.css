@@ -7550,7 +7550,7 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
 /* While the sheet is up, the panels a lesson points at get its height as
    bottom padding — otherwise a row under the sheet cannot be scrolled clear
    of it: the Explorer is exactly viewport-tall, so there is nothing below to
-   scroll to (lesson 05's "New namespace" button, at the bottom of the list,
+   scroll to (lesson 06's "New namespace" button, at the bottom of the list,
    was simply unreachable). */
 body.gd-tour-sheet-open #side-menu {
   padding-bottom: var(--gd-tour-sheet-h, 0);

@@ -194,7 +194,7 @@ armed. No known type-system bugs in production.
 
 ## 2026-09-13 — two API-layer defects, closed (not architecture)
 
-Found while making tutorial lesson 06 wire a callback of the reader's
+Found while making tutorial lesson 07 wire a callback of the reader's
 own into `map`: the picker's Compatible list for `map`'s `:func`
 (`[:fn {:item a} b]`) held nothing but never-returning fns, and an
 edge-label rename of an arg to `item` never made a fn eligible. Both

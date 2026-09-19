@@ -10,7 +10,12 @@
 //     card is drawn with its own `+`s, pinned by owner (`data-fn-name`);
 //   • a LIST-ITEM use-site: the item's ref moves to the child;
 //   • one Undo reverts both writes — the slot points at the base fn again
-//     and the child is gone.
+//     and the child is gone;
+//   • a TENANT (issue #30): with the ownership predicate answering "package
+//     fns are not mine" — what a cloud org sees — the use-site ⋯ on the
+//     package fn STILL offers Extend / Change value / Remove binding: the
+//     binding belongs to the owner fn, not to the card. A single-tenant
+//     stack answers "everything is mine", so this branch is stubbed here.
 //
 // Run from this directory:  node edit-extend-in-place.test.js
 // Exit code 0 = PASS, 1 = FAIL.
@@ -57,6 +62,40 @@ const LIST_CHILD = 'eip-button';
     // The base fn's card is on the canvas (one hop), with the owner's ⋯ context.
     await page.waitForSelector('.node-overlay[data-fn-name="map"] .ancestor-line[data-level="0"] button.more-actions-trigger',
       {timeout: 60000});
+
+    // ---- TENANT-shaped ownership (issue #30). Package fns are not the
+    // org's; the user's own fn is. The ⋯ on the PACKAGE fn's use-site card
+    // must still offer the three binding edits — they act on OWNER's slot.
+    const tenantMenu = await page.evaluate(async () => {
+      const orig = window.graphdenIsFnOwned;
+      window.graphdenIsFnOwned = (fn) => !!fn && !(typeof isPackageOwnedFn === 'function' && isPackageOwnedFn(fn.id));
+      try {
+        if (typeof invalidateRowActionsCache === 'function') invalidateRowActionsCache();
+        const trigger = document.querySelector('.node-overlay[data-fn-name="map"] .ancestor-line[data-level="0"] button.more-actions-trigger');
+        trigger.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+        for (let i = 0; i < 60; i++) {
+          await new Promise((r) => setTimeout(r, 100));
+          const pop = document.querySelector('.row-actions-popover');
+          if (pop && pop.querySelector('[data-action]')) {
+            const actions = [...pop.querySelectorAll('[data-action]')].map((b) => b.dataset.action);
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+            return actions;
+          }
+        }
+        return null;
+      } finally {
+        window.graphdenIsFnOwned = orig;
+        if (typeof invalidateRowActionsCache === 'function') invalidateRowActionsCache();
+      }
+    });
+    assert(Array.isArray(tenantMenu), 'the use-site ⋯ opened under a tenant-shaped ownership');
+    for (const a of ['extend-fn', 'change-use-site-value', 'remove-use-site-binding']) {
+      assert(tenantMenu.includes(a), 'tenant: the package fn\'s use-site ⋯ offers ' + a + ' (got: ' + tenantMenu.join(',') + ')');
+    }
+    console.log('  tenant: binding edits offered on a package fn\'s use-site (issue #30)');
+    await page.waitForFunction(() => !document.querySelector('.row-actions-popover') || document.querySelector('.row-actions-popover').style.display === 'none',
+      null, {timeout: 5000}).catch(() => {});
+
     const hashBefore = await page.evaluate(() => location.hash);
     await extendInPlace(page, 'map', CHILD);
     assert(await page.evaluate(() => location.hash) === hashBefore, 'still on the owner canvas');

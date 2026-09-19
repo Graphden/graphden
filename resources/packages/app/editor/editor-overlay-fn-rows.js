@@ -428,13 +428,20 @@ function renderSingleFnRow(line, levelInfo, ctx) {
     // check inside `deleteUseSiteBinding` as a defence in depth.
     if (useSiteArg) {
       if (typeof loadRowActionsContent !== 'function') return;
+      // Ownership (tenancy): × Remove-binding / ✎ Change-value / + Extend-
+      // in-place mutate the BINDING, and the binding belongs to the fn that
+      // holds the slot (`useSiteArg['fn-id']`) — never to the card. Gating on
+      // the card (the fn IN the slot) hid all three on every package fn a
+      // tenant had bound into their own fn (issue #30: `str-split` in
+      // `tutorial-shout`'s `coll` — lesson 15 unfinishable on the cloud),
+      // while single-tenant, where every fn is "owned", never noticed. The
+      // same predicate the edge chip's click-to-edit uses. Unknown owner →
+      // fail-open (the server enforces too).
+      const ownerFn = lookups?.fnMap?.get(useSiteArg['fn-id']) || null;
       return loadRowActionsContent(host, lineFn.fnId, 'use-site-arg', {
         showOpen: !!lineShowOpen,
-        // Ownership (tenancy): × Remove-binding / ✎ Change-value mutate the
-        // card's fn, so gate on owning the card. Read-only on a public/other-org
-        // fn (server enforces too). Unknown card → fail-open.
         editable: (typeof graphdenIsFnOwned !== 'function')
-                  || !cardFnEntity || graphdenIsFnOwned(cardFnEntity),
+                  || !ownerFn || graphdenIsFnOwned(ownerFn),
         useSiteArg: useSiteArg
       });
     }

@@ -42,6 +42,10 @@ exclude = [
   # on README's @graphdendev link, 2026-09-03). A social profile's uptime is
   # not a property of this repository either.
   '^https?://(x|twitter)\.com/',
+  # Open Collective answers 403 to GitHub's Actions egress (bot-blocked,
+  # like x.com); the page is live from anywhere else. Reddened main on
+  # 2026-09-19 with no change to the link.
+  '^https?://opencollective\.com/',
 
   # Localhost references in docs — not real URLs to validate.
   '^https?://localhost(:\d+)?($|/)',

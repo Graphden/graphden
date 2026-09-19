@@ -153,6 +153,40 @@ const VIEW_B = 'e2e-app-on-const-handlers';
     assert(!blanked, 'the member list re-evaluated after the write without blanking (' + n0 + ' → ' + (n0 + 1) + ')');
     await deleteFnByName(page, 'e2e-uses-const-probe').catch(() => {});
 
+    // A saved view naming a fn that was deleted since: the chip stays (it
+    // is what the reader saved) but is MARKED, and the set is empty with a
+    // reason — not a silent nothing. Point a personal view's `uses` at the
+    // probe fn's id (gone now), apply it.
+    const probeIdGone = await page.evaluate(async () => {
+      const r = await authFetch(API.api_graph_entities + '?scope=search&q=e2e-uses-const-probe');
+      return (await r.json()).fns.some((f) => f.name === 'e2e-uses-const-probe');
+    });
+    assert(!probeIdGone, 'the probe fn is gone');
+    await page.evaluate(() => gdClearFilters());
+    await page.evaluate((id) => gdApplyView({name: 'e2e-dangling', filters: {uses: [{id, name: 'e2e-uses-const-probe'}]}}), '00000000-0000-4000-8000-000000000001');
+    await page.waitForFunction(() => Array.isArray(gdViewMembers()), null, {timeout: 30000, polling: 200});
+    const dangling = await page.evaluate(() => {
+      const chip = document.querySelector('#gd-filter-chips .gd-filter-chip');
+      return { cls: chip?.className, label: chip?.getAttribute('aria-label'), members: gdViewMembers().length,
+               missing: gdViewMissing() };
+    });
+    assert(dangling.members === 0, 'a dangling uses chip yields an empty set');
+    assert(/gd-filter-chip-missing/.test(dangling.cls || '') && /no longer exists/.test(dangling.label || ''),
+      'the chip is marked and says why: ' + dangling.label);
+    assert(dangling.missing.uses.length === 1, 'the server named the missing id');
+
+    // The cap, said in the tree: "uses const" alone is over 500 on this graph.
+    await page.evaluate(() => gdClearFilters());
+    await page.evaluate((id) => gdAddUses({id, name: 'const'}), constId);
+    await page.waitForFunction(() => Array.isArray(gdViewMembers()) && gdViewMembers().length > 0,
+      null, {timeout: 30000, polling: 200});
+    const capped = await page.evaluate(() => ({
+      total: gdViewTotal(), shown: gdViewMembers().length,
+      note: [...document.querySelectorAll('#entity-list .loading')].map((e) => e.textContent).find((t) => /matching fns/.test(t)) || '',
+    }));
+    assert(capped.shown === 500 && capped.total > 500, 'the server capped at 500 of ' + capped.total);
+    assert(new RegExp('Showing 500 of ' + capped.total).test(capped.note), 'the tree says how many were cut: ' + capped.note);
+
     await page.evaluate(() => gdClearFilters());
     console.log('explorer-views-graph — PASS');
   } catch (err) {

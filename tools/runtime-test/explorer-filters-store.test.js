@@ -67,10 +67,15 @@ function filtersCtx(seed) {
     graphData: { namespaces: [] },
     API: { api_graph_entities: '/api/graph/entities', api_views_members: '/api/views/members', api_views: '/api/views' },
     authFetch: (url, opts) => {
-      fetches.push({ url, body: opts?.body ? JSON.parse(opts.body) : null });
+      const body = opts?.body ? JSON.parse(opts.body) : null;
+      fetches.push({ url, body });
+      // A `uses` id starting with "gone" is one the graph no longer holds.
+      const goneUses = (body?.uses || []).filter((id) => /^gone/.test(id));
       return Promise.resolve({
         ok: true,
-        json: () => Promise.resolve(url === '/api/views' ? [] : { fns: [{ id: 'x', name: 'member' }], 'truncated?': false }),
+        json: () => Promise.resolve(url === '/api/views' ? []
+          : Object.assign({ fns: goneUses.length ? [] : [{ id: 'x', name: 'member' }], total: goneUses.length ? 0 : 1, 'truncated?': false },
+                          goneUses.length ? { missing: { uses: goneUses } } : {})),
       });
     },
   });
@@ -170,6 +175,18 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
     assert(call && call.body.name === 'handler' && call.body.views.join() === 'v1', 'posted name + view ids: ' + JSON.stringify(call?.body));
     assert(call && !call.body.kinds.includes('apps'), 'apps stays a client overlay — never sent to the server');
     assert(ctx.gdFilterCount() === 3, 'counted: ' + ctx.gdFilterCount());
+  });
+
+  await test('a chip naming a deleted fn is marked ⚠ and its accessible name says so', async () => {
+    const { ctx, chips } = filtersCtx();
+    ctx.gdAddUses({ id: 'gone-1', name: 'old-fn' });
+    await tick(); await tick();
+    const chip = chips.children[0];
+    assert(String(chip.className).includes('gd-filter-chip-missing'), 'the chip carries the missing class: ' + chip.className);
+    assert(/no longer exists/.test(chip.getAttribute('aria-label') || ''), 'the accessible name says it: ' + chip.getAttribute('aria-label'));
+    assert(ctx.gdViewMembers().length === 0, 'the set is empty');
+    ctx.gdRemoveUses('gone-1');
+    assert(chips.children.length === 0, 'removing the chip clears it');
   });
 
   console.log(failures === 0 ? 'PASS: ' + passes + ' assertions' : 'FAIL: ' + failures + ' of ' + (passes + failures));

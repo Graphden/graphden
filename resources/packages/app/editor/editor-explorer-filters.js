@@ -57,6 +57,8 @@ function gdEmptyFilters() {
 let _filters = gdEmptyFilters();
 let _viewName = null;           // the saved view the active set came from, if any
 let _viewMembers = null;        // [{id,name,…}] | null while loading | undefined when no server axis
+let _viewTotal = null;          // the server's count before the 500 cap (null = not truncated)
+let _viewMissing = null;        // {uses:[ids], views:[ids]} — chips naming a deleted fn / view
 let _viewSeq = 0;
 let _sharedViews = null;        // GET /api/views cache: [{id,name,filters}] | null
 
@@ -188,6 +190,8 @@ function gdServerAxesActive(f = _filters) {
   return f.uses.length > 0 || f.effects.length > 0 || !!f.unused || !!f.name || f.views.length > 0;
 }
 function gdViewMembers() { return _viewMembers; }
+function gdViewTotal() { return _viewTotal; }
+function gdViewMissing() { return _viewMissing || { uses: [], views: [] }; }
 
 // Namespace predicates the tree's structural skips read (editor-sidebar.js
 // and editor-sidebar-rows.js) — a root+descendant match, `/`-tolerant.
@@ -231,6 +235,8 @@ function _afterChange(announce, kindsOnly) {
   if (gdServerAxesActive()) _fetchViewMembers();
   else {
     _viewMembers = undefined;
+    _viewTotal = null;
+    _viewMissing = null;
     if (kindsOnly && typeof applyKindFilters === 'function') applyKindFilters();
     else if (typeof graphData !== 'undefined' && graphData && typeof updateEntityList === 'function') {
       updateEntityList(graphData);
@@ -401,12 +407,22 @@ function _fetchViewMembers(quiet) {
     .then((d) => {
       if (seq !== _viewSeq) return;
       _viewMembers = d?.fns || [];
+      _viewTotal = d?.['truncated?'] ? (d.total || null) : null;
+      _viewMissing = d?.missing || null;
       if (typeof mergeKnownFns === 'function') mergeKnownFns(_viewMembers);
-      if (d?.['truncated?'] && typeof gdToast === 'function') {
-        gdToast('More than 500 fns match — add a filter to narrow it');
+      // A chip naming a fn / view the graph no longer holds: the set is
+      // empty and the reason is invisible unless said. The chip itself is
+      // marked (gdRenderFilterChips reads gdViewMissing).
+      const gone = _viewMissing ? (_viewMissing.uses || []).length + (_viewMissing.views || []).length : 0;
+      if (gone && typeof gdToast === 'function') {
+        gdToast(gone === 1 ? 'A filter names something that no longer exists — see the ⚠ chip'
+          : gone + ' filters name things that no longer exist — see the ⚠ chips');
       }
+      if (typeof gdRenderFilterChips === 'function') gdRenderFilterChips();
       if (!quiet && typeof window.gdAnnounce === 'function') {
-        window.gdAnnounce(_viewMembers.length + ' functions match');
+        window.gdAnnounce(_viewTotal
+          ? _viewMembers.length + ' of ' + _viewTotal + ' matching functions shown'
+          : _viewMembers.length + ' functions match');
       }
       if (typeof updateEntityList === 'function') updateEntityList(graphData);
     })
@@ -479,6 +495,8 @@ window.gdFiltersActive = gdFiltersActive;
 window.gdFilterCount = gdFilterCount;
 window.gdServerAxesActive = gdServerAxesActive;
 window.gdViewMembers = gdViewMembers;
+window.gdViewTotal = gdViewTotal;
+window.gdViewMissing = gdViewMissing;
 window.gdNsIncluded = gdNsIncluded;
 window.gdNsExcluded = gdNsExcluded;
 window.gdNsFiltersActive = gdNsFiltersActive;

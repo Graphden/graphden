@@ -733,15 +733,29 @@
                         (filterv (fn [f]
                                    (and (shown? f)
                                         (every? #(% f) preds))))))
-         limited (into [] (take view-result-cap) matches)]
-     {:fns (mapv (partial light-fn-row @rev-index) limited)
-      :truncated? (> (count matches) view-result-cap)})))
+         limited (into [] (take view-result-cap) matches)
+         ;; Ids the caller named that the graph does not hold (a fn or a
+         ;; view deleted since the set was saved) — the editor marks the
+         ;; chip; an unknown id otherwise just reads as an empty axis.
+         known-fn? (into #{} (map :id) @(:roled-fns env))
+         known-view? (into #{} (map :id) (explorer-views-decoded env))
+         missing (cond-> {}
+                   (seq (remove known-fn? (:uses filters)))
+                   (assoc :uses (vec (remove known-fn? (:uses filters))))
+                   (seq (remove known-view? (:views filters)))
+                   (assoc :views (vec (remove known-view? (:views filters)))))]
+     (cond-> {:fns (mapv (partial light-fn-row @rev-index) limited)
+              :total (count matches)
+              :truncated? (> (count matches) view-result-cap)}
+       (seq missing) (assoc :missing missing)))))
 
 
 (defn view-members
   "The Explorer's structured filter evaluation — `filters` is a map
    `{:name :uses :effects :kinds :namespaces :exclude :unused :views}`
-   (every key optional; see `normalise-filters`), the answer `{:fns :truncated?}`
+   (every key optional; see `normalise-filters`), the answer `{:fns :total
+   :truncated?}` (+ `:missing {:uses [ids] :views [ids]}` for ids the graph
+   no longer holds)
    in the `:search` light-row shape. One projection behind BOTH
    `POST /api/views/members` (an ad-hoc chip set) and the
    `:explorer-view` base-fn (a view saved IN the graph as a fn-def)."

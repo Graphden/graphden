@@ -558,7 +558,9 @@
             (is (empty? (members {:uses [a1 b1]}))
                 "nothing uses both a1 and b1"))
           (testing ":name is a case-insensitive substring of the qualified name"
-            (is (= #{a1 b1} (members {:name "WIDGET"}))))
+            (is (= #{a1 b1} (members {:name "WIDGET"})))
+            (is (= 2 (:total (entities/view-members c {:name "WIDGET"})))
+                ":total counts every match, before the cap"))
           (testing "an empty / unknown-id filter set is an empty view, not everything"
             (is (empty? (members {})))
             (is (empty? (members {:name "  "})))
@@ -649,7 +651,15 @@
                      (members {:views [(:id also-view) (:id also-view)]}))
                   "a view on the path twice is one view (cycle guard)")
               (is (empty? (members {:views [(java.util.UUID/randomUUID)]}))
-                  "an unknown view id is an empty axis, not everything")))
+                  "an unknown view id is an empty axis, not everything")
+              (testing "…and is REPORTED: the ids the graph no longer holds, so the chip can say so"
+                (let [gone-fn (java.util.UUID/randomUUID)
+                      gone-view (java.util.UUID/randomUUID)
+                      r (entities/view-members c {:uses [target gone-fn] :views [(:id parent-view) gone-view]})]
+                  (is (= {:uses [gone-fn] :views [gone-view]} (:missing r)))
+                  (is (zero? (:total r)))
+                  (is (nil? (:missing (entities/view-members c {:uses [target]})))
+                      "nothing missing → no key")))))
           (is (= {:namespaces ["alpha"]} (:filters (by-name "alpha-only"))))
           (is (= {:namespaces ["alpha" "beta"] :uses [target] :unused true}
                  (:filters (by-name "alpha-on-target")))

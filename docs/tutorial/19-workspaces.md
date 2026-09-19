@@ -74,7 +74,10 @@ ADD A FILTER
   leaves are public API and "unused in this graph" by design.
 
 Each becomes a chip with an **×**; the × is the way back. **◍ all**
-clears every filter at once.
+clears every filter at once. Two honest edges: a server-evaluated set
+stops at 500 fns and the tree says *Showing 500 of N — add a filter
+to narrow*; a chip that names a fn or view deleted since you saved it
+turns **⚠** and matches nothing — its × is the fix.
 
 ## The personal hide — ⊘
 

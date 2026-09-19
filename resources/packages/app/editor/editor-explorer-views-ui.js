@@ -21,16 +21,16 @@
 // toggles in #kind-filters; this renders the DYNAMIC ones after them).
 // ---------------------------------------------------------------------------
 
-function _chip(label, title, onRemove, cls) {
+function _chip(label, title, onRemove, cls, missing) {
   const b = document.createElement('button');
   b.type = 'button';
-  b.className = 'kind-toggle gd-filter-chip' + (cls ? ' ' + cls : '');
+  b.className = 'kind-toggle gd-filter-chip' + (cls ? ' ' + cls : '') + (missing ? ' gd-filter-chip-missing' : '');
   b.setAttribute('aria-pressed', 'true');
-  b.title = title + ' — click to remove';
-  b.setAttribute('aria-label', 'Remove filter: ' + title);
+  b.title = (missing ? 'No longer exists — this filter matches nothing. ' : '') + title + ' — click to remove';
+  b.setAttribute('aria-label', 'Remove filter: ' + title + (missing ? ' (no longer exists)' : ''));
   const l = document.createElement('span');
   l.className = 'kind-label';
-  l.textContent = label;
+  l.textContent = (missing ? '⚠ ' : '') + label;
   const x = document.createElement('span');
   x.className = 'gd-filter-chip-x';
   x.setAttribute('aria-hidden', 'true');
@@ -47,11 +47,12 @@ function gdRenderFilterChips() {
   host.replaceChildren();
   for (const p of gdFilters().namespaces) host.appendChild(_chip('in ' + p, 'Only namespace ' + p, () => gdToggleNamespace(p)));
   for (const p of gdFilters().exclude) host.appendChild(_chip('not ' + p, 'Hide namespace ' + p, () => gdToggleExclude(p)));
-  for (const u of gdFilters().uses) host.appendChild(_chip('uses ' + u.name, 'Only fns using ' + u.name, () => gdRemoveUses(u.id)));
+  const missing = (typeof gdViewMissing === 'function') ? gdViewMissing() : { uses: [], views: [] };
+  for (const u of gdFilters().uses) host.appendChild(_chip('uses ' + u.name, 'Only fns using ' + u.name, () => gdRemoveUses(u.id), null, missing.uses.includes(u.id)));
   for (const e of gdFilters().effects) host.appendChild(_chip('fx ' + e, 'Only fns with effect ' + e, () => gdToggleEffect(e)));
   if (gdFilters().unused) host.appendChild(_chip('unused', 'Only unused fns', () => gdToggleUnused()));
   if (gdFilters().name) host.appendChild(_chip('name ' + gdFilters().name, 'Only names containing ' + gdFilters().name, () => gdSetName('')));
-  for (const v of gdFilters().views) host.appendChild(_chip('view ' + v.name, 'Only fns in view ' + v.name, () => gdRemoveView(v.id)));
+  for (const v of gdFilters().views) host.appendChild(_chip('view ' + v.name, 'Only fns in view ' + v.name, () => gdRemoveView(v.id), null, missing.views.includes(v.id)));
   const addBtn = document.getElementById('gd-filter-add');
   if (addBtn) addBtn.hidden = false;
 }

@@ -6712,6 +6712,7 @@ body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
 .gd-filter-chip { max-width: 100%; }
 .gd-filter-chip .kind-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14rem; }
 .gd-filter-chip-x { margin-left: 2px; opacity: 0.7; }
+.gd-filter-chip-missing { border-color: var(--error-fg); color: var(--error-fg-strong); }
 .gd-filter-chip:hover .gd-filter-chip-x { opacity: 1; }
 .gd-ctx-chip.gd-ctx-chip-active .gd-ctx-dot { background: var(--accent); }
 .gd-views-pop-cap {

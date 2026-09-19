@@ -521,6 +521,15 @@ function updateEntityList(data) {
     note.textContent = 'Showing the first matches — refine to narrow.';
     list.appendChild(note);
   }
+  // Same for a server-evaluated filter set over the 500 cap — the count
+  // the server saw, and what to do about it.
+  if (viewActive && typeof gdViewTotal === 'function' && gdViewTotal()) {
+    const note = document.createElement('div');
+    note.className = 'loading';
+    note.textContent = 'Showing ' + (gdViewMembers() || []).length + ' of ' + gdViewTotal()
+      + ' matching fns — add a filter to narrow.';
+    list.appendChild(note);
+  }
 
   if (list.children.length === 0) {
     list.innerHTML = '<div class="loading">No matches</div>';

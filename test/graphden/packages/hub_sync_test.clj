@@ -1,5 +1,10 @@
-(ns graphden.packages.hub-sync-test
-  "Tests for the /api/sync/* hub push/pull surface (registry package) —
+(ns ^:serial graphden.packages.hub-sync-test
+  "`^:serial` — the unconfigured guard READS the process-global
+   deploy-config atom and asserts it empty; three namespaces install
+   `hub.example` into it for a test, and under kaocha's parallel plugin
+   one of them landed mid-read (main CI, 2026-09-19).
+
+   Tests for the /api/sync/* hub push/pull surface (registry package) —
    the two wire adapters against a stub hub, and the unconfigured guard
    (GRAPHDEN_HUB_URL unset ⇒ status {:configured false}, mutations 409)."
   (:require

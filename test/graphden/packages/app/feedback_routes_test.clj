@@ -1,5 +1,8 @@
-(ns graphden.packages.app.feedback-routes-test
-  "Regression sentinels for the feedback intake (`app.feedback`).
+(ns ^:serial graphden.packages.app.feedback-routes-test
+  "`^:serial` — the arm-gate is a read of the process-global
+   deploy-config atom, which the seam-installing namespaces mutate.
+
+   Regression sentinels for the feedback intake (`app.feedback`).
 
    POST /api/feedback is an OPEN write route — the abuse posture lives
    in the composition, so these tests pin it structurally: the env

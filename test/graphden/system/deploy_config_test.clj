@@ -1,5 +1,9 @@
-(ns graphden.system.deploy-config-test
-  "The boot snapshot of PUBLIC deployment settings — the process-global
+(ns ^:serial graphden.system.deploy-config-test
+  "`^:serial` — installs / clears the process-global deploy-config atom;
+   a parallel reader (hub-sync-test's unconfigured guard) saw the
+   `hub.example` this ns installs mid-test (main CI, 2026-09-19).
+
+   The boot snapshot of PUBLIC deployment settings — the process-global
    atom `graphden.system.deploy-config` + its `:exec/deploy-config`
    init-key. Pins the security-relevant contract: only DECLARED keys
    exist, blanks read as unset, a non-keyword key fails boot, and a

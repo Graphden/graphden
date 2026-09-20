@@ -21,6 +21,7 @@ const {
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, tourTitle, waitTourClosed,
   bindPlaceholderOn, setSealsViaBadge, settleTourRing,
+  moveSeqItem, insertSeqLiteralBefore, addMiParentViaParentRow,
 } = require('./tutorial-tour-helpers');
 
 (async () => {
@@ -274,7 +275,7 @@ const {
       Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
         .find((b) => b.textContent.trim() === 'Save').click();
     }, 'add-10-text');
-    await waitTourTitle(page, "That's inheritance — both ways", 150000);
+    await waitTourTitle(page, 'Two parents at once', 150000);
     // The wrapper exists, parented to :to-str, with add-10 bound in.
     const wrapped = await page.evaluate(() => {
       const w = (graphData?.fns || []).find((f) => f.name === 'add-10-text');
@@ -282,8 +283,31 @@ const {
     });
     assert(wrapped && wrapped.parents === 1,
       'wrapper created and loaded (' + JSON.stringify(wrapped) + ')');
+    // MI in the editor (2026-09-20): extend the status axis, then add the
+    // content-type axis as a SECOND parent from the parent row's ⋯ — the
+    // picker searches the whole graph, json-content-type is not loaded on
+    // this canvas (the old client-side gate disabled the + for exactly that).
+    await filterAndSelect(page, 'ok-response', 'ok-response');
+    await waitTourTitle(page, 'Extend the status axis', 150000);
+    await extendViaRowActions(page, 'tutorial-json-ok', 'ok-response');
+    await waitTourTitle(page, 'Add the second parent', 150000);
+    await addMiParentViaParentRow(page, 'tutorial-json-ok', 'json-content-type');
+    await waitTourTitle(page, 'Read the diamond', 150000);
+    const found = await api(page, 'GET', '/api/graph/entities?scope=search&q=tutorial-json-ok');
+    const jsonOk = (found.fns || []).find((f) => f.name === 'tutorial-json-ok');
+    const axes = await api(page, 'GET', '/api/graph/entities?scope=search&q=-response');
+    const axisNames = (jsonOk?.['parent-ids'] || []).map((pid) =>
+      ((axes.fns || []).concat(found.fns || [])).find((f) => f.id === pid)?.name
+      || 'unknown').sort();
+    assert(jsonOk && (jsonOk['parent-ids'] || []).length === 2,
+      'tutorial-json-ok carries two parents (got: ' + JSON.stringify(jsonOk?.['parent-ids']) + ')');
+    assert(axisNames.includes('ok-response'),
+      'the status axis is still a parent (got: ' + JSON.stringify(axisNames) + ')');
+    await settleTourRing(page, 10000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 03 diamond Next');
+    await waitTourTitle(page, "That's inheritance — both ways", 150000);
     await finishAndDelete(page);
-    console.log('  lesson 03: walked + cleaned (extend + wrap)');
+    console.log('  lesson 03: walked + cleaned (extend + wrap + MI)');
 
     // ---------- Lesson 05 — free arguments ----------
     await page.goto(BASE + '/?tutorial=05');
@@ -353,7 +377,19 @@ const {
     await bindPlaceholderOn(page, 'tutorial-base-sum', 'nums', 'literal', '1');
     await waitTourTitle(page, 'One more', 150000);
     await bindPlaceholderOn(page, 'tutorial-base-sum', 'nums', 'literal', '2');
+    // Order + insert on LITERAL items — the item's own ↑ / + (2026-09-20).
+    await waitTourTitle(page, 'Swap them', 150000);
+    await moveSeqItem(page, 1, 'up');
+    await waitTourTitle(page, 'Insert before', 150000);
+    await insertSeqLiteralBefore(page, 1, '0');
     await waitTourTitle(page, 'Now extend the seeded fn', 150000);
+    const order = await page.evaluate(() => {
+      const fn = Array.from(lookups.fnMap.values()).find((f) => f.name === 'tutorial-base-sum');
+      const b = (lookups.bindingsByFn.get(fn.id) || [])[0];
+      return (lookups.itemsByBinding.get(b?.id) || []).map((i) => String(i.value));
+    });
+    assert(JSON.stringify(order) === JSON.stringify(['2', '0', '1']),
+      'the list reads 2, 0, 1 after ↑ on the 2 and + before the 1 (got: ' + JSON.stringify(order) + ')');
     await extendViaRowActions(page, 'tutorial-sum-more', 'tutorial-base-sum');
     await waitTourTitle(page, 'The list you inherited', 150000);
     // Unfold the parent's row on the child's card: the PARENT's items appear
@@ -369,7 +405,7 @@ const {
       provenance: document.querySelectorAll('.arg-source-link, .provenance-badge').length,
       tailOwner: document.querySelector('.placeholder-binder.is-seq-anchor')?.dataset.fnName,
     }));
-    assert(inherited.items === 2, 'the unfolded child shows the parent\'s two items (got: ' + JSON.stringify(inherited) + ')');
+    assert(inherited.items === 3, 'the unfolded child shows the parent\'s three items (got: ' + JSON.stringify(inherited) + ')');
     assert(inherited.tailOwner === 'tutorial-sum-more', 'and the tail is the child\'s own');
     await waitTourTitle(page, 'Append here', 150000);
     await bindPlaceholderOn(page, 'tutorial-sum-more', 'nums', 'literal', '3');
@@ -388,8 +424,8 @@ const {
     const moreSub = await api(page, 'GET', '/api/graph/entities?scope=subtree&root-id=' + sumMore.id);
     const itemsOf = (sub, fnId) => (sub['list-items'] || []).filter((i) =>
       (sub.bindings || []).some((b) => b.id === i['binding-id'] && b['fn-id'] === fnId)).length;
-    assert(itemsOf(baseSub, baseSum.id) === 2 && itemsOf(moreSub, sumMore.id) === 1,
-      'two items on the parent, one on the child (got: ' + itemsOf(baseSub, baseSum.id) + ' / '
+    assert(itemsOf(baseSub, baseSum.id) === 3 && itemsOf(moreSub, sumMore.id) === 1,
+      'three items on the parent, one on the child (got: ' + itemsOf(baseSub, baseSum.id) + ' / '
       + itemsOf(moreSub, sumMore.id) + ')');
     assert(await clickTourButton(page, 'Next'), 'lesson 06 six Next');
     await waitTourTitle(page, 'Back to the parent', 150000);
@@ -410,11 +446,11 @@ const {
     }));
     assert(locked.tail === 0 && /List closed in tutorial-base-sum/.test(locked.ghost),
       'the child\'s tail is a lock naming the closer (got: ' + JSON.stringify(locked) + ')');
-    assert(locked.items === 3, 'its three items stay (got: ' + locked.items + ')');
+    assert(locked.items === 4, 'its four items stay (got: ' + locked.items + ')');
     assert(await clickTourButton(page, 'Next'), 'lesson 06 lock Next');
     await waitTourTitle(page, "That's a list", 150000);
     await finishAndDelete(page);
-    console.log('  lesson 06: walked + cleaned (seed, append from the child, close)');
+    console.log('  lesson 06: walked + cleaned (seed, reorder, insert, append from the child, close)');
 
     // ---------- Lesson 07 — optional, required and sealed ----------
     await page.goto(BASE + '/?tutorial=07');

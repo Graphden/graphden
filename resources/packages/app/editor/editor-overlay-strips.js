@@ -44,6 +44,15 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
   const rtEditable = isNavRoot && !isTypeRow
                   && (typeof isFnEditable === 'function' && isFnEditable(originalFnId))
                   && (typeof isAuthenticated === 'function' && isAuthenticated());
+  // The fn-row FLAGS (λ call-site params, 📍 branch-local) take the
+  // effects pencil's looser gate, not `isFnEditable`'s "no dependents":
+  // a fn is handed to a HOF or extended BECAUSE it is referenced, and
+  // that is exactly when its calling convention or merge policy needs
+  // saying. Ownership (tenancy) and package ownership still apply.
+  const flagEditable = isNavRoot && !isTypeRow
+                    && (typeof isAuthenticated === 'function' && isAuthenticated())
+                    && !(typeof isPackageOwnedFn === 'function' && isPackageOwnedFn(originalFnId))
+                    && ((typeof graphdenIsFnOwned !== 'function') || graphdenIsFnOwned(cardFnEntity));
 
   // --- return-type strip ---
   // Two display modes:
@@ -191,6 +200,42 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
         showReturnTypeRulePopover(cardFnEntity.name, provBtn);
       });
       strip.appendChild(provBtn);
+    }
+    // λ — the fn's CALL-SITE parameters when it is handed to a HOF or a
+    // route as a callable (`:lambda-params` on the fn row). Only a
+    // composed fn-def can carry one (a base-fn's arity is its impl's).
+    // Shown on an editable root card in every state, elsewhere only
+    // when declared: `λ derived` (the compile picks the one unambiguous
+    // free arg, refusing when several qualify), `λ []` (everything
+    // captured — a handler chain), `λ request` (named, in order).
+    const isComposed = Array.isArray(cardFnEntity['parent-ids'])
+                       && cardFnEntity['parent-ids'].length > 0;
+    const declared = cardFnEntity['lambda-params'];
+    if (isComposed && (flagEditable || declared != null)
+        && typeof enterLambdaParamsEditMode === 'function') {
+      const chip = document.createElement(flagEditable ? 'button' : 'span');
+      chip.className = 'lambda-params-chip';
+      if (flagEditable) chip.type = 'button';
+      const shown = declared == null ? 'derived'
+                  : (declared.length === 0 ? '[]' : declared.join(', '));
+      chip.textContent = 'λ ' + shown;
+      chip.dataset.declared = declared == null ? 'derived' : JSON.stringify(declared);
+      chip.title = (declared == null
+        ? 'Call-site parameters: derived — when a HOF or a route calls this fn, the compile picks its one unambiguous free arg (and refuses when several qualify).'
+        : declared.length === 0
+          ? 'Call-site parameters: none — every input is captured from the graph when this fn is handed over as a callable.'
+          : 'Call-site parameters, in order: ' + declared.join(', ')
+            + ' — these are filled per call; the rest is captured.')
+        + (flagEditable ? ' Click to change.' : '');
+      chip.setAttribute('aria-label', chip.title);
+      if (flagEditable) {
+        chip.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          enterLambdaParamsEditMode(cardFnEntity, chip);
+        });
+      }
+      strip.appendChild(chip);
     }
     overlay.appendChild(strip);
   }
@@ -371,33 +416,57 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
   // noisy stack of labels.)
 
   // --- branch-local strip ---
-  // The transitive parent-ids walk runs SERVER-side now (layout
-  // strip-facts → `branch-local/branch-local-seed`, the same module
-  // that owns merge-time semantics). The strip is a visual cue + an
-  // explainer tooltip — "this fn does not propagate across branches
-  // on merge". No edit affordance: descendants CAN'T widen back to
-  // non-local (sync-time guard rejects the write), so showing a
-  // toggle here would be a footgun. Admin opt-in lives in the
-  // fns.edn declaration of the root local ancestor.
+  // The transitive parent-ids walk runs SERVER-side (layout strip-facts
+  // → `branch-local/branch-local-seed`, the module that owns merge-time
+  // semantics); the strip reads the fact. Three states on an editable
+  // root card, one on everything else:
+  //   own       — this fn's row carries the flag: "branch-local", a
+  //               click reopens the toggle;
+  //   inherited — an ancestor seeded it: "branch-local", the popover
+  //               says who and that descendants can only stay local
+  //               (widening is refused by `crud.validation/branch-local-rej`);
+  //   off       — editable root only, dimmed "merges across branches":
+  //               the affordance to make a fn of one's own sticky-local
+  //               (a per-environment port, path or schedule that must
+  //               not ride a merge) without an fns.edn edit.
+  // A read-only card shows the strip only when the flag is in effect.
   const branchLocal = stripFacts.branchLocal;
-  if (branchLocal) {
+  if (branchLocal || flagEditable) {
+    const state = !branchLocal ? 'off' : (branchLocal.own ? 'own' : 'inherited');
     const strip = document.createElement('div');
-    strip.className = 'branch-local-strip';
+    strip.className = 'branch-local-strip branch-local-strip-' + state;
+    strip.dataset.state = state;
     const glyph = document.createElement('span');
     glyph.className = 'branch-local-strip-glyph';
     glyph.textContent = '📍';
     glyph.setAttribute('aria-hidden', 'true');
     const label = document.createElement('span');
     label.className = 'branch-local-strip-label';
-    label.textContent = 'branch-local';
+    label.textContent = state === 'off' ? 'merges across branches' : 'branch-local';
     strip.appendChild(glyph);
     strip.appendChild(label);
     // Tooltip explains the policy + names the ancestor that carries
     // the seed so the user can trace where it came from.
-    strip.title = branchLocal.own
+    strip.title = state === 'own'
       ? 'This fn is sticky-local: version rows do not propagate across branches on merge.'
-      : ('This fn inherits branch-local from `:' + (branchLocal.seed || '<anon>')
-         + '`. Version rows do not propagate across branches on merge.');
+      : state === 'inherited'
+        ? ('This fn inherits branch-local from `:' + (branchLocal.seed || '<anon>')
+           + '`. Version rows do not propagate across branches on merge.')
+        : 'Version rows of this fn propagate on merge like any other.';
+    if (flagEditable && typeof enterBranchLocalEditMode === 'function') {
+      strip.classList.add('branch-local-strip-editable');
+      strip.tabIndex = 0;
+      strip.setAttribute('role', 'button');
+      strip.title += ' Click to change.';
+      const handler = (e) => {
+        e.stopPropagation();
+        enterBranchLocalEditMode(cardFnEntity, strip, branchLocal || null);
+      };
+      strip.addEventListener('click', handler);
+      strip.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(e); }
+      });
+    }
     overlay.appendChild(strip);
   }
 }

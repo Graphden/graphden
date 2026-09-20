@@ -90,6 +90,12 @@ function _miCandidateRejectionReason(targetFnId, candidateId,
     candidateBase.forEach(cb => { if (existingBaseFns.has(cb)) shared = true; });
     if (!shared) return 'different base-fn — MI requires a shared root';
   }
+  // A fn whose bindings are not LOADED (a light row from the Explorer or
+  // the search scope — `lookups` holds bindings for the open subtree only)
+  // is unknown, not incompatible: the picker searches the whole graph and
+  // the server judges the write. Only a fn we can see setting nothing is
+  // rejected here.
+  if (!lookups?.bindingsByFn?.has(candidateId)) return null;
   const candidateSlots = _substantiveBoundSlotIds(candidateId);
   if (candidateSlots.size === 0) {
     return 'sets no substantive args of its own — MI would add nothing';
@@ -101,10 +107,8 @@ function _miCandidateRejectionReason(targetFnId, candidateId,
   if (allOverlap) {
     return 'every arg this fn sets is already configured by an existing parent';
   }
-  if (typeof miCollisionCheck === 'function') {
-    const v = miCollisionCheck([...currentParentIds, candidateId]);
-    if (!v.ok) return v.reason;
-  }
+  // No client-side name-collision verdict here either — see
+  // `addMIParentInline`: the server's `mi-collision-rej` is the rule.
   return null;
 }
 
@@ -259,16 +263,13 @@ function addMIParentInline(fn, anchorEl) {
   if (typeof isAuthenticated === 'function' && !isAuthenticated()) return;
   if (typeof openFnPicker !== 'function') return;
   const current = fn['parent-ids'] || [];
-  const { candidateIds } = compatibleMIParentInfo(fn.id, current);
-  if (candidateIds.size === 0) return;
-  // The picker takes an excludeIds list; build it from "everything
-  // NOT in candidateIds" so the picker only shows the allow-list.
-  const exclude = [];
-  if (lookups?.fnMap) {
-    lookups.fnMap.forEach((_, fid) => {
-      if (!candidateIds.has(fid)) exclude.push(fid);
-    });
-  }
+  // The picker searches the WHOLE graph (its rows come from the server),
+  // while `compatibleMIParentInfo` only knows the fns `lookups` holds — so
+  // it can rule fns OUT (a cycle, an already-parent, a loaded fn that sets
+  // nothing) but never rule the graph out. Exclude the known rejects and
+  // let the pick be validated (client, then server) like any re-parent.
+  const { rejected } = compatibleMIParentInfo(fn.id, current);
+  const exclude = Object.keys(rejected || {});
   openFnPicker({
     anchorEl,
     excludeIds: exclude,
@@ -276,10 +277,16 @@ function addMIParentInline(fn, anchorEl) {
     onPick: async (picked) => {
       if (!picked?.id) return;
       const next = [...current, picked.id];
-      const v = (typeof validateParentSet === 'function')
-                ? validateParentSet(fn.id, next) : { ok: true };
-      if (!v.ok) {
-        alert('Cannot add this parent: ' + v.reason);
+      // Client-side: only the cycle check. The name-collision rule is the
+      // SERVER's (`crud.validation/mi-collision-rej`) — the client copy
+      // (`miCollisionCheck`) sees renamed views and type-row fields as
+      // two args of one name (`ring-response`'s `body` next to
+      // `ring-response-shape`'s) and refused the exact pair the corpus
+      // ships as `:json-ok-response`. A refusal comes back with its
+      // reason through the cascade's alert.
+      const cyc = (typeof wouldCycle === 'function') ? wouldCycle(fn.id, picked.id) : { ok: true };
+      if (!cyc.ok) {
+        alert('Cannot add this parent: ' + cyc.reason);
         return;
       }
       await _runCascadeWithBusy(fn, next, 'Adding MI parent to');

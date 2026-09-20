@@ -3317,7 +3317,7 @@ textarea.value-form-hiccup {
 
 /* A list item's own overlay — just the `×`, hugging the item on its
    branch; the group's one label sits back at the end of the trunk. */
-.edge-label-overlay.edge-seq-item { padding: 0; background: transparent; }
+.edge-label-overlay.edge-seq-item { padding: 0; background: transparent; display: inline-flex; gap: 2px; }
 .edge-label-overlay.edge-seq-item .arg-seq-btn { margin-left: 0; background: var(--bg); }
 
 /* Placeholder binder — the small `+` button that sits at the endpoint
@@ -8499,3 +8499,50 @@ body.gd-no-write .branch-comment-form { display: none; }
     opacity: 0.75;
   }
 }
+
+/* λ chip — the fn's call-site parameters, at the end of the return-type
+   strip (editor-overlay-strips.js). A button on an editable root card
+   (opens editor-edit-modes-flags.js), a plain span elsewhere. */
+.lambda-params-chip {
+  display: inline-flex; align-items: center;
+  flex: 0 0 auto;
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted-fg);
+  font: inherit;
+  font-size: 0.5625rem; line-height: 0.875rem;
+  font-style: normal;
+  white-space: nowrap;
+  cursor: default;
+}
+button.lambda-params-chip { cursor: pointer; }
+button.lambda-params-chip:hover { color: var(--accent); border-color: var(--accent); }
+button.lambda-params-chip:focus-visible { outline: 1px solid var(--accent); }
+
+/* The λ popover — mode radios, then the ordered pick of free args. */
+.lambda-params-edit { display: flex; flex-direction: column; gap: 4px; max-width: 26rem; }
+.lambda-params-edit-head { font-size: 0.6875rem; color: var(--muted-fg); }
+.lambda-params-edit-mode { display: block; font-size: 0.75rem; }
+.lambda-params-edit-hint { color: var(--muted-fg); font-size: 0.6875rem; }
+.lambda-params-edit-names { display: flex; flex-wrap: wrap; gap: 2px 10px; padding-left: 1.25rem; }
+.lambda-params-edit-names-off { opacity: 0.5; }
+.lambda-params-edit-name { font-size: 0.75rem; }
+.lambda-params-edit-input { margin-left: 1.25rem; }
+
+/* 📍 branch-local strip states (editor-overlay-strips.js): `own` and
+   `inherited` read "branch-local"; `off` is the editable card's dimmed
+   "merges across branches" — the affordance, not a fact to shout. */
+.branch-local-strip-off { opacity: 0.55; }
+.branch-local-strip-editable { cursor: pointer; }
+.branch-local-strip-editable:hover,
+.branch-local-strip-editable:focus-visible { color: var(--fg); opacity: 1; outline: none; }
+.branch-local-edit { display: flex; flex-direction: column; gap: 4px; max-width: 26rem; }
+.branch-local-edit-row { font-size: 0.75rem; }
+.branch-local-edit-hint { color: var(--muted-fg); font-size: 0.6875rem; }
+
+/* A literal list item's order verbs (↑ ↓ + insert) sit with its × on the
+   item's own overlay — one row, hugging the branch. */
+.arg-seq-btn-up, .arg-seq-btn-down, .arg-seq-btn-insert { color: var(--muted-fg); }

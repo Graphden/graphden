@@ -153,11 +153,22 @@ One slot, many bindings — prove it with two children of one fn:
    `tutorial-b` has no binding of its own yet.
 6. Click the `+` on `:string`, **Bind literal**, type `beta`,
    **Save**. Run it: `BETA`.
+7. A bound literal is a click away from a new one: click the value
+   `beta` on the canvas, type `gamma`, **Save** — the binding row
+   was updated, not re-created.
+8. Click `gamma` once more and press **Delete** (confirm). The
+   binding is gone and the `+` is back on `:string`: the slot is
+   free again, and `tutorial-b` runs like `str-upper` does. Slipped?
+   **Ctrl+Z** (⌘Z) brings the value back for 30 seconds.
 
-`tutorial-a` says `ALPHA`, `tutorial-b` says `BETA`, `str-upper`
-stays open — one slot identity, three independent binding states,
-and a parent that never changed. That separation is why inheritance
-never copies anything.
+For a *fn* bound into a slot the same two verbs live on that card's
+`⋯`: **✎ Change value** (pick another fn, or a literal) and **×
+Remove this value** (the slot reverts to a free arg).
+
+`tutorial-a` says `ALPHA`, `tutorial-b` is free again, `str-upper`
+never changed — one slot identity, three independent binding states,
+and a value you can change or take away without touching anyone
+else. That separation is why inheritance never copies anything.
 
 ### Going further (fns.edn / MCP only)
 

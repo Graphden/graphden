@@ -355,8 +355,79 @@
                                                     :default nil}}}}]}}
           :else {:value {}}}}
 
+  ;; --- `:lambda-params` — the callable's call-site parameters, authored
+  ;; from the card's λ chip (editor-edit-modes-fn.js). Same three-state
+  ;; wire as `:expects-effects`: blank / "null" → nil (derived by the
+  ;; compile), "[]" → `[]` (everything captured, no per-call input), CSV
+  ;; → the ordered vector of free-arg names, leading colons stripped.
+  ;; Stored as strings (JSONB); `compile.renames/declared-lambda-params`
+  ;; keywordizes on read.
+
+  {:name :_parse-fn-form-lambda-params-raw
+   :parent :get
+   :args {:coll {:as :form-data} :key {:value :lambda-params} :default nil}}
+
+  {:name :_parse-fn-form-lambda-params-items
+   :parent :filter
+   :args {:pred :non-blank?
+          :coll {:parent :map
+                 :args {:func :_parse-fn-form-pid-trim-item
+                        :coll {:parent :str-split
+                               :args {:string :_parse-fn-form-lambda-params-raw
+                                      :separator {:value ","}
+                                      :limit nil}}}}}}
+
+  {:name :_parse-fn-form-lambda-params-parsed
+   :description "Parsed lambda-params vec — `nil` on blank/`\"null\"` (derived), `[]` on literal `\"[]\"` (everything captured), otherwise the CSV-derived ordered vec of arg names with leading colons stripped."
+   :parent :cond
+   :args {:clauses [{:parent :or
+                     :args {:values [{:parent :blank?
+                                      :args {:string :_parse-fn-form-lambda-params-raw}}
+                                     {:parent :equal?
+                                      :args {:a :_parse-fn-form-lambda-params-raw
+                                             :b {:value "null"}}}]}}
+                    {:value nil}
+                    {:parent :equal?
+                     :args {:a :_parse-fn-form-lambda-params-raw :b {:value "[]"}}}
+                    {:value []}
+                    {:value true}
+                    {:parent :vec
+                     :args {:coll {:parent :map
+                                   :args {:func :_parse-fn-form-effects-strip-colon
+                                          :coll :_parse-fn-form-lambda-params-items}}}}]}}
+
+  {:name :_parse-fn-form-lambda-params-fragment
+   :description "`{:lambda-params <vec-or-nil>}` when the form carries the field (nil CLEARS the declaration — the compile derives again); `{}` when absent."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :lambda-params}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :lambda-params}]
+                        :vals [:_parse-fn-form-lambda-params-parsed]}}
+          :else {:value {}}}}
+
+  ;; --- `:branch-local?` — the identity-level "versions never merge"
+  ;; flag, authored from the card's 📍 strip. `"true"` / `"false"`;
+  ;; anything else is treated as false. Widening past a sticky ancestor
+  ;; is refused by `crud.validation/branch-local-rej`.
+
+  {:name :_parse-fn-form-branch-local-fragment
+   :description "`{:branch-local? bool}` when the form carries `branch-local`; `{}` when absent."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :branch-local}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :branch-local?}]
+                        :vals [{:parent :equal?
+                                :args {:a {:parent :get
+                                           :args {:coll {:as :form-data}
+                                                  :key {:value :branch-local}
+                                                  :default nil}}
+                                       :b {:value "true"}}}]}}
+          :else {:value {}}}}
+
   {:name :parse-fn-from-form
-   :description "Extract a fn entity's field map from a parsed form-data map. 10 fields: name + parent-id + namespace-id + description + return-type → return-type-fn-id + parent-ids (CSV-of-UUIDs) + base-fn-id + element-fn-id + expects-effects (CSV-of-bare-names with `null`/`[]` literals) + constraint (JSON + recursive keyword-restore)."
+   :description "Extract a fn entity's field map from a parsed form-data map. 12 fields: name + parent-id + namespace-id + description + return-type → return-type-fn-id + parent-ids (CSV-of-UUIDs) + base-fn-id + element-fn-id + expects-effects (CSV-of-bare-names with `null`/`[]` literals) + constraint (JSON + recursive keyword-restore) + lambda-params (same three-state CSV as expects-effects) + branch-local (`true`/`false` → `:branch-local?`)."
    :parent :merge
    :args {:maps [{:value {}}
                  :_form-name-fragment
@@ -368,7 +439,9 @@
                  :_parse-fn-form-base-fn-id-fragment
                  :_parse-fn-form-element-fn-id-fragment
                  :_parse-fn-form-expects-effects-fragment
-                 :_parse-fn-form-constraint-fragment]
+                 :_parse-fn-form-constraint-fragment
+                 :_parse-fn-form-lambda-params-fragment
+                 :_parse-fn-form-branch-local-fragment]
           :form-data {:type :_form-data-shape
                       :description "Parsed application/x-www-form-urlencoded form-data map (`{field-name field-value}`). Each per-field fragment looks up its key here."}}}
 

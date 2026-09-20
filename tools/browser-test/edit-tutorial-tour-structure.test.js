@@ -21,6 +21,7 @@ const {
   runWithEffectAck, finishAndDelete, tourTitle,
   bindOptionalArgChip, appendFnRefViaChip, createRecordType,
   clickTourAdvance, waitTourClosed, appendSeqItemViaEdge, bindSeqAnchorPlaceholder,
+  deleteBoundValue, setLambdaParamsViaChip,
 } = require('./tutorial-tour-helpers');
 
 (async () => {
@@ -115,7 +116,16 @@ const {
       {timeout: 60000, polling: 200}).then(() => true, () => false),
       'tutorial-b ran and the pane shows BETA');
     assert(await clickTourButton(page, 'Next'), 'lesson 04 BETA Next');
+    // Change, then take away (2026-09-20): the literal's popover edits the
+    // binding in place; its Delete drops the row and the + comes back.
+    await waitTourTitle(page, 'Change it', 150000);
+    await editBoundValue(page, 'gamma');
+    await waitTourTitle(page, 'Take it away', 150000);
+    await deleteBoundValue(page);
     await waitTourTitle(page, 'One slot, two values', 150000);
+    assert(await page.waitForFunction(() => !!document.querySelector('.placeholder-binder'), null,
+      {timeout: 60000, polling: 200}).then(() => true, () => false),
+      'the + is back on tutorial-b\'s :string after Delete');
     // The point of the lesson, asserted over the API — NOT over `lookups`,
     // which only holds the subtree of the currently selected fn (tutorial-b
     // at this point, so tutorial-a's bindings simply aren't loaded).
@@ -132,12 +142,11 @@ const {
     };
     const twoChildren = {a: await bindingsOf('tutorial-a'),
                          b: await bindingsOf('tutorial-b')};
-    assert(twoChildren.a.length === 1 && twoChildren.b.length === 1,
-      'each child carries exactly one binding');
-    assert(twoChildren.a[0].slot === twoChildren.b[0].slot,
-      'both bindings point at the SAME inherited slot id');
-    assert(twoChildren.a[0].value === 'alpha' && twoChildren.b[0].value === 'beta',
-      'the two children hold independent values');
+    assert(twoChildren.a.length === 1 && twoChildren.b.length === 0,
+      'tutorial-a keeps its one binding; tutorial-b\'s was deleted (got: '
+      + JSON.stringify(twoChildren) + ')');
+    assert(twoChildren.a[0].value === 'alpha',
+      'tutorial-a still holds alpha — the delete on tutorial-b touched no one else');
     await finishAndDelete(page);
     console.log('  lesson 04: walked + cleaned');
 
@@ -204,9 +213,24 @@ const {
       {timeout: 60000, polling: 200}).then(() => true, () => false),
       'the pane shows ["GRAPH" "DEN"] — str-upper ran once per item');
     assert(await clickTourButton(page, 'Next'), 'lesson 09 look-step Next');
+    // A callable of the reader's own + its λ declaration (2026-09-20).
+    await waitTourTitle(page, 'A callable of your own', 150000);
+    await filterAndSelect(page, 'str-upper', 'str-upper');
+    await waitTourTitle(page, 'Extend it', 150000);
+    await extendViaRowActions(page, 'tutorial-upper', 'str-upper');
+    await waitTourTitle(page, 'Say what a caller fills', 150000);
+    await setLambdaParamsViaChip(page, 'tutorial-upper', ['string']);
     await waitTourTitle(page, "That's a HOF", 150000);
+    const upperIdx = await api(page, 'GET', '/api/graph/entities?scope=search&q=tutorial-upper');
+    const shout = (upperIdx.fns || []).find((f) => f.name === 'tutorial-upper');
+    const shoutRow = shout
+      ? ((await api(page, 'GET', '/api/graph/entities?scope=subtree&root-id=' + shout.id)).fns || [])
+        .find((f) => f.id === shout.id)
+      : null;
+    assert(shoutRow && JSON.stringify(shoutRow['lambda-params']) === JSON.stringify(['string']),
+      'the fn row carries lambda-params ["string"] (got: ' + JSON.stringify(shoutRow?.['lambda-params']) + ')');
     await finishAndDelete(page);
-    console.log('  lesson 09: walked + cleaned');
+    console.log('  lesson 09: walked + cleaned (+ λ)');
 
     // ---------- Lesson 10 — components (free-arg chips + list append) ------
     await page.goto(BASE + '/?tutorial=10');

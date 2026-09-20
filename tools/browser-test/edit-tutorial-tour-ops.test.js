@@ -19,7 +19,7 @@ const {
   appendSeqItemViaEdge, bindFnRefPlaceholder,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, tourTitle,
-  waitUntil, waitTourClosed,
+  waitUntil, waitTourClosed, setBranchLocalViaStrip,
 } = require('./tutorial-tour-helpers');
 
 (async () => {
@@ -57,7 +57,18 @@ const {
     assert(mainValue.includes('main version'),
       'main still reads "main version" after the branch edit');
     assert(await clickTourButton(page, 'Next'), 'lesson 23 back-on-main Next');
+    // 📍 (2026-09-20): the strip is a toggle on a fn the reader owns.
+    await waitTourTitle(page, 'Pin a fn to its branch', 150000);
+    await setBranchLocalViaStrip(page, 'branch-demo', true);
     await waitTourTitle(page, 'Compare the branches', 150000);
+    const demoIdx = await api(page, 'GET', '/api/graph/entities?scope=search&q=branch-demo');
+    const demo = (demoIdx.fns || []).find((f) => f.name === 'branch-demo');
+    const demoRow = demo
+      ? ((await api(page, 'GET', '/api/graph/entities?scope=subtree&root-id=' + demo.id)).fns || [])
+        .find((f) => f.id === demo.id)
+      : null;
+    assert(demoRow && demoRow['branch-local?'] === true,
+      'branch-demo\'s row carries branch-local? true (got: ' + JSON.stringify(demoRow?.['branch-local?']) + ')');
     // Δ on the tutorial-branch row → COMPARE MODE (UX-v3): the Δ chip
     // appears by the branch chip and the tour's dom-check passes.
     await waitClickable(page, '#branch-chip-btn');

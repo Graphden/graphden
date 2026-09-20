@@ -215,6 +215,43 @@ function _tourCheckPasses(check) {
             || (full === depth - 1 && (spec.partialFns?.size || 0) > 0);
         });
       }
+      case 'binding-absent': {
+        // The inverse of `binding-bound` for one slot: the fn holds NO
+        // binding that values, refs or fills `check.slot` — what a reader
+        // sees after Delete on a bound literal (the `+` is back). A
+        // flag-only binding (a seal, a rename) does not count as bound.
+        const fn = _tourFindFn(check.name);
+        if (!fn || typeof lookups === 'undefined' || !lookups) return false;
+        const list = (lookups.bindingsByFn?.get(fn.id)) || [];
+        return !list.some((b) => {
+          const s = lookups.slotMap?.get(b['slot-id']);
+          if (!s || s.name !== check.slot) return false;
+          if (b.value != null || b['ref-fn-id']) return true;
+          return (lookups.itemsByBinding?.get(b.id) || []).length > 0;
+        });
+      }
+      case 'list-first': {
+        // The FIRST item of the sequence slot `check.slot` reads
+        // `check.value` — how a lesson sees that ↑ / ↓ moved an item.
+        // Items are position-sorted in `itemsByBinding`.
+        const fn = _tourFindFn(check.name);
+        if (!fn || typeof lookups === 'undefined' || !lookups) return false;
+        const list = (lookups.bindingsByFn?.get(fn.id)) || [];
+        return list.some((b) => {
+          const s = lookups.slotMap?.get(b['slot-id']);
+          if (!s || s.name !== check.slot) return false;
+          const items = lookups.itemsByBinding?.get(b.id) || [];
+          return items.length > 0 && String(items[0].value) === String(check.value);
+        });
+      }
+      case 'fn-field': {
+        // A field of the fn ROW equals `check.value` — the card strips
+        // that write the row (λ lambda-params, 📍 branch-local). Compared
+        // as JSON so `[]`, `["string"]` and `true` all pin exactly.
+        const fn = _tourFindFn(check.name);
+        if (!fn) return false;
+        return JSON.stringify(fn[check.field] ?? null) === JSON.stringify(check.value ?? null);
+      }
       case 'dom':
         return _tourDomVisible(check.selector);
       case 'dom-absent':

@@ -5,7 +5,7 @@
 ;; or, for a cosmetic edit, refresh this file. See the fns.edn header.
 {"apps" {:version 1, :steps "3ae7e6b795cc34f231b7f25a17efe58673812c8c"}
  "asset-overrides" {:version 1, :steps "c3cfddea3cfcaeecb1acc3ba44cbddc0dcb41fc5"}
- "branches" {:version 1, :steps "bdd3a75158f615b5d810492736c0e57acc7300f7"}
+ "branches" {:version 2, :steps "90d708b29a86e54c8e57fe6dfd0f17386f0d1f98"}
  "components-and-pages" {:version 1, :steps "ee5abadafa04069edad7fce330d1797789d38519"}
  "custom-script-escape-hatch" {:version 1, :steps "5699f3f0926e4018150974882525ebad400abda7"}
  "debugging-traces" {:version 1, :steps "1706f022c32b54c3d6adcc4a3af09d6749dc9f62"}
@@ -17,12 +17,12 @@
  "fn-defs" {:version 1, :steps "bfff047f62413acac69d1c1eea425aa04b338a03"}
  "free-arguments" {:version 1, :steps "e14df1852f4b2d13afcfdf4615375a33f8ade5cb"}
  "grants" {:version 1, :steps "c1e52862bd04611d01a85605921838e90b616e4b"}
- "higher-order-functions" {:version 1, :steps "da5f6e131f73d942c5162f939c547344146edc36"}
+ "higher-order-functions" {:version 2, :steps "a195a742a1cb7cc5d5fd9391fe1fa6875e0589ae"}
  "keyboard-and-accessibility" {:version 1, :steps "7d9d89e48bd24849fbfedb7018def98089119a05"}
- "lists" {:version 1, :steps "34a126832a2e608fe301ee1a6f3d6f2047f96bc7"}
+ "lists" {:version 2, :steps "3afcdab60f81d8e0cf81231342d2cec0e0527f5e"}
  "marketplace-themes-keymaps" {:version 1, :steps "bb66be175666cc0fce08f1ed61ef5a320cee0a72"}
  "optional-required-sealed" {:version 1, :steps "20b74e3b21c3c99e9d81ff1caa3a9b8c2323efec"}
- "parents-and-inheritance" {:version 1, :steps "4f75a48359db8a3e0989c6cb51381f194413512d"}
+ "parents-and-inheritance" {:version 2, :steps "7fc3fd9a6a4ba221f9e6280242655abad13fd944"}
  "plans-and-tiers" {:version 1, :steps "b75530060db6d4591fd17af9228a840b5ac0f73a"}
  "reading-a-card" {:version 1, :steps "adda7e2bd1aca8dbaf2e5d78fcc2f435030e9c1c"}
  "recursion" {:version 1, :steps "db80cbe3a84f0a153646047676975f1d582a14bc"}
@@ -31,7 +31,7 @@
  "services" {:version 1, :steps "ad7014073d4e0a83248ecc9ef9030efec3917131"}
  "services-talking-to-services" {:version 1, :steps "262d38f857092f555b3f4b550c8ac28776b21e84"}
  "signing-up-and-in" {:version 1, :steps "fb18afdad87026f98cfbbef96e1c30c7f9a4c551"}
- "slots-and-bindings" {:version 1, :steps "d83c363689e25d55e05d12c9a9b185783c23a803"}
+ "slots-and-bindings" {:version 2, :steps "a056b25b299a890635c16b9d9f6b4a8619bbb4b8"}
  "state-cells-and-caches" {:version 1, :steps "6a4de5beb33e1f077a5530269790acd6a622343d"}
  "tests" {:version 1, :steps "5f072fe1a5c7066b1a50765f64e9dada1511e43f"}
  "types" {:version 1, :steps "0ad2df017268c697cef60cba767cb3592c9b3dd5"}

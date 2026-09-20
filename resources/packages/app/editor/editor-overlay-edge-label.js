@@ -66,17 +66,46 @@ function createSeqItemOverlay(edge, container) {
   const overlay = document.createElement('div');
   overlay.className = 'edge-label-overlay edge-seq-item';
   overlay.dataset.edgeId = edge.id();
-  const removeBtn = document.createElement('button');
-  removeBtn.type = 'button';
-  removeBtn.className = 'arg-seq-btn arg-seq-btn-remove';
-  removeBtn.textContent = '×';
-  removeBtn.title = 'Remove this item from the list';
-  removeBtn.setAttribute('aria-label', removeBtn.title);
-  removeBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
+  overlay.dataset.itemId = editArg.id || '';
+  if (typeof editArg.position === 'number') overlay.dataset.position = String(editArg.position);
+  // `position` is the stored ordinal — after swaps it need not be dense
+  // (0, 2, 3). `index` is the item's RANK in its list, what a reader means
+  // by "the second item" and what a tour step can point at.
+  const siblings = lookups?.itemsByBinding?.get(editArg['binding-id']) || [];
+  const rank = siblings.findIndex((it) => it.id === editArg.id);
+  if (rank >= 0) overlay.dataset.index = String(rank);
+  const btn = (cls, glyph, title, onClick) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'arg-seq-btn ' + cls;
+    b.textContent = glyph;
+    b.title = title;
+    b.setAttribute('aria-label', title);
+    b.addEventListener('click', (e) => { e.stopPropagation(); onClick(b); });
+    overlay.appendChild(b);
+    return b;
+  };
+  // The order verbs a fn-card item gets from its row-actions (↑ / ↓ /
+  // + Insert-before) — a LITERAL item has no ⋯, so they live here, next
+  // to its ×. Moving past either end is a server no-op; the buttons stay
+  // so the strip keeps one shape whichever item it hugs.
+  btn('arg-seq-btn-up', '↑', 'Move this item up', () => {
+    if (typeof moveSequenceItem === 'function') moveSequenceItem(editArg.id, 'up');
+  });
+  btn('arg-seq-btn-down', '↓', 'Move this item down', () => {
+    if (typeof moveSequenceItem === 'function') moveSequenceItem(editArg.id, 'down');
+  });
+  if (typeof editArg.position === 'number' && editArg['fn-id']) {
+    btn('arg-seq-btn-insert', '+', 'Insert a new item before this one', (b) => {
+      if (typeof appendSequenceItem !== 'function') return;
+      appendSequenceItem(editArg['fn-id'], b, undefined,
+                         { position: editArg.position,
+                           elemType: (typeof seqElemType === 'function') ? seqElemType(editArg) : null });
+    });
+  }
+  btn('arg-seq-btn-remove', '×', 'Remove this item from the list', () => {
     if (typeof removeSequenceItem === 'function') removeSequenceItem(editArg.id);
   });
-  overlay.appendChild(removeBtn);
   registerEdgeOverlay(overlay);
   container.appendChild(overlay);
   return overlay;

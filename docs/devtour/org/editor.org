@@ -120,13 +120,13 @@ Fetch an HTML partial, swap it into a host, re-bind the dispatcher. That is the 
 :PROPERTIES:
 :CUSTOM_ID: editor/loadRowActionsContent
 :FILE: resources/packages/app/editor/editor-row-actions.js
-:LINE: 422
+:LINE: 407
 :MINS: 3.7
 :END:
 
 The migration in the concrete: the ~⋯~ row menu is a server partial in four contexts, and the client only builds the query string, caches the returned HTML per URL, and recomputes the one state that MUST be fresh (add-MI compatibility, against current ~lookups~) — see [[../EDITOR_ROW_ACTIONS.md][docs/EDITOR_ROW_ACTIONS.md]] for why this popover moved and the others stayed JS.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-row-actions.js::async function loadRowActionsContent(host, fnId, context, opts) {][resources/packages/app/editor/editor-row-actions.js:422]]
+- source :: [[file:../../../resources/packages/app/editor/editor-row-actions.js::async function loadRowActionsContent(host, fnId, context, opts) {][resources/packages/app/editor/editor-row-actions.js:407]]
 
 * 10. pickerArrange
 :PROPERTIES:

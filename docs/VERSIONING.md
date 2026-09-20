@@ -673,9 +673,16 @@ Implementation:
   version`'s parent-branch recursion is also gated.
 - Type-check guard: `types.check/check-branch-local-monotonicity!`
   throws `:types/branch-local-widening-forbidden` on widening.
-- Editor: 📍 strip on the fn-card (walks parent-ids via
-  `lookups.fnMap` + the diff payload's `source-version` as a
-  seed for cross-branch fns); 📍 badge + dimmed rows in the
+- Editor: 📍 strip on the fn-card, fed by the layout's strip-facts
+  (`branch-local/branch-local-seed`, server-side). On an editable root
+  card it is a TOGGLE (`editor-edit-modes-flags.js`): "merges across
+  branches" (dimmed) ↔ "branch-local"; under a sticky-local ancestor it
+  is read-only and names the seed. The write goes through
+  `PUT /api/entities/fn/:id` with `branch-local=true|false`
+  (`parse-fn-from-form`), and `crud.validation/branch-local-rej`
+  refuses `false` under a true ancestor
+  (`:constraint-violation/branch-local-widening`) — the write-time
+  twin of the sync-time guard. 📍 badge + dimmed rows in the
   inspector diff panel and the Review dialog's change list.
 - Merge response surfaces a `:skipped-as-branch-local` list with
   entity-ids (see "Merge audit log" below) so API consumers can

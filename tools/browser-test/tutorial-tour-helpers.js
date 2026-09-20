@@ -69,7 +69,9 @@ async function hardCleanup(page) {
                      'tutorial-endpoint', 'tutorial-fetch',
                      // lessons 06 / 07 — children before parents.
                      'tutorial-sum-more', 'tutorial-base-sum',
-                     'tutorial-cut-more', 'tutorial-cut'];
+                     'tutorial-cut-more', 'tutorial-cut',
+                     // lesson 03's MI fn and lesson 09's callable (2026-09-20).
+                     'tutorial-json-ok', 'tutorial-upper'];
   // Per-browser view-state the lessons exercise (filters / views,
   // recents, last-used ns) — a leftover filter renders the next lesson's
   // Explorer as somebody else's narrowed tree. `graphden.tour.next` is the
@@ -517,14 +519,14 @@ async function appendSeqItemViaEdge(page, literalText) {
 // offers one), the value form, Save, and the wait for the write to land.
 async function appendOrBindLiteralFromChooser(page, literalText) {
   // Scalar slots offer "Bind literal"; sequence slots offer "Append
-  // literal" — accept either.
+  // literal" (or "Insert literal" from an item's + ) — accept any.
   await page.waitForFunction(() => {
     return Array.from(document.querySelectorAll('button'))
-      .some((b) => /^(Bind|Append) literal$/.test((b.textContent || '').trim()));
+      .some((b) => /^(Bind|Append|Insert) literal$/.test((b.textContent || '').trim()));
   }, null, {timeout: 8000, polling: 100});
   await page.evaluate(() => {
     Array.from(document.querySelectorAll('button'))
-      .find((b) => /^(Bind|Append) literal$/.test((b.textContent || '').trim()))
+      .find((b) => /^(Bind|Append|Insert) literal$/.test((b.textContent || '').trim()))
       .click();
   });
   await page.waitForFunction(() => {
@@ -1410,6 +1412,127 @@ async function setSealsViaBadge(page, argName, wanted) {
 }
 
 
+
+// --- the verbs lessons 04 / 06 / 09 / 23 teach on the card itself ------------
+
+// Delete a bound literal through its edit popover's Delete button (lesson 04
+// "Take it away"). Fires a native confirm() — the caller's dialog handler
+// accepts it. Resolves once the popover is gone.
+async function deleteBoundValue(page) {
+  await page.waitForSelector('.arg-value-editable', {timeout: 30000});
+  await page.evaluate(() => document.querySelector('.arg-value-editable').click());
+  await page.waitForSelector('.arg-value-edit-popover .arg-value-edit-btn-danger', {timeout: 15000});
+  await page.evaluate(() => document.querySelector('.arg-value-edit-popover .arg-value-edit-btn-danger').click());
+  await page.waitForFunction(() => !document.querySelector('.arg-value-edit-popover'),
+    null, {timeout: 30000, polling: 100});
+}
+
+
+// The literal list item at rank `index`'s own order buttons (lesson 06):
+// `dir` is 'up' / 'down'. Resolves when the item at that position reads
+// something else (the graph reloaded).
+async function moveSeqItem(page, index, dir) {
+  const sel = '.edge-seq-item[data-index="' + index + '"] .arg-seq-btn-' + dir;
+  await page.waitForSelector(sel, {timeout: 30000});
+  const before = await page.evaluate((i) => {
+    const ov = document.querySelector('.edge-seq-item[data-index="' + i + '"]');
+    return ov ? ov.dataset.itemId : null;
+  }, index);
+  await page.evaluate((s) => document.querySelector(s).click(), sel);
+  await page.waitForFunction(([i, id]) => {
+    const ov = document.querySelector('.edge-seq-item[data-index="' + i + '"]');
+    return ov && ov.dataset.itemId && ov.dataset.itemId !== id;
+  }, [index, before], {timeout: 30000, polling: 150});
+}
+
+
+// `+` on the literal item at rank `index` → Insert literal → `text` → Save.
+async function insertSeqLiteralBefore(page, index, text) {
+  const sel = '.edge-seq-item[data-index="' + index + '"] .arg-seq-btn-insert';
+  await page.waitForSelector(sel, {timeout: 30000});
+  // A move just before this reloads the graph; a chooser opened while that
+  // render lands is wiped by it — settle like a reader would.
+  await page.waitForTimeout(2000);
+  await page.waitForFunction(() => typeof graphReady === 'function' && graphReady() && !graph.animating,
+    null, {timeout: 30000, polling: 100});
+  await page.waitForSelector(sel, {timeout: 30000});
+  await page.evaluate((s) => document.querySelector(s).click(), sel);
+  await appendOrBindLiteralFromChooser(page, text);
+}
+
+
+// The λ chip on `fnName`'s card → "These, in order" → tick `names` → Save
+// (lesson 09). Resolves when the chip reads the declaration.
+async function setLambdaParamsViaChip(page, fnName, names) {
+  const chip = '.node-overlay[data-fn-name="' + fnName + '"] .lambda-params-chip';
+  await page.waitForSelector(chip, {timeout: 60000});
+  await page.evaluate((s) => document.querySelector(s).click(), chip);
+  await page.waitForSelector('.arg-value-edit-popover .lambda-params-edit', {timeout: 15000});
+  await page.evaluate((ns) => {
+    const pop = document.querySelector('.arg-value-edit-popover');
+    const named = pop.querySelector('input[name="lp-mode"][value="named"]');
+    named.checked = true;
+    named.dispatchEvent(new Event('change', {bubbles: true}));
+    for (const n of ns) {
+      const cb = pop.querySelector('input[data-lambda-name="' + n + '"]');
+      if (cb && !cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change', {bubbles: true})); }
+    }
+    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
+      .find((b) => b.textContent.trim() === 'Save').click();
+  }, names);
+  await page.waitForFunction(([s, ns]) => {
+    const el = document.querySelector(s);
+    return el && el.dataset.declared === JSON.stringify(ns);
+  }, [chip, names], {timeout: 60000, polling: 200});
+}
+
+
+// The 📍 strip on `fnName`'s card → tick / untick Branch-local → Save
+// (lesson 23). Resolves when the strip reads the new state.
+async function setBranchLocalViaStrip(page, fnName, on) {
+  const strip = '.node-overlay[data-fn-name="' + fnName + '"] .branch-local-strip';
+  await page.waitForSelector(strip, {timeout: 60000});
+  await page.evaluate((s) => document.querySelector(s).click(), strip);
+  await page.waitForSelector('.arg-value-edit-popover input[data-branch-local="toggle"]', {timeout: 15000});
+  await page.evaluate((want) => {
+    const pop = document.querySelector('.arg-value-edit-popover');
+    const cb = pop.querySelector('input[data-branch-local="toggle"]');
+    if (cb.checked !== want) cb.click();
+    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
+      .find((b) => b.textContent.trim() === 'Save').click();
+  }, on);
+  await page.waitForFunction(([s, want]) => {
+    const el = document.querySelector(s);
+    return el && (el.dataset.state === 'own') === want;
+  }, [strip, on], {timeout: 60000, polling: 200});
+}
+
+
+// ⋯ on the PARENT row (level 1) of `cardFnName`'s card → + (add another
+// parent) → type `parentName` in the picker and click its row (lesson 03).
+// Resolves when the card's fn carries two parents.
+async function addMiParentViaParentRow(page, cardFnName, parentName) {
+  const trigger = '.node-overlay[data-fn-name="' + cardFnName + '"] .ancestor-line[data-level="1"] button.more-actions-trigger';
+  await page.waitForSelector(trigger, {timeout: 60000});
+  await page.evaluate((s) => {
+    document.querySelector(s).dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+  }, trigger);
+  await page.waitForSelector('.row-actions-popover [data-action="add-mi-parent"]', {timeout: 15000});
+  await page.evaluate(() => {
+    document.querySelector('.row-actions-popover [data-action="add-mi-parent"]')
+      .dispatchEvent(new MouseEvent('click', {bubbles: true}));
+  });
+  await page.waitForSelector('.fn-picker-popover .fn-picker-search', {timeout: 15000});
+  await page.fill('.fn-picker-popover .fn-picker-search', parentName);
+  const row = '.fn-picker-popover .fn-picker-row[data-fn-name$="' + parentName + '"]';
+  await page.waitForSelector(row, {timeout: 30000});
+  await page.evaluate((s) => document.querySelector(s).click(), row);
+  await page.waitForFunction((name) => {
+    const fn = (typeof graphData !== 'undefined' && graphData?.fns || []).find((f) => f.name === name);
+    return fn && (fn['parent-ids'] || []).length === 2;
+  }, cardFnName, {timeout: 90000, polling: 250});
+}
+
 module.exports = {
   NS_NAME, FN_NAME,
   retryingDelete, hardCleanup, tourTitle, waitTourTitle, settleTourRing, clickTourButton,
@@ -1425,5 +1548,6 @@ module.exports = {
   bindNamedPlaceholder, bindPlaceholderOn, extendInPlace,
   bindOptionalArgChip, appendFnRefViaChip, renameArgViaEdgeLabel,
   createRecordType, openOperateSection, openAccountSettings, openAccountMenu,
-  setSealsViaBadge,
+  setSealsViaBadge, deleteBoundValue, moveSeqItem, insertSeqLiteralBefore,
+  setLambdaParamsViaChip, setBranchLocalViaStrip, addMiParentViaParentRow,
 };

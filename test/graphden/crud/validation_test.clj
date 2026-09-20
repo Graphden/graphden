@@ -652,3 +652,62 @@
                                    :resolver-fn-id (:id owner)
                                    :value "v" :value-present true})))))
       (finally (sp/close storage)))))
+
+
+(deftest branch-local-rej-test
+  (testing "declaring :branch-local? false under a sticky-local ancestor is refused"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [root  (setup/create-base-fn! storage "bl-root")
+              _     (sp/update-entity storage :fn (:id root) {:branch-local? true})
+              mid   (setup/create-composed-fn! storage "bl-mid" (:id root))
+              leaf  (setup/create-composed-fn! storage "bl-leaf" (:id mid))
+              other (setup/create-base-fn! storage "bl-other")]
+          (is (= :constraint-violation/branch-local-widening
+                 (:type (v/write-rej storage :fn {:id (:id leaf) :branch-local? false})))
+              "a PUT that only carries the flag reads the stored parents — two levels up")
+          (is (re-find #"bl-root" (:reason (v/write-rej storage :fn {:id (:id leaf) :branch-local? false})))
+              "the refusal names the seed")
+          (is (nil? (v/write-rej storage :fn {:id (:id leaf) :branch-local? true}))
+              "saying true under a true ancestor changes nothing and is fine")
+          (is (nil? (v/write-rej storage :fn {:id (:id other) :branch-local? false}))
+              "a fn with no sticky ancestor may say false")
+          (is (nil? (v/write-rej storage :fn {:id (:id leaf) :branch-local? false
+                                              :parent-ids [(:id other)]}))
+              "a re-parenting write is judged by the parents it declares")
+          (is (= :constraint-violation/branch-local-widening
+                 (:type (v/write-rej storage :fn {:id (:id other) :branch-local? false
+                                                  :parent-ids [(:id root)]})))
+              "…in both directions"))
+        (finally (sp/close storage))))))
+
+
+(deftest mi-collision-ignores-rename-views-test
+  (testing "a renamed VIEW and the slot it renames are one arg — two axes over the same renamed base do not collide"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [base  (setup/create-base-fn! storage "rv-base")
+              value (setup/create-slot! storage "value" :text)
+              _     (setup/attach-slot! storage (:id base) (:id value) 0)
+              ;; `rv-mid` renames :value → :body the way `ring-response` does
+              ;; (a view slot whose source-slot-id points at the base slot).
+              mid   (setup/create-composed-fn! storage "rv-mid" (:id base))
+              view  (setup/create-slot! storage "body" :text)
+              _     (sp/update-entity storage :slot (:id view) {:source-slot-id (:id value)})
+              _     (setup/attach-slot! storage (:id mid) (:id view) 0)
+              ax1   (setup/create-composed-fn! storage "rv-ax1" (:id mid))
+              ax2   (setup/create-composed-fn! storage "rv-ax2" (:id mid))]
+          (is (nil? (v/mi-collision-check storage [(:id ax1) (:id ax2)]))
+              "the view and its source count once — no collision on :body"))
+        (finally (sp/close storage)))))
+  (testing "two genuinely distinct slots under one name still collide"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [p1 (setup/create-base-fn! storage "rv-clash-1")
+              p2 (setup/create-base-fn! storage "rv-clash-2")
+              s1 (setup/create-slot! storage "body" :text)
+              s2 (setup/create-slot! storage "body" :int)]
+          (setup/attach-slot! storage (:id p1) (:id s1) 0)
+          (setup/attach-slot! storage (:id p2) (:id s2) 0)
+          (is (re-find #"collision" (:reason (v/mi-collision-check storage [(:id p1) (:id p2)])))))
+        (finally (sp/close storage))))))

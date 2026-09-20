@@ -30,7 +30,7 @@
    reader's own Next button — no predicate."
   #{"manual" "fn-exists" "fn-parent" "ns-exists" "binding-bound" "binding-value"
     "bindings-count" "list-items" "selected" "on-branch" "arg-named" "expanded"
-    "dom" "dom-absent" "input-value"})
+    "dom" "dom-absent" "input-value" "binding-absent" "list-first" "fn-field"})
 
 
 (def ^:private creates-types
@@ -119,6 +119,17 @@
         (is (and (some? (get-in s [:check :name])) (some? (get-in s [:check :slot]))
                  (pos-int? (get-in s [:check :count])))
             (str "lesson " (:id l) " / “" (:title s) "”: list-items needs :name + :slot + :count"))
+        "binding-absent"
+        (is (and (some? (get-in s [:check :name])) (some? (get-in s [:check :slot])))
+            (str "lesson " (:id l) " / “" (:title s) "”: binding-absent needs :name + :slot"))
+        "list-first"
+        (is (and (some? (get-in s [:check :name])) (some? (get-in s [:check :slot]))
+                 (contains? (:check s) :value))
+            (str "lesson " (:id l) " / “" (:title s) "”: list-first needs :name + :slot + :value"))
+        "fn-field"
+        (is (and (some? (get-in s [:check :name])) (some? (get-in s [:check :field]))
+                 (contains? (:check s) :value))
+            (str "lesson " (:id l) " / “" (:title s) "”: fn-field needs :name + :field + :value"))
         ("dom" "dom-absent")
         (is (not (str/blank? (get-in s [:check :selector])))
             (str "lesson " (:id l) " / “" (:title s) "”: " kind " needs :selector"))

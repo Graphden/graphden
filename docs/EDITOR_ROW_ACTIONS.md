@@ -126,6 +126,16 @@ a fixed glyph lane so labels align. Consequences:
 
 ## Live constraints
 
+- **`+ Add-MI` is never disabled client-side**: `compatibleMIParentInfo`
+  walks only the fns `lookups` holds (the open subtree + loaded Explorer
+  rows) while the picker it opens searches the whole graph, so the client
+  can rule fns OUT (a cycle, an already-parent, a loaded fn that sets
+  nothing) but never rule the graph out. A fn whose bindings are not loaded
+  is unknown, not rejected; the pick is checked client-side for a CYCLE only
+  and then by the server's write guards — the slot-name collision rule is
+  the server's (`mi-collision-rej`): the client copy (`miCollisionCheck`)
+  counts a renamed view and its type-row field as two args of one name and
+  refused the pair the corpus ships as `:json-ok-response`.
 - **`isFnEditable` parity**: col-header / cell / use-site contexts gate
   editability CLIENT-SIDE at click time (`isFnEditable(fnId)` from
   `lookups`); only root-row gates on the server. If a server-side editability

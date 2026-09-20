@@ -63,11 +63,29 @@
 ;; same logic client-side; this is the server-side mirror so non-editor
 ;; API consumers (scripts, tests, future UIs) get the same protection.
 
+(defn- canonical-slot-id
+  "The root of `slot-id`'s `:source-slot-id` chain — a renamed VIEW
+   and the slot it renames are one arg, not two (`ring-response`'s
+   `:body` is `assoc`'s `:value` under a new name). Stops on a cycle
+   or an unknown slot."
+  [slot-id slot-map]
+  (loop [sid slot-id seen #{}]
+    (let [src (get-in slot-map [sid :source-slot-id])]
+      (if (or (nil? src) (contains? seen src))
+        sid
+        (recur src (conj seen sid))))))
+
+
 (defn visible-slot-names
   "For `fn-id`, walk its inheritance closure and return a map of
-   `{slot-id → effective-name}` for every slot the fn exposes
+   `{canonical-slot-id → effective-name}` for every arg the fn exposes
    (own + inherited). Effective name accounts for `slot.source-slot-id`
-   renames via the existing `lookups/rename-for-slot` helper."
+   renames via the existing `lookups/rename-for-slot` helper; the KEY
+   is the rename chain's root, so a rename view and its source count
+   as the one arg they are — keyed by raw slot-id the MI-collision
+   check saw every renamed arg twice (`ring-response`'s `:body` next
+   to `assoc`'s `:value` it renames) and refused the very pair the
+   corpus composes as `:json-ok-response`."
   [fn-id lookups]
   (let [chain (l/inheritance-chain* fn-id lookups)
         fn-slots-by-fn (:fn-slots-by-fn lookups)
@@ -76,12 +94,13 @@
       (fn [acc fid]
         (let [own (get fn-slots-by-fn fid [])]
           (reduce (fn [a fs]
-                    (let [sid (:slot-id fs)]
-                      (if (or (nil? sid) (contains? a sid))
+                    (let [sid (:slot-id fs)
+                          canon (some-> sid (canonical-slot-id slot-map))]
+                      (if (or (nil? sid) (contains? a canon))
                         a
                         (let [eff (l/rename-for-slot fn-id sid lookups)
                               fallback (some-> (get slot-map sid) :name keyword)]
-                          (assoc a sid (or eff fallback))))))
+                          (assoc a canon (or eff fallback))))))
                   acc
                   own)))
       {}
@@ -159,7 +178,7 @@
                 (when (>= (count sids) 2)
                   {:reason (str "Arg name collision: " (pr-str nm)
                                 " is defined by " (count sids)
-                                " distinct ancestor slots across the parent set")}))
+                                " distinct ancestor args across the parent set")}))
               by-name)))))
 
 
@@ -775,6 +794,46 @@
     nil))
 
 
+(defn- sticky-ancestor
+  "The first fn in `parent-ids`' closure (BFS, the parents themselves
+   included) whose row carries `:branch-local? true`, read through
+   `storage`; nil when none does. The write-time twin of
+   `types.check/check-branch-local-monotonicity!` — that one sees the
+   fn-def and its parents' rich types at sync, this one sees rows."
+  [storage parent-ids]
+  (loop [queue (vec parent-ids)
+         visited #{}]
+    (when-let [cur (first queue)]
+      (if (contains? visited cur)
+        (recur (subvec queue 1) visited)
+        (let [row (sp/read-entity storage :fn cur)]
+          (if (true? (:branch-local? row))
+            row
+            (recur (into (subvec queue 1) (:parent-ids row))
+                   (conj visited cur))))))))
+
+
+(defn branch-local-rej
+  "`:branch-local?` is monotonic-OR over `:parent-ids`: once an ancestor
+   is sticky-local, every descendant is — so a `:fn` write declaring
+   `:branch-local? false` under such an ancestor would only LOOK like it
+   widened (`effective-branch-local?` still says true) while the row
+   lied about it. Refuse it, naming the ancestor. Parents come from the
+   payload when it re-parents, else from the stored row (a PUT carries
+   only the changed fields)."
+  [storage entity-type data]
+  (when (and (= entity-type :fn)
+             (false? (:branch-local? data)))
+    (let [parents (if (contains? data :parent-ids)
+                    (:parent-ids data)
+                    (some->> (:id data) (sp/read-entity storage :fn) :parent-ids))]
+      (when-let [seed (sticky-ancestor storage parents)]
+        {:reason (str "cannot set branch-local to false — inherited from "
+                      (pr-str (:name seed))
+                      "; a sticky-local ancestor makes every descendant"
+                      " branch-local. Re-parent off it to change that.")}))))
+
+
 (defn write-rej
   "Run every server-side write-time guard against the proposed row.
    Returns the first `{:reason :type}` rejection or nil if all pass.
@@ -799,4 +858,6 @@
       (some-> (resolver-rej storage entity-type entity-data)
               (assoc :type :capability/resolver-marker-laundering))
       (some-> (route-handler-shape-rej storage entity-type entity-data)
-              (assoc :type :constraint-violation/route-handler-shape))))
+              (assoc :type :constraint-violation/route-handler-shape))
+      (some-> (branch-local-rej storage entity-type entity-data)
+              (assoc :type :constraint-violation/branch-local-widening))))

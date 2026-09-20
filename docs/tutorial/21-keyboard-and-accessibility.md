@@ -70,6 +70,7 @@ canvas. Now the arrows follow the **wiring**, not the screen:
 | `.` or `m` (on a row) | that row's actions, the ⋯ menu |
 | `Escape` | back out — first to the card, then to the canvas |
 | `Shift`+arrows | move the card itself, in grid steps |
+| `Ctrl+Z` (⌘Z), or `Space` `u` | undo the last edit — for 30 seconds after it, anywhere but inside a text field |
 
 This is worth pausing on. `→` does not mean "the card drawn to the
 right" — it means "an argument of this function". You are walking the

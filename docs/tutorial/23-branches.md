@@ -207,8 +207,14 @@ don't want those merging from `dev` into `main` and silently
 clobbering production.
 
 Graphden marks these with `:branch-local? true` on the `:fn`
-row. The flag is **monotonic-OR over `:parent-ids`**: if any
-ancestor is sticky-local, you are too. Seeded defaults:
+row. In the editor that is the **📍 strip** at the bottom of a
+card you own: it reads *merges across branches* (dimmed) until you
+click it, tick **Branch-local** and **Save** — then *branch-local*.
+The flag is **monotonic-OR over `:parent-ids`**: if any ancestor
+is sticky-local, you are too — the strip then names the ancestor
+and the box is read-only; a write that tries to widen it is
+refused (`:constraint-violation/branch-local-widening`). Seeded
+defaults:
 
 | Seeded sticky-local | Why |
 |---|---|
@@ -300,20 +306,23 @@ when propagation may happen at all.
 
 ## Try it (sticky-local edition)
 
-1. On `main`, find `:web-server` (the editor's own server). Note
-   its port (8080).
-2. Fork to `feat-dev-server`. On the new branch, copy `:web-
-   server` to a new fn-def parented from `:http-server`, port
-   9001.
-3. Still ON `feat-dev-server`, press `Δ` on the `main` row
-   (compare mode) and select your new fn — it is "added here", and
-   the inspector's diff panel shows a `📍 branch-local` badge (the
-   Review dialog's change list carries it too; from `main` the fn
-   is only a ghost row — clicking it offers to switch over).
-4. Merge `feat-dev-server` → `main`. The alert names your fn as
-   skipped. Check `main` — it's not there.
-5. Switch back to `feat-dev-server` — still there. The branch
-   that produced it keeps it.
+1. On `main`, extend `const` as `tutorial-api-base` and bind its
+   `:value` to `http://localhost:9001` — the kind of per-environment
+   setting a merge must not carry. Click the card's `📍 merges
+   across branches` strip, tick **Branch-local**, **Save**: the
+   strip reads *branch-local*. (A fn parented from a seeded
+   sticky-local base such as `:http-server` shows that from the
+   start — inherited, with the ancestor named.)
+2. Fork to `feat-staging`. On the new branch change the value to
+   `https://staging.example.com`.
+3. Still ON `feat-staging`, press `Δ` on the `main` row (compare
+   mode) and select the fn — the inspector's diff panel shows the
+   changed value under a `📍 branch-local` badge (the Review
+   dialog's change list carries it too).
+4. Merge `feat-staging` → `main`. The alert names your fn as
+   skipped. Check `main` — it still reads `http://localhost:9001`.
+5. Switch back to `feat-staging` — `https://staging.example.com`.
+   The branch that wrote the version keeps it.
 
 ## What we glossed over
 

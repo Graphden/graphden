@@ -175,7 +175,12 @@ dispatcher. It reads the slot's structural shape (via
   reminder unchanged: `:http-server :handler` is a genuine per-call
   site (the request exists only at invocation — capture cannot feed
   it; a uniform 0-arg flip broke `/health`), so handler declarations
-  keep `:request` in their params.
+  keep `:request` in their params. In the editor the declaration is
+  the **λ chip** at the end of a composed fn's return-type strip
+  (`λ derived` / `λ []` / `λ request`; `editor-edit-modes-flags.js`),
+  written through `PUT /api/entities/fn/:id lambda-params=` — blank
+  clears back to derived, `[]` captures everything, a CSV is the
+  ordered list. Tutorial lesson 09 sets one.
 - **2+-arg slot** (`[:fn {:a A :b B} ret]`) → sub free args matching
   slot's structural names. Map-callable; covers
   `:middleware :body` (`{:request _ :next-handler _}`).

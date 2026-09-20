@@ -283,7 +283,7 @@
             {:id "03"
              :slug "parents-and-inheritance"
              :chapter "Basics"
-             :version 1
+             :version 2
              :title "Parents and inheritance"
              :steps
              [{:title "Inheritance, hands on"
@@ -339,6 +339,32 @@
                :target ".arg-value-edit-popover"
                :check {:kind "fn-parent" :name "add-10-text" :parent "to-str"}
                :creates {:type "fn" :name "add-10-text"}}
+              {:title "Two parents at once"
+               :body "A fn can also have TWO parents — two axes combined. The stdlib builds HTTP responses that way: a status axis and a content-type axis. Type `ok-response` in the Explorer filter and click the [[ok-response]] row (web.response) — it sets :status 200 and nothing else."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "ok-response"}}
+              {:title "Extend the status axis"
+               :body "Click [[⋯]] on the ok-response row, choose [[Extend]], name it `tutorial-json-ok` — then [[Save]]."
+               :target ".node-overlay[data-fn-name=\"ok-response\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"ok-response\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "fn-parent" :name "tutorial-json-ok" :parent "ok-response"}
+               :creates {:type "fn" :name "tutorial-json-ok"}}
+              ;; Selection gate — the next step opens the PARENT row's ⋯ on
+              ;; the child's card; ringing it while ok-response is still the
+              ;; selected fn would land on its own ancestor row.
+              {:title "tutorial-json-ok is open"
+               :body "One parent so far: the ok-response row sits under yours. Its :status is final; :headers and :body are free."
+               :target nil
+               :check {:kind "selected" :name "tutorial-json-ok"}}
+              {:title "Add the second parent"
+               :body "Click [[⋯]] on the ok-response row of YOUR card — the parent row, one level down — and choose [[+]] (add another parent). Type `json-content-type` in the filter that opens and click the [[json-content-type]] row. The card branches: your fn on top, both axes below it, their shared ring-response beneath — the diamond. Each axis binds a different slot, so nothing collides; :body stays free for a caller."
+               :target ".node-overlay[data-fn-name=\"tutorial-json-ok\"] .ancestor-line[data-level=\"1\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-json-ok\"] .ancestor-line[data-level=\"1\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"add-mi-parent\"]" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"json-content-type\"]"]
+               :check {:kind "fn-parent" :name "tutorial-json-ok" :parent "json-content-type"}}
+              {:title "Read the diamond"
+               :body "Two parents, one shared ancestor, three slots settled by three different fns — that is multiple inheritance, and the card is its picture. The parent row's [[⋯]] also removes a parent ([[×]]); bindings on slots only that parent brought are dropped with it. Click [[Next]]."
+               :target ".node-overlay[data-fn-name=\"tutorial-json-ok\"]"
+               :check {:kind "manual"}}
               {:title "That's inheritance — both ways"
                :body "One parent, inherited slots, per-child bindings — and when you need a step ABOVE what you have, Wrap builds the caller for you. (Names stay yours too: Rename and Move to another namespace work even on fns with callers — everyone references the fn by identity, not by name.) The written lesson 03 goes further: multiple parents, and why a value an ancestor set is final. Click [[Finish]] to clean up or keep what you made."
                :target nil
@@ -346,7 +372,7 @@
             {:id "04"
              :slug "slots-and-bindings"
              :chapter "Basics"
-             :version 1
+             :version 2
              :title "Slots and bindings"
              :steps
              [{:title "One slot, many bindings"
@@ -418,8 +444,19 @@
                :body "Same slot, same implementation, a different binding — BETA. Two children, two outputs, and a parent that never changed. Click [[Next]]."
                :target ".execute-result-host"
                :check {:kind "manual"}}
+              {:title "Change it"
+               :body "A bound literal is a click away from a new one. Click the value [[beta]] on the canvas, type `gamma` — then [[Save]]. (For a fn bound INTO a slot the same verb is that card's [[⋯]] → [[✎ Change value]].)"
+               :target ".arg-value-editable"
+               :targets [".arg-value-editable" ".arg-value-edit-popover"]
+               :check {:kind "binding-value" :name "tutorial-b"
+                       :slot "string" :value "gamma"}}
+              {:title "Take it away"
+               :body "Click [[gamma]] once more and press [[Delete]] (then confirm). The binding is gone and the [[+]] is back on :string — the slot is free again, and tutorial-b would run like str-upper does. Slipped? Ctrl+Z (⌘Z) brings the value back for 30 seconds."
+               :target ".arg-value-editable"
+               :targets [".arg-value-editable" ".arg-value-edit-popover .arg-value-edit-btn-danger"]
+               :check {:kind "binding-absent" :name "tutorial-b" :slot "string"}}
               {:title "One slot, two values"
-               :body "tutorial-a says ALPHA, tutorial-b says BETA, str-upper stays open — one slot identity, three independent binding states. That separation is why inheritance never copies anything. Click [[Finish]] to clean up or keep both."
+               :body "tutorial-a says ALPHA, tutorial-b is free again, str-upper never changed — one slot identity, three independent binding states, and a value you can change or take away without touching anyone else. That separation is why inheritance never copies anything. Click [[Finish]] to clean up or keep both."
                :target nil
                :check {:kind "manual"}}]}
             {:id "05"
@@ -502,7 +539,7 @@
             {:id "06"
              :slug "lists"
              :chapter "Basics"
-             :version 1
+             :version 2
              :title "Lists: seed, append, close"
              :steps
              [{:title "Lists on the card"
@@ -533,6 +570,15 @@
                :target ".placeholder-binder[data-fn-name=\"tutorial-base-sum\"][data-arg-name=\"nums\"]"
                :targets [".placeholder-binder[data-fn-name=\"tutorial-base-sum\"][data-arg-name=\"nums\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "list-items" :name "tutorial-base-sum" :slot "nums" :count 2}}
+              {:title "Swap them"
+               :body "Each item carries its own small buttons on its branch: [[↑]] [[↓]] move it, [[+]] inserts before it, [[×]] removes it. Click [[↑]] on the 2 — the list reads 2, 1. Order is the items' position, and it is yours to change."
+               :target ".edge-seq-item[data-index=\"1\"] .arg-seq-btn-up"
+               :check {:kind "list-first" :name "tutorial-base-sum" :slot "nums" :value "2"}}
+              {:title "Insert before"
+               :body "Click [[+]] on the 1 — the second item now — choose [[Insert literal]], type `0` — then [[Save]]. The list reads 2, 0, 1: an append can be an insert at a position, and the later items shift down."
+               :target ".edge-seq-item[data-index=\"1\"] .arg-seq-btn-insert"
+               :targets [".edge-seq-item[data-index=\"1\"] .arg-seq-btn-insert" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :check {:kind "list-items" :name "tutorial-base-sum" :slot "nums" :count 3}}
               {:title "Now extend the seeded fn"
                :body "Click [[⋯]] on the tutorial-base-sum row, [[Extend]], name it `tutorial-sum-more` — [[Save]]."
                :target ".node-overlay[data-fn-name=\"tutorial-base-sum\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
@@ -544,7 +590,7 @@
                :target nil
                :check {:kind "selected" :name "tutorial-sum-more"}}
               {:title "The list you inherited"
-               :body "Click the [[tutorial-base-sum]] row on your card to unfold it. The 1 and the 2 appear, each with a small ↖ — hover one: inherited from tutorial-base-sum. After them, a [[+]] that is YOURS: an inherited list stays open for appending."
+               :body "Click the [[tutorial-base-sum]] row on your card to unfold it. The 2, 0 and 1 appear, each with a small ↖ — hover one: inherited from tutorial-base-sum. After them, a [[+]] that is YOURS: an inherited list stays open for appending."
                :target ".node-overlay[data-fn-name=\"tutorial-sum-more\"] .ancestor-line[data-level=\"1\"]"
                :check {:kind "expanded" :name "tutorial-sum-more" :depth 1}}
               {:title "Append here"
@@ -558,7 +604,7 @@
                :targets [".node-overlay[data-fn-name=\"tutorial-sum-more\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                :check {:kind "dom" :selector ".execute-result-host .execute-result-pane, .execute-result-host .execute-error-pane"}}
               {:title "Six"
-               :body "1 + 2 + 3: the parent's seed and your append, one list at run time. Run tutorial-base-sum and it still answers 3 — you extended its list, you did not edit it. Click [[Next]]."
+               :body "2 + 0 + 1 + 3: the parent's seed and your append, one list at run time. Run tutorial-base-sum and it still answers 3 — you extended its list, you did not edit it. Click [[Next]]."
                :target ".execute-result-host"
                :check {:kind "manual"}}
               {:title "Back to the parent"
@@ -579,7 +625,7 @@
                :target ".placeholder-sealed[data-arg-name=\"nums\"]"
                :check {:kind "manual"}}
               {:title "That's a list"
-               :body "Seed it where it starts, append from below, close it when the seed IS the point. The written lesson 06 has the fns.edn forms — `[1 2]`, `{:append [3]}`, `:closed true` — and what an item's [[⋯]] can do. Click [[Finish]] to clean up or keep what you made."
+               :body "Seed it where it starts, append from below, close it when the seed IS the point. The written lesson 06 has the fns.edn forms — `[1 2]`, `{:append [3]}`, `:closed true` — and fn-ref items, whose ↑ ↓ + × live in the item card's [[⋯]]. Click [[Finish]] to clean up or keep what you made."
                :target nil
                :check {:kind "manual"}}]}
             {:id "07"
@@ -753,7 +799,7 @@
             {:id "09"
              :slug "higher-order-functions"
              :chapter "Composing"
-             :version 1
+             :version 2
              :title "Higher-order functions"
              :steps
              [{:title "A slot that wants a function"
@@ -807,8 +853,27 @@
                :body "GRAPH, DEN — two strings went in and each came out upper-cased: str-upper ran once per item, and you never called it. map did, handing each element in as its one argument. That is the whole HOF contract — the argument is passed unrun and the impl drives it. And notice the order you worked in: the data first, the callback last — each value you bound made the next choice smaller. Click [[Next]]."
                :target ".execute-result-host"
                :check {:kind "manual"}}
+              {:title "A callable of your own"
+               :body "str-upper is package-owned, so make a callable you can shape. Type `str-upper` in the Explorer filter and click the [[str-upper]] row."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "str-upper"}}
+              {:title "Extend it"
+               :body "Click [[⋯]] on the str-upper row, choose [[Extend]], name it `tutorial-upper` — then [[Save]]."
+               :target ".node-overlay[data-fn-name=\"str-upper\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"str-upper\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "fn-parent" :name "tutorial-upper" :parent "str-upper"}
+               :creates {:type "fn" :name "tutorial-upper"}}
+              {:title "tutorial-upper is open"
+               :body "Its card ends in a signature strip: the return type, and after it [[λ derived]] — the fn's CALL-SITE parameters."
+               :target nil
+               :check {:kind "selected" :name "tutorial-upper"}}
+              {:title "Say what a caller fills"
+               :body "When a HOF hands this fn its argument, the compile has to know WHICH free arg receives it — derived works with one candidate and refuses with several. Say it: click [[λ derived]], choose [[These, in order]], tick [[string]], then [[Save]]. The chip reads λ string: string is the per-call input, anything else the fn has stays captured from the graph. ([[None — []]] is what a route handler declares: no per-call input at all.)"
+               :target ".node-overlay[data-fn-name=\"tutorial-upper\"] .lambda-params-chip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-upper\"] .lambda-params-chip" ".arg-value-edit-popover input[data-lambda-name=\"string\"]" ".arg-value-edit-popover"]
+               :check {:kind "fn-field" :name "tutorial-upper" :field "lambda-params" :value ["string"]}}
               {:title "That's a HOF"
-               :body "One slot type (:fn …) changes everything: the argument is passed unrun and the impl drives it. The written lesson 09 goes further — callables that take SEVERAL arguments are matched by NAME, closure capture, lambda-params. Click [[Finish]] to clean up or keep tutorial-map."
+               :body "One slot type (:fn …) changes everything: the argument is passed unrun and the impl drives it. The written lesson 09 goes further — callables that take SEVERAL arguments are matched by NAME, closure capture, and the λ declaration you just made in fns.edn form. Click [[Finish]] to clean up or keep tutorial-map."
                :target nil
                :check {:kind "manual"}}]}
             {:id "10"
@@ -1497,7 +1562,7 @@
             {:id "23"
              :slug "branches"
              :chapter "The editor"
-             :version 1
+             :version 2
              :title "Branches"
              ;; This lesson MANAGES branches itself (fork, edit, return to
              ;; main) — running it inside a tour scratch branch broke its
@@ -1551,6 +1616,11 @@
                :body "branch-demo reads “main version” again — your edit is a version row that belongs to tutorial-branch alone. Time to compare the two sides properly."
                :target "#branch-chip-btn"
                :check {:kind "manual"}}
+              {:title "Pin a fn to its branch"
+               :body "Some fns are per-environment configuration — a port, a path, a schedule — and must NOT ride a merge. The bottom of branch-demo's card reads [[📍 merges across branches]]; click it, tick [[Branch-local]], then [[Save]]. It now reads branch-local: version rows of this fn stay on the branch that wrote them, whatever gets merged where. (The flag sits on the fn identity — every branch sees it; a descendant of a branch-local fn is branch-local too.)"
+               :target ".node-overlay[data-fn-name=\"branch-demo\"] .branch-local-strip"
+               :targets [".node-overlay[data-fn-name=\"branch-demo\"] .branch-local-strip" ".arg-value-edit-popover input[data-branch-local=\"toggle\"]" ".arg-value-edit-popover"]
+               :check {:kind "fn-field" :name "branch-demo" :field "branch-local?" :value true}}
               {:title "Compare the branches"
                :body "Click the branch chip and press [[Δ]] on the tutorial-branch row. The EDITOR becomes the diff: a “Δ vs tutorial-branch · 1” chip appears by the branch chip (the number counts the changed fns), changed fns get ± badges in the Explorer (a lens row under the kind chips filters by change type), and opening a changed fn shows its old → new details in the inspector."
                :target "#branch-chip-btn"

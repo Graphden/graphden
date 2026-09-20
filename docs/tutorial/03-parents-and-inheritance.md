@@ -214,8 +214,12 @@ In the editor:
    pipeline is built top-down: bind the base fn a slot needs, extend
    it where it sits, bind the child's slots on its card, repeat.
    Lessons 12, 18 and 35 build their fns this way.
-6. Try writing a multiple-inheritance fn-def over the two real
-   response axes:
+6. Now give a fn TWO parents, over the two real response axes.
+   Filter for `ok-response` (`web.response`), `⋯` → **Extend** →
+   `tutorial-json-ok` → **Save**. On the new card click `⋯` on the
+   **`ok-response` row** — the parent row, one level down — and
+   choose **+** (add another parent); type `json-content-type` in
+   the picker and click its row. In `fns.edn` the same fn is:
 
    ```edn
    {:name :tutorial-json-ok
@@ -228,6 +232,11 @@ In the editor:
    saw above. Each axis row is clickable, so you can walk into
    either branch. `:tutorial-json-ok` leaves `:body` free; bind it
    (e.g. `"{}"`) and Run to get a `200 application/json` response.
+   The same parent-row `⋯` also has **×** — remove a parent; the
+   bindings on slots only that parent brought go with it (the
+   editor asks first). The picker offers any fn that shares your
+   fn's base and sets args of its own; the server refuses a cycle or
+   a slot-name collision (*MI restrictions* above) and says why.
 
 ## What we glossed over
 

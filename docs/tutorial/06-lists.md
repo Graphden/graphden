@@ -111,28 +111,34 @@ Seed a list, extend it from a child, then close it:
 3. Click the `+` on `:nums` → **Append literal** → `1` → **Save**.
    Then the tail `+` → `2` → **Save**. The trunk fans out to `1`,
    `2` and a new tail.
-4. `⋯` on `tutorial-base-sum` → **Extend** → `tutorial-sum-more` →
+4. Each item carries its own small buttons on its branch: `↑` `↓`
+   move it, `+` inserts before it, `×` removes it. Click `↑` on the
+   `2` — the list reads `2, 1`. Then `+` on the `1` → **Insert
+   literal** → `0` → **Save**: `2, 0, 1`. Order is the items'
+   `position`, and it is yours to change; an append can be an
+   insert, and the later items shift down.
+5. `⋯` on `tutorial-base-sum` → **Extend** → `tutorial-sum-more` →
    **Save**. The new card shows no `:nums` yet — the list is the
    parent's. Click the `tutorial-base-sum` row on the card to unfold
-   it: `1`, `2` appear, each with `↖`, and after them a tail `+` of
-   your own.
-5. Click that tail → **Append literal** → `3` → **Save**. Three
+   it: `2`, `0`, `1` appear, each with `↖`, and after them a tail
+   `+` of your own.
+6. Click that tail → **Append literal** → `3` → **Save**. Four
    items on the canvas, one binding on each fn — and the list now
    stays on your card folded or not.
-6. `⋯` → **▶ Run** → **Run**: `6`. Run `tutorial-base-sum` and it
+7. `⋯` → **▶ Run** → **Run**: `6`. Run `tutorial-base-sum` and it
    still says `3` — you extended, you did not edit.
-7. Back on `tutorial-base-sum` (filter, click its row), click the
+8. Back on `tutorial-base-sum` (filter, click its row), click the
    `🔒` after `:nums`' type chip, tick **Close the list**, **Save**.
    The badge is a closed lock now.
-8. Open `tutorial-sum-more` again: its `3` is still there, but the
+9. Open `tutorial-sum-more` again: its `3` is still there, but the
    tail is a lock — hover it. Nothing below `tutorial-base-sum` can
    append any more.
 
 ## What we glossed over
 
-- **Order and insertion** — an item's `⋯` moves it up / down, and an
-  append can be an insert at a position; the chain is `position`
-  ordered.
+- **fn-ref items' order** — a fn bound as an item has no edge
+  buttons; its `↑` `↓` and **+ Insert item before** sit in the item
+  card's `⋯`. Same rows, same `position` chain.
 - **fn-ref items** — **Append fn-ref** puts a fn's *result* in the
   list (a component in a page's `children`, lesson 10).
 - **List types** — `[:list T]` and what the checker does with each

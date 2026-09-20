@@ -389,33 +389,18 @@ function _applyAppsAvailabilityState(host) {
 
 
 function _applyAddMICompatibilityState(host) {
-  // Post-swap MI-add compatibility check — disable + tooltip when
-  // no MI parent candidates exist. Mirrors the legacy
-  // `makeAddMIParentButton`'s in-place gating; the button itself
-  // is server-rendered, only the disabled-with-reason state lives
-  // in JS because `compatibleMIParentInfo` walks client-cached
-  // `lookups`.
+  // Post-swap hint on the + Add-MI button. `compatibleMIParentInfo` walks
+  // the fns `lookups` happens to hold (the open subtree + loaded Explorer
+  // rows), while the picker it opens searches the whole graph — so this
+  // can never say "no compatible parent exists"; it used to, and disabled
+  // the button on every card whose compatible partner was not loaded (a
+  // sibling axis such as `:json-content-type` next to `:ok-response`).
+  // Now it only names what a compatible parent looks like.
   const addMiBtn = host.querySelector('[data-action="add-mi-parent"]');
-  if (!addMiBtn || typeof compatibleMIParentInfo !== 'function') return;
-  const cardFnId = host.dataset.cardFnId;
-  const cardFnEntity = lookups?.fnMap?.get(cardFnId);
-  if (!cardFnEntity) return;
-  const info = compatibleMIParentInfo(cardFnEntity.id,
-                                      cardFnEntity['parent-ids'] || []);
-  if (info?.candidateIds.size !== 0) return;
-  const reasons = Object.values(info.rejected || {});
-  const counts = {};
-  for (const r of reasons) counts[r] = (counts[r] || 0) + 1;
-  let topReason = null;
-  let topCount = 0;
-  for (const [r, c] of Object.entries(counts)) {
-    if (c > topCount) { topReason = r; topCount = c; }
-  }
-  addMiBtn.disabled = true;
-  addMiBtn.classList.add('action-icon-disabled');
-  addMiBtn.style.cursor = 'help';
-  addMiBtn.title = 'No compatible MI parent — '
-                + (topReason || 'no compatible MI parent in the registry');
+  if (!addMiBtn) return;
+  addMiBtn.title = 'Add another parent (multi-inheritance) — a fn sharing this '
+                 + 'one\'s base that sets args of its own; the picker searches the whole graph';
+  addMiBtn.setAttribute('aria-label', addMiBtn.title);
 }
 
 

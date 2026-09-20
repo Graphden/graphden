@@ -53,6 +53,10 @@ target it merged into, see [VERSIONING.md](VERSIONING.md)),
 handler's declared `:lambda-params` outside `[]`/`[:request]`),
 `:packages/route-handler-shape` (400 — the same contract at package
 sync),
+`:constraint-violation/branch-local-widening` (400 — a `:fn` write
+declaring `:branch-local? false` under a sticky-local ancestor; the flag
+is monotonic-OR over `:parent-ids`, the editor's 📍 strip says who
+seeded it),
 `:merge-conflict`, `:vault/not-configured`, `:refinement/violated`,
 `:capability/secret-leaf-restricted`, `:authz/forbidden`,
 `:authz/branch-protected` (a write to a branch whose `write-policy`

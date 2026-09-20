@@ -20,7 +20,7 @@ const {
   appendSeqItemViaEdge,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, tourTitle, waitTourClosed,
-  bindPlaceholderOn, setSealsViaBadge,
+  bindPlaceholderOn, setSealsViaBadge, settleTourRing,
 } = require('./tutorial-tour-helpers');
 
 (async () => {
@@ -400,6 +400,9 @@ const {
     await filterAndSelect(page, 'tutorial-sum-more', 'tutorial-sum-more');
     await waitTourTitle(page, 'A lock where the tail was', 150000);
     await page.waitForSelector('.placeholder-sealed[data-arg-name="nums"] .seal-ghost', {timeout: 60000});
+    // The step's target landed after its title — let the ring find it before
+    // the walk moves on (the audit samples the ring, a reader would see it).
+    await settleTourRing(page, 20000);
     const locked = await page.evaluate(() => ({
       tail: document.querySelectorAll('.placeholder-binder.is-seq-anchor').length,
       ghost: document.querySelector('.placeholder-sealed[data-arg-name="nums"] .seal-ghost')?.title || '',
@@ -422,6 +425,8 @@ const {
     await waitTourTitle(page, 'Extend it');
     await extendViaRowActions(page, 'tutorial-cut', 'subs');
     await waitTourTitle(page, 'Optional, on the label', 150000);
+    await page.waitForSelector('.edge-label-overlay[data-arg-name="end"] .seal-badge', {timeout: 60000});
+    await settleTourRing(page, 20000);
     const optional = await page.evaluate(() => ({
       dimmed: document.querySelector('.placeholder-binder[data-fn-name="tutorial-cut"][data-arg-name="end"]')
         ?.classList.contains('is-optional'),
@@ -447,6 +452,7 @@ const {
     await extendViaRowActions(page, 'tutorial-cut-more', 'tutorial-cut');
     await waitTourTitle(page, 'A lock where the + would be', 150000);
     await page.waitForSelector('.placeholder-sealed[data-arg-name="end"] .seal-ghost', {timeout: 60000});
+    await settleTourRing(page, 20000);
     const sealedChild = await page.evaluate(() => ({
       ghost: document.querySelector('.placeholder-sealed[data-arg-name="end"] .seal-ghost')?.title || '',
       finalGone: !document.querySelector('.placeholder-binder[data-arg-name="string"]')
@@ -464,6 +470,7 @@ const {
     await waitTourTitle(page, 'The + is back — and solid', 150000);
     await page.waitForSelector('.placeholder-binder[data-fn-name="tutorial-cut-more"][data-arg-name="end"]',
       {timeout: 60000});
+    await settleTourRing(page, 20000);
     const ratchet = await page.evaluate(() => ({
       dimmed: document.querySelector('.placeholder-binder[data-fn-name="tutorial-cut-more"][data-arg-name="end"]')
         ?.classList.contains('is-optional'),

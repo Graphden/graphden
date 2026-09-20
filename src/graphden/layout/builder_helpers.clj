@@ -195,6 +195,83 @@
       {}))
 
 
+(defn- canon-slot-id
+  "A renamed-view slot (`{:as …}`, `:source-slot-id` set) and the slot
+   it renames are ONE list / ONE slot — a seal on either binds both.
+   Follow the source chain to the root slot id."
+  [slot-map sid]
+  (loop [s sid, seen #{}]
+    (let [src (:source-slot-id (get slot-map s))]
+      (if (and src (not (contains? seen s)))
+        (recur src (conj seen s))
+        s))))
+
+
+(defn- closest-flagged-binding
+  "Walk `fn-id` and its `:parent-ids` closure (BFS, self first) and
+   return the closest binding on `slot-id` — or on a renamed view of
+   it — whose `flag` is true, else nil. The same walk
+   `crud.validation/ancestor-binding-flag?` does at write time — minus
+   the self-skip: here the reader must see their OWN seal too, so the
+   edge carries who sealed it and the client can tell `sealed here` (a
+   lifted seal is one PUT away) from `sealed above` (a `+` that the
+   server would refuse)."
+  [lookups fn-id slot-id flag]
+  (let [{:keys [fn-map bindings-by-fn slot-map]} lookups
+        target (canon-slot-id slot-map slot-id)]
+    (loop [queue [fn-id]
+           visited #{}]
+      (when-let [cur (first queue)]
+        (if (contains? visited cur)
+          (recur (rest queue) visited)
+          (or (some #(when (and (true? (get % flag))
+                                (= target (canon-slot-id slot-map (:slot-id %))))
+                       %)
+                    (get bindings-by-fn cur))
+              (recur (concat (rest queue) (:parent-ids (get fn-map cur)))
+                     (conj visited cur))))))))
+
+
+(defn edge-seal-fields
+  "The SEALS on an arg's slot, as edge / placeholder data the client
+   renders and gates by — `{}` when there are none:
+
+     :sealedBy      fn-id (str) of the closest `:terminal true` binding
+                    on the chain — descendants may not bind the slot
+                    (`validation/terminal-rej`);
+     :listClosedBy  fn-id of the closest `:list-closed true` binding —
+                    descendants may not append (`list-closed-rej`);
+     :requiredBy    fn-id of the closest `:required true` binding on a
+                    slot the declaration left optional — the ratchet
+                    (`compile.bindings/effective-required?`).
+
+   Each carries a `…Name` twin so the badge can say WHO without a
+   client lookup. Computed here for the same reason `:descSource` is:
+   one walk, server-side, over the lookups the layout already holds —
+   the editor used to know nothing of these flags and offered a `+` the
+   server then refused."
+  [lookups arg-id]
+  (or (when-let [arg (get-in lookups [:arg-map arg-id])]
+        (let [{:keys [fn-map slot-map]} lookups
+              fn-id (:fn-id arg)
+              slot-id (:slot-id arg)
+              slot (get slot-map slot-id)
+              fname (fn [fid] (or (:name (get fn-map fid)) ""))]
+          (when (and fn-id slot-id)
+            (let [sealed (closest-flagged-binding lookups fn-id slot-id :terminal)
+                  closed (closest-flagged-binding lookups fn-id slot-id :list-closed)
+                  required (when (false? (:required slot))
+                             (closest-flagged-binding lookups fn-id slot-id :required))]
+              (cond-> {}
+                sealed (assoc :sealedBy (str (:fn-id sealed))
+                              :sealedByName (fname (:fn-id sealed)))
+                closed (assoc :listClosedBy (str (:fn-id closed))
+                              :listClosedByName (fname (:fn-id closed)))
+                required (assoc :requiredBy (str (:fn-id required))
+                                :requiredByName (fname (:fn-id required))))))))
+      {}))
+
+
 (defn add-arg-value-node
   "Emit a value-style arg node + edge linking it to `source-node-id`.
    No-op when the node is already present (dedup by `:added-node-ids`).
@@ -244,6 +321,7 @@
                                          (when arg-name (name arg-name)))}
                            (edge-source-fields lookups arg-id)
                            (edge-description-fields lookups arg-id)
+                           (edge-seal-fields lookups arg-id)
                            (edge-narrowing-fields lookups arg-id expanded-fns))}))
     node-id))
 
@@ -407,7 +485,7 @@
         sequence-anchors (filterv bnd/sequence-anchor? raw-args)
         chain-item-ids (into #{}
                              (mapcat (fn [anchor]
-                                       (map :id (bnd/walk-anchor-chain anchor arg-map))))
+                                       (map :id (bnd/walk-anchor-chain anchor arg-map lookups))))
                              sequence-anchors)
         anchor-ids (set (map :id sequence-anchors))
         sequence-slot-entries
@@ -417,7 +495,7 @@
                    anchor
                    (or (bnd/resolve-arg-name anchor arg-map) "items")
                    arg-map
-                   (not (bnd/list-closed-upstream? lookups fn-id (:slot-id anchor)))))
+                   lookups))
                sequence-anchors))
         args (filterv (fn [a]
                         (not (or (contains? anchor-ids (:id a))
@@ -486,6 +564,9 @@
   [lookups levels expand-set _bindings]
   (let [{:keys [arg-map args-by-fn slot-map]} lookups
         active-fns (filterv expand-set (mapcat identity levels))
+        ;; What a pass-through list anchor may show: its ancestors' lists
+        ;; only as far as the reader has unfolded (`walk-anchor-chain`).
+        active-set (set active-fns)
         ;; A renamed-view slot (`{:as …}`) is a distinct slot row whose
         ;; `:source-slot-id` points at the slot it renames. It and its
         ;; source are ONE logical slot — collapse them to a single
@@ -534,7 +615,7 @@
             chain-ids (into #{}
                             (mapcat (fn [a]
                                       (when (bnd/sequence-anchor? a)
-                                        (map :id (bnd/walk-anchor-chain a arg-map)))))
+                                        (map :id (bnd/walk-anchor-chain a arg-map lookups active-set)))))
                             raw-args)
             args (filterv (fn [a]
                             (not (or (contains? anchor-ids (:id a))
@@ -583,9 +664,8 @@
           ;; covered-slots gate the scalar arg loop above uses.
           (doseq [anchor anchors
                   :when (not (contains? @covered-slots (canon-slot (:slot-id anchor))))
-                  :let [slot-name (or (bnd/resolve-arg-name anchor arg-map) "items")
-                        open? (not (bnd/list-closed-upstream? lookups fn-id (:slot-id anchor)))]
-                  entry (bnd/expand-sequence-anchor anchor slot-name arg-map open?)]
+                  :let [slot-name (or (bnd/resolve-arg-name anchor arg-map) "items")]
+                  entry (bnd/expand-sequence-anchor anchor slot-name arg-map lookups active-set)]
             (swap! covered-slots conj (canon-slot (:slot-id anchor)))
             (swap! result conj (assoc entry :from-ancestor from-ancestor))))
         (doseq [a @fn-refs] (swap! result conj a))
@@ -707,6 +787,7 @@
                                            (when edge-arg-name (name edge-arg-name)))}
                              (edge-source-fields lookups source-arg-id)
                              (edge-description-fields lookups source-arg-id)
+                             (edge-seal-fields lookups source-arg-id)
                              (edge-narrowing-fields lookups source-arg-id source-expanded-fns))})))))
 
 
@@ -879,7 +960,12 @@
   [state lookups inverse-source-map arg-name arg-type arg-id source-node-id expanded-fns is-hof]
   (let [arg-map (:arg-map lookups)
         arg-rec (get arg-map arg-id)
-        optional? (arg-is-optional? arg-map arg-rec)
+        ;; Declared optional AND not ratcheted to required by a binding on
+        ;; the chain (`:requiredBy`, the same walk the seal badge reads) —
+        ;; the dimmed `+` must tell the truth the executor acts on.
+        seal-fields (edge-seal-fields lookups arg-id)
+        optional? (and (arg-is-optional? arg-map arg-rec)
+                       (nil? (:requiredBy seal-fields)))
         displayed-name (or (compute-edge-label lookups arg-id source-node-id expanded-fns)
                            (when arg-name (name arg-name)))
         hof-bound (when is-hof (caller-bound-arg arg-map inverse-source-map arg-id))
@@ -920,6 +1006,12 @@
                                         ;; them from the node-id string.
                                         :argId (str arg-id)}
                                        flag-fields
+                                       ;; The seals gate the `+` itself (a
+                                       ;; slot sealed / list closed ABOVE this
+                                       ;; card gets a lock, not a binder), so
+                                       ;; the node carries them, not only the
+                                       ;; edge.
+                                       seal-fields
                                        (when arg-rec
                                          (arg-row->node-id-fields arg-rec)))
                           arg-type  (assoc :argType (name arg-type))
@@ -942,6 +1034,7 @@
                                ;; carries no type label of its own).
                                (edge-source-fields lookups arg-id)
                                (edge-description-fields lookups arg-id)
+                               seal-fields
                                (edge-narrowing-fields lookups arg-id expanded-fns))}))))))
 
 
@@ -1048,6 +1141,7 @@
                                flag-fields
                                (edge-source-fields lookups arg-id)
                                (edge-description-fields lookups arg-id)
+                               (edge-seal-fields lookups arg-id)
                                (edge-narrowing-fields lookups arg-id #{root-fn-id}))}))))))
 
 

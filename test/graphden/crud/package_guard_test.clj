@@ -87,6 +87,19 @@
                      storage :binding-list-item
                      {:binding-id (:id pkg-binding) :value 11}))))
 
+    (testing "a slot write resolves the owner through the fn-slot that declares it"
+      ;; `:required` / `:description` on a base-fn's slot surface in every fn
+      ;; that inherits it — the seal popover only offers the optional toggle
+      ;; to the declaring fn, and the server must refuse the rest.
+      (let [pkg-slot (sp/create-entity storage :slot {:name "sealed" :type-fn-id pkg-id})
+            _ (sp/create-entity storage :fn-slot {:fn-id pkg-id :slot-id (:id pkg-slot) :position 1})
+            user-slot (sp/create-entity storage :slot {:name "mine" :type-fn-id pkg-id})
+            _ (sp/create-entity storage :fn-slot {:fn-id (:id user) :slot-id (:id user-slot) :position 0})]
+        (is (string? (pkg-guard/write-rejection storage :slot pkg-slot)))
+        (is (nil? (pkg-guard/write-rejection storage :slot user-slot)))
+        (is (nil? (pkg-guard/write-rejection storage :slot {:id (random-uuid)}))
+            "a slot no fn-slot declares has no owner to guard")))
+
     (testing "delete of the package fn row / its binding family is rejected"
       (is (string? (pkg-guard/delete-rejection storage :fn {:id pkg-id})))
       (is (string? (pkg-guard/delete-rejection storage :binding pkg-binding)))

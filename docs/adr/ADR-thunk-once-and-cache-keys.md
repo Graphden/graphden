@@ -128,7 +128,7 @@ stream's `:render`, re-run on every tick) sees its CAPTURED args resolve
 exactly once — so a fragment passed as a hiccup VALUE renders its first
 tree forever, every tick hashes equal, and the stream pushes nothing after
 its first frame. The Tests panel and the demo clock were dead like that
-from 2026-08-24 until 2026-09-02; the tutorial's lesson-14 e2e still passed
+from 2026-08-24 until 2026-09-02; the tutorial's lesson-16 e2e still passed
 because the auto-run usually beat the panel's first fetch.
 
 The fix is graph-side and keeps the ADR's model: `:sse-fragment-handler`'s

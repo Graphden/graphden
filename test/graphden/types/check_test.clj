@@ -1127,7 +1127,7 @@
 ;; Identity edges — a ref into a `:fn-ref` slot names its target without
 ;; evaluating it, so NEITHER the target's free args NOR its effects belong
 ;; to the fn-def. Before this, naming the editor's own listener from a
-;; lesson-35 consumer made the Run form list every free arg of the app and
+;; lesson-37 consumer made the Run form list every free arg of the app and
 ;; declared the consumer `:process` + `:io` + … (the effect gate would then
 ;; have demanded a producer's effects from its consumer).
 

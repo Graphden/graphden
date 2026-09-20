@@ -1,4 +1,4 @@
-// Lessons 13, 19, 18, 10, 16 — running fns, workspaces, the
+// Lessons 15, 21, 20, 12, 18 — running fns, workspaces, the
 // Explorer/Inspector view layer, in-graph state, and tracing a run.
 //
 // Part of the interactive-tutorial drift guard: walks every step of its
@@ -24,16 +24,16 @@ const {
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-ux — lessons 13 / 18 / 19 / 10 / 16');
+  console.log('edit-tutorial-tour-ux — lessons 15 / 20 / 21 / 12 / 18');
   let failed = false;
   try {
     await hardCleanup(page);
     const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 
-    // ---------- Lesson 13 — executing a fn ----------
-    await page.goto(BASE + '/?tutorial=13');
+    // ---------- Lesson 15 — executing a fn ----------
+    await page.goto(BASE + '/?tutorial=15');
     await waitTourTitle(page, 'Running is part of editing', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 13 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 15 Next');
     await waitTourTitle(page, 'Find str-len');
     await filterAndSelect(page, 'str-len', 'str-len');
     await waitTourTitle(page, 'Free args become the form', 150000);
@@ -43,7 +43,7 @@ const {
       (document.querySelector('.execute-result-host')?.textContent || '').replace(/Submitting…/, '')), null,
       {timeout: 60000, polling: 200}).then(() => true, () => false),
       'the pane shows 5 for hello');
-    assert(await clickTourButton(page, 'Next'), 'lesson 13 look-step Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 15 look-step Next');
     await waitTourTitle(page, 'Keep the interesting one', 150000);
     // The step now completes on a REAL persisted run (the
     // body[data-gd-persisted-run] marker) — do what the lesson says:
@@ -72,16 +72,16 @@ const {
     });
     await page.click('.execute-popover.visible .execute-run-btn');
     await waitTourTitle(page, 'History is a graph read', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 13 history Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 15 history Next');
     await waitTourTitle(page, "That's the run loop", 150000);
-    assert(await clickTourButton(page, 'Finish'), 'lesson 13 Finish');
+    assert(await clickTourButton(page, 'Finish'), 'lesson 15 Finish');
     await waitTourClosed(page, 30000);
-    console.log('  lesson 13: walked (nothing created)');
+    console.log('  lesson 15: walked (nothing created)');
 
-    // ---------- Lesson 18 — Explorer and Inspector ----------
-    await page.goto(BASE + '/?tutorial=18');
+    // ---------- Lesson 20 — Explorer and Inspector ----------
+    await page.goto(BASE + '/?tutorial=20');
     await waitTourTitle(page, 'Two panes, one graph', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 18 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 20 Next');
     await waitTourTitle(page, 'Narrow by kind');
     // The lens chips are the step's target; exercise one for real.
     await page.waitForSelector('.kind-toggle', {timeout: 30000});
@@ -94,13 +94,13 @@ const {
         .find((b) => /types/.test(b.textContent));
       if (t) t.click();
     });
-    assert(await clickTourButton(page, 'Next'), 'lesson 18 lens Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 20 lens Next');
     await waitTourTitle(page, 'Back to everything');
     await page.evaluate(() => {
       const all = document.querySelector('.kind-toggle.kind-all');
       if (all) all.click();
     });
-    assert(await clickTourButton(page, 'Next'), 'lesson 18 all-lens Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 20 all-lens Next');
     await waitTourTitle(page, 'Select something');
     await filterAndSelect(page, 'str-len', 'str-len');
     await waitTourTitle(page, "The Inspector's tabs", 150000);
@@ -137,17 +137,17 @@ const {
     });
     await page.waitForFunction((h) => location.hash !== h, beforeHash,
       {timeout: 30000, polling: 200});
-    console.log('  lesson 18: Used-by row navigated to '
+    console.log('  lesson 20: Used-by row navigated to '
       + await page.evaluate(() => location.hash));
     await waitTourTitle(page, "That's the view layer", 150000);
-    assert(await clickTourButton(page, 'Finish'), 'lesson 18 Finish');
+    assert(await clickTourButton(page, 'Finish'), 'lesson 20 Finish');
     await waitTourClosed(page, 30000);
-    console.log('  lesson 18: walked (nothing created)');
+    console.log('  lesson 20: walked (nothing created)');
 
-    // ---------- lesson 19 — working without the mouse ----------
-    await page.goto(BASE + '/?tutorial=19');
+    // ---------- lesson 21 — working without the mouse ----------
+    await page.goto(BASE + '/?tutorial=21');
     await waitTourTitle(page, 'Hands off the mouse', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 19 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 21 Next');
     await waitTourTitle(page, 'The cheatsheet');
     // Focus must be OUTSIDE inputs for bare keys — blur whatever holds it.
     await page.evaluate(() => document.activeElement?.blur?.());
@@ -208,9 +208,9 @@ const {
     const onCanvas = await page.evaluate(() => !!document.activeElement?.closest('#graph-container'));
     assert(onCanvas, 'Space g g moves the keyboard into the graph');
     await waitTourTitle(page, "That's the keyboard", 150000);
-    assert(await clickTourButton(page, 'Finish'), 'lesson 19 Finish');
+    assert(await clickTourButton(page, 'Finish'), 'lesson 21 Finish');
     await waitTourClosed(page, 30000);
-    console.log('  lesson 19: walked (keyboard-only, nothing created)');
+    console.log('  lesson 21: walked (keyboard-only, nothing created)');
 
     // The '/' binding proper — fresh page, no tour in the key path.
     await page.goto(BASE + '/');
@@ -221,13 +221,13 @@ const {
       null, {timeout: 15000, polling: 100});
     console.log("  '/' shortcut focuses the Explorer filter");
 
-    // ---------- lesson 20 — filters and views ----------
+    // ---------- lesson 22 — filters and views ----------
     // A reader arrives with the filters a previous lesson left on; the
     // lesson starts from a clean slate the way the tour's own cleanup does.
     await page.evaluate(() => { if (typeof gdClearFilters === 'function') gdClearFilters(); });
-    await page.goto(BASE + '/?tutorial=20');
+    await page.goto(BASE + '/?tutorial=22');
     await waitTourTitle(page, 'One way to narrow the tree', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 20 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 22 Next');
     await waitTourTitle(page, 'Add a namespace filter');
     await page.waitForSelector('#gd-filter-add', {timeout: 30000});
     await page.click('#gd-filter-add');
@@ -286,17 +286,17 @@ const {
     await page.click('#gd-ws-pop .gd-views-apply[aria-label="Apply view on-const"]');
     await page.waitForFunction(() => document.querySelector('#gd-ws-chip b')?.textContent === 'on-const'
       && document.querySelectorAll('#entity-list .entity-item').length > 0, null, {timeout: 30000, polling: 200});
-    console.log('  lesson 20: the saved view re-applies from the chip');
+    console.log('  lesson 22: the saved view re-applies from the chip');
     await page.evaluate(() => { toggleKind('all'); gdDeleteView('on-const'); });
     await waitTourTitle(page, "That's filters and views", 60000);
-    assert(await clickTourButton(page, 'Finish'), 'lesson 20 Finish');
+    assert(await clickTourButton(page, 'Finish'), 'lesson 22 Finish');
     await waitTourClosed(page, 30000);
-    console.log('  lesson 20: walked (nothing created)');
+    console.log('  lesson 22: walked (nothing created)');
 
-    // ---------- Lesson 10 — in-graph state ----------
-    await page.goto(BASE + '/?tutorial=10');
+    // ---------- Lesson 12 — in-graph state ----------
+    await page.goto(BASE + '/?tutorial=12');
     await waitTourTitle(page, 'A graph can remember', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 10 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 12 Next');
     // Built from the outside in (2026-09-16): the writer first, then the
     // cell it needs is bound as the base fn and EXTENDED IN PLACE from its
     // card — no trip through the Explorer, no retyping its name.
@@ -324,7 +324,7 @@ const {
       'tutorial-bump :a now references tutorial-cell (' + JSON.stringify(bumpBinds) + ')');
     await waitTourTitle(page, 'Run it', 150000);
     // Writing to a cell is the :state effect, so Run is gated behind the
-    // acknowledgement checkbox — the same gate lesson 14 teaches.
+    // acknowledgement checkbox — the same gate lesson 16 teaches.
     await runWithEffectAck(page, 'tick', 'tutorial-bump');
     // The lesson's whole claim: the SECOND run sees the first one's value —
     // and since 2026-09-13 the tour makes the reader do that second run
@@ -356,12 +356,12 @@ const {
       'the cell kept its value between runs (' + JSON.stringify(before)
       + ' → ' + JSON.stringify(after) + ')');
     await finishAndDelete(page);
-    console.log('  lesson 10: walked + cleaned (state survived the second run)');
+    console.log('  lesson 12: walked + cleaned (state survived the second run)');
 
-    // ---------- Lesson 16 — tracing a run ----------
-    await page.goto(BASE + '/?tutorial=16');
+    // ---------- Lesson 18 — tracing a run ----------
+    await page.goto(BASE + '/?tutorial=18');
     await waitTourTitle(page, 'What actually ran?', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 16 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 18 Next');
     // Built from the OUTSIDE IN (2026-09-16): the outer fn is extended from
     // the Explorer once; every inner fn is the base fn bound into a slot and
     // then EXTENDED IN PLACE from its card — the reader never leaves
@@ -519,10 +519,10 @@ const {
     await page.evaluate(() => document.querySelector('.gd-recent-row').click());
     await page.waitForFunction((h) => location.hash !== h, trailHash,
       {timeout: 30000, polling: 200});
-    console.log('  lesson 16: Recent row navigated to '
+    console.log('  lesson 18: Recent row navigated to '
       + await page.evaluate(() => location.hash));
     await finishAndDelete(page);
-    console.log('  lesson 16: walked + cleaned (pipeline + path + tree + peek + trail)');
+    console.log('  lesson 18: walked + cleaned (pipeline + path + tree + peek + trail)');
 
     console.log('PASS');
   } catch (err) {

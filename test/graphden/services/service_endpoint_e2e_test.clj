@@ -44,7 +44,7 @@
         _ (setup/sync-and-invalidate!
             ctx storage
             [;; Producer: a listener whose every request answers a JSON body.
-             ;; The same shape lesson 36 teaches: a JSON response
+             ;; The same shape lesson 38 teaches: a JSON response
              ;; template behind the encode/stringify wrap (header keys
              ;; keywordize on the jsonb round-trip; the wrap restores
              ;; the strings http-kit wants), served by a listener.

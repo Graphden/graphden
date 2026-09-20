@@ -117,7 +117,7 @@ function openFnPicker(opts) {
   // so for a callable slot it called `str-upper` (→ text) incompatible with
   // `(item:a) → b`, and a reader who typed the name and clicked in that
   // first second got the mismatch explainer for a perfectly good pick
-  // (lesson 16 walk). Pending rows render neutral; a click on
+  // (lesson 18 walk). Pending rows render neutral; a click on
   // one waits for the verdict, then picks or explains.
   let serverFailed = false;
   let loadPromise = null;

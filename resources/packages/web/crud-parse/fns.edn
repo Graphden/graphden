@@ -578,6 +578,20 @@
                                                   :default nil}}}}]}}
           :else {:value {}}}}
 
+  {:name :_parse-bnd-form-terminal-fragment
+   :description "`{:terminal (= \"true\" raw)}` when form-data carries `:terminal` — the explicit seal (§4.3, `validation/terminal-rej`): descendants may not bind this slot. Anything but \"true\" (\"\", \"false\") lifts it; the editor's seal popover writes both."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :terminal}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :terminal}]
+                        :vals [{:parent :equal?
+                                :args {:a {:value "true"}
+                                       :b {:parent :get
+                                           :args {:coll {:as :form-data}
+                                                  :key {:value :terminal}
+                                                  :default nil}}}}]}}
+          :else {:value {}}}}
   {:name :_parse-bnd-form-required-raw
    :parent :get
    :args {:coll {:as :form-data} :key {:value :required} :default nil}}
@@ -600,7 +614,7 @@
                         :vals [:_parse-bnd-form-required-coerced]}}}}
 
   {:name :parse-binding-from-form
-   :description "Extract a binding entity's field map. `:fn-id` and `:slot-id` (UUIDs) identify the slot being bound. Optional fields: `:value` (JSON literal), `:ref-fn-id` (UUID), `:rename-to` (string), `:type-override-fn-id` (UUID), `:description`, `:list-append`/`:list-closed` (bool). Empty form values clear the corresponding column. (`:override-kind` is retired — an unknown-field write rejects at storage.)"
+   :description "Extract a binding entity's field map. `:fn-id` and `:slot-id` (UUIDs) identify the slot being bound. Optional fields: `:value` (JSON literal), `:ref-fn-id` (UUID), `:rename-to` (string), `:type-override-fn-id` (UUID), `:description`, `:list-append`/`:list-closed`/`:terminal` (bool). Empty form values clear the corresponding column. (`:override-kind` is retired — an unknown-field write rejects at storage.)"
    :parent :merge
    :args {:maps [{:value {}}
                  :_form-fn-id-fragment
@@ -611,6 +625,7 @@
                  :_form-description-fragment
                  :_parse-bnd-form-list-append-fragment
                  :_parse-bnd-form-list-closed-fragment
+                 :_parse-bnd-form-terminal-fragment
                  :_parse-bnd-form-required-fragment]
           :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}

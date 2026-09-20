@@ -58,7 +58,8 @@ Three load-bearing things here:
    own slot row — it INHERITS via `:parent-ids` BFS.
 2. The **binding** lives on `:add-10`, attaching to `:add`'s
    slot. The `list-append: true` flag says "extend the
-   inherited sequence, don't replace it."
+   inherited sequence, don't replace it" — [Lesson 06](06-lists.md)
+   is about that.
 3. The **binding-list-item** carries the actual literal `10`.
 
 ## When does a fn own its OWN slot?
@@ -174,7 +175,7 @@ shows where each came from — `:input` from
 `:tutorial-renamed-input`'s slot, `:non-blank-text` from the
 type-override binding. Clicking the type chip in the editor offers
 only types that NARROW `:text` — `:any` isn't listed (the
-compatible-type select is described in [Lesson 06](06-types.md)).
+compatible-type select is described in [Lesson 08](08-types.md)).
 
 To see a type diagnostic land the way it actually happens — with a
 value — extend `:http-server` as `:tutorial-bad-port` and bind its
@@ -190,10 +191,10 @@ to `8081` and the fixing save clears all of it.
 - **Free arguments** — when no ancestor binds a slot, it becomes
   a "free arg" the caller must supply. Lesson 05.
 - **The `:fn` slot type** — slots can also expect callables, and
-  those flow differently. Lesson 07.
+  those flow differently. Lesson 09.
 - **Per-branch evolution of bindings** — how a binding's
   `value` lives on a `binding-version` row scoped to a branch.
-  Lesson 21.
+  Lesson 23.
 
 ## Next
 

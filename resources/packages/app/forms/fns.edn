@@ -60,7 +60,7 @@
 
   ;; `data-field-kind="any"` is the SMART parse (graphden-forms.js): JSON
   ;; when it parses, the raw text otherwise — so a reader binding a word
-  ;; to a `:const` types `tick`, not `"tick"` (lesson 33 used to teach the
+  ;; to a `:const` types `tick`, not `"tick"` (lesson 35 used to teach the
   ;; quotes), while `42`, `true`, `[]` and `{"a": 1}` still land typed.
   ;; Strict JSON (`json`) is what the "as: JSON" choice in the editor asks
   ;; for explicitly.

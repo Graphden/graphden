@@ -52,7 +52,7 @@ console.log(' steps are keyed per lesson and index, and a second walk of the sam
     rec({ lesson: '15', step: 3, title: 'Run it', el: { tag: 'button' } }),
   ]);
   assert(a.steps.length === 2, 'two steps (two lessons)');
-  assert(a.neverRinged.length === 0, 'lesson 16 step 3 was ringed on its second walk');
+  assert(a.neverRinged.length === 0, 'lesson 18 step 3 was ringed on its second walk');
 }
 
 console.log(' flags: ambiguous and popover-covers-target are listed, not gated');

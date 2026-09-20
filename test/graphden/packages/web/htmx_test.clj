@@ -123,12 +123,12 @@
 
 
 ;; =============================================================================
-;; Lesson 12 pins — the tutorial's fn-defs, synced VERBATIM through the
+;; Lesson 14 pins — the tutorial's fn-defs, synced VERBATIM through the
 ;; real declarative sync and executed. If a vocabulary rename breaks
 ;; the lesson, this fails before the lesson goes stale.
 ;; =============================================================================
 
-(def ^:private lesson-24-defs
+(def ^:private lesson-26-defs
   [{:name :clock-fragment
     :parent :wrap-element
     :args {:tag "p"
@@ -189,7 +189,7 @@
                    :args {:url "/streams/clock"}}}}])
 
 
-(deftest lesson-24-defs-sync-verbatim-test
+(deftest lesson-26-defs-sync-verbatim-test
   ;; The bootstrap ctx snapshots its compiled registry, so post-sync
   ;; fns can't execute HERE — runtime behaviour is pinned by the
   ;; template-level tests above (each lesson composition is those
@@ -197,7 +197,7 @@
   ;; literal EDN: names, refs, types and lambda-params all resolve
   ;; through the real declarative sync — the paste-correctness bar.
   (let [{:keys [storage]} gh/*graph*
-        ids (fn-composition/sync-fns-to-storage! storage lesson-24-defs)]
+        ids (fn-composition/sync-fns-to-storage! storage lesson-26-defs)]
     (is (every? ids [:clock-fragment :clock-fragment-route :clock-page-body
                      :vote-fragment :vote-fragment-handler
                      :vote-fragment-route :sse-clock-handler :sse-clock-route
@@ -205,7 +205,7 @@
         "every lesson fn-def synced and got an id")))
 
 
-(deftest lesson-24-compositions-behave-test
+(deftest lesson-26-compositions-behave-test
   ;; The lesson's runtime claims, exercised through the SAME templates
   ;; with execute-time args (the harness path page-test uses).
   (testing "the refresh button — :button over :hx-get-attrs"

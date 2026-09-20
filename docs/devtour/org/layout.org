@@ -53,13 +53,13 @@ Stage 2's orchestrator — dispatches the cycle-guarded ~process-*~ walkers over
 :PROPERTIES:
 :CUSTOM_ID: layout/emit-root-deep-frees!
 :FILE: src/graphden/layout/builder_helpers.clj
-:LINE: 961
-:MINS: 6.8
+:LINE: 1054
+:MINS: 6.9
 :END:
 
 After the walkers: the root card's DEEPER holes — a template's frees behind ancestor-bound refs — as ~:deepArg~ placeholders on the root itself, keyed by the inner slot but naming the root fn, so the ~+~ binder writes a closure-capture binding where the Run form lists the hole. The entry set is the SURFACE walk (~compile.renames/deep-free-ext-entries~): it stops at HOF boundaries, so a listener does not sprout every knob of the app it serves.
 
-- source :: [[file:../../../src/graphden/layout/builder_helpers.clj::(defn emit-root-deep-frees!][src/graphden/layout/builder_helpers.clj:961]]
+- source :: [[file:../../../src/graphden/layout/builder_helpers.clj::(defn emit-root-deep-frees!][src/graphden/layout/builder_helpers.clj:1054]]
 
 * 5. compute-layout-matrix
 :PROPERTIES:

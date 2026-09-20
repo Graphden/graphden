@@ -723,8 +723,9 @@
         entity-data (normalize-binding-slot storage entity-type entity-data)
         error-msg (volatile! nil)
         ;; Pre-image for the secret carve-out rollback (binding family)
-        ;; and for the package-owner write guard (adds fn-slot).
-        pre-row (when (and id-uuid (#{"binding" "binding-list-item" "fn-slot"} type-str))
+        ;; and for the package-owner write guard (adds fn-slot, and slot —
+        ;; its `:required` / `:description` belong to the declaring fn).
+        pre-row (when (and id-uuid (#{"binding" "binding-list-item" "fn-slot" "slot"} type-str))
                   (sp/read-entity storage entity-type id-uuid))
         ;; A `:fn` update (rename / description / ns-move) targets the row
         ;; identified by `id-uuid` itself — no pre-image read needed, and

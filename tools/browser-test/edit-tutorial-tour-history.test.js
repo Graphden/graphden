@@ -1,4 +1,4 @@
-// Lessons 23 and 17 — version history, and the diagnostics bar's three panels.
+// Lessons 25 and 19 — version history, and the diagnostics bar's three panels.
 //
 // Both lessons are about surfaces that answer "what happened": the ⌛
 // popover (every version row of a fn, across branches, with restore) and
@@ -9,7 +9,7 @@
 // counted.
 //
 // Own file rather than an addition to an existing one: the runner caps a
-// file at five minutes, and lesson 24's history has to be BUILT (two edits
+// file at five minutes, and lesson 26's history has to be BUILT (two edits
 // before the popover shows anything) while 29 has to produce both a failed
 // run and a type error.
 //
@@ -195,16 +195,16 @@ async function openVersionHistory(page) {
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-history — lessons 23 / 17');
+  console.log('edit-tutorial-tour-history — lessons 25 / 19');
   let failed = false;
   try {
     await hardCleanup(page);
     const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 
-    // ---------- lesson 24 — version history ----------
-    await page.goto(BASE + '/?tutorial=24');
+    // ---------- lesson 26 — version history ----------
+    await page.goto(BASE + '/?tutorial=26');
     await waitTourTitle(page, 'Every edit writes a row', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 24 opening Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 26 opening Next');
 
     await waitTourTitle(page, 'Something to edit', 30000);
     await filterAndSelect(page, 'const', 'const');
@@ -213,10 +213,10 @@ async function openVersionHistory(page) {
     await waitTourTitle(page, 'Give it a description', 150000);
 
     await setDescription(page, 'first draft');
-    assert(await clickTourButton(page, 'Next'), 'lesson 24 first-edit Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 26 first-edit Next');
     await waitTourTitle(page, 'And another', 30000);
     await setDescription(page, 'second draft');
-    assert(await clickTourButton(page, 'Next'), 'lesson 24 second-edit Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 26 second-edit Next');
 
     await waitTourTitle(page, 'Open the history', 30000);
     await openVersionHistory(page);
@@ -243,7 +243,7 @@ async function openVersionHistory(page) {
       const j = await r.json();
       return (j.fns || []).some((f) => f.id === id && f.description === 'first draft');
     }, _lessonFnId, 60000), 'restore put "first draft" back on the fn');
-    assert(await clickTourButton(page, 'Next'), 'lesson 24 restored Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 26 restored Next');
 
     await waitTourTitle(page, 'History is append-only', 30000);
     // Re-open the popover and let the NEW row land: the restore's write and
@@ -266,24 +266,24 @@ async function openVersionHistory(page) {
       'the restore APPENDED a version rather than removing any ('
       + before + ' → ' + after + ')');
 
-    assert(await clickTourButton(page, 'Next'), 'lesson 24 append-only Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 26 append-only Next');
     await waitTourTitle(page, 'What restore does not touch', 30000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 24 bindings Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 26 bindings Next');
     await waitTourTitle(page, "That's the timeline", 30000);
     await finishAndDelete(page);
-    console.log('  lesson 24: walked — two edits, restore, and the extra row it wrote');
+    console.log('  lesson 26: walked — two edits, restore, and the extra row it wrote');
 
-    // ---------- Lesson 17 — the three diagnostics panels ----------
-    // A reader arrives from lesson 16 with a Recent trail; the ✕ lens must
+    // ---------- Lesson 19 — the three diagnostics panels ----------
+    // A reader arrives from lesson 18 with a Recent trail; the ✕ lens must
     // read right under the chips, not under that trail.
     await page.goto(BASE + '/');
     await page.waitForFunction(() => typeof graphData !== 'undefined' && graphData
       && document.querySelector('#entity-list [role="treeitem"]'), null, {timeout: 90000});
     await filterAndSelect(page, 'str-join', 'str-join');
     await filterAndSelect(page, 'str-len', 'str-len');
-    await page.goto(BASE + '/?tutorial=17');
+    await page.goto(BASE + '/?tutorial=19');
     await waitTourTitle(page, 'Three kinds of wrong', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 17 opening Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 19 opening Next');
 
     await waitTourTitle(page, 'Something that fails', 30000);
     await filterAndSelect(page, 'parse-json', 'parse-json');
@@ -373,7 +373,7 @@ async function openVersionHistory(page) {
     const chipAfter = await page.evaluate(() => document.querySelector('#kind-filters .kind-toggle[data-kind="failed"] .kind-count')?.textContent);
     assert(parseInt(chipAfter, 10) === parseInt(chipBefore || '0', 10) + 1,
       'the ✕ failed chip counts the saved run (' + chipBefore + ' → ' + chipAfter + ')');
-    assert(await clickTourButton(page, 'Next'), 'lesson 17 look-step Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 19 look-step Next');
     // The filter still says `parse-json` — clearing it is a step of its own,
     // ringed on the ×, so the failed lens is read over the whole tree.
     await waitTourTitle(page, 'Clear the filter', 150000);
@@ -425,17 +425,17 @@ async function openVersionHistory(page) {
     assert(dismissBtn && dismissBtn.text === '✕ Dismiss' && dismissBtn.w > 30,
       'the failure row carries a legible "✕ Dismiss" (got: ' + JSON.stringify(dismissBtn) + ')');
     await waitTourTitle(page, 'Now a static mistake', 60000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 17 static Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 19 static Next');
     await waitTourTitle(page, 'Focus on type errors', 30000);
     await page.evaluate(() => toggleKind('type-errors'));
     await waitTourTitle(page, 'And what already exists', 60000);
     await page.evaluate(() => toggleKind('lint'));
     await waitTourTitle(page, 'You get to disagree', 60000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 17 lint Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 19 lint Next');
     await waitTourTitle(page, 'What each surface answers', 60000);
     await page.evaluate(() => toggleKind('all'));
     await finishAndDelete(page);
-    console.log('  lesson 17: walked — a persisted failure under the ✕ lens + Runs tab, the ⚠ and ⚐ lenses');
+    console.log('  lesson 19: walked — a persisted failure under the ✕ lens + Runs tab, the ⚠ and ⚐ lenses');
 
     console.log('PASS');
   } catch (err) {

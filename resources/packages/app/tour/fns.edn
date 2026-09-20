@@ -12,7 +12,16 @@
 ;; (Basics → Composing → Running it → The editor); the picker emits a heading
 ;; whenever the chapter changes, so this vector's order IS the reading order.
 ;; The `:id` stays the WRITTEN lesson's number (docs/tutorial/NN-*.md) — it is
-;; the deep link (`?tutorial=08`), not a position.
+;; the deep link (`?tutorial=10`), not a position.
+;;
+;; `:slug` is the lesson's IDENTITY — the written lesson's file name
+;; without its number (`docs/tutorial/NN-<slug>.md`; `tour_content_test`
+;; checks the pair). The reader's progress (`graphden.tour.done` /
+;; `.seen`) and the edition record (test/resources/tour-versions.edn) are
+;; keyed by it, so inserting a lesson mid-sequence renumbers the ids and
+;; moves nobody's ✓ (the 2026-09-19 insertion of 02 did — every mark on
+;; 02–39 slid one lesson down). Never renumber a slug; rename the file
+;; and the slug together only when the lesson itself becomes another.
 ;;
 ;; `:version` is the lesson's EDITION — a positive integer, 1 when the lesson
 ;; was written. The browser remembers which edition the reader finished
@@ -93,7 +102,7 @@
 ;;     (`REQUIRE_SIGNALS` in editor-tour.js): `services` = the dedicated plan
 ;;     (or a platform / self-host instance), `org` = organizations exist here.
 ;;
-;; ONE ACTION PER RING (from a reader walking lesson 16): the
+;; ONE ACTION PER RING (from a reader walking lesson 18): the
 ;; spotlight can only sit on one thing, so a step whose text passes through
 ;; several PERSISTENT surfaces ("type in the filter, click the row, then ⋯
 ;; → Extend") strands the ring on the first of them — the ⋯ never lights up.
@@ -169,6 +178,7 @@
             :finished-close "Close"}
            :lessons
            [{:id "01"
+             :slug "fn-defs"
              :chapter "Basics"
              :version 1
              :title "Your first function"
@@ -221,6 +231,7 @@
                :target nil
                :check {:kind "manual"}}]}
             {:id "02"
+             :slug "reading-a-card"
              :chapter "Basics"
              :version 1
              :title "Reading a card"
@@ -270,6 +281,7 @@
                :target nil
                :check {:kind "manual"}}]}
             {:id "03"
+             :slug "parents-and-inheritance"
              :chapter "Basics"
              :version 1
              :title "Parents and inheritance"
@@ -328,10 +340,11 @@
                :check {:kind "fn-parent" :name "add-10-text" :parent "to-str"}
                :creates {:type "fn" :name "add-10-text"}}
               {:title "That's inheritance — both ways"
-               :body "One parent, inherited slots, per-child bindings — and when you need a step ABOVE what you have, Wrap builds the caller for you. (Names stay yours too: Rename and Move to another namespace work even on fns with callers — everyone references the fn by identity, not by name.) The written lesson 03 goes further: multiple parents and closest-fn-wins overlays. Click [[Finish]] to clean up or keep what you made."
+               :body "One parent, inherited slots, per-child bindings — and when you need a step ABOVE what you have, Wrap builds the caller for you. (Names stay yours too: Rename and Move to another namespace work even on fns with callers — everyone references the fn by identity, not by name.) The written lesson 03 goes further: multiple parents, and why a value an ancestor set is final. Click [[Finish]] to clean up or keep what you made."
                :target nil
                :check {:kind "manual"}}]}
             {:id "04"
+             :slug "slots-and-bindings"
              :chapter "Basics"
              :version 1
              :title "Slots and bindings"
@@ -410,6 +423,7 @@
                :target nil
                :check {:kind "manual"}}]}
             {:id "05"
+             :slug "free-arguments"
              :chapter "Basics"
              :version 1
              :title "Free arguments"
@@ -486,6 +500,177 @@
                :target nil
                :check {:kind "manual"}}]}
             {:id "06"
+             :slug "lists"
+             :chapter "Basics"
+             :version 1
+             :title "Lists: seed, append, close"
+             :steps
+             [{:title "Lists on the card"
+               :body "A list slot takes several values: its edge is a trunk that fans out after the type chip — one branch per item, and a dashed branch to a [[+]], the list's next free place. You will seed a list in a fn, extend it from a child without touching the parent, then CLOSE it so nothing below can add to it. Click [[Next]]."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find add"
+               :body "Type `add` in the Explorer filter and click the [[add]] row (core.arithmetic). Its :nums is a list slot — one [[+]] on the card."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "add"}}
+              {:title "Extend it"
+               :body "Click [[⋯]] on the add row, choose [[Extend]], type exactly `tutorial-base-sum` — then [[Save]]. The editor opens the child."
+               :target ".node-overlay[data-fn-name=\"add\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"add\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "fn-parent" :name "tutorial-base-sum" :parent "add"}
+               :creates {:type "fn" :name "tutorial-base-sum"}}
+              {:title "tutorial-base-sum is open"
+               :body "Its card inherits add's :nums — empty so far, one [[+]]."
+               :target nil
+               :check {:kind "selected" :name "tutorial-base-sum"}}
+              {:title "Seed the list"
+               :body "Click the [[+]] on :nums, choose [[Append literal]], type `1` — then [[Save]]. The first item; the trunk now fans out to it and to a fresh [[+]]."
+               :target ".placeholder-binder[data-fn-name=\"tutorial-base-sum\"][data-arg-name=\"nums\"]"
+               :targets [".placeholder-binder[data-fn-name=\"tutorial-base-sum\"][data-arg-name=\"nums\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :check {:kind "list-items" :name "tutorial-base-sum" :slot "nums" :count 1}}
+              {:title "One more"
+               :body "Click the tail [[+]], [[Append literal]], `2`, [[Save]]. Two items, and the tail moves after them — it is always the list's next free place."
+               :target ".placeholder-binder[data-fn-name=\"tutorial-base-sum\"][data-arg-name=\"nums\"]"
+               :targets [".placeholder-binder[data-fn-name=\"tutorial-base-sum\"][data-arg-name=\"nums\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :check {:kind "list-items" :name "tutorial-base-sum" :slot "nums" :count 2}}
+              {:title "Now extend the seeded fn"
+               :body "Click [[⋯]] on the tutorial-base-sum row, [[Extend]], name it `tutorial-sum-more` — [[Save]]."
+               :target ".node-overlay[data-fn-name=\"tutorial-base-sum\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-base-sum\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "fn-parent" :name "tutorial-sum-more" :parent "tutorial-base-sum"}
+               :creates {:type "fn" :name "tutorial-sum-more"}}
+              {:title "tutorial-sum-more is open"
+               :body "The child's card — and no :nums on it. The list is the parent's binding, and a card draws what its fn binds itself (lesson 02)."
+               :target nil
+               :check {:kind "selected" :name "tutorial-sum-more"}}
+              {:title "The list you inherited"
+               :body "Click the [[tutorial-base-sum]] row on your card to unfold it. The 1 and the 2 appear, each with a small ↖ — hover one: inherited from tutorial-base-sum. After them, a [[+]] that is YOURS: an inherited list stays open for appending."
+               :target ".node-overlay[data-fn-name=\"tutorial-sum-more\"] .ancestor-line[data-level=\"1\"]"
+               :check {:kind "expanded" :name "tutorial-sum-more" :depth 1}}
+              {:title "Append here"
+               :body "Click your tail [[+]], [[Append literal]], `3`, [[Save]]. That writes a list-append binding on tutorial-sum-more: the parent's items, then yours — and from now on the whole list sits on your card, folded or not. The parent is untouched."
+               :target ".placeholder-binder[data-fn-name=\"tutorial-sum-more\"][data-arg-name=\"nums\"]"
+               :targets [".placeholder-binder[data-fn-name=\"tutorial-sum-more\"][data-arg-name=\"nums\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :check {:kind "list-items" :name "tutorial-sum-more" :slot "nums" :count 1}}
+              {:title "Run it"
+               :body "Click [[⋯]] on the tutorial-sum-more row, then [[▶ Run]], then [[Run]]."
+               :target ".node-overlay[data-fn-name=\"tutorial-sum-more\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-sum-more\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :check {:kind "dom" :selector ".execute-result-host .execute-result-pane, .execute-result-host .execute-error-pane"}}
+              {:title "Six"
+               :body "1 + 2 + 3: the parent's seed and your append, one list at run time. Run tutorial-base-sum and it still answers 3 — you extended its list, you did not edit it. Click [[Next]]."
+               :target ".execute-result-host"
+               :check {:kind "manual"}}
+              {:title "Back to the parent"
+               :body "Type `tutorial-base-sum` in the Explorer filter and click its row."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "tutorial-base-sum"}}
+              {:title "Close the list"
+               :body "After :nums' type chip sits a small lock — faint until you hover the label. Click [[🔓]], tick [[Close the list]], then [[Save]]. The lock closes: from here down, nobody appends."
+               :target ".edge-label-overlay[data-arg-name=\"nums\"] .seal-badge"
+               :targets [".edge-label-overlay[data-arg-name=\"nums\"] .seal-badge" ".arg-value-edit-popover input[data-seal=\"list-closed\"]" ".arg-value-edit-popover"]
+               :check {:kind "dom" :selector ".edge-label-overlay[data-arg-name=\"nums\"] .seal-badge[data-seal~=\"list-closed\"]"}}
+              {:title "See it from the child"
+               :body "Type `tutorial-sum-more` in the filter and click its row."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "tutorial-sum-more"}}
+              {:title "A lock where the tail was"
+               :body "Your 3 is still there — the seal is not retroactive — but the tail is a lock now. Hover it: List closed in tutorial-base-sum — descendants cannot append. Only tutorial-base-sum can reopen it. Click [[Next]]."
+               :target ".placeholder-sealed[data-arg-name=\"nums\"]"
+               :check {:kind "manual"}}
+              {:title "That's a list"
+               :body "Seed it where it starts, append from below, close it when the seed IS the point. The written lesson 06 has the fns.edn forms — `[1 2]`, `{:append [3]}`, `:closed true` — and what an item's [[⋯]] can do. Click [[Finish]] to clean up or keep what you made."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "07"
+             :slug "optional-required-sealed"
+             :chapter "Basics"
+             :version 1
+             :title "Optional, required and sealed"
+             :steps
+             [{:title "Three decisions beside a value"
+               :body "A slot can be OPTIONAL (the fn runs without it), REQUIRED HERE (a descendant insists on it), or SEALED (no descendant may bind it) — and a value, once set, is final. Every one of those shows on the card. You will run a fn without its optional input, seal a slot, watch a child hit the lock, then require it instead. Click [[Next]]."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find subs"
+               :body "Type `subs` in the Explorer filter and click the [[subs]] row (core.strings). Three free slots — and :end's [[+]] is dimmed: optional."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "subs"}}
+              {:title "Extend it"
+               :body "Click [[⋯]] on the subs row, choose [[Extend]], type exactly `tutorial-cut` — then [[Save]]."
+               :target ".node-overlay[data-fn-name=\"subs\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"subs\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "fn-parent" :name "tutorial-cut" :parent "subs"}
+               :creates {:type "fn" :name "tutorial-cut"}}
+              {:title "tutorial-cut is open"
+               :body "Three inherited slots: string, start, end."
+               :target nil
+               :check {:kind "selected" :name "tutorial-cut"}}
+              {:title "Optional, on the label"
+               :body "Hover the end label: after its type chip a faint lock appears — [[🔓]]. Its tooltip reads Optional — the fn runs without it. That is the slot's declaration, `:required false` on subs; the dimmed [[+]] says the same. Click [[Next]]."
+               :target ".edge-label-overlay[data-arg-name=\"end\"] .seal-badge"
+               :check {:kind "manual"}}
+              {:title "Bind the string"
+               :body "Click the [[+]] on :string, choose [[Bind literal]], type `graphden` — then [[Save]]."
+               :target ".placeholder-binder[data-fn-name=\"tutorial-cut\"][data-arg-name=\"string\"]"
+               :targets [".placeholder-binder[data-fn-name=\"tutorial-cut\"][data-arg-name=\"string\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :check {:kind "binding-value" :name "tutorial-cut" :slot "string" :value "graphden"}}
+              {:title "And the start"
+               :body "Click the [[+]] on :start, [[Bind literal]], `5`, [[Save]]. Leave :end alone."
+               :target ".placeholder-binder[data-fn-name=\"tutorial-cut\"][data-arg-name=\"start\"]"
+               :targets [".placeholder-binder[data-fn-name=\"tutorial-cut\"][data-arg-name=\"start\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :check {:kind "binding-value" :name "tutorial-cut" :slot "start" :value 5}}
+              {:title "Run without it"
+               :body "Click [[⋯]] on the tutorial-cut row, then [[▶ Run]], then [[Run]] — the form asks for nothing you must fill."
+               :target ".node-overlay[data-fn-name=\"tutorial-cut\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-cut\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :check {:kind "dom" :selector ".execute-result-host .execute-result-pane, .execute-result-host .execute-error-pane"}}
+              {:title "den"
+               :body "\"den\" — :end defaulted to the end of the string. Optional means exactly that: a fallback lives in the implementation. Click [[Next]]."
+               :target ".execute-result-host"
+               :check {:kind "manual"}}
+              {:title "Seal it"
+               :body "Now decide that no fn extending tutorial-cut may fill :end. Click the [[🔓]] after end's type chip, tick [[Seal against descendants]], then [[Save]]. The badge closes."
+               :target ".edge-label-overlay[data-arg-name=\"end\"] .seal-badge"
+               :targets [".edge-label-overlay[data-arg-name=\"end\"] .seal-badge" ".arg-value-edit-popover input[data-seal=\"terminal\"]" ".arg-value-edit-popover"]
+               :check {:kind "dom" :selector ".edge-label-overlay[data-arg-name=\"end\"] .seal-badge[data-seal~=\"terminal\"]"}}
+              {:title "Extend the sealed fn"
+               :body "Click [[⋯]] on the tutorial-cut row, [[Extend]], name it `tutorial-cut-more` — [[Save]]."
+               :target ".node-overlay[data-fn-name=\"tutorial-cut\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-cut\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "fn-parent" :name "tutorial-cut-more" :parent "tutorial-cut"}
+               :creates {:type "fn" :name "tutorial-cut-more"}}
+              {:title "tutorial-cut-more is open"
+               :body "The child's card."
+               :target nil
+               :check {:kind "selected" :name "tutorial-cut-more"}}
+              {:title "A lock where the + would be"
+               :body "string and start are not on this card at all — bound above, FINAL; nothing to fill. :end is here, but its [[+]] is a lock. Hover it: Sealed in tutorial-cut — descendants cannot bind this slot. The server refuses the write too. Click [[Next]]."
+               :target ".placeholder-sealed[data-arg-name=\"end\"]"
+               :check {:kind "manual"}}
+              {:title "Back to tutorial-cut"
+               :body "Type `tutorial-cut` in the Explorer filter and click its row — the seal is lifted where it was set."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "tutorial-cut"}}
+              {:title "Require it instead"
+               :body "Click the [[🔒]] after end: untick [[Seal against descendants]], tick [[Require it here]], then [[Save]]. From tutorial-cut down, :end must be supplied — a one-way ratchet no descendant can loosen."
+               :target ".edge-label-overlay[data-arg-name=\"end\"] .seal-badge"
+               :targets [".edge-label-overlay[data-arg-name=\"end\"] .seal-badge" ".arg-value-edit-popover input[data-seal=\"required\"]" ".arg-value-edit-popover"]
+               :check {:kind "dom" :selector ".edge-label-overlay[data-arg-name=\"end\"] .seal-badge[data-seal=\"required\"]"}}
+              {:title "See it from the child"
+               :body "Type `tutorial-cut-more` in the filter and click its row."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "tutorial-cut-more"}}
+              {:title "The + is back — and solid"
+               :body "No lock: the child may bind :end again. And the [[+]] is no longer dimmed — required since tutorial-cut, a run without it would fail with missing-required-arg. Click [[Next]]."
+               :target ".placeholder-binder[data-fn-name=\"tutorial-cut-more\"][data-arg-name=\"end\"]"
+               :check {:kind "manual"}}
+              {:title "Optional, required, sealed"
+               :body "Optional is the declaration; required-here tightens it one way; a seal keeps a free slot out of descendants' hands; a value does that by itself. One lock says all of it — hover it anywhere. The written lesson 07 has the fns.edn forms. Click [[Finish]] to clean up or keep what you made."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "08"
+             :slug "types"
              :chapter "Basics"
              :version 1
              :title "Types"
@@ -524,7 +709,7 @@
                :target ".mismatch-explainer"
                :check {:kind "dom" :selector ".type-error-badge"}}
               {:title "A diagnostic, not a wall"
-               :body "The binding saved and the card gained a ⚠ badge (the Explorer's [[⚠ type errors]] lens lists it — lesson 17). The fn refuses to EXECUTE until it is fixed, but your work was never blocked — that is the doctrine: warn and record, not reject."
+               :body "The binding saved and the card gained a ⚠ badge (the Explorer's [[⚠ type errors]] lens lists it — lesson 19). The fn refuses to EXECUTE until it is fixed, but your work was never blocked — that is the doctrine: warn and record, not reject."
                :target ".type-error-badge"
                :check {:kind "manual"}}
               {:title "Clear it"
@@ -562,10 +747,11 @@
                :target nil
                :check {:kind "selected" :name "tutorial-point"}}
               {:title "That's the type system"
-               :body "Slots carry types, the picker knows what fits, a violation is a recorded diagnostic you can fix later — and the types themselves are rows you author. The written lesson 06 adds unions, variants, lists and [:secret T]. Click [[Finish]] to clean up or keep what you made."
+               :body "Slots carry types, the picker knows what fits, a violation is a recorded diagnostic you can fix later — and the types themselves are rows you author. The written lesson 08 adds unions, variants, lists and [:secret T]. Click [[Finish]] to clean up or keep what you made."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "07"
+            {:id "09"
+             :slug "higher-order-functions"
              :chapter "Composing"
              :version 1
              :title "Higher-order functions"
@@ -622,10 +808,11 @@
                :target ".execute-result-host"
                :check {:kind "manual"}}
               {:title "That's a HOF"
-               :body "One slot type (:fn …) changes everything: the argument is passed unrun and the impl drives it. The written lesson 07 goes further — callables that take SEVERAL arguments are matched by NAME, closure capture, lambda-params. Click [[Finish]] to clean up or keep tutorial-map."
+               :body "One slot type (:fn …) changes everything: the argument is passed unrun and the impl drives it. The written lesson 09 goes further — callables that take SEVERAL arguments are matched by NAME, closure capture, lambda-params. Click [[Finish]] to clean up or keep tutorial-map."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "08"
+            {:id "10"
+             :slug "components-and-pages"
              :chapter "Composing"
              :version 1
              :title "Components"
@@ -709,10 +896,11 @@
                :target ".execute-result-html-preview"
                :check {:kind "manual"}}
               {:title "That's a page, in pieces"
-               :body "Keep nesting — rows, forms, a nav-bar — and the outermost fn is the page. The written lesson 08 wires one to a route and adds click handlers. Click [[Finish]] to clean up or keep both."
+               :body "Keep nesting — rows, forms, a nav-bar — and the outermost fn is the page. The written lesson 10 wires one to a route and adds click handlers. Click [[Finish]] to clean up or keep both."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "09"
+            {:id "11"
+             :slug "custom-script-escape-hatch"
              :chapter "Composing"
              :version 1
              :title "The escape hatch"
@@ -751,10 +939,11 @@
                :target ".execute-result-host"
                :check {:kind "manual"}}
               {:title "Know what you gave up"
-               :body "Inside that string the graph sees nothing: no types, no effects, no references. That is the trade — full freedom, zero analysis — so keep the hatch small and the composition in fns. The written lesson 09 adds the per-click twin (:dispatch-custom) and the CSS variant. Click [[Finish]] to clean up or keep it."
+               :body "Inside that string the graph sees nothing: no types, no effects, no references. That is the trade — full freedom, zero analysis — so keep the hatch small and the composition in fns. The written lesson 11 adds the per-click twin (:dispatch-custom) and the CSS variant. Click [[Finish]] to clean up or keep it."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "10"
+            {:id "12"
+             :slug "state-cells-and-caches"
              :chapter "Composing"
              :version 1
              :title "State: cells"
@@ -775,7 +964,7 @@
                :creates {:type "fn" :name "tutorial-bump"}}
               ;; Selection gate — the next step binds on the child.
               {:title "tutorial-bump is open"
-               :body "One [[+]] shows, on :a — WHICH cell to append to. What to append stays a free argument, so it gets asked for at run time (the form from lesson 13). The cell does not exist yet; you will make it from this slot, without leaving this canvas."
+               :body "One [[+]] shows, on :a — WHICH cell to append to. What to append stays a free argument, so it gets asked for at run time (the form from lesson 15). The cell does not exist yet; you will make it from this slot, without leaving this canvas."
                :target nil
                :check {:kind "selected" :name "tutorial-bump"}}
               {:title "Point it at a cell"
@@ -795,7 +984,7 @@
                :targets [".placeholder-binder[data-fn-name=\"tutorial-cell\"][data-arg-name=\"initial-value\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-cell" :slot "initial-value"}}
               {:title "Run it"
-               :body "[[⋯]] → [[▶ Run]]. Writing to a cell is the :state effect, so the Run pane asks you to acknowledge it first (lesson 14's gate). Tick the box, type `tick` in the field and [[Run]]."
+               :body "[[⋯]] → [[▶ Run]]. Writing to a cell is the :state effect, so the Run pane asks you to acknowledge it first (lesson 16's gate). Tick the box, type `tick` in the field and [[Run]]."
                :target ".node-overlay[data-fn-name=\"tutorial-bump\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
                :targets [".node-overlay[data-fn-name=\"tutorial-bump\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-effects-warning" ".execute-run-btn"]
                :check {:kind "dom" :selector ".execute-result-list > li"}}
@@ -805,10 +994,11 @@
                :targets [".execute-popover.visible .execute-run-btn" ".execute-result-list > li:nth-child(2)"]
                :check {:kind "dom" :selector ".execute-result-list > li:nth-child(2)"}}
               {:title "That's in-graph state"
-               :body "A cell belongs to the compiled registry: any edit to its closure recompiles and resets it, and it is not shared across executor instances — which is exactly what makes it a cache and not a database. The written lesson 10 covers :swap vs :reset and cache patterns. Click [[Finish]] to clean up or keep both."
+               :body "A cell belongs to the compiled registry: any edit to its closure recompiles and resets it, and it is not shared across executor instances — which is exactly what makes it a cache and not a database. The written lesson 12 covers :swap vs :reset and cache patterns. Click [[Finish]] to clean up or keep both."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "11"
+            {:id "13"
+             :slug "recursion"
              :chapter "Composing"
              :version 1
              :title "Recursion"
@@ -842,10 +1032,11 @@
                :target nil
                :check {:kind "manual"}}
               {:title "That's recursion"
-               :body "A step that receives :self, a base case that returns, a recursive arm that invokes. The written lesson 11 builds one from scratch — seven fn-defs that sum 1..n — and says when to reach for :reduce or a service instead. Click [[Finish]]."
+               :body "A step that receives :self, a base case that returns, a recursive arm that invokes. The written lesson 13 builds one from scratch — seven fn-defs that sum 1..n — and says when to reach for :reduce or a service instead. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "13"
+            {:id "15"
+             :slug "executing-a-fn"
              :chapter "Running it"
              :version 1
              :title "Executing a fn"
@@ -879,10 +1070,11 @@
                :target ".execute-history-row"
                :check {:kind "manual"}}
               {:title "That's the run loop"
-               :body "Free args in, result out, history when you ask for it. The written lesson 13 adds cancellation, how long history is kept, and the run-from-another-fn story. Click [[Finish]]."
+               :body "Free args in, result out, history when you ask for it. The written lesson 15 adds cancellation, how long history is kept, and the run-from-another-fn story. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "14"
+            {:id "16"
+             :slug "effects-and-secrets"
              :chapter "Running it"
              :version 1
              :title "Effects"
@@ -920,10 +1112,11 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Secrets ride the same rails"
-               :body "A vault value is typed [:secret T]: the checker propagates that marker exactly like an effect, and the executor hides such values at sinks (the Run pane says “Result hidden”). Creating one needs vault access, so the written lesson 14 covers it end to end — the marker is the part to remember. Click [[Finish]]."
+               :body "A vault value is typed [:secret T]: the checker propagates that marker exactly like an effect, and the executor hides such values at sinks (the Run pane says “Result hidden”). Creating one needs vault access, so the written lesson 16 covers it end to end — the marker is the part to remember. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "15"
+            {:id "17"
+             :slug "tests"
              :chapter "Running it"
              :version 1
              :title "Tests"
@@ -1002,10 +1195,11 @@
                :targets [".arg-value-editable" ".arg-value-edit-popover" "#kind-filters .kind-toggle[data-kind=\"tests\"]"]
                :check {:kind "dom" :selector ".kind-marker-test.test-passed"}}
               {:title "Tests are graph, too"
-               :body "Because a test is an ordinary fn, everything you learned applies: it can be extended, its args can be free, and it lives on a branch like anything else. Select it and the Inspector's Bindings tab shows a Test section with [[Run this test]]. The written lesson 15 covers statuses (including “stale by construction”) and auto-run. Click [[Finish]] to clean up or keep it."
+               :body "Because a test is an ordinary fn, everything you learned applies: it can be extended, its args can be free, and it lives on a branch like anything else. Select it and the Inspector's Bindings tab shows a Test section with [[Run this test]]. The written lesson 17 covers statuses (including “stale by construction”) and auto-run. Click [[Finish]] to clean up or keep it."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "16"
+            {:id "18"
+             :slug "debugging-traces"
              :chapter "Running it"
              :version 1
              :title "Tracing a run"
@@ -1106,10 +1300,11 @@
                :target "#search-clear"
                :check {:kind "dom" :selector "#gd-recent-fns:not([hidden]) .gd-recent-row"}}
               {:title "That's debugging in place"
-               :body "No log statements, no rebuild: the run you just did carries its own map of what it touched, how often, and what each hop returned — on the canvas and as a tree — and peek + Recent (any row takes you straight back) keep the reading itself in one place. The written lesson 16 adds catching a live HTTP request. Click [[Finish]] to clean up or keep the three fns."
+               :body "No log statements, no rebuild: the run you just did carries its own map of what it touched, how often, and what each hop returned — on the canvas and as a tree — and peek + Recent (any row takes you straight back) keep the reading itself in one place. The written lesson 18 adds catching a live HTTP request. Click [[Finish]] to clean up or keep the three fns."
                :target "#gd-recent-fns"
                :check {:kind "manual"}}]}
-            {:id "17"
+            {:id "19"
+             :slug "errors-and-diagnostics"
              :chapter "Running it"
              :version 1
              :title "When something breaks"
@@ -1157,7 +1352,7 @@
                :target "[data-insp-tab=\"stats\"]"
                :check {:kind "dom" :selector "#gd-insp-runs .execute-history-failures:not([hidden])"}}
               {:title "Now a static mistake"
-               :body "Failures are about run time. The next lens is about WRITE time: bind a value the type-checker objects to and the write still lands, with a diagnostic attached. You saw one badge in lesson 06 — the ⚠ lens is the branch-wide view of them, and the Inspector's Bindings tab prints the message under the argument."
+               :body "Failures are about run time. The next lens is about WRITE time: bind a value the type-checker objects to and the write still lands, with a diagnostic attached. You saw one badge in lesson 08 — the ⚠ lens is the branch-wide view of them, and the Inspector's Bindings tab prints the message under the argument."
                :target nil
                :check {:kind "manual"}}
               {:title "Focus on type errors"
@@ -1173,10 +1368,11 @@
                :target nil
                :check {:kind "manual"}}
               {:title "What each surface answers"
-               :body "The lenses answer WHERE: which fns, which namespaces, how many. The Inspector answers WHAT: the failure's message and its ✕ Dismiss, the diagnostic under its argument, the finding with your say. The trace tree answers why (lesson 16), and Monitoring (account menu → [[Organization]]) answers how often. Click [[◍ all]] to clear the lens, then [[Finish]] — the tour offers to delete tutorial-bad-json."
+               :body "The lenses answer WHERE: which fns, which namespaces, how many. The Inspector answers WHAT: the failure's message and its ✕ Dismiss, the diagnostic under its argument, the finding with your say. The trace tree answers why (lesson 18), and Monitoring (account menu → [[Organization]]) answers how often. Click [[◍ all]] to clear the lens, then [[Finish]] — the tour offers to delete tutorial-bad-json."
                :target "#kind-filters .kind-toggle[data-kind=\"all\"]"
                :check {:kind "manual"}}]}
-            {:id "18"
+            {:id "20"
+             :slug "explorer-and-inspector"
              :chapter "The editor"
              :version 1
              :title "Explorer and Inspector"
@@ -1212,16 +1408,17 @@
                :targets [".gd-insp-tabs" ".gd-insp-usages"]
                :check {:kind "dom" :selector ".gd-insp-usages .gd-insp-usage-row"}}
               {:title "That's the view layer"
-               :body "Lenses, tabs and the Used-by reverse index are how you keep a big graph readable — none of it is stored in the graph itself. The written lesson 18 covers the remaining chips and the Runs tab. Click [[Finish]]."
+               :body "Lenses, tabs and the Used-by reverse index are how you keep a big graph readable — none of it is stored in the graph itself. The written lesson 20 covers the remaining chips and the Runs tab. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "19"
+            {:id "21"
+             :slug "keyboard-and-accessibility"
              :chapter "The editor"
              :version 1
              :title "Working without the mouse"
              :steps
              [{:title "Hands off the mouse"
-               :body "Everything you have done so far works from the keyboard: the Explorer is an ARIA tree, the canvas walks by edges, every dialog traps and returns focus. This lesson shows the three entry points; the written lesson 19 covers the full map, font scaling and screen readers."
+               :body "Everything you have done so far works from the keyboard: the Explorer is an ARIA tree, the canvas walks by edges, every dialog traps and returns focus. This lesson shows the three entry points; the written lesson 21 covers the full map, font scaling and screen readers."
                :target nil
                :check {:kind "manual"}}
               {:title "The cheatsheet"
@@ -1259,13 +1456,14 @@
                :body "Leader menu for discovery, cheatsheet for the map, tree and canvas as first-class widgets. If the text is small — scale your browser font, the editor is sized in rem and grows with it. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "20"
+            {:id "22"
+             :slug "workspaces"
              :chapter "The editor"
              :version 1
              :title "Filters and views"
              :steps
              [{:title "One way to narrow the tree"
-               :body "Everything that narrows the Explorer is a FILTER — a chip under the filter box: a kind (you met those in lesson 18), a namespace, a fn something is built on, an effect, unused. Filters combine. A saved set of them is a VIEW. Nothing here changes the graph — only what you look at."
+               :body "Everything that narrows the Explorer is a FILTER — a chip under the filter box: a kind (you met those in lesson 20), a namespace, a fn something is built on, an effect, unused. Filters combine. A saved set of them is a VIEW. Nothing here changes the graph — only what you look at."
                :target "#kind-filters"
                :check {:kind "manual"}}
               {:title "Add a namespace filter"
@@ -1293,10 +1491,11 @@
                :target "#kind-filters .kind-toggle[data-kind=\"all\"]"
                :check {:kind "dom-absent" :selector "#gd-filter-chips .gd-filter-chip"}}
               {:title "That's filters and views"
-               :body "One idea, three depths: a chip narrows the tree, a set of chips is what you are looking at, a named set is a view — yours in this browser, or an fn in the graph when the team should have it too. The ⊘ on a namespace row is a filter as well (a [[not …]] chip). The written lesson 20 walks the graph-saved view and composing views with `also`. Click [[Finish]]."
+               :body "One idea, three depths: a chip narrows the tree, a set of chips is what you are looking at, a named set is a view — yours in this browser, or an fn in the graph when the team should have it too. The ⊘ on a namespace row is a filter as well (a [[not …]] chip). The written lesson 22 walks the graph-saved view and composing views with `also`. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "21"
+            {:id "23"
+             :slug "branches"
              :chapter "The editor"
              :version 1
              :title "Branches"
@@ -1362,19 +1561,20 @@
                :target ".gd-diff-chip-off"
                :check {:kind "dom-absent" :selector "#gd-diff-chip"}}
               {:title "When both sides touched the same thing"
-               :body "This lesson's branch only ADDED, so a merge is clean. When two branches edit the SAME binding, merge stops and shows a conflict resolver — pick per row which side wins; nothing lands until every row is decided. And when a protected branch requires review, incoming proposals wait in the branch popover — the same [[Δ]] chip you used here reads a proposal's diff before you approve it. The written lesson 21 walks a real conflict end-to-end."
+               :body "This lesson's branch only ADDED, so a merge is clean. When two branches edit the SAME binding, merge stops and shows a conflict resolver — pick per row which side wins; nothing lands until every row is decided. And when a protected branch requires review, incoming proposals wait in the branch popover — the same [[Δ]] chip you used here reads a proposal's diff before you approve it. The written lesson 23 walks a real conflict end-to-end."
                :target nil
                :check {:kind "manual"}}
 
               {:title "That's branching"
-               :body "Fork, edit in isolation, compare — and merge with [[⇢]] when a branch has earned it. The branch row also carries a review workflow: ✅ approve inline, with 📤 propose and ⚙ protection under the row's [[⋯]] menu — the NEXT tour lesson (21 · Review) walks that whole cycle, refusal included. The written lesson 21 adds protected branches and branch-local fns (runtime config that deliberately never merges). Click [[Finish]] to clean up (the branch goes too) or keep it."
+               :body "Fork, edit in isolation, compare — and merge with [[⇢]] when a branch has earned it. The branch row also carries a review workflow: ✅ approve inline, with 📤 propose and ⚙ protection under the row's [[⋯]] menu — the NEXT tour lesson (21 · Review) walks that whole cycle, refusal included. The written lesson 23 adds protected branches and branch-local fns (runtime config that deliberately never merges). Click [[Finish]] to clean up (the branch goes too) or keep it."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "22"
+            {:id "24"
+             :slug "review"
              :chapter "The editor"
              :version 1
              :title "Review: propose and approve"
-             ;; Like lesson 21 this lesson MANAGES branches itself — a
+             ;; Like lesson 23 this lesson MANAGES branches itself — a
              ;; protected release branch plus a feature branch proposed
              ;; into it; a tour scratch branch would fork the story
              ;; mid-way. The protected branch is LESSON-owned (never
@@ -1457,10 +1657,11 @@
                :targets ["#branch-chip-btn" ".branch-popover"]
                :check {:kind "on-branch" :name "main"}}
               {:title "That's review"
-               :body "Refuse, propose, approve — with the rule on the target, exactly the pull-request shape. Editing a proposed branch dismisses its now-stale approvals (like GitHub dismissing stale reviews), every proposal carries a comment thread in its 💬 Review dialog (the row's ⋯ menu), and ⚙ can also demand “push only via merge” (no direct writes at all). The written lesson 21 covers all of it. Click [[Finish]] to clean up — review-demo and both branches go."
+               :body "Refuse, propose, approve — with the rule on the target, exactly the pull-request shape. Editing a proposed branch dismisses its now-stale approvals (like GitHub dismissing stale reviews), every proposal carries a comment thread in its 💬 Review dialog (the row's ⋯ menu), and ⚙ can also demand “push only via merge” (no direct writes at all). The written lesson 23 covers all of it. Click [[Finish]] to clean up — review-demo and both branches go."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "23"
+            {:id "25"
+             :slug "asset-overrides"
              :chapter "The editor"
              :version 1
              :requires "assets"
@@ -1497,10 +1698,11 @@
                :target ".gd-asset-revert-btn"
                :check {:kind "dom-absent" :selector ".gd-asset-chip-override"}}
               {:title "What this is for"
-               :body "A house style for your deployment, an affordance upstream doesn't have, a quick instrumentation patch while you diagnose something. A JS override is syntax-checked before it is written — a typo would otherwise take down the whole bundle including this panel — while CSS is not, because a bad rule just doesn't apply. The written lesson 23 covers the ?v= hash and when NOT to override. Click [[Finish]]."
+               :body "A house style for your deployment, an affordance upstream doesn't have, a quick instrumentation patch while you diagnose something. A JS override is syntax-checked before it is written — a typo would otherwise take down the whole bundle including this panel — while CSS is not, because a bad rule just doesn't apply. The written lesson 25 covers the ?v= hash and when NOT to override. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "24"
+            {:id "26"
+             :slug "version-history"
              :chapter "The editor"
              :version 1
              :title "Version history"
@@ -1548,10 +1750,11 @@
                :target nil
                :check {:kind "manual"}}
               {:title "That's the timeline"
-               :body "Edits append, restores append, deletes append a tombstone. The written lesson 24 covers the per-version run history and how this reads on a branch. Click [[Finish]]."
+               :body "Edits append, restores append, deletes append a tombstone. The written lesson 26 covers the per-version run history and how this reads on a branch. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "25"
+            {:id "27"
+             :slug "users-admin"
              :chapter "Your organization"
              :version 1
              :requires "manage-users"
@@ -1587,10 +1790,11 @@
                :target "[data-users-panel] [data-invite-row] .grant-delete"
                :check {:kind "dom-absent" :selector "[data-users-panel] [data-invite-row]"}}
               {:title "That's membership"
-               :body "Invite by email or by link, remove by row, transfer ownership when you hand the org over. What a member may DO is the next lesson: capabilities are granted per namespace, not per person. The written lesson 25 covers the owner-only actions; lesson 27 covers roles."
+               :body "Invite by email or by link, remove by row, transfer ownership when you hand the org over. What a member may DO is the next lesson: capabilities are granted per namespace, not per person. The written lesson 27 covers the owner-only actions; lesson 29 covers roles."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "26"
+            {:id "28"
+             :slug "grants"
              :chapter "Your organization"
              :version 1
              :requires "manage-grants"
@@ -1618,17 +1822,18 @@
                :target "[data-grants-panel] .grant-delete"
                :check {:kind "manual"}}
               {:title "That's authorization"
-               :body "Per-namespace capabilities, one table, no roles required — though Roles exist when you want to name a bundle of them. The written lesson 26 covers the org-management axis (manage-users, manage-grants …), which is separate from namespace capabilities. Click [[Finish]]."
+               :body "Per-namespace capabilities, one table, no roles required — though Roles exist when you want to name a bundle of them. The written lesson 28 covers the org-management axis (manage-users, manage-grants …), which is separate from namespace capabilities. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "27"
+            {:id "29"
+             :slug "roles"
              :chapter "Your organization"
              :version 1
              :requires "manage-roles"
              :title "Roles"
              :steps
              [{:title "One bundle, several people"
-               :body "lesson 26 covered grants — who may touch which namespace. This is the OTHER axis: who may administer the org. Those capabilities (manage-users, manage-grants, manage-roles, manage-apps, publish-packages) are bundled by a ROLE, so a policy lives in one row instead of being spread across three people."
+               :body "lesson 28 covered grants — who may touch which namespace. This is the OTHER axis: who may administer the org. Those capabilities (manage-users, manage-grants, manage-roles, manage-apps, publish-packages) are bundled by a ROLE, so a policy lives in one row instead of being spread across three people."
                :target nil
                :check {:kind "manual"}}
               {:title "Open Roles"
@@ -1656,7 +1861,8 @@
                :body "Delete the role with [[×]] on its row. The members keep their accounts, their org membership and every namespace grant they hold — only what the role conferred goes away. Click [[Finish]]."
                :target "[data-roles-panel] .grant-delete"
                :check {:kind "manual"}}]}
-            {:id "28"
+            {:id "30"
+             :slug "apps"
              :chapter "Your organization"
              :version 1
              :requires "manage-apps"
@@ -1696,10 +1902,11 @@
                :target "[data-fn-apps] form"
                :check {:kind "manual"}}
               {:title "That's publishing"
-               :body "Click the host to open your page in a new tab — no build step, because there was nothing to build: the row points at a fn, and requests to that host are executed against it. Editing the fn changes what the host serves on the next request; the [[apps]] lens under the Explorer search lists every published fn. The written lesson 28 covers custom domains and the request shape a handler receives. Click [[Finish]] to clean up or keep the app."
+               :body "Click the host to open your page in a new tab — no build step, because there was nothing to build: the row points at a fn, and requests to that host are executed against it. Editing the fn changes what the host serves on the next request; the [[apps]] lens under the Explorer search lists every published fn. The written lesson 30 covers custom domains and the request shape a handler receives. Click [[Finish]] to clean up or keep the app."
                :target "[data-fn-apps]"
                :check {:kind "manual"}}]}
-            {:id "30"
+            {:id "32"
+             :slug "distributing-packages"
              :chapter "Your organization"
              :version 1
              :requires "publish-packages"
@@ -1739,7 +1946,7 @@
                :check {:kind "dom" :selector "[data-packages-panel] .packages-uninstall"}
                :creates {:type "ns" :name "mycorp@1-0-0"}}
               {:title "A pin, not a copy"
-               :body "The installed row carries a version box and ↑: type another version and press it to move the pin — that is what an update and a rollback both are. [[Fork]] is the other door: it copies the fns in so you can edit them, and writes no pin — it is for a package whose namespace is not built into this instance (the written lesson 39)."
+               :body "The installed row carries a version box and ↑: type another version and press it to move the pin — that is what an update and a rollback both are. [[Fork]] is the other door: it copies the fns in so you can edit them, and writes no pin — it is for a package whose namespace is not built into this instance (the written lesson 41)."
                :target "[data-packages-panel]"
                :check {:kind "manual"}}
               {:title "Uninstall"
@@ -1747,17 +1954,18 @@
                :target "[data-packages-panel] .packages-uninstall"
                :check {:kind "dom-absent" :selector "[data-packages-panel] .packages-uninstall"}}
               {:title "That's distribution"
-               :body "Publish freezes, install pins, fork copies. The written lessons 29 and 30 cover the on-disk package format (package.edn / fns.edn / impls.clj, which is how the built-in packages are written) and the governance catalog in the Organization surface. Click [[Finish]] to clean up."
+               :body "Publish freezes, install pins, fork copies. The written lessons 31 and 32 cover the on-disk package format (package.edn / fns.edn / impls.clj, which is how the built-in packages are written) and the governance catalog in the Organization surface. Click [[Finish]] to clean up."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "31"
+            {:id "33"
+             :slug "working-across-orgs"
              :chapter "Your organization"
              :version 1
              :requires "org"
              :title "Across organizations"
              :steps
              [{:title "Where your editor lives"
-               :body "Your organization's editor has its own address — one subdomain per org. Apps live on a different domain entirely (lesson 28), so your public site never shares an origin with your editing session."
+               :body "Your organization's editor has its own address — one subdomain per org. Apps live on a different domain entirely (lesson 30), so your public site never shares an origin with your editing session."
                :target nil
                :check {:kind "manual"}}
               {:title "Read your own address"
@@ -1774,15 +1982,16 @@
                :targets ["#org-chip-btn" "#org-popover"]
                :check {:kind "manual"}}
               {:title "How you get a second one"
-               :body "Two ways. Someone in another org grants your account a capability there (lesson 26) — membership is exactly “holds a grant in that org”, so it appears in the chip the moment they do. Or you make one: [[New organization…]] at the bottom of the chip's list takes a name (it becomes the editor address) and makes you its owner and admin. Signing up again is NOT a way — that only ever makes another account."
+               :body "Two ways. Someone in another org grants your account a capability there (lesson 28) — membership is exactly “holds a grant in that org”, so it appears in the chip the moment they do. Or you make one: [[New organization…]] at the bottom of the chip's list takes a name (it becomes the editor address) and makes you its owner and admin. Signing up again is NOT a way — that only ever makes another account."
                :target "#org-chip-btn"
                :targets ["#org-chip-btn" "#org-popover"]
                :check {:kind "manual"}}
               {:title "That's the map"
-               :body "Editors on one domain, one subdomain per org; apps on another, one subdomain per app; your own domain on top of an app when you want it. Nothing nested, nothing to configure. The written lesson 31 walks the same map from the landing inwards. Click [[Finish]]."
+               :body "Editors on one domain, one subdomain per org; apps on another, one subdomain per app; your own domain on top of an app when you want it. Nothing nested, nothing to configure. The written lesson 33 walks the same map from the landing inwards. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "33"
+            {:id "35"
+             :slug "services"
              :chapter "Your organization"
              :version 1
              :requires "services"
@@ -1819,7 +2028,7 @@
                :check {:kind "dom" :selector ".node-overlay[data-fn-name=\"tutorial-tick\"]"}
                :creates {:type "fn" :name "tutorial-tick"}}
               {:title "Give it something to return"
-               :body "tutorial-tick's :value edge runs on past its card to a dashed [[+]]: a callable's open input is supplied by its CALLER, so the value you bind here is written on tutorial-daemon and handed to the thunk on every call (lesson 07). Click that [[+]], choose [[Bind literal]] and type `tick` — the slot takes anything, so a bare word is stored as text (a number or `[…]` would land as that; the “as” chooser above the field lets you say so explicitly and narrow the slot). A service has no caller to pass arguments in, so a fn with free args can never become one; tutorial-daemon now has none AND carries :process — the two conditions for a service."
+               :body "tutorial-tick's :value edge runs on past its card to a dashed [[+]]: a callable's open input is supplied by its CALLER, so the value you bind here is written on tutorial-daemon and handed to the thunk on every call (lesson 09). Click that [[+]], choose [[Bind literal]] and type `tick` — the slot takes anything, so a bare word is stored as text (a number or `[…]` would land as that; the “as” chooser above the field lets you say so explicitly and narrow the slot). A service has no caller to pass arguments in, so a fn with free args can never become one; tutorial-daemon now has none AND carries :process — the two conditions for a service."
                :target ".placeholder-binder[data-fn-name=\"tutorial-daemon\"][data-arg-name=\"value\"]"
                :targets [".placeholder-binder[data-fn-name=\"tutorial-daemon\"][data-arg-name=\"value\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-daemon" :slot "value"}}
@@ -1847,10 +2056,11 @@
                :targets [".node-overlay[data-fn-name=\"tutorial-daemon\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"service-settings\"]" ".service-popover"]
                :check {:kind "manual"}}
               {:title "That's supervision"
-               :body "A service is desired state, not a deployment: you write the row, the reconciler makes it true. The written lesson 33 builds a real one — a :future-parented thunk, then a scheduled job — and covers cardinality and the dedicated-tier isolation this runs under. Click [[Finish]] to clean up."
+               :body "A service is desired state, not a deployment: you write the row, the reconciler makes it true. The written lesson 35 builds a real one — a :future-parented thunk, then a scheduled job — and covers cardinality and the dedicated-tier isolation this runs under. Click [[Finish]] to clean up."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "34"
+            {:id "36"
+             :slug "signing-up-and-in"
              :chapter "Your organization"
              :version 1
              :requires "org"
@@ -1882,10 +2092,11 @@
                :target "#gd-acct-toks"
                :check {:kind "manual"}}
               {:title "Leaving"
-               :body "The account menu's [[Sign out]] ends this session; [[Sign out everywhere]] ends every session of this account on every device — the move to make if a laptop goes missing. The written lesson 34 covers signing up, email verification and password reset, which happen before you ever reach this editor. Click [[Finish]]."
+               :body "The account menu's [[Sign out]] ends this session; [[Sign out everywhere]] ends every session of this account on every device — the move to make if a laptop goes missing. The written lesson 36 covers signing up, email verification and password reset, which happen before you ever reach this editor. Click [[Finish]]."
                :target "#auth-lock-btn, .auth-avatar"
                :check {:kind "manual"}}]}
-            {:id "35"
+            {:id "37"
+             :slug "plans-and-tiers"
              :chapter "Your organization"
              :version 1
              :requires "org"
@@ -1909,17 +2120,18 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Reading your own tier"
-               :body "The plan travels with every response: /api/orgs/quota answers with the slug and the two counted ceilings, which is what the badge and this lesson both read. The written lesson 35 has the full table — anonymous, free, network, dedicated, suspended — and what each grants. Click [[Finish]]."
+               :body "The plan travels with every response: /api/orgs/quota answers with the slug and the two counted ceilings, which is what the badge and this lesson both read. The written lesson 37 has the full table — anonymous, free, network, dedicated, suspended — and what each grants. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "36"
+            {:id "38"
+             :slug "services-talking-to-services"
              :chapter "Your organization"
              :version 1
              :requires "own-web-server"
              :title "Services talking to services"
              :steps
              [{:title "Two services, one graph"
-               :body "In lesson 33 a service just ran. Here a fn will call a running service over HTTP by NAMING it — no address typed anywhere. The reconciler records where every listener answers; a consumer asks for that address by pointing at the service fn itself. The service you will name is the one you are looking at: the editor's own web-server."
+               :body "In lesson 35 a service just ran. Here a fn will call a running service over HTTP by NAMING it — no address typed anywhere. The reconciler records where every listener answers; a consumer asks for that address by pointing at the service fn itself. The service you will name is the one you are looking at: the editor's own web-server."
                :target nil
                :check {:kind "manual"}}
               {:title "A consumer"
@@ -1953,7 +2165,7 @@
                :targets [".node-overlay[data-fn-name=\"tutorial-fetch\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-effects-warning" ".execute-run-btn" ".execute-result-host"]
                :check {:kind "manual"}}
               {:title "Your own services"
-               :body "Point :service at any listener you make a service of (lesson 33) and it resolves the same way; disable that service and the call answers `service/not-running` instead of guessing. The written lesson 36 builds a producer, shows its running copy in the ⚙ popover, and follows the call across the wire."
+               :body "Point :service at any listener you make a service of (lesson 35) and it resolves the same way; disable that service and the call answers `service/not-running` instead of guessing. The written lesson 38 builds a producer, shows its running copy in the ⚙ popover, and follows the call across the wire."
                :target nil
                :check {:kind "manual"}}
               {:title "That's naming a service"
@@ -1962,8 +2174,9 @@
                :check {:kind "manual"}}]}
             ;; 37 — the Marketplace: a theme saved, shared, rolled back; a
             ;; key rebound; a review posted. Needs the registry package
-            ;; (publish-packages under tenancy — the same gate as lesson 30).
-            {:id "38"
+            ;; (publish-packages under tenancy — the same gate as lesson 32).
+            {:id "40"
+             :slug "marketplace-themes-keymaps"
              :chapter "Your organization"
              :version 1
              :requires "publish-packages"

@@ -1,8 +1,8 @@
-// Lesson 38 — the Marketplace: theme saved + shared, a key rebound, a review.
+// Lesson 40 — the Marketplace: theme saved + shared, a key rebound, a review.
 //
 // Part of the interactive-tutorial drift guard: walks every step of the
 // lesson by doing the real UI actions (docs/MARKETPLACE.md; the lesson is
-// docs/tutorial/38-marketplace-themes-keymaps.md), so a renamed class or a
+// docs/tutorial/40-marketplace-themes-keymaps.md), so a renamed class or a
 // changed flow fails HERE, not on a reader. Needs the registry package (the
 // e2e stack has it); the theme version the lesson publishes is withdrawn by
 // the tour's own end-of-lesson cleanup, and the preferences are reset here.
@@ -17,13 +17,13 @@ const {waitTourTitle, clickTourButton, finishAndDelete} = require('./tutorial-to
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-market — lesson 38 walked end-to-end');
+  console.log('edit-tutorial-tour-market — lesson 40 walked end-to-end');
   let failed = false;
   const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
   try {
-    await page.goto(BASE + '/?tutorial=38');
+    await page.goto(BASE + '/?tutorial=40');
     await waitTourTitle(page, 'Make it yours, then share it', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 38 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 40 Next');
 
     // --- Open the theme editor: account menu → Settings → Customize…
     await waitTourTitle(page, 'Open the theme editor');
@@ -91,14 +91,14 @@ const {waitTourTitle, clickTourButton, finishAndDelete} = require('./tutorial-to
       const sel = document.querySelector('#gd-market-root .mk-review-form select[name="rating"]');
       sel.value = '5';
       const ta = document.querySelector('#gd-market-root .mk-review-form textarea[name="body"]');
-      ta.value = 'Lesson 38 says hello.';
+      ta.value = 'Lesson 40 says hello.';
       document.querySelector('#gd-market-root .mk-review-submit').click();
     });
     await waitTourTitle(page, "That's the Marketplace", 60000);
     console.log('  step 8: review posted');
 
     await finishAndDelete(page);
-    console.log('  lesson 38: walked + cleaned (theme version withdrawn)');
+    console.log('  lesson 40: walked + cleaned (theme version withdrawn)');
   } catch (e) {
     failed = true;
     console.error('FAIL edit-tutorial-tour-market:', e);

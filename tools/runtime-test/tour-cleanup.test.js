@@ -218,7 +218,7 @@ const tests = [
       packages: [{name: 'mycorp-hello', version: '1.0.0'}],
     });
     const out = await ctx._tourSurvivors([
-      {type: 'branch', name: 'tutorial-15'},
+      {type: 'branch', name: 'tutorial-17'},
       {type: 'fn', name: 'greet'},
       {type: 'ns', name: 'mycorp'},
       {type: 'package-version', name: 'mycorp-hello'},

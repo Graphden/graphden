@@ -157,6 +157,10 @@
                   "packages/app/editor/editor-overlay-type-expand.js"
                   "packages/app/editor/editor-provenance-popover.js"
                   "packages/app/editor/editor-overlay-arg.js"
+                  ;; Slot seals (:terminal / :list-closed / :required) —
+                  ;; the lock badge + popover the edge label mounts and the
+                  ;; `+` gate the placeholder overlay asks; before both.
+                  "packages/app/editor/editor-overlay-seal.js"
                   "packages/app/editor/editor-overlay-edge-label.js"
                   "packages/app/editor/editor-overlay-fn-rows.js"
                   "packages/app/editor/editor-overlay-fn.js"

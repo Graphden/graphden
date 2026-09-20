@@ -64,7 +64,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
  * `:submit-button` (which renders type="submit") gets the styling
  * automatically without needing an extra class; `.primary` is the same
  * look for a button that is not a form submit (`:attrs {:class "primary"}`
- * — the written lesson 08 has used that class since it was written, and
+ * — the written lesson 10 has used that class since it was written, and
  * until 2026-09-13 nothing styled it). */
 button[type="submit"],
 button.primary {

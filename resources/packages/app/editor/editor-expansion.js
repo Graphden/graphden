@@ -162,7 +162,7 @@ function applyClickSpec(nodeId, depth, fnId, allFnsAtDepth) {
     // layout, so a fit scheduled on the next frames measured the OLD graph
     // and found it fitting — the card the click had just revealed sat
     // off-screen under the inspector, exactly the dead end this guard is
-    // for (lesson 16's unfolded hop). New nodes jump straight
+    // for (lesson 18's unfolded hop). New nodes jump straight
     // to their place; the survivors tween for ANIM_DURATION, so measure
     // after the tween.
     Promise.resolve(rendered).then(() => {

@@ -405,7 +405,7 @@ const _prefListeners = new Set();
 // STARTED at and, when its response lands, keeps any key written since.
 // Without it a slow `GET /api/prefs` (the boot refresh, the marketplace's
 // after-install refresh) answered AFTER the user rebound a key and put the
-// server's older map back — the override vanished, and lesson 38's "Now
+// server's older map back — the override vanished, and lesson 40's "Now
 // the keys" step never saw its (default: …) badge (a gate flake, twice).
 let _prefsGen = 0;
 const _prefWrittenGen = {};

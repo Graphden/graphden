@@ -54,7 +54,7 @@ fi
 
 # Playwright does NOT await an async `waitForFunction` predicate: the pending
 # Promise is truthy, the wait returns on its first tick, and the "wait" is
-# decorative. Three such waits sat in this suite until 2026-09-05 — lesson 24's
+# decorative. Three such waits sat in this suite until 2026-09-05 — lesson 26's
 # "did the description land" check among them, which is how a PUT that 400'd
 # passed as landed. Poll server state from Node instead (`waitUntil` in
 # tutorial-tour-helpers.js, `waitFor` in edit-test-helpers.js).

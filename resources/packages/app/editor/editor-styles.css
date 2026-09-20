@@ -403,6 +403,44 @@ body.sidebar-collapsed #sidebar-resizer { display: none; }
   font-size: 0.75rem; font-style: italic; cursor: help;
 }
 
+/* Slot seals (editor-overlay-seal.js). The badge sits on the edge label after
+   the type chip: 🔒 whenever a seal is in force, a dim 🔓 on an editable edge
+   with none (the `i` badge's discoverability rule — visible on hover). The
+   ghost replaces a `+` the server would refuse: a slot sealed / list closed
+   above this card. */
+.seal-badge {
+  display: inline-block;
+  margin-left: 3px;
+  padding: 0 1px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.625rem;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: pointer;
+}
+.seal-badge-off { opacity: 0; }
+.edge-label-overlay:hover .seal-badge-off,
+.seal-badge-off:focus-visible { opacity: 0.7; }
+.seal-badge:hover { background-color: color-mix(in srgb, currentcolor 28%, transparent); }
+.seal-ghost {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 1px dashed var(--muted-fg);
+  background: var(--bg); color: var(--muted-fg);
+  font-size: 0.6875rem; cursor: help;
+}
+.seal-popover { display: flex; flex-direction: column; gap: 6px; font-size: 0.75rem; }
+.seal-popover-head { font-weight: 600; color: var(--fg); }
+.seal-popover-inherited { color: var(--muted-fg); font-style: italic; }
+.seal-popover-row { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: baseline; cursor: pointer; }
+.seal-popover-row input { grid-row: 1 / span 2; align-self: start; margin-top: 3px; }
+.seal-popover-row input:disabled + .seal-popover-label { color: var(--muted-fg); }
+.seal-popover-label { color: var(--fg); }
+.seal-popover-hint { grid-column: 2; color: var(--muted-fg); font-size: 0.6875rem; }
+
 /* Hovering an edge lights the whole visual bundle it belongs to. Markers use
    `fill: context-stroke`, so the arrowheads follow without a rule of their own. */
 .edge-line.edge-hovered {
@@ -7566,7 +7604,7 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
 /* While the sheet is up, the panels a lesson points at get its height as
    bottom padding — otherwise a row under the sheet cannot be scrolled clear
    of it: the Explorer is exactly viewport-tall, so there is nothing below to
-   scroll to (lesson 06's "New namespace" button, at the bottom of the list,
+   scroll to (lesson 08's "New namespace" button, at the bottom of the list,
    was simply unreachable). */
 body.gd-tour-sheet-open #side-menu {
   padding-bottom: var(--gd-tour-sheet-h, 0);

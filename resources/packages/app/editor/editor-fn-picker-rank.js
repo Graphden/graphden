@@ -24,7 +24,7 @@
 // /api/types/candidates + clientSubtype); ranking never widens or narrows
 // the Compatible set, it orders it.
 //
-// WHY THIS SHAPE (a reader on lesson 16 typing `map`): the
+// WHY THIS SHAPE (a reader on lesson 18 typing `map`): the
 // previous list was an accordion — Compatible / Other — with the
 // compatible half cut into collapsible tiers (Ready / Needs inputs /
 // Ignores). Typing `map` put six test fns whose names merely contain

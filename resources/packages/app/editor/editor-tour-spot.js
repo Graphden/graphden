@@ -372,7 +372,7 @@ function _tourFloatingRects() {
 // nodes, [[+]] placeholder binders). On canvas lessons these ARE the step's
 // subject: without them in the avoid list the popover repeatedly parked on
 // the selected fn's card, covering the ⋯ / [[+]] the step asks to press
-// (lessons 06/16/28/30 in the walkthrough). Scored SOFT, like
+// (lessons 08/18/30/32 in the walkthrough). Scored SOFT, like
 // the floating surfaces — a crowded canvas still yields the least-covering
 // corner instead of no position at all.
 function _tourNodeRects() {

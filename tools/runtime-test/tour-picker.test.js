@@ -178,6 +178,57 @@ function makeWorld(opts) {
       + JSON.stringify(w.stored()) + ')');
   });
 
+  // --- identity: slugs, not numbers -----------------------------------------
+
+  const SLUGGED = {
+    lessons: [
+      { id: '01', slug: 'first-fn', chapter: 'Basics', title: 'First fn', steps: [{}], version: 1 },
+      { id: '02', slug: 'slots', chapter: 'Basics', title: 'Slots', steps: [{}], version: 1 },
+      { id: '03', slug: 'free-args', chapter: 'Basics', title: 'Free args', steps: [{}], version: 1 },
+    ],
+  };
+
+  await test('the history is keyed by slug, and a number-keyed history reads as the lesson it names today', () => {
+    const w = makeWorld({ lessons: SLUGGED });
+    w.ctx._tourMarkDone(SLUGGED.lessons[1], 1);
+    assert(JSON.stringify(w.stored()) === '{"slots":1}',
+      'a finish is recorded under the slug (got: ' + JSON.stringify(w.stored()) + ')');
+    assert(w.ctx._tourDoneSet().has('slots') && !w.ctx._tourDoneSet().has('02'),
+      'and read back as the slug');
+
+    // A pre-slug history: `["01","03"]` — 01 and 03 as the catalogue numbers
+    // them NOW.
+    const legacy = makeWorld({ lessons: SLUGGED, done: ['01', '03'] });
+    assert([...legacy.ctx._tourDoneSet()].join() === 'first-fn,free-args',
+      'numbers translate to the slugs they name today (got: '
+      + [...legacy.ctx._tourDoneSet()].join() + ')');
+    legacy.ctx._tourMarkDone(SLUGGED.lessons[1], 1);
+    assert(JSON.stringify(legacy.stored()) === '{"first-fn":1,"free-args":1,"slots":1}',
+      'the next write carries the history over in slug form (got: '
+      + JSON.stringify(legacy.stored()) + ')');
+  });
+
+  await test('renumbering the lessons moves no ✓', async () => {
+    // Finished "slots" while it was lesson 02…
+    const w = makeWorld({ lessons: SLUGGED, done: { slots: 1 } });
+    // …then a lesson was inserted before it: same slugs, shifted numbers.
+    const renumbered = {
+      lessons: [
+        SLUGGED.lessons[0],
+        { id: '02', slug: 'reading', chapter: 'Basics', title: 'Reading', steps: [{}], version: 1 },
+        { ...SLUGGED.lessons[1], id: '03' },
+        { ...SLUGGED.lessons[2], id: '04' },
+      ],
+    };
+    w.ctx._tourLessons = renumbered;
+    w.ctx._tourFetchLessons = async () => renumbered;
+    await w.ctx.openTutorialMenu();
+    assert(/✓ done/.test(w.row('03').textContent), 'the ✓ followed "slots" to its new number 03');
+    assert(!/✓ done/.test(w.row('02').textContent),
+      'and the lesson that took number 02 is not marked (got: ' + w.row('02').textContent + ')');
+    assert(w.counts()[0] === '1 done', 'one lesson done, still (got: ' + JSON.stringify(w.counts()) + ')');
+  });
+
   // --- editions and news ---------------------------------------------------
 
   const VERSIONED = {

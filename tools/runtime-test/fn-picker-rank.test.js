@@ -71,7 +71,7 @@ assert(ctx.pickerTierOf(MAP_FUNC, { arity: 0 }) === 'ignores', 'no server fit â€
 assert(ctx.pickerIsTestNs('core.tests') && ctx.pickerIsTestNs('app.registry.tests.x') && !ctx.pickerIsTestNs('core.testsuite'),
   'a `tests` SEGMENT marks a test namespace, not a substring');
 
-// --- pickerArrange: the lesson-15 case ------------------------------------
+// --- pickerArrange: the lesson-17 case ------------------------------------
 // The reader typed `map` into a [list text] slot. Six test fns whose names
 // merely contain "map" are ready values; core.hof.map itself needs inputs.
 // The exact-name hit must be the first row, whatever its tier.

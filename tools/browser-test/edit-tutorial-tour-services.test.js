@@ -1,4 +1,4 @@
-// Drift guard for the lesson-36 interactive tour (services talking to
+// Drift guard for the lesson-38 interactive tour (services talking to
 // services). Walks the tour by doing the real UI actions — Extend, bind a
 // fn-ref through the picker on a DEEP `:fn-ref` placeholder, bind a literal
 // on a deep `path` placeholder, Run — so
@@ -16,15 +16,15 @@ const {
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-services — lesson 36');
+  console.log('edit-tutorial-tour-services — lesson 38');
   let failed = false;
   const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
   try {
     await hardCleanup(page);
 
-    await page.goto(BASE + '/?tutorial=36');
+    await page.goto(BASE + '/?tutorial=38');
     await waitTourTitle(page, 'Two services, one graph', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 36 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 38 Next');
 
     await waitTourTitle(page, 'A consumer');
     await filterAndSelect(page, 'service-get', 'service-get');
@@ -63,12 +63,12 @@ const {
       console.log('  run pane text: ' + dump);
       throw e;
     }
-    assert(await clickTourButton(page, 'Next'), 'lesson 36 run Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 38 run Next');
     await waitTourTitle(page, 'Your own services', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 36 explain Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 38 explain Next');
     await waitTourTitle(page, "That's naming a service", 150000);
     await finishAndDelete(page);
-    console.log('  lesson 36: walked + cleaned (consumer created, called web-server /version, deleted)');
+    console.log('  lesson 38: walked + cleaned (consumer created, called web-server /version, deleted)');
   } catch (e) {
     failed = true;
     console.log('FAIL: ' + (e && e.stack ? e.stack : e));

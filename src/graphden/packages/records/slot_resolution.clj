@@ -324,7 +324,7 @@
    scalar rename-view slot: the positional item's runtime reader
    (`seq-item-builder`) reads its OWN anchor slot and never consults
    further rename views over it, so a binding left on the outer
-   scalar view is a silent no-op (lesson-13's `:wrap-custom-script`
+   scalar view is a silent no-op (lesson-15's `:wrap-custom-script`
    children — `content → body` — were the reproducer). Normalizing to
    the positional anchor also matches what the editor writes for the
    same edit. Every other scalar-rename shape keeps the rename slot

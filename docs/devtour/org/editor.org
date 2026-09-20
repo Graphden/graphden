@@ -7,14 +7,14 @@ The ~25k lines of plain ES that draw the graph, bind the edits and mount the ser
 
 after: web, layout
 
-[[file:index.org][index]] · ~76 min
+[[file:index.org][index]] · ~77 min
 
 * 1. initGraph
 :PROPERTIES:
 :CUSTOM_ID: editor/initGraph
 :FILE: resources/packages/app/editor/editor-main.js
 :LINE: 222
-:MINS: 6.1
+:MINS: 6.5
 :END:
 
  *Start here for anything you can click.* The editor is ~75 plain ~.js~ files concatenated into one bundle in a fixed order (no imports, no build step — the per-module map is in [[../EDITOR_MODULES.md][docs/EDITOR_MODULES.md]]), and this is the boot. Note the shape of the fetches: the namespace TREE goes out alone first, because its status answers the auth question for everyone — only a non-401 fires the three secondary loads. Fn leaves and per-fn slots/bindings arrive lazily; a 401 sends the user to sign in rather than into a red fatal banner.
@@ -26,13 +26,13 @@ after: web, layout
 :PROPERTIES:
 :CUSTOM_ID: editor/buildLookups
 :FILE: resources/packages/app/editor/editor-data.js
-:LINE: 115
-:MINS: 6.8
+:LINE: 118
+:MINS: 6.9
 :END:
 
 The client mirror of the compile layer's ~build-lookups~: the same raw fn / slot / fn-slot / binding / list-item rows, indexed into the O(1) Maps every render path reads (~fnMap~, ~slotByFnAndName~, ~bindingByFnSlot~, ~itemsByBinding~, the namespace-path map). Every comment here is a fixed O(N×M) scan — this function runs on every mutation, so it is where client-side graph work gets slow.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-data.js::function buildLookups(data) {][resources/packages/app/editor/editor-data.js:115]]
+- source :: [[file:../../../resources/packages/app/editor/editor-data.js::function buildLookups(data) {][resources/packages/app/editor/editor-data.js:118]]
 - see also :: [[file:executor.org::#executor/build-lookups][build-lookups]]
 
 * 3. graph

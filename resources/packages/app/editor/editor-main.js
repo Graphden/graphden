@@ -267,6 +267,14 @@ async function initGraph() {
     return;
   }
   graphData = graphShellFromTree(await entResp.json());
+  // The shell has NO subtree — say so again. A selection's `ensureSubtreeFor`
+  // that landed during the awaits above set `_subtreeRootId` to its fn and
+  // put the rows into the OLD graphData; left standing, its guard
+  // (`root === fn && bindings is an array`) would take the shell's empty
+  // `[]` for that fn's rows and skip the refetch — a card whose list the
+  // layout draws while the client's lookups hold no binding for it
+  // (edit-seals e2e, 2026-09-20).
+  _subtreeRootId = null;
   // Hydrate the fresh shell from the fn cache, not `buildLookups` alone:
   // the cache was reset at the top of this function, so whatever it holds
   // now arrived DURING the awaits above — a lazy `loadNamespaceFns` the
@@ -364,8 +372,11 @@ async function loadGraphData() {
     return;
   }
   graphData = graphShellFromTree(await treeResp.json());
-  // Same hydration as initGraph: a namespace load that landed during the
-  // tree fetch already lives in the (reset) cache — the shell must carry it.
+  // Same as initGraph: the shell carries no subtree (a racing selection's
+  // fetch must not be taken for it), and a namespace load that landed
+  // during the tree fetch already lives in the (reset) cache — the shell
+  // must carry that.
+  _subtreeRootId = null;
   syncKnownFnsIntoGraph();
   if (typeResp?.ok) {
     try { richTypes = await typeResp.json(); }

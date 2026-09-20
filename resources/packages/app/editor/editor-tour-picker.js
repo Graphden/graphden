@@ -31,6 +31,30 @@ const TOUR_DONE_KEY = 'graphden.tour.done';
 // the baseline without announcing every lesson as new.
 const TOUR_SEEN_KEY = 'graphden.tour.seen';
 
+// A lesson's IDENTITY for the reader's history: its `:slug` (the written
+// lesson's file name without the number — stable across renumbering), the
+// `:id` for a script that has none. Numbers are positions; a lesson inserted
+// mid-sequence moves every number after it, and a ✓ keyed by number would
+// move with them onto a lesson the reader never took.
+function _tourKey(lesson) {
+  return lesson ? (lesson.slug || lesson.id || '') : '';
+}
+
+// The history used to be keyed by lesson NUMBER. A 2-digit key that names a
+// lesson in the current catalogue is translated to that lesson's slug on
+// read — best effort: a number can only mean what it means today.
+function _tourMigrateKeys(map) {
+  const all = (typeof _tourLessons !== 'undefined' && _tourLessons?.lessons) || [];
+  if (!map || !all.length) return map;
+  const out = new Map();
+  for (const [k, v] of map) {
+    const byId = /^\d\d$/.test(k) ? all.find((l) => l.id === k) : null;
+    const key = byId ? _tourKey(byId) : k;
+    if (!out.has(key)) out.set(key, v);
+  }
+  return out;
+}
+
 // A lesson's edition: `:version` from the script, 1 when it says nothing.
 function _tourVersionOf(lesson) {
   const v = lesson ? Number(lesson.version) : Number.NaN;
@@ -64,12 +88,12 @@ function _tourWriteMap(key, map) {
   } catch (_) { /* private mode — the catalogue still works, the mark just won't stick */ }
 }
 
-// The reading history: `Map id → edition finished`.
+// The reading history: `Map key → edition finished` (`_tourKey`).
 function _tourDoneMap() {
-  return _tourReadMap(TOUR_DONE_KEY, 1) || new Map();
+  return _tourMigrateKeys(_tourReadMap(TOUR_DONE_KEY, 1) || new Map());
 }
 
-// The ids alone — what most callers ask ("has the reader finished 05?").
+// The keys alone — what most callers ask ("has the reader finished this?").
 function _tourDoneSet() {
   return new Set(_tourDoneMap().keys());
 }
@@ -80,16 +104,17 @@ function _tourWriteDone(done) {
 
 // Called by the engine when the last step is reached — with the edition the
 // reader just walked, so a later bump is visible as "finished at 1, now 2".
-function _tourMarkDone(lessonId, version) {
-  if (!lessonId) return;
+function _tourMarkDone(lesson, version) {
+  const key = (typeof lesson === 'string') ? lesson : _tourKey(lesson);
+  if (!key) return;
   const done = _tourDoneMap();
-  done.set(lessonId, (Number.isInteger(version) && version > 0) ? version : 1);
+  done.set(key, (Number.isInteger(version) && version > 0) ? version : 1);
   _tourWriteDone(done);
 }
 
 // Finished, but at an OLDER edition than the script now carries.
 function _tourStale(lesson, done) {
-  const at = (done || _tourDoneMap()).get(lesson.id);
+  const at = (done || _tourDoneMap()).get(_tourKey(lesson));
   return at != null && at < _tourVersionOf(lesson);
 }
 
@@ -97,10 +122,11 @@ function _tourStale(lesson, done) {
 // skipped-through walk, a lesson from long ago that needs re-reading) or the
 // whole history. Answers whether anything changed, so the caller can leave the
 // list alone when the reader un-marks what was not marked.
-function _tourUnmarkDone(lessonId) {
-  if (!lessonId) return false;
+function _tourUnmarkDone(lesson) {
+  const key = (typeof lesson === 'string') ? lesson : _tourKey(lesson);
+  if (!key) return false;
   const done = _tourDoneMap();
-  if (!done.delete(lessonId)) return false;
+  if (!done.delete(key)) return false;
   _tourWriteDone(done);
   return true;
 }
@@ -115,7 +141,7 @@ function _tourClearDone() {
 // Record the catalogue as it stands — every listed lesson at its edition.
 function _tourWriteSeen(lessons) {
   _tourWriteMap(TOUR_SEEN_KEY,
-    new Map((lessons || []).map((l) => [l.id, _tourVersionOf(l)])));
+    new Map((lessons || []).map((l) => [_tourKey(l), _tourVersionOf(l)])));
 }
 
 // What changed since the reader last looked at the catalogue —
@@ -129,7 +155,7 @@ function _tourWriteSeen(lessons) {
 // reader the whole catalogue is new, and a count saying so would say nothing.
 function _tourNews(lessons) {
   const all = lessons?.lessons || [];
-  const seen = _tourReadMap(TOUR_SEEN_KEY, null);
+  const seen = _tourMigrateKeys(_tourReadMap(TOUR_SEEN_KEY, null));
   if (!seen) {
     if (all.length) _tourWriteSeen(all);
     return { fresh: [], updated: [], count: 0 };
@@ -139,9 +165,10 @@ function _tourNews(lessons) {
   const updated = [];
   for (const l of all) {
     const v = _tourVersionOf(l);
-    if (!seen.has(l.id)) {
-      if (!done.has(l.id)) fresh.push(l.id);
-    } else if (seen.get(l.id) !== v && _tourStale(l, done)) {
+    const k = _tourKey(l);
+    if (!seen.has(k)) {
+      if (!done.has(k)) fresh.push(l.id);
+    } else if (seen.get(k) !== v && _tourStale(l, done)) {
       updated.push(l.id);
     }
   }
@@ -165,7 +192,7 @@ const REQUIRE_SIGNALS = {
     phrase: 'the dedicated plan (or your own instance)',
     short: 'the dedicated plan',
   },
-  // Lesson 36 names the editor's OWN web-server as the service it calls. A
+  // Lesson 38 names the editor's OWN web-server as the service it calls. A
   // cloud organization has no such service of its own (the platform's row is
   // not the tenant's to resolve — the run answers an internal error), so the
   // tour needs both services and a single-tenant instance.
@@ -240,8 +267,8 @@ function _tourNextUp(lessonId) {
   const after = all.slice(idx + 1).filter(runnable);
   const done = _tourDoneSet();
   const next = after[0] || null;
-  const unfinished = after.find((l) => !done.has(l.id))
-    || all.filter(runnable).find((l) => !done.has(l.id) && l.id !== lessonId)
+  const unfinished = after.find((l) => !done.has(_tourKey(l)))
+    || all.filter(runnable).find((l) => !done.has(_tourKey(l)) && l.id !== lessonId)
     || null;
   return { next, unfinished: (unfinished && unfinished !== next) ? unfinished : null };
 }
@@ -290,7 +317,7 @@ async function openTutorialMenu() {
   const renderCounts = () => {
     counts.replaceChildren();
     const all = lessons.lessons;
-    const finished = all.filter((l) => done.has(l.id)).length;
+    const finished = all.filter((l) => done.has(_tourKey(l))).length;
     const available = all.filter((l) => _tourRequirement(l).allowed).length;
     const seg = (text, cls) => {
       const el = document.createElement('span');
@@ -386,7 +413,7 @@ async function openTutorialMenu() {
         row.classList.add('gd-tour-lesson-row-new');
         chip('new', 'gd-tour-lesson-badge-new', 'Added since you last opened the catalogue');
       }
-      if (done.has(lesson.id)) {
+      if (done.has(_tourKey(lesson))) {
         row.classList.add('gd-tour-lesson-row-done');
         btn.classList.add('gd-tour-btn-done');
         const mark = document.createElement('span');
@@ -396,11 +423,11 @@ async function openTutorialMenu() {
         if (_tourStale(lesson, done)) {
           row.classList.add('gd-tour-lesson-row-updated');
           chip('updated', 'gd-tour-lesson-badge-updated',
-               'Changed since you finished it (edition ' + done.get(lesson.id)
+               'Changed since you finished it (edition ' + done.get(_tourKey(lesson))
                + ' → ' + _tourVersionOf(lesson) + ') — worth taking again');
         }
         const undo = _tourBtn('↺', 'gd-tour-btn-quiet gd-tour-unmark', () => {
-          if (!_tourUnmarkDone(lesson.id)) return;
+          if (!_tourUnmarkDone(lesson)) return;
           done = _tourDoneMap();
           renderFoot(false);
           renderCounts();

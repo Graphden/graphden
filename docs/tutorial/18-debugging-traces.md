@@ -1,0 +1,125 @@
+# Lesson 18 — Debugging: traces, the call tree, and catching a request
+
+**Goal**: by the end of this lesson you can record what a run
+actually did — every fn it invoked, in call order, with per-node
+results — step through that record, and capture a live HTTP request
+to your app the same way.
+
+**Concepts introduced**: the path trace (`Trace path` /
+`+ capture values`), the **path** canvas highlight, the **tree**
+step-through view, the Runs tab's «catch next request»
+trap,
+secret redaction in traces.
+
+## Why a record, not breakpoints
+
+Graphden executes lazily: a node runs when something *forces* its
+value, cached calls skip their body entirely, and compile-time
+values never run at all. A classical pause-at-a-breakpoint debugger
+would step through that order — which rarely matches how you read
+the graph. So graphden debugs by **recording**: run once with the
+trace on, then walk the completed call tree as many times as you
+like. Deterministic, shareable (it's stored on the run), and nothing
+sits paused holding threads.
+
+## Try it — trace a run
+
+> Prefer to be shown? This lesson exists as a guided in-editor tour:
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=18)
+> (no sign-up), or pick “Interactive tutorial” in the editor's
+> account menu.
+
+Take any composed fn of yours (something with a few refs — the
+`slugify` test subject from lesson 17, or any page fn):
+
+1. Open its Run pane — `⋯ → ▶ Run` lands the Inspector on the
+   **Runs** tab.
+2. Check **Trace path**, and **Save to history** — the trace is
+   stored on the run, so an unsaved run keeps it only until you
+   navigate away. If you also want per-node return values, check
+   **+ capture values** — it asks for an explicit confirm with a
+   cost estimate (values are stored with the run, up to 4 KB per
+   node).
+3. Run. The result pane now offers **Show path on canvas** — every
+   traversed fn card, the one you ran included, gets a timing badge
+   (`3× 12ms`, `cache`, `secret`), and with values captured, a chip
+   with its return: short values print right on the card (`= "HI"`,
+   `= 11`), longer ones read `= value` and open on click.
+4. In the history list under the form, the traced row carries two
+   extra buttons:
+   - **path** — the same aggregate canvas highlight;
+   - **tree** — the step-through call tree.
+
+## The call tree
+
+The **tree** button opens a side panel: one row per invocation, in
+call order, indented by who-called-whom. Each row shows the fn name,
+a chip (`12ms` fresh call · `cache` memoised — the body didn't run ·
+`secret` hidden), and, for capture-values runs, a collapsible
+`value` viewer with that node's return.
+
+- Click a row (or use **◀ ▶** / arrow keys) to step; the selected
+  frame's card highlights on the canvas.
+- `Esc` or ✕ closes the panel.
+- A `trace truncated` note means the run hit a cap. There are two,
+  and they cut from opposite ends: recording **stops at 10 000
+  frames** (the first 10 000 are kept), and a stored trace over
+  **256 KB** drops its **oldest** frames until it fits. Frames whose
+  parent was dropped show up as roots rather than vanishing.
+
+Captured values have caps of their own, each reported rather than
+silent:
+
+- a single value over **4 KB** is not captured — the card's chip
+  reads `= 4KB+` and its popover explains the cap;
+- when all captured values together pass the **16 MB** budget, the
+  oldest entries drop first and the path panel says `some values
+  dropped`;
+- a fn that touches `:secret`-typed data gets a red `secret` badge,
+  no timings and no value chip — its value is never read by the
+  capture machinery, in either mode (next section).
+
+## Secrets never leak into a trace
+
+Traces obey the same `:secret` rules as results (lesson 16):
+
+- a fn that touches secret-typed data records `secret` — its value
+  is never read into the trace at all;
+- fns that *consumed* a secret value show `derived from secret`
+  instead of a value;
+- a fn the type system knows nothing about is hidden too
+  (`unknown type`) — no type information means no capture;
+- stored traces are re-checked on every read, so making a fn secret
+  *after* a run also hides its old recorded values.
+
+## Try it — catch a request
+
+Traces of manual runs cover fns you can call from the Run pane.
+For a **web handler** you usually want the real thing: the actual
+HTTP request, with its params and headers. That's the trap:
+
+1. Select your web server — the fn that runs as a service (the
+   **⚙ services** chip finds it) — and open the Inspector's **Runs**
+   tab. It opens with the trap block above the run history.
+2. Optionally type a path prefix (e.g. `/shop`) — empty catches the
+   next request to any app path (the editor's own `/api/…` and
+   `/partials/…` traffic is excluded so it can't eat the trap).
+3. Click **Catch next request**. The block shows an armed dot; the
+   trap is one-shot and expires after 10 minutes.
+4. Hit your app — open its page, or `curl` the route.
+5. The block flips to **Last captured request: open call tree** and
+   the tab re-reads its history — the request ran with the trace on
+   and landed as a run like any traced one: the (credential-stripped)
+   request as its argument, the response as its result, the full
+   call tree behind the button (and the row's **tree**).
+
+Cookies, `Authorization` headers and `Set-Cookie` are stripped
+before anything is stored — a captured run never becomes a
+credential store.
+
+## Where to go deeper
+
+- [EXECUTION.md § Path trace](../EXECUTION.md) — the stored trace
+  shape, caps, and the catch API.
+- [SECRETS.md § Path-trace capture](../SECRETS.md) — the redaction
+  layers in detail.

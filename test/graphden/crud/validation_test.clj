@@ -412,7 +412,7 @@
     ;; The same a→b edge that closes a→b→c→a through a call slot is
     ;; legal through a `:fn-ref` slot: the target is named, never
     ;; evaluated. Before the skip, naming the editor's own listener
-    ;; from a lesson-35 fn walked the whole app closure and answered
+    ;; from a lesson-37 fn walked the whole app closure and answered
     ;; `chain-too-deep`.
     (let [storage (setup/create-test-storage)]
       (try

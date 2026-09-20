@@ -490,7 +490,7 @@ response type-rows that BOTH sides reference — the producer's
 `:get-route` + handler return type, the consumer's `:service-get` +
 decoded result narrowed to the same shape. One edit moves both sides;
 the type-checker catches a drift at write time. Tutorial:
-[lesson 36](tutorial/36-services-talking-to-services.md).
+[lesson 38](tutorial/38-services-talking-to-services.md).
 
 ## Liveness — a copy that died in place
 
@@ -607,7 +607,7 @@ lists every queue with its pending / in-flight / dead counts
 (`:queue-dead-letters`) with *Requeue* (`:queue-requeue`) and *Delete* —
 org-scoped on the cloud, so a tenant sees its own queues, and the same
 cost on a queue of a million rows as on ten. Tutorial:
-[lesson 37](tutorial/37-queues.md).
+[lesson 39](tutorial/39-queues.md).
 
 ## Packages-based seeding
 

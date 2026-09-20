@@ -88,7 +88,7 @@ unfolding is your reading position, not part of the graph.
 
 If you want to read a closed card without changing the canvas at all,
 its `⋯` → `👁 Peek` opens its bindings in a floating panel
-([Lesson 18](18-explorer-and-inspector.md)).
+([Lesson 20](20-explorer-and-inspector.md)).
 
 ## Descriptions live at three levels
 
@@ -156,7 +156,7 @@ In the running editor (nothing is created in this lesson):
   inheritance, [Lesson 03](03-parents-and-inheritance.md) and
   [Lesson 04](04-slots-and-bindings.md).
 - **Reading the other panels** — the Inspector's Bindings table, kind
-  filters, Peek: [Lesson 18](18-explorer-and-inspector.md).
+  filters, Peek: [Lesson 20](20-explorer-and-inspector.md).
 
 ## Next
 

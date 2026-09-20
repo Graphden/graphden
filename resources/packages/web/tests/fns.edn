@@ -690,6 +690,17 @@
    :args {:actual {:parent :parse-binding-from-form :args {:form-data {:value {:value "[1,2]" :list-append "true" :list-closed "false"}}}}
           :expected {:value {:value [1 2] :list-append true :list-closed false}}}}
 
+  {:name :parse-binding-from-form-reads-the-terminal-seal
+   :description "`:parse-binding-from-form` reads `:terminal` as a boolean — \"true\" seals, anything else lifts the seal."
+   :parent :assert-eq
+   :args {:actual {:parent :parse-binding-from-form :args {:form-data {:value {:terminal "true"}}}}
+          :expected {:value {:terminal true}}}}
+
+  {:name :parse-binding-from-form-lifts-the-terminal-seal-on-blank
+   :parent :assert-eq
+   :args {:actual {:parent :parse-binding-from-form :args {:form-data {:value {:terminal ""}}}}
+          :expected {:value {:terminal false}}}}
+
   {:name :parse-binding-from-form-clears-required-on-blank
    :description "`:parse-binding-from-form` maps a blank `:required` to nil (empty-as-clear) and a blank `:value` to nil."
    :parent :assert-eq

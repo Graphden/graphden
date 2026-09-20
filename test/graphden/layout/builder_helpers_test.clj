@@ -80,6 +80,78 @@
 
 
 ;; =============================================================================
+;; edge-seal-fields — who sealed / closed / required the slot, for the badge
+;; and the `+` gate
+;; =============================================================================
+
+(defn- seal-lookups
+  [binding-by-fn-slot slot-required]
+  (-> (lookups binding-by-fn-slot)
+      (assoc :bindings-by-fn (reduce-kv (fn [m [fid sid] b]
+                                          (update m fid (fnil conj []) (assoc b :slot-id sid)))
+                                        {} binding-by-fn-slot))
+      (assoc-in [:fn-map child-id :name] "child")
+      (assoc-in [:fn-map parent-id :name] "parent")
+      (assoc-in [:slot-map slot-id :required] slot-required)))
+
+
+(deftest no-seal-is-an-empty-map
+  (is (= {} (bh/edge-seal-fields (seal-lookups {} nil) arg-id)))
+  (testing "a binding without flags, or with the flag false, seals nothing"
+    (is (= {} (bh/edge-seal-fields
+                (seal-lookups {[parent-id slot-id] {:fn-id parent-id :value 1 :terminal false}} nil)
+                arg-id)))))
+
+
+(deftest own-seal-and-ancestor-seal-both-name-the-sealer
+  (testing "sealed above — the child's `+` is one the server would refuse"
+    (is (= {:sealedBy (str parent-id) :sealedByName "parent"}
+           (bh/edge-seal-fields
+             (seal-lookups {[parent-id slot-id] {:fn-id parent-id :terminal true}} nil)
+             arg-id))))
+  (testing "sealed HERE — the reader may still bind, and may lift it"
+    (is (= {:sealedBy (str child-id) :sealedByName "child"}
+           (bh/edge-seal-fields
+             (seal-lookups {[child-id slot-id] {:fn-id child-id :terminal true}
+                            [parent-id slot-id] {:fn-id parent-id :terminal true}} nil)
+             arg-id))
+        "the closest seal wins the name")))
+
+
+(deftest list-closed-and-required-ratchet
+  (is (= {:listClosedBy (str parent-id) :listClosedByName "parent"}
+         (bh/edge-seal-fields
+           (seal-lookups {[parent-id slot-id] {:fn-id parent-id :list-append true :list-closed true}} nil)
+           arg-id)))
+  (testing "`:required true` on a binding only matters on a slot declared optional"
+    (is (= {:requiredBy (str parent-id) :requiredByName "parent"}
+           (bh/edge-seal-fields
+             (seal-lookups {[parent-id slot-id] {:fn-id parent-id :required true}} false)
+             arg-id)))
+    (is (= {} (bh/edge-seal-fields
+                (seal-lookups {[parent-id slot-id] {:fn-id parent-id :required true}} nil)
+                arg-id))
+        "a required-by-declaration slot has nothing to ratchet"))
+  (testing "a seal on a renamed view of the slot seals the slot"
+    (let [view-id (random-uuid)
+          r (bh/edge-seal-fields
+              (-> (seal-lookups {[parent-id view-id] {:fn-id parent-id :terminal true}} nil)
+                  (assoc-in [:slot-map view-id] {:id view-id :source-slot-id slot-id}))
+              arg-id)]
+      (is (= (str parent-id) (:sealedBy r)))))
+  (testing "the three are independent and can coexist"
+    (let [r (bh/edge-seal-fields
+              (seal-lookups {[child-id slot-id] {:fn-id child-id :required true}
+                             [parent-id slot-id] {:fn-id parent-id :list-append true
+                                                  :list-closed true :terminal true}}
+                            false)
+              arg-id)]
+      (is (= (str parent-id) (:sealedBy r)))
+      (is (= (str parent-id) (:listClosedBy r)))
+      (is (= (str child-id) (:requiredBy r))))))
+
+
+;; =============================================================================
 ;; Expansion specs — what the editor's "expand ancestors" control means
 ;; =============================================================================
 ;; The spec arrives from the client as either a LEVEL (an integer depth) or a

@@ -103,7 +103,7 @@ function renderRecentFns() {
     .slice(0, RECENT_FNS_MAX - 1);
   // A search or any active filter owns the tree — each narrows it to a
   // match list the reader is scanning, and the trail above it only pushes
-  // that list down (lesson 17 reads the ✕ failed filter right under the
+  // that list down (lesson 19 reads the ✕ failed filter right under the
   // chips).
   const searching = !!searchFilter
     || ((typeof gdFiltersActive === 'function') && gdFiltersActive());

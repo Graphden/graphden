@@ -233,7 +233,7 @@
   ;; `:vr-comp`. The PRODUCTION inheritance path (boot sweep records
   ;; `:wrap-script`'s declared return; editor-created descendants
   ;; inherit the computed form) is covered end-to-end by the tour
-  ;; e2e's lesson-13 Run step, whose check requires this repr.
+  ;; e2e's lesson-15 Run step, whose check requires this repr.
   (harness/sync! [{:name :_value-repr-registry
                    :namespace "app.reprs"
                    :parent :const

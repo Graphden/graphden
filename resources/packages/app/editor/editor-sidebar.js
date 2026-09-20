@@ -464,7 +464,7 @@ function updateEntityList(data) {
         const el = buildFnItem(fn, 1);
         // Same lens overlay as the tree rows — an exact-match row that
         // ignored the lens read as "visible" to the tour's lens-clear
-        // probe and broke the lesson-06 e2e (all=false).
+        // probe and broke the lesson-08 e2e (all=false).
         el.hidden = typeof fnKindVisible === 'function' ? !fnKindVisible(fn) : false;
         sec.appendChild(el);
       }

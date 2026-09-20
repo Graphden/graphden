@@ -237,6 +237,15 @@ function buildEdgeLabelOverlay(edge, container, label, overlayId) {
     if (desc) overlay.appendChild(desc);
   }
 
+  // The seals — 🔒 when this slot is sealed / its list closed / it was made
+  // required (here or above), a dim 🔓 on an edge the reader may seal; the
+  // popover behind it is where descendants' rights are decided
+  // (editor-overlay-seal.js). Nothing on a read-only edge with no seal.
+  if (editArg && typeof createSealBadge === 'function') {
+    const seal = createSealBadge(editArg, edge.data());
+    if (seal) overlay.appendChild(seal);
+  }
+
   // Stacked type-narrowing — same idea as the multi-line `name (parent)`
   // rename stacking. Backend emits `:typeChain` only when the source-
   // chain visible at the current expansion crosses a narrowing boundary,

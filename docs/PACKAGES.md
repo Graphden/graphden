@@ -188,6 +188,28 @@ normalizes the shorthand to the map form.
   sequence items, inline-anon bodies, `:return-type`, type members.
   See [ADR-identity-model.md](adr/ADR-identity-model.md) stage 4.
 
+**Arg spec map** — the map form carries the decisions that live on a
+slot beside its value (the editor shows and sets every one of them
+through the lock badge on the edge label; tutorial lessons 06 and 07):
+
+| Key | On | Meaning |
+|-----|----|---------|
+| `:value` / `:ref` | binding | the literal / the fn bound — final for every descendant (`value-override`) |
+| `:as` | slot (renamed view) | the public name of an inherited slot |
+| `:type` | binding | narrow the slot's type here |
+| `:required false` | slot declaration (base-fn / rename) | optional — the impl has a fallback |
+| `:required true` | binding | the ratchet: an inherited optional slot is required from here down; never widened back |
+| `:append [items]` | list binding | items appended to the inherited list (`:nums [1 2]` is shorthand for `{:append [1 2]}`) |
+| `:closed true` | list binding | descendants may not append (`list-closed`); `{:append [] :closed true}` closes an empty list |
+| `:terminal true` | binding | seal a still-free slot against descendant binding (`terminal-seal`) |
+| `:description` | binding | per-fn override of the slot's description |
+
+```edn
+{:name :base-sum :parent :add :args {:nums {:append [1 2] :closed true}}}
+{:name :cut      :parent :subs :args {:end {:terminal true}}}
+{:name :cut-to   :parent :subs :args {:end {:required true}}}
+```
+
 ### impls.clj — Clojure Implementations
 
 Base-fn bodies are written with the `defbase` macro. Arg symbols

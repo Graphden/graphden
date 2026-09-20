@@ -77,7 +77,7 @@ async function _tourEnd() {
     const rollback = async (thenStart) => {
       let ok = true;
       try {
-        // Children first — a fork the lesson itself made (lesson 21) would
+        // Children first — a fork the lesson itself made (lesson 23) would
         // otherwise block its parent's delete.
         await _tourDeleteCreatedBranches(created);
         // Namespaces are IDENTITY rows with no branch scope — deleting

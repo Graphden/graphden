@@ -102,6 +102,9 @@ function clientSubtype(sub, sup) {
 // NEW (slot/binding model — direct from the rewrite tables):
 //   slotMap            — id → slot row
 //   fnSlotsByFn        — fn-id → [fn-slot junction] sorted by :position
+//   slotOwnerById      — slot-id → the fn-id whose fn-slot row DECLARES it
+//                        (the only fn that may change the slot's own
+//                        `:required` — editor-overlay-seal.js)
 //   slotByFnAndName    — [fn-id, slot-name-keyword] → slot row
 //   bindingMap         — id → binding row
 //   bindingsByFn       — fn-id → [bindings on it]
@@ -135,10 +138,12 @@ function buildLookups(data) {
   // fn-slots. A renamed slot is an own slot (fn-slot row on F)
   // whose `:source-slot-id` FK points back at the slot it renames.
   const slotByFnSourceSlot = new Map();
+  const slotOwnerById = new Map();
   sortedFnSlots.forEach(fs => {
     const fnId = fs['fn-id'];
     if (!fnSlotsByFn.has(fnId)) fnSlotsByFn.set(fnId, []);
     fnSlotsByFn.get(fnId).push(fs);
+    if (fs['slot-id'] && !slotOwnerById.has(fs['slot-id'])) slotOwnerById.set(fs['slot-id'], fnId);
     const slot = slotMap.get(fs['slot-id']);
     if (slot?.name) {
       slotByFnAndName.set(fnId + '|' + slot.name, slot);
@@ -233,7 +238,7 @@ function buildLookups(data) {
   const inheritanceLevelsCache = new Map();
 
   return { fnMap,
-           slotMap, fnSlotsByFn, slotByFnAndName, slotByFnSourceSlot,
+           slotMap, fnSlotsByFn, slotByFnAndName, slotByFnSourceSlot, slotOwnerById,
            bindingMap, bindingsByFn, bindingByFnSlot, itemsByBinding, itemByItemId,
            nsMap, nsPathMap,
            fnUsedAsParent, fnUsedAsRef, nsHasChildNs, nsHasChildFn,

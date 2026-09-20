@@ -217,7 +217,7 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/PLANS.md](docs/PLANS.md) | Cloud tiers/quotas reference — what each plan grants | When touching tier ceilings, quota, or the demo flow |
 | [docs/FAQ.md](docs/FAQ.md) | Honest positioning Q&A about the project | When writing outward-facing copy about graphden |
 | [docs/README.md](docs/README.md) | The reader-facing doc index (composes with this map) | When adding/renaming a doc — keep both indexes current |
-| [docs/TUTORIAL_API_POLL.md](docs/TUTORIAL_API_POLL.md) | End-to-end worked example: scheduled API poller built from fn-defs | After tutorial lessons 01–11, or as a template for a real integration |
+| [docs/TUTORIAL_API_POLL.md](docs/TUTORIAL_API_POLL.md) | End-to-end worked example: scheduled API poller built from fn-defs | After tutorial lessons 01–13, or as a template for a real integration |
 | [docs/RUNTIME_SLOT_ID_REFACTOR.md](docs/RUNTIME_SLOT_ID_REFACTOR.md) | The name→slot-id key-space refactor ledger — which runtime spaces are id-keyed vs name-keyed and why the remainder stays hybrid | Before re-keying any runtime map keyed by arg NAME |
 | [docs/adr/ADR-free-arg-slot-map-perf.md](docs/adr/ADR-free-arg-slot-map-perf.md) | Why `free-arg-slot-map` is cached the way it is (VERIFIED) | Before touching free-arg caching |
 | [docs/adr/ADR-inherited-rename-surface.md](docs/adr/ADR-inherited-rename-surface.md) | The inherited-rename SURFACE contract — public names are the closest-chain rename, applied at the boundary; the walker/HOF internals stay per-fid | Before touching free-arg NAMING (`surface-entries`, `rename-for-slot`, `public-free-entries`) or proposing rename semantics changes |
@@ -423,7 +423,7 @@ and whether the step popover covers its target. Add
 ```bash
 cd tools/browser-test
 GRAPHDEN_TOUR_AUDIT=/tmp/audit GRAPHDEN_URL=http://localhost:9100 \
-  node edit-tutorial-tour-ux.test.js          # lessons 13 / 18 / 19 / 10 / 16
+  node edit-tutorial-tour-ux.test.js          # lessons 15 / 20 / 21 / 12 / 18
 node tour-spotlight-report.js /tmp/audit 15   # one lesson, flags: AMBIGUOUS×N,
                                               # NO-ELEMENT, POPOVER-COVERS-TARGET
 ```
@@ -807,9 +807,12 @@ landed change.
 - Performance work, caching, infra.
 - Anything happening only behind a feature flag or only in tests.
 
-**Tour lessons have editions.** Each lesson in `app/tour/fns.edn` carries
-`:version`; readers' browsers record which edition they finished, and a
-bump chips the lesson "updated" for them. `bb tour-versions-check` (in
+**Tour lessons have identities and editions.** Each lesson in
+`app/tour/fns.edn` carries `:slug` (= its `docs/tutorial/NN-<slug>.md` file
+name, the key the reader's ✓ is stored under — so inserting a lesson and
+renumbering the rest moves nobody's progress; `tour_content_test` checks the
+pair) and `:version`; readers' browsers record which edition they finished,
+and a bump chips the lesson "updated" for them. `bb tour-versions-check` (in
 `bb ci`) fails when a lesson's steps changed but its version did not —
 bump it when the FLOW changed (a step added / removed / reordered, a
 check or target asking for something else), or run `bb tour-versions`

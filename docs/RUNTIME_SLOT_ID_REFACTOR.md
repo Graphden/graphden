@@ -223,7 +223,7 @@ An alternative was considered (env-builder slot-id-only + cross-fn rename slot-i
 
 ## 9. Addendum — inherited renames
 
-Two facts established while closing the lesson-13 `:wrap-custom-script`
+Two facts established while closing the lesson-15 `:wrap-custom-script`
 descendant-binding bug (a value bound as `:body` silently vanished):
 
 - **Parser normalization (shipped).** A SCALAR rename whose source

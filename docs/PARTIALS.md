@@ -518,7 +518,7 @@ it eventually performs is not tied to the popover that asked for it. A
 popover that is torn down and re-created inside that window (the
 tutorial re-targets the packages chip; a user double-clicks) ends up
 showing a panel whose buttons htmx never processed — the HTML is there,
-`hx-post` is on the button, and a click does nothing (lesson 30's
+`hx-post` is on the button, and a click does nothing (lesson 32's
 "Install → server idle" flake, 2 runs in 5; `btn['htmx-internal-data']`
 was absent). For anything the user can re-open, fetch the partial
 explicitly, swap it, then call `htmx.process(mount)` synchronously, and

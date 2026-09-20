@@ -40,7 +40,7 @@
   // timer, and a second open (the tutorial re-targets the chip, a user
   // double-clicks) in that window re-created the popover while the first
   // load was still landing: the panel showed up, but the buttons inside it
-  // were never processed by htmx, so Install did nothing (lesson 30's
+  // were never processed by htmx, so Install did nothing (lesson 32's
   // "server idle" flake — 2/5 runs, htmx-internal-data absent on the
   // button). One sequence counter: only the newest open's response lands.
   let _pkgPopSeq = 0;

@@ -69,7 +69,8 @@
     (testing "the payload is there at all"
       (is (seq ls) "`:_tour-lessons` carries lessons")
       (is (every? :id ls) "every lesson has an id")
-      (is (= (count ls) (count (distinct (map :id ls)))) "ids are unique"))
+      (is (= (count ls) (count (distinct (map :id ls)))) "ids are unique")
+      (is (= (count ls) (count (distinct (map :slug ls)))) "slugs are unique"))
 
     (testing "every lesson has a title, a chapter, an edition and at least one step"
       (doseq [l ls]
@@ -80,6 +81,13 @@
         ;; `bb tour-versions-check` makes sure it MOVES when the steps do.
         (is (and (integer? (:version l)) (pos? (:version l)))
             (str "lesson " (:id l) " has a positive-integer :version"))
+        ;; The slug is the lesson's identity (the reader's ✓ is keyed by it,
+        ;; so a renumber moves nobody's progress) and it IS the written
+        ;; lesson's file name — one fact, checked here against the disk.
+        (is (and (string? (:slug l)) (re-matches #"[a-z0-9]+(?:-[a-z0-9]+)*" (:slug l)))
+            (str "lesson " (:id l) " has a kebab-case :slug"))
+        (is (java.io.File/.exists (io/file (str "docs/tutorial/" (:id l) "-" (:slug l) ".md")))
+            (str "lesson " (:id l) ": docs/tutorial/" (:id l) "-" (:slug l) ".md is the written lesson"))
         (is (seq (:steps l)) (str "lesson " (:id l) " has steps"))))
 
     (testing "every step has prose — an empty popover is a dead end"
@@ -125,7 +133,7 @@
 
 
 (deftest one-ring-per-action-and-every-typed-name-is-a-chip
-  ;; From a reader walking lesson 16: a step that passed
+  ;; From a reader walking lesson 18: a step that passed
   ;; through the Explorer filter, the row AND the row's ⋯ menu left the ring
   ;; on the filter — the spotlight has one place to be. The header of
   ;; fns.edn spells the conventions out; this pins them so the next compound
@@ -185,7 +193,7 @@
 (deftest chapters-are-contiguous-in-reading-order
   ;; The picker emits a heading whenever the chapter CHANGES, so a lesson
   ;; filed under an earlier chapter but placed later prints that heading a
-  ;; second time. That shipped once (lesson 22 sat after “Your organization”
+  ;; second time. That shipped once (lesson 24 sat after “Your organization”
   ;; carrying “The editor”).
   (let [order (map :chapter (lessons))
         runs (map first (partition-by identity order))]

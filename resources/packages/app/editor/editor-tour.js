@@ -321,7 +321,7 @@ function _tourTick() {
   // popover just says "advances automatically when done" forever. Same dead
   // end as a collapsed Explorer, same treatment: clear the lens once per
   // step, and only when the fn this step is waiting for is the one hidden.
-  // (Lessons 19 / 24, where the lens IS the subject, name no fn in their
+  // (Lessons 21 / 26, where the lens IS the subject, name no fn in their
   // checks, so they are untouched.)
   // The row a step needs is the fn its check NAMES — or, for an
   // "extend X" step (`fn-parent`), the PARENT the reader must find first:
@@ -377,7 +377,7 @@ function _tourAdvance(skipped) {
     // cleanup. Recorded WITH the edition walked, so a later `:version` bump
     // shows in the catalogue as "updated" rather than as plain done.
     if (typeof _tourMarkDone === 'function') {
-      _tourMarkDone(lesson.id,
+      _tourMarkDone(lesson,
         (typeof _tourVersionOf === 'function') ? _tourVersionOf(lesson) : 1);
     }
     _tourCount('finished', lesson.id, _tourState.step);
@@ -466,7 +466,7 @@ function _tourTeardown() {
 // default action, so the call means exactly that and nothing else). The old
 // rule was a LIST of dismissible selectors, and a list of other people's
 // surfaces goes stale: the Packages panel shipped through the shared popover
-// helper, was never added, and closing it killed the tour mid-lesson 30.
+// helper, was never added, and closing it killed the tour mid-lesson 32.
 //
 // The list survives as a belt for surfaces that close WITHOUT a keydown
 // handler of their own (a menu that closes on blur, an inline input).
@@ -539,7 +539,7 @@ async function startTutorial(lessonId, resumeStep, resumeCreated) {
   // canvas); lessons that need another surface tell the reader to open
   // it. Starting — or resuming after a branch-switch reload — while an
   // '#@organization'-style deep link holds another surface open left
-  // every step's target buried under that surface (lesson 15 ends on
+  // every step's target buried under that surface (lesson 17 ends on
   // Organization; the next lesson then dead-ended on "click + New
   // namespace").
   if (typeof gdShellSurface === 'function'
@@ -611,7 +611,7 @@ async function startTutorialIsolated(lessonId) {
   const canBranch = window.API && API.api_branches
     && typeof switchToBranch === 'function';
   const onMain = canBranch && !_tourCurrentBranch();
-  // A lesson that MANAGES branches itself (lesson 21) opts out of the
+  // A lesson that MANAGES branches itself (lesson 23) opts out of the
   // scratch-branch isolation — double-wrapping broke its own "main
   // never saw it" beat and leaked the scratch branch.
   const lesson = (lessons.lessons || []).find((l) => l.id === lessonId);

@@ -254,7 +254,7 @@
 
 
 (deftest same-chain-rename-shadows-source-name-test
-  ;; Tutorial finding (lessons 05/07/16): within ONE
+  ;; Tutorial finding (lessons 05/09/18): within ONE
   ;; inheritance chain, a rename-view slot and its source both counted
   ;; as direct free args — the Run form on a fn extending `:swap-conj`
   ;; showed `coll`+`item` (source names) next to `value` (the rename),

@@ -62,7 +62,7 @@ declare the parameters:
 | body uses `label` | the capture site both uses and declares it |
 | `(f "Run")` — positional call | binding by name: `:args {:label "Run"}`, the Run form, `/api/execute` args |
 | threading a param down by hand at every level | automatic: an unclosed hole at ANY depth surfaces as the top fn's parameter |
-| `(partial f 5)` / a factory returning a closure | a child fn-def binding some args — the rest stay free (Lesson 07) |
+| `(partial f 5)` / a factory returning a closure | a child fn-def binding some args — the rest stay free (Lesson 09) |
 
 The derived argument vector is always visible: it is exactly the
 set of placeholder edges on the card, and the Run form's fields.
@@ -167,7 +167,7 @@ are the dimmed and λ-ghost edges you just met above.
 
 ## Free args + HOF
 
-Lesson 07 covers HOFs in detail; the short version of how they
+Lesson 09 covers HOFs in detail; the short version of how they
 interact with free args:
 
 For ITERATING HOFs (`:map`, `:filter`, …) the callback's
@@ -286,14 +286,15 @@ it with `:message = "OK"` for a Ring response map.
 - **Optional vs required free args** — slots can be marked
   `:required false`. Optional frees default to nil; required
   ones must be supplied. A descendant may only make an optional
-  slot required, never the reverse — see
-  [TYPES.md](../TYPES.md) on required-narrowing monotonicity.
+  slot required, never the reverse — [Lesson 07](07-optional-required-sealed.md)
+  walks it on the canvas; [TYPES.md](../TYPES.md) has the
+  required-narrowing monotonicity rule.
 - **Type checking free args** — the executor validates each
   supplied value against the slot's declared type at call time.
-  Mismatch → `:validation-error/type-mismatch`. Lesson 13.
+  Mismatch → `:validation-error/type-mismatch`. Lesson 15.
 - **Closure-capture** — free args propagate through `:fn`-typed
-  slots in a way that requires special handling. Lesson 07.
+  slots in a way that requires special handling. Lesson 09.
 
 ## Next
 
-[Lesson 06 — Types](06-types.md)
+[Lesson 06 — Lists: seed, append, close](06-lists.md)

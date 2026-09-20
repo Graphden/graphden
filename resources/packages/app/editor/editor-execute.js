@@ -5,7 +5,7 @@
 // Runs tab. It used to be a floating anchored popover; that shape
 // fought the canvas it reports on — it parked over the very nodes a
 // traced run highlights, could not be moved, and the first canvas pan
-// dismissed it (lesson-27 finding). The inspector is a
+// dismissed it (lesson-29 finding). The inspector is a
 // fixed column, so the canvas stays fully visible and pannable while
 // a run session is open — finishing the 2026-08 shell redesign that
 // already retired the Run surface in favour of "▶ action + inspector".
@@ -268,9 +268,9 @@ async function submitExecution(fnEntity, args, persist, trace, captureValues,
                                resultHostEl, cancelBtn) {
   resultHostEl.textContent = '';
   resultHostEl.appendChild(renderSubmitSpinner('Submitting…'));
-  // The marker below describes THIS run: a lesson-09 persisted run
+  // The marker below describes THIS run: a lesson-11 persisted run
   // earlier in the same page-load must not vouch for an unticked one
-  // now (lesson 17 gates its "Break it on purpose" step on it).
+  // now (lesson 19 gates its "Break it on purpose" step on it).
   delete document.body.dataset.gdPersistedRun;
   try {
     const r = await authFetch(API.api_execute, {
@@ -295,7 +295,7 @@ async function submitExecution(fnEntity, args, persist, trace, captureValues,
     const status = String(body?.status || '').replace(/^:/, '');
     const execId = body?.['execution-id'];
     // Mark "a persisted run happened this page-load" on <body> — the
-    // interactive tour's lesson-09 step used to auto-pass off the mere
+    // interactive tour's lesson-11 step used to auto-pass off the mere
     // presence of the History toggle; this gives its `dom` check a real
     // signal to wait for.
     if (persist && status !== 'rejected') {

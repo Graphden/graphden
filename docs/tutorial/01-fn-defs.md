@@ -83,7 +83,7 @@ bound to `:hello-handler` (the keyword form of its name). When
 
 The same syntax in a `:fn`-typed slot would behave differently —
 the fn-id would be passed unchanged for the parent to invoke. We'll
-cover that in lesson 07 when we hit higher-order functions.
+cover that in lesson 09 when we hit higher-order functions.
 
 ## Try it
 
@@ -124,7 +124,7 @@ and its `{} raw` button switches back to the raw editor.
 
 - **What "slot" actually is** as a database entity — Lesson 04.
 - **What "inheritance" really means in the data layer** — Lesson 03.
-- **`:fn`-typed slots and higher-order functions** — Lesson 07.
+- **`:fn`-typed slots and higher-order functions** — Lesson 09.
 - **Why `:parent` is singular here but the docs mention "multiple
   parents" (MI)** — Lesson 03.
 

@@ -67,7 +67,7 @@ function initBranchSelector() {
     // OUTSIDE the popover element — a click on a control inside them
     // (the approvals segment, a checkbox) used to read as "outside the
     // popover" here and closed BOTH popovers mid-interaction (the
-    // lesson-21 "the menu closes before I can pick" bug).
+    // lesson-23 "the menu closes before I can pick" bug).
     if (e.target.closest?.('#gd-protect-pop, #gd-branch-policy-pop, .gd-pop-scrim')) return;
     if (pointerEventInTour(e)) return;
     closeBranchPopover();

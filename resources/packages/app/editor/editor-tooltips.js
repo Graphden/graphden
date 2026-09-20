@@ -136,7 +136,7 @@ function positionDescriptionTooltipAt(el, clientX, clientY) {
   const margin = 12;
   // A keyboard activation / synthetic click carries (0,0) — the tooltip
   // rendered in the viewport corner, detached from its card (tutorial
-  // finding, lesson 24). The caller passes an anchor-derived
+  // finding, lesson 26). The caller passes an anchor-derived
   // fallback; guard here too so any direct caller degrades to CENTER
   // of the viewport rather than the corner.
   if (!clientX && !clientY) {

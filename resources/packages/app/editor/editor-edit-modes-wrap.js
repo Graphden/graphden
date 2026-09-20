@@ -35,8 +35,14 @@ async function wrapSlotCandidates(parentFn, wrappedFn) {
     for (const pid of (fnById.get(id)?.['parent-ids'] || [])) queue.push(pid);
   }
   const slotById = new Map((sub.slots || []).map((sl) => [sl.id, sl]));
+  // A slot the parent closure already VALUED (a literal, a ref, a list
+  // with items) is final — the server refuses a wrapper binding on it
+  // (`value-override`, lesson 07), so it is listed but cannot be taken.
+  // A binding that only renames / seals / describes the slot leaves it
+  // free to bind.
   const bound = new Set((sub.bindings || [])
-    .filter((b) => closure.has(b['fn-id']))
+    .filter((b) => closure.has(b['fn-id'])
+                   && (b['value-present'] === true || b['ref-fn-id'] || b['list-append'] === true))
     .map((b) => b['slot-id']));
   const seen = new Set();
   const out = [];
@@ -164,7 +170,9 @@ function promptWrapDetails(fn, parent, anchorEl) {
           opt.textContent = ':' + sl.name
             + (sl.compatible === true ? ' ✓' : '')
             + (sl.compatible === false ? ' (type mismatch)' : '')
-            + (sl.free ? '' : ' (bound — will override)');
+            + (sl.free ? '' : ' (bound in the parent — final)');
+          // Offering it would end in the server's refusal; say why instead.
+          if (!sl.free) opt.disabled = true;
           slotSelect.appendChild(opt);
         }
         if (!slots.length) {

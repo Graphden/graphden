@@ -366,7 +366,7 @@
                       ;; the copy starts (the reconciler writes with the platform
                       ;; handle, so the org-scoped decorator cannot stamp it) —
                       ;; NULL ≡ platform. What lets an org read ITS copies on the
-                      ;; cloud (the ⚙ popover's "Running copies", lesson 36).
+                      ;; cloud (the ⚙ popover's "Running copies", lesson 38).
                       :org-id {:uuid service-instance-org-id-field-uuid
                                :type :text
                                :nullable? true}})))

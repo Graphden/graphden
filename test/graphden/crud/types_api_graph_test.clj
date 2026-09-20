@@ -158,7 +158,7 @@
   ;; its return type is no filter. The Clojure helper grew an `identity-slot?`
   ;; arm and its unit test went green while the GRAPH composition the editor
   ;; actually serves kept comparing `return ⊆ :fn-ref` and answered zero:
-  ;; the lesson-35 picker showed "Compatible · 0" for a slot every fn fits.
+  ;; the lesson-37 picker showed "Compatible · 0" for a slot every fn fits.
   ;; This pins the graph path.
   (testing "expected 'fn-ref' enumerates the same set 'any' does"
     (let [any-result (post-via :types-candidates-handler {:expected "any"})

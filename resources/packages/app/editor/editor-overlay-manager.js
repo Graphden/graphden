@@ -160,6 +160,25 @@ function createPlaceholderOverlay(node, container) {
     container.appendChild(wrap);
     return;
   }
+  // A slot sealed, or a list closed, ABOVE this card: the server would
+  // refuse the `+`, so the card shows why instead — a lock ghost, for
+  // everyone, like the λ badge (editor-overlay-seal.js).
+  const sealBlock = (arg && typeof gdSealBlocksBinder === 'function')
+    ? gdSealBlocksBinder(arg, node.data()) : null;
+  if (sealBlock) {
+    const wrap = document.createElement('div');
+    wrap.className = 'node-overlay placeholder-overlay placeholder-sealed';
+    wrap.dataset.nodeId = node.id();
+    if (arg?.name) wrap.dataset.argName = arg.name;
+    Object.assign(wrap.style, {
+      position: 'absolute', pointerEvents: 'none', zIndex: '10',
+      background: 'transparent', border: 'none', overflow: 'visible'
+    });
+    wrap.appendChild(createSealGhost(sealBlock));
+    registerNodeOverlay(wrap);
+    container.appendChild(wrap);
+    return;
+  }
   const inImpl = arg && implementationFnIds?.has(arg['fn-id']);
   const editable = inImpl
                 && (typeof isAuthenticated === 'function' && isAuthenticated());

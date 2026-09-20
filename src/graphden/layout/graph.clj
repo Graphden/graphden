@@ -609,7 +609,7 @@
                   seq-anchors (filterv bnd/sequence-anchor? raw-own-args)
                   seq-chain-ids (into #{}
                                       (mapcat (fn [anchor]
-                                                (map :id (bnd/walk-anchor-chain anchor arg-map))))
+                                                (map :id (bnd/walk-anchor-chain anchor arg-map lookups))))
                                       seq-anchors)
                   anchor-ids (into #{} (map :id) seq-anchors)
                   own-args (filterv (fn [a]
@@ -686,7 +686,7 @@
               ;; the closed card's body, unfold to see them.
               (doseq [anchor seq-anchors
                       :let [terminal (bh/terminal-source-of arg-map (:id anchor))]
-                      :when (and (empty? (bnd/walk-anchor-chain anchor arg-map))
+                      :when (and (empty? (bnd/walk-anchor-chain anchor arg-map lookups))
                                  (not (find-migrated (:id anchor)))
                                  (not (bh/arg-determined? arg-map parent-bound-terminals (:id anchor)))
                                  (mark-once! [terminal :unset]))]

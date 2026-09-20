@@ -83,7 +83,7 @@ async function _tourDeleted(call) {
 }
 
 // NEWEST FIRST, like the fn pass: a lesson that forks a branch OFF another
-// lesson branch (lesson 22: tutorial-feature off tutorial-release) creates the
+// lesson branch (lesson 24: tutorial-feature off tutorial-release) creates the
 // parent first, and the server refuses to delete a branch that still has
 // children — correctly. One reversed pass clears the normal case; whatever
 // still refuses goes round once more, after the rest unblocked it.
@@ -124,7 +124,7 @@ async function _tourFnIdByName(name) {
 }
 
 // NEWEST FIRST. A lesson that builds a chain creates the target before the fn
-// that points at it (lesson 10: the cell, then the swap that writes to it),
+// that points at it (lesson 12: the cell, then the swap that writes to it),
 // and the server refuses to delete a fn something still references — correctly.
 // Creation order therefore left the FIRST fn of every chain behind. Whatever
 // still refuses goes round once more, after the rest of the pass unblocked it.
@@ -189,7 +189,7 @@ async function _tourRemovePackages(created) {
 // ROOT namespaces only — `name` is a SEGMENT, not a path, and every lesson
 // creates its namespace at the Explorer's root. Without that guard this
 // resolver matches the first row carrying the segment ANYWHERE: once the
-// platform shipped its own `core.tests` / `web.tests` self-tests, lesson 15's
+// platform shipped its own `core.tests` / `web.tests` self-tests, lesson 17's
 // recorded `tests` resolved to one of those and the cleanup walked a platform
 // namespace, deleting (403 / 409) its way through fns the lesson never made.
 // The `ns-exists` CHECK has carried this rule since the cloud's

@@ -7,7 +7,7 @@ closer-wins on bindings."
 
 **Concepts introduced**: `parent-ids`, `single inheritance`,
 `multiple inheritance (MI)`, `BFS closure`, `closest-wins binding`,
-`override`, `inheritance chain`.
+`final value`, `inheritance chain`.
 
 ## A `:parent` is a row pointer
 
@@ -61,15 +61,22 @@ For `:authed.:value` — `:const` declares the slot, `:base` binds it
 to a literal map, `:authed` adds nothing. The closest binding is
 `:base`'s, so `:authed` returns the same map.
 
-If `:authed` had its own binding, that would override:
+Could `:authed` carry its own `:value` and win? At run time the
+closest binding does win — but a value an ancestor already set is
+**final** in graphden: the editor never offers a `+` for it, and the
+API refuses the write (`value-override`). The rule is the LEGO one —
+arguments aren't overridden, a different behaviour is a different
+fn-def. Want a `401` variant? Extend `:const` (or a sibling that
+carries the rest of the shape) and set the value there:
 
 ```edn
-{:name :authed-different
- :parent :base
+{:name :denied
+ :parent :const
  :args  {:value {:status 401 :body "denied"}}}
 ```
 
-Now `:authed-different` returns the `401` map. Closer wins.
+Lesson 07 goes through what is final, what is optional, and how you
+seal a slot on purpose.
 
 ## Multiple inheritance (MI) — when you'd use it
 
@@ -126,8 +133,8 @@ Two failure modes guard an MI parent set:
   is a recorded diagnostic — the fn saves, gets a ⚠ badge and shows
   under the Explorer's **⚠ type errors** filter, and refuses to
   execute until one side backs off (the doctrine is in
-  [Lesson 06](06-types.md), the filter in
-  [Lesson 17](17-errors-and-diagnostics.md)).
+  [Lesson 08](08-types.md), the filter in
+  [Lesson 19](19-errors-and-diagnostics.md)).
 
 ## The fn-card as a chain visualizer
 
@@ -192,11 +199,11 @@ In the editor:
    **Save**. The editor creates the wrapper with `add-10` already
    bound into it and opens it: your sum, stringified.
 
-   Compatible free slots sort first with a ✓; picking a slot marked
-   "(bound — will override)" is legal too — the wrapper's own
-   binding wins over the parent's (closer wins, as above). That is
-   how you add a step on top of existing logic without
-   re-assembling it by hand.
+   Compatible free slots sort first with a ✓; a slot marked
+   "(bound in the parent — final)" cannot take the fn — the
+   parent already valued it, and a value, once set, is final
+   (above). That is how you add a step on top of existing logic
+   without re-assembling it by hand.
 
    And **Extend has an in-place form** for building the other way,
    from the outside in. On `add-10-text`'s canvas, `add-10` sits as
@@ -206,7 +213,7 @@ In the editor:
    new card's own `+` placeholders are right there to bind. So a
    pipeline is built top-down: bind the base fn a slot needs, extend
    it where it sits, bind the child's slots on its card, repeat.
-   Lessons 10, 16 and 33 build their fns this way.
+   Lessons 12, 18 and 35 build their fns this way.
 6. Try writing a multiple-inheritance fn-def over the two real
    response axes:
 
@@ -229,7 +236,7 @@ In the editor:
 - **Free arguments** — what if a slot is declared but NEITHER
   ancestor binds it? Lesson 05.
 - **HOF-typed slots** — `:fn`-typed slots behave differently
-  during inheritance. Lesson 07.
+  during inheritance. Lesson 09.
 
 ## Next
 

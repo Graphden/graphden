@@ -100,6 +100,12 @@ frontend, docs, trivial constant/description edits.
 Guard: `upsert-fn-defs` refuses fn-defs whose deterministic id is
 package-owned (the platform set the boot sync restores) unless
 `allow-platform-overwrite` is passed — build under your own namespace.
+It also refuses what the editor and the API refuse on a single binding —
+re-binding a slot an ancestor already valued (`value-override`), binding
+a slot an ancestor sealed with `:terminal true` (`terminal-seal`),
+appending to a list an ancestor closed (`list-closed`) — over the whole
+bundle before a row lands (`packages.sync/sync-bundle!`; the same check
+guards registry install / fork / import). Tutorial lesson 07.
 
 ## Gotchas
 

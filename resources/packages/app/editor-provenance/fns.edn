@@ -1280,11 +1280,33 @@
   {:name :_insp-r-diag-lines
    :parent :map :args {:func :_insp-r-diag-line :coll :_insp-r-diags}}
 
+  ;; The seals on the fn's slots (`:terminal` / `:list-closed` / the
+  ;; `:required` ratchet / optional-by-declaration), ONCE outside the row
+  ;; callback like the diagnostics — the same walk the canvas lock badge
+  ;; shows, so a reader on the Bindings tab is told what descendants may
+  ;; do with a slot without opening the card.
+  {:name :_insp-seals
+   :parent :_fn-slot-seals
+   :args {:fn-id {:ref :_insp-fn-id :type :nullable-uuid}}}
+  {:name :_insp-r-seal-note
+   :description "The row's seal line — `sealed in cut · optional` — nil when the slot has nothing decided on it."
+   :parent :get
+   :args {:coll {:parent :get :args {:coll :_insp-seals :key {:as :item} :default {:value {}}}}
+          :key {:value :note}
+          :default nil}}
+  {:name :_insp-r-seal
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_insp-r-seal-note}}
+          :then {:parent :hiccup
+                 :args {:tag {:value "div"}
+                        :attrs {:value {:class "gd-bind-seal"}}
+                        :children [{:value "🔒 "} :_insp-r-seal-note]}}
+          :else nil}}
   {:name :_insp-arg-row
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "gd-bind-row"}}
-          :children [:_insp-r-name-span :_insp-r-chip :_insp-r-type-span :_insp-r-diag-lines]}}
+          :children [:_insp-r-name-span :_insp-r-chip :_insp-r-type-span :_insp-r-seal :_insp-r-diag-lines]}}
 
   {:name :_insp-arg-rows
    :parent :map

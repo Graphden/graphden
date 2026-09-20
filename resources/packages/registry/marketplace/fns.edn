@@ -285,11 +285,18 @@
    :parent :zipmap
    :args {:keys [{:value :count} {:value :avg}] :vals [:_mkv-count :_mkv-avg]}}
 
-  {:name :marketplace-review-map
-   :description "`{package-name {:count n :avg x}}` over every visible review — one query, aggregated in the graph."
+  ;; Aggregation with the grouped reviews FREE (`:m`) — the graph's tests
+  ;; feed their own; `:marketplace-review-map` pins the live query below
+  ;; (lesson 07: a pinned slot is final, a test could not override it).
+  {:name :review-map-over
+   :description "`{package-name {:count n :avg x}}` over `:m`, reviews grouped by package name."
    :parent :update-vals
-   :args {:m {:parent :group-by :args {:key-fn :_mkv-package-name :coll :_mk-review-rows}}
-          :f :_mkv-agg}}
+   :args {:f :_mkv-agg}}
+
+  {:name :marketplace-review-map
+   :description "`{package-name {:count n :avg x}}` over every visible review — one query, aggregated in the graph (`:review-map-over`)."
+   :parent :review-map-over
+   :args {:m {:parent :group-by :args {:key-fn :_mkv-package-name :coll :_mk-review-rows}}}}
 
   ;; --- installs → `{name installs}` ---
   {:name :_mk-stat-rows
@@ -301,11 +308,15 @@
    :args {:coll [{:parent :get :args {:coll {:as :item} :key {:value :package-name} :default {:value ""}}}
                  {:parent :get :args {:coll {:as :item} :key {:value :installs} :default {:value 0}}}]}}
 
-  {:name :marketplace-install-map
-   :description "`{package-name installs}` — the global cumulative install counters."
+  {:name :install-map-over
+   :description "`{package-name installs}` from `:from`, a coll of `[name installs]` pairs — free, the tests feed their own."
    :parent :into
-   :args {:to {:value {}}
-          :from {:parent :map :args {:func :_mks-pair :coll :_mk-stat-rows}}}}
+   :args {:to {:value {}}}}
+
+  {:name :marketplace-install-map
+   :description "`{package-name installs}` — the global cumulative install counters (`:install-map-over` the stat rows)."
+   :parent :install-map-over
+   :args {:from {:parent :map :args {:func :_mks-pair :coll :_mk-stat-rows}}}}
 
   ;; --- the card (`:item` = one package's index rows; `:reviews` / `:installs` captured) ---
   {:name :_mkc-sorted-desc
@@ -379,17 +390,30 @@
           :then {:as :value :type [:list :keyword-map]}
           :else :_mkg-own-rows}}
 
-  {:name :marketplace-index-groups
-   :description "The registry index grouped by name — one group of rows per package, the caller's own rows shadowing another org's under the same name."
+  ;; Free `:coll` (index rows) so the graph's tests feed fixture rows;
+  ;; `:marketplace-index-groups` pins the live index below (lesson 07: a
+  ;; pinned slot is final — a test could not override it).
+  {:name :index-groups-over
+   :description "`:_mkg-shadowed` over a `:coll` of name-groups (one list of rows per package) — the caller's own rows shadowing another org's under the same name."
    :parent :map
-   :args {:func :_mkg-shadowed
-          :coll {:parent :vals :args {:map {:parent :group-by :args {:key-fn :_mkr-name :coll :list-package-versions}}}}}}
+   :args {:func :_mkg-shadowed}}
+
+  {:name :marketplace-index-groups
+   :description "The registry index grouped by name — `:index-groups-over` the live `:list-package-versions` grouped by `:_mkr-name`."
+   :parent :index-groups-over
+   :args {:coll {:parent :vals :args {:map {:parent :group-by :args {:key-fn :_mkr-name :coll :list-package-versions}}}}}}
+
+  ;; The fold with `:reviews` / `:installs` FREE (the tests hand it maps of
+  ;; their own); `:marketplace-cards-over` pins the live aggregates.
+  {:name :marketplace-cards-fold
+   :description "`:marketplace-card` folded over a `:coll` of index groups, `:reviews` / `:installs` the aggregate maps each card reads."
+   :parent :map
+   :args {:func :marketplace-card}}
 
   {:name :marketplace-cards-over
-   :description "`:marketplace-card` folded over a `:coll` of index groups, the review / install aggregates captured once — the signed-in listing and the public storefront bind `:coll`."
-   :parent :map
-   :args {:func :marketplace-card
-          :reviews :marketplace-review-map
+   :description "`:marketplace-cards-fold` with the live review / install aggregates captured once — the signed-in listing and the public storefront bind `:coll`."
+   :parent :marketplace-cards-fold
+   :args {:reviews :marketplace-review-map
           :installs :marketplace-install-map}}
 
   {:name :marketplace-cards

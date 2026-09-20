@@ -261,6 +261,22 @@
           rpc (call-tool! "upsert-fn-defs" {:branch branch :fn-defs "[{:parent :add}]"})]
       (is (= -32602 (get-in rpc [:error :code])))))
 
+  (testing "a fn-def that overrides a value an ancestor set → refused, nothing written (seals, 2026-09-20)"
+    ;; :ok-response pins :status 200; :json-ok-response inherits it. The
+    ;; editor and the API refuse re-binding it; the MCP path used to write
+    ;; it through `sync-bundle!` unchecked.
+    (let [branch (str "ai/mcp-seal-" (subs (str (random-uuid)) 0 8))
+          _ (call-tool! "create-branch" {:name branch})
+          rpc (call-tool! "upsert-fn-defs"
+                          {:branch branch
+                           :fn-defs "[{:name :mcp-seal-bad :parent :json-ok-response :args {:status 500}}]"})
+          msg (str (get-in rpc [:error :message]) (get-in rpc [:result :content 0 :text]))]
+      (is (or (get rpc :error) (true? (get-in rpc [:result :isError])))
+          (str "the upsert is refused: " (pr-str rpc)))
+      (is (re-find #"implicitly final|value" msg) (str "and says why: " msg))
+      (let [data (tool-text (call-tool! "search-fns" {:q "mcp-seal-bad" :branch branch}))]
+        (is (not-any? #(= "mcp-seal-bad" (:name %)) (:fns data)) "no row landed on the branch"))))
+
   (testing "tools/list advertises the mutation + verification tools"
     (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 100 :method "tools/list"})]
       (is (= #{"list-namespaces" "search-fns" "read-fn" "describe-fn" "execute-fn"

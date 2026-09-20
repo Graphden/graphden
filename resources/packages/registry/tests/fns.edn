@@ -129,7 +129,7 @@
   {:name :review-map-aggregates-count-and-rounded-average
    :description "`{name {:count n :avg x}}` — the average rounded HALF_UP to one decimal (17 / 4 = 4.25 → 4.3). Ratings whose mean is a non-terminating decimal (e.g. 14 / 3) are avoided: `:round` over the ratio `:div` yields throws — a core arithmetic gap, not this fold's contract."
    :parent :assert-eq
-   :args {:actual {:parent :marketplace-review-map
+   :args {:actual {:parent :review-map-over
                    :args {:m {:parent :zipmap
                               :args {:keys [{:value "p"} {:value "q"}]
                                      :vals [{:value [{:package-name "p" :rating 4} {:package-name "p" :rating 5} {:package-name "p" :rating 5} {:package-name "p" :rating 3}]}
@@ -140,23 +140,23 @@
 
   {:name :review-map-is-empty-without-reviews
    :parent :assert
-   :args {:value {:parent :empty? :args {:coll {:parent :marketplace-review-map :args {:m {:value {}}}}}}}}
+   :args {:value {:parent :empty? :args {:coll {:parent :review-map-over :args {:m {:value {}}}}}}}}
 
   {:name :install-map-folds-pairs-into-a-name-keyed-map
    :parent :assert-eq
-   :args {:actual {:parent :marketplace-install-map :args {:from {:value [["a" 3] ["b" 0]]}}}
+   :args {:actual {:parent :install-map-over :args {:from {:value [["a" 3] ["b" 0]]}}}
           :expected {:parent :zipmap :args {:keys [{:value "a"} {:value "b"}] :vals [{:value 3} {:value 0}]}}}}
 
   {:name :index-groups-keep-foreign-rows-when-none-are-mine
    :description "A name listed by two other orgs: nothing of mine to shadow them, both rows stay."
    :parent :assert-eq
-   :args {:actual {:parent :marketplace-index-groups
+   :args {:actual {:parent :index-groups-over
                    :args {:coll {:value [[{:name "a" :org-id "org-x"} {:name "a" :org-id "org-y"}]]}}}
           :expected {:value [[{:name "a" :org-id "org-x"} {:name "a" :org-id "org-y"}]]}}}
 
   {:name :index-groups-are-empty-for-an-empty-index
    :parent :assert
-   :args {:value {:parent :empty? :args {:coll {:parent :marketplace-index-groups :args {:coll {:value []}}}}}}}
+   :args {:value {:parent :empty? :args {:coll {:parent :index-groups-over :args {:coll {:value []}}}}}}}
 
   {:name :_t-card-three-versions
    :description "Subject: one package's three index rows (out of order), no reviews / installs."
@@ -232,7 +232,7 @@
    :parent :assert-eq
    :args {:actual {:parent :map
                    :args {:func {:parent :get :args {:coll {:as :item} :key {:value :name} :default {:value ""}}}
-                          :coll {:parent :marketplace-cards-over
+                          :coll {:parent :marketplace-cards-fold
                                  :args {:coll {:value [[{:name "a" :version "1.0.0"}] [{:name "b" :version "2.0.0"} {:name "b" :version "2.1.0"}]]}
                                         :reviews {:value {}} :installs {:value {}}}}}}
           :expected ["a" "b"]}}
@@ -241,7 +241,7 @@
    :parent :assert-eq
    :args {:actual {:parent :map
                    :args {:func {:parent :get :args {:coll {:as :item} :key {:value :installs} :default {:value -1}}}
-                          :coll {:parent :marketplace-cards-over
+                          :coll {:parent :marketplace-cards-fold
                                  :args {:coll {:value [[{:name "a" :version "1.0.0"}] [{:name "b" :version "2.0.0"}]]}
                                         :reviews {:value {}}
                                         :installs {:parent :const :return-type :any :return-type-wide? true :args {:value {:parent :zipmap :args {:keys [{:value "a"} {:value "b"}] :vals [{:value 4} {:value 5}]}}}}}}}}
@@ -253,7 +253,7 @@
   {:name :storefront-rows-keep-only-public-approved-rows
    :description "Private, pending and public-less rows are dropped; a missing status reads as approved."
    :parent :assert-eq
-   :args {:actual {:parent :storefront-rows
+   :args {:actual {:parent :storefront-rows-over
                    :args {:coll {:value [{:name "a" :public true :status "approved"}
                                          {:name "b" :public false :status "approved"}
                                          {:name "c" :public true :status "pending"}
@@ -266,9 +266,9 @@
    :parent :assert-eq
    :args {:actual {:parent :map
                    :args {:func {:parent :get :args {:coll {:as :item} :key {:value :name} :default {:value ""}}}
-                          :coll {:parent :storefront-cards
+                          :coll {:parent :marketplace-cards-fold
                                  :args {:coll {:parent :list
-                                               :args {:items [{:parent :storefront-rows
+                                               :args {:items [{:parent :storefront-rows-over
                                                                :args {:coll {:value [{:name "a" :version "1.0.0" :public true}
                                                                                      {:name "a" :version "1.1.0" :public false}]}}}]}}
                                         :reviews {:value {}} :installs {:value {}}}}}}
@@ -281,12 +281,12 @@
 
   {:name :storefront-sitemap-urls-encode-one-path-per-card
    :parent :assert-eq
-   :args {:actual {:parent :storefront-sitemap-urls :args {:coll {:value [{:name "a"} {:name "b c"}]}}}
+   :args {:actual {:parent :storefront-sitemap-urls-over :args {:coll {:value [{:name "a"} {:name "b c"}]}}}
           :expected ["/marketplace/a" "/marketplace/b+c"]}}
 
   {:name :storefront-sitemap-urls-are-empty-without-cards
    :parent :assert
-   :args {:value {:parent :empty? :args {:coll {:parent :storefront-sitemap-urls :args {:coll {:value []}}}}}}}
+   :args {:value {:parent :empty? :args {:coll {:parent :storefront-sitemap-urls-over :args {:coll {:value []}}}}}}}
 
   ;; =====================================================================
   ;; SURFACE — the card hiccup over literal cards
@@ -374,7 +374,7 @@
   {:name :index-entry-reshapes-a-package-version-row
    :description "id / published-at stringified, `:fns` collapsed to `:fn-count`, `:public?` emitted as `:public`, nil kind / tags / status defaulted."
    :parent :assert-eq
-   :args {:actual {:parent :list-package-versions
+   :args {:actual {:parent :package-index-over
                    :args {:coll {:value [{:id "abc" :name "p" :version "1.0.0" :ns-root "p" :content-hash "h" :published-at "2026-01-01"
                                           :fns [{:name "x"} {:name "y"}] :dependencies ["x"] :org-id "o" :public? true
                                           :kind nil :description "d" :category "web" :tags nil :origin nil :status nil :moderation-note nil}]}}}
@@ -384,7 +384,7 @@
 
   {:name :index-is-empty-without-rows
    :parent :assert
-   :args {:value {:parent :empty? :args {:coll {:parent :list-package-versions :args {:coll {:value []}}}}}}}
+   :args {:value {:parent :empty? :args {:coll {:parent :package-index-over :args {:coll {:value []}}}}}}}
 
   {:name :semver-rank-weights-major-minor-patch
    :parent :assert-eq

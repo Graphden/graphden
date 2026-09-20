@@ -46,7 +46,10 @@ const {
     await bindNamedPlaceholder(page, 'path', 'literal', '/version');
 
     await waitTourTitle(page, 'Ask it', 150000);
-    await runWithEffectAck(page);
+    // Pinned to tutorial-fetch's own row: web-server sits on this canvas as
+    // the bound service, and its use-site ⋯ (no ▶ Run) can be the first
+    // trigger in the DOM — the walk then clicked nothing (flaked 2026-09-20).
+    await runWithEffectAck(page, undefined, 'tutorial-fetch');
     // The editor's own /version answers: the result pane shows the 200
     // and the three build hashes.
     try {

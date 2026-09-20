@@ -582,10 +582,11 @@ calls* continue across the queue exactly as across HTTP. Its `:take` /
 a knob), so the backend is a binding: `:pg-queue-consumer` binds the
 Postgres primitives above (batches of 10, 30 s visibility renewed every
 10 s, 5 s wait; retry after 5 s, dead after 5 attempts); a broker
-package binds its own `:take` / `:ack` / `:nack` to the same template
-and keeps the template's no-op `:extend` (`:_queue-no-extend`) when it
-has no leases. A consumer
-is two bindings away:
+package binds its own `:take` / `:ack` / `:nack` to the same template —
+extending `:queue-consumer-leaseless` (the no-op `:extend`,
+`:_queue-no-extend`) when it has no leases; the template itself leaves
+`:extend` free, because a slot a parent pins is final for every
+descendant (tutorial lesson 07). A consumer is two bindings away:
 
 ```edn
 {:name :orders-worker :parent :pg-queue-consumer

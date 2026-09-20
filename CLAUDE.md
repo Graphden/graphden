@@ -270,6 +270,12 @@ bb type-sweep   # The corpus type-check sweep (no DB, ~1 min): production's
 bb graph-lint   # Graph linters over the fns.edn corpus (no DB, ~10s): duplicate
                 #   definitions (exact + after private-helper expansion), unreferenced
                 #   privates, pure aliases — docs/GRAPH_LINT.md. In bb ci.
+bb tour-versions-check # (in bb ci) a tutorial lesson whose steps changed must
+                #   carry a new :version in app/tour/fns.edn — readers who
+                #   finished it are told to re-read. Record is
+                #   test/resources/tour-versions.edn (keyed by lesson :slug)
+bb tour-versions # Refresh that record after bumping a :version, or after a
+                #   cosmetic step edit that deliberately keeps it
 bb devtour      # Regenerate the developer code-tour from tour.edn — the page
                 #   (docs/devtour/index.html), the emacs data (tour.eld) and org/
 bb devtour-check # (in bb ci) fail if a tour anchor broke or a baked output drifted

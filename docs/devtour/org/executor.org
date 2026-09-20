@@ -95,13 +95,13 @@ The compile-at-startup pipeline in one form: ~read-graph~ from storage, then ~bu
 :PROPERTIES:
 :CUSTOM_ID: executor/sync-fns-to-storage!
 :FILE: src/graphden/executor/composition/core.clj
-:LINE: 339
+:LINE: 350
 :MINS: 2.6
 :END:
 
 The opposite direction — and the reason there is a graph to read at all. Authored fn-defs (from packages) are reconciled into fn / slot / binding rows in storage here. So the graph that ~rebuild!~ reads was itself *written* by this composition layer from source fn-defs. Read it to see how declarations become persisted graph entities.
 
-- source :: [[file:../../../src/graphden/executor/composition/core.clj::(defn sync-fns-to-storage!][src/graphden/executor/composition/core.clj:339]]
+- source :: [[file:../../../src/graphden/executor/composition/core.clj::(defn sync-fns-to-storage!][src/graphden/executor/composition/core.clj:350]]
 - referenced from :: [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]], [[file:web.org::#web/sync-fn-defs-branch!][sync-fn-defs-branch!]]
 
 * 8. build-lookups

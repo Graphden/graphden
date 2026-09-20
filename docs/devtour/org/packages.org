@@ -7,7 +7,7 @@ How fns.edn + impls.clj become base-fns and fn-defs; the loader, load order, and
 
 after: executor
 
-[[file:index.org][index]] · ~107 min
+[[file:index.org][index]] · ~106 min
 
 * 1. load-default-packages
 :PROPERTIES:
@@ -119,13 +119,13 @@ Reads a module's ~fns.edn~ (pure EDN data) via a source-position reader, attachi
 :PROPERTIES:
 :CUSTOM_ID: packages/parse-module
 :FILE: src/graphden/packages/records/parse.clj
-:LINE: 1234
+:LINE: 1240
 :MINS: 4.5
 :END:
 
 Where an ~fns.edn~ entry becomes ROWS. Two passes: mint the deterministic ids (~name->id~, so the same def yields the same uuid on every sync), then ~parse-fn-def~ each entry with the whole module — plus prior syncs' defs — in hand, because resolving which ancestor a bound arg targets needs to see the ancestors' shapes.
 
-- source :: [[file:../../../src/graphden/packages/records/parse.clj::(defn parse-module][src/graphden/packages/records/parse.clj:1234]]
+- source :: [[file:../../../src/graphden/packages/records/parse.clj::(defn parse-module][src/graphden/packages/records/parse.clj:1240]]
 - same file :: [[file:packages.org::#packages/parse-composed][parse-composed]]
 
 * 10. parse-composed
@@ -145,13 +145,13 @@ The composed case: ~:parent~ / ~:parents~ become the parent-ids junction, each ~
 :PROPERTIES:
 :CUSTOM_ID: packages/resolve-slot-owner
 :FILE: src/graphden/packages/records/slot_resolution.clj
-:LINE: 460
-:MINS: 6.8
+:LINE: 551
+:MINS: 5.4
 :END:
 
 Given a composed fn and an arg name, find the ancestor that DECLARED the slot — walking the inheritance chain, then the refs' trees, and disambiguating a name owned on both paths by type. This is the parse-time twin of the executor's ~build-lookups~: the same slot identity, computed once from EDN so the binding row carries the right ~slot-id~ before a single row is written.
 
-- source :: [[file:../../../src/graphden/packages/records/slot_resolution.clj::(defn resolve-slot-owner][src/graphden/packages/records/slot_resolution.clj:460]]
+- source :: [[file:../../../src/graphden/packages/records/slot_resolution.clj::(defn resolve-slot-owner][src/graphden/packages/records/slot_resolution.clj:551]]
 - see also :: [[file:executor.org::#executor/build-lookups][build-lookups]]
 - same file :: [[file:packages.org::#packages/build-rename-slot-records][build-rename-slot-records]]
 
@@ -159,13 +159,13 @@ Given a composed fn and an arg name, find the ancestor that DECLARED the slot �
 :PROPERTIES:
 :CUSTOM_ID: packages/build-rename-slot-records
 :FILE: src/graphden/packages/records/slot_resolution.clj
-:LINE: 652
+:LINE: 724
 :MINS: 5.2
 :END:
 
 A ~{Y {:as :X}}~ rename is not a binding column — it is a NEW slot owned by the renaming fn, linked to its source through ~source-slot-id~. That FK is what ~rename-for-slot~ and the editor's ~getEffectiveSlotName~ read, and what the executor's rename translation walks. Minted here, on parse.
 
-- source :: [[file:../../../src/graphden/packages/records/slot_resolution.clj::(defn build-rename-slot-records][src/graphden/packages/records/slot_resolution.clj:652]]
+- source :: [[file:../../../src/graphden/packages/records/slot_resolution.clj::(defn build-rename-slot-records][src/graphden/packages/records/slot_resolution.clj:724]]
 - see also :: [[file:executor.org::#executor/build-ref-renames][build-ref-renames]]
 - same file :: [[file:packages.org::#packages/resolve-slot-owner][resolve-slot-owner]]
 
@@ -227,13 +227,13 @@ Closes the loop into storage: take the collected namespace paths, build the ~cor
 :PROPERTIES:
 :CUSTOM_ID: packages/sync-fn-entities-from-packages!
 :FILE: src/graphden/packages/sync.clj
-:LINE: 932
+:LINE: 988
 :MINS: 11.4
 :END:
 
 The other half of every boot, and the one the loader hands off to: sync composed fn-defs to storage, heal namespace-moved identities and reap retired ones nothing live references (~_anon-*~ shapes included; ~{:dry-run? true}~ previews the plan from a REPL), seed each fn-def's rich-type, then run the topological type-check sweep. Read the two long comments — the batch-size binding (a fresh-DB boot writes >10k fn rows past the guard meant for USER writes) and ~:skip-type-check?~ (~15s of sweep the test bootstrap may opt out of, production never does — which is precisely why ~bb type-sweep~ exists: EVERY fixture opts out, so before that check a corpus type regression surfaced only when a real instance booted). This is declarative sync: the packages on disk are the desired state, storage is reconciled toward it.
 
-- source :: [[file:../../../src/graphden/packages/sync.clj::(defn sync-fn-entities-from-packages!][src/graphden/packages/sync.clj:932]]
+- source :: [[file:../../../src/graphden/packages/sync.clj::(defn sync-fn-entities-from-packages!][src/graphden/packages/sync.clj:988]]
 - see also :: [[file:types.org::#types/check-all-defs!][check-all-defs!]], [[file:versioning.org::#versioning/repoint-refs!][repoint-refs!]]
 - same file :: [[file:packages.org::#packages/reconcile-bundle-scope!][reconcile-bundle-scope!]]
 - referenced from :: [[file:boot.org::#boot/packages][packages]]
@@ -382,13 +382,13 @@ The WRITE half of the export/import pair — ~POST /api/import/graph~ applies an
 :PROPERTIES:
 :CUSTOM_ID: packages/reconcile-bundle-scope!
 :FILE: src/graphden/packages/sync.clj
-:LINE: 475
+:LINE: 527
 :MINS: 4.6
 :END:
 
 Snapshot semantics for a runtime import (~?prune=true~): within exactly the bundle's namespaces, a deterministic-id fn the bundle no longer contains is TOMBSTONED on the branch (a ~:deleted-at~ version — so it hides an INHERITED fn too, not just a branch-local one, and the deletion propagates on merge). Never the boot reconciler's identity-plane purge, which would reach across branches. Referenced removals are kept + reported, loud.
 
-- source :: [[file:../../../src/graphden/packages/sync.clj::(defn reconcile-bundle-scope!][src/graphden/packages/sync.clj:475]]
+- source :: [[file:../../../src/graphden/packages/sync.clj::(defn reconcile-bundle-scope!][src/graphden/packages/sync.clj:527]]
 - same file :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]]
 
 * 30. bundle->files

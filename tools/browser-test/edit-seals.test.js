@@ -235,6 +235,14 @@ async function bindingOf(page, fnId, slotName) {
     assert(child.badge === 'terminal required' && /Sealed in seal-subs-parent/.test(child.badgeTitle)
            && /required since seal-subs-parent/.test(child.badgeTitle),
            'the edge badge on the child names where each seal comes from: ' + JSON.stringify(child));
+    // The Inspector's Bindings tab says the same thing in words — the reader
+    // need not find the lock on the canvas.
+    await page.click('.gd-insp-tabs [data-insp-tab="bindings"]');
+    await page.waitForSelector('#gd-insp-detail .gd-bind-seal', {timeout: 30000});
+    const inspNote = await page.evaluate(() => Array.from(
+      document.querySelectorAll('#gd-insp-detail .gd-bind-seal')).map((n) => n.textContent.trim()));
+    assert(inspNote.some((t) => /sealed in seal-subs-parent/.test(t) && /required since seal-subs-parent/.test(t)),
+           'the Bindings row names the sealer and the ratchet (got: ' + JSON.stringify(inspNote) + ')');
     const refused = await page.evaluate(async ({fnId, slotId}) => {
       const r = await window.authFetch('/api/entities/binding', {
         method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},

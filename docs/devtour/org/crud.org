@@ -66,13 +66,13 @@ The generic single-row write entry point, and the best first stop for the whole 
 :PROPERTIES:
 :CUSTOM_ID: crud/write-rej
 :FILE: src/graphden/crud/validation.clj
-:LINE: 727
+:LINE: 778
 :MINS: 2.2
 :END:
 
 The pre-write rejection gate that ~create-entity~ / ~update-entity~ consult. It centralizes the cycle / MI-collision / terminal / list-closed / secret-path checks that can veto a mutation before it ever persists.
 
-- source :: [[file:../../../src/graphden/crud/validation.clj::(defn write-rej][src/graphden/crud/validation.clj:727]]
+- source :: [[file:../../../src/graphden/crud/validation.clj::(defn write-rej][src/graphden/crud/validation.clj:778]]
 - referenced from :: [[file:web.org::#web/write-rej][write-rej]]
 
 * 6. apply-create-record-type-body

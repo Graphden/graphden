@@ -778,21 +778,28 @@
    :parent :cond
    :args {:clauses [:_diff-target-missing?  :_diff-err-target-missing
                     :_diff-against-missing? :_diff-err-against-missing
-                    :_diff-source-missing?  :_diff-err-source-missing]
-          :parsed :_diff-parsed
-          :target-branch :_target-branch
-          :source-branch :_diff-source-branch}}
+                    :_diff-source-missing?  :_diff-err-source-missing]}}
 
+  ;; `:parsed` / `:target-branch` / `:source-branch` stay FREE through the
+  ;; guards and the diff data; `-http` pins them for the route, the MCP
+  ;; diff-branch tool binds its tool-built parsed map (lesson 07).
   {:name :_diff-branches-data
-   :description "GET /api/branches/:ref/diff?against=<source> — flat `:cond` of 3 guards + apply."
+   :description "The diff pipeline over free `:parsed` / `:target-branch` / `:source-branch` — the 3 guards + apply."
    :parent :_diff-guarded
    :args {:clauses {:append [{:value true} :_diff-apply]}}}
+
+  {:name :_diff-branches-data-http
+   :description "GET /api/branches/:ref/diff?against=<source> — `:_diff-branches-data` over the request's parsed refs."
+   :parent :_diff-branches-data
+   :args {:parsed :_diff-parsed
+          :target-branch :_target-branch
+          :source-branch :_diff-source-branch}}
 
   {:name :diff-branches-handler
    :lambda-params [:branch-row :request :default]
    :description "Ring handler for GET /api/branches/:ref/diff."
    :parent :json-handler
-   :args {:data :_diff-branches-data}}
+   :args {:data :_diff-branches-data-http}}
 
   ;; --- GET /api/branches/:ref/diff-view?against=<source> ------------
   ;; The GROUPED diff v2 payload (per-owning-fn groups, field-level
@@ -832,9 +839,12 @@
    :args {:coll :_diff-view-apply-raw :key {:value :groups} :default {:value []}}}
 
   {:name :_diff-view-data
-   :description "GET /api/branches/:ref/diff-view?against=<source> — the v1 guards, the v2 grouped payload."
+   :description "GET /api/branches/:ref/diff-view?against=<source> — the v1 guards, the v2 grouped payload, over the request's parsed refs."
    :parent :_diff-guarded
-   :args {:clauses {:append [{:value true} :_diff-view-apply]}}}
+   :args {:clauses {:append [{:value true} :_diff-view-apply]}
+          :parsed :_diff-parsed
+          :target-branch :_target-branch
+          :source-branch :_diff-source-branch}}
 
   {:name :diff-view-handler
    :lambda-params [:branch-row :request :default]
@@ -1112,15 +1122,24 @@
                     :_create-branch-policy-invalid? :_create-branch-err-policy-invalid
                     :_create-branch-name-taken?  :_create-branch-err-name-taken
                     :_create-branch-base-missing? :_create-branch-err-base-missing
-                    {:value true}                 :_create-branch-apply]
-          :parsed :_create-branch-parsed
+                    {:value true}                 :_create-branch-apply]}}
+
+  ;; `:parsed` / `:resolved-parent` stay FREE on the cond above and are
+  ;; pinned here for the HTTP route; the MCP create-branch tool extends the
+  ;; free cond with its tool-built parsed map (lesson 07: a pin on the cond
+  ;; would be final for it — it used to rely on closer-fn-wins, the write
+  ;; the API refuses).
+  {:name :_create-branch-data-http
+   :description "POST /api/branches — `:_create-branch-data` over the request body's parsed map."
+   :parent :_create-branch-data
+   :args {:parsed :_create-branch-parsed
           :resolved-parent :_create-branch-resolved-parent}}
 
   {:name :create-branch-handler
    :lambda-params [:storage-query :request]
    :description "Ring handler for POST /api/branches (auth-required)."
    :parent :json-handler
-   :args {:data :_create-branch-data}}
+   :args {:data :_create-branch-data-http}}
 
   ;; ---------------------------------------------------------------------
   ;; POST /api/branches/:ref/policy — set / clear the branch's write

@@ -7,7 +7,7 @@ Subtyping, unification, narrowing, refinements, the sweep-at-zero checker, and t
 
 after: executor
 
-[[file:index.org][index]] · ~82 min
+[[file:index.org][index]] · ~83 min
 
 * 1. primitives
 :PROPERTIES:
@@ -189,13 +189,13 @@ The declared-signature engine: when a root base-fn has no hand ~:return-type-rul
 :PROPERTIES:
 :CUSTOM_ID: types/check-fn-def!
 :FILE: src/graphden/types/check.clj
-:LINE: 2418
-:MINS: 8.3
+:LINE: 2435
+:MINS: 8.4
 :END:
 
 Type-checks a single fn-def against its (single or multiple- inheritance) parents: resolve parent slots, run the monotonicity / unknown-slot / effect guards, unify bindings, compute the return via type-rules, propagate effects, and snapshot the rich-type into the registry. The per-node checker the sweep repeats.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn check-fn-def!][src/graphden/types/check.clj:2418]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn check-fn-def!][src/graphden/types/check.clj:2435]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 - referenced from :: [[file:crud.org::#crud/type-check-fn-after-mutation!][type-check-fn-after-mutation!]]
 
@@ -203,13 +203,13 @@ Type-checks a single fn-def against its (single or multiple- inheritance) parent
 :PROPERTIES:
 :CUSTOM_ID: types/check-all-defs!
 :FILE: src/graphden/types/check.clj
-:LINE: 2538
+:LINE: 2556
 :MINS: 1.9
 :END:
 
 The whole-graph sweep entry point: fold ~check-fn-def!~ over topologically-ordered fn-defs so each def's computed rich-type is registered before its dependents read it. This is how the entire graph is checked end to end.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2538]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2556]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 - referenced from :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]]
 

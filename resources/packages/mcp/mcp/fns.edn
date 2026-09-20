@@ -381,11 +381,13 @@
    :parent :execute-parsed-record
    :args {:vals [{:parent :parse-uuid :args {:string nil}}
                  {:parent :to-str :args {:value :_mcp-read-fn-name}}
-                 {:parent :coalesce :args {:value :_mcp-exec-args :default {}}}
+                 ;; `:jsonb` — the record `:_execute-apply` reads types `:args`
+                 ;; so; the tool's map is JSON by construction.
+                 {:parent :coalesce :args {:value :_mcp-exec-args :default {}} :type :jsonb}
                  {:value 10000} :_mcp-exec-trace? :_mcp-exec-trace? {:value false}]}}
 
   {:name :_mcp-exec-validation
-   :description "The execute pipeline's stage-2 guard cond, fed my parsed map — :_execute-validation binds :parsed at itself (closer-fn-wins), so overriding :execute from outside can't reach it; this child rebinds it directly."
+   :description "The execute pipeline's stage-2 guard cond, fed my parsed map — `:_execute-validation` leaves `:parsed` free (the HTTP pipeline pins it one level down in `:_execute-validation-http`), so this child binds it to the tool-built map."
    :parent :_execute-validation
    :args {:parsed :_mcp-exec-parsed}}
 
@@ -394,12 +396,10 @@
    :parent :if
    :args {:test {:parent :some? :args {:value :_mcp-exec-validation}}
           :then :_mcp-exec-validation
-          ;; :fn-row must be re-bound HERE too: apply-bound's own :fn-row
-          ;; ref resolves its free :parsed against apply-bound's binding set,
-          ;; and a child's :parsed override does not retro-feed a ref bound
-          ;; at the parent — without this the apply stage resolved fn-row
-          ;; from the (absent) HTTP body and executed nothing.
-          :else {:parent :_execute-apply-bound
+          ;; The apply core itself, both slots bound here (as the preview's
+          ;; `:_pv-outcome` does): `:_execute-apply-bound` pins `:fn-row` to
+          ;; the HTTP resolve, and a pinned slot is final for a child.
+          :else {:parent :_execute-apply
                  :args {:parsed :_mcp-exec-parsed
                         :fn-row {:parent :_execute-fn-row
                                  :args {:parsed :_mcp-exec-parsed}}}}}}
@@ -462,10 +462,12 @@
    :description "create-branch tool — the SAME guards POST /api/branches runs (blank name, name taken, base missing), so a bad request reads as feedback the model can act on."
    :parent :_mcp-tool-ok
    :args {:text {:parent :to-json-string
+                 ;; `:_create-branch-data` leaves `:parsed` free; one binding
+                 ;; feeds the guards AND the resolver's own `parsed` (same
+                 ;; ext-name), exactly as `:_create-branch-data-http` does.
                  :args {:data {:parent :_create-branch-data
                                :args {:parsed :_mcp-create-branch-parsed
-                                      :resolved-parent {:parent :_create-branch-resolved-parent
-                                                        :args {:parsed :_mcp-create-branch-parsed}}}}}}}}
+                                      :resolved-parent :_create-branch-resolved-parent}}}}}}
 
   ;; --- diff-branch: reuse the /api/branches/:ref/diff pipeline ----------------
   {:name :_mcp-diff-parsed
@@ -479,12 +481,12 @@
    :description "diff-branch tool — what the human will review, in the same shape the editor's compare mode renders."
    :parent :_mcp-tool-ok
    :args {:text {:parent :to-json-string
+                 ;; Free `:parsed` on the diff data — bound once, it reaches the
+                 ;; guards and both resolvers (as `:_diff-branches-data-http`).
                  :args {:data {:parent :_diff-branches-data
                                :args {:parsed :_mcp-diff-parsed
-                                      :target-branch {:parent :_target-branch
-                                                      :args {:parsed :_mcp-diff-parsed}}
-                                      :source-branch {:parent :_diff-source-branch
-                                                      :args {:parsed :_mcp-diff-parsed}}}}}}}}
+                                      :target-branch :_target-branch
+                                      :source-branch :_diff-source-branch}}}}}}
 
   ;; --- upsert-fn-defs: parse EDN → validate → sync into the branch ------------
   {:name :_mcp-upsert-edn
@@ -570,17 +572,50 @@
    :args {:keys [{:value :ok} {:value :branch} {:value :fn-ids}]
           :vals [{:value true} :_mcp-branch-arg :_mcp-upsert-applied]}}
 
+  ;; The sync REFUSES as well as fails: a cycle, a name collision, a type
+  ;; mismatch, a seal an ancestor set (`value-override` / `terminal-seal` /
+  ;; `list-closed`, `packages.sync/sync-bundle!`). Those throw out of
+  ;; `:sync-fn-defs-branch!`; caught here so the model reads a -32602 with
+  ;; the reason instead of a bare HTTP error. One evaluation: the outcome
+  ;; is a ref thunk, read by the test and the arms alike.
+  {:name :_mcp-upsert-rejection
+   :description "`:try` on-throw branch — the sync's refusal as `{:sync-error msg}`."
+   :parent :zipmap
+   :args {:keys [{:value :sync-error}]
+          :vals [{:parent :throwable-message :args {:ex {:as :exception}}}]}}
+
+  {:name :_mcp-upsert-outcome
+   :description "The sync's result — `{:ok true :branch :fn-ids}`, or `{:sync-error msg}` when it refused."
+   :parent :try
+   :args {:body :_mcp-upsert-result
+          :on-throw :_mcp-upsert-rejection}}
+
+  {:name :_mcp-upsert-sync-error
+   :parent :get
+   :args {:coll :_mcp-upsert-outcome :key {:value :sync-error} :default nil}}
+
+  {:name :_mcp-upsert-rejected?
+   :parent :some?
+   :args {:value :_mcp-upsert-sync-error}}
+
+  {:name :_mcp-err-sync-rejected
+   :description "-32602 carrying the sync's own refusal text — the constraint the model has to satisfy."
+   :parent :_mcp-err
+   :args {:code {:value -32602}
+          :message {:ref :_mcp-upsert-sync-error :type :text}}}
+
   {:name :_mcp-tool-upsert-ok
    :parent :_mcp-tool-ok
-   :args {:text {:parent :to-json-string :args {:data :_mcp-upsert-result}}}}
+   :args {:text {:parent :to-json-string :args {:data :_mcp-upsert-outcome}}}}
 
   {:name :_mcp-tool-upsert
-   :description "upsert-fn-defs tool — guards first (branch resolves, EDN is a vector, every item is a named map, no platform fn-defs without the explicit flag), then the atomic branch-scoped sync. A rejection is a -32602 the model can read and fix."
+   :description "upsert-fn-defs tool — guards first (branch resolves, EDN is a vector, every item is a named map, no platform fn-defs without the explicit flag), then the atomic branch-scoped sync, whose own refusals (cycle, collision, type-check, a seal) come back the same way. A rejection is a -32602 the model can read and fix."
    :parent :cond
    :args {:clauses [:_mcp-upsert-branch-missing?      :_mcp-err-branch-missing
                     :_mcp-upsert-not-a-vector?        :_mcp-err-not-a-vector
                     :_mcp-upsert-items-malformed?     :_mcp-err-items-malformed
                     :_mcp-upsert-platform-protected?  :_mcp-err-platform-protected
+                    :_mcp-upsert-rejected?            :_mcp-err-sync-rejected
                     {:value true}                     :_mcp-tool-upsert-ok]}}
 
   ;; --- run-tests: the /api/tests/run apply stage, fed from tool arguments ----

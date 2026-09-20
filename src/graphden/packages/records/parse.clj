@@ -1009,6 +1009,12 @@
                           synthetic-name)]
       [new-arg-value (cons expanded extras)])
 
+    ;; The flag-carrying list form (`{:append [items] :closed true}`):
+    ;; its items are walked like the bare vector's, the flags ride along.
+    (and (map? v) (vector? (:append v)))
+    (let [[items extras] (expand-anons-in-arg-value (:append v) ns-id host)]
+      [(assoc v :append items) extras])
+
     (vector? v)
     (let [[acc-items acc-extras _]
           (reduce

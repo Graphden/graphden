@@ -79,6 +79,20 @@
     :else :any))
 
 
+(defn list-items
+  "The items of a LIST binding whichever way it was written — a bare
+   vector (`:items [{:as :path} :method-map]`) or the flag-carrying map
+   (`:items {:append [{:as :path} :method-map] :closed true}`, the form
+   that closes the list). nil for anything else. Every scan for a
+   positional `{:as …}` rename item goes through this, so a closed list
+   exposes its renamed items exactly like an open one."
+  [binding-value]
+  (cond
+    (vector? binding-value) binding-value
+    (and (map? binding-value) (vector? (:append binding-value))) (:append binding-value)
+    :else nil))
+
+
 (defn- rename-spec-type
   "If `(:args fd)` contains an `{:as owner-arg :type T …}` rename
    declaration (scalar `{X {:as owner-arg :type T}}` OR positional
@@ -97,13 +111,13 @@
         (:type binding-value)
 
         ;; Positional list-item rename: `:items [{:as owner-arg :type T}]`.
-        (vector? binding-value)
+        (list-items binding-value)
         (some (fn [item]
                 (when (and (map? item)
                            (= owner-arg (some-> (:as item) keyword))
                            (:type item))
                   (:type item)))
-              binding-value)))
+              (list-items binding-value))))
     (:args fd)))
 
 
@@ -192,11 +206,10 @@
                            (= exposed-name (some-> (:as binding-value) keyword))
                            (not= ancestor-arg-name exposed-name))
                       ;; Positional rename inside a sequence binding.
-                      (and (vector? binding-value)
-                           (some (fn [item]
-                                   (and (map? item)
-                                        (= exposed-name (some-> (:as item) keyword))))
-                                 binding-value)))
+                      (some (fn [item]
+                              (and (map? item)
+                                   (= exposed-name (some-> (:as item) keyword))))
+                            (list-items binding-value)))
               ancestor-arg-name))
           args)))
 
@@ -304,14 +317,62 @@
   [fn-def exposed-name]
   (boolean
     (some (fn [[_ binding-value]]
-            (and (vector? binding-value)
-                 (some #(and (map? %)
-                             (= exposed-name (some-> (:as %) keyword)))
-                       binding-value)))
+            (some #(and (map? %)
+                        (= exposed-name (some-> (:as %) keyword)))
+                  (list-items binding-value)))
           (:args fn-def))))
 
 
 (declare ^:private resolve-slot-owner-strict-inheritance)
+
+
+(def ^:private binding-spec-keys
+  "Keys that make an arg-value map a binding SPEC rather than a literal
+   map (the set `records/parse` `arg-value->binding-fields` reads)."
+  #{:value :ref :as :type :required :literal? :description :append
+    :closed :terminal :secret-path :resolver})
+
+
+(defn- valued-binding?
+  "Does this fn-def arg-value pin the slot to something — a fn-ref, a
+   literal, a resolver — as opposed to annotating it (`{:as …}`,
+   `{:type …}`, a seal) or extending a list (a vector / `{:append …}`)?
+   A pinned slot is FINAL for every descendant (`value-override`)."
+  [v]
+  (cond
+    (keyword? v) true
+    (vector? v) false
+    (map? v) (cond
+               ;; an inline anon fn-def, or an explicit value / ref / resolver
+               (or (contains? v :parent)
+                   (some #(contains? v %) [:value :ref :resolver :secret-path])) true
+               ;; a list to extend, or an annotation (rename / type / seal)
+               (or (contains? v :append)
+                   (some #(contains? v %) binding-spec-keys)) false
+               :else true)                                    ; a literal map
+    :else true))
+
+
+(defn- inherited-slot-pinned?
+  "Is the inherited slot `slot-name` already pinned by an ANCESTOR of
+   `composed-fn-name` (its own binding excluded)? Then no descendant may
+   bind that slot — so a same-named binding on the descendant can only
+   mean the OTHER slot its name matches: the free arg a ref propagates
+   (`sse-fragment-handler` pins `:interval-ms` to a coalesce whose free
+   is also `:interval-ms`; a child writing `:interval-ms 5000` means the
+   coalesce's). Before this the inheritance hit won and the child's
+   binding OVERRODE the parent's pin — the write the API refuses."
+  [composed-fn-name slot-name defs-by-name]
+  (boolean
+    (some (fn [anc]
+            (when-let [fd (get defs-by-name anc)]
+              ;; A base-fn / type-row has no parent and its `:args` are
+              ;; DECLARATIONS (`:body :text` names a type, not a ref) —
+              ;; only a composed ancestor can pin.
+              (when (or (:parent fd) (seq (:parents fd)))
+                (when-let [[_ v] (find (:args fd) slot-name)]
+                  (valued-binding? v)))))
+          (rest (chain-of composed-fn-name defs-by-name)))))
 
 
 (defn- scalar-over-positional-hit
@@ -457,6 +518,36 @@
             (chain-of ref-name defs-by-name)))))
 
 
+(defn- pick-by-value-type
+  "Both passes hit DIFFERENT owners for this ext-name. In the common
+   case these are the SAME logical shared arg exposed by sibling
+   composed refs (e.g. `:coll` on both `:count` and `:get` in
+   `:_er-list-total-count` — the value propagates to both via the
+   shared ext-name), often with sibling base-fns declaring
+   subtype-related types. Inheritance-wins is a sound DEFAULT here,
+   backstopped two ways so a genuinely-wrong pick can't pass silently:
+     - when a typed binding VALUE is present, it disambiguates (each
+       candidate slot's type vs the value's return-type);
+     - when the arg is free (no value), the sweep type-checker is the
+       backstop — a free arg cannot satisfy two genuinely-incompatible
+       slot types, so a real mis-pairing surfaces as a type-check
+       failure, not a silent mis-bind.
+   (A parse-time hard-fail on \"different types\" was tried and
+   reverted: it false-positives on legitimate shared args whose sibling
+   slots are merely subtype-related, not distinct.)"
+  [inh-hit ref-hit binding-value defs-by-name]
+  (if-let [vt (value-return-type binding-value defs-by-name)]
+    (let [inh-slot-type (apply slot-type-of (conj inh-hit defs-by-name))
+          ref-slot-type (apply slot-type-of (conj ref-hit defs-by-name))
+          inh-match? (and inh-slot-type (= vt inh-slot-type))
+          ref-match? (and ref-slot-type (= vt ref-slot-type))]
+      (cond
+        (and inh-match? (not ref-match?)) inh-hit
+        (and ref-match? (not inh-match?)) ref-hit
+        :else inh-hit))
+    inh-hit))
+
+
 (defn resolve-slot-owner
   "Find `[owner-name slot-name]` for the slot that `composed-fn-name`
    targets when binding `arg-name`.
@@ -501,37 +592,16 @@
                    composed-fn-name arg-name defs-by-name #{})
          strict-hit
          (cond
-           ;; Type-based disambiguation: both passes hit and we have a
-           ;; value-return-type to compare against the two slots'
-           ;; declared types.
-           ;; Both passes hit DIFFERENT owners for this ext-name. In the
-           ;; common case these are the SAME logical shared arg exposed by
-           ;; sibling composed refs (e.g. `:coll` on both `:count` and
-           ;; `:get` in `:_er-list-total-count` — the value propagates to
-           ;; both via the shared ext-name), often with sibling base-fns
-           ;; declaring subtype-related types. Inheritance-wins is a sound
-           ;; DEFAULT here, backstopped two ways so a genuinely-wrong pick
-           ;; can't pass silently:
-           ;;   - when a typed binding VALUE is present, it disambiguates
-           ;;     (each candidate slot's type vs the value's return-type);
-           ;;   - when the arg is free (no value), the sweep type-checker
-           ;;     is the backstop — a free arg cannot satisfy two
-           ;;     genuinely-incompatible slot types, so a real mis-pairing
-           ;;     surfaces as a type-check failure, not a silent mis-bind.
-           ;; (A parse-time hard-fail on "different types" was tried and
-           ;; reverted: it false-positives on legitimate shared args whose
-           ;; sibling slots are merely subtype-related, not distinct.)
+           ;; Both passes hit, differently, and the inherited slot is
+           ;; already pinned above — final; the binding is for the
+           ;; propagated free (see `inherited-slot-pinned?`).
+           (and inh-hit ref-hit (not= inh-hit ref-hit)
+                (inherited-slot-pinned? composed-fn-name (second inh-hit) defs-by-name))
+           ref-hit
+
+           ;; Both passes hit DIFFERENT owners — `pick-by-value-type`.
            (and inh-hit ref-hit (not= inh-hit ref-hit))
-           (if-let [vt (value-return-type binding-value defs-by-name)]
-             (let [inh-slot-type (apply slot-type-of (conj inh-hit defs-by-name))
-                   ref-slot-type (apply slot-type-of (conj ref-hit defs-by-name))
-                   inh-match? (and inh-slot-type (= vt inh-slot-type))
-                   ref-match? (and ref-slot-type (= vt ref-slot-type))]
-               (cond
-                 (and inh-match? (not ref-match?)) inh-hit
-                 (and ref-match? (not inh-match?)) ref-hit
-                 :else inh-hit))
-             inh-hit)
+           (pick-by-value-type inh-hit ref-hit binding-value defs-by-name)
 
            inh-hit inh-hit
            ref-hit ref-hit
@@ -618,12 +688,14 @@
                        (ancestor-type-pin fn-name arg-name defs-by-name))
                    arg-name])
 
-        (vector? arg-value)
+        ;; A list either way it is written — bare vector or the flagged
+        ;; `{:append [{:as …} …] :closed true}` map (`list-items`).
+        (list-items arg-value)
         (into acc
               (keep (fn [item]
                       (when (and (map? item) (:as item))
                         [(some-> (:as item) keyword) (:type item) nil])))
-              arg-value)
+              (list-items arg-value))
 
         :else acc))
     #{}

@@ -110,6 +110,25 @@
                               "gd-insp-captured"))))))
 
 
+(deftest inspector-detail-says-what-descendants-may-do-with-a-slot
+  ;; The Bindings row carries the canvas lock badge's line — optional by
+  ;; declaration, sealed / list closed / required since — from
+  ;; `:_fn-slot-seals` (same walk as `edge-seal-fields`).
+  (testing "an optional slot is said to be optional"
+    (let [body (body-of :_partial-inspector-detail-handler
+                        {"fn-id" (str (ga/fn-id :subs))})]
+      (is (str/includes? body "gd-bind-seal"))
+      (is (str/includes? body "optional"))))
+  (testing "a route's items list is closed in route — a descendant is told"
+    (let [body (body-of :_partial-inspector-detail-handler
+                        {"fn-id" (str (ga/fn-id :health))})]
+      (is (str/includes? body "list closed in route") (subs body 0 (min 600 (count body))))))
+  (testing "a fn with nothing decided on its slots has no seal line"
+    (is (not (str/includes? (body-of :_partial-inspector-detail-handler
+                                     {"fn-id" (str (ga/fn-id :add))})
+                            "gd-bind-seal")))))
+
+
 (deftest execute-history-graph-anchor-filter
   ;; `?graph-hash=H` narrows the API's SQL to one resolved graph and
   ;; renders the strip's active ⌗ chip; absent → the always-true clause

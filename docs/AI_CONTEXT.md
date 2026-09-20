@@ -65,6 +65,10 @@ name; the VALUE says how to fill it:
 | a literal keyword (not a ref) | `{:value :kw}` | `{:tag {:value :active}}` |
 | rename the slot as it surfaces | `{:as :new-name}` | `{:x {:as :price}}` |
 | leave it OPEN (a free arg) | omit the key entirely | — |
+| append to an inherited LIST slot | a vector, or `{:append [items]}` | `{:nums [3]}` — the parent's items stay, yours follow |
+| make an inherited optional slot required from here down | `{:required true}` | `{:end {:required true}}` (one-way: never `false` again below) |
+| seal a still-free slot against descendants | `{:terminal true}` | `{:end {:terminal true}}` — descendants may not bind it |
+| close a list against descendants | `{:append [items] :closed true}` | `{:nums {:append [1 2] :closed true}}` — descendants may not append |
 
 **The reference trap (this is why you write EDN, not JSON):** a bare
 keyword in a value position is a *reference* to another fn. `:my-router`
@@ -88,6 +92,16 @@ that step a `:name` (a `_`-private one is fine).
 
 So "make a specialised version of X" = "inherit X, bind the slots you
 want fixed, leave the rest free". That is the whole mechanism.
+
+**A value an ancestor set is final.** You cannot re-bind a slot your
+parent (or any ancestor) already bound to a value or a fn — the write is
+refused (`value-override`), by the editor, the API and `upsert-fn-defs`
+alike. Want a different value? Inherit from a fn that leaves the slot
+free (the base, a sibling) and bind it there. The same refusal guards a
+slot an ancestor sealed with `:terminal true` (`terminal-seal`) and a
+list an ancestor closed with `:closed true` (`list-closed`). Lists are
+otherwise the one thing you EXTEND rather than override: appending to an
+inherited list keeps the ancestor's items in front of yours.
 
 ```clojure
 ;; :add sums a sequence in its :nums slot.

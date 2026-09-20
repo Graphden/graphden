@@ -6964,6 +6964,12 @@ button.gd-views-row:focus-visible { outline: 2px solid var(--accent); outline-of
   font-family: var(--gd-mono); font-size: 0.625rem; color: var(--gd-ink-3);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* What descendants may do with the slot — sealed / list closed / required
+   since / optional — the canvas lock badge's line, on the Bindings row. */
+.gd-bind-seal {
+  flex-basis: 100%;
+  font-size: 0.6875rem; color: var(--gd-ink-3); font-style: italic;
+}
 .gd-prov-row { display: flex; gap: 10px; align-items: baseline; padding: 5px 0; }
 .gd-prov-k {
   flex: none; min-width: 96px;

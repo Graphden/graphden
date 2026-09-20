@@ -31,7 +31,8 @@
    explain each ±1). For each ADDED name ask \"does it pass/transform caller
    content?\" — if yes it needs `:taint-propagate?` and a `golden-tainted`
    entry; a REMOVED name just leaves both sets."
-  #{:_apply-create-list-type-body :_apply-create-record-type-body
+  #{:_fn-slot-seals
+    :_apply-create-list-type-body :_apply-create-record-type-body
     :_apply-create-record-type-rollback :_apply-create-secret-body
     :_apply-inline-bind-body :_apply-secret-rollback
     :_apply-update-record-type-body :_apply-update-record-type-rollback

@@ -211,6 +211,16 @@
               (sp/query-entities storage :fn {:anonymous-hash hashes}))))))
 
 
+(def ^:dynamic *before-write*
+  "Optional guard `(fn [storage records])` run by `write-records!` on the
+   parsed records BEFORE the first upsert — throw to refuse the whole
+   bundle. nil (the default, the boot package sync) writes unguarded;
+   `packages.sync/sync-bundle!` binds the seal check here so an MCP or
+   registry bundle meets the same refusals a binding written through
+   the API does (value-override / terminal-seal / list-closed)."
+  nil)
+
+
 (defn write-records!
   "Batch-upsert records of all kinds to storage in dependency order,
    then reconcile each synced fn's body so storage matches the
@@ -221,6 +231,7 @@
    Returns `{fn-name → fn-id}` for named fn rows."
   [storage records ns-id-map]
   (let [records (remap-anonymous-ids records (org-anonymous-rows-by-hash storage records))
+        _ (when-let [guard *before-write*] (guard storage records))
         {fns       :fn
          slots     :slot
          fn-slots  :fn-slot

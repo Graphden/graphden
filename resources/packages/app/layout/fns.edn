@@ -62,6 +62,12 @@
    :return-type :_graph-snapshot-shape
    :effects #{:db}}
 
+  {:name :_fn-slot-seals
+   :description "Seals on every slot of the fn's chain, by effective slot name — `{:end {:optional? true :sealed-by \"cut\" :list-closed-by … :required-by … :note \"sealed in cut · optional\"}}`; only slots with something to say. The Inspector's Bindings rows read it (same walk as the canvas lock badge). Context-aware (cached graph read)."
+   :args {:fn-id {:type :nullable-uuid :required false}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
   {:name :_parse-layout-body
    :description "Single library call — parse the Ring body into `{:root-id :expansions}`. Throws JsonParseException / ExceptionInfo / IllegalArgumentException on bad input; the graph's `:try` catches all three."
    :args {:request {:type :ring-request-shape}}

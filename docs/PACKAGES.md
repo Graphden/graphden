@@ -204,6 +204,23 @@ through the lock badge on the edge label; tutorial lessons 06 and 07):
 | `:terminal true` | binding | seal a still-free slot against descendant binding (`terminal-seal`) |
 | `:description` | binding | per-fn override of the slot's description |
 
+Two consequences of "pinned is final" for how a name resolves: a binding
+on a descendant whose name matches BOTH an inherited slot an ancestor
+already pinned AND a free arg one of that ancestor's refs propagates
+goes to the free arg (`sse-fragment-handler` pins `:interval-ms` to a
+coalesce whose optional free is also `:interval-ms`; a child's
+`:interval-ms 5000` feeds the coalesce). And a "default" a template wants
+descendants to replace is not a pin on the template — it is a child
+(`:queue-consumer-leaseless` binds the no-op `:extend`; `:queue-consumer`
+leaves it free) or a level below (`:_execute-validation-http` pins
+`:parsed`; the guard cond leaves it free).
+
+The seals are enforced on every tenant-facing write — the editor, the
+entity API, an AI's `upsert-fn-defs`, a registry install / fork / import
+(`packages.sync/sync-bundle!`) — but NOT by the boot package sync: a
+first-party package is its author's own tree. `corpus_seals_test` keeps
+the corpus honest about it anyway.
+
 ```edn
 {:name :base-sum :parent :add :args {:nums {:append [1 2] :closed true}}}
 {:name :cut      :parent :subs :args {:end {:terminal true}}}

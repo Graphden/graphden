@@ -2415,6 +2415,23 @@
                where)))
 
 
+(defn checker-view
+  "The fn-def as the checker reads it: a list binding written in the
+   flag-carrying map form — `{:append [items] :closed true}`, the shape
+   that closes the list or seals it (`:terminal`) — is checked as the
+   bare vector of its items, exactly like `:nums [1 2]`. The flags are
+   the loader's (`records/parse`); to the type checker a list binding
+   is its items. Without this the map read as a literal MAP against a
+   `:sequence` slot and every `:closed` list failed the sweep."
+  [fn-def]
+  (update fn-def :args
+          (fn [args]
+            (into {}
+                  (map (fn [[k v]]
+                         [k (if (and (map? v) (vector? (:append v))) (:append v) v)]))
+                  args))))
+
+
 (defn check-fn-def!
   "Type-check a single fn-def against its parent's signature
    (whether that parent is a base-fn or a previously-checked
@@ -2432,107 +2449,108 @@
      [items …]           — sequence chain; each item type-checked
                            against the slot's element type
      {:ref :name}        — same as a bare keyword fn-ref"
-  [{fn-name :name :as fn-def}]
-  (when-let [{:keys [primary-parent parent-info]} (resolve-parent-info fn-def)]
-    (binding [*source-info* (source-info-for fn-def)]
-      ;; Type-row parents (e.g. `:Storage`, `:ResolveVersionedRowsInput`)
-      ;; declare their abstract operations as record FIELDS, not as the
-      ;; rich-type `:args` slot map (which is empty for type-rows).
-      ;; Concrete impls (`:postgres-storage-impl :parent :Storage :args
-      ;; {:query :pg-query …}`) bind those fields. Inject the resolved
-      ;; fields from EVERY parent in the MI list (primary OR secondary)
-      ;; so the per-binding type-check verifies that bindings satisfy
-      ;; the type-row's field contracts. `(:args parent-info)` wins
-      ;; on a key collision — that's the normal slot map.
-      ;;
-      ;; Resolving every parent (not just primary) closes the MI bug
-      ;; surfaced by `:resolve-versioned-rows :parents [:filter
-      ;; :ResolveVersionedRowsInput]`: the type-row is the SECONDARY
-      ;; parent, so a primary-only resolver missed its fields entirely
-      ;; (`:version-id-field` etc. showed up as "unknown slot").
-      (let [parent-list (or (seq (:parents fn-def))
-                            (when (:parent fn-def) [(:parent fn-def)]))
-            type-row-fields (reduce
-                              (fn [acc p]
-                                (let [resolved (and (keyword? p)
-                                                    (types/resolve-alias p))]
-                                  (if (types/record-type? resolved)
-                                    (merge acc resolved)
-                                    acc)))
-                              ;; Every parent in the list — the primary included —
-                              ;; contributes its fields through `resolve-alias`
-                              ;; above, so nothing seeds from `(:return
-                              ;; parent-info)`: a base-fn / composed parent that
-                              ;; merely RETURNS a record (`:http-request` →
-                              ;; `{:status :headers :body}`) must not turn its
-                              ;; result fields into slots. It did — every
-                              ;; descendant of `:standard-http-request` carried a
-                              ;; phantom `status` free arg that the Run form, the
-                              ;; Bindings tab and the fn picker's signature read.
-                              {}
-                              parent-list)
-            parent-args (merge type-row-fields (:args parent-info))]
-        (check-effect-categories! fn-def)
-        (check-unknown-slots! fn-def primary-parent parent-args parent-info)
-        (check-ref-type-overrides! fn-def primary-parent)
-        (check-binding-monotonicity! fn-def primary-parent parent-args)
-        (check-branch-local-monotonicity! fn-def)
-        (let [;; Effective parent-args includes resolved bindings from
-              ;; further up the chain — gives rules a transitive view of
-              ;; slot types AND the ref-name (when bound to a fn-ref) so
-              ;; ref re-firing can pick up call-site narrowing.
-              effective-parent
-              (merge (:resolved-bindings parent-info {})
-                     (into {}
-                           (map (fn [[k t]] [k {:type t :value nil}]))
-                           parent-args))
-              ;; Backward unification: when this fn-def declares a
-              ;; concrete `:return-type` and the parent's return is a
-              ;; bare type-var, bind that var. Any parent slot typed by
-              ;; the SAME var is then checked against (and surfaced as)
-              ;; the narrowed type — e.g. `:default-security-headers`
-              ;; declaring `:return-type :security-headers-shape` over
-              ;; `:const` binds `a`, so the `:value` slot reads as
-              ;; `:security-headers-shape` instead of generic `a`.
-              parent-ret    (:return parent-info)
-              declared-ret  (:return-type fn-def)
-              init-subst    (if (and declared-ret (types/type-var? parent-ret))
-                              {parent-ret declared-ret}
-                              {})
-              subst (type-check-bindings fn-def primary-parent parent-args init-subst)
-              ;; Slots whose type changed once `subst` is applied (backward
-              ;; unification) PLUS rule-derived narrowings (e.g. `:update-in`
-              ;; narrowing `:path` from its `:m` record). Rule narrowings
-              ;; win on a key collision — a rule knows more than generic
-              ;; var-substitution. The editor shows these on type-chips.
-              slot-types (merge
-                           (into {}
-                                 (keep (fn [[arg-name arg-type]]
-                                         (let [resolved (types/resolve subst arg-type)]
-                                           (when (not= resolved arg-type)
-                                             [arg-name resolved]))))
-                                 parent-args)
-                           (compute-rule-slot-types fn-def primary-parent
-                                                    effective-parent))
-              nav-types (compute-rule-nav-types fn-def primary-parent
-                                                effective-parent)
-              free-args (collect-free-args fn-def parent-args subst)
-              static-ret (types/resolve subst (or (:return parent-info) :any))
-              own-bindings (bindings-info-for-rule (:args fn-def))
-              computed-return (compute-return-type fn-def primary-parent
-                                                   effective-parent static-ret)
-              recorded-return (enforce-declared-return! fn-name fn-def computed-return)
-              drift (return-type-drift fn-def computed-return)
-              effects (compute-effects (:args fn-def) parent-info)]
-          (when drift (log-return-type-drift! fn-name fn-def drift))
-          (when-let [declared (some-> fn-def :effects set)]
-            (when (not= declared effects)
-              (log-effects-drift! fn-name fn-def declared effects)))
-          (check-effects-policy! fn-name fn-def effects)
-          (record-result! fn-name fn-def primary-parent parent-info
-                          free-args recorded-return effects own-bindings
-                          slot-types nav-types drift)
-          subst)))))
+  [fn-def0]
+  (let [{fn-name :name :as fn-def} (checker-view fn-def0)]
+    (when-let [{:keys [primary-parent parent-info]} (resolve-parent-info fn-def)]
+      (binding [*source-info* (source-info-for fn-def)]
+        ;; Type-row parents (e.g. `:Storage`, `:ResolveVersionedRowsInput`)
+        ;; declare their abstract operations as record FIELDS, not as the
+        ;; rich-type `:args` slot map (which is empty for type-rows).
+        ;; Concrete impls (`:postgres-storage-impl :parent :Storage :args
+        ;; {:query :pg-query …}`) bind those fields. Inject the resolved
+        ;; fields from EVERY parent in the MI list (primary OR secondary)
+        ;; so the per-binding type-check verifies that bindings satisfy
+        ;; the type-row's field contracts. `(:args parent-info)` wins
+        ;; on a key collision — that's the normal slot map.
+        ;;
+        ;; Resolving every parent (not just primary) closes the MI bug
+        ;; surfaced by `:resolve-versioned-rows :parents [:filter
+        ;; :ResolveVersionedRowsInput]`: the type-row is the SECONDARY
+        ;; parent, so a primary-only resolver missed its fields entirely
+        ;; (`:version-id-field` etc. showed up as "unknown slot").
+        (let [parent-list (or (seq (:parents fn-def))
+                              (when (:parent fn-def) [(:parent fn-def)]))
+              type-row-fields (reduce
+                                (fn [acc p]
+                                  (let [resolved (and (keyword? p)
+                                                      (types/resolve-alias p))]
+                                    (if (types/record-type? resolved)
+                                      (merge acc resolved)
+                                      acc)))
+                                ;; Every parent in the list — the primary included —
+                                ;; contributes its fields through `resolve-alias`
+                                ;; above, so nothing seeds from `(:return
+                                ;; parent-info)`: a base-fn / composed parent that
+                                ;; merely RETURNS a record (`:http-request` →
+                                ;; `{:status :headers :body}`) must not turn its
+                                ;; result fields into slots. It did — every
+                                ;; descendant of `:standard-http-request` carried a
+                                ;; phantom `status` free arg that the Run form, the
+                                ;; Bindings tab and the fn picker's signature read.
+                                {}
+                                parent-list)
+              parent-args (merge type-row-fields (:args parent-info))]
+          (check-effect-categories! fn-def)
+          (check-unknown-slots! fn-def primary-parent parent-args parent-info)
+          (check-ref-type-overrides! fn-def primary-parent)
+          (check-binding-monotonicity! fn-def primary-parent parent-args)
+          (check-branch-local-monotonicity! fn-def)
+          (let [;; Effective parent-args includes resolved bindings from
+                ;; further up the chain — gives rules a transitive view of
+                ;; slot types AND the ref-name (when bound to a fn-ref) so
+                ;; ref re-firing can pick up call-site narrowing.
+                effective-parent
+                (merge (:resolved-bindings parent-info {})
+                       (into {}
+                             (map (fn [[k t]] [k {:type t :value nil}]))
+                             parent-args))
+                ;; Backward unification: when this fn-def declares a
+                ;; concrete `:return-type` and the parent's return is a
+                ;; bare type-var, bind that var. Any parent slot typed by
+                ;; the SAME var is then checked against (and surfaced as)
+                ;; the narrowed type — e.g. `:default-security-headers`
+                ;; declaring `:return-type :security-headers-shape` over
+                ;; `:const` binds `a`, so the `:value` slot reads as
+                ;; `:security-headers-shape` instead of generic `a`.
+                parent-ret    (:return parent-info)
+                declared-ret  (:return-type fn-def)
+                init-subst    (if (and declared-ret (types/type-var? parent-ret))
+                                {parent-ret declared-ret}
+                                {})
+                subst (type-check-bindings fn-def primary-parent parent-args init-subst)
+                ;; Slots whose type changed once `subst` is applied (backward
+                ;; unification) PLUS rule-derived narrowings (e.g. `:update-in`
+                ;; narrowing `:path` from its `:m` record). Rule narrowings
+                ;; win on a key collision — a rule knows more than generic
+                ;; var-substitution. The editor shows these on type-chips.
+                slot-types (merge
+                             (into {}
+                                   (keep (fn [[arg-name arg-type]]
+                                           (let [resolved (types/resolve subst arg-type)]
+                                             (when (not= resolved arg-type)
+                                               [arg-name resolved]))))
+                                   parent-args)
+                             (compute-rule-slot-types fn-def primary-parent
+                                                      effective-parent))
+                nav-types (compute-rule-nav-types fn-def primary-parent
+                                                  effective-parent)
+                free-args (collect-free-args fn-def parent-args subst)
+                static-ret (types/resolve subst (or (:return parent-info) :any))
+                own-bindings (bindings-info-for-rule (:args fn-def))
+                computed-return (compute-return-type fn-def primary-parent
+                                                     effective-parent static-ret)
+                recorded-return (enforce-declared-return! fn-name fn-def computed-return)
+                drift (return-type-drift fn-def computed-return)
+                effects (compute-effects (:args fn-def) parent-info)]
+            (when drift (log-return-type-drift! fn-name fn-def drift))
+            (when-let [declared (some-> fn-def :effects set)]
+              (when (not= declared effects)
+                (log-effects-drift! fn-name fn-def declared effects)))
+            (check-effects-policy! fn-name fn-def effects)
+            (record-result! fn-name fn-def primary-parent parent-info
+                            free-args recorded-return effects own-bindings
+                            slot-types nav-types drift)
+            subst))))))
 
 
 (defn check-all-defs!

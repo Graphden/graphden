@@ -259,6 +259,68 @@
               (recur next-frontier next-seen))))))))
 
 
+(def seal-reasons
+  "The three seal refusals, worded once — the API path (`write-rej`) and
+   the bundle path (`ancestor-seal-rej`, run by `packages.sync/sync-bundle!`
+   over an MCP / registry bundle before it is written) say the same thing."
+  {:constraint-violation/value-override
+   (str "Binding rejected: an ancestor in the inheritance chain "
+        "already supplied a value (or fn-ref) for this slot. "
+        "Arguments with a value are implicitly final — if you "
+        "need different behaviour, create a new fn-def instead "
+        "of overriding the inherited value.")
+   :constraint-violation/terminal-seal
+   (str "Binding rejected: an ancestor in the inheritance chain marked "
+        "this slot `:terminal true`, sealing it against descendant "
+        "overrides. Create a new fn-def instead of overriding it.")
+   :constraint-violation/list-closed
+   (str "List rejected: an ancestor in the inheritance "
+        "chain marked this list `:list-closed true`, "
+        "sealing it against further `:list-append`.")})
+
+
+(defn ancestor-seal-rej
+  "The seal rules over an arbitrary VIEW of the graph, so a bundle about
+   to be written can be checked against storage OVERLAID with its own
+   rows (a bundle may carry the sealing parent and the offending child
+   together): `parents-of` (fn-id → parent-ids) and `binding-of`
+   (fn-id, slot-id → the binding row or nil). Walks the ancestors of
+   `fn-id` BFS (never `fn-id`'s own binding — the sealer may bind its
+   own slot) and returns `{:type :reason}` for the first seal the
+   proposed binding breaks, else nil:
+
+     :terminal true          → :terminal-seal
+     value / ref present     → :value-override — unless the proposal is
+                               a LIST write (append / item): extending
+                               an inherited list is how lists compose
+     :list-closed true       → :list-closed, for a list write
+
+   The same rules `value-override-rej` / `terminal-rej` /
+   `list-closed-rej` apply on the API path, over storage."
+  [{:keys [parents-of binding-of]} fn-id slot-id {:keys [list-write?]}]
+  (let [rej (fn [k] {:type k :reason (seal-reasons k)})]
+    (loop [frontier (vec (distinct (remove nil? (parents-of fn-id))))
+           seen #{}]
+      (when (seq frontier)
+        (let [bs (keep #(binding-of % slot-id) frontier)
+              sealed? (some #(true? (:terminal %)) bs)
+              valued? (some #(or (true? (:value-present %)) (some? (:ref-fn-id %))) bs)
+              closed? (some #(true? (:list-closed %)) bs)]
+          (cond
+            sealed? (rej :constraint-violation/terminal-seal)
+            (and valued? (not list-write?)) (rej :constraint-violation/value-override)
+            (and closed? list-write?) (rej :constraint-violation/list-closed)
+            :else
+            (let [seen' (into seen frontier)]
+              (recur (->> frontier
+                          (mapcat parents-of)
+                          (remove nil?)
+                          (remove seen')
+                          distinct
+                          vec)
+                     seen'))))))))
+
+
 (defn value-override-rej
   "Reject a `:binding` write whose `(fn-id, slot-id)` already has a
    value-carrying binding somewhere in the inheritance chain. The
@@ -278,12 +340,7 @@
              (:slot-id entity-data))
     (when (ancestor-binding-has-value? storage (:fn-id entity-data)
                                        (:slot-id entity-data))
-      {:reason
-       (str "Binding rejected: an ancestor in the inheritance chain "
-            "already supplied a value (or fn-ref) for this slot. "
-            "Arguments with a value are implicitly final — if you "
-            "need different behaviour, create a new fn-def instead "
-            "of overriding the inherited value.")})))
+      {:reason (seal-reasons :constraint-violation/value-override)})))
 
 
 (defn terminal-rej
@@ -299,10 +356,7 @@
              (:slot-id entity-data))
     (when (ancestor-binding-flag? storage (:fn-id entity-data)
                                   (:slot-id entity-data) :terminal)
-      {:reason
-       (str "Binding rejected: an ancestor in the inheritance chain marked "
-            "this slot `:terminal true`, sealing it against descendant "
-            "overrides. Create a new fn-def instead of overriding it.")})))
+      {:reason (seal-reasons :constraint-violation/terminal-seal)})))
 
 
 (defn list-closed-rej
@@ -315,10 +369,7 @@
   [storage entity-type entity-data]
   (let [check (fn [fn-id slot-id]
                 (when (ancestor-binding-flag? storage fn-id slot-id :list-closed)
-                  {:reason
-                   (str "List rejected: an ancestor in the inheritance "
-                        "chain marked this list `:list-closed true`, "
-                        "sealing it against further `:list-append`.")}))]
+                  {:reason (seal-reasons :constraint-violation/list-closed)}))]
     (case entity-type
       :binding
       (when (and (true? (:list-append entity-data))

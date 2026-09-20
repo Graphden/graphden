@@ -725,10 +725,21 @@
                  :_pie-kind :_pie-description :_pie-category :_pie-tags :_pie-origin
                  :_pie-status :_pie-moderation-note]}}
 
+  ;; The index entry fold over a `:coll` of package-version rows — free, so
+  ;; the graph's own tests feed it fixture rows; `:list-package-versions`
+  ;; pins the storage read one level down. (A pin on the fold itself would
+  ;; be final for every descendant — lesson 07 — so a test could not feed
+  ;; its own rows without overriding the parent's value, the write the API
+  ;; refuses.)
+  {:name :package-index-over
+   :description "`:_pkg-index-entry` mapped over a `:coll` of package-version rows — the registry index shape, over whatever rows the caller binds."
+   :parent :map
+   :args {:func :_pkg-index-entry}}
+
   {:name :list-package-versions
    :description "All published package versions as a registry index — metadata only (name, version, ns-root, content-hash, published-at, fn-count, dependencies); omits the heavy :fns bundle. Pure graph composition over `:query-entities` + a HOF reshape."
-   :parent :map
-   :args {:func :_pkg-index-entry :coll :_pkg-index-rows}}
+   :parent :package-index-over
+   :args {:coll :_pkg-index-rows}}
 
   {:name :_list-packages-result
    :parent :list-package-versions}

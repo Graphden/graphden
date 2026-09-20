@@ -615,8 +615,19 @@
                     :_execute-running-as-svc-rej?   :_execute-running-as-svc-err
                     :_execute-unknown-arg-rej?      :_execute-unknown-arg-err
                     :_execute-malformed-ref-rej?    :_execute-malformed-ref-err
-                    {:value true}                   {:value nil}]
-          :parsed :_execute-parsed}}
+                    {:value true}                   {:value nil}]}}
+
+  ;; `:parsed` stays FREE on the guard cond above and is pinned here, one
+  ;; level down, for the HTTP pipeline. The preview (`:_pv-validation`) and
+  ;; the MCP tool (`:_mcp-exec-validation`) feed the same guards their own
+  ;; parsed map by extending the FREE cond — a pin on the cond itself
+  ;; would be final for them (lesson 07: a value a parent sets cannot be
+  ;; re-bound below; they used to rely on closer-fn-wins, the write the
+  ;; API refuses).
+  {:name :_execute-validation-http
+   :description "Stage 2 for POST /api/execute — `:_execute-validation` over the request body's parsed map."
+   :parent :_execute-validation
+   :args {:parsed :_execute-parsed}}
 
   {:name :_execute-apply
    :description "Stage 3 — submit future, deref with timeout. Returns inline `{:status :succeeded :result …}` for fast pure fns, or `{:status :pending :execution-id}` when timeout/effects/persist? forced async. Takes the validation stage's already-resolved `:fn-row` — one resolve per request, graph-visible."
@@ -644,9 +655,9 @@
    :description "POST /api/execute pipeline. Parse → validate → on success apply."
    :parent :if
    :args {:test :_execute-rejected?
-          :then :_execute-validation
+          :then :_execute-validation-http
           :else :_execute-apply-bound
-          :validation :_execute-validation
+          :validation :_execute-validation-http
           :parsed :_execute-parsed}}
 
   {:name :execute-handler

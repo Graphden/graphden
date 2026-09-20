@@ -1108,7 +1108,7 @@
                  {:value false}]}}
 
   {:name :_pv-validation
-   :description "The standard execute stage-2 guards over the preview's parsed map — nil, or the `{:ok false :error …}` rejection envelope."
+   :description "The standard execute stage-2 guards over the preview's parsed map — nil, or the `{:ok false :error …}` rejection envelope. `:_execute-validation` leaves `:parsed` free (the HTTP pipeline pins it in `:_execute-validation-http`), so binding it here is a plain binding, not an override."
    :parent :_execute-validation
    :args {:parsed :_pv-parsed}}
 

@@ -285,3 +285,38 @@
               :text-val  {:parent :_x :return-type :text}}]
     (is (= [:base-a :body]
            (sr/resolve-slot-owner :composed :body defs :text-val)))))
+
+
+(deftest a-closed-list-exposes-its-renamed-items-like-an-open-one-test
+  ;; `:items {:append [{:as :path} :method-map] :closed true}` is `route`'s
+  ;; shape since the list was closed (2026-09-20): the positional rename
+  ;; must still surface `:path`, or every route's `:path` binding is an
+  ;; orphan.
+  (let [open {:name :r :parent :list :args {:items [{:as :path} :method-map]}}
+        closed {:name :r :parent :list :args {:items {:append [{:as :path} :method-map] :closed true}}}]
+    (is (= [{:as :path} :method-map] (sr/list-items (:items (:args closed)))))
+    (is (= [{:as :path} :method-map] (sr/list-items (:items (:args open)))))
+    (is (nil? (sr/list-items {:value [1]})) "a literal map is not a list")
+    (is (= :items (sr/rename-target open :path)))
+    (is (= :items (sr/rename-target closed :path)) "the closed form renames the same item")
+    (is (nil? (sr/rename-target closed :items)) "no rename of the slot itself")
+    (is (= #{[:path nil nil]}
+           (sr/collect-exposed-names (:args closed) :r (sr/build-defs-by-name [closed])))
+        "the closed form EXPOSES the renamed item as a slot — the route's :path")))
+
+
+(deftest a-pinned-inherited-slot-sends-the-same-named-binding-to-the-propagated-free-test
+  ;; `sse-fragment-handler`'s shape: the parent pins the inherited slot to a
+  ;; ref whose free arg carries the SAME name. The child's `:interval-ms
+  ;; 5000` used to resolve to the inherited slot — an override of the pin
+  ;; (the write the API refuses) — and now goes to the coalesce's free.
+  (let [defs (sr/build-defs-by-name
+               [{:name :stream :args {:interval-ms {:type :int} :render {:type :fn}}}
+                {:name :opt :parent :first :args {:coll [{:as :interval-ms :required false}]}}
+                {:name :defaulted :parent :coalesce :args {:value :opt :default {:value 2000}}}
+                {:name :handler :parent :stream :args {:interval-ms :defaulted}}
+                {:name :child :parent :handler :args {:interval-ms 5000}}])]
+    (is (= [:opt :interval-ms] (sr/resolve-slot-owner :child :interval-ms defs 5000))
+        "the child binds the propagated free, not the pinned inherited slot")
+    (is (= [:stream :interval-ms] (sr/resolve-slot-owner :handler :interval-ms defs :defaulted))
+        "the parent's own pin still targets the inherited slot")))

@@ -22,10 +22,12 @@
    storage, parse a request, build the graph element lists, or
    grid-place them."
   (:require
+    [clojure.string :as str]
     [graphden.crud.types-api :as types-api]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
+    [graphden.layout.builder-helpers :as bh]
     [graphden.layout.core :as layout]
     [graphden.layout.graph :as lgraph]
     [graphden.layout.strip-facts :as strip-facts]))
@@ -95,8 +97,46 @@
 
 ;; === Registry ===
 
+(defn- seal-note
+  "One line for the Inspector row: what is decided on the slot, and by whom."
+  [{:keys [sealedByName listClosedByName requiredByName]} optional?]
+  (str/join " · "
+            (cond-> []
+              sealedByName (conj (str "sealed in " sealedByName))
+              listClosedByName (conj (str "list closed in " listClosedByName))
+              (and optional? requiredByName) (conj (str "required since " requiredByName))
+              (and optional? (not requiredByName)) (conj "optional"))))
+
+
+(defbase _fn-slot-seals
+  "The seals on every slot of `fn-id`'s inheritance chain, keyed by the
+   slot's effective name — the Inspector's Bindings tab prints the
+   `:note` beside each row. Per slot: `:sealed-by` / `:list-closed-by` /
+   `:required-by` (the NAME of the deciding fn, from `edge-seal-fields`
+   — the same walk the canvas lock badge shows), `:optional?` (declared
+   `:required false`) and the `:note`. One cached graph read."
+  [fn-id]
+  (when fn-id
+    (let [lookups (lgraph/cached-build-lookups (load-graph-entities ctx))
+          {:keys [arg-map slot-map]} lookups]
+      (into {}
+            (keep (fn [[aid arg]]
+                    (when (= fn-id (:fn-id arg))
+                      (let [seals (bh/edge-seal-fields lookups aid)
+                            slot (get slot-map (:slot-id arg))
+                            optional? (false? (:required slot))]
+                        (when (or (seq seals) optional?)
+                          [(keyword (or (:name arg) (:name slot)))
+                           (cond-> {:optional? optional? :note (seal-note seals optional?)}
+                             (:sealedByName seals) (assoc :sealed-by (:sealedByName seals))
+                             (:listClosedByName seals) (assoc :list-closed-by (:listClosedByName seals))
+                             (:requiredByName seals) (assoc :required-by (:requiredByName seals)))])))))
+            arg-map))))
+
+
 (def impls
-  {:_load-graph-cached _load-graph-cached
+  {:_fn-slot-seals _fn-slot-seals
+   :_load-graph-cached _load-graph-cached
    :_parse-layout-body _parse-layout-body
    :_layout-build-apply _layout-build-apply
    :_layout-place-apply _layout-place-apply

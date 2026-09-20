@@ -21,6 +21,8 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [clojure.walk]
+    [graphden.crud.validation :as validation]
+    [graphden.executor.composition.core :as fn-core]
     [graphden.executor.composition.deps :as deps]
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.interface :as exec]
@@ -358,6 +360,47 @@
         :base-fns base-fns-map}))))
 
 
+(defn records-seal-rej
+  "The seal refusal a parsed bundle would earn — `{:type :reason :fn-id
+   :slot-id}` for the first `:binding` / `:binding-list-item` record that
+   breaks an ancestor's seal (`validation/ancestor-seal-rej`), else nil.
+   The view is storage overlaid with the bundle's own rows: parents and
+   bindings the bundle carries win over what storage holds (the rows are
+   about to replace it), so a bundle sealing a parent and binding the
+   child in one upsert is caught too."
+  [storage records]
+  (let [by-kind (group-by :kind records)
+        fns (into {} (map (juxt :id identity)) (:fn by-kind))
+        bindings (into {} (map (juxt (juxt :fn-id :slot-id) identity)) (:binding by-kind))
+        by-id (into {} (map (juxt :id identity)) (:binding by-kind))
+        view {:parents-of (fn [fid]
+                            (if-let [r (get fns fid)]
+                              (:parent-ids r)
+                              (:parent-ids (sp/read-entity storage :fn fid))))
+              :binding-of (fn [fid sid]
+                            (or (get bindings [fid sid])
+                                (first (sp/query-entities storage :binding {:fn-id fid :slot-id sid}))))}
+        host (fn [item]
+               (or (get by-id (:binding-id item))
+                   (sp/read-entity storage :binding (:binding-id item))))]
+    (or (some (fn [b]
+                (some-> (validation/ancestor-seal-rej view (:fn-id b) (:slot-id b)
+                                                      {:list-write? (true? (:list-append b))})
+                        (assoc :fn-id (:fn-id b) :slot-id (:slot-id b))))
+              (:binding by-kind))
+        (some (fn [item]
+                (when-let [b (host item)]
+                  (some-> (validation/ancestor-seal-rej view (:fn-id b) (:slot-id b) {:list-write? true})
+                          (assoc :fn-id (:fn-id b) :slot-id (:slot-id b)))))
+              (:binding-list-item by-kind)))))
+
+
+(defn- refuse-sealed!
+  [storage records]
+  (when-let [rej (records-seal-rej storage records)]
+    (throw (ex-info (:reason rej) rej))))
+
+
 (defn sync-bundle!
   "Sync a BUNDLE of fn-defs into `storage` and return the ids of EVERY
    fn row the sync wrote: namespace upsert (`pkg/sync-namespaces!`) →
@@ -375,10 +418,19 @@
    bundle share a bare name. The shared core of the registry's
    fork/materialize apply-cores and the MCP branch sync (formerly three
    verbatim copies); each caller owns its divergent tail — ns-rewrite
-   prefix, invalidation target, branch switch."
+   prefix, invalidation target, branch switch.
+
+   Every bundle caller is a TENANT-facing surface (an AI's `upsert-fn-defs`,
+   a registry install / fork / import), so the seals the API enforces on a
+   single binding — an ancestor's value is final, `:terminal` seals a
+   slot, `:list-closed` closes a list — are enforced here too, before the
+   first row lands (`records-seal-rej` via `*before-write*`). The boot
+   package sync does not come through here: a package is its author's
+   own tree."
   [storage fn-defs]
   (let [ns-id-map (pkg/sync-namespaces! storage (into #{} (keep :namespace) fn-defs))
-        name->id (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map)]
+        name->id (binding [fn-core/*before-write* refuse-sealed!]
+                   (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map))]
     (into (mapv #(records/fn-id (:namespace %) (:name %)) fn-defs)
           (comp (remove (set (map #(records/fn-id (:namespace %) (:name %)) fn-defs)))
                 (distinct))
@@ -570,7 +622,11 @@
         ;; declared, so the owner lookup needs them alongside the fn-defs.
         defs-by-name (merge extra-defs (slot-res/build-defs-by-name expanded-fn-defs))
         identity-arg? (fn [fd arg] (slot-res/fn-ref-arg? fd arg defs-by-name))
-        sorted (deps/topological-sort expanded-fn-defs identity-arg?)
+        ;; The checker's view of a list binding is its items — a `{:append …
+        ;; :closed true}` map is a vector to it (`checker-view`); the
+        ;; narrowing builders below read `:args` directly, so view first.
+        sorted (mapv types-check/checker-view
+                     (deps/topological-sort expanded-fn-defs identity-arg?))
         fd-fn-id (fn [fd]
                    (when (and (:name fd) (:namespace fd))
                      (records/fn-id (:namespace fd) (:name fd))))

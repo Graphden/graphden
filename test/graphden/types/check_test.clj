@@ -2188,3 +2188,17 @@
       (catch clojure.lang.ExceptionInfo e
         (is (= :types/fn-ref-slot-needs-ref (:type (ex-data e))))
         (is (= :service (:arg-name (ex-data e))))))))
+
+
+(deftest the-checker-reads-a-flagged-list-binding-as-its-items
+  ;; `{:append [items] :closed true}` (the form that closes a list) is a
+  ;; vector to the checker — otherwise it read as a literal MAP against a
+  ;; `:sequence` slot and every closed list failed the sweep.
+  (let [fd {:name :r :parent :list
+            :args {:items {:append [{:as :path} :method-map] :closed true}
+                   :method {:type :text}}}
+        viewed (check/checker-view fd)]
+    (is (= [{:as :path} :method-map] (get-in viewed [:args :items])))
+    (is (= {:type :text} (get-in viewed [:args :method])) "other bindings untouched")
+    (is (= [1 2] (get-in (check/checker-view (assoc-in fd [:args :items] [1 2])) [:args :items]))
+        "a bare vector is already the checker's view")))

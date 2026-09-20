@@ -43,9 +43,9 @@
   ;; Level 3: route = [path, method-map] using :list
   ;; First item is the renamed free :path; second is the method-map.
   {:name :route
-   :description "Generic reitit route — `[path method-data]`. Own pins: `:path`, `:method`, `:handler`. Method-specific shortcuts below bind `:method`."
+   :description "Generic reitit route — `[path method-data]`. Own pins: `:path`, `:method`, `:handler`. Method-specific shortcuts below bind `:method`. The items list is CLOSED: a route is exactly those two elements, so no descendant may append a third (the editor shows a lock where the tail would be)."
    :parent :list
-   :args {:items [{:as :path} :method-map]
+   :args {:items {:append [{:as :path} :method-map] :closed true}
           :method {:type :keyword-or-text
                    :description "HTTP method literal — e.g. `\"GET\"` / `\"POST\"`. Bound to a concrete value by method shortcuts (`:get-route`, `:post-route`, …)."}}}
 

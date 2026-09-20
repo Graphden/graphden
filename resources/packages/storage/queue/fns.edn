@@ -97,19 +97,28 @@
 
   ;; --- The consumer template (backend-agnostic) ----------------------
   {:name :queue-consumer
-   :description "A service that takes messages and runs `:handler` on each, acking on return and nacking on a throw; while the handler runs, `:extend` (message-id) is called every `:lease-every-ms` so a long handler keeps its claim. The handler runs as a traced hop: with the trace ids `:queue-publish` stamped on the message, its execution is persisted as a child of the publisher's (Run pane → Downstream calls). Backend-agnostic: bind `:take` (0-arg → messages), `:ack` (message-id) and `:nack` (message-id, error) to a backend's primitives — `:pg-queue-consumer` does it for Postgres, and also binds `:extend`; a backend without leases keeps the no-op default (`:_queue-no-extend`, every 10 s). Inherits `:process` from `:future`; service-eligible once `:queue` / `:handler` are bound."
+   :description "A service that takes messages and runs `:handler` on each, acking on return and nacking on a throw; while the handler runs, `:extend` (message-id) is called every `:lease-every-ms` so a long handler keeps its claim. The handler runs as a traced hop: with the trace ids `:queue-publish` stamped on the message, its execution is persisted as a child of the publisher's (Run pane → Downstream calls). Backend-agnostic: bind `:take` (0-arg → messages), `:ack` (message-id) and `:nack` (message-id, error) to a backend's primitives — `:pg-queue-consumer` does it for Postgres, and also binds `:extend`; a backend without leases extends `:queue-consumer-leaseless` instead (the no-op `:_queue-no-extend`, every 10 s). Inherits `:process` from `:future`; service-eligible once `:queue` / `:handler` are bound."
    :parent :future
    :args {:body :_queue-loop
-          :extend :_queue-no-extend
           :lease-every-ms 10000}}
+
+  ;; A backend without leases binds the no-op `:extend` HERE — as a child,
+  ;; not as a default on the template: a value a parent pins is final for
+  ;; every descendant (lesson 07), so a template that pinned `:extend`
+  ;; could never be given a real one by `:pg-queue-consumer`.
+  {:name :queue-consumer-leaseless
+   :description "`:queue-consumer` for a backend without leases — `:extend` bound to the no-op (`:_queue-no-extend`, answers false every `:lease-every-ms`). Bind `:take` / `:ack` / `:nack` to the broker's primitives, then `:queue` / `:handler`."
+   :parent :queue-consumer
+   :args {:extend :_queue-no-extend}}
 
   {:name :_queue-loop
    :parent :loop-until-interrupted
    :args {:body :_queue-step}}
 
-  ;; The lease defaults a backend without leases keeps: a no-op `:extend`
-  ;; (a 0-free fn fits the 1-arg slot) at the standard period, so a
-  ;; broker package binds only `:take` / `:ack` / `:nack`.
+  ;; The lease default a backend without leases takes through
+  ;; `:queue-consumer-leaseless`: a no-op `:extend` (a 0-free fn fits the
+  ;; 1-arg slot) at the standard period, so a broker package binds only
+  ;; `:take` / `:ack` / `:nack`.
   {:name :_queue-no-extend
    :description "The `:extend` a backend without leases leaves in place — does nothing, answers false."
    :parent :const

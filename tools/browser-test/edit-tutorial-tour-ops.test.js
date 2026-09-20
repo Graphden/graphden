@@ -609,10 +609,12 @@ const {
     assert(!unmarked.stillMarked && unmarked.controlGone,
       'clicking it takes the ✓ off that row');
     assert(unmarked.neighbourKept, 'and leaves the rows around it alone');
-    // The history was seeded in its pre-edition LIST shape; the first write
-    // carries it over to `{id: edition}` (editions, 2026-09-19).
-    assert(JSON.stringify(unmarked.stored) === '{"01":1,"03":1}',
-      'the stored history agrees, in the edition shape (got: '
+    // The history was seeded in its pre-edition LIST shape, keyed by number;
+    // the first write carries it over to `{slug: edition}` — the lesson's
+    // slug is its identity, the number its position (editions 2026-09-19,
+    // slugs 2026-09-20).
+    assert(JSON.stringify(unmarked.stored) === '{"fn-defs":1,"parents-and-inheritance":1}',
+      'the stored history agrees, in the slug-keyed edition shape (got: '
       + JSON.stringify(unmarked.stored) + ')');
 
     const cleared = await page.evaluate(() => {
@@ -637,7 +639,7 @@ const {
     assert(/Clear 2 ✓ marks\?/.test(cleared.asked),
       'the bulk clear asks first, and says how much goes (got: '
       + cleared.asked + ')');
-    assert(JSON.stringify(cleared.afterKeep) === '{"01":1,"03":1}',
+    assert(JSON.stringify(cleared.afterKeep) === '{"fn-defs":1,"parents-and-inheritance":1}',
       'backing out of it changes nothing (got: '
       + JSON.stringify(cleared.afterKeep) + ')');
     assert(cleared.stored === null,

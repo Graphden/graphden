@@ -402,9 +402,11 @@
       (is (true? (get-in node [:data :isSequenceAnchor]))))))
 
 
-(deftest list-closed-ancestor-drops-the-append-tail
+(deftest list-closed-ancestor-locks-the-append-tail
   (testing "an ancestor's :list-closed binding seals the list: the items
-            still group, but no tail is offered (the API would 409)"
+            still group, and the tail is STILL emitted — carrying who closed
+            it (`:listClosedBy`), so the editor draws a lock there instead of
+            a `+` (a missing tail said nothing about why; the API would 409)"
     (let [base (random-uuid)
           base-nums (random-uuid)
           mid (random-uuid)
@@ -436,11 +438,21 @@
                         (build-lookups {:fns fns :args args
                                         :bindings [{:id (random-uuid) :fn-id mid :slot-id slot-id
                                                     :list-append true}]}))]
-      (is (= 2 (count (seq-members closed-layout))) "inherited item, own item, NO tail")
-      (is (not-any? #(get-in % [:data :seqTail]) (:edges closed-layout)))
+      (is (= 3 (count (seq-members closed-layout))) "inherited item, own item, the tail")
+      (let [tail (some #(when (get-in % [:data :seqTail]) %) (:edges closed-layout))
+            tail-node (some #(when (= (get-in tail [:data :target]) (get-in % [:data :id])) %)
+                            (:nodes closed-layout))]
+        (is (some? tail) "the tail edge is there")
+        (is (= (str mid) (get-in tail [:data :listClosedBy]))
+            "and names the ancestor that closed the list")
+        (is (= "sealed" (get-in tail [:data :listClosedByName])))
+        (is (= (str mid) (get-in tail-node [:data :listClosedBy]))
+            "the placeholder node carries it too — that is what gates the `+`"))
       (is (= 3 (count (seq-members open-layout)))
-          "the same chain with an open ancestor keeps its tail")
-      (is (true? (get-in (last (seq-members open-layout)) [:data :seqTail]))))))
+          "the same chain with an open ancestor has the same shape")
+      (is (true? (get-in (last (seq-members open-layout)) [:data :seqTail])))
+      (is (not-any? #(get-in % [:data :listClosedBy]) (:edges open-layout))
+          "and nothing on it says closed"))))
 
 
 (deftest own-list-closed-does-not-seal-own-tail

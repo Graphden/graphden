@@ -960,12 +960,10 @@
   [state lookups inverse-source-map arg-name arg-type arg-id source-node-id expanded-fns is-hof]
   (let [arg-map (:arg-map lookups)
         arg-rec (get arg-map arg-id)
-        ;; Declared optional AND not ratcheted to required by a binding on
-        ;; the chain (`:requiredBy`, the same walk the seal badge reads) —
-        ;; the dimmed `+` must tell the truth the executor acts on.
+        ;; Declared optional AND not ratcheted to required on the chain
+        ;; (`:requiredBy`) — the dimmed `+` tells the truth the executor acts on.
         seal-fields (edge-seal-fields lookups arg-id)
-        optional? (and (arg-is-optional? arg-map arg-rec)
-                       (nil? (:requiredBy seal-fields)))
+        optional? (and (arg-is-optional? arg-map arg-rec) (nil? (:requiredBy seal-fields)))
         displayed-name (or (compute-edge-label lookups arg-id source-node-id expanded-fns)
                            (when arg-name (name arg-name)))
         hof-bound (when is-hof (caller-bound-arg arg-map inverse-source-map arg-id))
@@ -1006,11 +1004,8 @@
                                         ;; them from the node-id string.
                                         :argId (str arg-id)}
                                        flag-fields
-                                       ;; The seals gate the `+` itself (a
-                                       ;; slot sealed / list closed ABOVE this
-                                       ;; card gets a lock, not a binder), so
-                                       ;; the node carries them, not only the
-                                       ;; edge.
+                                       ;; The seals gate the `+` itself (sealed /
+                                       ;; closed ABOVE → a lock, not a binder).
                                        seal-fields
                                        (when arg-rec
                                          (arg-row->node-id-fields arg-rec)))

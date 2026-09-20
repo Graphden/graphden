@@ -472,7 +472,7 @@ const {
     // under test is the button's.
     const locked = await page.evaluate(() => {
       const list = document.querySelector('.gd-tour-lesson-list');
-      const row = Array.from(list.children).find((c) => /^25 ·/.test(c.textContent.trim()));
+      const row = Array.from(list.children).find((c) => /^27 ·/.test(c.textContent.trim()));
       return row ? {text: row.textContent.trim(),
                     disabled: row.querySelector('.gd-tour-btn').disabled === true,
                     chapter: !!Array.from(list.children).find(
@@ -491,7 +491,7 @@ const {
     // words, not as a capability name.
     const orgLocked = await page.evaluate(() => {
       const list = document.querySelector('.gd-tour-lesson-list');
-      const row = Array.from(list.children).find((c) => /^31 ·/.test(c.textContent.trim()));
+      const row = Array.from(list.children).find((c) => /^33 ·/.test(c.textContent.trim()));
       return row ? {text: row.textContent.trim(),
                     disabled: row.querySelector('.gd-tour-btn').disabled === true} : null;
     });
@@ -505,7 +505,7 @@ const {
     // lesson from the only sessions that can run it.
     const assetsLesson = await page.evaluate(() => {
       const list = document.querySelector('.gd-tour-lesson-list');
-      const row = Array.from(list.children).find((c) => /^23 ·/.test(c.textContent.trim()));
+      const row = Array.from(list.children).find((c) => /^25 ·/.test(c.textContent.trim()));
       return row ? {text: row.textContent.trim(),
                     disabled: row.querySelector('.gd-tour-btn').disabled === true} : null;
     });

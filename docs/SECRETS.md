@@ -564,6 +564,19 @@ On submit the form POSTs to `/api/secret-bindings` (sibling to
    rich-type doesn't carry `:secret`, in which case we
    `vault/delete-secret` to keep the stores consistent.
 
+The slot's type reaches the registry through
+`crud.value-form/resolve-slot-effective-type`, whose tier 3 is
+`slot-declared-type`: a marker is not a type-fn, so the slot ROW
+stores `[:secret :text]` as its inner `:text`; when the declaring
+ancestor's rich `:args` entry says the row is such a degraded
+projection (marker → inner, list → `:sequence`, map/tuple → `:jsonb`,
+union → one branch), the declared type wins — so a CHILD of
+`:sql-exec` gets the secret form on `:password` too (2026-09-21; the
+row alone answered `text` and the form was a plain input). The editor
+names the action after the marker — the `+` chooser reads **Bind
+secret** (`slotMarkerName`, editor-literal-types.js) — and the written
+lesson 16 says when a secret is the answer.
+
 The frontend branch only fires when the slot has NO existing binding
 (`!arg['binding-id']`). For an existing binding, the regular popover
 opens — the user must `Delete` first to revert to a free-arg, then

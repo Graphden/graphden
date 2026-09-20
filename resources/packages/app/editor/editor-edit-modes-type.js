@@ -210,11 +210,15 @@ function enterFreeArgBindEditMode(arg, anchorEl) {
   }
 
   // Otherwise show a literal-vs-ref chooser, then descend into the
-  // appropriate input.
+  // appropriate input. A slot wrapped in a marker (`[:secret T]`) gets
+  // its value through that marker's form (the vault path + value for a
+  // secret) — the button says so, "Bind literal" hid where a secret is
+  // bound; the fn-ref side stays for a secret from the Secrets panel.
+  const marker = (typeof slotMarkerName === 'function') ? slotMarkerName(arg) : null;
   openLiteralVsRefChooser({
     anchorEl,
-    ariaLabel: 'Bind free arg',
-    litLabel: 'Bind literal',
+    ariaLabel: marker ? ('Bind ' + marker + ' slot') : 'Bind free arg',
+    litLabel: marker ? ('Bind ' + marker) : 'Bind literal',
     refLabel: 'Bind fn-ref',
     // Fall through into the existing arg-value editor.
     onLiteral: () => enterArgValueEditMode(arg, anchorEl),

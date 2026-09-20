@@ -77,6 +77,37 @@ function slotRichType(arg) {
   return null;
 }
 
+
+// The MARKER a slot's effective type is wrapped in — `[:secret T]` → "secret",
+// any registered marker (`[:pii T]`) → its name; a union is scanned for one
+// (`[:union :null [:secret :text]]`). Structural, like the literal
+// validator above: a 2-element vector whose head is not a type
+// constructor. null when the slot carries none. The chooser names the
+// action after it ("Bind secret") so a reader learns WHERE a secret is
+// bound; the form itself is still dispatched by the server's value-form
+// registry.
+function slotMarkerName(arg) {
+  // The DECLARED rich type first: on the storage slot row a marker
+  // degrades to its inner primitive (`[:secret :text]` → `text`), and
+  // `expectedSlotType` keeps that primitive whenever it is not one of
+  // the structurally-degraded ones — so the marker survives only in the
+  // rich-types chain `slotRichType` walks.
+  const t = (typeof slotRichType === 'function' ? slotRichType(arg) : null)
+            ?? ((typeof expectedSlotType === 'function') ? expectedSlotType(arg) : null);
+  const walk = (x, depth) => {
+    if (!Array.isArray(x) || depth > 3) return null;
+    if (x.length === 2 && typeof x[0] === 'string'
+        && !['union', 'refine', 'list', 'map', 'fn', 'variant', 'tuple'].includes(x[0])) {
+      return x[0];
+    }
+    if (x[0] === 'union') {
+      for (let i = 1; i < x.length; i++) { const m = walk(x[i], depth + 1); if (m) return m; }
+    }
+    return null;
+  };
+  return walk(t, 0);
+}
+
 // Element type of a sequence arg — `slotRichType`'s `[:list T]`
 // unwrapped to T. Types the append flow's "Append fn-ref" picker (e.g.
 // a hiccup :children chain offers the component library). null when

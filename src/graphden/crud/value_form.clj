@@ -134,16 +134,17 @@
 (declare inheritance-chain-info)
 
 
-(defn- declared-arg-elem-type
-  "Element type of a sequence slot as DECLARED in the rich-types
-   registry, read from the closest inheritance-chain ancestor whose
-   rich `:args` entry types this slot as a list. The slot's own row
-   often degrades to the bare `:sequence` base on sync (an inline
-   `[:list T]` isn't a named type-row), and the owning fn's rich
-   `:args` carries only its FREE args — but the declaring ancestor
-   (e.g. `:hiccup` for `:children [:list :hiccup-node]`) keeps the
-   type the aggregate type-check actually enforces. nil when no
-   ancestor declares a list type for this slot name."
+(defn- declared-arg-type
+  "The slot's type as DECLARED in the rich-types registry, read from
+   the closest inheritance-chain ancestor whose rich `:args` entry
+   names this slot, alias-resolved. The slot's own row keeps only what
+   sync could store as a type-fn (an inline `[:list T]` becomes the
+   bare `:sequence` base, a marker `[:secret :text]` its inner
+   `:text`), and the owning fn's rich `:args` carries only its FREE
+   args — but the declaring ancestor (`:hiccup` for `:children
+   [:list :hiccup-node]`, `:sql-exec` for `:password [:secret :text]`)
+   keeps the type the aggregate type-check actually enforces. nil
+   when no ancestor declares a type for this slot name."
   [storage fn-id slot]
   (when (and fn-id (:name slot))
     (let [slot-kw (keyword (:name slot))
@@ -152,13 +153,53 @@
               ;; Id-keyed with the stale-name rescue — ancestors here are
               ;; typically package fns whose abandoned historical ids the
               ;; rescue re-points; a bare-name lookup would let a same-
-              ;; named OTHER fn declare the element type.
+              ;; named OTHER fn declare the type.
               (let [rich (registry/rich-type-of-id-or-stale-name
-                           fid (:name (get fn-map fid)))
-                    t    (some-> (get-in rich [:args slot-kw])
-                                 types/resolve-alias)]
-                (when (types/list-type? t) (types/list-elem t))))
+                           fid (:name (get fn-map fid)))]
+                (some-> (get-in rich [:args slot-kw]) types/resolve-alias)))
             ids))))
+
+
+(defn- declared-arg-elem-type
+  "Element type of a sequence slot as DECLARED in the rich-types
+   registry (`declared-arg-type` unwrapped past `[:list T]`); nil when
+   the declaring ancestor types it as something else."
+  [storage fn-id slot]
+  (let [t (declared-arg-type storage fn-id slot)]
+    (when (types/list-type? t) (types/list-elem t))))
+
+
+(defn- degraded-projection?
+  "True when `slot-type` — what the slot ROW says — is the shadow sync
+   leaves of a MARKER type declared on the arg: `[:secret :text]` is
+   not a type-fn, so the row stores its inner `:text` (or `:any`).
+   Then the declared marker is the type to edit against — the row
+   lost the marker, it did not narrow. Deliberately marker-only: a
+   list / map / union declaration also degrades on the row, but the
+   value-form for those (raw JSON for a `:jsonb` row, the list form
+   for `:sequence`) is what every lesson and reader types into, and
+   swapping it for a record / union form changed what a typed value
+   became (lesson 10's components stopped running under a broader
+   rule, 2026-09-21). Lists keep their element rule in
+   `declared-arg-elem-type`."
+  [declared slot-type]
+  (let [d (some-> declared types/resolve-alias)
+        s (some-> slot-type types/resolve-alias)]
+    (boolean
+      (and (types/marker-type? d)
+           (or (= :any s)
+               (= (types/resolve-alias (types/marker-inner d)) s))))))
+
+
+(defn- slot-declared-type
+  "Tier 3 of the slot-type chain: the slot row's own type-fn, unless
+   that is the degraded projection of a marker the declaring
+   ancestor's rich `:args` entry carries — then the marker type the
+   checker enforces."
+  [storage fn-id slot]
+  (let [row-type (type-fn-rich storage (:type-fn-id slot))
+        declared (declared-arg-type storage fn-id slot)]
+    (if (degraded-projection? declared row-type) declared row-type)))
 
 
 (defn resolve-slot-effective-type
@@ -169,7 +210,10 @@
         keyed by slot-name on the owning fn (the type-checker records
         a narrowed slot type here when a fn-def's `:return-type`
         narrowed a parent type-var that also types this slot).
-     3. the slot's declared `:type-fn-id`.
+     3. the slot's declared `:type-fn-id` — or, when that row is the
+        degraded projection of a MARKER the declaring ancestor's rich
+        `:args` entry carries (`[:secret :text]` stored as `:text`),
+        the declared marker type (`slot-declared-type`).
 
    For a `binding-list-item` (`:item-id` present) the slot type is a
    list and the item's effective type is the element type — taken from
@@ -188,7 +232,7 @@
         owning    (when fn-id (sp/read-entity storage :fn fn-id))
         slot-type (or (type-fn-rich storage (:type-override-fn-id bnd))
                       (backward-unified-slot-type owning slot)
-                      (type-fn-rich storage (:type-fn-id slot)))
+                      (slot-declared-type storage fn-id slot))
         resolved  (some-> slot-type types/resolve-alias)]
     (cond
       (nil? resolved) nil
@@ -386,7 +430,16 @@
                                  :source (when (:name ref-fn)
                                            {:fn-name (:name ref-fn) :fn-id ref-fid})}
                                 {:key :slot
-                                 :type (type-of-fn-id storage (:type-fn-id slot))
+                                 ;; The same tier-3 rule the resolver applies —
+                                 ;; a marker stored as its inner reads as the
+                                 ;; marker here too.
+                                 :type (let [row-rich (type-fn-rich storage (:type-fn-id slot))
+                                             declared (declared-arg-type storage fn-id slot)]
+                                         ;; `type-of-fn-id` answers in the display shape
+                                         ;; (an alias NAME) — compare on the rich form.
+                                         (if (degraded-projection? declared row-rich)
+                                           declared
+                                           (type-of-fn-id storage (:type-fn-id slot))))
                                  :source declaring}]
                   winner       (some (fn [t] (when (some? (:type t)) (:key t))) tiers)
                   chain        (when chain-info

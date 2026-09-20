@@ -251,6 +251,31 @@ This applies AT THE BOUNDARY (HTTP response). Inside the
 graph, secret values flow freely between fn-defs — they're
 just typed.
 
+## When to reach for a secret
+
+The rule of thumb: **anything you would hate to see in a Run result,
+a log line, a branch diff or an exported package is a secret** — a
+database password, an API token, a signing key, a DSN with a
+password inside. The graph then holds only a *vault path*; the
+value lives in OpenBao and reaches the executor at run time. Plain
+per-environment configuration — a port, a base URL, a schedule —
+is not sensitive; give it a literal (and pin it to its branch with
+📍, lesson 23) rather than a vault entry.
+
+Where a secret is bound follows from the type: a slot typed
+`[:secret T]` is the *only* place one can land, and the editor says
+so. On such a slot — `sql-exec`'s `:password`, `http-get`'s
+`:auth-value`, `vault-put`'s `:value` — the `+` reads *Bind this
+secret-typed slot* and its chooser offers **Bind secret** (a vault
+path and the value: the value goes to OpenBao, graphden keeps the
+path) or **Bind fn-ref** (a secret already kept in the Secrets panel
+— the picker lists `secret-leaf` fns). On an ordinary `:text` slot
+there is no secret option, and that is the point: a secret cannot
+flow into `h-raw` or a log, so the editor does not offer to put one
+there. If your own fn needs a secret, give it a slot that is typed
+for one — extend a base-fn whose slot already is, or declare
+`{:type [:secret :text]}` in `fns.edn`.
+
 ## The admin secrets UX
 
 The **Secrets** rows in the explorer (toggle the **secrets**

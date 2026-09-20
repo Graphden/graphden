@@ -71,7 +71,9 @@ async function hardCleanup(page) {
                      'tutorial-sum-more', 'tutorial-base-sum',
                      'tutorial-cut-more', 'tutorial-cut',
                      // lesson 03's MI fn and lesson 09's callable (2026-09-20).
-                     'tutorial-json-ok', 'tutorial-upper'];
+                     'tutorial-json-ok', 'tutorial-upper',
+                     // lesson 16's secret-typed slot demo.
+                     'tutorial-db-call'];
   // Per-browser view-state the lessons exercise (filters / views,
   // recents, last-used ns) — a leftover filter renders the next lesson's
   // Explorer as somebody else's narrowed tree. `graphden.tour.next` is the
@@ -1533,6 +1535,23 @@ async function addMiParentViaParentRow(page, cardFnName, parentName) {
   }, cardFnName, {timeout: 90000, polling: 250});
 }
 
+
+// `+` on the named slot → the chooser reads "Bind <marker>" → click it →
+// the marker's form (lesson 16: the secret form on sql-exec's :password).
+// Returns the chooser's literal-side label so the caller can assert it.
+async function openMarkerFormViaPlaceholder(page, argName, marker) {
+  const sel = '.placeholder-binder[data-arg-name="' + argName + '"]';
+  await page.waitForSelector(sel, {timeout: 60000});
+  await page.evaluate((s) => document.querySelector(s).click(), sel);
+  await page.waitForFunction((m) => Array.from(document.querySelectorAll('button'))
+    .some((b) => b.textContent.trim() === 'Bind ' + m), marker, {timeout: 15000, polling: 100});
+  const label = await page.evaluate((m) => Array.from(document.querySelectorAll('button'))
+    .find((b) => b.textContent.trim() === 'Bind ' + m)?.textContent.trim(), marker);
+  await page.evaluate((m) => Array.from(document.querySelectorAll('button'))
+    .find((b) => b.textContent.trim() === 'Bind ' + m).click(), marker);
+  return label;
+}
+
 module.exports = {
   NS_NAME, FN_NAME,
   retryingDelete, hardCleanup, tourTitle, waitTourTitle, settleTourRing, clickTourButton,
@@ -1550,4 +1569,5 @@ module.exports = {
   createRecordType, openOperateSection, openAccountSettings, openAccountMenu,
   setSealsViaBadge, deleteBoundValue, moveSeqItem, insertSeqLiteralBefore,
   setLambdaParamsViaChip, setBranchLocalViaStrip, addMiParentViaParentRow,
+  openMarkerFormViaPlaceholder,
 };

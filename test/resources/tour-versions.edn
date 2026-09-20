@@ -10,7 +10,7 @@
  "custom-script-escape-hatch" {:version 1, :steps "5699f3f0926e4018150974882525ebad400abda7"}
  "debugging-traces" {:version 1, :steps "1706f022c32b54c3d6adcc4a3af09d6749dc9f62"}
  "distributing-packages" {:version 1, :steps "de6f2e72697eb5198fb6d6490879a0be896e97cc"}
- "effects-and-secrets" {:version 1, :steps "0171314e7853cb04bbe37f3f1dcc6c8538599b2a"}
+ "effects-and-secrets" {:version 2, :steps "e59bc47f8fb9cfd139184b89f877ec5828c4b110"}
  "errors-and-diagnostics" {:version 1, :steps "8514d93aeeddfe0d7fca3d9d56d9ac21bcfb613a"}
  "executing-a-fn" {:version 1, :steps "b65d193273e4fdd137f5b73ee836abfa212e3e4c"}
  "explorer-and-inspector" {:version 1, :steps "ce7868bf44ac4e07cfc3f4cf17addb16128aafc2"}

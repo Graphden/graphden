@@ -19,7 +19,7 @@ const {
   appendSeqItemViaEdge, bindFnRefPlaceholder,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, tourTitle,
-  waitUntil, waitTourClosed, setBranchLocalViaStrip,
+  waitUntil, waitTourClosed, setBranchLocalViaStrip, openMarkerFormViaPlaceholder,
 } = require('./tutorial-tour-helpers');
 
 (async () => {
@@ -212,12 +212,33 @@ const {
     assert(await clickTourButton(page, 'Next'), 'lesson 16 look-step Next');
     await waitTourTitle(page, 'Two gates, one vocabulary', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 16 gates Next');
-    await waitTourTitle(page, 'Secrets ride the same rails');
-    assert(await clickTourButton(page, 'Finish'), 'lesson 16 Finish');
-    // Nothing was created — no cleanup dialog, just the finished card offering
-    // what is next, which `waitTourClosed` dismisses.
-    await waitTourClosed(page, 30000);
-    console.log('  lesson 16: walked (no leftovers to clean)');
+    // Secrets (2026-09-21): where a secret is bound — the secret-typed slot's
+    // + says "Bind secret" and opens the vault-path form; nothing is stored.
+    await waitTourTitle(page, 'Where a secret goes', 150000);
+    await filterAndSelect(page, 'sql-exec', 'sql-exec');
+    await waitTourTitle(page, 'Extend it', 150000);
+    await extendViaRowActions(page, 'tutorial-db-call', 'sql-exec');
+    await waitTourTitle(page, 'A secret-typed slot', 150000);
+    const hint = await page.evaluate(() =>
+      document.querySelector('.placeholder-binder[data-arg-name="password"]')?.title || '');
+    assert(/secret-typed/.test(hint), 'the + on :password says it is secret-typed (got: ' + hint + ')');
+    const label = await openMarkerFormViaPlaceholder(page, 'password', 'secret');
+    assert(label === 'Bind secret', 'the chooser names the action after the marker (got: ' + label + ')');
+    await page.waitForSelector('.arg-value-edit-secret-form', {timeout: 15000});
+    await waitTourTitle(page, 'Read it, then Cancel', 150000);
+    await page.evaluate(() => document.querySelector('.arg-value-edit-popover .arg-value-edit-btn-secondary').click());
+    await waitTourTitle(page, 'Secrets ride the same rails', 150000);
+    // A plain slot on the same card never offers a secret.
+    await page.evaluate(() => document.querySelector('.placeholder-binder[data-arg-name="sql"]').click());
+    await page.waitForFunction(() => Array.from(document.querySelectorAll('button'))
+      .some((b) => b.textContent.trim() === 'Bind literal'), null, {timeout: 15000, polling: 100});
+    const plain = await page.evaluate(() => Array.from(document.querySelectorAll('button'))
+      .map((b) => b.textContent.trim()).filter((t) => /^Bind /.test(t)));
+    assert(!plain.includes('Bind secret') && plain.includes('Bind literal'),
+      ':sql offers a literal, never a secret (got: ' + JSON.stringify(plain) + ')');
+    await page.keyboard.press('Escape');
+    await finishAndDelete(page);
+    console.log('  lesson 16: walked + cleaned (secret-typed slot)');
 
     // ---------- Lesson 17 — tests (2 + 2 → assert-eq → green → red → green) --
     await page.goto(BASE + '/?tutorial=17');

@@ -706,3 +706,50 @@
   (testing "a type NAME as a string (the editor's \"as:\" chooser) classifies like the keyword"
     (is (= (vf/resolve-form :text) (vf/resolve-form "text")))
     (is (= :leaf (:kind (vf/resolve-form "int"))))))
+
+
+(deftest resolve-slot-effective-type-degraded-marker-test
+  ;; A `[:secret :text]` arg is stored on the slot row as its inner
+  ;; `:text` (a marker is not a type-fn). The value-form must still
+  ;; dispatch the secret-binding widget for a CHILD of the declaring
+  ;; fn — the closest ancestor's rich `:args` entry is the type the
+  ;; checker enforces; the row is its degraded projection.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [slot  (setup/create-slot! storage "password" :text)
+            base  (setup/create-base-fn! storage (str "vf-sec-base-" (random-uuid)))
+            _     (setup/attach-slot! storage (:id base) (:id slot) 0)
+            _     (registry/record-rich-types-raw!
+                    (:id base) (keyword (:name base))
+                    {:return :int
+                     :args {:password [:secret :text] :sql :text}
+                     :effects #{}})
+            child (sp/create-entity storage :fn {:name (str "vf-sec-child-" (random-uuid))
+                                                 :parent-ids [(:id base)]})]
+        (testing "the child's free :password edits as the declared marker type"
+          (is (= [:secret :text]
+                 (vf/resolve-slot-effective-type storage {:fn-id (:id child) :slot-id (:id slot)}))))
+        (testing "…and so does the declaring fn's own slot"
+          (is (= [:secret :text]
+                 (vf/resolve-slot-effective-type storage {:fn-id (:id base) :slot-id (:id slot)}))))
+        (testing "a row that is NOT a projection of the declared type keeps winning"
+          (let [other (setup/create-slot! storage "sql" :int)]
+            (setup/attach-slot! storage (:id base) (:id other) 1)
+            (is (= :int (vf/resolve-slot-effective-type storage {:fn-id (:id child) :slot-id (:id other)}))
+                ":int is not what :text degrades to — the row's own type stands")))
+        (testing "only a MARKER promotes — a list declaration keeps the row's :sequence for the whole-slot form"
+          (let [items (setup/create-slot! storage "items" :sequence)]
+            (setup/attach-slot! storage (:id base) (:id items) 2)
+            (registry/record-rich-types-raw!
+              (:id base) (keyword (:name base))
+              {:return :int
+               :args {:password [:secret :text] :sql :text :items [:list :text]}
+               :effects #{}})
+            (is (= :sequence (vf/resolve-slot-effective-type storage {:fn-id (:id child) :slot-id (:id items)}))
+                "the list form readers type into stays; the element rule lives in the item path")))
+        (testing "provenance's slot tier reads the marker too"
+          (let [prov (vf/slot-type-provenance storage {:fn-id (:id child) :slot-id (:id slot)})
+                slot-tier (some #(when (= :slot (:key %)) %) (:tiers prov))]
+            (is (= :slot (:winner prov)))
+            (is (= [:secret :text] (:type slot-tier))))))
+      (finally (sp/close storage)))))

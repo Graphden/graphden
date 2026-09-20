@@ -223,9 +223,12 @@ function createPlaceholderOverlay(node, container) {
   const ownerName = lookups?.fnMap?.get(arg?.['fn-id'])?.name;
   if (ownerName) btn.dataset.fnName = ownerName;
   btn.textContent = '+';
+  const marker = (!isSeqAnchor && typeof slotMarkerName === 'function') ? slotMarkerName(arg) : null;
   btn.title = (isSeqAnchor
               ? (node.data('seqTail') ? 'Append the next item' : 'Add the first item')
-              : 'Bind this slot (literal value or fn-ref)')
+              : (marker
+                  ? ('Bind this ' + marker + '-typed slot (a ' + marker + ' kept in the vault, or a fn-ref to one)')
+                  : 'Bind this slot (literal value or fn-ref)'))
     + (node.data('optionalArg') ? ' — optional input, the fn runs without it' : '')
     + (node.data('deepArg') ? ' — propagated from inside the composition; the binding lands on this fn' : '');
   btn.setAttribute('aria-label', btn.title);

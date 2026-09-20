@@ -1141,7 +1141,7 @@
             {:id "16"
              :slug "effects-and-secrets"
              :chapter "Running it"
-             :version 1
+             :version 2
              :title "Effects"
              :steps
              [{:title "Effects are declared, then they spread"
@@ -1176,8 +1176,31 @@
                :body "The checkbox is the human gate; the tier's allowed-effect set is the machine one, enforced at the execution boundary — the same mechanism that keeps a cloud tenant from reaching the network on a free plan. Declared effects are what both read."
                :target nil
                :check {:kind "manual"}}
+              {:title "Where a secret goes"
+               :body "A password, a token, a key — anything you would hate to see in a Run result, a log or a diff — is a SECRET: the graph keeps only a vault path, OpenBao keeps the value. It can land in one kind of slot only, one typed [:secret T]. Type `sql-exec` in the Explorer filter and click the [[sql-exec]] row (web.sql) — its :password is one."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "sql-exec"}}
+              {:title "Extend it"
+               :body "Click [[⋯]] on the sql-exec row, choose [[Extend]], name it `tutorial-db-call` — then [[Save]]."
+               :target ".node-overlay[data-fn-name=\"sql-exec\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"sql-exec\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "fn-parent" :name "tutorial-db-call" :parent "sql-exec"}
+               :creates {:type "fn" :name "tutorial-db-call"}}
+              {:title "tutorial-db-call is open"
+               :body "Five free slots. Hover the [[+]] on :password: “Bind this secret-typed slot” — the type chip reads [secret text]."
+               :target nil
+               :check {:kind "selected" :name "tutorial-db-call"}}
+              {:title "A secret-typed slot"
+               :body "Click the [[+]] on :password. Where the other slots offer Bind literal, this one offers [[Bind secret]] — click it. The form asks for a vault path and the value: the value is written to OpenBao, graphden stores the path on the binding. (Bind fn-ref would instead pick a secret already kept in the Secrets panel.)"
+               :target ".placeholder-binder[data-arg-name=\"password\"]"
+               :targets [".placeholder-binder[data-arg-name=\"password\"]" ".free-arg-bind-chooser" ".arg-value-edit-secret-form"]
+               :check {:kind "dom" :selector ".arg-value-edit-secret-form"}}
+              {:title "Read it, then Cancel"
+               :body "Nothing to store today — press [[Cancel]]. On :url, :user or :sql the chooser would never say secret: a secret cannot flow into a plain text slot, so the editor does not offer to put one there. That is the marker doing its work before anything runs."
+               :target ".arg-value-edit-popover .arg-value-edit-btn-secondary"
+               :check {:kind "dom-absent" :selector ".arg-value-edit-secret-form"}}
               {:title "Secrets ride the same rails"
-               :body "A vault value is typed [:secret T]: the checker propagates that marker exactly like an effect, and the executor hides such values at sinks (the Run pane says “Result hidden”). Creating one needs vault access, so the written lesson 16 covers it end to end — the marker is the part to remember. Click [[Finish]]."
+               :body "The checker propagates [:secret T] exactly like an effect, and the executor hides such values at sinks (the Run pane says “Result hidden”). The written lesson 16 has the whole flow — the Secrets panel, taint-propagating base-fns, what is refused. Click [[Finish]] to clean up or keep tutorial-db-call."
                :target nil
                :check {:kind "manual"}}]}
             {:id "17"

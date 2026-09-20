@@ -145,13 +145,13 @@ The composed case: ~:parent~ / ~:parents~ become the parent-ids junction, each ~
 :PROPERTIES:
 :CUSTOM_ID: packages/resolve-slot-owner
 :FILE: src/graphden/packages/records/slot_resolution.clj
-:LINE: 551
+:LINE: 552
 :MINS: 5.4
 :END:
 
 Given a composed fn and an arg name, find the ancestor that DECLARED the slot — walking the inheritance chain, then the refs' trees, and disambiguating a name owned on both paths by type. This is the parse-time twin of the executor's ~build-lookups~: the same slot identity, computed once from EDN so the binding row carries the right ~slot-id~ before a single row is written.
 
-- source :: [[file:../../../src/graphden/packages/records/slot_resolution.clj::(defn resolve-slot-owner][src/graphden/packages/records/slot_resolution.clj:551]]
+- source :: [[file:../../../src/graphden/packages/records/slot_resolution.clj::(defn resolve-slot-owner][src/graphden/packages/records/slot_resolution.clj:552]]
 - see also :: [[file:executor.org::#executor/build-lookups][build-lookups]]
 - same file :: [[file:packages.org::#packages/build-rename-slot-records][build-rename-slot-records]]
 
@@ -159,13 +159,13 @@ Given a composed fn and an arg name, find the ancestor that DECLARED the slot �
 :PROPERTIES:
 :CUSTOM_ID: packages/build-rename-slot-records
 :FILE: src/graphden/packages/records/slot_resolution.clj
-:LINE: 724
+:LINE: 725
 :MINS: 5.2
 :END:
 
 A ~{Y {:as :X}}~ rename is not a binding column — it is a NEW slot owned by the renaming fn, linked to its source through ~source-slot-id~. That FK is what ~rename-for-slot~ and the editor's ~getEffectiveSlotName~ read, and what the executor's rename translation walks. Minted here, on parse.
 
-- source :: [[file:../../../src/graphden/packages/records/slot_resolution.clj::(defn build-rename-slot-records][src/graphden/packages/records/slot_resolution.clj:724]]
+- source :: [[file:../../../src/graphden/packages/records/slot_resolution.clj::(defn build-rename-slot-records][src/graphden/packages/records/slot_resolution.clj:725]]
 - see also :: [[file:executor.org::#executor/build-ref-renames][build-ref-renames]]
 - same file :: [[file:packages.org::#packages/resolve-slot-owner][resolve-slot-owner]]
 
@@ -407,13 +407,13 @@ The GIT face: a bundle laid out as one module file per namespace (the fns.edn mo
 :PROPERTIES:
 :CUSTOM_ID: packages/lint
 :FILE: src/graphden/lint/core.clj
-:LINE: 741
+:LINE: 742
 :MINS: 1.8
 :END:
 
 The graph's own linter, run over the same loader output at CI time (~bb graph-lint~): duplicate definitions — exact, and after inlining ~_~-private helpers — dead privates (unreferenced, and the cluster behind them), bindings that restate what a fn inherits, siblings that should share a parent, and over-deep chains. One engine over EDN-shape fn-defs, so the editor's per-branch graph is linted by the same code. docs/GRAPH_LINT.md.
 
-- source :: [[file:../../../src/graphden/lint/core.clj::(defn lint][src/graphden/lint/core.clj:741]]
+- source :: [[file:../../../src/graphden/lint/core.clj::(defn lint][src/graphden/lint/core.clj:742]]
 
 * 32. lint-branch
 :PROPERTIES:

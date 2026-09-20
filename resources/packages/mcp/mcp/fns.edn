@@ -377,7 +377,7 @@
           :b {:value true}}}
 
   {:name :_mcp-exec-parsed
-   :description "The execute pipeline's parsed-request shape, built from tool arguments instead of an HTTP body. Overriding :execute's :parsed slot (closer-fn-wins) skips its own body parse — re-entering the Ring handler with a synthesized request would collide with the OUTER :request free arg the MCP dispatch itself reads. `:persist?` and `:trace?` follow the tool's `trace` flag."
+   :description "The execute pipeline's parsed-request shape, built from tool arguments instead of an HTTP body. `:_mcp-exec-run` feeds it to the free-`:parsed` guards and the apply core directly, skipping the body parse — re-entering the Ring handler with a synthesized request would collide with the OUTER :request free arg the MCP dispatch itself reads. `:persist?` and `:trace?` follow the tool's `trace` flag."
    :parent :execute-parsed-record
    :args {:vals [{:parent :parse-uuid :args {:string nil}}
                  {:parent :to-str :args {:value :_mcp-read-fn-name}}

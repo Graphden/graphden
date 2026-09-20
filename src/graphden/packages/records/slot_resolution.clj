@@ -326,9 +326,10 @@
 (declare ^:private resolve-slot-owner-strict-inheritance)
 
 
-(def ^:private binding-spec-keys
+(def binding-spec-keys
   "Keys that make an arg-value map a binding SPEC rather than a literal
-   map (the set `records/parse` `arg-value->binding-fields` reads)."
+   map (the set `records/parse` `arg-value->binding-fields` reads). The
+   graph linter reads the same set."
   #{:value :ref :as :type :required :literal? :description :append
     :closed :terminal :secret-path :resolver})
 

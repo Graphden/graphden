@@ -58,7 +58,8 @@
      of them is the corpus gate's business, not the editor's."
   (:require
     [clojure.set :as set]
-    [clojure.string :as str]))
+    [clojure.string :as str]
+    [graphden.packages.records.slot-resolution :as slot-res]))
 
 
 ;; -----------------------------------------------------------------------------
@@ -124,9 +125,9 @@
 
 (def ^:private spec-keys
   "Keys that make an arg-value map a binding SPEC rather than a literal
-   map (mirrors `records/parse` `arg-value->binding-fields`)."
-  #{:value :ref :as :type :required :literal? :description :append
-    :closed :terminal :secret-path :resolver})
+   map — the resolver's set (`slot-resolution/binding-spec-keys`), so a
+   new spec key is added in one place."
+  slot-res/binding-spec-keys)
 
 
 (defn- inline-fn-def?

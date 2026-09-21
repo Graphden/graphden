@@ -56,11 +56,11 @@ async function putDescription(page, fnId, desc) {
     // ===================================================================
     // Seed: fn on main + 3 description mutations (v1 → v2 → v3).
     // ===================================================================
-    const ents = await getEntities(page, 'identity');
-    const identity = ents.fns.find((f) => f.name === 'identity');
-    assert(identity, ':identity parent resolved');
+    const ents = await getEntities(page, 'const');
+    const constFn = ents.fns.find((f) => f.name === 'const');
+    assert(constFn, ':const parent resolved');
     await api(page, 'POST', '/api/entities/fn',
-              'name=' + FN_NAME + '&parent-ids=' + identity.id
+              'name=' + FN_NAME + '&parent-ids=' + constFn.id
               + '&description=v1-seed');
     const fn = (await getEntities(page, FN_NAME)).fns.find((f) => f.name === FN_NAME);
     assert(fn, 'probe fn-def created with description=v1-seed');

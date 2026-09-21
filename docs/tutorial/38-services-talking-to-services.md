@@ -110,9 +110,11 @@ calls it, and watch the address appear and disappear.
    again: `service/not-running` — *no live instance for fn …
    (the service row exists but no copy is alive, or it is not a
    listener)*. Nothing guessed, nothing cached: the consumer is told
-   the truth, and a real consumer wraps the call in `:try` / a retry
-   (the reconciler brings the producer back on its own; lesson 35's
-   restart policy).
+   the truth, and a real consumer wraps the call in `:retry` (tries,
+   a pause between them, the last failure rethrown) and, for a producer
+   that answers slowly rather than not at all, `:with-timeout` (the
+   reconciler brings the producer back on its own; lesson 35's restart
+   policy).
 
 6. **Enable it again.** The instance is back, the call works again.
    Delete the service and the three fn-defs when you are done.

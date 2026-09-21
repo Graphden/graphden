@@ -364,9 +364,7 @@ receive `[acc item]` as a single vector arg.
 
 ```clojure
 (defbase map-fn [func coll]
-  (if coll
-    (map func coll)   ;; eager mode — caller supplied a coll
-    (map func)))      ;; transducer mode — no coll
+  (mapv func coll))   ;; eager; the transducer form is its own base-fn, :map-xf
 ```
 
 The HOF marker is the slot's effective type — `slot.type-fn-id`

@@ -28,36 +28,6 @@
     ctx)))
 
 
-(defn- status-of
-  [t]
-  (call :error-http-status {:error-type t}))
-
-
-(deftest error-http-status-maps-keyword-and-string-forms-alike
-  (testing "explicitly mapped types"
-    (is (= 404 (status-of :not-found)))
-    (is (= 409 (status-of :constraint-violation/fn-name-collision)))
-    (is (= 403 (status-of :authz/forbidden)))
-    (is (= 429 (status-of :execution/over-capacity))))
-
-  (testing "a type with no explicit entry falls back by FAMILY"
-    ;; `:sequence-op/*` is the case that shipped as a 500 — the client
-    ;; never saw the message telling it how to fix its append body.
-    (is (= 400 (status-of :sequence-op/invalid-body)))
-    (is (= 400 (status-of :validation-error/anything-at-all)))
-    (is (= 404 (status-of :branch-router/no-such-branch))))
-
-  (testing "the STRING wire form maps identically to the keyword"
-    ;; A `:type` that went through JSONB / a JSON body arrives as text.
-    (is (= 404 (status-of "not-found")))
-    (is (= 409 (status-of "merge-conflict")))
-    (is (= 400 (status-of "validation-error/bad-field"))))
-
-  (testing "unknown / nil → 500, the honest default"
-    (is (= 500 (status-of :something/never-mapped)))
-    (is (= 500 (status-of nil)))))
-
-
 (deftest error-boundary-turns-a-throw-into-its-mapped-status
   (let [wrap (fn [handler] (call :error-boundary-wrap {:handler handler}))
         throwing (fn [t] (wrap (fn [_req] (throw t))))

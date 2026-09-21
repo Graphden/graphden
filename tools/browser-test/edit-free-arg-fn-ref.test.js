@@ -3,7 +3,7 @@
 // branch) with the regular non-sequence "Bind fn-ref" flow.
 //
 // Coverage:
-//   • Seed a probe parented from `:identity` (`:value :any` slot —
+//   • Seed a probe parented from `:const` (`:value :any` slot —
 //     non-sequence, eligible for either literal or fn-ref bind).
 //   • Click the placeholder-binder → chooser popover with "Bind
 //     literal" / "Bind fn-ref" buttons.
@@ -41,17 +41,17 @@ async function cleanup(page) {
     await cleanup(page);
 
     // ===================================================================
-    // Seed: probe parented :identity (:value slot is :any, non-seq).
+    // Seed: probe parented :const (:value slot is :any, non-seq).
     // ===================================================================
-    // full-dump: reads two unrelated baseline fns (:identity +
+    // full-dump: reads two unrelated baseline fns (:const +
     // :current-time-ms); neither is in the other's subtree closure.
     const ents = await getEntities(page);
-    const identity = ents.fns.find((f) => f.name === 'identity');
+    const constFn = ents.fns.find((f) => f.name === 'const');
     const ctmFn = ents.fns.find((f) => f.name === 'current-time-ms');
-    assert(identity && ctmFn,
-           ':identity + :current-time-ms baselines resolved');
+    assert(constFn && ctmFn,
+           ':const + :current-time-ms baselines resolved');
     await api(page, 'POST', '/api/entities/fn',
-              'name=' + PROBE_FN + '&parent-ids=' + identity.id);
+              'name=' + PROBE_FN + '&parent-ids=' + constFn.id);
     const probe = (await getEntities(page, PROBE_FN)).fns.find(
       (f) => f.name === PROBE_FN);
     assert(probe, 'probe fn-def created (no bindings)');

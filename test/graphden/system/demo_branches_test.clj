@@ -57,7 +57,7 @@
                   :mutations
                   [{:type :create-fn
                     :name (str branch-name "-fn")
-                    :parent "identity"
+                    :parent "const"
                     :description "created only on this branch"}]}])
       (let [br (branch-row branch-name)]
         (is (some? br) "branch row exists")
@@ -81,7 +81,7 @@
     (let [branch-name (str "demo-idemp-" (System/currentTimeMillis))
           decl [{:name      branch-name
                  :mutations [{:type :update-fn-description
-                              :fn-name "identity"
+                              :fn-name "const"
                               :description "first pass"}]}]]
       (db/seed! *storage* decl)
       (let [first-id (:id (branch-row branch-name))]
@@ -97,16 +97,16 @@
       (db/seed! *storage*
                 [{:name branch-name
                   :mutations [{:type :update-fn-description
-                               :fn-name "identity"
+                               :fn-name "const"
                                :description new-desc}]}])
       (let [br (branch-row branch-name)
             branch-storage (on-branch (:id br))
-            edited (fn-lookup/query-fn-by-name branch-storage "identity" true)]
+            edited (fn-lookup/query-fn-by-name branch-storage "const" true)]
         (is (= new-desc (:description edited))
             "branch view shows the edited description"))
       (let [main (branch-row "main")
             main-storage (on-branch (:id main))
-            on-main (fn-lookup/query-fn-by-name main-storage "identity" true)]
+            on-main (fn-lookup/query-fn-by-name main-storage "const" true)]
         (is (not= new-desc (:description on-main))
             "main view unchanged")))))
 
@@ -137,7 +137,7 @@
                   :base "ghost-branch-does-not-exist"
                   :mutations [{:type :create-fn
                                :name "ghost-fn"
-                               :parent "identity"}]}])
+                               :parent "const"}]}])
       (is (nil? (branch-row branch-name))
           "no branch created when base is missing"))))
 
@@ -173,7 +173,7 @@
                   :mutations
                   [{:type :create-fn
                     :name good-fn
-                    :parent "identity"}]}])
+                    :parent "const"}]}])
       (is (some? (branch-row good-name))
           "good branch was still created after bad branch's mutation")
       (let [br (branch-row good-name)

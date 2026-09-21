@@ -178,10 +178,6 @@
    :args {:value {:type a :description "Value to return as-is."}}
    :return-type a}
 
-  {:name :identity
-   :description "Alias of `:const`."
-   :parent :const}
-
   {:name :equal?
    :description "Two-arg equality (Clojure's `=`). Composition-friendly variant of `:eq`. The typevar `a` requires both operands to unify to a compatible type — sync-time guard against `:keyword` vs `:text` and similar cross-type compare typos (the dominant gotcha when comparing a server-derived kw field to a string-literal `{:value \"foo\"}`)."
    :args {:a {:type a :description "Left operand."}

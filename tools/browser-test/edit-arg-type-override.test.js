@@ -3,7 +3,7 @@
 // `:type-override-fn-id` pointing at the chosen type-row.
 //
 // Coverage:
-//   • Seed an `:identity`-parented probe (`:value` slot is `:any`-
+//   • Seed an `:const`-parented probe (`:value` slot is `:any`-
 //     typed — broad enough to allow narrowing without binding-value
 //     conflicts).
 //   • Navigate; verify the arg-overlay's type chip currently reads
@@ -43,17 +43,17 @@ async function cleanup(page) {
     await cleanup(page);
 
     // ===================================================================
-    // Seed: probe parented :identity (:value slot is :any-typed).
+    // Seed: probe parented :const (:value slot is :any-typed).
     // ===================================================================
-    const ents = await getEntities(page); // full-dump: two unrelated baselines (identity + int, no shared closure, probe not yet created)
-    const identity = ents.fns.find((f) => f.name === 'identity');
+    const ents = await getEntities(page); // full-dump: two unrelated baselines (const + int, no shared closure, probe not yet created)
+    const constFn = ents.fns.find((f) => f.name === 'const');
     const intFn = ents.fns.find(
       (f) => f.name === 'int' && (f['parent-ids'] || []).length === 0
              && !f['impl-hash']);
-    assert(identity && intFn,
-           ':identity + :int baselines resolved');
+    assert(constFn && intFn,
+           ':const + :int baselines resolved');
     await api(page, 'POST', '/api/entities/fn',
-              'name=' + PROBE_FN + '&parent-ids=' + identity.id);
+              'name=' + PROBE_FN + '&parent-ids=' + constFn.id);
     const probe = (await getEntities(page, PROBE_FN)).fns.find(
       (f) => f.name === PROBE_FN);
     assert(probe, 'probe fn-def created');

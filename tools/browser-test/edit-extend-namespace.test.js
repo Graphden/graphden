@@ -137,9 +137,9 @@ async function openExtendPopover(page, ownerName) {
     // ================================================================
     // Phase B: own parent → child defaults to the PARENT's ns.
     // ================================================================
-    const identity = (await getEntities(page)).fns.find((f) => f.name === 'identity');
+    const constFn = (await getEntities(page)).fns.find((f) => f.name === 'const');
     await api(page, 'POST', '/api/entities/fn',
-              'name=' + OWN_FN + '&parent-ids=' + identity.id
+              'name=' + OWN_FN + '&parent-ids=' + constFn.id
               + '&namespace-id=' + coreNs.id);
     await page.goto(BASE + '/#core.' + OWN_FN);
     await page.waitForFunction((name) =>

@@ -306,7 +306,7 @@
                                    {:request-method :post :uri "/api/branches"
                                     :headers {"content-type" "application/json"}
                                     :body (str "{\"name\":\"" feat "\"}")})
-          ident (get (:all-name->id *graph*) :identity)
+          ident (get (:all-name->id *graph*) :const)
           probe (setup/via-graph *graph* :process-create-entity
                                  {:uri "/api/entities/fn" :request-method :post
                                   :headers {"content-type" "application/x-www-form-urlencoded"

@@ -30,5 +30,5 @@
 
   {:name :_ex-field-echo
    :description "Echo helper exposing the free arg `:field` for the dynamic-path example."
-   :parent :identity
+   :parent :const
    :args {:value {:as :field}}}]}

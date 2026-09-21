@@ -47,15 +47,15 @@ async function cleanup(page) {
     // Seed: fn under :app.
     // ===================================================================
     // full-dump: needs the :app and :core namespace rows, which are not in
-    // :identity's subtree closure — no single fn root covers all three.
+    // :const's subtree closure — no single fn root covers all three.
     const ents = await getEntities(page);
-    const identity = ents.fns.find((f) => f.name === 'identity');
+    const constFn = ents.fns.find((f) => f.name === 'const');
     const fromNs = (ents.namespaces || []).find((n) => n.name === FROM_NS);
     const toNs = (ents.namespaces || []).find((n) => n.name === TO_NS);
-    assert(identity && fromNs && toNs,
-           'baselines resolved (:identity + :' + FROM_NS + ' + :' + TO_NS + ')');
+    assert(constFn && fromNs && toNs,
+           'baselines resolved (:const + :' + FROM_NS + ' + :' + TO_NS + ')');
     await api(page, 'POST', '/api/entities/fn',
-              'name=' + FN_NAME + '&parent-ids=' + identity.id
+              'name=' + FN_NAME + '&parent-ids=' + constFn.id
               + '&namespace-id=' + fromNs.id);
     const fn = (await getEntities(page, FN_NAME)).fns.find(
       (f) => f.name === FN_NAME);

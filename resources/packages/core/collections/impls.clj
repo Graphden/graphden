@@ -176,6 +176,18 @@
   (vec (distinct coll)))
 
 
+(defbase last-fn [coll]
+  (last coll))
+
+
+(defbase partition-fn [coll n]
+  (mapv vec (partition-all (long n) coll)))
+
+
+(defbase frequencies-fn [coll]
+  (frequencies coll))
+
+
 (defbase select-keys-fn [m ks]
   (select-keys m ks))
 
@@ -1054,4 +1066,7 @@
    :vec {:impl vec-fn :taint-propagate? true}
    :pairs->map {:impl pairs->map-fn :return-type-rule pairs->map-return-rule
                 :taint-propagate? true}
-   :position-in {:impl position-in-fn :taint-propagate? true}})
+   :position-in {:impl position-in-fn :taint-propagate? true}
+   :last {:impl last-fn :taint-propagate? true}
+   :partition {:impl partition-fn :taint-propagate? true}
+   :frequencies {:impl frequencies-fn :taint-propagate? true}})

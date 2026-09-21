@@ -207,11 +207,10 @@
   (doseq [[fn-name fn-def] (:base-fn-defs loaded)]
     (registry/record-rich-types! fn-name fn-def))
   (let [by-name (into {} (map (juxt :name identity)) (:fn-defs loaded))
-        ;; NB `:identity` opens the chain — it's itself a fn-def
+        ;; NB `:ring-request` opens the chain — a `:const` rename fn-def
         ;; (`:parent :const`), and relying on an ambient registry entry
         ;; for it is order-dependent across sibling test nses.
-        chain [:identity
-               :ring-request :ring-request-field
+        chain [:ring-request :ring-request-field
                :ring-method :ring-uri :ring-query-string
                :ring-headers :ring-body-input-stream
                :ring-method-entry :ring-uri-entry

@@ -9,7 +9,7 @@
 //   • Click ⋯ + Escape → popover hides, anchor aria-expanded back
 //     to "false".
 //
-// Uses a freshly-created fn parented to `:identity` (smallest possible
+// Uses a freshly-created fn parented to `:const` (smallest possible
 // graph; just one fn-card with one `⋯` trigger).
 //
 // Run from this directory:  node edit-row-actions-pin.test.js
@@ -46,13 +46,13 @@ async function popoverVisible(page) {
   try {
     await cleanup(page);
 
-    const ents = await getEntities(page, 'identity');
-    // `identity` may have a parent-ids chain in the test e2e baseline;
+    const ents = await getEntities(page, 'const');
+    // `const` may have a parent-ids chain in the test e2e baseline;
     // just pick whichever entry matches by name.
-    const identity = ents.fns.find((f) => f.name === 'identity');
-    assert(identity, ':identity baseline resolved');
+    const constFn = ents.fns.find((f) => f.name === 'const');
+    assert(constFn, ':const baseline resolved');
     await api(page, 'POST', '/api/entities/fn',
-              'name=' + PROBE_FN + '&parent-ids=' + identity.id);
+              'name=' + PROBE_FN + '&parent-ids=' + constFn.id);
 
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')
                     + '/#' + PROBE_FN);

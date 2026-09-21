@@ -54,10 +54,10 @@
     :unresolved-failure-counts
     :breaking-changes-between :brotli-bytes :build-form
     ;; Marketplace (docs/MARKETPLACE.md): identity + roster reads are
-    ;; server-derived; :round / :url-encode / :semver-latest / :ui-pref-write!
+    ;; server-derived; :round / :url-encode / / :ui-pref-write!
     ;; return caller content and carry :taint-propagate?.
     :current-instant :current-user-id :current-user-label :loaded-packages
-    :round :rows->csv :semver-latest :semver-rank :ui-pref-write! :ui-prefs-read :url-encode
+    :round :rows->csv :semver-rank :ui-pref-write! :ui-prefs-read :url-encode
     ;; the origin's marketplace card — remote, server-derived data, not the
     ;; caller's content
     :remote-package-card
@@ -89,9 +89,8 @@
     ;; values — same read-projection class as :diff-branches.
     :diff-affected :diff-branches-view
     :diff-value-against-type :digest-hex :dispatch-to-branch :dissoc
-    :distinct :div :do :drop :effective-branch-local? :empty? :env :eq
-    :encode-unreadable-kws :equal? :error-boundary-wrap
-    :error-http-status :every? :ex-data :execute-trace-rows
+    :distinct :div :do :drop :empty? :env :eq
+    :encode-unreadable-kws :equal? :error-boundary-wrap :every? :ex-data :execute-trace-rows
     :ex-info :extract-entity-params
     ;; :failure-ack / :failure-ack-all mutate acknowledged-at on audit
     ;; rows and return bool / count — no caller content in the return.
@@ -107,8 +106,7 @@
     :h-raw :header-get :heap-committed :heap-max :heap-used :hiccup
     :http-request :http-server :http-stop :hub-fetch-bundle :hub-push-bundle! :if :into
     :invalidate-after-write :invalidate-graph-cache :invoke :is-a?
-    :json-to-type :jvm-uptime-ms :keys
-    :keyword-to-str :list :list-all-graph-entities :graph-fn-defs-subtree :fn-unread-bindings :log-warn
+    :json-to-type :jvm-uptime-ms :keys :list :list-all-graph-entities :graph-fn-defs-subtree :fn-unread-bindings :log-warn
     ;; app/views — the Explorer's filter evaluation: light fn rows (ids,
     ;; names, roles) projected off the graph-cache, never the caller's
     ;; content. Same class as :list-all-graph-entities.
@@ -161,7 +159,7 @@
     :sse-stream
     :sql-query :start-all :storage-query-identities :str :str-contains? :str-join
     :str-clip :str-len :str-lower :str-replace :str-split :str-starts-with?
-    :str-to-keyword :str-to-uuid :str-trim :str-upper
+    :str-to-keyword :str-trim :str-upper
     :stringify-response-headers :strip-hidden-impl :strip-secret-paths
     :sub :subs :subtype? :svg-polyline-points :tabulate-records
     :swap :sync-fn-defs-branch! :system-property :take :tenancy-active?
@@ -179,7 +177,7 @@
     :usage-org-daily :usage-org-fn-stats
     :usage-org-summary :utf8-bytes :vals :value-kinds :vault-delete
     :vault-get :vault-metadata-get :vault-metadata-put :vault-put :vec
-    :version-qualified-ns :withdraw-package-apply :write-rej :zero? :zipmap})
+    :version-qualified-ns :withdraw-package-apply :write-rej :zero? :zipmap :min :max :floor :ceil :sqrt :pow :re-groups :re-seq :str-index-of :str-pad-left :str-pad-right :last :partition :frequencies :parse-float :base64-encode :base64-decode :random :random-uuid :log :instant-parse :instant-format :instant-plus :with-timeout})
 
 
 (def ^:private golden-tainted
@@ -187,14 +185,13 @@
    SECRETS.md § T3 set. Before changing this, for each ADDED name ask \"does it
    pass/transform caller content? then it needs `:taint-propagate?`\"; for each
    REMOVED name confirm it genuinely no longer handles content."
-  #{:round :semver-latest :ui-pref-write! :url-encode :moderate-package-version! ; marketplace: answer caller content
+  #{:round :ui-pref-write! :url-encode :moderate-package-version! ; marketplace: answer caller content
     :abs :add :and :assert :assert-eq :assert-some :assoc :assoc-in :atom :blank? :byte-len :call-with :call :call-traced :with-heartbeat
     :call-noargs :call-noargs-traced :case :cell :coalesce :comp :concat :cond :conj :cons :const
     :constant-time-equal? :constantly :contains? :count :deref :dissoc :distinct :div :do :drop
     :empty? :eq :equal? :every? :ex-data :ex-info :filter :filter-xf :find-first
     :first :flatten :fn-signature :fn-type? :form-decode :get :get-in :gt
-    :gte :group-by :hiccup :hub-fetch-bundle :hub-push-bundle! :if :into :invoke :is-a? :keys
-    :keyword-to-str :list :lt :lte
+    :gte :group-by :hiccup :hub-fetch-bundle :hub-push-bundle! :if :into :invoke :is-a? :keys :list :lt :lte
     :map :map-xf :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
     :import-bundle! :list-branch-comments :parse-edn :parse-graph-edn
     :parse-int :parse-json :parse-uuid :platform-owned-def-names
@@ -206,7 +203,8 @@
     :str-replace :str-split :str-starts-with? :str-to-keyword :str-trim
     :str-upper :sub :subs :tabulate-records :take :throw :throwable-class-name :throwable-message
     :to-json-pretty :to-json-string :to-str :transduce :try :update-in :update-keys :update-vals
-    :url-decode :vals :vec :zero? :zipmap})
+    :url-decode :vals :vec :zero? :zipmap
+    :min :max :floor :ceil :sqrt :pow :re-groups :re-seq :str-index-of :str-pad-left :str-pad-right :last :partition :frequencies :parse-float :base64-encode :base64-decode :instant-parse :instant-format :instant-plus :with-timeout})
 
 
 (deftest taint-propagate-set-has-not-drifted

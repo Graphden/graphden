@@ -24,7 +24,7 @@ const {assert, newContext} = require('./edit-test-helpers');
   console.log('edit-sidebar-filter — text-search narrows the namespace tree');
 
   try {
-    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#identity');
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#const');
     await page.waitForSelector('#search-input', {timeout: 60000});
     // Wait for the sidebar to be populated (at least a few entity-items)
     // and the namespace headers (≥3) the baseline assertion expects.
@@ -65,17 +65,17 @@ const {assert, newContext} = require('./edit-test-helpers');
            + baseline.nsHeaderCount);
 
     // ===================================================================
-    // Phase B: search for "identity" — matching entries stay.
+    // Phase B: search for "constantly" — matching entries stay.
     // ===================================================================
-    await page.fill('#search-input', 'identity');
+    await page.fill('#search-input', 'constantly');
     // Filter applies synchronously after the input event — wait until
-    // every visible entity-item carries "identity" (case-insensitive)
+    // every visible entity-item carries "constantly" (case-insensitive)
     // AND the count is ≥1 AND ≤ baseline (filter narrowed something).
     await page.waitForFunction(
       (b) => {
         const items = Array.from(document.querySelectorAll('.entity-item'));
         if (items.length < 1 || items.length > b) return false;
-        return items.every((el) => /identity/i.test(el.textContent || ''));
+        return items.every((el) => /constantly/i.test(el.textContent || ''));
       },
       baseline.entityCount,
       {timeout: 5000, polling: 50});
@@ -84,13 +84,13 @@ const {assert, newContext} = require('./edit-test-helpers');
       return {
         count: items.length,
         allContainIdentity: items.every(
-          (el) => /identity/i.test(el.textContent || '')),
+          (el) => /constantly/i.test(el.textContent || '')),
       };
     });
     assert(matched.count >= 1,
-           '"identity" filter shows ≥ 1 match: ' + matched.count);
+           '"constantly" filter shows ≥ 1 match: ' + matched.count);
     assert(matched.allContainIdentity,
-           'every visible entity-item contains "identity"');
+           'every visible entity-item contains "constantly"');
 
     // ===================================================================
     // Phase C: case-insensitive — same query in caps.
@@ -101,7 +101,7 @@ const {assert, newContext} = require('./edit-test-helpers');
       (b) => {
         const items = Array.from(document.querySelectorAll('.entity-item'));
         if (items.length < 1 || items.length > b) return false;
-        return items.every((el) => /identity/i.test(el.textContent || ''));
+        return items.every((el) => /constantly/i.test(el.textContent || ''));
       },
       baseline.entityCount,
       {timeout: 5000, polling: 50});

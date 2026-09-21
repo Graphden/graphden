@@ -98,12 +98,12 @@ async function gotoProbe(page) {
   try {
     await cleanup(page);
 
-    // Seed: identity-parented probe, NO expects-effects (no contract).
+    // Seed: const-parented probe, NO expects-effects (no contract).
     const ents = await getEntities(page);
-    const identity = ents.fns.find((f) => f.name === 'identity');
-    assert(identity, ':identity baseline resolved');
+    const constFn = ents.fns.find((f) => f.name === 'const');
+    assert(constFn, ':const baseline resolved');
     await api(page, 'POST', '/api/entities/fn',
-              'name=' + PROBE + '&parent-ids=' + identity.id);
+              'name=' + PROBE + '&parent-ids=' + constFn.id);
     assert((await getEntities(page, PROBE)).fns.some((f) => f.name === PROBE),
            'probe created');
 

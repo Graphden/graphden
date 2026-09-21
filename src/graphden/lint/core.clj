@@ -385,6 +385,39 @@
                        " — extract a shared parent and inherit it"))})))
 
 
+(defn- test-namespace?
+  "The `tests` namespace segment (docs/TESTS.md) — a reference from a
+   test is a contract, not a use."
+  [nsp]
+  (boolean (and nsp (re-find #"(^|\.)tests$" (str nsp)))))
+
+
+(defn- unreferenced-public-findings
+  "A PUBLIC composed fn-def nothing outside a tests namespace
+   references — vocabulary with no witness. Public names are deliberate
+   surface, so the finding asks for one of two things: a caller, or a
+   line in the reachability registry's `:vocabulary` saying which lesson
+   or doc carries the name (the exemption `roots` holds). Type-rows and
+   base-fn declarations are not subjects: their liveness is the
+   checker's and the impls map's."
+  [idx refs roots platform-fn?]
+  (for [fd (:fn-defs idx)
+        :let [k (fn-key fd)]
+        :when (and (lintable? fd)
+                   (composed? fd)
+                   (not (private-name? (:name fd)))
+                   (not (test-namespace? (:namespace fd)))   ; a test IS an entry point
+                   (empty? (remove (fn [[nsp _]] (test-namespace? nsp)) (get refs k)))
+                   (not (contains? roots (:name fd)))
+                   (not (and platform-fn? (platform-fn? fd))))]
+    {:rule :unreferenced-public
+     :severity :warning
+     :fns [k]
+     :weight 0
+     :message (str (label k) " is public and nothing but a test references it"
+                   " — give it a caller, or a :vocabulary line naming the lesson or doc it is for")}))
+
+
 (defn- unreferenced-private-findings
   [idx refs roots platform-fn?]
   (for [fd (:fn-defs idx)
@@ -693,7 +726,7 @@
    `empty-state`) for every fn-def not in `changed` — a set of fn-keys,
    or `:all`. Returns `{:findings … :state …}`; thread `:state` into
    the next call. Options as for `lint`."
-  [fn-defs {:keys [base-fn-names roots platform-fn? suppress]} state changed]
+  [fn-defs {:keys [base-fn-names roots platform-fn? suppress check-public?]} state changed]
   (let [idx (build-index fn-defs base-fn-names)
         keys-now (into #{} (map fn-key) fn-defs)
         prior-keys (set (keys (:refs state)))
@@ -723,6 +756,8 @@
         findings (->> (concat (duplicate-findings idx memo :shallow)
                               (duplicate-findings idx memo :deep)
                               (unreferenced-private-findings idx refs-of roots platform-fn?)
+                              (when check-public?
+                                (unreferenced-public-findings idx refs-of roots platform-fn?))
                               (unreachable-private-findings idx refs-by-key refs-of roots platform-fn?)
                               (keep val shadowed)
                               (fan-in-findings idx memo)
@@ -749,7 +784,10 @@
    - `:platform-fn?` — predicate over fn-defs: package-synced rows are
      never `:unreferenced-private` subjects, and an all-platform
      duplicate group is dropped;
-   - `:suppress` — set of `finding-key`s to drop.
+   - `:suppress` — set of `finding-key`s to drop;
+   - `:check-public?` — also file `:unreferenced-public` (the corpus
+     gate does; a user's graph does not — there a public fn-def IS the
+     entry point, run from the editor).
 
    Returns findings sorted by rule and fns — every finding is a
    warning: the engine files nothing it would not ask the author to act

@@ -843,6 +843,9 @@
            :conj "Item appended/prepended to coll — element type widened to include the item."
            :first "Returns [:union :null a] — head of a list, or :null when empty."
            :rest "Returns [:list a] — drops the head, element type preserved."
+           :last "Returns [:union :null a] — tail of a list, or :null when empty."
+           :partition "Declared signature — chunks of the input: [:list [:list a]], element type preserved."
+           :frequencies "Declared signature — each distinct element to its count: [:map a :int]."
            :cons "Item prepended — element type widens to LUB with coll's."
            :list "Element type LUB'd over the literal vector of items."
            :merge "Records merged left-to-right — later keys win, per-item record shapes unioned."
@@ -869,6 +872,7 @@
            :call-noargs-traced "Declared signature — the bound thunk's return: a (each fire persists as a run of the callee; the value is the callee's)."
            :call-traced "Declared signature — the bound callable's return: b (the trace hop persists the call, the value is the callee's)."
            :with-heartbeat "Declared signature — the body's return: a (the beat's value is discarded)."
+           :with-timeout "Declared signature — the body's return: a (a deadline miss throws, it never widens the type)."
            :try "Declared signature — body's type unioned with the handler's: [:union a b]."
            :vec "Declared signature — container changes, element type preserved: [:list a] → [:list a]."
            :to-set "Declared signature — duplicates dropped, element type preserved: [:list a] → [:list a]."
@@ -884,7 +888,6 @@
            :name "Keyword/text member-wise → text; :null passes through."
            :str-to-keyword "Text narrowed to keyword; :null passes through."
            :const "Identity passthrough — return type follows `:value`."
-           :identity "Identity passthrough — return type follows `:value`."
            :take "First :count items — element type preserved from coll."
            :drop "All but first :count items — element type preserved."
            :reverse "Items reversed — element type preserved."
@@ -991,8 +994,8 @@
    :args {:test {:parent :some? :args {:value :_rtr-row-ref}}
           :then {:parent :str-join
                  :args {:coll [{:value "ref→:"}
-                               {:parent :keyword-to-str
-                                :args {:keyword {:ref :_rtr-row-ref :type :keyword}}}]
+                               {:parent :name
+                                :args {:value {:ref :_rtr-row-ref :type :keyword}}}]
                         :separator {:value ""}}}
           :else {:parent :if
                  :args {:test {:parent :some? :args {:value :_rtr-row-value}}
@@ -1201,7 +1204,7 @@
   {:name :_insp-r-ref-text
    :parent :str-join
    :args {:coll [{:value "→ :"}
-                 {:parent :keyword-to-str :args {:keyword {:ref :_insp-r-ref :type :keyword}}}]
+                 {:parent :name :args {:value {:ref :_insp-r-ref :type :keyword}}}]
           :separator {:value ""}}}
 
   {:name :_insp-r-val-text
@@ -1243,7 +1246,7 @@
    :parent :hiccup
    :args {:tag {:value "span"}
           :attrs {:value {:class "gd-bind-name"}}
-          :children [{:parent :keyword-to-str :args {:keyword {:as :item}}}]}}
+          :children [{:parent :name :args {:value {:as :item}}}]}}
 
   {:name :_insp-r-type-span
    :parent :hiccup
@@ -1269,7 +1272,7 @@
    :args {:key-fn :_insp-diag-arg-of
           :coll {:parent :filter :args {:pred :_insp-diag-of-this-fn? :coll :type-diagnostics-list}}}}
   {:name :_insp-r-arg-str
-   :parent :keyword-to-str :args {:keyword {:as :item}}}
+   :parent :name :args {:value {:as :item}}}
   {:name :_insp-r-diags
    :parent :get :args {:coll :_insp-diag-by-arg :key :_insp-r-arg-str :default {:value []}}}
   {:name :_insp-r-diag-line
@@ -1353,8 +1356,8 @@
           :coll {:parent :filter :args {:pred :_insp-entry-captured? :coll :_insp-entries}}}}
 
   {:name :_insp-cap-name
-   :parent :keyword-to-str
-   :args {:keyword {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}}}
+   :parent :name
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}}}
 
   {:name :_insp-cap-via
    :parent :coalesce

@@ -135,3 +135,48 @@
           calls (atom 0)]
       (is (= :ok (impl {:func (delay (fn [] (swap! calls inc) :ok))} nil)))
       (is (= 1 @calls)))))
+
+
+;; ============================================================================
+;; parse-float / base64 / random-uuid / random / log / instant-* — the
+;; stdlib batch: one JDK call each, checked at the contract.
+;; ============================================================================
+
+(deftest parse-float-and-base64
+  (let [pf (impls/impl-of :parse-float) enc (impls/impl-of :base64-encode) decode (impls/impl-of :base64-decode)]
+    (is (= 3.14 (pf {:s (delay "3.14")} nil)))
+    (is (= -2000.0 (pf {:s (delay "-2e3")} nil)))
+    (is (thrown? NumberFormatException (pf {:s (delay "abc")} nil)))
+    (is (= "aGVsbG8=" (enc {:s (delay "hello")} nil)))
+    (is (= "hello" (decode {:s (delay "aGVsbG8=")} nil)))
+    (testing "round trip keeps non-ASCII text"
+      (is (= "привет ✓" (decode {:s (delay (enc {:s (delay "привет ✓")} nil))} nil))))))
+
+
+(deftest random-uuid-and-random
+  (let [ru (impls/impl-of :random-uuid) rn (impls/impl-of :random)
+        a (ru {} nil) b (ru {} nil) x (rn {} nil)]
+    (is (uuid? a))
+    (is (not= a b))
+    (is (and (number? x) (<= 0.0 x) (< x 1.0)))))
+
+
+(deftest instant-parse-format-plus
+  (let [pa (impls/impl-of :instant-parse) fmt (impls/impl-of :instant-format) pl (impls/impl-of :instant-plus)
+        ms (pa {:s (delay "2026-09-21T10:15:00Z")} nil)]
+    (is (= 1789985700000 ms))
+    (testing "an offset is honoured"
+      (is (= ms (pa {:s (delay "2026-09-21T13:15:00+03:00")} nil))))
+    (testing "format in a zone, default pattern is ISO with offset"
+      (is (= "2026-09-21T10:15:00Z" (fmt {:ms (delay ms) :pattern (delay "yyyy-MM-dd'T'HH:mm:ssXXX") :zone (delay "UTC")} nil)))
+      (is (= "13:15" (fmt {:ms (delay ms) :pattern (delay "HH:mm") :zone (delay "Europe/Moscow")} nil))))
+    (testing "calendar arithmetic: a month is a month, negatives go back"
+      (is (= "2026-10-21" (fmt {:ms (delay (pl {:ms (delay ms) :amount (delay 1) :unit (delay "months") :zone (delay "UTC")} nil))
+                                :pattern (delay "yyyy-MM-dd") :zone (delay "UTC")} nil)))
+      (is (= (- ms 86400000) (pl {:ms (delay ms) :amount (delay -1) :unit (delay "days") :zone (delay "UTC")} nil))))
+    (is (thrown? Exception (pa {:s (delay "yesterday")} nil)))))
+
+
+(deftest log-at-a-level-returns-nil
+  (let [lg (impls/impl-of :log)]
+    (is (nil? (lg {:level (delay "info") :message (delay "hello") :data (delay {:k 1})} nil)))))

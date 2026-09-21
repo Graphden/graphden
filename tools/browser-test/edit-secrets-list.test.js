@@ -75,7 +75,7 @@ async function cleanup(page) {
     // ===================================================================
     // Navigate to /, wait for sidebar wiring to be ready.
     // ===================================================================
-    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#identity',
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#const',
                     {waitUntil: 'networkidle'});
     await page.waitForFunction(
       () => typeof loadSecrets === 'function'

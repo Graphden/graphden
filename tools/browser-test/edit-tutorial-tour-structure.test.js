@@ -40,6 +40,12 @@ const {
     await waitTourTitle(page, 'Find str-len');
     await filterAndSelect(page, 'str-len', 'str-len');
     await waitTourTitle(page, 'Read the chips', 150000);
+    // The step rings the :string slot's type chip; under gate load the
+    // selected card can land its chips well after the title (gate #6 of
+    // 2026-09-22: >20 s), so wait for the chip like a reader would, then
+    // let the audit's sampler see the ring before moving on.
+    await page.waitForSelector('.arg-type-chip', {timeout: 150000});
+    await settleTourRing(page, 20000);
     assert(await clickTourButton(page, 'Next'), 'lesson 08 chips Next');
     await waitTourTitle(page, 'Extend it');
     await extendViaRowActions(page, 'tutorial-typed', 'str-len');

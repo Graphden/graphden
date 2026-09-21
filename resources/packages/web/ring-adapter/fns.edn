@@ -78,8 +78,8 @@
   ;; supplies both keys; this fn still picks `:request` out of the
   ;; resulting free-args map.
   {:name :ring-request
-   :description "Single holder for the inbound Ring request — identity rename that exposes `:value` as the free arg `:request`. All field extractors below source from this one fn so each request flows through it once."
-   :parent :identity
+   :description "Single holder for the inbound Ring request — a `:const` rename that exposes `:value` as the free arg `:request`. All field extractors below source from this one fn so each request flows through it once."
+   :parent :const
    :args {:value {:as :request :type :ring-request-shape}}}
 
   ;; Shared `:coll :ring-request` lookup — factor out the common binding so
@@ -309,7 +309,7 @@
   ;; AUTH SEAM (docs/TENANCY_SEAM.md § Auth seam) — the authentication DECISION delegates
   ;; to the context's pluggable `:auth-provider`. Core wires the default
   ;; single-token provider; the tenancy addon swaps it for session/JWT.
-  ;; The middleware + `:request-authed?` read ONLY `:request-authenticated?`,
+  ;; The middleware and every partial read ONLY `:request-authenticated?`,
   ;; so they're provider-agnostic.
   ;; =============================================================================
 

@@ -16,8 +16,8 @@
 ;;   - Use `:call` when `:func` is a fn-graph with one free arg —
 ;;     the most common case (`:str-upper`, `:_ex-greet-name-up`, …).
 ;;   - Use `:invoke` when `:func` is a fn-graph that COMPUTES a
-;;     callable (`:make-handler`, `:_router`, anything returning an
-;;     `(fn [x] …)` from inside the graph).
+;;     callable (`:comp`, a reitit `:router`, anything whose RESULT is
+;;     an `(fn [x] …)` rather than a graph with a free arg).
 ;;
 ;; Mismatch is a frequent bug — the project memory `feedback_fn_vs_any_for_callables`
 ;; documents getting this wrong: passing a fn-graph through a `:fn` slot
@@ -37,30 +37,23 @@
    :args {:func :str-upper
           :arg "hello"}}
 
-  ;; INVOKE: a fn-graph that PRODUCES a Clojure callable. `:make-handler`
-  ;; is a base-fn that returns `(fn [_request] response)` — i.e. its
-  ;; output IS the callable. We pass that output to `:invoke`, not the
-  ;; fn-graph itself.
-  {:name :ex-invoke-handler
-   :description "`:invoke` with a fn-graph that COMPUTES a callable. `:make-handler` returns `(fn [_req] {:status 200 :headers {} :body \"hi\"})`; `:invoke` calls that fn with `:arg` (a fake request map). Use this shape when `:func` is something whose RESULT is the callable, not something that IS one."
+  ;; INVOKE: a fn-graph that PRODUCES a Clojure callable. `:comp` is a
+  ;; base-fn that returns a composed Clojure fn — its OUTPUT is the
+  ;; callable. We pass that output to `:invoke`, not the fn-graph
+  ;; itself. With no parts to compose, Clojure's `comp` yields the
+  ;; identity fn, which keeps the example free of transducer plumbing.
+  {:name :ex-invoke-composed
+   :description "`:invoke` with a fn-graph that COMPUTES a callable. `:comp` returns a Clojure fn; `:invoke` calls that fn with `:arg`. Use this shape when `:func` is something whose RESULT is the callable, not something that IS one. (`(comp)` of nothing is the identity fn, so `:arg` comes back unchanged.)"
    :parent :invoke
-   :args {:func :_ex-static-handler
-          :arg {}}}
+   :args {:func :_ex-composed-fn
+          :arg "hello"}}
 
-  {:name :_ex-static-handler
-   :description "Builds a constant Ring handler `(fn [_req] {:status 200 …})` via `:make-handler`."
-   :parent :make-handler
-   ;; One-shot `:invoke :func` use-site: the handler ignores its
-   ;; per-call input; every surviving free is chain plumbing, captured
-   ;; at wrap time.
-   :lambda-params []
-   :args {:response {:value {:status 200 :headers {} :body "hi"}}}}
+  {:name :_ex-composed-fn
+   :description "Builds a Clojure callable via `:comp`. An empty parts list makes it the identity fn — the smallest fn-graph whose result IS a callable."
+   :parent :comp
+   :args {:functions {:value []}}}
 
-  ;; Side-by-side: same logical operation, two different shapes.
-  ;; `:_ex-shout-fn` produces a callable that upper-cases its input,
-  ;; via `:make-handler` over `:str-upper`-wrapped-as-callable.
-  ;;
-  ;; (Skipped here — `:make-handler` returns a one-arg-ignoring fn,
-  ;; so this exercise can't trivially layer on top of it. Stays at
-  ;; the two clear cases above.)
+  ;; The realistic `:comp` use is a transducer pipeline — see
+  ;; `:ex-pipeline-xf` in `examples.hof`. Its result is a callable too,
+  ;; but one you hand to `:transduce`, not to `:invoke`.
   ]}

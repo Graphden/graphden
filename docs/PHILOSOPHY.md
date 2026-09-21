@@ -529,6 +529,16 @@ versioning per-fn instead of per-binding, lost dedup).
 
 3. **Magic** — No hidden transformations or special cases.
 
+4. **The executor's own filesystem** — no base-fn writes a file or reads
+   one by path. The executor is shared (multi-tenant on the cloud, one
+   process per instance on self-host), and a path is the one input that
+   escapes both the effect gate and the type checker. Text comes in as
+   streams (`:slurp` of a request body), classpath resources (`:read-resource*`)
+   and HTTP; state that must outlive a request goes to SQL (`:pg-execute`,
+   `web/sql`) or the queue. The same boundary keeps HTTP bodies TEXT: a
+   binary payload is base64 (`:base64-encode`) or an object store behind
+   an HTTP API, not bytes in the graph.
+
 ### Patterns We Explicitly Don't Introduce
 
 These are recurring design temptations that look local-good but lose
@@ -1278,7 +1288,6 @@ When the same logic appears in multiple base-fns, extract it as a standalone bas
 
 - `parse-query-string` — duplicated in 3 places in crud
 - `parse-json` — inline in layout and crud handlers
-- `stringify-map-keys` — inline closure in http-server
 - `format-display-value` — nested cond in graph `arg->node`
 
 ### 3. No Hardcoded Defaults in Impls

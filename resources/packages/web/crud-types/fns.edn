@@ -423,9 +423,9 @@
                            :coll :_types-candidates-apply-effects-raw}}]}}
 
   {:name :_types-candidates-name-str
-   :description "The registry stores fn-names as KEYWORDS. `:keyword-to-str` returns the bare name (no leading colon) so prefix matching against `\"my-fn\"` works as the user expects; `:to-str` would emit `\":my-fn\"` and break the predicate."
-   :parent :keyword-to-str
-   :args {:keyword {:as :item}}}
+   :description "The registry stores fn-names as KEYWORDS. `:name` returns the bare name (no leading colon) so prefix matching against `\"my-fn\"` works as the user expects; `:to-str` would emit `\":my-fn\"` and break the predicate."
+   :parent :name
+   :args {:value {:as :item}}}
 
   {:name :_types-candidates-name-prefix-ok?
    :description "True iff name-prefix is nil OR the fn name starts with it."

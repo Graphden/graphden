@@ -71,22 +71,6 @@
 ;; :str-to-uuid
 ;; ---------------------------------------------------------------------------
 
-(deftest str-to-uuid-fails-soft-on-anything-that-is-not-a-uuid
-  (let [u (random-uuid)]
-    (testing "a well-formed uuid string parses"
-      (is (= u (call :str-to-uuid {:string (str u)}))))
-    (testing "garbage / blank / nil → nil instead of IllegalArgumentException"
-      ;; This runs on path segments from untrusted URLs; a throw here is
-      ;; a 500 on `/api/entities/fn/<garbage>`.
-      (is (nil? (call :str-to-uuid {:string "not-a-uuid"})))
-      (is (nil? (call :str-to-uuid {:string ""})))
-      (is (nil? (call :str-to-uuid {:string nil}))))))
-
-
-;; ---------------------------------------------------------------------------
-;; :parse-constraint — JSON wire form → keyword-headed constraint vector
-;; ---------------------------------------------------------------------------
-
 (deftest parse-constraint-rekeywordises-the-wire-form
   (testing "blank input → nil (an absent constraint field)"
     (is (nil? (call :parse-constraint {:raw nil})))

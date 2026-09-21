@@ -41,7 +41,7 @@ const VAL_FN = 'cmp-val' + RUN_ID;
 // UX-v4 — the diff as a GRAPH. INSIDE_FN is a CHILD of VAL_FN created on
 // main and never touched: its own rows are equal on both branches, but it
 // inherits VAL_FN's retuned value → "changed inside" (∿). REF_FN binds
-// :value to :identity on main and to :current-time-ms on feat → a
+// :value to :const on main and to :current-time-ms on feat → a
 // replaced ref, whose "there" side draws as a ghost subtree.
 const INSIDE_FN = 'cmp-inside' + RUN_ID;
 const REF_FN = 'cmp-ref' + RUN_ID;
@@ -112,8 +112,8 @@ async function cleanup(page) {
     assert((await api(page, 'POST', '/api/branches', {name: FEAT}))?.ok,
            'feat branch created');
     const mainEnts = await api(page, 'GET', '/api/graph/entities');
-    const identity = mainEnts.fns.find((f) => f.name === 'identity');
-    assert(identity, ':identity baseline resolved');
+    const constFn = mainEnts.fns.find((f) => f.name === 'const');
+    assert(constFn, ':const baseline resolved');
     const created = await page.evaluate(async ({name, parentId, branch}) => {
       const body = new URLSearchParams();
       body.set('name', name);
@@ -127,7 +127,7 @@ async function cleanup(page) {
         body: body.toString(),
       });
       return {status: r.status, body: await r.text()};
-    }, {name: PROBE_FN, parentId: identity.id, branch: FEAT});
+    }, {name: PROBE_FN, parentId: constFn.id, branch: FEAT});
     assert(created.body.includes('created successfully'),
            'probe fn created on feat');
     // Cosmetic probe: exists on main, description edited on feat only.
@@ -141,7 +141,7 @@ async function cleanup(page) {
         body: body.toString(),
       });
       return {status: r.status, body: await r.text()};
-    }, {name: COSM_FN, parentId: identity.id});
+    }, {name: COSM_FN, parentId: constFn.id});
     assert(cosmCreated.body.includes('created successfully'),
            'cosmetic probe created on main');
     const cosmId = ((await api(page, 'GET', '/api/graph/entities'))?.fns || [])
@@ -286,8 +286,8 @@ async function cleanup(page) {
         body: body.toString(),
       });
       return r.status;
-    }, {fnId: refId, slotId: valueSlot.id, refFnId: identity.id});
-    assert(refBind === 200, 'ref probe bound to :identity on main: ' + refBind);
+    }, {fnId: refId, slotId: valueSlot.id, refFnId: constFn.id});
+    assert(refBind === 200, 'ref probe bound to :const on main: ' + refBind);
     const refBindingId = ((await api(page, 'GET', '/api/graph/entities'))?.bindings || [])
       .find((b) => b['fn-id'] === refId)?.id;
     const refEdit = await page.evaluate(async ({id, refFnId, branch}) => {
@@ -325,7 +325,7 @@ async function cleanup(page) {
         body: body.toString(),
       });
       return await r.text();
-    }, {name: SUGG_FN, parentId: identity.id, branch: SUGG});
+    }, {name: SUGG_FN, parentId: constFn.id, branch: SUGG});
     assert(suggCreated.includes('created successfully'), 'suggestion fn created');
     assert((await api(page, 'POST',
                       '/api/branches/' + encodeURIComponent(SUGG) + '/propose',
@@ -448,10 +448,10 @@ async function cleanup(page) {
     assert(true, '"Δ changed" auto-expands the changed groups');
     await page.fill('#search-input', '');
     await page.waitForFunction(() => {
-      const identityRow = Array.from(document.querySelectorAll('#entity-list .entity-item'))
-        .find((e) => e.querySelector('.name')?.textContent.trim() === 'identity');
-      return !identityRow || identityRow.classList.contains('gd-diff-lens-hidden')
-        || identityRow.offsetParent === null;
+      const constRow = Array.from(document.querySelectorAll('#entity-list .entity-item'))
+        .find((e) => e.querySelector('.name')?.textContent.trim() === 'const');
+      return !constRow || constRow.classList.contains('gd-diff-lens-hidden')
+        || constRow.offsetParent === null;
     }, {timeout: 20000});
     assert(true, '"Δ changed" lens hides unchanged fns from the tree');
     await page.evaluate(() => {

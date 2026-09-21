@@ -143,13 +143,13 @@ The CRUD HTTP surface is one namespace, ~web.crud~, spread over seven modules (~
 :PROPERTIES:
 :CUSTOM_ID: web/form-decode
 :FILE: resources/packages/web/crud-parse/impls.clj
-:LINE: 83
+:LINE: 76
 :MINS: 1.7
 :END:
 
 Stage 1 of the same pipeline, and a model base-fn: one codec call, the ring-vector-for-repeated-keys quirk collapsed so the declared ~:text-map~ return stays honest, and a comment explaining why no regex (a 200KB asset override would trip ~*max-regex-input-length*~). The ~htmx~ module next door is fns-only — ~hx-*~ attribute builders, no impl at all.
 
-- source :: [[file:../../../resources/packages/web/crud-parse/impls.clj::(defbase form-decode][resources/packages/web/crud-parse/impls.clj:83]]
+- source :: [[file:../../../resources/packages/web/crud-parse/impls.clj::(defbase form-decode][resources/packages/web/crud-parse/impls.clj:76]]
 
 * 12. hiccup-element
 :PROPERTIES:

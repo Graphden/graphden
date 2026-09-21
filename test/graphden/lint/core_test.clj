@@ -185,6 +185,24 @@
       (is (= 2 (count (lint/warnings fs)))))))
 
 
+(deftest unreferenced-public-test
+  (testing "a public fn-def only a test names is filed; a root or a real caller keeps it quiet"
+    (let [defs [(fd "a" :orphan :parent :get :args {:key {:value :k}})
+                (fd "a" :used :parent :get :args {:key {:value :j}})
+                (fd "a" :caller :parent :assoc :args {:map :a/used :key {:value :k}})
+                (fd "a.tests" :orphan-is-k :parent :assoc :args {:map :a/orphan :key {:value :k}})]
+          rules (fn [fs] (frequencies (map (juxt :rule :fns) (lint/warnings fs))))]
+      (is (= {[:unreferenced-public [["a" :orphan]]] 1
+              [:unreferenced-public [["a" :caller]]] 1}
+             (rules (lint/lint defs {:base-fn-names base-fns :check-public? true})))
+          "orphan has only its test; caller has nothing; used has caller; the test fn-def is an entry point")
+      (is (= {[:unreferenced-public [["a" :orphan]]] 1}
+             (rules (lint/lint defs {:base-fn-names base-fns :roots #{:caller} :check-public? true})))
+          "a root is a witness")
+      (is (= {} (rules (lint/lint defs {:base-fn-names base-fns})))
+          "off by default — a user's graph files nothing for its entry points"))))
+
+
 (deftest unreachable-private-test
   (let [defs [(fd "a" :_head :parent :assoc :args {:map :a/_tail :key {:value :k}})
               (fd "a" :_tail :parent :get :args {:key {:value :k}})

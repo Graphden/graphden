@@ -520,10 +520,13 @@ For complete examples, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) Part 5.5
 
 ### Transducers and Lazy Sequences
 
-HOFs like `map`, `filter` support two modes via optional `coll` argument:
+`map` / `filter` are eager and REQUIRE `:coll` (a nil from an upstream
+`:get` must not silently become a transducer). The transducer forms are
+their own base-fns:
 
-- **With coll**: `(map f coll)` — returns lazy sequence of results
-- **Without coll**: `(map f)` — returns transducer
+- **Eager**: `(map f coll)` / `(filter pred coll)` — a list of results
+- **Transducer**: `(map-xf f)` / `(filter-xf pred)` — composed with `comp`,
+  applied with `transduce`
 
 **Key functions for composition:**
 

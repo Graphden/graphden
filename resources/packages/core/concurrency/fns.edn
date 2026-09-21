@@ -1,7 +1,7 @@
 ;; Concurrency / time primitives — atomic base-fns wrapping single
 ;; Clojure / Java primitives. Used to compose long-running patterns
-;; (cron schedule, file watcher, queue consumer, websocket listener,
-;; …) at the fn-def layer instead of monolithic base-fns.
+;; (cron schedule, interval, queue consumer, retry, bounded call, …)
+;; at the fn-def layer instead of monolithic base-fns.
 ;;
 ;; The vocabulary intentionally mirrors Clojure core: `:do` (sequence
 ;; effects), `:sleep` (Thread/sleep), `:future` (spawn daemon thread),
@@ -73,6 +73,114 @@
   ;; `:future` service-eligible — declares the `:process` effect AND
   ;; returns the right callable shape for the service registry.
   ;; ---------------------------------------------------------------------
+  {:name :with-timeout
+   :description "Run the 0-arg `:body` and return its value — unless `:timeout-ms` pass first: then the body's thread is interrupted and `:execution-error/timeout` is thrown. The bounded call a slow dependency needs; pair with `:retry` for \"try again after a timeout\"."
+   :args {:body {:type [:fn {} a]
+                 :description "Zero-arg callable whose value is wanted."}
+          :timeout-ms {:type :positive-int
+                       :description "How long to wait, in milliseconds."}}
+   :return-type a
+   :effects #{:process}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :retry — pure composition: `:fix` drives the attempts, each attempt is
+  ;; a `:try` around the callable, and the `:on-throw` arm either sleeps and
+  ;; re-enters with the counter bumped or rethrows the last failure. The
+  ;; state is `{:attempt n}`; `:func` / `:attempts` / `:delay-ms` are
+  ;; closure-captured into the step.
+  ;; ---------------------------------------------------------------------
+  {:name :retry
+   :description "Call the 0-arg `:func` and return its value; when it throws, wait `:delay-ms` and try again, `:attempts` tries in all — the last failure is rethrown. Three free args: bind `:func` to the callable, `:attempts` (3) and `:delay-ms` (1000) to your numbers. Composition over `:fix` + `:try` + `:sleep`."
+   :parent :fix
+   :args {:step :_retry-step
+          :input :_retry-initial
+          :func {:type [:fn {} :any] :description "What to try — a 0-arg callable; its effects are the retry's."}
+          :attempts {:type :positive-int :description "Tries in all, the first one included — 3 is the usual number."}
+          :delay-ms {:type :non-negative-int :description "Pause between two tries, in milliseconds."}}}
+
+  {:name :_retry-initial
+   :parent :zipmap
+   :args {:keys [{:value :attempt}] :vals [{:value 1}]}}
+
+  ;; The step keeps `:input` / `:self` OUT of the try's callbacks: a free
+  ;; arg captured across a HOF boundary surfaces as a captured free, not
+  ;; as the outer callable's call-site param — so the attempt is wrapped
+  ;; into an outcome map first, and the decision reads that map.
+  {:name :_retry-step
+   :description "One attempt: run the callable behind `:try`; on an outcome that failed decide between another try and giving up, else hand back the value."
+   :parent :if
+   :args {:test :_retry-failed?
+          :then :_retry-decide
+          :else :_retry-value}}
+
+  {:name :_retry-outcome
+   :description "`{:value v}` when the callable returned, `{:failed true :ex e}` when it threw."
+   :parent :try
+   :args {:body :_retry-body
+          :on-throw :_retry-catch}}
+
+  {:name :_retry-body
+   :parent :zipmap
+   :args {:keys [{:value :value}] :vals [:_retry-call]}}
+
+  {:name :_retry-call
+   :parent :call-noargs}
+
+  {:name :_retry-catch
+   :parent :zipmap
+   :args {:keys [{:value :failed} {:value :ex}] :vals [{:value true} {:as :exception}]}}
+
+  {:name :_retry-failed?
+   :parent :get
+   :args {:coll :_retry-outcome :key {:value :failed} :default false}}
+
+  {:name :_retry-value
+   :parent :get
+   :args {:coll :_retry-outcome :key {:value :value} :default nil}}
+
+  {:name :_retry-ex
+   :parent :get
+   :args {:coll :_retry-outcome :key {:value :ex} :default nil}}
+
+  {:name :_retry-attempt
+   :parent :get
+   :args {:coll {:as :input} :key {:value :attempt} :default nil}}
+
+  {:name :_retry-decide
+   :parent :if
+   :args {:test :_retry-again?
+          :then :_retry-again
+          :else :_retry-rethrow}}
+
+  {:name :_retry-again?
+   :description "True while the attempt just failed was not the last one allowed."
+   :parent :lt
+   :args {:nums [:_retry-attempt {:as :attempts}]}}
+
+  {:name :_retry-rethrow
+   :parent :throw
+   :args {:exception :_retry-ex}}
+
+  {:name :_retry-again
+   :parent :do
+   :args {:steps [:_retry-pause :_retry-recurse]}}
+
+  {:name :_retry-pause
+   :parent :sleep
+   :args {:ms {:as :delay-ms}}}
+
+  {:name :_retry-recurse
+   :parent :invoke
+   :args {:func {:as :self} :arg :_retry-next}}
+
+  {:name :_retry-next
+   :parent :assoc
+   :args {:map {:as :input} :key {:value :attempt} :value :_retry-attempt-next}}
+
+  {:name :_retry-attempt-next
+   :parent :add
+   :args {:nums [:_retry-attempt {:value 1}]}}
+
   {:name :future
    :description "Spawn `:body` in a daemon thread, return a stopper-thunk. The returned `(fn [] ...)` interrupts the thread when invoked — InterruptedException propagates through any blocking call (`:sleep`, IO with interrupt support) inside the body. Body errors are logged but don't crash the spawner."
    :args {:body {:type [:fn {} :any]

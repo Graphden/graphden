@@ -15,8 +15,7 @@
    base storage, not the wrapper."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.test-infra.impls :as impls]
-    [graphden.test-infra.storage-double :as double]))
+    [graphden.test-infra.impls :as impls]))
 
 
 (use-fixtures :once (impls/impls-fixture "storage" "branches"))
@@ -46,43 +45,3 @@
       (is (= :execution-error/missing-storage
              (try (call :current-branch-id {} nil)
                   (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))))))
-
-
-(deftest effective-branch-local?-is-a-monotonic-or-over-the-parent-closure
-  (let [;; grand → parent → child, with the marker seeded at the top.
-        child (random-uuid)
-        parent (random-uuid)
-        grand (random-uuid)
-        base (double/rows-storage
-               {:fn {child {:id child :parent-ids [parent]}
-                     parent {:id parent :parent-ids [grand]}
-                     grand {:id grand :parent-ids [] :branch-local? true}}})
-        plain-child (random-uuid)
-        plain (double/rows-storage {:fn {plain-child {:id plain-child :parent-ids []}}})
-        own (random-uuid)
-        own-storage (double/rows-storage
-                      {:fn {own {:id own :parent-ids [] :branch-local? true}}})]
-
-    (testing "nil fn-id → false (resolve-entity passes nil for a missing row)"
-      (is (false? (call :effective-branch-local? {:fn-id nil} {:storage base}))))
-
-    (testing "the fn's OWN :branch-local? marker wins"
-      (is (true? (call :effective-branch-local? {:fn-id own} {:storage own-storage}))))
-
-    (testing "an ANCESTOR's marker propagates down the whole chain"
-      ;; Seeds like :http-server / :secret-leaf / :schedule carry the
-      ;; flag; every descendant inherits the no-propagate-on-merge rule.
-      (is (true? (call :effective-branch-local? {:fn-id child} {:storage base})))
-      (is (true? (call :effective-branch-local? {:fn-id parent} {:storage base}))))
-
-    (testing "a chain with no marker anywhere → false, so its rows DO merge"
-      (is (false? (call :effective-branch-local? {:fn-id plain-child} {:storage plain}))))
-
-    (testing "an unknown id → false, no throw"
-      (is (false? (call :effective-branch-local? {:fn-id (random-uuid)} {:storage plain}))))
-
-    (testing "a VersionedStorage wrapper is UNWRAPPED before the walk"
-      ;; The walk's cache and its reads are per BASE storage; handing it
-      ;; the wrapper would both miss the cache and fail the protocol call.
-      (let [wrapper {:base-storage base :branch-id (random-uuid)}]
-        (is (true? (call :effective-branch-local? {:fn-id child} {:storage wrapper})))))))

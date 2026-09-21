@@ -1266,8 +1266,8 @@
   ;; checkboxes). Single-node callbacks shape-dedup at sync anyway;
   ;; the single NAME is for the reader.
   {:name :_kw-item-name
-   :parent :keyword-to-str
-   :args {:keyword {:as :item}}}
+   :parent :name
+   :args {:value {:as :item}}}
 
   ;; The effect-explainer popover. The lookup lives in
   ;; `:_effect-descriptions` below (one fn-def, editable through the

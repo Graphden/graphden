@@ -398,14 +398,6 @@
    :parent :assert-eq
    :args {:actual {:parent :semver-rank :args {:version {:value "junk"}}} :expected 0}}
 
-  {:name :semver-latest-picks-the-numerically-highest
-   :parent :assert-eq
-   :args {:actual {:parent :semver-latest :args {:versions {:value ["0.9.0" "0.10.0" "0.9.12"]}}} :expected "0.10.0"}}
-
-  {:name :semver-latest-is-nil-for-no-versions
-   :parent :assert
-   :args {:value {:parent :nil? :args {:value {:parent :semver-latest :args {:versions {:value []}}}}}}}
-
   {:name :semver-compatible-within-the-caret-major
    :parent :assert
    :args {:value {:parent :semver-compatible? :args {:from {:value "1.2.0"} :to {:value "1.9.0"}}}}}

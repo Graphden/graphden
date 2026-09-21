@@ -53,7 +53,8 @@
   []
   (let [{:keys [base-fn-defs fn-defs]} (loader/load-packages packages)]
     (lint/lint fn-defs {:base-fn-names (keys base-fn-defs)
-                        :roots (registry-roots)})))
+                        :roots (registry-roots)
+                        :check-public? true})))
 
 
 (defn- format-finding

@@ -2,11 +2,11 @@
 // parents through the editor's `×` action on the MI cell.
 //
 // Coverage:
-//   • Seed a probe with `[:identity, :add]` as parents (MI — the two
+//   • Seed a probe with `[:const, :add]` as parents (MI — the two
 //     base-fns introduce distinct slot names so the parent-set
 //     validator accepts it).
 //   • Navigate to probe. Verify the parent strip lists both names
-//     (sub-of: identity, add) and at least one row carries an MI
+//     (sub-of: const, add) and at least one row carries an MI
 //     cell.
 //   • Open the row-actions on the `:add` MI cell (the more-actions
 //     trigger on its row) → click the `×` button.
@@ -43,16 +43,16 @@ async function cleanup(page) {
     await cleanup(page);
 
     // ===================================================================
-    // Seed: probe with [:identity, :add] parents.
+    // Seed: probe with [:const, :add] parents.
     // ===================================================================
-    const ents = await getEntities(page); // full-dump: resolves two unrelated baselines (:identity + :add), probe not yet created
-    const identity = ents.fns.find((f) => f.name === 'identity');
+    const ents = await getEntities(page); // full-dump: resolves two unrelated baselines (:const + :add), probe not yet created
+    const constFn = ents.fns.find((f) => f.name === 'const');
     const addFn = ents.fns.find(
       (f) => f.name === 'add' && (f['parent-ids'] || []).length === 0);
-    assert(identity && addFn, ':identity + :add baselines resolved');
+    assert(constFn && addFn, ':const + :add baselines resolved');
     await api(page, 'POST', '/api/entities/fn',
               'name=' + PROBE_FN + '&parent-ids='
-              + identity.id + ',' + addFn.id);
+              + constFn.id + ',' + addFn.id);
     const probe = (await getEntities(page, PROBE_FN)).fns.find(
       (f) => f.name === PROBE_FN);
     assert(probe, 'probe fn-def created with both parents');
@@ -80,7 +80,7 @@ async function cleanup(page) {
       const root = document.querySelector('.fn-overlay, .node-overlay')
                 || document.body;
       const text = root.textContent || '';
-      return text.includes('identity') && text.includes('add');
+      return text.includes('const') && text.includes('add');
     },null,  {timeout: 5000, polling: 100});
 
     const parentStrip = await page.evaluate(() => {
@@ -90,12 +90,12 @@ async function cleanup(page) {
                 || document.body;
       const text = root.textContent || '';
       return {
-        hasIdentity: /identity/.test(text),
+        hasConst: /const/.test(text),
         hasAdd: /\badd\b/.test(text),
       };
     });
-    assert(parentStrip.hasIdentity,
-           'card displays "identity" parent name');
+    assert(parentStrip.hasConst,
+           'card displays "const" parent name');
     assert(parentStrip.hasAdd,
            'card displays "add" parent name');
 
@@ -143,7 +143,7 @@ async function cleanup(page) {
       {timeout: 15000});
 
     // ===================================================================
-    // Phase C: storage now reports parent-ids = [identity] only.
+    // Phase C: storage now reports parent-ids = [const] only.
     // ===================================================================
     const after = await api(page, 'GET', '/api/graph/entities');
     const updatedProbe = after.fns.find((f) => f.id === probe.id);
@@ -152,8 +152,8 @@ async function cleanup(page) {
            + updatedProbe['parent-ids'].length);
     assert(!updatedProbe['parent-ids'].includes(addFn.id),
            ':add removed from parent-ids');
-    assert(updatedProbe['parent-ids'].includes(identity.id),
-           ':identity retained in parent-ids');
+    assert(updatedProbe['parent-ids'].includes(constFn.id),
+           ':const retained in parent-ids');
 
     // ===================================================================
     // Phase D: any bindings on slots that ONLY :add introduced are

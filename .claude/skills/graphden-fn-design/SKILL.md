@@ -334,7 +334,7 @@ Planning to decompose a large fn?
     `:map.return = [:list b]`), OR
   - **(b)** it is passthrough — `:return-type` matches one of the
     bound slot-vars and the fn's role is literally "return what you were given"
-    (`:const`, `:identity`, `:constantly`).
+    (`:const`, `:constantly`).
 
   Otherwise — **(c) fake polymorphism**, close it. Example (historical):
   `:router-result :parent :invoke` was at first `[:fn {:arg :ring-

@@ -9,6 +9,7 @@
    `graphden.types.rules`) lives here as a plain `defn` and is wired
    into the `impls` map as `{:impl … :return-type-rule …}`."
   (:require
+    [clojure.math :as math]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.types.core :as types]))
 
@@ -199,6 +200,40 @@
 ;; through `:add` / `:eq` / `:lt` still leaks via the result. All
 ;; content-passing; bool predicates included since `(eq secret 42)`
 ;; tells you what the secret IS.
+;; === Bounds, roots, powers ===
+;; One Math/JDK call each. `min`/`max` take the same `[:list :numeric]`
+;; shape as `add`, so a list built for one fits the other.
+
+(defbase min-fn [nums]
+  (when (empty? nums)
+    (throw (ex-info "min requires at least one number"
+                    {:type :execution-error/invalid-args :operation :min})))
+  (apply min nums))
+
+
+(defbase max-fn [nums]
+  (when (empty? nums)
+    (throw (ex-info "max requires at least one number"
+                    {:type :execution-error/invalid-args :operation :max})))
+  (apply max nums))
+
+
+(defbase floor-fn [number]
+  (long (math/floor (double number))))
+
+
+(defbase ceil-fn [number]
+  (long (math/ceil (double number))))
+
+
+(defbase sqrt-fn [number]
+  (check-numeric-result! (math/sqrt (double number)) :sqrt [number]))
+
+
+(defbase pow-fn [base exponent]
+  (check-numeric-result! (math/pow (double base) (double exponent)) :pow [base exponent]))
+
+
 (def impls
   {:add {:impl add :return-type-rule add-return-rule :taint-propagate? true}
    :sub {:impl sub :return-type-rule sub-return-rule :taint-propagate? true}
@@ -214,4 +249,10 @@
    :lt {:impl lt :taint-propagate? true}
    :lte {:impl lte :taint-propagate? true}
    :gt {:impl gt :taint-propagate? true}
-   :gte {:impl gte :taint-propagate? true}})
+   :gte {:impl gte :taint-propagate? true}
+   :min {:impl min-fn :taint-propagate? true}
+   :max {:impl max-fn :taint-propagate? true}
+   :floor {:impl floor-fn :taint-propagate? true}
+   :ceil {:impl ceil-fn :taint-propagate? true}
+   :sqrt {:impl sqrt-fn :taint-propagate? true}
+   :pow {:impl pow-fn :taint-propagate? true}})

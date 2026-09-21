@@ -38,6 +38,11 @@ work". The seeded base-fns that declare it:
 | `:schedule` | Runs a cron loop until interrupted |
 | `:future` | Spawns a daemon thread (used by both above) |
 
+Time in the graph is epoch milliseconds — `:current-time-ms` now, and
+the `:instant-parse` / `:instant-format` / `:instant-plus` trio to read
+an ISO date, print one in a zone, or move by a day or a month. A cron
+expression is the only other clock vocabulary a service needs.
+
 If you try to create a service for a fn whose ancestor chain
 doesn't have `:process`, the create-guard rejects it: *Cannot make a
 :service for fn "current-time-ms" — neither it nor any ancestor

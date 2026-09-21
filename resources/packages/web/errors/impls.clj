@@ -15,15 +15,6 @@
   (errors/wrap-error-boundary handler))
 
 
-(defbase error-http-status
-  "HTTP status for an error `:type` keyword (or its text form) — the
-   central `graphden.web.errors/status-for` table. Response-building
-   fn-defs bind their `:status` through this so every family answers
-   with the same status for the same type."
-  [error-type]
-  (errors/status-for (cond-> error-type (string? error-type) keyword)))
-
-
 ;; :json-envelope-response is a GRAPH fn-def now (web/errors/fns.edn) —
 ;; status extraction, body strip, JSON serialise (`:to-json-string`) and
 ;; the 429 → `Retry-After: 1` header policy all compose over
@@ -32,5 +23,4 @@
 
 
 (def impls
-  {:error-boundary-wrap error-boundary-wrap
-   :error-http-status error-http-status})
+  {:error-boundary-wrap error-boundary-wrap})

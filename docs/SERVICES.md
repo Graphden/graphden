@@ -156,10 +156,12 @@ journal table is shared. Keep platform-table migrations on the branch
 that owns the deployment; for a user database of your own, put the
 DSN in a `branch-local?` `:env` fn-def and compose over `web/sql`
 (`:sql-exec` / `:sql-query`) instead — then each branch can point at
-its own database. Both templates record the `:raw-sql` effect, which
-the cloud effect gate forbids to tenant graphs
+its own database. The two differ in what they record: the platform-DB
+templates (`:pg-query` / `:pg-execute` / `:migration`) carry the
+`:raw-sql` effect, which the cloud effect gate forbids to tenant graphs
 ([SECURITY_MODEL.md](SECURITY_MODEL.md)) — on the cloud they are a
-platform / self-host affordance, not a tenant one.
+platform / self-host affordance — while `web/sql` against a database of
+your own is `:db` + `:network`, an ordinary tenant effect.
 
 ## Storage schema
 
@@ -609,6 +611,25 @@ lists every queue with its pending / in-flight / dead counts
 org-scoped on the cloud, so a tenant sees its own queues, and the same
 cost on a queue of a million rows as on ten. Tutorial:
 [lesson 39](tutorial/39-queues.md).
+
+## Waiting for a webhook, an approval, a human
+
+A run is a future: it answers within its inline budget or is cancelled
+after an hour ([EXECUTION.md](EXECUTION.md)). There is deliberately no
+suspended execution that sleeps for days waiting for a callback — a
+paused thread is state the reconciler cannot restart, move between
+pods or merge across branches. The graph-native shape of "wait for
+X" is two runs and a row:
+
+1. the first run does its work and **writes a row** (`:pg-execute`, or
+   a table of your own through `web/sql`) with what it is waiting for —
+   an id, a token in the callback URL, a due time;
+2. the callback (a `:post-route`), the approval (a form on a page), or a
+   `:schedule` tick **reads the row back** and runs the second half.
+
+Everything in between is a table row, so it survives restarts, shows in
+SQL, and is branch-scoped like any other write. `:queue-publish` with
+`:delay-ms` covers the "wait, then continue" case without a callback.
 
 ## Packages-based seeding
 

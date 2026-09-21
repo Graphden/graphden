@@ -132,7 +132,7 @@
   (testing "create feat → fn on feat invisible on main → merge → fn visible on main"
     ;; Pick names + bodies the test owns end-to-end so concurrent
     ;; sibling deftests can't smear state. The probe fn is parented
-    ;; to `:identity` (every package ships it; it's the cheapest base
+    ;; to `:const` (every package ships it; it's the cheapest base
     ;; to inherit from).
     (let [run-id    (str "-" (System/currentTimeMillis))
           feat-name (str "feat-roundtrip" run-id)
@@ -152,15 +152,15 @@
         ;; The `:fn` row CRUD goes through `/api/entities/fn` (form-
         ;; encoded body). VersionedStorage routes the write to the
         ;; ExecutionContext picked by `X-Graphden-Branch: feat`.
-        (let [identity-fn (fn-by-name nil "identity")
-              _ (is (some? identity-fn)
-                    ":identity baseline visible on main (cross-branch parent ref)")
+        (let [const-fn (fn-by-name nil "const")
+              _ (is (some? const-fn)
+                    ":const baseline visible on main (cross-branch parent ref)")
               write-resp (dispatch {:method :post
                                     :path "/api/entities/fn"
                                     :branch feat-name
                                     :content-type "application/x-www-form-urlencoded"
                                     :body (str "name=" fn-name
-                                               "&parent-ids=" (:id identity-fn))})]
+                                               "&parent-ids=" (:id const-fn))})]
           (is (= 200 (:status write-resp))
               (str "POST /api/entities/fn on feat returned 200; got status="
                    (:status write-resp) " body=" (:body write-resp))))
@@ -272,13 +272,13 @@
     ;; previous test covered the explicit-branch case; this one
     ;; covers the no-header default-to-main path.
     (let [fn-name (str "default-main-probe-" (System/currentTimeMillis))
-          identity-fn (fn-by-name nil "identity")
+          const-fn (fn-by-name nil "const")
           write-resp (dispatch {:method :post
                                 :path "/api/entities/fn"
                                 ;; No :branch ⇒ no X-Graphden-Branch header
                                 :content-type "application/x-www-form-urlencoded"
                                 :body (str "name=" fn-name
-                                           "&parent-ids=" (:id identity-fn))})]
+                                           "&parent-ids=" (:id const-fn))})]
       (is (= 200 (:status write-resp))
           (str "no-header write returned 200; got=" (:status write-resp)))
       (is (some? (fn-by-name nil fn-name))
@@ -294,7 +294,7 @@
         prot (str "protected" run-id)
         feat (str "feat-into-prot" run-id)
         probe (str "prot-probe" run-id)
-        identity-fn (fn-by-name nil "identity")]
+        const-fn (fn-by-name nil "const")]
     ;; a protected branch off main, flag on
     (ok-200 (dispatch {:method :post :path "/api/branches"
                        :body {:name prot :base-branch-id "main"
@@ -306,7 +306,7 @@
     (testing "a DIRECT write to the protected branch is refused"
       (let [resp (dispatch {:method :post :path "/api/entities/fn" :branch prot
                             :content-type "application/x-www-form-urlencoded"
-                            :body (str "name=" probe "&parent-ids=" (:id identity-fn))})]
+                            :body (str "name=" probe "&parent-ids=" (:id const-fn))})]
         (is (= 409 (:status resp))
             (str "direct write to a require-merge branch is a 409 CONFLICT "
                  "(well-formed write refused by policy); got " (:status resp)))
@@ -316,7 +316,7 @@
                          :body {:name feat :base-branch-id prot}}) "/api/branches")
       (ok-200 (dispatch {:method :post :path "/api/entities/fn" :branch feat
                          :content-type "application/x-www-form-urlencoded"
-                         :body (str "name=" probe "&parent-ids=" (:id identity-fn))}) (str "a write on the UNprotected child is fine" " — " "/api/entities/fn"))
+                         :body (str "name=" probe "&parent-ids=" (:id const-fn))}) (str "a write on the UNprotected child is fine" " — " "/api/entities/fn"))
       (is (some? (fn-by-name feat probe)) "probe IS on feat before merge")
       (let [m (dispatch {:method :post :path (str "/api/branches/" prot "/merge")
                          :body {:source feat}})]
@@ -329,7 +329,7 @@
       (let [probe2 (str probe "-after")
             resp (dispatch {:method :post :path "/api/entities/fn" :branch prot
                             :content-type "application/x-www-form-urlencoded"
-                            :body (str "name=" probe2 "&parent-ids=" (:id identity-fn))})]
+                            :body (str "name=" probe2 "&parent-ids=" (:id const-fn))})]
         (is (= 200 (:status resp)) "direct write allowed after clearing the flag")
         (is (some? (fn-by-name prot probe2)))))))
 
@@ -381,7 +381,7 @@
         tgt (str "rp-tgt" run-id)
         src (str "rp-src" run-id)
         probe (str "rp-probe" run-id)
-        identity-fn (fn-by-name nil "identity")]
+        const-fn (fn-by-name nil "const")]
     (ok-200 (dispatch {:method :post :path "/api/branches"
                        :body {:name tgt :base-branch-id "main"}}) "/api/branches")
     (ok-200 (dispatch {:method :post :path (str "/api/branches/" tgt "/review-policy")
@@ -393,7 +393,7 @@
                        :body {:name src :base-branch-id tgt}}) "/api/branches")
     (ok-200 (dispatch {:method :post :path "/api/entities/fn" :branch src
                        :content-type "application/x-www-form-urlencoded"
-                       :body (str "name=" probe "&parent-ids=" (:id identity-fn))}) "/api/entities/fn")
+                       :body (str "name=" probe "&parent-ids=" (:id const-fn))}) "/api/entities/fn")
     (testing "merge is refused (409) while the proposal has no approvals"
       (let [m (dispatch {:method :post :path (str "/api/branches/" tgt "/merge")
                          :body {:source src}})]
@@ -426,11 +426,11 @@
         src (str "sd-src" run-id)
         probe (str "sd-probe" run-id)
         probe2 (str "sd-probe2" run-id)
-        identity-fn (fn-by-name nil "identity")
+        const-fn (fn-by-name nil "const")
         write! (fn [branch nm]
                  (dispatch {:method :post :path "/api/entities/fn" :branch branch
                             :content-type "application/x-www-form-urlencoded"
-                            :body (str "name=" nm "&parent-ids=" (:id identity-fn))}))]
+                            :body (str "name=" nm "&parent-ids=" (:id const-fn))}))]
     (ok-200 (dispatch {:method :post :path "/api/branches"
                        :body {:name tgt :base-branch-id "main"}}) "/api/branches")
     (ok-200 (dispatch {:method :post :path (str "/api/branches/" tgt "/review-policy")
@@ -578,14 +578,14 @@
         tgt (str "mc-tgt" run-id)
         src (str "mc-src" run-id)
         probe (str "mc-probe" run-id)
-        identity-fn (fn-by-name nil "identity")]
+        const-fn (fn-by-name nil "const")]
     (ok-200 (dispatch {:method :post :path "/api/branches"
                        :body {:name tgt :base-branch-id "main"}}) "/api/branches")
     (ok-200 (dispatch {:method :post :path "/api/branches"
                        :body {:name src :base-branch-id tgt}}) "/api/branches")
     (ok-200 (dispatch {:method :post :path "/api/entities/fn" :branch src
                        :content-type "application/x-www-form-urlencoded"
-                       :body (str "name=" probe "&parent-ids=" (:id identity-fn))}) "/api/entities/fn")
+                       :body (str "name=" probe "&parent-ids=" (:id const-fn))}) "/api/entities/fn")
     (ok-200 (dispatch {:method :post :path (str "/api/branches/" src "/propose")
                        :body {:proposed true}}) (str "/api/branches/" src "/propose"))
     (testing "proposed before merge"
@@ -730,7 +730,7 @@
                        :body {:name feat :base-branch-id "main"}}) "/api/branches")
     (let [ents (graph nil)
           by-name (fn [nm] (some #(when (= nm (:name %)) %) (:fns ents)))
-          identity-fn (by-name "identity")
+          const-fn (by-name "const")
           coalesce (by-name "coalesce")
           time-fn (by-name "current-time-ms")
           value-slot (some (fn [fs]
@@ -740,14 +740,14 @@
                                         %)
                                      (:slots ents))))
                            (:fn-slots ents))]
-      (is (and identity-fn coalesce time-fn value-slot) "baseline fns + :value slot resolved")
+      (is (and const-fn coalesce time-fn value-slot) "baseline fns + :value slot resolved")
 
       (testing "a fn created ONLY on a branch stays out of main's registry"
         (ok-200 (dispatch {:method :post :path "/api/entities/fn"
                            :branch feat
                            :content-type "application/x-www-form-urlencoded"
                            :body (form-encode {:name only-name
-                                               :parent-ids (:id identity-fn)})}) "/api/entities/fn")
+                                               :parent-ids (:id const-fn)})}) "/api/entities/fn")
         ;; Compile/serve the BRANCH first — the leak direction was
         ;; "branch compile clobbers the global".
         (is (some? (get (types feat) (keyword only-name)))
@@ -811,12 +811,12 @@
         probe (str "dvep-fn" run-id)]
     (ok-200 (dispatch {:method :post :path "/api/branches"
                        :body {:name feat :base-branch-id "main"}}) "/api/branches")
-    (let [identity-fn (fn-by-name nil "identity")]
+    (let [const-fn (fn-by-name nil "const")]
       (ok-200 (dispatch {:method :post :path "/api/entities/fn"
                          :branch feat
                          :content-type "application/x-www-form-urlencoded"
                          :body (form-encode {:name probe
-                                             :parent-ids (:id identity-fn)})}) "/api/entities/fn"))
+                                             :parent-ids (:id const-fn)})}) "/api/entities/fn"))
 
     (testing "GET /api/branches/:ref/diff-view?against= — grouped envelope"
       (let [resp (dispatch {:method :get
@@ -838,11 +838,11 @@
       ;; affected — via base, one hop away, with its namespace path.
       (let [base-nm (str "dvep-base" run-id)
             child-nm (str "dvep-child" run-id)
-            identity-fn (fn-by-name nil "identity")]
+            const-fn (fn-by-name nil "const")]
         (ok-200 (dispatch {:method :post :path "/api/entities/fn"
                            :content-type "application/x-www-form-urlencoded"
                            :body (form-encode {:name base-nm
-                                               :parent-ids (:id identity-fn)})}) "/api/entities/fn")
+                                               :parent-ids (:id const-fn)})}) "/api/entities/fn")
         (let [base-fn (fn-by-name nil base-nm)]
           (ok-200 (dispatch {:method :post :path "/api/entities/fn"
                              :content-type "application/x-www-form-urlencoded"
@@ -904,12 +904,12 @@
                                 (keyword moved)))]
     (ok-200 (dispatch {:method :post :path "/api/branches"
                        :body {:name feat :base-branch-id "main"}}) "/api/branches")
-    (let [identity-fn (fn-by-name nil "identity")]
+    (let [const-fn (fn-by-name nil "const")]
       (ok-200 (dispatch {:method :post :path "/api/entities/fn"
                          :branch feat
                          :content-type "application/x-www-form-urlencoded"
                          :body (form-encode {:name moved
-                                             :parent-ids (:id identity-fn)})}) "/api/entities/fn"))
+                                             :parent-ids (:id const-fn)})}) "/api/entities/fn"))
     (is (false? (types-has?)) "pre-merge: main's slice does not know the fn")
     (is (true? (:ok (parse-json (dispatch {:method :post
                                            :path "/api/branches/main/merge"

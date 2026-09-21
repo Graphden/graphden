@@ -154,7 +154,7 @@
   {:name :_repr-rl-th-cb
    :parent :hiccup
    :args {:tag {:value "th"} :attrs {:value nil}
-          :children [{:parent :keyword-to-str :args {:keyword {:as :item}}}]}}
+          :children [{:parent :name :args {:value {:as :item}}}]}}
 
   {:name :_repr-rl-header
    :parent :hiccup

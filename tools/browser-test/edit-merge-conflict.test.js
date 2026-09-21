@@ -5,7 +5,7 @@
 //   1. Seed a fn on main with description="seed".
 //   2. Create feat branch (inherits the fn).
 //   3. On main: PUT description="MAIN-edit". On feat: PUT description=
-//      "FEAT-edit". Same identity, different version rows → conflict.
+//      "FEAT-edit". Same const, different version rows → conflict.
 //   4. Switch to main, open branch popover, click ⇢ on feat row.
 //   5. Conflict modal appears with one row + radio choice (source / target).
 //   6. Pick "target" (keep main's "MAIN-edit") and Apply merge.
@@ -69,12 +69,12 @@ async function putDescriptionOn(page, fnId, branch, desc) {
     // ===================================================================
     // Phase A: seed a fn on main with description="seed".
     // ===================================================================
-    const mainEnts = await getEntities(page, 'identity');
-    const identity = mainEnts.fns.find((f) => f.name === 'identity');
-    assert(identity, ':identity parent resolved');
+    const mainEnts = await getEntities(page, 'const');
+    const constFn = mainEnts.fns.find((f) => f.name === 'const');
+    assert(constFn, ':const parent resolved');
 
     await api(page, 'POST', '/api/entities/fn',
-              'name=' + FN_NAME + '&parent-ids=' + identity.id
+              'name=' + FN_NAME + '&parent-ids=' + constFn.id
               + '&description=seed');
     const created = (await getEntities(page, FN_NAME)).fns.find(
       (f) => f.name === FN_NAME);

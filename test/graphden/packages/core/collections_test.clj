@@ -591,3 +591,16 @@
     (is (= {:a :int} ((rule 'into-return-rule) {:to {:type {:a :int}}} :jsonb)))
     (is (= [:map :text :int]
            ((rule 'into-return-rule) {:to {:type [:map :text :int]}} :jsonb)))))
+
+
+;; ============================================================================
+;; :last / :partition / :frequencies
+;; ============================================================================
+
+(deftest last-partition-frequencies
+  (let [la (impls/impl-of :last) pa (impls/impl-of :partition) fr (impls/impl-of :frequencies)]
+    (is (= 3 (la {:coll (delay [1 2 3])} nil)))
+    (is (nil? (la {:coll (delay [])} nil)))
+    (is (= [[1 2] [3 4] [5]] (pa {:coll (delay [1 2 3 4 5]) :n (delay 2)} nil)))
+    (is (= [] (pa {:coll (delay []) :n (delay 2)} nil)))
+    (is (= {"a" 2 "b" 1} (fr {:coll (delay ["a" "b" "a"])} nil)))))

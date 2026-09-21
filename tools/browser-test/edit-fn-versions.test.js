@@ -64,11 +64,11 @@ async function putDescription(page, fnId, branch, desc) {
     // ===================================================================
     // Seed: fn on main + feat branch with diverging description.
     // ===================================================================
-    const ents = await getEntities(page, 'identity');
-    const identity = ents.fns.find((f) => f.name === 'identity');
-    assert(identity, ':identity parent resolved');
+    const ents = await getEntities(page, 'const');
+    const constFn = ents.fns.find((f) => f.name === 'const');
+    assert(constFn, ':const parent resolved');
     await api(page, 'POST', '/api/entities/fn',
-              'name=' + FN_NAME + '&parent-ids=' + identity.id
+              'name=' + FN_NAME + '&parent-ids=' + constFn.id
               + '&description=main-version');
     const fn = (await getEntities(page, FN_NAME)).fns.find((f) => f.name === FN_NAME);
     assert(fn, 'probe fn-def created on main');

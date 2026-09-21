@@ -83,16 +83,14 @@ async function openExecutePopoverForCard(page, fnId) {
     await cleanup(page);
 
     // ===================================================================
-    // Seed via API: const-parented leaf (value=41) + identity-parented
+    // Seed via API: const-parented leaf (value=41) + const-parented
     // wrapper whose :value slot is REF-bound to the leaf — gives the
     // execution one `:ref` frame for the path-trace seam to record.
     // ===================================================================
-    const ents = await getEntities(page, 'identity');
-    const identity = ents.fns.find((f) => f.name === 'identity');
+    const ents = await getEntities(page, 'const');
     const constFn = ents.fns.find((f) => f.name === 'const')
       || (await getEntities(page, 'const')).fns.find((f) => f.name === 'const');
-    assert(identity && constFn, ':identity + :const baselines resolved');
-    // :identity inherits :const's single `value` slot.
+    assert(constFn, ':const baseline resolved');
     const valueSlotId = (() => {
       const fnSlots = ents['fn-slots'] || [];
       const slots = new Map((ents.slots || []).map((s) => [s.id, s]));
@@ -105,7 +103,7 @@ async function openExecutePopoverForCard(page, fnId) {
     await api(page, 'POST', '/api/entities/fn',
               'name=' + CONST_FN + '&parent-ids=' + constFn.id);
     await api(page, 'POST', '/api/entities/fn',
-              'name=' + WRAP_FN + '&parent-ids=' + identity.id);
+              'name=' + WRAP_FN + '&parent-ids=' + constFn.id);
     const probeConst = (await getEntities(page, CONST_FN)).fns
       .find((f) => f.name === CONST_FN);
     const probeWrap = (await getEntities(page, WRAP_FN)).fns

@@ -18,12 +18,12 @@
     [;; The leaf binds its own :string — closer-fn-wins, so an OUTER
      ;; binding of :string can never reach it.
      {:name :ub-leaf :parent :str-upper :args {:string "leaf"}}
-     {:name :ub-mid :parent :identity :args {:value :ub-leaf}}
+     {:name :ub-mid :parent :const :args {:value :ub-leaf}}
      {:name :ub-dead :parent :ub-mid :args {:string "outer"}}
      ;; Same shape with the leaf's :string left FREE — the outer binding
      ;; is what feeds it.
      {:name :ub-leaf-free :parent :str-upper}
-     {:name :ub-mid-free :parent :identity :args {:value :ub-leaf-free}}
+     {:name :ub-mid-free :parent :const :args {:value :ub-leaf-free}}
      {:name :ub-live :parent :ub-mid-free :args {:string "outer"}}])
 
   (testing "the run confirms the semantics: the dead binding changes nothing, the live one feeds the leaf"

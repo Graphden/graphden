@@ -63,10 +63,10 @@ async function mergeFromPopover(page, branch) {
     console.log('edit-merge-plan — a stacked branch merges transitively');
     await page.goto(BASE + '/');
     await page.waitForSelector('#branch-chip-btn', {timeout: 30000});
-    const ents = await getEntities(page, 'identity');
-    const identity = ents.fns.find((f) => f.name === 'identity');
-    assert(identity, ':identity parent resolved');
-    await api(page, 'POST', '/api/entities/fn', 'name=' + FN_NAME + '&parent-ids=' + identity.id + '&description=seed');
+    const ents = await getEntities(page, 'const');
+    const constFn = ents.fns.find((f) => f.name === 'const');
+    assert(constFn, ':const parent resolved');
+    await api(page, 'POST', '/api/entities/fn', 'name=' + FN_NAME + '&parent-ids=' + constFn.id + '&description=seed');
     const fnId = (await getEntities(page, FN_NAME)).fns.find((f) => f.name === FN_NAME)?.id;
     assert(fnId, 'seed fn created on main');
     assert((await api(page, 'POST', '/api/branches', {name: R_BRANCH}))?.ok, 'R created');
@@ -84,8 +84,8 @@ async function mergeFromPopover(page, branch) {
            'the post-merge alert names R as merged first: ' + JSON.stringify(alerts));
 
     // A ← B ← C, each editing its OWN fn; from main, merge C → all three land.
-    await api(page, 'POST', '/api/entities/fn', 'name=' + FN2_NAME + '&parent-ids=' + identity.id + '&description=seed');
-    await api(page, 'POST', '/api/entities/fn', 'name=' + FN3_NAME + '&parent-ids=' + identity.id + '&description=seed');
+    await api(page, 'POST', '/api/entities/fn', 'name=' + FN2_NAME + '&parent-ids=' + constFn.id + '&description=seed');
+    await api(page, 'POST', '/api/entities/fn', 'name=' + FN3_NAME + '&parent-ids=' + constFn.id + '&description=seed');
     const fn2Id = (await getEntities(page, FN2_NAME)).fns.find((f) => f.name === FN2_NAME)?.id;
     const fn3Id = (await getEntities(page, FN3_NAME)).fns.find((f) => f.name === FN3_NAME)?.id;
     assert(fn2Id && fn3Id, 'two more seed fns on main');

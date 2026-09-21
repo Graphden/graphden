@@ -21,7 +21,7 @@ const {assert, newContext} = require('./edit-test-helpers');
   console.log('edit-fn-picker — popover / search filter / row click / dismiss');
 
   try {
-    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#identity');
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#const');
     await page.waitForFunction(
       () => graphReady()
             && !!document.querySelector('button.more-actions-trigger')
@@ -92,9 +92,9 @@ const {assert, newContext} = require('./edit-test-helpers');
            'the status line counts shown / total: ' + initial.status);
 
     // ===================================================================
-    // Phase B: type filter "identity" → only matching rows visible.
+    // Phase B: type filter "constantly" → only matching rows visible.
     // ===================================================================
-    await page.fill('.fn-picker-search', 'identity');
+    await page.fill('.fn-picker-search', 'constantly');
     // The picker re-renders `.fn-picker-list` with FILTERED candidates
     // (not show/hide) on every input event. Poll until the list shrinks
     // and only matches are present instead of a fixed window.
@@ -102,7 +102,7 @@ const {assert, newContext} = require('./edit-test-helpers');
       const p = document.querySelector('.fn-picker-popover');
       const rows = Array.from(p?.querySelectorAll('.fn-picker-row') || []);
       if (rows.length === 0 || rows.length >= 50) return false;
-      return rows.every(r => /identity/.test(r.textContent || ''));
+      return rows.every(r => /constantly/.test(r.textContent || ''));
     },null,  {timeout: 2000, polling: 50});
     const filtered = await page.evaluate(() => {
       const p = document.querySelector('.fn-picker-popover');
@@ -119,13 +119,13 @@ const {assert, newContext} = require('./edit-test-helpers');
       };
     });
     assert(filtered.visibleCount > 0,
-           '≥ 1 row matches "identity": ' + filtered.visibleCount);
+           '≥ 1 row matches "constantly": ' + filtered.visibleCount);
     const initialTotal = Number((initial.status.match(/of (\d+)/) || [])[1] || 0);
     assert(filtered.visibleCount < initialTotal,
            'filter narrows the list (was ' + initialTotal
            + ', now ' + filtered.visibleCount + ')');
-    assert(filtered.anyText.every((t) => /identity/i.test(t)),
-           'every visible row mentions "identity": '
+    assert(filtered.anyText.every((t) => /constantly/i.test(t)),
+           'every visible row mentions "constantly": '
            + JSON.stringify(filtered.anyText));
 
     // ===================================================================
@@ -136,7 +136,7 @@ const {assert, newContext} = require('./edit-test-helpers');
       const row = Array.from(p?.querySelectorAll('.fn-picker-list .fn-picker-row') || [])
         .find((r) => {
           const style = window.getComputedStyle(r);
-          return style.display !== 'none' && /identity/i.test(r.textContent || '');
+          return style.display !== 'none' && /constantly/i.test(r.textContent || '');
         });
       row?.click();
     });
@@ -147,8 +147,8 @@ const {assert, newContext} = require('./edit-test-helpers');
       null,
       {timeout: 5000});
     const picked = await page.evaluate(() => window.__fnPicked);
-    assert(picked && /identity/i.test(picked.name || ''),
-           'onPick fired with an :identity-named fn: '
+    assert(picked && /constantly/i.test(picked.name || ''),
+           'onPick fired with an :constantly-named fn: '
            + JSON.stringify(picked));
 
     // ===================================================================

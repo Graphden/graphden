@@ -9,7 +9,7 @@
 //   • Drift case: seed an `:env`-parented probe with
 //     `:expects-effects []` (empty declared, but `:env` effect
 //     computes). Verify the `:env` chip carries `effects-chip-drift`.
-//   • Ghost case: seed an `:identity`-parented probe with
+//   • Ghost case: seed an `:const`-parented probe with
 //     `:expects-effects [:network]` (declared network, but pure
 //     fn). Verify a `:network` chip with `effects-chip-ghost`.
 //
@@ -46,13 +46,13 @@ async function cleanup(page) {
     // ===================================================================
     // Seed both probes.
     // ===================================================================
-    // full-dump: resolves two unrelated baseline fns (:env + :identity)
+    // full-dump: resolves two unrelated baseline fns (:env + :const)
     // plus :env's own slots/fn-slots — not a single fn's closure.
     const ents = await getEntities(page);
     const envFn = ents.fns.find(
       (f) => f.name === 'env' && (f['parent-ids'] || []).length === 0);
-    const identity = ents.fns.find((f) => f.name === 'identity');
-    assert(envFn && identity, ':env + :identity baselines resolved');
+    const constFn = ents.fns.find((f) => f.name === 'const');
+    assert(envFn && constFn, ':env + :const baselines resolved');
 
     // DRIFT — env-parented with empty declared. The form-parser
     // treats blank value as "no declaration" (nil); the literal
@@ -74,10 +74,10 @@ async function cleanup(page) {
               'fn-id=' + driftProbe.id + '&slot-id=' + envNameSlot.id
               + '&value=' + encodeURIComponent('"MY_VAR"'));
 
-    // GHOST — identity-parented with declared `:network` (no actual
+    // GHOST — const-parented with declared `:network` (no actual
     // network call).
     await api(page, 'POST', '/api/entities/fn',
-              'name=' + GHOST_FN + '&parent-ids=' + identity.id
+              'name=' + GHOST_FN + '&parent-ids=' + constFn.id
               + '&expects-effects=' + encodeURIComponent('network'));
     const ghostProbe = (await getEntities(page, GHOST_FN)).fns.find(
       (f) => f.name === GHOST_FN);

@@ -230,11 +230,6 @@
    :return-type [:list :keyword-map]
    :effects #{:db}}
 
-  {:name :semver-latest
-   :description "The highest version string in `:versions` by parsed `[major minor patch]` — nil for an empty list. Pure."
-   :args {:versions {:type [:list :text] :description "Version strings."}}
-   :return-type :nullable-text}
-
   {:name :semver-rank
    :description "A version string as ONE sortable number (`major·10⁶ + minor·10³ + patch`, components capped at 999) — the pure `:sort-by` key that orders versions; nil / unparsable → 0."
    :args {:version {:type :nullable-text :description "Version string."}}

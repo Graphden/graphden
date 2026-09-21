@@ -69,12 +69,12 @@ async function cleanup(page) {
            'feat branch created: '
            + JSON.stringify(branchResp).slice(0, 200));
 
-    // Find a small, harmless parent (`:identity`) and use it for the
+    // Find a small, harmless parent (`:const`) and use it for the
     // probe. We create the probe directly on the feat branch via the
     // branch header.
     const mainEnts = await api(page, 'GET', '/api/graph/entities');
-    const identity = mainEnts.fns.find((f) => f.name === 'identity');
-    assert(identity, ':identity baseline resolved');
+    const constFn = mainEnts.fns.find((f) => f.name === 'const');
+    assert(constFn, ':const baseline resolved');
 
     const created = await page.evaluate(async ({name, parentId, branch}) => {
       const body = new URLSearchParams();
@@ -89,7 +89,7 @@ async function cleanup(page) {
         body: body.toString(),
       });
       return {status: r.status, body: await r.text()};
-    }, {name: PROBE_FN, parentId: identity.id, branch: FEAT_BRANCH});
+    }, {name: PROBE_FN, parentId: constFn.id, branch: FEAT_BRANCH});
     assert(created.body.includes('created successfully'),
            'probe fn-def created on feat: ' + JSON.stringify(created).slice(0, 200));
 

@@ -94,11 +94,6 @@
    :args {:coll [{:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
                  {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}]}}
 
-  {:name :str-to-uuid
-   :description "Coerce a string to `java.util.UUID`. Throws on malformed input."
-   :args {:string {:type :text :description "UUID in canonical 8-4-4-4-12 form."}}
-   :return-type :uuid}
-
   ;; Form data parsing helpers
   ;; --- :resolve-type-fn-id / :parse-constraint — atomic primitives
   ;; over the fn-create form's complex coercions. resolve-type-fn-id

@@ -234,13 +234,11 @@
                                             :ks [{:value :type} {:value :actual} {:value :expected}]}}}}
           :expected {:value {:type :execution-error/assertion-failed :actual 1 :expected 2}}}}
 
-  {:name :const-and-identity-pass-the-value-through
-   :description "`:const` and its alias `:identity` both return `:value` unchanged."
+  {:name :const-passes-the-value-through
+   :description "`:const` returns `:value` unchanged."
    :parent :assert-eq
-   :args {:actual {:parent :list
-                   :args {:items [{:parent :const :args {:value "v"}}
-                                  {:parent :identity :args {:value "v"}}]}}
-          :expected ["v" "v"]}}
+   :args {:actual {:parent :const :args {:value "v"}}
+          :expected "v"}}
 
   {:name :equal?-compares-structurally
    :description "`:equal?` over two separately-built maps with the same entries is true."
@@ -506,14 +504,6 @@
    :args {:actual {:parent :vec :args {:coll [1 2]}}
           :expected [1 2]}}
 
-  {:name :stringify-map-keys-turns-keyword-keys-into-strings
-   :description "`:stringify-map-keys` of `{:a 1}` is readable under the string key `\"a\"` and no longer under `:a`."
-   :parent :assert-eq
-   :args {:actual {:parent :list
-                   :args {:items [{:parent :get :args {:coll {:parent :stringify-map-keys :args {:m {:value {:a 1}}}} :key "a" :default nil}}
-                                  {:parent :get :args {:coll {:parent :stringify-map-keys :args {:m {:value {:a 1}}}} :key {:value :a} :default nil}}]}}
-          :expected [1 nil]}}
-
   {:name :select-keys-keeps-only-the-named-keys
    :description "`:select-keys` `[:a]` from `{:a 1 :b 2}` is `{:a 1}`."
    :parent :assert-eq
@@ -529,12 +519,12 @@
           :expected {:value {:a 11 :b 12}}}}
 
   {:name :update-keys-transforms-every-key
-   :description "`:update-keys` with `:keyword-to-str` makes `{:a 1}` readable under `\"a\"`."
+   :description "`:update-keys` with `:name` makes `{:a 1}` readable under `\"a\"`."
    :parent :assert-eq
    :args {:actual {:parent :get
                    :args {:coll {:parent :update-keys
                                  :args {:m {:value {:a 1}}
-                                        :f {:parent :keyword-to-str :args {:keyword {:as :value}}}}}
+                                        :f {:parent :name :args {:value {:as :value}}}}}
                           :key "a"
                           :default nil}}
           :expected 1}}
@@ -625,14 +615,13 @@
           :expected "org,runs,note\nacme,3,\"a, \"\"quoted\"\" one\"\nbeta,0,"}}
 
   {:name :keyword-and-string-convert-both-ways
-   :description "`:str-to-keyword` `\"foo\"` is `:foo`; `:keyword-to-str` and `:name` give `\"foo\"` back; `:to-str` keeps the colon."
+   :description "`:str-to-keyword` `\"foo\"` is `:foo`; `:name` gives `\"foo\"` back; `:to-str` keeps the colon."
    :parent :assert-eq
    :args {:actual {:parent :list
                    :args {:items [{:parent :str-to-keyword :args {:string "foo"}}
-                                  {:parent :keyword-to-str :args {:keyword {:value :foo}}}
                                   {:parent :name :args {:value {:value :foo}}}
                                   {:parent :to-str :args {:value {:value :foo}}}]}}
-          :expected {:value [:foo "foo" "foo" ":foo"]}}}
+          :expected {:value [:foo "foo" ":foo"]}}}
 
   {:name :str-to-keyword-of-nil-is-nil
    :description "`:str-to-keyword` is nil-safe."
@@ -787,14 +776,6 @@
                           :arg 21}}
           :expected 42}}
 
-  {:name :make-handler-answers-every-request-with-its-response
-   :description "`:make-handler` is a Ring-shaped constant — called with any request it returns `:response`."
-   :parent :assert-eq
-   :args {:actual {:parent :call
-                   :args {:func {:parent :make-handler :args {:response "fixed"}}
-                          :arg {:value {:uri "/x"}}}}
-          :expected "fixed"}}
-
   {:name :ring-bytes-response-assembles-status-headers-and-body
    :description "`:ring-bytes-response` builds the `{:status :headers :body}` record with the body stored verbatim."
    :parent :assert-eq
@@ -900,4 +881,93 @@
    :description "`:fix` over the factorial step from `{:n 5 :acc 1}` is 120 — five re-entries through `:self`, then the base case."
    :parent :assert-eq
    :args {:actual {:parent :fix :args {:step :_fact-step :input {:value {:n 5 :acc 1}}}}
-          :expected 120}}]}
+          :expected 120}}
+
+  ;; --- the stdlib batch (surface audit): bounds, roots, regex groups,
+  ;;     padding, chunking, encodings, dates — every subject is pure. -----
+
+  {:name :min-and-max-pick-the-extremes
+   :description "`:min` of [3 1 2] is 1, `:max` is 3."
+   :parent :assert-eq
+   :args {:actual {:parent :list :args {:items [{:parent :min :args {:nums [3 1 2]}}
+                                                {:parent :max :args {:nums [3 1 2]}}]}}
+          :expected [1 3]}}
+
+  {:name :floor-and-ceil-give-ints
+   :description "`:floor` 4.7 → 4, `:ceil` 4.2 → 5, `:floor` -4.2 → -5."
+   :parent :assert-eq
+   :args {:actual {:parent :list :args {:items [{:parent :floor :args {:number 4.7}}
+                                                {:parent :ceil :args {:number 4.2}}
+                                                {:parent :floor :args {:number -4.2}}]}}
+          :expected [4 5 -5]}}
+
+  {:name :sqrt-and-pow
+   :description "`:sqrt` 9 → 3.0; `:pow` 2 3 → 8.0."
+   :parent :assert-eq
+   :args {:actual {:parent :list :args {:items [{:parent :sqrt :args {:number 9}}
+                                                {:parent :pow :args {:base 2 :exponent 3}}]}}
+          :expected [3.0 8.0]}}
+
+  {:name :re-groups-extracts-the-captures
+   :description "`:re-groups` over a date pattern gives the whole match and its three groups; a miss is nil."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :re-groups :args {:string "due 2026-09-21" :pattern "(\\d{4})-(\\d{2})-(\\d{2})"}}
+                                  {:parent :re-groups :args {:string "none" :pattern "\\d+"}}]}}
+          :expected [["2026-09-21" "2026" "09" "21"] nil]}}
+
+  {:name :re-seq-lists-every-match
+   :description "`:re-seq` finds both numbers, each with its group."
+   :parent :assert-eq
+   :args {:actual {:parent :re-seq :args {:string "a1 b a2" :pattern "a(\\d)"}}
+          :expected [["a1" "1"] ["a2" "2"]]}}
+
+  {:name :str-index-of-and-padding
+   :description "`:str-index-of` finds the first `c` at 2 and nil for a miss; `:str-pad-left` 7 → \"007\"; `:str-pad-right` fills with the cycled pad."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :str-index-of :args {:string "abcabc" :substring "c"}}
+                                  {:parent :str-index-of :args {:string "abc" :substring "z"}}
+                                  {:parent :str-pad-left :args {:string "7" :length 3 :pad "0"}}
+                                  {:parent :str-pad-right :args {:string "7" :length 4 :pad "ab"}}]}}
+          :expected [2 nil "007" "7aba"]}}
+
+  {:name :last-partition-frequencies
+   :description "`:last` of [1 2 3] is 3; `:partition` by 2 chunks [1 2 3 4 5] into three; `:frequencies` counts."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :last :args {:coll [1 2 3]}}
+                                  {:parent :partition :args {:coll [1 2 3 4 5] :n 2}}
+                                  {:parent :get :args {:coll {:parent :frequencies :args {:coll ["a" "b" "a"]}} :key "a" :default 0}}]}}
+          :expected [3 [[1 2] [3 4] [5]] 2]}}
+
+  {:name :parse-float-and-base64-round-trip
+   :description "`:parse-float` reads 3.5; base64 of \"hello\" is aGVsbG8= and decodes back."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :parse-float :args {:s "3.5"}}
+                                  {:parent :base64-encode :args {:s "hello"}}
+                                  {:parent :base64-decode :args {:s "aGVsbG8="}}]}}
+          :expected [3.5 "aGVsbG8=" "hello"]}}
+
+  {:name :instant-parse-format-plus-agree
+   :description "An ISO instant parses to epoch ms, formats back in a zone, and moves by a calendar month."
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :instant-parse :args {:s "2026-09-21T10:15:00Z"}}
+                                  {:parent :instant-format :args {:ms {:parent :instant-parse :args {:s "2026-09-21T13:15:00+03:00"}}
+                                                                  :pattern "HH:mm" :zone "Europe/Moscow"}}
+                                  {:parent :instant-format :args {:ms {:parent :instant-plus :args {:ms {:parent :instant-parse :args {:s "2026-09-21T10:15:00Z"}}
+                                                                                                    :amount 1 :unit "months" :zone "UTC"}}
+                                                                  :pattern "yyyy-MM-dd" :zone "UTC"}}]}}
+          :expected [1789985700000 "13:15" "2026-10-21"]}}
+
+  {:name :retry-returns-the-value-on-the-first-try
+   :description "`:retry` over a callable that succeeds is just its value — the :fix step never re-enters."
+   :parent :assert-eq
+   :args {:actual {:parent :retry :args {:func :_retry-probe :attempts 2 :delay-ms 0}}
+          :expected "ok"}}
+
+  {:name :_retry-probe
+   :parent :const
+   :args {:value "ok"}}]}

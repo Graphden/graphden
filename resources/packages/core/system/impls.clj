@@ -10,6 +10,7 @@
     [cheshire.core :as json]
     [clojure.edn :as edn]
     [clojure.java.io :as io]
+    [clojure.math :as math]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.crud.fn-execution.trace :as trace]
@@ -26,13 +27,26 @@
       MemoryMXBean
       MemoryUsage
       OperatingSystemMXBean
-      RuntimeMXBean)))
+      RuntimeMXBean)
+    (java.time
+      Instant
+      OffsetDateTime
+      ZoneId
+      ZonedDateTime)
+    (java.time.format
+      DateTimeFormatter)
+    (java.time.temporal
+      ChronoUnit)
+    (java.util
+      Base64
+      Base64$Decoder
+      Base64$Encoder)))
 
 
 ;; === Ring Response Primitives ===
 ;; `:ring-response` is a fn-def constructor (see core/system/fns.edn) —
-;; built as an :assoc chain that threads `:headers` through
-;; `:stringify-map-keys` before assembly. No impl needed.
+;; an :assoc chain over `:status` / `:headers` (`:text-map`) / `:body`.
+;; No impl needed.
 
 
 (defbase to-json-string [data]
@@ -423,6 +437,69 @@
   (when ex (ex-data ex)))
 
 
+(defbase parse-float-fn [s]
+  (Double/parseDouble s))
+
+
+(defbase base64-encode-fn [s]
+  (Base64$Encoder/.encodeToString (Base64/getEncoder) (String/.getBytes s "UTF-8")))
+
+
+(defbase base64-decode-fn [s]
+  (String. (Base64$Decoder/.decode (Base64/getDecoder) ^String s) "UTF-8"))
+
+
+(defbase random-uuid-fn []
+  (cr/record-effect! :random)
+  (java.util.UUID/randomUUID))
+
+
+(defbase random-fn []
+  (cr/record-effect! :random)
+  (math/random))
+
+
+(defbase log-fn
+  "`clojure.tools.logging/logp` at `level` — `:log-warn`'s sibling for the
+   other levels; the level comes in as text so the graph can bind it."
+  [level message data]
+  (cr/record-effect! :io)
+  (log/logp (keyword level) message data))
+
+
+;; --- dates: three java.time calls; the graph's wall-clock value is epoch
+;; milliseconds (`:current-time-ms`), so parse lands there and format /
+;; plus start from there. A zone is text (`"UTC"`, `"Europe/Berlin"`).
+
+(defbase instant-parse-fn
+  "ISO-8601 text with an offset or `Z` → epoch milliseconds."
+  [s]
+  (Instant/.toEpochMilli (OffsetDateTime/.toInstant (OffsetDateTime/parse ^String s))))
+
+
+(defn- at-zone
+  "Epoch millis as a `ZonedDateTime` in `zone` — the one coercion the
+   format and plus calls share."
+  ^ZonedDateTime [ms zone]
+  (Instant/.atZone (Instant/ofEpochMilli (long ms)) (ZoneId/of ^String zone)))
+
+
+(defbase instant-format-fn
+  "Epoch milliseconds → text under a `DateTimeFormatter` pattern, in `zone`."
+  [ms pattern zone]
+  (DateTimeFormatter/.format (DateTimeFormatter/ofPattern ^String pattern) (at-zone ms zone)))
+
+
+(defbase instant-plus-fn
+  "Epoch milliseconds moved by `amount` `unit`s (`ChronoUnit` name: seconds …
+   years) — calendar-aware in `zone`, so a month is a month."
+  [ms amount unit zone]
+  (Instant/.toEpochMilli
+    (ZonedDateTime/.toInstant
+      (ZonedDateTime/.plus (at-zone ms zone) (long amount)
+                           (ChronoUnit/valueOf (str/upper-case (str unit)))))))
+
+
 (defbase parse-uuid-fn
   "Parse `:string` as a UUID. Returns nil for non-string / blank /
    malformed input — every failure mode collapses to nil so graph
@@ -512,4 +589,13 @@
    :throwable-message {:impl throwable-message-fn :taint-propagate? true}
    :throwable-class-name {:impl throwable-class-name-fn :taint-propagate? true}
    :ex-data {:impl ex-data-fn :taint-propagate? true}
-   :parse-uuid {:impl parse-uuid-fn :taint-propagate? true}})
+   :parse-uuid {:impl parse-uuid-fn :taint-propagate? true}
+   :parse-float {:impl parse-float-fn :taint-propagate? true}
+   :base64-encode {:impl base64-encode-fn :taint-propagate? true}
+   :base64-decode {:impl base64-decode-fn :taint-propagate? true}
+   :random-uuid random-uuid-fn
+   :random random-fn
+   :log log-fn
+   :instant-parse {:impl instant-parse-fn :taint-propagate? true}
+   :instant-format {:impl instant-format-fn :taint-propagate? true}
+   :instant-plus {:impl instant-plus-fn :taint-propagate? true}})

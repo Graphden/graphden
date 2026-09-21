@@ -49,13 +49,13 @@ async function cleanup(page) {
     // pseudo-group and would stay invisible until the user expanded
     // it — masks the badge we want to click).
     // ===================================================================
-    const ents = await getEntities(page); // full-dump: needs the unrelated `app` namespace row (not in :identity's subtree closure), and the probe doesn't exist yet
-    const identity = ents.fns.find((f) => f.name === 'identity');
-    assert(identity, ':identity parent resolved');
+    const ents = await getEntities(page); // full-dump: needs the unrelated `app` namespace row (not in :const's subtree closure), and the probe doesn't exist yet
+    const constFn = ents.fns.find((f) => f.name === 'const');
+    assert(constFn, ':const parent resolved');
     const appNs = (ents.namespaces || []).find((n) => n.name === 'app');
     assert(appNs, ':app namespace resolved');
     await api(page, 'POST', '/api/entities/fn',
-              'name=' + FN_NAME + '&parent-ids=' + identity.id
+              'name=' + FN_NAME + '&parent-ids=' + constFn.id
               + '&namespace-id=' + appNs.id
               + '&description=' + encodeURIComponent(SEED_DESC));
     const fn = (await getEntities(page, FN_NAME)).fns.find((f) => f.name === FN_NAME);

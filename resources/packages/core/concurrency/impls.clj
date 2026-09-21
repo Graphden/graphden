@@ -274,7 +274,9 @@
    handle. `:triggers` is `:lazy-seq-args`: each item is a delay whose
    forcing EXECUTES the trigger fn-def (a `:schedule` / `:interval`
    derivative spawns its daemon thread and returns its stopper), so
-   forcing them here starts them left-to-right. The combined stopper
+   forcing them here starts them left-to-right. (Longer than the 20-line
+   ideal because the stopper, `:alive?` and `:exit` are one handle the
+   reconciler reads as a unit.) The combined stopper
    stops every child; the liveness the reconciler reads is the
    children's combined — alive while any child is, `:failed` once any
    child failed, `:done` once every child is done."
@@ -306,6 +308,30 @@
                          :else nil))))})))
 
 
+(defbase with-timeout-fn
+  "Run `body` (a 0-arg callable) on a daemon thread and wait at most
+   `timeout-ms` for its value; past that the thread is interrupted and
+   `:execution-error/timeout` is thrown. One library boundary —
+   `FutureTask` + `get` with a deadline — under the conveyed bindings
+   `:future` gives its body (effect gate, org, the traced execution)."
+  [body timeout-ms]
+  (cr/record-effect! :process)
+  (let [conveyed (cr/capture-conveyed-bindings)
+        task (java.util.concurrent.FutureTask.
+               ^Callable (fn [] (with-bindings conveyed (cr/with-fresh-call-cache body))))]
+    (doto (Thread. ^Runnable task "graphden-with-timeout")
+      (Thread/.setDaemon true)
+      (Thread/.start))
+    (try
+      (java.util.concurrent.FutureTask/.get task (long timeout-ms) java.util.concurrent.TimeUnit/MILLISECONDS)
+      (catch java.util.concurrent.TimeoutException _
+        (java.util.concurrent.FutureTask/.cancel task true)
+        (throw (ex-info (str "Timed out after " timeout-ms " ms")
+                        {:type :execution-error/timeout :timeout-ms timeout-ms})))
+      (catch java.util.concurrent.ExecutionException e
+        (throw (or (Throwable/.getCause e) e))))))
+
+
 (defbase with-heartbeat-fn
   "Run `body` while a daemon thread calls `beat` every `every-ms`; no
    beat lands after the body ends. The beat runs under the spawning
@@ -318,7 +344,11 @@
    consumer had just acked was extended once more; a flaky
    `no beat after the body returned` on a loaded CI host). The flag is
    read after every sleep, and the join waits out a beat in flight —
-   capped, so a beat stuck in I/O cannot hold the caller."
+   capped, so a beat stuck in I/O cannot hold the caller.
+
+   Above the base-fn 20-line ideal on purpose: the flag, the interrupt
+   and the bounded join are ONE stop protocol — splitting it into
+   graph steps would let a caller compose the race back in."
   [body beat every-ms]
   (cr/record-effect! :process)
   (let [conveyed (cr/capture-conveyed-bindings)
@@ -368,6 +398,7 @@
    :future future-fn
    :loop-until-interrupted loop-until-interrupted-fn
    :with-heartbeat {:impl with-heartbeat-fn :taint-propagate? true}
+   :with-timeout {:impl with-timeout-fn :taint-propagate? true}
    :start-all {:impl start-all-fn :lazy-seq-args #{:triggers}}
    :cron-parse cron-parse-fn
    :cron-fire-after cron-fire-after-fn

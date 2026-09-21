@@ -18,6 +18,13 @@
 ;; `:custom-script` / `:wrap-custom-script` / `:custom-stylesheet`
 ;; escape hatches.
 ;; Modal is deferred (needs JS lifecycle).
+;;
+;; NOTE (surface audit): this is user-facing STARTER VOCABULARY, like
+;; web.response's status × content-type matrix — first-party pages use
+;; a handful (`:button`, `:plain-div`, the contact demo's form set), the
+;; rest exist for an author's first page and are exercised by
+;; web/tests. Do not re-flag the unused ones as dead code; the list is
+;; kept complete on purpose, and each component is named in lesson 10.
 
 
 {:namespace "web.components"

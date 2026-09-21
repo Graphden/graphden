@@ -47,7 +47,7 @@
     :conj :first :rest :cons :list :merge :into
     :repeat :keys :vals
     :take :drop :reverse :sort :distinct :concat
-    :case :cond :coalesce :if :invoke :const :identity
+    :case :cond :coalesce :if :invoke :const
     :add :sub :mul :mod :neg :abs
     ;; signature owners — no hand rule; the declared polymorphic
     ;; signature is the narrowing (checker's `signature-return`).
@@ -55,7 +55,9 @@
     ;; no rule, no vars — `rule-owner-of` returns nil, the popover
     ;; never opens, so a narrative would be dead prose.
     :map :filter :reduce :find-first :group-by :sort-by
-    :constantly :transduce :call :call-noargs :call-noargs-traced :call-with :call-traced :with-heartbeat :try
+    :constantly :transduce :call :call-noargs :call-noargs-traced :call-with :call-traced :with-heartbeat :with-timeout :try
+    ;; stdlib batch 2026-09-22 (var-carrying declarations):
+    :last :partition :frequencies
     ;; audit-3 guard additions (every-rule-owner-has-a-narrative):
     :vec :to-set :flatten :zipmap :select-keys
     :update-keys :update-vals :assert-some :assert :assert-eq :name :str-to-keyword

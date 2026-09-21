@@ -513,3 +513,26 @@
       (is (= :future (:parent (by-name :interval-now))))
       (is (= [:_fire-target :_interval-loop] (get-in (by-name :_interval-now-body) [:args :steps]))
           ":interval-now fires once at start, then runs the same loop"))))
+
+
+;; ============================================================================
+;; :with-timeout — the body's value, or a typed timeout
+;; ============================================================================
+
+(deftest with-timeout-returns-the-body-value-in-time
+  (let [f (impls/impl-of :with-timeout)]
+    (is (= 42 (f {:body (delay (fn [] 42)) :timeout-ms (delay 2000)} nil)))))
+
+
+(deftest with-timeout-throws-a-typed-error-past-the-deadline
+  (let [f (impls/impl-of :with-timeout)
+        ex (try (f {:body (delay (fn [] (Thread/sleep 5000) :late)) :timeout-ms (delay 100)} nil)
+                (catch clojure.lang.ExceptionInfo e e))]
+    (is (= :execution-error/timeout (:type (ex-data ex))))
+    (is (= 100 (:timeout-ms (ex-data ex))))))
+
+
+(deftest with-timeout-rethrows-the-body-error-unwrapped
+  (let [f (impls/impl-of :with-timeout)]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"boom"
+          (f {:body (delay (fn [] (throw (ex-info "boom" {})))) :timeout-ms (delay 1000)} nil)))))

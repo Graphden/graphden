@@ -1,6 +1,6 @@
 ;; String manipulation base functions
 ;; str, subs, str-len, str-upper, str-lower, str-trim, str-split, str-join,
-;; str-to-keyword, keyword-to-str
+;; str-to-keyword, name
 
 
 {:namespace "core.strings"
@@ -74,11 +74,6 @@
    :description "Coerce a string into a keyword (Clojure's `keyword`). Nil-safe — returns nil for nil input."
    :args {:string {:type :nullable-text :description "String to convert (nil-safe)."}}
    :return-type :nullable-keyword}
-
-  {:name :keyword-to-str
-   :description "Coerce a keyword into a string without the leading colon (Clojure's `name`)."
-   :args {:keyword {:type :keyword :description "Keyword to convert."}}
-   :return-type :text}
 
   {:name :pr-str
    :description "Print-readable string form of a value (Clojure's `pr-str`). Strings are quoted, keywords prefixed."
@@ -207,6 +202,38 @@
    :args {:string {:type :any :required false :description "String to search. Non-string / nil → false."}
           :pattern {:type :text :description "Regex pattern (Java syntax)."}}
    :return-type :bool}
+
+  {:name :re-groups
+   :description "First match of the regex `:pattern` in `:string` as a list — the whole match at index 0, then one entry per capture group (nil for a group that took no part). nil when nothing matches. `:re-find?` answers only yes/no; this is the extraction."
+   :args {:string {:type :any :required false :description "String to search. Non-string / nil → nil."}
+          :pattern {:type :text :description "Regex pattern (Java syntax), groups in parentheses."}}
+   :return-type [:union :null [:list :nullable-text]]}
+
+  {:name :re-seq
+   :description "Every match of the regex `:pattern` in `:string`, left to right, each in the `:re-groups` shape (whole match, then the groups). Empty list when nothing matches."
+   :args {:string {:type :any :required false :description "String to search. Non-string / nil → empty list."}
+          :pattern {:type :text :description "Regex pattern (Java syntax)."}}
+   :return-type [:list [:list :nullable-text]]}
+
+  {:name :str-index-of
+   :description "Zero-based index of the first occurrence of `:substring` in `:string`; nil when absent (`String.indexOf`)."
+   :args {:string {:type :any :required false :description "String to search. Non-string / nil → nil."}
+          :substring {:type :text :description "What to look for."}}
+   :return-type :nullable-int}
+
+  {:name :str-pad-left
+   :description "`:string` right-aligned in a field `:length` characters wide, the room on the left filled with `:pad` (cycled). Already that long → unchanged. `(str-pad-left \"7\" 3 \"0\")` → \"007\"."
+   :args {:string {:type :text :description "Text to pad."}
+          :length {:type :non-negative-int :description "Field width."}
+          :pad {:type :text :value " " :required false :description "Fill text, cycled; default a space."}}
+   :return-type :text}
+
+  {:name :str-pad-right
+   :description "`:string` left-aligned in a field `:length` characters wide, the room on the right filled with `:pad` (cycled)."
+   :args {:string {:type :text :description "Text to pad."}
+          :length {:type :non-negative-int :description "Field width."}
+          :pad {:type :text :value " " :required false :description "Fill text, cycled; default a space."}}
+   :return-type :text}
 
   {:name :url-encode
    :description "Percent-encode a string for a URL query value (`java.net.URLEncoder`, UTF-8; a space becomes `+`). Nil → \"\"."

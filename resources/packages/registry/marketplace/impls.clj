@@ -56,17 +56,6 @@
     (+ (* 1000000 (cap ma)) (* 1000 (cap mi)) (cap pa))))
 
 
-(defbase semver-latest
-  "The highest version string in `versions` by parsed `[major minor patch]`
-   — nil for an empty list. Pure; the marketplace card's \"latest\" pick."
-  [versions]
-  (->> versions
-       (map str)
-       (remove str/blank?)
-       (sort-by semver/parse-version)
-       last))
-
-
 (defbase moderation-on?
   "Whether this deployment moderates PUBLIC listings (`GRAPHDEN_MARKETPLACE_MODERATION`)."
   []
@@ -160,7 +149,6 @@
    :current-user-label current-user-label
    :loaded-packages loaded-packages
    ;; taint-propagate: answers one of the caller's own version strings
-   :semver-latest {:impl semver-latest :taint-propagate? true}
    :semver-rank semver-rank
    :remote-package-card remote-package-card
    :moderation-on? moderation-on?

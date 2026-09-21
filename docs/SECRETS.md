@@ -141,7 +141,7 @@ diagnostic's type-carrying keys (`:expected`/`:actual`/`:declared`/
 | `core/strings` | All 22 fns propagate (content-passing). |
 | `core/collections` | All 35 fns wrap existing structural rules. |
 | `core/logic` | All 15 fns propagate (passthrough / conditional). |
-| `core/arithmetic` | All 14 fns propagate (`:add` `:sub` `:mul` `:div` `:mod` `:quot` `:neg` `:abs` `:eq` `:neq` `:lt` `:lte` `:gt` `:gte`). `(eq secret 42)` leaks; `:lt` / `:gt` / `:eq` / `:neq` included. |
+| `core/arithmetic` | Every fn propagates (`:add` `:sub` `:mul` `:div` `:mod` `:quot` `:neg` `:abs` `:min` `:max` `:floor` `:ceil` `:sqrt` `:pow` `:neq` `:lt` `:lte` `:gt` `:gte`). `(lt secret 42)` leaks; the comparisons are included. |
 | `core/system` | 15 fns propagate. Bare environment readers (`:jvm-version`, `:env`, etc.) take no user input so taint can't enter — left bare. |
 | `core/hof` | All 13 fns propagate (content-passing by construction: `coll` elements / `init` / the captured `value` flow into the result). |
 | `core/refinements` | The `:ensure-*` narrowers (`:ensure-positive-int`, `:ensure-non-empty-text`) preserve taint structurally — refinement impls carry no `:taint-propagate?` flag. |

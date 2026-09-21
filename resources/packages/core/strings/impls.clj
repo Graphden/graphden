@@ -10,6 +10,7 @@
    taints the result. The propagator only changes type-level
    metadata; impl bodies are unchanged."
   (:require
+    [clojure.math :as math]
     [clojure.pprint :as pp]
     [clojure.string :as str]
     [graphden.executor.defbase :refer [defbase]]
@@ -185,12 +186,6 @@
       :else               default-ret)))
 
 
-(defbase keyword-to-str-fn [keyword]
-  (if (keyword? keyword)
-    (name keyword)
-    (str keyword)))
-
-
 (defbase pr-str-fn
   "Returns a string representation of value for debugging/display."
   [value]
@@ -299,6 +294,57 @@
   (java.net.URLEncoder/encode (str string) "UTF-8"))
 
 
+(defbase re-groups-fn
+  "First match of the regex `pattern` in `string`, as a vector — the
+   whole match first, then one entry per capture group (nil for a group
+   that did not take part). nil when nothing matches or `string` is not
+   a string. Same cached, size-capped compile as `:re-find?`."
+  [string pattern]
+  (when (string? string)
+    (when-let [m (re-find (safe-compile-regex pattern) string)]
+      (if (string? m) [m] (vec m)))))
+
+
+(defbase re-seq-fn
+  "Every match of the regex `pattern` in `string`, each in the `:re-groups`
+   shape (whole match, then the groups). Empty for no match / non-string."
+  [string pattern]
+  (if (string? string)
+    (mapv #(if (string? %) [%] (vec %)) (re-seq (safe-compile-regex pattern) string))
+    []))
+
+
+(defbase str-index-of-fn
+  "Index of the first occurrence of `substring` in `string`, nil when absent."
+  [string substring]
+  (let [i (if (string? string) (String/.indexOf string ^String substring) -1)]
+    (when (>= i 0) i)))
+
+
+(defn- pad-run
+  "`n` characters of `pad`, cycling it — the run a pad is built from."
+  [n pad]
+  (let [p (if (str/blank? (str pad)) " " (str pad))]
+    (subs (str/join (repeat (long (math/ceil (/ n (count p)))) p)) 0 n)))
+
+
+(defbase str-pad-left-fn
+  "`string` right-aligned in a field of `length` characters, the room on
+   the left filled with `pad` (cycled). A string already that long is
+   returned as is."
+  [string length pad]
+  (let [s (str string) n (- (long length) (count s))]
+    (if (pos? n) (str (pad-run n pad) s) s)))
+
+
+(defbase str-pad-right-fn
+  "`string` left-aligned in a field of `length` characters, the room on the
+   right filled with `pad` (cycled)."
+  [string length pad]
+  (let [s (str string) n (- (long length) (count s))]
+    (if (pos? n) (str s (pad-run n pad)) s)))
+
+
 (defbase re-replace-fn
   "Replace every match of the regex `pattern` in `string` with
    `replacement` — `clojure.string/replace` over a compiled pattern
@@ -321,7 +367,7 @@
   ;; downstream type-check refuses to drop the marker.
   ;;
   ;; The handful of fns that genuinely DON'T pass content
-  ;; (`:keyword-to-str`'s input is a `:keyword`, never a text-secret)
+  ;; (`:str-to-keyword`'s output is a `:keyword`, never a text-secret)
   ;; are still annotated, since the propagator is a no-op for plain
   ;; inputs. `:parse-query-string` is now a pure graph composition
   ;; — its taint flows through `:str-split` + `:url-decode`.
@@ -337,7 +383,6 @@
    :str-join           {:impl str-join-fn           :taint-propagate? true}
    :rows->csv          {:impl rows->csv-fn          :taint-propagate? true}
    :str-to-keyword     {:impl str-to-keyword-fn     :return-type-rule str-to-keyword-return-rule :taint-propagate? true}
-   :keyword-to-str     {:impl keyword-to-str-fn     :taint-propagate? true}
    :pr-str             {:impl pr-str-fn             :taint-propagate? true}
    :pprint-str         {:impl pprint-str-fn         :taint-propagate? true}
    :to-str             {:impl to-str-fn             :taint-propagate? true}
@@ -350,4 +395,9 @@
    :str-replace        {:impl str-replace-fn        :taint-propagate? true}
    :re-find?           {:impl re-find?-fn           :taint-propagate? true}
    :re-replace         {:impl re-replace-fn         :taint-propagate? true}
+   :re-groups          {:impl re-groups-fn          :taint-propagate? true}
+   :re-seq             {:impl re-seq-fn             :taint-propagate? true}
+   :str-index-of       {:impl str-index-of-fn       :taint-propagate? true}
+   :str-pad-left       {:impl str-pad-left-fn       :taint-propagate? true}
+   :str-pad-right      {:impl str-pad-right-fn      :taint-propagate? true}
    :url-encode         {:impl url-encode-fn         :taint-propagate? true}})

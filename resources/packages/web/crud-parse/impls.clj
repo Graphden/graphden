@@ -73,13 +73,6 @@
         (re-kw parsed)))))
 
 
-(defbase str-to-uuid
-  [string]
-  (try
-    (java.util.UUID/fromString string)
-    (catch Exception _ nil)))
-
-
 (defbase form-decode
   "Decode an `application/x-www-form-urlencoded` string into a
    `{string string}` map (`ring.util.codec/form-decode`). Single
@@ -107,5 +100,4 @@
 (def impls
   {:resolve-type-fn-id resolve-type-fn-id
    :parse-constraint parse-constraint
-   :str-to-uuid str-to-uuid
    :form-decode {:impl form-decode :taint-propagate? true}})

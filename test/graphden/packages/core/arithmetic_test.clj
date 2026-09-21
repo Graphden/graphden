@@ -36,3 +36,36 @@
       (is (= 5 (f {:number (delay 14/3) :decimals (delay 0)} nil))))
     (testing "a terminating ratio still rounds exactly"
       (is (= 4.3 (f {:number (delay 17/4) :decimals (delay 1)} nil))))))
+
+
+;; ============================================================================
+;; :min / :max / :floor / :ceil / :sqrt / :pow — the bounds-and-roots batch
+;; ============================================================================
+
+(deftest min-max-over-a-list
+  (let [mn (impls/impl-of :min) mx (impls/impl-of :max)]
+    (is (= 1 (mn {:nums (delay [3 1 2])} nil)))
+    (is (= 3 (mx {:nums (delay [3 1 2])} nil)))
+    (is (= 2.5 (mx {:nums (delay [2.5 -1])} nil)))
+    (testing "an empty list is refused with a typed error"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"at least one"
+            (mn {:nums (delay [])} nil))))))
+
+
+(deftest floor-ceil-return-ints
+  (let [fl (impls/impl-of :floor) ce (impls/impl-of :ceil)]
+    (is (= 4 (fl {:number (delay 4.7)} nil)))
+    (is (= -5 (fl {:number (delay -4.2)} nil)))
+    (is (= 5 (ce {:number (delay 4.2)} nil)))
+    (is (= 7 (ce {:number (delay 7)} nil)))
+    (is (instance? Long (fl {:number (delay 4.7)} nil)))))
+
+
+(deftest sqrt-and-pow
+  (let [sq (impls/impl-of :sqrt) pw (impls/impl-of :pow)]
+    (is (= 3.0 (sq {:number (delay 9)} nil)))
+    (is (= 8.0 (pw {:base (delay 2) :exponent (delay 3)} nil)))
+    (is (= 0.5 (pw {:base (delay 2) :exponent (delay -1)} nil)))
+    (testing "a NaN / infinite result is the numeric-overflow error, not a non-number"
+      (is (thrown? clojure.lang.ExceptionInfo (sq {:number (delay -1)} nil)))
+      (is (thrown? clojure.lang.ExceptionInfo (pw {:base (delay 10) :exponent (delay 400)} nil))))))

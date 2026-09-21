@@ -200,13 +200,13 @@ The glue: marry an fns.edn entry (args, return-type, effects, tags) with its imp
 :PROPERTIES:
 :CUSTOM_ID: packages/add
 :FILE: resources/packages/core/arithmetic/impls.clj
-:LINE: 53
+:LINE: 54
 :MINS: 0.7
 :END:
 
 A concrete ~defbase~ base-fn impl — ~(defbase add [nums] (safe-arith + nums :add))~. This is the value ~load-impls-via-eval~ collects and ~fn-def->base-fn-def~ pairs with the ~:add~ entry in fns.edn. Grounds the abstract loader in a real arithmetic primitive.
 
-- source :: [[file:../../../resources/packages/core/arithmetic/impls.clj::(defbase add ][resources/packages/core/arithmetic/impls.clj:53]]
+- source :: [[file:../../../resources/packages/core/arithmetic/impls.clj::(defbase add ][resources/packages/core/arithmetic/impls.clj:54]]
 - see also :: [[file:executor.org::#executor/defbase][defbase]]
 
 * 16. sync-namespaces!
@@ -332,13 +332,13 @@ Where the marketplace's install COUNT comes from (docs/MARKETPLACE.md). A new pi
 :PROPERTIES:
 :CUSTOM_ID: packages/moderate-package-version!
 :FILE: resources/packages/registry/marketplace/impls.clj
-:LINE: 76
+:LINE: 65
 :MINS: 3.4
 :END:
 
 The operator's decision on a public listing (docs/MARKETPLACE.md § 8). Three things to notice: the platform-admin gate sits at the deepest effectful core so no route bypasses it; the read goes through ~registry-shared/platform-base~ — the storage BENEATH the org-scoped decorator, because the operator's own org would hide another org's pending row; and the updated row is raised through core's notification seam (~tc/notify! :package-moderated~), which the tenancy addon turns into the publisher's email. The module's impls file is small on purpose: identity, roster, semver, the origin card and moderation — everything else is graph.
 
-- source :: [[file:../../../resources/packages/registry/marketplace/impls.clj::(defbase moderate-package-version!][resources/packages/registry/marketplace/impls.clj:76]]
+- source :: [[file:../../../resources/packages/registry/marketplace/impls.clj::(defbase moderate-package-version!][resources/packages/registry/marketplace/impls.clj:65]]
 
 * 26. install!
 :PROPERTIES:
@@ -407,13 +407,13 @@ The GIT face: a bundle laid out as one module file per namespace (the fns.edn mo
 :PROPERTIES:
 :CUSTOM_ID: packages/lint
 :FILE: src/graphden/lint/core.clj
-:LINE: 742
-:MINS: 1.8
+:LINE: 777
+:MINS: 2.0
 :END:
 
 The graph's own linter, run over the same loader output at CI time (~bb graph-lint~): duplicate definitions — exact, and after inlining ~_~-private helpers — dead privates (unreferenced, and the cluster behind them), bindings that restate what a fn inherits, siblings that should share a parent, and over-deep chains. One engine over EDN-shape fn-defs, so the editor's per-branch graph is linted by the same code. docs/GRAPH_LINT.md.
 
-- source :: [[file:../../../src/graphden/lint/core.clj::(defn lint][src/graphden/lint/core.clj:742]]
+- source :: [[file:../../../src/graphden/lint/core.clj::(defn lint][src/graphden/lint/core.clj:777]]
 
 * 32. lint-branch
 :PROPERTIES:

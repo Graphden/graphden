@@ -129,8 +129,8 @@
           :coll {:parent :filter :args {:pred :_xp-entry-optional? :coll :_xp-entries}}}}
 
   {:name :_xp-entry-name-str
-   :parent :keyword-to-str
-   :args {:keyword :_xp-entry-name}}
+   :parent :name
+   :args {:value :_xp-entry-name}}
 
   {:name :_xp-arg-slot-id-text
    :parent :to-str
@@ -406,7 +406,7 @@
   ;; rides on the same request), so the page is the last N secret flows,
   ;; not the secret flows among the last N.
   {:name :_partial-exec-hist-rows
-   :parent :identity
+   :parent :const
    :args {:value :_partial-exec-hist-all-rows}}
 
   {:name :_partial-eh-row-lock

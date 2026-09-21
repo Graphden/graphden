@@ -517,7 +517,7 @@
    :description "HOF callback over a malformed key — `{:arg (name k) :raw-ref (get args[k] :ref)}`. `:item` is the key; `:_execute-arg-ref` reads the ref via the same `:item` capture."
    :parent :zipmap
    :args {:keys [{:value :arg} {:value :raw-ref}]
-          :vals [{:parent :keyword-to-str :args {:keyword {:as :item}}}
+          :vals [{:parent :name :args {:value {:as :item}}}
                  :_execute-arg-ref]}}
 
   {:name :_execute-malformed

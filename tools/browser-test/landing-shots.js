@@ -152,21 +152,44 @@ async function diffShots(browser) {
     });
     return { top, bottom, right, canvasTop: canvas.top, canvasBottom: canvas.bottom };
   });
+  // Keep the cards legible: the canvas is 1400 wide, so only zoom out
+  // while something drawn falls off the right edge of the CLIP below.
   for (let i = 0; i < 5; i++) {
     const b = await drawnBox();
-    if (b.top >= b.canvasTop + 8 && b.bottom <= b.canvasBottom - 8 && b.right <= 1000) break;
+    if (b.top >= b.canvasTop + 8 && b.bottom <= b.canvasBottom - 8 && b.right <= 1380) break;
     await page.evaluate(() => {
       gv.setZoom(gv.zoom() * 0.85, { x: gv.width() / 2, y: gv.height() / 2 });
     });
     await sleep(600);
   }
+  // …and zoom IN when the fit left the cards small: the reader has to
+  // read the strikethrough on the url card, not guess it.
+  {
+    // gv's zoom anchor is canvas-local, the rects are viewport ones.
+    const anchor = await page.evaluate(() => {
+      const c = document.getElementById('graph-container').getBoundingClientRect();
+      const r = document.querySelector('.node-overlay[data-fn-name="notify"]').getBoundingClientRect();
+      return { x: r.left - c.left, y: r.top - c.top };
+    });
+    // Zoom about the notify card's own corner, so it stays where it is
+    // and everything else grows away from it, up to the canvas edge.
+    // The fit spends the width on the value leaf far to the right; the
+    // cards the section talks about are the changed one and its ghost.
+    // 1.35× keeps those legible and lets the leaf run off the edge.
+    const f = 1.35;
+    if (f > 1.05) {
+      await page.evaluate(({ f, anchor }) => { gv.setZoom(gv.zoom() * f, anchor); }, { f, anchor });
+      await sleep(800);
+    }
+  }
+  const canvasRight = await page.evaluate(() => document.getElementById('graph-container').getBoundingClientRect().right);
   const box = await drawnBox();
   // From the Δ chip down to the lowest drawn thing.
   const y = 120;
   const h = Math.max(345, Math.min(900 - y, Math.ceil(box.bottom) + 16 - y));
   console.log('canvas clip', JSON.stringify({ y, h, box }));
   await page.screenshot({ path: path.join(OUT, 'landing-diff-canvas.png'),
-    clip: { x: 0, y, width: 1012, height: h } });
+    clip: { x: 0, y, width: Math.min(Math.floor(canvasRight), Math.ceil(box.right) + 16), height: h } });
   await page.evaluate((br) => showReviewDialog(br), BR);
   await page.waitForSelector('.branch-diff-modal .bd-review-changes', { timeout: 30000 });
   await page.addStyleTag({ content: '.branch-diff-modal{width:680px!important;max-width:680px!important}' });

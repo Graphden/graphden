@@ -26,6 +26,37 @@
    :args {:nums {:type [:list :numeric] :description "Vector of numbers; first is the dividend."}}
    :return-type :numeric}
 
+  {:name :min
+   :description "Smallest of a vector of numbers (Clojure's `min`). Throws on an empty vector."
+   :args {:nums {:type [:list :numeric] :description "Vector of numbers; at least one."}}
+   :return-type :numeric}
+
+  {:name :max
+   :description "Largest of a vector of numbers (Clojure's `max`). Throws on an empty vector."
+   :args {:nums {:type [:list :numeric] :description "Vector of numbers; at least one."}}
+   :return-type :numeric}
+
+  {:name :floor
+   :description "Largest integer ≤ `:number` (`Math/floor`), as an int."
+   :args {:number {:type :numeric :description "Number to round down."}}
+   :return-type :int}
+
+  {:name :ceil
+   :description "Smallest integer ≥ `:number` (`Math/ceil`), as an int."
+   :args {:number {:type :numeric :description "Number to round up."}}
+   :return-type :int}
+
+  {:name :sqrt
+   :description "Square root (`Math/sqrt`). A negative input throws `:execution-error/numeric-overflow` (the result would be NaN) rather than returning a non-number."
+   :args {:number {:type :numeric :description "Non-negative number."}}
+   :return-type :numeric}
+
+  {:name :pow
+   :description "`:base` raised to `:exponent` (`Math/pow`), as a double. Overflow to infinity throws `:execution-error/numeric-overflow`."
+   :args {:base {:type :numeric :description "Base."}
+          :exponent {:type :numeric :description "Exponent (may be fractional or negative)."}}
+   :return-type :numeric}
+
   {:name :mod
    :description "Remainder of `dividend / divisor` (Clojure's `mod`, follows divisor sign)."
    :args {:dividend {:type :numeric :description "Number being divided."}

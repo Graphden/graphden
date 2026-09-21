@@ -48,7 +48,7 @@
   ;; wraps each in `constantly` for reitit's `(handler request)`
   ;; contract. Slots are typed as response shapes so the type-checker
   ;; sees the contract directly without going through a
-  ;; `:make-handler`-per-slot intermediary.
+  ;; `:constantly`-per-slot intermediary.
   {:name :ring-create-default-handler
    :description "Build a Ring fallback handler from the three slot-specific Ring responses (404 / 405 / 406). Each response is wired into reitit's default-handler map and wrapped in `constantly` at the adapter."
    :args {:not-found-response          {:type :ring-response-shape
@@ -63,7 +63,7 @@
   ;; final Ring callable that http-kit invokes per request.
   ;;
   ;; `:default-handler` is `:any` (not `:fn`): the fn-graph bound here
-  ;; evaluates to a Ring callable (built via `:make-handler` + reitit's
+  ;; evaluates to a Ring callable (built via `:constantly` + reitit's
   ;; `create-default-handler`) and we want to pass THAT fn object
   ;; through. `:fn` would trigger `hof-wrap` and re-wrap the fn-graph
   ;; — wrong here, because the value IS already a callable.

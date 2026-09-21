@@ -1,5 +1,5 @@
 ;; System information and Ring response primitives
-;; ring-response, make-handler, to-json-string, jvm-info, current-time-ms
+;; ring-response, to-json-string, jvm-info, current-time-ms
 
 
 {:namespace "core.system"
@@ -50,7 +50,7 @@
   ;; `:headers` flows through keyword-keyed (JSONB roundtrip keywordizes
   ;; literal map keys). The `:http-server` adapter (web/http/impls.clj)
   ;; stringifies once on the way to http-kit, so no in-graph
-  ;; `:stringify-map-keys` step is needed here.
+  ;; `:update-keys` + `:name` step is needed here.
 
   {:name :_ring-response--w-status
    :parent :assoc
@@ -83,18 +83,6 @@
           :key {:value :body}
           :value {:as :body :type :any}}
    :return-type :ring-response-shape}
-
-  ;; Ring-handler shape over `:constantly` — the result is a one-arg
-  ;; callable that returns `:response` for any request, ignoring the
-  ;; input. Used for reitit's default-handler trio (`:not-found`,
-  ;; `:method-not-allowed`, `:not-acceptable`) where the slot expects a
-  ;; raw Clojure callable; per-route handlers use `:assoc-fn` instead.
-  ;; Pure rename of `:constantly`'s `:value` arg to `:response` — no
-  ;; new impl, just a semantic alias.
-  {:name :make-handler
-   :description "Ring-handler shape over `:constantly` — binds `:response` so the resulting callable returns it for every request, ignoring the input."
-   :parent :constantly
-   :args {:value {:as :response}}}
 
   {:name :to-json-string
    :description "Serialize a Clojure value to a JSON string."
@@ -456,6 +444,55 @@
    :return-type :any
    :effects #{:time}}
 
+  {:name :random
+   :description "A uniformly random double in [0, 1) (`Math/random`). `:random` effect."
+   :args {}
+   :return-type :probability
+   :effects #{:random}}
+
+  {:name :random-uuid
+   :description "A fresh random (v4) UUID. `:random` effect — `:parse-uuid` is the pure read of one."
+   :args {}
+   :return-type :uuid
+   :effects #{:random}}
+
+  {:name :log
+   :description "Log `:message` + `:data` at `:level` (`clojure.tools.logging/logp`) — `:log-warn` for the other levels. Returns nil."
+   :args {:level {:type [:refine :text {:constraint [:in #{"trace" "debug" "info" "warn" "error"}]}]
+                  :value "info" :required false
+                  :description "Log level name."}
+          :message {:type :text :description "Human-readable line."}
+          :data {:type :jsonb :value {} :required false
+                 :description "Structured context map logged alongside the message."}}
+   :return-type :null
+   :effects #{:io}}
+
+  ;; --- dates & time: the graph's wall-clock value is epoch milliseconds
+  ;;     (`:current-time-ms`); these three move text ↔ ms ↔ ms.
+  {:name :instant-parse
+   :description "ISO-8601 date-time text with an offset — `2026-09-21T10:15:00Z`, `2026-09-21T13:15:00+03:00` — to epoch milliseconds (`java.time.OffsetDateTime/parse`). Malformed text throws."
+   :args {:s {:type :text :description "ISO-8601 date-time with a zone offset or Z."}}
+   :return-type :int}
+
+  {:name :instant-format
+   :description "Epoch milliseconds to text under a `DateTimeFormatter` pattern, rendered in `:zone` — `yyyy-MM-dd`, `HH:mm`, `yyyy-MM-dd'T'HH:mm:ssXXX` (the default: ISO with offset)."
+   :args {:ms {:type :int :description "Epoch milliseconds (`:current-time-ms`, `:instant-parse`)."}
+          :pattern {:type :text :value "yyyy-MM-dd'T'HH:mm:ssXXX" :required false
+                    :description "java.time DateTimeFormatter pattern."}
+          :zone {:type :text :value "UTC" :required false
+                 :description "Zone id the text is rendered in: `UTC`, `Europe/Berlin`, `+03:00`."}}
+   :return-type :text}
+
+  {:name :instant-plus
+   :description "Epoch milliseconds moved by `:amount` `:unit`s — negative to go back. Calendar-aware in `:zone`, so `1 months` lands on the same day next month and `1 days` survives a DST change."
+   :args {:ms {:type :int :description "Epoch milliseconds to start from."}
+          :amount {:type :int :description "How many units; negative subtracts."}
+          :unit {:type [:refine :text {:constraint [:in #{"millis" "seconds" "minutes" "hours" "days" "weeks" "months" "years"}]}]
+                 :description "ChronoUnit name."}
+          :zone {:type :text :value "UTC" :required false
+                 :description "Zone the calendar arithmetic happens in."}}
+   :return-type :int}
+
   {:name :current-time-ms
    :description "Wall-clock milliseconds since Unix epoch."
    :args {}
@@ -634,6 +671,21 @@
   ;; presets (same ladder shape as :http-request / :route). Deploy
   ;; verification uses the build-time hash below instead (single source
   ;; of truth across front- and back-end).
+  {:name :parse-float
+   :description "Parse a decimal number out of `:s` (`Double/parseDouble`) — `\"3.14\"`, `\"-2e3\"`. Rejects anything else with NumberFormatException; `:parse-int` is the integer sibling."
+   :args {:s {:type :text :description "Text containing the number literal."}}
+   :return-type :numeric}
+
+  {:name :base64-encode
+   :description "Standard Base64 of the UTF-8 bytes of `:s` (`java.util.Base64`, with padding)."
+   :args {:s {:type :text :description "Text to encode."}}
+   :return-type :text}
+
+  {:name :base64-decode
+   :description "Text from standard Base64 (`java.util.Base64`); the bytes are read as UTF-8. Malformed input throws."
+   :args {:s {:type :text :description "Base64 text."}}
+   :return-type :text}
+
   {:name :digest-hex
    :description "Lower-case hex digest of a UTF-8 string under `:algorithm` (any name the JVM's MessageDigest providers resolve — \"SHA-256\", \"SHA-512\", \"SHA-1\", \"MD5\", …; unknown names throw at runtime). Prefer the `:sha256-hex` preset unless the algorithm genuinely varies."
    :args {:algorithm {:type :non-blank-text
@@ -694,19 +746,17 @@
    :parent :subs
    :args {:string :build-hash-frontend :start 0 :end 12}}
 
-  ;; Invoke a value (that happens to be a Clojure fn) with one arg.
-  ;; `:func :any` — the value is deref'd and used as-is. Use this when
-  ;; :func is a fn-graph that PRODUCES a callable (e.g. :_router
-  ;; returns a reitit ring-handler).
+  ;; Invoke a value that is ALREADY a Clojure callable with one arg. Use
+  ;; this when :func is a fn-graph that PRODUCES a callable (e.g. :_router
+  ;; returns a reitit ring-handler; `:fix` hands the step `:self`).
   ;;
-  ;; NOTE: the slot's `:any` type is load-bearing for the executor's
-  ;; runtime dispatch — `:fn`-typed slots trigger `hof-wrap` (treat
-  ;; the bound fn-graph as something to wrap into a callable);
-  ;; `:any`-typed slots pass the value through as-is. Type-system
-  ;; polymorphism on this slot would require splitting the slot's
-  ;; runtime-dispatch tag from its type-check shape (separate task).
-  ;; Type-check still gets call-site narrowing via the rich-types
-  ;; ref re-firing mechanism (`effective-ref-return`).
+  ;; `:invoke` and `:call` share one impl (`invoke-fn`); they differ in
+  ;; the slot's TYPE, which is the executor's dispatch tag: `:call`'s
+  ;; `:func` is a fn-graph the runtime hof-wraps into a callable, while
+  ;; `:invoke`'s `:func` is typed `[:fn {:arg a} b]` and the runtime
+  ;; recognises a callable-PRODUCER (`produces-callable?`) and derefs the
+  ;; produced fn instead of wrapping the graph. The type-vars give the
+  ;; consumer `b`, the produced fn's return.
   {:name :invoke
    :description "Invoke a value that's already a Clojure callable with one argument. Polymorphic via type-vars `a`/`b`: a fn-graph whose `:return-type` is itself a fn-type produces the callable; type-checker unifies and propagates `b` from the produced fn's return through to consumers. Runtime detects callable-producer via `:produces-callable?` and uses thunk semantics."
    :args {:func {:type [:fn {:arg a} b]

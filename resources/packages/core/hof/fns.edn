@@ -6,7 +6,7 @@
  :description "Higher-order primitives — map/filter/reduce/comp/partial and friends. The `:func` slot is `:fn`-typed so the executor passes a HOF-wrapped callable, not a value."
  :fns
  [{:name :map
-   :description "Apply a callable to each item in a collection (Clojure's `map`). When `:coll` is omitted, returns a transducer."
+   :description "Apply a callable to each item in a collection (Clojure's `map`), eagerly — `:coll` is required. The transducer form is `:map-xf`."
    ;; Type vars `a` (input element) and `b` (output element):
    ;;   :func ≡ a → b,  :coll ≡ [list a],  return ≡ [list b].
    ;; `:func` carries NO effect constraint (3-element fn-type):

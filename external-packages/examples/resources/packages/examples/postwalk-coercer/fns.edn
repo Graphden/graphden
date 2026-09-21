@@ -45,7 +45,7 @@
    :description "Cond with keyword? guard — turns keywords into strings, else passthrough."
    :parent :cond
    :args {:clauses [{:parent :is-a? :args {:type {:value :keyword}}}
-                    {:parent :keyword-to-str :args {:keyword {:as :value}}}
+                    {:parent :name :args {:value {:as :value}}}
                     true
                     {:as :value}]}}
 

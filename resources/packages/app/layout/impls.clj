@@ -30,7 +30,8 @@
     [graphden.layout.builder-helpers :as bh]
     [graphden.layout.core :as layout]
     [graphden.layout.graph :as lgraph]
-    [graphden.layout.strip-facts :as strip-facts]))
+    [graphden.layout.strip-facts :as strip-facts]
+    [graphden.versioning.branch-local :as branch-local]))
 
 
 (defn- load-graph-entities
@@ -108,6 +109,21 @@
               (and optional? (not requiredByName)) (conj "optional"))))
 
 
+(defbase _fn-branch-local-seed
+  "Whether `fn-id` is branch-local and who made it so — `{:own bool
+   :seed \"name\"}` when the fn or an ancestor carries `:branch-local?
+   true` (`branch-local/branch-local-seed`, the walk the card's 📍 strip
+   reads through layout strip-facts), nil when nothing in the chain
+   does. The Inspector's Overview prints it so compact cards — which
+   hide the metadata strips — still show and set the flag."
+  [fn-id]
+  (when fn-id
+    (let [fns-by-id (into {} (map (juxt :id identity)) (:fns (load-graph-entities ctx)))
+          seed (branch-local/branch-local-seed fns-by-id fn-id)]
+      (when seed
+        {:own (= (:id seed) fn-id) :seed (:name seed)}))))
+
+
 (defbase _fn-slot-seals
   "The seals on every slot of `fn-id`'s inheritance chain, keyed by the
    slot's effective name — the Inspector's Bindings tab prints the
@@ -135,7 +151,8 @@
 
 
 (def impls
-  {:_fn-slot-seals _fn-slot-seals
+  {:_fn-branch-local-seed _fn-branch-local-seed
+   :_fn-slot-seals _fn-slot-seals
    :_load-graph-cached _load-graph-cached
    :_parse-layout-body _parse-layout-body
    :_layout-build-apply _layout-build-apply

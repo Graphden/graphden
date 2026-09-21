@@ -799,7 +799,7 @@
             {:id "09"
              :slug "higher-order-functions"
              :chapter "Composing"
-             :version 2
+             :version 3
              :title "Higher-order functions"
              :steps
              [{:title "A slot that wants a function"
@@ -864,13 +864,17 @@
                :check {:kind "fn-parent" :name "tutorial-upper" :parent "str-upper"}
                :creates {:type "fn" :name "tutorial-upper"}}
               {:title "tutorial-upper is open"
-               :body "Its card ends in a signature strip: the return type, and after it [[λ derived]] — the fn's CALL-SITE parameters."
+               :body "Your own fn now — the one whose row you may edit. (With Details on, its card's signature strip would also end in a λ chip; the Inspector carries the same in every view.)"
                :target nil
                :check {:kind "selected" :name "tutorial-upper"}}
+              {:title "Back to the Overview"
+               :body "The Inspector is still on the Runs tab from the last step. Click [[Overview]] — it lists what the fn row carries: parent, return type, effects, and two rows the card's compact view hides: [[Call-site params]] and [[Merge]]."
+               :target "#gd-insp-tab-overview"
+               :check {:kind "dom" :selector ".gd-insp-row[data-action=\"lambda-params\"]"}}
               {:title "Say what a caller fills"
-               :body "When a HOF hands this fn its argument, the compile has to know WHICH free arg receives it — derived works with one candidate and refuses with several. Say it: click [[λ derived]], choose [[These, in order]], tick [[string]], then [[Save]]. The chip reads λ string: string is the per-call input, anything else the fn has stays captured from the graph. ([[None — []]] is what a route handler declares: no per-call input at all.)"
-               :target ".node-overlay[data-fn-name=\"tutorial-upper\"] .lambda-params-chip"
-               :targets [".node-overlay[data-fn-name=\"tutorial-upper\"] .lambda-params-chip" ".arg-value-edit-popover input[data-lambda-name=\"string\"]" ".arg-value-edit-popover"]
+               :body "When a HOF hands this fn its argument, the compile has to know WHICH free arg receives it — derived works with one candidate and refuses with several. Say it: click the [[Call-site params]] row in the Inspector, choose [[These, in order]], tick [[string]], then [[Save]]. The row reads λ string: string is the per-call input, anything else the fn has stays captured from the graph. ([[None — []]] is what a route handler declares: no per-call input at all.)"
+               :target ".gd-insp-row[data-action=\"lambda-params\"]"
+               :targets [".gd-insp-row[data-action=\"lambda-params\"]" ".arg-value-edit-popover input[data-lambda-name=\"string\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-field" :name "tutorial-upper" :field "lambda-params" :value ["string"]}}
               {:title "That's a HOF"
                :body "One slot type (:fn …) changes everything: the argument is passed unrun and the impl drives it. The written lesson 09 goes further — callables that take SEVERAL arguments are matched by NAME, closure capture, and the λ declaration you just made in fns.edn form. Click [[Finish]] to clean up or keep tutorial-map."

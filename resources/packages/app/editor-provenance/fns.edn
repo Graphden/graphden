@@ -1985,6 +1985,84 @@
                                                [:span {:class "gd-insp-v gd-insp-pure"} "pure"]]}
                     {:value true} {:value [:span {:hidden "1"}]}]}}
 
+  ;; --- Call-site params + Merge: the two fn-row FLAGS a composed fn
+  ;;     carries (`:lambda-params`, `:branch-local?`). The card's strips
+  ;;     show them too, but compact cards (the default) hide the
+  ;;     return-type strip and its λ chip — the Inspector is where every
+  ;;     reader can see and, when they own the fn, set them: the rows
+  ;;     carry `data-action` and editor-inspector.js opens the same
+  ;;     popovers editor-edit-modes-flags.js gives the strips.
+  {:name :_iov-lambda
+   :parent :get :args {:coll :_insp-row :key {:value :lambda-params} :default nil}}
+  {:name :_iov-lambda-text
+   :description "`derived` (nil), `[] — everything captured` ([]), or the names in order."
+   :parent :cond
+   :args {:clauses [{:parent :nil? :args {:value :_iov-lambda}} {:value "derived"}
+                    {:parent :empty? :args {:coll {:ref :_iov-lambda :type [:list :any]}}} {:value "[] — everything captured"}
+                    {:value true} {:parent :str-join
+                                   :args {:coll {:ref :_iov-lambda :type [:list :any]} :separator {:value ", "}}}]}}
+  {:name :_iov-lambda-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:class "gd-insp-row gd-insp-flag-row"
+                                       :data-action "lambda-params"
+                                       :title "What a HOF or a route fills per call when it hands this fn over as a callable"}}
+                         :key {:value :data-fn-id}
+                         :value {:parent :to-str :args {:value :_insp-fn-id}}}}
+          :children [{:value [:span {:class "gd-insp-k"} "Call-site params"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "gd-insp-v gd-insp-flag"}}
+                             :children [{:parent :str :args {:parts ["λ " :_iov-lambda-text]}}]}}]}}
+
+  {:name :_iov-bl
+   :description "`{:own :seed}` when branch-local is in effect, nil otherwise."
+   :parent :_fn-branch-local-seed
+   :args {:fn-id {:ref :_insp-fn-id :type :nullable-uuid}}}
+  {:name :_iov-bl-own?
+   :parent :get :args {:coll :_iov-bl :key {:value :own} :default false}}
+  {:name :_iov-bl-seed
+   :parent :get :args {:coll :_iov-bl :key {:value :seed} :default nil}}
+  {:name :_iov-bl-text
+   :parent :cond
+   :args {:clauses [{:parent :nil? :args {:value :_iov-bl}} {:value "merges across branches"}
+                    :_iov-bl-own? {:value "branch-local"}
+                    {:value true} {:parent :str :args {:parts ["branch-local — inherited from " :_iov-bl-seed]}}]}}
+  {:name :_iov-bl-state
+   :parent :cond
+   :args {:clauses [{:parent :nil? :args {:value :_iov-bl}} {:value "off"}
+                    :_iov-bl-own? {:value "own"}
+                    {:value true} {:value "inherited"}]}}
+  {:name :_iov-merge-attrs
+   :parent :assoc
+   :args {:map {:parent :assoc
+                :args {:map {:parent :assoc
+                             :args {:map {:value {:class "gd-insp-row gd-insp-flag-row"
+                                                  :data-action "branch-local"
+                                                  :title "Whether this fn's version rows ride a merge to other branches"}}
+                                    :key {:value :data-fn-id}
+                                    :value {:parent :to-str :args {:value :_insp-fn-id}}}}
+                       :key {:value :data-state}
+                       :value :_iov-bl-state}}
+          :key {:value :data-seed}
+          :value {:parent :to-str :args {:value :_iov-bl-seed}}}}
+  {:name :_iov-merge-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs :_iov-merge-attrs
+          :children [{:value [:span {:class "gd-insp-k"} "Merge"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "gd-insp-v gd-insp-flag"}}
+                             :children [{:parent :str :args {:parts ["📍 " :_iov-bl-text]}}]}}]}}
+  {:name :_iov-lambda-row-shown
+   :parent :if
+   :args {:test :_iov-has-parents? :then :_iov-lambda-row :else {:value [:span {:hidden "1"}]}}}
+  {:name :_iov-merge-row-shown
+   :parent :if
+   :args {:test :_iov-has-parents? :then :_iov-merge-row :else {:value [:span {:hidden "1"}]}}}
+
   ;; --- Assembly: the three rows, or the empty note when there is
   ;;     nothing to show (no parents, no registry entry).
   {:name :_iov-anything?
@@ -1994,7 +2072,8 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "gd-insp-overview"}}
-          :children [:_iov-parents-row :_iov-returns-row :_iov-effects-row]}}
+          :children [:_iov-parents-row :_iov-returns-row :_iov-effects-row
+                     :_iov-lambda-row-shown :_iov-merge-row-shown]}}
   {:name :_iov-full
    :parent :if
    :args {:test :_iov-anything?

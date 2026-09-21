@@ -17,7 +17,7 @@
  "fn-defs" {:version 1, :steps "bfff047f62413acac69d1c1eea425aa04b338a03"}
  "free-arguments" {:version 1, :steps "e14df1852f4b2d13afcfdf4615375a33f8ade5cb"}
  "grants" {:version 1, :steps "c1e52862bd04611d01a85605921838e90b616e4b"}
- "higher-order-functions" {:version 2, :steps "a195a742a1cb7cc5d5fd9391fe1fa6875e0589ae"}
+ "higher-order-functions" {:version 3, :steps "809c738298114944a5a04ef0b3c5f05f63b0e909"}
  "keyboard-and-accessibility" {:version 1, :steps "7d9d89e48bd24849fbfedb7018def98089119a05"}
  "lists" {:version 2, :steps "3afcdab60f81d8e0cf81231342d2cec0e0527f5e"}
  "marketplace-themes-keymaps" {:version 1, :steps "bb66be175666cc0fce08f1ed61ef5a320cee0a72"}

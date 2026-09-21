@@ -358,3 +358,26 @@
       (is (re-find #"Tests: \d+ on this branch — \d+ passed, \d+ failed, \d+ never ran" body))
       (is (or (str/includes? body "bd-verif-runs") (str/includes? body "bd-verif-empty"))
           "either the runs list or its empty note"))))
+
+
+(deftest inspector-overview-carries-the-fn-row-flags
+  ;; Compact cards (the default) hide the return-type strip and its λ chip,
+  ;; so the Overview is where every reader sees — and an owner sets — the
+  ;; two fn-row flags. Rows carry `data-action` for editor-inspector.js.
+  (testing "a fn under a sticky-local ancestor: inherited, seed named; no lambda-params → derived"
+    (let [body (body-of :_partial-inspector-overview-handler
+                        {"fn-id" (str (ga/fn-id :web-server))})]
+      (is (str/includes? body "data-action=\"lambda-params\""))
+      (is (str/includes? body "λ derived"))
+      (is (str/includes? body "data-action=\"branch-local\""))
+      (is (str/includes? body "data-state=\"inherited\""))
+      (is (str/includes? body "branch-local — inherited from http-server"))))
+  (testing "a declared lambda-params list is printed in order"
+    (let [body (body-of :_partial-inspector-overview-handler
+                        {"fn-id" (str (ga/fn-id :list-fn-versions-handler))})]
+      (is (str/includes? body "λ storage-query, request, default"))
+      (is (str/includes? body "merges across branches"))))
+  (testing "a base-fn carries neither row"
+    (let [body (body-of :_partial-inspector-overview-handler
+                        {"fn-id" (str (ga/fn-id :add))})]
+      (is (not (str/includes? body "data-action=\"lambda-params\""))))))

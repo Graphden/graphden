@@ -196,6 +196,11 @@ function gdEscHtml(s) {
           if (typeof gdAppendFnUsages === 'function') {
             gdAppendFnUsages(host, fnId);
           }
+          // The Overview's λ / 📍 rows open the flag popovers on a fn the
+          // reader may edit (editor-edit-modes-flags.js).
+          if (typeof gdBindInspectorFlagRows === 'function') {
+            gdBindInspectorFlagRows(host);
+          }
         }
       })
       .catch(() => {

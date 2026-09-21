@@ -21,7 +21,7 @@ const {
   runWithEffectAck, finishAndDelete, tourTitle,
   bindOptionalArgChip, appendFnRefViaChip, createRecordType,
   clickTourAdvance, waitTourClosed, appendSeqItemViaEdge, bindSeqAnchorPlaceholder,
-  deleteBoundValue, setLambdaParamsViaChip,
+  deleteBoundValue, setLambdaParamsViaInspector,
 } = require('./tutorial-tour-helpers');
 
 (async () => {
@@ -218,8 +218,10 @@ const {
     await filterAndSelect(page, 'str-upper', 'str-upper');
     await waitTourTitle(page, 'Extend it', 150000);
     await extendViaRowActions(page, 'tutorial-upper', 'str-upper');
+    await waitTourTitle(page, 'Back to the Overview', 150000);
+    await page.evaluate(() => document.getElementById('gd-insp-tab-overview').click());
     await waitTourTitle(page, 'Say what a caller fills', 150000);
-    await setLambdaParamsViaChip(page, 'tutorial-upper', ['string']);
+    await setLambdaParamsViaInspector(page, 'tutorial-upper', ['string']);
     await waitTourTitle(page, "That's a HOF", 150000);
     const upperIdx = await api(page, 'GET', '/api/graph/entities?scope=search&q=tutorial-upper');
     const shout = (upperIdx.fns || []).find((f) => f.name === 'tutorial-upper');

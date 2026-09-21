@@ -175,13 +175,13 @@ captured callables). Declare the contract on the callable:
  ...}
 ```
 
-In the editor the declaration is the **λ chip** at the end of a
-composed fn's signature strip (the `→ type` line at the bottom of
-its card): `λ derived` until you say otherwise, `λ []` for
-"everything captured", `λ request` for a named list. Click it on a
-fn you own: **Derived** / **None — []** / **These, in order** with
-a tick-box per free arg (the order you tick is the order they are
-filled). Clearing back to *Derived* is a Save away.
+In the editor the declaration is the **Call-site params** row of
+the Inspector's Overview (and, with *Details* on, the **λ chip** at
+the end of the card's signature strip): `λ derived` until you say
+otherwise, `λ []` for "everything captured", `λ request` for a named
+list. Click it on a fn you own: **Derived** / **None — []** / **These,
+in order** with a tick-box per free arg (the order you tick is the
+order they are filled). Clearing back to *Derived* is a Save away.
 
 Without that explicitness, a Ring handler whose ref chain happens to mention
 `:request` would have `:request` swallowed as the one-shot
@@ -250,10 +250,10 @@ in your base-fn impl and the dispatch picks the right behavior.
    the impl drives it.
 7. `str-upper` is package-owned, so make a callable you can shape:
    filter for `str-upper`, `⋯` → **Extend** → `tutorial-upper` →
-   **Save**. Its card ends in a signature strip, and after the return
-   type sits `λ derived`.
-8. Click `λ derived`, choose **These, in order**, tick `string`,
-   **Save**. The chip reads `λ string`: when a HOF hands
+   **Save**. The Inspector's Overview lists **Call-site params:
+   λ derived**.
+8. Click that row, choose **These, in order**, tick `string`,
+   **Save**. It reads `λ string`: when a HOF hands
    `tutorial-upper` its argument, `string` receives it; anything
    else the fn had stays captured from the graph. With one free arg
    *derived* would have found the same answer — with two it would

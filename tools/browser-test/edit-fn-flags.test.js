@@ -226,6 +226,50 @@ async function waitItems(page, name, expected) {
     await page.keyboard.press('Escape');
     console.log('  λ: derived → string → [] → derived, empty named list refused');
 
+    // Compact cards (the DEFAULT for a reader; e2e contexts opt into full
+    // cards) hide the return-type strip and its λ chip — the Inspector
+    // Overview must carry both flags and open the same popovers.
+    // The e2e context opts every page into full cards (edit-test-helpers);
+    // flip the body class the way editor-shell.js does for a compact reader.
+    await openCanvas(page, SHOUT, '.node-overlay[data-fn-name="' + SHOUT + '"]');
+    await page.waitForSelector('.gd-insp-flag-row[data-action="lambda-params"]', {timeout: 30000});
+    await page.evaluate(() => document.body.classList.add('gd-cards-compact'));
+    const compact = await page.evaluate(() => {
+      const chip = document.querySelector('.lambda-params-chip');
+      const vis = (el) => !!el && el.getClientRects().length > 0;
+      const rows = Array.from(document.querySelectorAll('.gd-insp-flag-row')).map((r) => ({
+        action: r.dataset.action, text: r.textContent.trim(), editable: r.classList.contains('gd-insp-editable'),
+        state: r.dataset.state}));
+      return {compactOn: document.body.classList.contains('gd-cards-compact'), chipVisible: vis(chip), rows};
+    });
+    assert(compact.compactOn && !compact.chipVisible, 'compact cards hide the strip chip: ' + JSON.stringify(compact));
+    const lrow = compact.rows.find((r) => r.action === 'lambda-params');
+    const mrow = compact.rows.find((r) => r.action === 'branch-local');
+    assert(lrow && /λ derived/.test(lrow.text) && lrow.editable, 'the Inspector shows Call-site params, editable: ' + JSON.stringify(lrow));
+    assert(mrow && /merges across branches/.test(mrow.text) && mrow.state === 'off' && mrow.editable,
+      'the Inspector shows Merge, editable: ' + JSON.stringify(mrow));
+    await page.click('.gd-insp-flag-row[data-action="lambda-params"]');
+    await page.waitForSelector('.arg-value-edit-popover .lambda-params-edit', {timeout: 5000});
+    await page.evaluate(() => {
+      const r = document.querySelector('.arg-value-edit-popover input[name="lp-mode"][value="none"]');
+      r.checked = true; r.dispatchEvent(new Event('change', {bubbles: true}));
+    });
+    err = await saveInlinePopover(page);
+    assert(err === '', 'saving from the Inspector row works: ' + err);
+    await page.waitForFunction(() => /λ \[\]/.test(document.querySelector('.gd-insp-flag-row[data-action="lambda-params"]')?.textContent || ''),
+      null, {timeout: 30000, polling: 200});
+    row = await rowOf(page, shout);
+    assert(JSON.stringify(row['lambda-params']) === '[]', 'the fn row carries [] after the Inspector save');
+    await page.click('.gd-insp-flag-row[data-action="branch-local"]');
+    await page.waitForSelector('.arg-value-edit-popover input[data-branch-local="toggle"]', {timeout: 5000});
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => document.body.classList.remove('gd-cards-compact'));
+    await openCanvas(page, SHOUT, '.node-overlay[data-fn-name="' + SHOUT + '"] .lambda-params-chip');
+    err = await setLambda(page, SHOUT, 'derived');
+    assert(err === '', 'back to derived from the card: ' + err);
+    await waitChip(page, SHOUT, 'derived');
+    console.log('  compact: the Inspector rows carry λ / 📍 and open the popovers');
+
     // ===================================================================
     // 📍 — branch-local: off → own → off on the same fn; inherited is
     // read-only and the server refuses the widening.

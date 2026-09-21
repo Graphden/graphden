@@ -13,6 +13,80 @@
 //
 // Loads after editor-edit-modes-fn.js (`patchFnFieldInState`) and before
 // the overlay modules that call these entry points.
+//
+// Two SURFACES open these popovers: the card strips (editor-overlay-
+// strips.js) and the Inspector Overview's "Call-site params" / "Merge"
+// rows (`gdBindInspectorFlagRows`, called by editor-inspector.js after
+// the partial lands). Compact cards — the default — hide the return-type
+// strip and its λ chip, so the Inspector is where every reader can reach
+// the flags; both surfaces gate on `gdFlagEditable`.
+
+// The fn-row FLAGS take the effects pencil's looser gate, not
+// `isFnEditable`'s "no dependents": a fn is handed to a HOF or extended
+// BECAUSE it is referenced, and that is exactly when its calling
+// convention or merge policy needs saying. Ownership (tenancy) and
+// package ownership still apply; a type-row has neither flag.
+function gdFlagEditable(fn) {
+  if (!fn) return false;
+  const composed = Array.isArray(fn['parent-ids']) && fn['parent-ids'].length > 0;
+  return composed
+    && (typeof isAuthenticated === 'function' && isAuthenticated())
+    && !(typeof isPackageOwnedFn === 'function' && isPackageOwnedFn(fn.id))
+    && ((typeof graphdenIsFnOwned !== 'function') || graphdenIsFnOwned(fn));
+}
+
+
+// Wire the Inspector Overview's flag rows: on a fn the reader may edit, a
+// row becomes a button that opens the same popover the card strip opens.
+// Facts for the branch-local popover ride on the row (`data-state`,
+// `data-seed`) — the server computed them, the client does not re-walk.
+function gdBindInspectorFlagRows(host) {
+  if (!host) return;
+  // The fn row may not be in `lookups` yet when the Overview lands right
+  // after an Extend (the inspector renders on selection, the graph
+  // reload follows) — the server only prints these rows for a composed
+  // fn, so a signed-in reader gets the affordance and the fn is resolved
+  // again at click time.
+  const fnOf = (id) => lookups?.fnMap?.get(id)
+    || (typeof graphData !== 'undefined' && graphData?.fns || []).find((f) => f.id === id)
+    || null;
+  for (const row of host.querySelectorAll('.gd-insp-flag-row[data-action]')) {
+    const fn0 = fnOf(row.dataset.fnId);
+    const editable = fn0 ? gdFlagEditable(fn0)
+                         : (typeof isAuthenticated === 'function' && isAuthenticated());
+    if (!editable) continue;
+    row.classList.add('gd-insp-editable');
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    row.title = (row.title ? row.title + ' — ' : '') + 'click to change';
+    const open = () => {
+      const fn = fnOf(row.dataset.fnId);
+      if (!fn || !gdFlagEditable(fn)) return;
+      if (row.dataset.action === 'lambda-params') {
+        enterLambdaParamsEditMode(fn, row);
+      } else if (row.dataset.action === 'branch-local') {
+        const state = row.dataset.state;
+        const facts = state === 'off' ? null : { own: state === 'own', seed: row.dataset.seed || null };
+        enterBranchLocalEditMode(fn, row, facts);
+      }
+    };
+    row.addEventListener('click', (e) => { e.stopPropagation(); open(); });
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+    });
+  }
+}
+
+
+// After a flag write the canvas reloads (the strips read layout facts) and
+// the Inspector, if it shows this fn, re-renders its Overview rows.
+function gdAfterFlagSaved(fn) {
+  if (typeof loadGraphData === 'function') loadGraphData();
+  if (typeof window.gdInspectorRender === 'function'
+      && document.querySelector('.gd-insp-flag-row[data-fn-id="' + fn.id + '"]')) {
+    window.gdInspectorRender(fn.id);
+  }
+}
 
 // --- λ call-site parameters (`:lambda-params`) ---
 //
@@ -167,7 +241,7 @@ function enterLambdaParamsEditMode(fn, anchorEl) {
       } catch (_) {}
       return false;
     },
-    onSaved() { if (typeof loadGraphData === 'function') loadGraphData(); }
+    onSaved() { gdAfterFlagSaved(fn); }
   });
 }
 
@@ -245,6 +319,6 @@ function enterBranchLocalEditMode(fn, anchorEl, facts) {
     },
     // The strip reads a layout FACT (the server's parent-ids walk), so a
     // full graph reload is what redraws it.
-    onSaved() { if (typeof loadGraphData === 'function') loadGraphData(); }
+    onSaved() { gdAfterFlagSaved(fn); }
   });
 }

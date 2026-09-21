@@ -50,9 +50,7 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
   // that is exactly when its calling convention or merge policy needs
   // saying. Ownership (tenancy) and package ownership still apply.
   const flagEditable = isNavRoot && !isTypeRow
-                    && (typeof isAuthenticated === 'function' && isAuthenticated())
-                    && !(typeof isPackageOwnedFn === 'function' && isPackageOwnedFn(originalFnId))
-                    && ((typeof graphdenIsFnOwned !== 'function') || graphdenIsFnOwned(cardFnEntity));
+                    && typeof gdFlagEditable === 'function' && gdFlagEditable(cardFnEntity);
 
   // --- return-type strip ---
   // Two display modes:

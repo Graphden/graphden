@@ -62,6 +62,12 @@
    :return-type :_graph-snapshot-shape
    :effects #{:db}}
 
+  {:name :_fn-branch-local-seed
+   :description "`{:own bool :seed \"name\"}` when the fn or an ancestor is branch-local (the 📍 strip's fact), nil otherwise — read by the Inspector Overview's Merge row."
+   :args {:fn-id {:type :nullable-uuid :required false}}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
   {:name :_fn-slot-seals
    :description "Seals on every slot of the fn's chain, by effective slot name — `{:end {:optional? true :sealed-by \"cut\" :list-closed-by … :required-by … :note \"sealed in cut · optional\"}}`; only slots with something to say. The Inspector's Bindings rows read it (same walk as the canvas lock badge). Context-aware (cached graph read)."
    :args {:fn-id {:type :nullable-uuid :required false}}

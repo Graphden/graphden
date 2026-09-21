@@ -1463,12 +1463,18 @@ async function insertSeqLiteralBefore(page, index, text) {
 }
 
 
-// The λ chip on `fnName`'s card → "These, in order" → tick `names` → Save
-// (lesson 09). Resolves when the chip reads the declaration.
-async function setLambdaParamsViaChip(page, fnName, names) {
-  const chip = '.node-overlay[data-fn-name="' + fnName + '"] .lambda-params-chip';
-  await page.waitForSelector(chip, {timeout: 60000});
-  await page.evaluate((s) => document.querySelector(s).click(), chip);
+// The Inspector Overview's "Call-site params" row for the selected fn →
+// "These, in order" → tick `names` → Save (lesson 09). The row is what a
+// reader on compact cards (the default) sees; the card's λ chip is the
+// same popover. Resolves when the fn row carries the declaration.
+async function setLambdaParamsViaInspector(page, fnName, names) {
+  // The Inspector may sit on another tab (Runs, after a ▶) — the Overview
+  // is where the rows live.
+  await page.waitForSelector('#gd-insp-tab-overview', {timeout: 60000});
+  await page.evaluate(() => document.getElementById('gd-insp-tab-overview').click());
+  const row = '.gd-insp-row[data-action="lambda-params"].gd-insp-editable';
+  await page.waitForSelector(row, {timeout: 60000});
+  await page.evaluate((s) => document.querySelector(s).click(), row);
   await page.waitForSelector('.arg-value-edit-popover .lambda-params-edit', {timeout: 15000});
   await page.evaluate((ns) => {
     const pop = document.querySelector('.arg-value-edit-popover');
@@ -1482,10 +1488,10 @@ async function setLambdaParamsViaChip(page, fnName, names) {
     Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
       .find((b) => b.textContent.trim() === 'Save').click();
   }, names);
-  await page.waitForFunction(([s, ns]) => {
-    const el = document.querySelector(s);
-    return el && el.dataset.declared === JSON.stringify(ns);
-  }, [chip, names], {timeout: 60000, polling: 200});
+  await page.waitForFunction(([n, ns]) => {
+    const fn = Array.from(lookups.fnMap.values()).find((f) => f.name === n);
+    return fn && JSON.stringify(fn['lambda-params']) === JSON.stringify(ns);
+  }, [fnName, names], {timeout: 60000, polling: 200});
 }
 
 
@@ -1568,6 +1574,6 @@ module.exports = {
   bindOptionalArgChip, appendFnRefViaChip, renameArgViaEdgeLabel,
   createRecordType, openOperateSection, openAccountSettings, openAccountMenu,
   setSealsViaBadge, deleteBoundValue, moveSeqItem, insertSeqLiteralBefore,
-  setLambdaParamsViaChip, setBranchLocalViaStrip, addMiParentViaParentRow,
+  setLambdaParamsViaInspector, setBranchLocalViaStrip, addMiParentViaParentRow,
   openMarkerFormViaPlaceholder,
 };

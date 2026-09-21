@@ -8546,3 +8546,11 @@ button.lambda-params-chip:focus-visible { outline: 1px solid var(--accent); }
 /* A literal list item's order verbs (↑ ↓ + insert) sit with its × on the
    item's own overlay — one row, hugging the branch. */
 .arg-seq-btn-up, .arg-seq-btn-down, .arg-seq-btn-insert { color: var(--muted-fg); }
+
+/* Inspector Overview flag rows (λ call-site params, 📍 merge) — a button
+   on a fn the reader may edit, plain text otherwise. */
+.gd-insp-flag-row .gd-insp-flag { color: var(--muted-fg); }
+.gd-insp-flag-row.gd-insp-editable { cursor: pointer; border-radius: 4px; }
+.gd-insp-flag-row.gd-insp-editable:hover .gd-insp-flag,
+.gd-insp-flag-row.gd-insp-editable:focus-visible .gd-insp-flag { color: var(--accent); }
+.gd-insp-flag-row.gd-insp-editable:focus-visible { outline: 1px solid var(--accent); }

@@ -472,3 +472,71 @@
           (is (not ok))
           (is (re-find #"value" error))))
       (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; rotate-inline-binding — the card's Bind secret form, rotated in place
+;; ============================================================================
+
+(defn- seed-secret-slot-owner!
+  "A base-fn with one `[:secret :text]`-typed slot — the shape
+   `:sql-exec/:password` has — so `create-inline-binding`'s resolver gate
+   accepts a `:vault-get` binding on it. Returns `{:owner :slot}`."
+  [storage]
+  (let [owner (setup/create-base-fn! storage (str "vf-db-" (random-uuid)) :int)
+        slot  (setup/create-slot! storage "password" :text)]
+    (setup/attach-slot! storage (:id owner) (:id slot) 0)
+    (registry/record-rich-types! (:id owner) (keyword (:name owner))
+                                 {:args {:password {:type [:secret :text]}}
+                                  :return-type :int
+                                  :effects #{:db}})
+    {:owner owner :slot slot}))
+
+
+(deftest rotate-inline-binding-happy-test
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)
+        vault-state (fresh-vault)]
+    (try
+      (seed-secret-leaf! storage)
+      (let [{:keys [owner slot]} (seed-secret-slot-owner! storage)]
+        (with-fake-vault vault-state
+          (let [{:keys [ok binding]} (secrets/create-inline-binding
+                                       c {:fn-id (str (:id owner)) :slot-id (str (:id slot))
+                                          :path "db/password" :value "v1"})
+                _ (is ok (str "inline bind lands: " binding))
+                res (secrets/rotate-inline-binding c (:id binding) {:value "v2"})]
+            (is (:ok res) (str res))
+            (is (= "db/password" (:path res)))
+            (testing "vault holds the new value at the same path"
+              (is (= "v2" (get-in @vault-state [:values "db/password"]))))
+            (testing "the binding still points at the path"
+              (is (= "db/password"
+                     (:value (sp/read-entity storage :binding (parse-uuid (:id binding))))))))))
+      (finally (sp/close storage)))))
+
+
+(deftest rotate-inline-binding-rejections-test
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)
+        vault-state (fresh-vault)]
+    (try
+      (seed-secret-leaf! storage)
+      (let [{:keys [owner slot]} (seed-secret-slot-owner! storage)
+            plain (setup/create-slot! storage "sql" :text)
+            _     (setup/attach-slot! storage (:id owner) (:id plain) 1)
+            lit   (sp/create-entity storage :binding {:fn-id (:id owner) :slot-id (:id plain)
+                                                      :value "select 1"})]
+        (with-fake-vault vault-state
+          (testing "unknown binding"
+            (is (= :not-found (:reason (secrets/rotate-inline-binding c (str (random-uuid)) {:value "x"})))))
+          (testing "a literal binding is not a secret"
+            (is (= :not-a-secret (:reason (secrets/rotate-inline-binding c (str (:id lit)) {:value "x"})))))
+          (testing "a missing value is refused before any vault write"
+            (let [{:keys [binding]} (secrets/create-inline-binding
+                                      c {:fn-id (str (:id owner)) :slot-id (str (:id slot))
+                                         :path "db/pw2" :value "v1"})
+                  res (secrets/rotate-inline-binding c (:id binding) {})]
+              (is (false? (:ok res)))
+              (is (= "v1" (get-in @vault-state [:values "db/pw2"])))))))
+      (finally (sp/close storage)))))

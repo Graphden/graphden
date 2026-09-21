@@ -145,7 +145,7 @@ What the fn-picker shows, and in what order. ~/api/types/candidates~ answers the
 :CUSTOM_ID: editor/enterArgValueEditMode
 :FILE: resources/packages/app/editor/editor-edit-modes.js
 :LINE: 196
-:MINS: 6.8
+:MINS: 7.2
 :END:
 
 How an edit actually happens. The control is not chosen here: the client POSTs the slot to ~/api/value-form~ and the graph's value-form registry answers with hiccup naming a widget — the editor routes on ~data-form-widget~ and knows no type tags at all. Note ~onSaved~: a value change alters binding rows, so ~lookups~ is stale and the handler re-fetches rather than re-rendering.

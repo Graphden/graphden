@@ -33,6 +33,7 @@
    It is independently usable: VersionedStorage(BaseStorage) works without any cache.
    CachedStorage(VersionedStorage(BaseStorage)) works via simple stacking."
   (:require
+    [clojure.tools.logging :as log]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.generic-constraints :as gc]
@@ -320,83 +321,95 @@
    `{entity-name purged-count}`.
 
    `base-storage` is the UNWRAPPED storage (a `VersionedStorage`'s
-   `base-storage`), the same handle the delete path holds."
-  [base-storage retention-ms]
-  (let [cutoff (java.time.Instant/.minusMillis (java.time.Instant/now) (long retention-ms))
-        branch-ids (branch-ids-for-gc base-storage)]
-    (into {}
-          (map (fn [[entity-name {:keys [version-entity version-id-field]}]]
-                 (let [candidates (gc-candidate-ids base-storage
-                                                    version-entity version-id-field cutoff)
-                       purgeable (filter
-                                   (fn [id]
-                                     (and (dead-on-every-branch? base-storage entity-name id branch-ids)
-                                          ;; A dead `:fn` is purgeable only when NOTHING outside its
-                                          ;; own subgraph still references it. The parent-ids junction
-                                          ;; alone is not enough: a `binding.ref-fn-id` /
-                                          ;; `slot.type-fn-id` / `fn.return-type-fn-id` (incl. the
-                                          ;; version plane, e.g. a ref set on ANOTHER branch) would
-                                          ;; be left dangling — and for an editor random-id fn that
-                                          ;; ref can never be healed, since the id can't be re-minted.
-                                          ;; `idrepair/inbound-refs` is the exact surface the
-                                          ;; hard-delete guard (`identity-child-refs`) and the
-                                          ;; bundle-prune guard both trust; it already subsumes the
-                                          ;; parent-ids check and excludes the fn's own owned rows.
-                                          (not (and (= :fn entity-name)
-                                                    (seq (idrepair/inbound-refs base-storage id))))))
-                                   candidates)
-                       purge-own-versions!
-                       (fn [id]
-                         (let [vs (sp/query-entities base-storage version-entity
-                                                     {version-id-field id})]
-                           (when (seq vs)
-                             (sp/delete-entities base-storage version-entity (mapv :id vs)))))
-                       n (reduce
-                           (fn [acc id]
-                             (case entity-name
-                               ;; A fn OWNS a subgraph (its bindings + their
-                               ;; list-items, fn-slots, all version rows). A bare
-                               ;; identity+version delete reclaims only the fn row
-                               ;; and orphans the rest — a monotonic storage leak
-                               ;; on create/delete churn, plus a dangling
-                               ;; `binding.fn-id` / `binding-list-item.binding-id`
-                               ;; at the purged fn. Purge the whole subgraph (the
-                               ;; fn is unreferenced from outside — the `purgeable`
-                               ;; inbound-refs guard above).
-                               :fn (idrepair/purge-fn-subgraph! base-storage id)
-                               ;; A binding OWNS its list-items. A user delete
-                               ;; tombstones only the binding, so its items stay
-                               ;; live-orphaned; purging the binding without them
-                               ;; dangles `binding-list-item.binding-id` (invisible
-                               ;; to the dangling-refs detector, which checks only
-                               ;; `.ref-fn-id`). Cascade the items (+ versions),
-                               ;; then the binding's own version rows + identity.
-                               :binding
-                               (let [liv (filter #(= id (:binding-id %))
+   `base-storage`), the same handle the delete path holds. The 3-arity
+   takes `{:before-purge (fn [entity-name id])}` — called for every
+   entity about to be purged, while its rows are still readable."
+  ([base-storage retention-ms] (tombstone-gc-sweep! base-storage retention-ms nil))
+  ([base-storage retention-ms {:keys [before-purge]}]
+   (let [cutoff (java.time.Instant/.minusMillis (java.time.Instant/now) (long retention-ms))
+         branch-ids (branch-ids-for-gc base-storage)]
+     (into {}
+           (map (fn [[entity-name {:keys [version-entity version-id-field]}]]
+                  (let [candidates (gc-candidate-ids base-storage
+                                                     version-entity version-id-field cutoff)
+                        purgeable (filter
+                                    (fn [id]
+                                      (and (dead-on-every-branch? base-storage entity-name id branch-ids)
+                                           ;; A dead `:fn` is purgeable only when NOTHING outside its
+                                           ;; own subgraph still references it. The parent-ids junction
+                                           ;; alone is not enough: a `binding.ref-fn-id` /
+                                           ;; `slot.type-fn-id` / `fn.return-type-fn-id` (incl. the
+                                           ;; version plane, e.g. a ref set on ANOTHER branch) would
+                                           ;; be left dangling — and for an editor random-id fn that
+                                           ;; ref can never be healed, since the id can't be re-minted.
+                                           ;; `idrepair/inbound-refs` is the exact surface the
+                                           ;; hard-delete guard (`identity-child-refs`) and the
+                                           ;; bundle-prune guard both trust; it already subsumes the
+                                           ;; parent-ids check and excludes the fn's own owned rows.
+                                           (not (and (= :fn entity-name)
+                                                     (seq (idrepair/inbound-refs base-storage id))))))
+                                    candidates)
+                        purge-own-versions!
+                        (fn [id]
+                          (let [vs (sp/query-entities base-storage version-entity
+                                                      {version-id-field id})]
+                            (when (seq vs)
+                              (sp/delete-entities base-storage version-entity (mapv :id vs)))))
+                        n (reduce
+                            (fn [acc id]
+                              ;; `:before-purge` sees the entity while its rows
+                              ;; still exist — the seam a store OUTSIDE graphden
+                              ;; (the vault behind a secret binding) is reconciled
+                              ;; through. Its failure must not stop reclamation.
+                              (when before-purge
+                                (try (before-purge entity-name id)
+                                     (catch Exception e
+                                       (log/warn e "tombstone-gc: before-purge hook failed"
+                                                 {:entity entity-name :id id}))))
+                              (case entity-name
+                                ;; A fn OWNS a subgraph (its bindings + their
+                                ;; list-items, fn-slots, all version rows). A bare
+                                ;; identity+version delete reclaims only the fn row
+                                ;; and orphans the rest — a monotonic storage leak
+                                ;; on create/delete churn, plus a dangling
+                                ;; `binding.fn-id` / `binding-list-item.binding-id`
+                                ;; at the purged fn. Purge the whole subgraph (the
+                                ;; fn is unreferenced from outside — the `purgeable`
+                                ;; inbound-refs guard above).
+                                :fn (idrepair/purge-fn-subgraph! base-storage id)
+                                ;; A binding OWNS its list-items. A user delete
+                                ;; tombstones only the binding, so its items stay
+                                ;; live-orphaned; purging the binding without them
+                                ;; dangles `binding-list-item.binding-id` (invisible
+                                ;; to the dangling-refs detector, which checks only
+                                ;; `.ref-fn-id`). Cascade the items (+ versions),
+                                ;; then the binding's own version rows + identity.
+                                :binding
+                                (let [liv (filter #(= id (:binding-id %))
+                                                  (sp/query-entities base-storage
+                                                                     :binding-list-item-version {}))
+                                      li (filter #(= id (:binding-id %))
                                                  (sp/query-entities base-storage
-                                                                    :binding-list-item-version {}))
-                                     li (filter #(= id (:binding-id %))
-                                                (sp/query-entities base-storage
-                                                                   :binding-list-item {}))]
-                                 (when (seq liv)
-                                   (sp/delete-entities base-storage :binding-list-item-version
-                                                       (mapv :id liv)))
-                                 (when (seq li)
-                                   (sp/delete-entities base-storage :binding-list-item
-                                                       (mapv :id li)))
-                                 (purge-own-versions! id)
-                                 (sp/delete-entity base-storage entity-name id))
-                               ;; :fn-slot / :binding-list-item — nothing outside
-                               ;; their own (co-purged) version rows references
-                               ;; them by id (verified vs `ref-fields` /
-                               ;; `identity-child-refs`). Bare purge is safe.
-                               (do (purge-own-versions! id)
-                                   (sp/delete-entity base-storage entity-name id)))
-                             (inc acc))
-                           0
-                           purgeable)]
-                   [entity-name n])))
-          res/entity-config)))
+                                                                    :binding-list-item {}))]
+                                  (when (seq liv)
+                                    (sp/delete-entities base-storage :binding-list-item-version
+                                                        (mapv :id liv)))
+                                  (when (seq li)
+                                    (sp/delete-entities base-storage :binding-list-item
+                                                        (mapv :id li)))
+                                  (purge-own-versions! id)
+                                  (sp/delete-entity base-storage entity-name id))
+                                ;; :fn-slot / :binding-list-item — nothing outside
+                                ;; their own (co-purged) version rows references
+                                ;; them by id (verified vs `ref-fields` /
+                                ;; `identity-child-refs`). Bare purge is safe.
+                                (do (purge-own-versions! id)
+                                    (sp/delete-entity base-storage entity-name id)))
+                              (inc acc))
+                            0
+                            purgeable)]
+                    [entity-name n])))
+           res/entity-config))))
 
 
 (defn- revive-or-update!

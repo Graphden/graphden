@@ -13,13 +13,13 @@ after: storage
 :PROPERTIES:
 :CUSTOM_ID: versioning/wrap-with-versioning
 :FILE: src/graphden/versioning/storage/core.clj
-:LINE: 1268
+:LINE: 1281
 :MINS: 2.2
 :END:
 
 The entry point: take any base storage, ensure a ~main~ branch exists, and return a ~VersionedStorage~ bound to it. Start here to see how the entire versioning layer is bolted onto the plain storage from the previous block.
 
-- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn wrap-with-versioning][src/graphden/versioning/storage/core.clj:1268]]
+- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn wrap-with-versioning][src/graphden/versioning/storage/core.clj:1281]]
 - same file :: [[file:versioning.org::#versioning/VersionedStorage][VersionedStorage]], [[file:versioning.org::#versioning/create-entity-versioned!][create-entity-versioned!]], [[file:versioning.org::#versioning/purgeable-identity-ids][purgeable-identity-ids]]
 - referenced from :: [[file:crud.org::#crud/resolve-branch-ref][resolve-branch-ref]], [[file:boot.org::#boot/postgres][postgres]]
 
@@ -27,26 +27,26 @@ The entry point: take any base storage, ensure a ~main~ branch exists, and retur
 :PROPERTIES:
 :CUSTOM_ID: versioning/VersionedStorage
 :FILE: src/graphden/versioning/storage/core.clj
-:LINE: 1016
+:LINE: 1029
 :MINS: 12.6
 :END:
 
 The decorator record itself. It implements every storage protocol, delegating non-versioned entities straight to the base storage and intercepting versioned ones — reads resolve to a branch view, writes append version rows. Every method is a two-line dispatch: read this for the SHAPE, then follow the versioned arm into its own function. Grasp this structure before anything else here.
 
-- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defrecord VersionedStorage][src/graphden/versioning/storage/core.clj:1016]]
+- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defrecord VersionedStorage][src/graphden/versioning/storage/core.clj:1029]]
 - same file :: [[file:versioning.org::#versioning/wrap-with-versioning][wrap-with-versioning]], [[file:versioning.org::#versioning/create-entity-versioned!][create-entity-versioned!]], [[file:versioning.org::#versioning/purgeable-identity-ids][purgeable-identity-ids]]
 
 * 3. create-entity-versioned!
 :PROPERTIES:
 :CUSTOM_ID: versioning/create-entity-versioned!
 :FILE: src/graphden/versioning/storage/core.clj
-:LINE: 460
+:LINE: 473
 :MINS: 7.3
 :END:
 
 The versioned arm of a single create, and the write path worth reading in full: identity row + version row, the identity-field diff for when the deterministic id already exists, and the advisory-lock branch that serialises the writes whose uniqueness is a per-branch RESOLVED-VIEW property (fn names, list-item positions) rather than a table constraint. ~update-entity-versioned!~ next to it tells the same story for the append case.
 
-- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn- create-entity-versioned!][src/graphden/versioning/storage/core.clj:460]]
+- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn- create-entity-versioned!][src/graphden/versioning/storage/core.clj:473]]
 - same file :: [[file:versioning.org::#versioning/wrap-with-versioning][wrap-with-versioning]], [[file:versioning.org::#versioning/VersionedStorage][VersionedStorage]], [[file:versioning.org::#versioning/purgeable-identity-ids][purgeable-identity-ids]]
 
 * 4. entity-config
@@ -156,13 +156,13 @@ The same resolved-view doctrine applied to the newest versioned entity: ~:resour
 :PROPERTIES:
 :CUSTOM_ID: versioning/purgeable-identity-ids
 :FILE: src/graphden/versioning/storage/core.clj
-:LINE: 202
+:LINE: 203
 :MINS: 3.8
 :END:
 
 Delete has TWO modes, and this guard is the heart of the hard one. User-facing deletes tombstone (a version row with ~:deleted-at~, so descendants hide the entity too); sync + rollback hard-delete. A hard delete used to drop only the branch's version rows — the surviving versionless identity became a GHOST that a later re-mint of the same deterministic id revived through the update path, content-equal, invisible on every list read (the route-vanish incident). Now the identity row goes too, but ONLY when no other branch retains a version and no child identity still references it — per-branch isolation stays intact.
 
-- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn- purgeable-identity-ids][src/graphden/versioning/storage/core.clj:202]]
+- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn- purgeable-identity-ids][src/graphden/versioning/storage/core.clj:203]]
 - same file :: [[file:versioning.org::#versioning/wrap-with-versioning][wrap-with-versioning]], [[file:versioning.org::#versioning/VersionedStorage][VersionedStorage]], [[file:versioning.org::#versioning/create-entity-versioned!][create-entity-versioned!]]
 
 * 13. repoint-refs!

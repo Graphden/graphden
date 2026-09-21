@@ -305,6 +305,15 @@
                               :type "arg"
                               :argId (str arg-id)
                               :value wire-value}
+                             ;; A resolver-bound value is a vault PATH the
+                             ;; executor dereferences at run time — the card
+                             ;; marks it 🔒 and its click rotates the secret
+                             ;; instead of editing the path as text.
+                             ;; The display-projected row may have dropped the
+                             ;; field — read it off the canonical anchor row too.
+                             (when (or (:resolver-fn-id arg)
+                                       (:resolver-fn-id (get (:arg-map lookups) arg-id)))
+                               {:secretRef true})
                              id-fields
                              ;; `arg` here is the display-projected row
                              ;; (`:arg-id` / `:arg-name`), which carries

@@ -494,6 +494,87 @@
       (apply-create-inline-binding parsed ctx))))
 
 
+(declare rotate-secret-not-owned?)
+
+
+(defn parse-rotate-inline-request
+  "Parse the URL + body of `PUT /api/secret-bindings/:binding-id` into
+   `{:binding-id <uuid|nil> :binding-id-ref <raw> :value <new-secret>}`."
+  [binding-id-ref body]
+  {:binding-id (request/parse-uuid-or-clear binding-id-ref)
+   :binding-id-ref binding-id-ref
+   :value (:value body)})
+
+
+(defn rotate-inline-binding-row
+  "The inline secret binding being rotated — the resolved binding row,
+   or nil when the id is malformed / the row is not visible on this
+   branch."
+  [parsed ctx]
+  (when-let [id (:binding-id parsed)]
+    (sp/read-entity (request/require-storage ctx) :binding id)))
+
+
+(defn rotate-inline-owner-row
+  "The fn the binding sits on — the ownership the rotate is judged by
+   (a tenant may rotate secrets bound on its OWN fns only, the same
+   rule `rotate-secret-not-owned?` applies to a panel secret)."
+  [binding-row ctx]
+  (when-let [fn-id (:fn-id binding-row)]
+    (sp/read-entity (request/require-storage ctx) :fn fn-id)))
+
+
+(defn secret-binding?
+  "An inline secret binding is a binding with a resolver — its `:value`
+   is the vault PATH, dereferenced at run time. A plain literal binding
+   has no resolver and nothing in the vault to rotate."
+  [binding-row]
+  (boolean (and binding-row (:resolver-fn-id binding-row))))
+
+
+(defn apply-rotate-inline
+  "Success branch — vault-put the new value at the binding's path.
+   graphden state is unchanged (the binding keeps pointing at the
+   path; KV v2 keeps the previous version)."
+  [parsed binding-row ctx]
+  (let [vault-client (require-vault! ctx)
+        path (:value binding-row)
+        version (vault/put-secret vault-client path (:value parsed))]
+    {:ok true
+     :binding-id (str (:id binding-row))
+     :path path
+     :version version}))
+
+
+(defn rotate-inline-binding
+  "PUT /api/secret-bindings/:binding-id — rotate the secret an INLINE
+   binding points at (the `+` → Bind secret form of a `[:secret T]`
+   slot). Sibling of `rotate-secret` for the wrapper-fn shape; the
+   graph handler (`:_rotate-inline-data`) composes the same guards."
+  [ctx binding-id-ref body]
+  (let [parsed (parse-rotate-inline-request binding-id-ref body)
+        binding-row (rotate-inline-binding-row parsed ctx)
+        owner (rotate-inline-owner-row binding-row ctx)]
+    (cond
+      (nil? binding-row)
+      {:ok false :error (str "Binding not found: " binding-id-ref) :reason :not-found}
+
+      (not (secret-binding? binding-row))
+      {:ok false :error (str "Binding is not a secret binding (no resolver): " binding-id-ref)
+       :reason :not-a-secret}
+
+      (rotate-secret-not-owned? owner)
+      {:ok false
+       :error (str "Secret is not owned by your org — rotation forbidden: " binding-id-ref)
+       :reason :forbidden}
+
+      (not (string? (:value parsed)))
+      {:ok false :error "Required field ':value' (string) is missing"}
+
+      :else
+      (apply-rotate-inline parsed binding-row ctx))))
+
+
 (defn parse-delete-secret-request
   "Parse `DELETE /api/secrets/:fn-id` URL into `{:fn-id <uuid|nil>
    :fn-id-ref <raw>}`. Raw form is preserved for the dynamic error

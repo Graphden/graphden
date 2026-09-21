@@ -53,6 +53,17 @@ function createArgOverlay(node, container) {
   content.textContent = shown.text;
   content.classList.add('arg-value-text');
   if (shown.title) content.title = shown.title;
+  // A resolver-bound value (layout `secretRef`) is a vault PATH the
+  // executor dereferences at run time — never the secret itself. Say so
+  // on the card: a lock before the path; a click rotates rather than
+  // edits (editor-edit-modes.js routes on the binding's resolver).
+  const secretRef = !!node.data('secretRef');
+  if (secretRef) {
+    content.textContent = '🔒 ' + shown.text;
+    content.classList.add('arg-value-secret');
+    content.dataset.secretRef = 'true';
+    content.title = 'Secret — the value lives in the vault at this path';
+  }
   row.appendChild(content);
 
   // Persistent mismatch indicator. If this arg's literal value would
@@ -168,7 +179,9 @@ function createArgOverlay(node, container) {
   const editable = inImpl && signedIn && owned;
   if (editable) {
     content.style.cursor = 'pointer';
-    content.title = shown.title || (isTruncated ? rawLabel : 'Click to edit value');
+    content.title = secretRef
+      ? 'Secret at this vault path — click to rotate the value'
+      : (shown.title || (isTruncated ? rawLabel : 'Click to edit value'));
     // Visible affordance on hover (CSS ::after ✎) — click-to-edit was
     // pure cursor+title before, i.e. invisible until stumbled upon.
     content.classList.add('arg-value-editable');

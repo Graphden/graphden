@@ -272,7 +272,11 @@ path) or **Bind fn-ref** (a secret already kept in the Secrets panel
 — the picker lists `secret-leaf` fns). On an ordinary `:text` slot
 there is no secret option, and that is the point: a secret cannot
 flow into `h-raw` or a log, so the editor does not offer to put one
-there. If your own fn needs a secret, give it a slot that is typed
+there. Once bound, the card shows `🔒` and the vault path, never the
+value; click it to **rotate** (a new value at the same path — the
+previous version stays in OpenBao) or **Delete** the binding. The
+value itself leaves the vault only when nothing references the path
+any more and the tombstone GC reclaims the binding. If your own fn needs a secret, give it a slot that is typed
 for one — extend a base-fn whose slot already is, or declare
 `{:type [:secret :text]}` in `fns.edn`.
 

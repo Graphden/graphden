@@ -276,13 +276,21 @@ function enterArgValueEditMode(arg, anchorEl) {
           // Marker-typed slot (server-dispatched — the graph's
           // value-form registry mapped the slot's marker type to the
           // `secret-binding` widget; the editor knows no tag names):
-          // creating a NEW binding routes to the path+value popover
-          // that writes a resolver binding via POST /api/secrets/binding.
-          // An EXISTING binding keeps the legacy control (same UX as
-          // before server dispatch — inspect/replace the raw value).
+          // a NEW binding routes to the path+value popover that writes
+          // a resolver binding via POST /api/secret-bindings; an
+          // EXISTING secret binding (resolver present) reopens as the
+          // ROTATE form — path read-only, a new value — since editing
+          // the stored path as text would re-point the binding without
+          // touching the vault. A literal on a secret slot (auto-promote)
+          // keeps the plain control.
           if (formWidgetName(payload.form) === 'secret-binding') {
+            const bnd = arg['binding-id'] ? lookups?.bindingMap?.get(arg['binding-id']) : null;
             if (!arg['binding-id']) {
               enterSecretBindingEditMode(arg, anchorEl);
+              return;
+            }
+            if (bnd?.['resolver-fn-id']) {
+              enterSecretBindingEditMode(arg, anchorEl, { rotate: true, path: bnd.value });
               return;
             }
             makeLegacyControl(host, arg, expected, status);
@@ -336,15 +344,25 @@ function formWidgetName(node) {
 
 // Inline `:secret-path` form for a `[:secret T]`-typed slot. Two
 // fields: vault path + initial value. Submit posts to
-// /api/secrets/binding, which atomically writes the value to vault and
-// creates a `:secret-path`-kinded binding on (fn-id, slot-id). On
+// /api/secret-bindings, which atomically writes the value to vault and
+// creates a `:vault-get`-resolver binding on (fn-id, slot-id). On
 // success the graph reloads so the new binding appears immediately on
 // the slot's edge.
-function enterSecretBindingEditMode(arg, anchorEl) {
+//
+// `opts.rotate` (with `opts.path`) reopens the SAME form on an existing
+// secret binding: the path is shown read-only, the one field is the new
+// value, Save PUTs /api/secret-bindings/:binding-id (a new KV v2 version
+// at the path — graphden unchanged), and Delete drops the binding (the
+// vault value is reclaimed once the tombstone GC purges it).
+function enterSecretBindingEditMode(arg, anchorEl, opts) {
   if (!arg) return;
+  const rotate = !!opts?.rotate;
   openInlineEditPopover({
     anchorEl,
-    ariaLabel: 'Bind secret to slot',
+    ariaLabel: rotate ? 'Rotate secret' : 'Bind secret to slot',
+    onDelete: (rotate && arg['binding-id'])
+      ? () => { if (typeof deleteUseSiteBinding === 'function') deleteUseSiteBinding(arg); }
+      : null,
     makeControl(root) {
       // Wrap in a div so `openInlineEditPopover`'s `control.focus()`,
       // `control.addEventListener('keydown', …)` calls work — they
@@ -357,9 +375,12 @@ function enterSecretBindingEditMode(arg, anchorEl) {
       const wrap = document.createElement('div');
       wrap.className = 'arg-value-edit-secret-form';
       wrap.tabIndex = -1;
+      if (rotate) wrap.classList.add('arg-value-edit-secret-form-rotate');
       const hint = document.createElement('div');
       hint.className = 'arg-value-edit-hint';
-      hint.textContent = 'Secret-typed slot — value goes to OpenBao at the path below.';
+      hint.textContent = rotate
+        ? 'Secret binding — the value lives in OpenBao at this path. Enter a new value to rotate it (the previous version is kept).'
+        : 'Secret-typed slot — value goes to OpenBao at the path below.';
       wrap.appendChild(hint);
       const pathLbl = document.createElement('label');
       pathLbl.className = 'arg-value-edit-hint';
@@ -370,10 +391,15 @@ function enterSecretBindingEditMode(arg, anchorEl) {
       pathInput.className = 'arg-value-edit-input';
       pathInput.placeholder = 'e.g. postgres/password';
       pathInput.dataset.secretField = 'path';
+      if (rotate) {
+        pathInput.value = opts?.path || '';
+        pathInput.readOnly = true;
+        pathInput.title = 'The path is the binding — Delete and bind again to move the secret';
+      }
       wrap.appendChild(pathInput);
       const valLbl = document.createElement('label');
       valLbl.className = 'arg-value-edit-hint';
-      valLbl.textContent = 'Initial value (never displayed again)';
+      valLbl.textContent = rotate ? 'New value (never displayed again)' : 'Initial value (never displayed again)';
       wrap.appendChild(valLbl);
       const valInput = document.createElement('input');
       valInput.type = 'password';
@@ -381,7 +407,7 @@ function enterSecretBindingEditMode(arg, anchorEl) {
       valInput.dataset.secretField = 'value';
       wrap.appendChild(valInput);
       root.appendChild(wrap);
-      setTimeout(() => { try { pathInput.focus(); } catch (_) {} }, 0);
+      setTimeout(() => { try { (rotate ? valInput : pathInput).focus(); } catch (_) {} }, 0);
       return wrap;
     },
     async doSave(wrap) {
@@ -390,18 +416,24 @@ function enterSecretBindingEditMode(arg, anchorEl) {
       const path = (pathInput?.value || '').trim();
       const value = valInput?.value || '';
       if (!path) return { ok: false, error: 'Vault path is required.' };
-      if (!value) return { ok: false, error: 'Initial value is required.' };
+      if (!value) return { ok: false, error: rotate ? 'New value is required.' : 'Initial value is required.' };
       try {
-        const r = await authFetch(API.api_secret_bindings, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            'fn-id': arg['fn-id'],
-            'slot-id': arg['slot-id'],
-            path,
-            value,
-          }),
-        });
+        const r = rotate
+          ? await authFetch(API.api_secret_bindings_binding_id(arg['binding-id']), {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ value }),
+            })
+          : await authFetch(API.api_secret_bindings, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                'fn-id': arg['fn-id'],
+                'slot-id': arg['slot-id'],
+                path,
+                value,
+              }),
+            });
         if (r?.ok) {
           const body = await r.json().catch(() => null);
           if (body?.ok === false) return { ok: false, error: body.error || 'Save failed.' };
@@ -413,7 +445,8 @@ function enterSecretBindingEditMode(arg, anchorEl) {
         return { ok: false, error: 'Save failed — network error.' };
       }
     },
-    onSaved() { if (typeof initGraph === 'function') initGraph(); }
+    // A rotation changes nothing graphden draws; a new binding does.
+    onSaved() { if (!rotate && typeof initGraph === 'function') initGraph(); }
   });
 }
 

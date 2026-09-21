@@ -6,6 +6,7 @@
    fork-inheritance, referenced-as-parent, retention)."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.clients.vault :as vault]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.protocol :as ds]
@@ -14,6 +15,7 @@
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
+    [graphden.system.init.cleanup :as cleanup]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -278,4 +280,51 @@
           (is (empty? (sp/query-entities base :binding-list-item {:id (:id i)}))
               "no dangling binding-list-item.binding-id at the purged binding")
           (is (identity-exists? base (:id f)) "the live owning fn is untouched")))
+      (finally (sp/close base)))))
+
+
+(deftest before-purge-hook-sees-secret-bindings-and-the-vault-is-reconciled
+  ;; An inline secret binding stores only the vault PATH (`:value`) next to
+  ;; its `:vault-get` resolver. Tombstoning it on a branch must keep the
+  ;; vault value (another branch may still read it); the PURGE — dead on
+  ;; every branch, past retention — is the moment the value has no reader
+  ;; left, and `cleanup/sweep-orphan-secrets!` reclaims it unless another
+  ;; binding still points at the same path.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)
+        deleted (atom [])]
+    (try
+      (let [resolver (sp/create-entity v :fn {:name "vault-get" :parent-ids [] :description "r"})
+            owner    (sp/create-entity v :fn {:name "db-call" :parent-ids [] :description "o"})
+            keeper   (sp/create-entity v :fn {:name "db-call-2" :parent-ids [] :description "k"})
+            slot     (sp/create-entity v :slot {:name "password" :type-fn-id (:id owner)})
+            slot2    (sp/create-entity v :slot {:name "token" :type-fn-id (:id owner)})
+            gone     (sp/create-entity v :binding {:fn-id (:id owner) :slot-id (:id slot)
+                                                   :value "db/pw" :resolver-fn-id (:id resolver)})
+            shared   (sp/create-entity v :binding {:fn-id (:id owner) :slot-id (:id slot2)
+                                                   :value "shared/pw" :resolver-fn-id (:id resolver)})
+            _        (sp/create-entity v :binding {:fn-id (:id keeper) :slot-id (:id slot2)
+                                                   :value "shared/pw" :resolver-fn-id (:id resolver)})
+            seen     (atom [])]
+        (binding [vs/*tombstone-delete?* true]
+          (sp/delete-entity v :binding (:id gone))
+          (sp/delete-entity v :binding (:id shared)))
+        (testing "the hook is called for each purged entity while its rows are readable"
+          (let [paths (atom #{})
+                purged (vs/tombstone-gc-sweep!
+                         base -1000
+                         {:before-purge (fn [et id]
+                                          (swap! seen conj [et id])
+                                          (swap! paths into (cleanup/secret-paths-of base et id)))})]
+            (is (= 2 (:binding purged)))
+            (is (= #{[:binding (:id gone)] [:binding (:id shared)]} (set @seen)))
+            (is (= #{"db/pw" "shared/pw"} @paths) "both paths collected before the rows went")
+            (testing "reconciliation: the orphaned path goes, the still-referenced one stays"
+              (binding [vault/*impl-override*
+                        {:delete-secret (fn [_client path] (swap! deleted conj path) nil)}]
+                (reset! vault/active-client {:address "fake" :token "fake"})
+                (try (cleanup/sweep-orphan-secrets! base @paths)
+                     (finally (reset! vault/active-client nil))))
+              (is (= ["db/pw"] @deleted)
+                  "shared/pw is still bound on db-call-2 — kept")))))
       (finally (sp/close base)))))

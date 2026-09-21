@@ -29,9 +29,11 @@
     (with-redefs [cleanup/tombstone-gc-retention-ms
                   (fn [] (some-> retention-days (* day-ms)))
                   vcore/tombstone-gc-sweep!
-                  (fn [base retention-ms]
+                  (fn [base retention-ms & _opts]
                     (swap! calls conj [base retention-ms])
-                    {:fn 0})]
+                    {:fn 0})
+                  ;; No vault, nothing purged — the reconciliation is a no-op.
+                  cleanup/sweep-orphan-secrets! (fn [_base _paths] nil)]
       (f))
     @calls))
 

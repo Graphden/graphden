@@ -80,6 +80,11 @@ placeholder node + edge shape by `add-unset-arg-node`, carrying
 (`:optionalArgs` / `:hofCapturedArgs`) are retired; `:deepFreeArgs`
 (the informational ⇣-strip on expanded inner nodes) remains.
 
+A value node whose binding carries a resolver (an inline `:vault-get`
+secret — its stored `:value` is the vault PATH) is flagged `:secretRef true`
+(`add-arg-value-node`); the editor draws it as `🔒 <path>` and routes its
+click to the rotate form instead of the literal editor.
+
 Sequence groups: the items of one list are not N
 look-alike args. `expand-sequence-anchor` emits one entry per chain
 item and then the **append tail** — the anchor's own `:unset` entry,

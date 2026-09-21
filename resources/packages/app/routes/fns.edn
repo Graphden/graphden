@@ -892,6 +892,11 @@
    :parent :put
    :args {:path "/secrets/:fn-id/value" :handler :rotate-secret-handler}}
 
+  {:name :api-secret-binding-rotate
+   :description "PUT /api/secret-bindings/:binding-id — body `{value:\"…\"}`. Rotates the secret an INLINE binding (the card's Bind secret form) points at: a new KV v2 version at the binding's path, graphden unchanged. Auth-required."
+   :parent :put
+   :args {:path "/secret-bindings/:binding-id" :handler :rotate-inline-binding-handler}}
+
   ;; --- /api top group (combines all /api/* sub-groups + the standalone leaves) ---
 
   {:name :api-routes
@@ -950,6 +955,7 @@
                   ;; bootable without the registry package.
                   :api-secrets-root
                   :api-secret-inline-binding
+                  :api-secret-binding-rotate
                   :api-secret-delete
                   :api-secret-rotate-value
                   ;; per-user editor preferences (app-base/prefs — themes, keymaps)

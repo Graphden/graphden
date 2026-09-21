@@ -8,8 +8,10 @@
    `maybe-sweep-tombstones!` is public / test-reachable."
   (:require
     [clojure.tools.logging :as log]
+    [graphden.clients.vault :as vault]
     [graphden.crud.fn-execution.retention :as retention]
     [graphden.crud.fn-execution.stats :as stats]
+    [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.core :as vcore]
     [integrant.core :as ig]))
 
@@ -38,6 +40,51 @@
           not-empty parse-long (* 24 60 60 1000)))
 
 
+(defn secret-paths-of
+  "Vault paths the entity about to be purged points at: a `:binding`
+   whose version rows carry a resolver (an inline `:vault-get` secret —
+   its `:value` IS the path), or a `:fn` through the same rows of the
+   bindings it owns. Read BEFORE the purge (the GC's `:before-purge`
+   seam), while the rows exist. Other entity kinds hold no secrets."
+  [base-storage entity-name id]
+  (let [rows (case entity-name
+               :binding (sp/query-entities base-storage :binding-version {:binding-id id})
+               :fn      (sp/query-entities base-storage :binding-version {:fn-id id})
+               [])]
+    (into #{} (comp (filter :resolver-fn-id)
+                    (map :value)
+                    (filter string?))
+          rows)))
+
+
+(defn path-still-referenced?
+  "Does any binding version row — on any branch, purged rows excluded —
+   still resolve `path` through a resolver? Two fns may bind the same
+   vault path; the value goes only when the last reference is gone."
+  [base-storage path]
+  (boolean (some :resolver-fn-id
+                 (sp/query-entities base-storage :binding-version {:value path}))))
+
+
+(defn sweep-orphan-secrets!
+  "After a GC sweep: delete from the vault every collected `path` no
+   binding references any more. A missing vault client (self-host
+   without OpenBao) or a failing delete is logged, never thrown — the
+   storage reclamation already happened and must not be reported as
+   failed."
+  [base-storage paths]
+  (when (seq paths)
+    (if-let [client @vault/active-client]
+      (doseq [path paths
+              :when (not (path-still-referenced? base-storage path))]
+        (try (vault/delete-secret client path)
+             (log/info "tombstone-gc: vault secret reclaimed" {:path path})
+             (catch Exception e
+               (log/warn e "tombstone-gc: vault delete failed — manual cleanup" {:path path}))))
+      (log/warn "tombstone-gc: purged secret bindings but no vault client — paths left in the vault"
+                {:paths paths}))))
+
+
 (defn maybe-sweep-tombstones!
   "Run the tombstone GC when it's enabled AND at most once per `min-gap-ms`
    (the version-table scan is far heavier than the hourly execution sweep,
@@ -48,7 +95,19 @@
   (when-let [retention (tombstone-gc-retention-ms)]
     (when (>= (- now-ms @last-run) min-gap-ms)
       (reset! last-run now-ms)
-      (let [purged (vcore/tombstone-gc-sweep! (vcore/unwrap storage) retention)]
+      (let [base (vcore/unwrap storage)
+            ;; Secret paths of the bindings the sweep is about to purge —
+            ;; collected through the GC's `:before-purge` seam, reconciled
+            ;; against the vault once storage is reclaimed. A binding
+            ;; tombstoned on ONE branch keeps its vault value (another
+            ;; branch may still read it); only a purge — dead everywhere,
+            ;; past retention — is the moment the value has no reader left.
+            paths (atom #{})
+            purged (vcore/tombstone-gc-sweep!
+                     base retention
+                     {:before-purge (fn [entity-name id]
+                                      (swap! paths into (secret-paths-of base entity-name id)))})]
+        (sweep-orphan-secrets! base @paths)
         (when (pos? (reduce + 0 (vals purged)))
           (log/info "tombstone-gc: reclaimed dead entities" purged))))))
 

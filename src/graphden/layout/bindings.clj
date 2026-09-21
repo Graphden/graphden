@@ -37,9 +37,11 @@
   "Pluck slot-id/binding-id/item-id/fn-id from an arg row so it can be
    merged into the internal `compute-display-args` arg-row shape and
    eventually surface on the emitted graph node via
-   `arg-row->node-id-fields`."
+   `arg-row->node-id-fields`. `:resolver-fn-id` rides along too: a
+   binding resolved at run time (a `:vault-get` secret path) is drawn
+   as a SECRET REFERENCE, not as the literal it stores."
   [arg]
-  (select-keys arg [:slot-id :binding-id :item-id :fn-id]))
+  (select-keys arg [:slot-id :binding-id :item-id :fn-id :resolver-fn-id]))
 
 
 ;; ---------------------------------------------------------------------------

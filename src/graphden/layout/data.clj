@@ -189,6 +189,9 @@
      :value (:value b)
      :value-present (true? (:value-present b))
      :ref-id (:ref-fn-id b)
+     ;; A resolver-bound value (an inline `:vault-get` secret) is a
+     ;; PATH dereferenced at run time — the card draws it as 🔒.
+     :resolver-fn-id (:resolver-fn-id b)
      :next-arg-id first-item-id
      :append? (true? (:list-append b))}))
 

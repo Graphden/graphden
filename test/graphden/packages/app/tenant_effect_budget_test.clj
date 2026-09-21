@@ -65,6 +65,7 @@
    ;; Raw vault ops.
    :api-secret-delete (update vault-ops :effects conj :io)
    :api-secret-inline-binding vault-ops
+   :api-secret-binding-rotate vault-ops
    :api-secret-rotate-value vault-ops})
 
 

@@ -577,12 +577,25 @@ names the action after the marker — the `+` chooser reads **Bind
 secret** (`slotMarkerName`, editor-literal-types.js) — and the written
 lesson 16 says when a secret is the answer.
 
-The frontend branch only fires when the slot has NO existing binding
-(`!arg['binding-id']`). For an existing binding, the regular popover
-opens — the user must `Delete` first to revert to a free-arg, then
-re-open to bind the secret. Rotation of an inline-bound secret is
-covered by `PUT /api/secrets/:fn-id/value` for the wrapper-fn-def
-shape only — inline rotation is followup work.
+The frontend branch fires for a slot with NO binding (the bind form)
+and for an existing SECRET binding (resolver present — the same form
+in ROTATE mode: path read-only, one field for the new value, `Save`
+→ `PUT /api/secret-bindings/:binding-id` `{value}`, a new KV v2
+version at the path with graphden unchanged; `Delete` drops the
+binding). A literal that auto-promoted onto a secret slot keeps the
+plain control. On the card the bound value reads `🔒 <path>` (layout
+`secretRef`, `editor-overlay-arg.js`) — the path, never the value.
+
+**Deleting an inline secret binding does not touch the vault at
+once**: a user delete is a tombstone on one branch, and another branch
+may still read the path. The value is reclaimed by the tombstone GC
+(`system.init.cleanup`, opt-in `GRAPHDEN_TOMBSTONE_GC_RETENTION_DAYS`):
+`tombstone-gc-sweep!` calls its `:before-purge` hook for every entity
+it is about to purge, `secret-paths-of` collects the vault paths of
+the binding (or of a purged fn's bindings) that carry a resolver, and
+`sweep-orphan-secrets!` deletes each path no other binding version
+still references (`path-still-referenced?`). Without a vault client
+the paths are logged for manual cleanup.
 
 Verified end-to-end:
 

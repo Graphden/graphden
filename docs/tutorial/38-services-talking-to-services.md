@@ -153,7 +153,7 @@ grant's subject, so the team is one row).
   pod 1. A `:per-pod` listener records whichever pod started last;
   any of them serves.
 - **Cloud**: a tenant has no ports. A fn published as an app (lesson
-  27) resolves to its public origin, `https://<label>.graphden.app`,
+  30) resolves to its public origin, `https://<label>.graphden.app`,
   and the call is an ordinary outbound request — egress-guarded and
   rate-capped like any other. The graph is the same; only the answer
   to *where* differs.
@@ -191,7 +191,7 @@ nothing). Every hop shares the top-level run's trace id, so a chain
   goes stale, so consumers stop picking it within 45 seconds
   ([docs/SERVICES.md § Liveness](../SERVICES.md#liveness--a-copy-that-died-in-place)).
 - Asynchronous work between services is the next lesson
-  ([36 — Queues](39-queues.md)).
+  ([39 — Queues](39-queues.md)).
 
 ## Next
 

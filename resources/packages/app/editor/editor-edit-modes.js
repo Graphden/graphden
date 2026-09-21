@@ -42,6 +42,19 @@ installTabTrap({
   isVisible: () => !!inlineEditEl,
 });
 
+// Escape closes the open popover from ANYWHERE — Cancel / Save, a seal
+// checkbox, a radio the mode built, or with focus still on <body> while a
+// server-rendered form loads — not only from its first control. Consumed,
+// so a running tour does not read it as "end the lesson". Document-level
+// and registered at load, so the tour's own listener sees the preventDefault.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !inlineEditEl || e.defaultPrevented) return;
+  // A popover stacked on top of this one (the fn picker) closes first.
+  if (document.querySelector('.fn-picker-popover, .namespace-picker-popover')) return;
+  e.preventDefault();
+  closeInlineEdit();
+});
+
 function closeInlineEdit() {
   if (inlineEditEl) {
     const hadFocus = inlineEditEl.contains(document.activeElement);
@@ -163,9 +176,15 @@ function openInlineEditPopover(opts) {
   if (control) {
     control.addEventListener('keydown', (e) => {
       if (e.key === 'Enter')  { e.preventDefault(); doSave(); }
-      if (e.key === 'Escape') { e.preventDefault(); closeInlineEdit(); }
     });
   }
+  // A control that cannot take focus (a server-rendered form still loading,
+  // a plain div) leaves focus on <body>: put it on the first focusable
+  // thing inside instead, so Escape / Tab land in the dialog.
+  setTimeout(() => {
+    if (inlineEditEl === el && !el.contains(document.activeElement)
+        && typeof focusIntoDialog === 'function') focusIntoDialog(el);
+  }, 0);
 
   inlineEditOutsideHandler = (e) => {
     if (!el.contains(e.target) && !pointerEventInTour(e)) closeInlineEdit();

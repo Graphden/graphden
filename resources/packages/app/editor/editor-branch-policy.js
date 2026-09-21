@@ -14,11 +14,18 @@ const BRANCH_POLICY_OPTIONS = [
   ['admins', 'Org admins only'],
 ];
 
+// Who opened the panel — focus goes back there on close (the row's ⛨ / ⚙),
+// so a keyboard reader is not dropped on <body>.
+let _branchPolicyTrigger = null;
+let _protectTrigger = null;
+
 function closeBranchPolicyMenu() {
   const p = document.getElementById('gd-branch-policy-pop');
   if (p) p.remove();
   const s = document.getElementById('gd-branch-policy-scrim');
   if (s) s.remove();
+  if (p && typeof returnFocusTo === 'function') returnFocusTo(_branchPolicyTrigger);
+  _branchPolicyTrigger = null;
 }
 
 // Mini-menu on the row's ⛨ — pick who may write this branch.
@@ -41,6 +48,7 @@ function openBranchPolicyMenu(btn) {
   // (would re-inject `<img onerror=…>` live; there is no CSP). The option
   // rows below are built from the static BRANCH_POLICY_OPTIONS constant only,
   // so their markup stays a trusted template.
+  _branchPolicyTrigger = btn;
   const heading = document.createElement('h5');
   heading.textContent = 'Who can write ' + branchName;
   pop.appendChild(heading);
@@ -81,12 +89,22 @@ function openBranchPolicyMenu(btn) {
   pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 300)) + 'px';
   pop.style.top = (r.bottom + 6) + 'px';
   document.body.appendChild(pop);
+  // A form over a scrim is a dialog: a visible way out and focus inside
+  // (docs/ACCESSIBILITY.md) — Escape and the scrim stay as they were.
+  if (typeof ensurePopoverClose === 'function') {
+    ensurePopoverClose(pop, pop.id === 'gd-protect-pop' ? closeProtectionMenu : closeBranchPolicyMenu,
+                       pop.id === 'gd-protect-pop' ? 'Close protection' : 'Close', { prepend: true });
+  }
+  if (typeof focusIntoDialog === 'function') focusIntoDialog(pop);
 }
 
 // Tear down the ⚙ protection menu (popover + scrim) if open.
 function closeProtectionMenu() {
-  document.getElementById('gd-protect-pop')?.remove();
+  const p = document.getElementById('gd-protect-pop');
+  p?.remove();
   document.getElementById('gd-protect-scrim')?.remove();
+  if (p && typeof returnFocusTo === 'function') returnFocusTo(_protectTrigger);
+  _protectTrigger = null;
 }
 
 // POST a review-policy / protect change and reload the popover. `url` is
@@ -140,6 +158,7 @@ function openProtectionMenu(btn) {
   pop.id = 'gd-protect-pop';
   pop.className = 'gd-pop';
   // branchName is user-controlled + decoded → textContent only (no innerHTML).
+  _protectTrigger = btn;
   const heading = document.createElement('h5');
   heading.textContent = 'Protect ' + branchName;
   pop.appendChild(heading);
@@ -219,4 +238,11 @@ function openProtectionMenu(btn) {
   pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 280)) + 'px';
   pop.style.top = (r.bottom + 6) + 'px';
   document.body.appendChild(pop);
+  // A form over a scrim is a dialog: a visible way out and focus inside
+  // (docs/ACCESSIBILITY.md) — Escape and the scrim stay as they were.
+  if (typeof ensurePopoverClose === 'function') {
+    ensurePopoverClose(pop, pop.id === 'gd-protect-pop' ? closeProtectionMenu : closeBranchPolicyMenu,
+                       pop.id === 'gd-protect-pop' ? 'Close protection' : 'Close', { prepend: true });
+  }
+  if (typeof focusIntoDialog === 'function') focusIntoDialog(pop);
 }

@@ -37,7 +37,8 @@ them. Field types match the slot's declared type:
 - `:bool` slot → checkbox
 - `:port` slot → number input + the refinement's range hint
 - Record / list slots → nested form (see lesson 08)
-- `:fn`-typed slot → fn-picker
+- `:fn`-typed slot → not entered here: the pane says *this argument is a
+  function, resolved from the graph at run time*
 
 Live validation runs as you type — a `✓` or `✗ <reason>` marker
 next to the input. The marker is advice, not a lock: the server
@@ -52,8 +53,9 @@ re-checks the args on submit and rejects a mismatch outright.
 3. Click `Run`. Result `5` appears.
 
 If you create a tutorial fn-def with multiple free args, the
-form lists them all. The placeholder `+` edges on the card
-mirror the form so you can see what's needed at a glance.
+form lists them all — the optional ones folded under an **N optional**
+row you unfold when you want them. The placeholder `+` edges on the
+card mirror the form so you can see what's needed at a glance.
 
 ## Typed result representations
 
@@ -86,7 +88,7 @@ returning `[3 1 4]` sparklines.
    `12`, leave `start`/`step` at their defaults.
 2. Run. Instead of twelve bullet rows you get a rising sparkline
    and the caption `12 values`.
-3. Create a component fn-def: **New fn** → name `hello-card`,
+3. Create a component fn-def: **New graph…** → name `hello-card`,
    parent `:wrap-element`, bind `:tag` to `div` and `:content` to
    `hello from a card`.
 4. Click `▶` → Run on `hello-card`. The pane shows **Component
@@ -167,7 +169,7 @@ The persisted row carries:
   with `:result-truncated? true`)
 - `:effects` (the actual effect set the runtime saw, NOT the
   declared one — drift between the two surfaces in the editor)
-- `:error` + `:error-data` on failure (capped at 4 KB)
+- `:error` (capped at 4 KB) + `:error-data` (64 KB) on failure
 
 Persisted executions show up in the runs list under the form
 (see below), survive restarts, and are swept by retention (below).

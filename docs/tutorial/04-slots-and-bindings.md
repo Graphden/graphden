@@ -170,9 +170,11 @@ never changed — one slot identity, three independent binding states,
 and a value you can change or take away without touching anyone
 else. That separation is why inheritance never copies anything.
 
-### Going further (fns.edn / MCP only)
+### Going further
 
-A rename and a type override on the same slot, in one fn-def:
+A rename and a type override on the same slot, in one fn-def (both are
+ordinary editor moves too — click the arg name on the edge to rename it,
+lesson 05, and click the type chip to override the type, lesson 08):
 
 ```edn
 {:name :tutorial-renamed-input

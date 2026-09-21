@@ -15,7 +15,7 @@ ride along, and each shows on the card:
 
 | Decision | Where it is declared | On the card |
 |---|---|---|
-| **Optional** — the fn runs without it | `:required false` on the slot's declaration | the `+` is dimmed; the lock badge says *Optional* |
+| **Optional** — the fn runs without it | `:required false` on the slot's declaration | on a fn you own, the `+` is dimmed and the faint `🔓` says *Optional* |
 | **Required here** — a descendant insists on an inherited optional | `:required true` on that fn's binding | the `+` is solid again; the badge says *required since …* |
 | **Sealed** — no descendant may bind this slot | `:terminal true` on a binding | a `🔒` on the label; descendants get a lock where the `+` would be |
 
@@ -34,9 +34,11 @@ may be left unbound: the implementation has a fallback. `subs` is one
         :end    {:type :int :required false}}}
 ```
 
-On a card the free `end` is drawn like any free slot, but its `+` is
-**dimmed**, and the small lock after its type chip — `🔓`, faint until
-you hover the label — reads *Optional — the fn runs without it*. The
+On a card of your own the free `end` is drawn like any free slot, but
+its `+` is **dimmed**, and the small lock after its type chip — `🔓`,
+faint until you hover the label — reads *Optional — the fn runs without
+it*. (A package fn's card shows neither `+` nor badge for a free slot —
+it is not yours to bind; extend it first.) The
 Run form (lesson 15) lists it the same way. Bind it or don't; either
 runs.
 
@@ -106,9 +108,10 @@ In `fns.edn`:
 
 One glyph, three facts, everywhere a slot is drawn:
 
-- `🔓`, faint — nothing decided; on your own fn, click to decide.
+- `🔓`, faint — nothing decided, or only *Optional* (the slot's own
+  declaration); on your own fn, click to decide.
 - `🔒` — something is in force. Hover: *Sealed here* or *Sealed in
-  cut*; *List closed in …*; *Optional*; *required since …*. The
+  cut*; *List closed in …*; *required since …*. The
   popover repeats the inherited ones read-only and lets you change
   the ones that are yours.
 - A lock where a `+` should be — sealed, or a closed list, above you.
@@ -124,7 +127,8 @@ One glyph, three facts, everywhere a slot is drawn:
 Run a fn without its optional input, seal a slot, then require it:
 
 1. Type `subs` in the Explorer filter and click the `subs` row
-   (`core.strings`). Three free slots; `end`'s `+` is dimmed.
+   (`core.strings`). Three free slots; `end` is declared optional —
+   you will see it on your own child next.
 2. `⋯` → **Extend** → `tutorial-cut` → **Save**.
 3. Hover the `end` label and its faint `🔓`: *Optional — the fn runs
    without it.*

@@ -66,10 +66,19 @@ function buildFnUsagesSection(payload, opts) {
   // (name OR namespace substring); group labels keep the full counts.
   if (seen.size > 30) {
     const filter = document.createElement('input');
-    filter.type = 'text';
+    filter.type = 'search';   // native ✕ — a filter without a clear is a trap
     filter.className = 'gd-insp-usage-filter';
     filter.placeholder = 'Filter usages…';
     filter.setAttribute('aria-label', 'Filter the Used-by list');
+    // Escape: clear, then leave — two stages like the Explorer filter; the
+    // key is consumed either way so a running tour is not ended by it.
+    filter.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (filter.value) { filter.value = ''; filter.dispatchEvent(new Event('input')); }
+      else filter.blur();
+    });
     filter.addEventListener('input', () => {
       const needle = filter.value.trim().toLowerCase();
       for (const row of section.querySelectorAll('.gd-insp-usage-row')) {

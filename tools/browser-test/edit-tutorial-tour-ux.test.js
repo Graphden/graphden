@@ -243,6 +243,8 @@ const {
     assert(scoped.chips.join() === 'in core', 'an "in core" chip appeared (got: ' + scoped.chips.join() + ')');
     assert(scoped.roots.join() === 'core', 'the tree collapsed to core (got: ' + scoped.roots.join() + ')');
     await page.keyboard.press('Escape');
+    assert(await clickTourButton(page, 'Next'), 'view-chip Next');
+    await waitTourTitle(page, 'Clear it', 150000);
     await page.evaluate(() => toggleKind('all'));
     await waitTourTitle(page, 'A filter the graph answers', 150000);
     const cleared = await page.evaluate(() => ({

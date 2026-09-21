@@ -478,8 +478,31 @@ function openChildCreateMenu(anchorEl, parentNsId, parentNsPath) {
   menu.style.left = rect.left + 'px';
   menu.style.right = 'auto';
   menu.style.zIndex = '300';
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', 'Create in ' + (parentNsPath || 'this namespace'));
   document.body.appendChild(menu);
   activeChildMenu = menu;
+  // A menu the keyboard can leave: focus lands on the first item, Escape
+  // closes it and returns focus to the `+` that opened it (consumed, so a
+  // running tour does not end). ↑ / ↓ walk the items.
+  const items = Array.from(menu.querySelectorAll('.create-menu-item'));
+  for (const b of items) b.setAttribute('role', 'menuitem');
+  menu.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeChildCreateMenu();
+      if (anchorEl && typeof anchorEl.focus === 'function') anchorEl.focus();
+      return;
+    }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const i = items.indexOf(document.activeElement);
+      const n = items.length;
+      items[((i < 0 ? 0 : i) + (e.key === 'ArrowDown' ? 1 : n - 1)) % n].focus();
+    }
+  });
+  setTimeout(() => { if (items[0] && activeChildMenu === menu) items[0].focus(); }, 0);
 
   menu.querySelectorAll('.create-menu-item').forEach((btn) => {
     btn.addEventListener('click', (e) => {
@@ -619,7 +642,7 @@ function startNsRename(headerEl, nsId, nsPath) {
     .forEach((el) => { el.style.display = 'none'; });
 
   const row = buildInlineInputRow({
-    placeholder: 'Namespace name',
+    placeholder: 'Namespace name — or a.dotted.path to move it',
     indent: 0,
     initialValue: currentName,
     onSubmit: async (newName) => {
@@ -628,9 +651,34 @@ function startNsRename(headerEl, nsId, nsPath) {
         await initGraph();
         return;
       }
-      const response = await putEntity('ns', nsId, { name: newName });
+      // A dotted path MOVES the namespace: `tools.legacy` puts it under
+      // `tools` as `legacy`. The server takes `parent-id` on the same PUT
+      // the rename uses (`parse-ns-from-form`); the editor only has to
+      // resolve the path — fns already move this way (⋯ → ns badge).
+      const fields = { name: newName };
+      let undoRename = true;
+      if (newName.includes('.')) {
+        const segs = newName.split('.').map((x) => x.trim());
+        const leaf = segs.pop();
+        const parentPath = segs.join('.');
+        if (!leaf || segs.some((x) => !x)) throw new Error('Empty segment in ' + newName);
+        if (parentPath === nsPath || parentPath.startsWith(nsPath + '.')) {
+          throw new Error('A namespace cannot move under itself');
+        }
+        let parentId = null;
+        for (const [id, path] of (lookups?.nsPathMap || new Map())) {
+          if (path === parentPath) { parentId = id; break; }
+        }
+        if (!parentId) throw new Error('No namespace ' + parentPath + ' — create it first');
+        fields.name = leaf;
+        fields['parent-id'] = parentId;
+        undoRename = leaf !== currentName && parentId === (lookups?.nsMap?.get(nsId)?.['parent-id'] || null);
+      }
+      const response = await putEntity('ns', nsId, fields);
       if (response.status >= 200 && response.status < 300) {
-        if (typeof gdUndoRecordNsRenamed === 'function') gdUndoRecordNsRenamed(nsId, currentName, newName);
+        if (undoRename && typeof gdUndoRecordNsRenamed === 'function') {
+          gdUndoRecordNsRenamed(nsId, currentName, fields.name);
+        }
         await initGraph();
       } else {
         throw new Error(await extractResponseError(response));

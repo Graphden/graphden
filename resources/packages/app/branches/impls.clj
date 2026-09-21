@@ -745,6 +745,12 @@
     {:required required
      :have have
      :satisfied (>= have required)
+     ;; Whether the CALLER's own approval is among them — the ✅ in the
+     ;; branch popover renders pressed and turns into "withdraw"
+     ;; (`DELETE /api/branches/:ref/approve`) on the next click.
+     :mine (boolean (some #(= (or (:user-id tc/*current-principal*) "anonymous")
+                              (:approver-id %))
+                          approvals))
      :approvers (mapv (fn [a]
                         {:approver-id (:approver-id a)
                          :stale (or (not= stamp (:content-stamp a))

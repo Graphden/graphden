@@ -1925,23 +1925,64 @@
   ;;     prettifies `.gd-prov-mono` after the swap (raw kept in title).
   {:name :_iov-return-some?
    :parent :some? :args {:value :_insp-return}}
+  ;;     The row is a FLAG row like λ / 📍: compact cards (the default)
+  ;;     hide the return-type strip, so the Inspector is where a reader
+  ;;     who owns the fn declares or changes the return type (the same
+  ;;     popover the strip opens, `data-action="return-type"`), and where
+  ;;     the `↳` type-rule provenance button lives when a base-fn's
+  ;;     :return-type-rule computed the type.
+  {:name :_iov-flag-attrs
+   :description "Attrs of a flag row: the static class / data-action / title map (`:map`, bound by each row) plus `data-fn-id` for editor-edit-modes-flags.js."
+   :parent :assoc
+   :args {:key {:value :data-fn-id}
+          :value {:parent :to-str :args {:value :_insp-fn-id}}}}
+  {:name :_iov-returns-attrs
+   :parent :_iov-flag-attrs
+   :args {:map {:value {:class "gd-insp-row gd-insp-flag-row"
+                        :data-action "return-type"
+                        :title "The declared return type, or the one the type checker computed"}}}}
+  {:name :_iov-rt-rule-btn
+   :description "`↳` — opens the type-rule popover naming the base-fn whose :return-type-rule computed this type; hidden when no rule applies."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_insp-rule-owner-name}}
+          :then {:parent :hiccup
+                 :args {:tag {:value "button"}
+                        :attrs {:parent :assoc
+                                :args {:map {:value {:type "button"
+                                                     :class "return-type-strip-provenance gd-insp-rt-rule"
+                                                     :aria-haspopup "dialog"
+                                                     :aria-expanded "false"}}
+                                       :key {:value :title}
+                                       :value {:parent :str
+                                               :args {:parts ["Computed by :" :_insp-rule-owner-name
+                                                              "'s :return-type-rule — click for inputs"]}}}}
+                        :children [{:value "↳"}]}}
+          :else {:value [:span {:hidden "1"}]}}}
   {:name :_iov-returns-row-shown
    :parent :hiccup
    :args {:tag {:value "div"}
-          :attrs {:value {:class "gd-insp-row"}}
+          :attrs :_iov-returns-attrs
           :children [{:value [:span {:class "gd-insp-k"} "Returns"]}
                      {:parent :hiccup
                       :args {:tag {:value "span"}
-                             :attrs {:value {:class "gd-insp-v"}}
+                             :attrs {:value {:class "gd-insp-v gd-insp-flag"}}
                              :children [{:parent :hiccup
                                          :args {:tag {:value "span"}
                                                 :attrs {:value {:class "gd-chip gd-chip-type gd-prov-mono"}}
-                                                :children [{:parent :pr-str :args {:value :_insp-return}}]}}]}}]}}
+                                                :children [{:parent :pr-str :args {:value :_insp-return}}]}}
+                                        :_iov-rt-rule-btn]}}]}}
+  {:name :_iov-returns-row-none
+   :description "A composed fn with no return type yet — the row still shows, so the owner has somewhere to declare one."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs :_iov-returns-attrs
+          :children [{:value [:span {:class "gd-insp-k"} "Returns"]}
+                     {:value [:span {:class "gd-insp-v gd-insp-flag"} "(none)"]}]}}
   {:name :_iov-returns-row
-   :parent :if
-   :args {:test :_iov-return-some?
-          :then :_iov-returns-row-shown
-          :else {:value [:span {:hidden "1"}]}}}
+   :parent :cond
+   :args {:clauses [:_iov-return-some? :_iov-returns-row-shown
+                    :_iov-has-parents? :_iov-returns-row-none
+                    {:value true} {:value [:span {:hidden "1"}]}]}}
 
   ;; --- Effects chips (or the explicit `pure` note when the registry
   ;;     entry exists but lists none).
@@ -1954,35 +1995,51 @@
   {:name :_iov-eff-name
    :parent :name :args {:value {:as :item}}}
   {:name :_iov-effect-chip
+   :description "One effect chip; `data-effect` lets editor-edit-modes-flags.js open the effect explainer on click, as the card strip's chips do."
    :parent :hiccup
    :args {:tag {:value "span"}
           :attrs {:parent :zipmap
-                  :args {:keys [{:value :class}]
+                  :args {:keys [{:value :class} {:value :data-effect} {:value :role} {:value :tabindex}]
                          :vals [{:parent :str
                                  :args {:parts [{:value "effects-chip effects-chip-"}
-                                                :_iov-eff-name]}}]}}
+                                                :_iov-eff-name]}}
+                                :_iov-eff-name
+                                {:value "button"}
+                                {:value "0"}]}}
           :children [:_iov-eff-name]}}
   {:name :_iov-effect-chips
    :parent :map
    :args {:func :_iov-effect-chip
           :coll {:ref :_iov-effects :type [:list :any]}}}
+  ;;     Like Returns, a FLAG row: the card's effects strip and its ✎
+  ;;     pencil are hidden on compact cards, so the Inspector row opens
+  ;;     the same expects-effects form (`data-action="expects-effects"`).
+  {:name :_iov-effects-attrs
+   :parent :_iov-flag-attrs
+   :args {:map {:value {:class "gd-insp-row gd-insp-flag-row"
+                        :data-action "expects-effects"
+                        :title "The effects this fn performs — declare a contract and the drift checker compares it with what the graph computes"}}}}
   {:name :_iov-effects-row-chips
    :parent :hiccup
    :args {:tag {:value "div"}
-          :attrs {:value {:class "gd-insp-row"}}
+          :attrs :_iov-effects-attrs
           :children [{:value [:span {:class "gd-insp-k"} "Effects"]}
                      {:parent :hiccup
                       :args {:tag {:value "span"}
-                             :attrs {:value {:class "gd-insp-v gd-insp-effects"}}
+                             :attrs {:value {:class "gd-insp-v gd-insp-effects gd-insp-flag"}}
                              :children [:_iov-effect-chips]}}]}}
+  {:name :_iov-effects-row-pure
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs :_iov-effects-attrs
+          :children [{:value [:span {:class "gd-insp-k"} "Effects"]}
+                     {:value [:span {:class "gd-insp-v gd-insp-pure gd-insp-flag"} "pure"]}]}}
   {:name :_iov-entry-some?
    :parent :some? :args {:value :_insp-entry}}
   {:name :_iov-effects-row
    :parent :cond
    :args {:clauses [:_iov-effects-any? :_iov-effects-row-chips
-                    :_iov-entry-some? {:value [:div {:class "gd-insp-row"}
-                                               [:span {:class "gd-insp-k"} "Effects"]
-                                               [:span {:class "gd-insp-v gd-insp-pure"} "pure"]]}
+                    :_iov-entry-some? :_iov-effects-row-pure
                     {:value true} {:value [:span {:hidden "1"}]}]}}
 
   ;; --- Call-site params + Merge: the two fn-row FLAGS a composed fn

@@ -80,12 +80,13 @@ const {waitTourTitle, clickTourButton, finishAndDelete} = require('./tutorial-to
     await page.waitForSelector('#gd-market-root .mk-tab[data-mk-tab="theme"]', {timeout: 30000});
     await new Promise((r) => setTimeout(r, 700));
     await page.click('#gd-market-root .mk-tab[data-mk-tab="theme"]');
-    await waitTourTitle(page, 'Review it', 60000);
+    await waitTourTitle(page, 'Open the listing', 60000);
     console.log('  step 7: marketplace lists my-board');
 
-    // --- Review it.
+    // --- Open the listing, then review it (two rings: the card, the form).
     await page.evaluate(() => document.querySelector('#gd-market-root [data-mk-card="my-board"] .mk-card-open').click());
     await page.waitForSelector('#gd-market-root .mk-review-submit', {timeout: 30000});
+    await waitTourTitle(page, 'Review it', 60000);
     await page.waitForFunction(() => !!document.querySelector('#gd-market-root .mk-review-form')?.['htmx-internal-data'], null, {timeout: 15000, polling: 100});
     await page.evaluate(() => {
       const sel = document.querySelector('#gd-market-root .mk-review-form select[name="rating"]');

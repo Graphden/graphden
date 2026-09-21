@@ -37,7 +37,8 @@ Details worth knowing:
   `fx` (hover it for the exact footprint — `io`, `time`, …)
   without hiding anything. Off by default; flip it on to see the
   footprints, off again and the tree returns to normal.
-- **services** and **apps** show a live count; the **apps** chip
+- **services**, **tests** and **apps** show a live count (tests also
+  count their failures, `· N✗`); the **apps** chip
   appears only when the deployment has app routing at all
   (Lesson 30).
 - Pressing **secrets** also reveals the **+ New secret** button
@@ -65,6 +66,19 @@ Kinds are the fixed half of the row. **+ filter** opens the rest —
 with this effect*, *unused* — each of which appears as its own chip
 with an ×. Those, and saving a set of chips as a **view**, are
 [lesson 22](22-workspaces.md).
+
+### Folding the panel away
+
+The `<` in the Explorer's header (or `Space e`) collapses the whole
+panel to a slim tab at the left edge — it still names the branch you
+are on; click the tab (or `Space e` again) to bring the panel back. A
+tour step that needs the Explorer expands it for you.
+
+### From a card back to the tree
+
+`⋯` on a card → the **ns** badge shows the fn's namespace path and
+offers **Reveal in Explorer** — the tree unfolds to the row and
+selects it. The `↗` beside it opens the fn in a new tab.
 
 ## The Inspector — the right panel
 
@@ -106,7 +120,8 @@ Two more reading affordances live outside the Inspector:
   few named fns you selected render as rows just above the tree.
   Click one to go straight back; the ☆ on a row **pins** it above
   the trail permanently (★, until unpinned). The list hides while
-  the filter is active (search owns that space).
+  the filter — or any filter chip — is active (the search owns that
+  space).
 
 The cards themselves have one setting: **Settings → Appearance → Graph
 cards**. *Compact* hides the type / effect strips on every card until

@@ -110,15 +110,19 @@ async function newContext(chromium, opts = {}) {
     hasTouch: !!process.env.GRAPHDEN_VIEWPORT,
     isMobile: false,
   });
-  await ctx.addInitScript((auth) => {
+  await ctx.addInitScript(({auth, compactPass}) => {
     // about:blank has no origin → localStorage access throws. The
     // navigation to localhost runs the init script again on a real
     // origin, so just swallow the failure here.
     try { localStorage.setItem('graphden.auth.password', auth); } catch (_) {}
     // Redesign 2026-08: cards default to compact (metadata strips hidden).
     // Tests assert on / interact with those strips, so opt into full cards.
-    try { localStorage.setItem('graphden.cards.compact', '0'); } catch (_) {}
-  }, AUTH);
+    // `GRAPHDEN_CARDS_COMPACT=1` keeps the reader's default instead — a
+    // walk at that setting shows which tour targets a compact card hides.
+    if (!compactPass) {
+      try { localStorage.setItem('graphden.cards.compact', '0'); } catch (_) {}
+    }
+  }, {auth: AUTH, compactPass: !!process.env.GRAPHDEN_CARDS_COMPACT});
   const page = await ctx.newPage();
   // JS-coverage snapshot (Chromium block coverage). Opt-in via
   // GRAPHDEN_JS_COVERAGE=<dir>: V8 precise coverage runs for the page's

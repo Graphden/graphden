@@ -372,6 +372,16 @@
       (is (str/includes? body "data-action=\"branch-local\""))
       (is (str/includes? body "data-state=\"inherited\""))
       (is (str/includes? body "branch-local — inherited from http-server"))))
+  (testing "Returns and Effects are flag rows too — compact cards hide both strips"
+    (let [body (body-of :_partial-inspector-overview-handler
+                        {"fn-id" (str (ga/fn-id :web-server))})]
+      (is (str/includes? body "data-action=\"return-type\""))
+      (is (str/includes? body "data-action=\"expects-effects\""))
+      (is (re-find #"data-effect=\"io\"" body) "each effect chip names its effect for the explainer")))
+  (testing "a fn whose return type a base-fn rule computes carries the ↳ provenance button"
+    (let [body (body-of :_partial-inspector-overview-handler
+                        {"fn-id" (str (ga/fn-id :json-ok-response))})]
+      (is (str/includes? body "gd-insp-rt-rule") body)))
   (testing "a declared lambda-params list is printed in order"
     (let [body (body-of :_partial-inspector-overview-handler
                         {"fn-id" (str (ga/fn-id :list-fn-versions-handler))})]

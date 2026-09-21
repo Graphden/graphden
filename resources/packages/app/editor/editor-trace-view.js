@@ -145,6 +145,9 @@ async function openTraceView(execId) {
     panel.innerHTML = await r.text();
     _bindTraceViewActions(panel);
     _traceStep(1);   // select the root frame right away
+    // role=dialog: the keyboard goes in with it — the ◀ ▶ stepping only
+    // works once focus is inside, and nothing else puts it there.
+    if (typeof focusIntoDialog === 'function') focusIntoDialog(panel);
   } catch (e) {
     if (panel.isConnected) panel.textContent = 'Failed: ' + (e?.message || 'network error');
   }

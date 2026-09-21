@@ -216,8 +216,21 @@ function _tourPosition() {
       { left: window.innerWidth - pw - 12, top: window.innerHeight - ph - 12 },
       { left: 12, top: window.innerHeight - ph - 12 },
     ];
+    // On a management surface (Organization / Settings / Platform) a
+    // panel-wide target leaves no corner free of the panel; the surface
+    // HEAD — prose only — is a spot that covers nothing the step needs,
+    // and the section nav beside the panel is not.
+    for (const head of document.querySelectorAll('.gd-operate-head')) {
+      const hr = head.getBoundingClientRect();
+      if (hr.width > 0 && hr.height > 0) { cands.unshift({ left: hr.right - pw, top: hr.top }); break; }
+    }
     const avoid = _tourFloatingRects().concat(_tourNodeRects());
     if (panel) avoid.push(panel);
+    const nav = document.getElementById('gd-operate-nav');
+    if (nav && panel) {
+      const nr = nav.getBoundingClientRect();
+      if (nr.width > 0 && nr.height > 0) avoid.push(nr);
+    }
     const best = _tourPickSpot(cands, pw, ph, spotRect, avoid);
     pop.style.left = best.left + 'px';
     pop.style.top = best.top + 'px';

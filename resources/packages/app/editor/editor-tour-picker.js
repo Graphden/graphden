@@ -284,6 +284,23 @@ async function openTutorialMenu() {
   pop.replaceChildren();
   pop.classList.add('gd-tour-visible');
   _tourCenterPop(pop);
+  // The catalogue is a dialog: focus goes in when it opens and back to the
+  // menu chip (or wherever the reader was) when it closes; Escape is the
+  // Cancel button — consumed, so the tour engine's "Escape ends the
+  // lesson" never sees it (a paused lesson resumes, as Cancel does).
+  const returnEl = document.activeElement;
+  const cancel = () => {
+    _tourResume();
+    if (returnEl && typeof returnEl.focus === 'function' && document.contains(returnEl)) {
+      returnEl.focus();
+    }
+  };
+  pop.onkeydown = (e) => {
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    cancel();
+  };
   // On a phone the catalogue is a bottom sheet like every other tour surface
   // — `_tourPosition` sets this while a lesson RUNS, and the catalogue can be
   // opened without one.
@@ -508,7 +525,7 @@ async function openTutorialMenu() {
     }
     // Dismissing the catalogue returns to the tour it covered — ARMED. A bare
     // re-render left a step that polled nothing and ignored Escape.
-    foot.appendChild(_tourBtn('Cancel', 'gd-tour-btn-quiet', () => _tourResume()));
+    foot.appendChild(_tourBtn('Cancel', 'gd-tour-btn-quiet', cancel));
     if (done.size) {
       foot.appendChild(_tourBtn(
         'Clear progress (' + done.size + ')', 'gd-tour-btn-quiet gd-tour-clear',
@@ -521,11 +538,16 @@ async function openTutorialMenu() {
   // Escape inside the filter clears it rather than ending anything — the
   // catalogue's own Cancel is the way out.
   filter.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
+    if (e.key !== 'Escape' || !filter.value) return;   // empty: the dialog's Escape (Cancel)
     e.stopPropagation();
-    if (filter.value) { filter.value = ''; render(''); }
+    filter.value = '';
+    render('');
   });
   render('');
+  // Focus goes in once the catalogue is built — onto the filter, the first
+  // focusable thing (synchronous: the vm tests run without timers).
+  if (typeof focusIntoDialog === 'function') focusIntoDialog(pop);
+  else if (typeof filter.focus === 'function') filter.focus();
 }
 
 window.openTutorialMenu = openTutorialMenu;

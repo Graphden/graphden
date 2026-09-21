@@ -101,7 +101,7 @@ otherwise work; the affordance and the permission are the same fact.
 tenancy addon.)
 
 1. Account menu → **Organization** → **Roles**.
-2. Create a role: name `support`, tick `manage-users`, Create. The row
+2. Create a role: name `support`, tick `manage-users`, **+ Add role**. The row
    appears with an empty member list.
 3. Invite a second person if you have not already (lesson 27), then
    type their username into the role's member box and submit. The row

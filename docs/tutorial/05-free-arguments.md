@@ -235,8 +235,9 @@ Run a template through its free arg, pin that arg in a child, then
 rename it in another:
 
 1. Type `to-json` in the Explorer filter and click the
-   `to-json-string` row (`core.system`). Its card shows a `+`
-   placeholder on `:data` — the slot is FREE.
+   `to-json-string` row (`core.system`). Its `:data` edge ends in an
+   open arrow with nothing bound — the slot is FREE. (The `+` that fills
+   a slot appears only on a fn you own; you extend this one in step 3.)
 2. Click `⋯` on the row, then **▶ Run**. The Run pane opens in the
    right panel with a `data` field — the free slot surfaced as your
    input. Enter `{"a": 1}` and **Run**: the JSON string comes back.

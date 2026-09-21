@@ -143,12 +143,15 @@ ROWS, each labeled with an ancestor's name. The TOP row is the
 fn itself; the rows below are its ancestors in BFS order. Each
 row carries:
 
-- The ancestor's name (clickable — navigates to that fn).
+- The ancestor's name.
 - Any binding that ancestor contributed for the slot you're
   looking at.
 
-Clicking an ancestor row OPENS that ancestor on a new card. So
-you can walk the chain visually.
+Clicking an ancestor row **unfolds the card to that level** (lesson 02):
+the ancestor's own bindings and edges appear under it, so you can walk
+the chain visually without leaving the card. To OPEN the ancestor as
+the selected fn instead, use its row in the Explorer, or `⋯` on the
+card → `↗` (open in a new tab).
 
 ## Try it
 
@@ -197,7 +200,10 @@ In the editor:
    and pick `core.strings.to-str` — the wrapper's parent. Name it
    `add-10-text`, leave the **into** slot on `:value`, then
    **Save**. The editor creates the wrapper with `add-10` already
-   bound into it and opens it: your sum, stringified.
+   bound into it and opens it: your sum, stringified. (The same form
+   offers **take over the name**: the wrapper becomes `add-10` and the
+   fn you wrapped is renamed `_add-10-impl` — the refactoring for
+   "everyone who calls `add-10` should now get the wrapped result".)
 
    Compatible free slots sort first with a ✓; a slot marked
    "(bound in the parent — final)" cannot take the fn — the

@@ -105,7 +105,8 @@ descendants.
 Seed a list, extend it from a child, then close it:
 
 1. Type `add` in the Explorer filter and click the `add` row
-   (`core.arithmetic`). Its `:nums` is a list slot — one `+`.
+   (`core.arithmetic`). Its `:nums` is a list slot; its edge ends open,
+   nothing bound yet. (The `+` that fills it appears on a fn you own — next.)
 2. `⋯` on the row → **Extend**, name it `tutorial-base-sum`,
    **Save**. The editor opens the child.
 3. Click the `+` on `:nums` → **Append literal** → `1` → **Save**.
@@ -128,7 +129,7 @@ Seed a list, extend it from a child, then close it:
 7. `⋯` → **▶ Run** → **Run**: `6`. Run `tutorial-base-sum` and it
    still says `3` — you extended, you did not edit.
 8. Back on `tutorial-base-sum` (filter, click its row), click the
-   `🔒` after `:nums`' type chip, tick **Close the list**, **Save**.
+   `🔓` after `:nums`' type chip, tick **Close the list**, **Save**.
    The badge is a closed lock now.
 9. Open `tutorial-sum-more` again: its `3` is still there, but the
    tail is a lock — hover it. Nothing below `tutorial-base-sum` can

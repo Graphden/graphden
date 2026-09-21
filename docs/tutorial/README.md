@@ -121,8 +121,10 @@ is a different lesson — and starting it from the dialog cleans the
 finished lesson up first (deleting its branch, or the rows it created).
 
 Six lessons have no tour: **31** is about files on disk and
-`bb rebuild`, which the editor cannot show; **14** is a route-wiring
-marathon that reads better as text than as thirty steps; **34** is
+`bb rebuild`, which the editor cannot show; **14** is about MOUNTING a
+route (`:all` and a rebuild, or publishing as an app — lesson 30) and
+watching a page refresh itself, neither of which one editor session can
+demonstrate (the component preview cannot fetch a fragment); **34** is
 about running a second, local instance — something one editor session
 cannot demonstrate; **39** needs a second service running while the
 tour would hold the page; **41** is a two-role loop that a tour cannot

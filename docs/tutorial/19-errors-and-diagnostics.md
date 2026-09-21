@@ -44,7 +44,8 @@ answers *where*, and the Inspector, on the selected fn, answers *what*.
 
 ## ✕ failed — what failed and is still your problem
 
-The **✕ failed** chip focuses the tree on fns with recent failed runs
+The **✕ failed** chip (`Space x`; `Space y` and `Space w` are the other
+two) focuses the tree on fns with recent failed runs
 that are still **unresolved** on the branch you are on; the chip
 counts the runs, a namespace row shows `✕ 3`, the fn row `✕1`. Select
 the fn and the Inspector's **Runs** tab opens with its unresolved
@@ -223,7 +224,11 @@ The ✕ failed filter answers *what broke and where*, the trace tree *why*, ⚐
    `port`, with the expected refinement and the actual `:text`.
 7. Fix the binding — bind `8080` instead. The mark is gone; you did
    not have to dismiss it.
-8. Now build the same thing twice. Paste both:
+8. Now build the same thing twice: find `assoc`, `⋯` → **Extend** →
+   `tutorial-page-attrs`, bind `map` to `{:class "page"}`, `key` to
+   `title` and `value` to the fn-ref `tutorial-bad-json`; then extend
+   `assoc` again as `tutorial-row-attrs` with the same three bindings.
+   As fn-defs, the two read:
 
    ```edn
    {:name :tutorial-page-attrs

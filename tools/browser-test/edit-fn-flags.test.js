@@ -263,6 +263,32 @@ async function waitItems(page, name, expected) {
     await page.click('.gd-insp-flag-row[data-action="branch-local"]');
     await page.waitForSelector('.arg-value-edit-popover input[data-branch-local="toggle"]', {timeout: 5000});
     await page.keyboard.press('Escape');
+    // Returns and Effects are flag rows too — the return-type strip and the
+    // effects strip (with its ✎) are the two the compact card hides. Both
+    // open the strips' popovers and a save re-renders the row.
+    const rrow = compact.rows.find((r) => r.action === 'return-type');
+    const erow = compact.rows.find((r) => r.action === 'expects-effects');
+    assert(rrow && rrow.editable, 'the Inspector shows Returns, editable: ' + JSON.stringify(rrow));
+    assert(erow && erow.editable, 'the Inspector shows Effects, editable: ' + JSON.stringify(erow));
+    await page.click('.gd-insp-flag-row[data-action="return-type"]');
+    await page.waitForSelector('.arg-value-edit-popover select.arg-value-edit-input', {timeout: 5000});
+    await page.selectOption('.arg-value-edit-popover select.arg-value-edit-input', 'text');
+    err = await saveInlinePopover(page);
+    assert(err === '', 'declaring a return type from the Inspector row works: ' + err);
+    // The row already read the COMPUTED :text before the save; poll the fn
+    // row itself for the declaration — the graph API exposes it as the id of
+    // the `text` type row (`return-type-fn-id`), unset until declared.
+    for (let i = 0; i < 60; i++) {
+      row = await rowOf(page, shout);
+      if (row['return-type-fn-id']) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    assert(!!row['return-type-fn-id'], 'the fn row carries a declared return type after the Inspector save');
+    await page.click('.gd-insp-flag-row[data-action="expects-effects"]');
+    await page.waitForSelector('.arg-value-edit-popover .expects-effects-edit input[name="ee-mode"]', {timeout: 10000});
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('.arg-value-edit-popover'), null, {timeout: 5000, polling: 100});
+    console.log('  compact: Returns / Effects rows open the strip popovers; return-type saved from the row');
     await page.evaluate(() => document.body.classList.remove('gd-cards-compact'));
     await openCanvas(page, SHOUT, '.node-overlay[data-fn-name="' + SHOUT + '"] .lambda-params-chip');
     err = await setLambda(page, SHOUT, 'derived');

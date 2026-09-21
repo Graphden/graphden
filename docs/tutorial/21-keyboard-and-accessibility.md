@@ -102,7 +102,20 @@ you never have to know the key to get out.
 
 Settings, Organization and Platform are behind the leader as well:
 `Space v` opens the **Surfaces** group — `s` for Settings, `o` for
-Organization, `b` straight back to Build. A surface behaves like a
+Organization, `p` for Platform, `m` for the Marketplace, `b` straight
+back to Build. The whole leader map, group by group:
+
+| `Space` … | does |
+|---|---|
+| `g g` / `g f` / `g r` / `g p` | keyboard into the graph / fit / go to root / reset positions |
+| `b` / `e` | the branch popover / show or hide the Explorer |
+| `f f` / `f v` / `f a` | add a filter / views / clear every filter (lesson 22) |
+| `r` / `o` | the Inspector's Runs tab / its Overview |
+| `t` / `x` / `y` / `w` | only tests / failed runs / type errors / lint findings (lessons 17, 19) |
+| `v b` / `v s` / `v o` / `v p` / `v m` | Build / Settings / Organization / Platform / Marketplace |
+| `u` | undo the last edit |
+
+A surface behaves like a
 big dialog: opening one moves the keyboard into its section list,
 everything underneath leaves the tab order, and `Escape` returns you
 to the editor — as does the **× Close** button in the surface's

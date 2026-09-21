@@ -108,14 +108,22 @@ The owner (only) sees a **Transfer ownership** form: enter the
 new owner's email (they must already be a member), confirm. There
 is no revoke — ownership only moves.
 
+## Leaving the surface
+
+Organization covers the canvas while it is open. The **× Close** in
+its top-right corner (or `Escape`, or the Graphden logo in the bar)
+returns you to the editor exactly where you were — the same way out
+every management surface has (Settings, Platform, the Marketplace).
+
 ## Who may actually use this
 
 Adding and removing members requires the `manage-users`
 org-management capability — held implicitly by the **owner**, or
-delegated via a role ([Lesson 29](29-roles.md)). Everyone else
-sees the panel read-only at best: the underlying entities
-(`:account`, `:grant`, `:org`) are guarded server-side, so the
-affordances are just UX — the enforcement is in storage.
+delegated via a role ([Lesson 29](29-roles.md)). Everyone else does
+not get the panel at all — the Members section is not rendered without
+`manage-users` — and the underlying entities (`:account`, `:grant`,
+`:org`) are guarded server-side besides, so the enforcement is in
+storage, not in the UI.
 
 ## Try it
 

@@ -171,6 +171,19 @@ function gdEscHtml(s) {
     if (closeBtn) closeBtn.onclick = () => document.body.classList.remove('gd-insp-open');
   }
 
+  // Escape closes the sheet when it IS a sheet (the × is on screen only
+  // then) — consumed, so a running tour is not ended by it. Registered
+  // once, at load.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
+    if (!document.body.classList.contains('gd-insp-open')) return;
+    const x = document.querySelector('#gd-inspector .gd-insp-close');
+    if (!x || x.getClientRects().length === 0) return;   // wide viewport: a static column
+    if (!document.getElementById('gd-inspector')?.contains(document.activeElement)) return;
+    e.preventDefault();
+    document.body.classList.remove('gd-insp-open');
+  });
+
   // Overview content is a server partial (`GET /partials/inspector-overview`)
   // — the parent-chip ancestor walk, type formatting and effects chips render
   // where the reasoning lives; the client only mounts and post-formats.

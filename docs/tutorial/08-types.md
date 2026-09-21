@@ -258,7 +258,11 @@ The arg-type chip for any slot referencing one of these resolves
 to the type's name (e.g. `tutorial-cursor`) instead of its
 unfolded structural form. Click the chip's `▸` to expand inline
 and see the structural form; the provenance ↳ badge shows where
-the type came from.
+the type came from. On an INLINE type the expansion also offers
+**Give this anonymous type a name** — it becomes a type-row you can
+reference elsewhere. An existing type-row is edited from its own
+card: the **edit this type…** strip opens the same form you created
+it with, with **Save** instead of **Create**.
 
 Then create a fn-def with `:parent :assoc` and bind `:key` to a
 literal `:total`. Its return-type strip grows a `↳` — click it and

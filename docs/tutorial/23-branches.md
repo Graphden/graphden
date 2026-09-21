@@ -41,6 +41,8 @@ Create              → type a name, click Create
 Advanced            → (cloud/tenancy only) "Who can write" the new
                       branch: "Everyone with write access (default)",
                       "Only me (org admins can unlock)", "Org admins only"
+                      (the ⛨ menu on an existing branch offers the same
+                      three, worded "Only the owner …")
 row → switch        → click a branch row to switch to it
 Δ (compare)         → COMPARE MODE: pick this branch as the
                       second one and the whole editor becomes
@@ -197,7 +199,7 @@ approvals on the target, comment threads and suggestions — is
 If you edited the same entity on BOTH branches after their fork
 point, merge throws. The conflict modal asks "which side wins"
 per entity. Pick `source` (the branch you're merging in) or
-`target` (the branch you're merging into) per row, hit `Apply`.
+`target` (the branch you're merging into) per row, hit **Apply merge**.
 
 ## What DOESN'T merge: branch-local fn-defs
 

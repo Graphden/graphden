@@ -77,7 +77,8 @@ Any fn of your own works as the subject — `slugify` extended as
 
 Now the surfaces:
 
-- In the Explorer's filter bar click the **✓ tests** chip — the tree
+- In the Explorer's filter bar click the **✓ tests** chip (or press
+  `Space t`) — the tree
   focuses on your tests, each with a status dot: **green** passed,
   **red** failed, **grey** not run since its last edit.
 - With the ✓ tests chip on, the chip row shows **▶ Run all** — every test

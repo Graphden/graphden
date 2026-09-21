@@ -472,8 +472,12 @@ function enterExpectsEffectsEditMode(fn, anchorEl) {
     },
     // Full refresh — these write the fn ROW, which `lookups.fnMap` and
     // the inspector's Overview (RETURNS / EFFECTS) read; `renderGraph`
-    // alone left both stale until the next selection.
-    onSaved() { if (typeof loadGraphData === 'function') loadGraphData(); }
+    // alone left both stale until the next selection. The Overview row
+    // that opened this popover re-renders too (editor-edit-modes-flags.js).
+    onSaved() {
+      if (typeof gdAfterFlagSaved === 'function') gdAfterFlagSaved(fn);
+      else if (typeof loadGraphData === 'function') loadGraphData();
+    }
   });
 }
 function enterFnReturnTypeEditMode(fn, anchorEl) {
@@ -527,8 +531,12 @@ function enterFnReturnTypeEditMode(fn, anchorEl) {
     },
     // Full refresh — these write the fn ROW, which `lookups.fnMap` and
     // the inspector's Overview (RETURNS / EFFECTS) read; `renderGraph`
-    // alone left both stale until the next selection.
-    onSaved() { if (typeof loadGraphData === 'function') loadGraphData(); }
+    // alone left both stale until the next selection. The Overview row
+    // that opened this popover re-renders too (editor-edit-modes-flags.js).
+    onSaved() {
+      if (typeof gdAfterFlagSaved === 'function') gdAfterFlagSaved(fn);
+      else if (typeof loadGraphData === 'function') loadGraphData();
+    }
   });
 }
 // --- namespace-move (Phase 5) ---

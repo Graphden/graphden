@@ -164,6 +164,7 @@ function _tourRenderStep() {
   if (!lesson || !step) return;
   const { pop } = _tourEnsureEls();
   pop.replaceChildren();
+  pop.onkeydown = null;   // the catalogue's Escape→Cancel, if it was open
 
   const head = document.createElement('div');
   head.className = 'gd-tour-head';
@@ -483,7 +484,16 @@ const TOUR_ESCAPE_OWNERS = [
   '.create-menu',
   '.inline-input',
   '.gd-pop',                        // context-bar popovers (packages, workspace)
-  '#gd-asset-editor .gd-asset-diff',
+  // These register their Escape on first OPEN — after the tour armed its
+  // listener — so their preventDefault runs too late to be seen here.
+  '#fn-versions-popover:not(.hidden)',
+  '.trace-view-panel',
+  '.path-value-popover',
+  '.path-view-panel',               // the "rest dims" mode — Escape clears it
+  '.description-tooltip .description-tooltip-close',   // a PINNED tooltip has the ×
+  '#branch-diff-modal:not(.hidden)',
+  '#merge-conflicts-modal:not(.hidden)',
+  '.type-inline-host[style*="display: block"]',   // the host persists hidden
 ].join(', ');
 
 function _tourOnKey(e) {

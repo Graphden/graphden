@@ -11,7 +11,8 @@ merged branch is permanent.
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
 > [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=24)
-> (no sign-up), or pick Lesson 24 in the editor's account menu.
+> (no sign-up), or pick Lesson 24 under **Interactive tutorial** in the
+> editor's account menu.
 
 This lesson builds on [Lesson 23](23-branches.md) — fork, edit, diff,
 merge. Here the missing half: making a merge *conditional on review*.
@@ -42,9 +43,15 @@ like GitHub dismissing stale reviews on a new push.
   base. Proposed branches are the reviewer's to-do list — the popover
   header counts them.
 - **✅ Approve** records your approval; the row's badge shows `n/N`
-  and turns green when the requirement is met.
+  and turns green when the requirement is met. Both buttons toggle:
+  📤 on a proposed branch **withdraws the proposal**, and a pressed
+  ✅ (your approval is on record) **withdraws your approval**.
 - **⇢ Merge** now lands. Before the requirement is met it answers
   409 with the shortfall.
+- The Review dialog opens with **Verified on <branch>** — the
+  proposal's own tests (passed / failed / never ran) and its newest
+  runs, so a reviewer reads what the author actually verified before
+  reading the diff.
 - Every proposal carries a **comment thread** in its **💬 Review &
   comments** dialog (the row's ⋯ menu, or the Δ chip's cockpit) —
   alongside a collapsible "What changed" list and the suggestions.

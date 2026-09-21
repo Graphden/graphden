@@ -199,6 +199,9 @@ function setSiblingsInert(dialogEl, on) {
   if (!dialogEl || !document.body) return;
   for (const el of Array.from(document.body.children)) {
     if (el === dialogEl || el.contains(dialogEl)) continue;
+    // The tutorial's own layers stay live: a lesson step that opens a
+    // modal (the shortcuts sheet) still needs its Pause / Next / End.
+    if (/^gd-tour-/.test(el.id || '')) continue;
     if (on) {
       el.setAttribute('inert', '');
       el.setAttribute('aria-hidden', 'true');

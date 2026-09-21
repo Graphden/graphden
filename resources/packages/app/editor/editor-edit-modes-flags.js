@@ -15,11 +15,14 @@
 // the overlay modules that call these entry points.
 //
 // Two SURFACES open these popovers: the card strips (editor-overlay-
-// strips.js) and the Inspector Overview's "Call-site params" / "Merge"
-// rows (`gdBindInspectorFlagRows`, called by editor-inspector.js after
-// the partial lands). Compact cards — the default — hide the return-type
-// strip and its λ chip, so the Inspector is where every reader can reach
-// the flags; both surfaces gate on `gdFlagEditable`.
+// strips.js) and the Inspector Overview's rows — "Returns", "Effects",
+// "Call-site params", "Merge" (`gdBindInspectorFlagRows`, called by
+// editor-inspector.js after the partial lands). Compact cards — the
+// default — hide the return-type strip (with its λ chip and `↳`) and
+// the effects strip (with its ✎ pencil and chips), so the Inspector is
+// where every reader can reach all four; both surfaces gate on
+// `gdFlagEditable`. The return-type and effects popovers themselves live
+// in editor-edit-modes-fn.js.
 
 // The fn-row FLAGS take the effects pencil's looser gate, not
 // `isFnEditable`'s "no dependents": a fn is handed to a HOF or extended
@@ -50,6 +53,33 @@ function gdBindInspectorFlagRows(host) {
   const fnOf = (id) => lookups?.fnMap?.get(id)
     || (typeof graphData !== 'undefined' && graphData?.fns || []).find((f) => f.id === id)
     || null;
+  // Read-side disclosures every reader gets, owner or not — the same two
+  // the card strips carry: an effect chip opens the effect explainer, the
+  // `↳` opens the type-rule popover. Both stop the click so an editable
+  // row underneath does not also open its form.
+  for (const chip of host.querySelectorAll('.gd-insp-flag-row [data-effect]')) {
+    const open = (e) => {
+      e.stopPropagation();
+      if (typeof showEffectExplainer === 'function') {
+        showEffectExplainer({ effect: chip.dataset.effect, anchorEl: chip });
+      }
+    };
+    chip.title = 'Effect: ' + chip.dataset.effect + ' — click for details';
+    chip.addEventListener('click', open);
+    chip.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e); }
+    });
+  }
+  for (const btn of host.querySelectorAll('.gd-insp-flag-row .gd-insp-rt-rule')) {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const fn = fnOf(btn.closest('.gd-insp-flag-row')?.dataset.fnId);
+      if (fn && typeof showReturnTypeRulePopover === 'function') {
+        showReturnTypeRulePopover(fn.name, btn);
+      }
+    });
+  }
   for (const row of host.querySelectorAll('.gd-insp-flag-row[data-action]')) {
     const fn0 = fnOf(row.dataset.fnId);
     const editable = fn0 ? gdFlagEditable(fn0)
@@ -64,6 +94,10 @@ function gdBindInspectorFlagRows(host) {
       if (!fn || !gdFlagEditable(fn)) return;
       if (row.dataset.action === 'lambda-params') {
         enterLambdaParamsEditMode(fn, row);
+      } else if (row.dataset.action === 'return-type') {
+        enterFnReturnTypeEditMode(fn, row);
+      } else if (row.dataset.action === 'expects-effects') {
+        enterExpectsEffectsEditMode(fn, row);
       } else if (row.dataset.action === 'branch-local') {
         const state = row.dataset.state;
         const facts = state === 'off' ? null : { own: state === 'own', seed: row.dataset.seed || null };

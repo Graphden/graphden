@@ -250,8 +250,8 @@ in your base-fn impl and the dispatch picks the right behavior.
    the impl drives it.
 7. `str-upper` is package-owned, so make a callable you can shape:
    filter for `str-upper`, `⋯` → **Extend** → `tutorial-upper` →
-   **Save**. The Inspector's Overview lists **Call-site params:
-   λ derived**.
+   **Save**. After a run the Inspector sits on its **Runs** tab —
+   click **Overview**; it lists **Call-site params: λ derived**.
 8. Click that row, choose **These, in order**, tick `string`,
    **Save**. It reads `λ string`: when a HOF hands
    `tutorial-upper` its argument, `string` receives it; anything
@@ -301,6 +301,10 @@ before running.
   set. Lesson 16.
 - **The `:secret` type-marker** — how taint flows through HOF
   refs without spilling. Lesson 16.
+- **Pure-only callable slots** — a slot typed `[:fn … #{}]` (the
+  trailing empty effect set: `:filter`'s `:pred`, `:swap`'s `:func`)
+  accepts only a PURE callable; the picker ✗-marks an effectful one and
+  the checker says why. Lesson 12 meets one.
 - **`hof-wrap` / `hof-lambda-params` source** — the actual
   Clojure code that implements the dispatch lives in
   `executor/compile_eager.clj` (`hof-wrap`) and

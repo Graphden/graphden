@@ -132,6 +132,18 @@ function buildCloseButton() {
   return btn;
 }
 
+// A PINNED tooltip is a small dialog (× and ✎ Edit); Escape closes it like
+// any other, and says so (preventDefault) so a running tour does not end.
+// Registered at load — a handler registered on first pin would run after
+// the tour's own and be invisible to it.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !descriptionTooltipSticky || e.defaultPrevented) return;
+  if (descriptionTooltipEditing) return;   // the textarea's own Cancel handles it
+  e.preventDefault();
+  descriptionTooltipSticky = false;
+  hideDescriptionTooltip(true);
+});
+
 function positionDescriptionTooltipAt(el, clientX, clientY) {
   const margin = 12;
   // A keyboard activation / synthetic click carries (0,0) — the tooltip

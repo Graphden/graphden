@@ -119,9 +119,10 @@ computed set is enough. The cases where you'd add it:
 ## Editing the contract from the card (✎)
 
 You don't have to touch `fns.edn` to manage `:expects-effects` —
-the effects strip at the bottom of a fn-card carries a `✎`
-pencil (visible when you're signed in and the card is the
-selected fn). Clicking it opens a small server-rendered form:
+the Inspector's Overview **Effects** row is a button on a fn you own
+(and, with *Details* on — Settings → Appearance → Graph cards — the
+effects strip at the bottom of the card carries the same `✎` pencil).
+Clicking either opens a small server-rendered form:
 
 - Two radio modes: **no contract** ("Drift checker is off for
   this fn") and **explicit contract** ("Drift checker compares
@@ -145,7 +146,8 @@ an undeclarable category.
 ### Try it
 
 1. Select any pure fn-def of yours (e.g. the `:greet` from
-   lesson 01) and click `✎` on its (empty) effects strip.
+   lesson 01) and click the Inspector's **Effects** row (it reads
+   *pure*).
 2. Pick *explicit contract*, tick nothing, Save. You've pinned
    purity.
 3. Now bind one of its args to a ref that reaches `:env` or
@@ -285,8 +287,9 @@ for one — extend a base-fn whose slot already is, or declare
 The **Secrets** rows in the explorer (toggle the **secrets**
 filter) are the canonical admin flow:
 
-1. Admin clicks `+` on the secrets section.
-2. Form asks for name, vault path, value, description.
+1. Admin turns on the `🔒 secrets` lens and clicks **🔒 New secret**
+   beside the chips.
+2. Form asks for name, namespace, path, value, description.
 3. Submit writes:
    - The secret VALUE to OpenBao at the given path.
    - A fn-def parented from `:secret-leaf` with a **resolver
@@ -307,11 +310,14 @@ The graphden DB never holds the secret value. Only the path.
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu.
 
-1. Find `:current-time-ms` in the editor. Its effects strip
-   shows ONE chip: `:time`. Click the chip — the explainer
+1. Find `:current-time-ms` in the editor. The Inspector's **Effects**
+   row shows ONE chip: `:time`. Click the chip — the explainer
    popover gives the plain-English description.
 
-2. Build a fn-def with deliberate drift:
+2. Build a fn-def with deliberate drift — in the editor: find `env`,
+   `⋯` → **Extend** → `tutorial-pure-claim`; bind `name` to
+   `AUTH_TOKEN`; then click the Inspector's **Effects** row, pick
+   *explicit contract*, tick nothing, **Save**. As a fn-def it reads:
 
    ```edn
    {:name :tutorial-pure-claim
@@ -320,13 +326,15 @@ The graphden DB never holds the secret value. Only the path.
     :expects-effects #{}}
    ```
 
-   `:env` has `:effects #{:env}`. You declared `#{}`. Save —
-   the chip strip shows a RED `:env` chip (drift: undeclared).
-   The hover-title says "Drift (undeclared)".
+   `:env` has `:effects #{:env}`. You declared `#{}`, so the Effects
+   row shows a RED `:env` chip (drift: undeclared). The hover-title
+   says "Drift (undeclared)".
 
 3. Find any `:secret-leaf`-parented fn-def. Try feeding it into
    a plain `:text` sink that does NOT propagate taint — `:h-raw`,
-   whose `:string` slot is typed `:text`:
+   whose `:string` slot is typed `:text`: extend `h-raw`, then on the
+   child's `string` `+` choose **Bind fn-ref** and pick the secret's
+   row (it is ✗-muted in the picker; **Pick anyway**). As a fn-def:
 
    ```edn
    {:name :tutorial-secret-leak
@@ -334,9 +342,9 @@ The graphden DB never holds the secret value. Only the path.
     :args  {:string :my-secret-leaf}}
    ```
 
-   Save — the type-checker rejects: `[:secret :text]` ⊄ `:text`
-   for slot `:string`. The error explains the asymmetric
-   subtyping rule.
+   The server refuses the write — the type-checker rejects:
+   `[:secret :text]` ⊄ `:text` for slot `:string`. The error explains
+   the asymmetric subtyping rule.
 
    Now contrast a taint-*propagating* base-fn. `:str` carries the
    `:taint-propagate? true` flag, so binding the same secret into

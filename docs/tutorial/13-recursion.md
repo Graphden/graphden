@@ -129,11 +129,14 @@ Recursion is not a curiosity here — the branch chain your reads resolve
 through is itself a `:fix` composition. Find `:branch-chain`
 (`storage.branches`) in the Explorer and expand it:
 
-- its parent is `:fix`;
-- `:step` → `:_branch-chain-step`, an `:if`;
-- the `:else` arm is `:_branch-chain-recurse` — an `:invoke` whose
+- its parents are `:fix` and `:BranchChainInput` (the type row of its
+  input, lesson 08);
+- `:step` → `:_branch-chain-step`, an `:if` whose `:test` asks *has a
+  parent?*;
+- the `:then` arm is `:_branch-chain-recurse` — an `:invoke` whose
   `:func` is `{:as :self}`;
-- the `:then` arm returns the chain built so far.
+- the `:else` arm, `:_branch-chain-result`, returns the chain built so
+  far.
 
 Before `:fix` shipped, that walk lived in Clojure as a carve-out. It is
 now graph like everything else, which means you can reparent a step of

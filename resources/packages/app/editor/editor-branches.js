@@ -81,6 +81,17 @@ function initBranchSelector() {
     const popover = document.getElementById('branch-popover');
     if (!popover || popover.classList.contains('hidden')) return;
     e.preventDefault();
+    // One layer at a time: a ⋯ row menu or the ⚙ / ⛨ panel over the
+    // popover closes first; the popover itself goes on the next Escape.
+    if (document.querySelector('.branch-row-more-menu.open')) {
+      closeBranchMoreMenus();
+      return;
+    }
+    if (document.querySelector('#gd-protect-pop, #gd-branch-policy-pop')) {
+      if (typeof closeProtectionMenu === 'function') closeProtectionMenu();
+      if (typeof closeBranchPolicyMenu === 'function') closeBranchPolicyMenu();
+      return;
+    }
     closeBranchPopover();
   });
 }
@@ -135,7 +146,14 @@ function closeBranchPopover() {
   closeProtectionMenu();   // don't orphan the ⚙ menu over a hidden popover
   closeBranchMoreMenus();
   const popover = document.getElementById('branch-popover');
-  if (popover) popover.classList.add('hidden');
+  if (!popover) return;
+  const hadFocus = popover.contains(document.activeElement);
+  popover.classList.add('hidden');
+  // Focus back on the chip when it was inside — a keyboard reader is not
+  // dropped on <body> by closing the dialog they were in.
+  if (hadFocus && typeof returnFocusTo === 'function') {
+    returnFocusTo(document.getElementById('branch-chip-btn'));
+  }
 }
 
 // Close every open per-row ⋯ menu.
@@ -164,6 +182,17 @@ function toggleBranchMoreMenu(btn) {
   menu.style.left = Math.max(8, Math.min(r.right - 200, window.innerWidth - 210)) + 'px';
   menu.classList.add('open');
   btn.setAttribute('aria-expanded', 'true');
+  if (!menu._gdKeys) {
+    menu._gdKeys = true;
+    menu.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeBranchMoreMenus();
+      if (typeof returnFocusTo === 'function') returnFocusTo(btn);
+    });
+  }
+  if (typeof focusIntoDialog === 'function') focusIntoDialog(menu);
   // Menu items either reload the popover (propose / delete / policy)
   // or open their own floating menu (protection) — close the ⋯ shell
   // as soon as one is picked.
@@ -204,6 +233,15 @@ async function openBranchPopover() {
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     popover.innerHTML = await resp.text();
     wireBranchPopoverHandlers(popover, getCurrentBranchName());
+    // A list plus a create form is a dialog, not a short menu: a visible
+    // way out, and focus inside once the content has landed (only when
+    // the reader is not already typing somewhere else in it).
+    if (typeof ensurePopoverClose === 'function') {
+      ensurePopoverClose(popover, closeBranchPopover, 'Close branches', { prepend: true });
+    }
+    if (!popover.contains(document.activeElement) && typeof focusIntoDialog === 'function') {
+      focusIntoDialog(popover);
+    }
   } catch (err) {
     popover.innerHTML = '<div class="branch-popover-error">'
       + 'Failed to load branches: ' + (err?.message || 'unknown error')
@@ -526,10 +564,13 @@ async function toggleBranchPropose(btn) {
 async function approveProposal(btn) {
   const branchName = btn.getAttribute('data-approve-branch');
   const err = document.getElementById('branch-popover-error');
+  // A pressed ✅ (the caller's approval is on record, `populateReviewStatus`)
+  // withdraws it: the same endpoint, DELETE.
+  const withdraw = btn.getAttribute('data-approved') === '1';
   try {
     const resp = await window.authFetch(
       API.api_branches_ref_approve(branchRefFrom(btn, branchName)), {
-      method: 'POST',
+      method: withdraw ? 'DELETE' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '{}',
     });
@@ -538,7 +579,8 @@ async function approveProposal(btn) {
       openBranchPopover();
     } else if (err) {
       err.textContent = body.error
-        || (resp.status === 403 ? 'You are not allowed to approve merges into this branch' : 'Could not approve');
+        || (resp.status === 403 ? 'You are not allowed to approve merges into this branch'
+            : (withdraw ? 'Could not withdraw the approval' : 'Could not approve'));
       err.classList.remove('hidden');
     }
   } catch (e2) {
@@ -568,6 +610,15 @@ async function populateReviewStatus(popover) {
         API.api_branches_ref_approvals(branchRefFrom(btn, name)));
       if (!resp.ok) continue;
       const st = await resp.json();
+      // The reviewer's own approval makes ✅ a toggle — like 📤 propose /
+      // withdraw — so a "wait, not yet" needs no curl.
+      if (st.mine) {
+        btn.classList.add('on');
+        btn.setAttribute('aria-pressed', 'true');
+        btn.setAttribute('data-approved', '1');
+        btn.title = 'You approved this — click to withdraw your approval';
+        btn.setAttribute('data-tip', 'Withdraw approval');
+      }
       const req = st.required ?? 0;
       if (req <= 0) continue; // no approvals required → nothing to show
       const badge = document.createElement('span');

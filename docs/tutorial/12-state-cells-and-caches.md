@@ -77,8 +77,9 @@ supplied per-swap.
  :args  {:a :hit-count :func :_bump-one}}
 ```
 
-`:swap`'s `:func` slot is `[:fn {:current a} a]` — a 1-arg callable
-`a → a`. `:_bump-one` fits: it reads `:current` and returns a number
+`:swap`'s `:func` slot is `[:fn {:current a} a #{}]` — a 1-arg callable
+`a → a` that must be **pure** (the trailing `#{}`: a CAS retry may call
+it again, so the picker ✗-marks an effectful callback). `:_bump-one` fits: it reads `:current` and returns a number
 of the same type. Now `▶ Run` (via `⋯`) on `:count-a-hit` (lesson 15) returns `1`,
 then `2`, then `3` — it remembers. Writing a cell is the `:state`
 effect, so the Run pane first asks you to tick the side-effects

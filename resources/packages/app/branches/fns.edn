@@ -1200,7 +1200,7 @@
    :effects #{:db}}
 
   {:name :proposal-approval-status
-   :description "Read-only — the approval status of proposal `source-branch-id`: `{:required :have :satisfied :approvers [{:approver-id :stale}]}` for the reviewer UI."
+   :description "Read-only — the approval status of proposal `source-branch-id`: `{:required :have :satisfied :mine :approvers [{:approver-id :stale}]}` for the reviewer UI (`:mine` — the caller's own approval is recorded, so the ✅ offers to withdraw it)."
    :args {:source-branch-id {:type :uuid :description "The proposal (source) branch to report on."}}
    :return-type :keyword-map
    :effects #{:db}}

@@ -104,7 +104,9 @@ HTTP request, with its params and headers. That's the trap:
 2. Optionally type a path prefix (e.g. `/shop`) — empty catches the
    next request to any app path (the editor's own `/api/…` and
    `/partials/…` traffic is excluded so it can't eat the trap).
-3. Click **Catch next request**. The block shows an armed dot; the
+3. Tick **capture values** if you want every node's value on the
+   caught run (lesson 15's persist option, armed for the trap), then
+   click **Catch next request**. The block shows an armed dot; the
    trap is one-shot and expires after 10 minutes.
 4. Hit your app — open its page, or `curl` the route.
 5. The block flips to **Last captured request: open call tree** and

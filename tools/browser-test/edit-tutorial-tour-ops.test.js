@@ -197,11 +197,12 @@ const {
     await waitTourTitle(page, 'Find env');
     await filterAndSelect(page, 'env', 'env');
     await waitTourTitle(page, 'Read the effect chip', 150000);
-    // The step's title lands as soon as the fn is SELECTED; the card (and
-    // its effects strip) paints a beat later.
-    await page.waitForSelector('.effects-chip', {timeout: 60000});
+    // The step's title lands as soon as the fn is SELECTED; the Inspector
+    // Overview (the step's target — the card's strip is hidden on compact
+    // cards, and its chips sit in the DOM unseen) paints a beat later.
+    await page.waitForSelector('.gd-insp-effects .effects-chip', {timeout: 60000});
     const effChip = await page.evaluate(
-      () => document.querySelector('.effects-chip')?.className);
+      () => document.querySelector('.gd-insp-effects .effects-chip')?.className);
     assert(/effects-chip-env/.test(effChip || ''),
       'the env card carries an :env effect chip (got: ' + effChip + ')');
     assert(await clickTourButton(page, 'Next'), 'lesson 16 chip Next');

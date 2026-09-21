@@ -144,13 +144,13 @@ What the fn-picker shows, and in what order. ~/api/types/candidates~ answers the
 :PROPERTIES:
 :CUSTOM_ID: editor/enterArgValueEditMode
 :FILE: resources/packages/app/editor/editor-edit-modes.js
-:LINE: 196
+:LINE: 215
 :MINS: 7.2
 :END:
 
 How an edit actually happens. The control is not chosen here: the client POSTs the slot to ~/api/value-form~ and the graph's value-form registry answers with hiccup naming a widget — the editor routes on ~data-form-widget~ and knows no type tags at all. Note ~onSaved~: a value change alters binding rows, so ~lookups~ is stale and the handler re-fetches rather than re-rendering.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-edit-modes.js::function enterArgValueEditMode(arg, anchorEl) {][resources/packages/app/editor/editor-edit-modes.js:196]]
+- source :: [[file:../../../resources/packages/app/editor/editor-edit-modes.js::function enterArgValueEditMode(arg, anchorEl) {][resources/packages/app/editor/editor-edit-modes.js:215]]
 - see also :: [[file:crud.org::#crud/render-repr][render-repr]]
 
 * 12. gdEnterDiffMode
@@ -206,10 +206,10 @@ Every mutating call in the editor goes through this. It is 12 lines and worth al
 :PROPERTIES:
 :CUSTOM_ID: editor/_tourTick
 :FILE: resources/packages/app/editor/editor-tour.js
-:LINE: 302
+:LINE: 303
 :MINS: 3.9
 :END:
 
 Closing the loop back to the user tutorial: the in-editor guided lessons are graph content (~app.tour/_tour-lessons~, served at ~GET /api/tour~) and this file is only the engine that interprets them. Each tick clears the reader-state traps that make a lesson unfinishable — a collapsed Explorer, a kind filter hiding the very fn the step names, a target scrolled out of view — then polls the step's declarative check and advances. A tour that can dead-end is worse than no tour, which is what every guard here is paying for.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-tour.js::function _tourTick() {][resources/packages/app/editor/editor-tour.js:302]]
+- source :: [[file:../../../resources/packages/app/editor/editor-tour.js::function _tourTick() {][resources/packages/app/editor/editor-tour.js:303]]

@@ -204,7 +204,7 @@ turns overload into a clean 503 + retry instead of resource
 exhaustion.
 
 Live demo: the contact-form demo page (`/demo/contact`, lesson
-07) carries exactly this panel — a server clock streaming over
+10) carries exactly this panel — a server clock streaming over
 `/demo/contact/clock`; save any fn in the editor and watch it
 jump ahead of its 5-second keepalive.
 

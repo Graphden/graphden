@@ -161,7 +161,8 @@ base-fn, from the editor or an `fns.edn`.
    (core.logic). The tree is now the fns built on `:const`. Open the
    view chip, name it `on-const`, press **Enter**: the chip reads
    `on-const`.
-7. In the same popover, **Save in the graph…** — accept the name.
+7. In the same popover, **Save in the graph…** — the fn is created under
+   the name in the field, no further prompt.
    A fn `on-const` (parent `explorer-view`) appears in the graph; the
    popover lists it under **In the graph**, and **▶ Run** on its
    card answers the member list.

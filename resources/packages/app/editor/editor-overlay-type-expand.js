@@ -550,6 +550,18 @@ function installInlinePositionListeners() {
 // header. `onEdit` is the "Change type" entry-point (re-uses the
 // existing enterArgTypeEditMode popover). `bindingId` is needed for
 // the fn-effect tightening row (Phase 8).
+// Escape folds every open inline expansion (they had only the chip to
+// toggle them, and an unconsumed Escape ended a running tour). Registered
+// at load so the tour's own listener sees the preventDefault.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || e.defaultPrevented) return;
+  let open = false;
+  for (const h of inlineHostsByPath.values()) {
+    if (h.style.display === 'block') { h.style.display = 'none'; open = true; }
+  }
+  if (open) e.preventDefault();
+});
+
 function attachInlineExpand(chipEl, rich, path, ctx) {
   const expandable = isTypeExpandable(rich);
   const c = ctx || {};

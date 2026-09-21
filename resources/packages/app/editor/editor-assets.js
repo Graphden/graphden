@@ -64,6 +64,20 @@ document.addEventListener('htmx:configRequest', (e) => {
   }
 });
 
+// Escape on the open diff goes "Back to edit" — the same move as its
+// button — and says so (preventDefault), so the surface-exit handler does
+// not read the key as "leave Organization" while the reader is mid-diff.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || e.defaultPrevented) return;
+  const slot = document.getElementById('gd-asset-editor');
+  if (!slot?.querySelector('.gd-asset-diff')) return;
+  const btn = slot.querySelector('.gd-asset-diff-btn');
+  if (!btn) return;
+  e.preventDefault();
+  btn.click();
+  btn.focus();
+});
+
 // ---------------------------------------------------------------------
 // Diff vs baseline — a read-only CodeMirror MergeView of the shipped
 // file against the CURRENT editor content (unsaved edits included).

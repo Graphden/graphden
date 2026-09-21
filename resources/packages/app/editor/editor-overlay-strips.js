@@ -84,7 +84,7 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
     displayRich = ':' + stripFacts.returnTypeAlias;
   }
 
-  if (rt || rtEditable || displayRich) {
+  if (rt || rtEditable || flagEditable || displayRich) {
     const strip = document.createElement('div');
     strip.className = 'return-type-strip';
     const displayText = displayRich || rt;
@@ -155,7 +155,11 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
       : (displayRich
           ? 'Computed return type: ' + displayRich
           : 'No return type set');
-    if (rtEditable) {
+    // The flag gate, not `isFnEditable`: a fn that is extended or
+    // referenced can still be given a return type — the checker re-flags
+    // the callers that disagree, which is what the ⚠ lens is for. (The
+    // Inspector's Returns row uses the same gate, editor-edit-modes-flags.js.)
+    if (flagEditable) {
       strip.classList.add('return-type-strip-editable');
       strip.title = (displayRich && displayRich !== rt
                      ? 'Computed: ' + displayRich + ' — click to change return type'

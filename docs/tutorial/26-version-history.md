@@ -81,7 +81,7 @@ new version carrying the old values. Right after restoring "first" over
 main    09:48   first     ← the restore
 main    09:48   second
 main    09:48   first
-main    09:48   (created)
+main    09:48            ← the create row: no description yet
 ```
 
 History stays append-only, so a restore is itself undoable — restore

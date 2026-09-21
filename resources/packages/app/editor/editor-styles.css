@@ -2694,7 +2694,7 @@ textarea.value-form-hiccup {
 .type-create-popover {
   display: none;
   position: fixed;
-  z-index: 100;
+  z-index: 350; /* ≥ 300: the tour popover steers clear of it (editor-tour-spot.js) */
   width: 320px;
   background: var(--card-bg);
   color: var(--card-fg);
@@ -3176,7 +3176,7 @@ textarea.value-form-hiccup {
      the source fn card). Positioned in JS to follow the chip. */
   display: none;
   position: fixed;
-  z-index: 100;
+  z-index: 350; /* ≥ 300: the tour popover steers clear of it (editor-tour-spot.js) */
   padding: 4px 6px;
   background: var(--card-bg);
   color: var(--card-fg);
@@ -8554,3 +8554,8 @@ button.lambda-params-chip:focus-visible { outline: 1px solid var(--accent); }
 .gd-insp-flag-row.gd-insp-editable:hover .gd-insp-flag,
 .gd-insp-flag-row.gd-insp-editable:focus-visible .gd-insp-flag { color: var(--accent); }
 .gd-insp-flag-row.gd-insp-editable:focus-visible { outline: 1px solid var(--accent); }
+/* Returns / Effects rows carry the strips' disclosures too: the `↳`
+   type-rule button and clickable effect chips. */
+.gd-insp-flag-row .gd-insp-rt-rule { margin-left: 4px; }
+.gd-insp-flag-row [data-effect] { cursor: pointer; }
+.gd-insp-flag-row [data-effect]:focus-visible { outline: 1px solid var(--accent); }

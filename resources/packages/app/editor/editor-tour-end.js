@@ -190,6 +190,7 @@ function _tourDialog({ title, body, primary, quiet, next }) {
   const { pop } = _tourEnsureEls();
   _tourSpotHide();
   pop.replaceChildren();
+  pop.onkeydown = null;   // the catalogue's Escape→Cancel, if it was open
   pop.classList.add('gd-tour-visible');
   _tourCenterPop(pop);
   // Same rule as a step: on a phone this is a bottom sheet, not a 360px box

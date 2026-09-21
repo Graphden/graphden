@@ -5,8 +5,8 @@ graphden cloud, sign back into it (by password or a social
 provider), verify your email, protect the account with two-factor
 authentication — and you'll understand how the same login surface
 behaves on a self-hosted instance. The org lessons earlier in this
-chapter ([24 Members](27-users-admin.md), [25 Grants](28-grants.md))
-and [34 Plans](37-plans-and-tiers.md), next, all assume the account
+chapter ([27 Members](27-users-admin.md), [28 Grants](28-grants.md))
+and [37 Plans](37-plans-and-tiers.md), next, all assume the account
 this lesson makes.
 
 **Concepts introduced**: the `/login` page, accounts and sign-in

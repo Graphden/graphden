@@ -257,6 +257,16 @@ function _showPathViewPanel(highlightedCount, offCanvasIds, truncated, valuesDro
 
 // --- Show / clear ---------------------------------------------------------
 
+// Escape clears the "rest dims" mode — the strip's ✕ was the only way out,
+// and an unconsumed Escape ended a running tour (lesson 18). Registered at
+// load so the tour's listener sees the preventDefault.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !_pathViewPanelEl || e.defaultPrevented) return;
+  if (document.querySelector('.path-value-popover')) return;   // its own dismiss first
+  e.preventDefault();
+  clearExecutionPathView();
+});
+
 function clearExecutionPathView() {
   const layer = _pathViewLayer();
   if (layer) layer.classList.remove('path-view-active');

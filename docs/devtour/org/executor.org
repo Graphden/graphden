@@ -108,13 +108,13 @@ The opposite direction — and the reason there is a graph to read at all. Autho
 :PROPERTIES:
 :CUSTOM_ID: executor/build-lookups
 :FILE: src/graphden/executor/compile/lookups.clj
-:LINE: 70
-:MINS: 6.2
+:LINE: 89
+:MINS: 6.3
 :END:
 
 Indexes the raw graph rows — fns, slots, fn-slots, bindings, list-items — into the O(1) maps every compile helper consumes (~:fn-map~, ~:slot-map~, ~:bindings-by-fn~, the inheritance-chain cache, …). This is the in-memory materialization of the DB graph that the whole compile pass walks over.
 
-- source :: [[file:../../../src/graphden/executor/compile/lookups.clj::(defn build-lookups][src/graphden/executor/compile/lookups.clj:70]]
+- source :: [[file:../../../src/graphden/executor/compile/lookups.clj::(defn build-lookups][src/graphden/executor/compile/lookups.clj:89]]
 - same file :: [[file:executor.org::#executor/root-fn][root-fn]]
 - referenced from :: [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:packages.org::#packages/resolve-slot-owner][resolve-slot-owner]], [[file:editor.org::#editor/buildLookups][buildLookups]]
 
@@ -122,13 +122,13 @@ Indexes the raw graph rows — fns, slots, fn-slots, bindings, list-items — in
 :PROPERTIES:
 :CUSTOM_ID: executor/root-fn
 :FILE: src/graphden/executor/compile/lookups.clj
-:LINE: 246
+:LINE: 267
 :MINS: 2.1
 :END:
 
 Walks a composed fn's ~parent-ids~ inheritance chain up to the parentless *root* that owns the slots and carries a registered impl. This is the base-fn resolution step: how an arbitrary composed ~fn-id~ maps to the primitive whose Clojure impl will actually run.
 
-- source :: [[file:../../../src/graphden/executor/compile/lookups.clj::(defn root-fn][src/graphden/executor/compile/lookups.clj:246]]
+- source :: [[file:../../../src/graphden/executor/compile/lookups.clj::(defn root-fn][src/graphden/executor/compile/lookups.clj:267]]
 - same file :: [[file:executor.org::#executor/build-lookups][build-lookups]]
 
 * 10. collect-bindings

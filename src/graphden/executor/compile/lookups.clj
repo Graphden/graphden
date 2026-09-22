@@ -67,6 +67,25 @@
    :env-bindings-cache (atom {})})
 
 
+(defn- rename-views-by-root
+  "`{root-slot-id → #{every rename-view slot id whose source chain reaches
+   it}}` — one rename FAMILY per root. A binding row lives on the family's
+   root (the write path canonicalises the slot), but a card's arg rows
+   name the VIEW the reader sees (`body` over assoc's :value); anything
+   keyed by slot id that must treat the family as one slot reads this
+   (layout.bindings)."
+  [slot-map]
+  (reduce (fn [acc [id s]]
+            (if-let [root (loop [src (:source-slot-id s) depth 0]
+                            (when (and src (< depth 16))
+                              (let [nxt (:source-slot-id (get slot-map src))]
+                                (if (nil? nxt) src (recur nxt (inc depth))))))]
+              (update acc root (fnil conj #{}) id)
+              acc))
+          {}
+          slot-map))
+
+
 (defn build-lookups
   "Index entities for fast lookup during compile. Inputs:
      fns                 — vector of fn rows
@@ -133,9 +152,11 @@
                               (sort-by (juxt :binding-id :position))
                               (reduce (fn [acc i]
                                         (update acc (:binding-id i) (fnil conj []) i))
-                                      {}))]
+                                      {}))
+        views-by-root (rename-views-by-root slot-map)]
     (merge
       {:fn-map             fn-map
+       :views-by-root      views-by-root
        :slot-map           slot-map
        :fn-slots-by-fn     fn-slots-by-fn
        :slot-by-fn-name    slot-by-fn-name

@@ -146,7 +146,17 @@
   [fn-id slot-id inherits-from-fid {:keys [fn-by-id slot-by-id binding-by items-by-binding
                                            slot-by-fn-source-slot]}]
   (let [slot (get slot-by-id slot-id)
-        b (get binding-by [fn-id slot-id])
+        ;; The row is emitted for the VIEW the chain shows first (`body`
+        ;; over assoc's :value), but the binding row sits wherever the
+        ;; write landed — the write path canonicalises it to the rename
+        ;; family's ROOT. Walk the source chain so the view's row carries
+        ;; the binding; keyed by the view alone, the `+` for :body outlived
+        ;; the bind on lesson 38's card (2026-09-22).
+        b (or (get binding-by [fn-id slot-id])
+              (loop [src (:source-slot-id slot) depth 0]
+                (when (and src (< depth 16))
+                  (or (get binding-by [fn-id src])
+                      (recur (:source-slot-id (get slot-by-id src)) (inc depth))))))
         ;; Renamed-view slot owned by `fn-id` whose source-slot-id
         ;; points back at slot-id. Only the binding-owner's own renames
         ;; affect the displayed name here; ancestor-owned renames flow
@@ -238,9 +248,10 @@
    points at the binding's synthetic anchor — the editor's 'render `×`
    and `+` on every item with a non-nil prev-arg-id' rule relies on
    it. Subsequent items chain to the prior item's `:id`."
-  [bnd items-by-binding]
+  [bnd items-by-binding anchor-id-by-binding]
   (let [items (get items-by-binding (:id bnd) [])
-        anchor-id (synth-arg-id (:fn-id bnd) (:slot-id bnd))
+        anchor-id (get anchor-id-by-binding (:id bnd)
+                       (synth-arg-id (:fn-id bnd) (:slot-id bnd)))
         sorted (vec items)]
     (map-indexed
       (fn [idx item]
@@ -319,7 +330,13 @@
         anchor-rows (vec (mapcat #(anchor-rows-for-fn (:id %) anchor-ctx
                                                       own-fn-slots binding-extra-by-fn)
                                  fns))
-        item-rows (vec (mapcat #(item-rows-for-binding % items-by-binding)
+        ;; A binding found through the rename chain sits on a row whose id
+        ;; is the VIEW's; its items must chain to THAT row, not to the
+        ;; root-slot id the binding names.
+        anchor-id-by-binding (into {}
+                                   (keep (fn [r] (when (:binding-id r) [(:binding-id r) (:id r)])))
+                                   anchor-rows)
+        item-rows (vec (mapcat #(item-rows-for-binding % items-by-binding anchor-id-by-binding)
                                bindings))]
     (into anchor-rows item-rows)))
 

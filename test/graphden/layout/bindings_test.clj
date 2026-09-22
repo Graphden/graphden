@@ -11,6 +11,7 @@
    as far as the reader has unfolded."
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.executor.compile.lookups :as lookups]
     [graphden.layout.bindings :as bnd]))
 
 
@@ -67,3 +68,30 @@
   (let [entries (bnd/expand-sequence-anchor a-p "nums" arg-map lookups nil)]
     (is (= 2 (count entries)))
     (is (true? (:sequence-anchor? (last entries))))))
+
+
+(deftest a-binding-on-a-rename-family-root-marks-every-view-of-it-bound
+  ;; The write path canonicalises a binding to its rename family's ROOT
+  ;; (`body` over assoc's :value lands on :value), while the card's arg row
+  ;; names the VIEW. Keyed by the root alone, the view's `+` outlived the
+  ;; bind (lesson 38, 2026-09-22): the placeholder for :body stayed after
+  ;; `hello` was written on it.
+  (let [root (random-uuid) view (random-uuid) leaf (random-uuid)
+        owner (random-uuid) child (random-uuid)
+        lk (lookups/build-lookups
+             {:fns [{:id owner :name "ring-response" :parent-ids []}
+                    {:id child :name "tutorial-hello" :parent-ids [owner]}]
+              :slots [{:id root :name "value"}
+                      {:id view :name "body" :source-slot-id root}
+                      {:id leaf :name "greeting" :source-slot-id view}]
+              :fn-slots [{:fn-id owner :slot-id view :position 0}
+                         {:fn-id child :slot-id leaf :position 0}]
+              :bindings [{:id "b1" :fn-id child :slot-id root :value "hello" :value-present true}]
+              :list-items []})
+        b (bnd/add-bindings-from-fn child {} lk)]
+    (testing "the family is one slot to the card: root, view and the view of the view"
+      (is (contains? b root))
+      (is (contains? b view))
+      (is (contains? b leaf))
+      (is (= "hello" (:value (get b view))))
+      (is (= "b1" (:binding-id (get b leaf)))))))

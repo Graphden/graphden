@@ -121,7 +121,20 @@
    Caller is responsible for reduce ordering: walk ancestors-FIRST so
    descendants overlay via `assoc` (closest-fn-wins)."
   [fn-id bindings lookups]
-  (let [{:keys [bindings-by-fn slot-map items-by-binding slot-by-fn-source-slot]} lookups]
+  (let [{:keys [bindings-by-fn slot-map items-by-binding slot-by-fn-source-slot
+                views-by-root]} lookups
+        ;; A binding row sits on its rename family's ROOT (the write path
+        ;; canonicalises `body` → assoc's :value), while the card's arg row
+        ;; names the VIEW. Mark every slot id of the family bound, or the
+        ;; view's placeholder outlives the bind (lesson 38's `+` on :body
+        ;; stayed after `hello` was written, 2026-09-22).
+        root-of (fn [sid]
+                  (loop [sid sid depth 0]
+                    (let [src (some-> (get slot-map sid) :source-slot-id)]
+                      (if (and src (< depth 16)) (recur src (inc depth)) sid))))
+        family (fn [sid]
+                 (let [root (root-of sid)]
+                   (conj (get views-by-root root #{}) root sid)))]
     (reduce
       (fn [b bnd]
         (let [sid (:slot-id bnd)
@@ -139,14 +152,15 @@
               has-ref (some? (:ref-fn-id bnd))
               has-items (seq (get items-by-binding (:id bnd) []))]
           (if (and slot (or has-value has-ref has-items))
-            (assoc b sid {:arg-name (or (:name renamed-view) (:name slot))
-                          :value (:value bnd)
-                          :value-present (true? (:value-present bnd))
-                          :ref-id (:ref-fn-id bnd)
-                          :arg-id (data/synth-arg-id fn-id sid)
-                          :slot-id sid
-                          :binding-id (:id bnd)
-                          :fn-id fn-id})
+            (let [entry {:arg-name (or (:name renamed-view) (:name slot))
+                         :value (:value bnd)
+                         :value-present (true? (:value-present bnd))
+                         :ref-id (:ref-fn-id bnd)
+                         :arg-id (data/synth-arg-id fn-id sid)
+                         :slot-id sid
+                         :binding-id (:id bnd)
+                         :fn-id fn-id}]
+              (reduce (fn [b' id] (assoc b' id entry)) b (family sid)))
             b)))
       bindings
       (get bindings-by-fn fn-id []))))

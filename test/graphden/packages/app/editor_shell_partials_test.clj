@@ -391,3 +391,27 @@
     (let [body (body-of :_partial-inspector-overview-handler
                         {"fn-id" (str (ga/fn-id :add))})]
       (is (not (str/includes? body "data-action=\"lambda-params\""))))))
+
+
+(deftest fn-picker-incompat-explains-with-what-was-compared
+  ;; A callable slot admits by the candidate's SIGNATURE; the explainer
+  ;; used to print its return type under "Got" — a type the check never
+  ;; looked at (a Ring wrap showed `{:status … :body …}` against
+  ;; `[:fn {:request …} …]`). A value slot still shows the return.
+  (let [callable-slot "[\"fn\",{\"request\":\"ring-request-shape\"},\"ring-response-shape\"]"
+        got-of (fn [body]
+                 (second (re-find #"mismatch-row-got.*?mismatch-explainer-value\">([^<]*)<" body)))]
+    (testing "a callable slot: Got is the candidate's [:fn …] shape"
+      (let [body (body-of :_partial-fn-picker-incompat-handler
+                          {"expected" callable-slot
+                           "candidate-fn-id" (str (ga/fn-id :text-ok-response))})
+            got (got-of body)]
+        (is (str/starts-with? (str got) "[:fn ")
+            (str "Got names the signature, not the return (got: " got ")"))
+        (is (str/includes? (str got) ":body") "…with the callee's own args")))
+    (testing "a value slot: Got is the candidate's return type"
+      (let [body (body-of :_partial-fn-picker-incompat-handler
+                          {"expected" "\"int\""
+                           "candidate-fn-id" (str (ga/fn-id :str-upper))})
+            got (got-of body)]
+        (is (= ":text" (str got)) (str "got: " got))))))

@@ -308,10 +308,25 @@
    :parent :parse-uuid
    :args {:string :_partial-fpi-candidate-fn-id-str}}
 
-  {:name :_partial-fpi-candidate
-   :description "Candidate fn's rich return-type (the type the user would store if they picked it). Reads through the registry by name."
+  ;; What was COMPARED: a callable slot admits by the candidate's
+  ;; signature, every other slot by its return type — the same branch
+  ;; the candidate filter takes. Showing the return under "Got" for a
+  ;; callable slot named a type the check never looked at.
+  {:name :_partial-fpi-expected-callable?
+   :parent :fn-type?
+   :args {:type :_partial-fpi-expected}}
+  {:name :_partial-fpi-candidate-return
    :parent :rich-return-of-fn
    :args {:fn-id :_partial-fpi-candidate-fn-id}}
+  {:name :_partial-fpi-candidate-signature
+   :parent :rich-signature-of-fn
+   :args {:fn-id :_partial-fpi-candidate-fn-id}}
+  {:name :_partial-fpi-candidate
+   :description "The candidate's side of the comparison: its callable signature when the slot expects a function, its rich return-type otherwise."
+   :parent :if
+   :args {:test :_partial-fpi-expected-callable?
+          :then :_partial-fpi-candidate-signature
+          :else :_partial-fpi-candidate-return}}
 
   {:name :_partial-fpi-reason
    :description "One-line natural-language reason `candidate` ⊄ `expected` — same `:describe-type-mismatch` the `/api/types/compatible` endpoint produces, so the picker's text matches what a backend-validated `POST` would say."

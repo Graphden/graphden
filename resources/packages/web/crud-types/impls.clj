@@ -71,7 +71,10 @@
    picker would offer or refuse binds the write path judges the other
    way."
   [fn-name]
-  (tcheck/assemble-fn-type fn-name))
+  ;; `:keyword-or-text` — the registry is keyword-keyed; a name read off
+  ;; a fn ROW (`:rich-signature-of-fn`'s walk) arrives as text.
+  (when fn-name
+    (tcheck/assemble-fn-type (keyword fn-name))))
 
 
 (defbase candidate-fit-fn

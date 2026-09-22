@@ -130,10 +130,9 @@ catalogue repeats that line under every lesson you have marked `✓ done`
 (the `↗` on any row opens the text). The six lessons without a tour are
 listed in the catalogue too, as **text only** rows that open the text —
 so the catalogue is the whole tutorial, not just the part the editor can
-walk. The link target is `:text :base` in the tour script
-(`app.tour/_tour-lessons`, `https://graphden.dev/tutorial/` by default)
-plus the lesson's file name; a deployment serving its own copy of the
-lessons points it there.
+walk. The link target is `https://graphden.dev/tutorial/` plus the
+lesson's file name; a deployment serving its own copy of the lessons (a
+translation, an intranet mirror) sets `GRAPHDEN_TUTORIAL_BASE` to it.
 
 Six lessons have no tour: **31** is about files on disk and
 `bb rebuild`, which the editor cannot show; **14** is about MOUNTING a

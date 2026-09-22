@@ -92,6 +92,10 @@
  :exec/deploy-config
  {:settings {:hub-url                 #env GRAPHDEN_HUB_URL
              :feedback-url            #env GRAPHDEN_FEEDBACK_URL
+             ;; where the tour's "Read the written lesson" links go — a
+             ;; translation / intranet copy of docs/tutorial/; unset ⇒ the
+             ;; tour script's own default (graphden.dev)
+             :tutorial-base           #env GRAPHDEN_TUTORIAL_BASE
              :feedback-intake         #env GRAPHDEN_FEEDBACK_INTAKE
              :disable-asset-overrides #env GRAPHDEN_DISABLE_ASSET_OVERRIDES
              ;; "1" ⇒ a tenant's PUBLIC listing waits for the operator's

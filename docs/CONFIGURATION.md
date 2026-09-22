@@ -371,7 +371,8 @@ Telegram pair) hold those.
 {:settings {:hub-url                 #env GRAPHDEN_HUB_URL
             :feedback-url            #env GRAPHDEN_FEEDBACK_URL
             :feedback-intake         #env GRAPHDEN_FEEDBACK_INTAKE
-            :disable-asset-overrides #env GRAPHDEN_DISABLE_ASSET_OVERRIDES}}
+            :disable-asset-overrides #env GRAPHDEN_DISABLE_ASSET_OVERRIDES
+            :tutorial-base           #env GRAPHDEN_TUTORIAL_BASE}}
 ```
 
 Blank values read as unset (nil); an undeclared key reads as nil too.
@@ -478,6 +479,7 @@ The fragment (`resources/graphden/accounts/addon.edn`) reads via `#env`:
 | `RESEND_API_KEY` | *(empty ⇒ LogMailer)* | Resend API key for transactional email; unset logs the links instead |
 | `GRAPHDEN_MAIL_FROM` | *(built-in sender)* | Override the From address |
 | `GRAPHDEN_APP_ORIGIN` | *(unset ⇒ request Host)* | Public origin for OAuth redirect URIs + emailed links |
+| `GRAPHDEN_TUTORIAL_BASE` | `https://graphden.dev/tutorial/` | Where the interactive tour's "Read the written lesson" links point (`{id}-{slug}` is appended) — a translation or an intranet copy of docs/tutorial/; a `:deploy-config` setting, read at boot |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | *(empty ⇒ GitHub login off)* | GitHub OAuth app — both required to enable |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | *(empty ⇒ Google login off)* | Google OIDC client — both required to enable |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_BOT_USERNAME` | *(empty ⇒ Telegram login off)* | Telegram login-widget bot — both required to enable |

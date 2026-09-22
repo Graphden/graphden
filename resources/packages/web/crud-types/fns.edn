@@ -181,6 +181,26 @@
    :args {:value {:ref :_rrof-resolved :type :type-expression}}
    :return-type :type-expression}
 
+  ;; The same walk, ending in the fn's callable SHAPE instead of its
+  ;; return — what a `[:fn …]` slot is actually checked against. The
+  ;; picker's "why not" explainer used to print the return type under
+  ;; "Got" for a callable slot, i.e. not the thing that was compared.
+  {:name :_rsof-signature
+   :parent :fn-signature
+   :args {:fn-name {:parent :coalesce :args {:value :_rrof-name :default ""}}}}
+
+  {:name :_rsof-resolved
+   :parent :if
+   :args {:test :_rrof-fn-id-nil?
+          :then {:value nil}
+          :else :_rsof-signature}}
+
+  {:name :rich-signature-of-fn
+   :description "The named fn's callable shape `[:fn args ret effects]` as the registry assembles it — nil for nil fn-id / unknown fn. Same fn-id → row → name walk as `:rich-return-of-fn`, ending in `:fn-signature`."
+   :parent :const
+   :args {:value {:ref :_rsof-resolved :type :type-expression}}
+   :return-type :type-expression}
+
   ;; --- :_types-compatible-apply — pure graph composition over
   ;; `:subtype?` + `:if`-wrapped `:describe-type-mismatch` + envelope.
   ;; Admins can vary the response shape (e.g. add `:expected-kind`,

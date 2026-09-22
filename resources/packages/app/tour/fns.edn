@@ -198,7 +198,8 @@
            ;; Where the written lessons are served. `{id}-{slug}` is appended —
            ;; the file name under docs/tutorial/, which is also the landing's
            ;; route. A deployment that serves its own copy (a translation, an
-           ;; intranet mirror) points this at it.
+           ;; intranet mirror) sets `GRAPHDEN_TUTORIAL_BASE` instead
+           ;; (`:_tour-text-base` below) — this is the default.
            :text {:base "https://graphden.dev/tutorial/"}
            :lessons
            [{:id "01"
@@ -2491,9 +2492,29 @@
              :title "AI clients and API tokens: the graph over /mcp"
              :reads "connecting Claude Code or Cursor, branch scoping, the agent cycle, and the rights an API token hands out. No tour: the set-up lives in a terminal and an AI client."}]}}}
 
+  ;; Where the written lessons are served: `GRAPHDEN_TUTORIAL_BASE` when
+  ;; the deployment sets it (a translation, an intranet mirror), else the
+  ;; script's own `:text :base`. Read through `:deploy-config` (the boot
+  ;; snapshot, no `:env` effect): a tenant request on the cloud runs under
+  ;; the request-level effect gate, which excludes `:env` by design.
+  {:name :_tour-text-base-env
+   :parent :deploy-config
+   :args {:key {:value :tutorial-base}}}
+  ;; `:default` pinned: an unbound optional slot surfaces as a free arg
+  ;; of the whole handler, and a free arg on a route thunks to nothing.
+  {:name :_tour-text-base-default
+   :parent :get-in
+   :args {:map :_tour-lessons :path {:value [:text :base]} :default {:value nil}}}
+  {:name :_tour-text-base
+   :parent :coalesce
+   :args {:value :_tour-text-base-env :default :_tour-text-base-default}}
+  {:name :_tour-payload
+   :parent :assoc-in
+   :args {:m :_tour-lessons :path {:value [:text :base]} :v :_tour-text-base}}
+
   {:name :_tour-json
    :parent :to-json-string
-   :args {:data :_tour-lessons}}
+   :args {:data :_tour-payload}}
 
   {:name :tour-lessons-handler
    :description "GET /api/tour handler — the interactive-tutorial lesson scripts as JSON. Static teaching content, no data reads; open route (the demo's anonymous session must reach it)."

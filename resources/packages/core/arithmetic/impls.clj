@@ -115,10 +115,6 @@
 
 ;; === Comparison ===
 
-(defbase eq [values]
-  (apply = values))
-
-
 (defbase neq [values]
   (apply not= values))
 
@@ -244,7 +240,6 @@
    :neg {:impl neg :return-type-rule neg-return-rule :taint-propagate? true}
    :abs {:impl abs-fn :return-type-rule abs-return-rule :taint-propagate? true}
    :round {:impl round-fn :taint-propagate? true}
-   :eq {:impl eq :taint-propagate? true}
    :neq {:impl neq :taint-propagate? true}
    :lt {:impl lt :taint-propagate? true}
    :lte {:impl lte :taint-propagate? true}

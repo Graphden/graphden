@@ -76,7 +76,14 @@ Unified arg edges: EVERY unset arg — required, optional,
 ref-propagated (deep), or a HOF lambda-param — is emitted as the same
 placeholder node + edge shape by `add-unset-arg-node`, carrying
 `:optionalArg` / `:deepArg` / `:lambdaArg` flags the client styles by
-(lighter / sparser dashes / λ ghost). The former compact badge strips
+(lighter / sparser dashes / λ ghost). `:lambdaArg` follows the
+executor's call shape, not "any free under a HOF": `child-hof`
+resolves the boundary's lambda-params through
+`renames/hof-lambda-params` (authored `:lambda-params`, else the slot's
+structural `[:fn {ARGS} RET]`, else alpha-equivalence — docs/CLOSURE_CAPTURE.md),
+so a callee's captured frees render as ordinary bindable placeholders;
+only when that resolution refuses does the render fall back to the
+older every-free-is-λ reading. The former compact badge strips
 (`:optionalArgs` / `:hofCapturedArgs`) are retired; `:deepFreeArgs`
 (the informational ⇣-strip on expanded inner nodes) remains.
 

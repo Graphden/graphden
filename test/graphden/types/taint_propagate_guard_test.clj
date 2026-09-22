@@ -89,7 +89,7 @@
     ;; values — same read-projection class as :diff-branches.
     :diff-affected :diff-branches-view
     :diff-value-against-type :digest-hex :dispatch-to-branch :dissoc
-    :distinct :div :do :drop :empty? :env :eq
+    :distinct :div :do :drop :empty? :env
     :encode-unreadable-kws :equal? :error-boundary-wrap :every? :ex-data :execute-trace-rows
     :ex-info :extract-entity-params
     ;; :failure-ack / :failure-ack-all mutate acknowledged-at on audit
@@ -189,7 +189,7 @@
     :abs :add :and :assert :assert-eq :assert-some :assoc :assoc-in :atom :blank? :byte-len :call-with :call :call-traced :with-heartbeat
     :call-noargs :call-noargs-traced :case :cell :coalesce :comp :concat :cond :conj :cons :const
     :constant-time-equal? :constantly :contains? :count :deref :dissoc :distinct :div :do :drop
-    :empty? :eq :equal? :every? :ex-data :ex-info :filter :filter-xf :find-first
+    :empty? :equal? :every? :ex-data :ex-info :filter :filter-xf :find-first
     :first :flatten :fn-signature :fn-type? :form-decode :get :get-in :gt
     :gte :group-by :hiccup :hub-fetch-bundle :hub-push-bundle! :if :into :invoke :is-a? :keys :list :lt :lte
     :map :map-xf :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map

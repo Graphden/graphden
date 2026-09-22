@@ -269,8 +269,8 @@
    :args {:headers :ring-headers :header-name {:value "if-none-match"}}}
   {:name :_api-lint-fresh?
    :description "The client's validator still matches — nothing to send."
-   :parent :eq
-   :args {:values [:_api-lint-if-none-match :_api-lint-etag]}}
+   :parent :equal?
+   :args {:a :_api-lint-if-none-match :b :_api-lint-etag}}
   {:name :_api-lint-headers
    :parent :assoc
    :args {:map {:value {"Content-Type" "application/json" "Cache-Control" "no-cache"}}

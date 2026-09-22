@@ -41,9 +41,11 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
                  && !cardFnEntity['return-type-fn-id']
                  && !rt
                  && !isBareDraftFn;
+  // Ownership gate, not `isFnEditable`'s "no dependents": the server
+  // takes a return-type or parent change on a referenced fn (see
+  // `gdOwnEditable`), so the strips offer it too.
   const rtEditable = isNavRoot && !isTypeRow
-                  && (typeof isFnEditable === 'function' && isFnEditable(originalFnId))
-                  && (typeof isAuthenticated === 'function' && isAuthenticated());
+                  && typeof gdOwnEditable === 'function' && gdOwnEditable(cardFnEntity);
   // The fn-row FLAGS (λ call-site params, 📍 branch-local) take the
   // effects pencil's looser gate, not `isFnEditable`'s "no dependents":
   // a fn is handed to a HOF or extended BECAUSE it is referenced, and

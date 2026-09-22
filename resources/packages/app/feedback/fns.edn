@@ -53,7 +53,7 @@
    :args {:clauses [{:parent :blank?
                      :args {:string {:parent :to-str :args {:value :_fb-url-env}}}}
                     {:value "https://app.graphden.dev/api/feedback"}
-                    {:parent :eq :args {:values [:_fb-url-env {:value "off"}]}}
+                    {:parent :equal? :args {:a :_fb-url-env :b {:value "off"}}}
                     {:value ""}
                     {:value true}
                     :_fb-url-env]}}
@@ -112,9 +112,9 @@
   {:name :_fb-category
    :description "Report category, forced into the known set — an open route never stores a caller-invented label. An `:eq` ladder rather than `:case`: a literal `:case` clauses-map keywordizes its keys on the JSONB roundtrip and stops matching caller-supplied STRINGS, and `:str-to-keyword` on attacker input would intern unbounded keywords."
    :parent :cond
-   :args {:clauses [{:parent :eq :args {:values [:_fb-category-raw {:value "idea"}]}}
+   :args {:clauses [{:parent :equal? :args {:a :_fb-category-raw :b {:value "idea"}}}
                     {:value "idea"}
-                    {:parent :eq :args {:values [:_fb-category-raw {:value "question"}]}}
+                    {:parent :equal? :args {:a :_fb-category-raw :b {:value "question"}}}
                     {:value "question"}
                     {:value true}
                     {:value "bug"}]}}

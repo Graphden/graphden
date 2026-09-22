@@ -166,7 +166,7 @@
           (case (:kind arg)
             :ref (let [ref-expansion-root (when-not (:is-binding arg) expansion-root)
                        ref-bindings bindings]
-                   (process-any-fn ctx (:ref-id arg) node-id (:arg-name arg) false ref-bindings (:arg-id arg) ref-expansion-root #{display-fn-id} (bh/child-hof arg-map (:arg-id arg) is-hof)))
+                   (process-any-fn ctx (:ref-id arg) node-id (:arg-name arg) false ref-bindings (:arg-id arg) ref-expansion-root #{display-fn-id} (bh/child-hof lookups arg-map (:arg-id arg) is-hof)))
             :value (bh/add-arg-value-node state lookups arg node-id #{display-fn-id})
             :unset (bh/add-unset-arg-node state lookups inverse-source-map (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id #{display-fn-id} is-hof)
             nil))))
@@ -476,7 +476,7 @@
                   (process-any-fn ctx (:ref-id m) node-id
                                   (or (:arg-name m) (:arg-name arg))
                                   false parent-bindings (:arg-id arg)
-                                  parent-expansion-root expand-set (bh/child-hof arg-map (:arg-id arg) is-hof))
+                                  parent-expansion-root expand-set (bh/child-hof lookups arg-map (:arg-id arg) is-hof))
                   (and m (true? (:value-present m)))
                   (bh/add-arg-value-node state lookups
                                          (assoc m
@@ -490,7 +490,7 @@
 
         ;; Stage 4 — level-0 children
         (doseq [arg (filter #(= (:kind %) :ref) level-0-stay)]
-          (process-any-fn ctx (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root expand-set (bh/child-hof arg-map (:arg-id arg) is-hof)))
+          (process-any-fn ctx (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root expand-set (bh/child-hof lookups arg-map (:arg-id arg) is-hof)))
         (doseq [arg level-0-unsets] (render-unset arg))
         (doseq [arg (filter #(= (:kind %) :value) level-0-stay)]
           (bh/add-arg-value-node state lookups arg node-id expand-set))
@@ -508,7 +508,7 @@
                                                           (:arg-name arg) false leaf-bindings
                                                           (:arg-id arg)
                                                           effective-expansion-root expand-set
-                                                          (bh/child-hof arg-map (:arg-id arg) is-hof))]
+                                                          (bh/child-hof lookups arg-map (:arg-id arg) is-hof))]
                         [ref-target-id child-node-id])))]
 
           ;; Stage 6 — free-arg β-inline post-pass.
@@ -540,7 +540,7 @@
             (process-any-fn ctx (:ref-id arg) consumer-node-id
                             (:arg-name arg) false {} (:arg-id arg)
                             effective-expansion-root expand-set
-                            (bh/child-hof arg-map (:arg-id arg) is-hof))
+                            (bh/child-hof lookups arg-map (:arg-id arg) is-hof))
             (when-let [nm (:arg-name arg)]
               (swap! state update-in
                      [:deep-free-by-node consumer-node-id]
@@ -658,7 +658,7 @@
                                       (or (:arg-name migrated)
                                           (bnd/resolve-arg-name arg arg-map))
                                       false parent-bindings (:id arg)
-                                      nil #{fn-id} (bh/child-hof arg-map (:id arg) is-hof)))
+                                      nil #{fn-id} (bh/child-hof lookups arg-map (:id arg) is-hof)))
 
                     (and migrated (true? (:value-present migrated)))
                     (when (mark-once! [terminal :value (:value migrated)])

@@ -26,8 +26,8 @@
    :args {:nums [{:as :n} {:value 0}]}}
 
   {:name :_ex-n-zero?
-   :parent :eq
-   :args {:values [{:as :n} {:value 0}]}}
+   :parent :equal?
+   :args {:a {:as :n} :b {:value 0}}}
 
   ;; ==========================================================================
   ;; :case — exact-match dispatch via a `{match-value result}` map.

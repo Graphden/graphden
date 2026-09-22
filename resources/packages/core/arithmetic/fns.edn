@@ -86,11 +86,6 @@
    :return-type :numeric}
 
   ;; === Comparison ===
-  {:name :eq
-   :description "Test all values for equality (Clojure's `=`)."
-   :args {:values {:type [:list :any] :description "Vector of values; all must be equal."}}
-   :return-type :bool}
-
   {:name :neq
    :description "True iff at least one pair differs."
    :args {:values {:type [:list :any] :description "Vector of values; comparison is pairwise."}}

@@ -25,6 +25,7 @@
   (:require
     [clojure.string :as str]
     [graphden.executor.compile.bindings :as cb]
+    [graphden.executor.compile.renames :as renames]
     [graphden.executor.compile.surface :as surface]
     [graphden.layout.bindings :as bnd]
     [graphden.layout.data :as data]
@@ -749,12 +750,57 @@
   (= :fn (:type arg-entity)))
 
 
+(defn- structural-hof-slot?
+  "Is the HOF slot `arg-rec` binds a STRUCTURAL `[:fn {ARGS} RET]` type
+   (the binding's `:type-override-fn-id` first, then the slot's own
+   `:type-fn-id`)? A bare `:fn` keyword slot carries no call shape —
+   the executor guesses by alpha-equivalence there and the render keeps
+   its older reading rather than second-guess a test surface."
+  [{:keys [slot-map fn-map binding-by-fn-slot]} arg-rec]
+  (let [sid (:slot-id arg-rec)
+        override (some-> (get binding-by-fn-slot [(:fn-id arg-rec) sid])
+                         :type-override-fn-id)
+        tfid (or override (some-> (get slot-map sid) :type-fn-id))
+        c (some-> (get fn-map tfid) :constraint)]
+    (and (vector? c) (= :fn (first c)))))
+
+
+(defn hof-context
+  "The HOF context a ref-binding `arg-rec` opens for the fn it hands
+   over: `{:lambda-params #{…}}` — the names the executor will pass
+   per call, resolved exactly as `hof-wrap` resolves them
+   (`renames/hof-lambda-params`: authored `:lambda-params`, else the
+   slot's structural `[:fn {ARGS} RET]` shape, else alpha-equivalence;
+   docs/CLOSURE_CAPTURE.md). Every other free of the callee is CAPTURED
+   at wrap time — the caller binds it like any free arg, so it must
+   not wear the λ. `:lambda-params nil` when the resolution refuses
+   (an ambiguous shape the compile would reject) — the render then
+   falls back to \"every unbound free under a HOF is λ\", the
+   pre-2026-09-22 reading."
+  [lookups arg-rec]
+  (let [r (:ref-id arg-rec) f (:fn-id arg-rec) sid (:slot-id arg-rec)]
+    {:lambda-params
+     (when (and r f sid (structural-hof-slot? lookups arg-rec))
+       (try (some->> (renames/hof-lambda-params r sid arg-rec f lookups)
+                     (map keyword)
+                     set)
+            (catch Exception _ nil)))}))
+
+
 (defn child-hof
-  "HOF context to thread into a child render: ORs the parent's `is-hof`
-   with whether `arg-id` crosses the HOF boundary (any source-id chain
-   step has `:is-fn=true`). Once HOF, descendants stay HOF."
-  [arg-map arg-id is-hof]
-  (or is-hof (arg-marks-hof? arg-map (get arg-map arg-id))))
+  "HOF context to thread into a child render: the parent's `is-hof`
+   unless `arg-id` itself crosses a HOF boundary (its slot is
+   `:fn`-typed), in which case the boundary's own `hof-context` — the
+   innermost boundary decides which frees are call-site params. Once
+   HOF, descendants stay HOF. The 3-arity keeps the boolean reading
+   for callers without `lookups` at hand."
+  ([arg-map arg-id is-hof]
+   (or is-hof (arg-marks-hof? arg-map (get arg-map arg-id))))
+  ([lookups arg-map arg-id is-hof]
+   (let [arg-rec (get arg-map arg-id)]
+     (if (arg-marks-hof? arg-map arg-rec)
+       (hof-context lookups arg-rec)
+       is-hof))))
 
 
 (defn terminal-source-of
@@ -943,6 +989,24 @@
     node-id))
 
 
+(defn- lambda-param?
+  "λ = a call-site parameter of the enclosing HOF's callee: the arg is
+   under a HOF boundary (`is-hof`), no caller on the chain binds it
+   (`hof-bound` nil), and — when the boundary resolved its
+   `:lambda-params` (`hof-context`) — its name is one of THOSE. The
+   callee's other frees are captured at wrap time and render as
+   ordinary bindable placeholders. A boundary whose shape could not be
+   resolved (`:lambda-params nil`) keeps the older \"unbound under a
+   HOF\" reading; a boolean `is-hof` (the 3-arity `child-hof`) too."
+  [is-hof hof-bound arg-name displayed-name]
+  (let [lambda-params (when (map? is-hof) (:lambda-params is-hof))]
+    (boolean
+      (and is-hof (nil? hof-bound)
+           (or (nil? lambda-params)
+               (contains? lambda-params (some-> arg-name keyword))
+               (contains? lambda-params (some-> displayed-name keyword)))))))
+
+
 (defn add-unset-arg-node
   "Emit a placeholder for an unset arg. Since the unified-arg-edges
    redesign every unset arg renders as the SAME shape — a
@@ -976,7 +1040,7 @@
         displayed-name (or (compute-edge-label lookups arg-id source-node-id expanded-fns)
                            (when arg-name (name arg-name)))
         hof-bound (when is-hof (caller-bound-arg arg-map inverse-source-map arg-id))
-        lambda? (and is-hof (nil? hof-bound))
+        lambda? (lambda-param? is-hof hof-bound arg-name displayed-name)
         deep? (boolean
                 (when-let [owner (get (:slot-owner lookups) (:slot-id arg-rec))]
                   (when-let [fid (:fn-id arg-rec)]

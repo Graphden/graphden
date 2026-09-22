@@ -346,7 +346,13 @@ function _tourTick() {
     const el = document.querySelector(effSel);
     if (el && (!_tourTargetVisible(effSel) || _tourUnderSheet(effSel))) {
       _tourState._scrolledFor = _tourState.step + ':' + effSel;
-      try { el.scrollIntoView({block: 'center', inline: 'nearest'}); } catch (_) { /* ignore */ }
+      // A card on the canvas does not scroll — the canvas pans. Centre
+      // its node instead (a narrow window puts the ringed card off the
+      // right edge, where `scrollIntoView` inside #graph-container is a
+      // no-op); everything else scrolls its own container.
+      if (!_tourPanCanvasTo(el)) {
+        try { el.scrollIntoView({block: 'center', inline: 'nearest'}); } catch (_) { /* ignore */ }
+      }
     }
   }
   _tourPosition();
@@ -358,6 +364,21 @@ function _tourTick() {
     if (typeof gdToast === 'function') gdToast('Step complete ✓');
     _tourAdvance(false);
   }
+}
+
+// Pan the canvas so the node an element belongs to sits at the centre of
+// the viewport. Returns false when the element is not on the canvas (or
+// the graph view is not up), so the caller falls back to scrolling.
+function _tourPanCanvasTo(el) {
+  if (!el || !el.closest || !el.closest('#graph-container')) return false;
+  const wrap = el.closest('[data-node-id]');
+  const nodeId = wrap?.dataset?.nodeId || null;
+  if (!nodeId || typeof gv === 'undefined' || !gv || typeof gv.node !== 'function') return false;
+  let node = null;
+  try { node = gv.node(nodeId); } catch (_) { node = null; }
+  if (!node || typeof node.position !== 'function' || typeof gv.centerOn !== 'function') return false;
+  try { gv.centerOn(node, 250); } catch (_) { return false; }
+  return true;
 }
 
 function _tourAdvance(skipped) {

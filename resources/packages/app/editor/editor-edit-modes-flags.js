@@ -32,8 +32,19 @@
 function gdFlagEditable(fn) {
   if (!fn) return false;
   const composed = Array.isArray(fn['parent-ids']) && fn['parent-ids'].length > 0;
-  return composed
-    && (typeof isAuthenticated === 'function' && isAuthenticated())
+  return composed && gdOwnEditable(fn);
+}
+
+// The ownership half of that gate on its own: signed in, not a package
+// fn, and (under tenancy) the reader's own. The return-type strip and
+// the "set parent…" strip take this one rather than `isFnEditable`'s
+// "no dependents" — the server accepts both edits on a referenced fn
+// (a return-type change surfaces as type warnings on the dependents,
+// a re-parent keeps the fn-id), so refusing them in the editor was a
+// gap of the "server can, UI can't" kind (tour re-audit 2026-09-21).
+function gdOwnEditable(fn) {
+  if (!fn) return false;
+  return (typeof isAuthenticated === 'function' && isAuthenticated())
     && !(typeof isPackageOwnedFn === 'function' && isPackageOwnedFn(fn.id))
     && ((typeof graphdenIsFnOwned !== 'function') || graphdenIsFnOwned(fn));
 }

@@ -1024,7 +1024,7 @@
             {:id "12"
              :slug "state-cells-and-caches"
              :chapter "Composing"
-             :version 2
+             :version 3
              :title "State: cells"
              :steps
              [{:title "A graph can remember"
@@ -1043,7 +1043,7 @@
                :creates {:type "fn" :name "tutorial-bump"}}
               ;; Selection gate — the next step binds on the child.
               {:title "tutorial-bump is open"
-               :body "One [[+]] shows, on :a — WHICH cell to append to. The other input, value, is drawn as a λ edge with no +: it belongs to the callback under swap, so the card never asks for it here — the Run form does, at run time (lesson 15). The cell does not exist yet; you will make it from this slot, without leaving this canvas."
+               :body "Two [[+]] show. :a is WHICH cell to append to. value is the item the callback under swap appends — a free arg it captures from your card, so you may bind it here or leave it for the Run form at run time (lesson 15). (The callback's own per-call input, current, wears a λ and no +: swap supplies it.) The cell does not exist yet; you will make it from the :a slot, without leaving this canvas."
                :target nil
                :check {:kind "selected" :name "tutorial-bump"}}
               {:title "Point it at a cell"

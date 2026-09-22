@@ -398,8 +398,8 @@
   ;; candidate, the rule `check-one-binding`'s `:fn-ref` arm applies on
   ;; write. Mirrors `identity-slot?` in `types-api/apply-types-candidates`.
   {:name :_types-candidates-expected-identity?
-   :parent :eq
-   :args {:values [{:as :expected} {:value :fn-ref :literal? true}]}}
+   :parent :equal?
+   :args {:a {:as :expected} :b {:value :fn-ref :literal? true}}}
 
   {:name :_types-candidates-subtype-ok?
    :parent :cond

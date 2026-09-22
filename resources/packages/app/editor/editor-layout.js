@@ -142,8 +142,7 @@ function metadataStripsHeight(nodeData) {
                  && !fn['return-type-fn-id']
                  && !fn['return-type'];
   const rtEditable = isNavRoot && !isTypeRow
-    && (typeof isFnEditable === 'function' && isFnEditable(fnId))
-    && (typeof isAuthenticated === 'function' && isAuthenticated());
+    && typeof gdOwnEditable === 'function' && gdOwnEditable(fn);
   if (!compact && (fn['return-type'] || rtEditable || hasRtEntry)) {
     total += METADATA_STRIP_HEIGHT;
   }

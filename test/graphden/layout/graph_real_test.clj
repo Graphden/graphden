@@ -161,6 +161,26 @@
           (is (:valid (:validation result)) (str nm " grid is valid")))))))
 
 
+(deftest layout-lambda-flag-follows-the-hof-call-shape
+  ;; `:swap-conj` hands `:_conj-into` to `:swap`'s `:func`, whose
+  ;; structural type is `[:fn {:current a} a]`: `current` is the
+  ;; per-call parameter, `value` is closure-captured (the caller binds
+  ;; it). The λ ghost must sit on `current` ONLY — before 2026-09-22
+  ;; every unbound free under a HOF wore it, and lesson 12 had to
+  ;; talk its way around a λ on a slot the reader is meant to bind.
+  (when-let [root (fn-id "swap-conj")]
+    (let [result (layout root)
+          unset (into {}
+                      (keep (fn [e]
+                              (let [d (:data e)]
+                                (when (:isUnset d) [(:argName d) (boolean (:lambdaArg d))]))))
+                      (:edges result))]
+      (is (contains? unset "current") (str "the per-call param surfaces: " (pr-str unset)))
+      (is (contains? unset "value") (str "the captured free surfaces: " (pr-str unset)))
+      (is (true? (get unset "current")) "`current` is the callee's lambda-param → λ")
+      (is (false? (get unset "value")) "`value` is captured at wrap time → an ordinary placeholder, no λ"))))
+
+
 (deftest layout-type-row-test
   (testing "a structural type-row root lays out its internal edges"
     (doseq [nm ["ring-response-shape" "positive-int" "port"]]

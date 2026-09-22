@@ -76,11 +76,11 @@
                ";; `bb tour-versions-check` fails when the steps changed but the version did\n"
                ";; not; bump `:version` (readers who finished the lesson are told to re-read)\n"
                ";; or, for a cosmetic edit, refresh this file. See the fns.edn header.\n"
-               (with-out-str
-                 (println "{")
-                 (doseq [[id v] rec]
-                   (println (str " " (pr-str id) " " (pr-str v))))
-                 (println "}"))))
+               ;; One entry per line, in cljstyle's shape (`{` and `}` hug the
+               ;; first / last entry) so the record needs no `bb fix` after.
+               "{"
+               (str/join "\n " (map (fn [[id v]] (str (pr-str id) " " (pr-str v))) rec))
+               "}\n"))
     (println (str "tour-versions: recorded " (count rec) " lessons → " record-edn))))
 
 

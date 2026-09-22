@@ -281,7 +281,18 @@
                            ;; filters anonymous rows out anyway).
                            (:constraint f)
 
-                           nil)]
+                           nil)
+                    ;; A platform row the packages declared keeps its
+                    ;; DECLARED body: the slot walk above can only name
+                    ;; type-rows, so a union / fn-typed field comes back as
+                    ;; its storage kind (`:any`) — wider than fns.edn said,
+                    ;; and wide enough to fail contravariance on every
+                    ;; fn-typed slot naming the record (types/core
+                    ;; `package-alias-bodies`). Tenant rows (`:org-id` set)
+                    ;; are the API's own and keep the rebuilt shape.
+                    body (if (nil? (:org-id f))
+                           (or (types/package-alias-body nm) body)
+                           body)]
                 (when body {:nm nm :body body :org (:org-id f)
                             ;; Owner id feeds the alias-collision
                             ;; diagnostic — per-ns names may repeat,

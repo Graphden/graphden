@@ -7,14 +7,14 @@ HTTP from socket to response body: routing, middleware as graph fns, the hiccup 
 
 after: packages, boot
 
-[[file:index.org][index]] · ~29 min
+[[file:index.org][index]] · ~30 min
 
 * 1. http-server
 :PROPERTIES:
 :CUSTOM_ID: web/http-server
 :FILE: resources/packages/web/http/impls.clj
 :LINE: 239
-:MINS: 3.7
+:MINS: 4.3
 :END:
 
 The http-kit wrapper base-fn: ~run-server~ spins the listener thread and binds the composed Ring handler to a port, recording ~:network~ / ~:process~ effects. Where a request first enters the web layer, so the natural first stop. Note it is a tiny primitive — everything else is composed from small base-fns in ~web/http/fns.edn~.

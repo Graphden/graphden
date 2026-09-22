@@ -13,6 +13,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.entities :as entities]
     [graphden.crud.type-check :as tc]
+    [graphden.crud.types-api :as types-api]
     [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.golden-app :as ga :refer [*bootstrap*]]
@@ -72,3 +73,35 @@
             (is (empty? (:args info)) "nothing left free")
             (is (types/subtype? (tcheck/assemble-fn-type (:name info)) handler-slot)
                 "a 0-free-arg response producer fits a `request → response` slot")))))))
+
+
+(deftest bound-renamed-arg-leaves-the-registry-entry-with-no-free-args-test
+  ;; Lesson 38 builds a listener's answer in the editor: extend
+  ;; `text-ok-response`, bind its `body`. The picker then offers the child
+  ;; for `:http-server`'s :handler ONLY if the registry says it has no free
+  ;; args left (a nullary callee fits a 1-arg slot); a stale `{:body :text}`
+  ;; keeps it "incompatible" while the write path accepted it.
+  (let [{:keys [ctx all-name->id]} *bootstrap*
+        storage (:storage ctx)
+        tor-id (get all-name->id :text-ok-response)
+        child (entities/create-entity "fn" {:name "pceb-hello" :parent-ids [tor-id]} ctx)
+        _ (tc/type-check-fn-after-mutation! storage (:id child))
+        before (:args (registry/rich-type-of-id (:id child)))
+        ;; The editor writes on the slot the `body` placeholder carries —
+        ;; the rename chain's SOURCE (`assoc`'s :value).
+        value-slot (->> (sp/query-entities storage :fn-slot {:fn-id (get all-name->id :assoc)})
+                        (map #(sp/read-entity storage :slot (:slot-id %)))
+                        (filter #(= "value" (:name %)))
+                        first)
+        _ (entities/create-entity "binding" {:fn-id (:id child) :slot-id (:id value-slot) :value "hello"} ctx)
+        rej (tc/type-check-fn-after-mutation! storage (:id child))
+        after (:args (registry/rich-type-of-id (:id child)))
+        cands (:candidates
+                (types-api/apply-types-candidates
+                  {:expected [:fn {:request :ring-request-shape} :ring-response-shape]}
+                  ctx))]
+    (is (= #{:body} (set (keys before))) "freshly extended: body is the one free arg")
+    (is (nil? rej) (str "the bind type-checks: " (pr-str rej)))
+    (is (= {} after) (str "bound body → no free args (got " (pr-str after) ")"))
+    (is (some #(= :pceb-hello (:name %)) cands)
+        "…and the child is a valid Ring handler for the picker (nullary callee, 1-arg slot)")))

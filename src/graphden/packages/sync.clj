@@ -178,6 +178,10 @@
                      [(:name fd) body (records/fn-id (:namespace fd) (:name fd))
                       (when (edn-ns? (:namespace fd))
                         (keyword (:namespace fd) (name (:name fd))))])
+        ;; The declared bodies outlive this registration: the DB-side
+        ;; rebuild prefers them for platform rows (types/core).
+        _ (types/remember-package-alias-bodies!
+            (into {} (map (fn [[nm body]] [nm body])) candidates))
         try-once
         (fn [pending]
           ;; Returns the subset of [name body] pairs whose validation

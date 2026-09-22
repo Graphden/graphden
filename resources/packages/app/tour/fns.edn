@@ -109,8 +109,9 @@
 ;;   - a CAPABILITY name (`manage-users`, `manage-grants`, `manage-apps`,
 ;;     `publish-packages`) — checked against the caps header;
 ;;   - a named SIGNAL for needs that aren't capabilities at all
-;;     (`REQUIRE_SIGNALS` in editor-tour.js): `services` = the dedicated plan
-;;     (or a platform / self-host instance), `org` = organizations exist here.
+;;     (`REQUIRE_SIGNALS` in editor-tour-picker.js): `services` = the dedicated
+;;     plan (or a platform / self-host instance), `org` = organizations exist
+;;     here, `assets` = a single-tenant instance.
 ;;
 ;; ONE ACTION PER RING (from a reader walking lesson 18): the
 ;; spotlight can only sit on one thing, so a step whose text passes through
@@ -2242,16 +2243,73 @@
             {:id "38"
              :slug "services-talking-to-services"
              :chapter "Your organization"
-             :version 2
-             :requires "own-web-server"
+             :version 3
+             :requires "services"
              :title "Services talking to services"
              :steps
              [{:title "Two services, one graph"
-               :body "In lesson 35 a service just ran. Here a fn will call a running service over HTTP by NAMING it — no address typed anywhere. The reconciler records where every listener answers; a consumer asks for that address by pointing at the service fn itself. The service you will name is the one you are looking at: the editor's own web-server."
+               :body "In lesson 35 a service just ran. Here you build a listener, make it a service, and then a fn calls it over HTTP by NAMING it — no address typed anywhere. The reconciler records where every listener answers; a consumer asks for that address by pointing at the service fn itself. Inside out: first what the listener says, then the listener, then the caller."
                :target nil
                :check {:kind "manual"}}
+              {:title "The answer"
+               :body "Type `text-ok-response` in the Explorer filter and click the [[text-ok-response]] row (web.response) — a 200 text/plain response whose :body is open."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "text-ok-response"}}
+              {:title "Extend it"
+               :body "Click [[⋯]] on the text-ok-response row, choose [[Extend]] and name it `tutorial-hello` — then [[Save]]."
+               :target ".node-overlay[data-fn-name=\"text-ok-response\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"text-ok-response\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "fn-parent" :name "tutorial-hello" :parent "text-ok-response"}
+               :creates {:type "fn" :name "tutorial-hello"}}
+              ;; Selection gate — the bind must land on the child.
+              {:title "tutorial-hello is open"
+               :body "The card has one hole: :body, the text the response carries. Everything else — the status, the content-type header — is already bound by its parents."
+               :target nil
+               :check {:kind "selected" :name "tutorial-hello"}}
+              {:title "What it says"
+               :body "Click the [[+]] on :body, choose [[Bind literal]], type `hello` and [[Save]]. tutorial-hello now has no open input: it is a complete response, ready to be handed out."
+               :target ".placeholder-binder[data-fn-name=\"tutorial-hello\"][data-arg-name=\"body\"]"
+               :targets [".placeholder-binder[data-fn-name=\"tutorial-hello\"][data-arg-name=\"body\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               ;; `bindings-count`, not `binding-bound`: `body` is a rename
+               ;; view over assoc's :value, and the binding row lands on the
+               ;; SOURCE slot — a name match would never see it.
+               :check {:kind "bindings-count" :name "tutorial-hello" :count 1}}
+              {:title "A listener"
+               :body "Type `http-server` in the Explorer filter and click the [[http-server]] row (web.http) — the primitive that starts an http-kit listener: a :handler answers every request, a :port is where it listens."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "http-server"}}
+              {:title "Extend it"
+               :body "Click [[⋯]] on the http-server row, choose [[Extend]] and name it `tutorial-server` — then [[Save]]."
+               :target ".node-overlay[data-fn-name=\"http-server\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"http-server\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "fn-parent" :name "tutorial-server" :parent "http-server"}
+               :creates {:type "fn" :name "tutorial-server"}}
+              ;; Selection gate — the binds must land on the child.
+              {:title "tutorial-server is open"
+               :body ":handler is a callable slot and :port a number — both still open."
+               :target nil
+               :check {:kind "selected" :name "tutorial-server"}}
+              {:title "Give it the answer"
+               :body "Click the [[+]] on :handler, type `tutorial-hello` in the picker’s filter and click the [[tutorial-hello]] row. A handler is called with each request; tutorial-hello has no input left to take, so it ignores the request and answers `hello` to every path — which is exactly what the picker’s Compatible verdict says."
+               :target ".placeholder-binder[data-fn-name=\"tutorial-server\"][data-arg-name=\"handler\"]"
+               :targets [".placeholder-binder[data-fn-name=\"tutorial-server\"][data-arg-name=\"handler\"]" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-hello\"]"]
+               :check {:kind "binding-bound" :name "tutorial-server" :slot "handler"}}
+              {:title "Where it listens"
+               :body "Click the [[+]] on :port, choose [[Bind literal]], type `9101` and [[Save]] — any port nothing else uses on the executor. No free args left, and http-server carries :process: tutorial-server can be a service now."
+               :target ".placeholder-binder[data-fn-name=\"tutorial-server\"][data-arg-name=\"port\"]"
+               :targets [".placeholder-binder[data-fn-name=\"tutorial-server\"][data-arg-name=\"port\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :check {:kind "binding-bound" :name "tutorial-server" :slot "port"}}
+              {:title "Make it a service"
+               :body "Click [[⋯]] on the tutorial-server card, then the [[⚙]] button."
+               :target ".node-overlay[data-fn-name=\"tutorial-server\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-server\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"service-settings\"]"]
+               :check {:kind "dom" :selector ".service-popover"}}
+              {:title "Start it"
+               :body "Leave [[Enabled]] ticked and click [[Create & reconcile]]. The popover closes as the row is written; the reconciler starts the listener at once and records a service-instance — the host and the port it actually bound. That record is what a consumer reads."
+               :target ".service-popover"
+               :check {:kind "manual"}}
               {:title "A consumer"
-               :body "Type `service-get` in the Explorer filter and click the [[service-get]] row (web.service). :service-get is :http-get whose URL is built from a SERVICE's recorded address plus a path."
+               :body "Type `service-get` in the Explorer filter and click the [[service-get]] row (web.service). :service-get is :http-get whose URL is built from a SERVICE’s recorded address plus a path."
                :target "input[placeholder=\"Filter...\"]"
                :check {:kind "selected" :name "service-get"}}
               {:title "Extend it"
@@ -2266,31 +2324,33 @@
                :target nil
                :check {:kind "selected" :name "tutorial-fetch"}}
               {:title "Which service"
-               :body "Click the [[+]] on the :service placeholder, choose [[Bind fn-ref]], type `web-server` in the picker's filter and click the [[web-server]] row. The slot's type badge says fn-ref — the fn's IDENTITY. Every fn is Compatible here, whatever it returns, because the bound fn is never run: binding the listener does not start a second one; the consumer receives its id and asks the reconciler where it answers."
+               :body "Click the [[+]] on the :service placeholder, choose [[Bind fn-ref]], type `tutorial-server` in the picker’s filter and click the [[tutorial-server]] row. The slot’s type badge says fn-ref — the fn’s IDENTITY. Every fn is Compatible here, whatever it returns, because the bound fn is never run: binding the listener does not start a second one; the consumer receives its id and asks the reconciler where it answers."
                :target ".placeholder-binder[data-arg-name=\"service\"]"
-               :targets [".placeholder-binder[data-arg-name=\"service\"]" ".free-arg-bind-chooser" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"web-server\"]"]
+               :targets [".placeholder-binder[data-arg-name=\"service\"]" ".free-arg-bind-chooser" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-server\"]"]
                :check {:kind "bindings-count" :name "tutorial-fetch" :count 1}}
               {:title "Which path"
-               :body "Click the [[+]] on the :path placeholder, choose [[Bind literal]] and type `/version` — the slot is text, no quotes — then [[Save]]. That is the contract's other half; between your own services the path is a shared constant both sides reference."
+               :body "Click the [[+]] on the :path placeholder, choose [[Bind literal]] and type `/hello` — the slot is text, no quotes — then [[Save]]. That is the contract’s other half; between your own services the path is a shared constant both sides reference."
                :target ".placeholder-binder[data-arg-name=\"path\"]"
                :targets [".placeholder-binder[data-arg-name=\"path\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "bindings-count" :name "tutorial-fetch" :count 2}}
               {:title "Ask it"
-               :body "Click [[⋯]] → [[▶]], tick the effects box and [[Run]]. The result is the web-server's /version answer — status 200 and the build hashes in the body. Nothing named a host or a port: the reconciler recorded the listener's instance, :service-endpoint read it back, :http-get did the rest — and the request carried your run's trace, so a persisted run would list this hop under Downstream calls. Click [[Next]] when you have read it."
+               :body "Click [[⋯]] → [[▶]], tick the effects box and [[Run]]. The result is tutorial-server’s answer — status 200 and `hello` in the body. Nothing named a host or a port: the reconciler recorded the listener’s instance, :service-endpoint read it back, :http-get did the rest — and the request carried your run’s trace, so a persisted run would list this hop under Downstream calls. Click [[Next]] when you have read it."
                :target ".node-overlay[data-fn-name=\"tutorial-fetch\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
                :targets [".node-overlay[data-fn-name=\"tutorial-fetch\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-confirm-checkbox" ".execute-run-btn:not([disabled])" ".execute-result-host"]
                :check {:kind "manual"}}
-              {:title "Your own services"
-               :body "Point :service at any listener you make a service of (lesson 35) and it resolves the same way; disable that service and the call answers `service/not-running` instead of guessing. The written lesson 38 builds a producer, shows its running copy in the ⚙ popover, and follows the call across the wire."
-               :target nil
+              {:title "Back to the listener"
+               :body "Type `tutorial-server` in the Explorer filter and click the [[tutorial-server]] row."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "tutorial-server"}}
+              {:title "Stop it"
+               :body "Click [[⋯]] → [[⚙]]: the popover reads “Service: :tutorial-server” and lists its running copy. Click [[Delete service]]. The listener stops and its record goes with it — run tutorial-fetch now and it answers `service/not-running` instead of guessing an address."
+               :target ".node-overlay[data-fn-name=\"tutorial-server\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-server\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"service-settings\"]" ".service-popover"]
                :check {:kind "manual"}}
-              {:title "That's naming a service"
-               :body "The service fn is the value; the address is a fact the platform records; the call is explicit HTTP in the graph. Click [[Finish]] to clean up."
+              {:title "That’s naming a service"
+               :body "The service fn is the value; the address is a fact the platform records; the call is explicit HTTP in the graph. The written lesson 38 puts the path and the response shape in a namespace both sides reference — the contract, in the graph. Click [[Finish]] to clean up."
                :target nil
                :check {:kind "manual"}}]}
-            ;; 37 — the Marketplace: a theme saved, shared, rolled back; a
-            ;; key rebound; a review posted. Needs the registry package
-            ;; (publish-packages under tenancy — the same gate as lesson 32).
             {:id "40"
              :slug "marketplace-themes-keymaps"
              :chapter "Your organization"

@@ -22,7 +22,7 @@
    :fn-type [{} :null]}
 
   {:name :http-server
-   :description "Start an http-kit HTTP server. The `:handler` is a Ring-style fn `(fn [request] response)`; the executor's hof-wrap turns the bound fn-graph into a single-arg Ring callable per request. http-server itself does nothing beyond starting the listener and forwarding the request — body realisation, response post-processing, and the response cache are composed in via the wraps below."
+   :description "Start an http-kit HTTP server. The `:handler` is a Ring-style fn `(fn [request] response)`; the executor's hof-wrap turns the bound fn-graph into a single-arg Ring callable per request. http-server itself does nothing beyond starting the listener, forwarding the request and stringifying the response's header keys on the way out (the graph carries them keyword-keyed; http-kit wants strings) — body realisation, the rest of the response post-processing, and the response cache are composed in via the wraps below."
    :args {:handler {:type [:fn {:request :ring-request-shape} :ring-response-shape]
                     :description "Ring-style handler — typically the full wrap chain (see this package's fn-defs below)."}
           :port {:type :port

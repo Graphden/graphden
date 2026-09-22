@@ -65,8 +65,11 @@ async function hardCleanup(page) {
                      // lesson 18's chain — a crash between its create and
                      // finishAndDelete 409s the next run's create.
                      'tutorial-sentence', 'tutorial-shout', 'tutorial-words',
-                     // lesson 38's consumer.
-                     'tutorial-endpoint', 'tutorial-fetch',
+                     // lesson 38's consumer, then its listener, then the
+                     // response the listener hands out (the fn-ref edge is no
+                     // dependency, but delete the pointer first).
+                     'tutorial-endpoint', 'tutorial-fetch', 'tutorial-server',
+                     'tutorial-hello',
                      // lessons 06 / 07 — children before parents.
                      'tutorial-sum-more', 'tutorial-base-sum',
                      'tutorial-cut-more', 'tutorial-cut',

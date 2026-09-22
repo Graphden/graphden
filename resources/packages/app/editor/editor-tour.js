@@ -370,7 +370,7 @@ function _tourTick() {
 // the viewport. Returns false when the element is not on the canvas (or
 // the graph view is not up), so the caller falls back to scrolling.
 function _tourPanCanvasTo(el) {
-  if (!el || !el.closest || !el.closest('#graph-container')) return false;
+  if (!el?.closest?.('#graph-container')) return false;
   const wrap = el.closest('[data-node-id]');
   const nodeId = wrap?.dataset?.nodeId || null;
   if (!nodeId || typeof gv === 'undefined' || !gv || typeof gv.node !== 'function') return false;

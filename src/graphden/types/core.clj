@@ -389,6 +389,39 @@
   (or *type-aliases-override* type-aliases))
 
 
+;; `{alias-name → body}` as the PACKAGES declared it — the lossless
+;; structural form from fns.edn. The DB-side rebuild
+;; (`compile-runtime/register-type-aliases-from-db!`) reconstructs a
+;; record's fields from slot `type-fn-id`s, and a slot can only name a
+;; type-ROW: a field declared as a union / fn-type has no row, the
+;; slot carries its storage kind (`:any`), and the rebuilt alias is
+;; WIDER than the declaration. Under contravariance a wider `request`
+;; on the slot side made every Ring wrap (`encode-stringify-wrap`,
+;; `realize-body-wrap`) "incompatible" with `:http-server`'s :handler
+;; in the picker while the write path — checked at package sync,
+;; against this declaration — accepted the very same bind
+;; (2026-09-22). The rebuild consults this table first for platform
+;; rows, so what the packages said stays what the checker sees.
+;; Process-global like the package data itself; override-bound
+;; (test-isolated) alias registries read it too — it is a fact about
+;; the corpus, not about one registry.
+(defonce ^:private package-alias-bodies (atom {}))
+
+
+(defn remember-package-alias-bodies!
+  "Record the package-declared body of every alias in `m` (`{name → body}`)."
+  [m]
+  (swap! package-alias-bodies merge m)
+  nil)
+
+
+(defn package-alias-body
+  "The body the packages declared for `alias-name`, or nil when no
+   package declares it (a type created through the API)."
+  [alias-name]
+  (get @package-alias-bodies alias-name))
+
+
 (declare register-type-aliases-batch)
 
 

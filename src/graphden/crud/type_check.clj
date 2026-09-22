@@ -298,6 +298,65 @@
                               (when-let [src (:source-slot-id s)]
                                 [src s]))))
                     own-fn-slots)
+              ;; The PUBLIC name of an own binding's slot — what the
+              ;; checker matches against the parent's args. The editor
+              ;; writes a renamed arg's binding on the rename chain's
+              ;; SOURCE slot (`body` on a text-ok-response child lands on
+              ;; `assoc`'s :value), so keying the arg by the slot's own
+              ;; name left `body` free in the registry after the bind:
+              ;; the write passed, the picker still called the child a
+              ;; 1-arg fn and refused it as a Ring handler (lesson 38,
+              ;; 2026-09-22). Mirrors `compile.lookups/chain-rename-for-
+              ;; slot` on storage reads — ancestors level by level,
+              ;; closest first; the OWN fn's rename-views stay out (the
+              ;; parent's surface is what the check is against, and an
+              ;; own rename is the `{:as …}` shape below). Skipped when
+              ;; nothing is bound, so the bare :fn create keeps its
+              ;; round-trip budget.
+              public-name-by-slot
+              (when (seq own-bindings)
+                (let [levels (loop [acc [] seen (conj (set parent-ids) fn-id)
+                                    frontier (vec parent-ids)]
+                               (if (empty? frontier)
+                                 acc
+                                 (let [rows (sp/read-entities storage :fn frontier)
+                                       next-ids (into []
+                                                      (comp (mapcat (fn [[_ r]] (:parent-ids r)))
+                                                            (remove seen)
+                                                            (distinct))
+                                                      rows)]
+                                   (recur (conj acc frontier)
+                                          (into seen next-ids)
+                                          next-ids))))
+                      anc-ids (vec (apply concat levels))
+                      anc-fn-slots (when (seq anc-ids)
+                                     (sp/query-entities storage :fn-slot {:fn-id anc-ids}))
+                      anc-slots (when (seq anc-fn-slots)
+                                  (sp/read-entities storage :slot
+                                                    (vec (distinct (map :slot-id anc-fn-slots)))))
+                      slots-all (merge slot-by-id anc-slots)
+                      views-by-fn (group-by :fn-id anc-fn-slots)
+                      reaches? (fn [view target]
+                                 (loop [s view n 0]
+                                   (cond (nil? s) false
+                                         (= (:id s) target) true
+                                         (> n 32) false
+                                         :else (recur (get slots-all (:source-slot-id s))
+                                                      (inc n)))))
+                      name-for (fn [slot-id]
+                                 (some (fn [fid]
+                                         (some (fn [fs]
+                                                 (let [s (get slots-all (:slot-id fs))]
+                                                   (when (and s (:source-slot-id s)
+                                                              (reaches? s slot-id))
+                                                     (keyword (:name s)))))
+                                               (get views-by-fn fid)))
+                                       anc-ids))]
+                  (into {}
+                        (keep (fn [b]
+                                (when-let [n (name-for (:slot-id b))]
+                                  [(:slot-id b) n])))
+                        own-bindings)))
               ;; Resolve any ref-targets in bindings AND their list
               ;; items into fn-by-id so binding-shape-for-edn can name
               ;; them. Item refs were missed originally — a ref item
@@ -325,7 +384,9 @@
                                                       storage fn-by-id+refs
                                                       slot-by-id
                                                       renamed-view-by-source b)]
-                                     [(keyword (:name slot)) shape]))))
+                                     [(or (get public-name-by-slot (:slot-id b))
+                                          (keyword (:name slot)))
+                                      shape]))))
                          own-bindings)
               ret-name (some-> (:return-type-fn-id own)
                                (->> (get fn-by-id+refs))

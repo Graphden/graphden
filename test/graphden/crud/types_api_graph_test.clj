@@ -175,3 +175,21 @@
       (is (pos? (:count prefixed)))
       (is (every? #(str/starts-with? (name (:name %)) "str-")
                   (:candidates prefixed))))))
+
+
+(deftest types-candidates-admits-ring-wrap-for-handler-slot-test
+  (testing "the wraps a listener is built from are admitted for `:http-server`'s :handler"
+    ;; Their `request` arg is the `:ring-request-shape` record. The DB-side
+    ;; alias rebuild used to widen that record's union-typed `body` field to
+    ;; `:any` (a slot can only name a type-row), and under contravariance the
+    ;; wider slot-side request made every wrap "incompatible" in the picker
+    ;; while the write path accepted the bind. The rebuild now keeps the
+    ;; package-declared body for platform rows (types/core
+    ;; `package-alias-bodies`).
+    (let [expected ["fn" {:request "ring-request-shape"} "ring-response-shape"]
+          result (post-via :types-candidates-handler {:expected expected})
+          names (set (map :name (:candidates result)))]
+      (is (true? (:ok result)))
+      (is (contains? names "encode-stringify-wrap")
+          (str "wraps with a `request` arg must be compatible; got " (pr-str names)))
+      (is (contains? names "error-boundary-wrap")))))

@@ -24,13 +24,13 @@ The spine: turn a graph 'description of a computation' into a value.
 :PROPERTIES:
 :CUSTOM_ID: executor/execute~2
 :FILE: src/graphden/executor/compile_runtime.clj
-:LINE: 1478
+:LINE: 1489
 :MINS: 4.0
 :END:
 
 The dispatch heart of the hot path. It checks the cancellation / effect / execute-guard gates, pulls the *compiled registry* out of the context, looks up the closure for this ~fn-id~ (or throws fn-not-found), translates the caller's name-keyed args into the dual slot-id+name shape the compiled code expects, and finally calls ~(closure translated ctx)~. This is the moment *execute a fn* becomes *call a precompiled closure*.
 
-- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn execute][src/graphden/executor/compile_runtime.clj:1478]]
+- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn execute][src/graphden/executor/compile_runtime.clj:1489]]
 - see also :: [[file:executor.org::#executor/registry][registry]]
 - same file :: [[file:executor.org::#executor/registry][registry]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 
@@ -65,13 +65,13 @@ How the graph cache is FILLED on a miss — and why the install is guarded. A wr
 :PROPERTIES:
 :CUSTOM_ID: executor/registry
 :FILE: src/graphden/executor/compile_runtime.clj
-:LINE: 926
+:LINE: 937
 :MINS: 3.0
 :END:
 
 Returns the ~{fn-id -> closure}~ map from the context holder. A warm holder is served straight back; if a full clear flagged it stale it is still served immediately while a background ~rebuild-optimistic!~ refreshes it (stale-while-revalidate — no reader ever blocks behind a ~50s cold compile). Only a genuinely COLD holder (boot, a divergent cold branch) compiles on demand under the invalidation lock, double- checked so concurrent callers coalesce onto one rebuild. This is the lazy *compile-once, reuse-forever* registry the executor runs against.
 
-- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn registry][src/graphden/executor/compile_runtime.clj:926]]
+- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn registry][src/graphden/executor/compile_runtime.clj:937]]
 - see also :: [[file:executor.org::#executor/rebuild!][rebuild!]]
 - same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 - referenced from :: [[file:executor.org::#executor/execute~2][execute]], [[file:boot.org::#boot/compiled-registry][compiled-registry]]
@@ -80,13 +80,13 @@ Returns the ~{fn-id -> closure}~ map from the context holder. A warm holder is s
 :PROPERTIES:
 :CUSTOM_ID: executor/rebuild!
 :FILE: src/graphden/executor/compile_runtime.clj
-:LINE: 607
+:LINE: 618
 :MINS: 3.5
 :END:
 
 The compile-at-startup pipeline in one form: ~read-graph~ from storage, then ~build-lookups~, then ~compile-all~; finally it primes the graph/deps caches and resets the registry holder. This is the seam where *code = graph in DB* turns into runnable Clojure closures. The next few steps open up each stage it calls.
 
-- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn rebuild!][src/graphden/executor/compile_runtime.clj:607]]
+- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn rebuild!][src/graphden/executor/compile_runtime.clj:618]]
 - see also :: [[file:executor.org::#executor/build-lookups][build-lookups]], [[file:executor.org::#executor/compile-all][compile-all]]
 - same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/registry][registry]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 - referenced from :: [[file:executor.org::#executor/registry][registry]], [[file:storage.org::#storage/ExecutionGraph][ExecutionGraph]], [[file:boot.org::#boot/compiled-registry][compiled-registry]]

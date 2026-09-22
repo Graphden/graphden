@@ -24,3 +24,25 @@
           (is (pos? port))
           (is (= 200 (:status @(http/get (str "http://127.0.0.1:" port "/")))))))
       (finally (stop)))))
+
+
+(deftest http-server-serves-keyword-keyed-headers-test
+  ;; A response fn-def's `:headers` literal keywordizes on the JSONB
+  ;; round-trip; http-kit's writer casts every key to String and threw
+  ;; a ClassCastException (500) for a bare `text-ok-response` child bound
+  ;; as the handler — a wrap was silently mandatory. The adapter now
+  ;; stringifies once on the way out.
+  (let [start (impls/impl-of :http-server)
+        stop (start {:handler (fn [_req]
+                                {:status 200
+                                 :headers {:Content-Type "text/plain; charset=utf-8"}
+                                 :body "hello"})
+                     :port 0}
+                    nil)]
+    (try
+      (let [{:keys [port]} (:endpoint (meta stop))
+            {:keys [status headers body]} @(http/get (str "http://127.0.0.1:" port "/hello"))]
+        (is (= 200 status))
+        (is (= "hello" body))
+        (is (= "text/plain; charset=utf-8" (:content-type headers))))
+      (finally (stop)))))

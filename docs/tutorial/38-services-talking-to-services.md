@@ -35,18 +35,24 @@ HTTP in the graph, and nothing is typed by hand.
 You will create a producer service on a free port, a consumer that
 calls it, and watch the address appear and disappear.
 
-0. **The shortest version first** (what the in-editor tour does, on
-   your own instance): the editor's own `:web-server` is already a
-   running service, so name *it*. (On a cloud organization that row is
-   the platform's, not yours to resolve — skip to step 1 and name the
-   producer you make there.) Extend `:service-get` (filter `service-get`, `⋯` →
-   **Extend**, name `tutorial-fetch`); on the card bind the `service`
-   placeholder with **Bind fn-ref** → `web-server` and the `path`
-   placeholder with **Bind literal** → `/version`; `⋯` → `▶`, tick
-   the effects box, **Run**. The result is the web-server's
-   `/version` answer — status 200, the build hashes in the body — and
-   nothing named a host or a port. The rest of this walkthrough does
-   the same with a producer you own.
+0. **The shortest version first** (what the in-editor tour does): a
+   response, a listener that hands it out, made a service, and a
+   consumer that names it. Extend `:text-ok-response` (filter
+   `text-ok-response`, `⋯` → **Extend**, name `tutorial-hello`) and
+   bind its `body` → `hello`. Extend `:http-server` (name
+   `tutorial-server`); on the card bind `handler` → `tutorial-hello`
+   (a response with nothing left to bind ignores the request — a valid
+   handler) and `port` → a free port; `⋯` → `⚙` →
+   **Create & reconcile** with **Enabled** ticked — the reconciler
+   starts it and records where it answers. Then extend `:service-get`
+   (name `tutorial-fetch`); bind its `service` placeholder with
+   **Bind fn-ref** → `tutorial-server` and `path` with
+   **Bind literal** → `/hello`; `⋯` → `▶`, tick the effects box,
+   **Run**. The result is the listener's answer — status 200, `hello`
+   in the body — and nothing named a host or a port. `⋯` → `⚙` →
+   **Delete service** on the listener stops it; the same call now
+   answers `service/not-running`. The rest of this walkthrough does the
+   same with a JSON producer and puts the contract in a shared namespace.
 
 1. **The producer.** Add these fn-defs the way you add any (the editor,
    `upsert-fn-defs` over `/mcp` — [docs/MCP_CLIENTS.md](../MCP_CLIENTS.md) —

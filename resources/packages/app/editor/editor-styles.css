@@ -7901,6 +7901,51 @@ body.gd-tour-sheet-open #side-menu {
    accent-filled button, where a grey `--muted-fg` is barely legible. Inherit
    the button's own foreground and step it back with opacity instead — quiet
    on any background the row can have. */
+/* "Read the written lesson" — the hand-over from steps to text. On the last
+   step it sits under the prose; in the catalogue it follows a ✓ done row or a
+   text-only row, indented under the row it belongs to. */
+.gd-tour-read {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 0.8125rem;
+}
+.gd-tour-read-compact {
+  margin: 0 0 6px 10px;
+  padding-top: 0;
+  border-top: 0;
+}
+.gd-tour-read-link {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.gd-tour-read-link:hover,
+.gd-tour-read-link:focus-visible { text-decoration: underline; }
+.gd-tour-read-adds { color: var(--muted-fg); }
+/* A text-only lesson's row is an anchor styled as the row button: same
+   footprint, a link's cursor, and no "start" promise. */
+.gd-tour-btn-text {
+  display: inline-block;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+.gd-tour-read-btn {
+  flex: 0 0 auto;
+  min-width: 30px;
+  padding: 6px 8px;
+  border-color: var(--border);
+  color: var(--muted-fg);
+  line-height: 1;
+}
+.gd-tour-read-btn:hover,
+.gd-tour-read-btn:focus-visible {
+  border-color: var(--accent);
+  color: var(--fg);
+}
 .gd-tour-lesson-note {
   color: inherit;
   opacity: 0.85;

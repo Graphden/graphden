@@ -114,6 +114,7 @@ function _tourMarkDone(lesson, version) {
 
 // Finished, but at an OLDER edition than the script now carries.
 function _tourStale(lesson, done) {
+  if (lesson?.['text-only?']) return false;
   const at = (done || _tourDoneMap()).get(_tourKey(lesson));
   return at != null && at < _tourVersionOf(lesson);
 }
@@ -250,7 +251,8 @@ function _tourNextUp(lessonId) {
   const all = (typeof _tourLessons !== 'undefined' && _tourLessons)
     ? (_tourLessons.lessons || []) : [];
   if (!all.length) return { next: null, unfinished: null };
-  const runnable = (l) => _tourRequirement(l).allowed;
+  // A text-only lesson has nothing to start — it is read, not walked.
+  const runnable = (l) => !l['text-only?'] && _tourRequirement(l).allowed;
   const idx = all.findIndex((l) => l.id === lessonId);
   const after = all.slice(idx + 1).filter(runnable);
   const done = _tourDoneSet();
@@ -323,7 +325,8 @@ async function openTutorialMenu() {
     counts.replaceChildren();
     const all = lessons.lessons;
     const finished = all.filter((l) => done.has(_tourKey(l))).length;
-    const available = all.filter((l) => _tourRequirement(l).allowed).length;
+    const available = all.filter((l) => !l['text-only?'] && _tourRequirement(l).allowed).length;
+    const textOnly = all.filter((l) => l['text-only?']).length;
     const seg = (text, cls) => {
       const el = document.createElement('span');
       el.className = 'gd-tour-count' + (cls ? ' ' + cls : '');
@@ -333,6 +336,9 @@ async function openTutorialMenu() {
     seg(finished + ' done', 'gd-tour-count-done');
     seg(available + ' available', 'gd-tour-count-available');
     seg(all.length + ' lesson' + (all.length === 1 ? '' : 's'), 'gd-tour-count-total');
+    // Listed so the catalogue is the whole tutorial, but not "available":
+    // nothing on this instance can start them.
+    if (textOnly) seg(textOnly + ' ' + _tourCopy('read-only', 'text only'), 'gd-tour-count-text');
     // "new" is this look's news; "updated" is STATE — every ✓ the script has
     // since moved past, chipped on its row until the lesson is finished again.
     const stale = all.filter((l) => _tourStale(l, done)).length;
@@ -394,15 +400,44 @@ async function openTutorialMenu() {
       // so it stays listed — seeing what exists is the point of a catalogue —
       // but disabled, with the reason on the row rather than in a tooltip.
       const need = _tourRequirement(lesson);
-      const btn = _tourBtn(label, 'gd-tour-btn-primary',
-                           () => { if (need.allowed) startTutorialIsolated(lesson.id); });
+      const textUrl = (typeof _tourTextUrl === 'function') ? _tourTextUrl(lesson) : null;
+      // A text-only lesson's row IS the link to its text: there is no tour
+      // to start, and a disabled button would say "not for you" about a
+      // lesson that is for everyone.
+      const textOnly = !!lesson['text-only?'];
+      let btn;
+      if (textOnly) {
+        btn = document.createElement('a');
+        btn.className = 'gd-tour-btn gd-tour-btn-primary gd-tour-btn-text';
+        btn.textContent = label;
+        if (textUrl) { btn.href = textUrl; btn.target = '_blank'; btn.rel = 'noopener'; }
+        const note = document.createElement('span');
+        note.className = 'gd-tour-lesson-note';
+        note.textContent = ' — ' + _tourCopy('read-only', 'text only') + ' ↗';
+        btn.appendChild(note);
+      } else {
+        btn = _tourBtn(label, 'gd-tour-btn-primary',
+                       () => { if (need.allowed) startTutorialIsolated(lesson.id); });
+      }
       // The row is a CONTAINER, not just the button: a done lesson carries a
       // second control (take the ✓ off), and a control nested inside a button
       // is neither valid markup nor reachable by keyboard.
       const row = document.createElement('div');
-      row.className = 'gd-tour-lesson-row';
+      row.className = 'gd-tour-lesson-row' + (textOnly ? ' gd-tour-lesson-row-text' : '');
       row.setAttribute('data-lesson-id', lesson.id);
       row.appendChild(btn);
+      // Every toured lesson has a written half; the quiet ↗ opens it. What
+      // the text ADDS is spelled out only where the steps are behind the
+      // reader — under a ✓ done row (and on a text-only row).
+      const readOn = (typeof _tourReadOn === 'function') ? _tourReadOn(lesson, {compact: true}) : null;
+      let adds = null;
+      if (readOn && !textOnly) {
+        const link = _tourBtn('↗', 'gd-tour-btn-quiet gd-tour-read-btn', () => window.open(textUrl, '_blank', 'noopener'));
+        link.title = _tourCopy('read-label', 'Read the written lesson {lesson}', { lesson: lesson.id });
+        link.setAttribute('aria-label', link.title);
+        row.appendChild(link);
+      }
+      if (readOn && (textOnly || done.has(_tourKey(lesson)))) adds = readOn;
       // A lesson the reader's last look did not list is chipped once, on the
       // look that follows the menu's count; a lesson they finished at an
       // older edition stays chipped until they finish it again — the ✓ is
@@ -448,7 +483,7 @@ async function openTutorialMenu() {
         undo.setAttribute('aria-label', 'Mark lesson ' + label + ' as not done');
         row.appendChild(undo);
       }
-      if (!need.allowed) {
+      if (!need.allowed && !textOnly) {
         btn.classList.add('gd-tour-btn-locked');
         btn.disabled = true;
         btn.title = 'Needs ' + need.phrase + ' — this session does not have it.';
@@ -458,6 +493,7 @@ async function openTutorialMenu() {
         btn.appendChild(note);
       }
       list.appendChild(row);
+      if (adds) list.appendChild(adds);
     }
     if (!shown) {
       const empty = document.createElement('div');

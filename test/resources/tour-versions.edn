@@ -3,39 +3,39 @@
 ;; `bb tour-versions-check` fails when the steps changed but the version did
 ;; not; bump `:version` (readers who finished the lesson are told to re-read)
 ;; or, for a cosmetic edit, refresh this file. See the fns.edn header.
-{"apps" {:version 1, :steps "df246af2bfcec1e7e866ab0492a9583609d3e7ec"}
- "asset-overrides" {:version 1, :steps "c3cfddea3cfcaeecb1acc3ba44cbddc0dcb41fc5"}
- "branches" {:version 2, :steps "86f35aad1231f10485f65303ab7b900d1dd10375"}
- "components-and-pages" {:version 2, :steps "7a44f7e75ae215b993f57f54109442854970215c"}
- "custom-script-escape-hatch" {:version 1, :steps "5699f3f0926e4018150974882525ebad400abda7"}
- "debugging-traces" {:version 1, :steps "1706f022c32b54c3d6adcc4a3af09d6749dc9f62"}
- "distributing-packages" {:version 1, :steps "de6f2e72697eb5198fb6d6490879a0be896e97cc"}
- "effects-and-secrets" {:version 3, :steps "d50bf00ae782466ae7ce2108ac46b8ebade294b4"}
+{"apps" {:version 1, :steps "da4ea970697016621a2035e42722653937312d82"}
+ "asset-overrides" {:version 1, :steps "92e98545b83698954204d15a9d5076465cac7223"}
+ "branches" {:version 2, :steps "6326538513c566189d346361a63a38e75ea1bedb"}
+ "components-and-pages" {:version 2, :steps "1edd3031e8453661c3c921a32fcfe7de89195ec7"}
+ "custom-script-escape-hatch" {:version 1, :steps "6888c73f5709486153de1f056cea1c220e0fa128"}
+ "debugging-traces" {:version 1, :steps "23481cce15441b886d3340a82a54d34a5bd9dbf7"}
+ "distributing-packages" {:version 1, :steps "9321ea00d5b2718c8bddcb3320c2334a052481c8"}
+ "effects-and-secrets" {:version 3, :steps "8984b3b3ab297c40edb2b1d3f98037b112591fdf"}
  "errors-and-diagnostics" {:version 1, :steps "8514d93aeeddfe0d7fca3d9d56d9ac21bcfb613a"}
- "executing-a-fn" {:version 1, :steps "b65d193273e4fdd137f5b73ee836abfa212e3e4c"}
- "explorer-and-inspector" {:version 1, :steps "8db28dae6326b64c6553d14be113aa7683be8a1b"}
- "fn-defs" {:version 1, :steps "bfff047f62413acac69d1c1eea425aa04b338a03"}
- "free-arguments" {:version 1, :steps "4965eeaaaf5bcc6bfb1e55e93e1079af7cd7c31e"}
- "grants" {:version 1, :steps "c1e52862bd04611d01a85605921838e90b616e4b"}
- "higher-order-functions" {:version 4, :steps "2b711e18c78131caca6834857e0b8bb46a4c609b"}
+ "executing-a-fn" {:version 1, :steps "7df33a5aafd2427a4998ae531100695c20574239"}
+ "explorer-and-inspector" {:version 1, :steps "5c91fc82673c6f7509d373dee52964a9f75810aa"}
+ "fn-defs" {:version 1, :steps "5c7059e3177ae0697d904b5f25ee0ac1b3b8140d"}
+ "free-arguments" {:version 1, :steps "6a388e260f9fd87cb32a1cbd8536df96f625cbe9"}
+ "grants" {:version 1, :steps "f54a1f416cbe54f9ddb654a87f4a423b1e62a72a"}
+ "higher-order-functions" {:version 4, :steps "803664d9ec525888527118fed06e4ca07c892958"}
  "keyboard-and-accessibility" {:version 1, :steps "7d9d89e48bd24849fbfedb7018def98089119a05"}
- "lists" {:version 2, :steps "bccdd4a4c5cce784d641d20f47b5eed184d0bf6e"}
+ "lists" {:version 2, :steps "078ca125f752d67b8aaa9e90483dabd743077d98"}
  "marketplace-themes-keymaps" {:version 2, :steps "40c04fb737ec6868ce2c65fd05bf694ec91550ff"}
- "optional-required-sealed" {:version 1, :steps "610105e0a8dbc9cb1190cf9e307a68b0e22c5612"}
- "parents-and-inheritance" {:version 2, :steps "7fc3fd9a6a4ba221f9e6280242655abad13fd944"}
- "plans-and-tiers" {:version 1, :steps "b75530060db6d4591fd17af9228a840b5ac0f73a"}
- "reading-a-card" {:version 1, :steps "adda7e2bd1aca8dbaf2e5d78fcc2f435030e9c1c"}
- "recursion" {:version 2, :steps "31c79ead358097ffbcc5bb910ca2d8e0a9da3397"}
- "review" {:version 1, :steps "92c6ae13fdecd98f68cf63f8c7d1e35753035544"}
+ "optional-required-sealed" {:version 1, :steps "0beb80c41c1191f421df83f3f189471b11c31f5f"}
+ "parents-and-inheritance" {:version 2, :steps "94d209afaa817876be2033a0fc7deb912e61cac4"}
+ "plans-and-tiers" {:version 1, :steps "9be038d41425d8cdfdd5a20aaf56dc4605b50b52"}
+ "reading-a-card" {:version 1, :steps "1ea6771ae3efd4ec0f7b07468896d515cd21d058"}
+ "recursion" {:version 2, :steps "052bcafde087cf51807a32f60fb7a6cc6c836685"}
+ "review" {:version 1, :steps "1870d27a4613f0b066e1fbdff95982f706d47667"}
  "roles" {:version 1, :steps "4fb4f556d1407fefa2c615734cc2ad5bed888bec"}
- "services" {:version 1, :steps "86ddc0b043b17acb1df9d1131c4e4e8ce41dd1f9"}
- "services-talking-to-services" {:version 3, :steps "b973930b2652bc27d7c76a90356994e6d4b167dc"}
- "signing-up-and-in" {:version 2, :steps "199befdde86bb790711be4625ea3e6f503fcac88"}
+ "services" {:version 1, :steps "b960054afee503717eae9aabf7ddd54bf2ad912a"}
+ "services-talking-to-services" {:version 3, :steps "faaa646c036e3742b5e277126f5e52d6cb76e359"}
+ "signing-up-and-in" {:version 2, :steps "3befd16fd917f072cf85d883b2a064a63ee46826"}
  "slots-and-bindings" {:version 2, :steps "a056b25b299a890635c16b9d9f6b4a8619bbb4b8"}
- "state-cells-and-caches" {:version 3, :steps "c1a3229958634453dc7f7f393de3ba61940e5b57"}
- "tests" {:version 1, :steps "639e4fd7e30a44cbfad60b48766db2bea770c58f"}
- "types" {:version 1, :steps "0ad2df017268c697cef60cba767cb3592c9b3dd5"}
- "users-admin" {:version 1, :steps "9fa0f8fb236441424a76671bb889536c2cca094b"}
- "version-history" {:version 1, :steps "a3626e63b7239e8dd3fdc30d29d65adcd35902fb"}
- "working-across-orgs" {:version 1, :steps "d6d08a8be48051c058c7245b9b2b03d34dc2f4f4"}
- "workspaces" {:version 2, :steps "74e2f9b62293b52e0e195da6d166565fea4fbf1a"}}
+ "state-cells-and-caches" {:version 3, :steps "3e56b277d690a215a23cfeb98cf03bf7cadc2e9d"}
+ "tests" {:version 1, :steps "f7418ce3b2e656ab68d3114eb9a041270720fa11"}
+ "types" {:version 1, :steps "cf035f8d069e7cc531e0549c70ca90a9ac0e8877"}
+ "users-admin" {:version 1, :steps "7be1e4b9306c3e9aaeb12a9a0f14ab38d0984ad7"}
+ "version-history" {:version 1, :steps "49c839353313a5fe7efef8b02f27ff7707c2246a"}
+ "working-across-orgs" {:version 1, :steps "994aa5a41c991aeee76b21bf592fe0da21bd9893"}
+ "workspaces" {:version 2, :steps "8ce8a28c7055d57c04c16c00e65ef4f6b4f1e627"}}

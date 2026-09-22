@@ -206,10 +206,10 @@ Every mutating call in the editor goes through this. It is 12 lines and worth al
 :PROPERTIES:
 :CUSTOM_ID: editor/_tourTick
 :FILE: resources/packages/app/editor/editor-tour.js
-:LINE: 303
+:LINE: 309
 :MINS: 4.2
 :END:
 
 Closing the loop back to the user tutorial: the in-editor guided lessons are graph content (~app.tour/_tour-lessons~, served at ~GET /api/tour~) and this file is only the engine that interprets them. Each tick clears the reader-state traps that make a lesson unfinishable — a collapsed Explorer, a kind filter hiding the very fn the step names, a target scrolled out of view — then polls the step's declarative check and advances. A tour that can dead-end is worse than no tour, which is what every guard here is paying for.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-tour.js::function _tourTick() {][resources/packages/app/editor/editor-tour.js:303]]
+- source :: [[file:../../../resources/packages/app/editor/editor-tour.js::function _tourTick() {][resources/packages/app/editor/editor-tour.js:309]]

@@ -120,6 +120,21 @@ the lesson that follows, plus the first one you have not read when that
 is a different lesson — and starting it from the dialog cleans the
 finished lesson up first (deleting its branch, or the rows it created).
 
+Every tour is the SHOWN half of its lesson; the written lesson is the
+whole of it — the model behind the steps, the branches of the topic the
+tour does not walk (cardinality and per-branch services in 35, closure
+capture in 09, …), the same thing as fn-defs, and a "what we glossed
+over" list. The tour says so at the hand-over: its last step links to
+the written lesson and says in one line what the text adds, and the
+catalogue repeats that line under every lesson you have marked `✓ done`
+(the `↗` on any row opens the text). The six lessons without a tour are
+listed in the catalogue too, as **text only** rows that open the text —
+so the catalogue is the whole tutorial, not just the part the editor can
+walk. The link target is `:text :base` in the tour script
+(`app.tour/_tour-lessons`, `https://graphden.dev/tutorial/` by default)
+plus the lesson's file name; a deployment serving its own copy of the
+lessons points it there.
+
 Six lessons have no tour: **31** is about files on disk and
 `bb rebuild`, which the editor cannot show; **14** is about MOUNTING a
 route (`:all` and a rebuild, or publishing as an app — lesson 30) and
@@ -136,10 +151,9 @@ column is worth reading.
 The organization tours drive surfaces not every session has, so they
 declare what they need (`:requires`) — a capability (`manage-users`,
 `publish-packages`, …), or a named condition: the services tour needs the
-**dedicated plan** (services run on an executor the org owns), the
-services-talking-to-services tour additionally needs **your own
-instance** (it names the editor's web-server, which a cloud organization
-does not own), the cross-org tour needs organizations to exist at all,
+**dedicated plan** (services run on an executor the org owns — the
+services-talking-to-services tour builds the listener it then calls, so
+it needs nothing more), the cross-org tour needs organizations to exist at all,
 and the asset-override tour needs a single-tenant instance. Anywhere the condition
 fails — the public demo, a free-plan org, a self-hosted instance with no
 tenancy addon — the picker still lists the lesson, disabled, with the

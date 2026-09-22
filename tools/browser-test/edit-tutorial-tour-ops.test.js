@@ -590,8 +590,34 @@ const {
         doneMarked: !!done && /done/.test(done.textContent),
         chapters: Array.from(document.querySelectorAll('.gd-tour-chapter'))
           .map((c) => c.textContent.trim()),
+        // The text-only lessons are rows too (anchors, not start buttons),
+        // every toured row carries a quiet ↗ to its text, and the one ✓ done
+        // row (01) is followed by the "In the text: …" line.
+        textRows: Array.from(list.querySelectorAll('.gd-tour-lesson-row-text a.gd-tour-btn-text'))
+          .map((a) => [a.textContent.trim().slice(0, 2), a.getAttribute('href')]),
+        readBtns: list.querySelectorAll('.gd-tour-lesson-row:not(.gd-tour-lesson-row-text) .gd-tour-read-btn').length,
+        tourRows: list.querySelectorAll('.gd-tour-lesson-row:not(.gd-tour-lesson-row-text)').length,
+        addsAfterDone: (() => {
+          const next = done ? done.nextElementSibling : null;
+          return next && next.classList.contains('gd-tour-read') ? next.textContent.trim() : null;
+        })(),
+        addsTotal: list.querySelectorAll('.gd-tour-read').length,
+        textCount: document.querySelector('.gd-tour-count-text')?.textContent || null,
       };
     });
+    assert(cat.textRows.length === 6
+      && cat.textRows.every(([id, href]) => /\/tutorial\/\d\d-[a-z0-9-]+$/.test(href || ''))
+      && cat.textRows.map(([id]) => id).join(',') === '14,31,34,39,41,42',
+      'the six text-only lessons are catalogue rows that open their text (got: '
+      + JSON.stringify(cat.textRows) + ')');
+    assert(cat.readBtns === cat.tourRows && cat.tourRows > 30,
+      'every toured row carries a ↗ to its written lesson (' + cat.readBtns + '/' + cat.tourRows + ')');
+    assert(/^Read the written lesson 01 ↗/.test(cat.addsAfterDone || '') && /In the text: /.test(cat.addsAfterDone),
+      'the ✓ done row is followed by what the text adds (got: ' + cat.addsAfterDone + ')');
+    assert(cat.addsTotal === 7,
+      'the adds line is shown only under ✓ done and text-only rows — 1 + 6 (got ' + cat.addsTotal + ')');
+    assert(cat.textCount === '6 text only',
+      'the header counts the text-only lessons apart (got: ' + cat.textCount + ')');
     assert(/^Continue 04 · Slots and bindings — step 3\//.test(cat.resume || ''),
       'a paused lesson resumes from where it stopped (got: ' + cat.resume + ')');
     assert(cat.fitsViewport, 'the catalogue fits the window');

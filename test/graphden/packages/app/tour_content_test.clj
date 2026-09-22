@@ -59,18 +59,50 @@
     (get-in tour [:args :value])))
 
 
-(defn- lessons
+(defn- entries
+  "Every catalogue row — toured lessons AND the text-only ones."
   []
   (:lessons (payload)))
 
 
+(defn- lessons
+  "The toured lessons — the rows with steps."
+  []
+  (filter :steps (entries)))
+
+
+(defn- text-only
+  []
+  (remove :steps (entries)))
+
+
 (deftest lesson-scripts-are-well-formed
-  (let [ls (lessons)]
+  (let [ls (lessons)
+        all (entries)]
     (testing "the payload is there at all"
       (is (seq ls) "`:_tour-lessons` carries lessons")
-      (is (every? :id ls) "every lesson has an id")
-      (is (= (count ls) (count (distinct (map :id ls)))) "ids are unique")
-      (is (= (count ls) (count (distinct (map :slug ls)))) "slugs are unique"))
+      (is (every? :id all) "every row has an id")
+      (is (= (count all) (count (distinct (map :id all)))) "ids are unique")
+      (is (= (count all) (count (distinct (map :slug all)))) "slugs are unique"))
+
+    (testing "every row says what its written lesson adds, and knows where the text is"
+      ;; `:reads` is the hand-over from the steps to the text — shown on the
+      ;; last step and on a ✓ done / text-only row. A blank one tells the
+      ;; reader nothing about why they would open the text.
+      (is (string? (get-in (payload) [:text :base])) "`:text :base` names where the written lessons are served")
+      (doseq [l all]
+        (is (not (str/blank? (:reads l))) (str "lesson " (:id l) " has :reads"))))
+
+    (testing "a text-only row is a pointer, not a lesson: no steps, no edition, and a file to point at"
+      (doseq [l (text-only)]
+        (is (true? (:text-only? l)) (str "lesson " (:id l) " without steps is flagged :text-only?"))
+        (is (nil? (:version l)) (str "lesson " (:id l) " carries no edition — nothing to finish"))
+        (is (not (str/blank? (:title l))) (str "lesson " (:id l) " has a title"))
+        (is (not (str/blank? (:chapter l))) (str "lesson " (:id l) " has a chapter"))
+        (is (java.io.File/.exists (io/file (str "docs/tutorial/" (:id l) "-" (:slug l) ".md")))
+            (str "lesson " (:id l) ": docs/tutorial/" (:id l) "-" (:slug l) ".md is the written lesson")))
+      (doseq [l ls]
+        (is (not (:text-only? l)) (str "lesson " (:id l) " has steps and is not text-only"))))
 
     (testing "every lesson has a title, a chapter, an edition and at least one step"
       (doseq [l ls]
@@ -252,7 +284,8 @@
     :next-label :next-start :next-unfinished
     :next-note-branch :next-note-items
     :finished-title :finished-body :finished-close
-    :paused})
+    :paused
+    :read-label :read-adds :read-only})
 
 
 (deftest end-of-tour-copy-lives-in-the-graph
@@ -272,9 +305,9 @@
 
 
 (deftest copy-placeholders-are-ones-the-client-fills
-  ;; `{branch}` / `{items}` / `{lesson}` are substituted by `_tourCopy`'s
+  ;; `{branch}` / `{items}` / `{lesson}` / `{adds}` are substituted by `_tourCopy`'s
   ;; caller; any other `{…}` reaches the reader verbatim.
-  (let [allowed #{"branch" "items" "lesson"}]
+  (let [allowed #{"branch" "items" "lesson" "adds"}]
     (doseq [[k text] (:copy (payload))
             ph (map second (re-seq #"\{([a-z-]+)\}" (str text)))]
       (is (contains? allowed ph)
@@ -319,9 +352,19 @@
   ;; The ▶ column is how a reader decides whether to open the editor. It is
   ;; hand-maintained, so it drifts silently in both directions: a new tour
   ;; nobody advertises, or a ▶ pointing at a lesson whose tour was removed.
+  ;; The catalogue lists the text-only lessons too, so the reader sees the
+  ;; whole tutorial from the editor — those rows must be exactly the index's
+  ;; non-interactive ones, or the two halves disagree about what exists.
   (let [toured (into #{} (map :id) (lessons))
-        rows (index-rows)]
+        rows (index-rows)
+        text-rows (into #{} (map :id) (text-only))
+        index-text (into #{} (keep (fn [[id status]]
+                                     (when-not (str/includes? status "interactive") id)))
+                         rows)]
     (is (seq rows) "the index table parsed")
+    (is (= index-text text-rows)
+        (str "the catalogue's text-only rows " (pr-str (sort text-rows))
+             " must be the index's non-interactive lessons " (pr-str (sort index-text))))
     (doseq [[id status] rows]
       (if (contains? toured id)
         (is (str/includes? status "interactive")

@@ -39,7 +39,9 @@
   []
   (let [pkg (edn/read-string (slurp lessons-edn))
         const (some #(when (= :_tour-lessons (:name %)) %) (:fns pkg))]
-    (get-in const [:args :value :lessons])))
+    ;; Editions belong to TOURED lessons — a text-only row (no steps) is a
+    ;; pointer at its written lesson, nothing a reader finishes or re-reads.
+    (filter :steps (get-in const [:args :value :lessons]))))
 
 
 (defn- sha1

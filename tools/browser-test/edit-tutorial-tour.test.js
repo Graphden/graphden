@@ -126,6 +126,21 @@ const {
     assert(await clickTourButton(page, 'Next'), 'lesson 01 look-step Next');
     await waitTourTitle(page, "That's the whole loop", 150000);
     console.log('  steps 7-8: executed, looked at the 2, tour advanced');
+    // The last step hands over to the text: a link to the written lesson
+    // and one line on what it adds beyond the steps just walked.
+    const readOn = await page.evaluate(() => {
+      const a = document.querySelector('#gd-tour-pop .gd-tour-read .gd-tour-read-link');
+      return {
+        href: a ? a.getAttribute('href') : null,
+        target: a ? a.getAttribute('target') : null,
+        adds: document.querySelector('#gd-tour-pop .gd-tour-read-adds')?.textContent || '',
+      };
+    });
+    assert(/\/tutorial\/01-fn-defs$/.test(readOn.href || ''),
+      'the last step links to the written lesson 01 (got: ' + readOn.href + ')');
+    assert(readOn.target === '_blank', 'the text opens in its own tab — the tour stays');
+    assert(/^In the text: /.test(readOn.adds) && readOn.adds.length > 30,
+      'and says what the text adds (got: ' + readOn.adds + ')');
 
     // Step 7 — finish → cleanup dialog → delete what the tour created.
     assert(await clickTourButton(page, 'Finish'), 'Finish button');

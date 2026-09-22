@@ -190,6 +190,12 @@ function _tourRenderStep() {
   body.className = 'gd-tour-body';
   body.id = 'gd-tour-body';
   _tourRenderBody(body, step.body);
+  // The last step is where the tour hands over to the text: the steps are
+  // behind the reader, and what the written lesson adds is the next move.
+  if (_tourState.step >= lesson.steps.length - 1) {
+    const readOn = _tourReadOn(lesson);
+    if (readOn) body.appendChild(readOn);
+  }
 
   const foot = document.createElement('div');
   foot.className = 'gd-tour-foot';
@@ -456,6 +462,41 @@ function _tourPause() {
 // (`:copy` in app.tour/_tour-lessons) — the only reason it ever lived here is
 // that it hangs off no single step. `{placeholder}` slots are filled by the
 // caller.
+// Where a lesson's WRITTEN half lives: the payload's `text.base` plus the
+// lesson's file name (`{id}-{slug}`, docs/tutorial/ and the landing's route
+// alike). null when the deployment declares no base — then nothing links.
+function _tourTextUrl(lesson) {
+  const base = _tourLessons?.text?.base;
+  if (!base || !lesson?.id || !lesson?.slug) return null;
+  return base + lesson.id + '-' + lesson.slug;
+}
+
+// The "read on" block: a link to the written lesson and, in one line, what
+// the text adds beyond the steps (`:reads`). Rendered on a lesson's last step
+// and on the catalogue's ✓ done / text-only rows — the places where a reader
+// has the steps behind them and the text is what is left.
+function _tourReadOn(lesson, opts) {
+  const url = _tourTextUrl(lesson);
+  if (!url) return null;
+  const box = document.createElement('div');
+  box.className = 'gd-tour-read' + (opts?.compact ? ' gd-tour-read-compact' : '');
+  const a = document.createElement('a');
+  a.className = 'gd-tour-read-link';
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  a.textContent = _tourCopy('read-label', 'Read the written lesson {lesson}',
+    { lesson: lesson.id }) + ' ↗';
+  box.appendChild(a);
+  if (lesson.reads) {
+    const adds = document.createElement('span');
+    adds.className = 'gd-tour-read-adds';
+    adds.textContent = _tourCopy('read-adds', 'In the text: {adds}', { adds: lesson.reads });
+    box.appendChild(adds);
+  }
+  return box;
+}
+
 function _tourCopy(key, fallback, vars) {
   const raw = _tourLessons?.copy?.[key] || fallback;
   return Object.entries(vars || {}).reduce(

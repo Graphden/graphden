@@ -661,7 +661,12 @@ records. Tracing continues the tree across the wire:
    `:trace-id` and `:parent-execution-id` (`debug-capture/
    persist-captured!`, the same writer the Debug trap uses — request
    sanitised, response minus `Set-Cookie`). A request without the header
-   is not persisted; ordinary traffic pays a header lookup.
+   is not persisted; ordinary traffic pays a header lookup. Neither is one
+   whose header names no execution the listener's org can see — the
+   parent hop's row, or the trace root's when the parent is itself a
+   traced listener that writes its row only when it finishes. The header
+   reaches a PUBLIC listener, so an outside caller must not be able to
+   turn every request into a persisted, fully traced run.
 4. `GET /api/execute/:id` returns `:children` — the runs this one called
    into, each with its fn name and status — and the Run pane's result
    partial renders them as *Downstream calls* under the result. Open a

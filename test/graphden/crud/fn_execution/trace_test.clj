@@ -1,11 +1,15 @@
-(ns graphden.crud.fn-execution.trace-test
-  "The wire format of the cross-service trace header and the
-   `*execution*`-driven header map. Pure; the persisted hop is covered by
-   `services.service-endpoint-e2e-test`."
+(ns ^:serial graphden.crud.fn-execution.trace-test
+  "The wire format of the cross-service trace header, the
+   `*execution*`-driven header map, and which incoming headers may make a
+   request a persisted hop. Pure; the persisted hop end to end is covered
+   by `services.service-endpoint-e2e-test`.
+
+   ^:serial — the hop probe `with-redefs` `run-traced-with!`."
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.crud.fn-execution.trace :as trace]
-    [graphden.executor.compile-runtime :as cr]))
+    [graphden.executor.compile-runtime :as cr]
+    [graphden.storage.protocol.core :as sp]))
 
 
 (def ^:private t (random-uuid))
@@ -35,3 +39,44 @@
   (is (= {:trace-id t :parent-execution-id e}
          (trace/incoming-trace {:headers {"x-graphden-trace" (str t ";" e)}})))
   (is (nil? (trace/incoming-trace {:headers {}}))))
+
+
+
+(defn- storage-with-executions
+  "A storage stub whose `:fn-execution` table holds exactly `ids`."
+  [ids]
+  (reify sp/StorageCRUD
+    (read-entity [_ entity-type id]
+      (when (and (= :fn-execution entity-type) (contains? ids id))
+        {:id id}))))
+
+
+(defn- traced?
+  "Did `run-traced!` persist this request as a hop? Observed through the
+   `cr/*execution*` it binds for the handler (a traced hop names itself;
+   an untraced request runs with none)."
+  [ctx header]
+  (let [seen (atom ::unset)]
+    (with-redefs [trace/run-traced-with! (fn [_ _ _ _ thunk] (reset! seen :traced) (thunk))]
+      (trace/run-traced! ctx (random-uuid) {:headers {"x-graphden-trace" header}}
+                         #(when (= ::unset @seen) (reset! seen :plain))))
+    (= :traced @seen)))
+
+
+(deftest only-a-known-execution-makes-a-traced-hop-test
+  ;; The header arrives on a tenant's PUBLIC :http-server: any outside
+  ;; caller could send one and make every request a fully traced,
+  ;; persisted execution (~7 writes, rows kept 7 days).
+  (let [parent (random-uuid)
+        root (random-uuid)]
+    (testing "an unknown (made-up / other org's) execution id → the request just runs"
+      (is (false? (traced? {:storage (storage-with-executions #{})}
+                           (str (random-uuid) ";" (random-uuid))))))
+    (testing "no storage to check against → not persisted"
+      (is (false? (traced? {} (str root ";" parent)))))
+    (testing "the caller's own execution row is visible → a linked hop"
+      (is (true? (traced? {:storage (storage-with-executions #{parent})}
+                          (str root ";" parent)))))
+    (testing "a traced intermediate hop (row not yet written) links through the trace root"
+      (is (true? (traced? {:storage (storage-with-executions #{root})}
+                          (str root ";" parent)))))))

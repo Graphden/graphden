@@ -13,14 +13,18 @@
    `get-execution` lists a run's `:children` (docs/tutorial/35).
 
    A request WITHOUT the header is not persisted here: ordinary traffic
-   pays nothing. The wire format is deliberately tiny (two uuids), and a
-   malformed header is ignored, never an error."
+   pays nothing. Neither is one whose header names no execution this org
+   can see (`known-link?`): the header arrives on a tenant's PUBLIC
+   listener, so any outside caller could otherwise make every request a
+   fully traced, persisted run. The wire format is deliberately tiny (two
+   uuids), and a malformed or unknown header is ignored, never an error."
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.crud.debug-capture :as capture]
     [graphden.executor.compile-eager :as ce]
     [graphden.executor.compile-runtime :as cr]
+    [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -101,16 +105,32 @@
           (throw (:throwable outcome)))))))
 
 
+(defn- known-link?
+  "Does `link` name an execution this ctx's storage can read — its parent
+   hop, or (when that hop is itself a traced listener whose row is written
+   only after it finishes) the trace's root run? The storage is the
+   request's org-scoped view, so another org's execution is as unknown as a
+   made-up id."
+  [ctx {:keys [trace-id parent-execution-id]}]
+  (when-let [storage (:storage ctx)]
+    (boolean (some #(some? (sp/read-entity storage :fn-execution %))
+                   (distinct [parent-execution-id trace-id])))))
+
+
 (defn run-traced!
-  "Handle `request` through `thunk`. With a trace header present (and a
-   known `handler-fn-id`): `run-traced-with!` — this hop is persisted as
-   an execution of the handler linked to the caller, with the sanitized
-   request as its argument. Without a header: just `(thunk)`."
+  "Handle `request` through `thunk`. With a trace header naming a known
+   execution (and a known `handler-fn-id`): `run-traced-with!` — this hop
+   is persisted as an execution of the handler linked to the caller, with
+   the sanitized request as its argument. Otherwise: just `(thunk)`."
   [ctx handler-fn-id request thunk]
-  (if-let [link (and handler-fn-id (incoming-trace request))]
-    (run-traced-with! ctx handler-fn-id link
-                      {:request (capture/sanitize-request request)} thunk)
-    (do
-      (when (and (nil? handler-fn-id) (incoming-trace request))
-        (log/debug "trace header received but the handler carries no fn identity — not persisted"))
-      (thunk))))
+  (let [link (incoming-trace request)]
+    (if (and link handler-fn-id (known-link? ctx link))
+      (run-traced-with! ctx handler-fn-id link
+                        {:request (capture/sanitize-request request)} thunk)
+      (do
+        (when link
+          (log/debug "trace header received but not persisted —"
+                     (if handler-fn-id
+                       "it names no execution this org can see"
+                       "the handler carries no fn identity")))
+        (thunk)))))

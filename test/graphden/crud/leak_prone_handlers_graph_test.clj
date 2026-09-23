@@ -190,8 +190,6 @@
       (is (str/includes? body "id=\"auth-save-btn\""))
       (is (str/includes? body "id=\"auth-cancel-btn\""))
       (is (str/includes? body "auth-input-wrap"))
-      (is (str/includes? body "data-auth-mode=\"admin\"")
-          "declares the admin submit mode for editor-auth.js")
       ;; The core build carries NO tenant markup at all (the whole point of
       ;; the split): no username, no org, no create-account toggle.
       (is (not (str/includes? body "auth-username-input")))

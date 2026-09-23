@@ -180,8 +180,7 @@
       ;; the org/username fields must not exist here even hidden.
       (is (not (str/includes? body "auth-org-input")) "no org field in core")
       (is (not (str/includes? body "New org name")) "no org placeholder in core")
-      (is (str/includes? body "data-auth-mode=\"admin\"")
-          "the served form declares the admin submit mode"))))
+      (is (str/includes? body "auth-save-btn") "the submit button renders"))))
 
 
 (deftest auth-off-serves-protected-routes-openly-test

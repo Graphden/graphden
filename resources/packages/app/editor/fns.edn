@@ -1566,7 +1566,7 @@
    ;; drop the whole ring request into :children — rendered INSIDE the
    ;; inputs as garbage (<request-method>…, the reitit router object).
    :lambda-params []
-   :description "Ring handler for GET /partials/auth-form — the login/signup popover fields as text/html. Unauthenticated (it IS the login form). editor-auth.js mounts it into #auth-popover on first open."
+   :description "Ring handler for GET /partials/auth-form — the admin login popover fields as text/html. Unauthenticated (it IS the login form). editor-auth.js mounts it into #auth-popover on first open."
    :parent :html-ok-response
    :args {:body :_auth-form-html}}
 

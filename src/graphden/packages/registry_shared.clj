@@ -49,17 +49,32 @@
     (str "Bearer " token)))
 
 
+(def ^:dynamic *secret-env-override*
+  "Test seam: when bound to a map, the remote bearers below read their
+   env var NAME from it instead of the process environment. Thread-local
+   (a `binding`), so a test in the parallel pool can stub the tokens
+   without a `with-redefs` that every sibling namespace would see."
+  nil)
+
+
+(defn- secret-env
+  [var-name]
+  (if-let [o *secret-env-override*]
+    (get o var-name)
+    (System/getenv var-name)))
+
+
 (defn registry-token
   "The remote-registry bearer (`GRAPHDEN_REGISTRY_TOKEN`) — a secret, so a
    process-environment read, never a deploy setting."
   []
-  (System/getenv "GRAPHDEN_REGISTRY_TOKEN"))
+  (secret-env "GRAPHDEN_REGISTRY_TOKEN"))
 
 
 (defn hub-token
   "The hub bearer (`GRAPHDEN_HUB_TOKEN`) — a secret, like `registry-token`."
   []
-  (System/getenv "GRAPHDEN_HUB_TOKEN"))
+  (secret-env "GRAPHDEN_HUB_TOKEN"))
 
 
 (defn moderation-enabled?

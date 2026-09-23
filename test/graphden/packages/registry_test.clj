@@ -706,8 +706,8 @@
         mirror! #(run-named "mirror-remote-package!"
                             {:source stub :pkg-name "bearer.pkg" :version "1.0.0"})]
     (try
-      (with-redefs [shared/registry-token (constantly "reg-secret")
-                    shared/hub-token (constantly "hub-secret")]
+      (binding [shared/*secret-env-override* {"GRAPHDEN_REGISTRY_TOKEN" "reg-secret"
+                                              "GRAPHDEN_HUB_TOKEN" "hub-secret"}]
         (testing "the auth value itself: same origin only"
           (deploy-config/install! {:registry-url "https://registry.example:443/"
                                    :hub-url "http://hub.example"})

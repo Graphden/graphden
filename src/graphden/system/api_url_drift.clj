@@ -1,10 +1,12 @@
 (ns graphden.system.api-url-drift
   "Sync-time validator that fails the boot if any editor JS file
-   references an `/api/*` URL that the live reitit router doesn't
-   serve.
+   references an `/api/*` or `/partials/*` URL that the live reitit
+   router doesn't serve.
 
-   The editor frontend hardcodes ~120 `/api/*` URL literals across
-   ~15 JS modules; the router declares the same paths in `app/routes/*`.
+   The editor frontend hardcodes ~120 `/api/*` and ~50 `/partials/*`
+   URL literals (fetches, and `hx-get=\"/partials/…\"` attributes built
+   in JS strings) across the editor modules; the router declares the
+   same paths in `app/routes/*`.
    These two surfaces drift silently — rename a route fn-def, the
    JS keeps calling the old path, the user sees a 404 in the
    browser. This validator catches that at sync time so the deploy
@@ -20,7 +22,9 @@
         (so `/api/branches/' + encodeURIComponent(ref)` is allowed
         because `/api/branches/` is a known prefix).
    3. Scan every JS file under `resources/packages/app/editor/` for
-      string literals starting with `/api/`.
+      string literals (`'…'`, `\"…\"`, `` `…` ``) starting with `/api/`
+      or `/partials/`. Comment lines are skipped — prose naming a
+      route is not a request.
    4. For each literal, normalize and verify against the set.
    5. Throw with a per-file, per-line listing if any drift.
 
@@ -66,14 +70,25 @@
       (str (str/join "/" kept) "/"))))
 
 
+(def ^:private checked-roots
+  "The URL roots the editor JS calls on its own origin — every
+   literal under one of these must be served by the router."
+  ["/api/" "/partials/"])
+
+
+(defn- checked-path?
+  [path]
+  (some #(str/starts-with? path %) checked-roots))
+
+
 (defn allowed-literal-set
-  "Set of `/api/*` literals a JS file may legally contain, derived
-   from the router's path patterns. Each pattern contributes its
-   literal prefix; non-parametric patterns contribute themselves
-   verbatim."
+  "Set of `/api/*` and `/partials/*` literals a JS file may legally
+   contain, derived from the router's path patterns. Each pattern
+   contributes its literal prefix; non-parametric patterns contribute
+   themselves verbatim."
   [paths]
   (->> paths
-       (filter #(str/starts-with? % "/api/"))
+       (filter checked-path?)
        (map literal-prefix)
        set))
 
@@ -82,12 +97,20 @@
 ;; JS literal extraction
 ;; =============================================================================
 
-;; URL-shaped substrings inside single- or double-quoted strings.
-;; Greedy `/api/...` capture stops at the first non-URL character
-;; (quote, backtick, whitespace, `+`, `?`, etc.) — those are the
-;; characters that end a string-literal or start a JS expression.
+;; URL-shaped substrings inside single-, double- or back-quoted
+;; strings. Greedy `/api/...` / `/partials/...` capture stops at the
+;; first non-URL character (quote, backtick, whitespace, `+`, `?`, `$`,
+;; etc.) — those are the characters that end a string-literal or start
+;; a JS expression. A double quote also opens an HTML attribute inside
+;; a JS string, so `'<div hx-get="/partials/stats">'` is captured too.
 (def ^:private url-literal-regex
-  #"['\"](/api/[a-zA-Z0-9_\-/]*)")
+  #"['\"`]((?:/api|/partials)/[a-zA-Z0-9_\-/]*)")
+
+
+;; A line that is only comment (`// …`, ` * …`, `/* …`) is prose, not a
+;; request — a comment naming a route must not fail the boot.
+(def ^:private comment-line-regex
+  #"^\s*(?://|/\*|\*)")
 
 
 ;; Opt-out marker. A line containing `// api-url-drift-allow:` is
@@ -99,13 +122,15 @@
 
 
 (defn extract-js-literals
-  "Returns a seq of `{:file :line :literal}` for every `/api/*`
-   string-literal in the given JS source. Lines carrying the
-   `api-url-drift-allow:` opt-out marker are skipped wholesale."
+  "Returns a seq of `{:file :line :literal}` for every `/api/*` and
+   `/partials/*` string-literal in the given JS source. Lines carrying
+   the `api-url-drift-allow:` opt-out marker, and comment-only lines,
+   are skipped wholesale."
   [file source]
   (let [lines (str/split-lines source)]
     (->> (map vector (range 1 (inc (count lines))) lines)
-         (remove (fn [[_ line]] (re-find allow-marker-regex line)))
+         (remove (fn [[_ line]] (or (re-find allow-marker-regex line)
+                                    (re-find comment-line-regex line))))
          (mapcat
            (fn [[lineno line]]
              (for [[_ literal] (re-seq url-literal-regex line)]
@@ -155,7 +180,7 @@
 
 
 (defn extract-all-editor-literals
-  "Returns every `/api/*` literal across every editor JS file,
+  "Returns every `/api/*` and `/partials/*` literal across every editor JS file,
    tagged with `{:file :line :literal}`."
   []
   (->> (list-editor-js-resources)
@@ -206,7 +231,7 @@
 
 (defn- format-drift-message
   [drift allowed-set]
-  (str "Found " (count drift) " /api/* URL literal(s) in editor JS that "
+  (str "Found " (count drift) " /api/* or /partials/* URL literal(s) in editor JS that "
        "don't match any route the live router serves. Either fix the "
        "JS (the route was renamed) or add the route to "
        "`app/routes/*`. Drift:\n"
@@ -235,7 +260,7 @@
 
 (defn check-router!
   "Top-level entry: enumerate `router`'s paths, scan editor JS for
-   `/api/*` literals, throw if any drift. Idempotent + pure modulo
+   `/api/*` and `/partials/*` literals, throw if any drift. Idempotent + pure modulo
    the slurp."
   [router]
   (let [allowed (-> router router-paths allowed-literal-set)

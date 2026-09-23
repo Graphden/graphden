@@ -182,7 +182,7 @@ async function showFnAppsPopover(fnEntity, anchorEl) {
   fnAppsPopoverFnId = fnEntity.id;
   el.textContent = '';
   try {
-    const resp = await authFetch('/partials/fn-apps?fn-id=' + encodeURIComponent(fnEntity.id));
+    const resp = await authFetch('/partials/fn-apps?fn-id=' + encodeURIComponent(fnEntity.id)); // api-url-drift-allow: route-collection (tenancy addon)
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const html = await resp.text();
     if (fnAppsPopoverFnId !== fnEntity.id) return; // superseded

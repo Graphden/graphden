@@ -24,7 +24,7 @@ function buildOrgsAdminSection() {
   const wrap = document.createElement('div');
   wrap.className = 'sidebar-orgs-admin';
   wrap.innerHTML = ''
-    + '<div class="ns-children" hx-get="/partials/orgs-admin" hx-trigger="load" hx-swap="innerHTML">'
+    + '<div class="ns-children" hx-get="/partials/orgs-admin" hx-trigger="load" hx-swap="innerHTML">' // api-url-drift-allow: route-collection (tenancy addon)
     +   '<div class="loading">Loading…</div>'
     + '</div>';
   // The filter's behaviour. Markup comes from the server with the rest of

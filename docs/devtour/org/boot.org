@@ -138,13 +138,13 @@ The last boot-time seam. Optional subsystems (the ~registry~ package, ~/mcp~) an
 :PROPERTIES:
 :CUSTOM_ID: boot/check-router!
 :FILE: src/graphden/system/api_url_drift.clj
-:LINE: 236
+:LINE: 261
 :MINS: 1.3
 :END:
 
-A boot-time guard rather than a component: enumerate the router's paths, scan every editor JS module for ~/api/*~ string literals, and refuse to start if one names a route the router does not serve. This is why the frontend never hardcodes a path the backend can silently move — the coupling is checked once, at boot, on the real router.
+A boot-time guard rather than a component: enumerate the router's paths, scan every editor JS module for ~/api/*~ and ~/partials/*~ literals, and refuse to start if one names a route the router does not serve. This is why the frontend never hardcodes a path the backend can silently move — the coupling is checked once, at boot, on the real router.
 
-- source :: [[file:../../../src/graphden/system/api_url_drift.clj::(defn check-router!][src/graphden/system/api_url_drift.clj:236]]
+- source :: [[file:../../../src/graphden/system/api_url_drift.clj::(defn check-router!][src/graphden/system/api_url_drift.clj:261]]
 
 * 11. -main
 :PROPERTIES:

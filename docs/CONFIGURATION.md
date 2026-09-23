@@ -329,9 +329,12 @@ pick which branch's compiled view serves the call.
 ### `:exec/api-url-drift-check`
 
 Boot-time backend↔frontend URL drift guard. Walks the live router's
-`/api/*` paths and scans editor JS for `/api/*` literals; throws on
-drift so a route rename that forgets the JS fails boot rather than
-404ing at runtime. Toggle off via `GRAPHDEN_SKIP_URL_DRIFT_CHECK=1`.
+`/api/*` and `/partials/*` paths and scans editor JS for such literals
+(fetch URLs and `hx-get="/partials/…"` attributes built in JS strings;
+comment lines skipped); throws on drift so a route rename or removal
+that forgets the JS fails boot rather than 404ing at runtime. Routes an
+addon serves through the route collection carry a
+`// api-url-drift-allow: route-collection` marker on their line. Toggle off via `GRAPHDEN_SKIP_URL_DRIFT_CHECK=1`.
 
 ```clojure
 :exec/api-url-drift-check

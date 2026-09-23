@@ -27,7 +27,7 @@ function buildExecutorsAdminSection() {
   const wrap = document.createElement('div');
   wrap.className = 'sidebar-executors-admin';
   wrap.innerHTML = ''
-    + '<div class="ns-children" hx-get="/partials/executor-admin" hx-trigger="load" hx-swap="innerHTML">'
+    + '<div class="ns-children" hx-get="/partials/executor-admin" hx-trigger="load" hx-swap="innerHTML">' // api-url-drift-allow: route-collection (tenancy addon)
     +   '<div class="loading">Loading…</div>'
     + '</div>';
   // Markup is built imperatively; the CALLER runs htmx.process after

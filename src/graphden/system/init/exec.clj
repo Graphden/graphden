@@ -285,9 +285,9 @@
 ;; =============================================================================
 ;;
 ;; Runs once after `:_router` is compiled. Enumerates the live
-;; router's `/api/*` paths, scans every editor JS file for `/api/*`
-;; string-literals, and throws if any literal doesn't match a known
-;; path or prefix. Catches "renamed a route fn-def, forgot to
+;; router's `/api/*` + `/partials/*` paths, scans every editor JS
+;; file for such string-literals, and throws if any literal doesn't
+;; match a known path or prefix. Catches "renamed a route fn-def, forgot to
 ;; update the JS" silently-broken-deploys at boot time.
 ;;
 ;; See `graphden.system.api-url-drift` for the algorithm and
@@ -305,7 +305,7 @@
     (do (log/info "API URL drift check skipped"
                   "— set GRAPHDEN_SKIP_URL_DRIFT_CHECK= to re-enable")
         :skipped)
-    (do (log/info "Checking editor JS for /api/* URL drift...")
+    (do (log/info "Checking editor JS for /api/* + /partials/* URL drift...")
         (let [router (exec/execute-by-name context "_router" {})]
           (api-url-drift/check-router! router)
           (log/info "API URL drift check passed")

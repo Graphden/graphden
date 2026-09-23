@@ -25,7 +25,7 @@ function buildRolesAdminSection() {
   const wrap = document.createElement('div');
   wrap.className = 'sidebar-roles-admin';
   wrap.innerHTML = ''
-    + '<div class="ns-children" hx-get="/partials/roles-admin" hx-trigger="load" hx-swap="innerHTML">'
+    + '<div class="ns-children" hx-get="/partials/roles-admin" hx-trigger="load" hx-swap="innerHTML">' // api-url-drift-allow: route-collection (tenancy addon)
     +   '<div class="loading">Loading…</div>'
     + '</div>';
   // Collect the checked capability checkboxes into the create POST's

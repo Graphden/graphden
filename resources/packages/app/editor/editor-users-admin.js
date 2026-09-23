@@ -30,7 +30,7 @@ function buildUsersAdminSection() {
   // The .ns-children hx-get lazy-loads the server-rendered panel on insert;
   // the panel's own hx-post/hx-delete then handle create/delete + swap.
   wrap.innerHTML = ''
-    + '<div class="ns-children" hx-get="/partials/users-admin" hx-trigger="load" hx-swap="innerHTML">'
+    + '<div class="ns-children" hx-get="/partials/users-admin" hx-trigger="load" hx-swap="innerHTML">' // api-url-drift-allow: route-collection (tenancy addon)
     +   '<div class="loading">Loading…</div>'
     + '</div>';
   // Markup is built imperatively; the CALLER runs htmx.process after appending

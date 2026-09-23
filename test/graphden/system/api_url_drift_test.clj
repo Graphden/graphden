@@ -141,6 +141,49 @@
 
 
 ;; =============================================================================
+;; /partials/* — the second root the guard owns
+;; =============================================================================
+
+(deftest allowed-literal-set-includes-partials
+  (testing "/partials/* routes contribute exactly like /api/* ones"
+    (is (= #{"/partials/stats" "/partials/marketplace/item" "/api/x"}
+           (drift/allowed-literal-set
+             ["/partials/stats" "/partials/marketplace/item" "/api/x" "/health"])))))
+
+
+(deftest extract-js-literals-captures-partials
+  (testing "fetch literal, hx-get attribute built in a JS string, template literal"
+    (let [src (str "authFetch('/partials/provenance?fn-id=' + id);\n"
+                   "  + '<div hx-get=\"/partials/stats\" hx-trigger=\"load\">'\n"
+                   "const u = `/partials/fn-versions?fn-id=${id}`;")]
+      (is (= [{:file "f.js" :line 1 :literal "/partials/provenance"}
+              {:file "f.js" :line 2 :literal "/partials/stats"}
+              {:file "f.js" :line 3 :literal "/partials/fn-versions"}]
+             (drift/extract-js-literals "f.js" src))))))
+
+
+(deftest extract-js-literals-skips-comment-lines
+  (testing "prose naming a route in a comment is not a request"
+    (is (empty? (drift/extract-js-literals
+                  "f.js"
+                  (str "// Body comes from `/partials/execute-result?id=…`\n"
+                       " * and '/api/old' was renamed\n"
+                       "/* `/partials/gone` */"))))))
+
+
+(deftest removed-partial-route-is-drift
+  (testing "a JS hx-get naming a partial the router no longer serves fails the check"
+    (let [allowed (drift/allowed-literal-set ["/partials/stats" "/api/failures"])
+          literals (drift/extract-js-literals
+                     "editor-feedback.js"
+                     "const r = await authFetch('/partials/error-log');")
+          e (try (drift/assert-no-drift! allowed literals)
+                 (catch Exception e e))]
+      (is (= :web/api-url-drift (:type (ex-data e))))
+      (is (str/includes? (ex-message e) "/partials/error-log")))))
+
+
+;; =============================================================================
 ;; find-drift / assert-no-drift!
 ;; =============================================================================
 

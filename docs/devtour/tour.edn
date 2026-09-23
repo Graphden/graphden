@@ -1194,7 +1194,7 @@
            unchanged — the shape every seam in this codebase aims for."}
     {:ns graphden.system.api-url-drift :defn check-router!
      :say "A boot-time guard rather than a component: enumerate the router's
-           paths, scan every editor JS module for `/api/*` string literals,
+           paths, scan every editor JS module for `/api/*` and `/partials/*` literals,
            and refuse to start if one names a route the router does not
            serve. This is why the frontend never hardcodes a path the backend
            can silently move — the coupling is checked once, at boot, on the

@@ -20,7 +20,7 @@ function buildPlatformAccessSection() {
   const wrap = document.createElement('div');
   wrap.className = 'sidebar-platform-access';
   wrap.innerHTML = ''
-    + '<div class="ns-children" hx-get="/partials/platform-access" hx-trigger="load" hx-swap="innerHTML">'
+    + '<div class="ns-children" hx-get="/partials/platform-access" hx-trigger="load" hx-swap="innerHTML">' // api-url-drift-allow: route-collection (tenancy addon)
     +   '<div class="loading">Loading…</div>'
     + '</div>';
   // Built imperatively; the caller (mountAdminSection) runs htmx.process after

@@ -23,6 +23,7 @@
     [clojure.tools.logging :as log]
     [graphden.crud.debug-capture :as debug-capture]
     [graphden.crud.fn-execution.lookup :as fn-lookup]
+    [graphden.crud.request :as request]
     [graphden.crud.type-check :as type-check]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as ctx]
@@ -52,12 +53,19 @@
 
 
 (defn- parse-branch-from-query
+  "The `branch` value of `query-string`, URL-decoded. Decoding fails SOFT
+   (`request/safe-url-decode` — the raw text) because this runs on every
+   request, authenticated or not: a malformed escape (`?%zz=1`) used to
+   throw out of `dispatch` as a 500. A malformed KEY therefore never
+   matches `branch`; a malformed VALUE is taken literally, so it reaches
+   resolution as the ref the client sent and answers the unknown-branch
+   400 — rather than silently serving (and writing to) the default branch."
   [query-string]
   (when (and query-string (not (str/blank? query-string)))
     (some (fn [pair]
-            (let [[^String k ^String v] (str/split pair #"=" 2)]
-              (when (= query-param (java.net.URLDecoder/decode k "UTF-8"))
-                (some-> v (java.net.URLDecoder/decode "UTF-8")))))
+            (let [[k v] (str/split pair #"=" 2)]
+              (when (= query-param (request/safe-url-decode k))
+                (some-> v request/safe-url-decode))))
           (str/split query-string #"&"))))
 
 

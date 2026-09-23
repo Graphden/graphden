@@ -297,6 +297,26 @@
         (is (= [:feature] @calls))))))
 
 
+(deftest dispatch-survives-malformed-query-escapes
+  ;; `URLDecoder/decode` throws on a lone `%` / `%zz`; the branch-param
+  ;; scan ran it on EVERY query key before any auth, so `GET /x?%zz=1`
+  ;; threw out of dispatch as a 500 + ERROR log line.
+  (binding [br/*resolve-branch-id-override* (stub-resolutions {})]
+    (let [router (fake-router {default-id
+                               {:handler (fn [_] {:status 200 :body "main"})}})]
+      (testing "a malformed KEY is not the branch param → default branch"
+        (doseq [qs ["%zz=1" "%=1" "a=1&%zz&branch" "%zz"]]
+          (is (= {:status 200 :body "main"}
+                 (br/dispatch router {:headers {} :query-string qs}))
+              qs)))
+      (testing "a malformed VALUE is taken literally → unknown-branch 400,
+                never a silent fall-back onto the default branch"
+        (let [resp (br/dispatch router {:headers {} :query-string "branch=%zz"})]
+          (is (= 400 (:status resp)))
+          (is (= "Unknown branch: %zz"
+                 (:error (json/parse-string (:body resp) true)))))))))
+
+
 (deftest invalidate-drops-cached-entry
   (testing "invalidate! removes a per-branch entry; invalidate-all! drops everything"
     (let [router (br/->BranchRouter nil default-id

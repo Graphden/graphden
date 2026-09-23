@@ -13,6 +13,7 @@
    note (the FINDING-1 regression is pinned here)."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.crud.fn-execution.free-arg-cache :as free-arg-cache]
     [graphden.executor.compile-runtime :as cr]
     [graphden.schema.executions.schema :as es]
     [graphden.schema.graph.schema :as gds]
@@ -338,6 +339,30 @@
             (is (contains? @(:handlers router) tenant-id)
                 "the tenant branch exists — its pinned entry is not dropped")
             (finally (br-cache/set-pinned-branches-fn! nil)))))
+      (finally (sp/close base)))))
+
+
+(deftest heal-drops-the-free-arg-surface-memo-test
+  ;; The free-arg memo is cleared only by `invalidate-graph-cache!` — the
+  ;; eager path whose skipping is what a heal repairs. A heal that left it
+  ;; served a pre-write free-arg surface until the next local edit.
+  (let [base (storage)
+        v (vs/wrap-with-versioning base)
+        k [::heal-memo (random-uuid)]]
+    (try
+      (binding [br-epoch/*epoch-state-override* (fresh-state)
+                br-epoch/*epoch-check-ttl-ms* 0
+                br-epoch/*epoch-heal-sync?* true
+                epoch/*request-bump-log* (atom [])
+                cr/*impl-override* {:rebuild-optimistic! (fn [_ _] true)
+                                    :rebuild! (fn [_] nil)}]
+        (let [main-id (vs/current-branch-id v)
+              router (router-over v {main-id {:ctx {:x :main} :handler :h}})]
+          (free-arg-cache/get-or-compute k (constantly :before-write))
+          (foreign-bump! base)
+          (br/handler-for router nil)
+          (is (= :after-heal (free-arg-cache/get-or-compute k (constantly :after-heal)))
+              "the heal cleared the memo — the surface recomputes")))
       (finally (sp/close base)))))
 
 

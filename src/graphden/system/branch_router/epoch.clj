@@ -12,6 +12,7 @@
    never trigger the heal."
   (:require
     [clojure.tools.logging :as log]
+    [graphden.crud.fn-execution.free-arg-cache :as free-arg-cache]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.registry.core :as registry-core]
     [graphden.storage.postgres.graph-epoch :as pg-epoch]
@@ -231,6 +232,10 @@
         ;; It is keyed on the storage VersionedStorage wraps (the org-scoped
         ;; decorator on a multi-tenant deployment), not the raw handle.
         (bl/invalidate! (or (some-> router :base-ctx :storage vs/unwrap) base))
+        ;; The free-arg surface memo is a pure function of the graph and
+        ;; is otherwise dropped only by `invalidate-graph-cache!` — the
+        ;; eager path whose skipping is exactly what woke this heal.
+        (free-arg-cache/clear!)
         (let [snap @handlers
               refresh! (fn [bid entry]
                          (heal-refresh-entry! router base default-branch-id

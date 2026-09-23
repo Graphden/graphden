@@ -21,6 +21,7 @@
     [graphden.executor.context :as ctx]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.owned :as owned]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.graph-harness :as gh :refer [*graph* form-req json-req uniq]]
     [graphden.types.core :as types]
@@ -786,6 +787,51 @@
       (is (= 2 (count (sp/query-entities
                         storage :fn-slot
                         {:fn-id (java.util.UUID/fromString rec-id)})))))))
+
+
+(deftest process-update-record-type-refuses-non-record-targets-test
+  ;; A PUT against any fn id ran the diff-and-apply: on `:add` it deleted
+  ;; and re-created the base-fn's own slots — every descendant re-shaped
+  ;; until the next boot's sync — with no package guard and no check that
+  ;; the target is a record type-row at all.
+  (let [storage   (:storage *graph*)
+        fss-of    (fn [id]
+                    (set (map :slot-id (sp/query-entities storage :fn-slot
+                                                          {:fn-id id}))))
+        put-rec   (fn [id]
+                    (via-update-record
+                      (json-req "/api/types/record"
+                                {:id (str id) :fields [{:name "x" :type "int"}]}
+                                :put)))]
+    (testing "a package-synced record type-row → 403, slots untouched"
+      (let [created (via-create-record (json-req "/api/types/record"
+                                                 {:name (uniq "PkgRec")
+                                                  :fields [{:name "a" :type "text"}]}))
+            rec-id  (java.util.UUID/fromString (:id created))
+            before  (fss-of rec-id)
+            ;; Mark THIS fresh id package-owned — a random id no other
+            ;; test can touch, so the process-global registry is safe.
+            _       (owned/record-owned-ids! [rec-id])
+            res     (put-rec rec-id)]
+        (is (= 403 (:http-status res)))
+        (is (re-find #"package-owned" (:error res)))
+        (is (= before (fss-of rec-id)))))
+
+    (testing "a base-fn (`:add`) is refused, its slots untouched"
+      (let [add-id (:id (first (sp/query-entities storage :fn {:name "add"})))
+            before (fss-of add-id)
+            res    (put-rec add-id)]
+        (is (false? (:ok res)))
+        (is (= before (fss-of add-id)))))
+
+    (testing "a composed (user) fn is not a record type-row → refused"
+      (let [parent (sp/create-entity storage :fn {:name (uniq "RecParent")})
+            child  (sp/create-entity storage :fn {:name (uniq "RecChild")
+                                                  :parent-ids [(:id parent)]})
+            res    (put-rec (:id child))]
+        (is (false? (:ok res)))
+        (is (re-find #"not a record type" (:error res)))
+        (is (empty? (fss-of (:id child))))))))
 
 
 (deftest process-update-record-type-diff-test

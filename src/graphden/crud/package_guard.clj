@@ -75,7 +75,7 @@
   [storage entity-type row]
   (if (= :fn entity-type)
     (when (and (:id row) (package-owned-fn? storage (:id row)))
-      (rejection-reason storage (:id row) "renaming or re-describing it"))
+      (rejection-reason storage (:id row) "renaming, re-describing or re-shaping it"))
     (when-let [fid (owner-fn-id storage entity-type row)]
       (when (package-owned-fn? storage fid)
         (rejection-reason storage fid "editing its bindings")))))

@@ -13,6 +13,7 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.executor.registry.core :as registry]
+    [graphden.packages.records.types :as record-types]
     [graphden.types.check :as tcheck]
     [graphden.types.check.literals :as types-lit]
     [graphden.types.core :as types]))
@@ -298,6 +299,17 @@
 ;; (error-tolerance Phase 2): type validity no longer gates the write.
 
 
+(defbase slot-shaped-type-row?
+  "True when `row` is a type-row whose shape is its own slots — a
+   `:record`, or a still-empty one (`:primitive` role: what Create-type
+   produces before its first field). Classified WITHOUT the slot count,
+   so a record row reads `:primitive` here — both answer true, every
+   other role (composed / base-fn / refinement / list / union / variant
+   / fn-type / marker) false. One call into `type-row-role`."
+  [row]
+  (= :primitive (record-types/type-row-role row false)))
+
+
 ;; The package loader pairs each base-fn declared in this module's
 ;; `fns.edn` with its impl by looking up this map (keyword name -> impl).
 (def impls
@@ -323,4 +335,5 @@
    :_apply-create-record-type-rollback _apply-create-record-type-rollback
    :_apply-create-list-type-body _apply-create-list-type-body
    :_apply-update-record-type-body _apply-update-record-type-body
-   :_apply-update-record-type-rollback _apply-update-record-type-rollback})
+   :_apply-update-record-type-rollback _apply-update-record-type-rollback
+   :slot-shaped-type-row? slot-shaped-type-row?})

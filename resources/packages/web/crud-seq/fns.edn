@@ -206,6 +206,15 @@
    :return-type :nullable-text
    :effects #{:db}}
 
+  {:name :pkg-write-guard-reason
+   :description "Reason string when a create/update of `row` of `entity-type` targets a PACKAGE-SYNCED fn — the fn row itself (rename / re-describe / re-shape), or a binding-family row it owns. nil when the write is fine. The write twin of `:pkg-delete-guard-reason`; the entity-write cores apply the same guard in Clojure, compound endpoints (record-type update) consult it from the graph."
+   :args {:entity-type {:type :text
+                        :description "Entity-type name (\"fn\", \"binding\", \"binding-list-item\", \"fn-slot\", \"slot\")."}
+          :row {:type :nullable-keyword-map
+                :description "The row being written (entity-data for a create, the pre-image for an update); nil short-circuits to nil."}}
+   :return-type :nullable-text
+   :effects #{:db}}
+
   {:name :_seq-remove-item-not-found?
    :description "Guard #2 — no binding-list-item matches the parsed id."
    :parent :nil?

@@ -12,12 +12,14 @@
    never trigger the heal."
   (:require
     [clojure.tools.logging :as log]
+    [graphden.crud.fn-execution.free-arg-cache :as free-arg-cache]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.registry.core :as registry-core]
     [graphden.storage.postgres.graph-epoch :as pg-epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router.cache :as cache]
     [graphden.system.branch-router.recheck :as recheck]
+    [graphden.tenancy.context :as tc]
     [graphden.util.counters :as counters]
     [graphden.versioning.branch-local :as bl]
     [graphden.versioning.storage.core :as vs]))
@@ -56,7 +58,8 @@
    seed), so the first request does not spuriously heal over bumps (boot
    sync's) the build already absorbed."
   [base-storage]
-  (swap! (epoch-state) update :w max (or (pg-epoch/current base-storage) 0)))
+  (swap! (epoch-state) update :w max
+         (or (pg-epoch/current (pg-epoch/epoch-handle base-storage)) 0)))
 
 
 (defn reset-epoch-state!
@@ -141,11 +144,25 @@
   false)
 
 
+(defn- branch-row-exists?
+  "Does `bid`'s branch row exist? Read on the RAW Postgres handle as the
+   platform (public org, no principal — RLS's full-access arm): a branch
+   row is org-stamped, so the org-scoped storage — or a heal running on a
+   thread that carries some requester's org — reads a TENANT branch as
+   nil, and the heal then dropped a live tenant ctx (a pinned service's
+   among them) as if the branch had been deleted."
+  [base bid]
+  (tc/with-org tc/public-org
+               (binding [tc/*current-principal* nil]
+                 (some? (sp/read-entity base :branch bid)))))
+
+
 (defn- heal-refresh-entry!
   "One entry's stale-while-revalidate refresh for `heal-stale-ctxs!`.
    A DELETED branch (its epoch bump is what woke the heal) is dropped
    like the local delete path (`cache/invalidate!`) — rebuilding would resurrect a phantom
    ctx and leave the name→id ref-cache pointing at a dead registry.
+   `base` is the raw pool-bearing handle (`validate-graph-epoch!`).
    A live entry rebuilds under ITS OWN registry slices: two OPTIMISTIC
    attempts (compile outside the lock, swap only if the epoch didn't
    move mid-compile — a moved epoch means a delta already patched the
@@ -153,7 +170,7 @@
    rebuild as the correctness fallback under continuous writes."
   [router base default-branch-id bid entry]
   (if (and (not= bid default-branch-id)
-           (nil? (sp/read-entity base :branch bid)))
+           (not (branch-row-exists? base bid)))
     (cache/invalidate! router bid)
     (when-let [c (:ctx entry)]
       (recheck/call-with-ctx-slices
@@ -212,7 +229,13 @@
         (swap! state assoc :w global)
         ;; The missed write may have moved a `:branch-local?` flag or a
         ;; parent edge; that cache sits below every ctx, so drop it too.
-        (bl/invalidate! base)
+        ;; It is keyed on the storage VersionedStorage wraps (the org-scoped
+        ;; decorator on a multi-tenant deployment), not the raw handle.
+        (bl/invalidate! (or (some-> router :base-ctx :storage vs/unwrap) base))
+        ;; The free-arg surface memo is a pure function of the graph and
+        ;; is otherwise dropped only by `invalidate-graph-cache!` — the
+        ;; eager path whose skipping is exactly what woke this heal.
+        (free-arg-cache/clear!)
         (let [snap @handlers
               refresh! (fn [bid entry]
                          (heal-refresh-entry! router base default-branch-id
@@ -268,7 +291,10 @@
    global (no pool / missing sequence) skips: cannot validate, eager
    paths remain the only mechanism — the pre-epoch behavior."
   [{:keys [base-ctx] :as router}]
-  (let [base (vs/unwrap (:storage base-ctx))
+  (let [;; The RAW pool-bearing handle: it owns the sequence and the bump
+        ;; ledger. On a multi-tenant deployment `:storage` unwraps to the
+        ;; org-scoped decorator, which has neither.
+        base (pg-epoch/epoch-handle (or (:pg-storage base-ctx) (:storage base-ctx)))
         state (epoch-state)]
     (when-let [global (global-epoch-cached base)]
       (let [w (:w @state)]

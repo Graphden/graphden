@@ -33,6 +33,11 @@
    `:branch-id nil` and the receiver falls back to invalidating its base
    ctx — which is what pods did before the field existed.
 
+   Further optional `|`-slots: `<org>` (SSE fan-out), `<epochs>` (graph-epoch
+   coverage) and `<emitter>` — the id of the emitter that sent it
+   (`make-emitter`), so a pod can recognise its OWN events: LISTEN delivers a
+   pod's notifications back to itself.
+
    Callbacks pattern-match on `:kind` to opt in."
   (:require
     [clojure.string :as str]
@@ -70,7 +75,7 @@
   (when (string? payload)
     (let [parts (str/split payload #":" 3)]
       (when (= 3 (count parts))
-        (let [[id branch-id org-id epochs] (str/split (nth parts 2) #"\|" 4)]
+        (let [[id branch-id org-id epochs emitter] (str/split (nth parts 2) #"\|" 5)]
           (cond-> {:kind (keyword (nth parts 0))
                    :op (keyword (nth parts 1))
                    :id (or id "")}
@@ -85,16 +90,19 @@
             (assoc :epochs (into []
                                  (keep #(try (Long/parseLong %)
                                              (catch NumberFormatException _ nil)))
-                                 (str/split epochs #",")))))))))
+                                 (str/split epochs #",")))
+            ;; 5th slot: the sending emitter's id (`make-emitter`).
+            (not (str/blank? emitter)) (assoc :emitter emitter)))))))
 
 
 (defn format-payload
   "Inverse of `parse-payload`. Later slots force earlier (possibly
    empty) ones to be present so the positions line up."
-  [{:keys [kind op id branch-id org-id epochs]}]
+  [{:keys [kind op id branch-id org-id epochs emitter]}]
   (let [ep (when (seq epochs) (str/join "," epochs))]
     (str (name kind) ":" (name op) ":" (or id "")
          (cond
+           emitter (str "|" (or branch-id "") "|" (or org-id "") "|" (or ep "") "|" emitter)
            ep (str "|" (or branch-id "") "|" (or org-id "") "|" ep)
            org-id (str "|" (or branch-id "") "|" org-id)
            branch-id (str "|" branch-id)
@@ -312,16 +320,33 @@
    succeeded at the row level isn't rolled back by a transient
    NOTIFY failure. The reconciler's mutation-driven reconcile path
    IS the primary correctness mechanism; the NOTIFY just speeds up
-   propagation to sibling pods."
+   propagation to sibling pods.
+
+   Every event is stamped with this emitter's fresh id (`:emitter`, also on
+   the returned fn's metadata — `own-event?`), so the pod's own listener can
+   tell its own events from a sibling's."
   [ds]
-  (fn emit-notify
-    [event]
-    (try
-      (util/exec! ds ["SELECT pg_notify(?, ?)" channel-name (format-payload event)] {})
-      nil
-      (catch Exception e
-        (log/warn e "NOTIFY emit failed — sibling pods may lag until next mutation"
-                  {:event event})))))
+  (let [id (str (random-uuid))]
+    (with-meta
+      (fn emit-notify
+        [event]
+        (try
+          (util/exec! ds ["SELECT pg_notify(?, ?)" channel-name
+                          (format-payload (assoc event :emitter id))] {})
+          nil
+          (catch Exception e
+            (log/warn e "NOTIFY emit failed — sibling pods may lag until next mutation"
+                      {:event event}))))
+      {::emitter-id id})))
+
+
+(defn own-event?
+  "Did `event` come from `emitter` (a `make-emitter` fn) — i.e. is it this
+   pod's own write echoed back by LISTEN? False for an unstamped event (an
+   older pod's) or an emitter without an id (`noop-emitter`, test stubs)."
+  [emitter event]
+  (let [mine (some-> emitter meta ::emitter-id)]
+    (boolean (and mine (= mine (:emitter event))))))
 
 
 (defn noop-emitter

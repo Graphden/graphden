@@ -55,6 +55,9 @@
        :user-id (str (:id acct))
        :user (or (:primary-email acct) (:display-name acct) (str (:id acct)))
        :email (:primary-email acct)
+       ;; What a marketplace review is signed with
+       ;; (`tenancy.context/current-user-label`).
+       :display-name (:display-name acct)
        :totp-enabled? (boolean (:totp-enabled? acct))
        :api-token? (= "api" (:token-kind acct))
        :token-scopes (:token-scopes acct)}

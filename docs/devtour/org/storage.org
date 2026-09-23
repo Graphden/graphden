@@ -226,13 +226,13 @@ The optimized resolver: run the CTE to get reachable ids, enforce the graph-size
 :PROPERTIES:
 :CUSTOM_ID: storage/make-emitter
 :FILE: src/graphden/storage/postgres/notify.clj
-:LINE: 304
-:MINS: 2.1
+:LINE: 312
+:MINS: 2.5
 :END:
 
 How a committed write reaches every OTHER pod. The emitter is a closure over the pooled DataSource that sends one ~pg_notify~ on ~graphden_events~; best-effort by design — a NOTIFY failure must never roll back a row-level write, because the mutation-driven reconcile is the correctness path and NOTIFY only makes propagation fast. ~notify-after-write!~ in the CRUD block is its caller.
 
-- source :: [[file:../../../src/graphden/storage/postgres/notify.clj::(defn make-emitter][src/graphden/storage/postgres/notify.clj:304]]
+- source :: [[file:../../../src/graphden/storage/postgres/notify.clj::(defn make-emitter][src/graphden/storage/postgres/notify.clj:312]]
 - see also :: [[file:crud.org::#crud/notify-after-write!][notify-after-write!]]
 - same file :: [[file:storage.org::#storage/create-listener][create-listener]]
 
@@ -240,12 +240,12 @@ How a committed write reaches every OTHER pod. The emitter is a closure over the
 :PROPERTIES:
 :CUSTOM_ID: storage/create-listener
 :FILE: src/graphden/storage/postgres/notify.clj
-:LINE: 244
+:LINE: 252
 :MINS: 2.4
 :END:
 
 The receiving end: one DEDICATED connection (outside the pool — LISTEN is session state) subscribed to ~graphden_events~, a background poll thread, reconnect with backoff, and a callback set that ~register!~ / ~unregister!~ mutate. Callback exceptions are isolated so one bad listener cannot silence the rest. The branch router's invalidation, the reconciler and the SSE panels all hang off this handle.
 
-- source :: [[file:../../../src/graphden/storage/postgres/notify.clj::(defn create-listener][src/graphden/storage/postgres/notify.clj:244]]
+- source :: [[file:../../../src/graphden/storage/postgres/notify.clj::(defn create-listener][src/graphden/storage/postgres/notify.clj:252]]
 - see also :: [[file:versioning.org::#versioning/dispatch*][dispatch*]], [[file:services.org::#services/reconcile-once!][reconcile-once!]]
 - same file :: [[file:storage.org::#storage/make-emitter][make-emitter]]

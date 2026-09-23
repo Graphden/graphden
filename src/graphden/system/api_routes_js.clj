@@ -25,9 +25,8 @@
    validator that catches stale `/api/*` literals in editor JS."
   (:require
     [clojure.string :as str]
-    [graphden.system.route-collection :as rc]
-    [reitit.core :as r]
-    [reitit.ring :as ring]))
+    [graphden.system.api-url-drift :as drift]
+    [graphden.system.route-collection :as rc]))
 
 
 ;; =============================================================================
@@ -124,26 +123,6 @@
 
 
 ;; =============================================================================
-;; Router path extraction
-;; =============================================================================
-
-(defn router-paths
-  "All path patterns the compiled router serves, in route-table
-   order. Accepts either a bare `reitit.core/Router` or a
-   `reitit.ring` handler. A route-collection router that is a PLAIN
-   Clojure fn (the accounts `/auth/*` router — the seam explicitly
-   allows any `(fn [req] resp-or-nil)`) has no reitit route table, so
-   it contributes no window.API entries: return `[]` rather than throw
-   on the `reitit.core/routes` protocol. Mirrors
-   [[graphden.system.api-url-drift/router-paths]] — kept as a separate
-   fn so `bb test` doesn't force a require-cycle."
-  [router]
-  (if-let [rr (or (ring/get-router router) (when (satisfies? r/Router router) router))]
-    (mapv first (r/routes rr))
-    []))
-
-
-;; =============================================================================
 ;; Process-global cache
 ;; =============================================================================
 
@@ -172,7 +151,7 @@
    plus the tenancy router is safe even if they overlap."
   [routers]
   (let [paths (->> routers
-                   (mapcat router-paths)
+                   (mapcat drift/router-paths)
                    (filter #(str/starts-with? % "/api/")))]
     (reset! !cache (routes->js-bundle paths))))
 

@@ -13,6 +13,7 @@
    note (the FINDING-1 regression is pinned here)."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.crud.fn-execution.free-arg-cache :as free-arg-cache]
     [graphden.executor.compile-runtime :as cr]
     [graphden.schema.executions.schema :as es]
     [graphden.schema.graph.schema :as gds]
@@ -248,6 +249,120 @@
             (is (not (contains? @(:handlers router) gone-id))
                 "a pinned id with no branch row drops (a deleted branch)")
             (finally (br-cache/set-pinned-branches-fn! nil)))))
+      (finally (sp/close base)))))
+
+
+(defrecord ^:private OrgScopedStandIn
+  [base]
+  ;; What the tenancy addon's `OrgScopedStorage` looks like to the router:
+  ;; a decorator with NO `:pool` and no epoch ledger of its own, under
+  ;; which a tenant's branch row is invisible to a platform-context read.
+  sp/StorageCRUD
+
+  (create-entity [_ entity-name data] (sp/create-entity base entity-name data))
+
+
+  (read-entity
+    [_ entity-name id]
+    (when-not (= :branch entity-name) (sp/read-entity base entity-name id)))
+
+
+  (update-entity [_ entity-name id data] (sp/update-entity base entity-name id data))
+
+
+  (delete-entity [_ entity-name id] (sp/delete-entity base entity-name id))
+
+
+  (query-entities [_ entity-name where] (sp/query-entities base entity-name where))
+
+
+  (query-entities [_ entity-name where opts] (sp/query-entities base entity-name where opts))
+
+
+  (query-latest-per-group
+    [_ entity-name where group-cols]
+    (sp/query-latest-per-group base entity-name where group-cols)))
+
+
+(deftest ledger-resolves-through-storage-decorators-test
+  ;; Every caller on a multi-tenant deployment holds a decorator (the
+  ;; versioned storage over the org-scoped one); the bump, the note and the
+  ;; validation must all land on the ONE pool-bearing handle beneath.
+  (let [base (storage)
+        scoped (->OrgScopedStandIn base)
+        v (assoc (vs/wrap-with-versioning base) :base-storage scoped)]
+    (try
+      (is (identical? base (epoch/epoch-handle v)))
+      (is (identical? base (epoch/epoch-handle scoped)))
+      (let [b (epoch/bump! scoped :fn)]
+        (is (pos-int? b) "a bump through the decorator reaches the sequence")
+        (is (= #{:pending} (epoch/classify-range v (dec b) b 60000))
+            "…and the RAW handle's ledger, seen through any decorator")
+        (epoch/note-applied! v [b])
+        (is (= #{:applied} (epoch/classify-range scoped (dec b) b 60000))))
+      (finally (sp/close base)))))
+
+
+(deftest heal-runs-beneath-an-org-scoped-decorator-test
+  ;; Multi-tenant wiring is Versioned(OrgScoped(Postgres)): `vs/unwrap`
+  ;; lands on the decorator, which carries neither the sequence's pool nor
+  ;; the bump ledger — the whole self-heal was an inert no-op there. And
+  ;; once it runs, the deleted-branch check must read the RAW handle: the
+  ;; decorator reads a tenant branch as nil, and the heal dropped the
+  ;; pinned tenant service ctx instead of refreshing it.
+  (let [base (storage)
+        scoped (->OrgScopedStandIn base)
+        rebuilt (atom [])]
+    (try
+      (binding [br-epoch/*epoch-state-override* (fresh-state)
+                br-epoch/*epoch-check-ttl-ms* 0
+                br-epoch/*epoch-heal-sync?* true
+                epoch/*request-bump-log* (atom [])
+                cr/*impl-override* {:rebuild-optimistic! (fn [c _] (swap! rebuilt conj (:x c)) true)
+                                    :rebuild! (fn [c] (swap! rebuilt conj (:x c)))}]
+        (let [v (vs/wrap-with-versioning base)
+              main-id (vs/current-branch-id v)
+              tenant-id (:id (sp/create-entity base :branch
+                                               {:name "tenant-svc-branch"
+                                                :created-at (java.time.Instant/now)}))
+              router {:default-branch-id main-id
+                      :handlers (atom {main-id {:ctx {:x :main} :handler :h}
+                                       tenant-id {:ctx {:x :tenant} :handler :h}})
+                      :base-ctx {:storage (assoc v :base-storage scoped)
+                                 :pg-storage base}}]
+          (br-cache/set-pinned-branches-fn! (fn [] #{tenant-id}))
+          (try
+            (foreign-bump! base)
+            (br/handler-for router nil)
+            (is (= #{:main :tenant} (set @rebuilt))
+                "the heal fires beneath the decorator and refreshes the pinned tenant ctx")
+            (is (contains? @(:handlers router) tenant-id)
+                "the tenant branch exists — its pinned entry is not dropped")
+            (finally (br-cache/set-pinned-branches-fn! nil)))))
+      (finally (sp/close base)))))
+
+
+(deftest heal-drops-the-free-arg-surface-memo-test
+  ;; The free-arg memo is cleared only by `invalidate-graph-cache!` — the
+  ;; eager path whose skipping is what a heal repairs. A heal that left it
+  ;; served a pre-write free-arg surface until the next local edit.
+  (let [base (storage)
+        v (vs/wrap-with-versioning base)
+        k [::heal-memo (random-uuid)]]
+    (try
+      (binding [br-epoch/*epoch-state-override* (fresh-state)
+                br-epoch/*epoch-check-ttl-ms* 0
+                br-epoch/*epoch-heal-sync?* true
+                epoch/*request-bump-log* (atom [])
+                cr/*impl-override* {:rebuild-optimistic! (fn [_ _] true)
+                                    :rebuild! (fn [_] nil)}]
+        (let [main-id (vs/current-branch-id v)
+              router (router-over v {main-id {:ctx {:x :main} :handler :h}})]
+          (free-arg-cache/get-or-compute k (constantly :before-write))
+          (foreign-bump! base)
+          (br/handler-for router nil)
+          (is (= :after-heal (free-arg-cache/get-or-compute k (constantly :after-heal)))
+              "the heal cleared the memo — the surface recomputes")))
       (finally (sp/close base)))))
 
 

@@ -80,6 +80,26 @@
       (ig/halt-key! :exec/service-reconciler component))))
 
 
+(deftest service-reconciler-suspend-releases-the-ticker-and-callback-test
+  ;; Suspend is a halt (integrant's default): the resume after it is a fresh
+  ;; init, so a suspend that left the ticker + NOTIFY callback alive made
+  ;; every suspend/resume cycle add another of each.
+  (let [listener {:callbacks (atom #{})}
+        stopped (atom 0)
+        component (ig/init-key :exec/service-reconciler
+                               {:context {:storage (mock-storage [])}
+                                :packages {:seeded-services []}
+                                :notify-listener listener
+                                :reconcile-fn (fn [& _] nil)
+                                :stop-all-fn (fn [& _] (swap! stopped inc))})]
+    (is (= 1 (count @(:callbacks listener))))
+    (ig/suspend-key! :exec/service-reconciler component)
+    (is (empty? @(:callbacks listener)) "the NOTIFY callback is unregistered")
+    (is (java.util.concurrent.ExecutorService/.isShutdown (:ticker component))
+        "the reconcile ticker is stopped")
+    (is (= 1 @stopped) "the running services drain")))
+
+
 (deftest service-reconciler-init-with-rows-reconciles-test
   (testing "enabled :service rows present → init-key calls reconcile"
     (let [reconcile-called? (atom false)

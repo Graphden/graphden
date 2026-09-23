@@ -67,6 +67,23 @@
           "state is untouched — the throw is caught before the reset"))))
 
 
+(deftest fleet-controller-tick-reads-loads-off-the-raw-storage-test
+  ;; The tick thread has no org/principal; org loads come off the org-scoped
+  ;; `:fn-execution`, so the tick hands `run-tick!` the RAW `:pg-storage`
+  ;; (full-access at platform context) as `:load-storage`.
+  (let [seen (atom nil)
+        opts {:executors-fn (fn [] ["e1"])
+              :run-tick-fn (fn [env _ _] (reset! seen env) {:state {}})}]
+    (binding [pg-lock/*impl-override* {:ensure-live! (fn [_] false)
+                                       :holder-conn (fn [_] ::conn)
+                                       :try-lock! (fn [_ _] true)}]
+      (tick! (assoc (ctx) :pg-storage ::raw) ::holder (atom {}) opts)
+      (is (= [::storage ::raw] ((juxt :storage :load-storage) @seen)))
+      (tick! (ctx) ::holder (atom {}) opts)
+      (is (= ::storage (:load-storage @seen))
+          "single-tenant (no :pg-storage) falls back to :storage"))))
+
+
 (deftest lock-id-is-per-release
   ;; Advisory locks are DB-wide and a mixed fleet's releases share one
   ;; Postgres — a constant key made two releases' controllers contend for

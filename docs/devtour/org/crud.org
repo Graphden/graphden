@@ -132,13 +132,13 @@ Reconstructs the touched fn-def and runs ~check-fn-def!~ after a mutation, recor
 :PROPERTIES:
 :CUSTOM_ID: crud/notify-after-write!
 :FILE: src/graphden/crud/entities/invalidation.clj
-:LINE: 211
+:LINE: 219
 :MINS: 4.8
 :END:
 
 The post-persist step: invalidate caches and broadcast a NOTIFY delta so sibling pods rebuild the affected fns. How a committed write becomes visible fleet-wide.
 
-- source :: [[file:../../../src/graphden/crud/entities/invalidation.clj::(defn notify-after-write!][src/graphden/crud/entities/invalidation.clj:211]]
+- source :: [[file:../../../src/graphden/crud/entities/invalidation.clj::(defn notify-after-write!][src/graphden/crud/entities/invalidation.clj:219]]
 - referenced from :: [[file:storage.org::#storage/make-emitter][make-emitter]]
 
 * 11. resolve-fn

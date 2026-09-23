@@ -132,7 +132,8 @@
    serving the compiled closures it cached earlier.
 
    Also kicks `recon/restart-services-depending-on!` against the
-   affected fn-id seeds so cron-loop services whose closure was
+   affected fn-id seeds (every service on the branch for a full
+   clear) so cron-loop services whose closure was
    captured before the edit get restarted. HTTP services re-read
    their compiled-registry lazily on the next request and don't
    need the hint; cron loops sit in closed-over fn-graphs and
@@ -170,12 +171,19 @@
         ;; above only touched the ctx the request came in on.
         (when-let [router (br/current-router)]
           (br/invalidate-affected-ctxs! router (vcore/current-branch-id storage) seeds))
-        (when (seq seeds)
+        (when (or (nil? seeds) (seq seeds))
           (try
             ;; `recon/running` is a process-wide defonce atom — the same
-            ;; one the integrant init wired up.
-            (recon/restart-services-depending-on!
-              ctx recon/running seeds (vcore/current-branch-id storage))
+            ;; one the integrant init wired up. nil seeds = an unknown-shape
+            ;; write (the full clear above): conservatively restart every
+            ;; service on the branch — the same answer a sibling gives the
+            ;; empty-id event this write emits. (This pod used to get that
+            ;; restart only from its own echoed event, which it now skips.)
+            (if (nil? seeds)
+              (recon/restart-services-on-branch!
+                ctx recon/running (vcore/current-branch-id storage))
+              (recon/restart-services-depending-on!
+                ctx recon/running seeds (vcore/current-branch-id storage)))
             (catch Exception e
               (log/warn e
                         "post-edit service restart hook failed"

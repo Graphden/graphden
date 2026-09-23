@@ -285,13 +285,13 @@ The stale-dismissal fingerprint: a branch's own version rows reduced to ~count|m
 :PROPERTIES:
 :CUSTOM_ID: versioning/bump!
 :FILE: src/graphden/storage/postgres/graph_epoch.clj
-:LINE: 97
-:MINS: 2.4
+:LINE: 118
+:MINS: 2.5
 :END:
 
 The graph EPOCH — freshness as a comparison, not an imperative. Every graph-shaped write bumps this sequence BEFORE writing; the router's fetch-time check (~validate-graph-epoch!~) heals any cached ctx whose eager invalidation was skipped — a client abort mid-request, a write path with no NOTIFY, a lost NOTIFY. The eager delta machinery and NOTIFY remain pure latency optimizations, which is what their docstrings always claimed.
 
-- source :: [[file:../../../src/graphden/storage/postgres/graph_epoch.clj::(defn bump!][src/graphden/storage/postgres/graph_epoch.clj:97]]
+- source :: [[file:../../../src/graphden/storage/postgres/graph_epoch.clj::(defn bump!][src/graphden/storage/postgres/graph_epoch.clj:118]]
 
 * 23. build-branch-ctx
 :PROPERTIES:
@@ -325,10 +325,10 @@ The top-level Ring dispatch: extract the branch ref (header or query), resolve i
 :PROPERTIES:
 :CUSTOM_ID: versioning/validate-graph-epoch!
 :FILE: src/graphden/system/branch_router/epoch.clj
-:LINE: 261
-:MINS: 3.4
+:LINE: 284
+:MINS: 3.6
 :END:
 
 The other half of the epoch bump from a few steps back: on every ctx fetch the router compares the sequence against its watermark and classifies each epoch in between — applied here, covered by a sibling's NOTIFY, still in flight, or missed. A missed one heals: the base ctx rebuilds in the background (stale-while-revalidate) and every other cached branch ctx is dropped to rebuild on demand. The router namespace orchestrates; this one, ~.cache~ (eviction) and ~.recheck~ (type slices) sit underneath it.
 
-- source :: [[file:../../../src/graphden/system/branch_router/epoch.clj::(defn validate-graph-epoch!][src/graphden/system/branch_router/epoch.clj:261]]
+- source :: [[file:../../../src/graphden/system/branch_router/epoch.clj::(defn validate-graph-epoch!][src/graphden/system/branch_router/epoch.clj:284]]

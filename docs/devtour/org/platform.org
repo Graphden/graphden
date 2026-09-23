@@ -114,25 +114,25 @@ The built-in alerter's pure policy: given the last window's counters and the pre
 :PROPERTIES:
 :CUSTOM_ID: platform/start-relay!
 :FILE: src/graphden/system/sse.clj
-:LINE: 168
-:MINS: 2.0
+:LINE: 199
+:MINS: 2.3
 :END:
 
 The SSE invalidation relay: the hosted side fans branch/org invalidation events out to subscribed external executors so a BYO executor's compiled registry stays fresh without polling. The freshness half of the BYO story.
 
-- source :: [[file:../../../src/graphden/system/sse.clj::(defn start-relay!][src/graphden/system/sse.clj:168]]
+- source :: [[file:../../../src/graphden/system/sse.clj::(defn start-relay!][src/graphden/system/sse.clj:199]]
 
 * 10. RemoteStorage
 :PROPERTIES:
 :CUSTOM_ID: platform/RemoteStorage
 :FILE: src/graphden/storage/remote/core.clj
-:LINE: 112
+:LINE: 132
 :MINS: 3.8
 :END:
 
 The read side of BYO: a ~StorageCRUD~ leaf whose rows are an ATOM of ~{entity → [row …]}~ fetched from the hub over HTTP, with every write arm throwing ~read-only!~. The customer's executor compiles and runs the same graph while the hub stays the only writer — and ~refresh!~ swaps in a fresh bundle without rebuilding the record, which is what the SSE relay below triggers.
 
-- source :: [[file:../../../src/graphden/storage/remote/core.clj::(defrecord RemoteStorage][src/graphden/storage/remote/core.clj:112]]
+- source :: [[file:../../../src/graphden/storage/remote/core.clj::(defrecord RemoteStorage][src/graphden/storage/remote/core.clj:132]]
 - see also :: [[file:storage.org::#storage/StorageCRUD][StorageCRUD]]
 
 * 11. start-byo!

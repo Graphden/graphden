@@ -6,7 +6,8 @@
    the cells the controller manages."
   (:require
     [graphden.fleet.control-loop :as cl]
-    [graphden.fleet.packer :as packer]))
+    [graphden.fleet.packer :as packer]
+    [graphden.tenancy.context :as tc]))
 
 
 (defn fleet-status
@@ -24,7 +25,12 @@
         forward-deps (:forward-deps (some-> (:compile-deps ctx) deref))
         placement-rows (cl/read-placements storage)
         current (cl/current-placement placement-rows)
-        cells (cl/discover-cells storage forward-deps placement-rows)
+        ;; Org loads off the RAW storage at platform context (public org, no
+        ;; principal) — `:fn-execution` is org-scoped; see `discover-cells`.
+        cells (tc/with-org tc/public-org
+                           (binding [tc/*current-principal* nil]
+                             (doall (cl/discover-cells storage forward-deps placement-rows
+                                                       {:load-storage (or (:pg-storage ctx) storage)}))))
         executors (into (sorted-set) (vals current))]
     {:executor-id self-id
      :placements (mapv (fn [[[org entry] holder]]

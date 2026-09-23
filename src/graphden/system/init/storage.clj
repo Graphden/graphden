@@ -160,14 +160,17 @@
   auth-provider)
 
 
-(defmethod ig/init-key :sse/relay [_ {:keys [port notify-listener auth-provider]}]
+(defmethod ig/init-key :sse/relay [_ {:keys [port notify-listener auth-provider context]}]
   (let [p (if (string? port) (parse-long port) port)]
     (if (and p (pos? p))
       (do (log/info "Wiring SSE invalidation relay" {:port p})
           (warn-if-relay-open! p auth-provider)
           (sse/start-relay! {:port p
                              :notify-listener notify-listener
-                             :auth-provider auth-provider}))
+                             :auth-provider auth-provider
+                             ;; Its :request-scope resolves an org-agnostic
+                             ;; (accounts) principal's org per subscriber.
+                             :context context}))
       (do (log/info "SSE relay disabled (no GRAPHDEN_SSE_PORT)") nil))))
 
 

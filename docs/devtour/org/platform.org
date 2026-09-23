@@ -27,13 +27,13 @@ The one tenancy namespace that lives in core: ~*current-org*~ is the per-request
 :PROPERTIES:
 :CUSTOM_ID: platform/notify!
 :FILE: src/graphden/tenancy/context.clj
-:LINE: 176
+:LINE: 199
 :MINS: 1.2
 :END:
 
 The notification seam — the same install-a-hook shape as the capability predicates, pointed the other way: core RAISES a domain event (~:package-moderated~ with the decided row) and the addon decides who is told and how (the publishing org's owner, through the accounts Mailer, on the trusted origin). Without an addon the event is dropped, and the sink's result is never inspected — a mail failure is the sender's to log, not the domain write's to undo.
 
-- source :: [[file:../../../src/graphden/tenancy/context.clj::(defn notify!][src/graphden/tenancy/context.clj:176]]
+- source :: [[file:../../../src/graphden/tenancy/context.clj::(defn notify!][src/graphden/tenancy/context.clj:199]]
 - same file :: [[file:platform.org::#platform/platform-tier?][platform-tier?]], [[file:constellation.org::#constellation/install-org-cap-fn!][install-org-cap-fn!]], [[file:constellation.org::#constellation/tenancy-addon-active?][tenancy-addon-active?]]
 
 * 3. single-token-provider

@@ -3,10 +3,9 @@
    `/api/types/compatible`.
 
    These exercise the production GRAPH fn-def chain that the HTTP
-   handler reaches — distinct from `types-api-test`'s coverage of the
-   Clojure helpers (`ta/validate-types-candidates`,
-   `ta/apply-types-candidates`) that share the parse/validate stages
-   but bypass the graph composition.
+   handler reaches — the only implementation of the parse / validate
+   stages and of the candidates enumeration (the Clojure copies that
+   used to stand in for them in `types-api-test` are gone).
 
    Regression caught: Phase 5
    `apply-hof-translation` copying env-binding `rt/thunk`s to slot-id
@@ -20,6 +19,7 @@
     [cheshire.core :as cheshire]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.test-infra.graph-harness :as gh :refer [*graph*]]))
 
@@ -193,3 +193,105 @@
       (is (contains? names "encode-stringify-wrap")
           (str "wraps with a `request` arg must be compatible; got " (pr-str names)))
       (is (contains? names "error-boundary-wrap")))))
+
+
+;; =============================================================================
+;; Validation arms not covered above
+;; =============================================================================
+
+(deftest types-compatible-missing-side-returns-validation-error-test
+  (testing "a missing `expected` or `candidate` is rejected"
+    (is (false? (:ok (post-via :types-compatible-handler {:candidate "int"}))))
+    (is (false? (:ok (post-via :types-compatible-handler {:expected "int"}))))))
+
+
+(deftest types-usages-malformed-target-returns-validation-error-test
+  (testing "a type-fn-id that is not a uuid is rejected"
+    (is (false? (:ok (post-via :types-usages-handler {:type-fn-id "not-a-uuid"}))))))
+
+
+(deftest types-candidates-effects-filter-keeps-only-pure-rows-test
+  (testing "effects=[] → every surviving candidate is pure"
+    (let [res (post-via :types-candidates-handler {:expected "any" :effects []})]
+      (is (true? (:ok res)))
+      (is (every? #(empty? (:effects %)) (:candidates res))))))
+
+
+;; =============================================================================
+;; Candidate admission + ranking — stub signatures under a per-test prefix
+;; (recorded into the fixture's isolated registry; the name-prefix filter
+;; keeps each assertion to its own rows)
+;; =============================================================================
+
+(defn- stub-fns!
+  "Record `sigs` (`{suffix rich-type}`) as registry entries named
+   `<prefix><suffix>`. Returns the prefix."
+  [sigs]
+  (let [prefix (str "tcg" (subs (str (random-uuid)) 0 8) "-")]
+    (doseq [[suffix rt] sigs]
+      (registry/record-rich-types-raw! (random-uuid) (keyword (str prefix suffix))
+                                       (merge {:effects #{}} rt)))
+    prefix))
+
+
+(defn- candidates
+  "`{suffix candidate-row}` for `expected` (wire form) among `prefix`'s rows."
+  [prefix expected]
+  (let [res (post-via :types-candidates-handler {:expected expected :name-prefix prefix})]
+    (is (true? (:ok res)) (pr-str res))
+    (into {}
+          (map (fn [c] [(subs (:name c) (count prefix)) c]))
+          (:candidates res))))
+
+
+(deftest types-candidates-rank-arity-and-fit-test
+  (let [p (stub-fns! {"shout" {:return :text :args {:item :text}}
+                      "motto" {:return :text :args {}}
+                      "greet" {:return :text :args {:who :text :how :text}}})]
+    (testing "every candidate of a 1-arg callable slot carries :arity and :fit"
+      (let [by-name (candidates p ["fn" {:item "a"} "b"])]
+        (is (= [1 "exact"] ((juxt :arity :fit) (by-name "shout"))))
+        (is (= [0 "ignores"] ((juxt :arity :fit) (by-name "motto"))))
+        (is (nil? (by-name "greet"))
+            "a two-arg fn without an :item arg is not admitted to a one-arg slot")))
+    (testing "a value slot ranks finished values :exact and templates :captures"
+      (let [by-name (candidates p "text")]
+        (is (= "exact" (:fit (by-name "motto"))))
+        (is (= ["captures" 2] ((juxt :fit :arity) (by-name "greet"))))))))
+
+
+(deftest types-candidates-callable-slot-admits-by-signature-test
+  ;; A fn-typed slot receives the CALLABLE, not its result — admissibility
+  ;; is "candidate signature ⊆ slot", the rule `check-binding!` applies on
+  ;; write.
+  (let [p (stub-fns! {"tick" {:return :text :args {}}
+                      "counter" {:return :int :args {}}
+                      "greeter" {:return :text :args {:who :text}}
+                      "producer" {:return [:fn {} :text] :args {}}})]
+    (testing "a zero-arity callable slot admits ordinary fns"
+      (let [names (set (keys (candidates p ["fn" {} "any"])))]
+        (is (contains? names "tick") "a plain `() → text` fn belongs in a `() → any` slot")
+        (is (contains? names "greeter") "so does one with free args — hof-wrap captures them")
+        (is (contains? names "producer") "and a callable-producing fn still qualifies")))
+    (testing "the callable slot's return type still filters"
+      (let [names (set (keys (candidates p ["fn" {} "text"])))]
+        (is (contains? names "tick"))
+        (is (not (contains? names "counter")) "`() → text` rejects a fn returning :int")))
+    (testing "a 1-arg callable slot checks the argument contravariantly"
+      (let [names (set (keys (candidates p ["fn" {:who "text"} "text"])))]
+        (is (contains? names "greeter"))
+        (is (not (contains? names "counter")))))))
+
+
+(deftest types-candidates-polymorphic-slot-test
+  (testing "a POLYMORPHIC callee fits a polymorphic slot over the wire"
+    ;; `map`'s :func is `[:fn {:item a} b]`; a `(item:a) → [a]` callee and a
+    ;; `(item:text) → text` one both belong in it.
+    (let [p (stub-fns! {"echo" {:return '[:list a] :args '{:item a}}
+                        "shout" {:return :text :args {:item :text}}
+                        "pair" {:return :int :args {:x :int :y :int}}})
+          names (set (keys (candidates p ["fn" {:item "a"} "b"])))]
+      (is (contains? names "echo") "a generic callee is admitted")
+      (is (contains? names "shout") "a concrete one-arg callee is admitted")
+      (is (not (contains? names "pair"))
+          "a two-arg callee with neither arg named :item does not fit a one-arg slot"))))

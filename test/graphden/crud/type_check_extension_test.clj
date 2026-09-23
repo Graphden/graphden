@@ -10,11 +10,12 @@
    parent's own bound slots are not free, and nothing that is not a
    slot of the composition appears."
   (:require
+    [cheshire.core :as cheshire]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.entities :as entities]
     [graphden.crud.type-check :as tc]
-    [graphden.crud.types-api :as types-api]
     [graphden.executor.registry.core :as registry]
+    [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.golden-app :as ga :refer [*bootstrap*]]
     [graphden.types.check :as tcheck]
@@ -96,12 +97,17 @@
         _ (entities/create-entity "binding" {:fn-id (:id child) :slot-id (:id value-slot) :value "hello"} ctx)
         rej (tc/type-check-fn-after-mutation! storage (:id child))
         after (:args (registry/rich-type-of-id (:id child)))
-        cands (:candidates
-                (types-api/apply-types-candidates
-                  {:expected [:fn {:request :ring-request-shape} :ring-response-shape]}
-                  ctx))]
+        ;; The picker's own request — the production candidates handler.
+        cands (-> (setup/via-graph
+                    *bootstrap* :types-candidates-handler
+                    {:uri "/api/types/candidates" :request-method :post
+                     :headers {"content-type" "application/json"}
+                     :body (cheshire/generate-string
+                             {:expected ["fn" {:request "ring-request-shape"} "ring-response-shape"]
+                              :name-prefix "pceb-"})})
+                  :body (cheshire/parse-string true) :candidates)]
     (is (= #{:body} (set (keys before))) "freshly extended: body is the one free arg")
     (is (nil? rej) (str "the bind type-checks: " (pr-str rej)))
     (is (= {} after) (str "bound body → no free args (got " (pr-str after) ")"))
-    (is (some #(= :pceb-hello (:name %)) cands)
+    (is (some #(= "pceb-hello" (:name %)) cands)
         "…and the child is a valid Ring handler for the picker (nullary callee, 1-arg slot)")))

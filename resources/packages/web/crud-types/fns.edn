@@ -354,8 +354,8 @@
           :then {:parent :const :args {:value {:ok false :error "Request body must include 'expected'"}}}
           :else {:value nil}}}
 
-  ;; --- _types-candidates-apply. Mirrors
-  ;; `types-api/apply-types-candidates`: snapshot registry → filter by
+  ;; --- _types-candidates-apply (the only implementation — a Clojure
+  ;; mirror was retired): snapshot registry → filter by
   ;; (not-type-row, subtype, effect-subset, name-prefix) → reshape
   ;; per-row → sort by name → envelope. Closure-captured `:parsed`
   ;; carries the 3 filter dimensions into the per-row HOF.
@@ -450,7 +450,7 @@
   ;; A `:fn-ref` slot takes a fn's IDENTITY — the bound fn is never run,
   ;; so its return type is no filter at all. Every non-type-row fn is a
   ;; candidate, the rule `check-one-binding`'s `:fn-ref` arm applies on
-  ;; write. Mirrors `identity-slot?` in `types-api/apply-types-candidates`.
+  ;; write.
   {:name :_types-candidates-expected-identity?
    :parent :equal?
    :args {:a {:as :expected} :b {:value :fn-ref :literal? true}}}

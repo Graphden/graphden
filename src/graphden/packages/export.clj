@@ -71,10 +71,8 @@
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.core :as types]
-    [graphden.versioning.storage.core :as vs])
-  (:import
-    (graphden.versioning.storage.core
-      VersionedStorage)))
+    [graphden.util.ns-path :as ns-path]
+    [graphden.versioning.graph-rows :as graph-rows]))
 
 
 ;; =============================================================================
@@ -595,24 +593,15 @@
 ;; / `:value` / `:expects-effects` from JSONB on read, so no decode work
 ;; is needed here.
 ;;
-;; Layering note: this mirrors the 5-table read in
-;; `layout.data/load-graph-entities-uncached`, but reads against the
-;; STORAGE layer directly (`sp` + `vs`) rather than depending up into the
-;; editor/layout layer.
+;; Layering note: the 5-table read is `versioning.graph-rows/read-all`,
+;; the one below-crud definition `layout.data` and `crud.types-api` share
+;; — no dependency up into the editor/layout layer.
 
 (defn- ns-id->path-map
   "Map every `:ns` row id → its dotted path (`core.arithmetic`), walking
    `parent-id` to the root. Inverts `loader/sync-namespaces!`."
   [storage]
-  (let [rows (sp/query-entities storage :ns {})
-        by-id (into {} (map (juxt :id identity)) rows)
-        path (fn path
-               [id]
-               (when-let [r (get by-id id)]
-                 (if-let [p (:parent-id r)]
-                   (str (path p) "." (:name r))
-                   (:name r))))]
-    (into {} (map (fn [r] [(:id r) (path (:id r))])) rows)))
+  (ns-path/path-map (sp/query-entities storage :ns {})))
 
 
 (defn read-graph
@@ -625,13 +614,7 @@
    through the org-scoped request storage it returns exactly the caller's org
    + public rows — the shard a BYO executor serves."
   [storage]
-  (if (instance? VersionedStorage storage)
-    (vs/query-all-graph-entities storage)
-    {:fns        (vec (sp/query-entities storage :fn {}))
-     :slots      (vec (sp/query-entities storage :slot {}))
-     :fn-slots   (vec (sp/query-entities storage :fn-slot {}))
-     :bindings   (vec (sp/query-entities storage :binding {}))
-     :list-items (vec (sp/query-entities storage :binding-list-item {}))}))
+  (graph-rows/read-all storage))
 
 
 (defn- rows->records

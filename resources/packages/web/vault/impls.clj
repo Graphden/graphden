@@ -2,7 +2,7 @@
   "Base-fn shims for OpenBao / Vault KV v2.
 
    The HTTP client lives in `graphden.clients.vault` — that fn is
-   reused by `graphden.crud.secrets` for the admin-side Secrets CRUD
+   reused by `graphden.crud.secrets` for the admin-side secret writes
    (so the secret-leaf executor-side deref and the admin
    `/api/secrets` pipeline share one HTTP code path)."
   (:require

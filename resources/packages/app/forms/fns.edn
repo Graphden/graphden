@@ -444,9 +444,23 @@
   ;; normal case), the slot's own effective type decides. Read off the
   ;; request body directly: the parsed record is the slot ADDRESS the
   ;; provenance partial synthesises too, and `as` is not part of it.
-  {:name :_value-form-as
+  ;; Only a non-blank STRING counts as a request: a blank or non-string
+  ;; `as` used to flow straight into `:resolve-form` as a type, and
+  ;; `""` / `7` came back as the secret-binding widget instead of the
+  ;; slot's own form.
+  {:name :_value-form-as-raw
    :parent :get
    :args {:coll :_value-form-body :key {:value :as} :default nil}}
+  {:name :_value-form-as-given?
+   :description "True iff the body's `as` is a non-blank string — a type NAME the editor's \"as:\" chooser sent."
+   :parent :and
+   :args {:values [{:parent :is-a? :args {:value :_value-form-as-raw :type {:value :text}}}
+                   {:parent :non-blank? :args {:string :_value-form-as-raw}}]}}
+  {:name :_value-form-as
+   :parent :if
+   :args {:test :_value-form-as-given?
+          :then :_value-form-as-raw
+          :else {:value nil}}}
   {:name :_value-form-slot-type
    :parent :resolve-slot-effective-type
    :args {:parsed {:as :parsed}}}

@@ -41,6 +41,7 @@
     [graphden.types.check.narrowing :as types-narrowing]
     [graphden.types.core :as types]
     [graphden.types.diagnostics :as diag]
+    [graphden.util.ns-path :as ns-path]
     [graphden.versioning.identity-repair :as idrepair]
     [graphden.versioning.storage.core :as vs]
     [graphden.web.route-shape :as route-shape]))
@@ -364,6 +365,28 @@
         :base-fns base-fns-map}))))
 
 
+(defn- ancestor-parents
+  "fn-id → parent-ids over the ancestor closure of `fn-ids` — the bundle's
+   own fn rows (`fns`) win over storage; the rest is read one batched
+   `read-entities` per inheritance level."
+  [storage fns fn-ids]
+  (loop [acc (update-vals fns :parent-ids)
+         frontier (set fn-ids)
+         seen #{}]
+    (if (empty? frontier)
+      acc
+      (let [missing (vec (remove #(contains? acc %) frontier))
+            acc' (cond-> acc
+                   (seq missing)
+                   (merge (into (zipmap missing (repeat nil))
+                                (map (fn [[id r]] [id (:parent-ids r)]))
+                                (sp/read-entities storage :fn missing))))
+            seen' (into seen frontier)]
+        (recur acc'
+               (into #{} (comp (mapcat acc') (remove nil?) (remove seen')) frontier)
+               seen')))))
+
+
 (defn records-seal-rej
   "The seal refusal a parsed bundle would earn — `{:type :reason :fn-id
    :slot-id}` for the first `:binding` / `:binding-list-item` record that
@@ -371,32 +394,44 @@
    The view is storage overlaid with the bundle's own rows: parents and
    bindings the bundle carries win over what storage holds (the rows are
    about to replace it), so a bundle sealing a parent and binding the
-   child in one upsert is caught too."
+   child in one upsert is caught too.
+
+   The view is PRE-BATCHED: the item hosts, the ancestor closure of every
+   checked binding and the ancestors' bindings on the checked slots are
+   read up front (one query per level / table), not per ancestor step per
+   binding."
   [storage records]
   (let [by-kind (group-by :kind records)
         fns (into {} (map (juxt :id identity)) (:fn by-kind))
-        bindings (into {} (map (juxt (juxt :fn-id :slot-id) identity)) (:binding by-kind))
-        by-id (into {} (map (juxt :id identity)) (:binding by-kind))
-        view {:parents-of (fn [fid]
-                            (if-let [r (get fns fid)]
-                              (:parent-ids r)
-                              (:parent-ids (sp/read-entity storage :fn fid))))
-              :binding-of (fn [fid sid]
-                            (or (get bindings [fid sid])
-                                (first (sp/query-entities storage :binding {:fn-id fid :slot-id sid}))))}
-        host (fn [item]
-               (or (get by-id (:binding-id item))
-                   (sp/read-entity storage :binding (:binding-id item))))]
+        bundle-bindings (:binding by-kind)
+        by-id (into {} (map (juxt :id identity)) bundle-bindings)
+        items (:binding-list-item by-kind)
+        foreign-host-ids (into [] (comp (map :binding-id) (remove by-id) (distinct)) items)
+        hosts (merge (when (seq foreign-host-ids)
+                       (sp/read-entities storage :binding foreign-host-ids))
+                     by-id)
+        checked (concat bundle-bindings (keep #(get hosts (:binding-id %)) items))
+        parents (ancestor-parents storage fns (map :fn-id checked))
+        ancestor-ids (into [] (comp (mapcat val) (remove nil?) (distinct)) parents)
+        slot-ids (into [] (comp (map :slot-id) (distinct)) checked)
+        bindings (merge (when (and (seq ancestor-ids) (seq slot-ids))
+                          (into {}
+                                (map (juxt (juxt :fn-id :slot-id) identity))
+                                (sp/query-entities storage :binding
+                                                   {:fn-id ancestor-ids :slot-id slot-ids})))
+                        (into {} (map (juxt (juxt :fn-id :slot-id) identity)) bundle-bindings))
+        view {:parents-of parents
+              :binding-of (fn [fid sid] (get bindings [fid sid]))}]
     (or (some (fn [b]
                 (some-> (validation/ancestor-seal-rej view (:fn-id b) (:slot-id b)
                                                       {:list-write? (true? (:list-append b))})
                         (assoc :fn-id (:fn-id b) :slot-id (:slot-id b))))
-              (:binding by-kind))
+              bundle-bindings)
         (some (fn [item]
-                (when-let [b (host item)]
+                (when-let [b (get hosts (:binding-id item))]
                   (some-> (validation/ancestor-seal-rej view (:fn-id b) (:slot-id b) {:list-write? true})
                           (assoc :fn-id (:fn-id b) :slot-id (:slot-id b)))))
-              (:binding-list-item by-kind)))))
+              items))))
 
 
 (defn- refuse-sealed!
@@ -442,16 +477,10 @@
 
 
 (defn- ns-path-index
-  "`{ns-id → dotted-path}` resolver over storage's `:ns` rows (memoised
-   walk up `:parent-id`)."
+  "`{ns-id → dotted-path}` over storage's `:ns` rows (one read; a map, so
+   it also calls as a resolver)."
   [storage]
-  (let [ns-by-id (into {} (map (juxt :id identity)) (sp/query-entities storage :ns {}))]
-    (fn ns-path
-      [nsid]
-      (when-let [r (ns-by-id nsid)]
-        (if-let [p (:parent-id r)]
-          (str (ns-path p) "." (:name r))
-          (:name r))))))
+  (ns-path/path-map (sp/query-entities storage :ns {})))
 
 
 (defn drop-orphan-anon-defs
@@ -511,15 +540,21 @@
    Returns the adopted names (empty = nothing to do)."
   [storage fn-defs]
   (let [ns-path (ns-path-index storage)
+        ;; One name-IN query for the whole bundle, not one per def.
+        names (into [] (comp (map (comp name :name)) (distinct)) fn-defs)
+        rows-by-name (if (seq names)
+                       (group-by :name (sp/query-entities storage :fn {:name names}))
+                       {})
         adoptable
-        (for [d fn-defs
-              :let [det-id (records/fn-id (:namespace d) (:name d))
-                    rows (sp/query-entities storage :fn {:name (name (:name d))})
-                    same-ns (filterv #(= (:namespace d) (some-> (:namespace-id %) ns-path))
-                                     rows)]
-              :when (and (not-any? #(= det-id (:id %)) same-ns)
-                         (= 1 (count same-ns)))]
-          [(first same-ns) det-id])]
+        (vec
+          (for [d fn-defs
+                :let [det-id (records/fn-id (:namespace d) (:name d))
+                      rows (get rows-by-name (name (:name d)))
+                      same-ns (filterv #(= (:namespace d) (some-> (:namespace-id %) ns-path))
+                                       rows)]
+                :when (and (not-any? #(= det-id (:id %)) same-ns)
+                           (= 1 (count same-ns)))]
+            [(first same-ns) det-id]))]
     (doseq [[row det-id] adoptable]
       (log/info "adopting editor-created identity onto its deterministic id"
                 {:name (:name row) :from (:id row) :to det-id})
@@ -805,14 +840,7 @@
                            (filter uuid?)
                            (vals (compute-all-fn-name-ids packages)))
         synced-by-name (group-by :name (filter :name synced-rows))
-        ns-rows (sp/query-entities base :ns {})
-        ns-by-id (into {} (map (juxt :id identity)) ns-rows)
-        ns-path (fn ns-path
-                  [nsid]
-                  (when-let [r (ns-by-id nsid)]
-                    (if-let [p (:parent-id r)]
-                      (str (ns-path p) "." (:name r))
-                      (:name r))))
+        ns-path (ns-path-index base)
         leftovers
         (for [row (sp/query-entities base :fn {})
               :when (and (:name row)

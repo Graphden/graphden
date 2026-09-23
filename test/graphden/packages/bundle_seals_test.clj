@@ -44,6 +44,11 @@
   (testing "a platform value is final for a tenant bundle too — :ok-response pins :status"
     (let [rej (refusal [{:name :bs-status :parent :json-ok-response :args {:status 500}}])]
       (is (= :constraint-violation/value-override (:type rej)) (pr-str rej))))
+  (testing "a seal two levels up in storage is found through the batched ancestor walk"
+    (sync! [{:name :bs-mid :parent :bs-base}])
+    (let [rej (refusal [{:name :bs-grand :parent :bs-mid :args {:value {:status 404}}}])]
+      (is (= :constraint-violation/value-override (:type rej)) (pr-str rej))
+      (is (nil? (fn-named "bs-grand")))))
   (testing "the sealer and the offender in ONE bundle are caught through the overlay"
     (let [rej (refusal [{:name :bs-p :parent :add :args {:nums {:append [1] :closed true}}}
                         {:name :bs-c :parent :bs-p :args {:nums [2]}}])]

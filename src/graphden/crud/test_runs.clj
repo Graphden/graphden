@@ -80,7 +80,8 @@
 (defn test-fn-rows
   "Named fns of the current branch living in test namespaces — read
    DIRECTLY from the request storage (branch- and org-scoped by the
-   handle), one query per test namespace, sorted by name. Deliberately
+   handle), one `:namespace-id` IN query over every test namespace,
+   sorted by name. Deliberately
    NOT the ctx graph cache: the SSE panel stream is one long request
    whose per-request cache would freeze at its first tick, so every
    caller here pays the fresh (small — test namespaces only) read
@@ -91,8 +92,7 @@
   (let [storage (request/require-storage ctx)
         ns-ids (test-namespace-ids storage)]
     (when (seq ns-ids)
-      (->> ns-ids
-           (mapcat #(sp/query-entities storage :fn {:namespace-id %}))
+      (->> (sp/query-entities storage :fn {:namespace-id (vec ns-ids)})
            (filter #(and (:name %)
                          (not (str/starts-with? (str (:name %)) "_"))))
            (sort-by :name)

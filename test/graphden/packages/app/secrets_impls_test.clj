@@ -19,8 +19,8 @@
 
    The three vault+storage impls (`:_apply-create-secret-body`,
    `:_apply-inline-bind-body`, and the rollback's REPLAY of vault
-   entries) need a live OpenBao and are covered by
-   `graphden.crud.secrets-test`."
+   entries) need a vault and are covered through the real handlers by
+   `graphden.crud.secrets-graph-test`."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.tenancy.context :as tc]

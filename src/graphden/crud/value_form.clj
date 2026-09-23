@@ -1,5 +1,8 @@
 (ns graphden.crud.value-form
-  "Resolver + endpoint stages for the type-aware value-form system.
+  "Resolvers + the form renderer behind the type-aware value-form
+   system. The endpoint itself (parse → validate → apply) is the
+   `:value-form-handler` graph fn-def in `app/forms/fns.edn`; its
+   base-fns (`app/forms/impls.clj`) call into this namespace.
 
    `/api/value-form` answers: \"for the value bound at this
    binding / fn-slot, give me the editor form\". The flow:
@@ -26,7 +29,6 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
-    [graphden.crud.request :as request]
     [graphden.crud.type-check :as tc]
     [graphden.executor.interface :as executor]
     [graphden.executor.registry.core :as registry]
@@ -588,33 +590,8 @@
 
 
 ;; =============================================================================
-;; Endpoint stages — parse / validate / apply
+;; Endpoint helpers — the current value at the edit site
 ;; =============================================================================
-
-(defn parse-value-form-request
-  "Stage 1 — JSON body -> `{:binding-id :fn-id :slot-id :item-id}`,
-   each coerced to a UUID (nil when absent / malformed)."
-  [request]
-  (let [body (request/read-json-body request)]
-    {:binding-id (request/parse-uuid-or-clear (:binding-id body))
-     :fn-id      (request/parse-uuid-or-clear (:fn-id body))
-     :slot-id    (request/parse-uuid-or-clear (:slot-id body))
-     :item-id    (request/parse-uuid-or-clear (:item-id body))
-     ;; Optional: the type NAME the editor's "as:" chooser wants the
-     ;; form for (a wide `:any` slot edited as text / int / …).
-     :as         (let [a (:as body)] (when (string? a) (not-empty a)))}))
-
-
-(defn validate-value-form
-  "Stage 2 — the request must identify a slot: either a `binding-id`,
-   or both `fn-id` and `slot-id` (an unbound free-arg). Returns the
-   `{:ok false :error}` rejection, or nil when well-formed."
-  [parsed]
-  (when-not (or (:binding-id parsed)
-                (and (:fn-id parsed) (:slot-id parsed)))
-    {:ok false
-     :error "Request must include 'binding-id', or both 'fn-id' and 'slot-id'"}))
-
 
 (defn current-value
   "The literal currently bound at this site — from the list-item row
@@ -862,25 +839,3 @@
 
       ;; :leaf
       (build-leaf-form ctx (:type desc) path id))))
-
-
-(defn apply-value-form
-  "Stage 3 — resolve the slot's effective type, build the type-aware
-   form hiccup, and wrap it in a `data-form-root` div carrying the
-   binding ids the editor POSTs back with. Reached only after
-   `validate-value-form` passes."
-  [parsed ctx]
-  (let [storage  (request/require-storage ctx)
-        eff-type (or (:as parsed)
-                     (resolve-slot-effective-type storage parsed)
-                     :any)
-        cur-val  (current-value storage parsed)
-        control  (build-form ctx (resolve-form eff-type) "" nil cur-val)
-        root     (cond-> {"data-form-root" ""}
-                   (:binding-id parsed) (assoc "data-binding-id" (str (:binding-id parsed)))
-                   (:fn-id parsed)      (assoc "data-fn-id" (str (:fn-id parsed)))
-                   (:slot-id parsed)    (assoc "data-slot-id" (str (:slot-id parsed)))
-                   (:item-id parsed)    (assoc "data-item-id" (str (:item-id parsed))))]
-    {:ok    true
-     :form  ["div" root control]
-     :value cur-val}))

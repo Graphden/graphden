@@ -88,7 +88,7 @@ The guard that makes a private consumer safe to have. Most vars the tenancy addo
 The other kind of sibling: an external Type-2 package (code + fn-defs in its own repo). ~resources/executor-packages.edn~ is the operator's single data file naming them — today exactly one, *graphden-mathx* (~:gcd~ + ~:gcd-with-12~, the smallest package that proves the path end-to-end). ~build.clj~ bundles the listed libs into the uberjar; ~:app/packages~ loads them by name at boot. A name-only entry means the package is already on the classpath by other means.
 
 - source :: [[file:../../../src/graphden/packages/manifest.clj::(defn read-manifest][src/graphden/packages/manifest.clj:32]]
-- see also :: [[file:boot.org::#boot/packages][packages]], [[file:packages.org::#packages/load-default-packages][load-default-packages]]
+- see also :: [[file:boot.org::#boot/packages][packages]], [[file:packages.org::#packages/load-packages][load-packages]]
 - same file :: [[file:constellation.org::#constellation/extra-deps][extra-deps]]
 
 * 7. extra-deps

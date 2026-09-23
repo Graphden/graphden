@@ -27,6 +27,7 @@
     [graphden.types.check.literals :as types-lit]
     [graphden.types.core :as types]
     [graphden.types.diagnostics :as diag]
+    [graphden.util.ns-path :as ns-path]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -220,6 +221,22 @@
       :else nil)))
 
 
+(defn- annotate-rows
+  "`fn-by-id` rows with `::ns-path` (the FULL dotted path) stamped where
+   the row has a namespace — the qualified-name source for parent names
+   and `binding-shape-for-edn`. `ns-paths` is a delay over ONE whole-`:ns`
+   read, forced only when some row has a namespace. A batch read of just
+   the rows' own ns used to stop at the first missing ancestor, truncating
+   a depth ≥ 3 path (`my.app.utils` → `app.utils`) so the qualified
+   registry key missed and the check was silently skipped."
+  [ns-paths fn-by-id]
+  (update-vals fn-by-id
+               (fn [row]
+                 (if-let [nsp (some->> (:namespace-id row) (get @ns-paths))]
+                   (assoc row ::ns-path nsp)
+                   row))))
+
+
 (defn reconstruct-fn-def
   "Build the EDN-shape fn-def map (the form `check-fn-def!` accepts)
    from a fn-id by walking the DB rows. Returns nil for fn-rows that
@@ -243,25 +260,9 @@
               ;; ns paths for QUALIFIED name emission — per-ns duplicate
               ;; names resolve precisely only through the qualified
               ;; registry key, and the editor world (random ids, any
-              ;; namespace) is exactly where duplicates live. One
-              ;; batched :ns read over the rows in hand.
-              ns-ids (into #{} (keep :namespace-id) (vals fn-by-id))
-              ns-rows (when (seq ns-ids)
-                        (sp/read-entities storage :ns (vec ns-ids)))
-              ns-path (fn ns-path
-                        [nsid]
-                        (when-let [r (get ns-rows nsid)]
-                          (if-let [p (:parent-id r)]
-                            (str (or (ns-path p)
-                                     (some-> (sp/read-entity storage :ns p)
-                                             :name))
-                                 "." (:name r))
-                            (:name r))))
-              annotate (fn [row]
-                         (if-let [nsp (some-> (:namespace-id row) ns-path)]
-                           (assoc row ::ns-path nsp)
-                           row))
-              fn-by-id (into {} (map (fn [[k v]] [k (annotate v)])) fn-by-id)
+              ;; namespace) is exactly where duplicates live.
+              ns-paths (delay (ns-path/path-map (sp/query-entities storage :ns {})))
+              fn-by-id (annotate-rows ns-paths fn-by-id)
               parent-name (fn [pid]
                             (let [row (get fn-by-id pid)]
                               (when-let [n (:name row)]
@@ -374,9 +375,8 @@
                            (remove #(contains? fn-by-id %)))
               fn-by-id+refs (cond-> fn-by-id
                               (seq ref-ids)
-                              (merge (into {}
-                                           (map (fn [[k v]] [k (annotate v)]))
-                                           (sp/read-entities storage :fn ref-ids))))
+                              (merge (annotate-rows
+                                       ns-paths (sp/read-entities storage :fn ref-ids))))
               args (into {}
                          (keep (fn [b]
                                  (when-let [slot (get slot-by-id (:slot-id b))]
@@ -398,6 +398,11 @@
                    ;; entry by THIS id, not a derived one.
                    :fn-id fn-id
                    :args args}
+            ;; Dotted ns path → the registry write dual-keys the entry
+            ;; (bare + qualified). Without it an editor-created fn was
+            ;; bare-only, and every child's QUALIFIED parent lookup
+            ;; missed — the child's check was silently skipped.
+            (::ns-path (get fn-by-id fn-id)) (assoc :namespace (::ns-path (get fn-by-id fn-id)))
             (= 1 (count parent-ids)) (assoc :parent (parent-name (first parent-ids)))
             (> (count parent-ids) 1) (assoc :parents (mapv parent-name parent-ids))
             ret-name (assoc :return-type ret-name)

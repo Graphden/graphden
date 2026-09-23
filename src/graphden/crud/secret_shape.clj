@@ -1,9 +1,10 @@
 (ns graphden.crud.secret-shape
   "Single-source-of-truth predicates for the 'secret fn-def' shape:
    a `fn` row whose `parent-ids` is exactly `[<:secret-leaf>]`. Two
-   server-side callers reuse this — `graphden.crud.secrets` (the
-   admin CRUD) and `graphden.crud.entities` (the generic-DELETE
-   guard that bounces secret-shaped rows back through `/api/secrets`).
+   server-side callers reuse this — `graphden.crud.entities` (the
+   admin-only-vault write gate) and `graphden.crud.entities.list` (the
+   sidebar's secret-shaped role); the `/api/secrets` graph handlers
+   (`app/secrets/fns.edn`) spell the same rule in the graph.
 
    Lives in its own ns because both callers must agree on the
    shape — duplicating the literal `(= [sl-id] (vec parent-ids))` in
@@ -31,19 +32,6 @@
       (set (map :id
                 (sp/query-entities storage :fn
                                    {:name (mapv name names)}))))))
-
-
-(defn find-secret-leaf-fn-id
-  "Look up the `:secret-leaf` base-fn id via its `:secret-shape` tag
-   (declared in `web/vault/fns.edn`). Returns nil when the
-   `web.vault` package isn't loaded. `:secret-leaf` is the
-   passthrough base-fn used by the Secrets-panel admin path — its
-   `:in` slot is `[:secret :text]` and the binding carries
-   a `:vault-get` resolver binding (executor auto-derefs the OpenBao
-   path at arg-resolution time; the secret value never appears in
-   graphden storage)."
-  [storage]
-  (first (fn-ids-with-tag storage :secret-shape)))
 
 
 (defn find-admin-only-vault-base-fn-ids

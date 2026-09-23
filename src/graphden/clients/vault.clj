@@ -5,9 +5,9 @@
    - `graphden.packages.web.vault.impls` — wraps each fn in a `defbase`
      so the user fn-graph reads secrets via `:secret-leaf` (which
      the executor auto-derefs through this client).
-   - `graphden.crud.secrets` — uses the same fns to manage the
-     admin-side Secrets CRUD (create / list / delete / rotate) over
-     `/api/secrets/*`.
+   - `graphden.crud.secrets` — uses the same fns for the admin-side
+     secret writes behind `/api/secrets` (the journalled create bodies
+     and their rollback).
 
    All fns take a `client` map `{:address \"http://...\" :token \"...\"}`
    (the same shape produced by the `:vault/client` integrant key) and
@@ -70,7 +70,7 @@
    public fn (client map first). nil (production) = every call performs
    the real OpenBao request. Tests `binding` this instead of
    `with-redefs`-ing the root vars — a root rebind is process-global
-   and forced a `^:serial` pin on `crud.secrets-test` (a sibling NS
+   and forced a `^:serial` pin on the secrets suite (a sibling NS
    exercising real vault calls during the window would have seen the
    fake). Mirrors `advisory-lock/*impl-override*`. Cost on the real
    path: one nil-map lookup per vault call."

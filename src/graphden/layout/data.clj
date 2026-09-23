@@ -17,11 +17,7 @@
    that hierarchy. The `ctx`-aware cache wrapper around
    `load-graph-entities-uncached` lives in the defbase shim, not here."
   (:require
-    [graphden.storage.protocol.core :as sp]
-    [graphden.versioning.storage.core :as vs])
-  (:import
-    (graphden.versioning.storage.core
-      VersionedStorage)))
+    [graphden.versioning.graph-rows :as graph-rows]))
 
 
 ;; =============================================================================
@@ -346,13 +342,7 @@
    row and attach the derived `:args` slot views. Takes a plain
    storage; the `ctx`-aware cache wrapper lives in the defbase shim."
   [storage]
-  (let [graph (if (instance? VersionedStorage storage)
-                (vs/query-all-graph-entities storage)
-                {:fns        (vec (sp/query-entities storage :fn {}))
-                 :slots      (vec (sp/query-entities storage :slot {}))
-                 :fn-slots   (vec (sp/query-entities storage :fn-slot {}))
-                 :bindings   (vec (sp/query-entities storage :binding {}))
-                 :list-items (vec (sp/query-entities storage :binding-list-item {}))})]
+  (let [graph (graph-rows/read-all storage)]
     (assoc graph :args (derive-fn-slot-views graph))))
 
 

@@ -403,19 +403,28 @@
    it ran: `{:id :fn-id :fn-name :status :started-at :finished-at
    :error}`."
   [storage execution-id]
-  (->> (sp/query-entities storage :fn-execution {:parent-execution-id execution-id})
-       (sort-by #(some-> (:started-at %) inst-ms))
-       (mapv (fn [row]
-               (let [fn-id (some->> (:fn-version-id row)
-                                    (sp/read-entity storage :fn-version)
-                                    :fn-id)]
-                 {:id (:id row)
-                  :fn-id fn-id
-                  :fn-name (some->> fn-id (sp/read-entity storage :fn) :name)
-                  :status (:status row)
-                  :started-at (:started-at row)
-                  :finished-at (:finished-at row)
-                  :error (:error row)})))))
+  (let [rows (sort-by #(some-> (:started-at %) inst-ms)
+                      (sp/query-entities storage :fn-execution
+                                         {:parent-execution-id execution-id}))
+        ;; Two batched reads for the whole list (version → fn, fn →
+        ;; name) instead of two point reads per child — this runs on
+        ;; every GET /api/execute/:id poll.
+        version-ids (into [] (comp (keep :fn-version-id) (distinct)) rows)
+        fn-id-by-version (when (seq version-ids)
+                           (update-vals (sp/read-entities storage :fn-version version-ids)
+                                        :fn-id))
+        fn-ids (into [] (comp (keep val) (distinct)) fn-id-by-version)
+        fn-by-id (if (seq fn-ids) (sp/read-entities storage :fn fn-ids) {})]
+    (mapv (fn [row]
+            (let [fn-id (get fn-id-by-version (:fn-version-id row))]
+              {:id (:id row)
+               :fn-id fn-id
+               :fn-name (:name (get fn-by-id fn-id))
+               :status (:status row)
+               :started-at (:started-at row)
+               :finished-at (:finished-at row)
+               :error (:error row)}))
+          rows)))
 
 
 (defn get-execution

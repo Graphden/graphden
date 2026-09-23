@@ -7,7 +7,7 @@ Entity/branch/secret writes, request parsing, type-check on write, fn-execution 
 
 after: storage, types
 
-[[file:index.org][index]] · ~70 min
+[[file:index.org][index]] · ~71 min
 
 * 1. extract-entity-params
 :PROPERTIES:
@@ -119,13 +119,13 @@ The atomic core for generic creates: create-or-humanise-error, a post-create who
 :PROPERTIES:
 :CUSTOM_ID: crud/type-check-fn-after-mutation!
 :FILE: src/graphden/crud/type_check.clj
-:LINE: 432
+:LINE: 437
 :MINS: 4.9
 :END:
 
 Reconstructs the touched fn-def and runs ~check-fn-def!~ after a mutation, recording failures in (and clearing fixes from) the per-branch diagnostics store. This is the type-check-on-write that ~apply-create-core~ relies on — an ill-typed fn persists, but never silently: every save re-derives its diagnostics. The ~:reject-secret?~ option is the security carve-out: a secret-involving failure is flagged ~:secret? true~ and NOT recorded — the caller rolls the write back and hard-rejects.
 
-- source :: [[file:../../../src/graphden/crud/type_check.clj::(defn type-check-fn-after-mutation!][src/graphden/crud/type_check.clj:432]]
+- source :: [[file:../../../src/graphden/crud/type_check.clj::(defn type-check-fn-after-mutation!][src/graphden/crud/type_check.clj:437]]
 - see also :: [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 
 * 10. notify-after-write!
@@ -221,26 +221,26 @@ Typed value representations (docs/EXECUTION.md § Typed value representations) �
 :PROPERTIES:
 :CUSTOM_ID: crud/resolve-form
 :FILE: src/graphden/crud/value_form.clj
-:LINE: 452
+:LINE: 454
 :MINS: 3.6
 :END:
 
 The other direction of ~render-repr~: EDITING a value. A slot's effective type is classified into a form-descriptor tree — record, list, union, or leaf — purely, with aliases resolved and variants desugared, so the editor never has to know the type algebra. A depth guard keeps a recursive record type from unfolding forever.
 
-- source :: [[file:../../../src/graphden/crud/value_form.clj::(defn resolve-form][src/graphden/crud/value_form.clj:452]]
+- source :: [[file:../../../src/graphden/crud/value_form.clj::(defn resolve-form][src/graphden/crud/value_form.clj:454]]
 - same file :: [[file:crud.org::#crud/build-form][build-form]]
 
 * 18. build-form
 :PROPERTIES:
 :CUSTOM_ID: crud/build-form
 :FILE: src/graphden/crud/value_form.clj
-:LINE: 780
+:LINE: 757
 :MINS: 6.0
 :END:
 
 …and the descriptor becomes hiccup: a record is a labelled fieldset, a union a branch ~<select>~ plus one sub-form per branch (the backend pre-selects the branch the current value fits), a leaf goes through the form-fn registry the ~app/forms~ package populates. This is what ~GET /partials/value-form~ returns and what the Inspector swaps in — server-rendered, HTMX-wired (docs/PARTIALS.md).
 
-- source :: [[file:../../../src/graphden/crud/value_form.clj::(defn build-form][src/graphden/crud/value_form.clj:780]]
+- source :: [[file:../../../src/graphden/crud/value_form.clj::(defn build-form][src/graphden/crud/value_form.clj:757]]
 - same file :: [[file:crud.org::#crud/resolve-form][resolve-form]]
 
 * 19. run-captured!
@@ -255,17 +255,17 @@ The «catch next request» debugger entry (docs/EXECUTION.md § Debug): a one-sh
 
 - source :: [[file:../../../src/graphden/crud/debug_capture.clj::(defn run-captured!][src/graphden/crud/debug_capture.clj:288]]
 
-* 20. create-secret
+* 20. apply-create-secret-body
 :PROPERTIES:
-:CUSTOM_ID: crud/create-secret
+:CUSTOM_ID: crud/apply-create-secret-body
 :FILE: src/graphden/crud/secrets.clj
-:LINE: 348
-:MINS: 3.0
+:LINE: 133
+:MINS: 4.6
 :END:
 
-The write path that must not leak (docs/SECRETS.md): one ~POST /api/secrets~ atomically creates the OpenBao value, its custom-metadata, and the graphden fn-row + path-binding — with a vault-delete rollback if the graph half fails. The secret VALUE never enters the graph; only the path does, on a ~:secret-leaf~ child the executor auto-derefs through the ctx's vault handle. Note the shape: this public defn is thin orchestration over the same per-stage helpers the ~:cond~ in ~app/secrets/fns.edn~ consumes, so the Clojure and the graph path can never diverge.
+The write path that must not leak (docs/SECRETS.md): one ~POST /api/secrets~ creates the graphden fn-row + path-binding, then the OpenBao value and its custom-metadata — every step journalled so ~replay-secret-rollback!~ can undo the lot if a later one fails. The secret VALUE never enters the graph; only the path does, on a ~:secret-leaf~ child the executor auto-derefs through the ctx's vault handle. Note the shape: the endpoint is the ~:cond~ in ~app/secrets/fns.edn~ (parse, guards, a ~:try~); only this journalled body stays Clojure, reached through the ~:_apply-create-secret-body~ base-fn.
 
-- source :: [[file:../../../src/graphden/crud/secrets.clj::(defn create-secret][src/graphden/crud/secrets.clj:348]]
+- source :: [[file:../../../src/graphden/crud/secrets.clj::(defn apply-create-secret-body][src/graphden/crud/secrets.clj:133]]
 - see also :: [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
 * 21. run-tests!

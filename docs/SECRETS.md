@@ -206,8 +206,10 @@ fn-def whose `parent-ids` is exactly `[:secret-leaf]`. Each entry:
 
 `Create` form (path + value + name + description + namespace) opens
 the same path: atomic vault-put + graphden fn-def create through
-`crud/secrets/create-secret`. Rolls back via vault-delete if the
-graphden write fails.
+`POST /api/secrets` (`:create-secret-handler` in
+`app/secrets/fns.edn`; the journalled write body is
+`crud.secrets/apply-create-secret-body`). Rolls back via
+`replay-secret-rollback!` if any step fails.
 
 ## Composing in user-graph
 
@@ -420,7 +422,7 @@ layered redaction:
    entity` (via `secret-leaf-capability-rej`) refuses any `:fn`
    create whose `:parent-ids` contains the `:secret-leaf` row UNLESS the data
    carries the `:_admin-secret-create` marker, which only
-   `crud.secrets/create-secret` sets (and strips before the row
+   `crud.secrets/apply-create-secret-body` sets (and strips before the row
    reaches storage). The Secrets-panel admin path continues to
    work; everything else gets a 409 / 400 with a pointer to
    `/api/secrets`. The orthogonal "write any secret from user-graph
@@ -504,12 +506,14 @@ The Secrets-panel admin flow writes new secrets with this shape:
     passthrough whose `:in` slot is `[:secret :text]`. The impl
     just returns its arg; the executor's `:resolved-value` case
     has already dereferenced via vault by the time the impl runs.
-- `crud/secrets/create-secret` writes
+- `crud.secrets/apply-create-secret-body` (the `POST /api/secrets` write) writes
     `parent-ids=[<secret-leaf-id>]` + a binding with
     `:resolver-fn-id=<vault-get>` + `:value=<path>`.
-- `crud.secrets/find-usages`, `delete-secret`, `rotate-secret`
-    accept only the secret-leaf shape — `shape/secret-fn?` takes
-    the secret-leaf id and checks `[secret-leaf-id]` parent-ids.
+- The delete / rotate handlers (`:_delete-secret-data`,
+    `:_rotate-secret-data` in `app/secrets/fns.edn`) accept only the
+    secret-leaf shape — their `not-a-secret?` guard checks the fn's
+    parent-ids is exactly `[secret-leaf-id]` (the rule
+    `crud.secret-shape/secret-fn?` spells in Clojure).
 - `crud.entities/secret-leaf-capability-rej` gates
     `:secret-leaf`, `:vault-put`, `:vault-delete`,
     `:vault-metadata-put`, so user-graph can't `parent` any of
@@ -517,7 +521,7 @@ The Secrets-panel admin flow writes new secrets with this shape:
 - Editor `isSecretFn` (in `editor-secrets.js`) renders the 🔒
     badge on every fn-def whose `parent-ids` is exactly
     `[:secret-leaf]`.
-- `crud.secrets/create-secret` explicitly calls
+- `crud.secrets/apply-create-secret-body` explicitly calls
     `tc/type-check-fn-after-mutation!` on the new fn-def so its
     inherited `[:secret :text]` return-type lands in the rich-
     types registry; otherwise `tainted-fn?` wouldn't see the
@@ -553,7 +557,8 @@ For a new binding the editor opens a dedicated 2-field form:
 On submit the form POSTs to `/api/secret-bindings` (sibling to
 `/api/secrets/*` — separate path to avoid reitit's
 `/secrets/:fn-id` literal-vs-param conflict). The handler
-(`graphden.crud.secrets/create-inline-binding`) does:
+(`:create-inline-binding-handler`, whose journalled write is
+`graphden.crud.secrets/apply-create-inline-binding-body`) does:
 
 1. Validate `fn-id` + `slot-id` exist; reject if a binding already
    exists on `(fn-id, slot-id)`.

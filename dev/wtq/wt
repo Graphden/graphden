@@ -1167,7 +1167,8 @@ start_sampler() {
       mem="$(free -m | awk '/^Mem:/{printf "%s,%s",$3,$7}')"
       swap="$(free -m | awk '/^Swap:/{print $3}')"
       ctr="$(docker ps -q 2>/dev/null | wc -l)"
-      jvm="$(pgrep -c java 2>/dev/null || echo 0)"
+      # pgrep -c prints 0 AND exits 1 on no match — `|| echo 0` made that "0\n0".
+      jvm="$(pgrep -c java 2>/dev/null)" || true
       printf '%s,%s,%s,%s,%s,%s\n' "$(date +%H:%M:%S)" "$load" "$mem" "$swap" "$ctr" "$jvm"
       sleep 5
     done

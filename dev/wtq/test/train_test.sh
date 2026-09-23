@@ -234,6 +234,27 @@ check "with the conductor's verdict" eq "$(rc_of sv)" 0
 check "and never waited on memory" eval "! grep -q MemAvailable '$T/sv.out'"
 release_lock
 
+echo "== the resource sampler writes one field per column when no java runs"
+new_world sampler
+mkdir -p "$T/bin"
+cat > "$T/bin/pgrep" <<'PGREP'
+#!/usr/bin/env bash
+# pgrep -c on no match: prints 0 AND exits 1.
+if [ "${1:-}" = -c ]; then echo 0; exit 1; fi
+exec REAL_PGREP "$@"
+PGREP
+sed -i "s|REAL_PGREP|$(command -v pgrep)|" "$T/bin/pgrep"
+chmod +x "$T/bin/pgrep"
+feature sm sm.txt sm
+saved_path="$PATH"; export PATH="$T/bin:$PATH"
+merge_bg sm
+finish sm
+export PATH="$saved_path"
+check "sm GREEN" eq "$(rc_of sm)" 0
+csv="$(ls "$Q"/logs/_train-*.resources.csv)"
+check "every row has 7 fields" eval "awk -F, 'NF != 7 {bad=1} END {exit bad}' '$csv'"
+check "java_procs is 0" eval "tail -n1 '$csv' | grep -q ',0\$'"
+
 echo "== conflict with develop itself -> CONFLICT"
 new_world conflict
 feature x f.txt x

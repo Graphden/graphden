@@ -735,7 +735,7 @@
 
 (defn clear-aliases!
   "Drop every registered alias. Test convenience — production
-   registers aliases via `register-alias!` calls driven by
+   registers aliases via `register-type-alias!` calls driven by
    `:type` / `:refine` / `:list` / `:union` / `:variant` fn-defs in
    the package loader."
   []
@@ -947,14 +947,16 @@
                 ;; slot even though the contravariant relation
                 ;; trivially holds under unification.
                 ;; NOTE: `:any` is NOT "no constraint" here — matching
-                ;; the positional arm (subtype-fn-test:414): the slot
+                ;; the positional arm (`subtype-fn-test`, "1-arg slot —
+                ;; positional"): the slot
                 ;; promises `:any` at call time and a callee narrowing
                 ;; the arg to `:int` would crash on a non-int input.
                 (or (type-var? bt) (subtype? bt at))))
             b)
 
     ;; Single-arg / nullary slot, callee of the same arity — positional.
-    ;; Strict contravariance on `:any` (per `subtype-fn-test` line 414:
+    ;; Strict contravariance on `:any` (per `subtype-fn-test`, "1-arg
+    ;; slot — positional":
     ;; positional `:any` slot ARG is NOT "no constraint" — slot
     ;; promises `:any` at call time and a callee restricting to `:int`
     ;; would crash). Typevars on the slot side DO accept any callee

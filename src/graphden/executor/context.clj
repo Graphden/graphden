@@ -29,7 +29,9 @@
 ;;
 ;; Extra (off-record) atom assoc'd by `create-context`:
 ;;
-;; - `:invalidation-lock` — plain `Object` instance. Held by
+;; - `:invalidation-lock` — a `java.util.concurrent.locks.ReentrantLock`
+;;   (reentrant: `invalidate-graph-cache! → rebuild!` re-takes it),
+;;   taken through `compile-runtime/call-with-invalidation-lock`. Held by
 ;;   `invalidate-graph-cache!` and `compile-runtime/rebuild!` to
 ;;   serialize the read-graph → compute → prime-multi-atom sequence,
 ;;   so two concurrent writers can't interleave a stale storage

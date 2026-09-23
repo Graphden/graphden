@@ -2595,8 +2595,8 @@
 ;; Each name here is a piece of known debt — runtime is unaffected,
 ;; the editor's effect/return strips for these names may be missing.
 ;;
-;; The sync-time check in `packages.sync/sync-fn-entities-from-packages!`
-;; gates on this set:
+;; The sync-time check (`packages.sync/run-type-check-sweep!`, via
+;; `assert-sweep-failures-match-allowlist!`) gates on this set:
 ;;   - Any failure NOT in this set is a REGRESSION — throws hard.
 ;;   - Any name in this set that's NO LONGER failing is STALE — also
 ;;     throws hard, to keep the ledger honest.
@@ -2612,13 +2612,10 @@
 ;; α' Pass-2/3 caller-context propagation landed alongside the
 ;; per-use-site anon naming fix in `packages/records/parse.clj`.
 ;;
-;; The 11 entries below are nullability gaps that α'-driven
-;; tighter return types now surface — each binding passes
-;; `[:union :null T]` into a slot expecting `T`, where the runtime
-;; is guarded by an upstream nil-check the type-checker doesn't
-;; yet see through. Closing them needs Phase #170 control-flow
-;; narrowing through `:if`/`:cond` guards OR per-fn-def
-;; `:assert-some` annotations.
+;; The 11 nullability-gap entries that followed (a binding passing
+;; `[:union :null T]` into a slot expecting `T`, guarded at runtime by
+;; an upstream nil-check the checker couldn't see) closed too — see
+;; the note inside the set: the set is EMPTY.
 (def allowed-type-check-failures
   ;; Closed — sweep down to 0 after applying author
   ;; type-assertions for runtime-guaranteed nullability narrowings
@@ -2644,7 +2641,7 @@
    - Any allowlisted name that's NO LONGER failing — STALE allowlist
      (architectural gap closed, ledger needs trimming).
 
-   Called by `system.core/sync-fn-entities-from-packages!` after the
+   Called by `packages.sync/run-type-check-sweep!` after the
    sweep; exposed as a separate fn so unit tests can exercise the
    logic without bootstrapping integrant. The optional `detail` map
    `{name → failure message}` is embedded in the regression error so

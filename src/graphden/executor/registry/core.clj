@@ -60,9 +60,8 @@
   "Synthesised impl for a list-type fn-row — pass the items through,
    forcing any thunks the executor placed in `:items`. Hoisted to
    a top-level def so every call site shares one identity (otherwise
-   each `compute-base-fns-map` invocation creates a fresh closure,
-   wobbling the base-fns map's hash across boots and blocking
-   `compile-all-templates`' cross-boot template cache)."
+   each `compute-base-fns-map` invocation creates a fresh closure and
+   two maps of the same base-fns never compare equal)."
   [args _ctx]
   (force (:items args)))
 
@@ -102,9 +101,8 @@
    the user-provided `:impl`.
 
    Refinement + list impls flow through identity-stable cached
-   constructors so the resulting `compute-base-fns-map` output hashes
-   the same on repeated invocations — required for
-   `compile.compile-all-templates`' template cache to hit."
+   constructors so the resulting `compute-base-fns-map` output is
+   equal across repeated invocations."
   [fn-def]
   (cond
     (:type fn-def)   record-type-impl
@@ -1114,7 +1112,8 @@
 
 
 (defn sync-primitives!
-  "Pre-seed the 14 primitive fn-rows. Should run once at storage init,
+  "Pre-seed the primitive fn-rows (`records.ids/primitive-names`).
+   Should run once at storage init,
    before any base-fns or composed fn-defs sync. Idempotent."
   [storage]
   (composition/sync-primitives! storage))

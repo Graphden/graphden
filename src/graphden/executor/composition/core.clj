@@ -270,7 +270,8 @@
 ;; =============================================================================
 
 (defn sync-primitives!
-  "Pre-seed the 14 primitive fn-rows. Idempotent (deterministic UUIDs).
+  "Pre-seed the primitive fn-rows (`records.ids/primitive-names`).
+   Idempotent (deterministic UUIDs).
    Should run once at storage init, before any other sync."
   [storage]
   (write-records! storage (records/boot-primitive-records) {}))

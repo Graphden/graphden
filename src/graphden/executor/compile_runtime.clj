@@ -326,8 +326,10 @@
    now registers EVERY org's type-rows into the process-global alias registry,
    so two orgs' same-named types collide (last-write-wins — a low-severity
    cross-org info leak limited to a validation message; the `:fn` rows
-   themselves stay org-scoped via identity-filtering). Per-org type registries
-   is the follow-up. This merely WIDENS the pre-existing global-type registry."
+   themselves stay org-scoped via identity-filtering). The per-org slice
+   (`per-org-aliases` / `org-alias-snapshot`) is what a TENANT type-check
+   reads, so the collision reaches only global (platform) checks. This merely
+   WIDENS the pre-existing global-type registry."
   [ctx]
   (or (:compile-storage ctx) (:storage ctx)))
 

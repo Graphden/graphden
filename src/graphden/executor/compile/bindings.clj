@@ -425,7 +425,8 @@
                 [env-name {:kind :ref :env-name env-name
                            ;; `:slot-id` + `:type-override-fn-id` carry
                            ;; enough for downstream `hof-lambda-params`
-                           ;; (via `enrich-is-fn-ref`) to resolve the
+                           ;; (`compile-eager/env-arg-builder` passes
+                           ;; them through) to resolve the
                            ;; slot's structural `[:fn {ARGS} RET]` type
                            ;; — without these the helper would see a
                            ;; nil slot-id and reject the binding as a

@@ -53,7 +53,8 @@
 
 
 (defn sync-primitives!
-  "Pre-seed the 14 primitive fn-rows. Idempotent. Should run once at
+  "Pre-seed the primitive fn-rows (`records.ids/primitive-names`).
+   Idempotent. Should run once at
    storage init before any other sync."
   [storage]
   (core/sync-primitives! storage))

@@ -1460,8 +1460,8 @@
 ;; same package set, sibling branches with identical graph views) hit warm
 ;; in < 1 ms.
 ;;
-;; Bounded LRU — 4 entries comfortably cover {dev system + a couple of
-;; branches + a test bootstrap} without holding stale registries forever.
+;; Bounded FIFO of `compile-all-cache-max-size` entries (see
+;; `compile-all-cache` below for why FIFO, not LRU).
 
 ;; 2 (was 4): each cached registry holds ~3000 closure references,
 ;; and each closure captures references to its parent lookups
@@ -1540,7 +1540,7 @@
 
    `lookups` MUST already carry `:base-fns` (the impl registry).
 
-   Cached on a process-wide bounded LRU keyed by graph-shape +
+   Cached on a process-wide bounded FIFO keyed by graph-shape +
    base-fn name set — sister callers (test ns's that bootstrap the
    same package set, sibling branches with identical graph views)
    skip the compile pass entirely and just retrieve the

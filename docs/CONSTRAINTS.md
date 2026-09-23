@@ -123,7 +123,7 @@ occupy the key forever; cross-branch divergence must not be blocked):
 
 | Entity | Retired key | Now enforced by |
 |---|---|---|
-| `fn` | `(namespace-id, name)` | `check-fn-name-collision!` in `VersionedStorage` — live-view check per branch, advisory-lock-serialized. Error: `:constraint-violation/fn-name-collision` |
+| `fn` | `(namespace-id, name)` | `check-fn-name-collisions!` in `VersionedStorage` — live-view check per branch, one batched read per write batch, advisory-lock-serialized (`uniq/xact-lock!`). Error: `:constraint-violation/fn-name-collision` |
 | `binding-list-item` | `(binding-id, position)` | `check-list-item-position-collision!` in `VersionedStorage`. Error: `:constraint-violation/position-collision` |
 
 `slot.name` and `slot.type-fn-id` are NOT individually unique — two

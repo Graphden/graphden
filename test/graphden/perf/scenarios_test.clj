@@ -26,9 +26,11 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.test-autorun :as autorun]
+    [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry-core]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.loader :as pkg]
     [graphden.perf.calibrate :as cal]
     [graphden.perf.sql :as psql]
     [graphden.system.branch-router :as br]
@@ -284,6 +286,49 @@
                    #(setup/via-graph *graph* :_layout-api-handler request))]
       (is (= 200 (:status result))
           "the layout must succeed, or its query count means nothing"))))
+
+
+;; How many named fns `package-sync-sql-cost` re-syncs. The count it records
+;; must not grow with this number — that is the invariant the budget holds.
+(def ^:private bundle-size 40)
+
+
+(deftest ^:perf package-sync-sql-cost
+  ;; Re-syncing a bundle of named fn-defs the way the boot package sync
+  ;; does (namespace upsert → `sync-fns-to-storage!`) — what every boot
+  ;; pays per module, and what MCP `upsert-fn-defs` / registry install pay
+  ;; under their seal check. The write path's resolved-view collision guard
+  ;; used to run PER ROW: one advisory lock and one `fn-version WHERE name =
+  ;; ?` per named fn (plus a resolve per same-named candidate), and one lock
+  ;; per list-item binding — ~12k sequential round trips on a full boot
+  ;; sync. It is batched now: one lock statement, one version query, one
+  ;; resolve for the whole batch. The measured (second) call is the
+  ;; steady-state re-sync of an existing bundle, i.e. the boot path.
+  (testing "re-syncing 40 named fns"
+    (let [storage (:storage *graph*)
+          defs (mapv (fn [i]
+                       {:name (keyword (str "perf-sync-" i))
+                        :namespace "perf.bundle"
+                        :parent :const
+                        :args {:value i}})
+                     (range bundle-size))
+          {:keys [queries result statements]}
+          (record! :sql/package-sync
+                   #(fn-composition/sync-fns-to-storage!
+                      storage defs (pkg/sync-namespaces! storage #{"perf.bundle"})))]
+      (is (<= bundle-size (count result)) "every def of the bundle was synced")
+      (is (pos? queries))
+      ;; The SHAPE guard, as in list-secrets: the collision guard's own
+      ;; statements — the advisory lock and the version-by-name probe — run
+      ;; once per written BATCH, never once per synced fn. (Other per-fn
+      ;; statements of the bundle sync live above the storage layer.)
+      (let [guard (filter #(re-find #"pg_advisory_xact_lock|\"fn_version\" WHERE \(\"name\""
+                                    (str (:query %)))
+                          statements)]
+        (is (seq guard) "the collision guard ran")
+        (is (every? #(< (:calls %) 5) guard)
+            (str "the collision guard is querying per row again: "
+                 (pr-str (mapv (juxt :calls :query) guard))))))))
 
 
 (deftest ^:perf merge-fork-sql-cost

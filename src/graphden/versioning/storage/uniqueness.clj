@@ -8,7 +8,7 @@
    uniqueness is a per-branch RESOLVED-VIEW property (a cross-branch
    base index would wrongly block legal divergence):
 
-   - `fn(namespace-id, name)` — `check-fn-name-collision!`
+   - `fn(namespace-id, name)` — `check-fn-name-collisions!`
    - `binding-list-item(binding-id, position)` —
      `check-list-item-position-collisions!`
 
@@ -18,6 +18,7 @@
    over the entities a merge SURFACES onto the target without a
    `core → merge → core` require cycle."
   (:require
+    [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.resolution :as res]))
 
@@ -118,8 +119,50 @@
   (check-list-item-position-collisions! base-storage branch-id entity-name [new-data]))
 
 
-(defn check-fn-name-collision!
-  "Per-branch resolved-view uniqueness for a live fn's `(namespace-id, name)`.
+(defn- live-key-collision
+  "The shared core of the `(namespace-id, name)` and `:path` checks, over
+   a whole batch of `shapes` (the rows about to be written, each carrying
+   `:id`). `spec`:
+
+   - `:version-entity` / `:id-field` — the version table and its owner
+     column, queried ONCE on `:query-field` for every value the batch
+     writes (every version row carries the entity's then-current value, so
+     this covers creation values AND renames; an identity with no version
+     row can't resolve on any branch and can't collide);
+   - `:key-fn` — the uniqueness key compared in memory.
+
+   The candidates resolve through ONE `res/resolve-live-entities` — nil
+   for off-branch, tombstoned and chain-versionless rows, so cross-branch
+   divergence stays legal. The batch's OWN rows overlay that view (the
+   position check's rule): a row this batch renames away no longer holds
+   its old key, and two batch rows claiming the same key collide with each
+   other. Returns `[shape colliding-ids]` for the first colliding shape,
+   else nil. Replaces one version query + one resolve PER ROW (~3 round
+   trips a fn — ~12k sequential ones on a full boot sync)."
+  [base-storage branch-id entity-name
+   {:keys [version-entity id-field query-field key-fn]} shapes]
+  (let [keyed (filterv query-field shapes)]
+    (when (seq keyed)
+      (let [cand-ids (into #{}
+                           (map id-field)
+                           (sp/query-entities base-storage version-entity
+                                              {query-field (vec (distinct (map query-field keyed)))}))
+            live (res/resolve-live-entities base-storage entity-name cand-ids branch-id)
+            view (into live (comp (filter :id) (map (juxt :id identity))) keyed)
+            by-key (group-by (comp key-fn val) view)]
+        (some (fn [shape]
+                (let [hits (into []
+                                 (comp (map key) (remove #(= % (:id shape))))
+                                 (get by-key (key-fn shape)))]
+                  (when (seq hits) [shape hits])))
+              keyed)))))
+
+
+(defn check-fn-name-collisions!
+  "Per-branch resolved-view uniqueness for live fns' `(namespace-id, name)`,
+   over a whole batch of `shapes` (create: the new rows; update: current ⊕
+   incoming; merge: the surfaced rows). Skips when `entity-name` isn't
+   `:fn`; anonymous fns never collide.
 
    The raw `UNIQUE (namespace_id, name)` index was retired (NOTE in
    schema/graph/schema.clj): soft-deleted identity rows persist by design
@@ -128,92 +171,105 @@
    unique-violation — while NULL `namespace_id` (root fns) was never
    covered by the btree at all. Like list-item positions above, uniqueness
    is a property of the LIVE per-branch view, so enforce it against
-   resolved rows.
+   resolved rows (`live-key-collision` — one version query + one batch
+   resolve for the whole batch)."
+  [base-storage branch-id entity-name shapes]
+  (when (= :fn entity-name)
+    (when-let [[shape colliding]
+               (live-key-collision base-storage branch-id :fn
+                                   {:version-entity :fn-version :id-field :fn-id
+                                    :query-field :name
+                                    :key-fn (juxt :namespace-id :name)}
+                                   shapes)]
+      (let [{nm :name target-ns :namespace-id} shape
+            human (str "fn " (pr-str nm) " already exists"
+                       (when target-ns " in this namespace")
+                       " — pick a different name")]
+        (throw (ex-info human
+                        {:type :constraint-violation/fn-name-collision
+                         :entity-name :fn
+                         :name nm
+                         :namespace-id target-ns
+                         :branch-id branch-id
+                         :colliding-fn-ids colliding
+                         :reason human}))))))
 
-   Candidates come from ONE indexed query on `fn-version.name` — every
-   version row carries the fn's then-current name, so this covers creation
-   names AND renames; identities with no version row at all can't resolve
-   on any branch and can't collide. Each candidate then goes through
-   `res/resolve-entity`, which already yields nil for off-branch and
-   tombstoned fns, so cross-branch name divergence stays legal."
+
+(defn check-fn-name-collision!
+  "Singular form — delegates to `check-fn-name-collisions!`."
   [base-storage branch-id entity-name merged]
-  (when (and (= :fn entity-name) (:name merged))
-    (let [nm (:name merged)
-          target-ns (:namespace-id merged)
-          self-id (:id merged)
-          version-matches (sp/query-entities base-storage :fn-version {:name nm})
-          cand-ids (-> #{}
-                       (into (map :fn-id) version-matches)
-                       (disj self-id))
-          colliding (into []
-                          (comp (map #(res/resolve-entity base-storage :fn % branch-id))
-                                (filter #(and (some? %)
-                                              (= nm (:name %))
-                                              (= target-ns (:namespace-id %))))
-                                (map :id))
-                          cand-ids)]
-      (when (seq colliding)
-        (let [human (str "fn " (pr-str nm) " already exists"
-                         (when target-ns " in this namespace")
-                         " — pick a different name")]
-          (throw (ex-info human
-                          {:type :constraint-violation/fn-name-collision
-                           :entity-name :fn
-                           :name nm
-                           :namespace-id target-ns
-                           :branch-id branch-id
-                           :colliding-fn-ids colliding
-                           :reason human})))))))
+  (check-fn-name-collisions! base-storage branch-id entity-name [merged]))
 
 
-(defn check-resource-override-path-collision!
-  "Per-branch resolved-view uniqueness for a live :resource-override's
+(defn check-resource-override-path-collisions!
+  "Per-branch resolved-view uniqueness for live :resource-overrides'
    `:path` — the fn-name check's shape applied to asset overrides: an
    override whose path is already live on this branch would make
    `:read-resource-overridable` nondeterministic (whichever row a query
-   returns first wins). Candidates come from one indexed version query
-   on `:path`; off-branch / tombstoned rows resolve to nil and can't
-   collide."
+   returns first wins). Off-branch / tombstoned rows can't collide."
+  [base-storage branch-id entity-name shapes]
+  (when (= :resource-override entity-name)
+    (when-let [[shape colliding]
+               (live-key-collision base-storage branch-id :resource-override
+                                   {:version-entity :resource-override-version
+                                    :id-field :override-id
+                                    :query-field :path
+                                    :key-fn :path}
+                                   shapes)]
+      (let [path (:path shape)
+            human (str "an override for " (pr-str path)
+                       " already exists on this branch — edit it instead")]
+        (throw (ex-info human
+                        {:type :constraint-violation/resource-override-path-collision
+                         :entity-name :resource-override
+                         :path path
+                         :branch-id branch-id
+                         :colliding-ids colliding
+                         :reason human}))))))
+
+
+(defn check-resource-override-path-collision!
+  "Singular form — delegates to `check-resource-override-path-collisions!`."
   [base-storage branch-id entity-name merged]
-  (when (and (= :resource-override entity-name) (:path merged))
-    (let [path (:path merged)
-          self-id (:id merged)
-          version-matches (sp/query-entities base-storage :resource-override-version
-                                             {:path path})
-          cand-ids (-> #{}
-                       (into (map :override-id) version-matches)
-                       (disj self-id))
-          colliding (into []
-                          (comp (map #(res/resolve-entity base-storage :resource-override % branch-id))
-                                (filter #(and (some? %) (= path (:path %))))
-                                (map :id))
-                          cand-ids)]
-      (when (seq colliding)
-        (let [human (str "an override for " (pr-str path)
-                         " already exists on this branch — edit it instead")]
-          (throw (ex-info human
-                          {:type :constraint-violation/resource-override-path-collision
-                           :entity-name :resource-override
-                           :path path
-                           :branch-id branch-id
-                           :colliding-ids colliding
-                           :reason human})))))))
+  (check-resource-override-path-collisions! base-storage branch-id entity-name [merged]))
 
 
-(defn resource-override-path-lock-key
-  "Advisory-lock key serializing writes that could collide on the same
-   `(branch, path)` — mirrors `fn-name-lock-key`. nil when not a
-   path-bearing :resource-override write."
-  [branch-id entity-name merged]
-  (when (and (= :resource-override entity-name) (:path merged))
-    (str "resource-override-path|" branch-id "|" (:path merged))))
+(defn collision-lock-key
+  "The advisory-lock key serializing writes of `row` that could collide in
+   the resolved view — nil when the write can't collide:
+
+   - a `:binding-list-item` → its owning binding (`(binding-id, position)`
+     appends / moves on the same binding);
+   - a named `:fn` → `(branch, namespace, name)` (concurrent
+     create/rename/move otherwise both pass `check-fn-name-collisions!`
+     and both commit);
+   - a pathed `:resource-override` → `(branch, path)`."
+  [branch-id entity-name row]
+  (case entity-name
+    :binding-list-item (some-> (:binding-id row) str)
+    :fn (when (:name row)
+          (str "fn-name|" branch-id "|" (:namespace-id row) "|" (:name row)))
+    :resource-override (when (:path row)
+                         (str "resource-override-path|" branch-id "|" (:path row)))
+    nil))
 
 
-(defn fn-name-lock-key
-  "Advisory-lock key serializing all name-writes that could collide on the
-   same `(branch, namespace, name)` triple — concurrent create/rename/move
-   otherwise both pass `check-fn-name-collision!` and both commit. nil when
-   the write can't collide (not a :fn, or anonymous)."
-  [branch-id entity-name merged]
-  (when (and (= :fn entity-name) (:name merged))
-    (str "fn-name|" branch-id "|" (:namespace-id merged) "|" (:name merged))))
+(defn xact-lock!
+  "Take a transaction-scoped `pg_advisory_xact_lock` (released at commit /
+   rollback) on every key in `lock-keys`, in ONE statement. Deadlock-free:
+   the keys are de-duplicated and SORTED, and every caller locks through
+   here, so no two transactions can acquire an overlapping key set in
+   opposite orders (`WITH ORDINALITY … ORDER BY` keeps the array order; a
+   volatile target-list function is evaluated after the sort). `conn` is
+   the caller's transaction connection; nil (no pooled backend) or no keys
+   is a no-op. Runs through `util/exec!` so the parallel-test
+   `*jdbc-override*` seam sees it."
+  [conn lock-keys]
+  (let [ks (into-array String (->> lock-keys (remove nil?) distinct sort))]
+    (when (and conn (pos? (alength ks)))
+      (util/exec! conn
+                  [(str "SELECT pg_advisory_xact_lock(hashtext(k)::bigint)"
+                        " FROM unnest(?::text[]) WITH ORDINALITY AS u(k, ord)"
+                        " ORDER BY ord")
+                   ks]
+                  {}))))

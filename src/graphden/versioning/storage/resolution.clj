@@ -643,6 +643,25 @@
                 (recur (rest chain)))))))))
 
 
+(defn- winning-versions
+  "`{entity-id → winning version row}` for `ids` on `branch-id`'s chain —
+   live or tombstone, merge-aware — from ONE `load-merge-aware-cache`.
+   Ids with no version on the chain are absent. The shared core of the
+   batch resolvers below."
+  [base-storage entity-name ids branch-id]
+  (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
+        {:keys [versions-by-id merges-by-target branch-chain]}
+        (load-merge-aware-cache base-storage version-entity version-id-field
+                                (vec ids) branch-id)]
+    (into {}
+          (keep (fn [eid]
+                  (when-let [v (resolve-version-from-cache base-storage entity-name
+                                                           versions-by-id merges-by-target
+                                                           eid branch-chain)]
+                    [eid v])))
+          ids)))
+
+
 (defn resolve-entities-batch
   "Batch resolves entities by merging identity records with version data.
    Much faster than calling resolve-entity for each id.
@@ -659,19 +678,13 @@
   [base-storage entity-name identity-records branch-id]
   (if (empty? identity-records)
     {}
-    (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
-          entity-ids (mapv :id identity-records)
-          {:keys [versions-by-id merges-by-target branch-chain]}
-          (load-merge-aware-cache base-storage version-entity version-id-field
-                                  entity-ids branch-id)
-          identity-by-id (into {} (map (juxt :id identity)) identity-records)]
+    (let [{:keys [version-id-field]} (get entity-config entity-name)
+          winners (winning-versions base-storage entity-name
+                                    (mapv :id identity-records) branch-id)]
       (into {}
-            (keep (fn [eid]
-                    (let [identity-rec (get identity-by-id eid)
-                          version (resolve-version-from-cache
-                                    base-storage entity-name
-                                    versions-by-id merges-by-target
-                                    eid branch-chain)]
+            (keep (fn [identity-rec]
+                    (let [eid (:id identity-rec)
+                          version (get winners eid)]
                       (cond
                         ;; No version on the chain — a base-fn (or a fn whose
                         ;; only version lives off this branch): identity as-is.
@@ -682,8 +695,33 @@
                         (tombstone? version) nil
                         ;; Live version — merge identity + version data.
                         :else [eid (merge identity-rec
-                                          (extract-version-data version version-id-field))])))
-                  entity-ids)))))
+                                          (extract-version-data version version-id-field))]))))
+            identity-records))))
+
+
+(defn resolve-live-entities
+  "Batch `resolve-entity`: `{id → merged record}` for the `ids` that are
+   LIVE on `branch-id` — identity row present AND a non-tombstone version
+   winning on the chain (merge-aware). Unlike `resolve-entities-batch`
+   there is no identity-as-is fallback: an id with no chain version is
+   absent, exactly as `resolve-entity` answers nil for it — a version
+   living only on an unrelated branch must not make it visible here.
+   Two reads plus one merge-aware version load, whatever `(count ids)`."
+  [base-storage entity-name ids branch-id]
+  (let [identity-by-id (if (seq ids)
+                         (sp/read-entities base-storage entity-name (vec ids))
+                         {})]
+    (if (empty? identity-by-id)
+      {}
+      (let [{:keys [version-id-field]} (get entity-config entity-name)
+            winners (winning-versions base-storage entity-name
+                                      (keys identity-by-id) branch-id)]
+        (into {}
+              (keep (fn [[eid version]]
+                      (when-not (tombstone? version)
+                        [eid (merge (get identity-by-id eid)
+                                    (extract-version-data version version-id-field))])))
+              winners)))))
 
 
 (defn ids-without-chain-version
@@ -701,15 +739,8 @@
   [base-storage entity-name ids branch-id]
   (if (empty? ids)
     #{}
-    (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
-          {:keys [versions-by-id merges-by-target branch-chain]}
-          (load-merge-aware-cache base-storage version-entity version-id-field
-                                  (vec ids) branch-id)]
-      (into #{}
-            (remove #(some? (resolve-version-from-cache base-storage entity-name
-                                                        versions-by-id merges-by-target
-                                                        % branch-chain)))
-            ids))))
+    (let [winners (winning-versions base-storage entity-name ids branch-id)]
+      (into #{} (remove #(contains? winners %)) ids))))
 
 
 ;; === Batch Execution Graph Resolution ===

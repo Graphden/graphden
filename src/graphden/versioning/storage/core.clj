@@ -552,11 +552,7 @@
         ;; fires loudly instead of silently double-inserting. Named-:fn
         ;; creates ride the same mechanism keyed on (branch, ns, name) —
         ;; their retired UNIQUE moved to check-fn-name-collision! too.
-        lock-key (or (when (and (= entity-name :binding-list-item)
-                                (:binding-id normalized))
-                       (str (:binding-id normalized)))
-                     (uniq/fn-name-lock-key branch-id entity-name normalized)
-                     (uniq/resource-override-path-lock-key branch-id entity-name normalized))]
+        lock-key (uniq/collision-lock-key branch-id entity-name normalized)]
     (cond
       (and lock-key (:pool base-storage))
       ;; `:ignore` so any nested `with-transaction` in the create path
@@ -568,8 +564,7 @@
       ;; through — the (branch, ns, name) serialization would silently break.
       (binding [jdbc-tx/*nested-tx* :ignore]
         (jdbc/with-transaction [tx (:pool base-storage)]
-                               (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)"
-                                                  lock-key])
+                               (uniq/xact-lock! tx [lock-key])
                                (do-create! (assoc base-storage :pool tx))))
 
       ;; No lock key, but a pooled backend: still wrap the base-row +
@@ -671,11 +666,8 @@
           ;; Serialize on (branch, ns, name) for a rename/move and on the
           ;; owning binding for a list-item position move — the same
           ;; per-binding `pg_advisory_xact_lock` the create-append uses.
-          lock-key (cond
-                     name-write? (uniq/fn-name-lock-key branch-id entity-name merged)
-                     list-item-write? (str (:binding-id merged))
-                     path-write? (uniq/resource-override-path-lock-key
-                                   branch-id entity-name merged))]
+          lock-key (when (or name-write? list-item-write? path-write?)
+                     (uniq/collision-lock-key branch-id entity-name merged))]
       (if (and lock-key (:pool base-storage))
         ;; `:ignore` — same reason as the create path: a nested
         ;; `with-transaction` inside `do-update!` (crud/update-entity opens
@@ -683,8 +675,7 @@
         ;; commit early and drop the advisory lock mid-update.
         (binding [jdbc-tx/*nested-tx* :ignore]
           (jdbc/with-transaction [tx (:pool base-storage)]
-                                 (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)"
-                                                    lock-key])
+                                 (uniq/xact-lock! tx [lock-key])
                                  (do-update! (assoc base-storage :pool tx))))
         (do-update! base-storage)))))
 
@@ -720,16 +711,10 @@
    run inside the write transaction (`st` carries the tx pool) so lock + check +
    write are one critical section."
   [st branch-id entity-name shapes]
-  ;; Deadlock-free: acquire every collision lock in a stable (sorted) order.
-  (when-let [pool (:pool st)]
-    (doseq [k (->> shapes
-                   (keep (fn [d]
-                           (or (when (and (= entity-name :binding-list-item) (:binding-id d))
-                                 (str (:binding-id d)))
-                               (uniq/fn-name-lock-key branch-id entity-name d)
-                               (uniq/resource-override-path-lock-key branch-id entity-name d))))
-                   distinct sort)]
-      (jdbc/execute! pool ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)" k])))
+  ;; Every collision lock in ONE sorted statement (deadlock-free — see
+  ;; `uniq/xact-lock!`), not one round trip per fn / binding.
+  (uniq/xact-lock! (:pool st)
+                   (keep #(uniq/collision-lock-key branch-id entity-name %) shapes))
   ;; Intra-batch duplicates both pass the against-storage check (neither is
   ;; committed yet), so reject them up front (pure).
   (when (= entity-name :fn)
@@ -749,12 +734,11 @@
                       {:type :constraint-violation/position-collision
                        :entity-name :binding-list-item :binding-id (first k) :position (second k)
                        :colliding-item-ids (mapv :id items)}))))
-  ;; Against-storage resolved-view checks, per entity (each is a no-op for the
-  ;; entity types it doesn't apply to).
+  ;; Against-storage resolved-view checks, each batched over the whole
+  ;; batch (and a no-op for the entity types it doesn't apply to).
   (uniq/check-list-item-position-collisions! st branch-id entity-name shapes)
-  (doseq [d shapes]
-    (uniq/check-fn-name-collision! st branch-id entity-name d)
-    (uniq/check-resource-override-path-collision! st branch-id entity-name d)))
+  (uniq/check-fn-name-collisions! st branch-id entity-name shapes)
+  (uniq/check-resource-override-path-collisions! st branch-id entity-name shapes))
 
 
 (defn- create-entities-versioned!

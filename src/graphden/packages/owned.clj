@@ -3,7 +3,7 @@
 
    Populated by `packages.sync/register-base-fns-from-packages!` (the
    deterministic name→id map covering base-fns + composed fn-defs,
-   plus the 14 primitives) on every boot — exactly the set that the
+   plus the primitives, `records.ids/primitive-names`) on every boot — exactly the set that the
    declarative sync would restore on the next restart. Consulted by
    `crud.package-guard` to refuse editor-API writes against those fns
    (the :add poisoning class).

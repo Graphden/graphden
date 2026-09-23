@@ -191,7 +191,7 @@
 
    See `docs/CLOSURE_CAPTURE.md` § Implementation Contract for the
    semantics. Subsequent commits layer wrap-time capture in
-   `hof-callable` (3) and type-checker propagation (4) on top.
+   `hof-wrap` (3) and type-checker propagation (4) on top.
 
    This function is PURE — it re-reads the graph every call (a handful
    of round trips through the storage's graph resolver — see

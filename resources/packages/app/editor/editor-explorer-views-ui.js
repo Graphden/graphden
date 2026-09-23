@@ -504,27 +504,7 @@ function installExplorerFilters() {
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installExplorerFilters);
 else installExplorerFilters();
 
-window.gdFilters = gdFilters;
-window.gdFiltersActive = gdFiltersActive;
-window.gdFilterCount = gdFilterCount;
-window.gdServerAxesActive = gdServerAxesActive;
-window.gdViewMembers = gdViewMembers;
-window.gdNsIncluded = gdNsIncluded;
-window.gdNsExcluded = gdNsExcluded;
-window.gdNsFiltersActive = gdNsFiltersActive;
-window.gdToggleKind = gdToggleKind;
-window.gdToggleNamespace = gdToggleNamespace;
-window.gdToggleExclude = gdToggleExclude;
-window.gdAddUses = gdAddUses;
-window.gdToggleEffect = gdToggleEffect;
-window.gdToggleUnused = gdToggleUnused;
-window.gdClearFilters = gdClearFilters;
-window.gdApplyView = gdApplyView;
-window.gdSaveView = gdSaveView;
-window.gdDeleteView = gdDeleteView;
-window.gdReadViews = gdReadViews;
-window.gdActiveViewName = gdActiveViewName;
-window.gdRefreshViewMembers = gdRefreshViewMembers;
+// The filter model's own exports live in editor-explorer-filters.js.
 window.gdOpenViewPop = gdOpenViewPop;
 window.gdOpenFilterAdd = gdOpenFilterAdd;
 window.gdRenderFilterChips = gdRenderFilterChips;

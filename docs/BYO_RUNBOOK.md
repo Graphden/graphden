@@ -35,7 +35,11 @@ org is on a **paid tier** — the byo flip is tier-gated (`network` /
    `POST /api/orgs/plan {name, plan=network}`.
 3. **Mint the executor's token**: an account in the org mints a scoped API
    token via `POST /api/my-tokens` (label it, scope it — the executor only
-   READS, so an execute/write-free scope set is right). On a bare
+   READS, so an execute/write-free scope set is right). The token is the
+   ACCOUNT's, and an account belongs to several orgs (its personal one at
+   least): the executor names its org with `GRAPHDEN_EXECUTOR_ORG`, sent on
+   every hub call as the org selector, so the bundle and the SSE stream are
+   that org's whichever other orgs the account is in. On a bare
    self-hosted hub (no accounts/tenancy) the single `AUTH_TOKEN` plays this
    role instead.
 4. **Flip the org**: `POST /api/orgs/execution-mode {name,

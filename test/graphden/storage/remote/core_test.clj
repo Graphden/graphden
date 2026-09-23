@@ -139,9 +139,11 @@
                 :slots [] :fn-slots [] :bindings [] :list-items []}
         seen-auth (atom nil)
         seen-branch (atom :unset)
+        seen-cookie (atom :unset)
         handler (fn [req]
                   (reset! seen-auth (get-in req [:headers "authorization"]))
                   (reset! seen-branch (get-in req [:headers "x-graphden-branch"]))
+                  (reset! seen-cookie (get-in req [:headers "cookie"]))
                   (if (= "/api/export/graph-rows" (:uri req))
                     {:status 200
                      :headers {"Content-Type" "application/edn"}
@@ -165,6 +167,15 @@
           (reset! seen-branch :unset)
           (remote/refresh! rs)
           (is (= "dev" @seen-branch) "refresh! re-fetches the same branch")))
+      (testing "an org pin sends the hub's org selector on bootstrap AND refresh —
+                a token's account belongs to several orgs (its personal one at
+                least), and without it the hub served the sorted-first one"
+        (is (nil? @seen-cookie) "no org → no selector")
+        (let [rs (remote/create-remote-storage (str "http://localhost:" port) "tok" nil "acme")]
+          (is (= "gd_org=acme" @seen-cookie))
+          (reset! seen-cookie :unset)
+          (remote/refresh! rs)
+          (is (= "gd_org=acme" @seen-cookie))))
       (finally (stop)))))
 
 

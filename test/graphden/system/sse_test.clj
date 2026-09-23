@@ -134,8 +134,11 @@
                      {:authenticated? (some? (get-in req [:headers "authorization"]))
                       :user-id "acct-1"}))
         request-scope (fn [_ctx req thunk]
-                        (case (get-in req [:headers "authorization"])
-                          "Bearer member" (tc/with-org "acme" (thunk))
+                        ;; Membership resolution, narrowed by the org
+                        ;; selector the BYO source sends (`:org`).
+                        (if (and (= "Bearer member" (get-in req [:headers "authorization"]))
+                                 (= "gd_org=acme" (get-in req [:headers "cookie"])))
+                          (tc/with-org "acme" (thunk))
                           {:status 403 :body "cross-org"}))
         listener {:callbacks (atom #{})}
         relay (sse/start-relay! {:port 0 :notify-listener listener :auth-provider provider
@@ -144,6 +147,7 @@
         src (remote-sse/start-source!
               {:hub-url (str "http://localhost:" (relay-port relay))
                :token "member"
+               :org "acme"
                :on-event (fn [e] (swap! got conj e))})]
     (try
       (is (wait/wait-for 3000 #(= ["acme"] (vals @(:subscribers relay))))

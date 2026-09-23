@@ -36,6 +36,24 @@
 ;; Bundle fetch — GET /api/export/graph-rows
 ;; =============================================================================
 
+(def ^:private org-selector-cookie
+  "The hub's org-SELECTOR cookie (docs/ACCOUNTS.md — `POST /api/switch-org`
+   sets it for a browser). A BYO token belongs to an ACCOUNT, and an account
+   is a member of several orgs (every account has its personal org), so
+   without a selector the hub resolves the request to the account's
+   sorted-first membership — not necessarily the org this executor serves.
+   Selection only: the hub validates it against the memberships."
+  "gd_org")
+
+
+(defn hub-headers
+  "Request headers for a hub call as `org` (nil ⇒ no selector — the hub
+   picks): the bearer, plus the org-selector cookie."
+  [token org]
+  (cond-> {"Authorization" (str "Bearer " token)}
+    (seq (str org)) (assoc "Cookie" (str org-selector-cookie "=" org))))
+
+
 (def ^:private bundle-key->entity
   "The export bundle's plural keys → entity-name keywords used in queries."
   {:fns :fn
@@ -55,11 +73,13 @@
 
    `branch` (nil ⇒ the org's main branch) pins the bootstrap to one branch via
    the same `X-Graphden-Branch` header the editor uses — so a BYO executor can
-   serve prod or dev, not only main."
-  ([hub-url token] (fetch-graph-rows hub-url token nil))
-  ([hub-url token branch]
+   serve prod or dev, not only main. `org` selects which of the token
+   account's orgs the bundle is for (`hub-headers`)."
+  ([hub-url token] (fetch-graph-rows hub-url token nil nil))
+  ([hub-url token branch] (fetch-graph-rows hub-url token branch nil))
+  ([hub-url token branch org]
    (let [url (str hub-url "/api/export/graph-rows")
-         headers (cond-> {"Authorization" (str "Bearer " token)}
+         headers (cond-> (hub-headers token org)
                    branch (assoc "X-Graphden-Branch" branch))
          resp @(http/get url {:headers headers :timeout 30000 :as :text})]
      (when-let [err (:error resp)]
@@ -237,14 +257,18 @@
   "Bootstrap a RemoteStorage: fetch the whole graph from `hub-url` (org +
    public, authenticated with `token`) into memory. `hub-url` is the platform
    base URL, e.g. \"https://acme.graphden.app\". `branch` (nil ⇒ main) pins it
-   to one branch — `refresh!` re-fetches the same branch."
-  ([hub-url token] (create-remote-storage hub-url token nil))
-  ([hub-url token branch]
-   (let [rows (fetch-graph-rows hub-url token branch)]
+   to one branch — `refresh!` re-fetches the same branch. `org` (nil ⇒ the
+   hub picks) selects which of the token account's orgs it serves, and is
+   kept on the storage for `refresh!`."
+  ([hub-url token] (create-remote-storage hub-url token nil nil))
+  ([hub-url token branch] (create-remote-storage hub-url token branch nil))
+  ([hub-url token branch org]
+   (let [rows (fetch-graph-rows hub-url token branch org)]
      (log/info "RemoteStorage bootstrapped"
-               {:hub hub-url :branch branch
+               {:hub hub-url :branch branch :org org
                 :counts (into {} (map (fn [[k v]] [k (count v)])) rows)})
-     (->RemoteStorage (atom rows) hub-url token branch))))
+     (cond-> (->RemoteStorage (atom rows) hub-url token branch)
+       org (assoc :org org)))))
 
 
 (defn refresh!
@@ -252,9 +276,9 @@
    invalidation source when the hub signals a change. Best-effort: on a fetch
    error the previous snapshot is kept and the error logged, so a transient
    blip doesn't blank the executor's graph."
-  [{:keys [rows hub-url token branch]}]
+  [{:keys [rows hub-url token branch org]}]
   (try
-    (reset! rows (fetch-graph-rows hub-url token branch))
+    (reset! rows (fetch-graph-rows hub-url token branch org))
     (log/info "RemoteStorage refreshed" {:hub hub-url :branch branch})
     true
     (catch Exception e

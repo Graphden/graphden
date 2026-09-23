@@ -15,6 +15,7 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.storage.postgres.notify :as pg-notify]
+    [graphden.storage.remote.core :as remote]
     [graphden.util.backoff :as backoff])
   (:import
     (java.io
@@ -58,10 +59,11 @@
    close it — `Thread/.interrupt` does NOT unblock `BufferedReader.readLine`
    on a plain socket stream, so closing the body underneath the read is the
    only way to break out promptly on stop."
-  [client hub-url token on-event on-connect running? body-atom]
+  [client hub-url token org on-event on-connect running? body-atom]
   (let [url (str hub-url "/events/stream")
-        req (-> (HttpRequest/newBuilder (URI/create url))
-                (HttpRequest$Builder/.header "Authorization" (str "Bearer " token))
+        req (-> (reduce-kv HttpRequest$Builder/.header
+                           (HttpRequest/newBuilder (URI/create url))
+                           (remote/hub-headers token org))
                 (HttpRequest$Builder/.GET)
                 (HttpRequest$Builder/.build))
         resp (HttpClient/.send client req (HttpResponse$BodyHandlers/ofInputStream))
@@ -96,8 +98,10 @@
    running. Returns a handle for `stop-source!`.
 
    `on-event` receives the parsed `{:kind :op :id :branch-id}` map — the same
-   shape `graphden_events` delivers locally."
-  [{:keys [hub-url token on-event on-connect]}]
+   shape `graphden_events` delivers locally. `org` (optional) selects which of
+   the token account's orgs the relay registers this stream under
+   (`remote/hub-headers`) — the events it is woken by."
+  [{:keys [hub-url token org on-event on-connect]}]
   (let [running? (atom true)
         ;; ONE HttpClient for the source's whole life — reused across every
         ;; reconnect. Creating it per-attempt (as before) leaked a
@@ -111,7 +115,7 @@
                  (fn []
                    (loop [backoff-ms backoff/initial-ms]
                      (when @running?
-                       (let [ok? (try (stream-once! client hub-url token on-event
+                       (let [ok? (try (stream-once! client hub-url token org on-event
                                                     on-connect running? body-atom)
                                       true
                                       (catch Exception e

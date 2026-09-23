@@ -216,6 +216,69 @@ function graphShellFromTree(tree) {
 // INITIALIZATION
 // ============================================================================
 
+// ----------------------------------------------------------------------------
+// The shared RELOAD PHASE of `initGraph` (boot + structural refresh) and
+// `loadGraphData` (post-mutation refresh). Both replace the whole client
+// graph from a fresh `?scope=tree` payload; the two halves below are the
+// part they share, written once so the race fixes live in one place.
+// ----------------------------------------------------------------------------
+
+// Before the fetches: forget every per-fn cache so stale / renamed /
+// deleted rows don't linger. The sidebar re-fetches leaves for
+// still-expanded namespaces on its next render, and ensureSubtreeFor
+// re-primes the selected fn.
+function resetGraphCaches() {
+  _subtreeRootId = null;
+  _subtreeFetchInFlight.clear();
+  _knownFns = new Map();
+  _loadedNamespaceIds = new Set();
+}
+
+// After the fetches: install the fresh shell and what rides with it.
+// `typeResp` is the GET /api/types response (null / not-ok → the registry
+// is left as it was); `onTypesUnparseable(err)` decides what a broken body
+// means for the caller.
+async function installGraphShell(tree, typeResp, onTypesUnparseable) {
+  graphData = graphShellFromTree(tree);
+  // The shell has NO subtree — say so again. A selection's `ensureSubtreeFor`
+  // that landed during the caller's awaits set `_subtreeRootId` to its fn and
+  // put the rows into the OLD graphData; left standing, its guard
+  // (`root === fn && bindings is an array`) would take the shell's empty
+  // `[]` for that fn's rows and skip the refetch — a card whose list the
+  // layout draws while the client's lookups hold no binding for it
+  // (edit-seals e2e, 2026-09-20).
+  _subtreeRootId = null;
+  // Hydrate the fresh shell from the fn cache, not `buildLookups` alone:
+  // the cache was reset before the fetches, so whatever it holds now
+  // arrived DURING them — a lazy `loadNamespaceFns` the previous render
+  // started, whose fetch landed while the tree was in flight. It marked its
+  // namespace loaded and synced its rows into the OLD graphData; a shell
+  // built without them rendered that namespace as "loaded, no leaves" and
+  // never refetched (the edit-sidebar-filter flake: `initGraph` on top of a
+  // still-settling boot, 2026-09-19).
+  syncKnownFnsIntoGraph();
+  if (typeResp?.ok) {
+    try { richTypes = await typeResp.json(); } catch (err) { onTypesUnparseable(err); }
+    // Server-partial popovers key rich args by binding-id in
+    // `_rowActionsUseSiteArgs`; entries staled by this refresh would
+    // otherwise accumulate for the whole session.
+    if (typeof _rowActionsUseSiteArgs !== 'undefined') _rowActionsUseSiteArgs.clear();
+  }
+  // Resolve the secret-leaf base-fn id once so isSecretFn() stays
+  // synchronous without a full-fns mirror to scan.
+  if (typeof primeSecretLeafId === 'function') primeSecretLeafId();
+}
+
+// Repaint the Explorer from the installed shell. A graph write can change
+// who uses what / the views saved in the graph — drop the graph-views cache
+// and re-evaluate an active server-side filter set
+// (editor-explorer-filters.js).
+function repaintExplorer() {
+  if (typeof gdInvalidateSharedViews === 'function') gdInvalidateSharedViews();
+  updateEntityList(graphData);
+  if (typeof gdRefreshViewMembers === 'function') gdRefreshViewMembers();
+}
+
 /**
  * Initialize the graph editor
  */
@@ -230,10 +293,7 @@ async function initGraph() {
   //
   // `?scope=tree` — namespaces + counts only. Fn leaves load lazily per
   // expanded namespace; per-fn slots/bindings load via ensureSubtreeFor().
-  _subtreeRootId = null;
-  _subtreeFetchInFlight.clear();
-  _knownFns = new Map();
-  _loadedNamespaceIds = new Set();
+  resetGraphCaches();
   // Tree first, alone: on an auth-gated deployment an anonymous boot
   // used to fire all four fetches and paint FOUR red 401s into the
   // console before the sign-in prompt. The tree's status answers the
@@ -266,52 +326,18 @@ async function initGraph() {
     }
     return;
   }
-  graphData = graphShellFromTree(await entResp.json());
-  // The shell has NO subtree — say so again. A selection's `ensureSubtreeFor`
-  // that landed during the awaits above set `_subtreeRootId` to its fn and
-  // put the rows into the OLD graphData; left standing, its guard
-  // (`root === fn && bindings is an array`) would take the shell's empty
-  // `[]` for that fn's rows and skip the refetch — a card whose list the
-  // layout draws while the client's lookups hold no binding for it
-  // (edit-seals e2e, 2026-09-20).
-  _subtreeRootId = null;
-  // Hydrate the fresh shell from the fn cache, not `buildLookups` alone:
-  // the cache was reset at the top of this function, so whatever it holds
-  // now arrived DURING the awaits above — a lazy `loadNamespaceFns` the
-  // previous render started, whose fetch landed while the tree was in
-  // flight. It marked its namespace loaded and synced its rows into the
-  // OLD graphData; a shell built without them rendered that namespace as
-  // "loaded, no leaves" and never refetched (the edit-sidebar-filter
-  // flake: `initGraph` on top of a still-settling boot, 2026-09-19).
-  syncKnownFnsIntoGraph();
-  if (typeResp?.ok) {
-    try { richTypes = await typeResp.json(); } catch (err) {
-      console.error(API.api_types + ' JSON parse failed — type tooltips will be empty', err);
-      richTypes = {};
-    }
-    // Server-partial popovers key rich args by binding-id in
-    // `_rowActionsUseSiteArgs`; entries staled by this refresh would
-    // otherwise accumulate for the whole session.
-    if (typeof _rowActionsUseSiteArgs !== 'undefined') _rowActionsUseSiteArgs.clear();
-    // The type registry just (re)loaded, so any cached
-    // `/api/types/compatible` verdicts may now be stale. `initGraph` is
-    // also the fn-rename refresh path, where a retype changes the answers.
-  }
+  const tree = await entResp.json();
   if (vkResp?.ok) {
     try { VALUE_KINDS = await vkResp.json(); } catch (err) {
       console.error(API.api_value_kinds + ' JSON parse failed — type-picker may be incomplete', err);
       VALUE_KINDS = [];
     }
   }
-  // Resolve the secret-leaf base-fn id once so isSecretFn() stays
-  // synchronous without a full-fns mirror to scan.
-  if (typeof primeSecretLeafId === 'function') primeSecretLeafId();
-  // The Explorer's filters: a graph write can change who uses what / the
-  // views saved in the graph — drop the graph-views cache and re-evaluate
-  // an active server-side filter set (editor-explorer-filters.js).
-  if (typeof gdInvalidateSharedViews === 'function') gdInvalidateSharedViews();
-  updateEntityList(graphData);
-  if (typeof gdRefreshViewMembers === 'function') gdRefreshViewMembers();
+  await installGraphShell(tree, typeResp, (err) => {
+    console.error(API.api_types + ' JSON parse failed — type tooltips will be empty', err);
+    richTypes = {};
+  });
+  repaintExplorer();
   // Proactive plan-usage badge — the fn count just (re)loaded, so refresh it
   // after every graph mutation (create / delete / rename all call initGraph).
   if (typeof refreshQuotaBadge === 'function') refreshQuotaBadge();
@@ -339,16 +365,9 @@ async function initGraph() {
 // doesn't also re-fire the auth / hash navigation work.
 async function loadGraphData() {
   // Post-mutation refresh: re-fetch the namespace tree (counts can shift on
-  // create/delete/rename) AND re-prime the current subtree. The accumulating
-  // fn cache + per-ns load flags are reset so stale / renamed / deleted rows
-  // don't linger; the sidebar re-fetches leaves for still-expanded
-  // namespaces on its next render, and ensureSubtreeFor re-primes the
-  // selected fn below.
+  // create/delete/rename) AND re-prime the current subtree.
   const prevRoot = _subtreeRootId;
-  _subtreeRootId = null;
-  _subtreeFetchInFlight.clear();
-  _knownFns = new Map();
-  _loadedNamespaceIds = new Set();
+  resetGraphCaches();
   let treeResp;
   let typeResp;
   try {
@@ -371,22 +390,8 @@ async function loadGraphData() {
     console.error('loadGraphData HTTP', treeResp.status, treeResp.statusText);
     return;
   }
-  graphData = graphShellFromTree(await treeResp.json());
-  // Same as initGraph: the shell carries no subtree (a racing selection's
-  // fetch must not be taken for it), and a namespace load that landed
-  // during the tree fetch already lives in the (reset) cache — the shell
-  // must carry that.
-  _subtreeRootId = null;
-  syncKnownFnsIntoGraph();
-  if (typeResp?.ok) {
-    try { richTypes = await typeResp.json(); }
-    catch (_) { /* keep prior richTypes rather than blanking chips */ }
-    // Post-mutation refresh — prune the binding-id-keyed rich-arg
-    // registry the row-actions popover fills; stale entries would
-    // otherwise accumulate for the whole session.
-    if (typeof _rowActionsUseSiteArgs !== 'undefined') _rowActionsUseSiteArgs.clear();
-  }
-  if (typeof primeSecretLeafId === 'function') primeSecretLeafId();
+  // A broken types body keeps the prior richTypes rather than blanking chips.
+  await installGraphShell(await treeResp.json(), typeResp, () => {});
   // Re-fetch subtree for the previously-rendered fn so overlays /
   // type-chips reflect the mutation. `renderGraph` would do this
   // anyway, but a fresh prime here keeps any synchronous reads of
@@ -398,9 +403,7 @@ async function loadGraphData() {
       console.error('loadGraphData subtree refresh failed', err);
     }
   }
-  if (typeof gdInvalidateSharedViews === 'function') gdInvalidateSharedViews();
-  updateEntityList(graphData);
-  if (typeof gdRefreshViewMembers === 'function') gdRefreshViewMembers();
+  repaintExplorer();
 
   // Exactly one render: `selectFnByName` → `selectFn` → `renderGraph`
   // when a hash is present, else `renderGraph` directly. An earlier

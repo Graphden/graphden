@@ -34,6 +34,7 @@
     [graphden.perf.calibrate :as cal]
     [graphden.perf.sql :as psql]
     [graphden.system.branch-router :as br]
+    [graphden.system.branch-router.epoch :as br-epoch]
     [graphden.test-infra.shared-bootstrap :as sb]))
 
 
@@ -77,7 +78,7 @@
            ;; endpoint at all. Before the platform tests existed the pass
            ;; found nothing to run, which is why this never fired.
            (binding [*graph* graph
-                     br/*epoch-check-ttl-ms* (* 24 60 60 1000)
+                     br-epoch/*epoch-check-ttl-ms* (* 24 60 60 1000)
                      autorun/*auto-run?* false]
              ;; Calibrate once, here, against the same pool the scenarios use — a
              ;; reference measured on a different connection or at a different

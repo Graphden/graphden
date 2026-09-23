@@ -689,7 +689,8 @@ src/graphden/
 ├── util/               # Small shared helpers
 ├── system/             # Integrant lifecycle — config, init/* (per-concern init-keys),
 │                       #   branch_router (per-branch ctx + dispatch; also serves the
-│                       #   optional registry/mcp per-branch handlers), route_collection
+│                       #   optional registry/mcp per-branch handlers; branch_router/ =
+│                       #   request / cache / epoch heal / type recheck), route_collection
 │                       #   (the addon's fall-through router seam), sse (BYO relay)
 ├── executor_runtime/   # Main entry point (-main, shutdown hooks)
 ├── byo.clj             # BYO executor assembly (docs/SCALING.md § External / BYO)

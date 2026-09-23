@@ -664,7 +664,7 @@
 (def ^:dynamic *stale-revalidate-sync?*
   "Test seam. When true, `maybe-schedule-revalidate!` runs the background
    rebuild INLINE (deterministic) instead of on a daemon thread — mirrors
-   `branch-router/*epoch-heal-sync?*`."
+   `branch-router.epoch/*epoch-heal-sync?*`."
   false)
 
 
@@ -678,7 +678,7 @@
    `:registry-rebuild-inflight` CAS guard, so N concurrent requests that
    observe the flag still spawn only one rebuild.
 
-   Shape mirrors the epoch heal (`branch-router/heal-stale-ctxs!`): two
+   Shape mirrors the epoch heal (`branch-router.epoch/heal-stale-ctxs!`): two
    optimistic attempts (compile outside the invalidation lock, swap only if
    `:invalidation-count` didn't move mid-compile — a moved count means a
    newer write already patched the live registry and our snapshot would

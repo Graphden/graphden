@@ -292,26 +292,26 @@ The share-safety policy: vault paths are STRIPPED from bundles by default (the s
 :PROPERTIES:
 :CUSTOM_ID: packages/publish-package-apply
 :FILE: resources/packages/registry/registry/impls.clj
-:LINE: 139
+:LINE: 140
 :MINS: 2.1
 :END:
 
 Publish lands the bundle IN the graph: an immutable, content-hashed ~:package-version~ row (name + semver + fns + declared deps). Install is its mirror — ~materialize-package-fns~ syncs the pinned version's fns into a version-qualified ~@~-namespace and writes a ~:package-install~ pin; update/rollback rewrites refs between versions; fork copies copy-on-write with no pin.
 
-- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase publish-package-apply][resources/packages/registry/registry/impls.clj:139]]
+- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase publish-package-apply][resources/packages/registry/registry/impls.clj:140]]
 - same file :: [[file:packages.org::#packages/upsert-pin!][upsert-pin!]]
 
 * 23. upsert-pin!
 :PROPERTIES:
 :CUSTOM_ID: packages/upsert-pin!
 :FILE: resources/packages/registry/registry/impls.clj
-:LINE: 348
+:LINE: 349
 :MINS: 2.6
 :END:
 
 Where the marketplace's install COUNT comes from (docs/MARKETPLACE.md). A new pin is an install and bumps the global ~:package-stat~ row with an atomic ~INSERT … ON CONFLICT DO UPDATE~ over the pool — deliberately inside the pin write unit, like the invalidation an entity write owes, because a graph-side 'was it pinned?' probe is an effectful read a later ref would re-run AFTER the pin. Moving a pin (update / rollback) is not an install. Everything else the marketplace needs — listing normalisation, the cards' rating aggregate, the filters, the partials, the review upsert, the storefront bodies — is graph, four modules sharing the ~app.marketplace~ namespace: ~registry/marketplace{,-surface, -storefront,-moderation}/fns.edn~.
 
-- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defn- upsert-pin!][resources/packages/registry/registry/impls.clj:348]]
+- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defn- upsert-pin!][resources/packages/registry/registry/impls.clj:349]]
 - same file :: [[file:packages.org::#packages/publish-package-apply][publish-package-apply]]
 
 * 24. moderate-package-version!

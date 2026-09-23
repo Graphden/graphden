@@ -15,6 +15,8 @@
     [graphden.storage.postgres.notify :as pg-notify]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
+    [graphden.system.branch-router.cache :as br-cache]
+    [graphden.system.branch-router.epoch :as br-epoch]
     [graphden.util.executors :as executors]
     [graphden.versioning.branch-local :as bl]
     [graphden.versioning.storage.core :as vs]
@@ -212,7 +214,7 @@
                      ;; the gap stays visible and costs one coarse
                      ;; heal — safe, never wrong.
                      (when (seq epochs)
-                       (br/note-graph-epoch-covered! (:storage ctx) epochs)))
+                       (br-epoch/note-graph-epoch-covered! (:storage ctx) epochs)))
         :execution (when (and (= op :cancel) (not (str/blank? id)))
                      (persist/cancel-local! (java.util.UUID/fromString id)))
         nil)
@@ -278,7 +280,7 @@
     ;; Pin the branches with a running service: the router's heal and
     ;; idle sweep refresh those ctxs in place instead of dropping them,
     ;; so a service keeps running on the ctx the router serves.
-    (br/set-pinned-branches-fn!
+    (br-cache/set-pinned-branches-fn!
       #(into #{} (keep (fn [e] (when (map? e) (:branch-id e))))
              (vals @recon/running)))
     (let [callback (when notify-listener
@@ -295,7 +297,7 @@
 (defmethod ig/halt-key! :exec/service-reconciler
   [_ {:keys [running context notify-listener notify-callback ticker stop-all-fn]}]
   (log/info "Stopping service reconciler...")
-  (br/set-pinned-branches-fn! nil)
+  (br-cache/set-pinned-branches-fn! nil)
   (executors/shutdown-and-await! ticker)
   (when (and notify-listener notify-callback)
     (pg-notify/unregister! notify-listener notify-callback))

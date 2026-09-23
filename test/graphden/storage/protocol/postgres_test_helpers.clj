@@ -87,8 +87,8 @@
   ;; carried over from the previous deftest makes the next router see a
   ;; sequence REGRESSION one TTL later — a heal mid-test that drops the
   ;; branch ctx the test is holding. Fresh DB, fresh epoch state.
-  (require 'graphden.system.branch-router)
-  ((resolve 'graphden.system.branch-router/reset-epoch-state!)))
+  (require 'graphden.system.branch-router.epoch)
+  ((resolve 'graphden.system.branch-router.epoch/reset-epoch-state!)))
 
 
 (defn clean-database-iterative!

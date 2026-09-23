@@ -379,7 +379,8 @@
    :status :toured
    :summary "The VersionedStorage decorator, per-branch resolution, diff/merge
              and branch-local? propagation."
-   :paths ["src/graphden/versioning/" "src/graphden/system/branch_router.clj"]
+   :paths ["src/graphden/versioning/" "src/graphden/system/branch_router.clj"
+           "src/graphden/system/branch_router/"]
    :after [:storage]
    :steps
    [{:ns graphden.versioning.storage.core :defn wrap-with-versioning
@@ -561,7 +562,17 @@
            live request finally lands in the correct per-branch context. Its
            public wrapper `dispatch` first short-circuits `/livez` — the one
            registry-independent liveness path — so a pod busy on a full
-           recompile still answers its probe."}]}
+           recompile still answers its probe."}
+    {:ns graphden.system.branch-router.epoch :defn validate-graph-epoch!
+     :say "The other half of the epoch bump from a few steps back: on every
+           ctx fetch the router compares the sequence against its
+           watermark and classifies each epoch in between — applied here,
+           covered by a sibling's NOTIFY, still in flight, or missed. A
+           missed one heals: the base ctx rebuilds in the background
+           (stale-while-revalidate) and every other cached branch ctx is
+           dropped to rebuild on demand. The router namespace orchestrates;
+           this one, `.cache` (eviction) and `.recheck` (type slices) sit
+           underneath it."}]}
 
   {:id :types
    :title "Type system"

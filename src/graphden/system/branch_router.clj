@@ -16,93 +16,32 @@
    piggybacks on the existing `invalidate-graph-cache!` (the branch
    ctx's compiled-registry atom is cleared, and our cached Ring
    callable re-reads the registry on every call so the next request
-   picks up a fresh rebuild)."
+   picks up a fresh rebuild).
+
+   Split by concern into sub-namespaces this one orchestrates:
+   `.request` (what a Ring request asks for — branch ref, page load,
+   `/livez`), `.cache` (dropping cached entries + the pinned-branches
+   seam), `.epoch` (graph-epoch validation and the self-heal) and
+   `.recheck` (re-recording types into a ctx's rich-types slice)."
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.crud.debug-capture :as debug-capture]
     [graphden.crud.fn-execution.lookup :as fn-lookup]
-    [graphden.crud.type-check :as type-check]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as ctx]
     [graphden.executor.registry.core :as registry-core]
-    [graphden.packages.records :as records]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
+    [graphden.system.branch-router.cache :as cache]
+    [graphden.system.branch-router.epoch :as router-epoch]
+    [graphden.system.branch-router.recheck :as recheck]
+    [graphden.system.branch-router.request :as br-req]
     [graphden.system.route-collection :as rc]
-    [graphden.util.counters :as counters]
-    [graphden.util.ns-path :as ns-path]
-    [graphden.versioning.branch-local :as bl]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.merge :as vmerge]
     [graphden.versioning.storage.resolution :as vres]))
-
-
-;; =============================================================================
-;; Header / query extraction
-;; =============================================================================
-
-(def header-name
-  "Lowercased Ring-style header key the dispatcher reads."
-  "x-graphden-branch")
-
-
-(def query-param
-  "URL query-string key the dispatcher reads when no header is set."
-  "branch")
-
-
-(defn- parse-branch-from-query
-  [query-string]
-  (when (and query-string (not (str/blank? query-string)))
-    (some (fn [pair]
-            (let [[^String k ^String v] (str/split pair #"=" 2)]
-              (when (= query-param (java.net.URLDecoder/decode k "UTF-8"))
-                (some-> v (java.net.URLDecoder/decode "UTF-8")))))
-          (str/split query-string #"&"))))
-
-
-(defn extract-branch-ref
-  "Returns the branch ref the request asks for, or nil for default.
-   Header wins over query param — explicit programmatic API beats
-   shareable-URL convenience. Empty / blank values count as nil."
-  [request]
-  (let [hdr (get-in request [:headers header-name])
-        qs (parse-branch-from-query (:query-string request))
-        chosen (or (some-> hdr (str/trim) (#(when-not (str/blank? %) %)))
-                   (some-> qs (str/trim) (#(when-not (str/blank? %) %))))]
-    chosen))
-
-
-(defn document-navigation?
-  "Is this a browser NAVIGATION (a page load), rather than an API/XHR
-   call? A GET whose `Accept` asks for HTML — Fetch/XHR from the editor
-   ask for JSON or `*/*`, and htmx sends `HX-Request`. Used to answer a
-   stale `?branch=` with a redirect instead of a 400 the browser would
-   render as a dead page."
-  [request]
-  (let [headers (:headers request)
-        accept (or (get headers "accept") "")]
-    (and (= :get (:request-method request))
-         (not (get headers "hx-request"))
-         (str/includes? accept "text/html"))))
-
-
-(defn uri-without-branch
-  "The same URL with `branch` stripped from the query string — where a
-   navigation naming a dead branch gets sent."
-  [request]
-  (let [qs (:query-string request)
-        kept (when qs
-               (->> (str/split qs #"&")
-                    (remove #(or (str/blank? %)
-                                 (str/starts-with? % "branch=")
-                                 (= % "branch")))
-                    (str/join "&")))]
-    (if (str/blank? kept)
-      (:uri request)
-      (str (:uri request) "?" kept))))
 
 
 ;; =============================================================================
@@ -271,36 +210,6 @@
              m))))
 
 
-(defonce ^:private pinned-branches-fn
-  ;; Seam: `(fn [] #{branch-id …})` — the branches whose cached ctx must
-  ;; NOT be dropped by a heal, the idle sweep or the LRU cap. Registered by the
-  ;; service reconciler (`init/services`): a running per-branch service
-  ;; holds its ctx by reference, so dropping the router's entry left the
-  ;; service on a registry nobody refreshes while every request built a
-  ;; second, divergent ctx for the same branch. nil = no pins.
-  (atom nil))
-
-
-(defn set-pinned-branches-fn!
-  "Install (or clear, with nil) the pinned-branches seam — see
-   `pinned-branches-fn`."
-  [f]
-  (reset! pinned-branches-fn f))
-
-
-(defn- pinned-branches
-  "The set of branch ids whose ctx a heal refreshes in place and the idle
-   sweep + LRU cap leave alone; empty when no seam is registered or it
-   throws."
-  []
-  (or (when-let [f @pinned-branches-fn]
-        (try (set (f))
-             (catch Exception e
-               (log/warn e "pinned-branches seam failed; treating as none")
-               nil)))
-      #{}))
-
-
 (defn- evict-lru-if-full
   "If the cache is at `max-size` AND inserting `new-id` would push
    it past, drop the oldest non-default, non-pinned entry. The
@@ -406,157 +315,6 @@
           (into (set chain) merge-sources))))
 
 
-;; === Ctx-build diagnostics recompute (error-tolerance, ROADMAP § Error
-;; Tolerance) ==================================================================
-;;
-;; The per-branch type-diagnostics store (`graphden.types.diagnostics`) is
-;; DERIVED, in-memory state: after a JVM restart the package sync sweep
-;; re-records first-party fns, but an EDITOR-AUTHORED fn broken before the
-;; restart would stay absent — invisible in the error panel and, worse,
-;; admitted by the Phase 4 execute-refusal gate (absence = allow). Closing
-;; that gap here: whenever a branch ctx is built (boot seed of the default
-;; branch, lazy build / LRU re-build of any other), re-run the post-mutation
-;; check for the branch's editor-authored fns ASYNCHRONOUSLY so the store
-;; repopulates without blocking the request that triggered the build.
-
-(def ^:dynamic *recheck-user-fns?*
-  "Off-switch for the ctx-build diagnostics recompute (default on).
-   Bind false in tests that must not see background type-check writes."
-  true)
-
-
-(def ^:private max-user-fn-recheck
-  "Upper bound on how many editor-authored fns one ctx build will
-   re-check. A branch beyond this logs a warn and skips — the ROADMAP
-   restart caveat then still applies to it (huge editor graphs are
-   rare; the bound keeps a pathological branch from soaking a core)."
-  500)
-
-
-(defn- user-authored-fn-ids
-  "IDs of the branch's editor-authored composed fns — named, non-anon
-   rows whose id is NOT the deterministic package derivation
-   `uuid-v5(ns-path, name)` (see docs/adr/ADR-identity-model.md: the
-   package-sync world derives ids from names; the editor world mints
-   `random-uuid`s). Package fns are excluded because the sync sweep
-   already re-records them at boot."
-  [storage]
-  (let [fn-rows (sp/query-entities storage :fn {})
-        ns-path (ns-path/path-map (sp/query-entities storage :ns {}))]
-    (into []
-          (keep (fn [row]
-                  (when (and (:name row)
-                             (seq (:parent-ids row))
-                             (nil? (:anonymous-hash row))
-                             (not (str/starts-with? (:name row) "_anon-"))
-                             (not= (:id row)
-                                   (some-> (:namespace-id row)
-                                           ns-path
-                                           (records/fn-id (keyword (:name row))))))
-                    (:id row))))
-          fn-rows)))
-
-
-(defn- recheck-user-fns!
-  "Re-run `type-check-fn-after-mutation!` for every editor-authored fn
-   visible on `branch-ctx`'s branch, repopulating the per-branch
-   diagnostics store (failure records, success clears). Best-effort:
-   any throw is logged and swallowed — a diagnostics gap must never
-   fail a ctx build or a request."
-  [branch-ctx branch-id]
-  (try
-    (let [storage (:storage branch-ctx)
-          ids (user-authored-fn-ids storage)]
-      (cond
-        (empty? ids) nil
-
-        (> (count ids) max-user-fn-recheck)
-        (log/warn (str "skipping ctx-build diagnostics recompute — user-fn count over bound; "
-                       "this branch's rich-types slice may miss branch-authored fns "
-                       "until they are edited (post-eviction rebuild re-forks from base)")
-                  {:branch-id branch-id :count (count ids)
-                   :cap max-user-fn-recheck})
-
-        :else
-        (do (doseq [id ids]
-              (try
-                (type-check/type-check-fn-after-mutation! storage id)
-                (catch Exception t
-                  (log/debug t "ctx-build diagnostics recheck failed for fn"
-                             {:branch-id branch-id :fn-id id}))))
-            (log/debug "ctx-build diagnostics recompute done"
-                       {:branch-id branch-id :checked (count ids)}))))
-    (catch Exception t
-      ;; Includes storages a test hand-constructed without :fn/:ns tables.
-      (log/debug t "ctx-build diagnostics recompute failed"
-                 {:branch-id branch-id}))))
-
-
-(def ^:dynamic *ctx-build-async-recheck?*
-  "Test seam: bind false to SKIP the background user-fn recompute a ctx
-   build schedules, so a test can assert what the build itself recorded
-   synchronously (the branch's own fns) without racing the future."
-  true)
-
-
-(defn- schedule-user-fn-recheck!
-  "Fire `recheck-user-fns!` on a background future. `future` conveys
-   the caller's dynamic bindings (org context, the diagnostics-store
-   override the parallel test plugin binds, THIS ctx's rich-types
-   slice), so the recompute records into the same stores the
-   triggering thread would."
-  [branch-ctx branch-id]
-  (when (and *recheck-user-fns?* *ctx-build-async-recheck?*)
-    (future (recheck-user-fns! branch-ctx branch-id)))
-  nil)
-
-
-(defn- record-fn-types!
-  "Re-run the type-check for exactly `fn-ids` under `branch-ctx`'s own
-   slices (rich-types + per-org), SYNCHRONOUSLY — the caller decides
-   whether to run it inline or on a future. Best-effort per fn."
-  [branch-ctx branch-id fn-ids]
-  (binding [registry-core/*rich-types-override*
-            (or (:rich-types-atom branch-ctx) registry-core/*rich-types-override*)
-            registry-core/*per-org-rich-override*
-            (or (:per-org-rich-atom branch-ctx) registry-core/*per-org-rich-override*)]
-    (doseq [id fn-ids]
-      (try
-        (type-check/type-check-fn-after-mutation! (:storage branch-ctx) id)
-        (catch Exception t
-          (log/debug t "slice type re-record failed for fn"
-                     {:branch-id branch-id :fn-id id}))))))
-
-
-(defn recheck-ctx-types!
-  "Re-record rich-types (+ diagnostics) INTO `branch-ctx`'s own
-   rich-types slice — the propagation channel between per-branch
-   slices. `fn-ids` non-empty → re-check exactly that set (a write's
-   blast radius); empty/nil → the bounded full user-fn sweep.
-
-   Why this exists: a slice only ever learns types from type-checks
-   RUN UNDER ITS BINDING. A merge into a branch, or a base-branch
-   edit inherited by a cached child, changes what the child RESOLVES
-   without any check running on the child — its slice would stay
-   stale forever (the default branch's entry is pinned and never
-   rebuilt; non-default entries heal on rebuild only). Async +
-   best-effort, same contract as the ctx-build recompute."
-  [branch-ctx branch-id fn-ids]
-  (when *recheck-user-fns?*
-    (let [work (fn []
-                 (if (seq fn-ids)
-                   (record-fn-types! branch-ctx branch-id fn-ids)
-                   (binding [registry-core/*rich-types-override*
-                             (or (:rich-types-atom branch-ctx)
-                                 registry-core/*rich-types-override*)
-                             registry-core/*per-org-rich-override*
-                             (or (:per-org-rich-atom branch-ctx)
-                                 registry-core/*per-org-rich-override*)]
-                     (recheck-user-fns! branch-ctx branch-id))))]
-      (future (work))))
-  nil)
-
-
 (defn- build-actual-entry!
   "Lazy-compile per-branch ctx + Ring callable. Fast path: when the
    branch is graph-identical to its base (no own version rows, no
@@ -595,53 +353,46 @@
         own-fn-ids (when-not merge-target?
                      (chain-divergent-fn-ids base-storage default-branch-id branch-id))
         base-registry (some-> (:compiled-registry base-ctx) deref)]
-    (binding [registry-core/*rich-types-override* (:rich-types-atom branch-ctx)
-              registry-core/*per-org-rich-override* (:per-org-rich-atom branch-ctx)]
-      (cond
-        ;; 1. Identical to base → reuse the base registry directly.
-        (and base-registry (not merge-target?) (empty? own-fn-ids))
-        (cr/instantiate-from-templates! base-ctx branch-ctx)
+    (recheck/call-with-ctx-slices
+      branch-ctx
+      (fn []
+        (cond
+          ;; 1. Identical to base → reuse the base registry directly.
+          (and base-registry (not merge-target?) (empty? own-fn-ids))
+          (cr/instantiate-from-templates! base-ctx branch-ctx)
 
-        ;; 2. Divergent from main by own OR inherited version rows → delta-compile
-        ;;    on top of base.
-        ;;    A branch differs from main by a handful of fns; a full rebuild of
-        ;;    the whole ~3700-fn graph for that was measured at ~57s and BLOCKS the
-        ;;    executor (a divergent branch whose ctx was evicted from the LRU pays it
-        ;;    on next access — the `compile-all` cache is keyed by graph shape, so a
-        ;;    branch edit changes the shape and misses). Reuse the base's closures
-        ;;    for every unchanged fn; recompile only the fns this branch overrides
-        ;;    (+ their reverse-dep closure) against the branch's view.
-        (and base-registry (not merge-target?) (seq own-fn-ids))
-        (do
-          ;; Seed the branch registry + reverse-dep index from the base, but NOT the
-          ;; base graph-cache — leave it empty so `delta-recompile!` reads the
-          ;; BRANCH's resolved graph and compiles the overrides against it.
-          (reset! (:compiled-registry branch-ctx) base-registry)
-          (when-let [src-deps (some-> (:compile-deps base-ctx) deref)]
-            (when-let [holder (:compile-deps branch-ctx)]
-              (reset! holder src-deps)))
-          (cr/delta-recompile! branch-ctx (set own-fn-ids))
-          ;; The slice forked from the base knows nothing about THIS
-          ;; branch's own fns: record them now, before the entry is
-          ;; served. The async recompute below covers the rest, but it
-          ;; used to cover these too — so the first `/api/types` after a
-          ;; rebuild (a heal, an eviction) could miss a branch-authored
-          ;; fn until the future landed (main-CI flake:
-          ;; `rich-types-registry-branch-scope-test` on a slow runner).
-          ;; Bounded like the sweep; a wider divergence stays async.
-          (when (and *recheck-user-fns?*
-                     (<= (count own-fn-ids) max-user-fn-recheck))
-            (record-fn-types! branch-ctx branch-id own-fn-ids)))
+          ;; 2. Divergent from main by own OR inherited version rows → delta-compile
+          ;;    on top of base.
+          ;;    A branch differs from main by a handful of fns; a full rebuild of
+          ;;    the whole ~3700-fn graph for that was measured at ~57s and BLOCKS the
+          ;;    executor (a divergent branch whose ctx was evicted from the LRU pays it
+          ;;    on next access — the `compile-all` cache is keyed by graph shape, so a
+          ;;    branch edit changes the shape and misses). Reuse the base's closures
+          ;;    for every unchanged fn; recompile only the fns this branch overrides
+          ;;    (+ their reverse-dep closure) against the branch's view.
+          (and base-registry (not merge-target?) (seq own-fn-ids))
+          (do
+            ;; Seed the branch registry + reverse-dep index from the base, but NOT the
+            ;; base graph-cache — leave it empty so `delta-recompile!` reads the
+            ;; BRANCH's resolved graph and compiles the overrides against it.
+            (reset! (:compiled-registry branch-ctx) base-registry)
+            (when-let [src-deps (some-> (:compile-deps base-ctx) deref)]
+              (when-let [holder (:compile-deps branch-ctx)]
+                (reset! holder src-deps)))
+            (cr/delta-recompile! branch-ctx (set own-fn-ids))
+            ;; The slice forked from the base knows nothing about THIS
+            ;; branch's own fns: record them now, before the entry is served.
+            (recheck/record-own-fn-types! branch-ctx branch-id own-fn-ids))
 
-        ;; 3. Merge target (merged fns own their rows on the source, not cheaply
-        ;;    seedable here), or cold start with no base registry → full compile.
-        :else
-        (cr/rebuild! branch-ctx))
-      ;; Error-tolerance: repopulate the branch's derived diagnostics for
-      ;; editor-authored fns (async; see § Ctx-build diagnostics recompute).
-      ;; Inside the binding: `future` conveys it, so the recheck records
-      ;; into THIS branch's slice.
-      (schedule-user-fn-recheck! branch-ctx branch-id))
+          ;; 3. Merge target (merged fns own their rows on the source, not cheaply
+          ;;    seedable here), or cold start with no base registry → full compile.
+          :else
+          (cr/rebuild! branch-ctx))
+        ;; Error-tolerance: repopulate the branch's derived diagnostics for
+        ;; editor-authored fns (async; see § Ctx-build diagnostics recompute).
+        ;; Inside the binding: `future` conveys it, so the recheck records
+        ;; into THIS branch's slice.
+        (recheck/schedule-user-fn-recheck! branch-ctx branch-id)))
     {:ctx branch-ctx
      :handler (compose-branch-handler branch-ctx handler-fn-id optional-handler-fn-ids)
      :built-at (java.time.Instant/now)
@@ -669,7 +420,7 @@
    Returns `entry` regardless (the request in flight is still served from
    it even when the cache install is discarded)."
   [{:keys [handlers build-monitors]} branch-id entry max-size default-branch-id gen-holder gen0]
-  (let [pinned (pinned-branches)
+  (let [pinned (cache/pinned-branches)
         [old new] (swap-vals!
                     handlers
                     (fn [m]
@@ -734,296 +485,6 @@
                               default-branch-id nil 0)))))
 
 
-;; === Graph-epoch lazy validation (audit-6) ==================================
-;;
-;; Freshness self-heal: every graph-shaped write bumps a Postgres
-;; sequence BEFORE the write (storage.postgres.graph-epoch). The eager
-;; invalidate + NOTIFY remain latency optimizations; when either is
-;; skipped (client abort on the request thread, a write path with no
-;; NOTIFY, a lost NOTIFY), the router discovers it here — on context
-;; fetch — and invalidates every cached ctx once. Eager paths call
-;; `note-graph-epoch-validated!` after finishing so their own writes
-;; never trigger the heal.
-
-(defonce ^{:doc "Pod-wide epoch state: {:w watermark :read {:value :at}}.
-  :w = the newest epoch through which EVERY effect is known applied to
-  this pod's caches; :read = the TTL-cached global sequence read.
-  Advancing :w requires the whole (w, global] range to be accounted
-  for by the handle's ledger (audit-7 FINDING 1: the old scalar
-  max-advance silently skipped past interleaved foreign epochs whose
-  NOTIFY was lost). Tests isolate via *epoch-state-override* (wired
-  into the parallel plugin's isolation-vars)."}
-  global-epoch-state
-  (atom {:w 0 :read {:value nil :at 0}}))
-
-
-(def ^:dynamic *epoch-state-override* nil)
-
-
-(defn epoch-state-seed
-  "Fresh per-thread epoch state for the parallel test plugin's
-   isolation binding."
-  []
-  {:w 0 :read {:value nil :at 0}})
-
-
-(defn- epoch-state
-  []
-  (or *epoch-state-override* global-epoch-state))
-
-
-(defn reset-epoch-state!
-  "Forget everything this pod (or, under the parallel test plugin, this
-   NS-thread) knows about the graph-epoch sequence: watermark back to 0,
-   the TTL-cached global read dropped. For the test helper that DROPS
-   the schema between deftests — the sequence restarts at 1 while the
-   thread's state still says `w=11, read=11 (fresh)`, so the NEXT
-   router's first dispatch trusts the cached read, and the one after
-   it (TTL expired) sees a 'regression' and heals — dropping the
-   branch ctx whose handler the test had just swapped in
-   (`dispatch-routes-to-per-branch-ctx-end-to-end-test`, main CI
-   ). Never called in production: a real sequence restart is
-   a DB restore, and the regression path is the right answer there."
-  []
-  (reset! (epoch-state) (epoch-state-seed)))
-
-
-(def ^:dynamic *epoch-check-ttl-ms*
-  "Floor between two sequence reads — bounds the heal's staleness
-   window AND its hot-path cost to one tiny SELECT per TTL. Dynamic so
-   tests can force immediate checks."
-  1000)
-
-
-(def ^:dynamic *epoch-heal-grace-ms*
-  "How long an UN-NOTED local bump may age before it is treated as an
-   aborted eager path and healed. This no longer suppresses healing of
-   FOREIGN gaps — a missed sibling write heals immediately regardless
-   of local write activity (the first design's 10s blanket suppression
-   was the amplifier that let local notes bury foreign epochs).
-
-   Must exceed the abort-shield join budget (30 s): a write that is
-   merely SLOW — still inside its request, its note still to come — must
-   never read as aborted, because the heal it would trigger stalls the
-   next writes past the budget, whose un-noted bumps trigger the next
-   heal (the e2e heal storm: one 27 s namespace move, then a
-   heal every 30 s until the stack died)."
-  45000)
-
-
-(defn note-graph-epoch-validated!
-  "Eager-invalidation tail: mark this request's bumps APPLIED in the
-   handle ledger (drains `epoch/*request-bump-log*`; 2-arity takes
-   explicit values for off-thread tails like the merge post-commit).
-   Never advances the watermark — the validator does, and only when
-   the whole range is accounted for. Forgetting a call site ages the
-   bump past grace and costs one spurious heal, never a wrong result."
-  ([storage]
-   (epoch/note-applied! (or (:base-storage storage) storage)))
-  ([storage vs]
-   (epoch/note-applied! (or (:base-storage storage) storage) vs)))
-
-
-(defn note-graph-epoch-covered!
-  "NOTIFY-handler tail: the sibling's event carried the writer's exact
-   bump values and the delta was applied locally — mark them covered."
-  [storage vs]
-  (epoch/cover-foreign! (or (:base-storage storage) storage) vs))
-
-
-(defn- global-epoch-cached
-  [base-storage]
-  (let [state (epoch-state)
-        now (System/currentTimeMillis)
-        {:keys [value at]} (:read @state)]
-    (if (and value (< (- now at) *epoch-check-ttl-ms*))
-      value
-      (let [v (epoch/current base-storage)]
-        ;; nil (degraded / missing sequence) is cached too — without
-        ;; this a degraded DB pays a failing SELECT per request.
-        (swap! state assoc :read {:value v :at now})
-        v))))
-
-
-(defonce ^:private epoch-heal-monitor (Object.))
-
-
-;; Forward reference — `invalidate!` (drop one branch's ctx + ref-cache)
-;; is defined below but the epoch heal needs it to evict a branch that a
-;; sibling pod DELETED (the delete's `:branch` epoch bump is what wakes
-;; this heal on the other pods).
-(declare invalidate!)
-
-
-(def ^:dynamic *epoch-heal-sync?*
-  "Test hook: run the heal's rebuild work inline instead of on the
-   background thread, so assertions don't race it."
-  false)
-
-
-(defn- heal-refresh-entry!
-  "One entry's stale-while-revalidate refresh for `heal-stale-ctxs!`.
-   A DELETED branch (its epoch bump is what woke the heal) is dropped
-   like the local delete path — rebuilding would resurrect a phantom
-   ctx and leave the name→id ref-cache pointing at a dead registry.
-   A live entry rebuilds under ITS OWN registry slices: two OPTIMISTIC
-   attempts (compile outside the lock, swap only if the epoch didn't
-   move mid-compile — a moved epoch means a delta already patched the
-   live registry and our snapshot would clobber it), then a blocking
-   rebuild as the correctness fallback under continuous writes."
-  [router base default-branch-id bid entry]
-  (if (and (not= bid default-branch-id)
-           (nil? (sp/read-entity base :branch bid)))
-    (invalidate! router bid)
-    (when-let [c (:ctx entry)]
-      (binding [registry-core/*rich-types-override*
-                (or (:rich-types-atom c)
-                    registry-core/*rich-types-override*)
-                registry-core/*per-org-rich-override*
-                (or (:per-org-rich-atom c)
-                    registry-core/*per-org-rich-override*)]
-        (try
-          (loop [attempt 1]
-            (let [e0 (epoch/current base)
-                  swapped? (cr/rebuild-optimistic!
-                             c #(= e0 (epoch/current base)))]
-              (when-not swapped?
-                (if (< attempt 2)
-                  (recur (inc attempt))
-                  (cr/rebuild! c)))))
-          (catch Exception e
-            (log/warn e "graph-epoch heal: ctx rebuild failed")))))))
-
-
-(defn- heal-stale-ctxs!
-  "An epoch in (w, global] is neither locally-noted nor NOTIFY-covered:
-   somebody's write reached the DB without this pod applying its
-   invalidation.
-
-   STALE-WHILE-REVALIDATE for the BASE ctx: rebuild it on a BACKGROUND
-   thread instead of nil-ing its registry — `cr/rebuild!` reads the
-   graph fresh, compiles, and only then swaps the atoms, so requests
-   keep serving the (stale) registry for the rebuild's duration
-   instead of queueing behind a cold compile. The first heal design
-   full-cleared, and one heal mid-e2e took /health down past its 60s
-   ceiling — availability must survive the freshness backstop.
-   Staleness is bounded by one rebuild.
-
-   Every OTHER cached branch ctx is DROPPED, not rebuilt: the next
-   request for that branch builds it fresh (the graph-identical fast
-   path copies the now-fresh base by value; a branch with its own
-   changes compiles once, on demand). Rebuilding every cached entry
-   made a heal cost O(cached branches) full compiles — merged source
-   branches stay forever (main resolves through them), so an e2e run
-   or a busy workspace holds dozens of them, and one heal became
-   minutes of compile that stalled writes past the abort budget,
-   whose un-noted bumps triggered the next heal.
-
-   Base first, then drop the rest — including entries installed while
-   the base rebuilt (they copied the pre-swap base). Serialized on a
-   monitor so two heals can't interleave. The watermark advances
-   immediately — the heal is now in flight and a re-trigger would
-   only duplicate it."
-  [{:keys [handlers default-branch-id] :as router} base global]
-  (locking epoch-heal-monitor
-    (let [state (epoch-state)]
-      (when (> global (:w @state))
-        (counters/count! :epoch/heal)
-        (log/info "graph-epoch heal: background rebuild of cached ctxs"
-                  {:validated (:w @state) :global global})
-        (epoch/prune! base global)
-        (swap! state assoc :w global)
-        ;; The missed write may have moved a `:branch-local?` flag or a
-        ;; parent edge; that cache sits below every ctx, so drop it too.
-        (bl/invalidate! base)
-        (let [snap @handlers
-              refresh! (fn [bid entry]
-                         (heal-refresh-entry! router base default-branch-id
-                                              bid entry))
-              pinned (pinned-branches)
-              work (fn []
-                     (when-let [e (get snap default-branch-id)]
-                       (refresh! default-branch-id e))
-                     ;; Every non-base entry — the snapshot's AND those
-                     ;; installed while the base rebuilt (they copied the
-                     ;; pre-swap base) — is dropped; its next request
-                     ;; rebuilds it against the fresh base. PINNED entries
-                     ;; (a branch with a running service) are refreshed in
-                     ;; place instead: the service holds that ctx by
-                     ;; reference, so dropping it would strand the service
-                     ;; on a stale registry while requests built another.
-                     (doseq [bid (keys @handlers)]
-                       (when (not= bid default-branch-id)
-                         (if (contains? pinned bid)
-                           (when-let [e (get @handlers bid)] (refresh! bid e))
-                           (invalidate! router bid)))))
-              ;; Convey ONLY the test-isolation registry overrides onto the
-              ;; heal thread — NOT bound-fn* (that would drag per-request
-              ;; bindings like the tenant org into a background rebuild).
-              ;; Without this a heal fired from an isolated test thread
-              ;; rebuilt ctxs against an EMPTY rich-types registry: base-fn
-              ;; markers (`:lazy-seq-args` on `:cond` &c.) vanished and the
-              ;; recompiled closures evaluated cond clauses EAGERLY — the
-              ;; the "/api" update-keys ClassCast poisoning. In
-              ;; production the per-ctx binding below (each ctx's own
-              ;; rich-types slice) overrides these ambient captures anyway —
-              ;; they matter only for ctxs built before slice-tagging.
-              rt-override registry-core/*rich-types-override*
-              per-org-override registry-core/*per-org-rich-override*
-              work (fn []
-                     (binding [registry-core/*rich-types-override* rt-override
-                               registry-core/*per-org-rich-override* per-org-override]
-                       (work)))
-              t (Thread. ^Runnable work "graph-epoch-heal")]
-          (if *epoch-heal-sync?*
-            (work)
-            (do (Thread/.setDaemon t true)
-                (Thread/.start t))))))))
-
-
-(defn- validate-graph-epoch!
-  "Fetch-time check. Classify every epoch in (w, global] against the
-   handle ledger: a FOREIGN gap or an ABORTED local bump heals now; a
-   fully applied range advances the watermark; young un-noted local
-   bumps wait (their eager invalidate is in flight). A global BELOW
-   the watermark means the sequence regressed (DB restore under a
-   live JVM) — reseed + heal rather than going silently dead. nil
-   global (no pool / missing sequence) skips: cannot validate, eager
-   paths remain the only mechanism — the pre-epoch behavior."
-  [{:keys [base-ctx] :as router}]
-  (let [base (vs/unwrap (:storage base-ctx))
-        state (epoch-state)]
-    (when-let [global (global-epoch-cached base)]
-      (let [w (:w @state)]
-        (cond
-          (< global w)
-          (do (log/warn "graph-epoch regression — sequence restarted below the watermark; reseeding + healing"
-                        {:watermark w :global global})
-              (swap! state assoc :w -1)
-              (heal-stale-ctxs! router base global))
-
-          (> global w)
-          (let [statuses (epoch/classify-range base w global *epoch-heal-grace-ms*)]
-            (cond
-              (or (:foreign statuses) (:aborted statuses))
-              (do
-                ;; WHY — an aborted epoch names the entity whose write
-                ;; never reached its note (a missing call site, or a
-                ;; write that outlived the grace); a foreign one is a
-                ;; sibling pod's write this pod's NOTIFY missed.
-                (log/info "graph-epoch heal reason"
-                          (assoc (epoch/explain-range base w global *epoch-heal-grace-ms*)
-                                 :watermark w :global global))
-                (heal-stale-ctxs! router base global))
-
-              (:pending statuses)
-              nil ; eager invalidations in flight — check again next TTL
-
-              :else ; everything applied/covered — advance without healing
-              (do (epoch/prune! base global)
-                  (swap! state update :w max global)))))))))
-
-
 (def ^:dynamic *ctx-idle-ttl-ms*
   "How long a cached non-default branch ctx may go unused before it is
    dropped. The count cap (`default-max-cached-branches`, 16) bounds the
@@ -1055,12 +516,12 @@
           prev @idle-sweep]
       (when (and (> (- now prev) *ctx-idle-sweep-period-ms*)
                  (compare-and-set! idle-sweep prev now))
-        (let [pinned (pinned-branches)]
+        (let [pinned (cache/pinned-branches)]
           (doseq [[bid entry] @handlers]
             (when (and (not= bid default-branch-id)
                        (not (contains? pinned bid))
                        (> (- now (or (:last-used entry) now)) *ctx-idle-ttl-ms*))
-              (invalidate! router bid))))))))
+              (cache/invalidate! router bid))))))))
 
 
 (defn entry-for
@@ -1070,7 +531,7 @@
    cache hits so the LRU eviction sees the freshest order, and sweeps
    idle entries (`evict-idle-ctxs!`) on the way."
   [{:keys [default-branch-id handlers] :as router} branch-id]
-  (validate-graph-epoch! router)
+  (router-epoch/validate-graph-epoch! router)
   (evict-idle-ctxs! router)
   (let [effective (or branch-id default-branch-id)
         cached (get @handlers effective)]
@@ -1120,48 +581,6 @@
    keys the cache to match."
   []
   (some-> (resolve 'graphden.tenancy.context/*current-org*) deref))
-
-
-(defn- forget-ref-cache-for-branch!
-  "Drop every `ref → id` entry that points at `branch-id`. Called from
-   `invalidate!` so a delete-branch! followed by a re-create with the
-   same name doesn't surface a stale id. Keys are `[scope ref]`; matching is
-   by value (branch-id) so it sweeps every org's entry for the branch."
-  [router branch-id]
-  (when-let [ref-cache (:ref-cache router)]
-    (swap! ref-cache
-           (fn [m]
-             (reduce-kv (fn [acc k v]
-                          (if (= v branch-id) acc (assoc acc k v)))
-                        {}
-                        m)))))
-
-
-(defn invalidate!
-  "Drop the cached entry for one branch + every ref → id mapping that
-   points at it. Called after a write — the next request rebuilds.
-   Mainly used after `delete-branch!` so the ctx doesn't outlive its
-   branch row."
-  [{:keys [handlers build-monitors] :as router} branch-id]
-  ;; Bump the branch's build generation BEFORE dropping anything (L1): a
-  ;; cold build for this branch may be mid-flight — holding the lock, its
-  ;; result not yet installed. It captured the generation before its
-  ;; multi-second compile and re-checks it at install (`install-built-
-  ;; entry!`) via its captured holder reference, so the bump makes it
-  ;; DISCARD a now-stale result instead of resurrecting a ctx for a
-  ;; just-deleted branch. invalidate! deliberately does NOT take the
-  ;; per-branch lock (held across the rebuild; a delete must not block on
-  ;; it). Residual: the vanishingly-narrow window where invalidate!'s
-  ;; holder read runs before the builder's `computeIfAbsent` creates the
-  ;; holder — unreachable on the request path, since a build only starts
-  ;; after `resolve-branch-id` saw the (not-yet-deleted) branch row.
-  (when build-monitors
-    (when-let [holder (java.util.concurrent.ConcurrentHashMap/.get build-monitors branch-id)]
-      (java.util.concurrent.atomic.AtomicLong/.incrementAndGet ^java.util.concurrent.atomic.AtomicLong (:gen holder))))
-  (swap! handlers dissoc branch-id)
-  (forget-ref-cache-for-branch! router branch-id)
-  (when build-monitors
-    (java.util.concurrent.ConcurrentHashMap/.remove build-monitors branch-id)))
 
 
 (defn invalidate-cached-branch!
@@ -1228,9 +647,9 @@
                             ;; The child's rich-types slice learned nothing
                             ;; from a write it INHERITS — re-record the blast
                             ;; radius into it (async, bounded).
-                            (recheck-ctx-types! branch-ctx branch-id seeds))
+                            (recheck/recheck-ctx-types! branch-ctx branch-id seeds))
             (nil? seeds) (do (ctx/invalidate-graph-cache! branch-ctx)
-                             (recheck-ctx-types! branch-ctx branch-id nil))
+                             (recheck/recheck-ctx-types! branch-ctx branch-id nil))
             :else nil)
           (catch Exception e
             ;; Best-effort: a stale sibling ctx is worse than a slow one,
@@ -1239,17 +658,6 @@
             (log/warn e "sibling branch ctx invalidation failed — dropping entry"
                       {:branch-id branch-id})
             (swap! handlers dissoc branch-id)))))))
-
-
-(defn invalidate-all!
-  "Drop every cached per-branch entry + the entire ref-cache. Used by
-   schema-migration paths that change the executor's shape under all
-   branches."
-  [{:keys [handlers ref-cache build-monitors]}]
-  (reset! handlers {})
-  (when ref-cache (reset! ref-cache {}))
-  (when build-monitors
-    (java.util.concurrent.ConcurrentHashMap/.clear build-monitors)))
 
 
 ;; =============================================================================
@@ -1321,12 +729,11 @@
        ;; The default ctx was just built from the CURRENT graph — seed
        ;; the epoch watermark so the first request doesn't spuriously
        ;; heal over boot-sync bumps the build already absorbed.
-       (swap! (epoch-state) update :w max
-              (or (epoch/current (vs/unwrap (:storage base-ctx))) 0))
+       (router-epoch/seed-watermark! (vs/unwrap (:storage base-ctx)))
        ;; The default branch's ctx never goes through build-actual-entry!,
        ;; so schedule its diagnostics recompute here — this is the hook
        ;; that closes the ROADMAP restart caveat for the main branch.
-       (schedule-user-fn-recheck! base-ctx default-branch-id)
+       (recheck/schedule-user-fn-recheck! base-ctx default-branch-id)
        (log/info "Branch router ready" {:default-branch-id default-branch-id
                                         :handler-fn-name handler-fn-name
                                         :max-size (or max-size
@@ -1350,16 +757,44 @@
   nil)
 
 
+(defn- ref-uuid
+  "`branch-ref` parsed as a UUID, or nil. `UUID/fromString` is lenient —
+   any case mix, and short groups (`1-1-1-1-1`) — so many distinct
+   strings name the same id."
+  [branch-ref]
+  (try (java.util.UUID/fromString branch-ref)
+       (catch IllegalArgumentException _ nil)))
+
+
 (defn- resolve-branch-id-uncached
   [{:keys [base-ctx] :as router} branch-ref]
   (if-let [f *resolve-uncached-override*]
     (f router branch-ref)
     (let [base (vs/unwrap (:storage base-ctx))]
-      (or (try (some->> branch-ref java.util.UUID/fromString
-                        (sp/read-entity base :branch)
-                        :id)
-               (catch IllegalArgumentException _ nil))
+      (or (some->> (ref-uuid branch-ref) (sp/read-entity base :branch) :id)
           (:id (first (sp/query-entities base :branch {:name branch-ref})))))))
+
+
+(defn- ref-cache-key
+  "Where a resolution of `branch-ref` to `id` is cached. A ref that
+   resolved BY ID is keyed by the canonical id (`[scope :id \"<uuid>\"]`),
+   so every spelling of one branch id shares a slot — keyed by the raw
+   ref, each case variant of a visible id was its own never-evicted
+   entry (two DB reads apiece), a map grown by request input alone. A
+   ref resolved BY NAME is keyed by the name itself, which only an
+   existing branch can fill. `id` nil → the key a lookup tries."
+  [scope branch-ref id]
+  (if (and id (= id (ref-uuid branch-ref)))
+    [scope :id (str id)]
+    [scope branch-ref]))
+
+
+(defn- cached-ref
+  "The cached id for `branch-ref`, or nil. The by-id slot is tried first,
+   mirroring `resolve-branch-id-uncached`'s id-before-name order."
+  [cache scope branch-ref]
+  (or (some->> (ref-uuid branch-ref) (ref-cache-key scope branch-ref) (get cache))
+      (get cache (ref-cache-key scope branch-ref nil))))
 
 
 (def ^:dynamic *resolve-branch-id-override*
@@ -1379,7 +814,8 @@
    (handler-for then short-circuits to the seeded entry).
 
    Result is cached on the router's `:ref-cache` atom keyed by
-   `[scope ref]` (§4) — `:branch` is org-scoped, so org-A and org-B's
+   `[scope ref]` — or `[scope :id canonical-id]` for a ref that resolved
+   by id, see `ref-cache-key` — (§4) — `:branch` is org-scoped, so org-A and org-B's
    same-named branches resolve to different ids and must not share a
    cache slot (else one would run in the other's branch ctx). A
    non-default branch name resolves once per process lifetime per
@@ -1402,13 +838,13 @@
     (f router branch-ref)
     (if (or (nil? branch-ref) (str/blank? branch-ref))
       default-branch-id
-      (let [k [(current-scope) branch-ref]]
-        (if (and ref-cache (contains? @ref-cache k))
-          (get @ref-cache k)
-          (when-let [id (resolve-branch-id-uncached router branch-ref)]
-            (if-not ref-cache
-              id
-              (do (swap! ref-cache assoc k id)
+      (let [scope (current-scope)]
+        (or (some-> ref-cache deref (cached-ref scope branch-ref))
+            (when-let [id (resolve-branch-id-uncached router branch-ref)]
+              (if-not ref-cache
+                id
+                (let [k (ref-cache-key scope branch-ref id)]
+                  (swap! ref-cache assoc k id)
                   (let [id' (resolve-branch-id-uncached router branch-ref)]
                     (if (= id' id)
                       id
@@ -1416,24 +852,13 @@
                           id')))))))))))
 
 
-;; Static liveness path — the ONE endpoint that must answer WITHOUT the
-;; compiled registry. Every other route (including `/health`) is an
-;; `app.routes` graph fn reached through `ring-callable-for-ctx` →
-;; `cr/registry` below, so while a pod runs a full recompile (seconds — ~5 s today, 49.8 s in 2026-07 — holding
-;; the ctx invalidation lock) they all block. A k8s livenessProbe / Docker
-;; HEALTHCHECK pointed at such a path would kill a busy-but-alive pod, discard
-;; its in-flight compile, and force a cold boot (~115 s) — a slower outage than
-;; the rebuild it interrupted. `/livez` proves only "this process's HTTP worker
-;; can answer" (liveness); readiness — can it actually serve? — stays `/health`
-;; (registry-warm). Matched here, before any registry-touching seam, so it is
-;; immune to the rebuild. Path-only (any method); probes GET it.
-(def ^:private liveness-path "/livez")
-
-
-(def ^:private liveness-response
-  {:status 200
-   :headers {"Content-Type" "application/json"}
-   :body "{\"status\":\"alive\"}"})
+(defn extract-branch-ref
+  "Delegates to `graphden.system.branch-router.request/extract-branch-ref`. Kept here for the private
+   graphden-tenancy addon (`graphden.tenancy.preview` reads the branch ref
+   through `br/extract-branch-ref`; listed in tools/open-core-seam.edn) —
+   in-repo callers use the request namespace directly."
+  [request]
+  (br-req/extract-branch-ref request))
 
 
 (declare dispatch*)
@@ -1444,7 +869,7 @@
    request, resolves the branch, and delegates to the per-branch
    handler. Unknown branch refs surface a 400 rather than silently
    misrouting. `/livez` short-circuits FIRST as a registry-independent
-   liveness probe (see `liveness-path`).
+   liveness probe (see `br-req/liveness-path`).
 
    Binds `epoch/*request-bump-log*` for the request when the caller
    has not (the `:http-server` adapter does; a test or an embedded
@@ -1457,7 +882,7 @@
    `rich-types-registry-branch-scope-test`)."
   [router request]
   (cond
-    (= liveness-path (:uri request)) liveness-response
+    (= br-req/liveness-path (:uri request)) br-req/liveness-response
     epoch/*request-bump-log* (dispatch* router request)
     :else (binding [epoch/*request-bump-log* (atom [])]
             (dispatch* router request))))
@@ -1525,7 +950,7 @@
                       ;; through to the branch-resolution chain. Branch-agnostic
                       ;; by design: the branch ref is irrelevant to these paths.
                       (or (rc/dispatch-first request)
-                          (let [branch-ref (extract-branch-ref request)
+                          (let [branch-ref (br-req/extract-branch-ref request)
                                 branch-id (resolve-branch-id router branch-ref)]
                             (cond
                               (or (nil? branch-ref) (some? branch-id))
@@ -1541,13 +966,8 @@
                               ;; with a new ctx), and validate-graph-epoch!
                               ;; need not run twice per request.
                               (let [entry (entry-for router branch-id)]
-                                (binding [registry-core/*rich-types-override*
-                                          (or (:rich-types-atom (:ctx entry))
-                                              registry-core/*rich-types-override*)
-                                          registry-core/*per-org-rich-override*
-                                          (or (:per-org-rich-atom (:ctx entry))
-                                              registry-core/*per-org-rich-override*)]
-                                  ((:handler entry) request)))
+                                (recheck/call-with-ctx-slices (:ctx entry)
+                                                              #((:handler entry) request)))
 
                               ;; A PAGE load naming a branch that is gone (merged
                               ;; and deleted elsewhere, or by this user's own tour
@@ -1559,9 +979,9 @@
                               ;; the default branch and the user is back in
                               ;; business. API/XHR callers still get the 400 below,
                               ;; which is what they can act on.
-                              (document-navigation? request)
+                              (br-req/document-navigation? request)
                               {:status 302
-                               :headers {"Location" (uri-without-branch request)
+                               :headers {"Location" (br-req/uri-without-branch request)
                                          "Cache-Control" "no-store"}
                                :body ""}
 

@@ -22,7 +22,7 @@
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
-    [graphden.system.branch-router :as br]
+    [graphden.system.branch-router.epoch :as br-epoch]
     [graphden.test-infra.schemas :as schemas]
     [graphden.test-infra.shared-bootstrap :as sb]
     [graphden.test-infra.shared-container :as sc]
@@ -75,7 +75,7 @@
    with seed 405495992; the main-CI coverage job). Inline, the heal
    finishes before `ctx-for` runs."
   []
-  (alter-var-root #'br/*epoch-heal-sync?* (constantly true))
+  (alter-var-root #'br-epoch/*epoch-heal-sync?* (constantly true))
   (pth/create-container-fixture #'*container*))
 
 
@@ -706,7 +706,7 @@
    flake); this fixture stays for NSes that build their container some
    other way."
   [t]
-  (alter-var-root #'br/*epoch-heal-sync?* (constantly true))
+  (alter-var-root #'br-epoch/*epoch-heal-sync?* (constantly true))
   (t))
 
 

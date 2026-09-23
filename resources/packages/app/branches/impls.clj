@@ -15,6 +15,9 @@
     [graphden.storage.postgres.util :as pg-util]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
+    [graphden.system.branch-router.cache :as br-cache]
+    [graphden.system.branch-router.epoch :as br-epoch]
+    [graphden.system.branch-router.recheck :as br-recheck]
     [graphden.tenancy.context :as tc]
     [graphden.versioning.merge.core :as merge-policy]
     [graphden.versioning.storage.core :as vs]
@@ -160,7 +163,7 @@
     ;; but the epoch bump must still be NOTED — un-noted it ages past
     ;; grace and triggers a spurious heal ~10s after every branch
     ;; creation (audit-7 e2e: recurring mid-suite heals).
-    (br/note-graph-epoch-validated! (request/require-storage ctx))
+    (br-epoch/note-graph-epoch-validated! (request/require-storage ctx))
     row))
 
 
@@ -196,7 +199,7 @@
    After a successful delete, drops the branch's entry from the
    branch-router's per-branch ctx cache AND clears any cached
    `name → id` ref so a same-name recreate doesn't hand back the
-   stale id (see `branch-router/forget-ref-cache-for-branch!`).
+   stale id (see `branch-router.cache/forget-ref-cache-for-branch!`).
    Without this, deleting `foo` then creating a new `foo` routes
    subsequent /api/* requests to the dead branch's compiled
    registry — the closures point at nothing and every dispatch
@@ -212,7 +215,7 @@
   (cr/record-effect! :db)
   (let [result (vs/delete-branch! (request/require-storage ctx) branch-id)]
     (when-let [router (br/current-router)]
-      (br/invalidate! router branch-id))
+      (br-cache/invalidate! router branch-id))
     (try
       (recon/restart-services-on-branch! ctx recon/running branch-id)
       (catch Exception e
@@ -220,7 +223,7 @@
                   {:branch-id branch-id})))
     ;; Eager work done — advance the epoch watermark past the delete's
     ;; bump (an aborted request self-heals on the next ctx fetch).
-    (br/note-graph-epoch-validated! (request/require-storage ctx))
+    (br-epoch/note-graph-epoch-validated! (request/require-storage ctx))
     result))
 
 
@@ -351,7 +354,7 @@
         ;; learns them too.
         (let [t-re (System/nanoTime)]
           (tc/with-org request-org
-                       (br/recheck-ctx-types! target-ctx target-branch-id affected))
+                       (br-recheck/recheck-ctx-types! target-ctx target-branch-id affected))
           (lap! :recheck-ms t-re)))
       ;; Cross-pod: the local invalidate + restart-services-depending-on!
       ;; below fire only on THIS pod. A merge writes no per-fn NOTIFY of
@@ -395,7 +398,7 @@
     ;; to a raw Thread, so the 1-arity (request-log-draining) note would
     ;; see nothing here.
     (let [t-note (System/nanoTime)]
-      (br/note-graph-epoch-validated!
+      (br-epoch/note-graph-epoch-validated!
         (request/require-storage ctx) merge-bumps)
       (lap! :note-epoch-ms t-note))
     (log/info "merge post-commit"
@@ -452,10 +455,10 @@
         ;; the NS thread had not reached — phantom foreign gaps, a heal
         ;; per merge. Carrying the state closes that split at
         ;; its source; the ledger's retention window is the backstop.
-        epoch-state br/*epoch-state-override*
+        epoch-state br-epoch/*epoch-state-override*
         post-commit!
         (fn []
-          (binding [br/*epoch-state-override* epoch-state]
+          (binding [br-epoch/*epoch-state-override* epoch-state]
             (run-merge-post-commit! ctx router request-org merge-bumps
                                     source-branch-id target-branch-id merged-first-ids)))
         t (Thread. ^Runnable post-commit! "merge-post-commit")]

@@ -29,6 +29,8 @@
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
+    [graphden.system.branch-router.epoch :as br-epoch]
+    [graphden.system.branch-router.recheck :as br-recheck]
     [graphden.test-infra.shared-bootstrap :as sb]
     [graphden.versioning.storage.core :as vs]
     [graphden.web.errors :as web-errors]))
@@ -768,8 +770,8 @@
           ;; drops the branch entry; the next read rebuilds it.
           (let [base (vs/unwrap (:storage (:base-ctx *router*)))
                 foreign (epoch/bump! (dissoc base :graph-epoch-local :graph-epoch-covered) :fn)]
-            (binding [br/*ctx-build-async-recheck?* false
-                      br/*epoch-check-ttl-ms* 0]
+            (binding [br-recheck/*ctx-build-async-recheck?* false
+                      br-epoch/*epoch-check-ttl-ms* 0]
               (is (some? (get (types feat) (keyword only-name)))
                   "a branch ctx rebuilt after a heal already carries the branch-authored fn"))
             ;; Contain the blast: record the forced epoch in the shared ledger

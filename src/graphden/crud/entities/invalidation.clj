@@ -15,6 +15,7 @@
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
+    [graphden.system.branch-router.epoch :as br-epoch]
     [graphden.types.diagnostics :as diag]
     [graphden.util.abort-shield :as shield]
     [graphden.versioning.storage.core :as vcore]))
@@ -197,7 +198,7 @@
         ;; never reached (client abort anywhere above), the watermark
         ;; stays behind and the next context fetch heals — that is the
         ;; audit-6 self-heal contract.
-        (br/note-graph-epoch-validated! storage)))))
+        (br-epoch/note-graph-epoch-validated! storage)))))
 
 
 (def ^:private fn-graph-entity-types

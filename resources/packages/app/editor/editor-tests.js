@@ -78,10 +78,13 @@ function loadTestStatuses() {
 }
 
 // Re-prime + repaint: the dots in the tree, the chip count, the
-// [Run all] visibility. One coalesced pass per trigger.
+// [Run all] visibility. Triggers landing while a pass is in flight coalesce
+// into ONE more pass after it — not zero: the in-flight read may predate the
+// run the trigger announces, and dropping it left that run's dot stale.
 let _testsReprimeInFlight = false;
+let _testsReprimeAgain = false;
 function reprimeTestStatuses() {
-  if (_testsReprimeInFlight) return Promise.resolve(null);
+  if (_testsReprimeInFlight) { _testsReprimeAgain = true; return Promise.resolve(null); }
   _testsReprimeInFlight = true;
   return loadTestStatuses()
     .then(() => {
@@ -91,7 +94,14 @@ function reprimeTestStatuses() {
       if (typeof repaintAfterPrime === 'function' && typeof graphData !== 'undefined' && graphData) repaintAfterPrime();
     })
     .catch(() => null)
-    .then(() => { _testsReprimeInFlight = false; });
+    .then(() => {
+      _testsReprimeInFlight = false;
+      if (_testsReprimeAgain) {
+        _testsReprimeAgain = false;
+        return reprimeTestStatuses();
+      }
+      return null;
+    });
 }
 
 // --- the lens's live signal: SSE ping over fetch ----------------------

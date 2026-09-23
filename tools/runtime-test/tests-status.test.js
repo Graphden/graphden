@@ -86,6 +86,18 @@ function assert(cond, msg) {
   for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
   assert(repaints >= 1, 'the prime repainted the tree');
 
+  console.log(' a ping during a prime is not dropped: one more pass follows');
+  {
+    const statusReads = () => fetched.filter((u) => u === '/api/tests/status').length;
+    const n0 = statusReads();
+    const first = ctx.reprimeTestStatuses();
+    ctx.reprimeTestStatuses();   // lands mid-flight
+    ctx.reprimeTestStatuses();   // …and coalesces with this one
+    await first;
+    for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+    assert(statusReads() - n0 === 2, 'two reads (the in-flight one + one catch-up), got ' + (statusReads() - n0));
+  }
+
   console.log(fails === 0 ? 'PASS — ' + passes + ' assertions' : 'FAIL — ' + fails + ' failed');
   process.exit(fails === 0 ? 0 : 1);
 })();

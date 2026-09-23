@@ -1,4 +1,4 @@
-(ns ^:integration graphden.integration.import-graph-route-test
+(ns ^:integration ^{:cost :heavy} graphden.integration.import-graph-route-test
   "End-to-end coverage for `POST /api/import/graph` — the write half of the
    export/import pair (PACKAGE_DISTRIBUTION § runtime bundle import): apply
    an exported EDN bundle to a NAMED branch, with create/prune/skip-owned

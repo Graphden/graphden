@@ -1,4 +1,4 @@
-(ns ^:integration graphden.integration.heal-recompile-repro-test
+(ns ^:integration ^{:cost :heavy} graphden.integration.heal-recompile-repro-test
   "Regression guard for the graph-epoch HEAL thread's registry
    isolation: a heal fired from an isolated test thread
    used to rebuild ctxs against an EMPTY rich-types registry — base-fn

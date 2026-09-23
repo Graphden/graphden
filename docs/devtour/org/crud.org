@@ -7,7 +7,7 @@ Entity/branch/secret writes, request parsing, type-check on write, fn-execution 
 
 after: storage, types
 
-[[file:index.org][index]] · ~69 min
+[[file:index.org][index]] · ~70 min
 
 * 1. extract-entity-params
 :PROPERTIES:
@@ -170,13 +170,13 @@ The one free-arg surface every name-facing consumer reads — the Run form's arg
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-execute
 :FILE: src/graphden/crud/fn_execution.clj
-:LINE: 120
+:LINE: 121
 :MINS: 2.1
 :END:
 
 The ~/api/execute~ orchestrator: resolve fn + version + free-arg slots, acquire a concurrency slot, submit the future, and dispatch on succeeded / pending / failed. The spine of the execute write path — and where it hands off to the executor from the first block.
 
-- source :: [[file:../../../src/graphden/crud/fn_execution.clj::(defn apply-execute][src/graphden/crud/fn_execution.clj:120]]
+- source :: [[file:../../../src/graphden/crud/fn_execution.clj::(defn apply-execute][src/graphden/crud/fn_execution.clj:121]]
 
 * 14. create-pending-with-args!
 :PROPERTIES:
@@ -272,13 +272,13 @@ The write path that must not leak (docs/SECRETS.md): one ~POST /api/secrets~ ato
 :PROPERTIES:
 :CUSTOM_ID: crud/run-tests!
 :FILE: src/graphden/crud/test_runs.clj
-:LINE: 193
-:MINS: 4.2
+:LINE: 194
+:MINS: 4.6
 :END:
 
 The tests subsystem (docs/TESTS.md) rides everything above: a test is a fn in a ~tests~-segment namespace, executed through ~apply-execute~ with ~{}~ args (pass = no throw), its status the newest execution of its CURRENT version — so an edited test reads ~stale~ by construction, no bookkeeping. After EACH test it nudges the ~test:updated~ NOTIFY, which is what moves the Explorer's dots one by one under the ✓ tests filter chip (its SSE ping stream). Note the ~platform?~ arm: the SHIPPED packages carry their own ~*.tests~ modules (~core.tests~, ~web.tests~, …), and a default all-tests run skips them — the rule is OWNERSHIP (~packages.owned/owned-fn-id?~, package-synced this boot), not intent, so a tenant's Run all spends its budget on its own tests. The platform set is gated by its own Clojure anchor instead.
 
-- source :: [[file:../../../src/graphden/crud/test_runs.clj::(defn run-tests!][src/graphden/crud/test_runs.clj:193]]
+- source :: [[file:../../../src/graphden/crud/test_runs.clj::(defn run-tests!][src/graphden/crud/test_runs.clj:194]]
 
 * 22. schedule-affected!
 :PROPERTIES:

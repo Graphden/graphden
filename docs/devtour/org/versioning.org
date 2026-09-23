@@ -53,13 +53,13 @@ The versioned arm of a single create, and the write path worth reading in full: 
 :PROPERTIES:
 :CUSTOM_ID: versioning/entity-config
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 142
+:LINE: 143
 :MINS: 3.1
 :END:
 
 The authoritative map of WHICH entities are versioned (fn / fn-slot / binding / binding-list-item) and how each splits across two tables: ~version-data-fields~ live in the version table, identity fields stay on the base row. Everything downstream keys off this config.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(def entity-config][src/graphden/versioning/storage/resolution.clj:142]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(def entity-config][src/graphden/versioning/storage/resolution.clj:143]]
 - same file :: [[file:versioning.org::#versioning/resolve-version][resolve-version]], [[file:versioning.org::#versioning/collect-branch-chain][collect-branch-chain]], [[file:versioning.org::#versioning/resolve-version-from-cache][resolve-version-from-cache]]
 
 * 5. derive-version-fields
@@ -78,39 +78,39 @@ Where the ~-version~ mirror entities come from: derived from the base entity's f
 :PROPERTIES:
 :CUSTOM_ID: versioning/resolve-version
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 293
+:LINE: 294
 :MINS: 1.7
 :END:
 
 The public per-branch read: for one entity, load its version chain, merge in a single batched pass, and return the winning version (nil on a tombstone). This is how a plain read becomes branch-aware.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn resolve-version][src/graphden/versioning/storage/resolution.clj:293]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn resolve-version][src/graphden/versioning/storage/resolution.clj:294]]
 - same file :: [[file:versioning.org::#versioning/entity-config][entity-config]], [[file:versioning.org::#versioning/collect-branch-chain][collect-branch-chain]], [[file:versioning.org::#versioning/resolve-version-from-cache][resolve-version-from-cache]]
 
 * 7. collect-branch-chain
 :PROPERTIES:
 :CUSTOM_ID: versioning/collect-branch-chain
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 480
+:LINE: 481
 :MINS: 1.9
 :END:
 
 The branch-chain walk: ~[branch → parent → … → root]~ via ~:base-branch-id~, memoised process-wide. This inheritance backbone is what every resolve and cache-invalidation consults to know which branches a read can see.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn collect-branch-chain][src/graphden/versioning/storage/resolution.clj:480]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn collect-branch-chain][src/graphden/versioning/storage/resolution.clj:481]]
 - same file :: [[file:versioning.org::#versioning/entity-config][entity-config]], [[file:versioning.org::#versioning/resolve-version][resolve-version]], [[file:versioning.org::#versioning/resolve-version-from-cache][resolve-version-from-cache]]
 
 * 8. resolve-version-from-cache
 :PROPERTIES:
 :CUSTOM_ID: versioning/resolve-version-from-cache
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 610
+:LINE: 611
 :MINS: 2.7
 :END:
 
 The in-memory chain walk the resolver actually runs: at each branch level combine own-latest with merge candidates, pick the greatest ~effective-ts~, and recurse to the parent. One tested algorithm shared by both single-entity and whole-graph reads.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn- resolve-version-from-cache][src/graphden/versioning/storage/resolution.clj:610]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn- resolve-version-from-cache][src/graphden/versioning/storage/resolution.clj:611]]
 - same file :: [[file:versioning.org::#versioning/entity-config][entity-config]], [[file:versioning.org::#versioning/resolve-version][resolve-version]], [[file:versioning.org::#versioning/collect-branch-chain][collect-branch-chain]]
 
 * 9. effective-branch-local?
@@ -299,12 +299,12 @@ Builds a fresh live ~ExecutionContext~ whose storage is a ~VersionedStorage~ rew
 :PROPERTIES:
 :CUSTOM_ID: versioning/dispatch*
 :FILE: src/graphden/system/branch_router.clj
-:LINE: 1455
+:LINE: 1473
 :MINS: 8.6
 :END:
 
 The top-level Ring dispatch: extract the branch ref (header or query), resolve it to a branch-id, and route the request to that branch's lazily-built handler (400 on an unknown branch). Where a live request finally lands in the correct per-branch context. Its public wrapper ~dispatch~ first short-circuits ~/livez~ — the one registry-independent liveness path — so a pod busy on a full recompile still answers its probe.
 
-- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- dispatch*][src/graphden/system/branch_router.clj:1455]]
+- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- dispatch*][src/graphden/system/branch_router.clj:1473]]
 - same file :: [[file:versioning.org::#versioning/build-branch-ctx][build-branch-ctx]]
 - referenced from :: [[file:storage.org::#storage/create-listener][create-listener]], [[file:web.org::#web/dispatch-to-branch][dispatch-to-branch]]

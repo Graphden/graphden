@@ -22,6 +22,7 @@
   (:require
     [clojure.set :as set]
     [graphden.schema.versioned.schema :as vts]
+    [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.branch-local :as bl]))
 
@@ -823,6 +824,74 @@
 (declare resolve-execution-graph-batch*)
 
 
+;; === Whole-branch load memo (scope-bound) ===
+;;
+;; `resolve-execution-graph-batch` answers ONE root, but it gets there by
+;; loading EVERY fn / fn-slot / binding / list-item of the branch (plus
+;; their version overlays) and walking the root's closure in memory. On the
+;; shipped graph that load is ~0.8 s — and a run pays it twice (the free-arg
+;; surface and the graph hash both resolve the root), and a test run pays it
+;; twice PER TEST: 368 platform tests spent ~12 min of a gate reloading the
+;; same graph. Inside a scope that resolves many roots, the load is shared.
+;;
+;; Keyed on the branch AND the graph epoch (`graph-epoch/current`, bumped
+;; before every graph-shaped write), so a write inside the scope — a test
+;; whose body edits the graph — reloads instead of reading a stale graph. A
+;; handle without an epoch (no pool: an in-memory test storage) is never
+;; memoised. Scope-bound, never process-wide: holding a whole graph between
+;; requests is memory the executor already spends on its compiled registry.
+
+(def ^:dynamic *graph-load-memo*
+  "When bound to an atom, `resolve-execution-graph-batch` memoises the
+   whole-branch load per `[branch-id graph-epoch]` in it. nil outside a
+   scope (`call-with-graph-load-memo`)."
+  nil)
+
+
+(defn call-with-graph-load-memo
+  "Run `f` under a whole-branch load memo — a fresh one, or the
+   enclosing scope's when already bound (a test run's memo is not
+   shadowed by each run's own execute scope)."
+  [f]
+  (if *graph-load-memo*
+    (f)
+    (binding [*graph-load-memo* (atom {})]
+      (f))))
+
+
+(defn- load-branch-graph
+  "Every resolved row of `branch-id`, indexed for the closure walk:
+   `:all-fns` `{id → fn}`, fn-slots / bindings by owning fn, list items by
+   binding, and the slots (list + by id)."
+  [base-storage branch-id]
+  (let [;; Slots are immutable so they're not versioned — query directly.
+        slots (sp/query-entities base-storage :slot {})]
+    {:all-fns (load-all-resolved base-storage :fn branch-id)
+     :fn-slots-by-fn (index-by :fn-id (vals (load-all-resolved base-storage :fn-slot branch-id)))
+     :bindings-by-fn (index-by :fn-id (vals (load-all-resolved base-storage :binding branch-id)))
+     :items-by-binding (index-by :binding-id
+                                 (vals (load-all-resolved base-storage :binding-list-item branch-id)))
+     :slots slots
+     :slot-by-id (into {} (map (juxt :id identity)) slots)}))
+
+
+(defn- branch-graph
+  "`load-branch-graph`, through the scope memo when one is bound and the
+   handle reports an epoch."
+  [base-storage branch-id]
+  (let [memo *graph-load-memo*
+        e (when memo (epoch/current base-storage))]
+    (if (and memo (some? e))
+      (let [k [branch-id e]]
+        (or (get @memo k)
+            (let [g (load-branch-graph base-storage branch-id)]
+              ;; One entry per scope is the useful case; a write mid-scope
+              ;; supersedes the old epoch's graph, so drop it.
+              (reset! memo {k g})
+              g)))
+      (load-branch-graph base-storage branch-id))))
+
+
 (defn resolve-execution-graph-batch
   "Batch resolves execution graph using in-memory BFS over the
    slot/fn-slot/binding model. Loads fn / fn-slot / binding /
@@ -845,16 +914,9 @@
    memo: the four `load-all-resolved` calls share the chain's
    `branch-merge` rows instead of each fetching them."
   [base-storage fn-id branch-id]
-  (let [all-fns        (load-all-resolved base-storage :fn branch-id)
-        all-fn-slots   (load-all-resolved base-storage :fn-slot branch-id)
-        all-bindings   (load-all-resolved base-storage :binding branch-id)
-        all-items      (load-all-resolved base-storage :binding-list-item branch-id)
-        ;; Slots are immutable so they're not versioned — query directly.
-        slots          (sp/query-entities base-storage :slot {})
-        fn-slots-by-fn (index-by :fn-id (vals all-fn-slots))
-        bindings-by-fn (index-by :fn-id (vals all-bindings))
-        items-by-binding (index-by :binding-id (vals all-items))
-        slot-by-id     (into {} (map (juxt :id identity)) slots)
+  (let [{:keys [all-fns fn-slots-by-fn bindings-by-fn items-by-binding
+                slots slot-by-id]}
+        (branch-graph base-storage branch-id)
         collect-fn-refs
         (fn [fn-rec fn-fs fn-bs fn-items]
           (reduce into #{}

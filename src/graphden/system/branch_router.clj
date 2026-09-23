@@ -693,6 +693,24 @@
     entry))
 
 
+(def ^:dynamic *build-entry-override*
+  "Test seam: when bound to `(fn [router branch-id] entry)`,
+   `build-and-cache!` builds through it instead of `build-actual-entry!`
+   — the build-generation / LRU tests script a build (a delete landing
+   mid-build) around the real install path. A dynamic var for the
+   reason `*resolve-uncached-override*` gives: `with-redefs` of the
+   builder rebinds it for every parallel test that cold-builds a real
+   branch. nil (the default) means production behaviour."
+  nil)
+
+
+(defn- build-entry!
+  [router branch-id]
+  (if-let [f *build-entry-override*]
+    (f router branch-id)
+    (build-actual-entry! router branch-id)))
+
+
 (defn- build-and-cache!
   "Build the per-branch ctx + Ring callable and cache it. Cold-branch
    thundering-herd safe — concurrent callers for the same branch-id
@@ -712,13 +730,13 @@
         (try
           (or (get @handlers branch-id)
               (let [gen0 (java.util.concurrent.atomic.AtomicLong/.get gen-holder)
-                    entry (build-actual-entry! router branch-id)]
+                    entry (build-entry! router branch-id)]
                 (install-built-entry! router branch-id entry max-size
                                       default-branch-id gen-holder gen0)))
           (finally (java.util.concurrent.locks.ReentrantLock/.unlock lock))))
       ;; No monitor map → test path with a hand-constructed router.
       ;; Best-effort: just swap, accepting the rare duplicate build.
-      (let [entry (build-actual-entry! router branch-id)]
+      (let [entry (build-entry! router branch-id)]
         (install-built-entry! router branch-id entry max-size
                               default-branch-id nil 0)))))
 

@@ -30,6 +30,25 @@
   (atom nil))
 
 
+;; Parallel-test isolation (the `tenancy.context/*seams-override*` shape): a
+;; test namespace that installs a setting binds this to a fresh atom seeded
+;; from the global (`test-infra.seams/isolated-seams-fixture`), so the setting
+;; — or its reset — never reaches a sibling namespace reading the snapshot.
+;; nil in production → the global atom.
+(def ^:dynamic *snapshot-override* nil)
+
+
+(defn- snapshot-atom
+  []
+  (or *snapshot-override* !snapshot))
+
+
+(defn snapshot-isolation-seed
+  "The global snapshot, as a test's isolated starting point."
+  []
+  @!snapshot)
+
+
 (defn- normalize-value
   "A setting is text or absent: blank env values read as nil so callers
    see one 'unset' shape (docker-compose's `${VAR:-}` passthrough makes
@@ -48,7 +67,7 @@
     (when-not (keyword? k)
       (throw (ex-info (str ":exec/deploy-config :settings keys must be keywords, got " (pr-str k))
                       {:type :validation-error/deploy-config :key k}))))
-  (reset! !snapshot (into {} (map (fn [[k v]] [k (normalize-value v)])) settings)))
+  (reset! (snapshot-atom) (into {} (map (fn [[k v]] [k (normalize-value v)])) settings)))
 
 
 (defn read-setting
@@ -57,16 +76,16 @@
    nil — a tenant graph gets no other shape of access."
   [k]
   (when (keyword? k)
-    (get @!snapshot k)))
+    (get @(snapshot-atom) k)))
 
 
 (defn declared-keys
   "The declared setting keys (for diagnostics / tests)."
   []
-  (set (keys @!snapshot)))
+  (set (keys @(snapshot-atom))))
 
 
 (defn clear!
   "Reset the snapshot to nil — halt-key / test teardown."
   []
-  (reset! !snapshot nil))
+  (reset! (snapshot-atom) nil))

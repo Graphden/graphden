@@ -1,4 +1,4 @@
-(ns ^:integration graphden.layout.graph-real-test
+(ns ^:integration ^{:cost :heavy} graphden.layout.graph-real-test
   "Round 3 of `layout.graph` coverage — laying out the REAL package
    graph.
 

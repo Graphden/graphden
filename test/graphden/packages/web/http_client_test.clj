@@ -1,5 +1,8 @@
-(ns graphden.packages.web.http-client-test
-  "The universal `http-request` primitive + its fns.edn ladder.
+(ns ^:serial graphden.packages.web.http-client-test
+  "`^:serial` — the redirect test `with-redefs` `egress/resolve-public-ips`,
+   which every other namespace's egress check calls.
+
+   The universal `http-request` primitive + its fns.edn ladder.
 
    Impl-level: a local http-kit echo server receives what the impl
    actually dials (platform path) — method on the wire, body, header
@@ -18,6 +21,7 @@
     [cheshire.core :as json]
     [clojure.java.io :as io]
     [clojure.test :refer [deftest is testing]]
+    [graphden.clients.egress :as egress]
     [graphden.executor.compile-runtime :as cr]
     [graphden.packages.loader :as loader]
     [org.httpkit.server :as server]))
@@ -130,6 +134,43 @@
             (str "method " m " must be blocked before it connects"))
         (is (= "egress" (some-> ex ex-data :type namespace))
             (str "method " m " → " (some-> ex ex-data)))))))
+
+
+(deftest restricted-path-refuses-a-redirect-to-an-internal-address-test
+  ;; The first hop is public (so the up-front `check-target!` passes), but
+  ;; it answers 302 → an INTERNAL IP literal. An IP-literal host never
+  ;; reaches OkHttp's `Dns` hook, so the connect-time validation alone
+  ;; cannot catch it: every hop must be re-checked before it is dialed.
+  (let [internal-hits (atom 0)
+        internal (server/run-server
+                   (fn [_] (swap! internal-hits inc) {:status 200 :body "INTERNAL-SECRET"})
+                   {:port 0 :legacy-return-value? false})
+        internal-url (str "http://127.0.0.1:" (server/server-port internal) "/meta")
+        public (server/run-server
+                 (fn [_] {:status 302 :headers {"Location" internal-url} :body ""})
+                 {:port 0 :legacy-return-value? false})
+        public-url (str "http://registry.test:" (server/server-port public) "/")
+        real-resolve egress/resolve-public-ips]
+    (try
+      ;; `registry.test` stands in for a public host that resolves to the
+      ;; test server; every other host keeps the real classification.
+      (with-redefs [egress/resolve-public-ips
+                    (fn [host]
+                      (if (= "registry.test" host)
+                        [(java.net.InetAddress/getByName "127.0.0.1")]
+                        (real-resolve host)))]
+        (binding [cr/*allowed-effects* #{:network}]
+          (let [out (try (call! {:method "get" :url public-url})
+                         (catch clojure.lang.ExceptionInfo e e))]
+            (is (instance? clojure.lang.ExceptionInfo out)
+                (str "the redirect must not be followed silently — got " (pr-str out)))
+            (is (= "egress" (some-> out ex-data :type namespace)) (pr-str (ex-data out)))
+            (is (zero? @internal-hits) "the internal address was never dialed"))))
+      (testing "the platform (unrestricted) path still follows redirects"
+        (is (= "INTERNAL-SECRET" (:body (call! {:method "get" :url (str "http://127.0.0.1:" (server/server-port public) "/")})))))
+      (finally
+        (server/server-stop! public)
+        (server/server-stop! internal)))))
 
 
 ;; =============================================================================

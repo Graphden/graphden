@@ -1749,8 +1749,9 @@
      :say "The SSRF egress guard a tenant's outbound call passes before dialing:
            fail-closed resolution of the hostname, rejecting loopback / RFC1918 /
            link-local / cloud-metadata targets. Pair it with `validating-dns`
-           below in the same file — the connect-time re-check that closes the
-           DNS-rebind TOCTOU."}
+           and `validating-socket-factory` below in the same file — the
+           connect-time re-checks that close the DNS-rebind TOCTOU and the
+           redirect-to-an-IP-literal hop the Dns hook never sees."}
     {:ns graphden.web.hiccup-sanitize :defn sanitize-hiccup
      :say "An allowlist walk over an EDN hiccup tree — permitted tags,
            permitted attrs, a depth cap and a node budget, returning nil for

@@ -25,8 +25,12 @@
       Inet4Address
       Inet6Address
       InetAddress
+      InetSocketAddress
+      Socket
       URI
       UnknownHostException)
+    (javax.net
+      SocketFactory)
     (okhttp3
       Dns)))
 
@@ -237,6 +241,56 @@
       ;; PersistentVector implements java.util.List<InetAddress>, which is the
       ;; Dns.lookup contract.
       (vec (resolve-public-ips hostname)))))
+
+
+;; `validating-dns` only sees HOSTNAMES: OkHttp dials an IP-literal host
+;; (`http://10.0.0.5/`) without consulting its `Dns`, and a redirect hop is
+;; dialed without the caller's up-front `check-target!`. So a public first
+;; hop answering `302 Location: http://169.254.169.254/…` reached the
+;; internal address. The socket factory is the one point EVERY connection
+;; — every hop, literal or resolved — passes through: it refuses a
+;; non-public address before the socket connects.
+
+(defn- check-connect-address!
+  "Throw `:egress/blocked` unless `addr` (an `InetSocketAddress` about to be
+   connected) is a resolved, PUBLIC address. Fails closed on an unresolved
+   address."
+  [addr]
+  (let [ia (when (instance? InetSocketAddress addr)
+             (InetSocketAddress/.getAddress ^InetSocketAddress addr))]
+    (when (or (nil? ia) (internal-address? ia))
+      (throw (ex-info (str "egress blocked: connection to a non-public address "
+                           (some-> ia InetAddress/.getHostAddress))
+                      {:type :egress/blocked :reason :internal-target
+                       :address (some-> ia InetAddress/.getHostAddress)})))))
+
+
+(defn- validating-socket
+  "An unconnected `Socket` whose `connect` runs `check-connect-address!`
+   first."
+  []
+  (proxy [Socket] []
+    (connect
+      ([addr]
+       (check-connect-address! addr)
+       (proxy-super connect addr))
+      ([addr timeout]
+       (check-connect-address! addr)
+       (proxy-super connect addr timeout)))))
+
+
+(def validating-socket-factory
+  "A `SocketFactory` for the RESTRICTED tenant HTTP client: every socket it
+   makes refuses to connect to a non-public address (`internal-address?`).
+   Complements `validating-dns` — this is the check that also covers an
+   IP-literal host and every redirect hop. OkHttp asks only for unconnected
+   sockets (`createSocket []`); the pre-connected overloads are refused
+   rather than left unguarded."
+  (proxy [SocketFactory] []
+    (createSocket
+      ([] (validating-socket))
+      ([_ _] (throw (UnsupportedOperationException. "connected sockets are not validated")))
+      ([_ _ _ _] (throw (UnsupportedOperationException. "connected sockets are not validated"))))))
 
 
 ;; --- Per-org egress rate-limit + response byte-cap (task #5b) -----------------

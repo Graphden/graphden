@@ -235,26 +235,26 @@ Read it in three parts: validate (conflicts resolved, approval policy satisfied)
 :PROPERTIES:
 :CUSTOM_ID: versioning/merge-transitively!
 :FILE: src/graphden/versioning/merge/core.clj
-:LINE: 263
+:LINE: 304
 :MINS: 4.4
 :END:
 
 What makes a merge transitive: the storage layer surfaces only the source's OWN rows and refuses when the source inherits from a branch the target lacks, so this layer merges those branches in first — root-most first, each through the same policy gate a direct merge would face — then the source, and reports the steps as ~:merged-first~. docs/VERSIONING.md § Known gaps.
 
-- source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn merge-transitively!][src/graphden/versioning/merge/core.clj:263]]
+- source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn merge-transitively!][src/graphden/versioning/merge/core.clj:304]]
 - same file :: [[file:versioning.org::#versioning/validate-approval-policy!][validate-approval-policy!]], [[file:versioning.org::#versioning/branch-content-stamp][branch-content-stamp]]
 
 * 19. validate-approval-policy!
 :PROPERTIES:
 :CUSTOM_ID: versioning/validate-approval-policy!
 :FILE: src/graphden/versioning/merge/core.clj
-:LINE: 212
+:LINE: 253
 :MINS: 3.1
 :END:
 
 Merge GOVERNANCE — the code-review gate. When the target branch sets ~:required-approvals~, a merge into it is refused (~:branch/approval-required~, 409) until the proposal has enough VALID approvals: distinct, non-stale, BOUND to this exact merge target (~target-branch-id~), and — when the target names a restrictive ~:approver-ids~ — from that allow-list. Counting is pure/open-core (WHO may approve was enforced when each ~:branch-approval~ row was written, and re-checked here so a tightened policy or a wrong-target approval can't slip through); the live merge base-fn calls this right after the ~:forbid-invalid?~ gate. This is how 'protect main, land via reviewed merges' is enforced.
 
-- source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn validate-approval-policy!][src/graphden/versioning/merge/core.clj:212]]
+- source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn validate-approval-policy!][src/graphden/versioning/merge/core.clj:253]]
 - same file :: [[file:versioning.org::#versioning/merge-transitively!][merge-transitively!]], [[file:versioning.org::#versioning/branch-content-stamp][branch-content-stamp]]
 
 * 20. branch-content-stamp

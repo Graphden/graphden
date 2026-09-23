@@ -122,6 +122,44 @@
       (is (empty? @subscribers)))))
 
 
+(deftest sse-relay-resolves-an-org-agnostic-principal-through-the-request-scope
+  ;; The accounts provider's principal carries NO `:org` — the tenancy
+  ;; request-scope decides it from memberships. Registering under the
+  ;; principal's (nil) org dropped every tenant event (`deliver?`) and made
+  ;; `org-connection-count` 0 for every org (that pointer is process-global,
+  ;; so it is not asserted from this parallel NS).
+  (let [provider (reify auth/AuthProvider
+                   (authenticate
+                     [_ req]
+                     {:authenticated? (some? (get-in req [:headers "authorization"]))
+                      :user-id "acct-1"}))
+        request-scope (fn [_ctx req thunk]
+                        (case (get-in req [:headers "authorization"])
+                          "Bearer member" (tc/with-org "acme" (thunk))
+                          {:status 403 :body "cross-org"}))
+        listener {:callbacks (atom #{})}
+        relay (sse/start-relay! {:port 0 :notify-listener listener :auth-provider provider
+                                 :context {:request-scope request-scope}})
+        got (atom [])
+        src (remote-sse/start-source!
+              {:hub-url (str "http://localhost:" (relay-port relay))
+               :token "member"
+               :on-event (fn [e] (swap! got conj e))})]
+    (try
+      (is (wait/wait-for 3000 #(= ["acme"] (vals @(:subscribers relay))))
+          "the subscriber registers under the request-scope's org")
+      (doseq [cb @(:callbacks listener)] (cb {:kind :fn :op :invalidate :id "t1" :org-id "acme"}))
+      (is (wait/wait-for 2000 #(seq @got)) "a tenant-tagged event reaches its org's executor")
+      (testing "a request-scope refusal is returned, nothing registers"
+        (let [subscribers (atom {})
+              handler (sse/make-handler subscribers provider request-scope {})]
+          (is (= 403 (:status (handler {:headers {"authorization" "Bearer foreign"}}))))
+          (is (empty? @subscribers))))
+      (finally
+        (remote-sse/stop-source! src)
+        (sse/stop-relay! relay)))))
+
+
 (deftest sse-relay-fans-out-per-org
   ;; Each subscriber registers under its authenticated org; an org-tagged
   ;; event reaches only that org's subscribers, a nil-org (public) event

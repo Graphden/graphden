@@ -15,7 +15,9 @@
    That keeps the async SSE channel out of the graph dispatch + tenancy
    request-scope, which expect ordinary response maps.
 
-   Fan-out is per-org: each subscriber registers under its authenticated org,
+   Fan-out is per-org: each subscriber registers under its org, resolved at
+   subscribe time (`authenticate` — the request-scope's membership decision
+   for the org-agnostic accounts principal),
    and an event tagged with a real tenant org (`:org-id`, added by
    `crud.entities/notify-after-write!`) goes only to that org's subscribers.
    A nil-org event (an un-scoped / single-tenant write) and a PUBLIC-org
@@ -61,16 +63,37 @@
     (hk/send! ch frame close?)))
 
 
+(defn- scoped-org
+  "The org the deployment's request-scope seam (docs/TENANCY_SEAM.md) runs
+   `request` as — `{:org o}`, or `{:denied resp}` when one of its gates
+   short-circuits (cross-org Host, rate limit, …). The accounts principal is
+   org-AGNOSTIC: the org is a policy decision (the account's memberships,
+   narrowed by Host / the `gd_org` selector), made ONLY inside the
+   request-scope — so the relay asks it rather than reading `:org` off a
+   principal that never carries one."
+  [request-scope ctx request]
+  (let [resp (request-scope ctx request (fn [] {:status 200 ::org (tc/current-org)}))]
+    (if (contains? resp ::org)
+      {:org (::org resp)}
+      {:denied resp})))
+
+
 (defn- authenticate
-  "Authenticate the request; return `{:ok? bool :org <string-or-nil>}`. The
-   org (`(:org principal)`, read directly to avoid a tenancy dependency) keys
-   which events this subscriber receives. nil provider ⇒ open, nil org (single-
-   tenant / tests)."
-  [auth-provider request]
+  "Authenticate the request; return `{:ok? bool :org <string-or-nil>}` (plus
+   `:denied` — the response to send — when the request-scope refuses it). The
+   org keys which events this subscriber receives: the principal's own `:org`
+   when its provider resolves one (a static token map), else the
+   request-scope's resolution when one is wired (`scoped-org`), else nil
+   (single-tenant / tests). nil provider ⇒ open."
+  [auth-provider request-scope ctx request]
   (if (nil? auth-provider)
     {:ok? true :org nil}
     (let [principal (auth/authenticate auth-provider request)]
-      {:ok? (boolean (:authenticated? principal)) :org (:org principal)})))
+      (cond
+        (not (:authenticated? principal)) {:ok? false}
+        (:org principal) {:ok? true :org (:org principal)}
+        request-scope (assoc (scoped-org request-scope ctx request) :ok? true)
+        :else {:ok? true :org nil}))))
 
 
 (defn- deliver?
@@ -112,19 +135,27 @@
 (defn make-handler
   "Ring handler for `GET /events/stream`. Authenticates, opens an SSE channel,
    and registers it in `subscribers` (an atom of `{AsyncChannel → sub-org}`)
-   keyed by the subscriber's authenticated org, so `broadcast!` can fan an
-   event out only to the orgs it concerns. De-registers on close."
-  [subscribers auth-provider]
-  (fn [request]
-    (let [{:keys [ok? org]} (authenticate auth-provider request)]
-      (if-not ok?
-        {:status 401
-         :headers {"Content-Type" "application/json" "WWW-Authenticate" "Bearer"}
-         :body "{\"ok\":false,\"error\":\"unauthorized\"}"}
-        (hk/as-channel
-          request
-          {:on-open (fn [ch] (open-subscriber! subscribers ch org))
-           :on-close (fn [ch _status] (swap! subscribers dissoc ch))})))))
+   keyed by the subscriber's org (`authenticate`), so `broadcast!` can fan an
+   event out only to the orgs it concerns. De-registers on close.
+   `request-scope` / `ctx` — the exec ctx's request-scope seam and the ctx it
+   runs under; nil without the tenancy addon."
+  ([subscribers auth-provider] (make-handler subscribers auth-provider nil nil))
+  ([subscribers auth-provider request-scope ctx]
+   (fn [request]
+     (let [{:keys [ok? org denied]} (authenticate auth-provider request-scope ctx request)]
+       (cond
+         (not ok?)
+         {:status 401
+          :headers {"Content-Type" "application/json" "WWW-Authenticate" "Bearer"}
+          :body "{\"ok\":false,\"error\":\"unauthorized\"}"}
+
+         denied denied
+
+         :else
+         (hk/as-channel
+           request
+           {:on-open (fn [ch] (open-subscriber! subscribers ch org))
+            :on-close (fn [ch _status] (swap! subscribers dissoc ch))}))))))
 
 
 (defn broadcast!
@@ -173,12 +204,17 @@
    Only fn-invalidate + execution events are worth relaying to a remote
    executor; `:service` events are pod-local reconcile signals. The remote
    side ignores what it doesn't handle, so we forward everything and let
-   `on-notify` filter — keeping the relay dumb."
-  [{:keys [port notify-listener auth-provider]}]
+   `on-notify` filter — keeping the relay dumb.
+
+   `context` (optional) — the exec ctx; its `:request-scope` resolves an
+   org-agnostic principal's org (see `authenticate`)."
+  [{:keys [port notify-listener auth-provider context]}]
   (let [subscribers (atom {})
+        stream-handler (make-handler subscribers auth-provider
+                                     (:request-scope context) context)
         handler (fn [request]
                   (if (= "/events/stream" (:uri request))
-                    ((make-handler subscribers auth-provider) request)
+                    (stream-handler request)
                     {:status 404 :headers {"Content-Type" "text/plain"} :body "not found"}))
         server (hk/run-server handler {:port port})
         callback (when notify-listener

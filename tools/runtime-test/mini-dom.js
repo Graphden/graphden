@@ -15,7 +15,9 @@
 //   setAttribute/getAttribute,
 //   title / href / style.cursor, addEventListener + click(),
 //   querySelector / querySelectorAll over `tag.a.b` selectors with
-//   descendant combinators (`.parent .child`).
+//   descendant combinators (`.parent .child`) and `a, b` selector lists,
+//   `dataset` (reflected onto `data-*` attributes), `isConnected` (true
+//   under the document's body).
 //
 // NOT supported, on purpose: innerHTML, layout, CSS, events that
 // bubble to anything but their own listeners. A builder that needs
@@ -78,6 +80,15 @@ class MiniElement {
     Object.defineProperty(this.style, 'removeProperty',
       { value(k) { delete this[k]; }, enumerable: false });
     this.listeners = {};
+    // Reflected onto data-* attributes, like the real one — so `[data-x]`
+    // selectors see what code wrote through `el.dataset.x`.
+    const kebab = (k) => 'data-' + String(k).replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+    this.dataset = new Proxy({}, {
+      get: (_t, k) => (typeof k === 'string' ? (this.getAttribute(kebab(k)) ?? undefined) : undefined),
+      set: (_t, k, v) => { this.setAttribute(kebab(k), v); return true; },
+      deleteProperty: (_t, k) => { this.removeAttribute(kebab(k)); return true; },
+      has: (_t, k) => this.getAttribute(kebab(k)) !== null,
+    });
     this._className = '';
     this._text = '';
     const self = this;
@@ -123,6 +134,8 @@ class MiniElement {
   }
 
   set textContent(v) {
+    // The dropped children are detached for real (isConnected goes false).
+    for (const c of this.children) c.parentNode = null;
     this.children = [];
     this._text = v == null ? '' : String(v);
   }
@@ -170,6 +183,13 @@ class MiniElement {
   }
 
   get firstChild() { return this.children[0] || null; }
+
+  // Attached under a document's body (createDocument marks it).
+  get isConnected() {
+    let node = this;
+    while (node.parentNode) node = node.parentNode;
+    return !!node._isDocumentRoot;
+  }
 
   setAttribute(k, v) { this.attributes[k] = String(v); }
 
@@ -231,6 +251,13 @@ class MiniElement {
 
   // `.a .b` — descendant combinator; each fragment is `tag.a.b`.
   querySelectorAll(selector) {
+    if (String(selector).includes(',')) {
+      const hits = new Set();
+      for (const one of String(selector).split(',')) {
+        for (const n of this.querySelectorAll(one)) hits.add(n);
+      }
+      return descendants(this, []).filter((n) => hits.has(n));
+    }
     const parts = String(selector).trim().split(/\s+/).map(parseSimple);
     let scope = [this];
     for (const part of parts) {
@@ -261,6 +288,7 @@ class MiniText {
 
 function createDocument() {
   const body = new MiniElement('body');
+  body._isDocumentRoot = true;
   // Document-level listeners: modules that arm a global key handler (the tour
   // does) must be able to add and REMOVE one without blowing up.
   const listeners = {};

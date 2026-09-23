@@ -35,8 +35,10 @@
 
 
 (defn constant-time-equal?
-  "Timing-safe string compare — mirrors core.logic's
-   `:constant-time-equal?`. `MessageDigest/isEqual` XOR-accumulates every
+  "Timing-safe string compare — the ONE definition: the single-token
+   provider, the fleet command gate, accounts' TOTP / Telegram HMAC checks
+   and core.logic's `:constant-time-equal?` base-fn all call it.
+   `MessageDigest/isEqual` XOR-accumulates every
    byte instead of short-circuiting on first mismatch, so it doesn't leak
    a per-byte timing channel. nil / non-string → false."
   [a b]

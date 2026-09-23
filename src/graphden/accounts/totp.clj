@@ -8,7 +8,8 @@
    in `accounts.core` + `accounts.routes`."
   (:require
     [clojure.string :as str]
-    [graphden.accounts.crypto :as crypto])
+    [graphden.accounts.crypto :as crypto]
+    [graphden.auth.provider :as auth])
   (:import
     (java.io
       ByteArrayOutputStream)
@@ -106,7 +107,7 @@
   (boolean
     (when (and secret-base32 (not (str/blank? code)))
       (some (fn [delta]
-              (crypto/constant-time-equal? (str code)
+              (auth/constant-time-equal? (str code)
                                            (code-at secret-base32 (+ (long time-secs) (* delta step-secs)))))
             [-1 0 1]))))
 

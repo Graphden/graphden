@@ -55,15 +55,6 @@
                                   (random-bytes 32)))
 
 
-(defn constant-time-equal?
-  "Constant-time compare of two strings (fixed-shape byte compare). Guards HMAC
-   verification against timing side-channels."
-  [^String a ^String b]
-  (boolean
-    (when (and a b)
-      (MessageDigest/isEqual (String/.getBytes a "UTF-8") (String/.getBytes b "UTF-8")))))
-
-
 (defn per-key-fixed-window-limiter
   "A per-key fixed-window rate limiter whose cap is supplied PER CALL:
    `(fn [key max-attempts] → allowed?)`, so keys carrying different limits

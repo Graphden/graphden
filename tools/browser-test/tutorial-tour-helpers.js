@@ -333,19 +333,33 @@ async function waitTourTitle(page, title, timeoutMs) {
   }
 }
 
-// Wait (bounded) for the current step's effective target to be on screen,
-// then one tour tick so the audit's sampler records the ring on it. Walks
-// call it after their own "wait for X to render" when X is the step's
-// target — the title arrived before X did, so waitTourTitle's settle could
-// not see it.
+// Wait (bounded) until the audit's sampler has RECORDED the current step with
+// its effective target on screen — the ring held for a tour tick. Walks call
+// it after their own "wait for X to render" when X is the step's target — the
+// title arrived before X did, so waitTourTitle's settle could not see it.
+//
+// It used to wait for the target and then sleep a flat 650 ms (two 250 ms
+// samples plus slack) on every step — ~370 steps a gate, ~4 minutes, most of
+// it after the sampler had long committed. The sampler publishes what it
+// committed in `window.__gdTourAuditKey` (`lesson|title|eff|spotVisible|el?`),
+// so wait for exactly that: the same "held for two samples" guarantee the
+// NEVER-RINGED verdict reads (a record with an element), no sooner and no
+// later. A step with no target has nothing to ring and returns at once.
 async function settleTourRing(page, timeoutMs) {
   if (!process.env.GRAPHDEN_TOUR_AUDIT) return;
+  await installSpotlightAudit(page);
   await page.waitForFunction(() => {
     if (typeof _tourStep !== 'function' || typeof _tourEffTarget !== 'function') return true;
-    const eff = _tourEffTarget(_tourStep());
-    return !eff || !!document.querySelector(eff);
-  }, null, {timeout: timeoutMs || 5000, polling: 100}).catch(() => {});
-  await new Promise((r) => setTimeout(r, 650));
+    const step = _tourStep();
+    if (!step) return true;
+    const eff = _tourEffTarget(step);
+    if (!eff) return true;
+    if (!document.querySelector(eff)) return false;
+    const lesson = (typeof _tourLesson === 'function') ? _tourLesson() : null;
+    const recorded = window.__gdTourAuditKey || '';
+    return recorded.startsWith([lesson?.id, step.title, eff].join('|') + '|')
+      && recorded.endsWith('|1');
+  }, null, {timeout: timeoutMs || 5000, polling: 50}).catch(() => {});
 }
 
 

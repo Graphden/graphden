@@ -55,6 +55,27 @@
   (util/exec! ds [(str "CREATE SEQUENCE IF NOT EXISTS " sequence-name)] {}))
 
 
+(defn epoch-handle
+  "The pool-bearing Postgres handle beneath `storage` — the one that owns
+   the sequence's pool AND the bump ledger. Every entry point resolves
+   through it (except `current` — see there), so callers may pass
+   whatever storage they hold. A storage
+   DECORATOR (the tenancy addon's `OrgScopedStorage` under `:base`, a
+   `VersionedStorage` under `:base-storage`) carries neither; without this
+   descent every function here saw a pool-less handle on a multi-tenant
+   deployment and the whole self-heal was an inert no-op there — no bump,
+   no note, no validation. Returns `storage` itself when nothing beneath
+   has a pool (an in-memory test storage — the no-op contract)."
+  [storage]
+  (loop [s storage
+         depth 0]
+    (cond
+      (:pool s) s
+      (>= depth 8) storage
+      :else (let [inner (or (:base-storage s) (:base s))]
+              (if (map? inner) (recur inner (inc depth)) storage)))))
+
+
 (defn attach-state
   "Give a storage handle its own epoch LEDGER: a sorted-map of every
    locally-bumped value → {:at ms :noted? bool}, plus a sorted-set of
@@ -100,25 +121,26 @@
    missing sequence."
   [storage entity-name]
   (when (contains? graph-epoch-entities entity-name)
-    (when-let [pool (:pool storage)]
-      (try
-        ;; single-column row; take the value positionally — next.jdbc
-        ;; qualifies column keys by relation, so keyword access is
-        ;; brittle across the two query shapes here.
-        (let [v (some-> (util/exec-one!
-                          pool [(str "SELECT nextval('" sequence-name "')")] {})
-                        vals first)]
-          (when (and v (:graph-epoch-local storage))
-            ;; `:entity` names the write for the heal's reason log —
-            ;; an un-noted bump that ages past grace is a missing note
-            ;; call site, and the entity is what finds it.
-            (swap! (:graph-epoch-local storage)
-                   assoc v {:at (System/currentTimeMillis) :noted? false
-                            :entity entity-name})
-            (when *request-bump-log*
-              (swap! *request-bump-log* conj v)))
-          v)
-        (catch Exception e (warn-once e) nil)))))
+    (when-let [{:keys [pool] :as storage} (epoch-handle storage)]
+      (when pool
+        (try
+          ;; single-column row; take the value positionally — next.jdbc
+          ;; qualifies column keys by relation, so keyword access is
+          ;; brittle across the two query shapes here.
+          (let [v (some-> (util/exec-one!
+                            pool [(str "SELECT nextval('" sequence-name "')")] {})
+                          vals first)]
+            (when (and v (:graph-epoch-local storage))
+              ;; `:entity` names the write for the heal's reason log —
+              ;; an un-noted bump that ages past grace is a missing note
+              ;; call site, and the entity is what finds it.
+              (swap! (:graph-epoch-local storage)
+                     assoc v {:at (System/currentTimeMillis) :noted? false
+                              :entity entity-name})
+              (when *request-bump-log*
+                (swap! *request-bump-log* conj v)))
+            v)
+          (catch Exception e (warn-once e) nil))))))
 
 
 (defn note-applied!
@@ -133,7 +155,7 @@
        (reset! *request-bump-log* [])
        (note-applied! storage vs))))
   ([storage vs]
-   (when-let [ledger (:graph-epoch-local storage)]
+   (when-let [ledger (:graph-epoch-local (epoch-handle storage))]
      (when (seq vs)
        (swap! ledger
               (fn [m]
@@ -148,7 +170,7 @@
   "Mark foreign epochs as covered — a sibling's NOTIFY carried the
    writer's bump values and the delta was applied locally."
   [storage vs]
-  (when-let [covered (:graph-epoch-covered storage)]
+  (when-let [covered (:graph-epoch-covered (epoch-handle storage))]
     (when (seq vs)
       (swap! covered into vs))))
 
@@ -161,7 +183,7 @@
    the first validation read them as ABORTED and healed once for
    nothing: a base rebuild plus every cached branch ctx dropped."
   [storage]
-  (when-let [ledger (:graph-epoch-local storage)]
+  (when-let [ledger (:graph-epoch-local (epoch-handle storage))]
     (swap! ledger (fn [m] (into (sorted-map) (map (fn [[v e]] [v (assoc e :noted? true)])) m)))))
 
 
@@ -173,8 +195,9 @@
   [storage w global grace-ms]
   (if (> (- global w) 512)
     {:width (- global w)}
-    (let [local @(:graph-epoch-local storage)
-          covered @(:graph-epoch-covered storage)
+    (let [{:keys [graph-epoch-local graph-epoch-covered]} (epoch-handle storage)
+          local @graph-epoch-local
+          covered @graph-epoch-covered
           now (System/currentTimeMillis)]
       (reduce (fn [acc e]
                 (if-let [{:keys [at noted? entity]} (get local e)]
@@ -200,8 +223,9 @@
   [storage w global grace-ms]
   (if (> (- global w) 512)
     #{:foreign}
-    (let [local @(:graph-epoch-local storage)
-          covered @(:graph-epoch-covered storage)
+    (let [{:keys [graph-epoch-local graph-epoch-covered]} (epoch-handle storage)
+          local @graph-epoch-local
+          covered @graph-epoch-covered
           now (System/currentTimeMillis)]
       (into #{}
             (map (fn [e]
@@ -235,15 +259,16 @@
    it that are older than `*ledger-retention-ms*` (see there for why
    the ledger keeps recent ones)."
   [storage w]
-  (when-let [ledger (:graph-epoch-local storage)]
-    (let [cutoff (- (System/currentTimeMillis) *ledger-retention-ms*)]
-      (swap! ledger (fn [m]
-                      (into (sorted-map)
-                            (remove (fn [[v {:keys [at]}]]
-                                      (and (<= v w) (< at cutoff))))
-                            m)))))
-  (when-let [covered (:graph-epoch-covered storage)]
-    (swap! covered (fn [s] (into (sorted-set) (subseq s > w))))))
+  (let [{ledger :graph-epoch-local covered :graph-epoch-covered} (epoch-handle storage)]
+    (when ledger
+      (let [cutoff (- (System/currentTimeMillis) *ledger-retention-ms*)]
+        (swap! ledger (fn [m]
+                        (into (sorted-map)
+                              (remove (fn [[v {:keys [at]}]]
+                                        (and (<= v w) (< at cutoff))))
+                              m)))))
+    (when covered
+      (swap! covered (fn [s] (into (sorted-set) (subseq s > w)))))))
 
 
 (defn current
@@ -255,6 +280,10 @@
    or missing sequence — callers treat nil as 'cannot validate, skip
    healing'."
   [storage]
+  ;; Deliberately NOT through `epoch-handle`: the resolution load memo
+  ;; keys on `[branch epoch]` alone, so a decorator reporting its base's
+  ;; epoch would let an org-scoped read and a raw compile read share one
+  ;; memo entry. Callers that want the sequence resolve the handle first.
   (when-let [pool (:pool storage)]
     (try
       (let [row (util/exec-one!

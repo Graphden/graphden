@@ -94,10 +94,12 @@ rc_of() { echo "${RC[$1]:-none}"; }
 verdict() { cut -f1 "$Q/results/$1" 2>/dev/null || echo none; }
 gates() { cat "$STUB_LOG"; }
 hold_lock() {   # hold the gate lock until release_lock, so waiters pile up
-  mkdir -p "$Q"; rm -f "$T/release"
-  flock "$Q/queue.lock" -c "while [ ! -e '$T/release' ]; do sleep 0.1; done" &
+  mkdir -p "$Q"; rm -f "$T/release" "$T/held"
+  flock "$Q/queue.lock" -c "touch '$T/held'; while [ ! -e '$T/release' ]; do sleep 0.1; done" &
   HOLD_PID=$!
-  sleep 0.3
+  # Wait until the lock is HELD, not a fixed nap: on a loaded host a waiter
+  # started next could win the lock first and run the train early.
+  wait_for 30 test -e "$T/held"
 }
 release_lock() { touch "$T/release"; wait "$HOLD_PID" 2>/dev/null || true; }
 # Capture first, grep after: under pipefail `wt ... | grep -q` reds whenever

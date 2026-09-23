@@ -139,9 +139,8 @@ don't fit your traffic.
 
 ## 4. User feedback intake
 
-The editor carries a **Report a problem** form (shell menu, plus a
-"Report a problem" entry in the account menu that pre-checks the error-log
-attachment). It is how a user on ANY instance — local, self-hosted,
+The editor carries a **Report a problem** form (the account menu's
+"Report a problem" row). It is how a user on ANY instance — local, self-hosted,
 cloud — files a bug/idea/question without needing an account anywhere.
 
 The flow deliberately does not depend on the local backend being
@@ -154,7 +153,9 @@ preflight). When even that fails (offline), the form degrades to a
 Everything attached is opt-in-by-checkbox and shown before sending:
 build hashes + browser/env info, the client-side uncaught-JS-error ring
 buffer, optionally the current location (instance URL, branch, open fn)
-and the already-redacted error-log text. Nothing is sent without an
+and, when signed in, the current branch view's recent failed executions
+as fn names + counts (the failed-runs lens's `GET /api/failures` read —
+no error text). Nothing is sent without an
 explicit submit.
 
 Two env vars (see [DEPLOYMENT § Environment Variables](DEPLOYMENT.md#environment-variables)):

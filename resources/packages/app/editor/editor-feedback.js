@@ -104,14 +104,19 @@ async function _fbBuildContext(include) {
       branch: typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : null,
     };
   }
-  if (include.errorLog) {
+  if (include.failures && window.API && API.api_failures) {
+    // The failed-runs lens's own read (GET /api/failures): which fns
+    // failed on this branch view over the last 7 days, and how often.
+    // Names + counts only — no error text leaves the instance.
     try {
-      const r = await authFetch('/partials/error-log');
+      const r = await authFetch(API.api_failures);
       if (r.ok) {
-        const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
-        ctx.errorLog = (doc.body.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 4000);
+        const rows = await r.json();
+        if (Array.isArray(rows)) {
+          ctx.failures = rows.slice(0, 50).map((f) => ({ fn: f['fn-name'], count: f.count }));
+        }
       }
-    } catch (_) { /* panel unreachable — send without it */ }
+    } catch (_) { /* failures unreachable — send without them */ }
   }
   return ctx;
 }
@@ -120,8 +125,7 @@ async function _fbBuildContext(include) {
 // THE FORM POPOVER
 // ============================================================================
 
-// Where the keyboard was before the form opened (the account menu item or
-// the Errors-panel footer button).
+// Where the keyboard was before the form opened (the account menu item).
 let _fbTrigger = null;
 
 // Installed once — it reads the live backdrop each keystroke and is inert
@@ -167,7 +171,7 @@ function _fbCheck(labelText, checked) {
   return { el: label, box };
 }
 
-// opts: {includeErrorLog: bool, prefillText: string}
+// opts: {prefillText: string}
 function openFeedbackForm(opts = {}) {
   if (!feedbackEnabled()) {
     if (typeof gdToast === 'function') gdToast('Feedback is disabled on this instance.');
@@ -240,10 +244,10 @@ function openFeedbackForm(opts = {}) {
   attach.appendChild(cEnv.el);
   attach.appendChild(cErrs.el);
   attach.appendChild(cLoc.el);
-  let cLog = null;
+  let cFails = null;
   if (typeof isAuthenticated === 'function' && isAuthenticated()) {
-    cLog = _fbCheck('Recent failed executions (error log, already redacted)', !!opts.includeErrorLog);
-    attach.appendChild(cLog.el);
+    cFails = _fbCheck('Recent failed executions (fn names + counts, last 7 days)', false);
+    attach.appendChild(cFails.el);
   }
   card.appendChild(attach);
 
@@ -279,7 +283,7 @@ function openFeedbackForm(opts = {}) {
         env: cEnv.box.checked,
         consoleErrors: cErrs.box.checked,
         location: cLoc.box.checked,
-        errorLog: !!cLog?.box.checked,
+        failures: !!cFails?.box.checked,
       }),
     };
     try {

@@ -260,8 +260,8 @@ Idea / Question), a description, an optional email for follow-up —
 plus a checklist of what travels with it, each item yours to untick:
 build and environment (the frontend and server version hashes, the
 browser), the recent console errors, and off by default your current
-location (instance URL, branch, open fn) and, when signed in, the
-already-redacted error log. Nothing is sent until you press **Send**.
+location (instance URL, branch, open fn) and, when signed in, which
+fns failed recently and how often (names and counts, no error text). Nothing is sent until you press **Send**.
 The report goes to the intake URL this instance announces — the
 official graphden intake unless the operator pointed it elsewhere or
 switched the row off — and lands as a row in that instance's

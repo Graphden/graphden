@@ -65,6 +65,13 @@
     {:storage versioned :base base :fn-id (:id f) :slot-id (:id s)}))
 
 
+(defn- value-on
+  "The binding's `:value` as `storage`'s current branch resolves it —
+   nil while the branch cannot see a version of it."
+  [storage binding-id]
+  (:value (sp/read-entity storage :binding binding-id)))
+
+
 (defn- create-binding-on-current!
   "Helper: write a binding via the versioned wrapper so a version
    row lands on the storage's current branch."
@@ -197,19 +204,24 @@
           feature-storage (vs/switch-branch storage (:id source))
           b (create-binding-on-current! feature-storage fn-id slot-id "leaked")]
       (mp/add-merge-protection! feature-storage (:id b))
+      (is (nil? (value-on storage (:id b))) "main cannot see the binding before the merge")
       ;; Should NOT throw — the flag bypasses validate-merge!.
       (mp/safe-merge-branch! storage (:id source) {:skip-protection-check true})
-      (is true "merge proceeded under skip-protection-check")
+      (is (= "leaked" (value-on storage (:id b)))
+          "the merge ran: the protected binding transferred onto main")
       (sp/close storage))))
 
 
 (deftest safe-merge-branch-passes-without-violations-test
   (testing "safe-merge-branch! delegates to vs/merge-branch! when nothing is protected"
-    (let [{:keys [storage]} (create-test-storage)
-          source (vs/create-branch! storage "feature")]
+    (let [{:keys [storage fn-id slot-id]} (create-test-storage)
+          source (vs/create-branch! storage "feature")
+          b (create-binding-on-current! (vs/switch-branch storage (:id source))
+                                        fn-id slot-id "plain")]
       ;; No traits in DB — should be a clean pass-through.
       (mp/safe-merge-branch! storage (:id source))
-      (is true "merge succeeded with no protected bindings")
+      (is (= "plain" (value-on storage (:id b)))
+          "the unprotected binding reached main")
       (sp/close storage))))
 
 
@@ -222,24 +234,29 @@
 (deftest forbid-invalid-off-merge-unchanged-test
   (testing "diagnostics recorded but target has no :forbid-invalid? → merge proceeds"
     (binding [diag/*diagnostics-override* (atom {})]
-      (let [{:keys [storage fn-id]} (create-test-storage)
-            source (vs/create-branch! storage "feature")]
+      (let [{:keys [storage fn-id slot-id]} (create-test-storage)
+            source (vs/create-branch! storage "feature")
+            b (create-binding-on-current! (vs/switch-branch storage (:id source))
+                                          fn-id slot-id "from-feature")]
         (diag/record! (:id source) fn-id [{:message "broken on source"}])
         (mp/safe-merge-branch! storage (:id source))
-        (is true "merge proceeded — policy off by default")
+        (is (= "from-feature" (value-on storage (:id b)))
+            "merge proceeded — policy off by default")
         (sp/close storage)))))
 
 
 (deftest forbid-invalid-blocks-broken-source-test
   (testing "policy on + recorded diagnostics on source → blocked naming the fn; cleared → merges"
     (binding [diag/*diagnostics-override* (atom {})]
-      (let [{:keys [storage fn-id]} (create-test-storage)
+      (let [{:keys [storage fn-id slot-id]} (create-test-storage)
             ;; Create the protected target WITH the flag (exercises the
             ;; vs/create-branch! opt-passing) and fork the source off it.
             protected (vs/create-branch! storage "protected"
                                          {:forbid-invalid? true})
             target (vs/switch-branch storage (:id protected))
-            source (vs/create-branch! target "feature")]
+            source (vs/create-branch! target "feature")
+            b (create-binding-on-current! (vs/switch-branch storage (:id source))
+                                          fn-id slot-id "fixed")]
         (is (true? (:forbid-invalid? protected))
             "create-branch! persists the flag")
         (diag/record! (:id source) fn-id [{:message "Type mismatch on arg :x"}])
@@ -257,8 +274,10 @@
             "the full safe-merge path is gated too")
         ;; Fix (clear the recorded entry) → merge proceeds.
         (diag/clear-fn! (:id source) fn-id)
+        (is (nil? (value-on target (:id b))) "the blocked merges transferred nothing")
         (mp/safe-merge-branch! target (:id source))
-        (is true "merge proceeded after the fn was fixed")
+        (is (= "fixed" (value-on target (:id b)))
+            "merge proceeded after the fn was fixed")
         (sp/close storage)))))
 
 
@@ -293,8 +312,8 @@
             invisible-id (java.util.UUID/randomUUID)]
         (sp/update-entity base :branch main-id {:forbid-invalid? true})
         (diag/record! main-id invisible-id [{:message "foreign org's broken fn"}])
-        (mp/validate-branch-policy! storage (:id source))
-        (is true "invisible-only diagnostics → merge proceeds")
+        (is (nil? (mp/validate-branch-policy! storage (:id source)))
+            "invisible-only diagnostics → merge proceeds")
         (testing "mixed: a visible broken fn still blocks, naming ONLY itself"
           (diag/record! main-id fn-id [{:message "own broken fn"}])
           (try

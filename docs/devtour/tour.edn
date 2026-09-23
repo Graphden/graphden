@@ -807,16 +807,17 @@
            request + response persisted as a standard `:fn-execution` row —
            so a live handler run replays through the same call-tree UI as a
            traced `/api/execute`."}
-    {:ns graphden.crud.secrets :defn create-secret
+    {:ns graphden.crud.secrets :defn apply-create-secret-body
      :say "The write path that must not leak (docs/SECRETS.md): one
-           `POST /api/secrets` atomically creates the OpenBao value, its
-           custom-metadata, and the graphden fn-row + path-binding — with a
-           vault-delete rollback if the graph half fails. The secret VALUE
-           never enters the graph; only the path does, on a `:secret-leaf`
-           child the executor auto-derefs through the ctx's vault handle.
-           Note the shape: this public defn is thin orchestration over the
-           same per-stage helpers the `:cond` in `app/secrets/fns.edn`
-           consumes, so the Clojure and the graph path can never diverge."
+           `POST /api/secrets` creates the graphden fn-row + path-binding,
+           then the OpenBao value and its custom-metadata — every step
+           journalled so `replay-secret-rollback!` can undo the lot if a
+           later one fails. The secret VALUE never enters the graph; only
+           the path does, on a `:secret-leaf` child the executor auto-derefs
+           through the ctx's vault handle. Note the shape: the endpoint is
+           the `:cond` in `app/secrets/fns.edn` (parse, guards, a `:try`);
+           only this journalled body stays Clojure, reached through the
+           `:_apply-create-secret-body` base-fn."
      :see [[:types "taint-with-secret-if-tainted"]]}
     {:ns graphden.crud.test-runs :defn run-tests!
      :say "The tests subsystem (docs/TESTS.md) rides everything above: a test

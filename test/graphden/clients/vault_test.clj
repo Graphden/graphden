@@ -8,7 +8,7 @@
 
    Integration tests for `graphden.clients.vault` against a real
    OpenBao container — covers the HTTP path that the unit tests in
-   `secrets_test.clj` mock out via `with-redefs`.
+   `secrets_graph_test.clj` fake via `vault/*impl-override*`.
 
    Container lifecycle is namespace-scoped: one OpenBao (dev mode,
    in-memory KV v2, root token `root`) starts on first test and

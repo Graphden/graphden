@@ -76,7 +76,7 @@
    base-fn (declared via `:tags #{:admin-only-vault}` in
    `web/vault/fns.edn`; see `secret-shape/find-admin-only-vault-base-fn-ids`),
    UNLESS the data carries `:_admin-secret-create true`. The admin
-   path (`crud.secrets/create-secret`) sets the marker and strips
+   path (`crud.secrets/apply-create-secret-body`) sets the marker and strips
    it before calling the storage layer; any other path (the
    generic `/api/entities/fn` endpoint, ad-hoc API clients, etc.)
    reaches this gate WITHOUT the marker and gets bounced through
@@ -107,7 +107,7 @@
    re-binds this var to nil and re-enters `create-entity`. nil
    (production) = real body. Tests `binding` this instead of
    `with-redefs`-ing the root var — a root rebind is process-global
-   and forced a `^:serial` pin on `crud.secrets-test`. Mirrors
+   and forced a `^:serial` pin on the secrets suite. Mirrors
    `advisory-lock/*impl-override*`. Cost on the real path: one nil
    check per CRUD create."
   nil)

@@ -840,7 +840,7 @@
   ;; `parent-ids=[<secret-leaf>]` through the generic
   ;; `entities/create-entity` is refused unless the caller sets the
   ;; in-memory `:_admin-secret-create` marker. The admin path
-  ;; (`crud.secrets/create-secret`) sets the marker; user-facing
+  ;; (`crud.secrets/apply-create-secret-body`) sets the marker; user-facing
   ;; endpoints (`/api/entities/fn` form-post, ad-hoc API clients)
   ;; never do. The marker is also stripped before the row reaches
   ;; storage — verified via the read-back row.

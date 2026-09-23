@@ -4,12 +4,10 @@
    `in-use?` guard.
 
    `:find-fn-usages` is the graph fn-def that REPLACED the `defbase
-   find-fn-usages` thin-shim that used to delegate to
-   `graphden.crud.secrets/find-usages`. The Clojure helper is still
-   used by the test orchestrator (`crud.secrets/delete-secret`); these
-   tests cover the OTHER path — the production HTTP graph composition
-   over `:query-ref-many-owners` + 2 `:list-entities` reverse-ref scans
-   + `:merge`-precedence + name lookup."
+   find-fn-usages` thin-shim over a Clojure `crud.secrets/find-usages`
+   (since retired): a graph composition over `:query-ref-many-owners` +
+   2 `:list-entities` reverse-ref scans + `:merge`-precedence + name
+   lookup."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]

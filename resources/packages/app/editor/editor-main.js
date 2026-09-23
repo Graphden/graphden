@@ -332,7 +332,7 @@ async function initGraph() {
 }
 
 
-// Re-fetch the graph state after a mutation (e.g. crud.secrets/create
+// Re-fetch the graph state after a mutation (e.g. POST /api/secrets
 // → new fn-def + binding appear in the graph). Callable from
 // editor-secrets.js etc. so the ns-tree / graph pick up the new entries
 // without a full page reload. Kept as a separate fn from `init()` so it

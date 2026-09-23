@@ -9,6 +9,7 @@
   (:require
     [clojure.tools.logging :as log]
     [graphden.clients.vault :as vault]
+    [graphden.crud.secrets :as secrets]
     [graphden.crud.fn-execution.retention :as retention]
     [graphden.crud.fn-execution.stats :as stats]
     [graphden.storage.protocol.core :as sp]
@@ -59,15 +60,6 @@
           rows)))
 
 
-(defn path-still-referenced?
-  "Does any binding version row — on any branch, purged rows excluded —
-   still resolve `path` through a resolver? Two fns may bind the same
-   vault path; the value goes only when the last reference is gone."
-  [base-storage path]
-  (boolean (some :resolver-fn-id
-                 (sp/query-entities base-storage :binding-version {:value path}))))
-
-
 (defn sweep-orphan-secrets!
   "After a GC sweep: delete from the vault every collected `path` no
    binding references any more. A missing vault client (self-host
@@ -78,7 +70,7 @@
   (when (seq paths)
     (if-let [client @vault/active-client]
       (doseq [path paths
-              :when (not (path-still-referenced? base-storage path))]
+              :when (not (secrets/path-referenced? base-storage path))]
         (try (vault/delete-secret client path)
              (log/info "tombstone-gc: vault secret reclaimed" {:path path})
              (catch Exception e

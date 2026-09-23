@@ -20,10 +20,12 @@
     [clojure.tools.logging :as log]
     [graphden.clients.vault :as vault]
     [graphden.crud.entities :as crud-entities]
+    [graphden.crud.package-guard :as pkg-guard]
     [graphden.crud.request :as request]
     [graphden.crud.type-check :as tc]
     [graphden.storage.protocol.core :as sp]
-    [graphden.tenancy.context :as tctx])
+    [graphden.tenancy.context :as tctx]
+    [graphden.versioning.storage.core :as vcore])
   (:import
     (java.util
       UUID)))
@@ -95,6 +97,42 @@
     (:slot-id fs)))
 
 
+(defn path-referenced?
+  "Does any binding version row — on any branch, purged rows excluded —
+   resolve `path` through a resolver? Two fns may bind the same vault
+   path; the value goes only when the last reference is gone (the
+   tombstone GC), and a NEW secret must not claim a path that is still
+   referenced (its value write would silently replace the other
+   binding's secret). Reads the version table directly — `storage` may
+   be the versioned wrapper or its base."
+  [storage path]
+  (boolean (some :resolver-fn-id
+                 (sp/query-entities (vcore/unwrap storage) :binding-version
+                                    {:value path}))))
+
+
+(defn- claim-path!
+  "The path a new secret is stored at (`vault/scoped-path` — the tenant's
+   org prefix applied, the syntax checked), refusing one another binding
+   already references with a 409."
+  [storage path]
+  (let [p (vault/scoped-path path)]
+    (when (path-referenced? storage p)
+      (throw (ex-info (str "Vault path " p " is already bound by another secret — "
+                           "choose a different path, or bind the existing secret by reference")
+                      {:type :secrets/path-in-use :path p :http-status 409})))
+    p))
+
+
+(defn- refuse-package-owner!
+  "403 when `fn-id` is package-synced — an inline secret binding on it
+   would change every descendant and be reverted by the next sync, and
+   its value would be written to the vault before that became visible."
+  [storage fn-id]
+  (when-let [reason (pkg-guard/write-rejection storage :binding {:fn-id fn-id})]
+    (throw (ex-info reason {:type :package/owned :http-status 403}))))
+
+
 (defn replay-secret-rollback!
   "Shared rollback callable for the §3.3 secret-write `:try` carve-outs
    (create-secret + create-inline-binding). Walks the journal in
@@ -120,12 +158,17 @@
           (try (sp/delete-entity storage et id)
                (catch Exception e (log-rollback-failure et e))))))
     (if (instance? clojure.lang.ExceptionInfo exception)
-      {:ok false
-       :error (or (ex-message exception) (str exception))
-       ;; Drop `:body` — a vault error's ex-data carries the raw OpenBao
-       ;; HTTP response text, which is internal noise for the API caller
-       ;; and a theoretical secret-echo vector if a proxy mangles it.
-       :data (dissoc (ex-data exception) :body)}
+      (let [data (ex-data exception)]
+        (cond-> {:ok false
+                 :error (or (ex-message exception) (str exception))
+                 ;; Drop `:body` — a vault error's ex-data carries the raw
+                 ;; OpenBao HTTP response text, which is internal noise for
+                 ;; the API caller and a theoretical secret-echo vector if a
+                 ;; proxy mangles it.
+                 :data (dissoc data :body :http-status)}
+          ;; A guard that declared its status (403 package-owned, 409 path
+          ;; in use) — read by `:json-envelope-response`.
+          (:http-status data) (assoc :http-status (:http-status data))))
       {:ok false
        :error (or (ex-message exception) (str exception))})))
 
@@ -140,7 +183,8 @@
   [parsed leaf-id journal ctx]
   (let [storage (request/require-storage ctx)
         vault-client (require-vault! ctx)
-        {:keys [nm ns-id path value description custom-metadata]} parsed
+        {:keys [nm ns-id value description custom-metadata]} parsed
+        path (claim-path! storage (:path parsed))
         path-slot-id (find-path-slot-id storage leaf-id)
         fn-id (UUID/randomUUID)
         binding-id (UUID/randomUUID)]
@@ -188,15 +232,20 @@
 
 
 (defn apply-create-inline-binding-body
-  "Body of the inline-bind `:try`: vault-put then storage create.
-   Records rollback entries on the shared `journal` atom. Throws on
-   storage / vault failure (caught by `:try`)."
+  "Body of the inline-bind `:try`: storage create, THEN vault-put — the
+   same order as `apply-create-secret-body`, so a refused binding (the
+   resolver gate, a type rejection, a concurrent duplicate) never touches
+   the vault. Refuses a package-synced owner (403) and a path another
+   binding references (409) before any write. Records rollback entries on
+   the shared `journal` atom; throws on storage / vault failure (caught by
+   `:try`)."
   [parsed journal ctx]
-  (let [vault-client (require-vault! ctx)
-        {:keys [fn-id slot-id path value]} parsed
+  (let [storage (request/require-storage ctx)
+        vault-client (require-vault! ctx)
+        {:keys [fn-id slot-id value]} parsed
+        _ (refuse-package-owner! storage fn-id)
+        path (claim-path! storage (:path parsed))
         binding-id (UUID/randomUUID)]
-    (vault/put-secret vault-client path value)
-    (swap! journal conj [:vault-delete path])
     (crud-entities/create-entity
       :binding
       {:id binding-id
@@ -206,6 +255,10 @@
        :resolver-fn-id (vault-get-fn-id ctx)}
       ctx)
     (swap! journal conj [:storage-delete :binding binding-id])
+    ;; Vault only after the row exists — the rollback's `:vault-delete`
+    ;; then only ever removes a path THIS request claimed.
+    (vault/put-secret vault-client path value)
+    (swap! journal conj [:vault-delete path])
     {:ok true
      :binding {:id (str binding-id)
                :fn-id (str fn-id)

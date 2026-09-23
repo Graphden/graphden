@@ -27,6 +27,7 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.owned :as owned]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
     [graphden.tenancy.context :as tctx]
@@ -116,18 +117,23 @@
   (str stem "-" (random-uuid)))
 
 
+(defn- dispatch!
+  "Dispatch through the branch router; the raw Ring response."
+  [method uri body]
+  (br/dispatch *router*
+               (cond-> {:request-method method
+                        :uri uri
+                        :headers {"content-type" "application/json"
+                                  "authorization" (str "Bearer " token)}
+                        :query-string nil}
+                 body (assoc :body (cheshire/generate-string body)))))
+
+
 (defn- request!
   "Dispatch through the branch router; the decoded JSON envelope."
   ([method uri] (request! method uri nil))
   ([method uri body]
-   (let [resp (br/dispatch *router*
-                           (cond-> {:request-method method
-                                    :uri uri
-                                    :headers {"content-type" "application/json"
-                                              "authorization" (str "Bearer " token)}
-                                    :query-string nil}
-                             body (assoc :body (cheshire/generate-string body))))]
-     (cheshire/parse-string (str (:body resp)) true))))
+   (cheshire/parse-string (str (:body (dispatch! method uri body))) true)))
 
 
 (defn- list-secrets
@@ -430,3 +436,101 @@
               res (rotate-inline-binding! (:id binding) {})]
           (is (false? (:ok res)))
           (is (= "v1" (get-in @vault-state [:values path]))))))))
+
+
+(deftest create-secret-refuses-a-path-already-bound-test
+  ;; The path is free text: a second secret naming an existing secret's
+  ;; path overwrote its value in the vault — silently re-pointing every
+  ;; fn that reads the first one.
+  (let [vault-state (fresh-vault)
+        path (uniq "shared/pw")]
+    (with-fake-vault vault-state
+      (is (:ok (create-secret! {:name (uniq "_first") :path path :value "v1"})))
+      (let [resp (dispatch! :post "/api/secrets" {:name (uniq "_second") :path path :value "v2"})]
+        (is (= 409 (:status resp)))
+        (is (= "v1" (get-in @vault-state [:values path])))))))
+
+
+(deftest inline-bind-writes-storage-before-vault-test
+  ;; The body used to put the value FIRST, then create the binding; a
+  ;; refused binding rolled back with `vault/delete-secret` — every version
+  ;; at a path it had just overwritten.
+  (let [vault-state (fresh-vault)
+        {:keys [owner]} (seed-secret-slot-owner!)
+        plain (setup/create-slot! (storage) "sql" :text)
+        _ (setup/attach-slot! (storage) (:id owner) (:id plain) 1)
+        path (uniq "orphan/pw")]
+    (swap! vault-state assoc-in [:values path] "precious")
+    (with-fake-vault vault-state
+      (testing "a resolver binding onto a NON-secret slot is refused"
+        (is (false? (:ok (create-inline-binding! {:fn-id (str (:id owner))
+                                                  :slot-id (str (:id plain))
+                                                  :path path :value "v1"})))))
+      (testing "the vault was never touched"
+        (is (= "precious" (get-in @vault-state [:values path])))))))
+
+
+(deftest inline-bind-refuses-a-path-already-bound-test
+  (let [vault-state (fresh-vault)
+        a (seed-secret-slot-owner!)
+        b (seed-secret-slot-owner!)
+        path (uniq "db/shared")
+        bind! (fn [{:keys [owner slot]} v]
+                (dispatch! :post "/api/secret-bindings"
+                           {:fn-id (str (:id owner)) :slot-id (str (:id slot))
+                            :path path :value v}))]
+    (with-fake-vault vault-state
+      (is (= 200 (:status (bind! a "v1"))))
+      (let [resp (bind! b "v2")]
+        (is (= 409 (:status resp)))
+        (is (re-find #"already bound" (str (:body resp)))))
+      (is (= "v1" (get-in @vault-state [:values path])))
+      (is (empty? (sp/query-entities (storage) :binding {:fn-id (:id (:owner b))}))))))
+
+
+(deftest inline-bind-refuses-a-package-owned-fn-test
+  (let [vault-state (fresh-vault)
+        {:keys [owner slot]} (seed-secret-slot-owner!)
+        path (uniq "db/pkg")]
+    ;; A fresh random id no other test can touch — safe on the
+    ;; process-global registry.
+    (owned/record-owned-ids! [(:id owner)])
+    (with-fake-vault vault-state
+      (let [resp (dispatch! :post "/api/secret-bindings"
+                            {:fn-id (str (:id owner)) :slot-id (str (:id slot))
+                             :path path :value "v1"})]
+        (is (= 403 (:status resp)))
+        (is (nil? (get-in @vault-state [:values path])))
+        (is (empty? (sp/query-entities (storage) :binding {:fn-id (:id owner)})))))))
+
+
+(deftest inline-bind-scopes-a-tenant-path-to-its-org-test
+  ;; The KV mount is flat and written with the platform token: a tenant
+  ;; naming another org's path used to overwrite that org's secret.
+  (let [vault-state (fresh-vault)
+        {:keys [owner slot]} (seed-secret-slot-owner!)
+        victim "org/victim/db/password"]
+    (swap! vault-state assoc-in [:values victim] "victim-secret")
+    (with-fake-vault vault-state
+      (tctx/with-org "tenant-a"
+        (testing "a relative path lands under the tenant's own prefix"
+          (let [{:keys [ok binding]} (create-inline-binding!
+                                       {:fn-id (str (:id owner)) :slot-id (str (:id slot))
+                                        :path "db/password" :value "mine"})]
+            (is ok)
+            (is (= "org/tenant-a/db/password" (:path binding)))
+            (is (= "mine" (get-in @vault-state [:values "org/tenant-a/db/password"])))))
+        (testing "naming another org's path only nests it under the tenant's own prefix"
+          (let [other (seed-secret-slot-owner!)
+                res (create-inline-binding! {:fn-id (str (:id (:owner other)))
+                                             :slot-id (str (:id (:slot other)))
+                                             :path victim :value "pwned"})]
+            (is (= "org/tenant-a/org/victim/db/password" (get-in res [:binding :path])))
+            (is (= "victim-secret" (get-in @vault-state [:values victim])))))
+        (testing "a path escaping the KV mount is refused"
+          (let [other (seed-secret-slot-owner!)
+                res (create-inline-binding! {:fn-id (str (:id (:owner other)))
+                                             :slot-id (str (:id (:slot other)))
+                                             :path "../../sys/policy/root" :value "x"})]
+            (is (false? (:ok res)))
+            (is (re-find #"invalid path" (str (:error res))))))))))

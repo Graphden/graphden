@@ -132,26 +132,26 @@ Reconstructs the touched fn-def and runs ~check-fn-def!~ after a mutation, recor
 :PROPERTIES:
 :CUSTOM_ID: crud/notify-after-write!
 :FILE: src/graphden/crud/entities/invalidation.clj
-:LINE: 219
+:LINE: 224
 :MINS: 4.8
 :END:
 
 The post-persist step: invalidate caches and broadcast a NOTIFY delta so sibling pods rebuild the affected fns. How a committed write becomes visible fleet-wide.
 
-- source :: [[file:../../../src/graphden/crud/entities/invalidation.clj::(defn notify-after-write!][src/graphden/crud/entities/invalidation.clj:219]]
+- source :: [[file:../../../src/graphden/crud/entities/invalidation.clj::(defn notify-after-write!][src/graphden/crud/entities/invalidation.clj:224]]
 - referenced from :: [[file:storage.org::#storage/make-emitter][make-emitter]]
 
 * 11. resolve-fn
 :PROPERTIES:
 :CUSTOM_ID: crud/resolve-fn
 :FILE: src/graphden/crud/fn_execution/lookup.clj
-:LINE: 84
+:LINE: 97
 :MINS: 1.2
 :END:
 
 Translates the ~/api/execute~ ~{:fn-id | :fn-name}~ request into the full ~:fn~ row in one round-trip — the lookup that begins the execution + persist path.
 
-- source :: [[file:../../../src/graphden/crud/fn_execution/lookup.clj::(defn resolve-fn][src/graphden/crud/fn_execution/lookup.clj:84]]
+- source :: [[file:../../../src/graphden/crud/fn_execution/lookup.clj::(defn resolve-fn][src/graphden/crud/fn_execution/lookup.clj:97]]
 
 * 12. public-free-entries
 :PROPERTIES:
@@ -170,13 +170,13 @@ The one free-arg surface every name-facing consumer reads — the Run form's arg
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-execute
 :FILE: src/graphden/crud/fn_execution.clj
-:LINE: 121
+:LINE: 122
 :MINS: 2.1
 :END:
 
 The ~/api/execute~ orchestrator: resolve fn + version + free-arg slots, acquire a concurrency slot, submit the future, and dispatch on succeeded / pending / failed. The spine of the execute write path — and where it hands off to the executor from the first block.
 
-- source :: [[file:../../../src/graphden/crud/fn_execution.clj::(defn apply-execute][src/graphden/crud/fn_execution.clj:121]]
+- source :: [[file:../../../src/graphden/crud/fn_execution.clj::(defn apply-execute][src/graphden/crud/fn_execution.clj:122]]
 
 * 14. create-pending-with-args!
 :PROPERTIES:

@@ -1133,38 +1133,6 @@
         "the unresolved inner ref is named in the reason")))
 
 
-(deftest unregister-owner-scoped-arity-test
-  ;; The 2-arity drop removes ONE owner's registration without the
-  ;; 1-arity's collateral deletion of sibling owners' qualified
-  ;; aliases (the audited delete-path hazard).
-  (let [snap (t/global-aliases-snapshot)
-        owner-a (random-uuid)
-        owner-b (random-uuid)]
-    ;; Ambiguity bookkeeping runs against the GLOBAL registry only —
-    ;; unbind the parallel fixture's override for the probe (same move
-    ;; as alias-owner-collision-warning-test) and restore after.
-    (binding [t/*type-aliases-override* nil]
-      (try
-        (t/register-type-alias! :owner-scoped-probe :text owner-a :ns-a/owner-scoped-probe)
-        (t/register-type-alias! :owner-scoped-probe :int owner-b :ns-b/owner-scoped-probe)
-        (testing "two owners → bare name is ambiguous, both qualified live"
-          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"ambiguous"
-                (t/resolve-alias :owner-scoped-probe)))
-          (is (= :text (t/resolve-alias :ns-a/owner-scoped-probe)))
-          (is (= :int (t/resolve-alias :ns-b/owner-scoped-probe))))
-        (testing "dropping owner-a keeps owner-b's qualified AND re-points the bare name"
-          (t/unregister-type-alias! :owner-scoped-probe owner-a)
-          (is (= :int (t/resolve-alias :ns-b/owner-scoped-probe))
-              "sibling's qualified alias survives")
-          (is (= :int (t/resolve-alias :owner-scoped-probe))
-              "single survivor → bare name resolves to it again"))
-        (testing "dropping the last owner clears everything"
-          (t/unregister-type-alias! :owner-scoped-probe owner-b)
-          (is (= :owner-scoped-probe (t/resolve-alias :owner-scoped-probe))
-              "unknown keyword passes through unresolved"))
-        (finally (t/restore-global-aliases! snap))))))
-
-
 (deftest reserved-sentinel-alias-guard-test
   (testing ":empty-map cannot be rebound as an alias (sentinel hijack
             would let {} satisfy a required-fields record)"
@@ -1177,27 +1145,3 @@
                             (:failed (t/register-type-aliases-batch
                                        [[:empty-map {:hijacked :int} nil]])))})
                    :empty-map))))
-
-
-(deftest unregister-owner-scoped-batch-path-test
-  ;; Spot-check residue: the unknown-owner no-op guard only looked at
-  ;; alias-qualified, which the DB batch path never writes — every
-  ;; batch-registered alias fell through to the full-clear :else.
-  ;; Ownership is now provable via EITHER bookkeeping table.
-  (binding [t/*type-aliases-override* nil]
-    (let [snap (t/global-aliases-snapshot)]
-      (try
-        (testing "batch-registered alias without an owner survives a stranger's 2-arity drop"
-          (t/register-type-aliases-batch [[:usb-batch {:x :int} nil]])
-          (t/unregister-type-alias! :usb-batch (random-uuid))
-          (is (= {:x :int} (t/resolve-alias :usb-batch))))
-        (testing "batch-registered alias WITH an owner: stranger no-ops, owner deletes"
-          (let [o (random-uuid)]
-            (t/register-type-aliases-batch [[:usb-owned {:y :int} o]])
-            (t/unregister-type-alias! :usb-owned (random-uuid))
-            (is (= {:y :int} (t/resolve-alias :usb-owned))
-                "stranger cannot delete")
-            (t/unregister-type-alias! :usb-owned o)
-            (is (= :usb-owned (t/resolve-alias :usb-owned))
-                "the recorded owner can")))
-        (finally (t/restore-global-aliases! snap))))))

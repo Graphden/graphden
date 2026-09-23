@@ -712,67 +712,25 @@
 
 
 (defn unregister-type-alias!
-  "Drop an alias registration. Two arities with DIFFERENT blast radius:
-
-   1-arity (tests / full-clear): drops the bare name, EVERY owner's
-   qualified variant, and the whole ambiguity record — the nuke the
-   test-cleanup paths want.
-
-   2-arity `[alias-name owner-fn-id]` (the delete-path form): drops
-   ONLY that owner's qualified alias + its ambiguity entry. The bare
-   name is removed only when no other owner remains; when exactly one
-   sibling owner survives, the bare name is re-pointed at ITS body so
-   bare references resolve again instead of throwing ambiguous. The
-   1-arity's collateral deletion of SIBLING owners' qualified
-   registrations was the audited hazard this arity exists to avoid."
-  ([alias-name]
-   (when (nil? *type-aliases-override*)
-     (swap! alias-owners dissoc alias-name)
-     ;; Drop the qualified variants + ambiguity bookkeeping too.
-     (doseq [q (vals (get @alias-qualified alias-name))]
-       (swap! (aliases-atom) dissoc q))
-     (swap! alias-qualified dissoc alias-name))
-   (swap! (aliases-atom) dissoc alias-name)
-   nil)
-  ([alias-name owner-fn-id]
-   (if (some? *type-aliases-override*)
-     ;; Override-bound (test isolation) registries carry no ambiguity
-     ;; bookkeeping — fall back to the plain drop.
-     (swap! (aliases-atom) dissoc alias-name)
-     (let [owners (get @alias-qualified alias-name)
-           own-q  (get owners owner-fn-id)
-           rest-owners (dissoc owners owner-fn-id)
-           ;; Ownership is provable via EITHER bookkeeping table:
-           ;; qualified registrations write `alias-qualified`; the DB
-           ;; batch path records only `alias-owners` (last-write-wins
-           ;; single owner). Without the second check, EVERY
-           ;; batch-registered alias fell through to the full-clear
-           ;; :else — the exact case the no-op exists for.
-           owner? (or (some? own-q)
-                      (= owner-fn-id (get @alias-owners alias-name)))]
-       ;; When the caller's ownership is not provable through either
-       ;; table, deleting the bare name would violate the
-       ;; "drops ONLY that owner's" contract. No-op instead.
-       (when (and own-q (not= own-q alias-name))
-         (swap! (aliases-atom) dissoc own-q))
-       (cond
-         ;; unknown owner — leave everything in place
-         (not owner?) nil
-
-         (seq rest-owners)
-         (do (swap! alias-qualified assoc alias-name rest-owners)
-             ;; Exactly one survivor → bare name resolves to it again.
-             (when (= 1 (count rest-owners))
-               (let [[surv-owner surv-q] (first rest-owners)]
-                 (swap! alias-owners assoc alias-name surv-owner)
-                 (when-let [body (get @(aliases-atom) surv-q)]
-                   (swap! (aliases-atom) assoc alias-name body)))))
-
-         :else
-         (do (swap! alias-qualified dissoc alias-name)
-             (swap! alias-owners dissoc alias-name)
-             (swap! (aliases-atom) dissoc alias-name)))))
-   nil))
+  "Drop an alias registration — the bare name, EVERY owner's qualified
+   variant and the whole ambiguity record. Test cleanup only: there is
+   no runtime delete path to serve. The ambiguity bookkeeping
+   (`alias-qualified`) is written solely by the boot package sync
+   (`packages.sync/register-type-aliases!` → `register-type-alias!`
+   with an owner), and every row it records is package-owned — the API
+   refuses to delete those (`crud.package-guard/delete-rejection`), so
+   a bare name can't be left ambiguous by a type-row DELETE. Rows the
+   API may delete register through `register-type-aliases-batch`, which
+   records no ambiguity."
+  [alias-name]
+  (when (nil? *type-aliases-override*)
+    (swap! alias-owners dissoc alias-name)
+    ;; Drop the qualified variants + ambiguity bookkeeping too.
+    (doseq [q (vals (get @alias-qualified alias-name))]
+      (swap! (aliases-atom) dissoc q))
+    (swap! alias-qualified dissoc alias-name))
+  (swap! (aliases-atom) dissoc alias-name)
+  nil)
 
 
 (defn clear-aliases!

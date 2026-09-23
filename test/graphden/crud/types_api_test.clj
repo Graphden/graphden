@@ -1,16 +1,17 @@
 (ns graphden.crud.types-api-test
-  "Tests for `graphden.crud.types-api` — the bodies behind `/api/types`,
-   `/api/types/compatible`, `/api/types/candidates`, `/api/types/usages`,
-   plus the shared graph-cache loaders and role / rich-type derivations.
+  "Tests for `graphden.crud.types-api` — the Clojure bodies the
+   `/api/types`, `/api/types/candidates` and `/api/types/usages` graph
+   handlers call, plus the shared graph-cache loaders and role / rich-type derivations.
 
    The pure helpers (`compute-fn-role`, `json->type`, `describe-mismatch`,
-   `constraint-contains-type-ref?`, `types-compatible`) need no fixture;
-   the rest go through the shared container."
+   `constraint-contains-type-ref?`, `candidate-fit`) need no fixture;
+   the rest go through the shared container. The endpoints' parse /
+   validate stages and the candidates enumeration are graph fn-defs —
+   covered through the handlers in `types-api-graph-test`."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.types-api :as ta]
     [graphden.executor.context :as ctx]
-    [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]))
 
@@ -21,36 +22,6 @@
 (defn- test-ctx
   [storage]
   (ctx/create-context {:storage storage :base-fns {}}))
-
-
-;; ----------------------------------------------------------------------------
-;; The type-API handlers are decomposed into parse → validate → apply
-;; `src/` stages, glued in production by the `:types-compatible` /
-;; `:types-candidates` / `:types-usages` `:if` graph fn-defs.
-;; `validate-*` returns the `{:ok false :error}` rejection directly, so
-;; the helpers below are a plain `(or rejection apply)` — the
-;; test-level equivalent of the graph.
-;; ----------------------------------------------------------------------------
-
-(defn- types-compatible
-  [request]
-  (let [parsed (ta/parse-types-compatible-request request)]
-    (or (ta/validate-types-compatible parsed)
-        (ta/apply-types-compatible parsed))))
-
-
-(defn- types-candidates
-  [request ctx]
-  (let [parsed (ta/parse-types-candidates-request request)]
-    (or (ta/validate-types-candidates parsed)
-        (ta/apply-types-candidates parsed ctx))))
-
-
-(defn- types-usages
-  [request ctx]
-  (let [parsed (ta/parse-types-usages-request request)]
-    (or (ta/validate-types-usages parsed)
-        (ta/apply-types-usages parsed ctx))))
 
 
 ;; ============================================================================
@@ -253,26 +224,6 @@
 
 
 ;; ============================================================================
-;; types-compatible
-;; ============================================================================
-
-(deftest types-compatible-test
-  (testing "missing 'expected' / 'candidate' → {:ok false}"
-    (is (false? (:ok (types-compatible {:body {:candidate "int"}}))))
-    (is (false? (:ok (types-compatible {:body {:expected "int"}})))))
-
-  (testing "compatible pair → ok true"
-    (let [res (types-compatible {:body {:expected "int" :candidate "int"}})]
-      (is (true? (:ok res)))
-      (is (= :int (:expected res)))))
-
-  (testing "incompatible pair → ok false with a reason"
-    (let [res (types-compatible {:body {:expected "int" :candidate "text"}})]
-      (is (false? (:ok res)))
-      (is (string? (:reason res))))))
-
-
-;; ============================================================================
 ;; Graph-cache loaders
 ;; ============================================================================
 
@@ -388,149 +339,21 @@
 
 
 ;; ============================================================================
-;; types-candidates
+;; candidate-fit — the picker's whole-signature tier (pure). Admission and
+;; the enumeration itself run through the graph handler — see
+;; `types-api-graph-test`.
 ;; ============================================================================
 
-(deftest types-candidates-test
-  (let [storage (setup/create-test-storage)
-        c (test-ctx storage)]
-    (try
-      (testing "missing 'expected' → {:ok false}"
-        (is (false? (:ok (types-candidates {:body {}} c)))))
-
-      (testing "expected :any enumerates candidates; :count matches the vector"
-        (let [res (types-candidates {:body {:expected "any"}} c)]
-          (is (true? (:ok res)))
-          (is (vector? (:candidates res)))
-          (is (= (:count res) (count (:candidates res))))))
-
-      (testing "the effects filter keeps only candidates within the allowed set"
-        (let [res (types-candidates
-                    {:body {:expected "any" :effects []}} c)]
-          (is (true? (:ok res)))
-          ;; effects=[] → only pure (no-effect) producers survive
-          (is (every? #(empty? (:effects %)) (:candidates res)))))
-
-      ;; A `:fn-ref` slot takes a fn's IDENTITY, so the return type is no
-      ;; filter at all: a `:text` producer, an `:int` producer and a
-      ;; callable-returning fn are all candidates — the same rule
-      ;; `check-one-binding`'s `:fn-ref` arm applies on write. Before the
-      ;; fix the picker compared `return ⊆ :fn-ref` and answered zero.
-      (binding [registry/*rich-types-override* (atom {})]
-        (registry/record-rich-types-raw! :tick     {:return :text :args {} :effects #{}})
-        (registry/record-rich-types-raw! :counter  {:return :int  :args {} :effects #{}})
-        (registry/record-rich-types-raw! :producer {:return [:fn {} :text] :args {} :effects #{}})
-        (testing "a :fn-ref slot takes a fn's identity — every fn is a candidate, whatever it returns"
-          (let [any-res (types-candidates {:body {:expected "any"}} c)
-                ref-res (types-candidates {:body {:expected "fn-ref"}} c)]
-            (is (true? (:ok ref-res)))
-            (is (= #{:tick :counter :producer}
-                   (set (map :name (:candidates ref-res)))))
-            (is (= (set (map :name (:candidates any-res)))
-                   (set (map :name (:candidates ref-res))))
-                "the same set :any enumerates — no return-type filter for an identity slot")))
-
-        (testing "the name-prefix filter still applies to an identity slot"
-          (let [res (types-candidates
-                      {:body {:expected "fn-ref" :name-prefix "tic"}} c)]
-            (is (= [:tick] (mapv :name (:candidates res)))))))
-
-      (testing "the name-prefix filter restricts by fn-name"
-        (let [res (types-candidates
-                    {:body {:expected "any" :name-prefix "zzz-no-such"}} c)]
-          (is (true? (:ok res)))
-          (is (zero? (:count res)))))
-
-      ;; Ranking rides along with admissibility: every
-      ;; candidate says how its WHOLE signature sits in the slot, so the
-      ;; picker can lead with the rows that need nothing more and fold
-      ;; away the constants a 1-arg callable slot admits positionally.
-      (testing "candidate-fit: the whole-signature tier"
-        (is (= :exact (ta/candidate-fit '[:fn {:item a} b] 1)) "one free arg for a one-arg call")
-        (is (= :ignores (ta/candidate-fit '[:fn {:item a} b] 0)) "a constant drops the item")
-        (is (= :captures (ta/candidate-fit '[:fn {:item a} b] 3)) "two more are captured")
-        (is (= :exact (ta/candidate-fit '[:fn {:acc a :item b} a] 2)) "by-name slot, both names")
-        (is (= :exact (ta/candidate-fit [:fn {} :any] 0)) "nullary in a nullary slot")
-        (is (= :captures (ta/candidate-fit [:fn {} :any] 2)) "frees in a nullary slot are captured")
-        (is (= :exact (ta/candidate-fit :fn-ref 5)) "an identity slot asks no arity")
-        (is (= :exact (ta/candidate-fit :text 0)) "a finished value is ready")
-        (is (= :captures (ta/candidate-fit :text 2)) "a template with frees needs inputs"))
-
-      (binding [registry/*rich-types-override* (atom {})]
-        (registry/record-rich-types-raw! :shout {:return :text :args {:item :text} :effects #{}})
-        (registry/record-rich-types-raw! :motto {:return :text :args {} :effects #{}})
-        (registry/record-rich-types-raw! :greet {:return :text :args {:who :text :how :text} :effects #{}})
-        (testing "every candidate carries :arity and :fit"
-          (let [res (ta/apply-types-candidates {:expected '[:fn {:item a} b]} c)
-                by-name (into {} (map (juxt :name identity)) (:candidates res))]
-            (is (= [1 :exact] ((juxt :arity :fit) (by-name :shout))))
-            (is (= [0 :ignores] ((juxt :arity :fit) (by-name :motto))))
-            (is (nil? (by-name :greet))
-                "a two-arg fn is not admitted to a one-arg slot without the name — not a ranking question")))
-        (testing "a value slot ranks finished values as :exact and templates as :captures"
-          (let [res (ta/apply-types-candidates {:expected :text} c)
-                by-name (into {} (map (juxt :name identity)) (:candidates res))]
-            (is (= :exact (:fit (by-name :motto))))
-            (is (= :captures (:fit (by-name :greet))))
-            (is (= 2 (:arity (by-name :greet)))))))
-
-      ;; A fn-typed slot receives the CALLABLE, not its result — so
-      ;; admissibility is "candidate signature ⊆ slot", the rule
-      ;; `check-binding!` already applies on write. Comparing the candidate's
-      ;; RETURN against the slot (the pre-fix behaviour) answered zero for
-      ;; every ordinary fn: the picker read "Compatible · 0" while that very
-      ;; bind succeeded through "Other" → "Pick anyway".
-      (binding [registry/*rich-types-override* (atom {})]
-        (registry/record-rich-types-raw! :tick     {:return :text :args {} :effects #{}})
-        (registry/record-rich-types-raw! :counter  {:return :int  :args {} :effects #{}})
-        (registry/record-rich-types-raw! :greeter  {:return :text :args {:who :text} :effects #{}})
-        (registry/record-rich-types-raw! :producer {:return [:fn {} :text] :args {} :effects #{}})
-        (testing "a zero-arity callable slot admits ordinary fns"
-          (let [res (ta/apply-types-candidates {:expected [:fn {} :any]} c)
-                names (set (map :name (:candidates res)))]
-            (is (true? (:ok res)))
-            (is (contains? names :tick)
-                "a plain `() → text` fn belongs in a `() → any` slot")
-            (is (contains? names :greeter)
-                "so does one with free args — hof-wrap captures them")
-            (is (contains? names :producer)
-                "and a callable-producing fn still qualifies")))
-
-        (testing "the callable slot's return type still filters"
-          (let [names (set (map :name (:candidates
-                                        (ta/apply-types-candidates
-                                          {:expected [:fn {} :text]} c))))]
-            (is (contains? names :tick))
-            (is (not (contains? names :counter))
-                "`() → text` rejects a fn returning :int")))
-
-        (testing "a POLYMORPHIC callee fits a polymorphic slot — over the wire too"
-          ;; `map`'s :func is `[:fn {:item a} b]`; the picker posts that slot
-          ;; as JSON. A `(item:a) → [a]` callee (a :repeat child with its
-          ;; count pinned) and a `(item:text) → text` one both belong in it;
-          ;; before the wire decoded variables, only `→ never` fns did.
-          (registry/record-rich-types-raw! :echo {:return '[:list a] :args '{:item a} :effects #{}})
-          (registry/record-rich-types-raw! :shout {:return :text :args {:item :text} :effects #{}})
-          (registry/record-rich-types-raw! :pair {:return :int :args {:x :int :y :int} :effects #{}})
-          (let [names (set (map :name (:candidates
-                                        (types-candidates
-                                          {:body {:expected ["fn" {"item" "a"} "b"]}} c))))]
-            (is (contains? names :echo) "a generic callee is admitted")
-            (is (contains? names :shout) "a concrete one-arg callee is admitted")
-            ;; (a NULLARY fn is admitted too — hof-wrap lets a callable ignore
-            ;; its input; that arm is deliberate and unchanged.)
-            (is (not (contains? names :pair))
-                "a two-arg callee with neither arg named :item does not fit a one-arg slot")))
-
-        (testing "a 1-arg callable slot checks the argument contravariantly"
-          (let [names (set (map :name (:candidates
-                                        (ta/apply-types-candidates
-                                          {:expected [:fn {:who :text} :text]} c))))]
-            (is (contains? names :greeter)
-                "the single-arg callee matches a single-arg slot")
-            (is (not (contains? names :counter))
-                "a fn returning :int is still out"))))
-      (finally (sp/close storage)))))
+(deftest candidate-fit-test
+  (is (= :exact (ta/candidate-fit '[:fn {:item a} b] 1)) "one free arg for a one-arg call")
+  (is (= :ignores (ta/candidate-fit '[:fn {:item a} b] 0)) "a constant drops the item")
+  (is (= :captures (ta/candidate-fit '[:fn {:item a} b] 3)) "two more are captured")
+  (is (= :exact (ta/candidate-fit '[:fn {:acc a :item b} a] 2)) "by-name slot, both names")
+  (is (= :exact (ta/candidate-fit [:fn {} :any] 0)) "nullary in a nullary slot")
+  (is (= :captures (ta/candidate-fit [:fn {} :any] 2)) "frees in a nullary slot are captured")
+  (is (= :exact (ta/candidate-fit :fn-ref 5)) "an identity slot asks no arity")
+  (is (= :exact (ta/candidate-fit :text 0)) "a finished value is ready")
+  (is (= :captures (ta/candidate-fit :text 2)) "a template with frees needs inputs"))
 
 
 ;; ============================================================================
@@ -541,10 +364,6 @@
   (let [storage (setup/create-test-storage)
         c (test-ctx storage)]
     (try
-      (testing "missing / invalid type-fn-id → {:ok false}"
-        (is (false? (:ok (types-usages {:body {}} c))))
-        (is (false? (:ok (types-usages {:body {:type-fn-id "not-a-uuid"}} c)))))
-
       (testing "a slot typed against the target type-row is reported as a usage"
         (let [int-id  (get setup/primitive-fn-ids :int)
               type-row (sp/create-entity storage :fn
@@ -553,7 +372,7 @@
               host    (setup/create-base-fn! storage "tu-host")
               slot    (setup/create-slot! storage "field" (:id type-row))
               _       (setup/attach-slot! storage (:id host) (:id slot) 0)
-              res     (types-usages {:body {:type-fn-id (str (:id type-row))}} c)]
+              res     (ta/apply-types-usages {:target-id (:id type-row)} c)]
           (is (true? (:ok res)))
           (is (pos? (:count res)))
           (is (some #(= :slot-of (:kind %)) (:usages res)))))
@@ -591,8 +410,7 @@
               _       (sp/create-entity storage :binding
                                         {:fn-id (:id caller) :slot-id (:id resolvd)
                                          :resolver-fn-id (:id target)})
-              ;; `fn-id` is the synonym the /api/fns/usages alias sends.
-              res     (types-usages {:body {:fn-id (str (:id target))}} c)
+              res     (ta/apply-types-usages {:target-id (:id target)} c)
               by-kind (group-by :kind (:usages res))]
           (is (true? (:ok res)))
           (is (= ["fu-child"] (map :fn-name (:parent-of by-kind)))
@@ -625,8 +443,7 @@
               _        (sp/create-entity storage :binding
                                          {:fn-id (:id comp-fn) :slot-id (:id slot)
                                           :type-override-fn-id (:id type-row)})
-              res      (types-usages
-                         {:body {:type-fn-id (str (:id type-row))}} c)
+              res      (ta/apply-types-usages {:target-id (:id type-row)} c)
               kinds    (set (map :kind (:usages res)))]
           (is (true? (:ok res)))
           (is (contains? kinds :union-branch))

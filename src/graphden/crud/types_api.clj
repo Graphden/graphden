@@ -1,7 +1,8 @@
 (ns graphden.crud.types-api
-  "Type-API logic for the web/crud base functions — the heavy bodies
-   behind `/api/types`, `/api/types/compatible`, `/api/types/candidates`
-   and `/api/types/usages`.
+  "Type-API logic for the web/crud base functions — the Clojure bodies
+   the `/api/types`, `/api/types/candidates` and `/api/types/usages`
+   graph handlers call (rich-type snapshots, candidate ranking, the
+   usages walk).
 
    Also holds the shared graph-cache loaders (`cached-or-load-graph` /
    `load-graph-entities-uncached`) and the storage-row → role / rich-type
@@ -19,7 +20,6 @@
     [graphden.packages.records.types :as record-types]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tctx]
-    [graphden.types.check :as tcheck]
     [graphden.types.core :as types]
     [graphden.util.ns-path :as ns-path]
     [graphden.versioning.graph-rows :as graph-rows]))
@@ -542,69 +542,13 @@
 
 
 ;; === Heavy logic bodies behind the type-API defbases ========================
+;;
+;; The endpoints' parse → validate stages (and all of /api/types/compatible
+;; and the candidates enumeration) are graph fn-defs in
+;; `web/crud-types/fns.edn`; what stays here is the per-row ranking and
+;; namespace index the candidates chain calls, and the usages walk.
 
-;; --- types-compatible — parse → validate → apply (single-pair
-;; subtype check). `validate-*` returns the `{:ok false :error}`
-;; rejection directly (or nil); `apply-*` is reached only when valid.
-
-(defn parse-types-compatible-request
-  "Stage 1 of types-compatible — JSON body → `{:expected :candidate}`,
-   each decoded from the wire shape via `json->type`."
-  [request]
-  (let [body (request/read-json-body request)]
-    {:expected (json->type (:expected body))
-     :candidate (json->type (:candidate body))}))
-
-
-(defn validate-types-compatible
-  "Stage 2 of types-compatible. Returns the `{:ok false :error}`
-   rejection response, or nil when both sides are present."
-  [parsed]
-  (cond
-    (nil? (:expected parsed))
-    {:ok false :error "Request body must include 'expected'"}
-
-    (nil? (:candidate parsed))
-    {:ok false :error "Request body must include 'candidate'"}
-
-    :else nil))
-
-
-(defn apply-types-compatible
-  "Stage 3 of types-compatible — the subtype check. Reached only after
-   `validate-types-compatible` passes."
-  [parsed]
-  (let [{:keys [expected candidate]} parsed
-        ok? (types/subtype? candidate expected)]
-    (cond-> {:ok ok?
-             :expected expected
-             :candidate candidate}
-      (not ok?)
-      (assoc :reason (describe-mismatch expected candidate)))))
-
-
-;; --- types-candidates — parse → validate → apply (enumerate every fn
-;; whose return type is a subtype of `expected`, optionally filtered).
-
-(defn parse-types-candidates-request
-  "Stage 1 of types-candidates — JSON body → `{:expected
-   :allowed-effects :name-prefix}`."
-  [request]
-  (let [body (request/read-json-body request)]
-    {:expected (json->type (:expected body))
-     :allowed-effects (when-let [effs (:effects body)]
-                        (set (map (fn [e] (if (string? e) (keyword e) e))
-                                  effs)))
-     :name-prefix (some-> (:name-prefix body) str)}))
-
-
-(defn validate-types-candidates
-  "Stage 2 of types-candidates. Returns the `{:ok false :error}`
-   rejection response, or nil when `expected` is present."
-  [parsed]
-  (when (nil? (:expected parsed))
-    {:ok false :error "Request body must include 'expected'"}))
-
+;; --- types-candidates — per-row helpers of the graph enumeration.
 
 (defn candidate-fit
   "How a candidate's WHOLE signature sits in the slot — the picker's
@@ -656,80 +600,8 @@
           (:fns (cached-or-load-graph ctx)))))
 
 
-(defn apply-types-candidates
-  "Stage 3 of types-candidates — enumerate matching fns. Reached only
-   after `validate-types-candidates` passes."
-  [parsed ctx]
-  (let [{:keys [expected allowed-effects name-prefix]} parsed
-        registry-snapshot (rich-types-with-type-rows ctx)
-        ;; A fn-typed slot (`[:fn args ret effects]`, e.g. `:future`'s
-        ;; `:body`) does not receive the candidate's RESULT — the executor
-        ;; hof-wraps the ref and the callable itself is the value. So the
-        ;; admissible set is "signature ⊆ slot", which is what
-        ;; `check-binding!` enforces on write. Comparing `return` against the
-        ;; slot instead (the pre-fix behaviour) answered "Compatible · 0" for
-        ;; every ordinary fn — the picker hid legal binds behind "Other" and
-        ;; made the reader override its own diagnostic to make one.
-        fn-slot? (types/fn-type? expected)
-        ;; A `:fn-ref` slot takes a fn's IDENTITY — any fn is a candidate,
-        ;; whatever it returns (the same rule the write-time checker
-        ;; applies: `check-one-binding`'s `:fn-ref` arm).
-        identity-slot? (= :fn-ref expected)
-        ns-index (candidate-ns-index ctx)
-        candidates
-        (->> registry-snapshot
-             (keep (fn [[fn-name {:keys [return effects] row? :type-row?}]]
-                     (let [eff-set (or effects #{})
-                           name-str (some-> fn-name name)]
-                       (when (and (not row?) ; type-rows aren't callable producers
-                                  (cond
-                                    identity-slot? true
-                                    fn-slot? (when-let [sig (tcheck/assemble-fn-type fn-name)]
-                                               (types/subtype? sig expected))
-                                    :else (types/subtype? return expected))
-                                  (or (nil? allowed-effects)
-                                      (every? allowed-effects eff-set))
-                                  (or (nil? name-prefix)
-                                      (and name-str
-                                           (str/starts-with? name-str name-prefix))))
-                         (let [args (or (:args (get registry-snapshot fn-name)) {})]
-                           (merge {:name fn-name
-                                   :return return
-                                   :effects (vec (sort eff-set))
-                                   ;; Whole-signature ranking + namespace for
-                                   ;; the picker's tiers and groups.
-                                   :arity (count args)
-                                   :fit (candidate-fit expected (count args))}
-                                  (get ns-index (:fn-id (get registry-snapshot fn-name)))))))))
-             (sort-by (fn [c] (some-> c :name name))))]
-    {:ok true
-     :expected expected
-     :count (count candidates)
-     :candidates (vec candidates)}))
-
-
-;; --- types-usages — parse → validate → apply (find every place a
-;; type-row is referenced).
-
-(defn parse-types-usages-request
-  "Stage 1 of types-usages — JSON body → `{:target-id}` (the
-   `type-fn-id` coerced to a UUID, or nil when absent / malformed).
-   `fn-id` is accepted as a synonym: the same walk answers the
-   inspector's fn-level 'Used by' (`/api/fns/usages`), where calling
-   the target a type would be wrong."
-  [request]
-  (let [body (request/read-json-body request)
-        target-id-raw (or (:type-fn-id body) (:fn-id body))]
-    {:target-id (request/parse-uuid-or-clear (some-> target-id-raw str))}))
-
-
-(defn validate-types-usages
-  "Stage 2 of types-usages. Returns the `{:ok false :error}` rejection
-   response, or nil when a valid `type-fn-id` was supplied."
-  [parsed]
-  (when (nil? (:target-id parsed))
-    {:ok false :error "Request body must include valid 'type-fn-id'"}))
-
+;; --- types-usages — the walk behind the graph's apply stage (find every
+;; place a fn / type-row is referenced).
 
 (defn- usage-summary-fn
   "The per-usage row builder: fn identity + dotted ns path (best-effort
@@ -852,7 +724,8 @@
    branches). One walk serves `/api/types/usages` (the type-expand
    footer) and `/api/fns/usages` (the inspector's Used-by section) —
    kinds that don't apply to a given target simply come back empty.
-   Reached only after `validate-types-usages` passes."
+   Reached only after the graph's `types-usages` validation passes
+   (`{:target-id <uuid>}`)."
   [parsed ctx]
   (let [target-id (:target-id parsed)
         {:keys [fns slots fn-slots] :as graph} (cached-or-load-graph ctx)

@@ -95,12 +95,12 @@
    :return-type :bool}
 
   {:name :find-first
-   :description "First item where `(pred item)` is truthy, else nil. Like Clojure's `(first (filter pred coll))` but eager-shortcut."
+   :description "First item where `(pred item)` is truthy, else nil — hence the `[:union :null a]` return, like `:first`. Like Clojure's `(first (filter pred coll))` but eager-shortcut."
    :args {:pred {:type [:fn {:item a} :any #{}]
                  :description "Pure predicate callable."}
           :coll {:type [:list a]
                  :description "Collection to scan."}}
-   :return-type a}
+   :return-type [:union :null a]}
 
   {:name :group-by
    :description "Group items by the result of `(key-fn item)` (Clojure's `group-by`). Returns `{key [items …]}`."

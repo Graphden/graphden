@@ -69,3 +69,13 @@
     (testing "a NaN / infinite result is the numeric-overflow error, not a non-number"
       (is (thrown? clojure.lang.ExceptionInfo (sq {:number (delay -1)} nil)))
       (is (thrown? clojure.lang.ExceptionInfo (pw {:base (delay 10) :exponent (delay 400)} nil))))))
+
+
+(deftest quot-of-two-ints-types-as-int
+  ;; `:quot` promised "int inputs stay ints" with no rule behind it, so a
+  ;; quotient of two ints typed `:numeric` and failed an `:int` slot.
+  (let [rule (:return-type-rule (get impls/*impls* :quot))
+        info (fn [a b] {:dividend {:type a} :divisor {:type b}})]
+    (is (fn? rule) "`:quot` carries a return-type rule")
+    (is (= :int (rule (info :int :int) :numeric)))
+    (is (= :numeric (rule (info :int :numeric) :numeric)))))

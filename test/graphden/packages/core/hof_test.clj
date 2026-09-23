@@ -19,6 +19,7 @@
        implementation would skip past it."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.packages.loader :as loader]
     [graphden.test-infra.impls :as impls]))
 
 
@@ -213,6 +214,10 @@
   (testing "the FIRST match wins"
     (is (= 2 (call :find-first {:pred even? :coll [1 2 4]}))))
   (testing "no match / empty / nil coll → nil"
+    (is (= [:union :null 'a]
+           (->> (:fns (#'loader/load-module-fns "core" "hof"))
+                (some #(when (= :find-first (:name %)) (:return-type %)))))
+        "so the declared return admits nil, like `:first`'s")
     (is (nil? (call :find-first {:pred even? :coll [1 3]})))
     (is (nil? (call :find-first {:pred even? :coll []})))
     (is (nil? (call :find-first {:pred even? :coll nil}))))

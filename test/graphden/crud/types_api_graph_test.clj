@@ -153,6 +153,35 @@
       (is (some? (:reason result))))))
 
 
+;; /api/types/compatible-many — one candidate, N expected, one request
+;; (the wrap flow's slot check; it used to POST /compatible per slot).
+
+(deftest types-compatible-many-answers-each-expected-in-order-test
+  (testing "POST /api/types/compatible-many {candidate:'int' expected:[int text any [list int]]}"
+    (let [result (post-via :types-compatible-many-handler
+                           {:candidate "int"
+                            :expected ["int" "text" "any" ["list" "int"]]})]
+      (is (true? (:ok result)))
+      (is (= [true false true false] (:results result))
+          "same verdicts, same order, as four /compatible calls"))))
+
+
+(deftest types-compatible-many-structural-candidate-test
+  (testing "a structural candidate ([list text]) against named slot types"
+    (let [result (post-via :types-compatible-many-handler
+                           {:candidate ["list" "text"]
+                            :expected [["list" "text"] ["list" "int"] "any"]})]
+      (is (= [true false true] (:results result))))))
+
+
+(deftest types-compatible-many-edge-cases-test
+  (testing "no expected → empty results; no candidate → {:ok false :error}"
+    (is (= [] (:results (post-via :types-compatible-many-handler {:candidate "int" :expected []}))))
+    (let [r (post-via :types-compatible-many-handler {:expected ["int"]})]
+      (is (false? (:ok r)))
+      (is (string? (:error r))))))
+
+
 (deftest types-candidates-fn-ref-slot-admits-every-fn-test
   ;; A `:fn-ref` slot takes a fn's IDENTITY — the bound fn is never run, so
   ;; its return type is no filter. The Clojure helper grew an `identity-slot?`

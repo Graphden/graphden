@@ -498,6 +498,11 @@
    :parent :post
    :args {:path "/compatible" :handler :types-compatible-handler}}
 
+  {:name :api-types-compatible-many
+   :description "POST /api/types/compatible-many — one candidate against N expected types. Body: `{candidate, expected: [t …]}` in the `/api/types` wire shape. Returns `{ok, results: [bool …]}` in `expected` order. The wrap flow's slot check. Auth-required when auth is active; open when auth is off."
+   :parent :post
+   :args {:path "/compatible-many" :handler :types-compatible-many-handler}}
+
   {:name :api-types-candidates
    :description "POST /api/types/candidates — enumerate fns whose return type is a subtype of `expected`. Body: `{expected, effects?, name-prefix?}`. Returns `{count, candidates: [{name, return, args, effects}, ...]}` sorted alphabetically. Powers type-aware fn-pickers. Auth-required when auth is active; open when auth is off."
    :parent :post
@@ -529,6 +534,7 @@
    :args {:items ["/types"
                   :api-types
                   :api-types-compatible
+                  :api-types-compatible-many
                   :api-types-candidates
                   :api-types-usages
                   :api-types-record

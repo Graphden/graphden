@@ -255,6 +255,40 @@
           :then :_types-compatible-ok-shape
           :else :_types-compatible-not-ok-shape}}
 
+  ;; --- :types-compatible-many — ONE candidate against N expected types
+  ;; in one request: the wrap flow asks which of the picked parent's slots
+  ;; can take the wrapped fn's result (it used to POST /compatible once
+  ;; per slot). Same `subtype?`, mapped over the `expected` list.
+
+  {:name :_types-compatible-many-candidate
+   :description "The request's `candidate` type, decoded from the `/api/types` wire shape."
+   :parent :json-to-type
+   :args {:json {:parent :get
+                 :args {:coll :_parsed-body :key {:value :candidate} :default nil}}}}
+
+  {:name :_types-compatible-many-one?
+   :description "HOF callback — does the request's candidate fit this ONE `expected` type (wire shape)?"
+   :parent :subtype?
+   :args {:expected {:parent :json-to-type :args {:json {:as :item}}}
+          :candidate :_types-compatible-many-candidate}}
+
+  {:name :_types-compatible-many-results
+   :description "One boolean per `expected` entry, in request order."
+   :parent :vec
+   :args {:coll {:parent :map
+                 :args {:func :_types-compatible-many-one?
+                        :coll {:parent :get
+                               :args {:coll :_parsed-body :key {:value :expected} :default []}}}}}}
+
+  {:name :types-compatible-many
+   :description "POST /api/types/compatible-many — `{candidate, expected: [t …]}` (types in the `/api/types` wire shape) → `{:ok true :results [bool …]}`, one `subtype?` per expected type, in order; `{:ok false :error}` without a candidate. The batch form of `/api/types/compatible` for a caller that checks one type against many slots."
+   :parent :if
+   :args {:test {:parent :nil? :args {:value :_types-compatible-many-candidate}}
+          :then {:value {:ok false :error "Request body must include 'candidate'"}}
+          :else {:parent :zipmap
+                 :args {:keys [{:value :ok} {:value :results}]
+                        :vals [{:value true} :_types-compatible-many-results]}}}}
+
   ;; --- :to-set — atomic boundary over `clojure.core/set`. Used to
   ;; turn the wire's effect list into a containment predicate.
   {:name :to-set

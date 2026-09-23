@@ -118,6 +118,12 @@
    :parent :json-handler
    :args {:data :types-compatible}}
 
+  {:name :types-compatible-many-handler
+   :lambda-params [:request]
+   :description "Ring handler for `POST /api/types/compatible-many` — wraps `:types-compatible-many` in a JSON 200 response."
+   :parent :json-handler
+   :args {:data :types-compatible-many}}
+
   {:name :types-candidates-handler
    :lambda-params [:request]
    :description "Ring handler for `POST /api/types/candidates` — wraps `:types-candidates` in a JSON 200 response."

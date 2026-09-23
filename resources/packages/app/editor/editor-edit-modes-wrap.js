@@ -57,23 +57,26 @@ async function wrapSlotCandidates(parentFn, wrappedFn) {
                typeName, compatible: null });
   }
   // Which slots can legally TAKE the wrapped fn's result? Same checker
-  // the picker's Compatible split uses — asked per slot, best-effort
-  // (an unanswered check just leaves the slot unmarked).
+  // the picker's Compatible split uses, asked ONCE for every typed slot
+  // (POST /api/types/compatible-many) — best-effort: an unanswered check
+  // just leaves the slots unmarked.
   const ret = (typeof richTypes !== 'undefined')
     ? richTypes?.[wrappedFn?.name]?.return : null;
-  if (ret && window.API?.api_types_compatible) {
-    await Promise.all(out.map(async (sl) => {
-      if (!sl.typeName) return;
-      try {
-        const cr = await fetch(API.api_types_compatible, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ expected: sl.typeName, candidate: ret }),
+  const typed = out.filter((sl) => sl.typeName);
+  if (ret && typed.length && window.API?.api_types_compatible_many) {
+    try {
+      const cr = await fetch(API.api_types_compatible_many, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate: ret, expected: typed.map((sl) => sl.typeName) }),
+      });
+      const cd = cr.ok ? await cr.json() : null;
+      if (cd?.ok && Array.isArray(cd.results)) {
+        typed.forEach((sl, i) => {
+          if (typeof cd.results[i] === 'boolean') sl.compatible = cd.results[i];
         });
-        const cd = cr.ok ? await cr.json() : null;
-        if (cd && typeof cd.ok === 'boolean') sl.compatible = cd.ok;
-      } catch (_) { /* unmarked */ }
-    }));
+      }
+    } catch (_) { /* unmarked */ }
   }
   // Compatible free slots first, then free, then the rest.
   const rank = (sl) => (sl.free && sl.compatible ? 0 : sl.free ? 1 : 2);

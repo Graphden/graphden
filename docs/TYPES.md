@@ -310,7 +310,9 @@ Error example:
 ### Type variables on the wire
 
 `/api/types` and the picker's `/api/types/candidates` /
-`/api/types/compatible` carry types as JSON. A variable is a symbol
+`/api/types/compatible` / `/api/types/compatible-many` (one candidate
+against a list of expected types — the wrap flow's slot check) carry
+types as JSON. A variable is a symbol
 in the checker (`'a`, `'a-17` after freshening) and serialises as the
 bare string `"a"`; `crud.types-api/json->type` decodes a one-letter
 (optionally `-<n>`-suffixed) string back to a symbol — the same

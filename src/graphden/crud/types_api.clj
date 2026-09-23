@@ -22,10 +22,7 @@
     [graphden.types.check :as tcheck]
     [graphden.types.core :as types]
     [graphden.util.ns-path :as ns-path]
-    [graphden.versioning.storage.core :as vs])
-  (:import
-    (graphden.versioning.storage.core
-      VersionedStorage)))
+    [graphden.versioning.graph-rows :as graph-rows]))
 
 
 ;; === Graph-cache loaders ====================================================
@@ -35,13 +32,7 @@
    branch-cached batch when versioned, or as five vanilla queries
    otherwise. Same shape as the `:graph-cache` atom."
   [storage]
-  (if (instance? VersionedStorage storage)
-    (vs/query-all-graph-entities storage)
-    {:fns        (vec (sp/query-entities storage :fn {}))
-     :slots      (vec (sp/query-entities storage :slot {}))
-     :fn-slots   (vec (sp/query-entities storage :fn-slot {}))
-     :bindings   (vec (sp/query-entities storage :binding {}))
-     :list-items (vec (sp/query-entities storage :binding-list-item {}))}))
+  (graph-rows/read-all storage))
 
 
 (defn org-visible-slice

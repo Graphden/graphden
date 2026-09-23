@@ -1,7 +1,4 @@
 # median seconds per file over 25 log(s) — regenerate: node e2e-baseline.js <gate logs> > e2e-baseline.tsv
-208	edit-tutorial-tour-ops.test.js
-195	edit-tutorial-tour.test.js
-191	edit-tutorial-tour-structure.test.js
 143	edit-tutorial-tour-ux.test.js
 93	edit-tutorial-tour-platform.test.js
 69	edit-tutorial-tour-history.test.js

@@ -101,7 +101,7 @@ Lesson 01), or pick “Interactive tutorial” in the account-chip menu —
 in an organization workspace the lesson runs on its own `tutorial-NN-*`
 branch, and ending it offers branch deletion = full rollback. The tour's
 step scripts live in the graph (`app.tour/_tour-lessons`) and are
-drift-guarded by `tools/browser-test/edit-tutorial-tour.test.js` —
+drift-guarded by `tools/browser-test/edit-tutorial-tour*.test.js` —
 keep the written lesson's “Try it” section and the tour steps in
 sync when either changes.
 

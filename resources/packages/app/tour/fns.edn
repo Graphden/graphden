@@ -49,7 +49,7 @@
 ;;                    reader only OBSERVES keep ordinary “quotes”.
 ;;   :target        — CSS selector the spotlight anchors to; nil = centered
 ;;                    modal step. Selectors are DRIFT-PRONE: the e2e guard
-;;                    `tools/browser-test/edit-tutorial-tour.test.js` walks
+;;                    `tools/browser-test/edit-tutorial-tour*.test.js` walk
 ;;                    every step of every lesson against the live editor,
 ;;                    so a renamed class fails CI, not a user.
 ;;   :targets       — OPTIONAL ordered selector chain for a step whose

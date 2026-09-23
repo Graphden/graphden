@@ -29,6 +29,7 @@
    (read-only DB navigation) live in `.lookup`; row writes + future
    plumbing + size caps live in `.persist`."
   (:require
+    [clojure.set :as set]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.crud.request :as request]
@@ -171,8 +172,14 @@
                  ;; Per-org effect allow-list resolved from the org's plan
                  ;; (task #4) — free stays locked, a paid tier widens it
                  ;; (e.g. +:network). Falls back to the locked default when
-                 ;; no plan resolver is installed.
-                 (assoc :allowed-effects (cr/cloud-allowed-effects-for org)))
+                 ;; no plan resolver is installed. It only ever NARROWS a
+                 ;; list the caller already set: the test auto-runner's
+                 ;; `#{}` backstop must stay empty, not widen to the plan.
+                 (assoc :allowed-effects
+                        (let [plan (set (cr/cloud-allowed-effects-for org))]
+                          (if-some [caller (:allowed-effects ctx)]
+                            (set/intersection (set caller) plan)
+                            plan))))
      :fn-id fn-id
      :fn-version-id (lookup/resolve-fn-version-id ctx fn-id)
      ;; The run's content anchor — the hash of everything it can reach,

@@ -692,6 +692,37 @@
             "the failure names the forbidden effect")))))
 
 
+(deftest tenant-execute-narrows-a-caller-allow-list-test
+  ;; Regression: the test auto-runner submits with `:allowed-effects #{}`
+  ;; (its runtime backstop — a hidden effect must throw, not fire). For a
+  ;; tenant, `execution-plan` REPLACED that empty set with the org's plan
+  ;; allow-list, so an effect the static selection missed fired on every
+  ;; edit. The plan list may only narrow what the caller already allows.
+  (let [storage (create-full-storage)
+        nm "db-touch-sink"
+        composed-name "db-touch-composed"
+        _ (exec/register-base-fn! (keyword nm)
+                                  (fn [_args _ctx]
+                                    (cr/record-effect! :db)
+                                    :touched))
+        _ (registry/record-rich-types! (keyword nm)
+                                       {:args {} :return-type :any :effects #{:db}})
+        base (setup/create-base-fn! storage nm :any)
+        composed (setup/create-composed-fn! storage composed-name (:id base))
+        _ (registry/record-rich-types! (keyword composed-name)
+                                       {:args {} :return-type :any :effects #{:db}})
+        c (setup/default-registry-ctx storage)
+        run #(apply-and-await! % {:fn-id (:id composed) :args {}
+                                  :timeout-ms 5000 :persist? true})]
+    (is (contains? cr/default-cloud-allowed-effects :db)
+        "premise: the tenant plan list allows :db")
+    (testing "a tenant run with no caller restriction gets the plan list — :db runs"
+      (is (= :succeeded (:status (tc/with-org "acme" (run c))))))
+    (testing "a caller's empty allow-list stays empty for a tenant — :db refused"
+      (is (not= :succeeded
+                (:status (tc/with-org "acme" (run (assoc c :allowed-effects #{})))))))))
+
+
 (deftest apply-hides-result-for-tainted-fn-test
   ;; A fn-def whose registered :return carries the `:secret` marker
   ;; must NOT leak its computed value through `/api/execute`. The

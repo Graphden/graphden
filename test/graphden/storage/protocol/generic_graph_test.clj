@@ -33,7 +33,7 @@
               _      (setup/bind-ref! storage (:id composed) (:id slot) (:id target))
               result (gg/resolve-execution-graph storage (:id composed))]
           (is (graph/execution-graph? result))
-          (let [fn-ids (set (keys (graph/get-graph-fns result)))]
+          (let [fn-ids (set (keys (:fns result)))]
             (is (contains? fn-ids (:id composed)) "the root fn")
             (is (contains? fn-ids (:id base))     "its parent")
             (is (contains? fn-ids (:id target))   "the ref-binding target")))

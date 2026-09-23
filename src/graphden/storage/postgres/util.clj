@@ -31,12 +31,6 @@
 ;; can `(:require [.util :as util])` once and reach both timeout and
 ;; error helpers under one prefix.
 
-(def with-query-timeout
-  "Executes f with a custom query timeout (in milliseconds).
-   Delegates to storage-protocol for centralized configuration."
-  sp/with-query-timeout)
-
-
 (defn get-query-timeout-seconds
   "Returns the current query timeout in seconds for JDBC calls. Thin
    re-export over `protocol.config/get-query-timeout-seconds` —

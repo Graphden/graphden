@@ -32,6 +32,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.system.route-collection :as rc]
     [graphden.util.counters :as counters]
+    [graphden.versioning.branch-local :as bl]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.merge :as vmerge]
     [graphden.versioning.storage.resolution :as vres]))
@@ -939,6 +940,9 @@
                   {:validated (:w @state) :global global})
         (epoch/prune! base global)
         (swap! state assoc :w global)
+        ;; The missed write may have moved a `:branch-local?` flag or a
+        ;; parent edge; that cache sits below every ctx, so drop it too.
+        (bl/invalidate! base)
         (let [snap @handlers
               refresh! (fn [bid entry]
                          (heal-refresh-entry! router base default-branch-id

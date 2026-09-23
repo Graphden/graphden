@@ -453,7 +453,7 @@
            per path per branch view, guarded here; serving goes through
            `:read-resource-overridable` in the app package, and every save
            rolls the effective `?v=` asset hash so browsers re-fetch."}
-    {:ns graphden.versioning.storage.core :defn purgeable-identity-ids
+    {:ns graphden.versioning.storage.purge :defn purgeable-identity-ids
      :say "Delete has TWO modes, and this guard is the heart of the hard one.
            User-facing deletes tombstone (a version row with `:deleted-at`, so
            descendants hide the entity too); sync + rollback hard-delete. A

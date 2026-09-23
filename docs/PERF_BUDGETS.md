@@ -94,6 +94,7 @@ The invariants that are gated today:
 | `:sql/create-fn` | 20 | the write path re-reading what it already had |
 | `:sql/execute-popover-app-root` | 18 | the Run form's free-arg walk querying per level again (30–50 s for the app root before 2026-09-02) |
 | `:sql/merge-fork` | 35 | the merge reading all of main again (a full resolved-view diff + a whole-branch conflict scan: 1.6 s locally, ~7 s on the cloud before 2026-09-03) |
+| `:sql/package-sync` | 58 | the package / bundle sync's collision guard going back to one lock + one name query per fn (an isolated run measured 122 → 48 for 40 fns on 2026-09-23; ~12k round trips on a full boot) |
 
 ## How the SQL is counted
 

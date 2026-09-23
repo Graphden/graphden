@@ -23,7 +23,7 @@
     [graphden.storage.postgres.graph :as pg-graph]
     [graphden.storage.protocol.graph :as proto-graph]
     [graphden.versioning.identity-repair :as idrepair]
-    [graphden.versioning.storage.core :as vcore]
+    [graphden.versioning.storage.purge :as purge]
     [graphden.versioning.storage.resolution :as res]))
 
 
@@ -58,7 +58,7 @@
 
 
 (deftest identity-child-refs-covers-canonical
-  (let [fn-refs (set (:fn @#'vcore/identity-child-refs))]
+  (let [fn-refs (set (:fn @#'purge/identity-child-refs))]
     (doseq [f canonical]
       (is (contains? fn-refs [:binding f])
           (str "identity-child-refs :fn missing [:binding " f "]"))

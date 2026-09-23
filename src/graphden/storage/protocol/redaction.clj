@@ -10,9 +10,7 @@
    Applications register custom fields via `register-sensitive-field-*`
    at startup (PII / HIPAA / GDPR scenarios) and can call
    `validate-sensitive-field-coverage!` to assert the critical set is
-   wired in."
-  (:require
-    [clojure.string :as str]))
+   wired in.")
 
 
 ;; === Sensitive Data Redaction ===
@@ -210,20 +208,6 @@
          (set-sensitive-field-registry! saved-state#)))))
 
 
-(defn sensitive-field-names
-  "Returns the current set of explicitly registered sensitive field names.
-   Includes both default and custom registered names."
-  []
-  (:names @(registry-atom)))
-
-
-(defn sensitive-field-patterns
-  "Returns the current vector of sensitive field regex patterns.
-   Includes both default and custom registered patterns."
-  []
-  (:patterns @(registry-atom)))
-
-
 (defn sensitive-field?
   "Returns true if field name matches known sensitive patterns.
    Checks in order:
@@ -274,26 +258,6 @@
                       {:type :security-error/incomplete-sensitive-field-coverage
                        :unmatched-patterns (set unmatched)
                        :hint "Ensure default sensitive field patterns are registered"})))))
-
-
-(defn warn-on-suspicious-field
-  "Logs a warning if a field name looks sensitive but isn't registered.
-   Call this when logging/displaying data to catch potential misses.
-
-   Returns true if field looks suspicious but not registered."
-  [field-name]
-  (when field-name
-    (let [name-str (name (if (keyword? field-name) field-name (keyword field-name)))
-          ;; Check for common sensitive-looking substrings not in registry
-          suspicious-substrings ["key" "pwd" "pass" "cred" "secret" "token" "auth"]
-          looks-suspicious? (some #(str/includes? (str/lower-case name-str) %)
-                                  suspicious-substrings)]
-      (when (and looks-suspicious? (not (sensitive-field? field-name)))
-        ;; Log warning (lazy require to avoid circular deps)
-        (require 'clojure.tools.logging)
-        ((resolve 'clojure.tools.logging/warn)
-         "Potentially sensitive field not in registry:" field-name)
-        true))))
 
 
 (defn redact-sensitive-map

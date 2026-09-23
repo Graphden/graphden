@@ -13,7 +13,7 @@
     [graphden.crud.fn-execution.retention :as retention]
     [graphden.crud.fn-execution.stats :as stats]
     [graphden.system.init.cleanup :as cleanup]
-    [graphden.versioning.storage.core :as vcore]
+    [graphden.versioning.storage.purge :as purge]
     [integrant.core :as ig]))
 
 
@@ -28,7 +28,7 @@
   (let [calls (atom [])]
     (with-redefs [cleanup/tombstone-gc-retention-ms
                   (fn [] (some-> retention-days (* day-ms)))
-                  vcore/tombstone-gc-sweep!
+                  purge/tombstone-gc-sweep!
                   (fn [base retention-ms & _opts]
                     (swap! calls conj [base retention-ms])
                     {:fn 0})

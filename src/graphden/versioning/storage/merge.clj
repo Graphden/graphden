@@ -606,23 +606,19 @@
    collision (they never propagate), which resolving on the target handles
    for free."
   [storage source-branch-id target-branch-id]
-  ;; :fn — (namespace-id, name)
-  (let [src-fn-ids (into #{} (keep :fn-id)
-                         (sp/query-entities storage :fn-version
-                                            {:branch-id source-branch-id}))]
-    (doseq [fid src-fn-ids
-            :let [resolved (res/resolve-entity storage :fn fid target-branch-id)]
-            :when (:name resolved)]
-      (uniq/check-fn-name-collision! storage target-branch-id :fn resolved)))
-  ;; :binding-list-item — (binding-id, position)
-  (let [src-item-ids (into #{} (keep :item-id)
-                           (sp/query-entities storage :binding-list-item-version
-                                              {:branch-id source-branch-id}))
-        resolved (keep #(res/resolve-entity storage :binding-list-item % target-branch-id)
-                       src-item-ids)]
-    (when (seq resolved)
-      (uniq/check-list-item-position-collisions! storage target-branch-id
-                                                 :binding-list-item (vec resolved)))))
+  (doseq [[entity-name version-entity id-field check!]
+          [[:fn :fn-version :fn-id uniq/check-fn-name-collisions!]
+           [:binding-list-item :binding-list-item-version :item-id
+            uniq/check-list-item-position-collisions!]]]
+    (let [src-ids (into #{} (keep id-field)
+                        (sp/query-entities storage version-entity
+                                           {:branch-id source-branch-id}))
+          ;; ONE batch resolve of every surfaced entity on the post-merge
+          ;; target (was one `resolve-entity` per id).
+          resolved (vals (res/resolve-live-entities storage entity-name
+                                                    src-ids target-branch-id))]
+      (when (seq resolved)
+        (check! storage target-branch-id entity-name (vec resolved))))))
 
 
 (defn branch-lock-key
@@ -648,10 +644,7 @@
    order, so no wait cycle can form. No-op off a pooled backend (`:pool`
    nil) — matches the create/update advisory-lock path in `.core`."
   [storage & branch-ids]
-  (when-let [tx (:pool storage)]
-    (doseq [bid (->> branch-ids (remove nil?) distinct (sort-by str))]
-      (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)"
-                         (branch-lock-key bid)]))))
+  (uniq/xact-lock! (:pool storage) (map branch-lock-key (remove nil? branch-ids))))
 
 
 (defn merge-branch!

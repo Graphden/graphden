@@ -4,9 +4,8 @@
 
    Storage stack mirrors `versioning.storage.core-test`.
 
-   `pure-set-builder-test` is unit (in-memory fn map); the
-   storage-* tests are tagged per-deftest `^:integration` and skip in
-   `bb coverage` accordingly."
+   The storage-* tests are tagged per-deftest `^:integration` and skip
+   in `bb coverage` accordingly."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.schema.graph.schema :as gds]
@@ -17,7 +16,8 @@
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
-    [graphden.versioning.branch-local :as bl]))
+    [graphden.versioning.branch-local :as bl]
+    [graphden.versioning.storage.core :as vs]))
 
 
 (def ^:dynamic *container* nil)
@@ -47,32 +47,6 @@
                       (some? branch-local?) (assoc :branch-local? branch-local?))))
 
 
-(deftest pure-set-builder-test
-  (testing "build-branch-local-set: seed propagates downward by parent-ids"
-    (let [a-id (random-uuid)
-          b-id (random-uuid)
-          c-id (random-uuid)
-          d-id (random-uuid)
-          fns {a-id {:id a-id :parent-ids []        :branch-local? true}
-               b-id {:id b-id :parent-ids [a-id]    :branch-local? nil}
-               c-id {:id c-id :parent-ids [b-id]    :branch-local? nil}
-               d-id {:id d-id :parent-ids []        :branch-local? nil}}
-          result (bl/build-branch-local-set fns)]
-      (is (contains? result a-id) "seed: own true")
-      (is (contains? result b-id) "child of seed inherits")
-      (is (contains? result c-id) "grandchild propagates through one hop")
-      (is (not (contains? result d-id)) "unrelated fn stays false")))
-
-  (testing "MI OR: any local parent ⇒ effective local"
-    (let [local (random-uuid)
-          plain (random-uuid)
-          child (random-uuid)
-          fns {local {:id local :parent-ids [] :branch-local? true}
-               plain {:id plain :parent-ids [] :branch-local? nil}
-               child {:id child :parent-ids [local plain] :branch-local? nil}}]
-      (is (contains? (bl/build-branch-local-set fns) child)))))
-
-
 (deftest nil-fn-id-short-circuit-test
   (testing "effective-branch-local? returns false for nil fn-id (defensive)"
     ;; Doesn't touch storage at all — early `(if (nil? fn-id) false ...)` guard.
@@ -100,7 +74,7 @@
 
 
 (defrecord FakeStorage
-  [pool metadata-cache rw-lock])
+  [pool metadata-cache lock])
 
 
 (deftest storage-key-stability-test
@@ -181,4 +155,58 @@
         (bl/invalidate! base)
         (testing "after invalidate: re-walk picks up the new flag"
           (is (true? (bl/effective-branch-local? base (:id foo))))))
+      (finally (sp/close base) (bl/invalidate-all!)))))
+
+
+(deftest ^:integration versioned-fn-write-invalidates-cache-test
+  ;; The cache used to be cleared ONLY by the CRUD layer's post-write
+  ;; hook — a `:fn` write reaching VersionedStorage any other way (MCP
+  ;; `upsert-fn-defs` / registry install through `sync-bundle!`, a raw
+  ;; storage write) left the warmed value in place, and the next merge
+  ;; judged the fn by it. VersionedStorage now clears it on every `:fn`
+  ;; write, so no caller can forget.
+  (let [base (base-storage)
+        storage (vs/wrap-with-versioning base)]
+    (try
+      (bl/invalidate-all!)
+      (let [root (create-fn! storage {:name "cfg-root" :parents []
+                                      :branch-local? true})
+            plain (create-fn! storage {:name "plain" :parents []})
+            flag (create-fn! storage {:name "flag" :parents []})
+            batch (create-fn! storage {:name "batch" :parents []})]
+        (is (false? (bl/effective-branch-local? base (:id plain))) "warm: plain")
+        (is (false? (bl/effective-branch-local? base (:id flag))) "warm: flag")
+        (is (false? (bl/effective-branch-local? base (:id batch))) "warm: batch")
+        (testing "reparent onto a branch-local root through VersionedStorage"
+          (sp/update-entity storage :fn (:id plain) {:parent-ids [(:id root)]})
+          (is (true? (bl/effective-branch-local? base (:id plain)))))
+        (testing "setting the flag through VersionedStorage"
+          (sp/update-entity storage :fn (:id flag) {:branch-local? true})
+          (is (true? (bl/effective-branch-local? base (:id flag)))))
+        (testing "the batch path the bundle sync takes (upsert → update-entities)"
+          (sp/upsert-entities storage :fn [(assoc batch :branch-local? true)])
+          (is (true? (bl/effective-branch-local? base (:id batch))))))
+      (finally (sp/close base) (bl/invalidate-all!)))))
+
+
+(deftest ^:integration merge-after-versioned-flag-write-skips-branch-local-test
+  ;; End to end: a fn made branch-local by a raw VersionedStorage write
+  ;; AFTER the cache saw it as shared must not have its runtime-config
+  ;; binding carried by a merge.
+  (let [base (base-storage)
+        main (vs/wrap-with-versioning base)]
+    (try
+      (bl/invalidate-all!)
+      (let [cfg (create-fn! main {:name "server-cfg" :parents []})
+            slot (sp/create-entity main :slot {:name "port" :type-fn-id (:id cfg)})
+            b (sp/create-entity main :binding {:fn-id (:id cfg) :slot-id (:id slot)
+                                               :value 3000})
+            prod (vs/create-branch! main "prod")
+            feature (vs/switch-branch main (:id prod))]
+        (is (false? (bl/effective-branch-local? base (:id cfg))) "warm the cache")
+        (sp/update-entity main :fn (:id cfg) {:branch-local? true})
+        (sp/update-entity feature :binding (:id b) {:value 8080})
+        (vs/merge-branch! main (:id prod))
+        (is (= 3000 (:value (sp/read-entity main :binding (:id b))))
+            "the branch-local fn's binding stays main's own after the merge"))
       (finally (sp/close base) (bl/invalidate-all!)))))

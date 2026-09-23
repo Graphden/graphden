@@ -87,11 +87,8 @@ edges `forward-deps-of` follows, skipping identity edges; constraint-
 vector type NAMES (`[:union :a :b]`, keywords the resolver does not
 chase) are resolved in one batched query per round. There is no visit
 cap on this path: binding a fn with a large closure (the editor's own
-router) is a normal write. The per-fn generic walker
-(`constraints/collect-dependency-chain-impl`, four queries per visited
-fn, capped at `default-max-dependency-chain-depth` →
-`:constraint-violation/chain-too-deep`) remains for a backend without
-a graph resolver.
+router) is a normal write. (The per-fn walker it replaced — four queries
+per visited fn, capped at 1000 visits → `chain-too-deep` — is gone.)
 
 **Error:** `:constraint-violation/dependency-cycle`
 
@@ -123,7 +120,7 @@ occupy the key forever; cross-branch divergence must not be blocked):
 
 | Entity | Retired key | Now enforced by |
 |---|---|---|
-| `fn` | `(namespace-id, name)` | `check-fn-name-collision!` in `VersionedStorage` — live-view check per branch, advisory-lock-serialized. Error: `:constraint-violation/fn-name-collision` |
+| `fn` | `(namespace-id, name)` | `check-fn-name-collisions!` in `VersionedStorage` — live-view check per branch, one batched read per write batch, advisory-lock-serialized (`uniq/xact-lock!`). Error: `:constraint-violation/fn-name-collision` |
 | `binding-list-item` | `(binding-id, position)` | `check-list-item-position-collision!` in `VersionedStorage`. Error: `:constraint-violation/position-collision` |
 
 `slot.name` and `slot.type-fn-id` are NOT individually unique — two

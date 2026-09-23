@@ -36,59 +36,6 @@
       (is (not (contains? (ex-data wrapped) :failed-id))))))
 
 
-(deftest process-batch-with-index-test
-  (testing "processes items and returns results"
-    (let [items [{:id 1} {:id 2} {:id 3}]
-          results (doall (storage/process-batch-with-index
-                           items
-                           :id
-                           (fn [item _idx] (:id item))))]
-      (is (= [1 2 3] results))))
-
-  (testing "wraps exceptions with batch context"
-    (let [items [{:id 1} {:id 2} {:id 3}]
-          fail-on-2 (fn [item _idx]
-                      (if (= 2 (:id item))
-                        (throw (ex-info "Failed on 2" {:type :test-failure}))
-                        (:id item)))]
-      (try
-        (doall (storage/process-batch-with-index items :id fail-on-2))
-        (is false "Should have thrown")
-        (catch clojure.lang.ExceptionInfo e
-          (is (= "Failed on 2" (ex-message e)))
-          (is (= 1 (:batch-index (ex-data e))))
-          (is (= 3 (:batch-size (ex-data e))))
-          (is (= 2 (:failed-id (ex-data e))))))))
-
-  (testing "handles regular exceptions"
-    (let [items [{:id 1}]
-          fail-fn (fn [_item _idx]
-                    (throw (Exception. "Regular error")))]
-      (try
-        (doall (storage/process-batch-with-index items :id fail-fn))
-        (is false "Should have thrown")
-        (catch clojure.lang.ExceptionInfo e
-          (is (= "Regular error" (ex-message e)))
-          (is (= :batch-error/partial-failure (:type (ex-data e))))))))
-
-  (testing "works without get-id-fn"
-    (let [items [{:x 1} {:x 2}]
-          results (doall (storage/process-batch-with-index
-                           items
-                           nil
-                           (fn [item _idx] (:x item))))]
-      (is (= [1 2] results)))))
-
-
-;; needs-special-encoding? lives in `protocol.encoding` and is pinned there;
-;; the timeout / regex / graph-iteration dynamic-var macros live in
-;; `protocol.config` and `protocol.graph` and are pinned in THEIR tests. This
-;; file used to re-test all four through the `protocol.core` facade — four
-;; deftests whose names collided with the ones that own the subject, so a
-;; failure sent you to the wrong file. Removed by the audit; the
-;; assertions those copies had and the originals did not (binding restoration
-;; on the normal path and on a throw) were moved, not dropped.
-
 ;; =============================================================================
 ;; initialize-with-cleanup! tests
 ;; =============================================================================

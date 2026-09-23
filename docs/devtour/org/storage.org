@@ -13,26 +13,26 @@ after: executor
 :PROPERTIES:
 :CUSTOM_ID: storage/Storage
 :FILE: src/graphden/storage/protocol/core.clj
-:LINE: 81
+:LINE: 79
 :MINS: 1.1
 :END:
 
 The storage layer starts with three protocols; this is the first. ~Storage~ is the lifecycle contract (~initialize~ / ~close~) every backend implements, binding a concrete store to a ~DataSchema~ before any graph can be read or written.
 
-- source :: [[file:../../../src/graphden/storage/protocol/core.clj::(defprotocol Storage][src/graphden/storage/protocol/core.clj:81]]
+- source :: [[file:../../../src/graphden/storage/protocol/core.clj::(defprotocol Storage][src/graphden/storage/protocol/core.clj:79]]
 - same file :: [[file:storage.org::#storage/StorageCRUD][StorageCRUD]], [[file:storage.org::#storage/ExecutionGraph][ExecutionGraph]]
 
 * 2. StorageCRUD
 :PROPERTIES:
 :CUSTOM_ID: storage/StorageCRUD
 :FILE: src/graphden/storage/protocol/core.clj
-:LINE: 117
+:LINE: 115
 :MINS: 3.3
 :END:
 
 The row-level contract: ~read-entity~, ~query-entities~, ~create-entity~, and friends. Every graph read the executor does bottoms out in these calls — learn this shape and you know how the whole system touches the database.
 
-- source :: [[file:../../../src/graphden/storage/protocol/core.clj::(defprotocol StorageCRUD][src/graphden/storage/protocol/core.clj:117]]
+- source :: [[file:../../../src/graphden/storage/protocol/core.clj::(defprotocol StorageCRUD][src/graphden/storage/protocol/core.clj:115]]
 - same file :: [[file:storage.org::#storage/Storage][Storage]], [[file:storage.org::#storage/ExecutionGraph][ExecutionGraph]]
 - referenced from :: [[file:storage.org::#storage/resolve-execution-graph][resolve-execution-graph]], [[file:platform.org::#platform/RemoteStorage][RemoteStorage]]
 
@@ -40,13 +40,13 @@ The row-level contract: ~read-entity~, ~query-entities~, ~create-entity~, and fr
 :PROPERTIES:
 :CUSTOM_ID: storage/ExecutionGraph
 :FILE: src/graphden/storage/protocol/core.clj
-:LINE: 258
+:LINE: 256
 :MINS: 0.9
 :END:
 
 One method: ~resolve-execution-graph~ — given a root fn-id, return its entire reachable subgraph in a single shot. This is the seam the executor's ~rebuild!~ reads through, and it is implemented twice below: a backend-agnostic version and a Postgres-optimized one.
 
-- source :: [[file:../../../src/graphden/storage/protocol/core.clj::(defprotocol ExecutionGraph][src/graphden/storage/protocol/core.clj:258]]
+- source :: [[file:../../../src/graphden/storage/protocol/core.clj::(defprotocol ExecutionGraph][src/graphden/storage/protocol/core.clj:256]]
 - see also :: [[file:executor.org::#executor/rebuild!][rebuild!]]
 - same file :: [[file:storage.org::#storage/Storage][Storage]], [[file:storage.org::#storage/StorageCRUD][StorageCRUD]]
 
@@ -105,26 +105,26 @@ The runtime link between a field-spec's declared type and an actual value: one p
 :PROPERTIES:
 :CUSTOM_ID: storage/ExecutionGraphResult
 :FILE: src/graphden/storage/protocol/graph.clj
-:LINE: 159
+:LINE: 86
 :MINS: 0.7
 :END:
 
 The record every resolver returns: the entity collections plus by-fn / by-binding indexes. Know this shape first and the two resolvers below read easily — they all just fill it in.
 
-- source :: [[file:../../../src/graphden/storage/protocol/graph.clj::(defrecord ExecutionGraphResult][src/graphden/storage/protocol/graph.clj:159]]
+- source :: [[file:../../../src/graphden/storage/protocol/graph.clj::(defrecord ExecutionGraphResult][src/graphden/storage/protocol/graph.clj:86]]
 - same file :: [[file:storage.org::#storage/->execution-graph][->execution-graph]], [[file:storage.org::#storage/process-fn-node][process-fn-node]], [[file:storage.org::#storage/resolve-execution-graph-bfs][resolve-execution-graph-bfs]]
 
 * 9. ->execution-graph
 :PROPERTIES:
 :CUSTOM_ID: storage/->execution-graph
 :FILE: src/graphden/storage/protocol/graph.clj
-:LINE: 169
+:LINE: 96
 :MINS: 1.8
 :END:
 
 Builds that record and its O(1) convenience indexes — the shared ~assemble the result~ step both backends funnel into.
 
-- source :: [[file:../../../src/graphden/storage/protocol/graph.clj::(defn ->execution-graph][src/graphden/storage/protocol/graph.clj:169]]
+- source :: [[file:../../../src/graphden/storage/protocol/graph.clj::(defn ->execution-graph][src/graphden/storage/protocol/graph.clj:96]]
 - same file :: [[file:storage.org::#storage/ExecutionGraphResult][ExecutionGraphResult]], [[file:storage.org::#storage/process-fn-node][process-fn-node]], [[file:storage.org::#storage/resolve-execution-graph-bfs][resolve-execution-graph-bfs]]
 - referenced from :: [[file:storage.org::#storage/resolve-execution-graph~2][resolve-execution-graph]]
 
@@ -132,13 +132,13 @@ Builds that record and its O(1) convenience indexes — the shared ~assemble the
 :PROPERTIES:
 :CUSTOM_ID: storage/process-fn-node
 :FILE: src/graphden/storage/protocol/graph.clj
-:LINE: 272
+:LINE: 149
 :MINS: 2.2
 :END:
 
 Expands one fn during traversal, extracting its outgoing edges: parent-ids, base / element / return-type, and binding + list-item ~ref-fn-id~s. This function IS the authoritative definition of what counts as a graph edge.
 
-- source :: [[file:../../../src/graphden/storage/protocol/graph.clj::(defn process-fn-node][src/graphden/storage/protocol/graph.clj:272]]
+- source :: [[file:../../../src/graphden/storage/protocol/graph.clj::(defn process-fn-node][src/graphden/storage/protocol/graph.clj:149]]
 - same file :: [[file:storage.org::#storage/ExecutionGraphResult][ExecutionGraphResult]], [[file:storage.org::#storage/->execution-graph][->execution-graph]], [[file:storage.org::#storage/resolve-execution-graph-bfs][resolve-execution-graph-bfs]]
 - referenced from :: [[file:storage.org::#storage/reachable-fns-sql][reachable-fns-sql]]
 
@@ -146,13 +146,13 @@ Expands one fn during traversal, extracting its outgoing edges: parent-ids, base
 :PROPERTIES:
 :CUSTOM_ID: storage/resolve-execution-graph-bfs
 :FILE: src/graphden/storage/protocol/graph.clj
-:LINE: 299
+:LINE: 176
 :MINS: 2.3
 :END:
 
 The backend-agnostic BFS driver: keep calling ~process-fn-node~ until the reachable closure is exhausted. This is the reference algorithm the Postgres recursive CTE mirrors.
 
-- source :: [[file:../../../src/graphden/storage/protocol/graph.clj::(defn resolve-execution-graph-bfs][src/graphden/storage/protocol/graph.clj:299]]
+- source :: [[file:../../../src/graphden/storage/protocol/graph.clj::(defn resolve-execution-graph-bfs][src/graphden/storage/protocol/graph.clj:176]]
 - same file :: [[file:storage.org::#storage/ExecutionGraphResult][ExecutionGraphResult]], [[file:storage.org::#storage/->execution-graph][->execution-graph]], [[file:storage.org::#storage/process-fn-node][process-fn-node]]
 
 * 12. resolve-execution-graph
@@ -172,15 +172,15 @@ The default ~ExecutionGraph~ implementation — it wires the ~StorageCRUD~ loade
 :PROPERTIES:
 :CUSTOM_ID: storage/PostgresStorage
 :FILE: src/graphden/storage/postgres/core.clj
-:LINE: 134
-:MINS: 10.3
+:LINE: 103
+:MINS: 10.2
 :END:
 
 The concrete Postgres backend. Its ~ExecutionGraph~ extension delegates to the Postgres resolver instead of the generic BFS — showing how a backend overrides the default path when it can do better.
 
 Its length is protocol SURFACE, not logic: one record implementing ~Storage~, ~StorageIntrospection~, ~StorageCRUD~, the constraint protocols and ~ExecutionGraph~ in turn, most methods a single call deep. Read the protocol headings on the way down and stop at the ~ExecutionGraph~ arm — it is the only one doing something the generic path does not.
 
-- source :: [[file:../../../src/graphden/storage/postgres/core.clj::(defrecord PostgresStorage][src/graphden/storage/postgres/core.clj:134]]
+- source :: [[file:../../../src/graphden/storage/postgres/core.clj::(defrecord PostgresStorage][src/graphden/storage/postgres/core.clj:103]]
 
 * 14. do-initialize
 :PROPERTIES:

@@ -16,7 +16,8 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
     [graphden.system.init.cleanup :as cleanup]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.purge :as purge]))
 
 
 (def ^:dynamic *container* nil)
@@ -51,7 +52,7 @@
    reds the GitHub integration run. A future cutoff removes the race without
    touching prod semantics (prod retention is day-scale)."
   [base]
-  (vs/tombstone-gc-sweep! base -1000))
+  (purge/tombstone-gc-sweep! base -1000))
 
 
 (defn- live?
@@ -158,7 +159,7 @@
       (let [f (sp/create-entity v :fn {:name "recent" :parent-ids [] :description "h"})]
         (tombstone-delete! v (:id f))
         (testing "a tombstone younger than the retention window is left alone"
-          (let [purged (vs/tombstone-gc-sweep! base (* 60 60 1000))]  ; 1h retention
+          (let [purged (purge/tombstone-gc-sweep! base (* 60 60 1000))]  ; 1h retention
             (is (zero? (:fn purged)))
             (is (identity-exists? base (:id f))))))
       (finally (sp/close base)))))
@@ -311,7 +312,7 @@
           (sp/delete-entity v :binding (:id shared)))
         (testing "the hook is called for each purged entity while its rows are readable"
           (let [paths (atom #{})
-                purged (vs/tombstone-gc-sweep!
+                purged (purge/tombstone-gc-sweep!
                          base -1000
                          {:before-purge (fn [et id]
                                           (swap! seen conj [et id])
@@ -327,4 +328,30 @@
                      (finally (reset! vault/active-client nil))))
               (is (= ["db/pw"] @deleted)
                   "shared/pw is still bound on db-call-2 — kept")))))
+      (finally (sp/close base)))))
+
+
+(deftest one-sweep-sorts-a-mixed-batch-of-candidates
+  ;; The sweep decides liveness for ALL candidates of an entity type in one
+  ;; batched load per branch, and inbound refs for all dead fns in one pass
+  ;; — so the per-id verdicts must not bleed into each other: in one sweep,
+  ;; only the fn that is dead everywhere AND unreferenced goes.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [dead (sp/create-entity v :fn {:name "dead" :parent-ids [] :description "h"})
+            kept (sp/create-entity v :fn {:name "kept-on-branch" :parent-ids [] :description "h"})
+            parent (sp/create-entity v :fn {:name "still-a-parent" :parent-ids [] :description "h"})
+            _child (sp/create-entity v :fn {:name "child" :parent-ids [(:id parent)] :description "h"})
+            b (vs/create-branch! v "edits-kept")
+            vb (vs/switch-branch v (:id b))]
+        (sp/update-entity vb :fn (:id kept) {:description "branch's own live edit"})
+        (doseq [f [dead kept parent]]
+          (tombstone-delete! v (:id f)))
+        (let [purged (sweep-all! base)]
+          (is (= 1 (:fn purged)) "only the dead, unreferenced fn is purged")
+          (is (not (identity-exists? base (:id dead))))
+          (is (identity-exists? base (:id kept)) "live on the branch — kept")
+          (is (live? vb (:id kept)))
+          (is (identity-exists? base (:id parent)) "a live fn names it as parent — kept")))
       (finally (sp/close base)))))

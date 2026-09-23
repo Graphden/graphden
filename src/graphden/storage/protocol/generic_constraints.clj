@@ -127,7 +127,7 @@
    check asks \"does the ref's closure contain the owner?\" of.
 
    The old walk issued four queries per fn visited and capped itself at
-   `default-max-dependency-chain-depth` visits, so binding a fn with a
+   1000 visits, so binding a fn with a
    large closure (the editor's own listener, its router) took seconds
    and then failed `chain-too-deep`. This one loads the closure through
    `sp/resolve-execution-graph` (the recursive-CTE resolver — O(1)

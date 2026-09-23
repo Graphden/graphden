@@ -238,8 +238,7 @@
           (is (= 1000000 (:max-lifetime data))))))))
 
 
-;; === with-query-timeout tests ===
-;; Note: with-query-timeout is defined in util.clj, not in core.clj
+;; === error classification ===
 (defn- make-sql-exception
   "Creates a SQLException with the given SQL state code."
   [sql-state]
@@ -341,6 +340,5 @@
     (is (not (util/query-canceled? (make-sql-exception "23505"))))))
 
 
-;; `with-query-timeout`'s validation table (positive, >= 1000 ms) belongs to
+;; The query-timeout validation table (positive, >= 1000 ms) belongs to
 ;; `protocol.config`, which defines it, and is pinned by `config-test`.
-;; `postgres.util` only re-exports the var; `util-test` asserts THAT, once.

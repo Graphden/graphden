@@ -263,6 +263,12 @@
 ;; targets / empty owner-ids fast paths, etc.).
 ;; ============================================================================
 
+(defn- targets-of
+  "One owner's `:parent-ids` targets, in `ord` order, via the batch read."
+  [ds owner-id]
+  (get (junction/read-junction-rows-batch ds :fn :parent-ids [owner-id]) owner-id))
+
+
 (deftest insert-and-read-junction-rows-direct
   (testing "insert + read round-trip via the low-level fns"
     (let [storage (setup/create-test-storage)
@@ -280,19 +286,19 @@
         (junction/insert-junction-rows!
           ds :fn :parent-ids (:id owner) [(:id parent1) (:id parent2)])
         (is (= [(:id parent1) (:id parent2)]
-               (junction/read-junction-rows ds :fn :parent-ids (:id owner)))
+               (targets-of ds (:id owner)))
             "rows come back in insertion order")
 
         (testing "insert with empty targets is a no-op"
-          (let [snapshot (junction/read-junction-rows ds :fn :parent-ids (:id owner))]
+          (let [snapshot (targets-of ds (:id owner))]
             (junction/insert-junction-rows! ds :fn :parent-ids (:id owner) [])
             (is (= snapshot
-                   (junction/read-junction-rows ds :fn :parent-ids (:id owner))))))
+                   (targets-of ds (:id owner))))))
 
         (testing "delete clears all rows for one owner"
           (junction/delete-junction-rows! ds :fn :parent-ids (:id owner))
           (is (empty?
-                (junction/read-junction-rows ds :fn :parent-ids (:id owner)))))
+                (targets-of ds (:id owner)))))
         (finally (sp/close storage))))))
 
 

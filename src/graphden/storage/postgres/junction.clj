@@ -91,22 +91,6 @@
                                                               :where [:= :owner_id owner-id]}) {}))))
 
 
-(defn read-junction-rows
-  "Returns vector of target UUIDs for an owner-id, ordered by ord."
-  [ds entity-name field-name owner-id]
-  (let [jt (ddl/junction-table-name entity-name field-name)]
-    (util/with-sql-error-handling "Database error" :read-junction
-                                  {:entity-name entity-name :field-name field-name :owner-id owner-id}
-                                  (let [rows (util/exec! ds
-                                                         (sql/format {:select [:target_id]
-                                                                      :from [(keyword jt)]
-                                                                      :where [:= :owner_id owner-id]
-                                                                      :order-by [:ord]}))]
-                                    ;; query-opts uses :as-unqualified-lower-maps which converts underscore to underscore
-                                    ;; (NOT to kebab-case), so column "target_id" becomes :target_id
-                                    (mapv :target_id rows)))))
-
-
 (defn read-junction-owners
   "Reverse junction lookup: returns vector of owner-ids whose junction
    row has `target-id`. Hits the `idx_<jt>_target` index installed by

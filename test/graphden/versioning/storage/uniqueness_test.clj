@@ -43,8 +43,10 @@
 (defn- mem-storage
   "In-memory read-only storage over `db`, a map `{entity → {id → row}}`.
    Implements exactly the read surface the collision checks (and the
-   resolution layer under them) use; every write method throws."
-  [db]
+   resolution layer under them) use; every write method throws. The
+   optional `calls` atom counts each read by `[method entity]` — how the
+   batch tests pin one query per batch, not one per row."
+  [db & [calls]]
   (reify
     sp/StorageCRUD
 
@@ -52,6 +54,7 @@
 
     (read-entity
       [_ entity-name id]
+      (some-> calls (swap! update [:read-entity entity-name] (fnil inc 0)))
       (get-in db [entity-name id]))
 
     (update-entity [_ _ _ _] (unexpected! "update-entity"))
@@ -60,6 +63,7 @@
 
     (query-entities
       [_ entity-name where]
+      (some-> calls (swap! update [:query-entities entity-name] (fnil inc 0)))
       (filterv #(row-matches? % where) (vals (get db entity-name))))
 
     (query-entities [_ _ _ _] (unexpected! "query-entities/4"))
@@ -79,6 +83,7 @@
 
     (read-entities
       [_ entity-name ids]
+      (some-> calls (swap! update [:read-entities entity-name] (fnil inc 0)))
       (into {}
             (keep (fn [id]
                     (when-let [row (get-in db [entity-name id])]
@@ -214,6 +219,47 @@
                             {:id :f-new :name "b2-only" :namespace-id :ns1}))]
       (is (= :constraint-violation/fn-name-collision (:type data)))
       (is (= [:f-elsewhere] (:colliding-fn-ids data))))))
+
+
+(deftest fn-name-collisions-batch-checks-post-batch-view
+  (with-isolated-chain-cache
+    (let [storage (mem-storage (fn-name-db))]
+      (testing "a batch that moves the live holder away frees its name for a sibling"
+        (is (nil? (uniq/check-fn-name-collisions!
+                    storage :b1 :fn
+                    [{:id :f-live :name "moved-away" :namespace-id :ns1}
+                     {:id :f-new :name "taken" :namespace-id :ns1}]))))
+      (testing "two batch rows claiming one key collide with each other"
+        (let [data (err-data #(uniq/check-fn-name-collisions!
+                                storage :b1 :fn
+                                [{:id :f-a :name "fresh" :namespace-id :ns1}
+                                 {:id :f-b :name "fresh" :namespace-id :ns1}]))]
+          (is (= :constraint-violation/fn-name-collision (:type data)))
+          (is (= [:f-b] (:colliding-fn-ids data)))))
+      (testing "a batch row that lands on a live holder still collides"
+        (let [data (err-data #(uniq/check-fn-name-collisions!
+                                storage :b1 :fn
+                                [{:id :f-a :name "fresh" :namespace-id :ns1}
+                                 {:id :f-b :name "taken" :namespace-id :ns1}]))]
+          (is (= "taken" (:name data)))
+          (is (= [:f-live] (:colliding-fn-ids data))))))))
+
+
+(deftest fn-name-collisions-batch-reads-once
+  ;; The boot sync checks thousands of named fns per batch — the version
+  ;; table and the identity table are read ONCE for the whole batch, not
+  ;; once per row (the old per-fn loop cost ~3 round trips a fn).
+  (with-isolated-chain-cache
+    (let [calls (atom {})
+          storage (mem-storage (fn-name-db) calls)
+          shapes (for [i (range 25)]
+                   {:id (keyword (str "f-new-" i)) :name (str "n-" i) :namespace-id :ns1})]
+      (is (nil? (uniq/check-fn-name-collisions!
+                  storage :b1 :fn (conj (vec shapes)
+                                        {:id :f-x :name "renamed" :namespace-id :ns2}))))
+      (is (= 1 (get @calls [:query-entities :fn-version])))
+      (is (= 1 (get @calls [:read-entities :fn])))
+      (is (nil? (get @calls [:read-entity :fn])) "no per-candidate resolve"))))
 
 
 (deftest fn-name-collision-short-circuits
@@ -387,29 +433,39 @@
               (loud-storage) :b1 :resource-override {:id :x}))))
 
 
-;; === advisory-lock key builders ===
+;; === advisory-lock key builder ===
 ;;
 ;; Only the KEY construction is unit-testable — taking the lock itself
 ;; is a pg_advisory_xact_lock call and stays integration-covered.
 
-(deftest fn-name-lock-key-test
+(deftest collision-lock-key-fn-test
   (testing "a named :fn write yields the (branch, namespace, name) key"
     (is (= "fn-name|b1|ns1|taken"
-           (uniq/fn-name-lock-key "b1" :fn {:name "taken" :namespace-id "ns1"}))))
+           (uniq/collision-lock-key "b1" :fn {:name "taken" :namespace-id "ns1"}))))
 
   (testing "root fns (nil namespace) still key deterministically"
     (is (= "fn-name|b1||taken"
-           (uniq/fn-name-lock-key "b1" :fn {:name "taken"}))))
+           (uniq/collision-lock-key "b1" :fn {:name "taken"}))))
 
-  (testing "anonymous fns and non-:fn writes need no lock"
-    (is (nil? (uniq/fn-name-lock-key "b1" :fn {})))
-    (is (nil? (uniq/fn-name-lock-key "b1" :binding {:name "x"})))))
+  (testing "anonymous fns and entities that can't collide need no lock"
+    (is (nil? (uniq/collision-lock-key "b1" :fn {})))
+    (is (nil? (uniq/collision-lock-key "b1" :binding {:name "x"})))))
 
 
-(deftest resource-override-path-lock-key-test
+(deftest collision-lock-key-resource-override-test
   (is (= "resource-override-path|b1|/editor.js"
-         (uniq/resource-override-path-lock-key
-           "b1" :resource-override {:path "/editor.js"})))
-  (is (nil? (uniq/resource-override-path-lock-key
-              "b1" :resource-override {})))
-  (is (nil? (uniq/resource-override-path-lock-key "b1" :fn {:path "/x"}))))
+         (uniq/collision-lock-key "b1" :resource-override {:path "/editor.js"})))
+  (is (nil? (uniq/collision-lock-key "b1" :resource-override {})))
+  (is (nil? (uniq/collision-lock-key "b1" :fn {:path "/x"}))))
+
+
+(deftest collision-lock-key-list-item-test
+  (testing "a list item serializes on its owning binding"
+    (let [bid (random-uuid)]
+      (is (= (str bid) (uniq/collision-lock-key "b1" :binding-list-item {:binding-id bid})))))
+  (is (nil? (uniq/collision-lock-key "b1" :binding-list-item {:position 0}))))
+
+
+(deftest xact-lock-without-connection-is-a-no-op-test
+  (is (nil? (uniq/xact-lock! nil ["k"])))
+  (is (nil? (uniq/xact-lock! ::conn [])) "no keys → no statement"))

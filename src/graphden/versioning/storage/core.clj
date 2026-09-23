@@ -33,14 +33,14 @@
    It is independently usable: VersionedStorage(BaseStorage) works without any cache.
    CachedStorage(VersionedStorage(BaseStorage)) works via simple stacking."
   (:require
-    [clojure.tools.logging :as log]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.generic-constraints :as gc]
     [graphden.storage.protocol.graph :as graph]
     [graphden.types.diagnostics :as diag]
-    [graphden.versioning.identity-repair :as idrepair]
+    [graphden.versioning.branch-local :as bl]
     [graphden.versioning.storage.merge :as mrg]
+    [graphden.versioning.storage.purge :as purge]
     [graphden.versioning.storage.resolution :as res]
     [graphden.versioning.storage.uniqueness :as uniq]
     [next.jdbc :as jdbc]
@@ -142,6 +142,23 @@
         (throw t)))))
 
 
+(defn- with-write*
+  "Every VersionedStorage write method's frame: the graph-epoch bump
+   (`with-bump*`), then the derived caches this layer owns. A `:fn`
+   write — `:branch-local?` itself, or a `:parent-ids` junction
+   replacement (which only ever happens as part of a `:fn` write) — can
+   shift the effective branch-local set, so it drops the per-storage
+   `effective-branch-local?` cache here, whoever the caller is: the CRUD
+   layer, the bundle sync behind MCP `upsert-fn-defs` / registry install,
+   or a raw storage write. Cleared AFTER the write so a concurrent reader
+   cannot re-cache the pre-write value."
+  [base-storage entity-name write!]
+  (let [result (with-bump* base-storage entity-name write!)]
+    (when (= :fn entity-name)
+      (bl/invalidate! base-storage))
+    result))
+
+
 (defn- tombstone-version!
   "Write a tombstone version (current resolved data + `:deleted-at`) on
    `branch-id`, so the entity resolves ABSENT here and on descendants while
@@ -157,259 +174,6 @@
                              (assoc :deleted-at ts))]
         (sp/create-entity base-storage (:version-entity config) version-data)))
     (some? current)))
-
-
-(def ^:private identity-child-refs
-  "Child identity rows that logically reference an identity row a hard
-   delete may purge (no SQL FKs exist — refs are logical, index-only).
-   An id with surviving children keeps its identity row so nothing
-   dangles; the versionless backstop in `update-entities` still heals
-   it on the next content-equal write. Callers that delete leaves
-   first (`reconcile-fn-bodies!`, the crud rollback cascade) purge
-   cleanly.
-
-   The `:fn` and `:slot` lists include the INBOUND ref families (the
-   same ones `graphden.dev.integrity`'s dangling-refs detector
-   enumerates), not just structural children: today's hard-delete
-   callers are leaf-first so those never retain, but a future caller
-   hard-deleting a still-referenced fn must be met by a conservative
-   keep, not a silently manufactured dangling ref. `:fn.parent-ids`
-   is a ref-many junction, checked separately in
-   `purgeable-identity-ids`.
-
-   VERSION-plane referrers are checked too: a versioned ref field
-   (`binding.ref-fn-id` set by a later update) lives ONLY in version
-   rows — the identity row keeps the create-time NULL — so an
-   identity-plane probe alone would purge a fn that a binding's
-   current version still references."
-  {:binding [[:binding-list-item :binding-id]]
-   :slot    [[:fn-slot :slot-id] [:binding :slot-id]
-             [:fn-slot-version :slot-id] [:binding-version :slot-id]]
-   :fn      [[:fn-slot :fn-id] [:binding :fn-id]
-             [:binding :ref-fn-id] [:binding :type-override-fn-id]
-             [:binding :resolver-fn-id]
-             [:binding-list-item :ref-fn-id]
-             [:slot :type-fn-id]
-             [:fn :base-fn-id] [:fn :element-fn-id]
-             [:fn :return-type-fn-id]
-             [:binding-version :ref-fn-id]
-             [:binding-version :type-override-fn-id]
-             [:binding-version :resolver-fn-id]
-             [:binding-list-item-version :ref-fn-id]
-             [:fn-version :base-fn-id] [:fn-version :element-fn-id]
-             [:fn-version :return-type-fn-id]]})
-
-
-(defn- purgeable-identity-ids
-  "GHOST-IDENTITY prevention (the shrink-regrow class): the
-   subset of hard-deleted `ids` whose identity rows can be removed
-   outright — no OTHER branch retains a version row (per-branch
-   isolation: a diverged branch's view must survive this branch's
-   delete), and no child identity row still references them. Removing
-   the identity makes a later re-mint of the same deterministic id
-   flow through `create-entities` — which always writes a version — so
-   the row can never get stuck invisible-on-every-list-read the way a
-   surviving versionless identity does.
-
-   Known out-of-scope corner: a NON-descendant branch that merged this
-   branch reads its rows by reference (`merges-by-target`), which no
-   version row on that branch records. A hard delete here already
-   stripped such a row from that merge view before the purge existed
-   (own versions deleted), so the purge only changes the corner's
-   failure shape, not its reachability. Merge-target visibility stays
-   the merge endpoint's concern."
-  [base-storage entity-name ids branch-id all-versions version-id-field]
-  (let [other-branch (into #{}
-                           (comp (remove #(= branch-id (:branch-id %)))
-                                 (map version-id-field))
-                           all-versions)
-        candidates (into [] (remove other-branch) ids)
-        retained (when (seq candidates)
-                   (into #{}
-                         (mapcat (fn [[child-entity fk-field]]
-                                   (map fk-field
-                                        (sp/query-entities base-storage child-entity
-                                                           {fk-field candidates}))))
-                         (identity-child-refs entity-name)))
-        ;; `:fn.parent-ids` is a ref-many junction — per-candidate owner
-        ;; probe (hard-delete batches are small: sync stale rows,
-        ;; rollback singles). A fn still referenced as somebody's parent
-        ;; keeps its identity.
-        retained (if (and (= :fn entity-name) (seq candidates))
-                   (into (or retained #{})
-                         (filter (fn [id]
-                                   (seq (sp/query-ref-many-owners
-                                          base-storage :fn :parent-ids id))))
-                         candidates)
-                   retained)]
-    (into [] (remove (or retained #{})) candidates)))
-
-
-;; =============================================================================
-;; Tombstone GC — storage reclamation for provably-DEAD entities
-;; =============================================================================
-;;
-;; A user-facing delete writes a TOMBSTONE version (`:deleted-at`) and KEEPS
-;; the identity row + all version rows (so inheriting branches see the delete).
-;; The storage quota counts identity rows, so a tenant that churns
-;; create/delete monotonically fills its cap with dead rows it can't reclaim.
-;; This GC hard-purges entities that are dead EVERYWHERE, freeing that storage
-;; without any per-write cost.
-;;
-;; SAFETY (why "resolve on every branch" and not "delete old tombstones"):
-;; deleting a tombstone version RESURRECTS the entity on any branch that
-;; inherits an OLDER live version (a fork taken between the create and the
-;; delete). So we never delete a tombstone in isolation — we purge an entity
-;; (all versions + identity) ONLY when `res/resolve-version` returns nil for it
-;; on EVERY branch (main + every feature branch + the base view). If it
-;; resolves to nil everywhere, no reader can see it and no fork can inherit a
-;; live version, so the purge changes no resolved view. A live fn still naming
-;; it as a parent also blocks the purge (dangling-ref guard).
-
-(defn- ts-ms
-  "Milliseconds-since-epoch of a timestamptz column, tolerant of the shapes
-   the codec/driver return (Instant / java.sql.Timestamp / java.util.Date /
-   ISO string). nil / unparseable → nil, treated as 'no timestamp'."
-  [x]
-  (cond
-    (nil? x) nil
-    (instance? java.time.Instant x) (java.time.Instant/.toEpochMilli x)
-    (instance? java.util.Date x) (java.util.Date/.getTime x)
-    :else (try (java.time.Instant/.toEpochMilli (java.time.Instant/parse (str x)))
-               (catch Exception _ nil))))
-
-
-(defn- branch-ids-for-gc
-  "Every branch id whose resolved view the GC must prove empty. A fork is a
-   reference to its parent (not a snapshot), so it always resolves the
-   parent's LATEST version — there is no un-listed 'base' view to check
-   beyond the `:branch` rows themselves (main included)."
-  [base-storage]
-  (mapv :id (sp/query-entities base-storage :branch {})))
-
-
-(defn- dead-on-every-branch?
-  "True iff `id` resolves to nil (deleted/absent) on every branch — the
-   safety precondition for purging it."
-  [base-storage entity-name id branch-ids]
-  (every? (fn [b] (nil? (res/resolve-version base-storage entity-name id b)))
-          branch-ids))
-
-
-(defn- gc-candidate-ids
-  "Entity ids whose NEWEST version (max `:created-at` across all branches)
-   is a tombstone older than `cutoff` — the cheap pre-filter before the
-   authoritative per-branch resolve check. Grouping by the version-id-field,
-   newest-wins."
-  [base-storage version-entity version-id-field cutoff]
-  (->> (sp/query-entities base-storage version-entity {})
-       (group-by version-id-field)
-       (keep (fn [[eid versions]]
-               (let [newest (apply max-key (fn [v] (or (ts-ms (:created-at v)) 0)) versions)
-                     newest-ms (ts-ms (:created-at newest))]
-                 (when (and (:deleted-at newest)
-                            newest-ms
-                            (< newest-ms (java.time.Instant/.toEpochMilli cutoff)))
-                   eid))))))
-
-
-(defn tombstone-gc-sweep!
-  "Reclaim storage from versioned entities that are DELETED on every branch
-   and whose newest tombstone is older than `retention-ms`. Purges each such
-   entity's version rows (all branches) + its identity row. Idempotent and
-   safe to run periodically — see the safety note above. Returns a map
-   `{entity-name purged-count}`.
-
-   `base-storage` is the UNWRAPPED storage (a `VersionedStorage`'s
-   `base-storage`), the same handle the delete path holds. The 3-arity
-   takes `{:before-purge (fn [entity-name id])}` — called for every
-   entity about to be purged, while its rows are still readable."
-  ([base-storage retention-ms] (tombstone-gc-sweep! base-storage retention-ms nil))
-  ([base-storage retention-ms {:keys [before-purge]}]
-   (let [cutoff (java.time.Instant/.minusMillis (java.time.Instant/now) (long retention-ms))
-         branch-ids (branch-ids-for-gc base-storage)]
-     (into {}
-           (map (fn [[entity-name {:keys [version-entity version-id-field]}]]
-                  (let [candidates (gc-candidate-ids base-storage
-                                                     version-entity version-id-field cutoff)
-                        purgeable (filter
-                                    (fn [id]
-                                      (and (dead-on-every-branch? base-storage entity-name id branch-ids)
-                                           ;; A dead `:fn` is purgeable only when NOTHING outside its
-                                           ;; own subgraph still references it. The parent-ids junction
-                                           ;; alone is not enough: a `binding.ref-fn-id` /
-                                           ;; `slot.type-fn-id` / `fn.return-type-fn-id` (incl. the
-                                           ;; version plane, e.g. a ref set on ANOTHER branch) would
-                                           ;; be left dangling — and for an editor random-id fn that
-                                           ;; ref can never be healed, since the id can't be re-minted.
-                                           ;; `idrepair/inbound-refs` is the exact surface the
-                                           ;; hard-delete guard (`identity-child-refs`) and the
-                                           ;; bundle-prune guard both trust; it already subsumes the
-                                           ;; parent-ids check and excludes the fn's own owned rows.
-                                           (not (and (= :fn entity-name)
-                                                     (seq (idrepair/inbound-refs base-storage id))))))
-                                    candidates)
-                        purge-own-versions!
-                        (fn [id]
-                          (let [vs (sp/query-entities base-storage version-entity
-                                                      {version-id-field id})]
-                            (when (seq vs)
-                              (sp/delete-entities base-storage version-entity (mapv :id vs)))))
-                        n (reduce
-                            (fn [acc id]
-                              ;; `:before-purge` sees the entity while its rows
-                              ;; still exist — the seam a store OUTSIDE graphden
-                              ;; (the vault behind a secret binding) is reconciled
-                              ;; through. Its failure must not stop reclamation.
-                              (when before-purge
-                                (try (before-purge entity-name id)
-                                     (catch Exception e
-                                       (log/warn e "tombstone-gc: before-purge hook failed"
-                                                 {:entity entity-name :id id}))))
-                              (case entity-name
-                                ;; A fn OWNS a subgraph (its bindings + their
-                                ;; list-items, fn-slots, all version rows). A bare
-                                ;; identity+version delete reclaims only the fn row
-                                ;; and orphans the rest — a monotonic storage leak
-                                ;; on create/delete churn, plus a dangling
-                                ;; `binding.fn-id` / `binding-list-item.binding-id`
-                                ;; at the purged fn. Purge the whole subgraph (the
-                                ;; fn is unreferenced from outside — the `purgeable`
-                                ;; inbound-refs guard above).
-                                :fn (idrepair/purge-fn-subgraph! base-storage id)
-                                ;; A binding OWNS its list-items. A user delete
-                                ;; tombstones only the binding, so its items stay
-                                ;; live-orphaned; purging the binding without them
-                                ;; dangles `binding-list-item.binding-id` (invisible
-                                ;; to the dangling-refs detector, which checks only
-                                ;; `.ref-fn-id`). Cascade the items (+ versions),
-                                ;; then the binding's own version rows + identity.
-                                :binding
-                                (let [liv (filter #(= id (:binding-id %))
-                                                  (sp/query-entities base-storage
-                                                                     :binding-list-item-version {}))
-                                      li (filter #(= id (:binding-id %))
-                                                 (sp/query-entities base-storage
-                                                                    :binding-list-item {}))]
-                                  (when (seq liv)
-                                    (sp/delete-entities base-storage :binding-list-item-version
-                                                        (mapv :id liv)))
-                                  (when (seq li)
-                                    (sp/delete-entities base-storage :binding-list-item
-                                                        (mapv :id li)))
-                                  (purge-own-versions! id)
-                                  (sp/delete-entity base-storage entity-name id))
-                                ;; :fn-slot / :binding-list-item — nothing outside
-                                ;; their own (co-purged) version rows references
-                                ;; them by id (verified vs `ref-fields` /
-                                ;; `identity-child-refs`). Bare purge is safe.
-                                (do (purge-own-versions! id)
-                                    (sp/delete-entity base-storage entity-name id)))
-                              (inc acc))
-                            0
-                            purgeable)]
-                    [entity-name n])))
-           res/entity-config))))
 
 
 (defn- revive-or-update!
@@ -534,11 +298,7 @@
         ;; fires loudly instead of silently double-inserting. Named-:fn
         ;; creates ride the same mechanism keyed on (branch, ns, name) —
         ;; their retired UNIQUE moved to check-fn-name-collision! too.
-        lock-key (or (when (and (= entity-name :binding-list-item)
-                                (:binding-id normalized))
-                       (str (:binding-id normalized)))
-                     (uniq/fn-name-lock-key branch-id entity-name normalized)
-                     (uniq/resource-override-path-lock-key branch-id entity-name normalized))]
+        lock-key (uniq/collision-lock-key branch-id entity-name normalized)]
     (cond
       (and lock-key (:pool base-storage))
       ;; `:ignore` so any nested `with-transaction` in the create path
@@ -550,8 +310,7 @@
       ;; through — the (branch, ns, name) serialization would silently break.
       (binding [jdbc-tx/*nested-tx* :ignore]
         (jdbc/with-transaction [tx (:pool base-storage)]
-                               (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)"
-                                                  lock-key])
+                               (uniq/xact-lock! tx [lock-key])
                                (do-create! (assoc base-storage :pool tx))))
 
       ;; No lock key, but a pooled backend: still wrap the base-row +
@@ -653,11 +412,8 @@
           ;; Serialize on (branch, ns, name) for a rename/move and on the
           ;; owning binding for a list-item position move — the same
           ;; per-binding `pg_advisory_xact_lock` the create-append uses.
-          lock-key (cond
-                     name-write? (uniq/fn-name-lock-key branch-id entity-name merged)
-                     list-item-write? (str (:binding-id merged))
-                     path-write? (uniq/resource-override-path-lock-key
-                                   branch-id entity-name merged))]
+          lock-key (when (or name-write? list-item-write? path-write?)
+                     (uniq/collision-lock-key branch-id entity-name merged))]
       (if (and lock-key (:pool base-storage))
         ;; `:ignore` — same reason as the create path: a nested
         ;; `with-transaction` inside `do-update!` (crud/update-entity opens
@@ -665,8 +421,7 @@
         ;; commit early and drop the advisory lock mid-update.
         (binding [jdbc-tx/*nested-tx* :ignore]
           (jdbc/with-transaction [tx (:pool base-storage)]
-                                 (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)"
-                                                    lock-key])
+                                 (uniq/xact-lock! tx [lock-key])
                                  (do-update! (assoc base-storage :pool tx))))
         (do-update! base-storage)))))
 
@@ -679,8 +434,8 @@
         all-versions (sp/query-entities base-storage version-entity
                                         {version-id-field id})
         own-versions (filterv #(= branch-id (:branch-id %)) all-versions)
-        purgeable (purgeable-identity-ids base-storage entity-name [id]
-                                          branch-id all-versions version-id-field)]
+        purgeable (purge/purgeable-identity-ids base-storage entity-name [id]
+                                                branch-id all-versions version-id-field)]
     (when (seq own-versions)
       (sp/delete-entities base-storage version-entity (mapv :id own-versions)))
     (when (seq purgeable)
@@ -702,16 +457,10 @@
    run inside the write transaction (`st` carries the tx pool) so lock + check +
    write are one critical section."
   [st branch-id entity-name shapes]
-  ;; Deadlock-free: acquire every collision lock in a stable (sorted) order.
-  (when-let [pool (:pool st)]
-    (doseq [k (->> shapes
-                   (keep (fn [d]
-                           (or (when (and (= entity-name :binding-list-item) (:binding-id d))
-                                 (str (:binding-id d)))
-                               (uniq/fn-name-lock-key branch-id entity-name d)
-                               (uniq/resource-override-path-lock-key branch-id entity-name d))))
-                   distinct sort)]
-      (jdbc/execute! pool ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)" k])))
+  ;; Every collision lock in ONE sorted statement (deadlock-free — see
+  ;; `uniq/xact-lock!`), not one round trip per fn / binding.
+  (uniq/xact-lock! (:pool st)
+                   (keep #(uniq/collision-lock-key branch-id entity-name %) shapes))
   ;; Intra-batch duplicates both pass the against-storage check (neither is
   ;; committed yet), so reject them up front (pure).
   (when (= entity-name :fn)
@@ -731,12 +480,11 @@
                       {:type :constraint-violation/position-collision
                        :entity-name :binding-list-item :binding-id (first k) :position (second k)
                        :colliding-item-ids (mapv :id items)}))))
-  ;; Against-storage resolved-view checks, per entity (each is a no-op for the
-  ;; entity types it doesn't apply to).
+  ;; Against-storage resolved-view checks, each batched over the whole
+  ;; batch (and a no-op for the entity types it doesn't apply to).
   (uniq/check-list-item-position-collisions! st branch-id entity-name shapes)
-  (doseq [d shapes]
-    (uniq/check-fn-name-collision! st branch-id entity-name d)
-    (uniq/check-resource-override-path-collision! st branch-id entity-name d)))
+  (uniq/check-fn-name-collisions! st branch-id entity-name shapes)
+  (uniq/check-resource-override-path-collisions! st branch-id entity-name shapes))
 
 
 (defn- create-entities-versioned!
@@ -925,7 +673,7 @@
   [base-storage branch-id entity-name ids]
   ;; Batch hard delete: drop this branch's version rows, and — for
   ;; ids no other branch retains a version of — the identity rows
-  ;; too (see `purgeable-identity-ids`; the singular `delete-entity`
+  ;; too (see `purge/purgeable-identity-ids`; the singular `delete-entity`
   ;; mirrors this).
   (let [{:keys [version-entity version-id-field]} (get res/entity-config entity-name)
         ;; Single WHERE IN query for ALL branches' versions — the
@@ -937,8 +685,8 @@
         ;; Count unique entity-ids that had versions on this branch
         ;; (return-value contract, unchanged)
         deleted-entity-ids (into #{} (map version-id-field) own-versions)
-        purgeable (purgeable-identity-ids base-storage entity-name (vec ids)
-                                          branch-id all-versions version-id-field)]
+        purgeable (purge/purgeable-identity-ids base-storage entity-name (vec ids)
+                                                branch-id all-versions version-id-field)]
     (when (seq own-versions)
       (sp/delete-entities base-storage version-entity (mapv :id own-versions)))
     (when (seq purgeable)
@@ -1073,7 +821,7 @@
   (create-entity
     [_ entity-name data]
     (assert-not-merge-protected! base-storage branch-id entity-name)
-    (with-bump* base-storage entity-name
+    (with-write* base-storage entity-name
       (fn []
         (if-not (res/versioned-entity? entity-name)
           (sp/create-entity base-storage entity-name data)
@@ -1090,7 +838,7 @@
   (update-entity
     [_ entity-name id data]
     (assert-not-merge-protected! base-storage branch-id entity-name)
-    (with-bump* base-storage entity-name
+    (with-write* base-storage entity-name
       (fn []
         (if-not (res/versioned-entity? entity-name)
           (sp/update-entity base-storage entity-name id data)
@@ -1100,7 +848,7 @@
   (delete-entity
     [_ entity-name id]
     (assert-not-merge-protected! base-storage branch-id entity-name)
-    (with-bump* base-storage entity-name
+    (with-write* base-storage entity-name
       (fn []
         (cond
           (not (res/versioned-entity? entity-name))
@@ -1166,7 +914,7 @@
   (create-entities
     [_ entity-name data-seq]
     (assert-not-merge-protected! base-storage branch-id entity-name)
-    (with-bump* base-storage entity-name
+    (with-write* base-storage entity-name
       (fn []
         (if-not (res/versioned-entity? entity-name)
           (sp/create-entities base-storage entity-name data-seq)
@@ -1185,7 +933,7 @@
   (update-entities
     [_ entity-name data-seq]
     (assert-not-merge-protected! base-storage branch-id entity-name)
-    (with-bump* base-storage entity-name
+    (with-write* base-storage entity-name
       (fn []
         (if-not (res/versioned-entity? entity-name)
           (sp/update-entities base-storage entity-name data-seq)
@@ -1221,7 +969,7 @@
   (delete-entities
     [_ entity-name ids]
     (assert-not-merge-protected! base-storage branch-id entity-name)
-    (with-bump* base-storage entity-name
+    (with-write* base-storage entity-name
       (fn []
         (cond
           (not (res/versioned-entity? entity-name))

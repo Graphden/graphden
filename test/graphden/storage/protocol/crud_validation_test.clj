@@ -60,19 +60,6 @@
                  :name {:required true}})))))
 
 
-(deftest standard-batch-validations!-test
-  (testing "passes for unique IDs"
-    (let [id1 (random-uuid)
-          id2 (random-uuid)]
-      (is (nil? (storage/standard-batch-validations! :user [{:id id1} {:id id2}])))))
-
-  (testing "throws for duplicate IDs"
-    (let [dup-id (random-uuid)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Duplicate IDs"
-            (storage/standard-batch-validations! :user [{:id dup-id} {:id dup-id}]))))))
-
-
 ;; === validate-where-clause! tests ===
 
 (deftest validate-where-clause!-test

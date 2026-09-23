@@ -36,7 +36,6 @@
 (use-fixtures :each (setup/clean-db-fixture))
 
 
-;; === with-query-timeout tests ===
 (deftest close-pool-idempotency-test
   (testing "close-pool with nil pool returns true (no-op)"
     (is (true? (pg/close-pool nil))))
@@ -413,10 +412,6 @@
           (is (= [{:entity :test-entity :field :email}] (:created (:fields changes)))))
         (finally
           (sp/close storage))))))
-
-
-;; `with-query-timeout`'s binding semantics — including nesting and
-;; restoration — are pinned by `protocol.config-test`, which owns the fn.
 
 
 (deftest close-pool-through-a-datasource-wrap-test

@@ -1,8 +1,7 @@
 (ns graphden.storage.protocol.graph-test
   "Tests for `graphden.storage.protocol.graph` — the ExecutionGraph
-   utilities: iteration-limit guards, generic BFS, UUID parsing, the
-   ExecutionGraphResult record + accessors, and the loader-driven
-   graph-resolution BFS.
+   utilities: iteration-limit guards, the ExecutionGraphResult record,
+   and the loader-driven graph-resolution BFS.
 
    The whole namespace is pure (graph resolution takes loader fns as
    arguments), so no storage fixture is needed — in-memory maps stand
@@ -10,22 +9,6 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.protocol.graph :as g]))
-
-
-;; ============================================================================
-;; try-parse-uuid
-;; ============================================================================
-
-(deftest try-parse-uuid-test
-  (testing "a UUID passes through; a UUID string parses; anything else → nil"
-    (let [u (random-uuid)]
-      (is (= u (g/try-parse-uuid u)))
-      (is (= u (g/try-parse-uuid (str u)))))
-    (is (nil? (g/try-parse-uuid "not-a-uuid")))
-    (is (nil? (g/try-parse-uuid "12345")) "a shorter-than-a-uuid string")
-    (is (nil? (g/try-parse-uuid "")))
-    (is (nil? (g/try-parse-uuid 42)))
-    (is (nil? (g/try-parse-uuid nil)))))
 
 
 ;; ============================================================================
@@ -112,28 +95,7 @@
 
 
 ;; ============================================================================
-;; traverse-bfs
-;; ============================================================================
-
-(deftest traverse-bfs-test
-  (testing "every reachable node is visited"
-    (let [graph {:a [:b :c] :b [:d] :c [:d] :d []}]
-      (is (= #{:a :b :c :d}
-             (g/traverse-bfs :a #(get graph % []))))))
-
-  (testing "a cycle terminates rather than looping forever"
-    (let [graph {:a [:b] :b [:a]}]
-      (is (= #{:a :b} (g/traverse-bfs :a #(get graph % []))))))
-
-  (testing "exceeding :max-iterations throws :execution-error/traversal-too-large"
-    (let [ex (try (g/traverse-bfs :a (constantly [:b :c :d :e])
-                                  {:max-iterations 1})
-                  (catch clojure.lang.ExceptionInfo e e))]
-      (is (= :execution-error/traversal-too-large (:type (ex-data ex)))))))
-
-
-;; ============================================================================
-;; ->execution-graph / execution-graph? / accessors
+;; ->execution-graph / execution-graph?
 ;; ============================================================================
 
 (deftest execution-graph-construction-test
@@ -151,18 +113,18 @@
       (is (g/execution-graph? graph))
       (is (not (g/execution-graph? {:fns {}}))))
 
-    (testing "the table accessors return their collections"
-      (is (= {fa {:id fa :name "f"}} (g/get-graph-fns graph)))
-      (is (= 1 (count (g/get-graph-slots graph))))
-      (is (= 1 (count (g/get-graph-fn-slots graph))))
-      (is (= 1 (count (g/get-graph-bindings graph))))
-      (is (= 1 (count (g/get-graph-list-items graph)))))
+    (testing "the record carries each table's collection"
+      (is (= {fa {:id fa :name "f"}} (:fns graph)))
+      (is (= 1 (count (:slots graph))))
+      (is (= 1 (count (:fn-slots graph))))
+      (is (= 1 (count (:bindings graph))))
+      (is (= 1 (count (:list-items graph)))))
 
     (testing "the per-fn / per-binding indexes are O(1) and keyed correctly"
-      (is (= 1 (count (g/get-fn-slots-for-fn graph fa))))
-      (is (= 1 (count (g/get-bindings-for-fn graph fa))))
-      (is (= 9 (:value (first (g/get-items-for-binding graph bind-id)))))
-      (is (= [] (g/get-bindings-for-fn graph (random-uuid)))))))
+      (is (= 1 (count (get-in graph [:fn-slots-by-fn fa]))))
+      (is (= 1 (count (get-in graph [:bindings-by-fn fa]))))
+      (is (= 9 (:value (first (get-in graph [:items-by-binding bind-id])))))
+      (is (nil? (get-in graph [:bindings-by-fn (random-uuid)]))))))
 
 
 (deftest execution-graph-rejects-bad-fns-test
@@ -223,4 +185,4 @@
           result (g/resolve-execution-graph-bfs loaders fa)]
       (is (g/execution-graph? result))
       ;; fa → (ref) fb → (parent) fc — all three resolved.
-      (is (= #{fa fb fc} (set (keys (g/get-graph-fns result))))))))
+      (is (= #{fa fb fc} (set (keys (:fns result))))))))

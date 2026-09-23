@@ -46,11 +46,3 @@
       (catch clojure.lang.ExceptionInfo e
         (is (= :invalid-entity-name (:type (ex-data e))))
         (is (= "create-entity" (:operation (ex-data e))))))))
-
-
-;; === Chain depth limits tests ===
-
-(deftest chain-depth-limits-constants-test
-  (testing "default-max-dependency-chain-depth is defined"
-    (is (pos-int? storage/default-max-dependency-chain-depth))
-    (is (= 1000 storage/default-max-dependency-chain-depth))))

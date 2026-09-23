@@ -16,6 +16,8 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
     [graphden.util.executors :as executors]
+    [graphden.versioning.branch-local :as bl]
+    [graphden.versioning.storage.core :as vs]
     [integrant.core :as ig]))
 
 
@@ -125,8 +127,12 @@
    emitter) fall back to the base ctx, which is what this callback did
    before branch-ids rode along.
 
-   Empty `id` ≡ full clear; a populated id is one delta seed."
+   Empty `id` ≡ full clear; a populated id is one delta seed. The
+   sibling's `:fn` write may have moved a `:branch-local?` flag or a
+   parent edge, which this pod's per-storage `effective-branch-local?`
+   cache would otherwise keep — dropped on every event (a lazy re-walk)."
   [ctx id branch-id]
+  (some-> (:storage ctx) vs/unwrap bl/invalidate!)
   (let [seeds (when-not (str/blank? id) [(java.util.UUID/fromString id)])
         router (br/current-router)
         branch-uuid (when-not (str/blank? branch-id)

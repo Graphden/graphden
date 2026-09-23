@@ -92,6 +92,7 @@
    request so the per-candidate callback grouping by namespace is a
    map lookup."
   []
+  (cr/record-effect! :db)
   (types-api/candidate-ns-index ctx))
 
 

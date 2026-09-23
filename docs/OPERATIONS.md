@@ -202,8 +202,10 @@ tables exist:
 3. **Rescue** — any sign-in, token use, run or edit inside the grace
    clears `expires_at` (and the mail ledger) on the next sweep, before that
    sweep purges anything.
-4. **Purge** — past `expires_at` the org, its graph rows, its grants, the
-   owner's account + sessions are hard-deleted. Members keep their accounts.
+4. **Purge** — past `expires_at` the org, its graph rows and its grants are
+   hard-deleted. Every account is kept — the owner's too: a real person may
+   own or belong to other orgs. (Only a demo org's purge also takes the
+   ephemeral anonymous account that owns it, with its sessions and grants.)
 
 Paid (`network` / `dedicated`) and `suspended` orgs are never selected.
 Logs: `demo-gc: marked inactive free orgs …`, `demo-gc: warned <org> → n of m

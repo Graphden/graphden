@@ -7,19 +7,19 @@ The ~25k lines of plain ES that draw the graph, bind the edits and mount the ser
 
 after: web, layout
 
-[[file:index.org][index]] · ~78 min
+[[file:index.org][index]] · ~76 min
 
 * 1. initGraph
 :PROPERTIES:
 :CUSTOM_ID: editor/initGraph
 :FILE: resources/packages/app/editor/editor-main.js
-:LINE: 222
-:MINS: 6.5
+:LINE: 285
+:MINS: 4.7
 :END:
 
  *Start here for anything you can click.* The editor is ~75 plain ~.js~ files concatenated into one bundle in a fixed order (no imports, no build step — the per-module map is in [[../EDITOR_MODULES.md][docs/EDITOR_MODULES.md]]), and this is the boot. Note the shape of the fetches: the namespace TREE goes out alone first, because its status answers the auth question for everyone — only a non-401 fires the three secondary loads. Fn leaves and per-fn slots/bindings arrive lazily; a 401 sends the user to sign in rather than into a red fatal banner.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-main.js::async function initGraph() {][resources/packages/app/editor/editor-main.js:222]]
+- source :: [[file:../../../resources/packages/app/editor/editor-main.js::async function initGraph() {][resources/packages/app/editor/editor-main.js:285]]
 - see also :: [[file:editor.org::#editor/authFetch][authFetch]]
 
 * 2. buildLookups
@@ -158,7 +158,7 @@ How an edit actually happens. The control is not chosen here: the client POSTs t
 :CUSTOM_ID: editor/gdEnterDiffMode
 :FILE: resources/packages/app/editor/editor-diff-mode.js
 :LINE: 509
-:MINS: 3.6
+:MINS: 3.7
 :END:
 
 COMPARE MODE — THE diff surface, entered by picking the second branch (the Δ on a popover row; click again to exit). One fetch of the grouped ~diff-view~ payload, then pure annotation: Explorer rows badge +/±/−, namespace headers aggregate counts, a LENS BAR under the kind chips filters the tree by change type (~gdDiffSetLens~ — only-changed, kind toggles, substantive-only, effects-touched-only), changed fn cards and args ring on the canvas (~gdDiffModeCardInfo~ / ~gdDiffSlotsForFn~), a selected changed fn gets an inspector DIFF PANEL (~gdDiffRenderInspectorSection~ — old → new entries, effects delta, anchored 💬 threads), and the Δ chip persists the mode across reloads. The chip's menu is the review cockpit: Review & comments dialog, propose-current-for-review, merge-compared-in. Fns existing only on the compared branch inject as ghost rows; effect-set deltas come from a FULL per-branch registry comparison (~gdDiffEffectSetDelta~ — the registry is branch-scoped), with the changed-refs signal (~gdDiffEffectsTouched~) as the anonymous-fn fallback. Note what it does NOT do: no data re-routing — every read and write stays on the current branch, so the user keeps editing with the filter on.
@@ -193,13 +193,13 @@ A keyboard LAYOUT is an overrides map ~{id {keys leader}}~ over the shortcut reg
 :PROPERTIES:
 :CUSTOM_ID: editor/authFetch
 :FILE: resources/packages/app/editor/editor-auth.js
-:LINE: 148
+:LINE: 108
 :MINS: 1.4
 :END:
 
 Every mutating call in the editor goes through this. It is 12 lines and worth all of them: a 401 clears the stored credential and re-opens the sign-in popover in place. The trap to internalize before you write editor code — ~authFetch~ and ~authMutate~ *resolve* on 4xx, they do not throw. A caller that only wraps them in ~try/catch~ counts a rejected write as a success.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-auth.js::async function authFetch(url, opts = {}) {][resources/packages/app/editor/editor-auth.js:148]]
+- source :: [[file:../../../resources/packages/app/editor/editor-auth.js::async function authFetch(url, opts = {}) {][resources/packages/app/editor/editor-auth.js:108]]
 - referenced from :: [[file:editor.org::#editor/initGraph][initGraph]]
 
 * 16. _tourTick

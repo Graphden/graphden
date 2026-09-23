@@ -129,8 +129,9 @@
   [file source]
   (let [lines (str/split-lines source)]
     (->> (map vector (range 1 (inc (count lines))) lines)
-         (remove (fn [[_ line]] (or (re-find allow-marker-regex line)
-                                    (re-find comment-line-regex line))))
+         (remove (fn [[_ line]]
+                   (or (re-find allow-marker-regex line)
+                       (re-find comment-line-regex line))))
          (mapcat
            (fn [[lineno line]]
              (for [[_ literal] (re-seq url-literal-regex line)]

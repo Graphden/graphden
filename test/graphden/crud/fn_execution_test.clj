@@ -331,6 +331,30 @@
         (is (= [] (exec-errors/recent-executions c2 pool nil 20)))))))
 
 
+(deftest child-executions-name-each-callee-test
+  ;; GET /api/execute/:id's `:children` — the runs a run called into over
+  ;; the wire. Read with two batched lookups (version → fn → name) for the
+  ;; whole list; each child still carries its own fn.
+  (let [storage (create-full-storage)
+        {f1 :composed} (make-pure-add-fn! storage "child-one")
+        {f2 :composed} (make-pure-add-fn! storage "child-two")
+        c (setup/default-registry-ctx storage)
+        run! (fn [f]
+               (-> (apply-and-await! c {:fn-id (:id f) :args {:a 1 :b 2}
+                                        :timeout-ms 5000 :persist? true})
+                   :execution-id parse-uuid))
+        parent (run! f1)
+        kids [(run! f2) (run! f1)]]
+    (doseq [k kids]
+      (sp/update-entity storage :fn-execution k {:parent-execution-id parent}))
+    (testing "every child, oldest first, with the fn it ran"
+      (is (= [[(first kids) (:id f2) "my-test-add-child-two"]
+              [(second kids) (:id f1) "my-test-add-child-one"]]
+             (mapv (juxt :id :fn-id :fn-name) (fn-exec/child-executions storage parent)))))
+    (testing "a run that called nothing has no children"
+      (is (= [] (fn-exec/child-executions storage (first kids)))))))
+
+
 (deftest usage-rollup-bump-and-read-roundtrip-test
   ;; Phase C1: the pre-aggregated :usage-stat counters. bump! upserts one row
   ;; per (hour, org, fn, status) and increments in place; fn-stats aggregates

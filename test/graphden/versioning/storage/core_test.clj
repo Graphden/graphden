@@ -18,7 +18,8 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
     [graphden.versioning.storage.core :as vs]
-    [graphden.versioning.storage.merge :as mrg]))
+    [graphden.versioning.storage.merge :as mrg]
+    [graphden.versioning.storage.resolution :as res]))
 
 
 (def ^:dynamic *container* nil)
@@ -882,6 +883,40 @@
         (let [f (sp/create-entity v :fn {:name "veg-cyc" :parent-ids []
                                          :description "h"})]
           (is (nil? (sp/validate-no-dependency-cycle! v (:id f) nil)))))
+      (finally (sp/close base)))))
+
+
+(deftest graph-load-memo-shares-one-branch-load-per-epoch-test
+  ;; A test run resolves hundreds of roots; each resolve used to reload the
+  ;; whole branch (~0.8 s on the shipped graph, 2× per test). Under the
+  ;; scope memo the load is shared — and keyed on the graph epoch, so a
+  ;; versioned write inside the scope is seen by the next resolve.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)
+        known? (fn [fid]
+                 (try (contains? (:fns (sp/resolve-execution-graph v fid)) fid)
+                      (catch clojure.lang.ExceptionInfo e
+                        (if (= :not-found (:type (ex-data e))) false (throw e)))))]
+    (try
+      (let [a (sp/create-entity v :fn {:name "memo-a" :parent-ids [] :description "h"})]
+        (res/call-with-graph-load-memo
+          (fn []
+            (is (known? (:id a)))
+            ;; An identity row written UNDER the versioning layer bumps no
+            ;; epoch — only a memoised load can miss it.
+            (let [raw (sp/create-entity base :fn {:name "memo-raw" :parent-ids []
+                                                  :description "h"})]
+              (testing "a second resolve in the scope reuses the first one's load"
+                (is (false? (known? (:id raw)))))
+              (testing "a versioned write bumps the epoch — the next resolve reloads"
+                (let [b (sp/create-entity v :fn {:name "memo-b" :parent-ids []
+                                                 :description "h"})]
+                  (is (known? (:id b)))
+                  (is (known? (:id raw)))))
+              (testing "outside a scope every resolve reads fresh"
+                (let [raw2 (sp/create-entity base :fn {:name "memo-raw2" :parent-ids []
+                                                       :description "h"})]
+                  (is (true? (binding [res/*graph-load-memo* nil] (known? (:id raw2)))))))))))
       (finally (sp/close base)))))
 
 

@@ -1,10 +1,5 @@
-(ns ^:serial graphden.packages.hub-sync-test
-  "`^:serial` — the unconfigured guard READS the process-global
-   deploy-config atom and asserts it empty; three namespaces install
-   `hub.example` into it for a test, and under kaocha's parallel plugin
-   one of them landed mid-read (main CI, 2026-09-19).
-
-   Tests for the /api/sync/* hub push/pull surface (registry package) —
+(ns graphden.packages.hub-sync-test
+  "Tests for the /api/sync/* hub push/pull surface (registry package) —
    the two wire adapters against a stub hub, and the unconfigured guard
    (GRAPHDEN_HUB_URL unset ⇒ status {:configured false}, mutations 409)."
   (:require
@@ -13,6 +8,8 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
+    [graphden.system.deploy-config :as deploy-config]
+    [graphden.test-infra.seams :as ts]
     [org.httpkit.server :as http-kit]))
 
 
@@ -20,6 +17,7 @@
 
 
 (use-fixtures :once
+  ts/isolated-seams-fixture
   (fn [t]
     ;; Same package set as registry-test — shares its golden template.
     (binding [*bootstrap* (setup/bootstrap-crud-graph-from-golden!
@@ -128,6 +126,10 @@
   ;; unset in a test JVM, which is exactly the state under test.
   (is (empty? (str (System/getenv "GRAPHDEN_HUB_URL")))
       "test assumes GRAPHDEN_HUB_URL is not set in the test environment")
+  ;; The deploy snapshot is this namespace's copy (`test-infra.seams`):
+  ;; clear it so the guard reads "unconfigured" whatever the process
+  ;; global held when the fixture seeded it.
+  (deploy-config/clear!)
   (testing "status body reports unconfigured and never carries a token"
     (let [body (run-fn :_sync-status-body {})]
       (is (false? (:configured body)))

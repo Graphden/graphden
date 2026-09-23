@@ -60,6 +60,46 @@
   (platform-tier? (current-org)))
 
 
+;; The installable POLICY seams below — platform-admin, platform-capability,
+;; org-capability, notification — live in ONE atom so a test can isolate all
+;; of them at once. The tenancy addon installs each at wire time; with no addon
+;; every predicate denies and events drop.
+(defonce ^:private seams
+  (atom {:platform-admin-fn (constantly false)
+         :platform-cap-fn (constantly false)
+         :org-cap-fn (constantly false)
+         ;; The presence of an installed org-cap policy IS the "tenancy
+         ;; addon active" fact — the server-side twin of the editor's
+         ;; capability-header probe (graphdenTenancyActive).
+         :org-cap-installed? false
+         :notify-fn nil}))
+
+
+;; Parallel-test isolation, the `*byo-cache-override*` shape: a test
+;; namespace that installs a seam binds this to a fresh atom seeded from the
+;; global (`test-infra.seams/isolated-seams-fixture`), so its policy — or its
+;; `nil` reset — never reaches a sibling namespace mid-test. Reads on a thread
+;; the binding does not reach (an http-kit worker) see the global, so a test
+;; that needs the seam there stays `^:serial`. nil in production.
+(def ^:dynamic *seams-override* nil)
+
+
+(defn- seams-atom
+  []
+  (or *seams-override* seams))
+
+
+(defn seams-isolation-seed
+  "The global seams, as a test's isolated starting point."
+  []
+  @seams)
+
+
+(defn- seam
+  [k]
+  (get @(seams-atom) k))
+
+
 ;; Platform-admin predicate SEAM. Whether the current principal holds the
 ;; platform-admin capability is a POLICY question (it reads the principal's
 ;; grants), so the check lives in the tenancy addon. Core keeps only this
@@ -67,37 +107,31 @@
 ;; single-tenant instance has no operator escalation. The tenancy addon calls
 ;; `install-platform-admin-fn!` at wire time with its zero-arg
 ;; `grant/current-platform-admin?`.
-(defonce ^:private platform-admin-fn (atom (constantly false)))
-
-
 (defn install-platform-admin-fn!
   "Install the addon's zero-arg platform-admin predicate. `nil` restores the
    no-op default (no platform-admin)."
   [f]
-  (reset! platform-admin-fn (or f (constantly false))))
+  (swap! (seams-atom) assoc :platform-admin-fn (or f (constantly false))))
 
 
 (defn current-platform-admin?
   "True when the current principal holds the platform-admin capability — via the
    installed seam. False with no tenancy addon."
   []
-  (boolean (@platform-admin-fn)))
+  (boolean ((seam :platform-admin-fn))))
 
 
 ;; Fine-grained platform-capability SEAM. Same policy-lives-in-the-addon shape
-;; as `platform-admin-fn`, but the predicate takes a capability keyword — so a
-;; gate can admit a DELEGATE holding just that one platform right (e.g.
+;; as the platform-admin seam, but the predicate takes a capability keyword — so
+;; a gate can admit a DELEGATE holding just that one platform right (e.g.
 ;; `:view-all-stats`, `:manage-orgs`) rather than the whole `:platform-admin`
 ;; umbrella. The addon installs `grant/current-has-platform-capability?`, which
 ;; returns true for the umbrella too, so an operator keeps passing every gate.
-(defonce ^:private platform-cap-fn (atom (constantly false)))
-
-
 (defn install-platform-cap-fn!
   "Install the addon's 1-arg platform-capability predicate `(fn [cap] bool)`.
    `nil` restores the no-op default (no platform capabilities)."
   [f]
-  (reset! platform-cap-fn (or f (constantly false))))
+  (swap! (seams-atom) assoc :platform-cap-fn (or f (constantly false))))
 
 
 (defn current-has-platform-cap?
@@ -106,7 +140,7 @@
    Default-deny with no tenancy addon. The seam gates read so they don't thread
    a grant store + principal through their signatures."
   [cap]
-  (boolean (@platform-cap-fn cap)))
+  (boolean ((seam :platform-cap-fn) cap)))
 
 
 ;; Fine-grained ORG-capability SEAM. The org axis (`:manage-users`,
@@ -118,21 +152,13 @@
 ;; `current-platform-tier?` short-circuit to stay open in single-tenant /
 ;; operator contexts — see the `:view-all-stats` precedent in
 ;; `app/execution/impls.clj`.
-(defonce ^:private org-cap-fn (atom (constantly false)))
-
-
-;; Install-state flag alongside the fn: the presence of an installed
-;; org-cap policy IS the "tenancy addon active" fact — the server-side
-;; twin of the editor's capability-header probe (graphdenTenancyActive).
-(defonce ^:private org-cap-installed? (atom false))
-
-
 (defn install-org-cap-fn!
   "Install the addon's 1-arg org-capability predicate `(fn [cap] bool)` scoped
    to the current org. `nil` restores the no-op default (no org capabilities)."
   [f]
-  (reset! org-cap-installed? (some? f))
-  (reset! org-cap-fn (or f (constantly false))))
+  (swap! (seams-atom) assoc
+         :org-cap-installed? (some? f)
+         :org-cap-fn (or f (constantly false))))
 
 
 (defn tenancy-addon-active?
@@ -141,7 +167,7 @@
    copy branch on the SAME fact the editor derives from capability
    headers, instead of duplicating the branch client-side."
   []
-  @org-cap-installed?)
+  (boolean (seam :org-cap-installed?)))
 
 
 (defn current-has-org-cap?
@@ -150,7 +176,7 @@
    installed seam. Default-deny with no tenancy addon; pair with
    `current-platform-tier?` for single-tenant-safe gates."
   [cap]
-  (boolean (@org-cap-fn cap)))
+  (boolean ((seam :org-cap-fn) cap)))
 
 
 ;; Notification SEAM. Core raises a few domain EVENTS whose delivery is a
@@ -163,21 +189,18 @@
 ;; `(fn [event payload])`; its result is returned to the caller and never
 ;; inspected by core — so an installed sender must not throw (a mail failure
 ;; is the sender's to log, not the domain write's to undo).
-(defonce ^:private notify-fn (atom nil))
-
-
 (defn install-notify-fn!
   "Install the addon's 2-arg event sink `(fn [event payload])`. `nil`
    restores the default (events are dropped)."
   [f]
-  (reset! notify-fn f))
+  (swap! (seams-atom) assoc :notify-fn f))
 
 
 (defn notify!
   "Raise domain `event` with `payload` through the installed sink; nil when
    no addon listens."
   [event payload]
-  (when-let [f @notify-fn]
+  (when-let [f (seam :notify-fn)]
     (f event payload)))
 
 

@@ -1,4 +1,4 @@
-(ns ^:serial graphden.packages.app.branches-test
+(ns graphden.packages.app.branches-test
   "Unit tests for `app.branches`' request normalisers and its approval
    predicate — the decisions the branch write-path makes BEFORE it
    touches storage.
@@ -13,15 +13,16 @@
    bug where naming reviewers restricted nobody, because the ⚙ menu
    leaves the write policy open).
 
-   `^:serial`: `may-approve?` reads the org-capability SEAM, which is
-   process-global — a parallel sibling would see this test's install."
+   `may-approve?` reads the org-capability SEAM; the namespace installs it
+   into its own copy (`test-infra.seams`), never the process global."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.tenancy.context :as tc]
-    [graphden.test-infra.impls :as impls]))
+    [graphden.test-infra.impls :as impls]
+    [graphden.test-infra.seams :as ts]))
 
 
-(use-fixtures :once (impls/impls-fixture "app" "branches"))
+(use-fixtures :once ts/isolated-seams-fixture (impls/impls-fixture "app" "branches"))
 
 
 (defn- priv
@@ -89,8 +90,8 @@
 (defn- with-caps
   "Run `f` as a TENANT principal whose org capabilities answer `cap-pred`.
 
-   Two seams, both needed. The capability fn is process-global (hence
-   `^:serial`). `*current-org*` matters just as much: `platform-tier?`
+   Two seams, both needed. The capability fn (this namespace's copy — see
+   `test-infra.seams`). `*current-org*` matters just as much: `platform-tier?`
    treats an unbound org as the platform tier, i.e. operator authority,
    so without binding it every caller reads as an admin and every
    restriction below would pass vacuously — which is exactly what the

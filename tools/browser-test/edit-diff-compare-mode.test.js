@@ -825,17 +825,19 @@ async function cleanup(page) {
     // =================================================================
     // Phase F: ⇢ apply — the suggestion merges INTO the proposal.
     // =================================================================
-    await page.evaluate(() => {
-      const row = document.querySelector('.branch-diff-suggestion-row');
-      Array.from(row.querySelectorAll('button'))
-        .find((b) => /apply/.test(b.textContent)).click();
-    });
     // The apply reloads on success; wait for the RELOAD specifically
     // (waitForLoadState alone passes instantly on the already-loaded page).
-    await page.waitForFunction(() => !document.getElementById('gd-diff-chip')
-      || true, {timeout: 1000}).catch(() => {});
-    await page.waitForNavigation({waitUntil: 'load', timeout: 60000})
-      .catch(() => console.log('  (no navigation after apply — merge likely errored)'));
+    // Armed BEFORE the click: a fast merge reloads before a wait started
+    // afterwards is listening, and that wait then sits out its full timeout.
+    await Promise.all([
+      page.waitForNavigation({waitUntil: 'load', timeout: 60000})
+        .catch(() => console.log('  (no navigation after apply — merge likely errored)')),
+      page.evaluate(() => {
+        const row = document.querySelector('.branch-diff-suggestion-row');
+        Array.from(row.querySelectorAll('button'))
+          .find((b) => /apply/.test(b.textContent)).click();
+      }),
+    ]);
     await page.waitForSelector('#branch-chip-btn', {timeout: 30000});
     const applied = await page.evaluate(async ({branch, nm}) => {
       const r = await window.authFetch('/api/graph/entities',

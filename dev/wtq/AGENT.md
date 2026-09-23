@@ -88,8 +88,13 @@ You were started in one of two ways:
 2. **Implement** in small commits, inside your worktree.
 3. **Fast feedback:** run `bb lint` (~1 min, all linters, no tests) after each
    batch of edits — it catches most gate-reds for pennies. Run targeted tests
-   (`clojure -M:dev:test -m kaocha.runner --focus <ns>`) around the code you
-   actually changed. A full local `bb ci` before queueing is OPTIONAL when you
+   through **`bb wt test --focus <ns>`** (same kaocha arguments) around the code
+   you actually changed — never raw `clojure -M:dev:test -m kaocha.runner`. The
+   wrapper waits while the landing gate is in a heavy phase (image build, unit
+   suite, e2e, integration — it announces them in `.git/wtq/gate-heavy`) or
+   `MemAvailable` is below `WTQ_AGENT_MEM_MIN_MB` (default 3000): five agents'
+   JVMs next to a booting e2e stack is how this 12 GB host runs out of memory
+   and a gate goes red on environment. `bb wt up` waits the same way. A full local `bb ci` before queueing is OPTIONAL when you
    are the only agent in the pool — the gate re-runs `bb ci` on the merged
    result anyway (diff-scoped via `--since`: checks whose `:relevant` paths in
    `scripts/checks.edn` saw no change are skipped visibly; `WTQ_CI_SKIP=a,b`
@@ -101,7 +106,14 @@ You were started in one of two ways:
 4. **Land** — when the feature is complete and `bb lint` is green, run the
    gate. No sign-off needed (Rule 5):
 
-   `bb wt merge` **enqueues** your branch at its current commit and waits. It
+   `bb wt merge` first runs **`bb lint` on your worktree** (outside the queue;
+   skipped if that exact commit already passed) and refuses to queue a red or
+   uncommitted tree (PRECOND, exit 3, with the lint output) — a lint red found
+   inside a train would cost everyone in it a gate. Then it **enqueues** your
+   branch at its current commit and waits. A gate also only starts with enough
+   memory free (`WTQ_MEM_MIN_MB`, default 6000 — the gate's measured p90
+   footprint), so "waiting for memory" in the output is the queue protecting
+   the run, not a hang. It
    may land you in a **merge train**: every branch that is ready at the same
    time is merged on top of the latest develop together and gated ONCE
    (ci → build image → e2e → integration → fast-forward develop → advance the
@@ -170,7 +182,8 @@ You were started in one of two ways:
      observe NOW — a silently stalled gate wastes a serialized slot the whole
      pool waits behind. Check the obvious causes first: host load (a killed
      gate leaves no RESULT file — `bb wt merge` is idempotent, re-run it;
-     it now waits for load headroom by itself, threshold `WTQ_LOAD_MAX`),
+     it now waits for load headroom by itself, threshold `WTQ_LOAD_MAX`, and
+     for memory, `WTQ_MEM_MIN_MB`),
      a stale queue holder, Docker down.
    - **RED / FAIL in the log** → start fixing IMMEDIATELY, before being asked:
      read the failing check's output in the gate log, reproduce with a focused

@@ -46,6 +46,7 @@ bb wt task <name>      # the task spec you were handed
 bb wt log <name>       # full transcript of your last gate run
 bb wt watch <name>     # follow your queued/running train: 60s ticks until a final RESULT
 bb wt soon [minutes]   # "I'm N min from done" — the next merge train waits for you (max 15)
+bb wt test <kaocha…>   # focused tests; waits out the gate's heavy phases / low memory
 bb wt bootstrap        # reprint the discussion-phase (nameless-agent) launch prompt
 bb wt kickoff <name>   # reprint the launch prompt for an already-claimed agent
 ```
@@ -293,7 +294,11 @@ bb deploy       # Full rebuild with DB truncate (for clean deployments)
 
 ### Running a Single Test
 
+In an agent worktree use `bb wt test <same args>` instead — it waits while the
+landing gate is in a heavy phase or memory is short (dev/wtq/AGENT.md).
+
 ```bash
+bb wt test --focus graphden.executor.core-test   # agents (yields to the gate)
 clojure -M:dev:test -m kaocha.runner --focus graphden.executor.core-test
 clojure -M:dev:test -m kaocha.runner --focus graphden.executor.core-test/execute-test
 ```

@@ -129,6 +129,20 @@ Details that are deliberate:
 - **`bb wt list` / `status`** show `QUEUED`, `IN-TRAIN`, `SPLITTING` and the
   final verdicts, the running train (id, members, log), the queue order and
   live soon-markers.
+- **Lint before the queue.** `bb wt merge` runs `bb lint` on the member's
+  worktree first (outside the lock; stamped per sha in `.git/wtq/lint-ok/`, so
+  a re-queue of the same commit does not re-lint) and refuses to queue a red
+  or dirty tree. The conductor re-checks each member's stamp against its
+  queued sha. The train still runs `bb ci` (lint included) on the MERGED tree —
+  cross-branch drift such as a stale devtour bake only shows there.
+- **Memory.** A gate starts only with `WTQ_MEM_MIN_MB` (default 6000) of
+  `MemAvailable` besides the load bound: over 237 gate runs the gate's own
+  footprint was p50 4.2 GB, p90 5.4 GB on this 11.9 GB host, and a gate
+  admitted short of it is OOM-killed mid-suite rather than slowed. While the
+  gate is in a heavy phase (bb ci, image build, e2e, visual, integration,
+  fleet) it writes `.git/wtq/gate-heavy` (phase + pid; stale once the pid is
+  gone); `bb wt test <kaocha args>`, `bb wt up` and the pre-queue lint wait
+  it out, and also wait for `WTQ_AGENT_MEM_MIN_MB` (default 3000).
 - **Tested:** `dev/wtq/test/train_test.sh` (`bb wtq-test`, in `bb lint`/`bb ci`)
   drives real `wt merge` waiters in throwaway repos with only the heavy suites
   stubbed (`WTQ_GATE_STUB`, test-only).
@@ -150,6 +164,7 @@ bb wt merge [--no-e2e] [--no-fleet] [--no-visual] [--deploy] [--release]
                                 # (agent, inside a worktree) enqueue -> merge train -> land on develop;
                                 #   exits with THIS branch's verdict
 bb wt soon [minutes]            # (agent, inside a worktree) hold the next train for me (<= 15 min)
+bb wt test <kaocha args…>       # focused tests — waits out the gate's heavy phases / low memory
                                 #   --deploy also resets the develop DB schema on landing
                                 #   --release chains `bb release --push` (../graphden-cloud)
                                 #     after a GREEN landing, outside the queue lock

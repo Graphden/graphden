@@ -16,6 +16,14 @@
     [graphden.tenancy.context :as tc]))
 
 
+(defbase current-user-id
+  "The current request's user id as text — the accounts principal's
+   `:user-id`, or `anonymous` on a deployment without per-user identity
+   (`tenancy.context/current-user-id`, the seam)."
+  []
+  (tc/current-user-id))
+
+
 (defbase ui-prefs-read
   "The current user's preferences as `{key value}` (string keys) — an
    empty map for a user with none."
@@ -51,6 +59,7 @@
 
 
 (def impls
-  {:ui-prefs-read ui-prefs-read
+  {:current-user-id current-user-id
+   :ui-prefs-read ui-prefs-read
    ;; taint-propagate: returns the caller's own document back
    :ui-pref-write! {:impl ui-pref-write! :taint-propagate? true}})

@@ -13,7 +13,12 @@
 {:namespace "app.prefs"
  :description "Per-user editor preferences (`:ui-pref`): the owner-stamped read/write primitives, the key vocabulary, and the GET/PUT /api/prefs routes."
  :fns
- [{:name :ui-prefs-read
+ [{:name :current-user-id
+   :description "The current request's user id as text — the accounts principal's `:user-id`, or `anonymous` on a deployment without per-user identity (`tenancy.context/current-user-id`). The owner key of preferences and the author key of reviews — stamped server-side, never taken from the caller."
+   :args {}
+   :return-type :text}
+
+  {:name :ui-prefs-read
    :description "The CURRENT user's preferences as a `{key value}` map (string keys; empty when none). Owner = `tenancy.context/current-user-id`, filtered server-side."
    :args {}
    :return-type [:map :text :any]

@@ -742,49 +742,38 @@
     (count mine)))
 
 
-(defbase proposal-approval-status
-  "Read-only projection for the reviewer UI: the approval status of
-   proposal branch `source-branch-id` — its target's `:required-approvals`,
-   the current count of VALID (non-stale, distinct, author-adjusted)
-   approvals, whether that satisfies the requirement, and each recorded
-   approver with its merge-gate verdict (`:counted` / `:reason` / `:stale`,
-   `merge.core/approvals-report`). Read-only, org-scoped via the source
-   branch id."
+(defbase branch-content-stamp
+  "The proposal branch's content fingerprint (`merge.core/branch-content-stamp`)
+   — what an approval is stamped with, and compared against to call it
+   stale."
   [source-branch-id]
   (cr/record-effect! :db)
-  (let [base-storage (branches/base-storage ctx)
-        source-row (sp/read-entity base-storage :branch source-branch-id)
-        target-id (:base-branch-id source-row)
-        target-row (when target-id (sp/read-entity base-storage :branch target-id))
-        required (or (:required-approvals target-row) 0)
-        allow-self? (merge-policy/self-approval-allowed? target-row)
-        approver-ids (set (:approver-ids target-row))
-        author-id (:owner-id source-row)
-        stamp (merge-policy/branch-content-stamp base-storage source-branch-id)
-        approvals (sp/query-entities base-storage :branch-approval
-                                     {:source-branch-id source-branch-id})
-        ;; reuse the stamp + approvals just fetched — the I/O arity of
-        ;; count-valid-approvals would re-run the 5-table stamp query + a
-        ;; second approvals query (the audit-2 double-compute). The count is
-        ;; judged against the proposal's own target (`target-id`), matching
-        ;; the merge gate — an approval stamped for a different target, or one
-        ;; outside a restrictive `:approver-ids` allow-list, doesn't count.
-        have (merge-policy/count-valid-approvals* stamp target-id approver-ids
-                                                  approvals author-id allow-self?)]
-    {:required required
-     :have have
-     :satisfied (>= have required)
-     ;; Whether the CALLER's own approval is among them — the ✅ in the
-     ;; branch popover renders pressed and turns into "withdraw"
-     ;; (`DELETE /api/branches/:ref/approve`) on the next click.
-     :mine (boolean (some #(= (or (:user-id tc/*current-principal*) "anonymous")
-                              (:approver-id %))
-                          approvals))
-     ;; Each row judged by the merge gate's own rule
-     ;; (`merge.core/approval-rejection`) — the author's own approval
-     ;; under a strict target reads `:counted false :reason "author"`.
-     :approvers (merge-policy/approvals-report stamp target-id approver-ids
-                                               approvals author-id allow-self?)}))
+  (merge-policy/branch-content-stamp (branches/base-storage ctx) source-branch-id))
+
+
+(defbase branch-approvals
+  "Every recorded `:branch-approval` row for proposal `source-branch-id`."
+  [source-branch-id]
+  (cr/record-effect! :db)
+  (vec (sp/query-entities (branches/base-storage ctx) :branch-approval
+                          {:source-branch-id source-branch-id})))
+
+
+(defbase approvals-report
+  "Per-row merge-gate verdicts (`merge.core/approvals-report`) —
+   `{:approver-id :counted :reason :stale}` per approval. `approver-ids`
+   arrives as a list; the rule tests membership, hence the set."
+  [stamp target-branch-id approver-ids approvals author-id allow-self?]
+  (merge-policy/approvals-report stamp target-branch-id (set approver-ids)
+                                 approvals author-id allow-self?))
+
+
+(defbase count-valid-approvals
+  "How many DISTINCT approvers count toward the merge
+   (`merge.core/count-valid-approvals*` — the merge gate's own rule)."
+  [stamp target-branch-id approver-ids approvals author-id allow-self?]
+  (merge-policy/count-valid-approvals* stamp target-branch-id (set approver-ids)
+                                       approvals author-id allow-self?))
 
 
 (def ^:private max-comment-body-chars
@@ -903,7 +892,10 @@
    :set-branch-review-policy!  set-branch-review-policy!
    :approve-proposal!          approve-proposal!
    :dismiss-my-approval!       dismiss-my-approval!
-   :proposal-approval-status   proposal-approval-status
+   :branch-content-stamp       branch-content-stamp
+   :branch-approvals           branch-approvals
+   :approvals-report           approvals-report
+   :count-valid-approvals      count-valid-approvals
    ;; taint-propagate: list returns caller-authored comment bodies.
    :add-branch-comment!        add-branch-comment!
    :list-branch-comments       {:impl list-branch-comments :taint-propagate? true}

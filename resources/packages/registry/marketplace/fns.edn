@@ -193,11 +193,6 @@
    :args {:path "/marketplace/categories" :handler :_mk-categories-handler}}
 
   ;; --- marketplace identity + roster primitives (docs/MARKETPLACE.md) ---
-  {:name :current-user-id
-   :description "The current request's user id as text — the accounts principal's `:user-id`, or `anonymous` on a deployment without per-user identity (`tenancy.context/current-user-id`). The owner key of preferences and the author key of reviews — stamped server-side, never taken from the caller."
-   :args {}
-   :return-type :text}
-
   {:name :current-user-label
    :description "A PUBLIC-safe label for the current user — display name, else the local part of the email, else the org, else `anonymous`. What a review is signed with."
    :args {}

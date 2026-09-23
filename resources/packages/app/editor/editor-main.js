@@ -312,13 +312,14 @@ async function initGraph() {
       ]);
   // Auth wall (B3): the graph view is login-gated when auth is active, so an
   // unauthenticated (or stale-token) boot gets 401 here — send the user to
-  // sign in instead of dying into the red fatal banner. Tenancy deployments
-  // (the capability header on this very 401 set `gd-tenancy` via the fetch
-  // wrap) have the full /login page; single-tenant has no such page, so open
-  // the lock popover instead.
+  // sign in instead of dying into the red fatal banner. `openAuthPopover`
+  // picks the surface: the accounts addon's /login page when the boot probe
+  // found it (awaited — it may still be in flight), else the admin-password
+  // popover.
   if (entResp.status === 401) {
     clearAuthPassword(); // whatever we sent (or didn't) doesn't authenticate
-    if (document.body.classList.contains('gd-tenancy')) {
+    if (window.gdAccountsReady) await window.gdAccountsReady;
+    if (typeof graphdenAccountsMode === 'function' && graphdenAccountsMode()) {
       const next = location.pathname + location.search + location.hash;
       location.href = '/login?next=' + encodeURIComponent(next);
     } else if (typeof openAuthPopover === 'function') {

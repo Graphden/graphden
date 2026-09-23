@@ -11,7 +11,9 @@
     [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.wire :as wire]
+    [graphden.packages.registry-shared :as shared]
     [graphden.storage.protocol.core :as sp]
+    [graphden.system.deploy-config :as deploy-config]
     [graphden.tenancy.context :as tc]
     [graphden.versioning.storage.core :as vcore]
     [org.httpkit.server :as http-kit]))
@@ -677,6 +679,65 @@
           (is (= 12 (:installs origin)))
           (is (string? (:as-of origin)) "stamped with when the snapshot was taken")))
       (finally (stop)))))
+
+
+(defn- run-named
+  [fn-name args]
+  (exec/execute-by-name (:ctx *bootstrap*) fn-name args))
+
+
+(deftest remote-bearer-goes-only-to-the-configured-origin
+  ;; `source` in POST /api/packages/install is caller-chosen. The registry
+  ;; token used to ride EVERY dial to it — a caller naming their own host
+  ;; received this instance's GRAPHDEN_REGISTRY_TOKEN. It now goes only to
+  ;; the origin of GRAPHDEN_REGISTRY_URL (the hub token likewise only to
+  ;; GRAPHDEN_HUB_URL's).
+  (let [seen (atom [])
+        row {:name "bearer.pkg" :version "1.0.0" :ns-root "bearerpkg"
+             :fns [{:name :bearer-hello :namespace "bearerpkg" :parent :const :args {:value "hi"}}]
+             :dependencies [:const] :package-dependencies [] :content-hash "bh"}
+        stop (http-kit/run-server
+               (fn [req]
+                 (swap! seen conj (get-in req [:headers "authorization"]))
+                 {:status 200 :headers {"Content-Type" "application/edn"} :body (pr-str row)})
+               {:port 0})
+        stub (str "http://127.0.0.1:" (:local-port (meta stop)))
+        mirror! #(run-named "mirror-remote-package!"
+                            {:source stub :pkg-name "bearer.pkg" :version "1.0.0"})]
+    (try
+      (with-redefs [shared/registry-token (constantly "reg-secret")
+                    shared/hub-token (constantly "hub-secret")]
+        (testing "the auth value itself: same origin only"
+          (deploy-config/install! {:registry-url "https://registry.example:443/"
+                                   :hub-url "http://hub.example"})
+          (is (= "Bearer reg-secret"
+                 (run-named "remote-auth-value" {:url "https://REGISTRY.example/api/packages" :endpoint "registry"}))
+              "scheme / host case / default port normalise to one origin")
+          (is (nil? (run-named "remote-auth-value" {:url "https://evil.example/api/packages" :endpoint "registry"})))
+          (is (nil? (run-named "remote-auth-value" {:url "http://registry.example/api/packages" :endpoint "registry"}))
+              "another scheme is another origin")
+          (is (nil? (run-named "remote-auth-value" {:url "https://registry.example:8443/x" :endpoint "registry"})))
+          (is (= "Bearer hub-secret" (run-named "remote-auth-value" {:url "http://hub.example:80/api/export/graph" :endpoint "hub"})))
+          (is (nil? (run-named "remote-auth-value" {:url "https://registry.example/x" :endpoint "hub"}))
+              "the hub token never goes to the registry, nor the other way round")
+          (is (nil? (run-named "remote-auth-value" {:url "https://registry.example/x" :endpoint "other"}))))
+        (testing "a caller-chosen source is dialed WITHOUT the registry token"
+          (deploy-config/install! {:registry-url "https://registry.example"})
+          (is (= "bearer.pkg" (:mirrored (mirror!))))
+          (is (= [nil] @seen) "no Authorization header reached the caller's host"))
+        (testing "no registry configured → no token anywhere"
+          (reset! seen [])
+          (deploy-config/install! {})
+          (mirror!)
+          (is (= [nil] @seen)))
+        (testing "the configured registry gets it"
+          (reset! seen [])
+          (deploy-config/install! {:registry-url stub})
+          (mirror!)
+          (is (= ["Bearer reg-secret"] @seen))))
+      (finally
+        (deploy-config/clear!)
+        (stop)))))
 
 
 (deftest panel-update-handler-updates-and-refreshes-panel

@@ -296,8 +296,10 @@ into your self-hosted install). Behind the scenes the version is
 **mirrored** into your local registry first (an immutable local copy,
 never re-published as public), then installed exactly as above —
 reference, pin, secrets manifest and all. If the remote registry
-requires auth, the server presents its `GRAPHDEN_REGISTRY_TOKEN`; the
-browser never handles that credential. The copy also snapshots the
+requires auth, the server presents its `GRAPHDEN_REGISTRY_TOKEN` — only
+to the registry the operator named in `GRAPHDEN_REGISTRY_URL`, never to a
+URL someone types into the form; the browser never handles that
+credential. The copy also snapshots the
 origin's marketplace numbers (rating, installs) and shows them read-only
 — reviews stay where the package was published
 ([lesson 40](40-marketplace-themes-keymaps.md)).

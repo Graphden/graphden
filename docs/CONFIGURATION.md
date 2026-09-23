@@ -372,10 +372,16 @@ Telegram pair) hold those.
             :feedback-url            #env GRAPHDEN_FEEDBACK_URL
             :feedback-intake         #env GRAPHDEN_FEEDBACK_INTAKE
             :disable-asset-overrides #env GRAPHDEN_DISABLE_ASSET_OVERRIDES
-            :tutorial-base           #env GRAPHDEN_TUTORIAL_BASE}}
+            :tutorial-base           #env GRAPHDEN_TUTORIAL_BASE
+            :marketplace-moderation  #env GRAPHDEN_MARKETPLACE_MODERATION
+            :registry-url            #env GRAPHDEN_REGISTRY_URL}}
 ```
 
 Blank values read as unset (nil); an undeclared key reads as nil too.
+`:registry-url` / `:hub-url` also scope the two deployment bearers: the
+remote-registry token (`GRAPHDEN_REGISTRY_TOKEN`) and the hub token
+(`GRAPHDEN_HUB_TOKEN`) — secrets, read from the environment, never
+declared here — ride only dials whose origin is the declared URL's.
 
 ### `:exec/service-reconciler`
 

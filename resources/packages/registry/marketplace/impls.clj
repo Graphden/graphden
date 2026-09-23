@@ -1,15 +1,13 @@
 (ns graphden.packages.app.marketplace.impls
   "Impls for the marketplace's own base-fns (docs/MARKETPLACE.md) — the
-   identity + roster reads, the two pure semver helpers, the origin card
-   dial a mirror snapshots, and moderation (the flag, the operator's queue
-   and decision). Every listing / card / partial / envelope around them is
-   graph composition in the `marketplace*` modules. The remote dial shares
-   the registry impls' bearer + egress conventions
-   (`graphden.packages.registry-shared`)."
+   identity + roster reads, the pure semver helper, and moderation (the
+   flag, the operator's queue and decision). Every listing / card /
+   partial / envelope around them is graph composition in the
+   `marketplace*` modules — the origin card a mirror snapshots
+   (`:remote-package-card`) included: a fn-def over the registry's shared
+   remote dial."
   (:require
-    [cheshire.core :as json]
     [clojure.string :as str]
-    [graphden.clients.egress :as egress]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
@@ -17,8 +15,7 @@
     [graphden.packages.registry-shared :as shared]
     [graphden.packages.semver :as semver]
     [graphden.storage.protocol.core :as sp]
-    [graphden.tenancy.context :as tc]
-    [org.httpkit.client :as http-client]))
+    [graphden.tenancy.context :as tc]))
 
 
 (defbase current-user-id
@@ -120,37 +117,12 @@
                     (update :published-at str))))))
 
 
-(defbase remote-package-card
-  "The REMOTE registry's marketplace card for `pkg-name` (`GET
-   <source>/api/marketplace?q=<name>&kind=any`, exact-name match) — the
-   social signals a mirror snapshots as its `:origin` (docs/MARKETPLACE.md
-   § 7). nil when the remote has no marketplace (an older graphden), is
-   unreachable, or lists no such package — a mirror without signals is
-   still a mirror. Egress-guarded in restricted executions like the other
-   remote dials."
-  [source pkg-name]
-  (cr/record-effect! :network)
-  (cr/record-effect! :env)
-  (let [base (str/replace (str source) #"/+$" "")
-        url (str base "/api/marketplace?kind=any&q="
-                 (java.net.URLEncoder/encode (str pkg-name) "UTF-8"))
-        _ (when (some? cr/*allowed-effects*) (egress/check-target! url))
-        resp @(http-client/get url {:headers (shared/remote-auth-headers) :as :text :timeout 60000})]
-    (when (and (nil? (:error resp)) (= 200 (:status resp)))
-      (let [cards (try (json/parse-string (:body resp) true) (catch Exception _ nil))]
-        (when (sequential? cards)
-          (some-> (first (filter #(= (str pkg-name) (str (:name %))) cards))
-                  (select-keys [:rating :installs :version-count :latest :published-at])
-                  (assoc :url base :as-of (str (java.time.Instant/now)))))))))
-
-
 (def impls
   {:current-user-id current-user-id
    :current-user-label current-user-label
    :loaded-packages loaded-packages
    ;; taint-propagate: answers one of the caller's own version strings
    :semver-rank semver-rank
-   :remote-package-card remote-package-card
    :moderation-on? moderation-on?
    ;; taint-propagate: the updated row carries the operator's note
    :moderate-package-version! {:impl moderate-package-version! :taint-propagate? true}

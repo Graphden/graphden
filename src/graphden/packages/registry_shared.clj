@@ -4,7 +4,7 @@
    starter catalogue (`graphden.packages.starter-catalogue`) shares with
    the publish path. Module impls are evaluated standalone by the package
    loader — one `impls.clj` cannot `require` another — so what both need
-   lives here: the remote registry's bearer, the moderation deploy flag,
+   lives here: the remote bearers' origin rule, the moderation deploy flag,
    the platform-wide storage beneath the org-scoped decorator, the
    package-name lock, and the publish INSERT itself (the row a publish
    writes + the UNIQUE-tolerant insert), so a seeded listing is exactly
@@ -23,12 +23,43 @@
       Connection)))
 
 
-(defn remote-auth-headers
-  "Headers for a dial to the configured remote registry — the
-   `GRAPHDEN_REGISTRY_TOKEN` bearer when one is set, else none."
+(defn url-origin
+  "`[scheme host port]` of `url` — lower-cased, the scheme's default port
+   filled in — or nil when `url` has no scheme or host. Two URLs share an
+   origin iff these are equal (RFC 6454)."
+  [url]
+  (when-let [u (try (java.net.URI. (str url)) (catch Exception _ nil))]
+    (let [scheme (some-> (java.net.URI/.getScheme u) str/lower-case)
+          host (some-> (java.net.URI/.getHost u) str/lower-case)
+          port (java.net.URI/.getPort u)]
+      (when (and scheme (not (str/blank? host)))
+        [scheme host (if (neg? port) (case scheme "https" 443 "http" 80 port) port)]))))
+
+
+(defn bearer-for-origin
+  "`\"Bearer <token>\"` when `token` is set and `url` has the SAME origin as
+   the operator-configured `configured-url`; nil otherwise (no token, no
+   configured endpoint, or any other host). A deployment token belongs to
+   one endpoint — a dial whose URL a caller chose must never carry it
+   elsewhere."
+  [url configured-url token]
+  (when (and (not (str/blank? (str token)))
+             (some? (url-origin configured-url))
+             (= (url-origin url) (url-origin configured-url)))
+    (str "Bearer " token)))
+
+
+(defn registry-token
+  "The remote-registry bearer (`GRAPHDEN_REGISTRY_TOKEN`) — a secret, so a
+   process-environment read, never a deploy setting."
   []
-  (let [token (System/getenv "GRAPHDEN_REGISTRY_TOKEN")]
-    (cond-> {} (seq (str token)) (assoc "Authorization" (str "Bearer " token)))))
+  (System/getenv "GRAPHDEN_REGISTRY_TOKEN"))
+
+
+(defn hub-token
+  "The hub bearer (`GRAPHDEN_HUB_TOKEN`) — a secret, like `registry-token`."
+  []
+  (System/getenv "GRAPHDEN_HUB_TOKEN"))
 
 
 (defn moderation-enabled?

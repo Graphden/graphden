@@ -1,4 +1,4 @@
-(ns ^:integration graphden.integration.import-graph-route-test
+(ns ^:integration ^:serial graphden.integration.import-graph-route-test
   "End-to-end coverage for `POST /api/import/graph` — the write half of the
    export/import pair (PACKAGE_DISTRIBUTION § runtime bundle import): apply
    an exported EDN bundle to a NAMED branch, with create/prune/skip-owned
@@ -7,10 +7,10 @@
    `graph_rows_route_test`."
   (:require
     [cheshire.core :as json]
-    [clojure.java.io :as io]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.auth.provider :as auth]
+    [graphden.clients.egress :as egress]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry-core]
@@ -24,26 +24,7 @@
 
 (def ^:dynamic *router* nil)
 (def ^:dynamic *storage* nil)
-
-
-;; Registry impls are a PACKAGE ns (path ≠ ns, loaded by the package loader),
-;; so reach the private `resolve-remote-version` by load-file + ns-resolve —
-;; the house pattern (see effect_trace_test).
-(def ^:private registry-resolve-remote-version
-  ;; A defbase now (graph-visible resolve step) — 2-arity (args-map, ctx).
-  (let [r (io/resource "packages/registry/registry/impls.clj")]
-    (when r (load-file (java.io.File/.getPath (io/file r))))
-    (ns-resolve (find-ns 'graphden.packages.app.registry.impls)
-                'resolve-remote-version)))
-
-
-;; The `mirror-remote-package!` defbase — the SECOND egress-guard site (the
-;; pinned `?format=edn` fetch, reached with a CONCRETE spec that
-;; `resolve-remote-version` passes straight through without a list dial, so
-;; this guard is the only one on that path).
-(def ^:private registry-mirror-remote-package
-  (ns-resolve (find-ns 'graphden.packages.app.registry.impls)
-              'mirror-remote-package!))
+(def ^:dynamic *ctx* nil)
 
 
 (def ^:private test-auth-token "import-graph-test-token-xyz")
@@ -70,7 +51,8 @@
                    {:optional-handler-fn-names ["_registry-ring-response"]})]
       (try
         (binding [*router* router
-                  *storage* storage]
+                  *storage* storage
+                  *ctx* ctx]
           (t))
         (finally (sp/close storage))))))
 
@@ -352,47 +334,72 @@
       (finally (stub)))))
 
 
+(defn- run-remote
+  "Execute a registry fn-def by name (the remote dials are graph
+   compositions over `:http-request` now)."
+  [fn-name args]
+  (exec/execute-by-name *ctx* fn-name args))
+
+
 (deftest remote-fetch-ssrf-guarded-in-restricted-ctx
   ;; A RESTRICTED (tenant/cloud) execution — `*allowed-effects*` bound —
   ;; must refuse a caller-supplied `source` pointing at an internal /
   ;; link-local target BEFORE dialing (SSRF + registry-token exfiltration).
-  ;; The unrestricted platform / self-host ctx is NOT gated, so an offline
-  ;; localhost hub still resolves (that's the whole point of push/pull).
+  ;; The dials are `:http-request` calls, so the guard is the primitive's
+  ;; own. The unrestricted platform / self-host ctx is NOT gated, so an
+  ;; offline localhost hub still resolves (the whole point of push/pull).
   (testing "restricted ctx blocks a link-local source (cloud-metadata probe)"
-    ;; :env allowed too — the resolve defbase records :env for the
-    ;; GRAPHDEN_REGISTRY_TOKEN read BEFORE the egress guard runs (the
-    ;; same set the concrete-mirror case below binds).
     (binding [cr/*allowed-effects* #{:network :env}]
       (is (thrown-with-msg?
             clojure.lang.ExceptionInfo #"(?i)egress"
-            (registry-resolve-remote-version
-              {:source "http://169.254.169.254" :pkg-name "acme.x" :spec "latest"}
-              {}))
+            (run-remote "resolve-remote-version"
+                        {:source "http://169.254.169.254" :pkg-name "acme.x" :spec "latest"}))
           "link-local source → :egress/blocked before any dial")))
   (testing "unrestricted ctx does NOT egress-block (self-host localhost hub)"
-    ;; *allowed-effects* nil → no egress check; resolve reaches the dial and
-    ;; returns nil (nothing listening) rather than throwing :egress/blocked.
-    (is (nil? (registry-resolve-remote-version
-                {:source "http://127.0.0.1:1" :pkg-name "acme.x" :spec "latest"}
-                {}))
+    (is (nil? (run-remote "resolve-remote-version"
+                          {:source "http://127.0.0.1:1" :pkg-name "acme.x" :spec "latest"}))
         "loopback allowed in the unrestricted path (returns nil, not blocked)"))
-  (testing "the CONCRETE-spec mirror path is guarded too (its own check-target!)"
-    ;; The mirror path dials with an already-concrete version, so
-    ;; mirror-remote-package!'s own guard is the ONLY one on that path —
-    ;; a link-local source must still be blocked before the pinned fetch.
+  (testing "the CONCRETE-spec mirror path is guarded too"
+    ;; A concrete spec passes resolve without a dial, so the mirror's own
+    ;; fetch is the only dial on that path — it must still be refused.
     (binding [cr/*allowed-effects* #{:network :db :env}]
       (is (thrown-with-msg?
             clojure.lang.ExceptionInfo #"(?i)egress"
-            (registry-mirror-remote-package
-              {:source "http://169.254.169.254" :pkg-name "acme.x" :version "1.0.0"}
-              {}))
+            (run-remote "mirror-remote-package!"
+                        {:source "http://169.254.169.254" :pkg-name "acme.x" :version "1.0.0"}))
           "concrete-spec mirror → :egress/blocked before the pinned dial")))
   (testing "unrestricted ctx does NOT block the concrete mirror path either"
-    (let [r (registry-mirror-remote-package
-              {:source "http://127.0.0.1:1" :pkg-name "acme.x" :version "1.0.0"}
-              {})]
+    (let [r (run-remote "mirror-remote-package!"
+                        {:source "http://127.0.0.1:1" :pkg-name "acme.x" :version "1.0.0"})]
       (is (= "remote-unreachable" (:error r))
-          "loopback allowed unrestricted → reaches the dial, fails as data not :egress"))))
+          "loopback allowed unrestricted → reaches the dial, fails as data not :egress")))
+  (testing "a redirect from a public remote to an internal address is refused"
+    ;; The first hop resolves public (so the up-front check passes); it
+    ;; answers 302 → an internal IP literal. Every hop is address-checked
+    ;; at connect time, so the internal target is never dialed.
+    (let [internal-hits (atom 0)
+          internal (hk/run-server (fn [_]
+                                    (swap! internal-hits inc)
+                                    {:status 200 :body "{:name \"x\"}"})
+                                  {:port 0})
+          internal-url (str "http://127.0.0.1:" (:local-port (meta internal)) "/api/packages/acme.x/1.0.0")
+          public (hk/run-server (fn [_] {:status 302 :headers {"Location" internal-url} :body ""})
+                                {:port 0})
+          real-resolve egress/resolve-public-ips]
+      (try
+        (with-redefs [egress/resolve-public-ips
+                      (fn [host]
+                        (if (= "registry.test" host)
+                          [(java.net.InetAddress/getByName "127.0.0.1")]
+                          (real-resolve host)))]
+          (binding [cr/*allowed-effects* #{:network :db :env}]
+            (is (thrown-with-msg?
+                  clojure.lang.ExceptionInfo #"(?i)egress"
+                  (run-remote "mirror-remote-package!"
+                              {:source (str "http://registry.test:" (:local-port (meta public)))
+                               :pkg-name "acme.x" :version "1.0.0"})))
+            (is (zero? @internal-hits) "the internal address was never dialed")))
+        (finally (public) (internal))))))
 
 
 (deftest import-decodes-graphden-ref-wire-tags

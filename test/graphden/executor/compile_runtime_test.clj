@@ -87,11 +87,73 @@
         (is (not (types/alias-registered? :Tmp)))))))
 
 
+(deftest compiling-one-branch-keeps-the-tenant-types-of-another
+  ;; The per-org slice used to be REPLACED by every compile, so a write on
+  ;; any branch wiped the tenant types every other branch declares.
+  (binding [cr/*per-org-aliases-override* (atom {})
+            types/*type-aliases-override* (atom {})]
+    (let [prims [{:id "int" :name "int"}]
+          on-c {:fns (conj prims {:id "c1" :name "OnC" :element-fn-id "int" :org-id "org2"})
+                :slots [] :fn-slots []}
+          on-main {:fns prims :slots [] :fn-slots []}]
+      (cr/register-type-aliases-from-db! on-c :branch-c)
+      (cr/register-type-aliases-from-db! on-main :main)
+      (testing "branch C's view still has its tenant type"
+        (is (= [:list :int] (:OnC (cr/org-alias-snapshot "public" "org2" :branch-c)))))
+      (testing "main's view does not — it never declared it"
+        (is (nil? (:OnC (cr/org-alias-snapshot "public" "org2" :main)))))
+      (testing "without a branch, a type some branch declares resolves"
+        (is (= [:list :int] (:OnC (cr/org-alias-snapshot "public" "org2"))))))))
+
+
+(deftest a-deleted-branch-takes-its-type-aliases-with-it
+  (binding [cr/*per-org-aliases-override* (atom {})
+            types/*type-aliases-override* (atom {})]
+    (let [prims [{:id "int" :name "int"}]
+          g (fn [& rows] {:fns (into prims rows) :slots [] :fn-slots []})]
+      (cr/register-type-aliases-from-db! (g {:id "g1" :name "Gone" :element-fn-id "int" :org-id "o"}
+                                            {:id "s1" :name "Shared" :element-fn-id "int"})
+                                         :doomed)
+      (cr/register-type-aliases-from-db! (g {:id "s1" :name "Shared" :element-fn-id "int"})
+                                         :other)
+      (cr/forget-alias-source! :doomed)
+      (testing "a name only the deleted branch declared stops resolving"
+        (is (not (types/alias-registered? :Gone)))
+        (is (nil? (:Gone (cr/org-alias-snapshot "public" "o")))))
+      (testing "a name another branch still declares stays"
+        (is (types/alias-registered? :Shared))))))
+
+
+(deftest optimistic-rebuild-that-is-not-swapped-in-leaves-the-aliases-alone
+  ;; The heal reads the graph BEFORE its compile; a type-row created while it
+  ;; compiled is missing from that read. Syncing the registry from it retired
+  ;; the new type — even though the stale compile itself was thrown away.
+  (binding [cr/*per-org-aliases-override* (atom {})
+            types/*type-aliases-override* (atom {})]
+    (let [storage (setup/create-test-storage)
+          prims [{:id "int" :name "int"}]
+          stale {:fns prims :slots [] :fn-slots [] :bindings [] :list-items []}]
+      (try
+        (let [ctx (exec/create-context {:storage storage})]
+          ;; The write that landed mid-compile registered its type.
+          (cr/register-type-aliases-from-db!
+            {:fns (conj prims {:id "n1" :name "JustMade" :element-fn-id "int"})
+             :slots [] :fn-slots []}
+            (cr/storage-alias-source (:storage ctx)))
+          (binding [cr/*impl-override* {:read-graph (fn [& _] stale)}]
+            (is (false? (cr/rebuild-optimistic! ctx (constantly false)))
+                "the write moved the ctx on — no swap"))
+          (is (types/alias-registered? :JustMade)
+              "the thrown-away compile did not retire the new type"))
+        (finally
+          (sp/close storage))))))
+
+
 (deftest with-org-alias-view-filters-resolution-for-a-tenant
   ;; The shared helper (used by the type-check guards AND the read-display paths
   ;; via the request-scope) makes `resolve-alias` org-filtered for a tenant and
   ;; leaves platform/public on the global registry.
-  (binding [cr/*per-org-aliases-override* (atom {"A" {:Foo [:list :int]}})
+  (binding [cr/*per-org-aliases-override* (atom {:some-branch {"A" {:Foo [:list :int]}}})
             types/*type-aliases-override* (atom {})] ; global: no Foo
     (testing "a tenant resolves its OWN per-org alias"
       (tc/with-org "A"

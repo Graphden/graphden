@@ -39,13 +39,19 @@
    `types/*type-aliases-override*` (READ-only callers — they resolve, never
    register, so registration still writes the org-agnostic global). Shared by the
    type-CHECK guards here and the alias-resolving READ paths (value-form / types-
-   api) so a tenant's editor display is org-filtered too."
-  [thunk]
-  (if (= (tc/current-org) tc/public-org)
-    (thunk)
-    (binding [types/*type-aliases-override*
-              (atom (cr/org-alias-snapshot tc/public-org (tc/current-org)))]
-      (thunk))))
+   api) so a tenant's editor display is org-filtered too.
+
+   With `storage`, the view of the branch it reads (a tenant's type-row
+   declared only on another branch does not resolve here); without, every
+   branch's declarations together."
+  ([thunk] (with-org-alias-view* nil thunk))
+  ([storage thunk]
+   (if (= (tc/current-org) tc/public-org)
+     (thunk)
+     (binding [types/*type-aliases-override*
+               (atom (cr/org-alias-snapshot tc/public-org (tc/current-org)
+                                            (some-> storage cr/storage-alias-source)))]
+       (thunk)))))
 
 
 (defn resolve-type-fn-id
@@ -465,6 +471,7 @@
    (type-check-fn-after-mutation! storage fn-id nil))
   ([storage fn-id {:keys [reject-secret?]}]
    (with-org-alias-view*
+     storage
      (fn []
        (let [result
              (try
@@ -522,6 +529,7 @@
    useful)."
   [storage entity-data binding-id]
   (with-org-alias-view*
+    storage
     (fn []
       (let [slot-id (or (:slot-id entity-data)
                         (when binding-id

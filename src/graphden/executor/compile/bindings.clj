@@ -14,15 +14,9 @@
      under the new name."
   (:require
     [graphden.executor.compile.lookups :as l]
+    [graphden.executor.registry.core :as reg]
     [graphden.packages.records.ids :as ids]
     [graphden.types.core :as types]))
-
-
-;; The registry is part of the executor but its loading transitively
-;; pulls compile/bindings; avoid the cycle by resolving lazily.
-(def ^:private rich-type-of-id-or-stale-name-fn
-  (delay (requiring-resolve
-           'graphden.executor.registry.core/rich-type-of-id-or-stale-name)))
 
 
 ;; Binding-row shape predicates. Single source of truth for "what kind
@@ -216,7 +210,7 @@
         (if (contains? seen fid)
           (recur (subvec queue 1) seen)
           (let [row (get fn-map fid)
-                ret (:return (@rich-type-of-id-or-stale-name-fn fid (:name row)))]
+                ret (:return (reg/rich-type-of-id-or-stale-name fid (:name row)))]
             (if (and (some? ret) (not= :any ret))
               ret
               (recur (into (subvec queue 1) (:parent-ids row))
@@ -247,7 +241,7 @@
    site and read here by base-fn identity — never by name-dispatch."
   [fn-id {:keys [fn-map] :as lookups}]
   (let [root (l/root-fn fn-id fn-map lookups)]
-    (some-> (@rich-type-of-id-or-stale-name-fn (:id root) (:name root))
+    (some-> (reg/rich-type-of-id-or-stale-name (:id root) (:name root))
             :lazy-seq-args set)))
 
 

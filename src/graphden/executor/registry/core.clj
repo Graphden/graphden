@@ -21,8 +21,9 @@
   (:require
     [clojure.tools.logging :as log]
     [graphden.executor.composition.core :as composition]
-    [graphden.executor.interface :as exec]
+    [graphden.executor.registry :as base-registry]
     [graphden.packages.records :as records]
+    [graphden.types.check.literals :as literals]
     [graphden.types.core :as types]))
 
 
@@ -45,8 +46,7 @@
   [constraint]
   (fn [args _ctx]
     (let [v (force (:value args))
-          check-fn (requiring-resolve 'graphden.types.check.literals/literal-satisfies-refinement?)
-          result (check-fn v constraint)]
+          result (literals/literal-satisfies-refinement? v constraint)]
       (when (false? result)
         (throw (ex-info (str "refinement constraint failed: "
                              (pr-str constraint) " on value " (pr-str v))
@@ -140,7 +140,7 @@
    (`exec/get-base-fn` by name from REPL etc.) keep working."
   [defs]
   (doseq [[fn-name impl] (compute-base-fns-map defs)]
-    (exec/register-base-fn! fn-name impl)))
+    (base-registry/register-base-fn! fn-name impl)))
 
 
 ;; =============================================================================
@@ -698,9 +698,8 @@
    Lives HERE (not in `crud.fn-execution.persist`, its original home)
    so both consumers can reach it cycle-free: persist's audit trail
    (`stamp-touched-secret`) requires this ns already, and
-   `compile-eager`'s path-trace capture-time secret skip reaches it via
-   a `requiring-resolve` delay (a direct require would cycle through
-   interface → compile-runtime → compile-eager)."
+   `compile-eager`'s path-trace capture-time secret skip requires it
+   directly."
   ([fn-id] (touches-secret? fn-id nil))
   ([fn-id row-name]
    (when fn-id
@@ -1056,15 +1055,9 @@
   ;; storage and confuse downstream type-checking / runtime narrowing.
   (when-let [refine (:refine fn-def)]
     (let [base (:base refine)
-          constraint (:constraint refine)
-          check-fn (or (requiring-resolve
-                         'graphden.types.check.literals/constraint-compatible-with-base?)
-                       (throw (ex-info
-                                "constraint-compatible-with-base? unresolved — namespace rename?"
-                                {:type :sync/missing-symbol
-                                 :symbol 'graphden.types.check.literals/constraint-compatible-with-base?})))]
+          constraint (:constraint refine)]
       (when (and constraint
-                 (not (check-fn base constraint)))
+                 (not (literals/constraint-compatible-with-base? base constraint)))
         (throw (ex-info (str "Refinement constraint " (pr-str constraint)
                              " uses operators not valid on base " (pr-str base))
                         {:type :invalid-refinement-constraint

@@ -18,6 +18,7 @@
     [graphden.executor.compile.lookups :as l]
     [graphden.executor.compile.renames :as r]
     [graphden.executor.compile.surface :as surface]
+    [graphden.executor.registry.core :as reg]
     [graphden.packages.records.types :as record-types]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.core :as types]
@@ -427,25 +428,14 @@
    too — the set drives every `:ref` invocation's cache lookup, so it
    must reflect the current graph after a partial recompile."
   [fns]
-  ;; `registry.core` requires `executor.interface`, which requires
-  ;; `executor.context`, which requires this ns — so eagerly
-  ;; requiring it here would cycle. Deferred-resolved + asserted
-  ;; non-nil so a future rename fails loudly instead of silently
-  ;; degrading.
-  (let [type-of-id (or (requiring-resolve
-                         'graphden.executor.registry.core/rich-type-of-id)
-                       (throw (ex-info
-                                "rich-type-of-id missing — namespace rename?"
-                                {:type :compile/missing-symbol
-                                 :symbol 'graphden.executor.registry.core/rich-type-of-id})))
-        fresh-cats #{:time :random}
+  (let [fresh-cats #{:time :random}
         fresh-ids
         (into #{}
               (keep (fn [f]
                       ;; Registry entries key on the fn's IDENTITY — the
                       ;; row id in hand — so same-named fns in different
                       ;; namespaces each get their own freshness verdict.
-                      (let [eff (:effects (type-of-id (:id f)))]
+                      (let [eff (:effects (reg/rich-type-of-id (:id f)))]
                         (when (and eff (some fresh-cats eff))
                           (:id f)))))
               fns)]
@@ -723,16 +713,13 @@
           ;; cron execution on a branch ctx carries no binding) compiled
           ;; the branch against the GLOBAL registry. NOT bound-fn* —
           ;; that would drag per-request bindings like the tenant org
-          ;; into a background rebuild. requiring-resolve, not :require:
-          ;; registry.core → executor.interface → executor.context → this
-          ;; ns would cycle (see `prime-always-fresh!`).
-          (let [rt-var (requiring-resolve
-                         'graphden.executor.registry.core/*rich-types-override*)
-                po-var (requiring-resolve
-                         'graphden.executor.registry.core/*per-org-rich-override*)
-                rt (or (:rich-types-atom ctx) (some-> rt-var deref))
-                po (or (:per-org-rich-atom ctx) (some-> po-var deref))
-                run' (fn [] (with-bindings* {rt-var rt po-var po} run))
+          ;; into a background rebuild.
+          (let [rt (or (:rich-types-atom ctx) reg/*rich-types-override*)
+                po (or (:per-org-rich-atom ctx) reg/*per-org-rich-override*)
+                run' (fn []
+                       (binding [reg/*rich-types-override* rt
+                                 reg/*per-org-rich-override* po]
+                         (run)))
                 t (Thread. ^Runnable run' "registry-stale-revalidate")]
             (Thread/.setDaemon t true)
             (Thread/.start t)))))))

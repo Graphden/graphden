@@ -23,6 +23,7 @@
     [graphden.executor.compile.bindings :as b]
     [graphden.executor.compile.lookups :as l]
     [graphden.executor.compile.renames :as r]
+    [graphden.executor.registry.core :as reg]
     [graphden.executor.runtime :as rt]
     [graphden.util.counters :as counters]
     [graphden.util.json-size :as json-size]))
@@ -325,15 +326,6 @@
   #{:db :network :io :process :state :raw-sql})
 
 
-(def ^:private rich-type-of-id-fn
-  "Var handle to `registry.core/rich-type-of-id` — resolved lazily to
-   break the same load cycle the other delays in this ns dodge. Read
-   only on the rare cap-eviction path, so its cost is off the hot
-   path. Honours `*rich-types-override*` (parallel-test isolation) via
-   the registry's own view."
-  (delay (requiring-resolve 'graphden.executor.registry.core/rich-type-of-id)))
-
-
 (defn- effectful-ref?
   "True iff `ref-id`'s registry rich-type declares a single-fire
    side-effect (`single-fire-effect-cats`) — the entries cap-eviction
@@ -344,7 +336,7 @@
    only bites a side-effecting fn re-pulled AFTER >cap distinct keys in
    one execute, which no real graph reaches)."
   [ref-id]
-  (boolean (some single-fire-effect-cats (:effects (@rich-type-of-id-fn ref-id)))))
+  (boolean (some single-fire-effect-cats (:effects (reg/rich-type-of-id ref-id)))))
 
 
 (defn- evict-preserving-effectful!
@@ -373,9 +365,8 @@
 ;; consults live elsewhere: `*path-trace*` in `compile-runtime` (per-
 ;; execution opt-in, bound by `crud.fn-execution.persist/run-future`)
 ;; and `*traced-fn-ids*` above (per-fn opt-in). The `requiring-resolve`
-;; delays below break the load cycle the direct `:require`s would
-;; create (compile-eager ← compile-runtime ← interface ← registry.core)
-;; — same precedent as `rich-type-of-id-or-stale-name-fn` /
+;; delay below breaks the load cycle a direct `:require` would create
+;; (compile-runtime requires this ns) — same precedent as
 ;; `make-single-arg-callable-fn` further down this file.
 ;; =============================================================================
 
@@ -386,17 +377,6 @@
    pays one delay-field read + one Var read, nothing else, when
    tracing is off."
   (delay (requiring-resolve 'graphden.executor.compile-runtime/*path-trace*)))
-
-
-(def ^:private trace-capture-class-fn
-  "Var handle to `registry.core/trace-capture-class` — the capture-time
-   frame classification (`:plain` / `:secret-output` / `:secret-input`
-   / `:unknown`) that decides value capture, `{:hidden …}` marking, and
-   ancestor poisoning. FAIL-CLOSED: a frame with no registry entry
-   classifies `:unknown` and is treated like a secret, not captured.
-   Called only on the already-opted-in slow path, never when tracing
-   is off."
-  (delay (requiring-resolve 'graphden.executor.registry.core/trace-capture-class)))
 
 
 (def max-path-trace-entries
@@ -595,7 +575,7 @@
    fresh one. `ref-name` (the ref's authored row name) is the stale-id
    rescue for the classification."
   [trace ref-id ref-name]
-  (let [cls (@trace-capture-class-fn ref-id ref-name)
+  (let [cls (reg/trace-capture-class ref-id ref-name)
         [n parent] (leaf-frame! trace)
         base (cond-> {:seq n :fn-id ref-id}
                (some? parent) (assoc :parent-seq parent))]
@@ -640,7 +620,7 @@
    whose secret rich-type lives under its current name reads as
    non-secret and its return would be captured (a narrow trace leak)."
   [trace ref-id ref-name thunk]
-  (let [cls (@trace-capture-class-fn ref-id ref-name)]
+  (let [cls (reg/trace-capture-class ref-id ref-name)]
     (if (not= :plain cls)
       ;; Hidden frame (secret-touching, or fail-closed unknown): the
       ;; entry records UP-FRONT — the return value is never read into
@@ -991,11 +971,6 @@
                          (child (if lambda-args (merge fa* lambda-args) fa*) ctx))))))
 
 
-(def ^:private rich-type-of-id-or-stale-name-fn
-  (delay (requiring-resolve
-           'graphden.executor.registry.core/rich-type-of-id-or-stale-name)))
-
-
 (defn- compile-time-value-root?
   "True iff `fn-id`'s root base-fn is registered `:compile-time-value?`
    — the marker (from the impls.clj registry, threaded through
@@ -1004,7 +979,7 @@
    persistent atom."
   [fn-id {:keys [fn-map] :as lookups}]
   (let [root (l/root-fn fn-id fn-map lookups)]
-    (boolean (some-> (@rich-type-of-id-or-stale-name-fn (:id root)
+    (boolean (some-> (reg/rich-type-of-id-or-stale-name (:id root)
                                                         (:name root))
                      :compile-time-value?))))
 
@@ -1532,13 +1507,6 @@
   (atom []))
 
 
-(def ^:private effective-rich-types-fn
-  ;; requiring-resolve — same cycle-avoidance as
-  ;; `rich-type-of-id-or-stale-name-fn` above.
-  (delay (requiring-resolve
-           'graphden.executor.registry.core/effective-rich-types)))
-
-
 (defn- compile-all-cache-key
   "Hash of (graph shape × base-fn name set × ambient rich-types).
    Same key ⇒ same compile output. Picks the same per-entity field set
@@ -1562,7 +1530,7 @@
          (set (mapcat val bindings-by-fn))
          (set (mapcat val items-by-binding))
          (set (keys base-fns))
-         (@effective-rich-types-fn)]))
+         (reg/effective-rich-types)]))
 
 
 (defn compile-all

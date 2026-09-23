@@ -13,7 +13,8 @@
   (:require
     [clojure.set :as set]
     [graphden.executor.compile.bindings :as b]
-    [graphden.executor.compile.lookups :as l]))
+    [graphden.executor.compile.lookups :as l]
+    [graphden.executor.registry.core :as reg]))
 
 
 (defn chain-source-slot-ids
@@ -866,15 +867,6 @@
       (set (keys (or (second constraint) {}))))))
 
 
-(def ^:private rich-type-of-id-fn
-  (delay (requiring-resolve 'graphden.executor.registry.core/rich-type-of-id)))
-
-
-(def ^:private rich-type-of-id-or-stale-name-fn
-  (delay (requiring-resolve
-           'graphden.executor.registry.core/rich-type-of-id-or-stale-name)))
-
-
 (defn- declared-lambda-params
   "The fn-def's AUTHORED `:lambda-params` (ordered vector of its own
    free-arg names), from the rich-types registry entry — or nil when
@@ -893,16 +885,16 @@
                         (some->> (:lambda-params
                                    (get (:fn-map lookups) r-fn-id))
                                  (mapv keyword))
-                        (:lambda-params (@rich-type-of-id-fn r-fn-id))
+                        (:lambda-params (reg/rich-type-of-id r-fn-id))
                         ;; LEGACY-ROW rescue — delegated to the shared
                         ;; registry helper (audit-3: the same rescue now
                         ;; also covers produces-callable? /
                         ;; lazy-seq-args / compile-time-value?, all
                         ;; previously silent under stale identities).
                         (:lambda-params
-                          (@rich-type-of-id-or-stale-name-fn
-                           r-fn-id
-                           (:name (get (:fn-map lookups) r-fn-id)))))]
+                          (reg/rich-type-of-id-or-stale-name
+                            r-fn-id
+                            (:name (get (:fn-map lookups) r-fn-id)))))]
     (let [frees (set (deep-free-ext-names r-fn-id lookups))
           ;; The author may declare a param under the PUBLIC
           ;; (closest-chain-rename) name the editor shows

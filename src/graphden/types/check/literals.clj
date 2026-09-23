@@ -5,8 +5,8 @@
    recursion into the type-checker), and FIVE namespaces outside the
    type-checker call into this surface directly:
 
-   - `executor.registry.core` — `literal-satisfies-refinement?` (via
-     `requiring-resolve`) + `constraint-compatible-with-base?`
+   - `executor.registry.core` — `literal-satisfies-refinement?` +
+     `constraint-compatible-with-base?`
    - `crud.type_check` — `classify-literal`, `literal-satisfies-refinement?`
    - `crud.validation` — `constraint-compatible-with-base?`
    - `crud.value_form` — `classify-literal`, `literal-satisfies-refinement?`

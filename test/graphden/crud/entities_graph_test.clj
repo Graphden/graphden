@@ -1020,4 +1020,18 @@
     (let [body (via-entities {"scope" "index"})]
       (is (contains? body :fns))
       (is (contains? body :namespaces))
-      (is (seq (:fns body))))))
+      (is (seq (:fns body)))))
+
+  ;; The dispatch is a graph `:cond` since the one scope-switching base-fn
+  ;; was split into a base-fn per projection.
+  (testing "scope=subtree + root-id — only the closure"
+    (let [add-id (str (get (:all-name->id *graph*) :add))
+          body (via-entities {"scope" "subtree" "root-id" add-id})]
+      (is (some #(= add-id (:id %)) (:fns body)))
+      (is (< (count (:fns body)) (count (:fns (via-entities {})))))))
+
+  (testing "no scope, an unknown scope, and subtree without a root — the full dump"
+    (doseq [params [{} {"scope" "view"} {"scope" "subtree"}]]
+      (let [body (via-entities params)]
+        (is (contains? body :slots) (pr-str params))
+        (is (contains? body :bindings) (pr-str params))))))

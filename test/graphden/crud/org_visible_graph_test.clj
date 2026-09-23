@@ -86,28 +86,28 @@
 
 
 (deftest sidebar-scopes-respect-org-visibility
-  ;; `list-all-graph-entities` reads `base` off the cache; these pin the
+  ;; the `graph-*` reads take `base` off the cache; these pin the
   ;; two enumeration scopes a tenant hits on every editor init.
   (let [ctx {:graph-cache (atom full-graph)
              :storage empty-ns-storage}]
     (binding [diag/*diagnostics-override* (atom {})]
       (testing ":search cannot find a foreign org's fn"
         (tctx/with-org "bcorp"
-                       (let [{:keys [fns]} (entities/list-all-graph-entities
-                                             ctx :search nil nil "acme")]
+                       (let [{:keys [fns]} (entities/graph-search
+                                             ctx "acme" false)]
                          (is (empty? fns) "substring search over foreign names finds nothing"))
-                       (let [{:keys [fns]} (entities/list-all-graph-entities
-                                             ctx :search nil nil "bcorp-own")]
+                       (let [{:keys [fns]} (entities/graph-search
+                                             ctx "bcorp-own" false)]
                          (is (= [(str b-fn-id)] (mapv (comp str :id) fns))
                              "own fns still resolve"))))
       (testing ":tree diag counts ignore foreign fn-ids in the shared bucket"
         (diag/record! nil a-fn-id [{:message "acme's broken fn"}])
         (tctx/with-org "bcorp"
-                       (let [{:keys [counts]} (entities/list-all-graph-entities ctx :tree)]
+                       (let [{:keys [counts]} (entities/graph-tree ctx)]
                          (is (every? (comp nil? :type-error-count) counts)
                              "no phantom per-namespace error chip from a foreign org's fn")))
         (tctx/with-org "acme"
-                       (let [{:keys [counts]} (entities/list-all-graph-entities ctx :tree)]
+                       (let [{:keys [counts]} (entities/graph-tree ctx)]
                          (is (= 1 (reduce + 0 (keep :type-error-count counts)))
                              "the owning org still sees its own count")))))))
 

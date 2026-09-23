@@ -281,21 +281,49 @@
    :return-type [:map :keyword :uuid]
    :effects #{:db}}
 
-  {:name :list-all-graph-entities
-   :description "Dump every fn, arg, and namespace currently in storage — the payload behind `/api/graph/entities`. `scope :tree` returns `{:namespaces :counts}` (O(namespaces) sidebar init). `scope :namespace` + `namespace-id` returns one namespace's light fn rows (lazy expand). `scope :search` + `q` returns capped name-substring matches (filter box / pickers / name resolution). `scope :index` returns `{:fns :namespaces}` (legacy full-fns pull). `scope :subtree` + `root-id` returns only the transitive closure reachable from `root-id` via parent-ids + binding-refs + type-overrides + list-item-refs + own-slot type-fn-ids (~98% smaller — typical per-fn editor view)."
-   :args {:scope {:required false :type :nullable-keyword
-                  :value nil
-                  :description "`:tree` → `{:namespaces :counts}` only (sidebar init). `:namespace` (+ `namespace-id`) → one namespace's light fns. `:search` (+ `q`) → capped name matches; `:search-text` adds description matches ranked last. `:index` → `{:fns :namespaces}` full pull. `:subtree` (+ `root-id`) → subgraph reachable from it. `nil` / `:full` (default) → complete dump."}
-          :root-id {:required false :type :nullable-uuid
-                    :value nil
-                    :description "Required when `:scope :subtree`. Ignored otherwise. Anchor for the BFS closure."}
-          :namespace-id {:required false :type :nullable-uuid
-                         :value nil
-                         :description "Required when `:scope :namespace`. Ignored otherwise. Selects the namespace whose fns to return."}
-          :q {:required false :type :nullable-text
-              :value nil
-              :description "Required when `:scope :search`. Ignored otherwise. Case-insensitive substring matched against each fn's raw name."}}
-   :return-type :keyword-map
+  ;; --- The editor's graph reads — one base-fn per projection over the
+  ;; shared graph-cache. Every fn row carries a `:role` (Types vs
+  ;; Functions decided server-side); `GET /api/graph/entities` picks one
+  ;; by its `scope` (`:all-entities-handler`), each MCP tool binds its own.
+  {:name :graph-tree
+   :description "Sidebar init — the namespace list plus a per-namespace count of named fns (`:counts`, with `:type-count` / `:fn-count` / `:type-error-count` where >0). No fn rows: leaves load lazily through `:graph-namespace-fns`."
+   :args {}
+   :return-type {:namespaces [:list :keyword-map] :counts [:list :keyword-map]}
+   :effects #{:db}}
+
+  {:name :graph-namespace-fns
+   :description "One namespace's light fn rows (the sidebar's lazy expand); nil `namespace-id` selects the root bucket."
+   :args {:namespace-id {:type :nullable-uuid :description "The namespace whose named fns to return; nil = namespace-less fns."}}
+   :return-type {:fns [:list :keyword-map]}
+   :effects #{:db}}
+
+  {:name :graph-search
+   :description "Capped light fn rows whose qualified name contains `q` (case-insensitive; `/` reads as `.`). With `descriptions?`, description matches too, ranked last — what the MCP `search-fns` tool asks for."
+   :args {:q {:type :nullable-text :description "The needle; blank → no rows."}
+          :descriptions? {:type :bool :description "Also match descriptions (ranked after name matches)."}}
+   :return-type {:fns [:list :keyword-map]}
+   :effects #{:db}}
+
+  {:name :graph-index
+   :description "Every fn row and namespace — `{:fns :namespaces}`, nil fields dropped (CLI / batch pull)."
+   :args {}
+   :return-type {:fns [:list :keyword-map] :namespaces [:list :keyword-map]}
+   :effects #{:db}}
+
+  {:name :graph-subtree
+   :description "The fn-view slice: the fns transitively reachable from `root-id` via parent-ids + binding refs + type overrides + list-item refs + own-slot type-fn-ids, plus the rows they own (~98% smaller than the full dump). Empty rows for a nil / unknown root."
+   :args {:root-id {:type :nullable-uuid :description "Anchor of the closure."}}
+   :return-type {:fns [:list :keyword-map] :slots [:list :keyword-map] :fn-slots [:list :keyword-map]
+                 :bindings [:list :keyword-map] :list-items [:list :keyword-map]
+                 :namespaces [:list :keyword-map]}
+   :effects #{:db}}
+
+  {:name :graph-full
+   :description "Every fn, slot, fn-slot, binding, list item and namespace — the editor's initial load (~4.5 MB on a 3000-fn graph)."
+   :args {}
+   :return-type {:fns [:list :keyword-map] :slots [:list :keyword-map] :fn-slots [:list :keyword-map]
+                 :bindings [:list :keyword-map] :list-items [:list :keyword-map]
+                 :namespaces [:list :keyword-map]}
    :effects #{:db}}
 
   {:name :fn-unread-bindings
@@ -305,15 +333,15 @@
    :effects #{:db}}
 
   {:name :graph-fn-defs-subtree
-   :description "The fn-defs (fns.edn maps) of the subtree reachable from `root-id` — the same closure `:list-all-graph-entities` `:scope :subtree` walks, emitted through the records→EDN codec (`packages.export/export-subtree`). `[]` for nil / unknown root. What an AI author reads back through `read-fn`: the exact syntax it writes."
+   :description "The fn-defs (fns.edn maps) of the subtree reachable from `root-id` — the same closure `:graph-subtree` walks, emitted through the records→EDN codec (`packages.export/export-subtree`). `[]` for nil / unknown root. What an AI author reads back through `read-fn`: the exact syntax it writes."
    :args {:root-id {:type :nullable-uuid :description "Anchor fn-id; nil → `[]`."}}
    :return-type [:list :keyword-map]
    :effects #{:db}}
 
   {:name :strip-hidden-impl
-   :description "Apply the installed view-impl filter to a `/api/graph/entities` dump — strips the internal composition (parent-ids + bindings) of fns the current viewer lacks `:view-impl` on (own-org / grant), leaving each fn's signature. Identity when no tenancy addon is wired (single-tenant sees everything). Pure pass-through base-fn over the `graphden.crud.entities/apply-view-impl-filter` seam; the actual filter fn is installed by the tenancy addon. Compose it over `:list-all-graph-entities` in the graph-read handler."
+   :description "Apply the installed view-impl filter to a `/api/graph/entities` dump — strips the internal composition (parent-ids + bindings) of fns the current viewer lacks `:view-impl` on (own-org / grant), leaving each fn's signature. Identity when no tenancy addon is wired (single-tenant sees everything). Pure pass-through base-fn over the `graphden.crud.entities/apply-view-impl-filter` seam; the actual filter fn is installed by the tenancy addon. Compose it over the `:graph-*` reads in the graph-read handler."
    :args {:graph {:type :keyword-map
-                  :description "The graph dump from :list-all-graph-entities."}}
+                  :description "A graph dump from one of the `:graph-*` reads."}}
    :return-type :keyword-map
    :effects #{}}
 

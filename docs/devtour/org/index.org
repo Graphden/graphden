@@ -21,11 +21,11 @@ This tour is about the code, not the workflow. For how to BUILD and test it — 
 - [[file:storage.org][Storage & the graph]] (18 · ~61 min) :: How the graph is stored and traversed — Postgres, recursive CTEs, the StorageCRUD / ExecutionGraph protocols.
 - [[file:versioning.org][Branches & versioning]] (23 · ~100 min) :: The VersionedStorage decorator, per-branch resolution, diff/merge and branch-local? propagation.
 - [[file:types.org][Type system]] (17 · ~83 min) :: Subtyping, unification, narrowing, refinements, the sweep-at-zero checker, and the :secret information-flow marker.
-- [[file:crud.org][CRUD & the write path]] (24 · ~70 min) :: Entity/branch/secret writes, request parsing, type-check on write, fn-execution lookup + persist.
-- [[file:packages.org][Packages — the graph's content]] (32 · ~104 min) :: How fns.edn + impls.clj become base-fns and fn-defs; the loader, load order, and the first-party package tree — then the inverse: export, the ref wire form, and the publish/install registry.
+- [[file:crud.org][CRUD & the write path]] (24 · ~71 min) :: Entity/branch/secret writes, request parsing, type-check on write, fn-execution lookup + persist.
+- [[file:packages.org][Packages — the graph's content]] (31 · ~104 min) :: How fns.edn + impls.clj become base-fns and fn-defs; the loader, load order, and the first-party package tree — then the inverse: export, the ref wire form, and the publish/install registry.
 - [[file:boot.org][Boot & lifecycle]] (12 · ~23 min) :: How the process starts: the Integrant component graph, the Aero config + addon manifest, and the router seams installed at boot.
 - [[file:web.org][Web — routing & the page runtime]] (19 · ~30 min) :: HTTP from socket to response body: routing, middleware as graph fns, the hiccup page runtime, and the APIs the editor reads.
-- [[file:layout.org][Layout — the editor's graph view]] (6 · ~23 min) :: Turn raw fn/slot/binding rows into the placed cards, edges and server-computed facts the editor renders.
+- [[file:layout.org][Layout — the editor's graph view]] (6 · ~22 min) :: Turn raw fn/slot/binding rows into the placed cards, edges and server-computed facts the editor renders.
 - [[file:editor.org][Editor frontend — the browser half]] (16 · ~76 min) :: The ~25k lines of plain ES that draw the graph, bind the edits and mount the server's partials. No build step, no framework.
 - [[file:services.org][Services & the fleet]] (19 · ~52 min) :: Desired-state service registry, the reconciler/supervisor, and the dynamic multi-executor fleet controller.
 - [[file:platform.org][Platform seams & hardening]] (11 · ~28 min) :: The seams the multi-tenant addon plugs into (docs/TENANCY_SEAM.md) and the hardening layers the core itself carries — effect gate, SSRF egress guard, alerting, BYO executor.

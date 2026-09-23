@@ -59,9 +59,9 @@
 ;; descendant would expose two differently-typed slots under the same
 ;; user-visible name, and the executor wouldn't know which to forward.
 ;;
-;; The editor's `editor-edit-validation.js/miCollisionCheck` runs the
-;; same logic client-side; this is the server-side mirror so non-editor
-;; API consumers (scripts, tests, future UIs) get the same protection.
+;; This server-side check is the only one: the editor sends the parent
+;; set and renders the refusal (its client-side copy judged some valid
+;; sets wrong and was removed), so every API consumer gets one rule.
 
 (defn- canonical-slot-id
   "The root of `slot-id`'s `:source-slot-id` chain — a renamed VIEW

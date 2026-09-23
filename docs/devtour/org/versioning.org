@@ -194,13 +194,13 @@ The branch-symmetric resolved-view diff: gather every entity touched on either s
 :PROPERTIES:
 :CUSTOM_ID: versioning/diff-branches-view
 :FILE: src/graphden/versioning/storage/diff_view.clj
-:LINE: 203
+:LINE: 197
 :MINS: 6.5
 :END:
 
 The DISPLAY model over diff-branches (diff v2): entries grouped under the fn that owns them (list-items chain through their binding), per-field before/after pairs for modified rows, and batch name-resolution for slots and fn-typed refs. The editor's compare mode (inspector diff panel + Review dialog) client-renders THIS shape from the :diff-branches-view base-fn's JSON endpoint; the v1 API keeps the flat wire shape.
 
-- source :: [[file:../../../src/graphden/versioning/storage/diff_view.clj::(defn diff-branches-view][src/graphden/versioning/storage/diff_view.clj:203]]
+- source :: [[file:../../../src/graphden/versioning/storage/diff_view.clj::(defn diff-branches-view][src/graphden/versioning/storage/diff_view.clj:197]]
 
 * 16. detect-conflicts
 :PROPERTIES:
@@ -285,13 +285,13 @@ The graph EPOCH — freshness as a comparison, not an imperative. Every graph-sh
 :PROPERTIES:
 :CUSTOM_ID: versioning/build-branch-ctx
 :FILE: src/graphden/system/branch_router.clj
-:LINE: 135
+:LINE: 136
 :MINS: 4.3
 :END:
 
 Builds a fresh live ~ExecutionContext~ whose storage is a ~VersionedStorage~ rewrapped at the requested branch, with its own compiled-registry and graph-cache atoms — and its own RICH-TYPES SLICE, forked from the base's view at build time and bound as the registry override for the ctx's compiles and every request dispatched to it. This is how a branch gets its own executor without re-sharding the graph.
 
-- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- build-branch-ctx][src/graphden/system/branch_router.clj:135]]
+- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- build-branch-ctx][src/graphden/system/branch_router.clj:136]]
 - see also :: [[file:executor.org::#executor/create-context][create-context]]
 - same file :: [[file:versioning.org::#versioning/dispatch*][dispatch*]]
 
@@ -299,12 +299,12 @@ Builds a fresh live ~ExecutionContext~ whose storage is a ~VersionedStorage~ rew
 :PROPERTIES:
 :CUSTOM_ID: versioning/dispatch*
 :FILE: src/graphden/system/branch_router.clj
-:LINE: 1473
+:LINE: 1466
 :MINS: 8.6
 :END:
 
 The top-level Ring dispatch: extract the branch ref (header or query), resolve it to a branch-id, and route the request to that branch's lazily-built handler (400 on an unknown branch). Where a live request finally lands in the correct per-branch context. Its public wrapper ~dispatch~ first short-circuits ~/livez~ — the one registry-independent liveness path — so a pod busy on a full recompile still answers its probe.
 
-- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- dispatch*][src/graphden/system/branch_router.clj:1473]]
+- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- dispatch*][src/graphden/system/branch_router.clj:1466]]
 - same file :: [[file:versioning.org::#versioning/build-branch-ctx][build-branch-ctx]]
 - referenced from :: [[file:storage.org::#storage/create-listener][create-listener]], [[file:web.org::#web/dispatch-to-branch][dispatch-to-branch]]

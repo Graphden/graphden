@@ -266,7 +266,7 @@ as `:namespace` on each fn-def, reconstructed on install).
   `publish-package` diffs the bundle against the newest published version
   BELOW the candidate (`graphden.packages.compat/breaking-changes` — removed
   public fn-defs, removed / narrowed / newly-required args, dropped bindings,
-  changed renames or parents, widened returns, added base-fn effects,
+  changed renames or parents, widened returns, a grown or dropped `:expects-effects` contract,
   reshaped type-rows; `_`-private fn-defs never count) and diffs the two
   bundles' `:package-dependencies` (`incompatible-dependency-bumps` — a
   dependency that left its previous caret range is `:dependency-incompatible`,

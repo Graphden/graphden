@@ -7,7 +7,7 @@ The ~25k lines of plain ES that draw the graph, bind the edits and mount the ser
 
 after: web, layout
 
-[[file:index.org][index]] · ~76 min
+[[file:index.org][index]] · ~77 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -67,10 +67,10 @@ Most of its length is the sizing pass that runs AFTER the response: per-column w
 :CUSTOM_ID: editor/renderGraph
 :FILE: resources/packages/app/editor/editor-render.js
 :LINE: 105
-:MINS: 9.6
+:MINS: 9.7
 :END:
 
-One render cycle, and the reason it is not a one-liner: prime the selected fn's subtree, capture an ANCHOR node before the await so the canvas doesn't jump under the cursor, fetch the layout, diff it against the live graph, then re-measure — card heights are only known after the overlays exist, so the server's grid is corrected against measured DOM and the nodes settle onto the result.
+One render cycle, and the reason it is not a one-liner: a render GENERATION makes the last call win across its awaits, prime the selected fn's subtree, capture an ANCHOR node before the await so the canvas doesn't jump under the cursor, fetch the layout, diff it against the live graph, then re-measure — card heights are only known after the overlays exist, so the server's grid is corrected against measured DOM and the nodes settle onto the result.
 
 - source :: [[file:../../../resources/packages/app/editor/editor-render.js::async function renderGraph(shouldFit = true) {][resources/packages/app/editor/editor-render.js:105]]
 

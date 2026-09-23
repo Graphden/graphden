@@ -3,7 +3,7 @@
 ;; Consumed by docs/devtour/devtour.el; every step carries the anchor
 ;; (:file + :head) rather than baked source, so emacs shows live code.
 (:title "Graphden — developer tour"
- :mins 767.1
+ :mins 767.2
  :blocks
  ((:id "executor" :title "Executor — how a fn runs" :status "toured" :mins 86.1 :summary "The spine: turn a graph 'description of a computation' into a value."
    :steps
@@ -390,7 +390,7 @@ Same shape as `subtype?`, so read it the same way: one `cond` over the normalise
      :say "Stages 3+ — grid placement: roots at column zero, dependents right of their sources, rows packed to avoid overlap, plus the validation summary. Pixel geometry stays client-side (measured reflow off the real DOM); the server owns the grid topology.")
     (:key "layout/annotate" :n 6 :gi 173 :defn "annotate" :ns "graphden.layout.strip-facts" :file "src/graphden/layout/strip_facts.clj" :line 60 :lang "clj" :mins 2.3 :head "(defn annotate" :see (("versioning/effective-branch-local?" . "effective-branch-local?")) :refs nil :siblings nil
      :say "The editor-facing tail: attach server-computed FACTS to each fn-node — the inherited return-type alias, the rule-owning base-fn (`registry/rule-owner-of`), and the transitive branch-local seed (`branch-local/branch-local-seed`). These replaced three hand-written client mirrors of the same walks; the client renders facts, it doesn't re-derive them.")))
-  (:id "editor" :title "Editor frontend — the browser half" :status "toured" :mins 76.4 :summary "The ~25k lines of plain ES that draw the graph, bind the edits
+  (:id "editor" :title "Editor frontend — the browser half" :status "toured" :mins 76.5 :summary "The ~25k lines of plain ES that draw the graph, bind the edits
              and mount the server's partials. No build step, no framework."
    :steps
    ((:key "editor/initGraph" :n 1 :gi 174 :defn "initGraph" :ns "resources/packages/app/editor/editor-main.js" :file "resources/packages/app/editor/editor-main.js" :line 306 :lang "js" :mins 4.7 :head "async function initGraph() {" :see (("editor/authFetch" . "authFetch")) :refs nil :siblings nil
@@ -403,8 +403,8 @@ Same shape as `subtype?`, so read it the same way: one `cond` over the normalise
      :say "The client does NOT lay the graph out. It POSTs the selected root plus the per-node expansion spec to `/api/graph/layout` and gets back nodes, edges and a `nodeId → {x, y, row, col}` map. This is the wire crossing into the previous block: the server owns grid topology, the client owns pixels.
 
 Most of its length is the sizing pass that runs AFTER the response: per-column widths, then per-column gaps computed from the widest edge label plus the type chips and badges the overlays render beside it. That is the client's one real layout responsibility — making the server's grid fit the pixels its own cards actually occupy. Read the POST at the top, then jump to the comment blocks that explain each gap term.")
-    (:key "editor/renderGraph" :n 5 :gi 178 :defn "renderGraph" :ns "resources/packages/app/editor/editor-render.js" :file "resources/packages/app/editor/editor-render.js" :line 105 :lang "js" :mins 9.6 :head "async function renderGraph(shouldFit = true) {" :see nil :refs nil :siblings nil
-     :say "One render cycle, and the reason it is not a one-liner: prime the selected fn's subtree, capture an ANCHOR node before the await so the canvas doesn't jump under the cursor, fetch the layout, diff it against the live graph, then re-measure — card heights are only known after the overlays exist, so the server's grid is corrected against measured DOM and the nodes settle onto the result.")
+    (:key "editor/renderGraph" :n 5 :gi 178 :defn "renderGraph" :ns "resources/packages/app/editor/editor-render.js" :file "resources/packages/app/editor/editor-render.js" :line 105 :lang "js" :mins 9.7 :head "async function renderGraph(shouldFit = true) {" :see nil :refs nil :siblings nil
+     :say "One render cycle, and the reason it is not a one-liner: a render GENERATION makes the last call win across its awaits, prime the selected fn's subtree, capture an ANCHOR node before the await so the canvas doesn't jump under the cursor, fetch the layout, diff it against the live graph, then re-measure — card heights are only known after the overlays exist, so the server's grid is corrected against measured DOM and the nodes settle onto the result.")
     (:key "editor/createFnOverlay" :n 6 :gi 179 :defn "createFnOverlay" :ns "resources/packages/app/editor/editor-overlay-fn.js" :file "resources/packages/app/editor/editor-overlay-fn.js" :line 215 :lang "js" :mins 9.1 :head "function createFnOverlay(node, container) {" :see (("layout/derive-fn-slot-views" . "derive-fn-slot-views")) :refs nil :siblings nil
      :say "A node is not drawn — it is an absolutely-positioned HTML card riding the layer transform (edges are SVG; everything else is DOM). This builds one fn card: the inheritance levels from `parent-ids`, the use-site header when the card is an expanded child rather than the navigation root, and a row per slot. The slot/binding model of the very first block, made clickable.")
     (:key "editor/bindActionDispatch" :n 7 :gi 180 :defn "bindActionDispatch" :ns "resources/packages/web/runtime/graphden-runtime.js" :file "resources/packages/web/runtime/graphden-runtime.js" :line 78 :lang "js" :mins 2.3 :head "function bindActionDispatch(host) {" :see (("web/hiccup-element" . "hiccup-element")) :refs (("web/hiccup-element" . "hiccup-element")) :siblings (("editor/loadPartial" . "loadPartial"))

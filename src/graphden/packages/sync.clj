@@ -555,7 +555,8 @@
    The inbound check is conservative: a stale row referenced only by
    ANOTHER stale row is kept this round; re-importing the same snapshot
    converges (the referencing row is gone by then). Returns
-   `{:pruned [names] :kept-referenced [names]}`.
+   `{:pruned [names] :kept-referenced [names] :pruned-ids #{ids}}` — the
+   ids so the caller can invalidate exactly what went away.
 
    Scope is derived from the bundle's OWN namespaces, so an EMPTY bundle
    covers no namespaces and prunes nothing — `?prune=true` on an empty
@@ -587,7 +588,8 @@
       (log/warn "bundle prune: fn absent from the snapshot but STILL REFERENCED — kept"
                 {:name (:name row) :id (:id row)}))
     {:pruned (mapv :name pruned)
-     :kept-referenced (mapv :name kept)}))
+     :kept-referenced (mapv :name kept)
+     :pruned-ids (into #{} (map :id) pruned)}))
 
 
 (defn- run-type-check-sweep!

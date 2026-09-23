@@ -2756,16 +2756,113 @@
   ;; snapshots land here, then ride the normal diff → review → merge flow.
   ;; Body is application/edn TEXT (EDN keeps a reference `:other-fn`
   ;; distinguishable from the string "other-fn"). Guards first, one
-  ;; predicate per rule; the §3.3 atomic write core is `:import-bundle!`.
+  ;; predicate per rule; the write is the `:import-bundle!` pipeline below.
   ;; ---------------------------------------------------------------------
-  {:name :import-bundle!
-   :description "Apply a bundle's fn-defs to the branch named `branch-name` (create it when `create?`, stamping the caller as owner with the `owner` write-policy). Platform-owned defs are skipped + reported; the rest sync through the same path the package loader uses; `prune?` adds snapshot semantics (branch tombstones for fns the bundle no longer contains, kept + reported while referenced); the TARGET branch's registry is delta-invalidated. Editor-born same-name identities are ADOPTED onto their deterministic ids first (adopt-bundle-identities! — the pull-after-push dedup). Returns {:fn-ids :skipped-owned :adopted :pruned} or {:error \"branch-not-found\"}."
-   :args {:branch-name {:type :nullable-text :description "Target branch — never the request's own, never main implicitly. nil/blank never resolves (the route's guard 400s first)."}
-          :create? {:type :bool :description "Create the branch (forked off the request's branch) when it doesn't exist."}
-          :prune? {:type :bool :description "Snapshot semantics: tombstone fns in the bundle's namespaces that the bundle no longer contains."}
-          :fn-defs {:type [:union :null [:list :keyword-map]] :description "Parsed fn-def maps, exactly the fns.edn shape."}}
+  ;; The import is a pipeline of named steps over effectful primitives:
+  ;; find / create the branch → partition out the platform-owned defs →
+  ;; drop the anons that partition orphaned → adopt editor-born identities
+  ;; → the shared branch sync (`:sync-fn-defs-branch!`, storage/branches —
+  ;; the MCP upsert's own) → optional prune. `:do` orders the writes; every
+  ;; step is a ref thunk, so the result map re-reads them without re-running.
+  {:name :branch-by-name
+   :description "The branch row named `:branch-name`, or nil — a read of the branch table (branches are not branch-versioned)."
+   :args {:branch-name {:type :nullable-text :description "Branch name."}}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
+  {:name :create-owned-branch!
+   :description "Create branch `:branch-name` off the request's branch, stamping the caller as owner with the `owner` write-policy when a user is bound (the push-branch convention). Returns the row."
+   :args {:branch-name {:type :nullable-text :description "Branch name."}}
    :return-type :keyword-map
    :effects #{:db}}
+
+  {:name :drop-orphan-anon-defs
+   :description "`:fn-defs` without the exporter-lifted `_anon-*` defs no kept def still reaches — the hygiene step after a partition dropped some owners (syncing those orphans flooded the target with duplicate anonymous identities). Pure."
+   :args {:fn-defs {:type [:union :null [:list :keyword-map]] :description "Parsed fn-def maps."}}
+   :return-type [:list :keyword-map]}
+
+  {:name :adopt-bundle-identities!
+   :description "On branch `:branch-id`, repoint + purge each editor-born RANDOM-id row whose (namespace, name) a def in `:fn-defs` is about to sync under its deterministic id, so the sync re-creates it canonically (the pull-after-push dedup). Returns the adopted names."
+   :args {:branch-id {:type :uuid :description "Target branch."}
+          :fn-defs {:type [:list :keyword-map] :description "The defs about to sync."}}
+   :return-type [:list :text]
+   :effects #{:db}}
+
+  {:name :prune-bundle-scope!
+   :description "Snapshot semantics on branch `:branch-id`: tombstone the deterministic-id fns of the bundle's namespaces that `:fn-defs` no longer contains (a still-referenced one is kept + reported), and invalidate what went away on that branch. Returns `{:pruned [names] :kept-referenced [names]}`."
+   :args {:branch-id {:type :uuid :description "Target branch."}
+          :fn-defs {:type [:list :keyword-map] :description "The bundle's defs (the snapshot)."}}
+   :return-type {:pruned [:list :text] :kept-referenced [:list :text]}
+   :effects #{:db}}
+
+  {:name :_imp-found-branch
+   :parent :branch-by-name
+   :args {:branch-name {:as :branch-name :type :nullable-text}}}
+
+  {:name :_imp-branch
+   :description "The target branch — found by name, else created when `:create?`, else nil. Never the request's own, never main implicitly."
+   :parent :cond
+   :args {:clauses [{:parent :some? :args {:value :_imp-found-branch}} :_imp-found-branch
+                    {:as :create? :type :bool} {:parent :create-owned-branch!
+                                                :args {:branch-name {:as :branch-name :type :nullable-text}}}
+                    {:value true} {:value nil}]}}
+
+  {:name :_imp-branch-id
+   :parent :get
+   :args {:coll :_imp-branch :key {:value :id} :default nil}}
+
+  {:name :_imp-defs
+   :parent :coalesce
+   :args {:value {:as :fn-defs :type [:union :null [:list :keyword-map]]} :default {:value []}}}
+
+  {:name :_imp-owned-names
+   :description "Names of the bundle's defs whose deterministic id is PACKAGE-OWNED — skipped and reported (the boot sync would restore them anyway; silently repointing platform fns is the incident class)."
+   :parent :platform-owned-def-names
+   :args {:fn-defs :_imp-defs}}
+
+  {:name :_imp-owned-index
+   :parent :zipmap
+   :args {:keys :_imp-owned-names :vals :_imp-owned-names}}
+
+  {:name :_imp-def-not-owned?
+   :description "Is this def (`:item`) NOT one of the package-owned names?"
+   :parent :not
+   :args {:value {:parent :contains?
+                  :args {:coll :_imp-owned-index
+                         :key {:parent :name :args {:value {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}}}}}}}
+
+  {:name :_imp-wanted
+   :description "The defs to write: the bundle minus the package-owned ones, minus the `_anon-*` entries only those owned defs reached."
+   :parent :drop-orphan-anon-defs
+   :args {:fn-defs {:parent :filter :args {:pred :_imp-def-not-owned? :coll :_imp-defs}}}}
+
+  {:name :_imp-adopted
+   :parent :adopt-bundle-identities!
+   :args {:branch-id :_imp-branch-id :fn-defs :_imp-wanted}}
+
+  {:name :_imp-synced
+   :description "Adopt THEN sync (the adoption must land first — it frees the canonical ids the sync writes)."
+   :parent :do
+   :args {:steps [:_imp-adopted
+                  {:parent :sync-fn-defs-branch! :args {:branch-id :_imp-branch-id :fn-defs :_imp-wanted}}]}}
+
+  {:name :_imp-report
+   :parent :zipmap
+   :args {:keys [{:value :fn-ids} {:value :skipped-owned} {:value :adopted}]
+          :vals [:_imp-synced :_imp-owned-names :_imp-adopted]}}
+
+  {:name :_imp-pruned
+   :description "The prune, after the sync."
+   :parent :do
+   :args {:steps [:_imp-synced
+                  {:parent :prune-bundle-scope! :args {:branch-id :_imp-branch-id :fn-defs :_imp-wanted}}]}}
+
+  {:name :import-bundle!
+   :description "Apply a bundle's fn-defs to the branch named `branch-name` (create it when `create?`, stamping the caller as owner with the `owner` write-policy). Platform-owned defs are skipped + reported; the rest sync through the same path the package loader uses (`:sync-fn-defs-branch!`, the MCP upsert's own); `prune?` adds snapshot semantics (branch tombstones for fns the bundle no longer contains, kept + reported while referenced); the TARGET branch's registry is delta-invalidated. Editor-born same-name identities are ADOPTED onto their deterministic ids first (the pull-after-push dedup). Returns {:fn-ids :skipped-owned :adopted :pruned} or {:error \"branch-not-found\"}."
+   :parent :cond
+   :args {:clauses [{:parent :nil? :args {:value :_imp-branch}} {:value {:error "branch-not-found"}}
+                    {:as :prune? :type :bool} {:parent :assoc :args {:map :_imp-report :key {:value :pruned} :value :_imp-pruned}}
+                    {:value true} :_imp-report]}}
 
   ;; ---------------------------------------------------------------------
   ;; The remote dial — every call this package makes to ANOTHER graphden
@@ -3053,7 +3150,7 @@
                          :coll :_import-fns}}}}
 
   {:name :_import-applied
-   :description "The §3.3 write core, referenced by BOTH the branch-not-found predicate and the ok-envelope — the per-execution result cache makes that one write, not two."
+   :description "The import pipeline, referenced by BOTH the branch-not-found predicate and the ok-envelope — the per-execution result cache makes that one write, not two."
    :parent :import-bundle!
    :args {:branch-name :_import-branch-param
           :create? :_import-create?
@@ -3392,7 +3489,7 @@
                      :args {:maps [{:value {:ok false :http-status 502}} :_sync-pull-fetched]}}}}
 
   {:name :_sync-pull-applied
-   :description "The §3.3 write core — the same :import-bundle! the import route uses; hub/<source> is created on demand and pruned to the hub snapshot."
+   :description "The import pipeline — the same :import-bundle! the import route uses; hub/<source> is created on demand and pruned to the hub snapshot."
    :parent :import-bundle!
    :args {:branch-name :_sync-pull-target
           :create? {:value true}

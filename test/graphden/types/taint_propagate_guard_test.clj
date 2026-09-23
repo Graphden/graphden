@@ -56,9 +56,12 @@
     ;; Marketplace (docs/MARKETPLACE.md): identity + roster reads are
     ;; server-derived; :round / :url-encode / / :ui-pref-write!
     ;; return caller content and carry :taint-propagate?.
-    ;; Registry remote primitives (the dials are fn-defs over these): the
-    ;; bearer is server-derived; the pick / store echo caller content.
-    :semver-pick :mirror-store-package-version! :remote-auth-value :import-bundle!
+    ;; Registry remote / import primitives (the dials and the import
+    ;; pipeline are fn-defs over these): the bearer + branch reads are
+    ;; server-derived; the bundle filters / pick / store echo caller content.
+    :semver-pick :mirror-store-package-version! :remote-auth-value
+    :branch-by-name :create-owned-branch! :drop-orphan-anon-defs
+    :adopt-bundle-identities! :prune-bundle-scope!
     :current-instant :current-user-id :current-user-label :loaded-packages
     :round :rows->csv :semver-rank :ui-pref-write! :ui-prefs-read :url-encode
     ;; the origin's marketplace card — remote, server-derived data, not the
@@ -189,8 +192,9 @@
    pass/transform caller content? then it needs `:taint-propagate?`\"; for each
    REMOVED name confirm it genuinely no longer handles content."
   #{:round :ui-pref-write! :url-encode :moderate-package-version! ; marketplace: answer caller content
-    ;; registry: the pick / store / import echo caller content
-    :semver-pick :mirror-store-package-version! :import-bundle!
+    ;; registry: the pick / store / import filters echo caller content
+    :semver-pick :mirror-store-package-version! :drop-orphan-anon-defs
+    :adopt-bundle-identities! :prune-bundle-scope!
     :abs :add :and :assert :assert-eq :assert-some :assoc :assoc-in :atom :blank? :byte-len :call-with :call :call-traced :with-heartbeat
     :call-noargs :call-noargs-traced :case :cell :coalesce :comp :concat :cond :conj :cons :const
     :constant-time-equal? :constantly :contains? :count :deref :dissoc :distinct :div :do :drop

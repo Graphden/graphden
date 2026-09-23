@@ -248,12 +248,12 @@ Admissibility and ranking are two questions, and this is the second one. ~subtyp
 * 19. sync-fn-defs-branch!
 :PROPERTIES:
 :CUSTOM_ID: web/sync-fn-defs-branch!
-:FILE: resources/packages/mcp/mcp/impls.clj
+:FILE: resources/packages/storage/branches/impls.clj
 :LINE: 30
-:MINS: 3.0
+:MINS: 2.9
 :END:
 
-The web layer has a second client: an AI. The optional ~mcp~ package serves ~/mcp~ (JSON-RPC) through the same per-branch router, and this is its only write primitive — sync fn-defs into a branch, then delta-invalidate THAT branch's registry, not the request's own (the AI writes to ~ai/…~ while its POST rides main). The key design point is in the docstring: writes go through the very ~sync-fns-to-storage!~ the package loader uses, so a proposal from an AI meets the same cycle / collision / type constraints as a human's ~fns.edn~.
+The web layer has a second client: an AI. The optional ~mcp~ package serves ~/mcp~ (JSON-RPC) through the same per-branch router, and this is its only write primitive — sync fn-defs into a branch, then delta-invalidate THAT branch's registry, not the request's own (the AI writes to ~ai/…~ while its POST rides main). It lives in ~storage/branches~ because the registry's bundle import (~POST /api/import/graph~) runs the very same sync. The key design point is in the docstring: writes go through the very ~sync-fns-to-storage!~ the package loader uses, so a proposal from an AI meets the same cycle / collision / type constraints as a human's ~fns.edn~.
 
-- source :: [[file:../../../resources/packages/mcp/mcp/impls.clj::(defbase sync-fn-defs-branch!][resources/packages/mcp/mcp/impls.clj:30]]
+- source :: [[file:../../../resources/packages/storage/branches/impls.clj::(defbase sync-fn-defs-branch!][resources/packages/storage/branches/impls.clj:30]]
 - see also :: [[file:executor.org::#executor/sync-fns-to-storage!][sync-fns-to-storage!]], [[file:boot.org::#boot/dispatch-first][dispatch-first]]

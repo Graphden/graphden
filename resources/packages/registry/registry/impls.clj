@@ -12,7 +12,6 @@
     [graphden.executor.defbase :refer [defbase]]
     [graphden.packages.compat :as compat]
     [graphden.packages.export :as export]
-    [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.wire :as wire]
     [graphden.packages.registry-shared :as shared]
@@ -575,81 +574,77 @@
 
 
 ;; ---------------------------------------------------------------------------
-;; Bundle import — POST /api/import/graph. The §3.3 atomic write core:
-;; branch resolve/create, the branch-switched sync, the optional prune and
-;; the TARGET branch's invalidation are one effect-ordered sequence (same
-;; carve-out as the MCP `sync-fn-defs-branch!` and fork/materialize cores);
-;; the HTTP guards + envelopes around it are graph composition in fns.edn.
+;; Bundle import — POST /api/import/graph. The steps are graph composition
+;; (`:import-bundle!` in fns.edn: find/create the branch → partition out the
+;; platform-owned defs → drop orphaned anons → adopt editor-born identities
+;; → the shared `:sync-fn-defs-branch!` → optional prune); these are the
+;; effectful primitives it composes, each one storage call (+ its
+;; invalidation, where it writes graph rows).
 ;; ---------------------------------------------------------------------------
 
-(defbase import-bundle!
-  "Apply an exported bundle's `fn-defs` to the branch named `branch-name` —
-   never the request's own branch, never main implicitly.
+(defn- branch-storage
+  "The request's storage switched onto branch `branch-id`."
+  [ctx branch-id]
+  (vs/switch-branch (request/require-storage ctx) branch-id))
 
-   Steps: resolve the branch by name (create it off the request's branch
-   when `create?`, stamping the caller as owner with the `owner`
-   write-policy — the push-branch convention); split out defs whose
-   deterministic id is PACKAGE-OWNED (skipped + reported — the boot sync
-   would restore them anyway, and silently repointing platform fns is the
-   incident class); sync the rest through the SAME
-   `sync-bundle!` path the package loader uses (name collisions, cycles,
-   type-check all apply — a rejection surfaces as an error the caller can
-   act on); optionally prune (`reconcile-bundle-scope!` — snapshot
-   semantics, branch tombstones only); delta-invalidate THAT branch's
-   compiled registry.
 
-   Returns `{:fn-ids [...] :skipped-owned [...] :adopted [...] :pruned {...}}`, or
-   `{:error \"branch-not-found\"}` when the branch doesn't resolve and
-   `create?` is false — errors ride as data so the graph maps them to
-   response envelopes."
-  [branch-name create? prune? fn-defs]
+(defbase branch-by-name
+  "The branch row named `branch-name`, or nil — a read of the branch table
+   (beneath the versioned view: branches are not branch-versioned)."
+  [branch-name]
   (cr/record-effect! :db)
-  (let [request-storage (request/require-storage ctx)
-        find-branch #(first (sp/query-entities (:base-storage request-storage)
-                                               :branch {:name branch-name}))
-        branch (or (find-branch)
-                   (when create?
-                     (let [principal tc/*current-principal*]
-                       (vs/create-branch! request-storage branch-name
-                                          (cond-> {}
-                                            (seq (str (:user-id principal)))
-                                            (assoc :owner-id (str (:user-id principal))
-                                                   :write-policy "owner"))))))]
-    (if-not branch
-      {:error "branch-not-found"}
-      (let [storage (vs/switch-branch request-storage (:id branch))
-            {owned-defs true wanted-raw false}
-            (group-by #(owned/owned-fn-id? (ids/fn-id (:namespace %) (:name %)))
-                      (vec fn-defs))
-            ;; Dropping the owned defs orphans their exporter-lifted
-            ;; `_anon-*` entries — syncing those floods the branch with
-            ;; duplicate anon identities (they poisoned compiled routers).
-            wanted (pkg-sync/drop-orphan-anon-defs (vec wanted-raw))
-            ;; Canonicalise BEFORE the sync: an editor-born fn has a random
-            ;; id here while the bundle's sync mints uuid-v5(ns,name) — see
-            ;; adopt-bundle-identities!. Without it the first pull after a
-            ;; push lands a duplicate name next to the original.
-            adopted (pkg-sync/adopt-bundle-identities! storage (vec wanted))
-            ;; The sync records rich-types as it checks. This write targets a
-            ;; NAMED branch while the request rides its own — rebind to the
-            ;; TARGET's slice so the records don't land in (and, via the sync
-            ;; world's deterministic uuid-v5 ids, clobber) the request
-            ;; branch's registry. Mirrors mcp/sync-fn-defs-branch!.
-            target-slice (when-let [router (br/current-router)]
-                           (:rich-types-atom (br/ctx-for router (:id branch))))
-            fn-ids (when (seq wanted)
-                     (if target-slice
-                       (binding [registry-core/*rich-types-override* target-slice]
-                         (pkg-sync/sync-bundle! storage (vec wanted)))
-                       (pkg-sync/sync-bundle! storage (vec wanted))))
-            pruned (when prune? (pkg-sync/reconcile-bundle-scope! storage (vec wanted)))]
-        (exec-ctx/invalidate-graph-cache!
-          (if-let [router (br/current-router)] (br/ctx-for router (:id branch)) ctx)
-          fn-ids)
-        (cond-> {:fn-ids (mapv str fn-ids)
-                 :skipped-owned (mapv #(some-> (:name %) name) owned-defs)
-                 :adopted adopted}
-          pruned (assoc :pruned pruned))))))
+  (first (sp/query-entities (:base-storage (request/require-storage ctx))
+                            :branch {:name branch-name})))
+
+
+(defbase create-owned-branch!
+  "Create branch `branch-name` off the request's branch, stamping the
+   caller as owner with the `owner` write-policy (the push-branch
+   convention) when a user is bound. Returns the row."
+  [branch-name]
+  (cr/record-effect! :db)
+  (let [uid (str (:user-id tc/*current-principal*))]
+    (vs/create-branch! (request/require-storage ctx) branch-name
+                       (cond-> {}
+                         (seq uid) (assoc :owner-id uid :write-policy "owner")))))
+
+
+(defbase drop-orphan-anon-defs
+  "`fn-defs` without the exporter-lifted `_anon-*` defs nothing kept in
+   the bundle still reaches (`packages.sync/drop-orphan-anon-defs`) — the
+   hygiene step after the import dropped the platform-owned owners, so
+   their anons don't flood the target with duplicate anonymous
+   identities (they poisoned compiled routers). Pure."
+  [fn-defs]
+  (pkg-sync/drop-orphan-anon-defs (vec fn-defs)))
+
+
+(defbase adopt-bundle-identities!
+  "On branch `branch-id`: repoint + purge each editor-born RANDOM-id row
+   whose `(namespace, name)` a def of `fn-defs` is about to sync under its
+   deterministic id — so the sync re-creates it canonically instead of
+   landing a same-name twin (`packages.sync/adopt-bundle-identities!`, the
+   pull-after-push dedup). Returns the adopted names."
+  [branch-id fn-defs]
+  (cr/record-effect! :db)
+  (pkg-sync/adopt-bundle-identities! (branch-storage ctx branch-id) (vec fn-defs)))
+
+
+(defbase prune-bundle-scope!
+  "Snapshot semantics on branch `branch-id`: tombstone the deterministic-id
+   fns of the bundle's namespaces that `fn-defs` no longer contains, keep
+   (and report) the ones still referenced
+   (`packages.sync/reconcile-bundle-scope!`), and invalidate what went
+   away on THAT branch's registry. Returns `{:pruned :kept-referenced}`."
+  [branch-id fn-defs]
+  (cr/record-effect! :db)
+  (let [{:keys [pruned-ids] :as result}
+        (pkg-sync/reconcile-bundle-scope! (branch-storage ctx branch-id) (vec fn-defs))
+        target-ctx (when-let [router (br/current-router)] (br/ctx-for router branch-id))]
+    ;; The tombstoned fns had no inbound refs (a referenced one is kept),
+    ;; so the delta is exactly those fns; `#{}` when nothing went away.
+    (exec-ctx/invalidate-graph-cache! (or target-ctx ctx) pruned-ids)
+    (dissoc result :pruned-ids)))
 
 
 ;; ---------------------------------------------------------------------------
@@ -717,6 +712,11 @@
    ;; taint-propagate: echoes the caller's pkg-name / version.
    :mirror-store-package-version! {:impl mirror-store-package-version! :taint-propagate? true}
    :remote-auth-value remote-auth-value
-   ;; taint-propagate: :skipped-owned returns the caller bundle's own
-   ;; :name fields — content passthrough (SECRETS.md § T3).
-   :import-bundle! {:impl import-bundle! :taint-propagate? true}})
+   ;; taint-propagate: a filtered sub-vector of the caller's own bundle.
+   :drop-orphan-anon-defs {:impl drop-orphan-anon-defs :taint-propagate? true}
+   :branch-by-name branch-by-name
+   :create-owned-branch! create-owned-branch!
+   ;; taint-propagate: the adopted names are the caller bundle's own :name
+   ;; fields — content passthrough (SECRETS.md § T3), like the pruned names.
+   :adopt-bundle-identities! {:impl adopt-bundle-identities! :taint-propagate? true}
+   :prune-bundle-scope! {:impl prune-bundle-scope! :taint-propagate? true}})

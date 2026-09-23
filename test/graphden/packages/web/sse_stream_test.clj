@@ -64,6 +64,17 @@
     conn))
 
 
+(defn- stop-then-disconnect!
+  "Tear a socket test down server-first. Stopping the server closes the
+   stream, so the reader thread sees EOF and `disconnect` returns at once;
+   the other order parks `disconnect` behind the reader's blocked
+   `readLine` until the 15 s read timeout — 15 s of every test whose
+   stream is still open at the end."
+  [stop conn]
+  (stop)
+  (HttpURLConnection/.disconnect conn))
+
+
 (defn- data-frames
   [lines]
   (into [] (comp (filter #(str/starts-with? % "data: "))
@@ -92,8 +103,7 @@
           (is (= 1 (count (filter #{"<p>A</p>"} frames)))
               "the unchanged content was pushed exactly once — dedupe held")))
       (finally
-        (HttpURLConnection/.disconnect conn)
-        (stop)))))
+        (stop-then-disconnect! stop conn)))))
 
 
 (deftest stream-lifetime-close-test
@@ -107,8 +117,7 @@
         (is (wait/wait-for 5000 #(some #{"event: close"} @lines))
             "close event arrived (client-side EventSource would reconnect)"))
       (finally
-        (HttpURLConnection/.disconnect conn)
-        (stop)))))
+        (stop-then-disconnect! stop conn)))))
 
 
 (deftest stream-capacity-cap-test
@@ -172,8 +181,7 @@
           (is (<= (- @renders before) 2)
               "ten events cost at most two renders, not ten")))
       (finally
-        (HttpURLConnection/.disconnect conn)
-        (stop)))))
+        (stop-then-disconnect! stop conn)))))
 
 
 (deftest wake-callback-unregisters-on-stream-close-test
@@ -201,8 +209,7 @@
         (is (wait/wait-for 5000 #(empty? @(:callbacks listener)))
             "no dead callback lingers on the bus"))
       (finally
-        (HttpURLConnection/.disconnect conn)
-        (stop)))))
+        (stop-then-disconnect! stop conn)))))
 
 
 ;; =============================================================================
@@ -249,8 +256,7 @@
         (is (not-any? #(str/includes? % "UNSCOPED") @lines)
             "no tick rendered outside the captured sandbox"))
       (finally
-        (HttpURLConnection/.disconnect conn)
-        (stop)))))
+        (stop-then-disconnect! stop conn)))))
 
 
 (deftest slow-render-skips-tick-but-stream-survives-test
@@ -277,5 +283,4 @@
         (is (wait/wait-for 5000 #(some #{"<p>ok</p>"} (data-frames @lines)))
             "the stream survived the timeouts and recovered"))
       (finally
-        (HttpURLConnection/.disconnect conn)
-        (stop)))))
+        (stop-then-disconnect! stop conn)))))

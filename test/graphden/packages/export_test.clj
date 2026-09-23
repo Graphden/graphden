@@ -1,4 +1,4 @@
-(ns graphden.packages.export-test
+(ns ^{:cost :heavy} graphden.packages.export-test
   "Round-trip tests for the graph → fns.edn exporter.
 
    Two layers:

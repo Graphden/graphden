@@ -344,13 +344,13 @@ The operator's decision on a public listing (docs/MARKETPLACE.md § 8). Three th
 :PROPERTIES:
 :CUSTOM_ID: packages/install!
 :FILE: src/graphden/packages/loaded.clj
-:LINE: 45
+:LINE: 63
 :MINS: 1.5
 :END:
 
 The loaded-package ROSTER — recorded by ~load-packages~ itself, so boot and the test golden bootstrap leave the same read model. One row per package (version, description, base-fn count, ~impl+fns~ vs ~fns-only~, ~bundled~ vs ~manifest~); the marketplace's Executor tab lists it through ~:loaded-packages~. It is the honest answer to 'what does this executor run?' without offering to install a Type-2 package, which is code and enters through the build.
 
-- source :: [[file:../../../src/graphden/packages/loaded.clj::(defn install!][src/graphden/packages/loaded.clj:45]]
+- source :: [[file:../../../src/graphden/packages/loaded.clj::(defn install!][src/graphden/packages/loaded.clj:63]]
 - referenced from :: [[file:constellation.org::#constellation/extra-deps][extra-deps]]
 
 * 27. seed!

@@ -1,6 +1,5 @@
-(ns ^:serial graphden.packages.marketplace-test
-  "`^:serial` — installs process-global seams (`tc/install-*-fn!` / `deploy-config/install!`) for the length of a test; under kaocha's parallel plugin another namespace's `finally` reset them mid-test (the CI perf job).
-   The marketplace over the registry (docs/MARKETPLACE.md): listing
+(ns graphden.packages.marketplace-test
+  "The marketplace over the registry (docs/MARKETPLACE.md): listing
    normalisation, the non-fns publish route, cards (latest / versions /
    rating / installs), reviews, apply-a-theme → preference, the install
    counter, and the two partials — all through the graph handlers."
@@ -13,13 +12,15 @@
     [graphden.packages.loaded :as loaded]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.deploy-config :as deploy-config]
-    [graphden.tenancy.context :as tc]))
+    [graphden.tenancy.context :as tc]
+    [graphden.test-infra.seams :as ts]))
 
 
 (def ^:dynamic *bootstrap* nil)
 
 
 (use-fixtures :once
+  ts/isolated-seams-fixture
   (fn [t]
     (binding [*bootstrap* (setup/bootstrap-crud-graph-from-golden!
                             "marketplace-test" ["core" "web" "app" "registry" "mcp"])]

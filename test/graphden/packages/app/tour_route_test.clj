@@ -1,4 +1,4 @@
-(ns ^:integration ^:serial graphden.packages.app.tour-route-test
+(ns ^:integration graphden.packages.app.tour-route-test
   "`GET /api/tour` end-to-end against the golden DB: the payload the
    editor's tour and catalogue read, with the text base resolved at
    request time (`GRAPHDEN_TUTORIAL_BASE`, else the script's default)."
@@ -6,10 +6,11 @@
     [cheshire.core :as json]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.system.deploy-config :as deploy-config]
-    [graphden.test-infra.golden-app :as ga]))
+    [graphden.test-infra.golden-app :as ga]
+    [graphden.test-infra.seams :as ts]))
 
 
-(use-fixtures :once (ga/fixture (ns-name *ns*)))
+(use-fixtures :once ts/isolated-seams-fixture (ga/fixture (ns-name *ns*)))
 
 
 (deftest the-tour-payload-carries-a-resolved-text-base
@@ -28,8 +29,8 @@
 
 
 (deftest the-deployment-setting-overrides-the-text-base
-  ;; `^:serial` — installs the process-global deploy snapshot for the
-  ;; length of the test. `GRAPHDEN_TUTORIAL_BASE` is read through
+  ;; Installs the deploy snapshot for the length of the test — this
+  ;; namespace's copy (`test-infra.seams`). `GRAPHDEN_TUTORIAL_BASE` is read through
   ;; `:deploy-config`, not `:env`: a tenant request on the cloud runs
   ;; under the effect gate, which excludes `:env`.
   (try

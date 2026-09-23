@@ -37,7 +37,8 @@
     [graphden.tenancy.context :as tc]
     [graphden.types.diagnostics :as diag]
     [graphden.util.json-safe :as json-safe]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.resolution :as res]))
 
 
 ;; Re-export: tests + the cancel endpoint look up futures by id.
@@ -142,10 +143,8 @@
        (apply-execute* ctx parsed fn-row))))
 
 
-(defn- execution-plan
-  "Everything the run needs, derived once from the request. Pure apart
-   from the two graph lookups; nothing here takes a slot or writes a
-   row, so a rejection after this point costs nothing to unwind."
+(defn- execution-plan*
+  "The body of `execution-plan`, under its graph-load scope."
   [ctx parsed fn-row]
   (let [fn-id (:id fn-row)
         ;; Cached: this call was ~1.3–1.9 s uncached and runs once per
@@ -203,6 +202,16 @@
      :stats-ctx {:pool (:pool (:pg-storage ctx))
                  :org org
                  :start-ms (System/currentTimeMillis)}}))
+
+
+(defn- execution-plan
+  "Everything the run needs, derived once from the request. Pure apart
+   from the two graph lookups; nothing here takes a slot or writes a
+   row, so a rejection after this point costs nothing to unwind."
+  [ctx parsed fn-row]
+  ;; The two graph lookups both resolve the root's closure, and each
+  ;; resolve loads the whole branch: share ONE load between them.
+  (res/call-with-graph-load-memo #(execution-plan* ctx parsed fn-row)))
 
 
 (def ^:private over-capacity-rejection

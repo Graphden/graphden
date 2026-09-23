@@ -20,6 +20,16 @@
 (def ^:dynamic *bootstrap* nil)
 
 
+(def ^:private drain-ms
+  "Deadline for the consumer to act on what the test published. The
+   polls return the moment it has; the bound is the honest worst case,
+   not the median: the consumer handles a batch one message at a time,
+   and in a loaded integration run (load ~30) each handler run took
+   ~8.6 s — three acks blew the old 10 s bound (gate 2026-09-23), while
+   the whole test takes ~4 s on a quiet host."
+  60000)
+
+
 (use-fixtures :once
   (fn [t]
     (binding [*bootstrap* (setup/bootstrap-crud-graph-from-golden!)]
@@ -63,10 +73,10 @@
           (is (map? (get @running (:id svc))))
           (is (= 1 (count (sp/query-entities storage :service-instance {:service-id (:id svc)})))))
         (testing "handled messages are acked away"
-          (wait/wait-for 10000 #(every? (fn [id] (nil? (sp/read-entity storage :queue-message id))) good))
+          (wait/wait-for drain-ms #(every? (fn [id] (nil? (sp/read-entity storage :queue-message id))) good))
           (is (every? #(nil? (sp/read-entity storage :queue-message %)) good)))
         (testing "the throwing one is retried, then dead-lettered with the error"
-          (wait/wait-for 10000 #(= "dead" (:state (sp/read-entity storage :queue-message bad))))
+          (wait/wait-for drain-ms #(= "dead" (:state (sp/read-entity storage :queue-message bad))))
           (let [row (sp/read-entity storage :queue-message bad)]
             (is (= "dead" (:state row)))
             (is (= 2 (:attempts row)))
@@ -79,8 +89,8 @@
                 parent-id (:id parent)
                 traced (binding [cr/*execution* {:id parent-id :trace-id parent-id}]
                          (publish! "{\"order\":42}"))]
-            (wait/wait-for 10000 #(nil? (sp/read-entity storage :queue-message traced)))
-            (wait/wait-for 10000 #(seq (:children (fn-exec/get-execution ctx parent-id))))
+            (wait/wait-for drain-ms #(nil? (sp/read-entity storage :queue-message traced)))
+            (wait/wait-for drain-ms #(seq (:children (fn-exec/get-execution ctx parent-id))))
             (let [children (:children (fn-exec/get-execution ctx parent-id))
                   child-row (some->> children first :id (sp/read-entity storage :fn-execution))]
               (is (= 1 (count children)))
@@ -97,8 +107,8 @@
             (let [id (publish! "{\"order\":43}")
                   trace-id (:trace-id (sp/read-entity storage :queue-message id))]
               (is (uuid? trace-id))
-              (wait/wait-for 10000 #(nil? (sp/read-entity storage :queue-message id)))
-              (wait/wait-for 10000 #(seq (sp/query-entities storage :fn-execution {:trace-id trace-id})))
+              (wait/wait-for drain-ms #(nil? (sp/read-entity storage :queue-message id)))
+              (wait/wait-for drain-ms #(seq (sp/query-entities storage :fn-execution {:trace-id trace-id})))
               (let [[row :as rows] (sp/query-entities storage :fn-execution {:trace-id trace-id})]
                 (is (= 1 (count rows)))
                 (is (nil? (:parent-execution-id row)))
@@ -141,7 +151,7 @@
       (let [id ((impls/impl-of :queue-publish)
                 {:queue "qs-orders" :payload {:n 1} :delay-ms 0} ctx)]
         (recon/reconcile-once! ctx running)
-        (wait/wait-for 15000 #(nil? (sp/read-entity storage :queue-message id)))
+        (wait/wait-for drain-ms #(nil? (sp/read-entity storage :queue-message id)))
         (Thread/sleep 1500)
         (is (nil? (sp/read-entity storage :queue-message id)) "handled and acked")
         (is (= 1 (count (done))) "handled exactly once — the lease outlived the claim"))

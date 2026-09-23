@@ -41,13 +41,13 @@ How a fragment attaches: its ~:graphden/require~ directive loads the addon's nam
 :PROPERTIES:
 :CUSTOM_ID: constellation/install-org-cap-fn!
 :FILE: src/graphden/tenancy/context.clj
-:LINE: 130
-:MINS: 1.3
+:LINE: 155
+:MINS: 1.4
 :END:
 
 The only policy seam core exposes as a mutable slot. ~graphden.tenancy.context~ is the ONE tenancy namespace kept in this repo: the ~*current-org*~ thread-local, the tier predicates, and two default-deny capability predicates the addon installs at boot (~addon.clj~ calls this with ~org-admin/current-has-org-capability?~ and its platform twin with ~grant/current-has-platform-capability?~). Every authz gate in core reads through them — so a self-hosted instance denies nothing and a cloud instance denies by grant, from the same call sites. docs/TENANCY_SEAM.md is the mechanism half; the policy half's ADRs live in the private repo's ~docs/PLATFORM_NOTES.md~.
 
-- source :: [[file:../../../src/graphden/tenancy/context.clj::(defn install-org-cap-fn!][src/graphden/tenancy/context.clj:130]]
+- source :: [[file:../../../src/graphden/tenancy/context.clj::(defn install-org-cap-fn!][src/graphden/tenancy/context.clj:155]]
 - see also :: [[file:platform.org::#platform/platform-tier?][platform-tier?]]
 - same file :: [[file:platform.org::#platform/platform-tier?][platform-tier?]], [[file:platform.org::#platform/notify!][notify!]], [[file:constellation.org::#constellation/tenancy-addon-active?][tenancy-addon-active?]]
 
@@ -55,13 +55,13 @@ The only policy seam core exposes as a mutable slot. ~graphden.tenancy.context~ 
 :PROPERTIES:
 :CUSTOM_ID: constellation/tenancy-addon-active?
 :FILE: src/graphden/tenancy/context.clj
-:LINE: 138
+:LINE: 164
 :MINS: 1.2
 :END:
 
 …and the one fact server-rendered copy is allowed to branch on: is the addon installed at all. Not a config flag, not a tier — the installed predicate itself. The editor derives the same answer from capability headers, so nothing is duplicated client-side; a page that says 'organisation' only when there are organisations gets it from here.
 
-- source :: [[file:../../../src/graphden/tenancy/context.clj::(defn tenancy-addon-active?][src/graphden/tenancy/context.clj:138]]
+- source :: [[file:../../../src/graphden/tenancy/context.clj::(defn tenancy-addon-active?][src/graphden/tenancy/context.clj:164]]
 - same file :: [[file:platform.org::#platform/platform-tier?][platform-tier?]], [[file:platform.org::#platform/notify!][notify!]], [[file:constellation.org::#constellation/install-org-cap-fn!][install-org-cap-fn!]]
 
 * 5. every-addon-facing-var-still-resolves-test

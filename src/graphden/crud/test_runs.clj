@@ -48,6 +48,7 @@
     [graphden.types.core :as types]
     [graphden.util.ns-path :as ns-path]
     [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.resolution :as res]
     [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs]))
 
@@ -219,12 +220,18 @@
                                                 (request/require-storage ctx))
                                               str)}]
                    (fn [] (try (emit ev) (catch Exception _ nil)))))
-        results (mapv (fn [row]
-                        (let [r (merge {:fn-id (str (:id row)) :fn-name (:name row)}
-                                       (run-one! ctx row (or timeout-ms default-test-timeout-ms)))]
-                          (when nudge! (nudge!))
-                          r))
-                      rows)
+        ;; Every test resolves its own closure twice (free-arg surface,
+        ;; graph hash), and each resolve loads the whole branch — ~0.8 s
+        ;; on the shipped graph. One load per graph epoch for the whole
+        ;; run instead (docs/PERF_NOTES.md § Run all).
+        results (res/call-with-graph-load-memo
+                  (fn []
+                    (mapv (fn [row]
+                            (let [r (merge {:fn-id (str (:id row)) :fn-name (:name row)}
+                                           (run-one! ctx row (or timeout-ms default-test-timeout-ms)))]
+                              (when nudge! (nudge!))
+                              r))
+                          rows)))
         by-status (frequencies (map :status results))]
     (when (and nudge! (seq results))
       (future (Thread/sleep 2000) (nudge!)))

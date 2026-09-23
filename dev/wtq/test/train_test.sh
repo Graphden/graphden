@@ -255,6 +255,15 @@ csv="$(ls "$Q"/logs/_train-*.resources.csv)"
 check "every row has 7 fields" eval "awk -F, 'NF != 7 {bad=1} END {exit bad}' '$csv'"
 check "java_procs is 0" eval "tail -n1 '$csv' | grep -q ',0\$'"
 
+echo "== wt list warns about the shared stash"
+new_world stash
+feature st st.txt st
+check "no warning while the stash is empty" eval "! list_has 'stash is SHARED'"
+printf 'wip\n' >> "$WTQ_ROOT/st/st.txt"
+git -C "$WTQ_ROOT/st" stash -q
+check "a stash entry is flagged" list_has 'stash is SHARED'
+check "naming the branch it came from" list_has 'stash@\{0\}: WIP on feature/st'
+
 echo "== conflict with develop itself -> CONFLICT"
 new_world conflict
 feature x f.txt x

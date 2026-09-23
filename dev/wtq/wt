@@ -812,6 +812,15 @@ cmd_list() {
     printf '%s\n' "$soon" | grep -q "^$nm " && dirty="${dirty:+$dirty }soon"
     printf '%-20s %-24s %-12s %-20s %b\n' "$nm" "$br" "$ab" "$result" "$dirty"
   done
+  # The stash is ONE list for every worktree of the repo: an agent's
+  # `git stash pop` takes whatever is on top — possibly another agent's work
+  # (2026-09-23). AGENT.md forbids stashing; any entry here is a hazard.
+  local stashes; stashes="$(git -C "$MAIN_WT" stash list 2>/dev/null || true)"
+  if [ -n "$stashes" ]; then
+    echo
+    warn "git stash is SHARED by every worktree — never stash (AGENT.md); pop only what you can name as yours:"
+    printf '%s\n' "$stashes" | sed 's/^/    /'
+  fi
 }
 
 # =====================================================================

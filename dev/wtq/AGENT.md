@@ -26,6 +26,12 @@ You were started in one of two ways:
 1. **Stay in your worktree.** Never `cd` into another worktree, never edit
    `develop` directly, never touch another agent's branch. Other agents change
    unrelated files in parallel — your view of the repo is your branch only.
+
+   **Never `git stash` in a worktree.** The stash is one list shared by every
+   worktree of the repo: another agent's `git stash pop` takes YOUR changes
+   into THEIR tree (two agents popped each other's work on 2026-09-23). To park
+   work, make a WIP commit on your branch (amend or reset it later), or save
+   `git diff > <scratch file>`. `bb wt list` shows any stash entries it finds.
 2. **Never drive the SHARED stack by hand.** Do **not** run `bb rebuild`,
    `bb deploy`, `bb test-integration`, `bb test-e2e`, `bb coverage`, or push to
    `origin`. Those address the canonical instance (`graphden-executor` on

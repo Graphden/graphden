@@ -96,11 +96,22 @@ async function _runSubmitForm(btn, e) {
     target.innerHTML = html && html.trim()
       ? html
       : '<p class="error">Request failed (HTTP ' + res.status + ').</p>';
-    if (typeof bindActionDispatch === 'function') bindActionDispatch(target);
+    _bindSwappedTarget(target);
     return;
   }
   target.innerHTML = html;
-  if (typeof bindActionDispatch === 'function') bindActionDispatch(target);
+  _bindSwappedTarget(target);
+}
+
+// Route `data-action` clicks inside freshly swapped content — but only when
+// no bound host already covers it. Delegation is by ancestor: a page binds
+// `document.body` once, so a target inside it is served already, and a second
+// listener on the target makes every later click fire its action TWICE (the
+// next submit-form POSTed twice, then again on each click after that).
+function _bindSwappedTarget(target) {
+  if (typeof bindActionDispatch !== 'function') return;
+  if (target.closest?.('[data-gd-dispatch-bound]')) return;
+  bindActionDispatch(target);
 }
 
 registerActionHandler('submit-form', _runSubmitForm);

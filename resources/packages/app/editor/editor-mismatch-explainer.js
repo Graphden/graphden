@@ -37,27 +37,19 @@ function ensureMismatchExplainerEl() {
   return el;
 }
 
-// Post-swap binding for the three interactive surfaces the server
-// hiccup emits — all rendering is server-side as of step 4, but
-// click behaviour stays JS (it triggers other editor popovers /
-// navigation, both of which are interactive components that don't
-// fit a pure-render contract):
+// Shared post-swap wiring for a server-rendered explainer popover (this one
+// and the provenance popover, editor-provenance-popover.js):
 //
 //   * `[data-explainer-close]` — close button (same convention the
-//     effect-explainer partial uses).
-//   * `a[data-fn-id]` — provenance source links → `selectFn(fnId)`
-//     navigates and dismisses the popover. Same behaviour the
-//     standalone provenance popover offers.
-//   * `[data-edit-action]` — the Edit-value button → opens the inline
-//     value-edit popover via `enterArgValueEditMode(arg, anchorEl)`.
-//     The popover itself is JS-interactive (textarea + save / cancel),
-//     not a pure render — keeping it here is correct.
-function bindPostSwap(el, arg, anchorEl) {
+//     effect-explainer partial uses) → `hide()`.
+//   * `a[data-fn-id]` — provenance source links → `hide()` then
+//     `selectFn(fnId)`.
+function bindExplainerCloseAndFnLinks(el, hide) {
   const close = el.querySelector('[data-explainer-close]');
   if (close) {
     close.addEventListener('click', (e) => {
       e.stopPropagation();
-      hideMismatchExplainer();
+      hide();
     });
   }
   el.querySelectorAll('a[data-fn-id]').forEach((link) => {
@@ -67,11 +59,25 @@ function bindPostSwap(el, arg, anchorEl) {
       e.preventDefault();
       e.stopPropagation();
       if (typeof selectFn === 'function') {
-        hideMismatchExplainer();
+        hide();
         selectFn(fnId);
       }
     });
   });
+}
+
+// Post-swap binding for the three interactive surfaces the server
+// hiccup emits — all rendering is server-side as of step 4, but
+// click behaviour stays JS (it triggers other editor popovers /
+// navigation, both of which are interactive components that don't
+// fit a pure-render contract): close + nav links
+// (`bindExplainerCloseAndFnLinks`), and
+// `[data-edit-action]` — the Edit-value button → opens the inline
+// value-edit popover via `enterArgValueEditMode(arg, anchorEl)`.
+// The popover itself is JS-interactive (textarea + save / cancel),
+// not a pure render — keeping it here is correct.
+function bindPostSwap(el, arg, anchorEl) {
+  bindExplainerCloseAndFnLinks(el, hideMismatchExplainer);
   const editBtn = el.querySelector('[data-edit-action]');
   if (editBtn && typeof enterArgValueEditMode === 'function') {
     editBtn.addEventListener('click', (e) => {

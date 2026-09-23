@@ -113,31 +113,6 @@ function attachAndShow(anchorEl) {
   provenancePopoverAnchor = liveAnchor;
 }
 
-// Post-swap binding for nav-links + close button. Same three-data-attr
-// pattern as mismatch-explainer: `[data-explainer-close]` for close,
-// `a[data-fn-id]` for provenance source-link navigation.
-function bindProvPopoverPostSwap(el) {
-  const close = el.querySelector('[data-explainer-close]');
-  if (close) {
-    close.addEventListener('click', (e) => {
-      e.stopPropagation();
-      hideProvenancePopover();
-    });
-  }
-  el.querySelectorAll('a[data-fn-id]').forEach((link) => {
-    const fnId = link.getAttribute('data-fn-id');
-    if (!fnId) return;
-    link.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (typeof selectFn === 'function') {
-        hideProvenancePopover();
-        selectFn(fnId);
-      }
-    });
-  });
-}
-
 
 // Fetch server-rendered popover and bind interactive surfaces. Steps
 // 1-3 of the migration complete — header / Resolved-via / Allowed-
@@ -173,7 +148,7 @@ async function showProvenancePopover(arg, anchorEl) {
 
   const el = ensureProvenancePopoverEl();
   el.innerHTML = html;
-  bindProvPopoverPostSwap(el);
+  bindExplainerCloseAndFnLinks(el, hideProvenancePopover); // editor-mismatch-explainer.js
   attachAndShow(anchorEl);
 }
 
@@ -209,7 +184,7 @@ async function showReturnTypeRulePopover(fnName, anchorEl) {
 
   const el = ensureProvenancePopoverEl();
   el.innerHTML = html;
-  bindProvPopoverPostSwap(el);
+  bindExplainerCloseAndFnLinks(el, hideProvenancePopover); // editor-mismatch-explainer.js
   attachAndShow(anchorEl);
 }
 

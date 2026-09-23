@@ -1361,16 +1361,44 @@
   nil)
 
 
+(defn- ref-uuid
+  "`branch-ref` parsed as a UUID, or nil. `UUID/fromString` is lenient —
+   any case mix, and short groups (`1-1-1-1-1`) — so many distinct
+   strings name the same id."
+  [branch-ref]
+  (try (java.util.UUID/fromString branch-ref)
+       (catch IllegalArgumentException _ nil)))
+
+
 (defn- resolve-branch-id-uncached
   [{:keys [base-ctx] :as router} branch-ref]
   (if-let [f *resolve-uncached-override*]
     (f router branch-ref)
     (let [base (vs/unwrap (:storage base-ctx))]
-      (or (try (some->> branch-ref java.util.UUID/fromString
-                        (sp/read-entity base :branch)
-                        :id)
-               (catch IllegalArgumentException _ nil))
+      (or (some->> (ref-uuid branch-ref) (sp/read-entity base :branch) :id)
           (:id (first (sp/query-entities base :branch {:name branch-ref})))))))
+
+
+(defn- ref-cache-key
+  "Where a resolution of `branch-ref` to `id` is cached. A ref that
+   resolved BY ID is keyed by the canonical id (`[scope :id \"<uuid>\"]`),
+   so every spelling of one branch id shares a slot — keyed by the raw
+   ref, each case variant of a visible id was its own never-evicted
+   entry (two DB reads apiece), a map grown by request input alone. A
+   ref resolved BY NAME is keyed by the name itself, which only an
+   existing branch can fill. `id` nil → the key a lookup tries."
+  [scope branch-ref id]
+  (if (and id (= id (ref-uuid branch-ref)))
+    [scope :id (str id)]
+    [scope branch-ref]))
+
+
+(defn- cached-ref
+  "The cached id for `branch-ref`, or nil. The by-id slot is tried first,
+   mirroring `resolve-branch-id-uncached`'s id-before-name order."
+  [cache scope branch-ref]
+  (or (some->> (ref-uuid branch-ref) (ref-cache-key scope branch-ref) (get cache))
+      (get cache (ref-cache-key scope branch-ref nil))))
 
 
 (def ^:dynamic *resolve-branch-id-override*
@@ -1390,7 +1418,8 @@
    (handler-for then short-circuits to the seeded entry).
 
    Result is cached on the router's `:ref-cache` atom keyed by
-   `[scope ref]` (§4) — `:branch` is org-scoped, so org-A and org-B's
+   `[scope ref]` — or `[scope :id canonical-id]` for a ref that resolved
+   by id, see `ref-cache-key` — (§4) — `:branch` is org-scoped, so org-A and org-B's
    same-named branches resolve to different ids and must not share a
    cache slot (else one would run in the other's branch ctx). A
    non-default branch name resolves once per process lifetime per
@@ -1413,13 +1442,13 @@
     (f router branch-ref)
     (if (or (nil? branch-ref) (str/blank? branch-ref))
       default-branch-id
-      (let [k [(current-scope) branch-ref]]
-        (if (and ref-cache (contains? @ref-cache k))
-          (get @ref-cache k)
-          (when-let [id (resolve-branch-id-uncached router branch-ref)]
-            (if-not ref-cache
-              id
-              (do (swap! ref-cache assoc k id)
+      (let [scope (current-scope)]
+        (or (some-> ref-cache deref (cached-ref scope branch-ref))
+            (when-let [id (resolve-branch-id-uncached router branch-ref)]
+              (if-not ref-cache
+                id
+                (let [k (ref-cache-key scope branch-ref id)]
+                  (swap! ref-cache assoc k id)
                   (let [id' (resolve-branch-id-uncached router branch-ref)]
                     (if (= id' id)
                       id

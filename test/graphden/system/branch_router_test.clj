@@ -19,6 +19,7 @@
      per-branch ctx ends up bound to the right branch."
   (:require
     [cheshire.core :as json]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
@@ -522,6 +523,40 @@
         (is (empty? @(:ref-cache router))
             "the ambiguous first id is dropped; the next call re-resolves
              and caches the stable id")))))
+
+
+(deftest ref-cache-is-bounded-by-branches-not-by-ref-spellings
+  ;; `UUID/fromString` accepts any case mix and short groups, so the same
+  ;; visible branch id has unboundedly many spellings. Keyed by the raw
+  ;; ref, each became its own never-evicted entry (two reads apiece) —
+  ;; cache growth driven by request input alone.
+  (let [calls (atom 0)
+        ;; ids with letters, so case variants exist
+        bid (java.util.UUID/fromString "0000000a-000b-000c-000d-00000000000e")]
+    (binding [br/*resolve-uncached-override*
+              (fn [_ branch-ref]
+                (swap! calls inc)
+                (when (= bid (try (java.util.UUID/fromString branch-ref)
+                                  (catch IllegalArgumentException _ nil)))
+                  bid))]
+      (let [router (-> (br/->BranchRouter nil default-id (atom {}) :stub)
+                       (assoc :ref-cache (atom {})))
+            spellings [(str bid)
+                       (str/upper-case (str bid))
+                       "0000000A-000b-000C-000d-00000000000E"
+                       "a-b-c-d-e"
+                       "A-B-C-D-E"]]
+        (testing "every spelling of one id resolves to it"
+          (is (= (repeat (count spellings) bid)
+                 (map #(br/resolve-branch-id router %) spellings))))
+        (testing "…through ONE cache slot: only the first spelling read storage"
+          (is (= 1 (count @(:ref-cache router))))
+          (is (= 2 @calls) "one miss = resolve + TOCTOU recheck; the rest hit"))
+        (testing "unresolvable refs never grow the cache"
+          (doseq [i (range 20)]
+            (br/resolve-branch-id router (str "no-such-" i))
+            (br/resolve-branch-id router (str (random-uuid))))
+          (is (= 1 (count @(:ref-cache router)))))))))
 
 
 (deftest invalidate-all-clears-ref-cache

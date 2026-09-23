@@ -494,8 +494,8 @@ A `trace?` submission records one entry for the run's own fn — the
 **outermost frame** (`compile-eager/traced-root-call`, applied by
 `run-future`, the request trap and the cross-service hop alike) — plus
 one per `:ref` invocation and one per **call of a callable** handed to a
-higher-order fn (`compile-eager/traced-callable-call`, in `hof-wrap` and
-`make-single-arg-callable`: `:map` over three items gives three frames of
+higher-order fn (`compile-eager/tagged-callable`, behind `hof-wrap`, the
+env-binding HOF case and `make-single-arg-callable`: `:map` over three items gives three frames of
 the mapped fn, nested under the mapping fn's), into the row's `:path-trace` jsonb
 (`capture-values?` additionally stores each non-hidden frame's return,
 4 KB/entry). Every entry carries `:seq` (entry-order frame number) and

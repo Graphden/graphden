@@ -467,7 +467,7 @@
    `{:value v, value-bytes-key n}`; oversize or unserializable →
    `{:value-truncated? true}` (no value — nothing partial leaks).
    NEVER called for secret-touching fns — their branch in
-   `path-traced-fresh-call` records `{:hidden :secret}` without
+   `path-traced-call` records `{:hidden :secret}` without
    reading the value at all (constraint 4)."
   [v]
   (if-some [n (json-size/json-bytes-up-to v max-captured-value-bytes)]
@@ -690,58 +690,37 @@
               (record! nil))))))))
 
 
-(defn- path-traced-fresh-call
-  "`path-traced-call` for one `:ref` frame — `(child fa ctx)` is the
-   thunk."
-  [trace ref-id ref-name child fa ctx]
-  (path-traced-call trace ref-id ref-name #(child fa ctx)))
-
-
-(defn traced-root-call
-  "Run `(thunk)` as the OUTERMOST frame of the current path trace — the
-   run's own fn. A trace records `:ref` invocations, so without this
-   frame the fn the reader actually ran was the one card the path view
-   dimmed (\"Execution path: 1 fn highlighted\" with the root greyed
-   out), and the call tree had no top. The root records under exactly
-   the gating a `:ref` frame gets (`active-path-trace`: the var bound
-   AND the fn in the traced set / the trace-all sentinel), through the
-   same classification — a secret-touching root hides like any other
-   frame — so an untraced run pays the nil-check and nothing else.
-   `fn-name` is the stale-id rescue (`nil` is fine for a current id)."
-  [fn-id fn-name thunk]
-  (if-some [trace (active-path-trace fn-id)]
-    (path-traced-call trace fn-id fn-name thunk)
-    (thunk)))
-
-
-(defn traced-callable-call
+(defn traced-call
   "Run `(thunk)` as a traced frame of `fn-id` when tracing applies to it
-   (`active-path-trace`), bare otherwise — the seam for a CALLABLE handed
-   to a higher-order fn (`:map`'s `:func`, `:filter`'s `:pred`, a
-   handler). Such a call goes through no `:ref` edge — the HOF impl
-   invokes the wrapped closure directly — so before this seam a traced
-   `:map` over `:str-upper` lit `:map` and left `:str-upper` plain, and
-   the tree had no rows for the calls that did the work. Frames nest
-   under whatever frame is open when the HOF loops, so three items give
-   three rows under the mapping fn and a `3×` badge on its card. The
-   same gating and classification as a `:ref` frame; a secret-touching
-   callable hides like any other. Reached from `hof-wrap` (compile-time
-   callables) and `compile-runtime/make-single-arg-callable` (raw ids)."
+   (`active-path-trace`: `*path-trace*` bound AND the fn in the traced
+   set / the trace-all sentinel), bare otherwise — so an untraced run
+   pays the nil-check and nothing else. The ONE seam every frame kind
+   passes, under the same gating and classification (a secret-touching
+   frame hides like any other):
+
+   - a fresh `:ref` invocation (`call-with-cache`, thunk `(child fa ctx)`);
+   - the run's own fn as the OUTERMOST frame (`traced-root-call`) — a
+     trace records `:ref` invocations, so without it the fn the reader
+     actually ran was the one card the path view dimmed and the call
+     tree had no top;
+   - a CALLABLE handed to a higher-order fn (`:map`'s `:func`,
+     `:filter`'s `:pred`, a handler — `tagged-callable`). Such a call
+     goes through no `:ref` edge (the HOF impl invokes the closure
+     directly), so its frames nest under whatever frame is open when
+     the HOF loops: three items give three rows under the mapping fn.
+
+   `fn-name` (the authored row name) is threaded to the seam for the
+   stale-id secret rescue (`nil` is fine for a current id)."
   [fn-id fn-name thunk]
   (if-some [trace (active-path-trace fn-id)]
     (path-traced-call trace fn-id fn-name thunk)
     (thunk)))
 
 
-(defn- fresh-call
-  "One fresh `(child fa ctx)` invocation — through the path-trace seam
-   when capture applies to `ref-id`, bare otherwise. `ref-name` (the
-   ref's authored row name) is threaded to the seam for the stale-id
-   secret rescue."
-  [ref-id ref-name child fa ctx]
-  (if-some [trace (active-path-trace ref-id)]
-    (path-traced-fresh-call trace ref-id ref-name child fa ctx)
-    (child fa ctx)))
+(def traced-root-call
+  "`traced-call` for the run's own fn — the name the crud execution
+   paths (`fn-execution.persist` / `.trace`, `debug-capture`) call it by."
+  traced-call)
 
 
 (defn- call-with-cache
@@ -762,7 +741,7 @@
    works. The 5-arity form (no name) delegates with `nil` — used by
    focused tests and any caller without a name in hand.
 
-   Debug P1: every arm passes the path-trace seam (`fresh-call` /
+   Debug P1: every arm passes the path-trace seam (`traced-call` /
    `record-path-hit!`) — zero work beyond one nil-check unless the
    execution bound `*path-trace*` AND `ref-id` is in `*traced-fn-ids*`.
    Entries land in COMPLETION order (a callee's entry precedes its
@@ -772,14 +751,14 @@
   ([ref-id ref-frees ref-name child fa ctx]
    (let [^java.util.HashMap cache (::call-cache ctx)]
      (if (or (nil? cache) (contains? @*always-fresh-fn-ids* ref-id))
-       (fresh-call ref-id ref-name child fa ctx)
+       (traced-call ref-id ref-name #(child fa ctx))
        (let [k [ref-id (fa-key-for-cache ref-frees fa)]
              cached (java.util.HashMap/.get cache k)]
          (if (some? cached)
            (do (when-some [trace (active-path-trace ref-id)]
                  (record-path-hit! trace ref-id ref-name))
                (when-not (identical? cached ::nil) cached))
-           (let [v (fresh-call ref-id ref-name child fa ctx)]
+           (let [v (traced-call ref-id ref-name #(child fa ctx))]
              (when (>= (java.util.HashMap/.size cache) call-cache-max-size)
                (evict-preserving-effectful! cache effectful-ref?))
              (java.util.HashMap/.put cache k (if (nil? v) ::nil v))
@@ -966,6 +945,32 @@
                fa translation)))
 
 
+(defn tagged-callable
+  "The Clojure callable a HOF receives for the wrapped fn `fn-id`:
+   `make-shape-callable` over `invoke` (`lambda-args → value`), with
+   every invocation a traced frame of `fn-id` (`traced-call`) — the HOF
+   impl calls it directly, so no `:ref` seam would ever see it.
+
+   The callable carries the wrapped fn's IDENTITY as metadata
+   (`:graphden.executor/fn-id`) — an adapter that receives a callable
+   (`:http-server`'s handler) can name the fn it runs; the traced
+   listener persists the request as an execution of THAT fn — and the
+   names it takes per call (`:graphden.executor/lambda-params`), so a
+   traced adapter (`:call-traced`) can persist the argument under the
+   callee's own free-arg name.
+
+   The one builder behind all three callable sites: root-binding
+   `hof-wrap`, the env-binding HOF case of `env-arg-builder`, and
+   `compile-runtime/make-single-arg-callable`."
+  [fn-id lambda-params invoke]
+  (with-meta
+    (make-shape-callable lambda-params
+                         (fn [lambda-args]
+                           (traced-call fn-id nil #(invoke lambda-args))))
+    {:graphden.executor/fn-id fn-id
+     :graphden.executor/lambda-params (vec lambda-params)}))
+
+
 (defn- hof-wrap
   "Root-binding HOF: returns a `(fn [fa ctx])` whose call yields the
    callable. The callable closes over `fa` (the wrap-time snapshot of
@@ -979,38 +984,11 @@
    (e.g. `:method-map :handler` rename slot → `:assoc-handler :handler`
    rename slot have different ids) to survive the wrap."
   [child lambda-params translation ref-id]
-  ;; The callable carries the wrapped fn's IDENTITY as metadata
-  ;; (`:graphden.executor/fn-id`): an adapter that receives a callable
-  ;; (`:http-server`'s handler) can name the fn it runs — the traced
-  ;; listener persists the request as an execution of THAT fn.
-  (let [tag {:graphden.executor/fn-id ref-id
-             ;; …and the names it takes per call, so a traced adapter
-             ;; (`:call-traced`) can persist the argument under the
-             ;; callee's own free-arg name.
-             :graphden.executor/lambda-params (vec lambda-params)}]
-    ;; Every invocation of the callable is a traced frame of the wrapped
-    ;; fn (`traced-callable-call`) — the HOF impl calls it directly, so no
-    ;; `:ref` seam would ever see it.
-    (if (empty? translation)
-      (fn [fa ctx]
-        (with-meta
-          (make-shape-callable lambda-params
-                               (fn [lambda-args]
-                                 (traced-callable-call
-                                   ref-id nil
-                                   #(child (if lambda-args (merge fa lambda-args) fa)
-                                           ctx))))
-          tag))
-      (fn [fa ctx]
-        (let [fa* (apply-hof-translation fa translation)]
-          (with-meta
-            (make-shape-callable lambda-params
-                                 (fn [lambda-args]
-                                   (traced-callable-call
-                                     ref-id nil
-                                     #(child (if lambda-args (merge fa* lambda-args) fa*)
-                                             ctx))))
-            tag))))))
+  (fn [fa ctx]
+    (let [fa* (apply-hof-translation fa translation)]
+      (tagged-callable ref-id lambda-params
+                       (fn [lambda-args]
+                         (child (if lambda-args (merge fa* lambda-args) fa*) ctx))))))
 
 
 (def ^:private rich-type-of-id-or-stale-name-fn
@@ -1257,16 +1235,11 @@
         (let [lambda-params (r/hof-lambda-params ref-id slot-id env-bnd fn-id lookups)
               translation (r/build-hof-translation ref-id lambda-params lookups)]
           (fn [fa-ref ctx]
-            (with-meta
-              (make-shape-callable
-                lambda-params
-                (fn [lambda-args]
-                  (let [fa* (apply-hof-translation @fa-ref translation)]
-                    (child (if lambda-args (merge fa* lambda-args) fa*)
-                           ctx))))
-              ;; Same identity tag as the root-slot `hof-wrap`.
-              {:graphden.executor/fn-id ref-id
-               :graphden.executor/lambda-params (vec lambda-params)})))
+            (tagged-callable ref-id lambda-params
+                             (fn [lambda-args]
+                               (let [fa* (apply-hof-translation @fa-ref translation)]
+                                 (child (if lambda-args (merge fa* lambda-args) fa*)
+                                        ctx))))))
 
         ;; Target evaluates to a callable (`:_router` → reitit
         ;; ring-handler). Same as the regular `arg-builder` :ref

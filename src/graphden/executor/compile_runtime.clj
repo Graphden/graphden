@@ -1600,15 +1600,7 @@
           closure (or (get reg fn-id) (throw-fn-not-found! fn-id))
           lookups (lookups-for-ctx ctx)
           free-names (vec (r/deep-free-ext-names fn-id lookups))]
-      (with-meta
-        (ce/make-shape-callable free-names
-                                (fn [args]
-                                  ;; A traced frame per call, as `hof-wrap`'s
-                                  ;; callables record theirs.
-                                  (ce/traced-callable-call
-                                    fn-id nil
-                                    #(closure (translate-named-args
-                                                fn-id (or args {}) lookups)
-                                              ctx))))
-        ;; Same identity tag `compile-eager/hof-wrap` puts on its callables.
-        {:graphden.executor/fn-id fn-id}))))
+      (ce/tagged-callable fn-id free-names
+                          (fn [args]
+                            (closure (translate-named-args fn-id (or args {}) lookups)
+                                     ctx))))))

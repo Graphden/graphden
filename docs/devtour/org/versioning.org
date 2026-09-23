@@ -7,47 +7,47 @@ The VersionedStorage decorator, per-branch resolution, diff/merge and branch-loc
 
 after: storage
 
-[[file:index.org][index]] · ~102 min
+[[file:index.org][index]] · ~100 min
 
 * 1. wrap-with-versioning
 :PROPERTIES:
 :CUSTOM_ID: versioning/wrap-with-versioning
 :FILE: src/graphden/versioning/storage/core.clj
-:LINE: 1281
+:LINE: 1029
 :MINS: 2.2
 :END:
 
 The entry point: take any base storage, ensure a ~main~ branch exists, and return a ~VersionedStorage~ bound to it. Start here to see how the entire versioning layer is bolted onto the plain storage from the previous block.
 
-- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn wrap-with-versioning][src/graphden/versioning/storage/core.clj:1281]]
-- same file :: [[file:versioning.org::#versioning/VersionedStorage][VersionedStorage]], [[file:versioning.org::#versioning/create-entity-versioned!][create-entity-versioned!]], [[file:versioning.org::#versioning/purgeable-identity-ids][purgeable-identity-ids]]
+- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn wrap-with-versioning][src/graphden/versioning/storage/core.clj:1029]]
+- same file :: [[file:versioning.org::#versioning/VersionedStorage][VersionedStorage]], [[file:versioning.org::#versioning/create-entity-versioned!][create-entity-versioned!]]
 - referenced from :: [[file:crud.org::#crud/resolve-branch-ref][resolve-branch-ref]], [[file:boot.org::#boot/postgres][postgres]]
 
 * 2. VersionedStorage
 :PROPERTIES:
 :CUSTOM_ID: versioning/VersionedStorage
 :FILE: src/graphden/versioning/storage/core.clj
-:LINE: 1029
+:LINE: 777
 :MINS: 12.6
 :END:
 
 The decorator record itself. It implements every storage protocol, delegating non-versioned entities straight to the base storage and intercepting versioned ones — reads resolve to a branch view, writes append version rows. Every method is a two-line dispatch: read this for the SHAPE, then follow the versioned arm into its own function. Grasp this structure before anything else here.
 
-- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defrecord VersionedStorage][src/graphden/versioning/storage/core.clj:1029]]
-- same file :: [[file:versioning.org::#versioning/wrap-with-versioning][wrap-with-versioning]], [[file:versioning.org::#versioning/create-entity-versioned!][create-entity-versioned!]], [[file:versioning.org::#versioning/purgeable-identity-ids][purgeable-identity-ids]]
+- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defrecord VersionedStorage][src/graphden/versioning/storage/core.clj:777]]
+- same file :: [[file:versioning.org::#versioning/wrap-with-versioning][wrap-with-versioning]], [[file:versioning.org::#versioning/create-entity-versioned!][create-entity-versioned!]]
 
 * 3. create-entity-versioned!
 :PROPERTIES:
 :CUSTOM_ID: versioning/create-entity-versioned!
 :FILE: src/graphden/versioning/storage/core.clj
-:LINE: 473
-:MINS: 7.3
+:LINE: 237
+:MINS: 7.0
 :END:
 
 The versioned arm of a single create, and the write path worth reading in full: identity row + version row, the identity-field diff for when the deterministic id already exists, and the advisory-lock branch that serialises the writes whose uniqueness is a per-branch RESOLVED-VIEW property (fn names, list-item positions) rather than a table constraint. ~update-entity-versioned!~ next to it tells the same story for the append case.
 
-- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn- create-entity-versioned!][src/graphden/versioning/storage/core.clj:473]]
-- same file :: [[file:versioning.org::#versioning/wrap-with-versioning][wrap-with-versioning]], [[file:versioning.org::#versioning/VersionedStorage][VersionedStorage]], [[file:versioning.org::#versioning/purgeable-identity-ids][purgeable-identity-ids]]
+- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn- create-entity-versioned!][src/graphden/versioning/storage/core.clj:237]]
+- same file :: [[file:versioning.org::#versioning/wrap-with-versioning][wrap-with-versioning]], [[file:versioning.org::#versioning/VersionedStorage][VersionedStorage]]
 
 * 4. entity-config
 :PROPERTIES:
@@ -117,53 +117,52 @@ The in-memory chain walk the resolver actually runs: at each branch level combin
 :PROPERTIES:
 :CUSTOM_ID: versioning/effective-branch-local?
 :FILE: src/graphden/versioning/branch_local.clj
-:LINE: 109
+:LINE: 113
 :MINS: 1.6
 :END:
 
 Monotonic-OR over the ~:parent-ids~ closure: a fn (or ANY ancestor) marked ~:branch-local? true~ is local forever. The resolver's merge filter calls this so runtime-config fns — web-server port, vault path, cron schedule — never leak across branches on merge.
 
-- source :: [[file:../../../src/graphden/versioning/branch_local.clj::(defn effective-branch-local?][src/graphden/versioning/branch_local.clj:109]]
+- source :: [[file:../../../src/graphden/versioning/branch_local.clj::(defn effective-branch-local?][src/graphden/versioning/branch_local.clj:113]]
 - referenced from :: [[file:layout.org::#layout/annotate][annotate]]
 
 * 10. check-list-item-position-collisions!
 :PROPERTIES:
 :CUSTOM_ID: versioning/check-list-item-position-collisions!
 :FILE: src/graphden/versioning/storage/uniqueness.clj
-:LINE: 25
+:LINE: 26
 :MINS: 6.7
 :END:
 
 The list-item position-collision guard, now in a shared ~uniqueness~ namespace so BOTH the write path (~core~) and the merge path (~merge~) enforce it without a require cycle. A cross-branch base index on ~(binding-id, position)~ would wrongly block divergence, so per-branch uniqueness is enforced here in the resolved view instead — a subtle invariant the write path defends with an advisory lock. Fn names follow the same doctrine: ~check-fn-name-collision!~ just below replaced the raw ~UNIQUE (namespace_id, name)~, whose soft-deleted identities blocked their names forever.
 
-- source :: [[file:../../../src/graphden/versioning/storage/uniqueness.clj::(defn check-list-item-position-collisions!][src/graphden/versioning/storage/uniqueness.clj:25]]
+- source :: [[file:../../../src/graphden/versioning/storage/uniqueness.clj::(defn check-list-item-position-collisions!][src/graphden/versioning/storage/uniqueness.clj:26]]
 - same file :: [[file:versioning.org::#versioning/check-resource-override-path-collision!][check-resource-override-path-collision!]]
 
 * 11. check-resource-override-path-collision!
 :PROPERTIES:
 :CUSTOM_ID: versioning/check-resource-override-path-collision!
 :FILE: src/graphden/versioning/storage/uniqueness.clj
-:LINE: 169
-:MINS: 2.9
+:LINE: 231
+:MINS: 1.1
 :END:
 
 The same resolved-view doctrine applied to the newest versioned entity: ~:resource-override~ (UI Step 1) shadows a shipped frontend asset — path → content, per branch — so the editor's own JS/CSS is editable from inside the editor (Operate → Assets). One override per path per branch view, guarded here; serving goes through ~:read-resource-overridable~ in the app package, and every save rolls the effective ~?v=~ asset hash so browsers re-fetch.
 
-- source :: [[file:../../../src/graphden/versioning/storage/uniqueness.clj::(defn check-resource-override-path-collision!][src/graphden/versioning/storage/uniqueness.clj:169]]
+- source :: [[file:../../../src/graphden/versioning/storage/uniqueness.clj::(defn check-resource-override-path-collision!][src/graphden/versioning/storage/uniqueness.clj:231]]
 - same file :: [[file:versioning.org::#versioning/check-list-item-position-collisions!][check-list-item-position-collisions!]]
 
 * 12. purgeable-identity-ids
 :PROPERTIES:
 :CUSTOM_ID: versioning/purgeable-identity-ids
-:FILE: src/graphden/versioning/storage/core.clj
-:LINE: 203
+:FILE: src/graphden/versioning/storage/purge.clj
+:LINE: 62
 :MINS: 3.8
 :END:
 
 Delete has TWO modes, and this guard is the heart of the hard one. User-facing deletes tombstone (a version row with ~:deleted-at~, so descendants hide the entity too); sync + rollback hard-delete. A hard delete used to drop only the branch's version rows — the surviving versionless identity became a GHOST that a later re-mint of the same deterministic id revived through the update path, content-equal, invisible on every list read (the route-vanish incident). Now the identity row goes too, but ONLY when no other branch retains a version and no child identity still references it — per-branch isolation stays intact.
 
-- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn- purgeable-identity-ids][src/graphden/versioning/storage/core.clj:203]]
-- same file :: [[file:versioning.org::#versioning/wrap-with-versioning][wrap-with-versioning]], [[file:versioning.org::#versioning/VersionedStorage][VersionedStorage]], [[file:versioning.org::#versioning/create-entity-versioned!][create-entity-versioned!]]
+- source :: [[file:../../../src/graphden/versioning/storage/purge.clj::(defn purgeable-identity-ids][src/graphden/versioning/storage/purge.clj:62]]
 
 * 13. repoint-refs!
 :PROPERTIES:
@@ -220,7 +219,7 @@ Finds entities modified on BOTH branches after the computed fork point (skipping
 :PROPERTIES:
 :CUSTOM_ID: versioning/merge-branch!
 :FILE: src/graphden/versioning/storage/merge.clj
-:LINE: 657
+:LINE: 650
 :MINS: 8.9
 :END:
 
@@ -228,7 +227,7 @@ The merge itself: assert conflicts are resolved, then atomically write ONE ~bran
 
 Read it in three parts: validate (conflicts resolved, approval policy satisfied), write — the single ~branch-merge~ row plus any resolution overrides, in one transaction — then report, including ~skipped-as-branch-local~ right below it: the rows a merge deliberately does NOT carry across.
 
-- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn merge-branch!][src/graphden/versioning/storage/merge.clj:657]]
+- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn merge-branch!][src/graphden/versioning/storage/merge.clj:650]]
 - same file :: [[file:versioning.org::#versioning/diff-branches][diff-branches]], [[file:versioning.org::#versioning/detect-conflicts][detect-conflicts]]
 
 * 18. merge-transitively!
@@ -286,13 +285,13 @@ The graph EPOCH — freshness as a comparison, not an imperative. Every graph-sh
 :PROPERTIES:
 :CUSTOM_ID: versioning/build-branch-ctx
 :FILE: src/graphden/system/branch_router.clj
-:LINE: 134
+:LINE: 135
 :MINS: 4.3
 :END:
 
 Builds a fresh live ~ExecutionContext~ whose storage is a ~VersionedStorage~ rewrapped at the requested branch, with its own compiled-registry and graph-cache atoms — and its own RICH-TYPES SLICE, forked from the base's view at build time and bound as the registry override for the ctx's compiles and every request dispatched to it. This is how a branch gets its own executor without re-sharding the graph.
 
-- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- build-branch-ctx][src/graphden/system/branch_router.clj:134]]
+- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- build-branch-ctx][src/graphden/system/branch_router.clj:135]]
 - see also :: [[file:executor.org::#executor/create-context][create-context]]
 - same file :: [[file:versioning.org::#versioning/dispatch*][dispatch*]]
 
@@ -300,12 +299,12 @@ Builds a fresh live ~ExecutionContext~ whose storage is a ~VersionedStorage~ rew
 :PROPERTIES:
 :CUSTOM_ID: versioning/dispatch*
 :FILE: src/graphden/system/branch_router.clj
-:LINE: 1451
+:LINE: 1455
 :MINS: 8.6
 :END:
 
 The top-level Ring dispatch: extract the branch ref (header or query), resolve it to a branch-id, and route the request to that branch's lazily-built handler (400 on an unknown branch). Where a live request finally lands in the correct per-branch context. Its public wrapper ~dispatch~ first short-circuits ~/livez~ — the one registry-independent liveness path — so a pod busy on a full recompile still answers its probe.
 
-- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- dispatch*][src/graphden/system/branch_router.clj:1451]]
+- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- dispatch*][src/graphden/system/branch_router.clj:1455]]
 - same file :: [[file:versioning.org::#versioning/build-branch-ctx][build-branch-ctx]]
 - referenced from :: [[file:storage.org::#storage/create-listener][create-listener]], [[file:web.org::#web/dispatch-to-branch][dispatch-to-branch]]

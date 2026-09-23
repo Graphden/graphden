@@ -61,6 +61,12 @@
  ;; standalone repo), so no changed-path pattern here could scope it. Sub-second
  ;; when the siblings are absent (GitHub CI) — each pair just skips.
  {:name "pkg-copy-sync" :bb "pkg-copy-sync" :timeout  30000 :group :infra}
+ ;; The merge train (dev/wtq/wt) end to end in throwaway git repos, with only
+ ;; the heavy suites stubbed: batching, bisection, conflicts, stale shas, soon
+ ;; markers, waiter hand-off. The gate is the script executing, so a broken
+ ;; queue would otherwise be discovered by the first landing that needs it.
+ {:name "wtq-train"     :bb "wtq-test"      :timeout 180000 :group :infra
+  :relevant ["^dev/wtq/"]}
  ;; The scoping mechanism guards itself: selector partition semantics +
  ;; checks.edn shape/regex validity + the canonical path→check drift table.
  {:name "ci-selftest"   :bb "ci-test"       :timeout  60000 :group :infra

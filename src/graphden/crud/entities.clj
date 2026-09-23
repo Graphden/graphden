@@ -722,6 +722,7 @@
         ;; rename-root rule applies as on create.
         entity-data (normalize-binding-slot storage entity-type entity-data)
         error-msg (volatile! nil)
+        error-status (volatile! nil)
         ;; Pre-image for the secret carve-out rollback (binding family)
         ;; and for the package-owner write guard (adds fn-slot, and slot —
         ;; its `:required` / `:description` belong to the declaring fn).
@@ -744,10 +745,15 @@
                          ;; check) — a bare "Failed to update entity" hides
                          ;; exactly the message the user can act on.
                          (vreset! error-msg (some-> (ex-data e) :reason))
+                         ;; Same central mapping as create: a rename onto a
+                         ;; taken name is a 409 CONFLICT, a vanished row a
+                         ;; 404 — not a malformed 400.
+                         (vreset! error-status
+                                  (web-errors/status-for-ex-data (ex-data e)))
                          nil)))]
     (if-not updated
-      (cond-> {:error (or pkg-reason @error-msg "Failed to update entity")}
-        pkg-reason (assoc :http-status 403))
+      {:error (or pkg-reason @error-msg "Failed to update entity")
+       :http-status (if pkg-reason 403 @error-status)}
       (let [;; Renamed-view slot BEFORE the type check — same reason as in
             ;; `apply-create-core`: the checker must see the rename it is
             ;; about to record.

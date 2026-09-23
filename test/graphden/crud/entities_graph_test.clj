@@ -78,6 +78,11 @@
   (setup/via-graph *graph* :process-sequence-update request))
 
 
+(defn- via-seq-move
+  [request]
+  (setup/via-graph *graph* :process-sequence-move request))
+
+
 (defn- via-create-record
   [request]
   (setup/via-graph *graph* :process-create-record-type request))
@@ -618,6 +623,46 @@
             resp  (via-seq-append (json-req (str "/api/sequence/append/" (:id plain))
                                             {:value 1}))]
         (is (= 404 (:status resp)))))))
+
+
+(deftest entity-write-errors-keep-the-core-status-test
+  ;; The apply stages rendered every core error as a hard-coded 400,
+  ;; dropping the 403 the package guard computes (and the cores of the
+  ;; sequence ops returned no status at all) — the editor could not tell
+  ;; "read-only package fn" from "malformed request".
+  (let [storage (:storage *graph*)
+        host (setup/create-base-fn! storage (uniq "pkg-seq-host"))
+        slot (setup/create-slot! storage "items" :sequence)
+        _    (setup/attach-slot! storage (:id host) (:id slot) 0)
+        bnd  (sp/create-entity storage :binding {:fn-id (:id host) :slot-id (:id slot)
+                                                 :list-append true})
+        item (sp/create-entity storage :binding-list-item {:binding-id (:id bnd)
+                                                           :position 0 :value 1})
+        _    (sp/create-entity storage :binding-list-item {:binding-id (:id bnd)
+                                                           :position 1 :value 2})
+        ;; A fresh random id no other test can touch — safe on the
+        ;; process-global registry.
+        _    (owned/record-owned-ids! [(:id host)])
+        _    (ctx/invalidate-graph-cache! (:ctx *graph*) #{(:id host)})
+        item-uri (str "/api/sequence/item/" (:id item))]
+    (testing "package-synced owner → 403 on every sequence op"
+      (is (= 403 (:status (via-seq-append
+                            (json-req (str "/api/sequence/append/" (:id host)) {:value 3})))))
+      (is (= 403 (:status (via-seq-update (json-req item-uri {:value 9} :put)))))
+      (is (= 403 (:status (via-seq-move (json-req (str "/api/sequence/move/" (:id item))
+                                                  {:direction "down"})))))
+      (is (= 1 (:value (sp/read-entity storage :binding-list-item (:id item))))))
+
+    (testing "package-synced binding update → 403"
+      (is (= 403 (:status (via-update (form-req (str "/api/entities/binding/" (:id bnd))
+                                                "terminal=true" :put))))))
+
+    (testing "a rename onto a taken name → 409"
+      (let [taken (setup/create-base-fn! storage (uniq "taken-name"))
+            other (setup/create-base-fn! storage (uniq "other-name"))
+            resp  (via-update (form-req (str "/api/entities/fn/" (:id other))
+                                        (str "name=" (:name taken)) :put))]
+        (is (= 409 (:status resp)))))))
 
 
 (deftest sequence-append-malformed-body-does-not-wedge-the-slot-test

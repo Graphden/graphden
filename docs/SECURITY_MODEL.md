@@ -93,7 +93,12 @@ so a gap in one does not by itself cross tenants:
    reverted by the next sync — the guard makes that class impossible for
    ANY principal; the legitimate paths are extending into a child fn or
    editing the package's `fns.edn`. Renaming or re-describing the package
-   fn itself is refused for the same reason. The editor mirrors the rule
+   fn itself is refused for the same reason. The 403 holds on EVERY write
+   surface: the generic entity create/update, sequence append / update /
+   move / remove, the record-type compound update (`PUT /api/types/record`,
+   which would otherwise re-shape the fn's own slots) and the inline secret
+   bind (`POST /api/secret-bindings`); a slot shared by several fns is
+   guarded if ANY fn declaring it is package-synced. The editor mirrors the rule
    client-side (`package-owned` rides out on each fn row): no `+`
    placeholder, no rename/delete, and the edit-block reason says to
    extend instead — so the affordance is absent rather than failing.

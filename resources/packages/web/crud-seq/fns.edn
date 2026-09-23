@@ -68,7 +68,7 @@
    :description "Success branch — materializes a synthetic binding if needed, appends the item, invalidates caches. Either 200 (with JSON `{:item-id :position}`) or 400 with the write-rej reason."
    :parent :if
    :args {:test :_seq-append-apply-error?
-          :then :_seq-append-apply-err-response
+          :then :_apply-err-response
           :else :_seq-append-apply-success
           :result :_seq-append-apply-result}}
 
@@ -80,11 +80,6 @@
   {:name :_seq-append-apply-error?
    :parent :some?
    :args {:value :_apply-error-msg}}
-
-  {:name :_seq-append-apply-err-response
-   :parent :html-error-response
-   :args {:status {:value 400}
-          :reason :_apply-error-msg}}
 
   {:name :_seq-append-apply-success
    :parent :do
@@ -310,7 +305,7 @@
    :description "Success branch — resolve body payload, run write-rej, update the row. Returns 200 or 400."
    :parent :if
    :args {:test :_seq-update-apply-error?
-          :then :_seq-update-apply-err-response
+          :then :_apply-err-response
           :else :_seq-update-apply-success
           :result :_seq-update-apply-result}}
 
@@ -322,11 +317,6 @@
   {:name :_seq-update-apply-error?
    :parent :some?
    :args {:value :_apply-error-msg}}
-
-  {:name :_seq-update-apply-err-response
-   :parent :html-error-response
-   :args {:status {:value 400}
-          :reason :_apply-error-msg}}
 
   {:name :_seq-update-apply-success
    :parent :do
@@ -429,7 +419,7 @@
    :description "Success branch — swap the item with its neighbour, invalidate, return 200 JSON `{item-id, position}` (or 400 with the reject reason)."
    :parent :if
    :args {:test :_seq-move-apply-error?
-          :then :_seq-move-apply-err-response
+          :then :_apply-err-response
           :else :_seq-move-apply-success
           :result :_seq-move-apply-result}}
 
@@ -441,11 +431,6 @@
   {:name :_seq-move-apply-error?
    :parent :some?
    :args {:value :_apply-error-msg}}
-
-  {:name :_seq-move-apply-err-response
-   :parent :html-error-response
-   :args {:status {:value 400}
-          :reason :_apply-error-msg}}
 
   {:name :_seq-move-apply-success
    :parent :do

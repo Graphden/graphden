@@ -272,17 +272,19 @@
   "Write this pod's `:service-instance` row for a just-started copy.
    Returns the row id, or nil when the write failed (logged) — the copy
    runs regardless; it just cannot be resolved by consumers."
-  [ctx storage service-id stopper]
+  [ctx storage svc stopper]
   (when storage
     (try
       (let [now (java.time.Instant/now)
+            service-id (:id svc)
             ep (endpoint-of ctx stopper)
-            ;; The tenant is the service row's. The reconciler is the
+            ;; The tenant is the service row's (the pass's own `:service`
+            ;; query carries `:org-id` — no re-read). The reconciler is the
             ;; trusted system path (public org, no principal), and the
             ;; tenancy decorator keeps an EXPLICIT `:org-id` for that path
             ;; instead of stamping `public` over it — a public-stamped copy
             ;; was readable by every org.
-            org-id (:org-id (sp/read-entity storage :service service-id))]
+            org-id (:org-id svc)]
         (:id (sp/create-entity storage :service-instance
                                (cond-> {:service-id service-id
                                         :executor-id (self-executor-id ctx)
@@ -292,7 +294,7 @@
                                         :seen-at now}
                                  org-id (assoc :org-id org-id)))))
       (catch Exception e
-        (log/warn e "service instance write failed" {:service-id service-id})
+        (log/warn e "service instance write failed" {:service-id (:id svc)})
         nil))))
 
 
@@ -847,7 +849,7 @@
                 (let [eff-branch (effective-branch-id svc)
                       ;; This copy's instance row (where it answers + its
                       ;; heartbeat). Kept on the entry so stop deletes it.
-                      instance-id (create-instance! ctx storage sid (:stopper entry))
+                      instance-id (create-instance! ctx storage svc (:stopper entry))
                       entry' (cond-> (assoc entry
                                             :cardinality (svc-schema/service-cardinality svc)
                                             :pool-size pool-size

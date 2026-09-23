@@ -1500,6 +1500,36 @@
       (finally (sp/close storage)))))
 
 
+(deftest reconcile-instance-carries-the-service-org-without-a-re-read-test
+  ;; The instance row is the service row's tenant — taken from the pass's
+  ;; own `:service` query row, not a per-start `read-entity` of it.
+  (let [storage (setup/create-branch-versioned-test-storage)
+        calls (atom []) stops (atom []) alive (atom true) exit (atom nil)
+        {composed :composed} (make-listener-fn! storage "inst-org" 43212 calls stops alive exit)
+        svc (make-service-row! storage (:id composed) true)
+        _ (sp/update-entity storage :service (:id svc) {:org-id "acme"})
+        service-reads (atom 0)
+        counting (reify sp/StorageCRUD
+                   (query-entities [_ en where] (sp/query-entities storage en where))
+                   (query-entities [_ en where opts] (sp/query-entities storage en where opts))
+                   (create-entity [_ en data] (sp/create-entity storage en data))
+                   (read-entity [_ en id]
+                     (when (= en :service) (swap! service-reads inc))
+                     (sp/read-entity storage en id))
+                   (update-entity [_ en id data] (sp/update-entity storage en id data))
+                   (delete-entity [_ en id] (sp/delete-entity storage en id))
+                   (query-latest-per-group [_ en where cols] (sp/query-latest-per-group storage en where cols)))
+        c (assoc (setup/default-registry-ctx storage) :executor-orgs #{"public" "acme"})
+        running (atom {})]
+    (try
+      (#'recon/create-instance! c counting (sp/read-entity storage :service (:id svc)) nil)
+      (is (zero? @service-reads) "no :service re-read per start")
+      (is (= ["acme"] (map :org-id (instances-of storage (:id svc)))))
+      (recon/reconcile-once! c running)
+      (is (= 2 (count (instances-of storage (:id svc)))))
+      (finally (recon/stop-all! running c) (sp/close storage)))))
+
+
 (deftest reconcile-instance-host-is-the-pod-executor-id-test
   (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom []) stops (atom []) alive (atom true) exit (atom nil)

@@ -20,8 +20,8 @@
 // password and re-opens the popover with an error so the user notices
 // when their session was rejected.
 //
-// The account chip's MENU (`openShellMenu`,
-// `logoutEverywhere`) is editor-shell-menu.js, loaded right after this file.
+// The account chip's MENU (`openShellMenu`) is editor-shell-menu.js,
+// loaded right after this file.
 // This file is the auth STATE + `authFetch` / `authMutate` + the login popover.
 
 const AUTH_STORAGE_KEY = 'graphden.auth.password';

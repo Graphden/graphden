@@ -1964,11 +1964,11 @@
   "Effects are tainted: parent ∪ every ref-binding's effects. Once
    any link in the composition reads/writes I/O the tag flows into
    the fn-def — caching / parallelism / docs all read this single
-   source of truth."
-  [args parent-info]
-  (let [ref-effects (reduce into #{} (vals (compute-per-arg-effects
-                                             args (:args parent-info))))]
-    (into ref-effects (or (:effects parent-info) #{}))))
+   source of truth. `arg-effects` is `compute-per-arg-effects`' output,
+   computed once per `check-fn-def!` and shared with the record step."
+  [arg-effects parent-info]
+  (into (reduce into #{} (vals arg-effects))
+        (or (:effects parent-info) #{})))
 
 
 (defn- compute-call-time-effects
@@ -1988,12 +1988,12 @@
    value at construction time is still a pure predicate at call time.
 
    Free args are the arg-NAMES that survive the lift — bound args
-   are everything else under `(:args fn-def)`."
-  [args parent-info free-arg-names]
-  (let [free-keys (set free-arg-names)
-        per-arg (compute-per-arg-effects args (:args parent-info))
-        call-site-arg-effects (reduce into #{}
-                                      (vals (select-keys per-arg free-keys)))
+   are everything else under `(:args fn-def)`. `arg-effects` is
+   `compute-per-arg-effects`' output (see `compute-effects`)."
+  [arg-effects parent-info free-arg-names]
+  (let [call-site-arg-effects (reduce into #{}
+                                      (vals (select-keys arg-effects
+                                                         (set free-arg-names))))
         parent-call-time (or (:call-time-effects parent-info)
                              (:effects parent-info)
                              #{})]
@@ -2065,13 +2065,15 @@
    `:nav-types` — `{slot-name → navigable-structure}` for sequence
    slots whose items index into a known shape (`:update-in`'s `:path`
    → `:m`'s record). The editor walks this against the live path to
-   type each segment position and gate the `+` append affordance."
+   type each segment position and gate the `+` append affordance.
+
+   The effects arrive as `{:effects :arg-effects}` — computed once by
+   `check-fn-def!` (`compute-per-arg-effects` → `compute-effects`)."
   [fn-name fn-def primary-parent parent-info free-args
-   computed-return effects own-resolved slot-types nav-types drift]
+   computed-return {:keys [effects arg-effects]} own-resolved slot-types nav-types drift]
   (let [expected (some-> fn-def :expects-effects set)
         resolved (merge (:resolved-bindings parent-info {}) own-resolved)
-        arg-effects (compute-per-arg-effects (:args fn-def) (:args parent-info))
-        call-time-effects (compute-call-time-effects (:args fn-def)
+        call-time-effects (compute-call-time-effects arg-effects
                                                      parent-info
                                                      (keys free-args))]
     (registry/record-rich-types-raw!
@@ -2541,14 +2543,20 @@
                                                      effective-parent static-ret)
                 recorded-return (enforce-declared-return! fn-name fn-def computed-return)
                 drift (return-type-drift fn-def computed-return)
-                effects (compute-effects (:args fn-def) parent-info)]
+                ;; Once per fn-def: both the total effects and the
+                ;; record step's per-arg / call-time split read it.
+                arg-effects (compute-per-arg-effects (:args fn-def)
+                                                     (:args parent-info))
+                effects (compute-effects arg-effects parent-info)]
             (when drift (log-return-type-drift! fn-name fn-def drift))
             (when-let [declared (some-> fn-def :effects set)]
               (when (not= declared effects)
                 (log-effects-drift! fn-name fn-def declared effects)))
             (check-effects-policy! fn-name fn-def effects)
             (record-result! fn-name fn-def primary-parent parent-info
-                            free-args recorded-return effects own-bindings
+                            free-args recorded-return
+                            {:effects effects :arg-effects arg-effects}
+                            own-bindings
                             slot-types nav-types drift)
             subst))))))
 

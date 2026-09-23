@@ -679,10 +679,6 @@
    :description "Closed enum for the `:change` field on a `:diff-branches` entry. Same keyword set the Clojure merge layer emits."
    :refine {:base :keyword :constraint [:in [:added-in-source :added-in-target :modified]]}}
 
-  {:name :diff-entity-name-kw
-   :description "Closed enum for the `:entity-name` field on a `:diff-branches` entry — the versioned entity kinds the diff walker considers."
-   :refine {:base :keyword :constraint [:in [:fn :fn-slot :binding :binding-list-item]]}}
-
   {:name :diff-branches
    :description "Atomic library boundary over `mrg/diff-branches` — returns the resolved-view diff between the two branches' ancestor chains: `{:source-branch-id :target-branch-id :diffs [...]}`."
    :args {:source-branch-id {:type :uuid :description "Source branch id."}

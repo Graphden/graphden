@@ -16,8 +16,8 @@
           :capture-values? :bool}}
 
   {:name :_execute-rejection-shape
-   :description "Output of `:_execute-validation` — `{:ok false :error :error-data}` rejection or nil."
-   :type {:ok :bool :error :text :error-data :jsonb}}
+   :description "Output of `:_execute-validation` — `{:ok false :status :rejected :http-status :error :error-data}` rejection or nil. `:error-data` stays an open keyword map: each guard adds its own detail keys."
+   :type {:ok :bool :status :keyword :http-status :int :error :text :error-data :keyword-map}}
 
   ;; ---------------------------------------------------------------------
   ;; Base-fns — stage shims
@@ -615,7 +615,9 @@
                     :_execute-running-as-svc-rej?   :_execute-running-as-svc-err
                     :_execute-unknown-arg-rej?      :_execute-unknown-arg-err
                     :_execute-malformed-ref-rej?    :_execute-malformed-ref-err
-                    {:value true}                   {:value nil}]}}
+                    {:value true}                   {:value nil}]}
+   :return-type [:union :null :_execute-rejection-shape]
+   :return-type-wide? true}
 
   ;; `:parsed` stays FREE on the guard cond above and is pinned here, one
   ;; level down, for the HTTP pipeline. The preview (`:_pv-validation`) and

@@ -253,7 +253,8 @@
    :parent :if
    :args {:test :_types-compatible-ok?
           :then :_types-compatible-ok-shape
-          :else :_types-compatible-not-ok-shape}}
+          :else :_types-compatible-not-ok-shape}
+   :return-type :_types-compatible-result-shape}
 
   ;; --- :types-compatible-many — ONE candidate against N expected types
   ;; in one request: the wrap flow asks which of the picked parent's slots
@@ -586,7 +587,9 @@
           :vals [{:value true}
                  :_types-candidates-apply-expected
                  :_types-candidates-count
-                 {:parent :vec :args {:coll :_types-candidates-sorted}}]}}
+                 {:parent :vec :args {:coll :_types-candidates-sorted}}]}
+   :return-type :_types-candidates-result-shape
+   :return-type-wide? true}
 
   {:name :_types-usages-parsed
    :description "Stage 1 of types-usages — JSON body → `{:target-id}` (the `type-fn-id` — or its `fn-id` synonym, which the /api/fns/usages alias sends — coerced to a UUID, or nil when absent / malformed). The `:to-str → :parse-uuid` chain preserves the original `(when id (try uuid-parse (catch _ nil)))` shape — `:to-str` of nil is `\"\"`, `:parse-uuid` of `\"\"` is nil, so missing keys still collapse to a nil target-id."

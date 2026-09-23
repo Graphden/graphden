@@ -112,11 +112,11 @@
 
   {:name :_types-compatible-result-shape
    :description "Output of `:_types-compatible-apply` — the subtype-check verdict. An extra `:reason` is present when not ok (open-record — extra fields are fine)."
-   :type {:ok :bool :expected :jsonb :candidate :jsonb}}
+   :type {:ok :bool :expected :type-expression :candidate :type-expression}}
 
   {:name :_types-candidates-result-shape
    :description "Output of `:_types-candidates-apply` — the enumeration of fns whose return type is a subtype of `expected`."
-   :type {:ok :bool :expected :jsonb :count :int :candidates :jsonb}}
+   :type {:ok :bool :expected :type-expression :count :non-negative-int :candidates [:list :any]}}
 
   {:name :_types-usages-result-shape
    :description "Output of `:_types-usages-apply` — every reference to the target type-row. `:type-fn-id` is the id stringified."
@@ -186,10 +186,6 @@
   {:name :_storage-where-map
    :description "A storage query filter — `{column-keyword → match-value}`. Keys are entity column names; values arbitrary."
    :map {:key :keyword :value :any}}
-
-  {:name :_form-field-map
-   :description "Parsed `application/x-www-form-urlencoded` fields — `{field-keyword → string-value}`."
-   :map {:key :keyword :value :text}}
 
   {:name :_form-data-shape
    :description "Pre-parser form payload: `{field-name field-value}` keyed by FORM field name (string-or-keyword post JSONB-roundtrip). Wider than `:keyword-map` — covers the wire layer where keys may still be strings."

@@ -140,29 +140,6 @@
    :args {:value ["div" {"class" "value-form-widget"
                          "data-form-widget" "rating"}]}}
 
-  ;; --- value-form demo shape ---
-  ;;
-  ;; A record whose fields exercise each non-trivial form kind: a
-  ;; closed-enum `<select>` (`verb`), a union branch-selector (`mix`),
-  ;; and the `rating` custom widget (`score`). Its field slots are the
-  ;; reference targets for `/api/value-form`. Record fields must be
-  ;; NAMED type-rows — an inline structural type degrades to its base
-  ;; on sync — so the enum / union get their own aliases.
-
-  {:name :ex-http-verb
-   :description "Demo closed enum — an HTTP verb keyword."
-   :refine {:base :keyword :constraint [:in [:get :post :put :delete]]}}
-
-  {:name :ex-int-or-text
-   :description "Demo union — an int or a text value."
-   :union [:int :text]}
-
-  {:name :ex-value-form-shape
-   :description "Demo record for the type-aware value-form: `verb` is a closed keyword enum, `mix` a union, `score` the custom-widget `:vf-rating`."
-   :type {:verb  :ex-http-verb
-          :mix   :ex-int-or-text
-          :score :vf-rating}}
-
   ;; --- dispatch registry ---
   ;;
   ;; Vector of [type-name form-fn-name] pairs, both as plain strings
@@ -306,8 +283,8 @@
    :type {:binding-id :nullable-uuid :fn-id :nullable-uuid :slot-id :nullable-uuid :item-id :nullable-uuid}}
 
   {:name :_value-form-result-shape
-   :description "Output of `:_value-form-apply` — the resolved editor form: `:form` is the control hiccup, `:value` the binding's current value."
-   :type {:ok :bool :form :jsonb :value :jsonb}}
+   :description "Output of `:_value-form-apply` — the resolved editor form: `:form` is the control hiccup, `:value` the binding's current value (any type the slot holds)."
+   :type {:ok :bool :form :hiccup-node :value :any}}
 
   ;; --- :_value-form-parsed — pure graph composition over
   ;; :parse-json-body + 4 :parse-uuid + :zipmap (4 UUID fields off
@@ -436,7 +413,9 @@
    :args {:keys [{:value :ok} {:value :form} {:value :value}]
           :vals [{:value true}
                  :_value-form-hiccup
-                 :_value-form-current]}}
+                 :_value-form-current]}
+   :return-type :_value-form-result-shape
+   :return-type-wide? true}
 
   ;; The editor's "as:" chooser on a wide (`:any` / `:jsonb`) slot asks
   ;; for a NARROWER type's form by name — `:resolve-form` reads a text

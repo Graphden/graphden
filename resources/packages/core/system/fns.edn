@@ -132,7 +132,8 @@
    :args {:keys [{:value :name} {:value :version} {:value :uptime-ms}]
           :vals [{:parent :system-property :args {:name {:value "java.vm.name"}}}
                  {:parent :system-property :args {:name {:value "java.version"}}}
-                 :jvm-uptime-ms]}}
+                 :jvm-uptime-ms]}
+   :return-type :jvm-version-shape}
 
   ;; Heap / process-memory primitives — one MXBean/Runtime call each,
   ;; same standard as :jvm-uptime-ms: admins compose their own memory

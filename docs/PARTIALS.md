@@ -312,9 +312,8 @@ KEYWORD literal:
 The trap is observability: the partial silently renders empty
 sections / wrong dispatch instead of failing loudly. After this
 gotcha hit twice (execute-history `:status`, branch-diff `:change`
-and `:entity-name`), the affected fields got closed-enum types
-(`:diff-change-kw`, `:diff-entity-name-kw`) so downstream sites
-can pin the kind explicitly. `:equal?` itself stays untyped today
+and `:entity-name`), the `:change` field got a closed-enum type
+(`:diff-change-kw`) so downstream sites can pin the kind explicitly. `:equal?` itself stays untyped today
 — sync-time guard for `:kw` vs `:string` compares would need a
 typed-equal variant; deferred.
 

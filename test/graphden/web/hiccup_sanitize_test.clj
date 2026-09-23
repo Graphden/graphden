@@ -7,7 +7,8 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.web.hiccup-sanitize :as sanitize]
-    [hiccup.util :as hutil]))
+    [hiccup.util :as hutil]
+    [hiccup2.core :as h]))
 
 
 (defn- in-tree?
@@ -112,6 +113,21 @@
       (is (= ["div" {} "<script>alert(1)</script>"] out)
           "collapsed to a PLAIN string — hiccup2 escapes it on render")
       (is (string? (nth out 2))))))
+
+
+(deftest child-seq-stays-a-seq-test
+  (testing "a child seq whose first item is a string never becomes an element"
+    (doseq [tag ["script" "style" "iframe"]]
+      (let [out  (sanitize/sanitize-hiccup [:div (list tag "alert(1)")])
+            html (str (h/html out))]
+        (is (not (re-find (re-pattern (str "<" tag)) html))
+            (str tag " must not render as an element: " html))
+        (is (= (str "<div>" tag "alert(1)</div>") html)))))
+
+  (testing "a nested child seq keeps its allowed elements"
+    (is (= "<div><span>x</span>y</div>"
+           (str (h/html (sanitize/sanitize-hiccup
+                          [:div (list [:span "x"] (list "y"))])))))))
 
 
 (deftest bounds-test

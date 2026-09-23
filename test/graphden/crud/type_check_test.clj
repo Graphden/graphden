@@ -278,6 +278,94 @@
         (finally (sp/close storage))))))
 
 
+;; A parent living in a depth-3 namespace. The ns rows the reconstruct
+;; batch-reads were only the fns' OWN namespaces, so a missing
+;; grandparent contributed just its `:name` and the walk stopped:
+;; `my.app.utils/helper` came out as `:app.utils/helper`, the registry
+;; (bare + FULL qualified keys only) missed it, and `check-fn-def!`
+;; skipped the fn silently — no diagnostic for an ill-typed binding.
+(defn- deep-ns-parent!
+  "`<prefix>-a.<prefix>-b.<prefix>-c` ns chain + a base fn `<prefix>-helper`
+   in the leaf, with an `:int` slot `a`, registered like the sync path
+   (qualified key from `:namespace`). Returns `{:base :slot :ns-path}`."
+  [storage prefix]
+  (let [a     (sp/create-entity storage :ns {:name (str prefix "-a")})
+        b     (sp/create-entity storage :ns {:name (str prefix "-b") :parent-id (:id a)})
+        c     (sp/create-entity storage :ns {:name (str prefix "-c") :parent-id (:id b)})
+        path  (str prefix "-a." prefix "-b." prefix "-c")
+        base  (sp/create-entity storage :fn
+                                {:name (str prefix "-helper")
+                                 :namespace-id (:id c)
+                                 :parent-ids nil
+                                 :return-type-fn-id (:id (setup/create-base-fn! storage (str prefix "-rt")))})
+        slot  (setup/create-slot! storage "a" :int)]
+    (setup/attach-slot! storage (:id base) (:id slot) 0)
+    {:base base :slot slot :ns-path path}))
+
+
+(deftest reconstruct-fn-def-deep-namespace-parent-test
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [{:keys [base slot ns-path]} (deep-ns-parent! storage "rfdns")
+            child (setup/create-composed-fn! storage "rfdns-child" (:id base))
+            _     (setup/bind-value! storage (:id child) (:id slot) 5)]
+        (testing "the parent's full dotted path is emitted, not a suffix"
+          (is (= (keyword ns-path "rfdns-helper")
+                 (:parent (tc/reconstruct-fn-def storage (:id child)))))))
+      (finally (sp/close storage)))))
+
+
+(deftest type-check-deep-namespace-parent-test
+  (testing "an ill-typed binding on a child of a depth-3-ns fn is diagnosed"
+    (binding [diag/*diagnostics-override* (atom {})]
+      (let [storage (setup/create-test-storage)]
+        (try
+          (let [{:keys [base slot ns-path]} (deep-ns-parent! storage "tcdns")
+                _     (registry/record-rich-types-raw!
+                        (:id base) :tcdns-helper
+                        {:return :int :args {:a :int} :effects #{}
+                         :namespace ns-path})
+                ;; A same-named fn elsewhere owns the BARE key — the
+                ;; editor-world duplicate that makes only the qualified
+                ;; key precise.
+                _     (registry/record-rich-types-raw!
+                        (random-uuid) :tcdns-helper
+                        {:return :int :args {} :effects #{} :namespace "tcdns-other"})
+                child (setup/create-composed-fn! storage "tcdns-child" (:id base))
+                _     (setup/bind-value! storage (:id child) (:id slot) "hello")
+                rej   (tc/type-check-fn-after-mutation! storage (:id child))]
+            (is (= {:expected :int :actual :text :arg-name :a}
+                   (select-keys (:diagnostic rej) [:expected :actual :arg-name]))))
+          (finally (sp/close storage)))))))
+
+
+;; The parent is itself EDITOR-created (never synced): its registry entry
+;; comes from its own post-write check, which must dual-key it under the
+;; qualified name too — else every child's qualified parent lookup misses
+;; and the child's check is skipped.
+(deftest type-check-editor-parent-in-namespace-test
+  (testing "a child of an editor-created fn in a namespace is still checked"
+    (binding [diag/*diagnostics-override* (atom {})]
+      (let [storage (setup/create-test-storage)]
+        (try
+          (let [{:keys [base slot ns-path]} (deep-ns-parent! storage "tcedp")
+                _      (registry/record-rich-types-raw!
+                         (:id base) :tcedp-helper
+                         {:return :int :args {:a :int} :effects #{}
+                          :namespace ns-path})
+                leaf   (:namespace-id base)
+                mid    (sp/create-entity storage :fn
+                                         {:name "tcedp-mid" :namespace-id leaf
+                                          :parent-ids [(:id base)]})
+                _      (is (nil? (tc/type-check-fn-after-mutation! storage (:id mid))))
+                child  (setup/create-composed-fn! storage "tcedp-child" (:id mid))
+                _      (setup/bind-value! storage (:id child) (:id slot) "hello")
+                rej    (tc/type-check-fn-after-mutation! storage (:id child))]
+            (is (= {:expected :int :actual :text :arg-name :a}
+                   (select-keys (:diagnostic rej) [:expected :actual :arg-name]))))
+          (finally (sp/close storage)))))))
+
+
 ;; ============================================================================
 ;; type-check-fn-after-mutation!
 ;; ============================================================================

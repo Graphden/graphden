@@ -1,4 +1,4 @@
-(ns graphden.packages.registry-test
+(ns ^{:cost :heavy} graphden.packages.registry-test
   "Tests for the package registry — the `:package-version` entity that
    stores immutable published bundles."
   (:require

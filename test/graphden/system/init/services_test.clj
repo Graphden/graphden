@@ -1,5 +1,10 @@
-(ns graphden.system.init.services-test
-  "Unit coverage for the NOTIFY-driven cross-pod service restart wiring.
+(ns ^:serial graphden.system.init.services-test
+  "`^:serial`: stubs `recon/restart-services-depending-on!` /
+   `restart-services-on-branch!` with `with-redefs` — a root rebind that
+   every CRUD write in a parallel namespace would call into (and break the
+   exact-call assertions below with its own calls).
+
+   Unit coverage for the NOTIFY-driven cross-pod service restart wiring.
    `restart-notified-services!` is the hook a sibling pod runs when it hears a
    `fn:invalidate` event, so a cron/loop singleton it owns restarts its closure
    after a fn edit / merge on ANOTHER pod (before this, only the writer pod's

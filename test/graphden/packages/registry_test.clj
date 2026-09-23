@@ -1,6 +1,5 @@
-(ns ^:serial graphden.packages.registry-test
-  "`^:serial` — installs process-global seams (`tc/install-*-fn!` / `deploy-config/install!`) for the length of a test; under kaocha's parallel plugin another namespace's `finally` reset them mid-test (the CI perf job).
-   Tests for the package registry — the `:package-version` entity that
+(ns ^{:cost :heavy} graphden.packages.registry-test
+  "Tests for the package registry — the `:package-version` entity that
    stores immutable published bundles."
   (:require
     [cheshire.core :as json]
@@ -15,6 +14,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.system.deploy-config :as deploy-config]
     [graphden.tenancy.context :as tc]
+    [graphden.test-infra.seams :as ts]
     [graphden.versioning.storage.core :as vcore]
     [org.httpkit.server :as http-kit]))
 
@@ -23,6 +23,7 @@
 
 
 (use-fixtures :once
+  ts/isolated-seams-fixture
   (fn [t]
     ;; registry is its own OPTIONAL package now (installed via the route-
     ;; collection seam), so `app` no longer pulls it — bootstrap the golden

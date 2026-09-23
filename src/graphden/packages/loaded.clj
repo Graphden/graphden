@@ -17,6 +17,24 @@
 (defonce ^:private roster (atom []))
 
 
+;; Parallel-test isolation (the `tenancy.context/*seams-override*` shape): a
+;; test namespace that installs a roster binds this to a fresh atom seeded
+;; from the global (`test-infra.seams/isolated-seams-fixture`), so it never
+;; reaches a sibling namespace. nil in production → the global atom.
+(def ^:dynamic *roster-override* nil)
+
+
+(defn- roster-atom
+  []
+  (or *roster-override* roster))
+
+
+(defn roster-isolation-seed
+  "The global roster, as a test's isolated starting point."
+  []
+  @roster)
+
+
 (defn- external-names
   "Package names the operator manifest (`executor-packages.edn`) adds —
    a Type-2 package pulled in by git / Maven coord, as opposed to a
@@ -49,7 +67,7 @@
   [{:keys [packages base-fn-counts]}]
   (let [ext (external-names)
         counts (or base-fn-counts {})]
-    (reset! roster
+    (reset! (roster-atom)
             (vec (for [m packages]
                    (roster-entry m (get counts (:name m) 0) (contains? ext (:name m))))))))
 
@@ -57,9 +75,9 @@
 (defn read-roster
   "The loaded-package roster, in load order — `[]` before boot."
   []
-  @roster)
+  @(roster-atom))
 
 
 (defn clear!
   []
-  (reset! roster []))
+  (reset! (roster-atom) []))

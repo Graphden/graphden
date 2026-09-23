@@ -388,11 +388,11 @@
         handlers (atom {})
         router (-> (br/->BranchRouter nil default-id handlers :stub-fn-id)
                    (assoc :build-monitors (java.util.concurrent.ConcurrentHashMap.)))]
-    (with-redefs [br/build-actual-entry!
-                  (fn [r bid]
-                    ;; simulate a concurrent delete landing mid-build
-                    (br/invalidate! r bid)
-                    {:handler :stub-h :last-used 1})]
+    (binding [br/*build-entry-override*
+              (fn [r bid]
+                ;; simulate a concurrent delete landing mid-build
+                (br/invalidate! r bid)
+                {:handler :stub-h :last-used 1})]
       (let [built (#'br/build-and-cache! router gone-id)]
         (is (= :stub-h (:handler built))
             "the in-flight request is still served from the built entry")
@@ -414,8 +414,8 @@
     ;; Seed holders for both the victim and (as computeIfAbsent would) new-id.
     (#'br/build-holder router victim-id)
     (is (java.util.concurrent.ConcurrentHashMap/.containsKey monitors victim-id))
-    (with-redefs [br/build-actual-entry!
-                  (fn [_ _] {:handler :new-h :last-used 9})]
+    (binding [br/*build-entry-override*
+              (fn [_ _] {:handler :new-h :last-used 9})]
       (#'br/build-and-cache! router new-id))
     (is (contains? @handlers new-id) "new branch installed")
     (is (not (contains? @handlers victim-id)) "victim evicted from handlers")

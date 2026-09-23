@@ -1,15 +1,19 @@
-(ns ^:serial graphden.tenancy.context-test
+(ns graphden.tenancy.context-test
   "Unit tests for the core-side tenancy seam (docs/TENANCY_SEAM.md § Context):
    org binding/derivation, the platform-tier predicate, the installable
    admin/capability hooks, and the byo execution-mode memo.
 
-   `^:serial`: the install-*-fn! tests mutate the ns-global seam atoms
-   (process-wide state a parallel sibling could observe mid-test). The
-   byo tests are already isolated via `*byo-cache-override*`."
+   The install-*-fn! tests write this namespace's copy of the seams
+   (`test-infra.seams`), never the process global a parallel sibling
+   reads; the byo tests are isolated via `*byo-cache-override*`."
   (:require
-    [clojure.test :refer [deftest is testing]]
+    [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.storage.protocol.core :as sp]
-    [graphden.tenancy.context :as ctx]))
+    [graphden.tenancy.context :as ctx]
+    [graphden.test-infra.seams :as ts]))
+
+
+(use-fixtures :each ts/isolated-seams-fixture)
 
 
 ;; =============================================================================
@@ -88,6 +92,16 @@
       (ctx/install-platform-admin-fn! nil)))
   (is (false? (ctx/current-platform-admin?))
       "nil restores the default-deny no-op"))
+
+
+(deftest seams-override-keeps-installs-off-the-global
+  (ctx/install-org-cap-fn! (constantly true))
+  (is (true? (ctx/current-has-org-cap? :manage-users)) "the install is seen here")
+  (is (true? (ctx/tenancy-addon-active?)))
+  (binding [ctx/*seams-override* nil]
+    (is (false? (ctx/current-has-org-cap? :manage-users))
+        "…but never reaches the process-global seams a sibling reads")
+    (is (false? (ctx/tenancy-addon-active?)))))
 
 
 (deftest notify-seam-drops-without-a-sink-and-passes-the-event-through

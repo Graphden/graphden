@@ -1,4 +1,4 @@
-(ns ^:integration graphden.integration.branches-lifecycle-test
+(ns ^:integration ^{:cost :heavy} graphden.integration.branches-lifecycle-test
   "End-to-end coverage for the per-branch CRUD lifecycle through the
    real Ring handler chain — create branch → write a fn on it → diff
    vs main → merge → verify the fn now resolves on main.

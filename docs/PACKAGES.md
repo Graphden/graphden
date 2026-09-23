@@ -219,7 +219,9 @@ The seals are enforced on every tenant-facing write — the editor, the
 entity API, an AI's `upsert-fn-defs`, a registry install / fork / import
 (`packages.sync/sync-bundle!`) — but NOT by the boot package sync: a
 first-party package is its author's own tree. `corpus_seals_test` keeps
-the corpus honest about it anyway.
+the corpus honest about it anyway — a unit test with no database: it parses
+the shipped packages into the records the boot sync would write and runs the
+same seal rules over them, reporting every violation.
 
 ```edn
 {:name :base-sum :parent :add :args {:nums {:append [1 2] :closed true}}}

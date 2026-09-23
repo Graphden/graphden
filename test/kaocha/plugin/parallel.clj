@@ -23,6 +23,9 @@
      `registry/*registry-override*` pattern; extend the list when a
      new global-mutable surface gets used by tests in parallel.
 
+   One scheduling hint: `^{:cost :heavy}` NS meta submits that namespace
+   ahead of the rest (`heavy-first`), so the longest jobs start first.
+
    IMPLEMENTATION GOTCHA: kaocha lazy-loads
    `kaocha.type.clojure.test` / `kaocha.type.ns` / `kaocha.type.var`
    from `testable/run` via `try-load-third-party-lib` — and their
@@ -53,15 +56,32 @@
       TimeUnit)))
 
 
+(defn- ns-meta
+  [t]
+  (when-let [id (:kaocha.testable/id t)]
+    ;; kaocha's :kaocha.testable/id is a KEYWORD (e.g. :graphden.foo-test);
+    ;; find-ns wants a symbol. Convert.
+    (when-let [n (try (find-ns (symbol (name id))) (catch Exception _ nil))]
+      (meta n))))
+
+
 (defn- ns-serial?
   [t]
-  (boolean
-    (when-let [id (:kaocha.testable/id t)]
-      ;; kaocha's :kaocha.testable/id is a KEYWORD (e.g. :graphden.foo-test);
-      ;; find-ns wants a symbol. Convert.
-      (let [ns-sym (symbol (name id))]
-        (when-let [n (try (find-ns ns-sym) (catch Exception _ nil))]
-          (:serial (meta n)))))))
+  (boolean (:serial (ns-meta t))))
+
+
+(defn- heavy-first
+  "`indexed` (`[i testable]` pairs) with the `^{:cost :heavy}`
+   namespaces moved to the front, order otherwise kept. The pool runs namespaces in submission order and
+   kaocha randomises that order, so a minutes-long namespace drawn last
+   started when the others were done and set the suite's wall on its own
+   (longest-job-first is what bounds a fixed pool). Tag a namespace heavy
+   when its own run is several times the suite's typical one — the
+   profiling report's per-ns table says which."
+  [indexed]
+  (let [{heavy true light false}
+        (group-by #(= :heavy (:cost (ns-meta (second %)))) indexed)]
+    (into (vec heavy) light)))
 
 
 ;; Process-global mutables that test code mutates as if it owned them
@@ -296,6 +316,7 @@
         serial-results (mapv (fn [[i t]]
                                [i (run-one t test-plan load-error?)])
                              serial-set)
+        parallel-set (heavy-first parallel-set)
         parallel-tests (mapv second parallel-set)
         parallel-raw (run-testables-parallel parallel-tests test-plan n load-error?)
         parallel-results (mapv vector (map first parallel-set) parallel-raw)]

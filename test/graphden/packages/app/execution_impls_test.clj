@@ -185,7 +185,7 @@
     ;; The whole map is JSON-encoded straight into the services
     ;; response; a java.time.Instant would either serialize as an
     ;; opaque object or break the encoder.
-    (let [backoff-atom (ns-resolve 'graphden.services.reconciler 'exit-backoff)
+    (let [backoff-atom (requiring-resolve 'graphden.services.liveness/exit-backoff)
           sid (random-uuid)]
       (try
         (swap! recon/running assoc sid :graphden.services.reconciler/backoff)

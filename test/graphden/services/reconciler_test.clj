@@ -21,6 +21,8 @@
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.schema.services.schema :as svcs]
+    [graphden.services.instances :as instances]
+    [graphden.services.liveness :as liveness]
     [graphden.services.reconciler :as recon]
     [graphden.storage.postgres.advisory-lock :as pg-lock]
     [graphden.storage.protocol.core :as sp]
@@ -1511,18 +1513,25 @@
         service-reads (atom 0)
         counting (reify sp/StorageCRUD
                    (query-entities [_ en where] (sp/query-entities storage en where))
+
                    (query-entities [_ en where opts] (sp/query-entities storage en where opts))
+
                    (create-entity [_ en data] (sp/create-entity storage en data))
-                   (read-entity [_ en id]
+
+                   (read-entity
+                     [_ en id]
                      (when (= en :service) (swap! service-reads inc))
                      (sp/read-entity storage en id))
+
                    (update-entity [_ en id data] (sp/update-entity storage en id data))
+
                    (delete-entity [_ en id] (sp/delete-entity storage en id))
+
                    (query-latest-per-group [_ en where cols] (sp/query-latest-per-group storage en where cols)))
         c (assoc (setup/default-registry-ctx storage) :executor-orgs #{"public" "acme"})
         running (atom {})]
     (try
-      (#'recon/create-instance! c counting (sp/read-entity storage :service (:id svc)) nil)
+      (instances/create-instance! c counting (sp/read-entity storage :service (:id svc)) nil)
       (is (zero? @service-reads) "no :service re-read per start")
       (is (= ["acme"] (map :org-id (instances-of storage (:id svc)))))
       (recon/reconcile-once! c running)
@@ -1615,8 +1624,8 @@
         ;; copy reads as alive on the next pass.
         die! (fn [] (reset! alive false) (reset! exit :done))]
     (try
-      (binding [recon/*exit-stable-ms* (* 60 60 1000)
-                recon/*exit-backoff-cap-ms* 300]
+      (binding [liveness/*exit-stable-ms* (* 60 60 1000)
+                liveness/*exit-backoff-cap-ms* 300]
         (recon/reconcile-once! c running)
         (is (= 1 (count @calls)))
         (die!)
@@ -1641,7 +1650,7 @@
           (is (= 3 (count @calls)))
           (is (map? (get @running (:id svc)))))
         (testing "a stable run resets the counter — immediate restart again"
-          (binding [recon/*exit-stable-ms* 0]
+          (binding [liveness/*exit-stable-ms* 0]
             (die!)
             (recon/reconcile-once! c running)
             (reset! alive true)

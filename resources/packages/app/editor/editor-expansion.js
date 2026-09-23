@@ -181,27 +181,18 @@ function applyClickSpec(nodeId, depth, fnId, allFnsAtDepth) {
  * reader is building here, so the canvas shows what they just wired
  * instead of leaving it folded inside a closed card (reopening the fn
  * later shows closed cards again — names are boundaries). A nav-root card
- * draws its own refs already — nothing to do (null). Returns a token for
- * `refoldNodeForBuild` when the state changed.
+ * draws its own refs already — nothing to do. Callers unfold only after
+ * the write succeeded, so there is nothing to put back.
  */
 function unfoldNodeForBuild(fnId) {
-  if (!fnId) return null;
+  if (!fnId) return;
   const overlay = document.querySelector('.node-overlay[data-original-fn-id="' + fnId + '"]');
   const nodeId = overlay?.dataset?.nodeId;
-  if (!nodeId || nodeId === 'fn-' + fnId) return null;
-  const current = expansionState.get(nodeId);
-  if ((current?.fullDepth || 0) >= 1) return null;
+  if (!nodeId || nodeId === 'fn-' + fnId) return;
+  if ((expansionState.get(nodeId)?.fullDepth || 0) >= 1) return;
   expansionState.set(nodeId, { fullDepth: 1, partialFns: new Set() });
   previewState.delete(nodeId);
   savedUserPositions.clear();
-  return { nodeId, previous: current || null };
-}
-
-// Put back what `unfoldNodeForBuild` changed — for a write that then failed.
-function refoldNodeForBuild(token) {
-  if (!token?.nodeId) return;
-  if (token.previous) expansionState.set(token.nodeId, token.previous);
-  else expansionState.delete(token.nodeId);
 }
 
 /**

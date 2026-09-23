@@ -9,8 +9,8 @@
 //   - sets at least one own substantive binding (value/ref/list)
 //     whose slot is NOT already substantively bound by a current
 //     parent (otherwise MI just stacks redundant bindings),
-//   - doesn't cycle and doesn't trip the existing arg-name
-//     collision check (`miCollisionCheck`).
+//   - doesn't cycle (`wouldCycle`); the arg-name collision rule is
+//     the server's (`mi-collision-rej`).
 //
 // 0-parent case: the "set parent…" strip on the root card opens the
 // fn-picker directly (no chooser popover), and the chosen fn becomes
@@ -20,10 +20,9 @@
 // bindings (those whose slot vanishes from the new parent closure)
 // are deleted in the same network round-trip as the `parent-ids` PUT.
 //
-// Globals consumed: lookups, openFnPicker, openConfirmPopover,
-// authMutate, initGraph, validateParentSet, miCollisionCheck,
-// wouldCycle, getQualifiedFnName, withBusy, isOpInflight,
-// isAuthenticated, isFnEditable.
+// Globals consumed: lookups, API, openFnPicker, authMutate,
+// extractResponseError, initGraph, wouldCycle, getQualifiedFnName,
+// withBusy, isOpInflight, isAuthenticated.
 
 // =============================================================================
 // COMPATIBILITY FILTER
@@ -278,8 +277,8 @@ function addMIParentInline(fn, anchorEl) {
       if (!picked?.id) return;
       const next = [...current, picked.id];
       // Client-side: only the cycle check. The name-collision rule is the
-      // SERVER's (`crud.validation/mi-collision-rej`) — the client copy
-      // (`miCollisionCheck`) sees renamed views and type-row fields as
+      // SERVER's (`crud.validation/mi-collision-rej`) — the retired client
+      // copy saw renamed views and type-row fields as
       // two args of one name (`ring-response`'s `body` next to
       // `ring-response-shape`'s) and refused the exact pair the corpus
       // ships as `:json-ok-response`. A refusal comes back with its

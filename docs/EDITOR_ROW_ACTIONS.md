@@ -133,8 +133,8 @@ a fixed glyph lane so labels align. Consequences:
   nothing) but never rule the graph out. A fn whose bindings are not loaded
   is unknown, not rejected; the pick is checked client-side for a CYCLE only
   and then by the server's write guards — the slot-name collision rule is
-  the server's (`mi-collision-rej`): the client copy (`miCollisionCheck`)
-  counts a renamed view and its type-row field as two args of one name and
+  the server's (`mi-collision-rej`): the retired client copy counted a
+  renamed view and its type-row field as two args of one name and
   refused the pair the corpus ships as `:json-ok-response`.
 - **`isFnEditable` parity**: col-header / cell / use-site contexts gate
   editability CLIENT-SIDE at click time (`isFnEditable(fnId)` from

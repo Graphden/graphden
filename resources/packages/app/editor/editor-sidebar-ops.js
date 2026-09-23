@@ -57,9 +57,9 @@ function activateOpSection(nav, pane, key) {
   });
 }
 
-// Mount an ops/admin section as a selectable pane. `nav` is the section-list
-// container (null → legacy fallback: append the card inline, always visible).
-// The pane carries exactly ONE heading (the card title); the build's own
+// Mount an ops/admin section as a selectable pane. `nav` is the surface's
+// section-list container (the page shell always carries it — see
+// `#gd-operate-nav` / `#gd-platform-nav` in app/editor/fns.edn). The pane carries exactly ONE heading (the card title); the build's own
 // header label is dropped since the nav already names the section.
 function mountAdminSection(pane, nav, key, build) {
   let section = _adminSections.get(key);
@@ -86,8 +86,7 @@ function mountAdminSection(pane, nav, key, build) {
     navBtn.addEventListener('click', () => activateOpSection(nav, pane, key));
     _adminNavBtns.set(key, navBtn);
   }
-  if (nav) nav.appendChild(navBtn);
-  else section.hidden = false;     // legacy fallback — no section list, show all
+  nav.appendChild(navBtn);
   pane.appendChild(section);
   // process() fires hx-trigger="load" and must run on a CONNECTED node.
   if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(section);
@@ -161,32 +160,23 @@ function buildPackagesGovernanceSection() {
 // somewhere.
 //
 // Redesign 2026-08: these mount into surfaces, not the explorer, so the
-// sidebar stays a clean namespace browser — `fallbackList` is used only when
-// the operate pane isn't on the page. Cross-org / platform panels go to the
+// sidebar stays a clean namespace browser. Cross-org / platform panels go to the
 // PLATFORM surface; everything else (org RBAC + the org's operational
 // panels) to Organization. (Code diagnostics are Explorer lenses + Inspector
 // sections; the diagnostics drawer under the canvas was retired.)
 //
 // Lifted out of `updateEntityList`, which had ninety lines of this in the
 // middle of building the namespace tree — two surfaces, one function.
-function mountOpsSections(fallbackList, searchMode) {
+// The four hosts are static page-shell nodes (app/editor/fns.edn), so they
+// are always present once the editor has booted.
+function mountOpsSections(searchMode) {
   if (searchMode) return;
-  const opsPane = document.getElementById('gd-operate-panels');
-  const opsNav = document.getElementById('gd-operate-nav');
-  const platPane = document.getElementById('gd-platform-panels');
-  const platNav = document.getElementById('gd-platform-nav');
-  const opsHost = opsPane || fallbackList;
-  const opsNavHost = opsPane ? opsNav : null;
-  const platHost = platPane || opsHost;
-  const platNavHost = platPane ? platNav : opsNavHost;
-  if (opsHost !== fallbackList) {
-    opsPane.innerHTML = '';
-    if (opsNavHost) opsNavHost.innerHTML = '';
-  }
-  if (platHost !== opsHost && platHost !== fallbackList) {
-    platPane.innerHTML = '';
-    if (platNavHost && platNavHost !== opsNavHost) platNavHost.innerHTML = '';
-  }
+  const opsHost = document.getElementById('gd-operate-panels');
+  const opsNavHost = document.getElementById('gd-operate-nav');
+  const platHost = document.getElementById('gd-platform-panels');
+  const platNavHost = document.getElementById('gd-platform-nav');
+  if (!opsHost || !opsNavHost || !platHost || !platNavHost) return;
+  for (const el of [opsHost, opsNavHost, platHost, platNavHost]) el.innerHTML = '';
   if (typeof buildGrantsAdminSection === 'function') {
     mountAdminSection(opsHost, opsNavHost, 'grants', buildGrantsAdminSection);
   }
@@ -245,10 +235,10 @@ function mountOpsSections(fallbackList, searchMode) {
     return (cur && pane.querySelector(':scope > section[data-section="' + cur + '"]'))
       ? cur : nav.firstElementChild.dataset.section;
   };
-  if (opsNavHost?.firstElementChild) {
+  if (opsNavHost.firstElementChild) {
     activateOpSection(opsNavHost, opsHost, activeOrFirst(opsNavHost, opsHost));
   }
-  if (platNavHost && platNavHost !== opsNavHost && platNavHost.firstElementChild) {
+  if (platNavHost.firstElementChild) {
     activateOpSection(platNavHost, platHost, activeOrFirst(platNavHost, platHost));
   }
 }

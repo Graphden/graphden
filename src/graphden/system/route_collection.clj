@@ -14,13 +14,16 @@
    short-circuits to `nil`, and the seam is a transparent pass-through —
    single-tenant behaviour is byte-for-byte unchanged.
 
-   Optional first-party subsystems (the package `registry`, the `mcp`
-   endpoint) and the tenancy addon each install THEIR OWN router here at
-   boot under a distinct key, so a deployment that omits a package simply
-   never installs its router and its paths 404. The routers claim
-   DISJOINT path prefixes (`/api/packages` + `/api/export` +
-   `/partials/packages-panel`; `/mcp`; the tenancy `/admin` + `/api/auth`
-   control plane), so `dispatch-first`'s order is not load-bearing.
+   Addons (the tenancy addon's `/admin` + `/api/auth` control plane, the
+   accounts `/auth/*` router) each install THEIR OWN router here at boot
+   under a distinct key, so a deployment without the addon simply never
+   installs its router and its paths 404. The routers claim DISJOINT path
+   prefixes, so `dispatch-first`'s order is not load-bearing. The optional
+   first-party packages (`registry`, `mcp`) do NOT use this seam any more:
+   they are served per-branch through the branch-router's optional-handler
+   slot (`_registry-ring-response` / `_mcp-ring-response`, wired in
+   `:exec/branch-router`), because a boot-frozen router here could not stay
+   invalidation-fresh or thread `:request`.
 
    Like `graphden.system.branch-router/active-router`, the installed
    routers are compiled Ring callables that closed over a fixed ctx, so
@@ -35,10 +38,9 @@
                  `{key → compiled-Ring-callable}`. Empty outside any
                  installed subsystem: `dispatch-first` short-circuits so
                  the seam falls through to the main app router
-                 (single-tenant default). Populated by the
-                 `:tenancy/router-install` / `:registry/router-install` /
-                 `:mcp/router-install` init-keys on startup, drained on
-                 halt.
+                 (single-tenant default). Populated by addon
+                 router-install init-keys (`:tenancy/router-install`, …)
+                 on startup, drained on halt.
 
                  Reached only through `collection-atom` so the kaocha
                  parallel plugin can isolate it per NS-thread via

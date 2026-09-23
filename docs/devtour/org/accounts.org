@@ -5,32 +5,32 @@
 
 The opt-in identity layer (docs/ACCOUNTS.md): one account, many sign-in identities (password / Google / GitHub / Telegram), hashed sessions, email verification, TOTP 2FA, and the /auth/* + /login surface — all OFF unless the addon fragment is enabled.
 
-[[file:index.org][index]] · ~15 min
+[[file:index.org][index]] · ~16 min
 
 * 1. resolve-social-identity!
 :PROPERTIES:
 :CUSTOM_ID: accounts/resolve-social-identity!
 :FILE: src/graphden/accounts/core.clj
-:LINE: 169
-:MINS: 2.6
+:LINE: 168
+:MINS: 3.3
 :END:
 
 The heart of account-LINKING: a social sign-in resolves to an existing identity, auto-links onto an account that owns the same VERIFIED email, or creates a fresh account — in that order. One person, many sign-in methods, one stable account-id for authz.
 
-- source :: [[file:../../../src/graphden/accounts/core.clj::(defn resolve-social-identity!][src/graphden/accounts/core.clj:169]]
+- source :: [[file:../../../src/graphden/accounts/core.clj::(defn resolve-social-identity!][src/graphden/accounts/core.clj:168]]
 - same file :: [[file:accounts.org::#accounts/mint-session!][mint-session!]]
 
 * 2. mint-session!
 :PROPERTIES:
 :CUSTOM_ID: accounts/mint-session!
 :FILE: src/graphden/accounts/core.clj
-:LINE: 212
+:LINE: 221
 :MINS: 1.8
 :END:
 
 Sessions are rows, not JWTs: the raw token exists exactly once (the return value); storage keeps only its SHA-256. ~kind~ overloads the same row for verify links and pending-2FA steps — kinds outside nil/"api" never authenticate, so a verify link can't become a bearer.
 
-- source :: [[file:../../../src/graphden/accounts/core.clj::(defn mint-session!][src/graphden/accounts/core.clj:212]]
+- source :: [[file:../../../src/graphden/accounts/core.clj::(defn mint-session!][src/graphden/accounts/core.clj:221]]
 - same file :: [[file:accounts.org::#accounts/resolve-social-identity!][resolve-social-identity!]]
 
 * 3. accounts-provider
@@ -49,22 +49,22 @@ The module's AuthProvider: bearer OR the HttpOnly gd_session cookie (an OAuth re
 :PROPERTIES:
 :CUSTOM_ID: accounts/make-router
 :FILE: src/graphden/accounts/routes.clj
-:LINE: 509
+:LINE: 493
 :MINS: 8.9
 :END:
 
 The whole HTTP surface as one route-collection Ring router: password + social + telegram callbacks, verify links, identities list/unlink, TOTP enroll/confirm/login-step, and the /login + /account pages. Installed before the graph router; returns nil to fall through, so an instance without the addon never sees it. The page/email PRESENTATION renders through the injected graph seam (~app.auth-pages~ on the platform ctx) with the built-in Clojure shell as the graph-outage fallback — see ~graph-page~ just above.
 
-- source :: [[file:../../../src/graphden/accounts/routes.clj::(defn make-router][src/graphden/accounts/routes.clj:509]]
+- source :: [[file:../../../src/graphden/accounts/routes.clj::(defn make-router][src/graphden/accounts/routes.clj:493]]
 
 * 5. valid?
 :PROPERTIES:
 :CUSTOM_ID: accounts/valid?
 :FILE: src/graphden/accounts/totp.clj
-:LINE: 102
+:LINE: 103
 :MINS: 1.2
 :END:
 
 RFC 6238 in ~100 lines: base32, HOTP, a ±1-step skew window and a constant-time compare, verified against the RFC's reference vectors. The enrollment/confirm flow that uses it lives in accounts.core.
 
-- source :: [[file:../../../src/graphden/accounts/totp.clj::(defn valid?][src/graphden/accounts/totp.clj:102]]
+- source :: [[file:../../../src/graphden/accounts/totp.clj::(defn valid?][src/graphden/accounts/totp.clj:103]]

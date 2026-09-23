@@ -114,8 +114,6 @@
   "one unit: cache clear + epoch bump + delta seed, under the invalidation lock"
   "graphden.executor.context/splice-graph-cache!"
   "one unit: the in-place cache patch, same lock, same invariant"
-  "graphden.services.reconciler/reconcile-once!*"
-  "one unit: one reconcile tick under the reconcile monitor; the arms share the desired/actual diff"
   "graphden.crud.entities.seq/apply-seq-append-core"
   "one unit: synthetic-binding materialise + position compute + pre-reject share a binding id that cannot cross a node boundary without a race"
   "graphden.crud.type-check/type-check-binding-direct!"

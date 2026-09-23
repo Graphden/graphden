@@ -15,6 +15,7 @@
     [graphden.storage.postgres.notify :as pg-notify]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
+    [graphden.util.executors :as executors]
     [graphden.versioning.branch-local :as bl]
     [graphden.versioning.storage.core :as vs]
     [integrant.core :as ig]))
@@ -295,11 +296,7 @@
   [_ {:keys [running context notify-listener notify-callback ticker stop-all-fn]}]
   (log/info "Stopping service reconciler...")
   (br/set-pinned-branches-fn! nil)
-  (when ticker
-    (java.util.concurrent.ExecutorService/.shutdown ^java.util.concurrent.ExecutorService ticker)
-    (try (java.util.concurrent.ExecutorService/.awaitTermination
-           ^java.util.concurrent.ExecutorService ticker 5 java.util.concurrent.TimeUnit/SECONDS)
-         (catch InterruptedException _ nil)))
+  (executors/shutdown-and-await! ticker)
   (when (and notify-listener notify-callback)
     (pg-notify/unregister! notify-listener notify-callback))
   ;; `context` lets the drain clear the endpoints this pod recorded —

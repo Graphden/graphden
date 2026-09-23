@@ -23,8 +23,8 @@
       (case en
         :app-route (mapv (fn [[org h]] {:org org :handler-fn-id h}) app-routes)
         :placement placements
-        :fn-execution (when (= :pending (:status where))
-                        (vec (repeat (get pending (:org-id where) 0) {:status :pending})))
+        :fn-execution (when (= {:status :pending} where)
+                        (vec (for [[org n] pending, _ (range n)] {:org-id org :status :pending})))
         nil))
 
     (query-entities [_ _ _ _] nil)

@@ -115,7 +115,9 @@ picks one, Telegram winning if both are set):
   [@BotFather](https://t.me/BotFather) for the token; get the chat id
   by messaging the bot then reading
   `https://api.telegram.org/bot<TOKEN>/getUpdates` (or use a group's
-  numeric `-100…` id).
+  numeric `-100…` id). The text is clipped under Telegram's 4096-character
+  limit — the operational alerts lead the batch, so only feedback text is
+  cut (the full reports stay in `feedback_reports`).
 - **Generic webhook** — set `GRAPHDEN_ALERT_WEBHOOK` and it POSTs
   `{"text": "…"}` (Slack / Mattermost / any JSON `{…}` sink).
 

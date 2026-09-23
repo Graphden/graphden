@@ -90,17 +90,6 @@
         @counters))
 
 
-(defn reset-counters!
-  "Drop every count. For the perf harness's own setup only — a test that resets
-   a process-global while a sibling namespace counts into it on another thread
-   would corrupt that sibling's delta. Prefer `snapshot` + `delta-since`."
-  []
-  (reset! counters {})
-  (reset! gauges {})
-  (reset! notes {})
-  nil)
-
-
 ;; === Gauges =================================================================
 ;;
 ;; A gauge is an OBSERVATION, not an event: a measured duration, a calibration

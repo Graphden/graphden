@@ -155,6 +155,24 @@
                          "error=provider_disabled")))))
 
 
+(deftest ^:integration social-callback-refuses-a-password-accounts-email
+  (let [router (routes/make-router {:storage (storage) :mailer (email/->CapturingMailer (atom []))
+                                    :app-origin origin
+                                    :oauth-providers {"github" {:client-id "c" :client-secret "s"}}})
+        {:keys [account]} (core/password-signup! (storage) {:email "rt-pw@example.com"
+                                                            :password "rt-pw-pass-1"})]
+    (sp/update-entity (storage) :account (:id account) {:primary-email "rt-pw@example.com"})
+    (with-redefs [oauth/exchange-code! (fn [_ _ _ _]
+                                         {:provider "github" :subject "gh-rt-pw"
+                                          :email "rt-pw@example.com" :email-verified? true})]
+      (let [resp (router {:request-method :get :uri "/auth/github/callback"
+                          :query-string "code=c&state=S" :headers {"cookie" "gd_oauth=S"}})]
+        (is (= 302 (:status resp)))
+        (is (= (str origin "/login?error=email_has_password&provider=github")
+               (get-in resp [:headers "Location"])))
+        (is (nil? (set-cookie-token resp)) "no session minted")))))
+
+
 (deftest ^:integration social-login-enforces-totp-when-enabled
   ;; A social identity ALONE must not mint a full session for an account that
   ;; enabled TOTP — the second factor would otherwise protect only the password

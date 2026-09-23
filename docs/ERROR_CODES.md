@@ -141,6 +141,25 @@ Error types follow the pattern `:category/specific-error` where:
 - `:min-timeout-ms` - Minimum allowed (1000ms)
 **Solution:** Provide a positive integer timeout of at least 1000ms.
 
+### `:byo/missing-config`
+
+**Component:** BYO executor (`graphden.byo/start-byo!`)
+**Description:** A required setting (`:hub-url`, `:token`, `:org`, `:handler-fn`, `:port`) is unset or blank; the executor refuses to start.
+**Ex-data keys:** `:key` — the missing setting.
+
+### `:byo/handler-not-found`
+
+**Component:** BYO executor
+**Description:** `GRAPHDEN_APP_HANDLER_FN` names no fn in the org's branch.
+**Solution:** Check the name and `GRAPHDEN_EXECUTOR_BRANCH` ([BYO_RUNBOOK.md](BYO_RUNBOOK.md)).
+
+### `:byo/ambiguous-handler`
+
+**Component:** BYO executor
+**Description:** `GRAPHDEN_APP_HANDLER_FN` is a bare name that several namespaces define (names are unique only per namespace), so the executor refuses to guess which one to serve.
+**Ex-data keys:** `:handler-fn`, `:candidates` — the matching fn ids.
+**Solution:** Set `GRAPHDEN_APP_HANDLER_FN` to one of the listed fn ids.
+
 ## Constraint Violations
 
 ### `:constraint-violation/unique`

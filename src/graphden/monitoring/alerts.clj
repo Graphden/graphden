@@ -107,6 +107,28 @@
        (str/join "; " (map :message alerts))))
 
 
+(def telegram-text-limit
+  "Telegram's `sendMessage` rejects (400) a text longer than 4096
+   characters. Clipped a little below it, leaving room for the marker."
+  4000)
+
+
+(defn clip-text
+  "`text` cut to at most `limit` UTF-16 units, ending in a marker that says
+   how much was dropped. Never splits a surrogate pair (the feedback lines
+   start with an emoji). The batch leads with the error-spike / 5xx alerts
+   (`decide` puts feedback last), so what a clip drops is feedback text —
+   still in `feedback_reports`."
+  [^String text limit]
+  (if (<= (count text) limit)
+    text
+    (let [marker-room 80
+          cut (- limit marker-room)
+          cut (if (Character/isHighSurrogate (String/.charAt text (dec cut))) (dec cut) cut)]
+      (str (subs text 0 cut)
+           "\n… (" (- (count text) cut) " more characters clipped — see feedback_reports)"))))
+
+
 (defn alert-request
   "PURE channel selection — given the delivery `cfg` and a message `text`,
    return the `{:url … :body <clojure-map>}` to POST, or `nil` when nothing is
@@ -115,7 +137,10 @@
    Two channels, Telegram taking precedence when its pair is present:
    - Telegram: `:telegram-token` + `:telegram-chat` → the Bot API
      `sendMessage` endpoint with `{:chat_id :text}` (Telegram rejects a bare
-     `{text}` — it needs the chat id in-band).
+     `{text}` — it needs the chat id in-band). The text is clipped under
+     Telegram's 4096 limit: an over-long batch (20 × 300-char feedback
+     reports) answered 400, delivery never advanced, and every later alert
+     — error spikes, 5xx — sat behind it forever.
    - generic webhook: `:webhook-url` → `{:text text}` (Slack / Mattermost /
      any JSON `{…}` sink).
 
@@ -125,7 +150,7 @@
   (cond
     (and (not (str/blank? telegram-token)) (not (str/blank? telegram-chat)))
     {:url (str "https://api.telegram.org/bot" telegram-token "/sendMessage")
-     :body {:chat_id telegram-chat :text text}}
+     :body {:chat_id telegram-chat :text (clip-text text telegram-text-limit)}}
 
     (not (str/blank? webhook-url))
     {:url webhook-url :body {:text text}}

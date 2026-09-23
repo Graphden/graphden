@@ -9,6 +9,7 @@
    `http://<executor-id>:<port>`. No executor→URL registry (that's the option-2
    extension for BYO / non-k8s, deliberately deferred)."
   (:require
+    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.fleet.placement :as placement]
     [org.httpkit.client :as http]))
@@ -20,12 +21,25 @@
        (when (seq query-string) (str "?" query-string))))
 
 
+(def ^:private response-reframed-headers
+  "Holder response headers that describe the bytes on the WIRE between the
+   pods, not the (already inflated, un-chunked) body we hand back."
+  #{"content-encoding" "content-length" "transfer-encoding" "connection"})
+
+
 (defn forward-request
   "HTTP-forward `request` to the executor named `executor-id` (a DNS name) on
    `port`, and return its Ring response. A transport failure is a `502` — the
    holder is unreachable, which is the caller's problem to surface, not a
    silent drop. Strips hop-by-hop headers so the downstream response frames
-   cleanly."
+   cleanly.
+
+   The body crosses as BYTES (`:as :byte-array`): the old `:as :text`
+   decoded every response as a string, corrupting images, downloads and
+   any other binary a tenant app serves. http-kit's client transparently
+   inflates a gzip/deflate response, so the holder's `Content-Encoding`
+   (and the `Content-Length` of the compressed body) no longer describe
+   the bytes we return — both are dropped, and the Ring server re-frames."
   [executor-id port request]
   (let [{:keys [request-method uri query-string headers body]} request
         resp @(http/request {:method (or request-method :get)
@@ -41,7 +55,7 @@
                              :headers (dissoc headers "content-length" "connection")
                              :body body
                              :timeout 30000
-                             :as :text})]
+                             :as :byte-array})]
     (if (:error resp)
       (do (log/warn (:error resp) "fleet forward-hop failed"
                     {:executor-id executor-id :uri uri})
@@ -50,7 +64,11 @@
       ;; httpkit's client returns header keys as keywords; a Ring response needs
       ;; string keys, so normalise (`name` is a no-op on strings, safe either way).
       {:status (:status resp)
-       :headers (into {} (map (fn [[k v]] [(name k) v])) (:headers resp))
+       :headers (into {}
+                      (keep (fn [[k v]]
+                              (let [h (str/lower-case (name k))]
+                                (when-not (response-reframed-headers h) [h v]))))
+                      (:headers resp))
        :body (:body resp)})))
 
 

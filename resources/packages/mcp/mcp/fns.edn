@@ -854,12 +854,12 @@
    :parent :post
    :args {:path "/mcp" :handler :_mcp-dispatch}}
 
-  ;; Route-collection seam: this package's routes as a fall-through
-  ;; `:router-or-nil`, installed into the JVM-wide route collection by the
-  ;; `:mcp/router-install` init-key at boot (mirrors the tenancy addon's
-  ;; `:tenancy-router`). `app` no longer references `:mcp-route`, so when
-  ;; `"mcp"` is omitted from :package-names this router is simply never
-  ;; built/installed and `/mcp` 404s while the rest of the app is unaffected.
+  ;; This package's routes as a fall-through `:router-or-nil`, served
+  ;; per-branch through the branch-router's optional-handler slot
+  ;; (`:_mcp-ring-response`, wired in `:exec/branch-router`). `app` no longer
+  ;; references `:mcp-route`, so when `"mcp"` is omitted from :package-names
+  ;; this handler is simply absent and `/mcp` 404s while the rest of the app
+  ;; is unaffected.
   {:name :_mcp-routes
    :description "The mcp package's route list — the single `/mcp` endpoint."
    :parent :list

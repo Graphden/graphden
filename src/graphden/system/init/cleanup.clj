@@ -12,6 +12,7 @@
     [graphden.crud.fn-execution.retention :as retention]
     [graphden.crud.fn-execution.stats :as stats]
     [graphden.storage.protocol.core :as sp]
+    [graphden.util.executors :as executors]
     [graphden.versioning.storage.core :as vcore]
     [graphden.versioning.storage.purge :as purge]
     [integrant.core :as ig]))
@@ -156,7 +157,4 @@
   [_ ^java.util.concurrent.ScheduledExecutorService scheduler]
   (when scheduler
     (log/info "Stopping execution cleanup scheduler...")
-    (java.util.concurrent.ExecutorService/.shutdown scheduler)
-    (try (java.util.concurrent.ExecutorService/.awaitTermination
-           scheduler 5 java.util.concurrent.TimeUnit/SECONDS)
-         (catch InterruptedException _ nil))))
+    (executors/shutdown-and-await! scheduler)))

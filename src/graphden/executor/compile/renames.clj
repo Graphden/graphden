@@ -808,15 +808,11 @@
   "Set of fn-ids whose inheritance chain reaches `f-fn-id` — F itself
    plus every fn that has F (transitively) as a parent. These are the
    fns whose runtime free-args propagate back into F's body when they
-   are invoked through F's chain."
-  [f-fn-id {:keys [fn-map]}]
-  (let [parent->children (reduce (fn [acc [id f]]
-                                   (reduce (fn [a pid]
-                                             (update a pid (fnil conj #{}) id))
-                                           acc
-                                           (or (:parent-ids f) [])))
-                                 {}
-                                 fn-map)
+   are invoked through F's chain. Reads the precomputed
+   `:children-by-fn` index (`l/build-lookups`); hand-built lookups
+   without it get the index computed on the fly."
+  [f-fn-id {:keys [fn-map children-by-fn]}]
+  (let [parent->children (or children-by-fn (l/children-by-fn fn-map))
         out (atom #{f-fn-id})]
     (letfn [(walk
               [fid]

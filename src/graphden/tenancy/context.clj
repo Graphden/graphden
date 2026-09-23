@@ -244,18 +244,28 @@
       "anonymous")))
 
 
+(defn- public-display-name
+  "`display` when it is a real name — not blank and not an email address
+   (password signup defaults the display name to the sign-up email, and a
+   social provider may hand one over), so the label never leaks an address."
+  [display]
+  (let [d (str/trim (str display))]
+    (when (and (seq d) (not (str/includes? d "@")))
+      d)))
+
+
 (defn current-user-label
   "A PUBLIC-safe label for the current user — what a review is signed
-   with: the account's display name, else the local part of its email
-   (never the whole address), else the principal's org, else
-   `anonymous`."
+   with: the account's display name (unless it is an email address), else
+   the local part of its email (never the whole address), else the
+   principal's org, else `anonymous`."
   []
   (let [p *current-principal*
         user (:user p)
-        display (or (:display-name user) (:display-name p))
+        display (public-display-name (or (:display-name user) (:display-name p)))
         email (or (:email p) (:primary-email user))]
     (cond
-      (seq (str display)) (str display)
+      display display
       (seq (str email)) (first (str/split (str email) #"@" 2))
       (seq (str (:org p))) (str (:org p))
       :else "anonymous")))

@@ -2021,8 +2021,10 @@ cmd_merge() {
   trap 'waiter_abort; exit 130' INT TERM
   ok "Queued $branch @ ${sha:0:8} — it rides the next merge train (bb wt list shows the queue)."
 
-  wait_for_headroom
-
+  # No wait_for_headroom here: the conductor waits for headroom before every
+  # train. A waiter looping on memory instead of the loop below never read the
+  # verdict a running train already settled, nor noticed being superseded —
+  # and a running gate alone uses most of the memory floor it waited for.
   local poll="${WTQ_POLL_SECS:-30}" st said=""
   case "$poll" in ''|*[!0-9]*|0) poll=30 ;; esac
   exec 9>"$LOCK"

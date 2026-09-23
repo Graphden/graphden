@@ -216,6 +216,24 @@ check "two gates: the moved one, then a train on the new tip" eq "$(gates | tr '
 check "both the outside commit and mv landed" eval "on_develop outside.txt && on_develop mv.txt"
 check "the train log says it re-queued" eval "grep -q 'moved under the gate' '$Q'/logs/_train-*.log"
 
+echo "== a waiter reads a settled verdict without waiting for memory"
+new_world settled
+feature sv sv.txt sv
+hold_lock
+export WTQ_MEM_MIN_MB=99999999 WTQ_HEADROOM_POLL=1
+enqueue_in_order sv
+export WTQ_MEM_MIN_MB=0; unset WTQ_HEADROOM_POLL
+sv_sha="$(git -C "$REPO" rev-parse feature/sv)"
+# What a running conductor does when it settles the entry: result, then dequeue.
+printf 'GREEN\t0\tfeature/sv\t%s\tt\tlanded elsewhere\n' "$sv_sha" > "$Q/results/sv"
+rm -f "$Q/queue/sv"
+check "the waiter reports within seconds" wait_for 10 grep -q 'RESULT: GREEN' "$T/sv.out"
+grep -q 'RESULT:' "$T/sv.out" || kill "${PID[sv]}" 2>/dev/null || true   # never hang the suite
+finish sv
+check "with the conductor's verdict" eq "$(rc_of sv)" 0
+check "and never waited on memory" eval "! grep -q MemAvailable '$T/sv.out'"
+release_lock
+
 echo "== conflict with develop itself -> CONFLICT"
 new_world conflict
 feature x f.txt x

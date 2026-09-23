@@ -65,14 +65,6 @@
    :return-type :null
    :effects #{:time}}
 
-  ;; ---------------------------------------------------------------------
-  ;; :future — spawn body in a daemon thread; return stopper-thunk.
-  ;;
-  ;; The returned `[:fn {} :null]` callable, when invoked, interrupts
-  ;; the spawned thread. This is what makes any composition built on
-  ;; `:future` service-eligible — declares the `:process` effect AND
-  ;; returns the right callable shape for the service registry.
-  ;; ---------------------------------------------------------------------
   {:name :with-timeout
    :description "Run the 0-arg `:body` and return its value — unless `:timeout-ms` pass first: then the body's thread is interrupted and `:execution-error/timeout` is thrown. The bounded call a slow dependency needs; pair with `:retry` for \"try again after a timeout\"."
    :args {:body {:type [:fn {} a]
@@ -181,6 +173,14 @@
    :parent :add
    :args {:nums [:_retry-attempt {:value 1}]}}
 
+  ;; ---------------------------------------------------------------------
+  ;; :future — spawn body in a daemon thread; return stopper-thunk.
+  ;;
+  ;; The returned `[:fn {} :null]` callable, when invoked, interrupts
+  ;; the spawned thread. This is what makes any composition built on
+  ;; `:future` service-eligible — declares the `:process` effect AND
+  ;; returns the right callable shape for the service registry.
+  ;; ---------------------------------------------------------------------
   {:name :future
    :description "Spawn `:body` in a daemon thread, return a stopper-thunk. The returned `(fn [] ...)` interrupts the thread when invoked — InterruptedException propagates through any blocking call (`:sleep`, IO with interrupt support) inside the body. Body errors are logged but don't crash the spawner."
    :args {:body {:type [:fn {} :any]
@@ -188,14 +188,6 @@
    :return-type [:fn {} :null]
    :effects #{:process}}
 
-  ;; ---------------------------------------------------------------------
-  ;; :loop-until-interrupted — body runs while !Thread.isInterrupted.
-  ;;
-  ;; Cooperative shutdown: the parent :future's stopper interrupts the
-  ;; thread; the next `(.isInterrupted ...)` check or a thrown
-  ;; InterruptedException from inside the body breaks the loop. Catches
-  ;; the exception so unwinding is clean.
-  ;; ---------------------------------------------------------------------
   {:name :with-heartbeat
    :description "Run `:body` on this thread while a daemon thread calls `:beat` every `:every-ms` — a lease renewal, a liveness ping — and stop the beat when the body returns or throws. Returns the body's value. A beat that throws is logged and skipped; the body is never interrupted by it."
    :args {:body {:type [:fn {} a]
@@ -206,6 +198,14 @@
    :return-type a
    :effects #{:process}}
 
+  ;; ---------------------------------------------------------------------
+  ;; :loop-until-interrupted — body runs while !Thread.isInterrupted.
+  ;;
+  ;; Cooperative shutdown: the parent :future's stopper interrupts the
+  ;; thread; the next `(.isInterrupted ...)` check or a thrown
+  ;; InterruptedException from inside the body breaks the loop. Catches
+  ;; the exception so unwinding is clean.
+  ;; ---------------------------------------------------------------------
   {:name :loop-until-interrupted
    :description "Run `:body` repeatedly while `(Thread/isInterrupted)` is false. Exits cleanly when the parent :future's stopper interrupts the thread — either at the next loop boundary or via InterruptedException thrown from inside the body (e.g. by `:sleep`). Catches the exception so shutdown is clean."
    :args {:body {:type [:fn {} :any]

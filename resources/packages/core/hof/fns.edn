@@ -139,7 +139,7 @@
    :return-type :any}
 
   {:name :transduce
-   :description "Single-pass transducer pipeline with a reducing fn (Clojure's `transduce`). `transducer` typically comes from `:comp`-ing `:filter`/`:map` without `:coll`. `(reducer [acc item])` — the reducer is a 1-arg callable receiving the pair as one vector, exactly like `:reduce`'s `:func`."
+   :description "Single-pass transducer pipeline with a reducing fn (Clojure's `transduce`). `transducer` typically comes from `:comp`-ing the transducer forms `:filter-xf` / `:map-xf` (`:map` / `:filter` are eager and require `:coll`). `(reducer [acc item])` — the reducer is a 1-arg callable receiving the pair as one vector, exactly like `:reduce`'s `:func`."
    ;; Same pure-fold rationale as `:reduce` — and the same calling
    ;; convention: the impl calls `(reducer [acc item])`, ONE argument
    ;; holding the pair. The slot used to be typed `[:fn {:acc a :item b}

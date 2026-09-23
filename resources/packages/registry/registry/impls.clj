@@ -315,11 +315,6 @@
   (already-materialized? (request/require-storage ctx) ns-root version fns))
 
 
-;; Upsert the single pin for `(current-branch, pkg-name)` → version. One pin
-;; per (branch, package). Returns the branch-id. Branch comes from the
-;; request-scoped VersionedStorage, so it records on the request's branch
-;; (staging). Shared by the `:package-upsert-pin` base-fn (which the
-;; graph install flow + :set-package-pin bind) and the update core.
 (defn- bump-install-stat!
   "Count one install of `pkg-name` on the GLOBAL `:package-stat` row —
    an atomic `INSERT … ON CONFLICT DO UPDATE` over the pool, the
@@ -347,7 +342,10 @@
 
 
 (defn- upsert-pin!
-  "One pin per (branch, package). A NEW pin is an install and bumps the
+  "Upsert the pin `(current-branch, pkg-name)` → version and return the
+   branch id. The branch is the request's VersionedStorage branch, so the
+   pin records on the request's branch (staging). One pin per (branch,
+   package). A NEW pin is an install and bumps the
    package's global install counter; moving an existing pin (update /
    rollback) is not — the counter is installs, not pin writes. The bump is
    part of the pin write unit (like the cache invalidation an entity write
@@ -475,10 +473,10 @@
 
 ;; `:install-package` is now a GRAPH fn-def — a `:fix` worklist loop
 ;; over resolve/install ops (see the `:_inst-*` chain in fns.edn). Its
-;; primitives are the base-fns this file already exposes:
-;; `:resolve-package-version`, `:missing-package-dependencies`,
-;; `:package-version-materialized?`, `:materialize-package-fns`,
-;; `:package-upsert-pin`. The former Clojure `install-recursive!` /
+;; primitives are the base-fns `:missing-package-dependencies`,
+;; `:package-version-materialized?`, `:materialize-package-fns` and
+;; `:package-upsert-pin` from this file, and the `:resolve-package-version`
+;; fn-def (`:semver-pick` over the name's `:package-version` rows). The former Clojure `install-recursive!` /
 ;; `install-one!` orchestration (guards, depth-first dep order,
 ;; short-circuit) lives in the graph where it is visible and per-step
 ;; composable.
@@ -655,8 +653,8 @@
 ;; ---------------------------------------------------------------------------
 
 ;; Single-row pin upsert (current-branch, pkg-name) → version — a
-;; check-then-write pair on one desired-state row, shared with the
-;; install / update cores via `upsert-pin!`. Returns the branch-id as
+;; check-then-write pair on one desired-state row (`upsert-pin!`), which
+;; the graph install and update flows bind. Returns the branch-id as
 ;; text; the `{:ok …}` envelope is graph composition
 ;; (`:set-package-pin` in fns.edn).
 (defbase package-upsert-pin

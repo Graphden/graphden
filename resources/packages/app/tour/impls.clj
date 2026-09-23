@@ -2,7 +2,8 @@
   "Impls for the interactive tutorial's progress counters — two thin
    boundaries over `graphden.util.counters`.
 
-   The tutorial is 25 lessons long and nobody knows where readers stop.
+   The tutorial runs to dozens of lessons and nobody knows where readers
+   stop.
    The counters registry is already exposed on `/metrics` and
    `/metrics/prometheus`, and a Prometheus scrape is what turns a
    process-local, restart-resetting count into a series you can read a

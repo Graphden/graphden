@@ -372,11 +372,12 @@
    :return-type :keyword-map
    :effects #{:db}}
 
-  ;; Atomic update unit. Simpler than try-apply-create — no post-write
-  ;; type-check + rollback, just `sp/update-entity` + conditional
-  ;; Phase-6c rename-slot.
+  ;; Atomic update unit — `sp/update-entity` + conditional Phase-6c
+  ;; rename-slot + the post-write whole-fn type-check for binding-shaped
+  ;; writes (a type failure is a warning; a SECRET-laundering failure
+  ;; restores the touched fields — the create side's carve-out).
   {:name :try-apply-update
-   :description "Atomic update unit. Returns `{:updated <id>}` on success or `{:error <msg>}` on write failure. Rename-slot failure is logged but never escalated."
+   :description "Atomic update unit. Returns `{:updated <id>}` on success — plus `:type-warnings` when a binding-shaped write landed but the owning fn now fails the aggregate type-check — or `{:error <msg>}` on write failure or a secret-laundering rejection (whose write is rolled back). Rename-slot failure is logged but never escalated."
    :args {:entity-type {:type :text :description "Entity name as text."}
           :id-uuid {:type :uuid :description "Target row id."}
           :entity-data {:type :nullable-keyword-map :description "Pre-validated row patch. Nullable at type level; non-null at runtime."}

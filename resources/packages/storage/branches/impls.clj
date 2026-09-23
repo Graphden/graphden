@@ -1,11 +1,13 @@
 (ns graphden.packages.storage.branches.impls
   "Impls for storage/branches base functions.
 
-   One thin primitive — `:current-branch-id`, the active branch id off
-   the request's VersionedStorage wrapper (one library call). It lives
-   in `storage/branches` (not `app/branches`) because lower packages
-   (`web/crud`, future external integrations) need to compose against
-   branch state without taking an app-level dep. (The branch-local walk
+   Two primitives that live in `storage/branches` (not `app/branches`)
+   because lower packages (`web/crud`, the optional `registry` / `mcp`
+   packages) need them without taking an app-level dep:
+   `:current-branch-id`, the active branch id off the request's
+   VersionedStorage wrapper (one library call), and
+   `:sync-fn-defs-branch!`, the branch-targeted bundle sync the MCP
+   `upsert-fn-defs` tool and the registry's import share. (The branch-local walk
    `graphden.versioning.branch-local/effective-branch-local?` is read by
    the layout's strip facts, not through a graph base-fn.)"
   (:require

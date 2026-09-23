@@ -26,7 +26,7 @@
   ;; First-class list primitive. :items is a sequence-arg; items live in
   ;; linked arg entities chained via arg.next_arg_id.
   {:name :list
-   :description "Construct a vector from a sequence-arg. Each item is a separate arg entity chained via `next-arg-id`, so refs and literals can be freely mixed."
+   :description "Construct a vector from a sequence-arg. Each item is its own list-item row (ordered by `position`), so refs and literals can be freely mixed."
    ;; `:items` is `[:list :any]` (heterogeneous) — a `:list` may freely
    ;; mix element types (`:cond` builds `[test result test result …]`
    ;; this way). `list-return-rule` lubs the actual items per call site.
@@ -34,7 +34,7 @@
    :return-type [:list :any]}
 
   {:name :vec
-   :description "Coerce any collection / sequence to a vector. Idempotent on vectors. Compose with `:if (sequential? coll) (vec coll) coll` to apply only when needed. The per-call `vec-return-rule` narrows the element type when the input has a known `[:list T]` shape — falls back to `[:list :any]` for opaque sources."
+   :description "Coerce any collection / sequence to a vector. Idempotent on vectors. Compose with `:if (sequential? coll) (vec coll) coll` to apply only when needed. The declared `[:list a] → [:list a]` keeps the element type when the input has a known `[:list T]` shape."
    :args {:coll {:type [:list a] :description "Sequence / collection to coerce."}}
    :return-type [:list a]}
 
@@ -56,8 +56,8 @@
    :return-type [:map :any :any]}
 
   {:name :conj
-   :description "Append/prepend an item depending on collection type (Clojure's `conj`). Vectors append; lists/seqs prepend; maps add a `[k v]` entry."
-   :args {:coll {:type [:union :null [:map a :any] [:list :any]] :description "Collection to add to. Nil treated as empty (becomes a list)."}
+   :description "Add an item to a collection. Sequential collections (vectors, lists, lazy seqs) APPEND — the input is vec'd first, so list-building keeps insertion order where Clojure's `conj` would prepend onto a seq; maps / sets take a plain `conj` (a map adds a `[k v]` entry)."
+   :args {:coll {:type [:union :null [:map a :any] [:list :any]] :description "Collection to add to. Nil treated as empty (becomes a vector)."}
           :item {:type :any :description "Item to add."}}
    :return-type :any}
 

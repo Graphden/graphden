@@ -334,7 +334,10 @@ Boot-time backend↔frontend URL drift guard. Walks the live router's
 comment lines skipped); throws on drift so a route rename or removal
 that forgets the JS fails boot rather than 404ing at runtime. Routes an
 addon serves through the route collection carry a
-`// api-url-drift-allow: route-collection` marker on their line. Toggle off via `GRAPHDEN_SKIP_URL_DRIFT_CHECK=1`.
+`// api-url-drift-allow: route-collection` marker on their line; routes an
+OPTIONAL first-party package serves (registry / mcp, per-branch) carry
+`// api-url-drift-optional: registry-router` and are checked against that
+router when the package is loaded, skipped when it is not. Toggle off via `GRAPHDEN_SKIP_URL_DRIFT_CHECK=1`.
 
 ```clojure
 :exec/api-url-drift-check

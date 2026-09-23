@@ -19,7 +19,7 @@ function buildModerationSection() {
   wrap.innerHTML = ''
     + '<p class="gd-set-hint">Public listings an organization published wait here before other organizations see them. '
     + 'Approve lists it; Reject keeps it the publisher\'s own and shows them your note.</p>'
-    + '<div class="ns-children" hx-get="/partials/moderation-queue" hx-trigger="load" hx-swap="innerHTML">'
+    + '<div class="ns-children" hx-get="/partials/moderation-queue" hx-trigger="load" hx-swap="innerHTML">' // api-url-drift-optional: registry-router
     +   '<div class="loading">Loading…</div>'
     + '</div>';
   // Built imperatively; the caller (mountAdminSection) runs htmx.process after

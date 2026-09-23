@@ -107,6 +107,17 @@
   #"['\"`]((?:/api|/partials)/[a-zA-Z0-9_\-/]*)")
 
 
+;; Optional-package marker. A line carrying
+;; `// api-url-drift-optional: <router-fn-name>` names a URL an OPTIONAL
+;; first-party package serves (registry / mcp — dropped from
+;; `:package-names` on some deployments, served per-branch by the
+;; branch-router). Its literals are checked against that router when it is
+;; loaded, and skipped when it is not — the editor gates those surfaces at
+;; runtime, so an absent package is not drift.
+(def ^:private optional-marker-regex
+  #"//\s*api-url-drift-optional:\s*([a-zA-Z0-9_\-]+)")
+
+
 ;; A line that is only comment (`// …`, ` * …`, `/* …`) is prose, not a
 ;; request — a comment naming a route must not fail the boot.
 (def ^:private comment-line-regex
@@ -123,9 +134,10 @@
 
 (defn extract-js-literals
   "Returns a seq of `{:file :line :literal}` for every `/api/*` and
-   `/partials/*` string-literal in the given JS source. Lines carrying
-   the `api-url-drift-allow:` opt-out marker, and comment-only lines,
-   are skipped wholesale."
+   `/partials/*` string-literal in the given JS source (plus
+   `:optional-router` when the line carries the `api-url-drift-optional:`
+   marker). Lines carrying the `api-url-drift-allow:` opt-out marker, and
+   comment-only lines, are skipped wholesale."
   [file source]
   (let [lines (str/split-lines source)]
     (->> (map vector (range 1 (inc (count lines))) lines)
@@ -134,10 +146,12 @@
                        (re-find comment-line-regex line))))
          (mapcat
            (fn [[lineno line]]
-             (for [[_ literal] (re-seq url-literal-regex line)]
-               {:file file
-                :line lineno
-                :literal literal}))))))
+             (let [optional (second (re-find optional-marker-regex line))]
+               (for [[_ literal] (re-seq url-literal-regex line)]
+                 (cond-> {:file file
+                          :line lineno
+                          :literal literal}
+                   optional (assoc :optional-router optional)))))))))
 
 
 (def ^:private editor-js-prefix "packages/app/editor/")
@@ -259,11 +273,25 @@
                        :allowed allowed-set})))))
 
 
+(defn checkable-literals
+  "`literals` minus those tagged for an optional router that is not loaded
+   (`loaded-optional` — a set of router fn-names)."
+  [literals loaded-optional]
+  (remove (fn [{:keys [optional-router]}]
+            (and optional-router (not (contains? loaded-optional optional-router))))
+          literals))
+
+
 (defn check-router!
-  "Top-level entry: enumerate `router`'s paths, scan editor JS for
-   `/api/*` and `/partials/*` literals, throw if any drift. Idempotent + pure modulo
-   the slurp."
-  [router]
-  (let [allowed (-> router router-paths allowed-literal-set)
-        literals (extract-all-editor-literals)]
-    (assert-no-drift! allowed literals)))
+  "Top-level entry: enumerate the paths of `router` plus every loaded
+   OPTIONAL router (`optional` — `{router-fn-name router}`), scan editor JS
+   for `/api/*` and `/partials/*` literals, throw if any drift. Idempotent
+   + pure modulo the slurp."
+  ([router] (check-router! router {}))
+  ([router optional]
+   (let [allowed (->> (cons router (vals optional))
+                      (mapcat router-paths)
+                      allowed-literal-set)
+         literals (checkable-literals (extract-all-editor-literals)
+                                      (set (keys optional)))]
+     (assert-no-drift! allowed literals))))

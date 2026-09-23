@@ -68,7 +68,7 @@
     const mount = pop.querySelector('.ns-children');
     const seq = ++_pkgPopSeq;
     const fetcher = typeof window.authFetch === 'function' ? window.authFetch : fetch;
-    fetcher('/partials/packages-panel')
+    fetcher('/partials/packages-panel') // api-url-drift-optional: registry-router
       .then((resp) => resp.text())
       .then((html) => {
         // A newer open replaced this popover, or it was closed meanwhile.

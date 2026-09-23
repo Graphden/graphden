@@ -24,8 +24,8 @@
   // The probe is an /api/* key: window.API carries API routes, not partials
   // (partial paths are literals here, as everywhere in the editor).
   function gdMarketPresent() { return !!api() && typeof api().api_marketplace !== 'undefined'; }
-  const PARTIAL = '/partials/marketplace';
-  const PARTIAL_ITEM = '/partials/marketplace/item';
+  const PARTIAL = '/partials/marketplace'; // api-url-drift-optional: registry-router
+  const PARTIAL_ITEM = '/partials/marketplace/item'; // api-url-drift-optional: registry-router
   function fetcher() { return window.authFetch || fetch; }
 
   // The publish route's refusal codes, worded for the share dialog (the

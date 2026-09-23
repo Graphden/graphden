@@ -147,7 +147,7 @@ function buildPackagesGovernanceSection() {
   const wrap = document.createElement('div');
   wrap.className = 'sidebar-packages-governance';
   wrap.innerHTML = ''
-    + '<div class="ns-children" hx-get="/partials/packages-governance" hx-trigger="load" hx-swap="innerHTML">'
+    + '<div class="ns-children" hx-get="/partials/packages-governance" hx-trigger="load" hx-swap="innerHTML">' // api-url-drift-optional: registry-router
     +   '<div class="loading">Loading…</div>'
     + '</div>';
   return wrap;

@@ -296,6 +296,22 @@
 ;; a circuit breaker for test bootstraps that load a subset of
 ;; packages.
 
+(defn- optional-router-if-present
+  "The compiled router for `router-fn-name` when its (optional) package is
+   loaded, else nil. Used to feed the OPTIONAL packages' route PATHS into
+   `window.API` and into the URL drift check — the paths are static, so a
+   boot-time read is correct even though the routes are SERVED per-branch
+   (see `:exec/branch-router`)."
+  [context router-fn-name]
+  (when (fn-lookup/query-fn-by-name (:storage context) router-fn-name true)
+    (exec/execute-by-name context router-fn-name {})))
+
+
+(def ^:private optional-router-names
+  "The OPTIONAL first-party packages' router fn-names (registry / mcp)."
+  ["registry-router" "mcp-router"])
+
+
 (defmethod ig/init-key :exec/api-url-drift-check
   [_ {:keys [context skip?]}]
   ;; `skip?` reuses `env-truthy?` — unset env collapses to `""`,
@@ -306,8 +322,15 @@
                   "— set GRAPHDEN_SKIP_URL_DRIFT_CHECK= to re-enable")
         :skipped)
     (do (log/info "Checking editor JS for /api/* + /partials/* URL drift...")
-        (let [router (exec/execute-by-name context "_router" {})]
-          (api-url-drift/check-router! router)
+        (let [router (exec/execute-by-name context "_router" {})
+              ;; The OPTIONAL first-party routers, when loaded — their
+              ;; partials are served per-branch but their paths are static.
+              optional (into {}
+                             (keep (fn [n]
+                                     (some->> (optional-router-if-present context n)
+                                              (vector n))))
+                             optional-router-names)]
+          (api-url-drift/check-router! router optional)
           (log/info "API URL drift check passed")
           :ok))))
 
@@ -325,16 +348,6 @@
 ;; main editor.js loads, exposing `window.API.<key>` to every
 ;; editor module.
 
-(defn- optional-router-if-present
-  "The compiled router for `router-fn-name` when its (optional) package is
-   loaded, else nil. Used to feed the OPTIONAL packages' `/api/*` route PATHS
-   into `window.API` — the paths are static, so a boot-time build is correct
-   even though the routes are SERVED per-branch (see `:exec/branch-router`)."
-  [context router-fn-name]
-  (when (fn-lookup/query-fn-by-name (:storage context) router-fn-name true)
-    (exec/execute-by-name context router-fn-name {})))
-
-
 (defmethod ig/init-key :exec/api-routes-js-cache
   [_ {:keys [context]}]
   (log/info "Building cached api-routes JS module...")
@@ -345,7 +358,7 @@
   ;; routes themselves are served per-branch by the branch-router.
   (let [routers (into [(exec/execute-by-name context "_router" {})]
                       (keep #(optional-router-if-present context %))
-                      ["registry-router" "mcp-router"])]
+                      optional-router-names)]
     (api-routes-js/install-base-routers! routers)
     (log/info "api-routes JS cache:" (count (api-routes-js/read-cache)) "bytes")
     :ok))

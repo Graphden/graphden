@@ -6,7 +6,8 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.lint.core :as lint]
-    [graphden.lint.graph :as lg]))
+    [graphden.lint.graph :as lg]
+    [graphden.storage.protocol.core :as sp]))
 
 
 (defn- uid
@@ -126,3 +127,48 @@
     (testing "a suppression entry as the graph stores it (strings) matches the key"
       (is (empty? (lg/lint-graph g ns-rows
                                  #{[:duplicate-definition [(str (uid 31)) (str (uid 32))]]}))))))
+
+
+(defn- stub-ctx
+  "Just enough ctx for `lint-branch`: the graph cache it reads and a
+   storage answering the `:ns` query (branch id → nil)."
+  [graph-atom ns-atom]
+  {:graph-cache graph-atom
+   :storage #_{:clj-kondo/ignore [:missing-protocol-method]}
+   (reify sp/StorageCRUD
+     (query-entities [_ _ _] @ns-atom)
+
+     (query-entities [_ _ _ _] @ns-atom))})
+
+
+(deftest lint-branch-relints-when-a-type-row-moves-test
+  ;; Regression: the delta path only rebuilds the fn-defs whose rows moved
+  ;; plus their COMPOSED referrers — a renamed type-row / base-fn left
+  ;; every fn-def naming it spelled the old way. Here the rename makes two
+  ;; fn-defs spell the same ref, so they become duplicates.
+  (lg/forget-branch! nil)
+  (let [t-old (uid 60)
+        t-new (uid 61)
+        extra {:fns [{:id t-old :name "t-old" :parent-ids []}
+                     {:id t-new :name "t-new" :parent-ids []}]}
+        g (-> (graph-with (composed 62 "a-attrs" t-old) (composed 63 "b-attrs" t-new))
+              (update :fns into (:fns extra)))
+        cache (atom g)
+        ctx (stub-ctx cache (atom ns-rows))
+        dups #(filterv (comp #{:duplicate-definition} :rule) (lg/lint-branch ctx #{}))]
+    (is (empty? (dups)) "different refs — no duplicate")
+    (swap! cache update :fns (fn [fns] (mapv #(if (= t-old (:id %)) (assoc % :name "t-new") %) fns)))
+    (is (= [[(uid 62) (uid 63)]] (mapv :fn-ids (dups)))
+        "after the rename both spell :t-new — the full re-lint sees it")))
+
+
+(deftest forget-branch-drops-the-memo-test
+  (lg/forget-branch! nil)
+  (let [cache (atom (graph-with (composed 70 "c-attrs" const-id) (composed 71 "d-attrs" const-id)))
+        nss (atom ns-rows)
+        ctx (stub-ctx cache nss)
+        paths #(set (mapcat :fns (lg/lint-branch ctx #{})))]
+    (is (= #{["app.editor" :c-attrs] ["app.editor" :d-attrs]} (paths)))
+    (reset! nss (assoc-in ns-rows [1 :name] "pages"))
+    (lg/forget-branch! nil)
+    (is (= #{["app.pages" :c-attrs] ["app.pages" :d-attrs]} (paths)))))

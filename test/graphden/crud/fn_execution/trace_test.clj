@@ -4,7 +4,8 @@
    request a persisted hop. Pure; the persisted hop end to end is covered
    by `services.service-endpoint-e2e-test`.
 
-   ^:serial — the hop probe `with-redefs` `run-traced-with!`."
+   ^:serial — the hop probe `with-redefs` `run-traced-with!` and
+   `sp/read-entity`."
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.crud.fn-execution.trace :as trace]
@@ -41,23 +42,23 @@
   (is (nil? (trace/incoming-trace {:headers {}}))))
 
 
-
 (defn- storage-with-executions
-  "A storage stub whose `:fn-execution` table holds exactly `ids`."
+  "A storage stand-in whose `:fn-execution` table holds exactly `ids`
+   (read through the `sp/read-entity` redef in `traced?`)."
   [ids]
-  (reify sp/StorageCRUD
-    (read-entity [_ entity-type id]
-      (when (and (= :fn-execution entity-type) (contains? ids id))
-        {:id id}))))
+  {::executions ids})
 
 
 (defn- traced?
-  "Did `run-traced!` persist this request as a hop? Observed through the
-   `cr/*execution*` it binds for the handler (a traced hop names itself;
-   an untraced request runs with none)."
+  "Did `run-traced!` hand this request to `run-traced-with!` (the
+   persisted-hop path) or just run it?"
   [ctx header]
   (let [seen (atom ::unset)]
-    (with-redefs [trace/run-traced-with! (fn [_ _ _ _ thunk] (reset! seen :traced) (thunk))]
+    (with-redefs [trace/run-traced-with! (fn [_ _ _ _ thunk] (reset! seen :traced) (thunk))
+                  sp/read-entity (fn [storage entity-type id]
+                                   (when (and (= :fn-execution entity-type)
+                                              (contains? (::executions storage) id))
+                                     {:id id}))]
       (trace/run-traced! ctx (random-uuid) {:headers {"x-graphden-trace" header}}
                          #(when (= ::unset @seen) (reset! seen :plain))))
     (= :traced @seen)))

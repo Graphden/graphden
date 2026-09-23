@@ -513,24 +513,24 @@
     (swap! vault-state assoc-in [:values victim] "victim-secret")
     (with-fake-vault vault-state
       (tctx/with-org "tenant-a"
-        (testing "a relative path lands under the tenant's own prefix"
-          (let [{:keys [ok binding]} (create-inline-binding!
-                                       {:fn-id (str (:id owner)) :slot-id (str (:id slot))
-                                        :path "db/password" :value "mine"})]
-            (is ok)
-            (is (= "org/tenant-a/db/password" (:path binding)))
-            (is (= "mine" (get-in @vault-state [:values "org/tenant-a/db/password"])))))
-        (testing "naming another org's path only nests it under the tenant's own prefix"
-          (let [other (seed-secret-slot-owner!)
-                res (create-inline-binding! {:fn-id (str (:id (:owner other)))
-                                             :slot-id (str (:id (:slot other)))
-                                             :path victim :value "pwned"})]
-            (is (= "org/tenant-a/org/victim/db/password" (get-in res [:binding :path])))
-            (is (= "victim-secret" (get-in @vault-state [:values victim])))))
-        (testing "a path escaping the KV mount is refused"
-          (let [other (seed-secret-slot-owner!)
-                res (create-inline-binding! {:fn-id (str (:id (:owner other)))
-                                             :slot-id (str (:id (:slot other)))
-                                             :path "../../sys/policy/root" :value "x"})]
-            (is (false? (:ok res)))
-            (is (re-find #"invalid path" (str (:error res))))))))))
+                     (testing "a relative path lands under the tenant's own prefix"
+                       (let [{:keys [ok binding]} (create-inline-binding!
+                                                    {:fn-id (str (:id owner)) :slot-id (str (:id slot))
+                                                     :path "db/password" :value "mine"})]
+                         (is ok)
+                         (is (= "org/tenant-a/db/password" (:path binding)))
+                         (is (= "mine" (get-in @vault-state [:values "org/tenant-a/db/password"])))))
+                     (testing "naming another org's path only nests it under the tenant's own prefix"
+                       (let [other (seed-secret-slot-owner!)
+                             res (create-inline-binding! {:fn-id (str (:id (:owner other)))
+                                                          :slot-id (str (:id (:slot other)))
+                                                          :path victim :value "pwned"})]
+                         (is (= "org/tenant-a/org/victim/db/password" (get-in res [:binding :path])))
+                         (is (= "victim-secret" (get-in @vault-state [:values victim])))))
+                     (testing "a path escaping the KV mount is refused"
+                       (let [other (seed-secret-slot-owner!)
+                             res (create-inline-binding! {:fn-id (str (:id (:owner other)))
+                                                          :slot-id (str (:id (:slot other)))
+                                                          :path "../../sys/policy/root" :value "x"})]
+                         (is (false? (:ok res)))
+                         (is (re-find #"invalid path" (str (:error res))))))))))

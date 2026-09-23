@@ -38,8 +38,8 @@
 
   (testing "a tenant's path lands under its org prefix, idempotently"
     (tctx/with-org "acme"
-      (is (= "org/acme/db/password" (vault/scoped-path "db/password")))
-      (is (= "org/acme/db/password" (vault/scoped-path "org/acme/db/password"))))))
+                   (is (= "org/acme/db/password" (vault/scoped-path "db/password")))
+                   (is (= "org/acme/db/password" (vault/scoped-path "org/acme/db/password"))))))
 
 
 (deftest malformed-paths-are-refused-test
@@ -47,25 +47,25 @@
              "a%2e%2e/b" "a b" "a\\b" "a\nb"]]
     (testing (pr-str p)
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid path"
-                            (vault/scoped-path p)))
+            (vault/scoped-path p)))
       (is (= :vault/invalid-path (reached #(vault/get-secret % p)))
           "and never reaches the HTTP layer"))))
 
 
 (deftest tenant-ops-stay-inside-the-org-prefix-test
   (tctx/with-org "acme"
-    (testing "every op on another org's / the platform's path is forbidden"
-      (doseq [p ["org/other/db/password" "db/password" "org/acmex/db"]
-              [op-name op] {"get" #(vault/get-secret % p)
-                            "put" #(vault/put-secret % p "v")
-                            "delete" #(vault/delete-secret % p)
-                            "get-metadata" #(vault/get-metadata % p)
-                            "put-metadata" #(vault/put-metadata % p {})}]
-        (is (= :vault/path-forbidden (reached op)) (str op-name " " p))))
+                 (testing "every op on another org's / the platform's path is forbidden"
+                   (doseq [p ["org/other/db/password" "db/password" "org/acmex/db"]
+                           [op-name op] {"get" #(vault/get-secret % p)
+                                         "put" #(vault/put-secret % p "v")
+                                         "delete" #(vault/delete-secret % p)
+                                         "get-metadata" #(vault/get-metadata % p)
+                                         "put-metadata" #(vault/put-metadata % p {})}]
+                     (is (= :vault/path-forbidden (reached op)) (str op-name " " p))))
 
-    (testing "the org's own prefix is reachable"
-      (is (= ["org/acme/db/password"]
-             (reached #(vault/put-secret % "org/acme/db/password" "v")))))))
+                 (testing "the org's own prefix is reachable"
+                   (is (= ["org/acme/db/password"]
+                          (reached #(vault/put-secret % "org/acme/db/password" "v")))))))
 
 
 (deftest platform-tier-is-unrestricted-test

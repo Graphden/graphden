@@ -176,10 +176,10 @@
   (let [branch-id (random-uuid)
         writes (atom nil)
         request (req "/hook" {:request-method :post})
-        run! (fn [thunk]
-               (try (dbg/run-captured! {} branch-id {} (random-uuid) request thunk)
-                    (catch clojure.lang.ExceptionInfo _ nil))
-               (second @writes))]
+        capture-run! (fn [thunk]
+                       (try (dbg/run-captured! {} branch-id {} (random-uuid) request thunk)
+                            (catch clojure.lang.ExceptionInfo _ nil))
+                       (second @writes))]
     (with-redefs [lookup/resolve-fn-version-id (fn [_ _] (random-uuid))
                   lookup/free-arg-slot-map-cached (fn [_ _] {:request (random-uuid)})
                   lookup/graph-hash-cached (fn [_ _] "cafe0000")
@@ -190,9 +190,9 @@
       (try
         (testing "a failed run that consumed a secret persists no message"
           (with-redefs [persist/touches-secret? (constantly true)]
-            (let [outcome (run! (fn []
-                                  (cr/record-effect! :network)
-                                  (throw (ex-info "token hunter2 rejected" {}))))]
+            (let [outcome (capture-run! (fn []
+                                          (cr/record-effect! :network)
+                                          (throw (ex-info "token hunter2 rejected" {}))))]
               (is (= :failed (:status outcome)))
               (is (true? (:touched-secret? outcome)))
               (is (not (re-find #"hunter2" (str (:error outcome) (:error-data outcome)))))
@@ -200,7 +200,7 @@
 
         (testing "the tenant error scrub applies to captured runs too"
           (binding [cr/*scrub-internal-errors?* true]
-            (let [outcome (run! (fn [] (throw (ex-info "SELECT boom" {:type :storage/oops}))))]
+            (let [outcome (capture-run! (fn [] (throw (ex-info "SELECT boom" {:type :storage/oops}))))]
               (is (= :internal (get-in outcome [:error-data :reason])))
               (is (not (re-find #"SELECT" (str (:error outcome))))))))
         (finally (dbg/disarm! branch-id))))))

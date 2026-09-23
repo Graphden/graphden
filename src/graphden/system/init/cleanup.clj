@@ -9,9 +9,9 @@
   (:require
     [clojure.tools.logging :as log]
     [graphden.clients.vault :as vault]
-    [graphden.crud.secrets :as secrets]
     [graphden.crud.fn-execution.retention :as retention]
     [graphden.crud.fn-execution.stats :as stats]
+    [graphden.crud.secrets :as secrets]
     [graphden.storage.protocol.core :as sp]
     [graphden.util.executors :as executors]
     [graphden.versioning.storage.core :as vcore]

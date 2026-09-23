@@ -212,107 +212,119 @@
    [:list :tree]}`, `Person↔Address`) register in a single pass
    without the legacy fixed-point loop. Genuinely malformed entries
    (dangling refs to names that aren't in the batch and aren't
-   registered yet) are collected per-row and logged."
-  [{:keys [fns slots fn-slots]}]
-  (let [fn-by-id   (into {} (map (juxt :id identity)) fns)
-        slot-by-id (into {} (map (juxt :id identity)) slots)
-        slots-by-fn (group-by :fn-id fn-slots)
-        name-by-id (fn [id] (some-> (get fn-by-id id) :name keyword))
-        candidates
-        (keep
-          (fn [f]
-            (when-let [nm (some-> (:name f) keyword)]
-              (let [own-slots (->> (get slots-by-fn (:id f) [])
-                                   (sort-by :position)
-                                   (keep #(get slot-by-id (:slot-id %))))
-                    role (record-types/type-row-role f (seq own-slots))
-                    body (case role
-                           :record
-                           (into {}
-                                 (keep (fn [s]
-                                         (when-let [tn (name-by-id (:type-fn-id s))]
-                                           [(keyword (:name s)) tn])))
-                                 own-slots)
+   registered yet) are collected per-row and logged.
 
-                           :refinement
-                           (when-let [base (name-by-id (:base-fn-id f))]
-                             [:refine base (or (:constraint f) [:any])])
+   `source` names whose view of the graph this is (the branch — see
+   `alias-source`): a type-row that source registered before and no
+   longer has (deleted / renamed through the API) leaves the registry,
+   unless another source still declares it (`types/sync-db-aliases!`)."
+  ([graph] (register-type-aliases-from-db! graph ::unscoped))
+  ([{:keys [fns slots fn-slots]} source]
+   (let [fn-by-id   (into {} (map (juxt :id identity)) fns)
+         slot-by-id (into {} (map (juxt :id identity)) slots)
+         slots-by-fn (group-by :fn-id fn-slots)
+         name-by-id (fn [id] (some-> (get fn-by-id id) :name keyword))
+         candidates
+         (keep
+           (fn [f]
+             (when-let [nm (some-> (:name f) keyword)]
+               (let [own-slots (->> (get slots-by-fn (:id f) [])
+                                    (sort-by :position)
+                                    (keep #(get slot-by-id (:slot-id %))))
+                     role (record-types/type-row-role f (seq own-slots))
+                     body (case role
+                            :record
+                            (into {}
+                                  (keep (fn [s]
+                                          (when-let [tn (name-by-id (:type-fn-id s))]
+                                            [(keyword (:name s)) tn])))
+                                  own-slots)
 
-                           :list
-                           (when-let [elem (name-by-id (:element-fn-id f))]
-                             [:list elem])
+                            :refinement
+                            (when-let [base (name-by-id (:base-fn-id f))]
+                              [:refine base (or (:constraint f) [:any])])
 
-                           :union
-                           ;; Constraint already shaped as [:union T1 T2 …]
-                           ;; by parse-union; re-register verbatim so
-                           ;; resolve-alias sees the same form the EDN
-                           ;; path produces.
-                           (:constraint f)
+                            :list
+                            (when-let [elem (name-by-id (:element-fn-id f))]
+                              [:list elem])
 
-                           :variant
-                           ;; Desugar to the union-of-pinned-records
-                           ;; form so the alias-registry stores the
-                           ;; same structural type the EDN path
-                           ;; produces (see types/desugar-variant).
-                           ;; The constraint payload is
-                           ;; `[:variant tag1 T1 tag2 T2 …]`; we strip
-                           ;; the leading `:variant` and let the
-                           ;; helper rebuild the union. Names embedded
-                           ;; in `Tᵢ` resolve through the batch's
-                           ;; pre-extended `*alias-view*`, so mutual
-                           ;; refs across newly-saved type-rows work
-                           ;; in a single pass — same as records.
-                           (types/desugar-variant (:constraint f))
+                            :union
+                            ;; Constraint already shaped as [:union T1 T2 …]
+                            ;; by parse-union; re-register verbatim so
+                            ;; resolve-alias sees the same form the EDN
+                            ;; path produces.
+                            (:constraint f)
 
-                           ;; marker declaration — register the TAG in
-                           ;; the marker registry (not an alias) and emit
-                           ;; no alias body.
-                           :marker
-                           (do (types/register-marker!
-                                 nm (second (:constraint f)))
-                               nil)
+                            :variant
+                            ;; Desugar to the union-of-pinned-records
+                            ;; form so the alias-registry stores the
+                            ;; same structural type the EDN path
+                            ;; produces (see types/desugar-variant).
+                            ;; The constraint payload is
+                            ;; `[:variant tag1 T1 tag2 T2 …]`; we strip
+                            ;; the leading `:variant` and let the
+                            ;; helper rebuild the union. Names embedded
+                            ;; in `Tᵢ` resolve through the batch's
+                            ;; pre-extended `*alias-view*`, so mutual
+                            ;; refs across newly-saved type-rows work
+                            ;; in a single pass — same as records.
+                            (types/desugar-variant (:constraint f))
 
-                           :fn-type
-                           ;; `[:fn args ret]` — already in canonical
-                           ;; structural form, register verbatim. The
-                           ;; row has no name when it came from an
-                           ;; inline reference; alias entry only
-                           ;; lands when the `:name` keyword exists
-                           ;; (the `keep` over `(:name f)` above
-                           ;; filters anonymous rows out anyway).
-                           (:constraint f)
+                            ;; marker declaration — register the TAG in
+                            ;; the marker registry (not an alias) and emit
+                            ;; no alias body.
+                            :marker
+                            (do (types/register-marker!
+                                  nm (second (:constraint f)))
+                                nil)
 
-                           nil)
-                    ;; A platform row the packages declared keeps its
-                    ;; DECLARED body: the slot walk above can only name
-                    ;; type-rows, so a union / fn-typed field comes back as
-                    ;; its storage kind (`:any`) — wider than fns.edn said,
-                    ;; and wide enough to fail contravariance on every
-                    ;; fn-typed slot naming the record (types/core
-                    ;; `package-alias-bodies`). Tenant rows (`:org-id` set)
-                    ;; are the API's own and keep the rebuilt shape.
-                    body (if (nil? (:org-id f))
-                           (or (types/package-alias-body nm) body)
-                           body)]
-                (when body {:nm nm :body body :org (:org-id f)
-                            ;; Owner id feeds the alias-collision
-                            ;; diagnostic — per-ns names may repeat,
-                            ;; a silent alias overwrite must not.
-                            :owner (:id f)}))))
-          fns)
-        {:keys [failed]} (types/register-type-aliases-batch
-                           (map (juxt :nm :body :owner) candidates))
-        failed-names (set (map :nm failed))]
-    ;; Rebuild the per-org slice from the SUCCESSFULLY-registered candidates
-    ;; (reuse the already-validated bodies; no re-check). Lockstep with the
-    ;; global write above → same freshness guarantee.
-    (reset! (per-org-atom)
-            (reduce (fn [m {:keys [nm body org]}]
-                      (if (contains? failed-names nm) m (assoc-in m [org nm] body)))
-                    {} candidates))
-    (doseq [{:keys [nm reason]} failed]
-      (log/warn (str "register-type-aliases-from-db!: skipped " (pr-str nm)
-                     " — " reason)))))
+                            :fn-type
+                            ;; `[:fn args ret]` — already in canonical
+                            ;; structural form, register verbatim. The
+                            ;; row has no name when it came from an
+                            ;; inline reference; alias entry only
+                            ;; lands when the `:name` keyword exists
+                            ;; (the `keep` over `(:name f)` above
+                            ;; filters anonymous rows out anyway).
+                            (:constraint f)
+
+                            nil)
+                     ;; A platform row the packages declared keeps its
+                     ;; DECLARED body: the slot walk above can only name
+                     ;; type-rows, so a union / fn-typed field comes back as
+                     ;; its storage kind (`:any`) — wider than fns.edn said,
+                     ;; and wide enough to fail contravariance on every
+                     ;; fn-typed slot naming the record (types/core
+                     ;; `package-alias-bodies`). Tenant rows (`:org-id` set)
+                     ;; are the API's own and keep the rebuilt shape.
+                     body (if (nil? (:org-id f))
+                            (or (types/package-alias-body nm) body)
+                            body)]
+                 (when body {:nm nm :body body :org (:org-id f)
+                             ;; Owner id feeds the alias-collision
+                             ;; diagnostic — per-ns names may repeat,
+                             ;; a silent alias overwrite must not.
+                             :owner (:id f)}))))
+           fns)
+         {:keys [failed]} (types/register-type-aliases-batch
+                            (map (juxt :nm :body :owner) candidates))
+         failed-names (set (map :nm failed))]
+     (types/sync-db-aliases! source
+                             (into {}
+                                   (keep (fn [{:keys [nm body]}]
+                                           (when-not (contains? failed-names nm)
+                                             [nm body])))
+                                   candidates))
+     ;; Rebuild the per-org slice from the SUCCESSFULLY-registered candidates
+     ;; (reuse the already-validated bodies; no re-check). Lockstep with the
+     ;; global write above → same freshness guarantee.
+     (reset! (per-org-atom)
+             (reduce (fn [m {:keys [nm body org]}]
+                       (if (contains? failed-names nm) m (assoc-in m [org nm] body)))
+                     {} candidates))
+     (doseq [{:keys [nm reason]} failed]
+       (log/warn (str "register-type-aliases-from-db!: skipped " (pr-str nm)
+                      " — " reason))))))
 
 
 (defn- compile-storage
@@ -355,6 +367,18 @@
       (deps/build-reverse-deps (graph-snapshot ctx))))
 
 
+(defn- alias-source
+  "Which branch's view of the graph `ctx` compiles — the key
+   `register-type-aliases-from-db!` tracks its DB aliases under. The
+   branch lives on the VersionedStorage, which may sit under a decorator."
+  [ctx]
+  (or (loop [s (compile-storage ctx) depth 0]
+        (when (and (map? s) (< depth 4))
+          (or (:branch-id s)
+              (recur (or (:base s) (:base-storage s)) (inc depth)))))
+      ::unscoped))
+
+
 (defn refresh-type-registries-from-storage!
   "Light-weight equivalent of `rebuild!` that ONLY refreshes type
    registries (aliases + rich-types snapshot of current DB type-rows)
@@ -366,7 +390,7 @@
    on-demand by the next `execute` (via `registry`'s lazy fallback)."
   [ctx]
   (let [graph (graph-in-hand ctx (compile-storage ctx))]
-    (register-type-aliases-from-db! graph)
+    (register-type-aliases-from-db! graph (alias-source ctx))
     graph))
 
 
@@ -546,7 +570,7 @@
    block with small drifts — the audit's :resolved-value walker bug
    showed what per-site drift costs; keep the sequence HERE only."
   [ctx graph]
-  (register-type-aliases-from-db! graph)
+  (register-type-aliases-from-db! graph (alias-source ctx))
   (let [fns-map (if (map? (:fns graph))
                   (:fns graph)
                   (into {} (map (juxt :id identity)) (:fns graph)))]

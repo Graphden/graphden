@@ -78,7 +78,7 @@ Rewrites ~[:variant tag T …]~ into a structural union of tag-pinned records. S
 :PROPERTIES:
 :CUSTOM_ID: types/subtype?
 :FILE: src/graphden/types/core.clj
-:LINE: 1226
+:LINE: 1262
 :MINS: 13.7
 :END:
 
@@ -86,7 +86,7 @@ The heart of assignability: reflexive / transitive subtyping across primitives, 
 
 It is one ~cond~ ladder and the ORDER is the semantics: the universal yes/no arms first (identity, ~:any~, ~:never~, the typevar → ~:jsonb~ escape), then the ~:empty-map~ sentinel, unions (EVERY member on the left, SOME member on the right), primitives, ~:jsonb~, refinements, the structural shapes, and the ~:secret~ marker last. Don't hold the whole ladder in your head — find the arm for the pair of shapes you are asking about and read the comment that argues for it.
 
-- source :: [[file:../../../src/graphden/types/core.clj::(defn subtype?][src/graphden/types/core.clj:1226]]
+- source :: [[file:../../../src/graphden/types/core.clj::(defn subtype?][src/graphden/types/core.clj:1262]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 - referenced from :: [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
@@ -94,13 +94,13 @@ It is one ~cond~ ladder and the ORDER is the semantics: the universal yes/no arm
 :PROPERTIES:
 :CUSTOM_ID: types/constraint-implies?
 :FILE: src/graphden/types/core.clj
-:LINE: 1162
+:LINE: 1198
 :MINS: 2.7
 :END:
 
 Decides when one refinement constraint entails another (numeric bounds, ~:in~ / ~:=~ / ~:not=~, ~:and~ / ~:or~). This is exactly how ~subtype?~ compares refinement types like ~:positive-int~ ⊆ ~:non-negative-int~, so read it right after.
 
-- source :: [[file:../../../src/graphden/types/core.clj::(defn constraint-implies?][src/graphden/types/core.clj:1162]]
+- source :: [[file:../../../src/graphden/types/core.clj::(defn constraint-implies?][src/graphden/types/core.clj:1198]]
 - see also :: [[file:types.org::#types/subtype?][subtype?]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 
@@ -108,7 +108,7 @@ Decides when one refinement constraint entails another (numeric bounds, ~:in~ / 
 :PROPERTIES:
 :CUSTOM_ID: types/unify
 :FILE: src/graphden/types/core.clj
-:LINE: 1654
+:LINE: 1690
 :MINS: 10.1
 :END:
 
@@ -116,7 +116,7 @@ Robinson unification with occurs-check and subtype-aware leniency, plus a union 
 
 Same shape as ~subtype?~, so read it the same way: one ~cond~ over the normalised pair — typevar arms bind first (with the occurs check), then structural recursion into fn / list / record shapes, then the union fallback. It returns a substitution map or the ~::fail~ sentinel that ~unify-ok?~ / ~unify-fail?~ just below test for.
 
-- source :: [[file:../../../src/graphden/types/core.clj::(defn unify][src/graphden/types/core.clj:1654]]
+- source :: [[file:../../../src/graphden/types/core.clj::(defn unify][src/graphden/types/core.clj:1690]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/strip-null][strip-null]]
 
 * 9. strip-null

@@ -23,6 +23,7 @@
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.graph-harness :as gh :refer [*graph* form-req json-req uniq]]
+    [graphden.types.core :as types]
     [graphden.versioning.storage.core :as vs]
     [graphden.web.errors :as errors]))
 
@@ -349,6 +350,21 @@
       (is (= 404 (:status resp)))
       (is (str/includes? (or (:body resp) "")
                          "00000000-0000-0000-0000-000000000000")))))
+
+
+(deftest deleted-type-row-stops-resolving-test
+  (testing "a type-row created then deleted through the API is no longer a known type"
+    (let [nm (uniq "pde-tmp-type")
+          int-id (:id (first (sp/query-entities (:storage *graph*) :fn {:name "int"})))
+          created (via-create (form-req "/api/entities/fn"
+                                        (str "name=" nm "&element-fn-id=" int-id)))
+          row (first (sp/query-entities (:storage *graph*) :fn {:name nm}))]
+      (is (= 200 (:status created)))
+      (is (types/alias-registered? (keyword nm)) "the create registers it")
+      (is (= 200 (:status (via-delete {:uri (str "/api/entities/fn/" (:id row))
+                                       :request-method :delete}))))
+      (is (not (types/alias-registered? (keyword nm)))
+          "the delete takes it out of the alias registry"))))
 
 
 (deftest process-delete-entity-fn-binding-test

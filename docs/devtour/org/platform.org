@@ -52,13 +52,13 @@ Auth is provider-driven: core ships this single-token default behind the ~:auth/
 :PROPERTIES:
 :CUSTOM_ID: platform/cloud-forbidden-effects
 :FILE: src/graphden/executor/compile_runtime.clj
-:LINE: 1222
+:LINE: 1246
 :MINS: 3.0
 :END:
 
 The effect gate's registry of what a sandboxed graph must NOT do — env / io / network / process / raw-sql — with the docstring explaining why ~:raw-sql~ exists separately from ~:db~. The gate mechanism (~record-effect!~ throwing outside ~*allowed-effects*~) lives in core; the addon only chooses the policy sets.
 
-- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(def cloud-forbidden-effects][src/graphden/executor/compile_runtime.clj:1222]]
+- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(def cloud-forbidden-effects][src/graphden/executor/compile_runtime.clj:1246]]
 - same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/registry][registry]], [[file:executor.org::#executor/rebuild!][rebuild!]]
 
 * 5. check-target!

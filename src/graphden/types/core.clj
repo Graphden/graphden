@@ -711,6 +711,41 @@
       :else             nil)))
 
 
+(defonce ^:private db-alias-sources
+  ;; `{registry-atom → {source → {alias-name → body}}}` — what each source
+  ;; (a branch's compile, see `compile-runtime/register-type-aliases-from-db!`)
+  ;; last registered from DB type-rows. The registry is one map for every
+  ;; branch, so a name can only leave it when NO source still declares it.
+  ;; Weak on the registry atom: a test's override registry takes its
+  ;; bookkeeping with it.
+  (java.util.WeakHashMap.))
+
+
+(defn sync-db-aliases!
+  "Record `registered` (`{alias-name → body}`) as everything `source`
+   declares from its DB type-rows, and take out of the registry each name
+   `source` declared last time but no longer does (a type-row deleted or
+   renamed through the API). A name another source still declares is kept
+   — re-pointed at that source's body — and package-declared names are
+   never dropped (the packages own them; the API refuses to delete them)."
+  [source registered]
+  (let [reg (aliases-atom)
+        [prev others] (locking db-alias-sources
+                        (let [by-src (or (java.util.WeakHashMap/.get db-alias-sources reg) {})
+                              by-src' (assoc by-src source registered)]
+                          (java.util.WeakHashMap/.put db-alias-sources reg by-src')
+                          [(get by-src source {}) (vals (dissoc by-src' source))]))]
+    (doseq [nm (keys prev)
+            :when (not (contains? registered nm))]
+      (if-let [body (some #(get % nm) others)]
+        (swap! reg assoc nm body)
+        (when-not (or (package-alias-body nm) (contains? @alias-qualified nm))
+          (swap! reg dissoc nm)
+          (when (nil? *type-aliases-override*)
+            (swap! alias-owners dissoc nm)))))
+    nil))
+
+
 (defn unregister-type-alias!
   "Drop an alias registration — the bare name, EVERY owner's qualified
    variant and the whole ambiguity record. Test cleanup only: there is
@@ -721,7 +756,8 @@
    refuses to delete those (`crud.package-guard/delete-rejection`), so
    a bare name can't be left ambiguous by a type-row DELETE. Rows the
    API may delete register through `register-type-aliases-batch`, which
-   records no ambiguity."
+   records no ambiguity; their removal on delete / rename is
+   `sync-db-aliases!`."
   [alias-name]
   (when (nil? *type-aliases-override*)
     (swap! alias-owners dissoc alias-name)

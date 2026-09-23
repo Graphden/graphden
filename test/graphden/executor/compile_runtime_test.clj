@@ -55,6 +55,38 @@
         (is (= [:list :int] (:Bar view-b)))))))
 
 
+(deftest deleted-type-row-leaves-the-alias-registry
+  ;; A type-row deleted (or renamed) through the API must stop resolving
+  ;; after the next rebuild — the registry used to only ever ADD, so the
+  ;; old name stayed a known type until restart. The registry is shared
+  ;; by every branch, so a name another branch still declares stays.
+  (binding [cr/*per-org-aliases-override* (atom {})
+            types/*type-aliases-override* (atom {})]
+    (let [prims [{:id "int" :name "int"} {:id "text" :name "text"}]
+          with-tmp {:fns (conj prims {:id "t1" :name "Tmp" :element-fn-id "int"})
+                    :slots [] :fn-slots []}
+          without {:fns prims :slots [] :fn-slots []}
+          renamed {:fns (conj prims {:id "t1" :name "Tmp2" :element-fn-id "int"})
+                   :slots [] :fn-slots []}]
+      (cr/register-type-aliases-from-db! with-tmp :branch-a)
+      (is (types/alias-registered? :Tmp) "registered while the row exists")
+      (testing "the branch that deleted it no longer resolves it"
+        (cr/register-type-aliases-from-db! without :branch-a)
+        (is (not (types/alias-registered? :Tmp))))
+      (testing "a rename drops the old name and keeps the new one"
+        (cr/register-type-aliases-from-db! with-tmp :branch-a)
+        (cr/register-type-aliases-from-db! renamed :branch-a)
+        (is (not (types/alias-registered? :Tmp)))
+        (is (types/alias-registered? :Tmp2)))
+      (testing "a name another branch still declares survives the delete"
+        (cr/register-type-aliases-from-db! with-tmp :branch-a)
+        (cr/register-type-aliases-from-db! with-tmp :branch-b)
+        (cr/register-type-aliases-from-db! without :branch-a)
+        (is (types/alias-registered? :Tmp))
+        (cr/register-type-aliases-from-db! without :branch-b)
+        (is (not (types/alias-registered? :Tmp)))))))
+
+
 (deftest with-org-alias-view-filters-resolution-for-a-tenant
   ;; The shared helper (used by the type-check guards AND the read-display paths
   ;; via the request-scope) makes `resolve-alias` org-filtered for a tenant and

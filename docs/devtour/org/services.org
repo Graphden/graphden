@@ -127,13 +127,13 @@ The read side: a consumer names a service through a ~:fn-ref~ slot (~:service-en
 :PROPERTIES:
 :CUSTOM_ID: services/run-traced!
 :FILE: src/graphden/crud/fn_execution/trace.clj
-:LINE: 104
-:MINS: 1.7
+:LINE: 120
+:MINS: 2.0
 :END:
 
 A call across the wire stays one tree: a persisted run's ~:service-get~ sends ~X-Graphden-Trace~ (trace id + its own execution id), and the listener runs the request through this — a fresh execution id bound for the handler's own outbound calls, a path trace, and the outcome persisted as an execution of the handler fn linked to the caller. No header, no row: ordinary traffic pays nothing. ~get-execution~ then lists a run's ~:children~.
 
-- source :: [[file:../../../src/graphden/crud/fn_execution/trace.clj::(defn run-traced!][src/graphden/crud/fn_execution/trace.clj:104]]
+- source :: [[file:../../../src/graphden/crud/fn_execution/trace.clj::(defn run-traced!][src/graphden/crud/fn_execution/trace.clj:120]]
 
 * 11. extend-builder
 :PROPERTIES:
@@ -163,13 +163,13 @@ Opens the fleet half with its shared source of truth: the ~:placement~ row mappi
 :PROPERTIES:
 :CUSTOM_ID: services/forward-or-nil
 :FILE: src/graphden/fleet/router.clj
-:LINE: 75
+:LINE: 114
 :MINS: 1.3
 :END:
 
 The internal forward-hop: when a request lands on a pod that does not hold the target cell, look up the holder in the placement map and HTTP-forward there instead of returning ~421~. How the placement map becomes live cross-fleet routing.
 
-- source :: [[file:../../../src/graphden/fleet/router.clj::(defn forward-or-nil][src/graphden/fleet/router.clj:75]]
+- source :: [[file:../../../src/graphden/fleet/router.clj::(defn forward-or-nil][src/graphden/fleet/router.clj:114]]
 
 * 14. cell-weight
 :PROPERTIES:

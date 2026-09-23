@@ -247,25 +247,25 @@ The other direction of ~render-repr~: EDITING a value. A slot's effective type i
 :PROPERTIES:
 :CUSTOM_ID: crud/run-captured!
 :FILE: src/graphden/crud/debug_capture.clj
-:LINE: 288
+:LINE: 292
 :MINS: 2.4
 :END:
 
 The «catch next request» debugger entry (docs/EXECUTION.md § Debug): a one-shot, TTL-bounded, org+branch-keyed trap consumed in ~branch-router/ring-callable-for-ctx~ runs the next matching HTTP request through this wrapper — Debug path-trace bound, sanitized request + response persisted as a standard ~:fn-execution~ row — so a live handler run replays through the same call-tree UI as a traced ~/api/execute~.
 
-- source :: [[file:../../../src/graphden/crud/debug_capture.clj::(defn run-captured!][src/graphden/crud/debug_capture.clj:288]]
+- source :: [[file:../../../src/graphden/crud/debug_capture.clj::(defn run-captured!][src/graphden/crud/debug_capture.clj:292]]
 
 * 20. apply-create-secret-body
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-secret-body
 :FILE: src/graphden/crud/secrets.clj
-:LINE: 133
-:MINS: 4.6
+:LINE: 176
+:MINS: 4.7
 :END:
 
 The write path that must not leak (docs/SECRETS.md): one ~POST /api/secrets~ creates the graphden fn-row + path-binding, then the OpenBao value and its custom-metadata — every step journalled so ~replay-secret-rollback!~ can undo the lot if a later one fails. The secret VALUE never enters the graph; only the path does, on a ~:secret-leaf~ child the executor auto-derefs through the ctx's vault handle. Note the shape: the endpoint is the ~:cond~ in ~app/secrets/fns.edn~ (parse, guards, a ~:try~); only this journalled body stays Clojure, reached through the ~:_apply-create-secret-body~ base-fn.
 
-- source :: [[file:../../../src/graphden/crud/secrets.clj::(defn apply-create-secret-body][src/graphden/crud/secrets.clj:133]]
+- source :: [[file:../../../src/graphden/crud/secrets.clj::(defn apply-create-secret-body][src/graphden/crud/secrets.clj:176]]
 - see also :: [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
 * 21. run-tests!

@@ -108,7 +108,7 @@
     (when (and secret-base32 (not (str/blank? code)))
       (some (fn [delta]
               (auth/constant-time-equal? (str code)
-                                           (code-at secret-base32 (+ (long time-secs) (* delta step-secs)))))
+                                         (code-at secret-base32 (+ (long time-secs) (* delta step-secs)))))
             [-1 0 1]))))
 
 

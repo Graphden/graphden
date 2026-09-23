@@ -60,14 +60,14 @@
 (defn cell-weight
   "Fold structural cost + live load into the single scalar the packer orders by.
 
-   `load` is the org's pending count (`pending-loads`) — per-ORG, so all of an
+   `org-load` is the org's pending count (`pending-loads`) — per-ORG, so all of an
    org's cells share it: Phase 1 attributes the whole org load to each cell.
    That is exact for the common single-cell-per-org deployment (an org app is
    one cell today, docs/FLEET_RFC.md §12) and conservative otherwise — a
    busier org's cells simply sort heavier. Per-cell load attribution is a
    Phase 2 refinement, gated on multi-cell orgs proving common."
-  ([forward-deps root-fn-id load]
-   (cell-weight forward-deps root-fn-id load default-weights))
-  ([forward-deps root-fn-id load {:keys [w-fn-count w-load]}]
+  ([forward-deps root-fn-id org-load]
+   (cell-weight forward-deps root-fn-id org-load default-weights))
+  ([forward-deps root-fn-id org-load {:keys [w-fn-count w-load]}]
    (+ (* w-fn-count (cell-fn-count forward-deps root-fn-id))
-      (* w-load load))))
+      (* w-load org-load))))

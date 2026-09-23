@@ -183,8 +183,7 @@
   (try
     (core/resolve-social-identity! storage info)
     (catch clojure.lang.ExceptionInfo e
-      (if (= :accounts/email-has-password (:type (ex-data e)))
-        nil
+      (when-not (= :accounts/email-has-password (:type (ex-data e)))
         (throw e)))))
 
 

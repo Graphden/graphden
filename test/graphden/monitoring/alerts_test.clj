@@ -107,7 +107,7 @@
   ;; A full feedback batch (20 × 300 chars) used to exceed sendMessage's
   ;; 4096 limit → 400 → the batch was never delivered, and the undelivered
   ;; batch jammed every later alert behind it.
-  (let [feedback (repeat 20 {:category "bug" :body (apply str (repeat 400 "é"))})
+  (let [feedback (repeat 20 {:category "bug" :body (str/join (repeat 400 "é"))})
         {:keys [fire]} (alerts/decide {:org-totals [] :server-error-delta 50 :feedback feedback}
                                       {} {} 0)
         text (alerts/summary-text fire)
@@ -120,5 +120,5 @@
     (testing "the webhook arm is not clipped (no such limit)"
       (is (= text (get-in (alerts/alert-request {:webhook-url "http://x"} text) [:body :text])))))
   (testing "a clip never splits a surrogate pair"
-    (let [clipped (alerts/clip-text (apply str (repeat 100 "📮")) 101)]
-      (is (not (Character/isHighSurrogate (.charAt ^String clipped (dec (str/index-of clipped "\n…")))))))))
+    (let [clipped (alerts/clip-text (str/join (repeat 100 "📮")) 101)]
+      (is (not (Character/isHighSurrogate (String/.charAt ^String clipped (dec (str/index-of clipped "\n…")))))))))

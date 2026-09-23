@@ -21,8 +21,8 @@
 (defn- gzip
   ^bytes [^bytes bs]
   (let [out (ByteArrayOutputStream.)]
-    (with-open [gz (GZIPOutputStream. out)] (.write gz bs))
-    (.toByteArray out)))
+    (with-open [gz (GZIPOutputStream. out)] (GZIPOutputStream/.write gz bs))
+    (ByteArrayOutputStream/.toByteArray out)))
 
 
 (defn- holder

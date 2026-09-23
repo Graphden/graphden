@@ -17,6 +17,6 @@
    pool, the lock connection, the running-services map). nil is a no-op."
   [^ExecutorService executor]
   (when executor
-    (.shutdown executor)
-    (try (.awaitTermination executor await-seconds TimeUnit/SECONDS)
+    (ExecutorService/.shutdown executor)
+    (try (ExecutorService/.awaitTermination executor await-seconds TimeUnit/SECONDS)
          (catch InterruptedException _ nil))))

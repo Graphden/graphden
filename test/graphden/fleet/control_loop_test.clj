@@ -101,17 +101,17 @@
                          (vec (for [[org n] pending, _ (range n)] {:org-id org :status :pending})))
          nil))
 
-    (query-entities [_ _ _ _] nil)
+     (query-entities [_ _ _ _] nil)
 
-    (create-entity [_ _ _] nil)
+     (create-entity [_ _ _] nil)
 
-    (read-entity [_ _ _] nil)
+     (read-entity [_ _ _] nil)
 
-    (update-entity [_ _ _ _] nil)
+     (update-entity [_ _ _ _] nil)
 
-    (delete-entity [_ _ _] nil)
+     (delete-entity [_ _ _] nil)
 
-    (query-latest-per-group [_ _ _ _] nil))))
+     (query-latest-per-group [_ _ _ _] nil))))
 
 
 (deftest current-placement-reads-highest-epoch

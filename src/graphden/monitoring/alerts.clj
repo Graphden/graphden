@@ -124,7 +124,7 @@
     text
     (let [marker-room 80
           cut (- limit marker-room)
-          cut (if (Character/isHighSurrogate (.charAt text (dec cut))) (dec cut) cut)]
+          cut (if (Character/isHighSurrogate (String/.charAt text (dec cut))) (dec cut) cut)]
       (str (subs text 0 cut)
            "\n… (" (- (count text) cut) " more characters clipped — see feedback_reports)"))))
 

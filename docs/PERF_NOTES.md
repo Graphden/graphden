@@ -343,3 +343,26 @@ the snapshot object); the per-namespace diagnostic counts stay per request,
 because they move without a graph write. `:sidebar/tree-kinds-computed`
 counts the recomputations and `perf/budgets.edn` holds it at 1 for the
 three-paint scenario.
+
+### 2026-09-23 — Run all reloaded the whole branch twice per test
+
+The platform-tests namespace was ~760 s of every landing gate: 368 tests at
+~2.1 s each, against tests that each run in milliseconds. A JFR profile of
+`run-tests!` put 98% of the samples under `resolve-execution-graph`, reached
+twice per test — the free-arg surface (`free-arg-slot-map-cached`) and the
+run's graph hash (`graph-hash-cached`). The batch resolver answers one root,
+but gets there by loading EVERY fn / fn-slot / binding / list-item of the
+branch with their version overlays (~0.8 s on the shipped graph) and walking
+the root's closure in memory. Both memos above it are per root, so each new
+test paid two whole-branch loads. The same cost lands on a tenant's
+[Run all], and a cold Run of any fn paid it twice.
+
+`resolution/call-with-graph-load-memo` shares the load inside a scope,
+keyed on `[branch-id graph-epoch]` — the epoch is bumped before every
+graph-shaped write, so a test that edits the graph is followed by a reload,
+not a stale read; a handle with no epoch (no pool) is never memoised.
+`run-tests!` scopes the whole run, `apply-execute`'s plan scopes its two
+lookups. Measured on 40 platform tests, one JVM, no contention:
+1638 ms → 69 ms per test. Scope-bound on purpose: holding a whole graph
+across requests would duplicate what the compiled registry already holds.
+Covered by `versioning.storage.core-test/graph-load-memo-shares-one-branch-load-per-epoch-test`.

@@ -1,6 +1,5 @@
-(ns ^:serial graphden.executor.effect-gating-test
-  "`^:serial` — installs the process-global deploy setting (`deploy-config/install!`) for the length of a test; under kaocha's parallel plugin another namespace's reset landed mid-test.
-   Runtime effect gate (docs/TENANCY_SEAM.md § Effect gate) — a context with
+(ns graphden.executor.effect-gating-test
+  "Runtime effect gate (docs/TENANCY_SEAM.md § Effect gate) — a context with
    `:allowed-effects` makes `record-effect!` throw
    `:execution/forbidden-effect` for any effect outside the set. The
    cloud sandbox boundary: env / io / network excluded for cloud orgs,
@@ -10,13 +9,15 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
-    [graphden.system.deploy-config :as deploy-config]))
+    [graphden.system.deploy-config :as deploy-config]
+    [graphden.test-infra.seams :as ts]))
 
 
 (def ^:dynamic *bootstrap* nil)
 
 
 (use-fixtures :once
+  ts/isolated-seams-fixture
   (fn [t]
     (binding [*bootstrap* (setup/bootstrap-crud-graph-from-golden!)]
       (t))))

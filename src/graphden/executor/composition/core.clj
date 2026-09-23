@@ -348,6 +348,24 @@
   (faithful-defs-by-name (export/graph->records storage)))
 
 
+(defn fn-defs->records
+  "The records a sync of `fn-defs` writes — validated, dependency-sorted,
+   parsed — without touching storage. `extra-name->id` /
+   `extra-defs-by-name` are the already-known names and fn-def shapes
+   (base-fns, prior syncs) the slot resolver reaches, as in
+   `sync-fns-to-storage!`, which writes exactly these records. Also the
+   no-DB view of a package corpus (`packages.corpus-seals-test`)."
+  [fn-defs extra-name->id extra-defs-by-name]
+  (validation/validate-all-defs! fn-defs)
+  (let [;; Identity edges (`:fn-ref` slots) don't order the sync — two
+        ;; services may name each other. The slot type resolves across
+        ;; this module + the already-synced defs.
+        defs-by-name (merge extra-defs-by-name (slot-res/build-defs-by-name fn-defs))
+        identity-arg? (fn [fd arg] (slot-res/fn-ref-arg? fd arg defs-by-name))
+        sorted (deps/topological-sort fn-defs identity-arg?)]
+    (records/parse-module sorted extra-name->id extra-defs-by-name)))
+
+
 (defn sync-fns-to-storage!
   "Top-level sync for a list of fn-defs. See arity-5 for full
    signature; convenience arities auto-discover `extra-name->id` from
@@ -368,12 +386,6 @@
    (sync-fns-to-storage! storage fn-defs ns-id-map extra-name->id
                          (existing-defs-by-name storage)))
   ([storage fn-defs ns-id-map extra-name->id extra-defs-by-name]
-   (validation/validate-all-defs! fn-defs)
-   (let [;; Identity edges (`:fn-ref` slots) don't order the sync — two
-         ;; services may name each other. The slot type resolves across
-         ;; this module + the already-synced defs.
-         defs-by-name (merge extra-defs-by-name (slot-res/build-defs-by-name fn-defs))
-         identity-arg? (fn [fd arg] (slot-res/fn-ref-arg? fd arg defs-by-name))
-         sorted (deps/topological-sort fn-defs identity-arg?)
-         records (records/parse-module sorted extra-name->id extra-defs-by-name)]
-     (write-records! storage records ns-id-map))))
+   (write-records! storage
+                   (fn-defs->records fn-defs extra-name->id extra-defs-by-name)
+                   ns-id-map)))

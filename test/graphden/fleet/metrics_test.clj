@@ -27,14 +27,15 @@
 
 
 (defn- pending-storage
-  "Fake storage: `query-entities :fn-execution {:org-id o :status :pending}` →
-   `(get org->pending o)` rows (a vec of length = the pending count)."
+  "Fake storage: `query-entities :fn-execution {:status :pending}` → every
+   org's pending rows (`(get org->pending o)` of them per org, each carrying
+   its `:org-id`)."
   [org->pending]
   (reify sp/StorageCRUD
     (query-entities
       [_ en where]
-      (when (and (= en :fn-execution) (= :pending (:status where)))
-        (vec (repeat (get org->pending (:org-id where) 0) {:status :pending}))))
+      (when (and (= en :fn-execution) (= {:status :pending} where))
+        (vec (for [[org n] org->pending, _ (range n)] {:org-id org :status :pending}))))
 
     (query-entities [_ _ _ _] nil)
 
@@ -49,26 +50,22 @@
     (query-latest-per-group [_ _ _ _] nil)))
 
 
-(deftest org-pending-load-counts-pending-rows
-  (let [storage (pending-storage {"acme" 5 "beta" 0})]
+(deftest pending-loads-counts-pending-rows-per-org
+  (let [loads (metrics/pending-loads (pending-storage {"acme" 5 "beta" 0}))]
     (testing "an org's live load is its pending-execution row count"
-      (is (= 5 (metrics/org-pending-load storage "acme"))))
-    (testing "an idle org loads zero"
-      (is (zero? (metrics/org-pending-load storage "beta")))
-      (is (zero? (metrics/org-pending-load storage "ghost"))
-          "an org with no rows at all also loads zero"))))
+      (is (= 5 (get loads "acme"))))
+    (testing "an idle org is absent — load 0"
+      (is (zero? (get loads "beta" 0)))
+      (is (zero? (get loads "ghost" 0))))))
 
 
 (deftest cell-weight-folds-structure-and-load
-  (let [fwd {A #{B}, B #{C}, C #{D}}          ; A's cell = 4 fns
-        storage (pending-storage {"acme" 3})]
+  (let [fwd {A #{B}, B #{C}, C #{D}}]          ; A's cell = 4 fns
     (testing "default equal weights sum fn-count + load"
       ;; 4 fns + 3 pending = 7
-      (is (= 7.0 (metrics/cell-weight fwd storage "acme" A))))
+      (is (= 7.0 (metrics/cell-weight fwd A 3))))
     (testing "custom weights scale each term independently"
       ;; 2·4 + 10·3 = 38
-      (is (= 38.0 (metrics/cell-weight fwd storage "acme" A
-                                       {:w-fn-count 2.0 :w-load 10.0}))))
+      (is (= 38.0 (metrics/cell-weight fwd A 3 {:w-fn-count 2.0 :w-load 10.0}))))
     (testing "an idle org's weight is purely structural"
-      (let [idle (pending-storage {"acme" 0})]
-        (is (= 4.0 (metrics/cell-weight fwd idle "acme" A)))))))
+      (is (= 4.0 (metrics/cell-weight fwd A 0))))))

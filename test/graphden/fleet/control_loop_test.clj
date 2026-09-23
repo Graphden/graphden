@@ -88,16 +88,18 @@
 (defn- fleet-storage
   "Fake storage: `:app-route` rows (org→handler-fn-id), `:placement` rows, and a
    pending-execution count per org (for cell-weight's load term)."
-  [{:keys [app-routes placements pending]}]
-  (reify sp/StorageCRUD
-    (query-entities
-      [_ en where]
-      (case en
-        :app-route (mapv (fn [[org h]] {:org org :handler-fn-id h}) app-routes)
-        :placement placements
-        :fn-execution (when (= :pending (:status where))
-                        (vec (repeat (get pending (:org-id where) 0) {:status :pending})))
-        nil))
+  ([opts] (fleet-storage opts (atom [])))
+  ([{:keys [app-routes placements pending]} queries]
+   (reify sp/StorageCRUD
+     (query-entities
+       [_ en where]
+       (swap! queries conj en)
+       (case en
+         :app-route (mapv (fn [[org h]] {:org org :handler-fn-id h}) app-routes)
+         :placement placements
+         :fn-execution (when (= {:status :pending} where)
+                         (vec (for [[org n] pending, _ (range n)] {:org-id org :status :pending})))
+         nil))
 
     (query-entities [_ _ _ _] nil)
 
@@ -109,14 +111,14 @@
 
     (delete-entity [_ _ _] nil)
 
-    (query-latest-per-group [_ _ _ _] nil)))
+    (query-latest-per-group [_ _ _ _] nil))))
 
 
 (deftest current-placement-reads-highest-epoch
   (let [storage (fleet-storage
                   {:placements [{:org "o" :entry-fn-id c1 :executor-id "e1" :epoch 1}
                                 {:org "o" :entry-fn-id c1 :executor-id "e2" :epoch 2}]})]
-    (is (= {["o" c1] "e2"} (loop/current-placement storage))
+    (is (= {["o" c1] "e2"} (loop/current-placement (loop/read-placements storage)))
         "a stale duplicate is shadowed by the highest epoch")))
 
 
@@ -126,7 +128,7 @@
                                 :pending {"acme" 2}})
         ;; c1's cell = {c1}; weight = 1 fn + 2 pending = 3. c2's cell = {c2}=1, no load.
         fwd {}
-        cells (loop/discover-cells storage fwd)]
+        cells (loop/discover-cells storage fwd (loop/read-placements storage))]
     (is (= #{{:org "acme" :entry-fn-id c1 :weight 3.0}
              {:org "beta" :entry-fn-id c2 :weight 1.0}}
            (set cells))
@@ -156,7 +158,7 @@
                   (delete-entity [_ _ _] nil)
 
                   (query-latest-per-group [_ _ _ _] nil))
-        cells (loop/discover-cells storage {})]
+        cells (loop/discover-cells storage {} (loop/read-placements storage))]
     (is (= [{:org "beta" :entry-fn-id c2 :weight 1.0}] cells)
         "a throwing :org read is tolerated; placement cells are still discovered")))
 
@@ -179,6 +181,21 @@
              (loop/scope-cells cells {:exclude-orgs #{"acme"}}))))
     (testing "no scope config = manage everything (single-release fleet)"
       (is (= {:cells cells :skipped 0} (loop/scope-cells cells {}))))))
+
+
+(deftest run-tick-reads-placement-and-load-once
+  ;; The tick used to read `:placement` twice and run one pending
+  ;; `:fn-execution` count PER CELL; now one of each, however many cells.
+  (let [queries (atom [])
+        storage (fleet-storage {:app-routes {"acme" c1 "beta" c2}
+                                :placements [{:org "gamma" :entry-fn-id c3 :executor-id "e1" :epoch 1}]
+                                :pending {"acme" 2 "beta" 1}}
+                               queries)
+        decision (loop/run-tick! {:storage storage :forward-deps {} :executors ["e1" "e2"]
+                                  :move-fn (constantly nil)}
+                                 {} {})]
+    (is (= 2 (count (:initial-placements decision))))
+    (is (= {:app-route 1 :placement 1 :fn-execution 1} (frequencies @queries)))))
 
 
 (deftest run-tick-respects-the-release-scope
@@ -216,9 +233,9 @@
 (deftest discover-cells-attaches-closure-when-requested
   (let [storage (fleet-storage {:app-routes {"acme" c1} :pending {}})]
     (testing "default omits :closure (cheap, no per-cell closure walk)"
-      (is (nil? (:closure (first (loop/discover-cells storage {}))))))
+      (is (nil? (:closure (first (loop/discover-cells storage {} []))))))
     (testing "with-closure? attaches the cell's forward-closure fn-set"
-      (let [cells (loop/discover-cells storage {} {:with-closure? true})]
+      (let [cells (loop/discover-cells storage {} [] {:with-closure? true})]
         (is (= #{c1} (:closure (first cells)))
             "a root with no forward edges is a one-fn closure")))))
 

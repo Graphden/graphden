@@ -110,41 +110,50 @@
     (catch Exception _ nil)))
 
 
+(defn read-placements
+  "Every `:placement` row — read ONCE per tick and handed to both
+   `current-placement` and `discover-cells`, which used to query it twice."
+  [storage]
+  (safe-query storage :placement {}))
+
+
 (defn current-placement
   "The fleet's current placement as `{[org entry-fn-id] executor-id}`, taking the
    highest-epoch row per cell (defensive against a stale duplicate a partial move
-   might leave)."
-  [storage]
+   might leave). Takes the `read-placements` rows."
+  [placement-rows]
   (into {}
         (map (fn [[k rows]]
                [k (:executor-id (first (sort-by :epoch > rows)))]))
-        (group-by (juxt :org :entry-fn-id) (safe-query storage :placement {}))))
+        (group-by (juxt :org :entry-fn-id) placement-rows)))
 
 
 (defn discover-cells
   "The cells the fleet manages, each weighted by `metrics/cell-weight`
    (fn-count + org load): every tenant app cell (an `:app-route` row's
-   `(org, handler-fn-id)`) unioned with whatever is already placed. An org can
-   run several named apps, so it contributes one cell per route. Platform
-   `:service` cells are deliberately EXCLUDED — the reconciler owns their
-   advisory-lock singleton placement, so the fleet controller must not also
-   move them.
+   `(org, handler-fn-id)`) unioned with whatever is already placed
+   (`placement-rows`, from `read-placements`). An org can run several named
+   apps, so it contributes one cell per route. Platform `:service` cells are
+   deliberately EXCLUDED — the reconciler owns their advisory-lock singleton
+   placement, so the fleet controller must not also move them. The org loads
+   are read with one `metrics/pending-loads` query, not one per cell.
 
    `opts` — `{:with-closure? bool}`. When true each cell also carries its
    `:closure` (forward-closure fn-set) for overlap-aware placement; computed
    only on demand since it walks every cell's closure each tick."
-  ([storage forward-deps] (discover-cells storage forward-deps {}))
-  ([storage forward-deps {:keys [with-closure?]}]
+  ([storage forward-deps placement-rows] (discover-cells storage forward-deps placement-rows {}))
+  ([storage forward-deps placement-rows {:keys [with-closure?]}]
    (let [app-roots (keep (fn [r]
                            (when-let [h (:handler-fn-id r)]
                              {:org (:org r) :entry-fn-id h}))
                          (safe-query storage :app-route {}))
          placed-roots (map (fn [r] {:org (:org r) :entry-fn-id (:entry-fn-id r)})
-                           (safe-query storage :placement {}))]
+                           placement-rows)
+         loads (metrics/pending-loads storage)]
      (map (fn [{:keys [org entry-fn-id]}]
             (cond-> {:org org
                      :entry-fn-id entry-fn-id
-                     :weight (metrics/cell-weight forward-deps storage org entry-fn-id)}
+                     :weight (metrics/cell-weight forward-deps entry-fn-id (get loads org 0))}
               with-closure? (assoc :closure (metrics/cell-closure forward-deps entry-fn-id))))
           (distinct (concat app-roots placed-roots))))))
 
@@ -188,10 +197,11 @@
    code-sharing cells. `:shard-orgs` / `:exclude-orgs` in `opts` bound the
    managed cell set (mixed fleets — see `scope-cells`)."
   [{:keys [storage forward-deps executors move-fn]} state opts]
-  (let [discovered (discover-cells storage forward-deps
+  (let [placement-rows (read-placements storage)
+        discovered (discover-cells storage forward-deps placement-rows
                                    {:with-closure? (pos? (double (:w-overlap opts 0.0)))})
         {:keys [cells skipped]} (scope-cells discovered opts)
-        current (current-placement storage)
+        current (current-placement placement-rows)
         decision (plan-tick {:cells cells :current current :executors executors} state opts)]
     (when (pos? skipped)
       (log/debug "fleet controller: cells outside this release's scope skipped"

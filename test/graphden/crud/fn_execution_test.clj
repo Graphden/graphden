@@ -339,12 +339,12 @@
         {f1 :composed} (make-pure-add-fn! storage "child-one")
         {f2 :composed} (make-pure-add-fn! storage "child-two")
         c (setup/default-registry-ctx storage)
-        run! (fn [f]
-               (-> (apply-and-await! c {:fn-id (:id f) :args {:a 1 :b 2}
-                                        :timeout-ms 5000 :persist? true})
-                   :execution-id parse-uuid))
-        parent (run! f1)
-        kids [(run! f2) (run! f1)]]
+        run-fn! (fn [f]
+                  (-> (apply-and-await! c {:fn-id (:id f) :args {:a 1 :b 2}
+                                           :timeout-ms 5000 :persist? true})
+                      :execution-id parse-uuid))
+        parent (run-fn! f1)
+        kids [(run-fn! f2) (run-fn! f1)]]
     (doseq [k kids]
       (sp/update-entity storage :fn-execution k {:parent-execution-id parent}))
     (testing "every child, oldest first, with the fn it ran"

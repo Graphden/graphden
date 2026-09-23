@@ -190,16 +190,6 @@
 
 
 ;; =============================================================================
-;; list-available-packages tests
-;; =============================================================================
-
-(deftest list-available-packages-test
-  (testing "returns a vector or nil"
-    (let [result (loader/list-available-packages)]
-      (is (or (nil? result) (vector? result))))))
-
-
-;; =============================================================================
 ;; get-seeded-services tests
 ;; =============================================================================
 
@@ -232,13 +222,13 @@
       (is (empty? (:packages result))))))
 
 
-(deftest load-default-packages-test
+(deftest load-packages-default-set-test
   (testing "loads core, web, app packages"
     ;; The default set IS the product and is always on the classpath here, so a
     ;; "Package not found" is a genuine regression — it used to be caught and
     ;; asserted as an acceptable outcome, which made the whole test pass on a
     ;; broken tree. Same reasoning as `resolve-dependencies-test` below.
-    (let [result (loader/load-default-packages)
+    (let [result (loader/load-packages ["core" "web" "app"])
           pkgs (set (map :name (:packages result)))]
       (is (contains? pkgs "core"))
       (is (contains? pkgs "web"))

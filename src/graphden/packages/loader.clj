@@ -728,29 +728,9 @@
 ;; Convenience Functions
 ;; =============================================================================
 
-(defn load-default-packages
-  "Loads the default package set: core, web, app."
-  []
-  (load-packages ["core" "web" "app"]))
-
-
 (defn get-seeded-services
   "Returns the vector of `:services` entries aggregated across all
    loaded packages — each entry is the original package map plus
    `:package-name` so the seeder can compute deterministic ids."
   [loaded-packages]
   (vec (:seeded-services loaded-packages)))
-
-
-(defn list-available-packages
-  "Lists all available packages in resources/packages/."
-  []
-  (when-let [packages-url (io/resource "packages/")]
-    (let [file (io/file packages-url)]
-      (when (java.io.File/.isDirectory file)
-        (when-let [children (java.io.File/.listFiles file)]
-          (->> children
-               (filter #(java.io.File/.isDirectory ^java.io.File %))
-               (map #(java.io.File/.getName ^java.io.File %))
-               sort
-               vec))))))

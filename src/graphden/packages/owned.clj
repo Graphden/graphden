@@ -29,9 +29,3 @@
   "True iff `fn-id` was written by the package sync this boot."
   [fn-id]
   (contains? @owned-ids fn-id))
-
-
-(defn reset-owned-ids!
-  "Test hygiene — empty the registry."
-  []
-  (reset! owned-ids #{}))

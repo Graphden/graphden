@@ -867,12 +867,9 @@
    :paths ["src/graphden/packages/" "resources/packages/"]
    :after [:executor]
    :steps
-   [{:ns graphden.packages.loader :defn load-default-packages
-     :say "The newcomer's entry point: it just calls `load-packages [core web
-           app]`, naming the default package set and showing where the whole
-           disk-to-graph pipeline is kicked off at boot."}
-    {:ns graphden.packages.loader :defn load-packages
-     :say "The top-level orchestrator: resolve dependency order, load each
+   [{:ns graphden.packages.loader :defn load-packages
+     :say "The entry point and top-level orchestrator — boot calls it with the
+           configured `:package-names`: resolve dependency order, load each
            package, and fold every module's results into the combined
            `{:base-fn-defs … :fn-defs … :namespaces …}` map that seeds the graph.
            The hub the rest of this block drills into."}
@@ -1916,7 +1913,7 @@
            libs into the uberjar; `:app/packages` loads them by name at boot.
            A name-only entry means the package is already on the classpath by
            other means."
-     :see [[:boot "packages"] [:packages "load-default-packages"]]}
+     :see [[:boot "packages"] [:packages "load-packages"]]}
     {:ns graphden.packages.manifest :defn extra-deps
      :say "Where the manifest meets tools.deps. The `{lib coord}` map the build
            basis adds — and the reason `bb pkg-pin-sync` exists: `deps.edn`

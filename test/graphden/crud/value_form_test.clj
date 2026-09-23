@@ -8,12 +8,12 @@
 
    Tests for `graphden.crud.value-form` — the `/api/value-form`
    resolver: structural classification, form-fn dispatch, refinement
-   extraction, the request parse/validate stages, the storage-backed
+   extraction, the storage-backed
    slot-type resolution, and the ctx-backed form assembly.
 
    Pure helpers need no fixture; the storage-backed resolvers go
    through the shared container. The ctx-backed assembly (registry-
-   pairs / build-leaf-form / build-form / apply-value-form) runs
+   pairs / build-leaf-form) runs
    against a minimal in-test forms package — a `vf-const` identity
    base-fn plus the leaf form-fn `:const` rows + the dispatch
    registry — built by `forms-ctx`."
@@ -435,33 +435,6 @@
 
 
 ;; ============================================================================
-;; Endpoint stages — parse / validate
-;; ============================================================================
-
-(deftest validate-value-form-test
-  (testing "a binding-id alone identifies the slot"
-    (is (nil? (vf/validate-value-form {:binding-id (random-uuid)}))))
-  (testing "fn-id + slot-id together identify an unbound free-arg"
-    (is (nil? (vf/validate-value-form {:fn-id (random-uuid)
-                                       :slot-id (random-uuid)}))))
-  (testing "fn-id without slot-id is rejected"
-    (is (false? (:ok (vf/validate-value-form {:fn-id (random-uuid)})))))
-  (testing "an empty request is rejected"
-    (is (false? (:ok (vf/validate-value-form {}))))))
-
-
-(deftest parse-value-form-request-test
-  (testing "uuid strings are coerced to UUIDs"
-    (let [bid (random-uuid)
-          parsed (vf/parse-value-form-request {:body {:binding-id (str bid)}})]
-      (is (= bid (:binding-id parsed)))))
-  (testing "malformed / absent ids parse to nil"
-    (let [parsed (vf/parse-value-form-request {:body {:binding-id "not-a-uuid"}})]
-      (is (nil? (:binding-id parsed)))
-      (is (nil? (:fn-id parsed))))))
-
-
-;; ============================================================================
 ;; resolve-slot-effective-type — storage-backed type resolution
 ;; ============================================================================
 
@@ -563,8 +536,8 @@
 
 
 ;; ============================================================================
-;; ctx-backed form assembly — registry-pairs / build-leaf-form / build-form /
-;; apply-value-form, driven against a minimal in-storage forms package.
+;; ctx-backed form assembly — registry-pairs / build-leaf-form, driven
+;; against a minimal in-storage forms package.
 ;; ============================================================================
 
 (defn- forms-ctx
@@ -670,36 +643,8 @@
 
 ;; `build-form`'s composite arms render through the app.forms graph
 ;; structure templates now — covered on the golden clone in
-;; `graphden.crud.value-form-graph-test`; the leaf path stays covered by
-;; `apply-value-form-test` below.
-
-
-(deftest apply-value-form-test
-  (testing "end-to-end: a bound :int slot yields a number control wrapped
-            in a data-form-root div carrying the binding id"
-    (let [storage (setup/create-test-storage)]
-      (try
-        (let [ctx    (forms-ctx storage)
-              slot   (setup/create-slot! storage "n" :int)
-              fr     (setup/create-base-fn! storage "avf-owner")
-              b      (setup/bind-value! storage (:id fr) (:id slot) 5)
-              result (vf/apply-value-form {:binding-id (:id b)} ctx)
-              [tag attrs control] (:form result)]
-          (is (true? (:ok result)))
-          (is (= 5 (:value result)))
-          (is (= "div" tag))
-          (is (contains? attrs "data-form-root"))
-          (is (= (str (:id b)) (get attrs "data-binding-id")))
-          (is (in-tree? control "number")))
-        (finally (sp/close storage))))))
-
-
-(deftest parse-value-form-request-as-test
-  (testing "the optional `as` (a type NAME from the editor's \"as:\" chooser) rides along; blank / non-string is dropped"
-    (is (= "text" (:as (vf/parse-value-form-request {:body {:fn-id (str (random-uuid)) :as "text"}}))))
-    (is (nil? (:as (vf/parse-value-form-request {:body {:fn-id (str (random-uuid))}}))))
-    (is (nil? (:as (vf/parse-value-form-request {:body {:fn-id (str (random-uuid)) :as ""}}))))
-    (is (nil? (:as (vf/parse-value-form-request {:body {:fn-id (str (random-uuid)) :as 7}}))))))
+;; `graphden.crud.value-form-graph-test`, together with the
+;; `:value-form-handler` endpoint (which exercises the leaf path).
 
 
 (deftest resolve-form-text-alias-test

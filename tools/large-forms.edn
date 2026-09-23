@@ -96,8 +96,6 @@
   "linear let: derives one registry entry (args, return, effects, markers) and writes it"
 
   ;; ---- effect sequences that must not be split -------------------------
-  "graphden.versioning.storage.core/create-entity-versioned!"
-  "one unit: identity row + version row inside one transaction / advisory-lock scope"
   "graphden.versioning.storage.core/delete-branch!"
   "one unit: the branch teardown transaction — write, invalidate, best-effort service stop (decision recorded in its docstring)"
   "graphden.versioning.storage.merge/merge-branch!"

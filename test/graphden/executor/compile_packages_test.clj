@@ -10,8 +10,11 @@
    `cr/rebuild!` compile every fn (covers the compile-time branches),
    then execute a spread of `ex-*` fns (covers the runtime branches).
 
-   Fixture boots `:dev` config up to `:exec/compiled-registry` — the
-   whole executor minus the HTTP server."
+   Fixture: a golden clone of `package-set` with the cached type-check
+   sweep overlaid first (`test-infra.golden-app/fixture`), so the clone's
+   eager `cr/rebuild!` compiles every fn under the rich-types a real boot
+   computes — the executor a `:dev` system builds, minus its integrant
+   boot (which paid the full sync + sweep per run, ~190 s)."
   (:require
     [cheshire.core]
     [clojure.string :as str]
@@ -19,56 +22,38 @@
     [graphden.executor.compile-runtime]
     [graphden.executor.interface :as exec]
     [graphden.storage.protocol.core :as sp]
-    [graphden.storage.protocol.postgres-test-helpers :as pth]
-    [graphden.system.interface :as sys]
-    [integrant.core :as ig]))
+    [graphden.test-infra.golden-app :as ga]))
 
 
-(def ^:dynamic *container* nil)
-(def ^:dynamic *context* nil)
-(def ^:dynamic *storage* nil)
+(def ^:private package-set
+  "`examples` for the `ex-*` fns; `app` (with its `web` / `storage` /
+   `app-base` deps) for the router, `process-response` and the secrets
+   handlers. The same set `layout.graph-real-test` and
+   `crud.tests-namespace-graph-test` clone."
+  ["core" "web" "app" "examples"])
 
 
-(use-fixtures :once
-  (pth/create-container-fixture #'*container*)
-  ;; `:exec/base-fns` init-key registers ~190 package base-fn impls
-  ;; into the process-global registry via `exec/register-base-fn!`.
-  ;; Wrap the integrant init in `with-clean-registry` so those
-  ;; writes land in a thread-local override atom — sibling test
-  ;; ns'es running in parallel kaocha threads keep their own
-  ;; override and don't race on the global atom.
-  exec/with-clean-registry
-  (fn [f]
-    (pth/clean-database-fast! *container*)
-    (let [cfg    (pth/get-container-config *container*)
-          config (-> (sys/read-config :dev)
-                     (assoc-in [:db/postgres :jdbc-url] (:jdbc-url cfg))
-                     (assoc-in [:db/postgres :username] (:username cfg))
-                     (assoc-in [:db/postgres :password] (:password cfg))
-                     ;; :exec/context refs :db/notify-listener (event-driven
-                     ;; SSE), so the partial init below now pulls the LISTEN
-                     ;; connection too — point it at the same container.
-                     (assoc-in [:db/notify-listener :pg-opts]
-                               {:jdbc-url (:jdbc-url cfg)
-                                :username (:username cfg)
-                                :password (:password cfg)}))
-          ;; :exec/compiled-registry pulls in storage → base-fns →
-          ;; fn-entities → context → cr/rebuild!. cr/rebuild! runs
-          ;; `compile-all` over the whole graph.
-          system (ig/init config [:exec/compiled-registry])]
-      (binding [*context* (:exec/context system)
-                *storage* (:db/versioned system)]
-        (try (f) (finally (ig/halt! system)))))))
+(use-fixtures :once (ga/fixture (ns-name *ns*) package-set))
+
+
+(defn- ctx
+  []
+  (:ctx ga/*bootstrap*))
+
+
+(defn- storage
+  []
+  (:storage ga/*bootstrap*))
 
 
 (defn- fn-id
   [nm]
-  (:id (first (sp/query-entities *storage* :fn {:name nm}))))
+  (:id (first (sp/query-entities (storage) :fn {:name nm}))))
 
 
 (defn- run
   ([nm] (run nm {}))
-  ([nm args] (exec/execute *context* (fn-id nm) args)))
+  ([nm args] (exec/execute (ctx) (fn-id nm) args)))
 
 
 ;; ============================================================================
@@ -333,21 +318,21 @@
   ;; within a hard timeout — so it implicitly verifies termination
   ;; for N≥2 too). Don't duplicate the 1-secret seeding case here.
   (testing "list-secrets-handler returns a Ring response within 15s"
-    (let [registry (graphden.executor.compile-runtime/registry *context*)
+    (let [registry (graphden.executor.compile-runtime/registry (ctx))
           pg-query-closure (get registry (fn-id "pg-query"))
           ;; Sibling tests in the ns may have already populated
           ;; `secret-leaf` descendants in shared storage; the handler
           ;; then actually hits the DB through `:storage-query`. Wire
           ;; the real callable so the deref doesn't NPE if so.
           storage-query-callable (fn [hsql]
-                                   (pg-query-closure {:hsql hsql} *context*))
+                                   (pg-query-closure {:hsql hsql} (ctx)))
           fid (fn-id "list-secrets-handler")
           closure (get registry fid)
           done (future (closure {:request {:uri "/api/secrets"
                                            :request-method :get
                                            :headers {}}
                                  :storage-query storage-query-callable}
-                                *context*))
+                                (ctx)))
           ;; 60 s budget: 2 s flaked under integration-suite parallel
           ;; load; 15 s flaked under cloverage instrumentation
           ;; (~6× overhead via `bb coverage-full`). The hang regression
@@ -386,41 +371,41 @@
   list-secrets-handler-returns-distinct-paths-per-secret
   (testing "two secrets in storage → API returns each one's own :path"
     (let [leaf-id (fn-id "secret-leaf")
-          path-slot (-> (sp/query-entities *storage* :fn-slot {:fn-id leaf-id})
+          path-slot (-> (sp/query-entities (storage) :fn-slot {:fn-id leaf-id})
                         first :slot-id)
           probe-a-id (random-uuid)
           probe-b-id (random-uuid)
-          _ (sp/create-entity *storage* :fn
+          _ (sp/create-entity (storage) :fn
                               {:id probe-a-id
                                :name "regression-secret-a"
                                :parent-ids [leaf-id]})
           vg-id (fn-id "vault-get")
-          _ (sp/create-entity *storage* :binding
+          _ (sp/create-entity (storage) :binding
                               {:fn-id probe-a-id
                                :slot-id path-slot
                                :value "kv/data/secret-a"
                                :value-present true
                                :resolver-fn-id vg-id})
-          _ (sp/create-entity *storage* :fn
+          _ (sp/create-entity (storage) :fn
                               {:id probe-b-id
                                :name "regression-secret-b"
                                :parent-ids [leaf-id]})
-          _ (sp/create-entity *storage* :binding
+          _ (sp/create-entity (storage) :binding
                               {:fn-id probe-b-id
                                :slot-id path-slot
                                :value "kv/data/secret-b"
                                :value-present true
                                :resolver-fn-id vg-id})
-          registry (graphden.executor.compile-runtime/registry *context*)
+          registry (graphden.executor.compile-runtime/registry (ctx))
           pg-query-closure (get registry (fn-id "pg-query"))
           storage-query-callable (fn [hsql]
-                                   (pg-query-closure {:hsql hsql} *context*))
+                                   (pg-query-closure {:hsql hsql} (ctx)))
           closure (get registry (fn-id "list-secrets-handler"))
           done (future (closure {:request {:uri "/api/secrets"
                                            :request-method :get
                                            :headers {}}
                                  :storage-query storage-query-callable}
-                                *context*))
+                                (ctx)))
           ;; 15s budget: in isolation this handler returns in ~3.5 s; the
           ;; previous 5 s budget flaked under integration-suite parallel
           ;; load (sibling tests in `^:integration` compete for CPU + GC),

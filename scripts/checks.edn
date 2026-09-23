@@ -65,7 +65,10 @@
  ;; the heavy suites stubbed: batching, bisection, conflicts, stale shas, soon
  ;; markers, waiter hand-off. The gate is the script executing, so a broken
  ;; queue would otherwise be discovered by the first landing that needs it.
- {:name "wtq-train"     :bb "wtq-test"      :timeout 180000 :group :infra
+ ;; 240 s: ~170 s under a parallel lint on this host (94% of the old 180 s
+ ;; ceiling) once the develop-moved / settled-verdict / sampler / stash
+ ;; scenarios joined; a gate running beside the lint pushed it over.
+ {:name "wtq-train"     :bb "wtq-test"      :timeout 240000 :group :infra
   :relevant ["^dev/wtq/"]}
  ;; The scoping mechanism guards itself: selector partition semantics +
  ;; checks.edn shape/regex validity + the canonical path→check drift table.

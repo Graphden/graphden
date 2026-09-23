@@ -229,15 +229,17 @@
    the binding itself resolves via ancestor inheritance (not filtered),
    but the source branch's new item slipped through unfiltered. That PK
    read only fires during MERGE-aware resolution of a list-item that
-   has a merge candidate — a narrow, infrequent path, NOT a per-read
-   hot loop. Returns nil when the entity exposes no owning fn."
-  [base-storage entity-name entity-id version-row]
+   has a merge candidate, and `binding-fn-ids` (the merge-aware cache's
+   one batched read of those bindings) answers it without a round trip.
+   Returns nil when the entity exposes no owning fn."
+  [base-storage binding-fn-ids entity-name entity-id version-row]
   (case entity-name
     :fn entity-id
     (:fn-slot :binding) (:fn-id version-row)
-    :binding-list-item (some->> (:binding-id version-row)
-                                (sp/read-entity base-storage :binding)
-                                :fn-id)
+    :binding-list-item (when-let [bid (:binding-id version-row)]
+                         (if (contains? binding-fn-ids bid)
+                           (get binding-fn-ids bid)
+                           (:fn-id (sp/read-entity base-storage :binding bid))))
     nil))
 
 
@@ -247,8 +249,8 @@
    entity-aware owner-lookup so child-row version rows
    (`:binding`, `:fn-slot`, `:binding-list-item`) are filtered
    alongside `:fn` itself."
-  [base-storage entity-name entity-id version-row]
-  (when-let [fid (owning-fn-id base-storage entity-name entity-id version-row)]
+  [base-storage binding-fn-ids entity-name entity-id version-row]
+  (when-let [fid (owning-fn-id base-storage binding-fn-ids entity-name entity-id version-row)]
     (bl/effective-branch-local? base-storage fid)))
 
 
@@ -283,12 +285,10 @@
    this minus tombstones; `resolve-tombstone` is this minus live rows."
   [base-storage entity-name entity-id branch-id]
   (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
-        {:keys [versions-by-id merges-by-target branch-chain]}
+        cache
         (load-merge-aware-cache base-storage version-entity version-id-field
                                 [entity-id] branch-id)]
-    (resolve-version-from-cache base-storage entity-name
-                                versions-by-id merges-by-target
-                                entity-id branch-chain)))
+    (resolve-version-from-cache base-storage entity-name cache entity-id)))
 
 
 (defn resolve-version
@@ -407,21 +407,19 @@
 
 (defn- resolve-all-entities*
   [base-storage entity-name branch-id where version-entity version-id-field entity-ids]
-  (let [{:keys [versions-by-id merges-by-target branch-chain]}
+  (let [cache
         (load-merge-aware-cache base-storage version-entity version-id-field
                                 entity-ids branch-id)
         ;; Entities visible: those with at least one loaded version
         ;; (loaded set already covers chain + merge sources).
-        entity-ids-with-versions (set (keys versions-by-id))
+        entity-ids-with-versions (set (keys (:versions-by-id cache)))
         identities-map (if (empty? entity-ids-with-versions)
                          {}
                          (sp/read-entities base-storage entity-name
                                            (vec entity-ids-with-versions)))
         resolved (for [[eid identity-rec] identities-map
                        :let [version (resolve-version-from-cache
-                                       base-storage entity-name
-                                       versions-by-id merges-by-target
-                                       eid branch-chain)]
+                                       base-storage entity-name cache eid)]
                        ;; A tombstone-winner ⇒ deleted on this branch ⇒ omit.
                        :when (and version (not (tombstone? version)))]
                    (merge identity-rec (extract-version-data version version-id-field)))]
@@ -507,7 +505,7 @@
    of the type if `entity-ids` is nil) on `branch-id` with full
    `branch-merge` support.
 
-   Returns `{:versions-by-id :merges-by-target :branch-chain}`:
+   Returns `{:versions-by-id :merges-by-target :branch-chain :binding-fn-ids}`:
 
    - `:branch-chain` — `[branch-id parent-id … root-id]`.
    - `:merges-by-target` — every `branch-merge` row landing on any
@@ -559,7 +557,18 @@
         all-versions (into chain-versions source-versions)]
     {:versions-by-id (group-by version-id-field all-versions)
      :merges-by-target (group-by :target-branch-id all-merges)
-     :branch-chain branch-chain}))
+     :branch-chain branch-chain
+     ;; A merged-in list item's branch-local filter needs the fn owning its
+     ;; binding (`owning-fn-id`); read those bindings ONCE here instead of
+     ;; once per merged item while resolving.
+     :binding-fn-ids (when (and (= :binding-list-item-version version-entity)
+                                (seq source-versions))
+                       (into {}
+                             (map (juxt :id :fn-id))
+                             (vals (sp/read-entities
+                                     base-storage :binding
+                                     (into [] (comp (keep :binding-id) (distinct))
+                                           source-versions)))))}))
 
 
 (defn- merge-candidates-from-cache
@@ -573,7 +582,7 @@
    the fn-id; for `:fn-slot` / `:binding` the version row carries
    `:fn-id` in its data fields, so the same flag suppresses child
    rows whose owning fn is sticky-local."
-  [base-storage entity-name entity-id versions-by-branch own-latest merges]
+  [base-storage binding-fn-ids entity-name entity-id versions-by-branch own-latest merges]
   (when (seq merges)
     (let [;; For each merge, the `:source-timestamp` of the PREVIOUS merge of the
           ;; SAME source into this target (ordered by when the merge landed). A
@@ -600,11 +609,13 @@
                                    src-versions)
                   best (latest-by-created-at eligible)]
             :when best
-            :when (not (branch-local-version? base-storage entity-name
-                                              entity-id best))
+            ;; The cheap timestamp test first: a candidate the branch's own
+            ;; later edit beats never needs its owner's branch-local flag.
             :when (or (nil? own-latest)
                       (pos? (compare (:target-timestamp m)
-                                     (:created-at own-latest))))]
+                                     (:created-at own-latest))))
+            :when (not (branch-local-version? base-storage binding-fn-ids entity-name
+                                              entity-id best))]
         {:version best :effective-ts (:target-timestamp m)}))))
 
 
@@ -624,15 +635,16 @@
    `entity-name` + `base-storage` are threaded down to
    `merge-candidates-from-cache` so the `:fn` branch-local filter can
    call `bl/effective-branch-local?`. Non-fn entities skip the check."
-  [base-storage entity-name versions-by-id merges-by-target entity-id branch-chain]
+  [base-storage entity-name
+   {:keys [versions-by-id merges-by-target branch-chain binding-fn-ids]} entity-id]
   (when-let [versions (get versions-by-id entity-id)]
     (let [by-branch (group-by :branch-id versions)]
       (loop [chain branch-chain]
         (when-let [bid (first chain)]
           (let [own-latest (latest-by-created-at (get by-branch bid))
                 merges (get merges-by-target bid)
-                merge-cands (merge-candidates-from-cache base-storage entity-name
-                                                         entity-id by-branch
+                merge-cands (merge-candidates-from-cache base-storage binding-fn-ids
+                                                         entity-name entity-id by-branch
                                                          own-latest merges)
                 all-candidates (cond-> []
                                  own-latest
@@ -651,14 +663,12 @@
    batch resolvers below."
   [base-storage entity-name ids branch-id]
   (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
-        {:keys [versions-by-id merges-by-target branch-chain]}
+        cache
         (load-merge-aware-cache base-storage version-entity version-id-field
                                 (vec ids) branch-id)]
     (into {}
           (keep (fn [eid]
-                  (when-let [v (resolve-version-from-cache base-storage entity-name
-                                                           versions-by-id merges-by-target
-                                                           eid branch-chain)]
+                  (when-let [v (resolve-version-from-cache base-storage entity-name cache eid)]
                     [eid v])))
           ids)))
 
@@ -770,16 +780,14 @@
   [base-storage entity-name branch-id]
   (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
         all-identities (sp/query-entities base-storage entity-name {})
-        {:keys [versions-by-id merges-by-target branch-chain]}
+        cache
         (load-merge-aware-cache base-storage version-entity version-id-field
                                 nil branch-id)]
     (into {}
           (keep (fn [identity-rec]
                   (let [eid (:id identity-rec)
                         version (resolve-version-from-cache
-                                  base-storage entity-name
-                                  versions-by-id merges-by-target
-                                  eid branch-chain)]
+                                  base-storage entity-name cache eid)]
                     (cond
                       (nil? version) [eid identity-rec]
                       ;; Tombstone ⇒ omit from the compiled executor graph +

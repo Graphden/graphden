@@ -120,8 +120,38 @@ occupy the key forever; cross-branch divergence must not be blocked):
 
 | Entity | Retired key | Now enforced by |
 |---|---|---|
-| `fn` | `(namespace-id, name)` | `check-fn-name-collisions!` in `VersionedStorage` — live-view check per branch, one batched read per write batch, advisory-lock-serialized (`uniq/xact-lock!`). Error: `:constraint-violation/fn-name-collision` |
-| `binding-list-item` | `(binding-id, position)` | `check-list-item-position-collision!` in `VersionedStorage`. Error: `:constraint-violation/position-collision` |
+| `fn` | `(namespace-id, name)` | `check-fn-name-collisions!` in `VersionedStorage` — live-view check on the writing branch AND on every branch forked off it, one batched read per write batch, advisory-lock-serialized (`uniq/xact-lock!`). Error: `:constraint-violation/fn-name-collision` |
+| `binding-list-item` | `(binding-id, position)` | `check-list-item-position-collision!` in `VersionedStorage` — the writing branch's own view only (see below). Error: `:constraint-violation/position-collision` |
+
+The same resolved-view rule covers `resource-override.path`
+(`check-resource-override-path-collisions!`,
+`:constraint-violation/resource-override-path-collision`).
+
+Every check also runs where rows reach a view other than by a direct
+write:
+
+- **A merge** re-runs all three checks on the target over the rows it
+  surfaces, inside the merge transaction and under the same advisory
+  locks a create of those keys takes — a merge and a create of the same
+  name cannot both pass and both commit.
+- **A revival** (undo of a delete) is checked like a create — the key may
+  have been taken since the delete.
+- **An ancestor's write** shows on every branch forked off it. A name or
+  override path is therefore also checked on those descendants (only the
+  ones holding a version with that name/path — the candidate query already
+  names them), and the error says which branch holds it
+  (`:descendant-branch-id`). The advisory-lock keys for these two leave
+  the branch out, so a write on main and one on a feature branch are
+  serialized against each other.
+
+**List positions take the other side of that trade-off.** Refusing main's
+append because some feature branch already has an item at that position
+would leave main's author no way out — they may not see that branch, and
+the editor computes the position for them. So an ancestor's append is
+never refused on a descendant's account; the descendant transiently shows
+two items at one position (ordered by id, so the compiled list is stable),
+and **merging it back is refused** with `position-collision` until its
+author moves one of them — the author who can fix it is the one asked to.
 
 `slot.name` and `slot.type-fn-id` are NOT individually unique — two
 slots with the same name and type are distinct identities (sharing

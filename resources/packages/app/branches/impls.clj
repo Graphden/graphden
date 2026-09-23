@@ -7,6 +7,7 @@
     [clojure.tools.logging :as log]
     [graphden.crud.branches :as branches]
     [graphden.crud.request :as request]
+    [graphden.crud.secrets :as secrets]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
@@ -14,6 +15,7 @@
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.postgres.util :as pg-util]
     [graphden.storage.protocol.core :as sp]
+    [graphden.storage.tx :as tx]
     [graphden.system.branch-router :as br]
     [graphden.system.branch-router.cache :as br-cache]
     [graphden.system.branch-router.epoch :as br-epoch]
@@ -210,12 +212,22 @@
    reconciler won't pick that up until its next pass, so trigger
    it eagerly via `recon/restart-services-on-branch!` (which then
    reconcile-once!'s the deleted branch and removes its now-
-   disabled entries from `running-atom`)."
+   disabled entries from `running-atom`).
+
+   Also reclaims the vault values of secrets bound only on the deleted
+   branch, and drops the branch's type-rows from the alias registry."
   [branch-id]
   (cr/record-effect! :db)
-  (let [result (vs/delete-branch! (request/require-storage ctx) branch-id)]
+  (let [storage (request/require-storage ctx)
+        result (vs/delete-branch!
+                 storage branch-id
+                 {:reclaim-secrets!
+                  #(secrets/sweep-orphan-secrets! (vs/unwrap storage) (secrets/secret-paths %))})]
     (when-let [router (br/current-router)]
       (br-cache/invalidate! router branch-id))
+    ;; The type-rows the branch declared stop resolving — unless another
+    ;; branch still declares the same name.
+    (cr/forget-alias-source! branch-id)
     (try
       (recon/restart-services-on-branch! ctx recon/running branch-id)
       (catch Exception e
@@ -308,7 +320,9 @@
    (`:sql/merge-fork`)."
   [base source-branch-id target-branch-id]
   (try
-    (when-let [pool (:pool base)]
+    ;; Through any decorator (the cloud's org-scoped layer has no `:pool`
+    ;; of its own) — else the source was never archived on the cloud.
+    (when-let [pool (tx/datasource base)]
       (pg-util/exec! pool ["UPDATE branch SET archived_at = now() WHERE id = ? AND base_branch_id = ?"
                            source-branch-id target-branch-id]))
     (catch Exception e
@@ -320,9 +334,10 @@
   "The post-commit thread's body — invalidate the TARGET ctx, re-check
    the affected set into its registry slices, fan the invalidation out
    cross-pod, restart the target's affected services, note the epoch bumps.
-   Everything thread-hostile (dynamic router / org / bump-log state)
-   is CAPTURED by the caller on the request thread and passed in."
-  [ctx router request-org merge-bumps source-branch-id target-branch-id merged-first-ids]
+   Everything thread-hostile (dynamic router / bump-log state) is
+   CAPTURED by the caller on the request thread and passed in; the tenant
+   org and the other conveyed bindings are re-bound around this call."
+  [ctx router merge-bumps source-branch-id target-branch-id merged-first-ids]
   (let [t0 (System/nanoTime)
         timings (atom {})
         lap! (fn [k t] (swap! timings assoc k (long (/ (- (System/nanoTime) t) 1e6))))
@@ -349,12 +364,11 @@
         ;; merged fns (their checks ran under the SOURCE's slice) —
         ;; and the default branch's entry is pinned, so no rebuild
         ;; will ever re-record them. Re-check the affected set into
-        ;; the target's own slice (async, bounded), under the tenant
-        ;; org captured on the request thread so the PER-ORG slice
+        ;; the target's own slice (async, bounded) — under the tenant
+        ;; org the caller bound for this thread, so the PER-ORG slice
         ;; learns them too.
         (let [t-re (System/nanoTime)]
-          (tc/with-org request-org
-                       (br-recheck/recheck-ctx-types! target-ctx target-branch-id affected))
+          (br-recheck/recheck-ctx-types! target-ctx target-branch-id affected)
           (lap! :recheck-ms t-re)))
       ;; Cross-pod: the local invalidate + restart-services-depending-on!
       ;; below fire only on THIS pod. A merge writes no per-fn NOTIFY of
@@ -441,12 +455,12 @@
         ;; fn invisible on a NON-main target until an unrelated recompile.
         router (br/current-router)
         ;; The finisher runs on a RAW thread — dynamic bindings do not
-        ;; convey. Capture the tenant org HERE (request thread) so the
-        ;; recheck below can re-record into the target's PER-ORG slice
-        ;; too; without it `record-rich-types-raw!` skips the per-org
-        ;; mirror (org-gated) and tenant reads on the target keep
-        ;; serving the fork-time entry (the slices are branch-scoped
-        ;; now — no shared global to paper over it).
+        ;; convey. Capture the tenant org HERE (request thread) and run the
+        ;; whole finisher under it: the recheck re-records into the
+        ;; target's PER-ORG slice only under the org (without it
+        ;; `record-rich-types-raw!` skips the org-gated per-org mirror and
+        ;; tenant reads on the target keep serving the fork-time entry),
+        ;; and every read below is org-scoped.
         request-org (tc/current-org)
         ;; …and the caller's epoch STATE. In production it is nil (one
         ;; global state per JVM); under the parallel test plugin each NS
@@ -456,11 +470,22 @@
         ;; per merge. Carrying the state closes that split at
         ;; its source; the ledger's retention window is the backstop.
         epoch-state br-epoch/*epoch-state-override*
+        ;; …and every binding a background thread must carry (the tenant
+        ;; org, the effect gate — `cr/register-conveyed-var!`). The whole
+        ;; body reads the tenant's rows: under the public org
+        ;; `merge-affected-fn-ids` saw none of them (an empty delta — the
+        ;; target kept serving pre-merge closures), the archive UPDATE ran
+        ;; outside the tenant's row-level security, and the cross-pod
+        ;; invalidation events went out without the org.
+        conveyed (cr/capture-conveyed-bindings)
         post-commit!
         (fn []
-          (binding [br-epoch/*epoch-state-override* epoch-state]
-            (run-merge-post-commit! ctx router request-org merge-bumps
-                                    source-branch-id target-branch-id merged-first-ids)))
+          (with-bindings conveyed
+            (tc/with-org request-org
+                         (binding [br-epoch/*epoch-state-override* epoch-state]
+                           (run-merge-post-commit! ctx router merge-bumps
+                                                   source-branch-id target-branch-id
+                                                   merged-first-ids)))))
         t (Thread. ^Runnable post-commit! "merge-post-commit")]
     (Thread/.start t)
     (try

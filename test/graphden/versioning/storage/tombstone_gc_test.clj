@@ -7,6 +7,7 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.clients.vault :as vault]
+    [graphden.crud.secrets :as secrets]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.protocol :as ds]
@@ -15,7 +16,6 @@
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
-    [graphden.system.init.cleanup :as cleanup]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.purge :as purge]))
 
@@ -289,7 +289,7 @@
   ;; its `:vault-get` resolver. Tombstoning it on a branch must keep the
   ;; vault value (another branch may still read it); the PURGE — dead on
   ;; every branch, past retention — is the moment the value has no reader
-  ;; left, and `cleanup/sweep-orphan-secrets!` reclaims it unless another
+  ;; left, and `secrets/sweep-orphan-secrets!` reclaims it unless another
   ;; binding still points at the same path.
   (let [base (base-storage)
         v    (vs/wrap-with-versioning base)
@@ -316,7 +316,7 @@
                          base -1000
                          {:before-purge (fn [et id]
                                           (swap! seen conj [et id])
-                                          (swap! paths into (cleanup/secret-paths-of base et id)))})]
+                                          (swap! paths into (secrets/secret-paths-of base et id)))})]
             (is (= 2 (:binding purged)))
             (is (= #{[:binding (:id gone)] [:binding (:id shared)]} (set @seen)))
             (is (= #{"db/pw" "shared/pw"} @paths) "both paths collected before the rows went")
@@ -324,7 +324,7 @@
               (binding [vault/*impl-override*
                         {:delete-secret (fn [_client path] (swap! deleted conj path) nil)}]
                 (reset! vault/active-client {:address "fake" :token "fake"})
-                (try (cleanup/sweep-orphan-secrets! base @paths)
+                (try (secrets/sweep-orphan-secrets! base @paths)
                      (finally (reset! vault/active-client nil))))
               (is (= ["db/pw"] @deleted)
                   "shared/pw is still bound on db-call-2 — kept")))))

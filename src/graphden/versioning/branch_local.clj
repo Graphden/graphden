@@ -25,7 +25,8 @@
    `base-storage`."
   (:require
     [clojure.set :as set]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.storage.tx :as tx]))
 
 
 (defonce ^:private storage-caches
@@ -36,26 +37,27 @@
 (defn- storage-key
   "Stable cache/identity key for a storage handle.
 
-   The advisory-lock write paths in `versioning.storage.core` open a
-   `with-transaction` and run every read on a per-transaction storage
-   handle `(assoc base-storage :pool tx)` — a DISTINCT object whose
-   `System/identityHashCode` differs from the base on every write. The
-   original key-by-identity-hash therefore (a) never hit the base
-   handle's cached entry from inside a transaction, and (b) LEAKED a
-   fresh `storage-caches` entry per write transaction that `invalidate!`
-   (keyed on the base handle) could never clear — unbounded growth on a
-   long-running executor.
+   The write paths in `versioning.storage.core` run every read inside a
+   transaction on a per-transaction copy of the storage
+   (`storage.tx/with-connection` — the backend's `:pool` swapped for the
+   connection, every decorator above it rebuilt) — a DISTINCT object whose
+   `System/identityHashCode` differs from the base on every write. Keyed
+   by identity, it (a) never hit the base handle's cached entry from
+   inside a transaction, and (b) LEAKED a fresh `storage-caches` entry per
+   write transaction that `invalidate!` (keyed on the base handle) could
+   never clear — unbounded growth on a long-running executor.
 
-   Elide `:pool` so the base handle and all its transaction transients
-   collapse to ONE stable, per-storage-unique entry: the remaining
-   fields (the metadata-cache atom / lock monitor / slot-row-cache atom, plus the
-   epoch-ledger atoms) are shared by identity across the `assoc`, so a
-   storage record's value-hash is stable across transactions yet
-   distinct between two real storages. Non-associative handles (opaque
-   test doubles) fall back to identity."
+   Elide the backend's connectable (`tx/without-connection`, through any
+   decorator) so the base handle and all its transaction transients
+   collapse to ONE stable, per-storage-unique entry: the remaining fields
+   (the metadata-cache atom / lock monitor / slot-row-cache atom, the
+   epoch-ledger atoms, a decorator's own config) are shared by identity
+   across the copy, so a storage record's value-hash is stable across
+   transactions yet distinct between two real storages. Non-associative
+   handles (opaque test doubles) fall back to identity."
   [storage]
   (if (map? storage)
-    (dissoc storage :pool)
+    (tx/without-connection storage)
     (System/identityHashCode storage)))
 
 

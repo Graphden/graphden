@@ -403,6 +403,14 @@
            RESOLVED-VIEW property (fn names, list-item positions) rather than a
            table constraint. `update-entity-versioned!` next to it tells the
            same story for the append case."}
+    {:ns graphden.storage.tx :defn in-transaction
+     :say "How every one of those writes gets its transaction: find the pool
+           at the bottom of the decorator chain (on the cloud the storage
+           VersionedStorage holds is the tenancy decorator, which has none of
+           its own) and rebuild the whole stack around the transaction
+           connection, so each write still passes every decorator above the
+           backend. The `pg_advisory_xact_lock`s the uniqueness checks rely on
+           only mean something inside it."}
     {:ns graphden.versioning.storage.resolution :defn entity-config
      :say "The authoritative map of WHICH entities are versioned (fn / fn-slot
            / binding / binding-list-item) and how each splits across two tables:

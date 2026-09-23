@@ -439,12 +439,16 @@
 ;; is a pg_advisory_xact_lock call and stays integration-covered.
 
 (deftest collision-lock-key-fn-test
-  (testing "a named :fn write yields the (branch, namespace, name) key"
-    (is (= "fn-name|b1|ns1|taken"
+  (testing "a named :fn write yields the (namespace, name) key"
+    (is (= "fn-name|ns1|taken"
            (uniq/collision-lock-key "b1" :fn {:name "taken" :namespace-id "ns1"}))))
 
+  (testing "the branch is not in it — a write collides with the branches forked off it"
+    (is (= (uniq/collision-lock-key "main" :fn {:name "taken" :namespace-id "ns1"})
+           (uniq/collision-lock-key "feature" :fn {:name "taken" :namespace-id "ns1"}))))
+
   (testing "root fns (nil namespace) still key deterministically"
-    (is (= "fn-name|b1||taken"
+    (is (= "fn-name||taken"
            (uniq/collision-lock-key "b1" :fn {:name "taken"}))))
 
   (testing "anonymous fns and entities that can't collide need no lock"
@@ -453,7 +457,7 @@
 
 
 (deftest collision-lock-key-resource-override-test
-  (is (= "resource-override-path|b1|/editor.js"
+  (is (= "resource-override-path|/editor.js"
          (uniq/collision-lock-key "b1" :resource-override {:path "/editor.js"})))
   (is (nil? (uniq/collision-lock-key "b1" :resource-override {})))
   (is (nil? (uniq/collision-lock-key "b1" :fn {:path "/x"}))))
@@ -464,6 +468,19 @@
     (let [bid (random-uuid)]
       (is (= (str bid) (uniq/collision-lock-key "b1" :binding-list-item {:binding-id bid})))))
   (is (nil? (uniq/collision-lock-key "b1" :binding-list-item {:position 0}))))
+
+
+(deftest row-lock-keys-are-bounded-and-stable-test
+  (let [ids (repeatedly 5000 random-uuid)
+        ks (uniq/row-lock-keys "b1" :binding ids)]
+    (testing "thousands of rows take a bounded number of locks"
+      (is (<= (count ks) 256)))
+    (testing "the same row always maps to the same key"
+      (is (= (uniq/row-lock-keys "b1" :binding [(first ids)])
+             (uniq/row-lock-keys "b1" :binding [(first ids)]))))
+    (testing "keys are per branch and entity"
+      (is (not= (uniq/row-lock-keys "b1" :fn [(first ids)])
+                (uniq/row-lock-keys "b2" :fn [(first ids)]))))))
 
 
 (deftest xact-lock-without-connection-is-a-no-op-test

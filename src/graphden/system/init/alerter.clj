@@ -23,6 +23,7 @@
     [graphden.crud.fn-execution.stats :as stats]
     [graphden.monitoring.alerts :as alerts]
     [graphden.util.counters :as counters]
+    [graphden.util.executors :as executors]
     [integrant.core :as ig]
     [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs]
@@ -165,4 +166,6 @@
   [_ ^java.util.concurrent.ScheduledExecutorService scheduler]
   (when scheduler
     (log/info "Stopping domain alerter...")
-    (java.util.concurrent.ExecutorService/.shutdown scheduler)))
+    ;; Await the in-flight tick like the other schedulers: a bare shutdown
+    ;; let a tick keep reading the pool and POSTing after halt returned.
+    (executors/shutdown-and-await! scheduler)))

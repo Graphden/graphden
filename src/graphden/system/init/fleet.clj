@@ -11,6 +11,7 @@
     [graphden.fleet.discovery :as fleet-discovery]
     [graphden.storage.postgres.advisory-lock :as pg-lock]
     [graphden.util.counters :as counters]
+    [graphden.util.executors :as executors]
     [integrant.core :as ig]))
 
 
@@ -146,11 +147,6 @@
 (defmethod ig/halt-key! :exec/fleet-controller [_ component]
   (when component
     (let [{:keys [scheduler holder]} component]
-      (when scheduler
-        (java.util.concurrent.ExecutorService/.shutdown
-          ^java.util.concurrent.ExecutorService scheduler)
-        (try (java.util.concurrent.ExecutorService/.awaitTermination
-               ^java.util.concurrent.ExecutorService scheduler 5 java.util.concurrent.TimeUnit/SECONDS)
-             (catch InterruptedException _ nil)))
+      (executors/shutdown-and-await! scheduler)
       (when holder (pg-lock/close-holder! holder))
       (log/info "Fleet controller stopped"))))

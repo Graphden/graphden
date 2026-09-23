@@ -33,6 +33,10 @@ shape, self-hosted included.
 | `:quota/entity-limit` (tenant fn row-cap, #7) | 429 |
 | execute args-too-large (256 KB) | 413 |
 | `:vault/not-configured` | 503 |
+| `:vault/path-forbidden` (a tenant vault op on a path outside its own `org/<org-id>/` prefix — [SECRETS.md § Per-org paths](SECRETS.md#per-org-vault-paths)) | 403 |
+| `:vault/invalid-path` (a secret path that could leave the KV mount: `..` / `.` / empty segments, `%`, `?`, `#`, whitespace, backslash) | 400 |
+| `:secrets/path-in-use` (POST /api/secrets or /api/secret-bindings naming a vault path another binding already references) | 409 (envelope `:http-status`) |
+| package-owned target of POST /api/secret-bindings, PUT /api/types/record | 403 (envelope `:http-status`) |
 | `validation-error/*`, `constraint-violation/*` (other), `type-check/*`, `packages/*`, `refinement/*`, `execution-error/*`, `graph-error/*`, `secrets/*`, `sequence-op/*`, execute rejected (other) | 400 |
 | `branch-router/*` | 404 |
 | unknown / internal | 500 (opaque `:ref`) |

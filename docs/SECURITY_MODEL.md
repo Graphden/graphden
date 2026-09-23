@@ -127,7 +127,11 @@ only.
 Secrets live in Vault / OpenBao. The platform holds the root token as
 infrastructure configuration, never exposed to a tenant graph; a tenant reaches
 a secret only through the `:vault-get` base-fn, whose result is typed
-`[:secret :text]`. See [SECRETS.md](SECRETS.md).
+`[:secret :text]`. The KV mount is one flat namespace on that token, so
+the vault client confines every tenant-context op to the org's own
+`org/<org-id>/` prefix and refuses paths that could leave the mount
+([SECRETS.md § Per-org vault paths](SECRETS.md#per-org-vault-paths)).
+See [SECRETS.md](SECRETS.md).
 
 ## API-token scopes (least privilege for MCP / CLI)
 

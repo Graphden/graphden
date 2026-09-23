@@ -101,3 +101,24 @@
     (testing "no reports ⇒ no feedback alert"
       (is (empty? (:fire (alerts/decide (assoc inputs :feedback []) {} cfg 1000))))
       (is (empty? (:fire (alerts/decide (dissoc inputs :feedback) {} cfg 1000)))))))
+
+
+(deftest telegram-text-is-clipped-under-the-send-limit-test
+  ;; A full feedback batch (20 × 300 chars) used to exceed sendMessage's
+  ;; 4096 limit → 400 → the batch was never delivered, and the undelivered
+  ;; batch jammed every later alert behind it.
+  (let [feedback (repeat 20 {:category "bug" :body (str/join (repeat 400 "é"))})
+        {:keys [fire]} (alerts/decide {:org-totals [] :server-error-delta 50 :feedback feedback}
+                                      {} {} 0)
+        text (alerts/summary-text fire)
+        sent (get-in (alerts/alert-request {:telegram-token "t" :telegram-chat "c"} text)
+                     [:body :text])]
+    (is (> (count text) 4096) "the batch really is over the limit")
+    (is (<= (count sent) 4096))
+    (is (str/includes? sent "server errors (5xx)") "the operational alert survives the clip")
+    (is (str/includes? sent "characters clipped"))
+    (testing "the webhook arm is not clipped (no such limit)"
+      (is (= text (get-in (alerts/alert-request {:webhook-url "http://x"} text) [:body :text])))))
+  (testing "a clip never splits a surrogate pair"
+    (let [clipped (alerts/clip-text (str/join (repeat 100 "📮")) 101)]
+      (is (not (Character/isHighSurrogate (String/.charAt ^String clipped (dec (str/index-of clipped "\n…")))))))))

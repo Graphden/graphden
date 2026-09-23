@@ -28,11 +28,6 @@
              :authorize-extra {"access_type" "online" "prompt" "select_account"}}})
 
 
-(defn provider?
-  [k]
-  (contains? providers k))
-
-
 (defn- enc
   [s]
   (URLEncoder/encode (str s) "UTF-8"))

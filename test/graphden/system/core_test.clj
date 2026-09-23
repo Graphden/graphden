@@ -159,31 +159,6 @@
 ;; surfaces fast.
 ;; =============================================================================
 
-(deftest env-truthy?-test
-  (let [env-truthy? graphden.system.init.exec/env-truthy?]
-    (testing "boolean true / false / nil"
-      (is (true?  (env-truthy? true)))
-      (is (false? (env-truthy? false)))
-      (is (false? (env-truthy? nil))))
-
-    (testing "wire-friendly strings (case-insensitive)"
-      (doseq [yes ["1" "true" "TRUE" "True" "yes" "YES" "on" "ON"]]
-        (is (true? (env-truthy? yes))
-            (str "should be enabled: " yes))))
-
-    (testing "everything else off"
-      (doseq [no [""    "0"  "false" "FALSE" "no" "off"
-                  "  true  "   ; whitespace not stripped — intentional
-                  "yeah" "enabled" "yep"]]
-        (is (false? (env-truthy? no))
-            (str "should be disabled: " (pr-str no)))))
-
-    (testing "non-string truthy/falsy values pass through boolean"
-      (is (true?  (env-truthy? :keyword)))
-      (is (true?  (env-truthy? 42)))
-      (is (true?  (env-truthy? {:a 1}))))))
-
-
 (deftest compute-all-fn-name-ids-test
   (testing "extracts both base-fn-defs and fn-defs into one name→id map"
     ;; keep over `:base-fn-defs` destructures `[fn-name fn-def]` from

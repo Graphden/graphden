@@ -283,7 +283,7 @@ Set on hosted pods that participate in the dynamic fleet. The Helm chart wires a
 | `GRAPHDEN_EXECUTOR_TOKEN` | *(required)* | This executor's bearer token |
 | `GRAPHDEN_EXECUTOR_ORG` | *(required)* | The single org this executor serves |
 | `GRAPHDEN_EXECUTOR_BRANCH` | *(empty)* | Branch to pin (unset ⇒ main) |
-| `GRAPHDEN_APP_HANDLER_FN` | `_app-ring-response` | Name of the org's app-handler fn to run per request |
+| `GRAPHDEN_APP_HANDLER_FN` | `_app-ring-response` | Name of the org's app-handler fn to run per request (or its fn id, when several namespaces define the name) |
 | `GRAPHDEN_PORT` | `8080` | HTTP port to serve on |
 
 Step-by-step provisioning (operator side + customer side) lives in

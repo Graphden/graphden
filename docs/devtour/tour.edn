@@ -1615,14 +1615,16 @@
            config drift, and race advisory-lock slots. This is BOTH the
            edge-triggered handler (fired by `:service` CRUD / NOTIFY) and the
            level-triggered periodic tick — the placeholder it recomputes each
-           pass is exactly what heals a crashed lock-owner on the next tick."}
+           pass is exactly what heals a crashed lock-owner on the next tick.
+           The pass itself reads as its phases: `begin-pass!` (housekeeping),
+           `plan-pass` (the pure diff + drift), `start-one!` per service."}
     {:ns graphden.services.reconciler :defn start-service!
      :say "The supervisor that actually keeps a fn running: invoke the target fn
            via the executor and, on a startup failure, sleep + retry up to N
            times per the row's `:restart-policy`, stamping `:start-failed-at` when
            exhausted so reconcile will not busy-loop. The `how a service stays up`
            answer that closes out the services half."}
-    {:ns graphden.services.reconciler :defn endpoint-of
+    {:ns graphden.services.instances :defn endpoint-of
      :say "A service that listens somewhere ANSWERS somewhere: the handle
            `:http-server` returns carries `{:endpoint {:port p}}` as metadata,
            and the pod that started it completes that with its own dialable host
@@ -1638,7 +1640,7 @@
            skipped, constraint-vector type names resolved per round. No
            per-fn queries, no visit cap; the old walk took seconds and then
            refused as `chain-too-deep`."}
-    {:ns graphden.services.reconciler :defn check-liveness!
+    {:ns graphden.services.liveness :defn check-liveness!
      :say "The per-tick liveness pass: a handle may also carry `:alive?` and
            `:exit` (http-kit's listener status; a `:future`'s thread state and
            how it ended), so a copy that died IN PLACE is caught here — its row

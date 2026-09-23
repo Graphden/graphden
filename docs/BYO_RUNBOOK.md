@@ -117,6 +117,7 @@ the log carries a loud WARN.
 | `BYO executor started WITHOUT a live-refresh signal` WARN | No SSE url and no poll cadence | Set `GRAPHDEN_SSE_URL` or `GRAPHDEN_REFRESH_POLL_MS` |
 | Graph serves stale values | SSE stream dropped and nothing re-signalled | The source reconnects with backoff and resyncs on connect; check the LB idle-timeout in front of the relay |
 | `BYO handler fn not found` at start | `GRAPHDEN_APP_HANDLER_FN` names a fn absent from the org's branch | Check the fn name and `GRAPHDEN_EXECUTOR_BRANCH` |
+| `BYO handler fn name … is defined in several namespaces` at start (`:byo/ambiguous-handler`) | Names are unique only per namespace, and more than one namespace in the org's branch defines that name | Set `GRAPHDEN_APP_HANDLER_FN` to one of the fn ids the message lists |
 
 ## Billing
 

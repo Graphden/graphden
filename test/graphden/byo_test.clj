@@ -181,3 +181,33 @@
     (testing "a blank string counts as missing too"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"missing required config"
             (byo/start-byo! (assoc full :org "  ")))))))
+
+
+(deftest resolve-handler-fn-id-refuses-an-ambiguous-name
+  ;; Names are unique only per namespace: the handler used to be the FIRST
+  ;; row the name query returned — an arbitrary pick when two namespaces
+  ;; define it.
+  (let [storage (hub-storage!)]
+    (try
+      (let [base (setup/create-base-fn! storage "byo-dup-base" :any)
+            mk! (fn [ns-name]
+                  (let [ns-row (sp/create-entity storage :ns {:name ns-name})]
+                    (sp/create-entity storage :fn {:id (random-uuid) :name "dup-handler"
+                                                   :parent-ids [(:id base)]
+                                                   :namespace-id (:id ns-row)})))
+            a (mk! "byo-a")
+            b (mk! "byo-b")]
+        (testing "a bare name two namespaces define → :byo/ambiguous-handler with both ids"
+          (let [e (try (byo/resolve-handler-fn-id storage "dup-handler") nil
+                       (catch clojure.lang.ExceptionInfo e e))]
+            (is (= :byo/ambiguous-handler (:type (ex-data e))))
+            (is (= (sort (map (comp str :id) [a b])) (:candidates (ex-data e))))))
+        (testing "a fn id pins one of them"
+          (is (= (:id b) (byo/resolve-handler-fn-id storage (str (:id b))))))
+        (testing "a unique name resolves as before"
+          (is (= (:id base) (byo/resolve-handler-fn-id storage "byo-dup-base"))))
+        (testing "no match → :byo/handler-not-found"
+          (is (= :byo/handler-not-found
+                 (:type (ex-data (try (byo/resolve-handler-fn-id storage "nope") nil
+                                      (catch clojure.lang.ExceptionInfo e e))))))))
+      (finally (sp/close storage)))))

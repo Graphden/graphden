@@ -276,7 +276,10 @@ verdict every placeholder rendered as "pending".
 
 ## Reconciler
 
-Lives in `graphden.services.reconciler`. Diff-driven, idempotent.
+Lives in `graphden.services.reconciler`. Diff-driven, idempotent. A
+running copy's instance row + stop path live in
+`graphden.services.instances`; exit detection, the restart policy at
+runtime and the exit backoff in `graphden.services.liveness`.
 
 ### Lifecycle
 
@@ -288,11 +291,17 @@ Lives in `graphden.services.reconciler`. Diff-driven, idempotent.
    - If any are enabled → `reconcile-once!` starts each.
 
 2. **Reconcile** (`POST /api/services/reconcile` or programmatic
-   `reconcile-once!`):
-   - Read enabled rows.
-   - Diff desired set (DB) vs running set (in-process atom). Stop
-     extra entries, start missing ones with empty args (the fn is
-     fully bound by definition).
+   `reconcile-once!`), one pass under `reconcile-monitor`:
+   - `begin-pass!` — heal the lock connection (re-assert ownership),
+     drop the transient `::not-our-lock` / `::start-failed` placeholders
+     and elapsed `::backoff`s, run the liveness + heartbeat pass, reap
+     stale instance rows.
+   - Read enabled rows this pod's shard serves.
+   - `plan-pass` (no I/O) — diff desired set (DB) vs running set
+     (in-process atom), plus config drift (`entry-drifted?`).
+   - Stop extra entries; `start-one!` each missing one with empty args
+     (the fn is fully bound by definition) — outcome `:started` /
+     `:start-failed` / `:not-our-lock` / `:branch-ctx-failed`.
 
 3. **Halt** (`halt-key!`): drain `recon/running` via `stop-all!`.
 
@@ -357,9 +366,14 @@ on the next pass with no operator action. Admin can still poll for
 a persistent failure (bad `:fn-id`, permanently-taken port) is re-probed
 each pass until the underlying issue is fixed.
 
-Tests can override the retry behaviour via the optional `start-opts`
-arg on `reconcile-once!`: `{:max-retries 0 :backoff-ms 0}` for
-zero-time tests; production defaults apply when omitted.
+Every automatic trigger is retry-free (`{:max-retries 0 :backoff-ms 0}`):
+the periodic tick, the `:service` NOTIFY, and the edge-triggered restarts
+(`restart-services-depending-on!` / `restart-services-on-branch!`, which
+fire on every fn / binding write and run no pass at all when no running
+service matches) — a start retried inline would sleep 1+2+4 s under
+`reconcile-monitor` and block every other trigger. The defaults apply to
+the explicit `POST /api/services/reconcile`, boot and CRaC resume. Tests pass the same
+`start-opts` to `reconcile-once!` for zero-time runs.
 
 ## HTTP API
 
@@ -685,7 +699,9 @@ all loaded packages.
 ## Code locations
 
 - Schema: `src/graphden/schema/services/schema.clj`
-- Reconciler: `src/graphden/services/reconciler.clj`
+- Reconciler: `src/graphden/services/reconciler.clj` (the pass),
+  `src/graphden/services/instances.clj` (instance rows, stop, stale reap),
+  `src/graphden/services/liveness.clj` (exit detection, exit backoff)
 - Endpoint resolution: `src/graphden/services/endpoint.clj` (+ the `:service-endpoint` base-fn and call templates in `resources/packages/web/service/`)
 - Queue: `src/graphden/schema/queue/schema.clj`, `resources/packages/storage/queue/` (primitives + the consumer templates)
 - Integrant: `src/graphden/system/core.clj` → `:exec/service-reconciler`

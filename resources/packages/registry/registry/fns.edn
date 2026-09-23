@@ -3523,12 +3523,13 @@
    :parent :post
    :args {:path "/sync/pull" :handler :_sync-pull-handler}}
 
-  ;; Route-collection seam: this package's routes as a fall-through
-  ;; `:router-or-nil`, installed into the JVM-wide route collection by the
-  ;; `:registry/router-install` init-key at boot. `app` no longer lists these
-  ;; routes in its `:api-routes`/`:all`, so when `"registry"` is omitted from
-  ;; :package-names this router is never built and the `/api/packages/*`,
-  ;; `/api/export/*` + `/partials/packages-panel` paths 404 while the rest of
+  ;; This package's routes as a fall-through `:router-or-nil`, served
+  ;; per-branch through the branch-router's optional-handler slot
+  ;; (`:_registry-ring-response`, wired in `:exec/branch-router`). `app` no
+  ;; longer lists these routes in its `:api-routes`/`:all`, so when
+  ;; `"registry"` is omitted from :package-names this handler is absent and
+  ;; the `/api/packages/*`, `/api/export/*` + `/partials/packages-panel`
+  ;; paths 404 while the rest of
   ;; the app is unaffected (the editor hides its Packages panel — it probes
   ;; `window.API` for the registry route). The `["/api" …]` nesting reproduces
   ;; reitit's prefix walk exactly as app's `:api-routes` did.

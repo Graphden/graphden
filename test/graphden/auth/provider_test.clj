@@ -32,3 +32,18 @@
         (is (false? (:authenticated? (auth/authenticate p (req "Bearer "))))
             (str "blank token=" (pr-str t) " + empty bearer must NOT validate"))
         (is (false? (:authenticated? (auth/authenticate p (req nil)))))))))
+
+
+(deftest constant-time-equal?-is-nil-safe-and-correct-test
+  (is (true? (auth/constant-time-equal? "abc" "abc")))
+  (is (false? (auth/constant-time-equal? "abc" "abd")))
+  (testing "length differences are not equality"
+    (is (false? (auth/constant-time-equal? "abc" "abcd")))
+    (is (false? (auth/constant-time-equal? "" "a"))))
+  (testing "nil never compares equal — a missing HMAC must not authenticate"
+    (is (false? (auth/constant-time-equal? nil nil)))
+    (is (false? (auth/constant-time-equal? "abc" nil)))
+    (is (false? (auth/constant-time-equal? nil "abc"))))
+  (testing "non-ASCII compares by UTF-8 bytes"
+    (is (true? (auth/constant-time-equal? "тест" "тест")))
+    (is (false? (auth/constant-time-equal? "тест" "тесТ")))))

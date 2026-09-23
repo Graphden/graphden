@@ -40,13 +40,13 @@ The notification seam — the same install-a-hook shape as the capability predic
 :PROPERTIES:
 :CUSTOM_ID: platform/single-token-provider
 :FILE: src/graphden/auth/provider.clj
-:LINE: 63
+:LINE: 65
 :MINS: 1.0
 :END:
 
 Auth is provider-driven: core ships this single-token default behind the ~:auth/provider~ Integrant key, and the addon swaps in its session/user provider. Note the constant-time compare — the default is small, but it is still a real credential check.
 
-- source :: [[file:../../../src/graphden/auth/provider.clj::(defn single-token-provider][src/graphden/auth/provider.clj:63]]
+- source :: [[file:../../../src/graphden/auth/provider.clj::(defn single-token-provider][src/graphden/auth/provider.clj:65]]
 
 * 4. cloud-forbidden-effects
 :PROPERTIES:
@@ -139,10 +139,10 @@ The read side of BYO: a ~StorageCRUD~ leaf whose rows are an ATOM of ~{entity �
 :PROPERTIES:
 :CUSTOM_ID: platform/start-byo!
 :FILE: src/graphden/byo.clj
-:LINE: 130
-:MINS: 6.3
+:LINE: 154
+:MINS: 6.2
 :END:
 
 The customer-hosted executor assembly: RemoteStorage over HTTP as the read-only graph source, the SSE source for invalidation, and a direct http-server — the same core, assembled for someone else's hardware. Closes the platform block: the seams above are exactly what make this assembly possible.
 
-- source :: [[file:../../../src/graphden/byo.clj::(defn start-byo!][src/graphden/byo.clj:130]]
+- source :: [[file:../../../src/graphden/byo.clj::(defn start-byo!][src/graphden/byo.clj:154]]

@@ -21,6 +21,7 @@
    `{:impl … :return-type-rule …}` and looked up by the type-checker
    through the rich-types registry."
   (:require
+    [graphden.auth.provider :as auth]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.executor.registry.core :as registry]
     [graphden.types.core :as types]))
@@ -176,15 +177,10 @@
 
 (defbase constant-time-equal?-fn
   [a b]
-  ;; `MessageDigest/isEqual` is constant-time relative to the LONGER
-  ;; input — it XOR-accumulates every byte instead of short-circuiting
-  ;; on first mismatch. nil / non-string inputs short-circuit at the
-  ;; boundary so a callable that's never seen a bearer token returns
-  ;; false rather than throwing.
-  (let [^bytes ab (when (string? a) (String/.getBytes ^String a "UTF-8"))
-        ^bytes bb (when (string? b) (String/.getBytes ^String b "UTF-8"))]
-    (and (some? ab) (some? bb)
-         (java.security.MessageDigest/isEqual ab bb))))
+  ;; `MessageDigest/isEqual` via the one src definition the auth seam and
+  ;; the accounts module also use: constant-time relative to the LONGER
+  ;; input, nil / non-string → false (never throws).
+  (auth/constant-time-equal? a b))
 
 
 ;; === Type-rules ===

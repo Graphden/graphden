@@ -22,8 +22,9 @@
   [ctx self-id]
   (let [storage (:storage ctx)
         forward-deps (:forward-deps (some-> (:compile-deps ctx) deref))
-        current (cl/current-placement storage)
-        cells (cl/discover-cells storage forward-deps)
+        placement-rows (cl/read-placements storage)
+        current (cl/current-placement placement-rows)
+        cells (cl/discover-cells storage forward-deps placement-rows)
         executors (into (sorted-set) (vals current))]
     {:executor-id self-id
      :placements (mapv (fn [[[org entry] holder]]

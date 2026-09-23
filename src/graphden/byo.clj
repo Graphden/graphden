@@ -127,6 +127,30 @@
         nil)))
 
 
+(defn resolve-handler-fn-id
+  "The fn-id of the org's app handler. `handler-fn` is a fn name, or a fn
+   id (uuid string) to pin one row. Names are unique only per namespace, so
+   a bare name several namespaces define is refused
+   (`:byo/ambiguous-handler`, listing the candidate ids) instead of serving
+   whichever row the query happened to return first. (An `ns.path/name`
+   form can't be offered: the graph-rows bundle carries no `:ns` rows.)
+   No match → `:byo/handler-not-found`."
+  [storage handler-fn]
+  (let [candidates (if-let [id (parse-uuid handler-fn)]
+                     (sp/query-entities storage :fn {:id [id]})
+                     (sp/query-entities storage :fn {:name handler-fn}))]
+    (case (count candidates)
+      0 (throw (ex-info (str "BYO handler fn not found in the graph: " handler-fn)
+                        {:type :byo/handler-not-found :handler-fn handler-fn}))
+      1 (:id (first candidates))
+      (let [ids (sort (map (comp str :id) candidates))]
+        (throw (ex-info (str "BYO handler fn name " handler-fn " is defined in several"
+                             " namespaces — set GRAPHDEN_APP_HANDLER_FN to one fn id: "
+                             (str/join ", " ids))
+                        {:type :byo/ambiguous-handler :handler-fn handler-fn
+                         :candidates (vec ids)}))))))
+
+
 (defn start-byo!
   "Assemble + start a BYO executor. Returns a handle for `stop-byo!`.
 
@@ -145,6 +169,7 @@
    - `:org`          the org this executor serves (its slug)
    - `:branch`       branch to pin (nil ⇒ main)
    - `:handler-fn`   name of the org's app-handler fn to run per request
+                     (or its fn id, when several namespaces define that name)
    - `:port`         HTTP port to serve on
    - `:packages`     package set to load impls from (default `default-packages`)
    - `:extra-base-fns` optional `{fn-name → impl}` merged over the package impls
@@ -172,10 +197,7 @@
                                   :base-fns base-fns
                                   :byo-executor? true})
         _ (cr/rebuild! ctx)
-        handler-fn-id (:id (first (sp/query-entities storage :fn {:name handler-fn})))
-        _ (when-not handler-fn-id
-            (throw (ex-info (str "BYO handler fn not found in the graph: " handler-fn)
-                            {:type :byo/handler-not-found :handler-fn handler-fn})))
+        handler-fn-id (resolve-handler-fn-id storage handler-fn)
         server (hk/run-server (app-handler ctx org handler-fn-id) {:port port})
         ;; Stay fresh WITHOUT blocking the SSE reader thread. Each fn-invalidate
         ;; the hub pushes marks the graph dirty and submits a refetch+recompile

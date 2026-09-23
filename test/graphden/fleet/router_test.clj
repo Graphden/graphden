@@ -68,7 +68,8 @@
                                           {:request-method :get :uri "/checkout"})]
           (is (= 200 (:status resp)))
           (is (= "holder" (get-in resp [:headers "x-served-by"])) "response came from the holder")
-          (is (= "get /checkout" (:body resp)) "method + path reached the holder intact")))
+          (is (= "get /checkout" (String. ^bytes (:body resp) "UTF-8"))
+              "method + path reached the holder intact")))
 
       (testing "placed HERE (self) → nil (serve locally, don't forward to self)"
         (is (nil? (router/forward-or-nil storage "localhost" port "acme" eid

@@ -31,3 +31,17 @@
     (with-log
       (is (= {:p 1} (init-storage/warn-if-relay-open! 8081 {:p 1})))
       (is (not (logged? 'graphden.system.init.storage :warn #"SECURITY"))))))
+
+
+(deftest shard-opts-parses-the-env-strings
+  (testing "GRAPHDEN_BYO_EXECUTOR reads like every other env flag — case-insensitive"
+    (doseq [v ["true" "TRUE" "Yes" "1" "on"]]
+      (is (= {:byo-executor? true} (init-exec/shard-opts nil v)) v))
+    (doseq [v ["" "false" "0"]]
+      (is (= {:byo-executor? false} (init-exec/shard-opts nil v)) v))
+    (is (= {} (init-exec/shard-opts nil nil)) "unset → not a BYO pod, key absent"))
+  (testing "executor-orgs: a CSV env string becomes a set; blank means the whole graph"
+    (is (= {:executor-orgs #{"public" "acme"}} (init-exec/shard-opts " public , acme ," nil)))
+    (is (= {} (init-exec/shard-opts "" nil)))
+    (let [pred #{"x"}]
+      (is (= {:executor-orgs pred} (init-exec/shard-opts pred nil)) "an addon override passes through"))))

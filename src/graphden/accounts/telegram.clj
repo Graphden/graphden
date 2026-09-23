@@ -12,7 +12,8 @@
    explicitly by a signed-in user (Phase 3)."
   (:require
     [clojure.string :as str]
-    [graphden.accounts.crypto :as crypto]))
+    [graphden.accounts.crypto :as crypto]
+    [graphden.auth.provider :as auth]))
 
 
 (def ^:const max-auth-age-secs
@@ -38,7 +39,7 @@
                                          (data-check-string data))
         auth-date (some-> (get data "auth_date") str parse-long)]
     (when (and their-hash
-               (crypto/constant-time-equal? computed their-hash)
+               (auth/constant-time-equal? computed their-hash)
                auth-date
                (<= (- now-secs auth-date) max-auth-age-secs))
       {:provider "telegram"

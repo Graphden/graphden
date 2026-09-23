@@ -311,6 +311,8 @@
   (log/info "Service reconciler stopped"))
 
 
-(defmethod ig/suspend-key! :exec/service-reconciler [_ {:keys [running context stop-all-fn]}]
-  ;; Same as halt — services don't have a suspend state distinct from stop.
-  (when running ((or stop-all-fn recon/stop-all!) running context)))
+;; No `ig/suspend-key!` / `ig/resume-key` on purpose: integrant's defaults
+;; (suspend = halt, resume = init) are exactly right — services have no
+;; suspend state distinct from stop. A custom suspend that only drained the
+;; services left the ticker running and the NOTIFY callback registered, and
+;; the default resume (a fresh init) then added a SECOND ticker + callback.

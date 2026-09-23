@@ -13,9 +13,7 @@
 ;; resolve-sequence-payload
 ;; =============================================================================
 ;;
-;; The :ref / :value / invalid-body branches never touch storage — pass
-;; nil. (The :ref-name branch queries storage and is covered by the
-;; integration suite.)
+;; No branch touches storage (there is no by-name form) — pass nil.
 
 (deftest ref-branch-parses-uuid
   (testing "a well-formed :ref UUID string becomes :ref-fn-id"
@@ -57,7 +55,7 @@
 
 
 (deftest invalid-body-throws
-  (testing "a body with none of :ref / :ref-name / :value is rejected"
+  (testing "a body with neither :ref nor :value is rejected"
     (let [ex (try (seq-crud/resolve-sequence-payload nil {:other 1})
                   nil
                   (catch clojure.lang.ExceptionInfo e e))]

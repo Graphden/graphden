@@ -506,12 +506,8 @@ left unchanged.
 
 ### `:sequence-op/invalid-body`
 
-A `POST /api/sequence/append/:fn-id` (or insert) body carried none of
-`:ref`, `:ref-name`, `:value` — there is nothing to append. Nothing is
+A `POST /api/sequence/append/:fn-id` (or insert) body carried neither
+`:ref` (a fn id) nor `:value` — there is nothing to append. (There is no
+by-name form: a bare name can live in several namespaces.) Nothing is
 written: the body is parsed before the host `:list-append` binding is
 materialised.
-
-### `:sequence-op/fn-not-found`
-
-The body's `:ref-name` matches no fn on this branch. Pass `:ref` with a
-fn-id when the name is ambiguous across namespaces.

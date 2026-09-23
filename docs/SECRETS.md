@@ -635,8 +635,11 @@ may still read the path. The value is reclaimed by the tombstone GC
 it is about to purge, `secret-paths-of` collects the vault paths of
 the binding (or of a purged fn's bindings) that carry a resolver, and
 `sweep-orphan-secrets!` deletes each path no other binding version
-still references (`crud.secrets/path-referenced?`). Without a vault client
-the paths are logged for manual cleanup.
+still references (`path-still-referenced?`). Without a vault client
+the paths are logged for manual cleanup. **Deleting a branch** reclaims
+the same way, at once: `vs/delete-branch!` hands its deleted binding
+versions to the caller after the commit, and the `:delete-branch!`
+base-fn sweeps their paths. The three helpers live in `crud.secrets`.
 
 Verified end-to-end:
 

@@ -39,7 +39,7 @@
   (when (= :binding-list-item entity-name)
     (let [candidates (filter #(and (:binding-id %) (some? (:position %))) check-seq)]
       (when (seq candidates)
-        (let [chain (#'res/collect-branch-chain base-storage branch-id)
+        (let [chain (res/collect-branch-chain base-storage branch-id)
               ;; Merge-aware: a collision can be introduced by a MERGE too —
               ;; a source-branch item that resolves onto this branch at a
               ;; position an existing item already holds. Those items live
@@ -119,6 +119,65 @@
   (check-list-item-position-collisions! base-storage branch-id entity-name [new-data]))
 
 
+(defn- first-hit
+  "The first shape in `keyed` whose key another row of `view`
+   (`{id → row}`) already holds → `[shape colliding-ids]`, else nil."
+  [view key-fn keyed]
+  (let [by-key (group-by (comp key-fn val) view)]
+    (some (fn [shape]
+            (let [hits (into []
+                             (comp (map key) (remove #(= % (:id shape))))
+                             (get by-key (key-fn shape)))]
+              (when (seq hits) [shape hits])))
+          keyed)))
+
+
+(defn- descendant-chains
+  "`{descendant-branch-id → the part of its chain BELOW branch-id}` for
+   every branch in `bids` that forks (transitively) off `branch-id`."
+  [base-storage branch-id bids]
+  (into {}
+        (keep (fn [bid]
+                (let [chain (res/collect-branch-chain base-storage bid)]
+                  (when (and (not= bid branch-id) (some #{branch-id} chain))
+                    [bid (into [] (take-while #(not= % branch-id)) chain)]))))
+        bids))
+
+
+(defn- descendant-collision
+  "The write on `branch-id` becomes visible on every branch forked off it,
+   so a key a DESCENDANT already holds collides there even though this
+   branch's own view is clean (main creating `foo` while a feature branch
+   has its own `foo`). Only a descendant that itself holds a candidate
+   version row can hold such a key — a row inherited from this branch or
+   above is in this branch's own view — so the candidate versions the
+   caller already loaded name the branches to look at, and the rows to
+   resolve there. A shape the descendant overrides (its own version of the
+   same id, somewhere below this branch) does not surface on it and is
+   left out. Returns `[shape colliding-ids descendant-id]` or nil."
+  [base-storage branch-id entity-name {:keys [version-entity id-field key-fn]}
+   keyed cand-versions]
+  (let [below-by-desc (descendant-chains base-storage branch-id
+                                         (into #{} (map :branch-id) cand-versions))]
+    (when (seq below-by-desc)
+      (let [overridden (into #{}
+                             (map (juxt :branch-id id-field))
+                             (sp/query-entities base-storage version-entity
+                                                {id-field (vec (keep :id keyed))
+                                                 :branch-id (vec (distinct (mapcat val below-by-desc)))}))]
+        (some (fn [[desc below]]
+                (let [below? (set below)
+                      ids (into #{} (comp (filter #(below? (:branch-id %))) (map id-field))
+                                cand-versions)
+                      surfacing (filterv (fn [shape]
+                                           (not-any? #(overridden [% (:id shape)]) below))
+                                         keyed)
+                      live (res/resolve-live-entities base-storage entity-name ids desc)
+                      view (into live (comp (filter :id) (map (juxt :id identity))) surfacing)]
+                  (some-> (first-hit view key-fn surfacing) (conj desc))))
+              below-by-desc)))))
+
+
 (defn- live-key-collision
   "The shared core of the `(namespace-id, name)` and `:path` checks, over
    a whole batch of `shapes` (the rows about to be written, each carrying
@@ -136,26 +195,31 @@
    divergence stays legal. The batch's OWN rows overlay that view (the
    position check's rule): a row this batch renames away no longer holds
    its old key, and two batch rows claiming the same key collide with each
-   other. Returns `[shape colliding-ids]` for the first colliding shape,
-   else nil. Replaces one version query + one resolve PER ROW (~3 round
-   trips a fn — ~12k sequential ones on a full boot sync)."
+   other. Then the same question for the branches forked off this one
+   (`descendant-collision`) — the write will show there too. Returns
+   `[shape colliding-ids]` (plus the descendant's id when the collision is
+   on one) for the first colliding shape, else nil. Replaces one version
+   query + one resolve PER ROW (~3 round trips a fn — ~12k sequential ones
+   on a full boot sync)."
   [base-storage branch-id entity-name
-   {:keys [version-entity id-field query-field key-fn]} shapes]
+   {:keys [version-entity id-field query-field key-fn] :as spec} shapes]
   (let [keyed (filterv query-field shapes)]
     (when (seq keyed)
-      (let [cand-ids (into #{}
-                           (map id-field)
-                           (sp/query-entities base-storage version-entity
-                                              {query-field (vec (distinct (map query-field keyed)))}))
-            live (res/resolve-live-entities base-storage entity-name cand-ids branch-id)
-            view (into live (comp (filter :id) (map (juxt :id identity))) keyed)
-            by-key (group-by (comp key-fn val) view)]
-        (some (fn [shape]
-                (let [hits (into []
-                                 (comp (map key) (remove #(= % (:id shape))))
-                                 (get by-key (key-fn shape)))]
-                  (when (seq hits) [shape hits])))
-              keyed)))))
+      (let [cand-versions (sp/query-entities base-storage version-entity
+                                             {query-field (vec (distinct (map query-field keyed)))})
+            live (res/resolve-live-entities base-storage entity-name
+                                            (into #{} (map id-field) cand-versions) branch-id)
+            view (into live (comp (filter :id) (map (juxt :id identity))) keyed)]
+        (or (first-hit view key-fn keyed)
+            (descendant-collision base-storage branch-id entity-name spec keyed cand-versions))))))
+
+
+(defn- on-branch-clause
+  "\" on branch <name>\" for a collision found on a descendant, else nil."
+  [base-storage desc-id]
+  (when desc-id
+    (str " on branch " (pr-str (or (:name (sp/read-entity base-storage :branch desc-id))
+                                   (str desc-id))))))
 
 
 (defn check-fn-name-collisions!
@@ -175,7 +239,7 @@
    resolve for the whole batch)."
   [base-storage branch-id entity-name shapes]
   (when (= :fn entity-name)
-    (when-let [[shape colliding]
+    (when-let [[shape colliding desc-id]
                (live-key-collision base-storage branch-id :fn
                                    {:version-entity :fn-version :id-field :fn-id
                                     :query-field :name
@@ -184,15 +248,17 @@
       (let [{nm :name target-ns :namespace-id} shape
             human (str "fn " (pr-str nm) " already exists"
                        (when target-ns " in this namespace")
+                       (on-branch-clause base-storage desc-id)
                        " — pick a different name")]
         (throw (ex-info human
-                        {:type :constraint-violation/fn-name-collision
-                         :entity-name :fn
-                         :name nm
-                         :namespace-id target-ns
-                         :branch-id branch-id
-                         :colliding-fn-ids colliding
-                         :reason human}))))))
+                        (cond-> {:type :constraint-violation/fn-name-collision
+                                 :entity-name :fn
+                                 :name nm
+                                 :namespace-id target-ns
+                                 :branch-id branch-id
+                                 :colliding-fn-ids colliding
+                                 :reason human}
+                          desc-id (assoc :descendant-branch-id desc-id))))))))
 
 
 (defn check-fn-name-collision!
@@ -209,7 +275,7 @@
    returns first wins). Off-branch / tombstoned rows can't collide."
   [base-storage branch-id entity-name shapes]
   (when (= :resource-override entity-name)
-    (when-let [[shape colliding]
+    (when-let [[shape colliding desc-id]
                (live-key-collision base-storage branch-id :resource-override
                                    {:version-entity :resource-override-version
                                     :id-field :override-id
@@ -217,15 +283,17 @@
                                     :key-fn :path}
                                    shapes)]
       (let [path (:path shape)
-            human (str "an override for " (pr-str path)
-                       " already exists on this branch — edit it instead")]
+            human (str "an override for " (pr-str path) " already exists"
+                       (or (on-branch-clause base-storage desc-id) " on this branch")
+                       " — edit it instead")]
         (throw (ex-info human
-                        {:type :constraint-violation/resource-override-path-collision
-                         :entity-name :resource-override
-                         :path path
-                         :branch-id branch-id
-                         :colliding-ids colliding
-                         :reason human}))))))
+                        (cond-> {:type :constraint-violation/resource-override-path-collision
+                                 :entity-name :resource-override
+                                 :path path
+                                 :branch-id branch-id
+                                 :colliding-ids colliding
+                                 :reason human}
+                          desc-id (assoc :descendant-branch-id desc-id))))))))
 
 
 (defn check-resource-override-path-collision!
@@ -240,18 +308,44 @@
 
    - a `:binding-list-item` → its owning binding (`(binding-id, position)`
      appends / moves on the same binding);
-   - a named `:fn` → `(branch, namespace, name)` (concurrent
-     create/rename/move otherwise both pass `check-fn-name-collisions!`
-     and both commit);
-   - a pathed `:resource-override` → `(branch, path)`."
-  [branch-id entity-name row]
+   - a named `:fn` → `(namespace, name)` (concurrent create/rename/move
+     otherwise both pass `check-fn-name-collisions!` and both commit);
+   - a pathed `:resource-override` → its `path`.
+
+   The fn and override keys leave the BRANCH out on purpose: their checks
+   look at the branches forked off the writer too, so a write on main and
+   one on a feature branch can collide and must be serialized against each
+   other. (Same-name writes on unrelated branches merely queue — rare.)
+   `branch-id` is kept in the signature for the callers' symmetry."
+  [_branch-id entity-name row]
   (case entity-name
     :binding-list-item (some-> (:binding-id row) str)
     :fn (when (:name row)
-          (str "fn-name|" branch-id "|" (:namespace-id row) "|" (:name row)))
+          (str "fn-name|" (:namespace-id row) "|" (:name row)))
     :resource-override (when (:path row)
-                         (str "resource-override-path|" branch-id "|" (:path row)))
+                         (str "resource-override-path|" (:path row)))
     nil))
+
+
+(def ^:private row-lock-buckets
+  "How many advisory keys the row locks of one (branch, entity) spread
+   over. Bounded so a batch update of thousands of rows takes at most this
+   many locks — each advisory lock takes a slot in Postgres' shared lock
+   table (`max_locks_per_transaction` × connections); two rows sharing a
+   bucket only queue behind each other."
+  256)
+
+
+(defn row-lock-keys
+  "Advisory keys serializing read-merge-write updates of the rows `ids` of
+   `entity-name` on `branch-id` — the lost-update guard of the update
+   paths. Stable across JVMs (a string hash), so executors on different
+   pods agree on them."
+  [branch-id entity-name ids]
+  (into #{}
+        (map #(str "row|" branch-id "|" (name entity-name) "|"
+                   (mod (hash (str %)) row-lock-buckets)))
+        ids))
 
 
 (defn xact-lock!

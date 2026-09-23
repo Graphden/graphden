@@ -97,18 +97,13 @@
     (:slot-id fs)))
 
 
-(defn path-referenced?
+(defn path-still-referenced?
   "Does any binding version row — on any branch, purged rows excluded —
-   resolve `path` through a resolver? Two fns may bind the same vault
-   path; the value goes only when the last reference is gone (the
-   tombstone GC), and a NEW secret must not claim a path that is still
-   referenced (its value write would silently replace the other
-   binding's secret). Reads the version table directly — `storage` may
-   be the versioned wrapper or its base."
-  [storage path]
+   still resolve `path` through a resolver? Two fns may bind the same
+   vault path; the value goes only when the last reference is gone."
+  [base-storage path]
   (boolean (some :resolver-fn-id
-                 (sp/query-entities (vcore/unwrap storage) :binding-version
-                                    {:value path}))))
+                 (sp/query-entities base-storage :binding-version {:value path}))))
 
 
 (defn- claim-path!
@@ -117,7 +112,10 @@
    already references with a 409."
   [storage path]
   (let [p (vault/scoped-path path)]
-    (when (path-referenced? storage p)
+    ;; Any binding version on any branch — a new secret must not claim a
+    ;; path still referenced: its value write would silently replace the
+    ;; other binding's secret.
+    (when (path-still-referenced? (vcore/unwrap storage) p)
       (throw (ex-info (str "Vault path " p " is already bound by another secret — "
                            "choose a different path, or bind the existing secret by reference")
                       {:type :secrets/path-in-use :path p :http-status 409})))
@@ -280,3 +278,51 @@
     (and fn-row
          (not= (tctx/current-org) tctx/public-org)
          (not= (tctx/current-org) (or (:org-id fn-row) tctx/public-org)))))
+
+
+;; =============================================================================
+;; Reclaiming vault values whose bindings are gone
+;; =============================================================================
+;;
+;; The vault is outside graphden's transactions: whoever removes secret
+;; bindings for good (the tombstone GC, `vs/delete-branch!`) collects their
+;; paths first and hands them here after the commit.
+
+(defn secret-paths
+  "The vault paths `binding-versions` point at — an inline secret binding
+   (a `:resolver-fn-id` resolver, the `:vault-get` secret) stores its KV
+   path as `:value`."
+  [binding-versions]
+  (into #{} (comp (filter :resolver-fn-id) (map :value) (filter string?))
+        binding-versions))
+
+
+(defn secret-paths-of
+  "Vault paths the entity about to be purged points at: a `:binding`
+   through its version rows, or a `:fn` through the same rows of the
+   bindings it owns. Read BEFORE the purge (the GC's `:before-purge`
+   seam), while the rows exist. Other entity kinds hold no secrets."
+  [base-storage entity-name id]
+  (secret-paths (case entity-name
+                  :binding (sp/query-entities base-storage :binding-version {:binding-id id})
+                  :fn      (sp/query-entities base-storage :binding-version {:fn-id id})
+                  [])))
+
+
+(defn sweep-orphan-secrets!
+  "After storage reclamation (the tombstone GC, a branch delete): delete
+   from the vault every collected `path` no binding references any more. A missing vault client (self-host
+   without OpenBao) or a failing delete is logged, never thrown — the
+   storage reclamation already happened and must not be reported as
+   failed."
+  [base-storage paths]
+  (when (seq paths)
+    (if-let [client @vault/active-client]
+      (doseq [path paths
+              :when (not (path-still-referenced? base-storage path))]
+        (try (vault/delete-secret client path)
+             (log/info "vault secret reclaimed" {:path path})
+             (catch Exception e
+               (log/warn e "vault delete failed — manual cleanup" {:path path}))))
+      (log/warn "secret bindings removed but no vault client — paths left in the vault"
+                {:paths paths}))))

@@ -12,6 +12,7 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.crud.fn-execution.retention :as retention]
     [graphden.crud.fn-execution.stats :as stats]
+    [graphden.crud.secrets :as secrets]
     [graphden.system.init.cleanup :as cleanup]
     [graphden.versioning.storage.purge :as purge]
     [integrant.core :as ig]))
@@ -33,7 +34,7 @@
                     (swap! calls conj [base retention-ms])
                     {:fn 0})
                   ;; No vault, nothing purged — the reconciliation is a no-op.
-                  cleanup/sweep-orphan-secrets! (fn [_base _paths] nil)]
+                  secrets/sweep-orphan-secrets! (fn [_base _paths] nil)]
       (f))
     @calls))
 

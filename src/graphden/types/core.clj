@@ -721,28 +721,52 @@
   (java.util.WeakHashMap.))
 
 
+(defn- retire-db-aliases!
+  "Take out of `reg` each name in `retired` — unless a source in `others`
+   (`{alias-name → body}` maps) still declares it, then re-point it at that
+   body; package-declared names are never dropped (the packages own them;
+   the API refuses to delete them). Called under the `db-alias-sources`
+   lock, so a concurrent sync cannot interleave between reading who
+   declares what and acting on it."
+  [reg retired others]
+  (doseq [nm retired]
+    (if-let [body (some #(get % nm) others)]
+      (swap! reg assoc nm body)
+      (when-not (or (package-alias-body nm) (contains? @alias-qualified nm))
+        (swap! reg dissoc nm)
+        (when (nil? *type-aliases-override*)
+          (swap! alias-owners dissoc nm))))))
+
+
 (defn sync-db-aliases!
   "Record `registered` (`{alias-name → body}`) as everything `source`
    declares from its DB type-rows, and take out of the registry each name
    `source` declared last time but no longer does (a type-row deleted or
-   renamed through the API). A name another source still declares is kept
-   — re-pointed at that source's body — and package-declared names are
-   never dropped (the packages own them; the API refuses to delete them)."
+   renamed through the API) — see `retire-db-aliases!`."
   [source registered]
-  (let [reg (aliases-atom)
-        [prev others] (locking db-alias-sources
-                        (let [by-src (or (java.util.WeakHashMap/.get db-alias-sources reg) {})
-                              by-src' (assoc by-src source registered)]
-                          (java.util.WeakHashMap/.put db-alias-sources reg by-src')
-                          [(get by-src source {}) (vals (dissoc by-src' source))]))]
-    (doseq [nm (keys prev)
-            :when (not (contains? registered nm))]
-      (if-let [body (some #(get % nm) others)]
-        (swap! reg assoc nm body)
-        (when-not (or (package-alias-body nm) (contains? @alias-qualified nm))
-          (swap! reg dissoc nm)
-          (when (nil? *type-aliases-override*)
-            (swap! alias-owners dissoc nm)))))
+  (let [reg (aliases-atom)]
+    (locking db-alias-sources
+      (let [by-src (or (java.util.WeakHashMap/.get db-alias-sources reg) {})
+            prev (get by-src source {})]
+        (java.util.WeakHashMap/.put db-alias-sources reg (assoc by-src source registered))
+        (retire-db-aliases! reg (remove #(contains? registered %) (keys prev))
+                            (vals (dissoc by-src source)))))
+    nil))
+
+
+(defn forget-db-alias-source!
+  "`source` is gone (a deleted branch): retire every name it declared, as
+   `sync-db-aliases!` would for an empty declaration, and drop its record
+   — else the registry keeps the dead branch's types forever and they keep
+   another branch's same-named rows from ever leaving it."
+  [source]
+  (let [reg (aliases-atom)]
+    (locking db-alias-sources
+      (let [by-src (or (java.util.WeakHashMap/.get db-alias-sources reg) {})]
+        (when (contains? by-src source)
+          (java.util.WeakHashMap/.put db-alias-sources reg (dissoc by-src source))
+          (retire-db-aliases! reg (keys (get by-src source))
+                              (vals (dissoc by-src source))))))
     nil))
 
 

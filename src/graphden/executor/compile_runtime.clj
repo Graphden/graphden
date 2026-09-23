@@ -112,12 +112,15 @@
 
 
 (defonce ^:private per-org-aliases
-  ;; §4 Risk-2 fix: `{org-id → {alias-name → body}}`, the per-org SLICE of the
-  ;; flat global registry. Rebuilt in lockstep with the global by
-  ;; `register-type-aliases-from-db!`. The global stays org-agnostic (bootstrap /
-  ;; public / platform type-checks read it); a TENANT type-check binds
-  ;; `types/*type-aliases-override*` to `org-alias-snapshot` so it sees only
-  ;; {public + own-org} aliases, never another org's same-named type.
+  ;; §4 Risk-2 fix: `{source → {org-id → {alias-name → body}}}`, the per-org
+  ;; SLICE of the flat global registry, one per SOURCE (a branch's compile —
+  ;; `alias-source`). Each compile replaces only its own source's slice
+  ;; (`register-type-aliases-from-db!`): a compile of branch B must not
+  ;; wipe the tenant types branch C declares. The global stays org-agnostic
+  ;; (bootstrap / public / platform type-checks read it); a TENANT
+  ;; type-check binds `types/*type-aliases-override*` to
+  ;; `org-alias-snapshot` so it sees only {public + own-org} aliases, never
+  ;; another org's same-named type.
   (atom {}))
 
 
@@ -144,10 +147,28 @@
   "The `{name → body}` alias view a tenant in `org` should type-check against:
    the public slice (under `public-org`, plus any untenanted NULL-org rows) as
    the base, overlaid by `org`'s own. `public-org` is supplied by the caller
-   (the tenancy layer) so this core fn needs no tenancy dependency."
-  [public-org org]
-  (let [m @(per-org-atom)]
-    (merge (get m nil) (get m public-org) (get m org))))
+   (the tenancy layer) so this core fn needs no tenancy dependency.
+
+   With `source` (the caller's branch — `alias-source`), that branch's view;
+   without one, or before that branch has compiled, every source's slice
+   together — a name some branch still declares resolves (the rule the
+   global registry follows)."
+  ([public-org org] (org-alias-snapshot public-org org nil))
+  ([public-org org source]
+   (let [by-source @(per-org-atom)
+         m (or (get by-source source)
+               (apply merge-with merge (vals by-source)))]
+     (merge (get m nil) (get m public-org) (get m org)))))
+
+
+(defn forget-alias-source!
+  "`source` (a branch) is gone: retire the type-aliases it declared from the
+   global registry (`types/forget-db-alias-source!` — a name another branch
+   still declares stays) and drop its per-org slice."
+  [source]
+  (types/forget-db-alias-source! source)
+  (swap! (per-org-atom) dissoc source)
+  nil)
 
 
 (declare prime-graph-cache! call-with-invalidation-lock)
@@ -315,13 +336,14 @@
                                            (when-not (contains? failed-names nm)
                                              [nm body])))
                                    candidates))
-     ;; Rebuild the per-org slice from the SUCCESSFULLY-registered candidates
-     ;; (reuse the already-validated bodies; no re-check). Lockstep with the
-     ;; global write above → same freshness guarantee.
-     (reset! (per-org-atom)
-             (reduce (fn [m {:keys [nm body org]}]
-                       (if (contains? failed-names nm) m (assoc-in m [org nm] body)))
-                     {} candidates))
+     ;; Replace THIS source's per-org slice with the SUCCESSFULLY-registered
+     ;; candidates (reuse the already-validated bodies; no re-check). Only
+     ;; this source's — another branch's slice is its own compile's to
+     ;; replace.
+     (swap! (per-org-atom) assoc source
+            (reduce (fn [m {:keys [nm body org]}]
+                      (if (contains? failed-names nm) m (assoc-in m [org nm] body)))
+                    {} candidates))
      (doseq [{:keys [nm reason]} failed]
        (log/warn (str "register-type-aliases-from-db!: skipped " (pr-str nm)
                       " — " reason))))))
@@ -367,16 +389,21 @@
       (deps/build-reverse-deps (graph-snapshot ctx))))
 
 
-(defn- alias-source
-  "Which branch's view of the graph `ctx` compiles — the key
+(defn storage-alias-source
+  "Which branch's view of the graph `storage` reads — the key
    `register-type-aliases-from-db!` tracks its DB aliases under. The
    branch lives on the VersionedStorage, which may sit under a decorator."
-  [ctx]
-  (or (loop [s (compile-storage ctx) depth 0]
+  [storage]
+  (or (loop [s storage depth 0]
         (when (and (map? s) (< depth 4))
           (or (:branch-id s)
               (recur (or (:base s) (:base-storage s)) (inc depth)))))
       ::unscoped))
+
+
+(defn- alias-source
+  [ctx]
+  (storage-alias-source (compile-storage ctx)))
 
 
 (defn refresh-type-registries-from-storage!
@@ -568,17 +595,22 @@
    Four call sites (`rebuild!`, `rebuild-optimistic!`,
    `delta-recompile!`, `load-cell!`) previously copy-pasted this
    block with small drifts — the audit's :resolved-value walker bug
-   showed what per-site drift costs; keep the sequence HERE only."
-  [ctx graph]
-  (register-type-aliases-from-db! graph (alias-source ctx))
-  (let [fns-map (if (map? (:fns graph))
-                  (:fns graph)
-                  (into {} (map (juxt :id identity)) (:fns graph)))]
-    (prime-always-fresh! (vals fns-map))
-    {:graph graph
-     :fns-map fns-map
-     :lookups (assoc (l/cached-build-lookups graph)
-                     :base-fns (:base-fns ctx))}))
+   showed what per-site drift costs; keep the sequence HERE only.
+
+   `:defer-aliases?` leaves the alias registration to the caller — for a
+   compile that may not be swapped in (`rebuild-optimistic!`)."
+  ([ctx graph] (prep-compile-inputs ctx graph nil))
+  ([ctx graph {:keys [defer-aliases?]}]
+   (when-not defer-aliases?
+     (register-type-aliases-from-db! graph (alias-source ctx)))
+   (let [fns-map (if (map? (:fns graph))
+                   (:fns graph)
+                   (into {} (map (juxt :id identity)) (:fns graph)))]
+     (prime-always-fresh! (vals fns-map))
+     {:graph graph
+      :fns-map fns-map
+      :lookups (assoc (l/cached-build-lookups graph)
+                      :base-fns (:base-fns ctx))})))
 
 
 (defn rebuild-optimistic!
@@ -591,8 +623,11 @@
    registry, and clobbering it with our older snapshot would regress
    read-your-writes. Returns true when the swap happened.
 
-   Alias re-registration runs outside the lock too — it is idempotent
-   and per-name, so a transiently-ahead alias view is harmless.
+   Alias registration is the exception: it runs INSIDE the lock and only
+   when the swap happens. The graph was read before the lock, so a write
+   that landed mid-compile (a type-row just created) is missing from it —
+   syncing the registry from that graph would retire the new type until
+   the next compile.
 
    The read + compile runs under the full-compile permit (released
    BEFORE the swap takes the lock — see `call-with-compile-permit`'s
@@ -607,14 +642,16 @@
               (let [{:keys [graph lookups]}
                     (prep-compile-inputs
                       ctx (read-graph (compile-storage ctx)
-                                      (:executor-orgs ctx)))]
+                                      (:executor-orgs ctx))
+                      {:defer-aliases? true})]
                 {:graph graph :lookups lookups
                  :compiled (ce/compile-all lookups)})))]
       (call-with-invalidation-lock
         ctx
         (fn []
           (if (unchanged?)
-            (do (reset! (:compiled-registry ctx) compiled)
+            (do (register-type-aliases-from-db! graph (alias-source ctx))
+                (reset! (:compiled-registry ctx) compiled)
                 (prime-graph-cache! ctx graph)
                 (prime-compile-deps! ctx lookups)
                 true)

@@ -19,9 +19,9 @@ This tour is about the code, not the workflow. For how to BUILD and test it — 
 
 - [[file:executor.org][Executor — how a fn runs]] (22 · ~86 min) :: The spine: turn a graph 'description of a computation' into a value.
 - [[file:storage.org][Storage & the graph]] (18 · ~61 min) :: How the graph is stored and traversed — Postgres, recursive CTEs, the StorageCRUD / ExecutionGraph protocols.
-- [[file:versioning.org][Branches & versioning]] (24 · ~104 min) :: The VersionedStorage decorator, per-branch resolution, diff/merge and branch-local? propagation.
+- [[file:versioning.org][Branches & versioning]] (25 · ~103 min) :: The VersionedStorage decorator, per-branch resolution, diff/merge and branch-local? propagation.
 - [[file:types.org][Type system]] (17 · ~83 min) :: Subtyping, unification, narrowing, refinements, the sweep-at-zero checker, and the :secret information-flow marker.
-- [[file:crud.org][CRUD & the write path]] (24 · ~71 min) :: Entity/branch/secret writes, request parsing, type-check on write, fn-execution lookup + persist.
+- [[file:crud.org][CRUD & the write path]] (24 · ~72 min) :: Entity/branch/secret writes, request parsing, type-check on write, fn-execution lookup + persist.
 - [[file:packages.org][Packages — the graph's content]] (31 · ~104 min) :: How fns.edn + impls.clj become base-fns and fn-defs; the loader, load order, and the first-party package tree — then the inverse: export, the ref wire form, and the publish/install registry.
 - [[file:boot.org][Boot & lifecycle]] (12 · ~23 min) :: How the process starts: the Integrant component graph, the Aero config + addon manifest, and the router seams installed at boot.
 - [[file:web.org][Web — routing & the page runtime]] (19 · ~30 min) :: HTTP from socket to response body: routing, middleware as graph fns, the hiccup page runtime, and the APIs the editor reads.

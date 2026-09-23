@@ -7,7 +7,7 @@ Entity/branch/secret writes, request parsing, type-check on write, fn-execution 
 
 after: storage, types
 
-[[file:index.org][index]] · ~71 min
+[[file:index.org][index]] · ~72 min
 
 * 1. extract-entity-params
 :PROPERTIES:
@@ -119,13 +119,13 @@ The atomic core for generic creates: create-or-humanise-error, a post-create who
 :PROPERTIES:
 :CUSTOM_ID: crud/type-check-fn-after-mutation!
 :FILE: src/graphden/crud/type_check.clj
-:LINE: 437
-:MINS: 4.9
+:LINE: 443
+:MINS: 5.0
 :END:
 
 Reconstructs the touched fn-def and runs ~check-fn-def!~ after a mutation, recording failures in (and clearing fixes from) the per-branch diagnostics store. This is the type-check-on-write that ~apply-create-core~ relies on — an ill-typed fn persists, but never silently: every save re-derives its diagnostics. The ~:reject-secret?~ option is the security carve-out: a secret-involving failure is flagged ~:secret? true~ and NOT recorded — the caller rolls the write back and hard-rejects.
 
-- source :: [[file:../../../src/graphden/crud/type_check.clj::(defn type-check-fn-after-mutation!][src/graphden/crud/type_check.clj:437]]
+- source :: [[file:../../../src/graphden/crud/type_check.clj::(defn type-check-fn-after-mutation!][src/graphden/crud/type_check.clj:443]]
 - see also :: [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 
 * 10. notify-after-write!
@@ -259,13 +259,13 @@ The «catch next request» debugger entry (docs/EXECUTION.md § Debug): a one-sh
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-secret-body
 :FILE: src/graphden/crud/secrets.clj
-:LINE: 176
+:LINE: 174
 :MINS: 4.7
 :END:
 
 The write path that must not leak (docs/SECRETS.md): one ~POST /api/secrets~ creates the graphden fn-row + path-binding, then the OpenBao value and its custom-metadata — every step journalled so ~replay-secret-rollback!~ can undo the lot if a later one fails. The secret VALUE never enters the graph; only the path does, on a ~:secret-leaf~ child the executor auto-derefs through the ctx's vault handle. Note the shape: the endpoint is the ~:cond~ in ~app/secrets/fns.edn~ (parse, guards, a ~:try~); only this journalled body stays Clojure, reached through the ~:_apply-create-secret-body~ base-fn.
 
-- source :: [[file:../../../src/graphden/crud/secrets.clj::(defn apply-create-secret-body][src/graphden/crud/secrets.clj:176]]
+- source :: [[file:../../../src/graphden/crud/secrets.clj::(defn apply-create-secret-body][src/graphden/crud/secrets.clj:174]]
 - see also :: [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
 * 21. run-tests!

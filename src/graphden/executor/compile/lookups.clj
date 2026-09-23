@@ -163,8 +163,12 @@
         binding-by-fn-slot (into {}
                                  (map (juxt (juxt :fn-id :slot-id) identity))
                                  bindings)
+        ;; `:id` breaks a position tie — a branch can transiently show two
+        ;; items at one position (an ancestor's append landing on a position
+        ;; the branch already used, docs/CONSTRAINTS.md), and its compiled
+        ;; list must not change order from one compile to the next.
         items-by-binding (->> list-items
-                              (sort-by (juxt :binding-id :position))
+                              (sort-by (juxt :binding-id :position :id))
                               (reduce (fn [acc i]
                                         (update acc (:binding-id i) (fnil conj []) i))
                                       {}))

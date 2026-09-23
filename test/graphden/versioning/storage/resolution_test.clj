@@ -111,26 +111,29 @@
               {:id bind-id :fn-id other-fn})))]
 
     (testing ":fn → entity-id itself (storage unused)"
-      (is (= fn-id (owning-fn-id nil :fn fn-id nil)))
-      (is (= fn-id (owning-fn-id nil :fn fn-id {:irrelevant true}))
+      (is (= fn-id (owning-fn-id nil nil :fn fn-id nil)))
+      (is (= fn-id (owning-fn-id nil nil :fn fn-id {:irrelevant true}))
           "version-row content doesn't matter for :fn"))
 
     (testing ":fn-slot → version-row's :fn-id"
       (is (= other-fn
-             (owning-fn-id nil :fn-slot fn-id {:fn-id other-fn}))
+             (owning-fn-id nil nil :fn-slot fn-id {:fn-id other-fn}))
           "owner is the fn-id carried on the version row, NOT entity-id"))
 
     (testing ":binding → version-row's :fn-id"
       (is (= other-fn
-             (owning-fn-id nil :binding fn-id {:fn-id other-fn}))))
+             (owning-fn-id nil nil :binding fn-id {:fn-id other-fn}))))
 
     (testing ":binding-list-item → chains through the binding's :fn-id"
       (is (= other-fn
-             (owning-fn-id stub :binding-list-item fn-id {:binding-id bind-id}))
-          "reads the binding identity row to recover its owning fn"))
+             (owning-fn-id stub nil :binding-list-item fn-id {:binding-id bind-id}))
+          "reads the binding identity row to recover its owning fn")
+      (is (= fn-id
+             (owning-fn-id nil {bind-id fn-id} :binding-list-item fn-id {:binding-id bind-id}))
+          "a binding the merge-aware cache already read answers without a storage read"))
 
     (testing "unknown entity → nil"
-      (is (nil? (owning-fn-id nil :branch fn-id {:fn-id other-fn}))
+      (is (nil? (owning-fn-id nil nil :branch fn-id {:fn-id other-fn}))
           ":branch isn't versioned — case dispatch falls through"))))
 
 

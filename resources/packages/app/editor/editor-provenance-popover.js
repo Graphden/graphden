@@ -17,6 +17,11 @@
 
 let provenancePopoverEl = null;
 let provenancePopoverAnchor = null;
+// Request token — same contract as editor-mismatch-explainer.js: every open,
+// close and Escape bumps it, and a response carrying an older one is dropped
+// instead of opening the popover after the reader moved on.
+let _provenanceReq = 0;
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') _provenanceReq += 1; }, true);
 
 function ensureProvenancePopoverEl() {
   if (provenancePopoverEl) return provenancePopoverEl;
@@ -64,6 +69,7 @@ function isProvenanceOpenFor(bindingId, itemId) {
 }
 
 function hideProvenancePopover() {
+  _provenanceReq += 1;
   if (!provenancePopoverEl) return;
   provenancePopoverEl.classList.remove('visible');
   provenancePopoverEl.style.display = 'none';
@@ -128,6 +134,7 @@ async function showProvenancePopover(arg, anchorEl) {
   if (!bindingId) return;
   const params = new URLSearchParams({ 'binding-id': bindingId });
   if (itemId) params.set('item-id', itemId);
+  const req = ++_provenanceReq;
   let html;
   try {
     const r = await authFetch('/partials/provenance?' + params.toString());
@@ -136,6 +143,7 @@ async function showProvenancePopover(arg, anchorEl) {
   } catch (_) {
     return;
   }
+  if (req !== _provenanceReq) return;   // dismissed or superseded meanwhile
   // Server returns the popover shell unconditionally. When there's no
   // narrowing chain to show (`:_provenance-some?` false), the resolved-
   // via section degrades to a hidden span — the popover would be just
@@ -167,6 +175,7 @@ async function showProvenancePopover(arg, anchorEl) {
 // popover above.
 async function showReturnTypeRulePopover(fnName, anchorEl) {
   if (!fnName || !anchorEl) return;
+  const req = ++_provenanceReq;
   let html;
   try {
     const r = await authFetch('/partials/return-type-rule?fn='
@@ -176,6 +185,7 @@ async function showReturnTypeRulePopover(fnName, anchorEl) {
   } catch (_) {
     return;
   }
+  if (req !== _provenanceReq) return;   // dismissed or superseded meanwhile
   // The partial renders the intro only when a rule-owning ancestor
   // exists — a header-only response means nothing to show.
   const probe = document.createElement('div');

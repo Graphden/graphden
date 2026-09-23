@@ -25,6 +25,11 @@
 let mismatchExplainerEl = null;
 let mismatchExplainerArg = null;
 let mismatchExplainerAnchor = null;
+// Request token: bumped by every open, every close and every Escape. A
+// response carrying an older token is dropped — a slow partial used to pop
+// the explainer open AFTER the reader had pressed Escape or moved on.
+let _mismatchReq = 0;
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') _mismatchReq += 1; }, true);
 
 function ensureMismatchExplainerEl() {
   if (mismatchExplainerEl) return mismatchExplainerEl;
@@ -107,6 +112,7 @@ async function showMismatchExplainer(arg, anchorEl) {
   if (!bindingId) return;
   const params = new URLSearchParams({ 'binding-id': bindingId });
   if (itemId) params.set('item-id', itemId);
+  const req = ++_mismatchReq;
   let html;
   try {
     const r = await authFetch('/partials/mismatch-explainer?' + params.toString());
@@ -115,6 +121,7 @@ async function showMismatchExplainer(arg, anchorEl) {
   } catch (_) {
     return;
   }
+  if (req !== _mismatchReq) return;   // dismissed or superseded meanwhile
   const el = ensureMismatchExplainerEl();
   el.innerHTML = html;
   mismatchExplainerArg = arg;
@@ -126,6 +133,7 @@ async function showMismatchExplainer(arg, anchorEl) {
 }
 
 function hideMismatchExplainer() {
+  _mismatchReq += 1;
   if (!mismatchExplainerEl) return;
   mismatchExplainerEl.classList.remove('visible');
   mismatchExplainerEl.style.display = 'none';

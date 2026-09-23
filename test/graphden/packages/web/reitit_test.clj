@@ -12,6 +12,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.system.api-routes-js :as api-js]
+    [graphden.system.api-url-drift :as drift]
     [reitit.ring :as ring]))
 
 
@@ -39,7 +40,7 @@
 
 ;; The path enumeration + `window.API` templater behind the boot-time
 ;; `:exec/api-routes-js-cache` (the graph reads the cached module).
-(def ^:private route-paths api-js/router-paths)
+(def ^:private route-paths drift/router-paths)
 (def ^:private js-bundle api-js/routes->js-bundle)
 
 

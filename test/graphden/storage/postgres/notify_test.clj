@@ -79,6 +79,14 @@
     (is (= {:kind :fn :op :invalidate :id "fn-1" :branch-id "br-9"}
            (pg-notify/parse-payload "fn:invalidate:fn-1|br-9"))))
 
+  (testing "the emitter id rides in the fifth slot, forcing the empty ones before it"
+    (let [event {:kind :fn :op :invalidate :id "fn-1" :emitter "pod-a"}]
+      (is (= "fn:invalidate:fn-1||||pod-a" (pg-notify/format-payload event)))
+      (is (= event (pg-notify/parse-payload (pg-notify/format-payload event)))))
+    (let [event {:kind :fn :op :invalidate :id "fn-1" :branch-id "br-9"
+                 :org-id "acme" :epochs [4 5] :emitter "pod-a"}]
+      (is (= event (pg-notify/parse-payload (pg-notify/format-payload event))))))
+
   (testing "parse on a malformed payload → nil"
     (is (nil? (pg-notify/parse-payload "")))
     (is (nil? (pg-notify/parse-payload "no-colons")))
@@ -97,6 +105,16 @@
         emit (pg-notify/make-emitter bad-ds)]
     (is (nil? (emit {:kind :fn :op :invalidate :id "x"}))
         "the SQLException is swallowed, emit returns nil")))
+
+
+(deftest own-event-recognises-only-its-own-emitter
+  (let [a (pg-notify/make-emitter nil)
+        b (pg-notify/make-emitter nil)
+        stamp (fn [e] {:kind :fn :op :invalidate :id "x" :emitter (-> e meta ::pg-notify/emitter-id)})]
+    (is (pg-notify/own-event? a (stamp a)))
+    (is (not (pg-notify/own-event? a (stamp b))) "a sibling's emitter is not ours")
+    (is (not (pg-notify/own-event? a {:kind :fn :op :invalidate :id "x"})) "unstamped → not ours")
+    (is (not (pg-notify/own-event? pg-notify/noop-emitter (stamp a))) "no id → never ours")))
 
 
 (deftest reconnect-with-backoff-bails-when-stopped-during-sleep

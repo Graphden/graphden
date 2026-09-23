@@ -188,7 +188,7 @@
   (log/info "Starting BYO executor" {:hub hub-url :org org :branch branch :port port})
   (let [loaded (when (seq packages) (pkg/load-packages packages))
         base-fns (register-impls-in-memory! loaded extra-base-fns)
-        storage (remote/create-remote-storage hub-url token branch)
+        storage (remote/create-remote-storage hub-url token branch org)
         ;; No `:executor-orgs`: RemoteStorage already holds ONLY this org's +
         ;; public rows (the hub scoped the bundle server-side), so re-filtering
         ;; in `read-graph` is redundant — and `#{org}` would wrongly drop any
@@ -224,7 +224,7 @@
         ;; URL/port is separate from the hub. nil ⇒ no live push.
         source (when sse-url
                  (remote-sse/start-source!
-                   {:hub-url sse-url :token token
+                   {:hub-url sse-url :token token :org org
                     :on-event (fn [event]
                                 (when (= :fn (:kind event)) (submit-refresh!)))
                     ;; Refresh on every (re)connect too (F5): an invalidate

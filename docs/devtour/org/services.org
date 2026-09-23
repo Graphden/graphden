@@ -224,13 +224,13 @@ The pure brain of one control pass: always emit initial placements for unheld ce
 :PROPERTIES:
 :CUSTOM_ID: services/run-tick!
 :FILE: src/graphden/fleet/control_loop.clj
-:LINE: 186
-:MINS: 2.5
+:LINE: 191
+:MINS: 2.6
 :END:
 
 The side-effecting driver the leader-locked component runs each tick: read live cells + current placement, call ~plan-tick~, then realise each initial placement and sustained move through the ~move-fn~ seam. The loop that ties the whole fleet together.
 
-- source :: [[file:../../../src/graphden/fleet/control_loop.clj::(defn run-tick!][src/graphden/fleet/control_loop.clj:186]]
+- source :: [[file:../../../src/graphden/fleet/control_loop.clj::(defn run-tick!][src/graphden/fleet/control_loop.clj:191]]
 - same file :: [[file:services.org::#services/plan-tick][plan-tick]]
 
 * 19. move-cell!

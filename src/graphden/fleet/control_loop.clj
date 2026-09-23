@@ -138,18 +138,23 @@
    placement, so the fleet controller must not also move them. The org loads
    are read with one `metrics/pending-loads` query, not one per cell.
 
-   `opts` — `{:with-closure? bool}`. When true each cell also carries its
-   `:closure` (forward-closure fn-set) for overlap-aware placement; computed
-   only on demand since it walks every cell's closure each tick."
+   `opts` — `{:with-closure? bool :load-storage s}`. When `:with-closure?`
+   each cell also carries its `:closure` (forward-closure fn-set) for
+   overlap-aware placement; computed only on demand since it walks every
+   cell's closure each tick. `:load-storage` is what the org loads are read
+   from — the RAW Postgres storage on a multi-tenant deployment, because
+   `:fn-execution` is org-scoped and a platform-context read through the
+   scoped `storage` sees only public rows (every tenant's load read 0).
+   Defaults to `storage`."
   ([storage forward-deps placement-rows] (discover-cells storage forward-deps placement-rows {}))
-  ([storage forward-deps placement-rows {:keys [with-closure?]}]
+  ([storage forward-deps placement-rows {:keys [with-closure? load-storage]}]
    (let [app-roots (keep (fn [r]
                            (when-let [h (:handler-fn-id r)]
                              {:org (:org r) :entry-fn-id h}))
                          (safe-query storage :app-route {}))
          placed-roots (map (fn [r] {:org (:org r) :entry-fn-id (:entry-fn-id r)})
                            placement-rows)
-         loads (metrics/pending-loads storage)]
+         loads (metrics/pending-loads (or load-storage storage))]
      (map (fn [{:keys [org entry-fn-id]}]
             (cond-> {:org org
                      :entry-fn-id entry-fn-id
@@ -192,14 +197,16 @@
    directed transport. Returns the `plan-tick` decision (so the caller carries
    `:state` to the next tick).
 
-   `env` — `{:storage :forward-deps :executors :move-fn}`. With `:w-overlap` > 0
+   `env` — `{:storage :load-storage :forward-deps :executors :move-fn}`
+   (`:load-storage` — see `discover-cells`). With `:w-overlap` > 0
    in `opts`, cells are discovered WITH their closures so placement can co-locate
    code-sharing cells. `:shard-orgs` / `:exclude-orgs` in `opts` bound the
    managed cell set (mixed fleets — see `scope-cells`)."
-  [{:keys [storage forward-deps executors move-fn]} state opts]
+  [{:keys [storage load-storage forward-deps executors move-fn]} state opts]
   (let [placement-rows (read-placements storage)
         discovered (discover-cells storage forward-deps placement-rows
-                                   {:with-closure? (pos? (double (:w-overlap opts 0.0)))})
+                                   {:with-closure? (pos? (double (:w-overlap opts 0.0)))
+                                    :load-storage load-storage})
         {:keys [cells skipped]} (scope-cells discovered opts)
         current (current-placement placement-rows)
         decision (plan-tick {:cells cells :current current :executors executors} state opts)]

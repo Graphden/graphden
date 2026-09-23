@@ -229,3 +229,15 @@
       (is (false? (ctx/byo-org? storage "byo-co")))
       (is (= 2 (count @reads))
           "the error verdict is NOT cached — the next request re-reads"))))
+
+
+(deftest current-user-label-never-signs-with-an-email-test
+  (let [label (fn [p] (binding [ctx/*current-principal* p] (ctx/current-user-label)))
+        acct {:authenticated? true :user-id "u1" :email "alice@example.com"}]
+    (testing "the account's display name signs the review"
+      (is (= "Alice" (label (assoc acct :display-name "Alice")))))
+    (testing "a display name that IS an email (the signup default) falls back to the local part"
+      (is (= "alice" (label (assoc acct :display-name "alice@example.com"))))
+      (is (= "alice" (label (assoc acct :display-name "other@example.org")))))
+    (testing "no display name → the email's local part, never the address"
+      (is (= "alice" (label acct))))))

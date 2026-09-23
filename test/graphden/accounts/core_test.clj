@@ -9,7 +9,9 @@
     [graphden.accounts.core :as accounts]
     [graphden.accounts.crypto :as crypto]
     [graphden.accounts.identity-schema :as identity-schema]
+    [graphden.accounts.provider :as provider]
     [graphden.accounts.session-schema :as session-schema]
+    [graphden.auth.provider :as auth]
     [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.protocol :as ds]
     [graphden.storage.postgres.core :as pg]
@@ -100,6 +102,19 @@
     (is (thrown? clojure.lang.ExceptionInfo
           (accounts/password-signup! (storage)
                                      {:email "alice@example.com" :password "another"})))))
+
+
+(deftest ^:integration provider-principal-carries-the-display-name
+  ;; `tenancy.context/current-user-label` signs a marketplace review with the
+  ;; principal's display name; without it every review fell back to the
+  ;; email local part.
+  (let [{:keys [token]} (accounts/password-signup! (storage)
+                                                   {:email "dana@example.com" :password "s3cret-pw"
+                                                    :display-name "Dana"})
+        principal (auth/authenticate (provider/accounts-provider (storage))
+                                     {:headers {"authorization" (str "Bearer " token)}})]
+    (is (:authenticated? principal))
+    (is (= "Dana" (:display-name principal)))))
 
 
 (deftest ^:integration session-lifecycle

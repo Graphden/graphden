@@ -37,13 +37,13 @@ Sessions are rows, not JWTs: the raw token exists exactly once (the return value
 :PROPERTIES:
 :CUSTOM_ID: accounts/accounts-provider
 :FILE: src/graphden/accounts/provider.clj
-:LINE: 64
+:LINE: 67
 :MINS: 0.9
 :END:
 
 The module's AuthProvider: bearer OR the HttpOnly gd_session cookie (an OAuth redirect can't carry a bearer) → an org-AGNOSTIC principal. Org is deliberately absent — the tenancy layer resolves it from membership, which is what keeps this module open-core.
 
-- source :: [[file:../../../src/graphden/accounts/provider.clj::(defn accounts-provider][src/graphden/accounts/provider.clj:64]]
+- source :: [[file:../../../src/graphden/accounts/provider.clj::(defn accounts-provider][src/graphden/accounts/provider.clj:67]]
 
 * 4. make-router
 :PROPERTIES:

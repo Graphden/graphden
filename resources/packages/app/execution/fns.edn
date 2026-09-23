@@ -841,7 +841,7 @@
    :parent :zipmap
    :args {:keys [{:value :runs} {:value :failed} {:value :cancelled} {:value :avg-ms}]
           :vals [:_ufs-runs :_ufs-failed :_ufs-cancelled :_ufs-avg]}
-   :return-type {:runs :int :failed :int :cancelled :int :avg-ms :numeric}}
+   :return-type {:runs :int :failed :int :cancelled :int :avg-ms :int}}
 
   ;; Org-scoped rollups for the editor's Stats panel — every one reads ONLY
   ;; counts + durations from `:usage-stat`, always scoped to the CURRENT org

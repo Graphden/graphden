@@ -13,12 +13,24 @@
 
    Also pins the two halves of the platform flag: the default run
    excludes exactly the package-owned tests, and the status join
-   marks them."
+   marks them.
+
+   PRODUCTION-shaped, over the whole shipped superset: the cached
+   type-check sweep of `package-set` (allowlist gate ON — an
+   un-allowlisted failure throws in the fixture) is overlaid before the
+   golden clone's eager `cr/rebuild!`, so every fn of every shipped
+   package compiles under the rich-types a real boot computes. That is
+   the coverage `system.full-bundle-sweep-test` used to buy with a
+   private full bootstrap; the golden it clones is built under a
+   100-row batch ceiling (`test-infra.shared-bootstrap`)."
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.test-runs :as test-runs]
-    [graphden.executor.test-setup :as setup]))
+    [graphden.executor.interface :as exec]
+    [graphden.executor.registry.core :as registry-core]
+    [graphden.executor.test-setup :as setup]
+    [graphden.test-infra.shared-bootstrap :as sb]))
 
 
 (def ^:private package-set
@@ -31,7 +43,13 @@
 
 (use-fixtures :once
   (setup/create-container-fixture)
+  exec/with-clean-registry
+  exec/with-isolated-rich-types
   (fn [f]
+    ;; Sweep BEFORE the clone: its `cr/rebuild!` compiles under the
+    ;; ambient rich-types (see `test-infra.golden-app/fixture`).
+    (reset! registry-core/*rich-types-override*
+            (sb/ensure-swept-rich-types! package-set))
     (let [graph (setup/bootstrap-crud-graph-from-golden!*
                   "graphden.packages.platform-tests-test"
                   package-set)]

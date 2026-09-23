@@ -35,6 +35,7 @@
     [graphden.packages.records :as records]
     [graphden.packages.sync :as pkg-sync]
     [graphden.storage.postgres.core :as pg]
+    [graphden.storage.protocol.config :as sp-config]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.schemas :as schemas]
     [graphden.test-infra.shared-container :as sc]
@@ -133,7 +134,15 @@
                           (mapv #(dissoc % :kind)
                                 (records/boot-primitive-records)))
       (let [versioned (vs/wrap-with-versioning storage "main")]
-        (binding [registry/*registry-override* nil]
+        ;; `*max-batch-size*` shrunk to 100: the bulk package sync MUST
+        ;; bind its own ceiling (`sync-fn-entities-from-packages!` /
+        ;; `register-base-fns-from-packages!`). The cloud graph once
+        ;; outgrew the global 10000 cap and every FRESH-DB boot died
+        ;; :batch-error/batch-too-large while incremental deployments
+        ;; kept working. Every golden is such a fresh boot, so any
+        ;; un-ceilinged batch path in the sync overflows here at once.
+        (binding [registry/*registry-override* nil
+                  sp-config/*max-batch-size* 100]
           (pkg-sync/bootstrap-from-packages! versioned packages
                                              {:skip-type-check? true})))
       (finally

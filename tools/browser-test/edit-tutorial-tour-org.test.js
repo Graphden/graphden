@@ -29,7 +29,7 @@
 const {chromium} = require('playwright');
 const {assert} = require('./edit-test-helpers');
 const {
-  waitTourTitle, clickTourButton, tourTitle, filterAndSelect,
+  waitTourTitle, clickTourButton, tourWhere, filterAndSelect,
   extendViaRowActions, bindFirstPlaceholder,
   openOperateSection, openAccountSettings,
   clickTourAdvance,
@@ -556,7 +556,7 @@ async function cleanup(page) {
     failed = true;
     console.error('FAIL:', err.message);
     try {
-      console.error('  tour title at failure:', await tourTitle(page));
+      console.error('  tour at failure:', await tourWhere(page));
       await page.screenshot({path: '/tmp/edit-tutorial-tour-org-fail.png'});
       console.error('  screenshot: /tmp/edit-tutorial-tour-org-fail.png');
     } catch (_) { /* page may be gone */ }

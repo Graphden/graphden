@@ -1,5 +1,6 @@
-// Lessons 15, 21, 20, 12, 18 — running fns, workspaces, the
-// Explorer/Inspector view layer, in-graph state, and tracing a run.
+// Lessons 15, 20, 21, 22, 12, 18 — running fns, the Explorer/Inspector,
+// working without the mouse, filters and views, in-graph state, and
+// tracing a run.
 //
 // Part of the interactive-tutorial drift guard: walks every step of its
 // lessons by doing the real UI actions, so a renamed class or a changed
@@ -14,7 +15,7 @@ const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {
   hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
-  runViaRowActions, tourTitle, extendViaRowActions, bindFirstPlaceholder,
+  runViaRowActions, tourWhere, extendViaRowActions, bindFirstPlaceholder,
   bindFnRefPlaceholder, finishAndDelete, runWithEffectAck, waitTourClosed,
   openRowActionsFor, bindNamedPlaceholder, bindPlaceholderOn, extendInPlace,
   waitUntil,
@@ -24,7 +25,7 @@ const {
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-ux — lessons 15 / 20 / 21 / 12 / 18');
+  console.log('edit-tutorial-tour-ux — lessons 15 / 20 / 21 / 22 / 12 / 18');
   let failed = false;
   try {
     await hardCleanup(page);
@@ -531,7 +532,7 @@ const {
     failed = true;
     console.error('FAIL:', err.message);
     try {
-      console.error('  tour title at failure:', await tourTitle(page));
+      console.error('  tour at failure:', await tourWhere(page));
       await page.screenshot({path: '/tmp/edit-tutorial-tour-ux-fail.png'});
       console.error('  screenshot: /tmp/edit-tutorial-tour-ux-fail.png');
     } catch (_) { /* page may be gone */ }

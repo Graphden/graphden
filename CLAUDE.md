@@ -435,7 +435,7 @@ and whether the step popover covers its target. Add
 ```bash
 cd tools/browser-test
 GRAPHDEN_TOUR_AUDIT=/tmp/audit GRAPHDEN_URL=http://localhost:9100 \
-  node edit-tutorial-tour-ux.test.js          # lessons 15 / 20 / 21 / 12 / 18
+  node edit-tutorial-tour-ux.test.js          # lessons 15 / 20 / 21 / 22 / 12 / 18
 node tour-spotlight-report.js /tmp/audit 15   # one lesson, flags: AMBIGUOUS×N,
                                               # NO-ELEMENT, POPOVER-COVERS-TARGET
 ```

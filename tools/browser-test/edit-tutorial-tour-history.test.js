@@ -1,4 +1,4 @@
-// Lessons 25 and 19 — version history, and the diagnostics bar's three panels.
+// Lessons 26 and 19 — version history, and the diagnostics bar's three panels.
 //
 // Both lessons are about surfaces that answer "what happened": the ⌛
 // popover (every version row of a fn, across branches, with restore) and
@@ -19,7 +19,7 @@
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {
-  hardCleanup, waitTourTitle, clickTourButton, tourTitle, filterAndSelect,
+  hardCleanup, waitTourTitle, clickTourButton, tourWhere, filterAndSelect,
   extendViaRowActions, openRowActionsFor, finishAndDelete, openOperateSection,
   waitUntil,
 } = require('./tutorial-tour-helpers');
@@ -195,7 +195,7 @@ async function openVersionHistory(page) {
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-history — lessons 25 / 19');
+  console.log('edit-tutorial-tour-history — lessons 26 / 19');
   let failed = false;
   try {
     await hardCleanup(page);
@@ -442,7 +442,7 @@ async function openVersionHistory(page) {
     failed = true;
     console.error('FAIL:', err.message);
     try {
-      console.error('  tour title at failure:', await tourTitle(page));
+      console.error('  tour at failure:', await tourWhere(page));
       await page.screenshot({path: '/tmp/edit-tutorial-tour-history-fail.png'});
       console.error('  screenshot: /tmp/edit-tutorial-tour-history-fail.png');
     } catch (_) { /* page may be gone */ }

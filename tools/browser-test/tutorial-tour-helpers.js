@@ -188,6 +188,28 @@ function tourTitle(page) {
 }
 
 
+// Where the tour stood, read from the tour DATA the page runs — lesson id +
+// slug + step — for a failure message. The walks' own labels are prose, and
+// after the 2026-09 renumbering half of them named the wrong lesson; a gate log
+// that says "lesson 23 (branches) · step 4/9" cannot drift that way.
+async function tourWhere(page) {
+  try {
+    return await page.evaluate(() => {
+      const t = document.querySelector('#gd-tour-pop .gd-tour-title');
+      const title = t ? t.textContent.trim() : null;
+      const lesson = (typeof _tourLesson === 'function') ? _tourLesson() : null;
+      if (!lesson) return title ? '"' + title + '" (no lesson state)' : 'no tour open';
+      const step = (typeof _tourState !== 'undefined' && _tourState) ? _tourState.step + 1 : '?';
+      return 'lesson ' + lesson.id + (lesson.slug ? ' (' + lesson.slug + ')' : '')
+        + ' · step ' + step + '/' + ((lesson.steps || []).length || '?')
+        + (title ? ' · "' + title + '"' : '');
+    });
+  } catch (e) {
+    return 'unreadable (' + e.message.split('\n')[0] + ')';
+  }
+}
+
+
 // Deadlines are sized for the GATE's shared e2e stack, not a dev laptop:
 // a write-following step there can stall >60s behind a registry recompile
 // plus GC churn (observed 2026-08-19: three 45s branch-wait timeouts and
@@ -422,7 +444,7 @@ async function filterAndSelect(page, filterText, fnName) {
   await page.fill('input[placeholder="Filter..."]', filterText);
   // The filter is debounced and server-side; wait for the row to actually
   // be in the tree rather than for a fixed slice of time. Same observable
-  // the lens probe in `edit-tutorial-tour-ops` waits on.
+  // the lens probe in `edit-tutorial-tour-picker` waits on.
   await page.waitForFunction((name) => {
     const row = Array.from(document.querySelectorAll('#entity-list .entity-item'))
       .find((e) => e.querySelector('.name')?.textContent.trim() === name);
@@ -1577,7 +1599,7 @@ async function openMarkerFormViaPlaceholder(page, argName, marker) {
 
 module.exports = {
   NS_NAME, FN_NAME,
-  retryingDelete, hardCleanup, tourTitle, waitTourTitle, settleTourRing, clickTourButton,
+  retryingDelete, hardCleanup, tourTitle, tourWhere, waitTourTitle, settleTourRing, clickTourButton,
   waitUntil, tourProgress, clickTourAdvance,
   installSpotlightAudit,
   filterAndSelect, openRowActionsFor, extendViaRowActions, bindFirstPlaceholder,

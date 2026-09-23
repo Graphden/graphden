@@ -517,6 +517,7 @@ async function gdEnterDiffMode(otherBranch) {
     // a dismissed mode (the refresh path has the same guard).
     if (epoch !== _gdDiffEnterEpoch) return;
     _gdDiffMode = fetched;
+    if (typeof gdDiffGhostsReset === 'function') gdDiffGhostsReset();
     try { localStorage.setItem(GD_DIFF_MODE_KEY, otherBranch); } catch (_) {}
     gdDiffModeLoadEffects(_gdDiffMode);
     gdDiffModeRenderChip();
@@ -559,6 +560,9 @@ async function gdDiffModeRefresh() {
     // resurrect a mode with no chip and no way out.
     if (_gdDiffMode === prev) {
       _gdDiffMode = fresh;
+      // The compared branch may have moved: next render re-reads its
+      // subtrees (the drawn clusters stay until then).
+      if (typeof gdDiffGhostsDropCache === 'function') gdDiffGhostsDropCache();
       gdDiffModeLoadEffects(fresh);
       gdDiffModeDecorateSidebar();
       gdDiffModeRenderChip();
@@ -597,7 +601,7 @@ function gdExitDiffMode() {
     .forEach((el) => { el.remove(); });
   document.querySelectorAll('.arg-overlay-diff-added, .edge-label-diff')
     .forEach((el) => { el.classList.remove('arg-overlay-diff-added', 'edge-label-diff'); });
-  if (typeof gdDiffGhostsClear === 'function') gdDiffGhostsClear();
+  if (typeof gdDiffGhostsReset === 'function') gdDiffGhostsReset();
   if (typeof gdAnnounce === 'function') gdAnnounce('Compare mode off');
 }
 

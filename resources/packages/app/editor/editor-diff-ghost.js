@@ -16,27 +16,23 @@
 // geometry sync (`gdDiffGhostsSync`) so a tween or a drag carries it.
 //
 // Exposes `gdDiffGhostsRender(container)` (called at the end of
-// `createNodeOverlays`) and `gdDiffGhostsSync()`.
+// `createNodeOverlays`), `gdDiffGhostsSync()`, and the two invalidations
+// compare mode calls: `gdDiffGhostsReset()` on enter / exit (drops the
+// clusters AND the subtree cache) and `gdDiffGhostsDropCache()` on a
+// refresh — either way the next render reads the compared branch as it
+// is now.
 
 const GD_GHOST_MAX_CARDS = 8;
 const GD_GHOST_MAX_ROWS = 6;
 const GD_GHOST_GAP_Y = 36;
 const GD_GHOST_CARD_W = 200;
-const GD_GHOST_CARD_GAP = 26;
-// subtree fetches, keyed `branch|fn-id` → Promise<lookups-like|null>
+// subtree fetches, keyed `branch|fn-id` → Promise<lookups-like|null>.
+// Only successes stay: a failed read is evicted so the next render
+// retries instead of showing no ghost until reload.
 const _gdGhostCache = new Map();
 // live clusters: {el, link, anchorId, rootId}
 let _gdGhosts = [];
 let _gdGhostEpoch = 0;
-
-function _gdGhostBranchHeaders(branch) {
-  const h = { 'X-Graphden-Branch': branch };
-  try {
-    const tok = (typeof getStoredToken === 'function') ? getStoredToken() : null;
-    if (tok) h.Authorization = 'Bearer ' + tok;
-  } catch (_) { /* the fetch wrap attaches the bearer anyway */ }
-  return h;
-}
 
 // The compared branch's subtree under `fnId`, indexed like `lookups`.
 function gdDiffGhostSubtree(branch, fnId) {
@@ -46,7 +42,9 @@ function gdDiffGhostSubtree(branch, fnId) {
     try {
       const r = await fetch(
         API.api_graph_entities + '?scope=subtree&root-id=' + encodeURIComponent(fnId),
-        { headers: _gdGhostBranchHeaders(branch) });
+        // Explicit branch header — the fetch wrap (editor-branch-context.js)
+        // keeps it and attaches the bearer.
+        { headers: { [BRANCH_HEADER]: branch } });
       if (!r.ok) return null;
       const sub = await r.json();
       if (!sub || !Array.isArray(sub.fns)) return null;
@@ -54,6 +52,7 @@ function gdDiffGhostSubtree(branch, fnId) {
     } catch (_) { return null; }
   })();
   _gdGhostCache.set(key, p);
+  p.then((lk) => { if (!lk && _gdGhostCache.get(key) === p) _gdGhostCache.delete(key); });
   return p;
 }
 
@@ -239,6 +238,17 @@ function gdDiffGhostsClear() {
   _gdGhosts = [];
 }
 
+function gdDiffGhostsDropCache() {
+  _gdGhostCache.clear();
+}
+
+function gdDiffGhostsReset() {
+  gdDiffGhostsClear();
+  gdDiffGhostsDropCache();
+  // An in-flight render's promises land into a stale epoch and draw nothing.
+  _gdGhostEpoch += 1;
+}
+
 // Which (anchor node, there-ref, slot) triples the current graph asks
 // for: value / placeholder arg nodes carry the owning fn + slot; a ref
 // bound HERE is an edge to a card, anchored on that card.
@@ -297,5 +307,7 @@ function gdDiffGhostsRender(container) {
 
 window.gdDiffGhostsRender = gdDiffGhostsRender;
 window.gdDiffGhostsClear = gdDiffGhostsClear;
+window.gdDiffGhostsReset = gdDiffGhostsReset;
+window.gdDiffGhostsDropCache = gdDiffGhostsDropCache;
 window.gdDiffGhostsSync = gdDiffGhostsSync;
 window.gdDiffGhostSubtree = gdDiffGhostSubtree;

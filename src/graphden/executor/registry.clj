@@ -72,16 +72,6 @@
       (get @default-registry fn-name)))
 
 
-(defn clear-base-fns!
-  "Reset the active registry to empty. The thread-local override (when
-   bound) is reset alone — the global is left untouched, so a
-   `with-clean-registry`-scoped test can clear and re-populate
-   without disturbing sibling tests on other threads."
-  []
-  (reset! (target-atom) {})
-  nil)
-
-
 (defn get-default-registry
   "Return the current registry map. Merges the global atom under the
    thread-local override (override wins on conflict) so callers see
@@ -91,10 +81,3 @@
   (if-let [override *registry-override*]
     (merge @default-registry @override)
     @default-registry))
-
-
-(defn get-base-fn-from-context
-  "Look up a base-fn by name in `context`'s `:base-fns` map. Returns nil
-   if absent."
-  [context fn-name]
-  (get (:base-fns context) fn-name))

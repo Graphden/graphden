@@ -2,8 +2,8 @@
 
 ## Why
 
-graphden's existing HOF wrapping (`hof-callable` in
-`graphden.executor.runtime`) treats every free-arg of a
+graphden's existing HOF wrapping (`hof-wrap` in
+`graphden.executor.compile-eager`) treats every free-arg of a
 wrapped fn-graph as a **call-site arg** — the executor passes the
 arg's value when invoking the callable. That works perfectly for
 data-flow HOFs like `:map`, `:filter`, `:reduce`: the callable
@@ -78,7 +78,7 @@ For `:schedule` composition:
 
 ## Implementation contract
 
-### Wrap-time capture (`hof-callable`)
+### Wrap-time capture (`hof-wrap`)
 
 When a fn-graph is HOF-wrapped, the executor:
 
@@ -347,7 +347,7 @@ No regressions expected for the existing HOF use cases. Specifically:
 
 ## Glossary
 
-- **Wrap site** — the location where `hof-callable` wraps a fn-graph
+- **Wrap site** — the location where `hof-wrap` wraps a fn-graph
   into a Clojure callable. Typically inside a parent fn's binding
   resolution (e.g. `:map`'s `:func` slot).
 - **Call site** — the location where the wrapped callable is invoked.

@@ -1120,13 +1120,6 @@
   (composition/sync-primitives! storage))
 
 
-;; =============================================================================
-;; Re-exports kept for downstream compatibility
-;; =============================================================================
-
-(def type->storage-kind types/type->storage-kind)
-
-
 (defn fn-uuid
   "Deterministic UUID for a globally-named fn — namespace-less. Tests
    call this; production paths use `records/fn-id` with the actual

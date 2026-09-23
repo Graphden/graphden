@@ -643,8 +643,8 @@
           ;; injected at the test entry point. Compile-produced
           ;; refs to `:fn`-typed slots are passed as IFn callables,
           ;; so we wrap the raw fn-id through
-          ;; `make-single-arg-callable` — same shape `hof-callable`
-          ;; uses for `:fn`-typed HOF args.
+          ;; `make-single-arg-callable` — the same callable shape the
+          ;; compiler hands `:fn`-typed HOF args.
           storage-query-id (get all-name->id :pg-query)
           args (cond-> {}
                  (contains? valid-args :request)

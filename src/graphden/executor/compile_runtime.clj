@@ -1482,8 +1482,8 @@
   "Invoke `fn-id` via the compiled registry. `named-args` is a `{arg-name
    value}` map using the outermost external arg names (rename-aware).
 
-   HOF impls that deref a `:fn`-type arg end up with a callable (from
-   `rt/hof-callable`) rather than a UUID and hand it back in through
+   HOF impls that deref a `:fn`-type arg end up with a callable (the
+   compiler's `compile-eager/hof-wrap`) rather than a UUID and hand it back in through
    this same entry point. For single-entry args the value is unwrapped
    from the map; for empty or multi-entry args the whole map is passed
    through.

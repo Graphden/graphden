@@ -56,13 +56,6 @@
   (registry/get-base-fn fn-name))
 
 
-(defn clear-base-fns!
-  "Clears all registered base functions from the global registry.
-   Useful for testing."
-  []
-  (registry/clear-base-fns!))
-
-
 (defn get-default-registry
   "Returns the current state of the default global registry as a map.
    Useful for passing to create-context.
@@ -72,13 +65,6 @@
                     :base-fns (get-default-registry)})"
   []
   (registry/get-default-registry))
-
-
-(defn get-base-fn-from-context
-  "Gets a base function from the context's registry by name.
-   Returns nil if not found."
-  [context fn-name]
-  (registry/get-base-fn-from-context context fn-name))
 
 
 ;; === Execution ===

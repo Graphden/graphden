@@ -22,10 +22,9 @@
    - `IDeref` values (test-supplied delays) → deref.
    - Everything else → return as-is.
 
-   For `:fn`-typed args (HOF), the callable is resolved via
-   `rt/hof-callable` so impls uniformly write `(mapv func coll)`
-   without worrying about whether `func` is a compiled closure or a
-   raw fn-id.
+   `:fn`-typed args (HOF) arrive already wrapped — the compiler binds
+   the slot to a callable (`compile-eager/hof-wrap`) — so impls
+   uniformly write `(mapv func coll)`.
 
    In-place symbol substitution preserves Clojure's natural short-circuit
    for `if`/`and`/`or`/`when`/`cond`.

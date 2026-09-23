@@ -61,9 +61,6 @@
     :else         #{}))
 
 
-(declare ^:private extract-dependencies* build-dependency-graph*)
-
-
 (defn- extract-dependencies
   "Extracts fn names that this fn-def depends on (parents, arg refs,
    type-row references, return-type). Returns set of keywords filtered
@@ -73,13 +70,6 @@
    whose slot is `:fn-ref`-typed. Such a binding names its target
    without evaluating it, so it is NOT an ordering dependency (a pair
    of services may name each other)."
-  ([fn-def fn-names-in-set]
-   (extract-dependencies fn-def fn-names-in-set (constantly false)))
-  ([fn-def fn-names-in-set identity-arg?]
-   (extract-dependencies* fn-def fn-names-in-set identity-arg?)))
-
-
-(defn- extract-dependencies*
   [fn-def fn-names-in-set identity-arg?]
   (let [args (:args fn-def {})
         parent-names (concat (when-let [p (:parent fn-def)] [p])
@@ -114,21 +104,12 @@
 (defn- build-dependency-graph
   "Builds dependency graph from fn-defs.
    Returns map of {fn-name -> #{dependency-names}}."
-  ([fn-defs] (build-dependency-graph fn-defs (constantly false)))
-  ([fn-defs identity-arg?]
-   (build-dependency-graph* fn-defs identity-arg?)))
-
-
-(defn- build-dependency-graph*
   [fn-defs identity-arg?]
   (let [fn-names (into #{} (map :name) fn-defs)]
     (into {}
           (map (fn [fd]
                  [(:name fd) (extract-dependencies fd fn-names identity-arg?)])
                fn-defs))))
-
-
-(declare ^:private topological-sort*)
 
 
 (defn topological-sort
@@ -149,57 +130,52 @@
   ([fn-defs]
    (topological-sort fn-defs (constantly false)))
   ([fn-defs identity-arg?]
-   (topological-sort* fn-defs identity-arg?)))
-
-
-(defn- topological-sort*
-  [fn-defs identity-arg?]
-  (let [dep-graph (build-dependency-graph fn-defs identity-arg?)
-        fn-def-map (into {} (map (juxt :name identity) fn-defs))
-        all-names (into #{} (map :name) fn-defs)
-        ;; Build reverse dependency map: {fn-name -> #{fns-that-depend-on-it}}
-        reverse-deps (reduce-kv
-                       (fn [acc fn-name deps]
-                         (reduce (fn [m dep]
-                                   (update m dep (fnil conj #{}) fn-name))
-                                 acc deps))
-                       {}
-                       dep-graph)
-        ;; Initial in-degree: count of unvisited dependencies
-        ;; Only count deps that are in our set (external deps are pre-satisfied)
-        initial-in-degree (into {}
-                                (map (fn [fn-name]
-                                       [fn-name (count (set/intersection
-                                                         (get dep-graph fn-name #{})
-                                                         all-names))]))
-                                all-names)
-        ;; Initial ready-set: nodes with no dependencies within the set
-        initial-ready (into #{} (filter #(zero? (get initial-in-degree % 0))) all-names)]
-    (loop [sorted []
-           ready-set initial-ready
-           in-degree initial-in-degree]
-      (if (empty? ready-set)
-        (if (= (count sorted) (count fn-defs))
-          (mapv fn-def-map sorted)
-          ;; Not all processed - cycle detected
-          (let [remaining (set/difference all-names (set sorted))]
-            (throw (ex-info "Circular dependency detected in fn definitions"
-                            {:type :fn-composition/circular-dependency
-                             :remaining remaining
-                             :dep-graph (select-keys dep-graph remaining)}))))
-        ;; Pick any ready node (first for determinism)
-        (let [current (first ready-set)
-              rest-ready (disj ready-set current)
-              ;; Update in-degree for all dependents
-              dependents (get reverse-deps current #{})
-              {:keys [new-ready new-in-degree]}
-              (reduce (fn [{:keys [new-ready new-in-degree]} dependent]
-                        (let [old-deg (get new-in-degree dependent)
-                              new-deg (dec old-deg)]
-                          {:new-in-degree (assoc new-in-degree dependent new-deg)
-                           :new-ready (if (zero? new-deg)
-                                        (conj new-ready dependent)
-                                        new-ready)}))
-                      {:new-ready rest-ready :new-in-degree in-degree}
-                      dependents)]
-          (recur (conj sorted current) new-ready new-in-degree))))))
+   (let [dep-graph (build-dependency-graph fn-defs identity-arg?)
+         fn-def-map (into {} (map (juxt :name identity) fn-defs))
+         all-names (into #{} (map :name) fn-defs)
+         ;; Build reverse dependency map: {fn-name -> #{fns-that-depend-on-it}}
+         reverse-deps (reduce-kv
+                        (fn [acc fn-name deps]
+                          (reduce (fn [m dep]
+                                    (update m dep (fnil conj #{}) fn-name))
+                                  acc deps))
+                        {}
+                        dep-graph)
+         ;; Initial in-degree: count of unvisited dependencies
+         ;; Only count deps that are in our set (external deps are pre-satisfied)
+         initial-in-degree (into {}
+                                 (map (fn [fn-name]
+                                        [fn-name (count (set/intersection
+                                                          (get dep-graph fn-name #{})
+                                                          all-names))]))
+                                 all-names)
+         ;; Initial ready-set: nodes with no dependencies within the set
+         initial-ready (into #{} (filter #(zero? (get initial-in-degree % 0))) all-names)]
+     (loop [sorted []
+            ready-set initial-ready
+            in-degree initial-in-degree]
+       (if (empty? ready-set)
+         (if (= (count sorted) (count fn-defs))
+           (mapv fn-def-map sorted)
+           ;; Not all processed - cycle detected
+           (let [remaining (set/difference all-names (set sorted))]
+             (throw (ex-info "Circular dependency detected in fn definitions"
+                             {:type :fn-composition/circular-dependency
+                              :remaining remaining
+                              :dep-graph (select-keys dep-graph remaining)}))))
+         ;; Pick any ready node (first for determinism)
+         (let [current (first ready-set)
+               rest-ready (disj ready-set current)
+               ;; Update in-degree for all dependents
+               dependents (get reverse-deps current #{})
+               {:keys [new-ready new-in-degree]}
+               (reduce (fn [{:keys [new-ready new-in-degree]} dependent]
+                         (let [old-deg (get new-in-degree dependent)
+                               new-deg (dec old-deg)]
+                           {:new-in-degree (assoc new-in-degree dependent new-deg)
+                            :new-ready (if (zero? new-deg)
+                                         (conj new-ready dependent)
+                                         new-ready)}))
+                       {:new-ready rest-ready :new-in-degree in-degree}
+                       dependents)]
+           (recur (conj sorted current) new-ready new-in-degree)))))))

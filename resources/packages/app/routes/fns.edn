@@ -248,7 +248,7 @@
    :args {:path "/partials/provenance" :handler :_partial-provenance-handler}}
 
   {:name :partial-return-type-rule
-   :description "GET /partials/return-type-rule?fn=<name> — the \"Type rule\" popover (the `↳` badge on a fn-card's return-type strip): rule-owner attribution + per-rule narrative + Inputs table, all computed server-side off the rich-types registry. Auth-required (`:get-auth-required`) for the same reason as `/partials/provenance` — it projects tenant-private type structure and so gates identically to `/api/graph/entities` and `/api/types` (closed to anonymous when auth is active, open when auth is off)."
+   :description "GET /partials/return-type-rule?fn-id=<uuid> — the \"Type rule\" popover (the `↳` badge on a fn-card's return-type strip): rule-owner attribution + per-rule narrative + Inputs table, all computed server-side off the rich-types registry. Auth-required (`:get-auth-required`) for the same reason as `/partials/provenance` — it projects tenant-private type structure and so gates identically to `/api/graph/entities` and `/api/types` (closed to anonymous when auth is active, open when auth is off)."
    :parent :get-auth-required
    :args {:path "/partials/return-type-rule" :handler :_partial-rtr-handler}}
 

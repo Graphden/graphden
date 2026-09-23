@@ -189,7 +189,7 @@
    replace them are gone: their one reader (the editor's client-side
    rule-owner walk) was replaced by the server-computed layout strip
    facts + `/partials/return-type-rule`, which read the RAW registry
-   via `registry/rule-owner-of`.
+   via `registry/rule-owner-info-of-id`.
 
    Exposed for tests — the wire shape of `/api/types` depends on this
    projector being applied to every entry."

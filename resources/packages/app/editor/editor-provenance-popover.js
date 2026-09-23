@@ -181,20 +181,22 @@ async function showProvenancePopover(arg, anchorEl) {
 // Return-type variant — anchored to the `↳` glyph on a fn-card's
 // return-type strip when an ancestor base-fn's :return-type-rule
 // computed this fn's return type. Server-rendered at
-// `GET /partials/return-type-rule?fn=<name>` — the rule-owner walk,
+// `GET /partials/return-type-rule?fn-id=<uuid>` — the rule-owner walk,
 // the per-rule narrative prose, and the Inputs table all ship from
 // the partial (the rule narratives live in the graph, as
 // `:_rtr-narratives`). JS mounts + anchors only, reusing the same
 // singleton element and dismiss handler as the slot-narrowing
 // popover above.
-async function showReturnTypeRulePopover(fnName, anchorEl) {
-  if (!fnName || !anchorEl) return;
-  const req = _provenanceBegin('rule|' + fnName);
+// By id, never by name: a bare name can live in several namespaces, and
+// the partial would then explain a different fn.
+async function showReturnTypeRulePopover(fnId, anchorEl) {
+  if (!fnId || !anchorEl) return;
+  const req = _provenanceBegin('rule|' + fnId);
   if (req == null) return;
   let html;
   try {
-    const r = await authFetch('/partials/return-type-rule?fn='
-                              + encodeURIComponent(fnName));
+    const r = await authFetch('/partials/return-type-rule?fn-id='
+                              + encodeURIComponent(fnId));
     html = r.ok ? await r.text() : null;
   } catch (_) {
     html = null;

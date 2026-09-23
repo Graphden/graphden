@@ -89,7 +89,7 @@
   ;; that arrive from OUTSIDE the system (the MCP `read-fn` tool's
   ;; user-typed name); internal flows that already hold a registry
   ;; entry carry its `:fn-id` instead (e.g. the return-type-rule
-  ;; popover's rule-owner link rides `:rule-owner-of-name`'s id).
+  ;; popover's rule-owner link rides `:rule-owner-of-id`'s id).
 
   {:name :_fibn-where
    :parent :assoc

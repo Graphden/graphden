@@ -52,8 +52,8 @@
   ;; --- effects banner ---------------------------------------------------
 
   {:name :_xp-entry
-   :parent :rich-type-of-name
-   :args {:fn-name :_xp-name}}
+   :parent :rich-type-of-id
+   :args {:fn-id {:ref :fn-id-param :type :nullable-uuid}}}
 
   {:name :_xp-effects
    :description "Sorted vec of the fn's computed effects (raw registry entry holds a set of keywords)."
@@ -1388,8 +1388,8 @@
   ;; --- enrich (effectful map — ns walk + free-arg lookup) ---
 
   {:name :_pvg-it-entry
-   :parent :rich-type-of-name
-   :args {:fn-name :_pvg-it-name}}
+   :parent :rich-type-of-id
+   :args {:fn-id :_pvg-it-id}}
 
   {:name :_pvg-it-effects
    :parent :sort

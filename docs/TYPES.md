@@ -1188,7 +1188,7 @@ Four stacked sections, SERVER-RENDERED (`GET /partials/provenance`
 | Slot effect bound | Slot's effective type is `[:fn args ret eff]` with a concrete eff set    | `eff: pure` (empty set) or one chip per allowed category. |
 
 The `↳` glyph on a fn-card's return-type strip opens the type-rule
-variant (`GET /partials/return-type-rule?fn=<name>`, also fully
+variant (`GET /partials/return-type-rule?fn-id=<uuid>`, also fully
 server-rendered): rule-owner attribution as a clickable link, a
 static per-rule narrative from the graph-resident `:_rtr-narratives`
 map — e.g. for `:assoc`: "Literal key + typed value add that field

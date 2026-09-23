@@ -160,9 +160,9 @@
    A seeded event scopes the restart to services depending on that fn on the
    edited branch; a full-clear event (no seed) conservatively restarts every
    service on the branch. Best-effort: the write already committed; a restart
-   failure is logged, never propagated. (The pod that emitted the event also
-   receives it and may restart a service its local hook just restarted — a rare
-   redundant bounce, not incorrectness.)"
+   failure is logged, never propagated. Runs for SIBLINGS' events only: LISTEN
+   echoes a pod's own events back to it, and its local write hook already
+   restarted those services (`on-notify` skips `own-event?`s)."
   [ctx id branch-id]
   (let [branch-uuid (when-not (str/blank? branch-id)
                       (java.util.UUID/fromString branch-id))
@@ -205,8 +205,12 @@
                      ;; Dropping the ctx cache does NOT rebuild an already-
                      ;; running cron/loop closure — restart the services that
                      ;; depend on the changed fn on this pod (mirrors the local
-                     ;; write hook, which only fired on the writer pod).
-                     (restart-notified-services! ctx id branch-id)
+                     ;; write hook, which only fired on the writer pod). NOT for
+                     ;; this pod's own echoed event: the local hook already
+                     ;; restarted them, and the echo bounced every affected
+                     ;; service a second time (once more per seed event).
+                     (when-not (pg-notify/own-event? (:notify-emitter ctx) event)
+                       (restart-notified-services! ctx id branch-id))
                      ;; Delta applied — mark the writer's exact bump
                      ;; values COVERED so the lazy epoch validation
                      ;; doesn't heal over what this event just did.

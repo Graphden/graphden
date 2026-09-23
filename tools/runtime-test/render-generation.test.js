@@ -95,6 +95,8 @@ function bootRender() {
     assert(await pa === false, 'A reports superseded');
     const s = m.state();
     assert(s.root === 'B' && s.bindings.join() === 'b-B', 'B pinned with B\'s rows, got ' + JSON.stringify(s));
+    assert(vm.runInContext('graphData.fns.some((f) => f.id === "A")', m.ctx),
+      'the overtaken fetch still adds its fn rows to the cache');
   }
 
   console.log(' ensureSubtreeFor: a fetch started before the reload phase is dropped');
@@ -107,6 +109,8 @@ function bootRender() {
     assert(await pa === false, 'the pre-reload fetch is superseded');
     const s = m.state();
     assert(s.root === null && s.bindings.length === 0, 'the fresh shell keeps no stale rows, got ' + JSON.stringify(s));
+    assert(!vm.runInContext('graphData.fns.some((f) => f.id === "A")', m.ctx),
+      'nor stale fn rows from before the reload');
     const again = m.ctx.ensureSubtreeFor('A');
     await flush();
     m.answer('A');

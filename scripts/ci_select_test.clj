@@ -52,6 +52,7 @@
         iac (run-names #{"deploy/kind/postgres.yaml"})
         compose (run-names #{"docker-compose.yml"})
         sh (run-names #{"dev/new-script.sh"})
+        wtq (run-names #{"dev/wtq/wt"})
         tour (run-names #{"docs/devtour/tour.edn"})]
     (is (every? src ["clj-kondo" "splint" "cljstyle" "tests-unit" "tests-perf" "perf"
                      "devtour" "devtour-emacs"])
@@ -62,6 +63,7 @@
     (is (contains? iac "trivy") "deploy/ IaC manifests are trivy-scanned — must stay relevant")
     (is (contains? compose "trivy") "docker-compose is trivy-scanned — must stay relevant")
     (is (contains? sh "shellcheck"))
+    (is (every? wtq ["shellcheck" "wtq-train"]) "the merge queue is linted AND exercised")
     (is (every? tour ["devtour" "devtour-emacs" "devtour-page"])
         "the tour's three reading paths are all baked from tour.edn")))
 

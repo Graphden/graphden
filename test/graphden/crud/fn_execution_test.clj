@@ -2529,3 +2529,22 @@
     (is (= (into {} (keep (fn [id] (some->> (lookup/resolve-fn-version-id c id) (vector id)))) ids)
            batch))
     (is (= #{(:id a) (:id b)} (set (keys batch))))))
+
+
+(deftest renamed-fn-shows-its-current-name-in-errors-and-stats-test
+  ;; Regression: the Errors panel, the failed-runs lens, the recent-runs
+  ;; list and the Stats top-fns table read the name off the `fn` identity
+  ;; row — the name the fn was CREATED with — so a renamed fn kept showing
+  ;; its original name. The version row carries the current one.
+  (let [storage (create-full-storage)
+        {composed :composed} (make-pure-add-fn! storage "pre-rename")
+        _ (sp/update-entity storage :fn (:id composed) {:name "post-rename-add"})
+        pool (:pool @shared-storage)
+        c (assoc (setup/default-registry-ctx storage) :pg-storage @shared-storage)
+        _ (apply-and-await! c {:fn-id (:id composed) :args {:a 1 :b "boom"}
+                               :timeout-ms 5000 :persist? true})
+        name-of (fn [rows] (:fn-name (first (filter #(= (str (:id composed)) (str (:fn-id %))) rows))))]
+    (is (= "post-rename-add" (name-of (exec-errors/recent-unresolved-failures c pool nil 7 10))))
+    (is (= "post-rename-add" (name-of (exec-errors/unresolved-failure-counts c pool nil 7))))
+    (is (= "post-rename-add" (name-of (exec-errors/recent-executions c pool nil 20))))
+    (is (= "post-rename-add" (name-of (exec-stats/org-fn-stats-named pool nil 7 50))))))

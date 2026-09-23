@@ -82,7 +82,7 @@
       pool
       (into [(str "SELECT e.id, fv.fn_id, e.fn_version_id, e.branch_id,"
                   " e.finished_at, e.error,"
-                  " e.error_data::text AS error_data, f.name AS fn_name,"
+                  " e.error_data::text AS error_data, fv.name AS fn_name,"
                   " f.namespace_id AS namespace_id"
                   " FROM \"fn_execution\" e"
                   " LEFT JOIN \"fn_version\" fv ON fv.id = e.fn_version_id"
@@ -237,7 +237,7 @@
               pool
               [(str "SELECT e.id, fv.fn_id, e.status, e.started_at, e.finished_at,"
                     " (e.path_trace IS NOT NULL) AS traced,"
-                    " f.name AS fn_name, f.namespace_id AS namespace_id"
+                    " fv.name AS fn_name, f.namespace_id AS namespace_id"
                     " FROM \"fn_execution\" e"
                     " LEFT JOIN \"fn_version\" fv ON fv.id = e.fn_version_id"
                     " LEFT JOIN \"fn\" f ON f.id = fv.fn_id"

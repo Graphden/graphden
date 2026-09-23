@@ -108,6 +108,8 @@
  {:name "tour-versions" :bb "tour-versions-check" :timeout 30000 :group :docs
   :relevant ["^resources/packages/app/tour/fns\\.edn$" "^test/resources/tour-versions\\.edn$"
              "^scripts/tour_versions\\.clj$"]}
+ {:name "tour-versions-selftest" :bb "tour-versions-test" :timeout 30000 :group :docs
+  :relevant ["^scripts/tour_versions(_test)?\\.clj$" "^bb\\.edn$"]}
  {:name "devtour"       :bb "devtour-check" :timeout  60000 :group :docs
   ;; `resources/packages/**/impls.clj` IS toured (~15 steps anchor on
   ;; base-fn impls like :add / :http-server / publish-package-apply), so

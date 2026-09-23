@@ -361,8 +361,12 @@
   {:doc "Rewrite test/resources/tour-versions.edn — per interactive-tutorial lesson, its :version and a digest of its steps. Run after bumping a lesson's :version, or after a cosmetic step edit that deliberately keeps it."
    :task (binding [*command-line-args* ["write"]] (load-file "scripts/tour_versions.clj"))}
 
+  tour-versions-test
+  {:doc "Self-test of the lesson-edition guard (scripts/tour_versions.clj). Runs inside bb ci as the tour-versions-selftest check."
+   :task (load-file "scripts/tour_versions_test.clj")}
+
   tour-versions-check
-  {:doc "CI guard for lesson editions: every lesson in app/tour/fns.edn has a positive-integer :version, and a lesson whose steps changed since test/resources/tour-versions.edn was recorded carries a NEW version. Fix by bumping :version, or `bb tour-versions` for a cosmetic edit."
+  {:doc "CI guard for lesson editions: every lesson in app/tour/fns.edn has a positive-integer :version, and test/resources/tour-versions.edn holds every lesson at exactly its current :version and steps. Steps changed at the same version -> bump :version (or `bb tour-versions` for a cosmetic edit); a version the record does not hold (a bump, a new lesson) -> `bb tour-versions`."
    :task (binding [*command-line-args* ["check"]] (load-file "scripts/tour_versions.clj"))}
 
   graph-lint

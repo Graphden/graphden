@@ -19,6 +19,33 @@
 # sets SWEEP_DELAY=0 itself — its executor has restart:on-failure
 # and doesn't bounce, so the delay is dead sleep there. This 2s
 # default is for a run against the DEMO (:9002).
+#
+# STRICT MODE (WTQ_FLAKE_STRICT=1, what the landing gate runs) — how a
+# failure is judged, in one place (details at each site below):
+#
+#   * A file that fails and then passes on a retry is a REAL flake → red
+#     result, UNLESS the failure carried an environment signature at the
+#     moment it happened: the compiled-path probe was dead (a server
+#     unavailability window), the registry did a FULL rebuild during the
+#     attempt (the request queued behind it), or the host was starved
+#     (MemAvailable / load average). A wait TIMEOUT is not by itself an
+#     environment signature any more: a UI race shows up exactly as a
+#     timeout, and exempting every timeout made strict mode report-only
+#     for every race.
+#   * The run as a whole is DEGRADED — and every strict flake / leak
+#     verdict drops to report-only — when the host starved the stack: at
+#     least THRASH_MIN_FILES files ran slow against THEIR OWN baseline
+#     (e2e-baseline.tsv: median seconds per file from green gate runs; slow
+#     = the passing attempt took > SLOW_FACTOR × baseline and at least
+#     SLOW_MIN_EXTRA seconds over it; a file with no baseline yet falls back
+#     to the absolute THRASH_FILE_SECS), or THRASH_MIN_FLAKED different
+#     files needed a retry. The old rule — any 3 files over an absolute
+#     150 s — fired on every healthy run once three tour files grew past
+#     it, so strict mode silently did nothing for weeks.
+#     Refresh the baseline after a suite change with
+#       node e2e-baseline.js <gate log>... > e2e-baseline.tsv
+#   * Leaks are counted per file as fns + namespaces + un-archived
+#     branches left behind.
 
 set -u
 cd "$(dirname "$0")" || exit 1
@@ -133,20 +160,51 @@ probe_compiled_path() {
 # written to stop numbers turning into folklore. Which argues FOR the
 # instrument, not against it: a printed measurement can be re-read and
 # corrected, a remembered one just gets repeated.
-executor_mem() {
-  local id port
-  # The container BEHIND $URL: match on the published port (a `bb wt up`
-  # stack, an isolated e2e stack), not on the canonical image tag — with
-  # several executors on the box the ancestor filter picked the first one
-  # (2026-09-07: a worktree run reported the personal instance's memory).
-  port="$(printf '%s' "$URL" | sed -nE 's#^[a-z]+://[^:/]+:([0-9]+).*#\1#p')"
-  if [ -n "$port" ]; then
-    id="$(docker ps --filter "publish=$port" --format '{{.ID}}' 2>/dev/null | head -1)"
+# Memory is read from the executor container's cgroup (`memory.current` minus
+# reclaimable `inactive_file` — the figure `docker stats` prints), not from
+# `docker stats --no-stream`: that call blocks 1-2 s for a fresh sample, and
+# with a `docker ps` to find the container it cost ~3 s per file, minutes per
+# gate. The container is resolved ONCE — the e2e stack hands its id over in
+# GD_EXECUTOR_CONTAINER; otherwise the one publishing $URL's port (a `bb wt up`
+# stack, the demo), not the canonical image tag: with several executors on
+# the box the ancestor filter picked the first one (2026-09-07: a worktree
+# run reported the personal instance's memory). Re-resolved only when the
+# cgroup disappears (a recreated container). No cgroup v2 on the host →
+# `docker stats` as before.
+EXECUTOR_ID=""
+EXECUTOR_CGROUP=""
+resolve_executor() {
+  local id="${GD_EXECUTOR_CONTAINER:-}" port p
+  if [ -z "$id" ]; then
+    port="$(printf '%s' "$URL" | sed -nE 's#^[a-z]+://[^:/]+:([0-9]+).*#\1#p')"
+    if [ -n "$port" ]; then
+      id="$(docker ps --no-trunc --filter "publish=$port" --format '{{.ID}}' 2>/dev/null | head -1)"
+    fi
+    [ -n "$id" ] || id="$(docker ps --no-trunc --filter "ancestor=${GD_IMAGE:-graphden-executor:latest}" \
+                    --format '{{.ID}}' 2>/dev/null | head -1)"
   fi
-  [ -n "$id" ] || id="$(docker ps --filter "ancestor=${GD_IMAGE:-graphden-executor:latest}" \
-                  --format '{{.ID}}' 2>/dev/null | head -1)"
-  [ -n "$id" ] || { printf '?'; return; }
-  docker stats --no-stream --format '{{.MemUsage}}' "$id" 2>/dev/null \
+  EXECUTOR_ID="$id"
+  EXECUTOR_CGROUP=""
+  [ -n "$id" ] || return
+  for p in "/sys/fs/cgroup/system.slice/docker-$id.scope" "/sys/fs/cgroup/docker/$id"; do
+    if [ -r "$p/memory.current" ]; then EXECUTOR_CGROUP="$p"; return; fi
+  done
+}
+executor_mem() {
+  if [ -z "$EXECUTOR_ID" ] || { [ -n "$EXECUTOR_CGROUP" ] && [ ! -r "$EXECUTOR_CGROUP/memory.current" ]; }; then
+    resolve_executor
+  fi
+  [ -n "$EXECUTOR_ID" ] || { printf '?'; return; }
+  if [ -n "$EXECUTOR_CGROUP" ]; then
+    awk -v cur="$(cat "$EXECUTOR_CGROUP/memory.current" 2>/dev/null)" \
+        '$1 == "inactive_file" {inact = $2}
+         END {v = cur - inact; if (cur == "" || v <= 0) {printf "?"; exit}
+              if (v >= 1073741824) printf "%.3fGiB", v / 1073741824;
+              else printf "%.1fMiB", v / 1048576}' \
+        "$EXECUTOR_CGROUP/memory.stat" 2>/dev/null || printf '?'
+    return
+  fi
+  docker stats --no-stream --format '{{.MemUsage}}' "$EXECUTOR_ID" 2>/dev/null \
     | awk '{print $1}' | head -1
 }
 TIMINGS=""          # "<seconds>\t<mem>\t<file>" per line, for the summary
@@ -178,21 +236,41 @@ SUITE_START=$SECONDS
 # file's after-count read as a leak of the WHOLE GRAPH — 8892 rows blamed on an
 # innocent test, which is the same misnaming trap as the namespaces note above.
 # -1 is not a count, so the leak verdict below can tell "no rows" from "no answer".
-fn_count() {
-  curl -fsS -H "Authorization: Bearer ${AUTH_TOKEN:-}" \
-       "$URL/api/graph/entities?scope=index" 2>/dev/null \
-    | python3 -c 'import sys,json; d=json.load(sys.stdin); print(len(d.get("fns") or []))' \
-       2>/dev/null || echo -1
+#
+# Namespaces leak too — a package install creates one per version — and they
+# show up in the sidebar tree of every file that runs after. Counted
+# separately so the report says which kind of row was left behind. Both come
+# from ONE `scope=index` read (the payload carries both lists; the old
+# fn_count / ns_count pair downloaded the same whole-graph index twice per
+# sample, four times per file).
+#
+# Branches leak as well, and nothing counted them: four files left ten
+# branches in every gate run because their cleanup DELETEs were refused (a
+# merged branch is undeletable while its target lives) and the refusal was
+# swallowed. An ARCHIVED branch is not counted — archiving is the designed
+# end state of a branch that cannot be deleted (see deleteBranches in
+# edit-test-helpers.js).
+#
+# Prints "<fns> <namespaces> <branches>"; "-1 -1 -1" when any read failed.
+SAMPLE_DIR="$(mktemp -d /tmp/e2e-sample.XXXXXX)"
+trap 'rm -rf "$SAMPLE_DIR"' EXIT
+graph_counts() {
+  if curl -fsS --max-time 30 -H "Authorization: Bearer ${AUTH_TOKEN:-}" \
+          -o "$SAMPLE_DIR/index.json" "$URL/api/graph/entities?scope=index" 2>/dev/null \
+     && curl -fsS --max-time 30 -H "Authorization: Bearer ${AUTH_TOKEN:-}" \
+          -o "$SAMPLE_DIR/branches.json" "$URL/api/branches" 2>/dev/null; then
+    python3 -c '
+import sys, json
+d = json.load(open(sys.argv[1]))
+b = json.load(open(sys.argv[2]))
+live = [x for x in (b.get("branches") or []) if not x.get("archived-at")]
+print(len(d.get("fns") or []), len(d.get("namespaces") or []), len(live))
+' "$SAMPLE_DIR/index.json" "$SAMPLE_DIR/branches.json" 2>/dev/null || echo "-1 -1 -1"
+  else
+    echo "-1 -1 -1"
+  fi
 }
-# Namespaces leak too — a package install creates one per version — and they show
-# up in the sidebar tree of every file that runs after. Counted separately so the
-# report says which kind of row was left behind.
-ns_count() {
-  curl -fsS -H "Authorization: Bearer ${AUTH_TOKEN:-}" \
-       "$URL/api/graph/entities?scope=index" 2>/dev/null \
-    | python3 -c 'import sys,json; d=json.load(sys.stdin); print(len(d.get("namespaces") or []))' \
-       2>/dev/null || echo -1
-}
+
 # What did the executor DO while this file ran?
 #
 # The leak counters above answer "did it leave rows behind", and they come back
@@ -243,8 +321,59 @@ print(1 if any(k in a and a[k] < b[k] for k in b) else 0)
 ' "$1" "$2" 2>/dev/null || echo 0
 }
 
+# Did the registry do a FULL rebuild between two counter samples? That is the
+# one executor event known to stall a request long enough to time a wait out
+# (a full-clear makes the next request recompile the whole graph — 49.8 s at
+# 4137 fns); delta recompiles are routine and small. Prints `1` or `0`.
+counters_full_rebuild() {
+  python3 -c '
+import sys, json
+b = json.loads(sys.argv[1] or "{}")
+a = json.loads(sys.argv[2] or "{}")
+keys = ("registry/invalidate-full", "registry/rebuild", "registry/delta-fell-back-to-rebuild")
+restarted = any(k in a and a[k] < b[k] for k in b)
+print(1 if restarted or any(a.get(k, 0) > b.get(k, 0) for k in keys) else 0)
+' "$1" "$2" 2>/dev/null || echo 0
+}
+
+# Is the HOST starving the stack right now? Empty when not; otherwise what it
+# saw. Thresholds: HOST_MEM_MIN_MB (MemAvailable, default 1000) and
+# HOST_LOAD_PER_CPU (1-min load per CPU, default 2).
+host_starved() {
+  local avail load cpus
+  avail="$(awk '/^MemAvailable:/ {printf "%d", $2 / 1024}' /proc/meminfo 2>/dev/null)"
+  load="$(cut -d' ' -f1 /proc/loadavg 2>/dev/null)"
+  cpus="$(nproc 2>/dev/null || echo 1)"
+  awk -v a="${avail:-}" -v l="${load:-0}" -v c="$cpus" \
+      -v amin="${HOST_MEM_MIN_MB:-1000}" -v lmax="${HOST_LOAD_PER_CPU:-2}" 'BEGIN {
+    if (a != "" && a + 0 < amin + 0) printf "MemAvailable=%dMB ", a;
+    if (l + 0 > lmax * c) printf "load1=%s on %d cpus", l, c }'
+}
+
+# Per-file duration baseline for the DEGRADED verdict (see the header).
+declare -A BASELINE
+BASELINE_FILE="${E2E_BASELINE:-e2e-baseline.tsv}"
+if [ -r "$BASELINE_FILE" ]; then
+  while IFS=$'\t' read -r b_secs b_file; do
+    case "$b_secs" in ''|'#'*) continue ;; esac
+    BASELINE["$b_file"]="$b_secs"
+  done < "$BASELINE_FILE"
+fi
+SLOW_FACTOR="${SLOW_FACTOR:-2.5}"
+SLOW_MIN_EXTRA="${SLOW_MIN_EXTRA:-30}"
+# Seconds past which a file's attempt reads as STARVED rather than slow-ish.
+slow_limit() {
+  local b="${BASELINE[$1]:-}"
+  if [ -z "$b" ]; then printf '%s' "$THRASH_FILE_SECS"; return; fi
+  awk -v b="$b" -v f="$SLOW_FACTOR" -v m="$SLOW_MIN_EXTRA" \
+      'BEGIN {l = b * f; if (l < b + m) l = b + m; printf "%d", l}'
+}
+
+pos() { if [ "$1" -gt 0 ] 2>/dev/null; then echo "$1"; else echo 0; fi; }
+
 LEAKS=""
 FLAKED=""
+SLOW_FILES=""       # "file(secs>limit)" for the DEGRADED banner
 
 WORST=0
 PASS=0
@@ -259,7 +388,7 @@ FAILED_NAMES=""
 # still reproduces on a quiet host, where DEGRADED=0 and strict stays on.
 STRICT_FLAKES=""    # flaked-passed-on-retry files; strict-escalated only if NOT degraded
 STRICT_LEAKS=""     # leak-in-passing-test files (name(count)); same
-DEGRADED_FILES=0    # count of files that ran slower than THRASH_FILE_SECS
+DEGRADED_FILES=0    # count of files whose attempt ran past slow_limit (own baseline)
 UNCOUNTABLE_LEAKS=0 # files whose leak check was skipped: the executor was down for a
                     # sample, or restarted between the two. Named in the leak banner so
                     # a skipped check never reads as a clean one.
@@ -267,8 +396,8 @@ HEAP_HWM_MIB=0      # executor heap high-water (docker stats), MiB — INFO ONLY
                     # NOT a degraded trigger: a JVM at MaxRAMPercentage commits heap toward
                     # the cap regardless of pressure (the "executor memory" note at the end
                     # of this file measured a FLAT after-GC live-set), so ~1.7GiB is normal.
-THRASH_FILE_SECS=${THRASH_FILE_SECS:-150}   # norm ~10-40s; >150s = starved (hard cap is 300s)
-THRASH_MIN_FILES=${THRASH_MIN_FILES:-3}     # this many slow files => degraded run
+THRASH_FILE_SECS=${THRASH_FILE_SECS:-150}   # slow limit for a file with NO baseline yet (cap is 300s)
+THRASH_MIN_FILES=${THRASH_MIN_FILES:-3}     # this many slow files (vs own baseline) => degraded run
 THRASH_MIN_FLAKED=${THRASH_MIN_FLAKED:-2}   # OR this many DIFFERENT files needing a retry: a
                                             # real race is localized to one file, so several
                                             # innocent files flaking in one run = host jitter
@@ -307,9 +436,9 @@ for f in $FILES; do
     continue
   fi
   CONSECUTIVE_DOWN=0
-  FN_BEFORE="$(fn_count)"
-  NS_BEFORE="$(ns_count)"
+  read -r FN_BEFORE NS_BEFORE BR_BEFORE <<<"$(graph_counts)"
   CTR_BEFORE="$(executor_counters)"
+  CTR_ATTEMPT="$CTR_BEFORE"
   # Per-test wall-clock cap. Individual tests should complete in
   # < 1 min under load; bounded at 5 min hard, then SIGKILL via the
   # GNU coreutils `timeout`. Without this a stuck `page.evaluate`
@@ -342,16 +471,20 @@ for f in $FILES; do
   rc=0
   is_timeout=0
   real_flake=0
+  judged_secs=""      # the passing attempt's seconds, else the fastest failed one
   for attempt in 1 2 3 4 5; do
     if [ "$attempt" -gt 1 ]; then
       echo "  (attempt $((attempt - 1)) rc=$rc — sleeping 10s, retry $attempt/5)" >&2
       sleep 10
       wait_for_server || break
+      CTR_ATTEMPT="$(executor_counters)"
     fi
     attempt_out="$(mktemp)"
     GRAPHDEN_TOUR_AUDIT="$AUDIT_ROOT/${f%.test.js}.attempt$attempt"
     export GRAPHDEN_TOUR_AUDIT
+    ATTEMPT_START=$SECONDS
     if timeout -k 5 "${PER_TEST_TIMEOUT:-300}" node "$f" >"$attempt_out" 2>&1; then
+      judged_secs=$((SECONDS - ATTEMPT_START))
       cat "$attempt_out"; rm -f "$attempt_out"
       passed=1
       [ -d "$GRAPHDEN_TOUR_AUDIT" ] && AUDIT_DIRS="$AUDIT_DIRS $GRAPHDEN_TOUR_AUDIT"
@@ -361,28 +494,39 @@ for f in $FILES; do
       # would read the `if`'s own status, which is 0 for a false condition
       # with no else, masking a real 124/137 timeout.
       rc=$?
+      a_secs=$((SECONDS - ATTEMPT_START))
+      if [ -z "$judged_secs" ] || [ "$a_secs" -lt "$judged_secs" ]; then judged_secs=$a_secs; fi
       cat "$attempt_out"
       if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then is_timeout=1; fi
-      # Strict-flake TRIAGE. Two environment signatures, probed at the
-      # moment of failure; anything else is a REAL flake:
+      # Strict-flake TRIAGE. Three environment signatures, probed at the
+      # moment of failure; anything else is a REAL flake candidate:
       #   - compiled-path probe DEAD → unavailability window (a request-
       #     path recompile parks the worker pool while /health stays 200);
-      #   - the attempt died as a WAIT TIMEOUT → the request queued behind
-      #     a recompile (reads serve — the probe passes — while a write
-      #     waits on the compile permit; measured: the same publish is
-      #     >60s in-sweep and 4-5s solo, 8/8).
-      # A genuine race manifests as a wrong-DOM/assertion failure, which
-      # matches neither signature and stays a strict RED. Eight gate runs
-      # of evidence behind this split: every flake so far was
-      # timeout-shaped with 60/60 on retry.
+      #   - the registry did a FULL rebuild during this attempt → a request
+      #     queued behind the recompile (reads serve — the probe passes —
+      #     while a write waits on the compile permit; measured: the same
+      #     publish is >60s in-sweep and 4-5s solo, 8/8);
+      #   - the HOST is starved right now (host_starved).
+      # A wait TIMEOUT alone is NOT one of them. It used to be — "every
+      # flake so far was timeout-shaped" — but a UI race looks exactly like
+      # a timeout too (the selector the race removed never shows up), so
+      # that rule exempted every race and strict mode caught nothing. A
+      # timeout with none of the signatures above is judged like any other
+      # failure; a starved RUN is still forgiven by the run-level DEGRADED
+      # verdict after the loop.
+      shape="assertion"
+      if grep -qE 'Timeout [0-9]+ms exceeded|TimeoutError' "$attempt_out" \
+         || [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then shape="timeout"; fi
+      starved="$(host_starved)"
       if ! probe_compiled_path; then
         echo "  (probe: compiled path DEAD at failure time — SERVER WINDOW, not counted strict)" >&2
-      elif grep -qE 'Timeout [0-9]+ms exceeded|TimeoutError' "$attempt_out" \
-           || [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
-        echo "  (probe OK but failure is timeout-shaped — request stalled behind a recompile, not counted strict)" >&2
+      elif [ "$(counters_full_rebuild "$CTR_ATTEMPT" "$(executor_counters)")" = 1 ]; then
+        echo "  ($shape-shaped failure during a FULL registry rebuild — stalled behind the recompile, not counted strict)" >&2
+      elif [ -n "$starved" ]; then
+        echo "  ($shape-shaped failure on a starved host ($starved) — not counted strict)" >&2
       else
         real_flake=1
-        echo "  (probe OK and failure is NOT timeout-shaped — REAL flake candidate)" >&2
+        echo "  (probe OK, no rebuild, host healthy — $shape-shaped failure is a REAL flake candidate)" >&2
       fi
       rm -f "$attempt_out"
     fi
@@ -416,17 +560,29 @@ for f in $FILES; do
   # differently from one slow run (the FLAKED note lives only in the summary).
   ATTEMPT_NOTE=""
   if [ "${attempt:-1}" -gt 1 ]; then ATTEMPT_NOTE="  attempts=$attempt"; fi
-  # Thrash signal: a file far past the norm. (Heap high-water is tracked too but
-  # only for the banner — see the HEAP_HWM_MIB note above for why it is not a trigger.)
-  # executor_mem is like "1.701GiB" / "812.3MiB" / "?" — normalise to MiB.
-  if [ "$FILE_SECS" -gt "$THRASH_FILE_SECS" ]; then DEGRADED_FILES=$((DEGRADED_FILES+1)); fi
+  # Thrash signal: an attempt far past THIS file's own baseline — the passing
+  # attempt, or the fastest failed one (a retried file's wall time spans every
+  # attempt, and a failure that sat out a wait timeout is slow BECAUSE it
+  # failed, which says nothing about the host). (Heap high-water is tracked
+  # too but only for the banner — see the HEAP_HWM_MIB note above for why it
+  # is not a trigger.) executor_mem is like "1.701GiB" / "812.3MiB" / "?" —
+  # normalise to MiB.
+  file_limit="$(slow_limit "$f")"
+  if [ -n "$judged_secs" ] && [ "$judged_secs" -gt "$file_limit" ]; then
+    DEGRADED_FILES=$((DEGRADED_FILES+1))
+    SLOW_FILES="$SLOW_FILES $f(${judged_secs}s>${file_limit}s)"
+    echo "  (slow: ${judged_secs}s vs this file's limit ${file_limit}s — counts toward DEGRADED)" >&2
+  fi
   file_mib="$(printf '%s' "$FILE_MEM" | awk '{v=$0; g=(v ~ /GiB/); sub(/[A-Za-z].*/,"",v); if (v+0>0) printf "%d", (g? v*1024 : v+0); else print 0}')"
   if [ "${file_mib:-0}" -gt "$HEAP_HWM_MIB" ] 2>/dev/null; then HEAP_HWM_MIB="$file_mib"; fi
-  FN_AFTER="$(fn_count)"
-  NS_AFTER="$(ns_count)"
+  read -r FN_AFTER NS_AFTER BR_AFTER <<<"$(graph_counts)"
   CTR_AFTER="$(executor_counters)"
   CTR_DELTA="$(counters_delta "$CTR_BEFORE" "$CTR_AFTER")"
-  FN_LEAKED=$(( (FN_AFTER - FN_BEFORE) + (NS_AFTER - NS_BEFORE) ))
+  # Each kind on its own, positives only: a file that removed two stray fns
+  # and left two branches behind has not "leaked 0".
+  FN_LEAKED=$(( $(pos $((FN_AFTER - FN_BEFORE))) + $(pos $((NS_AFTER - NS_BEFORE))) \
+                + $(pos $((BR_AFTER - BR_BEFORE))) ))
+  LEAK_KINDS="fns=$((FN_AFTER - FN_BEFORE)) namespaces=$((NS_AFTER - NS_BEFORE)) branches=$((BR_AFTER - BR_BEFORE))"
   # Is the leak number MEANINGFUL at all? Two ways it is not, and in both the
   # honest answer is silence rather than a number: a sample that never arrived
   # (-1 sentinel, the executor was down when we asked), and a process restart
@@ -435,8 +591,9 @@ for f in $FILES; do
   # This is the accounting that reported `8892 edit-tutorial-tour-structure` and
   # reddened an otherwise-green run: the file was innocent, the ruler was not.
   LEAK_COUNTABLE=1
-  if [ "$FN_BEFORE" -lt 0 ] 2>/dev/null || [ "$NS_BEFORE" -lt 0 ] 2>/dev/null \
-     || [ "$FN_AFTER" -lt 0 ] 2>/dev/null || [ "$NS_AFTER" -lt 0 ] 2>/dev/null; then
+  if [ "$FN_BEFORE" -lt 0 ] 2>/dev/null || [ "$FN_AFTER" -lt 0 ] 2>/dev/null \
+     || [ "$NS_BEFORE" -lt 0 ] 2>/dev/null || [ "$NS_AFTER" -lt 0 ] 2>/dev/null \
+     || [ "$BR_BEFORE" -lt 0 ] 2>/dev/null || [ "$BR_AFTER" -lt 0 ] 2>/dev/null; then
     LEAK_COUNTABLE=0
     UNCOUNTABLE_LEAKS=$((UNCOUNTABLE_LEAKS+1))
     echo "  (graph counts unavailable — executor was unreachable; leak check skipped)" >&2
@@ -449,9 +606,9 @@ for f in $FILES; do
     FN_LEAKED=0
   fi
   if [ "$FN_LEAKED" -gt 0 ] 2>/dev/null && [ "$passed" = 1 ]; then
-    printf '  [%3ds  executor=%s%s]%s  \033[31mLEAKED %d entities into the graph\033[0m\n' \
-      "$FILE_SECS" "$FILE_MEM" "$ATTEMPT_NOTE" "${CTR_DELTA:+  $CTR_DELTA}" "$FN_LEAKED"
-    LEAKS="$LEAKS$FN_LEAKED	$f
+    printf '  [%3ds  executor=%s%s]%s  \033[31mLEAKED %d rows into the graph (%s)\033[0m\n' \
+      "$FILE_SECS" "$FILE_MEM" "$ATTEMPT_NOTE" "${CTR_DELTA:+  $CTR_DELTA}" "$FN_LEAKED" "$LEAK_KINDS"
+    LEAKS="$LEAKS$FN_LEAKED	$f ($LEAK_KINDS)
 "
     # A leak in a PASSING test is a real cleanup-bug signal — the entities stay
     # and the next file runs against a graph it did not create, which is how
@@ -499,8 +656,8 @@ fi
 
 # --- run-level thrash decision (see the state block before the loop) ---
 # The run is DEGRADED when the host was starving the stack: several files ran far
-# past the norm, or the executor heap sat at its high-water. Under those
-# conditions a strict flake/leak is the environment, not the branch.
+# past their OWN baseline, or several different files needed a retry. Under
+# those conditions a strict flake/leak is the environment, not the branch.
 DEGRADED=0
 FLAKED_COUNT=0
 for _x in $FLAKED; do FLAKED_COUNT=$((FLAKED_COUNT+1)); done
@@ -555,7 +712,7 @@ if [ "$FAIL" != "0" ]; then
   echo "  failed:$FAILED_NAMES" >&2
 fi
 if [ "$DEGRADED" = 1 ]; then
-  echo "  ⚠ ENVIRONMENT DEGRADED: ${DEGRADED_FILES} file(s) ran >${THRASH_FILE_SECS}s (norm ~10-40s), ${FLAKED_COUNT} file(s) needed a retry; executor heap high-water ${HEAP_HWM_MIB}MiB (info)." >&2
+  echo "  ⚠ ENVIRONMENT DEGRADED: ${DEGRADED_FILES} file(s) ran past ${SLOW_FACTOR}x their baseline:${SLOW_FILES:- none}; ${FLAKED_COUNT} file(s) needed a retry; executor heap high-water ${HEAP_HWM_MIB}MiB (info)." >&2
   echo "    Strict flake/leak verdicts were downgraded to report-only — a retry-pass under thrash is a pass, not a race." >&2
   if [ "$FAIL" != "0" ]; then
     echo "    A file HARD-failed above: the host is too starved to judge it. Free RAM (e.g. 'docker stop graphden-executor' to drop the demo stack) and re-run on a quiet host — do NOT read this as a branch regression." >&2

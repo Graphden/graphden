@@ -528,6 +528,11 @@
                 env (ProcessBuilder/.environment pb)]
             (java.util.Map/.put env "GRAPHDEN_URL" url)
             (java.util.Map/.put env "AUTH_TOKEN" auth-token)
+            ;; run-edit-tests.sh reads the executor's memory straight from
+            ;; this container's cgroup instead of paying a `docker ps` +
+            ;; `docker stats --no-stream` (~3 s) per file.
+            (when container-id
+              (java.util.Map/.put env "GD_EXECUTOR_CONTAINER" container-id))
             ;; run-edit-tests.sh sleeps SWEEP_DELAY (default 2s) between files so the
             ;; DEMO container (:9002, restart:unless-stopped) can GC before its
             ;; restart policy bounces it mid-sweep. This ISOLATED stack has its own

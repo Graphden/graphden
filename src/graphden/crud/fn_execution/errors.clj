@@ -100,14 +100,10 @@
   "Keep only rows whose failing version is STILL what the viewing
    branch resolves for that fn — a shipped fix, a branch-local
    override, or a deleted fn all clear the failure. Resolution goes
-   through `lookup/resolve-fn-version-id` (chain + merge aware); one
-   resolve per DISTINCT fn-id, not per row."
+   through `lookup/resolve-fn-version-ids` (chain + merge aware) — one
+   batched version load for every distinct fn-id, not a resolve per fn."
   [ctx rows]
-  (let [current (into {}
-                      (keep (fn [fid]
-                              (when-let [vid (lookup/resolve-fn-version-id ctx fid)]
-                                [fid vid])))
-                      (distinct (keep :fn_id rows)))]
+  (let [current (lookup/resolve-fn-version-ids ctx (keep :fn_id rows))]
     (filterv (fn [r]
                (and (:fn_id r)
                     (= (get current (:fn_id r)) (:fn_version_id r))))

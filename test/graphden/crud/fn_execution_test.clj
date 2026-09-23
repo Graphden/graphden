@@ -2511,3 +2511,21 @@
     (is (some? eid) "persisted run returns an execution id")
     (is (= (:id composed) (:fn-id row))
         "read-time join back to the LOGICAL fn id")))
+
+
+(deftest resolve-fn-version-ids-matches-the-per-fn-resolve-test
+  ;; The /api/tests/status + Errors-panel N+1: both resolved versions one
+  ;; fn at a time (~750-1100 queries per status read with ~370 tests).
+  ;; The batch answer must be exactly the per-fn answer — deleted fns
+  ;; (tombstone winners) and unknown ids absent.
+  (let [storage (create-full-storage)
+        {a :composed} (make-pure-add-fn! storage "batch-a")
+        {b :composed} (make-pure-add-fn! storage "batch-b")
+        {gone :composed} (make-pure-add-fn! storage "batch-gone")
+        _ (sp/delete-entity storage :fn (:id gone))
+        c (setup/default-registry-ctx storage)
+        ids [(:id a) (:id b) (:id gone) (random-uuid)]
+        batch (lookup/resolve-fn-version-ids c ids)]
+    (is (= (into {} (keep (fn [id] (some->> (lookup/resolve-fn-version-id c id) (vector id)))) ids)
+           batch))
+    (is (= #{(:id a) (:id b)} (set (keys batch))))))

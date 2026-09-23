@@ -37,6 +37,19 @@
         (:id (res/resolve-version base :fn fn-id branch-id))))))
 
 
+(defn resolve-fn-version-ids
+  "Batch `resolve-fn-version-id`: `{fn-id → current fn-version-id}` for
+   the `fn-ids` visible on the active branch, from ONE merge-aware version
+   load (the per-fn form costs a handful of queries per id). Fns with no
+   live version here are absent; `{}` on a non-versioned storage."
+  [ctx fn-ids]
+  (let [storage (request/require-storage ctx)]
+    (if (and (seq fn-ids) (vs/versioned-storage? storage))
+      (res/resolve-version-ids (vs/unwrap storage) :fn (vec (distinct fn-ids))
+                               (vs/current-branch-id storage))
+      {})))
+
+
 (defn query-fn-by-name
   "Storage schemas vary on whether `fn.name` is stored as text or as
    an enum (the package-loader codec roundtrip is sometimes one,

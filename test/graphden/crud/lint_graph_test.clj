@@ -13,6 +13,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.entities :as entities]
     [graphden.crud.types-api :as types-api]
+    [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.lint.core :as lint]
     [graphden.lint.graph :as lg]
@@ -112,3 +113,27 @@
         (entities/create-entity "binding" {:fn-id user :slot-id (slot-id storage assoc-id "map")
                                            :ref-fn-id dead} ctx)
         (is (empty? (filterv #(= :unreferenced-private (:rule %)) (findings-naming ctx dead #{}))))))))
+
+
+(deftest branch-lint-warnings-display-rows-test
+  ;; The display row is graph composition over `:branch-lint-findings`:
+  ;; the wire shape the Lint tab and the problem lens read must not move.
+  (let [{:keys [ctx storage all-name->id]} *graph*
+        title (fn-id-by-name storage "const")
+        a (make-assoc-child! ctx storage "lint-row-a" "row" title)
+        b (make-assoc-child! ctx storage "lint-row-b" "row" title)
+        rows (exec/execute-with-named-args ctx (get all-name->id :branch-lint-warnings)
+                                           {:suppressed []})
+        row (first (filter #(= [(str a) (str b)] (:fn-ids %)) rows))]
+    (is (some? row) (pr-str rows))
+    (is (= "duplicate-definition" (:rule row)))
+    (is (string? (:message row)))
+    (is (number? (:weight row)))
+    (is (= (str a "," b) (:fn-ids-csv row)))
+    (is (= [{:id (str a) :name "lint-row-a" :ns ""} {:id (str b) :name "lint-row-b" :ns ""}]
+           (:fns row)))
+    (testing "a stored suppression drops the row"
+      (is (not-any? #(= [(str a) (str b)] (:fn-ids %))
+                    (exec/execute-with-named-args
+                      ctx (get all-name->id :branch-lint-warnings)
+                      {:suppressed [{:rule "duplicate-definition" :fn-ids [(str a) (str b)]}]}))))))

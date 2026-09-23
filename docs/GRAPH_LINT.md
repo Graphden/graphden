@@ -213,8 +213,10 @@ only what the author explicitly said.
 The flow is graph composition (`app/editor-panels/fns.edn` `_plint-*`
 for the store and the entry, `app/editor-provenance/fns.edn`
 `_insp-lint-*` for the section) over one base-fn,
-`:branch-lint-warnings`, whose impl is a single
-`lint.graph/lint-branch` call. The section is parametrised by
+`:branch-lint-findings`, whose impl is a single
+`lint.graph/lint-branch` call plus the coercion of its findings to wire
+data; `:branch-lint-warnings` reshapes each into a display row in the
+graph. The section is parametrised by
 `:suppressed` so the POST handlers render from the list they just
 wrote — the store's own thunk was forced before the write
 (ADR-thunk-once). Every reader lints the per-ctx graph snapshot: a

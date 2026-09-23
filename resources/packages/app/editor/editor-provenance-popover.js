@@ -21,6 +21,20 @@ let provenancePopoverAnchor = null;
 // close and Escape bumps it, and a response carrying an older one is dropped
 // instead of opening the popover after the reader moved on.
 let _provenanceReq = 0;
+// The request still in flight, by what it asks for: a repeat click on the
+// same badge joins it instead of superseding it (a burst of clicks on a slow
+// answer would otherwise drop every answer but one that never comes).
+let _provenancePending = null;   // {key, req}
+function _provenanceBegin(key) {
+  if (_provenancePending?.key === key && _provenancePending.req === _provenanceReq) return null;
+  const req = ++_provenanceReq;
+  _provenancePending = { key, req };
+  return req;
+}
+function _provenanceLive(req) {
+  if (_provenancePending?.req === req) _provenancePending = null;
+  return req === _provenanceReq;
+}
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') _provenanceReq += 1; }, true);
 
 function ensureProvenancePopoverEl() {
@@ -134,16 +148,16 @@ async function showProvenancePopover(arg, anchorEl) {
   if (!bindingId) return;
   const params = new URLSearchParams({ 'binding-id': bindingId });
   if (itemId) params.set('item-id', itemId);
-  const req = ++_provenanceReq;
+  const req = _provenanceBegin('slot|' + params.toString());
+  if (req == null) return;   // that very answer is already on its way
   let html;
   try {
     const r = await authFetch('/partials/provenance?' + params.toString());
-    if (!r.ok) return;
-    html = await r.text();
+    html = r.ok ? await r.text() : null;
   } catch (_) {
-    return;
+    html = null;
   }
-  if (req !== _provenanceReq) return;   // dismissed or superseded meanwhile
+  if (!_provenanceLive(req) || html == null) return;   // dismissed / superseded / failed
   // Server returns the popover shell unconditionally. When there's no
   // narrowing chain to show (`:_provenance-some?` false), the resolved-
   // via section degrades to a hidden span — the popover would be just
@@ -175,17 +189,17 @@ async function showProvenancePopover(arg, anchorEl) {
 // popover above.
 async function showReturnTypeRulePopover(fnName, anchorEl) {
   if (!fnName || !anchorEl) return;
-  const req = ++_provenanceReq;
+  const req = _provenanceBegin('rule|' + fnName);
+  if (req == null) return;
   let html;
   try {
     const r = await authFetch('/partials/return-type-rule?fn='
                               + encodeURIComponent(fnName));
-    if (!r.ok) return;
-    html = await r.text();
+    html = r.ok ? await r.text() : null;
   } catch (_) {
-    return;
+    html = null;
   }
-  if (req !== _provenanceReq) return;   // dismissed or superseded meanwhile
+  if (!_provenanceLive(req) || html == null) return;   // dismissed / superseded / failed
   // The partial renders the intro only when a rule-owning ancestor
   // exists — a header-only response means nothing to show.
   const probe = document.createElement('div');

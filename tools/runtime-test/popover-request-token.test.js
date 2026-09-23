@@ -90,6 +90,20 @@ const visible = (doc, cls) => !!doc.querySelector('.' + cls)?.classList.contains
     }
   }
 
+  for (const [fn, cls] of [['showMismatchExplainer', 'mismatch-explainer'],
+                           ['showProvenancePopover', 'provenance-popover']]) {
+    console.log(' ' + fn + ': repeat clicks on the same badge join the request in flight');
+    const t = boot();
+    const anchor = t.doc.createElement('button');
+    const p1 = t.ctx[fn](arg, anchor);
+    const p2 = t.ctx[fn](arg, anchor);
+    await flush();
+    assert(t.pending.length === 1, 'one request, got ' + t.pending.length);
+    t.answer(0, '<p>tier</p>');
+    await p1; await p2;
+    assert(visible(t.doc, cls), 'the answer opens the popover');
+  }
+
   if (fails) { console.error(`✗ ${fails} failed, ${passes} passed`); process.exit(1); }
   console.log(`✓ ${passes} passed`);
 })();

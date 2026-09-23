@@ -48,7 +48,7 @@
 
    Elide `:pool` so the base handle and all its transaction transients
    collapse to ONE stable, per-storage-unique entry: the remaining
-   fields (the metadata-cache / rw-lock / slot-row-cache atoms, plus the
+   fields (the metadata-cache atom / lock monitor / slot-row-cache atom, plus the
    epoch-ledger atoms) are shared by identity across the `assoc`, so a
    storage record's value-hash is stable across transactions yet
    distinct between two real storages. Non-associative handles (opaque
@@ -148,29 +148,3 @@
             row
             (recur (concat (rest queue) (:parent-ids row))
                    (conj visited cur))))))))
-
-
-(defn build-branch-local-set
-  "Pre-compute the set of effective-branch-local fn-ids from a map
-   `{fn-id → fn-row}` (loaded in batch). Used by the batch-resolution
-   path so it doesn't need per-id walks; the in-memory map provides
-   the entire parent-id graph already.
-
-   Algorithm: any node `:branch-local? true` is local; then any node
-   whose `:parent-ids` includes a local node is local. Iterate until
-   the set stops growing."
-  [fns-by-id]
-  (let [seed (into #{}
-                   (keep (fn [[fid row]] (when (true? (:branch-local? row)) fid)))
-                   fns-by-id)]
-    (loop [local seed]
-      (let [grown (reduce (fn [acc [fid row]]
-                            (if (and (not (contains? acc fid))
-                                     (some local (or (:parent-ids row) [])))
-                              (conj acc fid)
-                              acc))
-                          local
-                          fns-by-id)]
-        (if (= grown local)
-          local
-          (recur grown))))))

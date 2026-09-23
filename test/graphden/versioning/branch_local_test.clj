@@ -4,9 +4,8 @@
 
    Storage stack mirrors `versioning.storage.core-test`.
 
-   `pure-set-builder-test` is unit (in-memory fn map); the
-   storage-* tests are tagged per-deftest `^:integration` and skip in
-   `bb coverage` accordingly."
+   The storage-* tests are tagged per-deftest `^:integration` and skip
+   in `bb coverage` accordingly."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.schema.graph.schema :as gds]
@@ -48,32 +47,6 @@
                       (some? branch-local?) (assoc :branch-local? branch-local?))))
 
 
-(deftest pure-set-builder-test
-  (testing "build-branch-local-set: seed propagates downward by parent-ids"
-    (let [a-id (random-uuid)
-          b-id (random-uuid)
-          c-id (random-uuid)
-          d-id (random-uuid)
-          fns {a-id {:id a-id :parent-ids []        :branch-local? true}
-               b-id {:id b-id :parent-ids [a-id]    :branch-local? nil}
-               c-id {:id c-id :parent-ids [b-id]    :branch-local? nil}
-               d-id {:id d-id :parent-ids []        :branch-local? nil}}
-          result (bl/build-branch-local-set fns)]
-      (is (contains? result a-id) "seed: own true")
-      (is (contains? result b-id) "child of seed inherits")
-      (is (contains? result c-id) "grandchild propagates through one hop")
-      (is (not (contains? result d-id)) "unrelated fn stays false")))
-
-  (testing "MI OR: any local parent ⇒ effective local"
-    (let [local (random-uuid)
-          plain (random-uuid)
-          child (random-uuid)
-          fns {local {:id local :parent-ids [] :branch-local? true}
-               plain {:id plain :parent-ids [] :branch-local? nil}
-               child {:id child :parent-ids [local plain] :branch-local? nil}}]
-      (is (contains? (bl/build-branch-local-set fns) child)))))
-
-
 (deftest nil-fn-id-short-circuit-test
   (testing "effective-branch-local? returns false for nil fn-id (defensive)"
     ;; Doesn't touch storage at all — early `(if (nil? fn-id) false ...)` guard.
@@ -101,7 +74,7 @@
 
 
 (defrecord FakeStorage
-  [pool metadata-cache rw-lock])
+  [pool metadata-cache lock])
 
 
 (deftest storage-key-stability-test

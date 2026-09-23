@@ -56,10 +56,9 @@
 
    ## Query Timeout
 
-   All storage backends support configurable query timeout via:
-   - `*query-timeout-ms*` - Dynamic var (default: 30s)
-   - `with-query-timeout` - Macro for temporary timeout change
-   - `get-query-timeout-seconds` - Get timeout in seconds for JDBC"
+   All storage backends read the query timeout from
+   `storage.protocol.config/*query-timeout-ms*` (default: 30s);
+   `get-query-timeout-seconds` converts it for JDBC."
   (:require
     [graphden.schema.fields.types :as ft]
     [graphden.storage.protocol.codec :as codec]
@@ -67,7 +66,6 @@
     [graphden.storage.protocol.constraints :as constraints]
     [graphden.storage.protocol.errors :as errors]
     [graphden.storage.protocol.graph :as graph]
-    [graphden.storage.protocol.locks :as locks]
     [graphden.storage.protocol.metadata :as metadata]
     [graphden.storage.protocol.naming :as naming]
     [graphden.storage.protocol.redaction :as redaction]
@@ -279,9 +277,6 @@
 ;; ============================================================================
 
 ;; === Error re-exports ===
-(def storage-error-types errors/storage-error-types)
-(def make-error-context errors/make-error-context)
-(def make-storage-error errors/make-storage-error)
 (def redact-sensitive-map redaction/redact-sensitive-map)
 (def redact-sensitive-deep redaction/redact-sensitive-deep)
 
@@ -292,43 +287,10 @@
   errors/wrap-storage-error)
 
 
-;; === Unified Validation Error Factory ===
-;;
-;; Use these functions for consistent error creation across all validators.
-
-(def create-validation-error
-  "Creates a validation error with consistent structure.
-   See errors/create-validation-error for details."
-  errors/create-validation-error)
-
-
-(def throw-validation-error!
-  "Creates and throws a validation error with consistent structure.
-   See errors/throw-validation-error! for details."
-  errors/throw-validation-error!)
-
-
-(defmacro with-storage-error-handling
-  "Executes body with consistent error handling and wrapping.
-   See errors/with-storage-error-handling for details."
-  [error-type operation context & body]
-  `(errors/with-storage-error-handling ~error-type ~operation ~context ~@body))
-
-
 ;; === Error Registry ===
 ;;
 ;; Extensible error type registry for custom application errors.
 ;; Pre-registered types cover common storage scenarios.
-
-(def error-categories
-  "Valid error categories for classification."
-  errors/error-categories)
-
-
-(def error-severities
-  "Valid error severities."
-  errors/error-severities)
-
 
 (def register-error-type!
   "Registers a custom error type with metadata.
@@ -381,32 +343,10 @@
   redaction/reset-sensitive-field-registry!)
 
 
-(def get-sensitive-field-registry
-  "Returns current sensitive field registry state. Useful for tests."
-  redaction/get-sensitive-field-registry)
-
-
-(def set-sensitive-field-registry!
-  "Sets sensitive field registry to a specific state. Useful for tests."
-  redaction/set-sensitive-field-registry!)
-
-
-(defmacro with-sensitive-field-registry
-  "Executes body with isolated sensitive field registry.
-   Automatically saves and restores registry state for test isolation."
-  [& body]
-  `(redaction/with-sensitive-field-registry (do ~@body)))
-
-
 (def sensitive-field?
   "Returns true if field name matches sensitive patterns.
    Checks explicit names, regex patterns, and custom predicates."
   redaction/sensitive-field?)
-
-
-(def critical-sensitive-patterns
-  "Critical patterns that must be matched for security."
-  redaction/critical-sensitive-patterns)
 
 
 ;; === Metadata re-exports ===
@@ -497,49 +437,15 @@
     (f)))
 
 
-(def check-graph-iteration-limit! graph/check-graph-iteration-limit!)
-(def traverse-bfs graph/traverse-bfs)
-(def try-parse-uuid graph/try-parse-uuid)
-
-
-;; === Constraint limits re-exports ===
-(def default-max-dependency-chain-depth constraints/default-max-dependency-chain-depth)
-
-
-;; === Lock re-exports ===
-(def with-write-lock locks/with-write-lock)
-(def create-rw-lock locks/create-rw-lock)
-
-
 ;; === Naming re-exports ===
 (def kw->snake-case naming/kw->snake-case)
 (def snake->kw naming/snake->kw)
 (def check-snake-case-collisions! naming/check-snake-case-collisions!)
 
 
-;; === Query timeout re-exports + dynamic vars ===
-
-(def ^:dynamic *query-timeout-ms*
-  "Timeout for storage queries in milliseconds. Can be rebound per-thread.
-   Default is 30000 ms (30 seconds). Use with-query-timeout for safe rebinding."
-  config/*query-timeout-ms*)
-
-
-(def validate-query-timeout! config/validate-query-timeout!)
-
+;; === Query timeout re-export ===
 
 (def get-query-timeout-seconds config/get-query-timeout-seconds)
-
-
-(defn with-query-timeout
-  "Executes f with a custom query timeout (in milliseconds).
-   Binds both config/*query-timeout-ms* and this namespace's *query-timeout-ms*
-   for consistent behavior regardless of which var code reads."
-  [timeout-ms f]
-  (config/validate-query-timeout! timeout-ms)
-  (binding [config/*query-timeout-ms* timeout-ms
-            *query-timeout-ms* timeout-ms]
-    (f)))
 
 
 ;; === Collection generation limits re-exports ===
@@ -570,29 +476,6 @@
   config/*regex-compile-timeout-ms*)
 
 
-(defn with-regex-limits
-  "Executes f with custom regex safety limits.
-   Binds both config and interface vars for compatibility.
-
-   Arguments:
-   - opts: map with optional keys:
-     - :max-pattern-length - maximum regex pattern length
-     - :max-input-length - maximum input string length
-     - :compile-timeout-ms - regex compilation timeout
-   - f: zero-arg function to execute"
-  [opts f]
-  (let [pattern-len (get opts :max-pattern-length config/*max-regex-length*)
-        input-len (get opts :max-input-length config/*max-regex-input-length*)
-        timeout (get opts :compile-timeout-ms config/*regex-compile-timeout-ms*)]
-    (binding [config/*max-regex-length* pattern-len
-              config/*max-regex-input-length* input-len
-              config/*regex-compile-timeout-ms* timeout
-              *max-regex-length* pattern-len
-              *max-regex-input-length* input-len
-              *regex-compile-timeout-ms* timeout]
-      (f))))
-
-
 ;; === Batch size validation re-exports ===
 (def ^:dynamic *max-batch-size*
   "Maximum entities in a single batch operation. Default: 10000
@@ -608,12 +491,6 @@
 ;; ============================================================================
 ;; ADDITIONAL HELPERS
 ;; ============================================================================
-
-(defn needs-special-encoding?
-  "Returns true if field type requires special encoding (not passthrough)."
-  [field-type]
-  (contains? #{:jsonb :union :enum} field-type))
-
 
 (defn standard-crud-normalize-data
   "Apply entity-specific normalization rules to a CRUD write payload
@@ -695,12 +572,6 @@
                            :entity-name entity-name k v})))))))
 
 
-(defn standard-batch-validations!
-  "Performs standard validations for batch CRUD operations."
-  [entity-name data-seq]
-  (validate-no-duplicate-ids! entity-name data-seq))
-
-
 (defn wrap-batch-error
   "Wraps an exception with batch context information."
   ([exception index batch-size]
@@ -715,22 +586,6 @@
      (ex-info (ex-message exception)
               (merge base-data batch-data)
               exception))))
-
-
-(defn process-batch-with-index
-  "Processes a sequence of items with error handling that includes batch context."
-  [items get-id-fn process-fn]
-  (let [items-vec (vec items)
-        batch-size (count items-vec)]
-    (map-indexed
-      (fn [idx item]
-        (try
-          (process-fn item idx)
-          (catch clojure.lang.ExceptionInfo e
-            (throw (wrap-batch-error e idx batch-size (when get-id-fn (get-id-fn item)))))
-          (catch Exception e
-            (throw (wrap-batch-error e idx batch-size (when get-id-fn (get-id-fn item)))))))
-      items-vec)))
 
 
 (defn initialize-with-cleanup!

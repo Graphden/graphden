@@ -48,7 +48,7 @@
         (let [base (setup/create-base-fn! storage "isolated-base")
               result (sp/resolve-execution-graph storage (:id base))]
           (is (graph/execution-graph? result))
-          (let [fn-ids (set (keys (graph/get-graph-fns result)))]
+          (let [fn-ids (set (keys (:fns result)))]
             (is (contains? fn-ids (:id base)) "seed is included")))
         (finally (sp/close storage))))))
 
@@ -61,7 +61,7 @@
               middle   (setup/create-composed-fn! storage "chain-middle" (:id root))
               leaf     (setup/create-composed-fn! storage "chain-leaf" (:id middle))
               result   (sp/resolve-execution-graph storage (:id leaf))
-              fn-ids   (set (keys (graph/get-graph-fns result)))]
+              fn-ids   (set (keys (:fns result)))]
           (is (contains? fn-ids (:id leaf))   "leaf — the seed itself")
           (is (contains? fn-ids (:id middle)) "middle — leaf's parent")
           (is (contains? fn-ids (:id root))   "root — middle's parent (transitive)"))
@@ -98,7 +98,7 @@
               composed (setup/create-composed-fn! storage "ref-composed" (:id base))
               _        (setup/bind-ref! storage (:id composed) (:id slot) (:id target))
               result   (sp/resolve-execution-graph storage (:id composed))
-              fn-ids   (set (keys (graph/get-graph-fns result)))]
+              fn-ids   (set (keys (:fns result)))]
           (is (contains? fn-ids (:id composed)) "seed")
           (is (contains? fn-ids (:id base))     "parent")
           (is (contains? fn-ids (:id target))   "ref-binding target"))
@@ -125,7 +125,7 @@
                                              :position 0
                                              :ref-fn-id (:id item-target)})
               result      (sp/resolve-execution-graph storage (:id composed))
-              fn-ids      (set (keys (graph/get-graph-fns result)))]
+              fn-ids      (set (keys (:fns result)))]
           (is (contains? fn-ids (:id composed)))
           (is (contains? fn-ids (:id item-target))
               "sequence-item ref target is in the closure"))
@@ -158,21 +158,21 @@
                                            :ref-fn-id (:id target2)})
               pg-result      (sp/resolve-execution-graph storage (:id leaf))
               generic-result (gg/resolve-execution-graph storage (:id leaf))]
-          (is (= (set (keys (graph/get-graph-fns pg-result)))
-                 (set (keys (graph/get-graph-fns generic-result))))
+          (is (= (set (keys (:fns pg-result)))
+                 (set (keys (:fns generic-result))))
               "PG and generic resolvers produce the same fn closure")
-          (is (= (set (map :id (graph/get-graph-slots pg-result)))
-                 (set (map :id (graph/get-graph-slots generic-result))))
+          (is (= (set (map :id (:slots pg-result)))
+                 (set (map :id (:slots generic-result))))
               "same slot set")
           (is (= (set (map (juxt :fn-id :slot-id)
-                           (graph/get-graph-fn-slots pg-result)))
+                           (:fn-slots pg-result)))
                  (set (map (juxt :fn-id :slot-id)
-                           (graph/get-graph-fn-slots generic-result))))
+                           (:fn-slots generic-result))))
               "same fn-slot junctions")
           (is (= (set (map (juxt :fn-id :slot-id)
-                           (graph/get-graph-bindings pg-result)))
+                           (:bindings pg-result)))
                  (set (map (juxt :fn-id :slot-id)
-                           (graph/get-graph-bindings generic-result))))
+                           (:bindings generic-result))))
               "same bindings"))
         (finally (sp/close storage))))))
 
@@ -189,6 +189,6 @@
               result (pg-graph/resolve-execution-graph
                        (:pool storage) storage (:id base))]
           (is (graph/execution-graph? result))
-          (is (contains? (set (keys (graph/get-graph-fns result)))
+          (is (contains? (set (keys (:fns result)))
                          (:id base))))
         (finally (sp/close storage))))))

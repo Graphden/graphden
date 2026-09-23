@@ -24,9 +24,7 @@
     [graphden.storage.protocol.generic-constraints :as gc])
   (:import
     (java.sql
-      SQLException)
-    (java.util.concurrent.locks
-      ReentrantReadWriteLock)))
+      SQLException)))
 
 
 ;; === Pool re-exports (for API compatibility) ===
@@ -39,12 +37,6 @@
 (def close-pool
   "Closes a HikariCP connection pool. See pool/close-pool for details."
   pool/close-pool)
-
-
-(def with-query-timeout
-  "Executes f with a custom query timeout (in milliseconds).
-   See util/with-query-timeout for details."
-  util/with-query-timeout)
 
 
 ;; === Storage record ===
@@ -70,105 +62,80 @@
 
 
 (defn- get-cached-metadata
-  "Gets metadata from cache or reads from database.
-   Thread-safe: uses ReentrantReadWriteLock for concurrent read access.
-   Write lock is only acquired when cache needs to be populated.
-   Cache is invalidated on schema changes (initialize).
+  "Gets metadata from cache or reads from database. Cache is invalidated
+   on schema changes (initialize).
 
-   ## Double-Check Locking Pattern
+   Double-checked: the fast path reads `@metadata-cache` with no lock; a
+   miss takes `lock` (the monitor `initialize` / `close` hold while they
+   reset the cache) and re-checks before reading the rows, so a populate
+   never interleaves with a migration and runs at most once per miss.
 
-   State machine:
-   ```
-   [nil] ---(first access)---> [loading] ---(success)---> [cached]
-     ^                            |                           |
-     |                            v                           |
-     +-------(table not found)----+                           |
-     +-------(initialize called)------------------------------+
-   ```
-
-   Thread safety:
-   1. Fast path: Read @metadata-cache without lock (safe for concurrent reads)
-   2. Slow path: Acquire write lock, double-check cache (another thread may have populated it)
-   3. On success: Cache result; on table-not-found: return nil without caching
-
-   NOTE: Returns nil without caching if table not found (not initialized yet).
-   This prevents caching stale nil values during initialization race conditions.
-
-   Cache safety: reset! only happens after parse-metadata-lenient successfully returns.
-   If parsing throws, cache remains unchanged (Clojure let-binding evaluation order).
-
-   Optimization: Adds :fields-by-entity index for O(1) entity field lookups."
-  [pool metadata-cache ^ReentrantReadWriteLock rw-lock]
-  ;; Fast path: check cache without lock
+   Returns nil WITHOUT caching when the metadata table does not exist yet
+   (not initialized) — caching that nil would pin a stale answer through
+   the initialization race. The cache is `reset!` only after
+   `parse-metadata-lenient` returns; if parsing throws, it stays as it
+   was. Adds a `:fields-by-entity` index for O(1) entity field lookups."
+  [pool metadata-cache lock]
   (or @metadata-cache
-      ;; Slow path: acquire write lock to populate cache
-      ;; Note: We use write lock here because we need to modify cache.
-      ;; This is rare (only on first access or after cache invalidation).
-      (sp/with-write-lock rw-lock
-                          (fn []
-                            ;; Double-check after acquiring lock
-                            (or @metadata-cache
-                                (try
-                                  ;; Parse first, cache only on success (let ensures order)
-                                  (let [raw-metadata (metadata/parse-metadata-lenient (metadata/read-metadata-rows pool))
-                                        ;; Add entity->fields index for O(1) lookups
-                                        result (when raw-metadata
-                                                 (assoc raw-metadata
-                                                        :fields-by-entity (build-entity-fields-index raw-metadata)))]
-                                    (reset! metadata-cache result)
-                                    result)
-                                  (catch SQLException e
-                                    ;; Don't cache nil - table might be created soon
-                                    (when-not (util/table-not-found? e)
-                                      (throw e)))))))))
+      (locking lock
+        (or @metadata-cache
+            (try
+              (let [raw-metadata (metadata/parse-metadata-lenient (metadata/read-metadata-rows pool))
+                    result (when raw-metadata
+                             (assoc raw-metadata
+                                    :fields-by-entity (build-entity-fields-index raw-metadata)))]
+                (reset! metadata-cache result)
+                result)
+              (catch SQLException e
+                ;; Don't cache nil - table might be created soon
+                (when-not (util/table-not-found? e)
+                  (throw e))))))))
 
 
 (defn- get-entity-fields
   "Gets field specs for an entity using cached index.
    O(1) lookup via pre-built :fields-by-entity index."
-  [pool metadata-cache rw-lock entity-name]
-  (when-let [cached-metadata (get-cached-metadata pool metadata-cache rw-lock)]
+  [pool metadata-cache lock entity-name]
+  (when-let [cached-metadata (get-cached-metadata pool metadata-cache lock)]
     (get (:fields-by-entity cached-metadata) entity-name)))
 
 
 (defrecord PostgresStorage
-  [pool metadata-cache ^ReentrantReadWriteLock rw-lock slot-row-cache]
+  [pool metadata-cache lock slot-row-cache]
 
   sp/Storage
 
   (initialize
     [_this schema]
-    (sp/with-write-lock rw-lock
-                        (fn []
-                          ;; Invalidate cache BEFORE migration to prevent stale reads.
-                          ;;
-                          ;; Why invalidate before, not after?
-                          ;; - If we invalidate after and migration partially fails (DDL succeeds
-                          ;;   but metadata update fails), concurrent readers during recovery
-                          ;;   would still see old cached metadata while DB has new schema.
-                          ;; - By invalidating before, any read during/after migration will
-                          ;;   fetch fresh state from DB, ensuring consistency.
-                          ;; - The write lock prevents concurrent reads during the critical section,
-                          ;;   so this is safe even with eager invalidation.
-                          ;;
-                          ;; If migration throws, cache stays nil - next read refreshes from DB.
-                          ;; This is correct: DB state is authoritative, cache is just optimization.
-                          (reset! metadata-cache nil)
-                          ;; Schema (re)init is the one lifecycle point where
-                          ;; previously-read slot rows can stop being true
-                          ;; (test fixtures DROP SCHEMA CASCADE, deploy
-                          ;; truncates) — drop the immutable-row cache with it.
-                          (reset! slot-row-cache {})
-                          (migration/do-initialize pool schema))))
+    (locking lock
+      ;; Invalidate cache BEFORE migration to prevent stale reads.
+      ;;
+      ;; Why invalidate before, not after?
+      ;; - If we invalidate after and migration partially fails (DDL succeeds
+      ;;   but metadata update fails), concurrent readers during recovery
+      ;;   would still see old cached metadata while DB has new schema.
+      ;; - By invalidating before, any read during/after migration will
+      ;;   fetch fresh state from DB, ensuring consistency.
+      ;; - A metadata populate takes the same monitor, so it cannot
+      ;;   interleave with the migration.
+      ;;
+      ;; If migration throws, cache stays nil - next read refreshes from DB.
+      ;; This is correct: DB state is authoritative, cache is just optimization.
+      (reset! metadata-cache nil)
+      ;; Schema (re)init is the one lifecycle point where
+      ;; previously-read slot rows can stop being true
+      ;; (test fixtures DROP SCHEMA CASCADE, deploy
+      ;; truncates) — drop the immutable-row cache with it.
+      (reset! slot-row-cache {})
+      (migration/do-initialize pool schema)))
 
 
   (close
     [_this]
-    (sp/with-write-lock rw-lock
-                        (fn []
-                          ;; Clear cache first to prevent memory leak from stale references
-                          (reset! metadata-cache nil)
-                          (pool/close-pool pool)))
+    (locking lock
+      ;; Clear cache first to prevent memory leak from stale references
+      (reset! metadata-cache nil)
+      (pool/close-pool pool))
     nil)
 
 
@@ -184,7 +151,7 @@
     ;; O(1) lookup via pre-built :fields-by-entity index
     ;; Index already contains {field-name {:type t :nullable? n}} format
     ;; get returns nil if entity doesn't exist - no redundant check needed
-    (when-let [cached-metadata (get-cached-metadata pool metadata-cache rw-lock)]
+    (when-let [cached-metadata (get-cached-metadata pool metadata-cache lock)]
       (get (:fields-by-entity cached-metadata) entity-name)))
 
 
@@ -201,7 +168,7 @@
 
   (schema-metadata
     [_this]
-    (get-cached-metadata pool metadata-cache rw-lock))
+    (get-cached-metadata pool metadata-cache lock))
 
 
   sp/StorageCRUD
@@ -209,7 +176,7 @@
   (create-entity
     [_this entity-name data]
     (crud/create-entity pool entity-name data
-                        (get-entity-fields pool metadata-cache rw-lock entity-name)))
+                        (get-entity-fields pool metadata-cache lock entity-name)))
 
 
   (read-entity
@@ -225,11 +192,11 @@
     (if (= :slot entity-name)
       (or (get @slot-row-cache id)
           (when-some [row (crud/read-entity pool entity-name id
-                                            (get-entity-fields pool metadata-cache rw-lock entity-name))]
+                                            (get-entity-fields pool metadata-cache lock entity-name))]
             (swap! slot-row-cache assoc id row)
             row))
       (crud/read-entity pool entity-name id
-                        (get-entity-fields pool metadata-cache rw-lock entity-name))))
+                        (get-entity-fields pool metadata-cache lock entity-name))))
 
 
   (update-entity
@@ -238,7 +205,7 @@
     ;; future mutation path cannot silently serve a stale cached row.
     (when (= :slot entity-name) (swap! slot-row-cache dissoc id))
     (crud/update-entity pool entity-name id data
-                        (get-entity-fields pool metadata-cache rw-lock entity-name)))
+                        (get-entity-fields pool metadata-cache lock entity-name)))
 
 
   (delete-entity
@@ -250,20 +217,20 @@
   (query-entities
     [_this entity-name where]
     (crud/query-entities pool entity-name where
-                         (get-entity-fields pool metadata-cache rw-lock entity-name)))
+                         (get-entity-fields pool metadata-cache lock entity-name)))
 
 
   (query-entities
     [_this entity-name where opts]
     (crud/query-entities pool entity-name where
-                         (get-entity-fields pool metadata-cache rw-lock entity-name)
+                         (get-entity-fields pool metadata-cache lock entity-name)
                          opts))
 
 
   (query-latest-per-group
     [_this entity-name where group-cols]
     (crud/query-latest-per-group pool entity-name where group-cols
-                                 (get-entity-fields pool metadata-cache rw-lock entity-name)))
+                                 (get-entity-fields pool metadata-cache lock entity-name)))
 
 
   sp/StorageBatchCRUD
@@ -271,25 +238,25 @@
   (create-entities
     [_this entity-name data-seq]
     (crud/create-entities pool entity-name data-seq
-                          (get-entity-fields pool metadata-cache rw-lock entity-name)))
+                          (get-entity-fields pool metadata-cache lock entity-name)))
 
 
   (read-entities
     [_this entity-name ids]
     (crud/read-entities pool entity-name ids
-                        (get-entity-fields pool metadata-cache rw-lock entity-name)))
+                        (get-entity-fields pool metadata-cache lock entity-name)))
 
 
   (update-entities
     [_this entity-name data-seq]
     (crud/update-entities pool entity-name data-seq
-                          (get-entity-fields pool metadata-cache rw-lock entity-name)))
+                          (get-entity-fields pool metadata-cache lock entity-name)))
 
 
   (upsert-entities
     [_this entity-name data-seq]
     (crud/upsert-entities pool entity-name data-seq
-                          (get-entity-fields pool metadata-cache rw-lock entity-name)))
+                          (get-entity-fields pool metadata-cache lock entity-name)))
 
 
   (delete-entities
@@ -342,9 +309,9 @@
    - :max-lifetime - maximum connection lifetime in ms (default 1800000)
 
    Thread safety:
-   - Uses ReentrantReadWriteLock for metadata cache access
-   - Multiple concurrent reads allowed, writes are exclusive
+   - Metadata-cache populate / invalidate serialize on one monitor
+     (reads of a warm cache take no lock)
    - CRUD operations use PostgreSQL's own transaction isolation"
   [opts]
   (graph-epoch/attach-state
-    (->PostgresStorage (pool/create-pool opts) (atom nil) (ReentrantReadWriteLock.) (atom {}))))
+    (->PostgresStorage (pool/create-pool opts) (atom nil) (Object.) (atom {}))))

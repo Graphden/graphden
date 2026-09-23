@@ -168,22 +168,6 @@ A ref into a `:fn-ref`-typed slot is an IDENTITY edge (the target is
 named, never evaluated) and does not count — see
 [CONSTRAINTS.md](CONSTRAINTS.md#1-no-dependency-cycle).
 
-### `:constraint-violation/chain-too-deep`
-
-**Component:** storage-protocol (GraphConstraints)
-**Description:** The GENERIC per-fn dependency walk
-(`constraints/collect-dependency-chain-impl`) visited more than
-`default-max-dependency-chain-depth` (1000) fns before finishing — its
-DoS bound. The Postgres path does not raise it: `dependency-closure`
-loads the closure through the recursive-CTE resolver and walks it in
-memory, uncapped (CONSTRAINTS.md § How the walk runs). Identity edges
-(`:fn-ref` slots) run no walk at all.
-**Ex-data keys:**
-
-- `:fn-id` - The fn whose closure was being walked
-- `:max-depth` - The bound
-- `:chain-type` - `:dependency`
-
 ### `:constraint-violation/fn-name-collision`
 
 **Component:** versioning (VersionedStorage)

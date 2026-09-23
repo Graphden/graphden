@@ -49,8 +49,8 @@
 
    ```clojure
    ;; Increase query timeout for slow queries
-   (config/with-query-timeout 60000
-     #(sp/query-entities storage :large-table {}))
+   (binding [config/*query-timeout-ms* 60000]
+     (sp/query-entities storage :large-table {}))
 
    ;; Increase batch size for bulk import
    (binding [config/*max-batch-size* 5000]
@@ -100,7 +100,8 @@
 
 (def ^:dynamic *query-timeout-ms*
   "Timeout for storage queries in milliseconds. Can be rebound per-thread.
-   Default is 30000 ms (30 seconds). Use `with-query-timeout` to temporarily change.
+   Default is 30000 ms (30 seconds). Rebind it to change the timeout for a
+   dynamic extent; `get-query-timeout-seconds` validates the bound value.
 
    The only shipped backend, PostgreSQL, converts this to seconds for
    JDBC `setQueryTimeout`."
@@ -137,31 +138,13 @@
                      :min-timeout-ms min-query-timeout-ms}))))
 
 
-(defn with-query-timeout
-  "Executes f with a custom query timeout (in milliseconds).
-   Timeout must be a positive integer >= 1000ms.
-
-   Why 1000ms minimum?
-   - JDBC setQueryTimeout uses seconds (integer), values <1000ms become 0
-   - SQL queries need time for network roundtrip and query parsing
-   - Different from executor timeout (50ms min) which covers overall execution
-
-   Example:
-   (with-query-timeout 60000
-     #(sp/query-entities storage :user {}))"
-  [timeout-ms f]
-  (validate-query-timeout! timeout-ms)
-  (binding [*query-timeout-ms* timeout-ms]
-    (f)))
-
-
 (defn get-query-timeout-seconds
   "Returns the current query timeout in seconds for JDBC calls.
    Reads the dynamic var *query-timeout-ms* and converts to seconds.
 
    Safety: Throws if timeout is invalid (non-positive OR below minimum)
    to prevent silent timeout disabling. This catches improper direct
-   binding of `*query-timeout-ms*` — use `with-query-timeout` instead.
+   binding of `*query-timeout-ms*`.
 
    Delegates the validation to `validate-query-timeout!` so the
    pos-int? check + minimum check stay in one place. The pre-fix
@@ -327,8 +310,7 @@
 ;; These are grouped by category and documented with rationale.
 
 ;; === Limits — canonical sources elsewhere ===
-;; Identifier / fn-name / batch / cache / dependency-chain limits live
+;; Identifier / fn-name / batch / cache limits live
 ;; next to their use sites; reach for those namespaces directly:
 ;;   - `max-identifier-length`    → `schema.fields.types`
 ;;   - credential-length limits   → `storage.protocol.credential-validation`
-;;   - `default-max-dependency-chain-depth` → `storage.protocol.constraints`

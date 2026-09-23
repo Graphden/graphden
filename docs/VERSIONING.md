@@ -666,7 +666,10 @@ queries), `:future` (transitively reaches `:schedule`).
 Implementation:
 
 - Walker + per-storage cache: `graphden.versioning.branch-local`
-  (`effective-branch-local?` + `build-branch-local-set`).
+  (`effective-branch-local?`, and `branch-local-seed` over an
+  already-loaded fn map). The cache is cleared by `VersionedStorage`
+  after every `:fn` write, and on the cross-pod `fn:invalidate` NOTIFY /
+  graph-epoch heal.
 - Resolution filter: `versioning.storage.resolution/merge-
   candidates(-from-cache)` drops foreign-branch candidates when
   `effective-branch-local?` is true for the fn-id; `resolve-

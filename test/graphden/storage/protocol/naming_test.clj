@@ -36,10 +36,3 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"collision"
           (storage/check-snake-case-collisions! {:context "test"} [:user-name :user_name])))))
-
-
-;; === traverse-bfs tests ===
-
-
-;; `traverse-bfs` is a `protocol.graph` utility, not a naming one — it is
-;; pinned by `graph-test` alongside the rest of that namespace.

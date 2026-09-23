@@ -77,79 +77,6 @@
                      :iteration-count iteration-count}))))
 
 
-;; === Generic BFS Traversal ===
-
-(defn- check-bfs-iteration-limit!
-  "Throws if BFS iteration count exceeds limit."
-  [iter-count max-iter context-id]
-  (when (> iter-count max-iter)
-    (throw (ex-info "BFS traversal exceeded maximum iterations"
-                    {:type :execution-error/traversal-too-large
-                     :context-id context-id
-                     :max-iterations max-iter
-                     :iteration-count iter-count}))))
-
-
-(defn- bfs-step
-  "Processes a single BFS step.
-   Returns updated state map with :queue, :visited."
-  [queue visited get-neighbors-fn]
-  (let [current-id (peek queue)
-        rest-queue (pop queue)
-        neighbors (get-neighbors-fn current-id)
-        new-neighbors (remove visited neighbors)
-        new-visited (into visited new-neighbors)]
-    {:queue (into rest-queue new-neighbors)
-     :visited new-visited}))
-
-
-(defn traverse-bfs
-  "Generic BFS traversal utility for in-memory graph operations.
-   Returns set of all visited nodes.
-
-   Parameters:
-   - start-id: Starting node ID
-   - get-neighbors-fn: (fn [node-id] -> seq of neighbor IDs)
-     Function that returns neighbors for a given node.
-     Only unvisited neighbors will be added to queue.
-
-   Options (via opts map):
-   - :max-iterations - Override default iteration limit (default: *max-graph-iterations*)
-   - :context-id - ID for error context in limit messages (default: start-id)
-
-   Returns: Set of all visited node IDs (including start-id)"
-  ([start-id get-neighbors-fn]
-   (traverse-bfs start-id get-neighbors-fn {}))
-  ([start-id get-neighbors-fn opts]
-   (let [max-iter (or (:max-iterations opts) *max-graph-iterations*)
-         context-id (or (:context-id opts) start-id)
-         ;; Use PersistentQueue for O(1) enqueue/dequeue instead of vector O(n)
-         init-queue (conj clojure.lang.PersistentQueue/EMPTY start-id)]
-     (loop [queue init-queue
-            visited #{start-id}
-            iter-count 0]
-       (check-bfs-iteration-limit! iter-count max-iter context-id)
-       (if (empty? queue)
-         visited
-         (let [{new-queue :queue new-visited :visited}
-               (bfs-step queue visited get-neighbors-fn)]
-           (recur new-queue new-visited (inc iter-count))))))))
-
-
-;; === UUID parsing ===
-
-(defn try-parse-uuid
-  "Attempts to parse value as UUID. Returns UUID or nil.
-   Handles UUIDs, UUID strings, and returns nil for non-UUID values."
-  [v]
-  (cond
-    (uuid? v) v
-    (string? v) (try
-                  (java.util.UUID/fromString v)
-                  (catch IllegalArgumentException _ nil))
-    :else nil))
-
-
 ;; === ExecutionGraphResult record ===
 ;;
 ;; Slot/fn-slot/binding model: each field carries the corresponding
@@ -192,56 +119,6 @@
   "Returns true if x is an ExecutionGraphResult record."
   [x]
   (instance? ExecutionGraphResult x))
-
-
-;; === ExecutionGraph Accessor Functions ===
-;;
-;; These provide stable API for accessing graph data, insulating callers
-;; from internal record structure changes.
-
-(defn get-graph-fns
-  "Returns the fns map from an execution graph.
-   Prefer this over direct :fns access for forward compatibility."
-  [graph]
-  (:fns graph))
-
-
-(defn get-graph-slots
-  [graph]
-  (:slots graph))
-
-
-(defn get-graph-fn-slots
-  [graph]
-  (:fn-slots graph))
-
-
-(defn get-graph-bindings
-  [graph]
-  (:bindings graph))
-
-
-(defn get-graph-list-items
-  [graph]
-  (:list-items graph))
-
-
-(defn get-bindings-for-fn
-  "Returns bindings for a specific fn-id. O(1) via the index."
-  [graph fn-id]
-  (get (:bindings-by-fn graph) fn-id []))
-
-
-(defn get-fn-slots-for-fn
-  "Returns fn-slot junction rows for a specific fn-id. O(1)."
-  [graph fn-id]
-  (get (:fn-slots-by-fn graph) fn-id []))
-
-
-(defn get-items-for-binding
-  "Returns the binding-list-item rows for a binding-id. O(1)."
-  [graph binding-id]
-  (get (:items-by-binding graph) binding-id []))
 
 
 ;; === Graph Resolution BFS Algorithm ===

@@ -218,9 +218,6 @@
           (util/enum-value->sql (keyword "123-invalid"))))))
 
 
-;; === with-query-timeout validation tests ===
-
-
 ;; This namespace boots a real PostgreSQL container. Five pure unit tests
 ;; used to sit here paying for it and duplicating `util-test` /
 ;; `protocol.naming-test` / `protocol.config-test` under colliding names;

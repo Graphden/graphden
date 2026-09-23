@@ -164,7 +164,7 @@
 (deftest register-sensitive-field-name-test
   (testing "registers custom sensitive field name"
     (redaction/register-sensitive-field-name! :employee-ssn)
-    (is (contains? (redaction/sensitive-field-names) :employee-ssn))
+    (is (contains? (:names (redaction/get-sensitive-field-registry)) :employee-ssn))
     (is (redaction/sensitive-field? :employee-ssn)))
 
   (testing "rejects non-keyword"
@@ -210,7 +210,7 @@
     (redaction/reset-sensitive-field-registry!)
 
     ;; Custom should be gone, defaults should remain
-    (is (not (contains? (redaction/sensitive-field-names) :custom-sensitive)))
+    (is (not (contains? (:names (redaction/get-sensitive-field-registry)) :custom-sensitive)))
     (is (redaction/sensitive-field? :password))))
 
 
@@ -226,33 +226,18 @@
       (redaction/register-sensitive-field-name! :temp-field)
       (is (redaction/sensitive-field? :temp-field))
       (redaction/set-sensitive-field-registry! original)
-      (is (not (contains? (redaction/sensitive-field-names) :temp-field))))))
+      (is (not (contains? (:names (redaction/get-sensitive-field-registry)) :temp-field))))))
 
 
 (deftest with-sensitive-field-registry-test
   (testing "isolates registry modifications"
-    (let [before-count (count (redaction/sensitive-field-names))]
+    (let [before-count (count (:names (redaction/get-sensitive-field-registry)))]
       (redaction/with-sensitive-field-registry
         (redaction/register-sensitive-field-name! :isolated-field)
         (is (redaction/sensitive-field? :isolated-field)))
       ;; After macro, registration should be rolled back
-      (is (= before-count (count (redaction/sensitive-field-names))))
-      (is (not (contains? (redaction/sensitive-field-names) :isolated-field))))))
-
-
-(deftest sensitive-field-names-test
-  (testing "returns set of names"
-    (let [names (redaction/sensitive-field-names)]
-      (is (set? names))
-      (is (contains? names :password))
-      (is (contains? names :api-key)))))
-
-
-(deftest sensitive-field-patterns-test
-  (testing "returns vector of patterns"
-    (let [patterns (redaction/sensitive-field-patterns)]
-      (is (vector? patterns))
-      (is (every? #(instance? java.util.regex.Pattern %) patterns)))))
+      (is (= before-count (count (:names (redaction/get-sensitive-field-registry)))))
+      (is (not (contains? (:names (redaction/get-sensitive-field-registry)) :isolated-field))))))
 
 
 (deftest sensitive-field-test
@@ -405,28 +390,6 @@
         (throw (RuntimeException.)))
       (catch clojure.lang.ExceptionInfo e
         (is (= "Storage operation failed" (ex-message e)))))))
-
-
-;; === Warn on Suspicious Field Tests ===
-
-(deftest warn-on-suspicious-field-test
-  (testing "returns nil for nil input"
-    (is (nil? (redaction/warn-on-suspicious-field nil))))
-
-  (testing "returns nil for non-suspicious registered field"
-    (is (nil? (redaction/warn-on-suspicious-field :password))))  ; registered, not suspicious
-
-  (testing "returns nil for clearly non-sensitive field"
-    (is (nil? (redaction/warn-on-suspicious-field :username))))
-
-  (testing "returns true for suspicious unregistered field"
-    ;; This field looks suspicious (has 'key' in name) but isn't registered
-    ;; Note: may actually be caught by patterns - test different field
-    (redaction/with-sensitive-field-registry
-      (redaction/reset-sensitive-field-registry!)
-      ;; With empty registry, 'api-key-backup' should be suspicious
-      (redaction/set-sensitive-field-registry! {:names #{} :patterns [] :predicates []})
-      (is (true? (redaction/warn-on-suspicious-field :api-key-backup))))))
 
 
 ;; === Redact deep with sequences ===

@@ -4,6 +4,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.postgres.util :as util]
+    [graphden.storage.protocol.config :as cfg]
     [graphden.storage.protocol.core :as sp])
   (:import
     (java.sql
@@ -343,10 +344,8 @@
 ;; someone forks a re-export into a second implementation.
 
 (deftest re-exports-resolve-to-the-protocol-implementations-test
-  (is (identical? sp/with-query-timeout util/with-query-timeout)
-      ":with-query-timeout is protocol.config's, not a fork")
   (is (identical? sp/kw->snake-case util/kw->snake-case))
   (is (identical? sp/check-snake-case-collisions! util/check-snake-case-collisions!))
   (testing "get-query-timeout-seconds wraps rather than aliases, so check behaviour"
-    (is (= (sp/with-query-timeout 5000 sp/get-query-timeout-seconds)
-           (sp/with-query-timeout 5000 util/get-query-timeout-seconds)))))
+    (binding [cfg/*query-timeout-ms* 5000]
+      (is (= (sp/get-query-timeout-seconds) (util/get-query-timeout-seconds))))))

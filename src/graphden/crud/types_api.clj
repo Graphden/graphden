@@ -58,33 +58,73 @@
         (reduce slice graph [:fns :slots :fn-slots :bindings :list-items])))))
 
 
+(def ^:private slice-memo-cap
+  "(graph-cache, org) pairs whose slice is kept — one live entry per
+   branch ctx × active tenant org; the oldest goes when a new pair
+   arrives. Each entry pins at most one raw snapshot (the one it sliced),
+   and a pair's next read replaces it."
+  64)
+
+
+(defonce ^:private slice-memo
+  ;; [[cache-atom org raw sliced] …], most recent last.
+  (atom []))
+
+
+(defn- memo-org-slice
+  "`org-visible-slice` of the cached snapshot `raw`, memoised on the
+   snapshot's IDENTITY + the org. Every tenant read used to filter the
+   whole graph again and hand back a new object, so every downstream
+   identity-keyed memo (layout lookups, the lint memo) missed on every
+   request. The snapshot is replaced, never mutated, on a write, so
+   identity is the freshness check. Platform tier: the raw snapshot
+   itself (no slice)."
+  [cache raw]
+  (let [org (tctx/current-org)]
+    (if (or (nil? cache) (tctx/platform-tier? org))
+      (org-visible-slice raw)
+      (let [same-pair? (fn [[c o]] (and (identical? c cache) (= o org)))]
+        (or (some (fn [[_ _ r sliced :as e]]
+                    (when (and (same-pair? e) (identical? r raw)) sliced))
+                  @slice-memo)
+            (let [sliced (org-visible-slice raw)]
+              (swap! slice-memo
+                     (fn [entries]
+                       (conj (vec (take-last (dec slice-memo-cap)
+                                             (remove same-pair? entries)))
+                             [cache org raw sliced])))
+              sliced))))))
+
+
 (defn cached-or-load-graph
   "The shared per-ctx graph snapshot, restricted to the current org's
    visibility (see `org-visible-slice`). The cache itself always holds
    the FULL org-agnostic graph: a hit slices per read; a miss loads via
    the privileged `:compile-storage` handle (same source
    `prime-graph-cache!` uses) so one tenant's miss can never poison the
-   shared cache with its narrower slice for every other reader."
+   shared cache with its narrower slice for every other reader. A hit's
+   slice is memoised per (snapshot, org) — `memo-org-slice`."
   [ctx]
-  (org-visible-slice
-    (or (exec-ctx/cached-graph ctx)
-        ;; Load-on-miss races the write path: a write that commits while
-        ;; the load runs finds an EMPTY cache (nothing to splice) and the
-        ;; loaded snapshot is already behind it. Take the invalidation
-        ;; epoch first and install only if it did not move. On a move,
-        ;; serve what the write itself left in the cache (its delta path
-        ;; primes the post-write graph), else read again — bounded, so a
-        ;; write storm ends with an uncached read rather than a stale
-        ;; snapshot published as the truth.
-        (loop [attempt 1]
-          (let [epoch (exec-ctx/invalidation-epoch ctx)
-                data (load-graph-entities-uncached
-                       (or (:compile-storage ctx) (request/require-storage ctx)))]
-            (cond
-              (exec-ctx/fill-graph-cache! ctx data epoch) data
-              (exec-ctx/cached-graph ctx) (exec-ctx/cached-graph ctx)
-              (>= attempt 3) data
-              :else (recur (inc attempt))))))))
+  (if-let [raw (exec-ctx/cached-graph ctx)]
+    (memo-org-slice (:graph-cache ctx) raw)
+    (org-visible-slice
+      ;; Load-on-miss races the write path: a write that commits while
+      ;; the load runs finds an EMPTY cache (nothing to splice) and the
+      ;; loaded snapshot is already behind it. Take the invalidation
+      ;; epoch first and install only if it did not move. On a move,
+      ;; serve what the write itself left in the cache (its delta path
+      ;; primes the post-write graph), else read again — bounded, so a
+      ;; write storm ends with an uncached read rather than a stale
+      ;; snapshot published as the truth.
+      (loop [attempt 1]
+        (let [epoch (exec-ctx/invalidation-epoch ctx)
+              data (load-graph-entities-uncached
+                     (or (:compile-storage ctx) (request/require-storage ctx)))]
+          (cond
+            (exec-ctx/fill-graph-cache! ctx data epoch) data
+            (exec-ctx/cached-graph ctx) (exec-ctx/cached-graph ctx)
+            (>= attempt 3) data
+            :else (recur (inc attempt))))))))
 
 
 (defn org-visible-rich-snapshot

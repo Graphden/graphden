@@ -100,8 +100,9 @@
 ;; surface. The other defonce atoms are safe under parallel by
 ;; construction:
 ;;   - `executor.compile.lookups/cached-build-lookups-state`
-;;     and `layout.data/cached-build-lookups-state` — identity-keyed by
-;;     graph reference. Two ctxes never collide on the same key (the
+;;     and `layout.data/cached-build-lookups-state` /
+;;     `layout.data/synth-args-state` / `crud.types-api/slice-memo` —
+;;     identity-keyed by graph reference (the slice memo also by org). Two ctxes never collide on the same key (the
 ;;     bounded LRU might evict a sibling's entry, but that's a perf
 ;;     hiccup, not a correctness bug).
 ;;   - `crud.fn-execution.persist/futures-registry` — UUID-keyed by

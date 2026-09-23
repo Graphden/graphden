@@ -42,3 +42,16 @@
             item (first (filter #(= "i1" (:id %)) rows))]
         (is (= (:id items-row) (:source-id item)))
         (is (= (:id item) (:next-arg-id items-row)))))))
+
+
+(deftest synthesised-graph-is-stable-per-snapshot
+  ;; The cached graph carries no `:args`, so every layout request built a
+  ;; NEW map here — and `cached-build-lookups` (identity-keyed) re-derived
+  ;; the whole graph on every POST /api/graph/layout.
+  (let [snapshot {:fns [] :slots [] :fn-slots [] :bindings [] :list-items []}
+        synth (data/ensure-synth-args snapshot)]
+    (is (identical? synth (data/ensure-synth-args snapshot))
+        "the same snapshot yields the same synthesised map — so the
+         identity-keyed lookups memo downstream can hit")
+    (is (not (identical? synth (data/ensure-synth-args (assoc snapshot :namespaces []))))
+        "a replaced snapshot is synthesised afresh")))

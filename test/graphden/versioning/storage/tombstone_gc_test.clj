@@ -16,7 +16,8 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
     [graphden.system.init.cleanup :as cleanup]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.purge :as purge]))
 
 
 (def ^:dynamic *container* nil)
@@ -51,7 +52,7 @@
    reds the GitHub integration run. A future cutoff removes the race without
    touching prod semantics (prod retention is day-scale)."
   [base]
-  (vs/tombstone-gc-sweep! base -1000))
+  (purge/tombstone-gc-sweep! base -1000))
 
 
 (defn- live?
@@ -158,7 +159,7 @@
       (let [f (sp/create-entity v :fn {:name "recent" :parent-ids [] :description "h"})]
         (tombstone-delete! v (:id f))
         (testing "a tombstone younger than the retention window is left alone"
-          (let [purged (vs/tombstone-gc-sweep! base (* 60 60 1000))]  ; 1h retention
+          (let [purged (purge/tombstone-gc-sweep! base (* 60 60 1000))]  ; 1h retention
             (is (zero? (:fn purged)))
             (is (identity-exists? base (:id f))))))
       (finally (sp/close base)))))
@@ -311,7 +312,7 @@
           (sp/delete-entity v :binding (:id shared)))
         (testing "the hook is called for each purged entity while its rows are readable"
           (let [paths (atom #{})
-                purged (vs/tombstone-gc-sweep!
+                purged (purge/tombstone-gc-sweep!
                          base -1000
                          {:before-purge (fn [et id]
                                           (swap! seen conj [et id])

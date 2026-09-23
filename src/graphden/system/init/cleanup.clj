@@ -13,6 +13,7 @@
     [graphden.crud.fn-execution.stats :as stats]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.core :as vcore]
+    [graphden.versioning.storage.purge :as purge]
     [integrant.core :as ig]))
 
 
@@ -103,7 +104,7 @@
             ;; branch may still read it); only a purge — dead everywhere,
             ;; past retention — is the moment the value has no reader left.
             paths (atom #{})
-            purged (vcore/tombstone-gc-sweep!
+            purged (purge/tombstone-gc-sweep!
                      base retention
                      {:before-purge (fn [entity-name id]
                                       (swap! paths into (secret-paths-of base entity-name id)))})]

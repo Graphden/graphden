@@ -18,7 +18,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, openBranchPopover} =
+const {assert, newContext, api, openBranchPopover, deleteBranches} =
   require('./edit-test-helpers');
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
@@ -77,18 +77,9 @@ async function cleanup(page) {
       }, {id: probe.id, branch: FEAT});
     }
   } catch (_) {}
-  // Delete by ID where we can resolve one — the slashed name can't be
-  // a path ref.
-  let rows = [];
-  try {
-    rows = (await api(page, 'GET', '/api/branches'))?.branches || [];
-  } catch (_) {}
-  for (const b of [SLASHED, SUGG, FEAT]) {
-    const ref = rows.find((r) => r.name === b)?.id || b;
-    try {
-      await api(page, 'DELETE', '/api/branches/' + encodeURIComponent(ref));
-    } catch (_) {}
-  }
+  // SUGG was applied (merged) into its own base FEAT, so each blocks the
+  // other's delete by design — those two are archived (see deleteBranches).
+  await deleteBranches([SLASHED, SUGG, FEAT], {archive: [SUGG, FEAT]});
   try { await page.evaluate(() => localStorage.removeItem('graphden.diffAgainst')); }
   catch (_) {}
 }

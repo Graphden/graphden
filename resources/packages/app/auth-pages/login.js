@@ -28,9 +28,25 @@ function initSocialTotp(){
 if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',initSocialTotp);}else{initSocialTotp();}
 // `?signup=1` opens the page on the Create-account tab — the invite page's
 // "Create account" button lands here for someone without an account yet.
+// `?error=<code>` — the server-side auth redirects (OAuth / Telegram
+// callbacks, the email-verify link) land here; say why in the form's alert.
+const PROVIDER_NAMES={github:'GitHub',google:'Google',telegram:'Telegram'};
+function errorText(code,provider){
+  const p=PROVIDER_NAMES[provider]||'that provider';
+  switch(code){
+    case'email_has_password':return 'An account with this email already exists. Sign in with your password, then connect '+p+' in Settings.';
+    case'verify':return 'That verification link is invalid or has expired.';
+    case'provider_disabled':return 'That sign-in method is not enabled here.';
+    case'oauth_state':return 'The sign-in expired or was started in another tab. Please try again.';
+    case'oauth_failed':return 'Could not sign you in with '+p+'. Please try again.';
+    case'telegram':return 'Telegram sign-in could not be verified. Please try again.';
+    default:return null;
+  }
+}
 function initFromQuery(){
   const q=new URLSearchParams(location.search);
   if(q.get('signup')==='1'&&typeof mode==='function')mode(true);
+  const err=errorText(q.get('error'),q.get('provider'));if(err)say(err);
   if(q.get('next')&&nextPath()!=='/'){const sb=document.getElementById('sb');if(sb)sb.textContent+=' You will be taken back to the invitation afterwards.';}
 }
 if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',initFromQuery);}else{initFromQuery();}

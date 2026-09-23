@@ -1,6 +1,6 @@
 # Accounts — the open identity module
 
-Last verified against code: 2026-08-17.
+Last verified against code: 2026-09-23.
 
 `accounts` is the **open-core**, **opt-in** identity layer: it gives a
 self-hosted Graphden real users, passwords, sessions and — the point of the
@@ -93,6 +93,28 @@ HttpOnly `gd_session` cookie (Max-Age 24 h); cookies are written as raw
 A social callback on an **already signed-in** request LINKs the identity to
 the current account (identity conflicts redirect to
 `/settings?error=identity_conflict`) instead of switching accounts.
+
+A social sign-in with **no session** resolves in this order
+(`accounts.core/resolve-social-identity!`):
+
+1. a known `(provider, subject)` identity → its account;
+2. a **verified** email that an existing account owns as its primary email →
+   - that account has a **password** identity → **refused**: the callback
+     redirects to `/login?error=email_has_password&provider=<p>` and the page
+     says *"An account with this email already exists. Sign in with your
+     password, then connect <Provider> in Settings."* Auto-linking there would
+     be a pre-hijack: anyone controlling a provider account that asserts the
+     address (a recycled mailbox, a loosely-verifying provider) would land in
+     an account its owner protects with a password. The owner connects the
+     provider from Settings while signed in — the authenticated LINK above —
+     which is what mainstream services do;
+   - an account with **only social identities** → the new identity is
+     auto-linked to it;
+3. otherwise a new account (primary email set only from a verified email).
+
+The `/login` page reads `?error=` for every server-side auth redirect
+(`email_has_password`, `oauth_state`, `oauth_failed`, `provider_disabled`,
+`telegram`, `verify`) and shows the reason in the form's alert.
 
 ## Password reset & rate limiting
 
@@ -233,7 +255,8 @@ All phases shipped:
    promotes a verified email to `:account.primary-email`. ✅
 2. **Social providers** — Google (OIDC), GitHub (OAuth), Telegram (login
    widget); each config-gated, resolving to an `:identity` row,
-   auto-linking by **verified** email where the provider vouches one. ✅
+   auto-linking by **verified** email where the provider vouches one —
+   never into an account that has a password (see the sign-in order above). ✅
 3. **Account-linking UI** — the `/login` page + the editor's Account
    card (formerly the `/account` page);
    attach/detach identities on a signed-in account. ✅

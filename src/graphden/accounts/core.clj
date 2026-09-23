@@ -172,7 +172,14 @@
 
    1. an existing `(provider, subject)` identity → its account (returning user);
    2. else a VERIFIED email that an existing account owns as its primary-email →
-      attach the new identity to THAT account (auto-link across providers);
+      - the account signs in with a PASSWORD → refuse (`:accounts/email-has-
+        password`). Auto-linking there is the pre-hijack hole: whoever controls
+        a provider account asserting that email (a recycled address, a
+        provider that verified it loosely) would walk into an account the
+        owner protects with a password. The owner links the provider from
+        Settings while signed in instead — what mainstream services do.
+      - an account with only social identities → attach the new identity to
+        it (auto-link across providers);
    3. else a brand-new account (primary-email set only when the email is
       verified) plus the identity.
 
@@ -186,6 +193,9 @@
          :created? false :linked? false})
       (if-let [acct (and email email-verified? (account-by-email storage email))]
         (let [account-id (str (:id acct))]
+          (when (some #(= "password" (:provider %)) (identities-for-account storage account-id))
+            (throw (ex-info "an account with this email signs in with a password"
+                            {:type :accounts/email-has-password :provider provider})))
           (create-identity! storage account-id
                             {:provider provider :subject subject
                              :email email :email-verified? true})

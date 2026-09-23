@@ -177,6 +177,44 @@
              (set (map :provider (accounts/identities-for-account (storage) account-id))))))))
 
 
+(deftest ^:integration social-sign-in-never-auto-links-into-a-password-account
+  ;; Pre-hijack: a social identity asserting a verified email used to be
+  ;; auto-linked into ANY account owning that email as primary — including one
+  ;; its owner protects with a password.
+  (let [{:keys [account-id account]} (accounts/password-signup! (storage)
+                                                                {:email "pw-owner@example.com"
+                                                                 :password "pw-owner-99"})]
+    ;; as after clicking the verification link
+    (sp/update-entity (storage) :account (:id account) {:primary-email "pw-owner@example.com"})
+    (testing "a verified social email matching a PASSWORD account is refused"
+      (let [e (try (accounts/resolve-social-identity!
+                     (storage) {:provider "github" :subject "gh-hijack"
+                                :email "PW-Owner@example.com" :email-verified? true})
+                   nil
+                   (catch clojure.lang.ExceptionInfo e e))]
+        (is (= {:type :accounts/email-has-password :provider "github"} (ex-data e)))
+        (is (nil? (accounts/find-identity (storage) "github" "gh-hijack")) "nothing was linked")
+        (is (= #{"password"} (set (map :provider (accounts/identities-for-account (storage) account-id)))))))
+    (testing "once linked from Settings, the provider signs in to that account"
+      (accounts/link-identity! (storage) account-id {:provider "github" :subject "gh-hijack"
+                                                     :email "pw-owner@example.com" :email-verified? true})
+      (is (= account-id (:account-id (accounts/resolve-social-identity!
+                                       (storage) {:provider "github" :subject "gh-hijack"
+                                                  :email "pw-owner@example.com" :email-verified? true})))))))
+
+
+(deftest ^:integration social-only-accounts-still-auto-link
+  (let [first-login (accounts/resolve-social-identity!
+                      (storage) {:provider "google" :subject "g-social-only"
+                                 :email "social-only@example.com" :email-verified? true})
+        second-login (accounts/resolve-social-identity!
+                       (storage) {:provider "github" :subject "gh-social-only"
+                                  :email "social-only@example.com" :email-verified? true})]
+    (is (:created? first-login))
+    (is (= (:account-id first-login) (:account-id second-login)))
+    (is (:linked? second-login))))
+
+
 (deftest ^:integration accounts-of-batches-and-matches-account-of
   (let [mk #(accounts/create-account! (storage) {:display-name % :primary-email (str % "@example.com")})
         a (mk "batch-a")

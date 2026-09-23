@@ -173,6 +173,20 @@
 (declare pending-2fa-cookie)
 
 
+(defn- resolve-social-or-refuse
+  "`core/resolve-social-identity!`, or nil when it refuses to auto-link into
+   an account that signs in with a password (`:accounts/email-has-password`)
+   — the login page then tells the person to sign in with the password and
+   connect the provider from Settings."
+  [storage info]
+  (try
+    (core/resolve-social-identity! storage info)
+    (catch clojure.lang.ExceptionInfo e
+      (if (= :accounts/email-has-password (:type (ex-data e)))
+        nil
+        (throw e)))))
+
+
 (defn- finish-social
   "Common tail for an OAuth/Telegram callback that produced a normalized
    identity `info`.
@@ -188,7 +202,9 @@
    ask to swap identities either, so we leave them signed in as themselves and
    do nothing.
 
-   With no session we log in / create and set a fresh session."
+   With no session we log in / create and set a fresh session — unless the
+   verified email belongs to an account that signs in with a password, which
+   is never auto-linked (`/login?error=email_has_password`)."
   [storage origin request info provider-key link-ok?]
   (if-let [acct (current-account storage request)]
     (if link-ok?
@@ -198,7 +214,7 @@
         (catch clojure.lang.ExceptionInfo _
           (redirect (str origin "/settings?error=identity_conflict"))))
       (redirect (str origin "/settings?error=link_intent")))
-    (let [{:keys [account account-id]} (core/resolve-social-identity! storage info)]
+    (if-let [{:keys [account account-id]} (resolve-social-or-refuse storage info)]
       (if (core/totp-enabled? account)
         ;; The account has 2FA enabled — a social identity ALONE must not mint a
         ;; full session, or the second factor the user configured would protect
@@ -208,7 +224,8 @@
         ;; the login page in its TOTP-entry state (?totp=1).
         (redirect (str origin "/login?totp=1")
                   (pending-2fa-cookie (core/mint-pending-2fa! storage account-id) origin))
-        (redirect (str origin "/") (session-cookie (core/mint-session! storage account-id) origin))))))
+        (redirect (str origin "/") (session-cookie (core/mint-session! storage account-id) origin)))
+      (redirect (str origin "/login?error=email_has_password&provider=" provider-key)))))
 
 
 (defn- handle-identities

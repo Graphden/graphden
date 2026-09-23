@@ -130,11 +130,29 @@
      (cheshire/parse-string (str (:body resp)) true))))
 
 
-(defn- list-secrets [] (request! :get "/api/secrets"))
-(defn- create-secret! [body] (request! :post "/api/secrets" body))
-(defn- delete-secret! [id] (request! :delete (str "/api/secrets/" id)))
-(defn- rotate-secret! [id body] (request! :put (str "/api/secrets/" id "/value") body))
-(defn- create-inline-binding! [body] (request! :post "/api/secret-bindings" body))
+(defn- list-secrets
+  []
+  (request! :get "/api/secrets"))
+
+
+(defn- create-secret!
+  [body]
+  (request! :post "/api/secrets" body))
+
+
+(defn- delete-secret!
+  [id]
+  (request! :delete (str "/api/secrets/" id)))
+
+
+(defn- rotate-secret!
+  [id body]
+  (request! :put (str "/api/secrets/" id "/value") body))
+
+
+(defn- create-inline-binding!
+  [body]
+  (request! :post "/api/secret-bindings" body))
 
 
 (defn- rotate-inline-binding!

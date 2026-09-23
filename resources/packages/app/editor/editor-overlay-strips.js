@@ -54,6 +54,26 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
   const flagEditable = isNavRoot && !isTypeRow
                     && typeof gdFlagEditable === 'function' && gdFlagEditable(cardFnEntity);
 
+  const c = { overlay, cardFnEntity, originalFnId, isNavRoot, stripFacts,
+              rt, rtEditable, flagEditable };
+  appendReturnTypeStrip(c);
+  appendEffectsStrip(c);
+  appendEditTypeRowStrip(c);
+  appendSetParentStrip(c);
+  // (Namespace surface lives as the `ns` badge in the row-actions
+  // popover — served by `:partial-row-actions` and dispatched via
+  // `editor-row-actions.js`. Removed the dedicated bottom strip:
+  // same payload duplicated in two places turned the card into a
+  // noisy stack of labels.)
+  appendBranchLocalStrip(c);
+}
+
+// The strips below take the context `appendFnMetadataStrips` computed once:
+// `{overlay, cardFnEntity, originalFnId, isNavRoot, stripFacts, rt,
+//   rtEditable, flagEditable}`.
+
+function appendReturnTypeStrip(c) {
+  const { overlay, cardFnEntity, stripFacts, rtEditable, flagEditable, rt } = c;
   // --- return-type strip ---
   // Two display modes:
   //   - Non-root cards (expanded ancestors): show only when a type is
@@ -171,79 +191,94 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
         enterFnReturnTypeEditMode(cardFnEntity, strip);
       });
     }
-    // Type-rule provenance — when this fn-def inherits (possibly through
-    // a chain of intermediate fn-defs) from a base-fn whose
-    // :return-type-rule computed the return type (assoc / get / dissoc /
-    // conj / first / cons / …), the chip's value isn't from a declaration
-    // or simple unification — it was COMPUTED. Surface a small `↳`
-    // button so the user can answer "where did this return type come
-    // from?" without reading the parent base-fn's source. The popover
-    // (server-rendered, /partials/return-type-rule) names the rule's
-    // source and lists the resolved bindings that fed into it. The
-    // rule-owner walk itself runs SERVER-side (layout strip-facts →
-    // `registry/rule-owner-of`).
-    const ruleOwner = stripFacts.ruleOwner || null;
-    if (ruleOwner && typeof showReturnTypeRulePopover === 'function') {
-      const provBtn = document.createElement('button');
-      provBtn.type = 'button';
-      provBtn.className = 'return-type-strip-provenance';
-      provBtn.textContent = '↳';
-      provBtn.title = "Computed by :" + ruleOwner
-                    + "'s :return-type-rule — click for inputs";
-      provBtn.setAttribute('aria-label', provBtn.title);
-      // Disclosure button — opens the type-rule popover.
-      // `attachAndShow` (editor-provenance-popover.js) flips this to
-      // "true" on open, hideProvenancePopover back to "false".
-      provBtn.setAttribute('aria-expanded', 'false');
-      provBtn.setAttribute('aria-haspopup', 'dialog');
-      provBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        // Server partial owns the rule-owner walk, narrative and
-        // Inputs table; it only needs the fn's name.
-        showReturnTypeRulePopover(cardFnEntity.name, provBtn);
-      });
-      strip.appendChild(provBtn);
-    }
-    // λ — the fn's CALL-SITE parameters when it is handed to a HOF or a
-    // route as a callable (`:lambda-params` on the fn row). Only a
-    // composed fn-def can carry one (a base-fn's arity is its impl's).
-    // Shown on an editable root card in every state, elsewhere only
-    // when declared: `λ derived` (the compile picks the one unambiguous
-    // free arg, refusing when several qualify), `λ []` (everything
-    // captured — a handler chain), `λ request` (named, in order).
-    const isComposed = Array.isArray(cardFnEntity['parent-ids'])
-                       && cardFnEntity['parent-ids'].length > 0;
-    const declared = cardFnEntity['lambda-params'];
-    if (isComposed && (flagEditable || declared != null)
-        && typeof enterLambdaParamsEditMode === 'function') {
-      const chip = document.createElement(flagEditable ? 'button' : 'span');
-      chip.className = 'lambda-params-chip';
-      if (flagEditable) chip.type = 'button';
-      const shown = declared == null ? 'derived'
-                  : (declared.length === 0 ? '[]' : declared.join(', '));
-      chip.textContent = 'λ ' + shown;
-      chip.dataset.declared = declared == null ? 'derived' : JSON.stringify(declared);
-      chip.title = (declared == null
-        ? 'Call-site parameters: derived — when a HOF or a route calls this fn, the compile picks its one unambiguous free arg (and refuses when several qualify).'
-        : declared.length === 0
-          ? 'Call-site parameters: none — every input is captured from the graph when this fn is handed over as a callable.'
-          : 'Call-site parameters, in order: ' + declared.join(', ')
-            + ' — these are filled per call; the rest is captured.')
-        + (flagEditable ? ' Click to change.' : '');
-      chip.setAttribute('aria-label', chip.title);
-      if (flagEditable) {
-        chip.addEventListener('click', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          enterLambdaParamsEditMode(cardFnEntity, chip);
-        });
-      }
-      strip.appendChild(chip);
-    }
+    appendRuleProvenanceButton(strip, c);
+    appendLambdaParamsChip(strip, c);
     overlay.appendChild(strip);
   }
+}
 
+// The return-type strip's `↳` button (see appendReturnTypeStrip).
+function appendRuleProvenanceButton(strip, c) {
+  const { cardFnEntity, stripFacts } = c;
+  // Type-rule provenance — when this fn-def inherits (possibly through
+  // a chain of intermediate fn-defs) from a base-fn whose
+  // :return-type-rule computed the return type (assoc / get / dissoc /
+  // conj / first / cons / …), the chip's value isn't from a declaration
+  // or simple unification — it was COMPUTED. Surface a small `↳`
+  // button so the user can answer "where did this return type come
+  // from?" without reading the parent base-fn's source. The popover
+  // (server-rendered, /partials/return-type-rule) names the rule's
+  // source and lists the resolved bindings that fed into it. The
+  // rule-owner walk itself runs SERVER-side (layout strip-facts →
+  // `registry/rule-owner-of`).
+  const ruleOwner = stripFacts.ruleOwner || null;
+  if (ruleOwner && typeof showReturnTypeRulePopover === 'function') {
+    const provBtn = document.createElement('button');
+    provBtn.type = 'button';
+    provBtn.className = 'return-type-strip-provenance';
+    provBtn.textContent = '↳';
+    provBtn.title = "Computed by :" + ruleOwner
+                  + "'s :return-type-rule — click for inputs";
+    provBtn.setAttribute('aria-label', provBtn.title);
+    // Disclosure button — opens the type-rule popover.
+    // `attachAndShow` (editor-provenance-popover.js) flips this to
+    // "true" on open, hideProvenancePopover back to "false".
+    provBtn.setAttribute('aria-expanded', 'false');
+    provBtn.setAttribute('aria-haspopup', 'dialog');
+    provBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // Server partial owns the rule-owner walk, narrative and
+      // Inputs table; it only needs the fn's name.
+      showReturnTypeRulePopover(cardFnEntity.name, provBtn);
+    });
+    strip.appendChild(provBtn);
+  }
+}
+
+// The return-type strip's λ chip (see appendReturnTypeStrip).
+function appendLambdaParamsChip(strip, c) {
+  const { cardFnEntity, flagEditable } = c;
+  // λ — the fn's CALL-SITE parameters when it is handed to a HOF or a
+  // route as a callable (`:lambda-params` on the fn row). Only a
+  // composed fn-def can carry one (a base-fn's arity is its impl's).
+  // Shown on an editable root card in every state, elsewhere only
+  // when declared: `λ derived` (the compile picks the one unambiguous
+  // free arg, refusing when several qualify), `λ []` (everything
+  // captured — a handler chain), `λ request` (named, in order).
+  const isComposed = Array.isArray(cardFnEntity['parent-ids'])
+                     && cardFnEntity['parent-ids'].length > 0;
+  const declared = cardFnEntity['lambda-params'];
+  if (isComposed && (flagEditable || declared != null)
+      && typeof enterLambdaParamsEditMode === 'function') {
+    const chip = document.createElement(flagEditable ? 'button' : 'span');
+    chip.className = 'lambda-params-chip';
+    if (flagEditable) chip.type = 'button';
+    const shown = declared == null ? 'derived'
+                : (declared.length === 0 ? '[]' : declared.join(', '));
+    chip.textContent = 'λ ' + shown;
+    chip.dataset.declared = declared == null ? 'derived' : JSON.stringify(declared);
+    chip.title = (declared == null
+      ? 'Call-site parameters: derived — when a HOF or a route calls this fn, the compile picks its one unambiguous free arg (and refuses when several qualify).'
+      : declared.length === 0
+        ? 'Call-site parameters: none — every input is captured from the graph when this fn is handed over as a callable.'
+        : 'Call-site parameters, in order: ' + declared.join(', ')
+          + ' — these are filled per call; the rest is captured.')
+      + (flagEditable ? ' Click to change.' : '');
+    chip.setAttribute('aria-label', chip.title);
+    if (flagEditable) {
+      chip.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        enterLambdaParamsEditMode(cardFnEntity, chip);
+      });
+    }
+    strip.appendChild(chip);
+  }
+}
+
+function appendEffectsStrip(c) {
+  const { overlay, cardFnEntity, isNavRoot } = c;
   // --- effects strip ---
   // Small per-category badges (db / env / io / network / time /
   // effect). Reads richTypes[name].effects when available. Pure fns
@@ -343,19 +378,10 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
       overlay.appendChild(effRow);
     }
   }
+}
 
-  const appendClickStrip = (label, title, onClick) => {
-    const strip = document.createElement('div');
-    strip.className = 'reparent-strip';
-    strip.textContent = label;
-    strip.title = title;
-    strip.addEventListener('click', (e) => {
-      e.stopPropagation();
-      onClick(strip);
-    });
-    overlay.appendChild(strip);
-  };
-
+function appendEditTypeRowStrip(c) {
+  const { overlay, cardFnEntity, originalFnId, isNavRoot, rtEditable } = c;
   // --- edit-type-row strip ---
   // Type-rows have no parents and no callable signature — their value
   // lives in the structural fields (`base-fn-id`, `element-fn-id`,
@@ -397,7 +423,10 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
       overlay.appendChild(strip);
     }
   }
+}
 
+function appendSetParentStrip(c) {
+  const { overlay, cardFnEntity, rtEditable } = c;
   // --- set-parent strip (no-parents case only) ---
   // When the fn HAS a parent, the depth-1 ancestor row already shows
   // it AND carries an inline ✎ pencil — no separate strip needed.
@@ -406,19 +435,21 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
   if (rtEditable && typeof enterReparentEditMode === 'function') {
     const pids = cardFnEntity['parent-ids'] || [];
     if (pids.length === 0) {
-      appendClickStrip(
-        'set parent…',
-        'Click to assign a parent (the rest of the chain follows)',
-        (strip) => enterReparentEditMode(cardFnEntity, strip));
+      const strip = document.createElement('div');
+      strip.className = 'reparent-strip';
+      strip.textContent = 'set parent…';
+      strip.title = 'Click to assign a parent (the rest of the chain follows)';
+      strip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        enterReparentEditMode(cardFnEntity, strip);
+      });
+      overlay.appendChild(strip);
     }
   }
+}
 
-  // (Namespace surface lives as the `ns` badge in the row-actions
-  // popover — served by `:partial-row-actions` and dispatched via
-  // `editor-row-actions.js`. Removed the dedicated bottom strip:
-  // same payload duplicated in two places turned the card into a
-  // noisy stack of labels.)
-
+function appendBranchLocalStrip(c) {
+  const { overlay, cardFnEntity, stripFacts, flagEditable } = c;
   // --- branch-local strip ---
   // The transitive parent-ids walk runs SERVER-side (layout strip-facts
   // → `branch-local/branch-local-seed`, the module that owns merge-time

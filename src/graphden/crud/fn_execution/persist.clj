@@ -680,7 +680,8 @@
    whether or not they persist a `:fn-execution` row. `tenant?` additionally
    gates FLEET-WIDE on the pending-row count (`over-fleet-org-cap?` below), the
    cross-pod bound for persisted runs. The atom tallies ALL of the org's live
-   executions (inline pure + async) and is released in `run-future`'s `finally`.
+   executions (inline pure + async) and is released by `run-future`'s task
+   (`release-on-done-task`).
 
    Before this, the atom check was short-circuited for tenants (`or tenant?`),
    so a flood of PURE / non-persisted executions (which write no `:fn-execution`
@@ -866,6 +867,30 @@
           (cr/execute ctx fn-id args))))))
 
 
+(defn release-on-done-task
+  "A `FutureTask` running `body` that fires `on-done` exactly when the work
+   is over: from the body's `finally` once the body STARTED (so a slot frees
+   when the computation ends, not when a `cancel(true)` merely interrupts
+   it), and from `done()` when the task reached a terminal state WITHOUT the
+   body ever starting — a task cancelled while still QUEUED (the
+   /api/execute cancel, or the deadline watchdog, firing before a worker
+   picks it up). A `finally` alone missed that case: the body never ran, the
+   slot leaked, and 32 such leaks locked the org out with 429 until restart.
+   `on-done` must be idempotent — a cancel racing the body's first
+   instruction can fire it from both sides (the slot release is).
+   FutureTask + `execute`, NOT `.submit`: submit's Runnable/Callable overload
+   pick rode on the ^Callable hint, which coverage instrumentation erases —
+   the reflective submit(Runnable)'s Future.get() returns null by contract,
+   nulling every executed result under `bb coverage`."
+  ^java.util.concurrent.FutureTask [body on-done]
+  (let [started? (atom false)
+        task (fn []
+               (reset! started? true)
+               (try (body) (finally (on-done))))]
+    (proxy [java.util.concurrent.FutureTask] [^Callable task]
+      (done [] (when-not @started? (on-done))))))
+
+
 (defn run-future
   "Submit `(executor/execute …)` to a future bound to a cancel-flag
    AND a fresh effect-trace atom. The executor's `*cancel-check*`
@@ -874,11 +899,11 @@
    atom-set that effectful base-fn impls conj into via `record-effect!`.
 
    `release` (nil-able) is the concurrency-slot releaser from
-   `acquire-execution-slot!`; it fires in the future's `finally` so the slot
-   frees when the COMPUTATION ends (which may be long after the HTTP deref
-   times out), never leaking a permit. A wall-clock watchdog
-   (`*max-execution-wall-ms*`) hard-kills a runaway; the finally cancels it
-   on normal completion.
+   `acquire-execution-slot!`; `release-on-done-task` fires it when the
+   COMPUTATION ends (which may be long after the HTTP deref times out) — or
+   on cancel, when the task never left the queue — never leaking a permit.
+   A wall-clock watchdog (`*max-execution-wall-ms*`) hard-kills a runaway;
+   the same hook cancels it on normal completion.
 
    `opts` (optional): `:trace?` — Debug P1 execution-path capture
    opt-in from the submit body. When true, `cr/*path-trace*` is bound
@@ -926,24 +951,17 @@
          ;; queue full) throws `RejectedExecutionException` HERE, on the
          ;; submitting thread, which `apply-execute*` maps to 503 + Retry-After.
          ;; The returned j.u.c.Future supports `.get`/`.cancel`/`.isDone`.
-         ;; FutureTask + execute, NOT `.submit`: submit's Runnable/Callable
-         ;; overload pick rode on the ^Callable hint, which coverage
-         ;; instrumentation erases — the reflective submit(Runnable)'s
-         ;; Future.get() returns null by contract, nulling every executed
-         ;; result under `bb coverage` (same class as abort-shield/run!).
+         ;; `execute` (see `release-on-done-task` for why not `.submit`):
          ;; RejectedExecutionException still throws HERE, on the
          ;; submitting thread — execute shares submit's saturation
          ;; behaviour on a bounded pool.
-         fut (let [ft (java.util.concurrent.FutureTask.
-                        ^Callable
+         fut (let [ft (release-on-done-task
+                        bf
                         (fn []
-                          (try
-                            (bf)
-                            (finally
-                              ;; @watchdog blocks only until the request thread
-                              ;; delivers it (microseconds after creation).
-                              (some-> @watchdog (java.util.concurrent.ScheduledFuture/.cancel false))
-                              (when release (release))))))]
+                          ;; @watchdog blocks only until the request thread
+                          ;; delivers it (microseconds after creation).
+                          (some-> @watchdog (java.util.concurrent.ScheduledFuture/.cancel false))
+                          (when release (release))))]
                (java.util.concurrent.ExecutorService/.execute
                  (current-execution-pool) ft)
                ft)]

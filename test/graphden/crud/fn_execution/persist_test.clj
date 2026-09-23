@@ -720,3 +720,58 @@
                                      {:return :int :effects #{}})
     (let [pt {:entries [{:seq 0 :fn-id (str id) :hidden :secret}]}]
       (is (= pt (persist/re-redact-path-trace pt))))))
+
+
+(deftest release-on-done-task-fires-for-a-task-cancelled-while-queued
+  ;; Regression: the slot release lived in the task body's `finally`, so a
+  ;; task cancelled while still QUEUED (never picked up by a worker) never
+  ;; ran it — the org's slot leaked for good. 1 worker, blocked; the second
+  ;; task parks in the queue and is cancelled there.
+  (let [pool (persist/make-execution-pool 1 4)
+        gate (promise)
+        started (java.util.concurrent.CountDownLatch. 1)
+        released (atom [])
+        blocker (persist/release-on-done-task
+                  (fn [] (java.util.concurrent.CountDownLatch/.countDown started) @gate)
+                  #(swap! released conj :blocker))
+        queued (persist/release-on-done-task
+                 (fn [] (swap! released conj :queued-body-ran))
+                 #(swap! released conj :queued))]
+    (try
+      (java.util.concurrent.ExecutorService/.execute pool blocker)
+      (java.util.concurrent.CountDownLatch/.await started)
+      (java.util.concurrent.ExecutorService/.execute pool queued)
+      (java.util.concurrent.Future/.cancel queued true)
+      (testing "cancel of a queued task releases immediately, body never runs"
+        (is (= [:queued] @released)))
+      (deliver gate :done)
+      (java.util.concurrent.Future/.get blocker 2 java.util.concurrent.TimeUnit/SECONDS)
+      (testing "a task that ran releases once, from its own finally"
+        (is (= [:queued :blocker] @released)))
+      (finally (java.util.concurrent.ThreadPoolExecutor/.shutdownNow pool)))))
+
+
+(deftest release-on-done-task-holds-the-slot-until-a-cancelled-body-ends
+  ;; cancel(true) of a RUNNING task only interrupts it — the slot must stay
+  ;; held until the body actually unwinds.
+  (let [pool (persist/make-execution-pool 1 1)
+        started (java.util.concurrent.CountDownLatch. 1)
+        unwinding (promise)
+        finish (promise)
+        released (promise)
+        task (persist/release-on-done-task
+               (fn []
+                 (java.util.concurrent.CountDownLatch/.countDown started)
+                 (try @(promise) (catch InterruptedException _
+                                   (deliver unwinding true)
+                                   @finish)))
+               #(deliver released true))]
+    (try
+      (java.util.concurrent.ExecutorService/.execute pool task)
+      (java.util.concurrent.CountDownLatch/.await started)
+      (java.util.concurrent.Future/.cancel task true)
+      (is (true? (deref unwinding 2000 false)) "the body saw the interrupt")
+      (is (false? (realized? released)) "slot still held while the body unwinds")
+      (deliver finish :ok)
+      (is (true? (deref released 2000 false)) "released once the body ended")
+      (finally (java.util.concurrent.ThreadPoolExecutor/.shutdownNow pool)))))

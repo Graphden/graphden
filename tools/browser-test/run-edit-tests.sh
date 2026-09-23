@@ -701,14 +701,17 @@ echo "edit suite: $PASS pass / $FAIL fail / $((PASS+FAIL)) total"
 [ -n "$TOUR_AUDIT_NOTE" ] && echo "  tour spotlight: $TOUR_AUDIT_NOTE"
 if [ -n "$FLAKED" ]; then
   if [ "${WTQ_FLAKE_STRICT:-0}" = "1" ] && [ "$DEGRADED" != 1 ]; then
-    echo "  FLAKED (failed once, passed on retry — counted as FAILURES):$FLAKED" >&2
+    echo "  FLAKED (failed once, passed on retry):$FLAKED" >&2
+    echo "    counted as FAILURES (no environment signature):${STRICT_FLAKES:- none}" >&2
   elif [ "${WTQ_FLAKE_STRICT:-0}" = "1" ]; then
     echo "  FLAKED (failed once, passed on retry — REPORT-ONLY, env degraded):$FLAKED" >&2
   else
     echo "  FLAKED (failed once, passed on retry — investigate, run stays green):$FLAKED" >&2
   fi
 fi
-if [ "$FAIL" != "0" ]; then
+# FAILED_NAMES also carries the strict escalations (a flake, a leak), which
+# are not in FAIL — print it whenever it names anything.
+if [ -n "$FAILED_NAMES" ]; then
   echo "  failed:$FAILED_NAMES" >&2
 fi
 if [ "$DEGRADED" = 1 ]; then

@@ -540,15 +540,21 @@
    Returns the adopted names (empty = nothing to do)."
   [storage fn-defs]
   (let [ns-path (ns-path-index storage)
+        ;; One name-IN query for the whole bundle, not one per def.
+        names (into [] (comp (map (comp name :name)) (distinct)) fn-defs)
+        rows-by-name (if (seq names)
+                       (group-by :name (sp/query-entities storage :fn {:name names}))
+                       {})
         adoptable
-        (for [d fn-defs
-              :let [det-id (records/fn-id (:namespace d) (:name d))
-                    rows (sp/query-entities storage :fn {:name (name (:name d))})
-                    same-ns (filterv #(= (:namespace d) (some-> (:namespace-id %) ns-path))
-                                     rows)]
-              :when (and (not-any? #(= det-id (:id %)) same-ns)
-                         (= 1 (count same-ns)))]
-          [(first same-ns) det-id])]
+        (vec
+          (for [d fn-defs
+                :let [det-id (records/fn-id (:namespace d) (:name d))
+                      rows (get rows-by-name (name (:name d)))
+                      same-ns (filterv #(= (:namespace d) (some-> (:namespace-id %) ns-path))
+                                       rows)]
+                :when (and (not-any? #(= det-id (:id %)) same-ns)
+                           (= 1 (count same-ns)))]
+            [(first same-ns) det-id]))]
     (doseq [[row det-id] adoptable]
       (log/info "adopting editor-created identity onto its deterministic id"
                 {:name (:name row) :from (:id row) :to det-id})

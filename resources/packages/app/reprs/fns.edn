@@ -217,7 +217,7 @@
           :children [:_repr-rl-caption-text]}}
 
   {:name :_repr-record-list
-   :description "Table repr for a list of keyword-keyed records — the `[" list " " keyword-map "]` row of :_value-repr-registry."
+   :description "Table repr for a list of keyword-keyed records — the `[\"list\" \"keyword-map\"]` row of :_value-repr-registry."
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "repr-record-wrap"}}

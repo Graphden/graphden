@@ -149,6 +149,64 @@
         fn-defs))
 
 
+(def ^:private arg-spec-keys
+  "Keys that mark an `:args` value as an arg SPEC rather than a literal
+   map (a literal map, e.g. `:headers {\"Content-Type\" …}`, may carry
+   string keys)."
+  #{:type :description :as :required})
+
+
+(declare fn-def-key-problems)
+
+
+(defn- arg-map-key-problems
+  "Non-keyword keys in one `:args` value map: an inline fn-def recurses;
+   an arg spec must be all keywords; ANY map may not carry a symbol key.
+   A symbol key is the signature of an unescaped `\"` inside a
+   description — the string ends early, the stray words read as symbols
+   and the file still parses."
+  [m where]
+  (cond
+    (or (:parent m) (:parents m)) (fn-def-key-problems m where)
+    (some arg-spec-keys (keys m)) (for [k (keys m) :when (not (keyword? k))]
+                                    {:where where :key k})
+    :else (for [k (keys m) :when (symbol? k)] {:where where :key k})))
+
+
+(defn- fn-def-key-problems
+  "Every non-keyword key in `fn-def`'s own map and in its `:args` value
+   maps (list elements included), as `{:where [...] :key k}`."
+  [fn-def where]
+  (concat
+    (for [k (keys fn-def) :when (not (keyword? k))] {:where where :key k})
+    (when (map? (:args fn-def))
+      (for [[arg v] (:args fn-def)
+            m (cond (map? v) [v]
+                    (sequential? v) (filter map? v)
+                    :else nil)
+            problem (arg-map-key-problems m (conj where arg))]
+        problem))))
+
+
+(defn validate-fn-def-keys!
+  "Throw `:package-error/malformed-fn-def` when a fn-def (or an arg spec
+   under it) carries a non-keyword key — see `arg-map-key-problems`."
+  [fn-defs path]
+  (doseq [fd fn-defs
+          :when (map? fd)
+          :let [problems (seq (fn-def-key-problems fd [(:name fd)]))]
+          :when problems]
+    (throw (ex-info (str "Malformed fn-def " (:name fd) " in " path
+                         (when-let [l (:line (meta fd))] (str ":" l))
+                         ": non-keyword key(s) "
+                         (pr-str (mapv :key problems))
+                         " — an unescaped \" in a description ends the string early")
+                    {:type :package-error/malformed-fn-def
+                     :path path
+                     :fn-name (:name fd)
+                     :problems (vec problems)}))))
+
+
 (defn- load-module-fns
   "Loads fns.edn for a module. Expected shape:
 
@@ -167,7 +225,8 @@
     (if-let [raw (read-resource-edn-with-meta path)]
       {:ns-path (:namespace raw)
        :ns-description (:description raw)
-       :fns (attach-source-meta (vec (:fns raw)) path)}
+       :fns (do (validate-fn-def-keys! (:fns raw) path)
+                (attach-source-meta (vec (:fns raw)) path))}
       (throw (ex-info (str "Module fns not found: " package-name "/" module-name)
                       {:type :package-error/module-not-found
                        :package package-name

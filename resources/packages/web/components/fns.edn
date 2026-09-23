@@ -266,7 +266,7 @@
   ;; wrap-enabled row — the two 90%-case layouts. Class pre-merged like
   ;; `:card` so the default styling applies; caller attrs win.
   {:name :_stack-attrs
-   :description "Internal — pre-merges `{:class " stack "}` onto the caller's optional `:attrs` map."
+   :description "Internal — pre-merges `{:class \"stack\"}` onto the caller's optional `:attrs` map."
    :parent :merge
    :args {:maps [{:value {:class "stack"}}
                  {:as :attrs :required false
@@ -281,7 +281,7 @@
                      :description "Wrapped hiccup nodes."}}}
 
   {:name :stack
-   :description "Vertical flex container — `<div class=" stack " [attrs]>children...</div>` (column, gap from graphden-components.css). Slot `:children` is the stacked content."
+   :description "Vertical flex container — `<div class=\"stack\" [attrs]>children...</div>` (column, gap from graphden-components.css). Slot `:children` is the stacked content."
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs :_stack-attrs
@@ -289,14 +289,14 @@
                      :description "Stacked hiccup nodes, top to bottom."}}}
 
   {:name :_row-attrs
-   :description "Internal — pre-merges `{:class " row "}` onto the caller's optional `:attrs` map."
+   :description "Internal — pre-merges `{:class \"row\"}` onto the caller's optional `:attrs` map."
    :parent :merge
    :args {:maps [{:value {:class "row"}}
                  {:as :attrs :required false
                   :description "Extra attrs (`:id` / extra `:class` / …)."}]}}
 
   {:name :row
-   :description "Horizontal flex container — `<div class=" row " [attrs]>children...</div>` (wrap-enabled row, gap from graphden-components.css). Slot `:children` is the row content."
+   :description "Horizontal flex container — `<div class=\"row\" [attrs]>children...</div>` (wrap-enabled row, gap from graphden-components.css). Slot `:children` is the row content."
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs :_row-attrs
@@ -361,7 +361,7 @@
   ;; `label` clashes with the `:label` SLOT convention used across the
   ;; component set. Bind `:attrs {:for "input-id"}` to link a control.
   {:name :field-label
-   :description "HTML `<label [attrs]>children...</label>` — form-field label; bind `:attrs {:for " <input-id> "}` to associate it with a control."
+   :description "HTML `<label [attrs]>children...</label>` — form-field label; bind `:attrs {:for \"<input-id>\"}` to associate it with a control."
    :parent :hiccup
    :args {:tag {:value "label"}
           :children {:as :children :type [:list :hiccup-node]

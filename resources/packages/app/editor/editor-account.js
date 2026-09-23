@@ -13,16 +13,10 @@
 // partial can't render another principal's session, so the card body is
 // client-built from the same endpoints the standalone page used.
 
-function gdAcctEsc(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
 // Attach a delegated click handler to `host` exactly once (guarded via a
 // dataset flag so repeated list re-renders don't stack listeners). Reading
 // the datum from `dataset` keeps dynamic values out of inline onclick
-// JS-strings — gdAcctEsc escapes for HTML attributes, not JS-string context.
+// JS-strings — gdEscapeHtml escapes for HTML attributes, not JS-string context.
 function gdAcctDelegate(host, selector, handler) {
   if (!host || host.dataset.gdDelegated) return;
   host.dataset.gdDelegated = '1';
@@ -79,11 +73,11 @@ async function gdAcctLoadIdents() {
   const n = j.identities.length;
   host.innerHTML = j.identities.map((i) =>
     "<div class='gd-acct-row'><div class='gd-set-copy'>"
-    + "<div class='gd-set-label'>" + gdAcctEsc(i.provider) + '</div>'
-    + "<div class='gd-set-hint'>" + gdAcctEsc(i.email || '')
+    + "<div class='gd-set-label'>" + gdEscapeHtml(i.provider) + '</div>'
+    + "<div class='gd-set-hint'>" + gdEscapeHtml(i.email || '')
     + (i.provider === 'password' && !i['email-verified?'] ? ' · unverified' : '') + '</div></div>'
     + (n > 1
-      ? "<button type='button' class='gd-set-btn' data-unlink-provider='" + gdAcctEsc(i.provider) + "'>Unlink</button>"
+      ? "<button type='button' class='gd-set-btn' data-unlink-provider='" + gdEscapeHtml(i.provider) + "'>Unlink</button>"
       : '')
     + '</div>').join('');
   gdAcctDelegate(host, '[data-unlink-provider]', (el) => gdAcctUnlink(el.dataset.unlinkProvider));
@@ -127,7 +121,7 @@ async function gdAcctTotpEnroll() {
   if (s !== 200 || !host) { gdAcctSay('Could not start enrollment.'); return; }
   host.innerHTML =
     "<div class='gd-set-hint'>Add this key to your authenticator app, then enter the code.</div>"
-    + "<code class='gd-set-code gd-acct-secret'>" + gdAcctEsc(j.secret) + '</code>'
+    + "<code class='gd-set-code gd-acct-secret'>" + gdEscapeHtml(j.secret) + '</code>'
     + "<input type='text' id='gd-acct-ecode' class='gd-acct-input' inputmode='numeric' placeholder='123456'>"
     + "<button type='button' class='gd-set-btn' onclick='gdAcctTotpConfirm()'>Confirm &amp; enable</button>";
 }
@@ -159,11 +153,11 @@ async function gdAcctLoadTokens() {
   host.innerHTML = j.length
     ? j.map((t) =>
       "<div class='gd-acct-row'><div class='gd-set-copy'>"
-      + "<div class='gd-set-label'>" + (gdAcctEsc(t.label) || '(unlabeled)') + '</div>'
-      + "<div class='gd-set-hint'>" + gdAcctEsc(t.scopes || 'unscoped') + ' · '
+      + "<div class='gd-set-label'>" + (gdEscapeHtml(t.label) || '(unlabeled)') + '</div>'
+      + "<div class='gd-set-hint'>" + gdEscapeHtml(t.scopes || 'unscoped') + ' · '
       + (t['expires-at'] ? 'expires ' + gdAcctFmtDate(t['expires-at']) : 'no expiry')
       + '</div></div>'
-      + "<button type='button' class='gd-set-btn' data-revoke-token='" + gdAcctEsc(t.id) + "'>Revoke</button></div>").join('')
+      + "<button type='button' class='gd-set-btn' data-revoke-token='" + gdEscapeHtml(t.id) + "'>Revoke</button></div>").join('')
     : "<div class='gd-set-hint'>No API tokens yet.</div>";
   gdAcctDelegate(host, '[data-revoke-token]', (el) => gdAcctRevokeToken(el.dataset.revokeToken));
 }
@@ -189,7 +183,7 @@ async function gdAcctMintToken() {
   if (reveal) {
     reveal.innerHTML =
       "<div class='gd-set-hint'>Copy your new token now — it will not be shown again:</div>"
-      + "<code class='gd-set-code gd-acct-secret'>" + gdAcctEsc(j.token) + '</code>'
+      + "<code class='gd-set-code gd-acct-secret'>" + gdEscapeHtml(j.token) + '</code>'
       + "<button type='button' class='gd-set-btn' onclick='gdAcctCopyToken(this)'>Copy</button>";
   }
   const labelInput = document.getElementById('gd-acct-tok-label');

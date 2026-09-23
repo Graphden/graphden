@@ -59,12 +59,6 @@ function closeBranchDiffModal() {
   _branchDiffTrigger = null;
 }
 
-function escapeText(s) {
-  const d = document.createElement('div');
-  d.textContent = s === undefined || s === null ? '' : String(s);
-  return d.innerHTML;
-}
-
 // ============================================================================
 // The review dialog
 // ============================================================================
@@ -82,7 +76,7 @@ async function showReviewDialog(sourceName, sourceRef) {
     '<div class="branch-diff-overlay"></div>'
     + '<div class="branch-diff-card">'
     +   '<div class="branch-diff-header">'
-    +     'Review: <strong>' + escapeText(sourceName) + '</strong>'
+    +     'Review: <strong>' + gdEscapeHtml(sourceName) + '</strong>'
     +     '<span class="branch-diff-header-into"></span>'
     +     '<button class="branch-diff-close" aria-label="Close">×</button>'
     +   '</div>'
@@ -151,7 +145,7 @@ async function showReviewDialog(sourceName, sourceRef) {
   } catch (err) {
     body.classList.remove('branch-diff-loading');
     body.innerHTML = '<div class="branch-diff-error">Failed: '
-      + escapeText(err?.message || 'network error') + '</div>';
+      + gdEscapeHtml(err?.message || 'network error') + '</div>';
   }
 }
 

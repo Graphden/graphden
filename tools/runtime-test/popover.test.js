@@ -226,6 +226,15 @@ test('other keys are left alone', () => {
 });
 
 
+test('gdEscapeHtml escapes text and quoted attributes; nullish is empty', () => {
+  const { ctx } = makeCtx({ w: 800, h: 600 });
+  const esc = ctx.gdEscapeHtml;
+  assert(esc('<a href="x">T&C\'s</a>') === '&lt;a href=&quot;x&quot;&gt;T&amp;C&#39;s&lt;/a&gt;',
+    'all five characters escaped: ' + esc('<a href="x">T&C\'s</a>'));
+  assert(esc(null) === '' && esc(undefined) === '', 'nullish → empty string');
+  assert(esc(0) === '0' && esc(false) === 'false', 'falsy non-nullish values are kept');
+});
+
 console.log(failures === 0
   ? '✓ popover — ' + passes + ' assertions'
   : '✗ popover — ' + failures + ' failed of ' + (passes + failures));

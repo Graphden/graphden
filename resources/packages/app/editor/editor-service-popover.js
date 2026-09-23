@@ -327,17 +327,11 @@ function invalidateServicePopoverCache() { _servicePopoverCache.clear(); }
 // SAME class names + `data-existing-service-id` the server partial does, so the
 // shared `wireServicePopoverHandlers` binds it unchanged — and the absent
 // cardinality / branch / pool-size controls default to singleton / none there.
-function escapeServiceHtml(s) {
-  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
-    ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
-}
-
-
 function tenantServicePopoverHtml(fnEntity, svc) {
-  const existingId = escapeServiceHtml(svc?.id || '');
+  const existingId = gdEscapeHtml(svc?.id || '');
   const enabled = svc ? !!svc['enabled?'] : true;
   const policy = svc?.['restart-policy'] || 'always';
-  const name = escapeServiceHtml(fnEntity.name || '(anonymous)');
+  const name = gdEscapeHtml(fnEntity.name || '(anonymous)');
   const radio = (val, label) =>
     '<label><input type="radio" name="service-restart-policy" value="' + val + '"'
     + (policy === val ? ' checked' : '') + '> ' + label + '</label>';

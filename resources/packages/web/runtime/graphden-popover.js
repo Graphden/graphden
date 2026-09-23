@@ -14,6 +14,14 @@
 //     focus moves a dialog has to make itself, at the points only it knows
 //     about — it opens, and it closes through paths (× button, Cancel,
 //     submit) that never reach installPopoverDismiss.
+//   - gdEscapeHtml: the one HTML escaper (& < > " ') for popover bodies and
+//     attribute values a caller still has to build as a string.
+
+// Escape `s` for HTML text AND quoted attribute values; null/undefined → ''.
+function gdEscapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
 
 // Place `el` below `anchorEl`, flipping above when there is no room and
 // clamping horizontally into the viewport. `el` must already be in the DOM; it

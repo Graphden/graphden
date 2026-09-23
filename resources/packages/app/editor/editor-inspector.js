@@ -13,14 +13,7 @@
 // on narrow viewports (`gd-insp-open`). Compare mode appends its diff panel
 // after every render (`gdDiffRenderInspectorSection`, editor-diff-inspector.js).
 //
-// `gdEscHtml` is the HTML escaper this and editor-shell-chips.js share (it was
-// the shell IIFE's private `esc`).
-
-function gdEscHtml(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
+// HTML escaping goes through `gdEscapeHtml` (web/runtime/graphden-popover.js).
 
 (() => {
 
@@ -88,10 +81,10 @@ function gdEscHtml(s) {
 
     let head = '<div class="gd-insp-head">'
       + '<button type="button" class="gd-insp-close" aria-label="Close inspector">&times;</button>'
-      + '<div class="gd-insp-title"><span class="gd-insp-name">' + gdEscHtml(fnLabel(fn))
-      + '</span><span class="gd-insp-kind">' + gdEscHtml(kind) + '</span></div>';
-    if (ns) head += '<div class="gd-insp-ns">' + gdEscHtml(ns) + '</div>';
-    if (fn.description) head += '<p class="gd-insp-desc">' + gdEscHtml(fn.description) + '</p>';
+      + '<div class="gd-insp-title"><span class="gd-insp-name">' + gdEscapeHtml(fnLabel(fn))
+      + '</span><span class="gd-insp-kind">' + gdEscapeHtml(kind) + '</span></div>';
+    if (ns) head += '<div class="gd-insp-ns">' + gdEscapeHtml(ns) + '</div>';
+    if (fn.description) head += '<p class="gd-insp-desc">' + gdEscapeHtml(fn.description) + '</p>';
     head += '</div>';
 
     // Full ARIA tab pattern: `id` + `aria-controls` tie each tab to the ONE

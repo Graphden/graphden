@@ -281,6 +281,8 @@ async function installGraphShell(tree, typeResp, onTypesUnparseable) {
   // The row-actions popover HTML bakes the fn's name, description and the
   // ⚙ Service blocked reason — all of which a reload can have changed.
   if (typeof _rowActionsHtmlCache !== 'undefined') _rowActionsHtmlCache.clear();
+  // The type panels' "Used by N" counts change with the same writes.
+  if (typeof typeUsagesCache !== 'undefined') typeUsagesCache.clear();
   // Resolve the secret-leaf base-fn id once so isSecretFn() stays
   // synchronous without a full-fns mirror to scan.
   if (typeof primeSecretLeafId === 'function') primeSecretLeafId();

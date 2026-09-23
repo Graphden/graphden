@@ -55,6 +55,7 @@ function boot({ routes, accounts = false, tenancyClass = false }) {
     VALUE_KINDS: [],
     _rowActionsUseSiteArgs: rowActions,
     _rowActionsHtmlCache: new Map([['/partials/row-actions?fn-id=f1', '<b>old name</b>']]),
+    typeUsagesCache: new Map([['t-port', [{ kind: 'slot-of' }]]]),
   });
   ctx.window = ctx;
   ctx.window.addEventListener = () => {};
@@ -103,6 +104,7 @@ function racingRoutes(ctxRef, typesBody) {
     assert(vm.runInContext('richTypes.int !== undefined && !richTypes.stale', b.ctx), which + ': richTypes installed');
     assert(b.rowActions.size === 0, which + ': _rowActionsUseSiteArgs pruned');
     assert(b.ctx._rowActionsHtmlCache.size === 0, which + ': row-actions HTML cache cleared');
+    assert(b.ctx.typeUsagesCache.size === 0, which + ': type Used-by cache cleared');
     assert(b.calls.entityList >= 1, which + ': Explorer repainted');
   }
 

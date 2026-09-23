@@ -173,6 +173,13 @@ const {
       'the Inspector head shows health\'s description (got: ' + inspDesc + ')');
     assert(await clickTourButton(page, 'Next'), 'lesson 02 inspector Next');
     await waitTourTitle(page, 'What the canvas drew');
+    // The step is text only — its layout request may still be in flight
+    // when the popover lands (~1 s under a loaded host); a reader looks
+    // at the card once it is drawn, so wait for it (bounded, honest
+    // worst case) before reading what it shows.
+    await page.waitForFunction(() => document.querySelectorAll(
+      '.node-overlay[data-fn-name="health"] .ancestor-line[data-level]').length > 0,
+    null, {timeout: 30000}).catch(() => {});
     const drawn = await page.evaluate(() => ({
       rows: Array.from(document.querySelectorAll(
         '.node-overlay[data-fn-name="health"] .ancestor-line[data-level]'))

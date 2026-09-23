@@ -19,7 +19,7 @@
 (use-fixtures :once
   ts/isolated-seams-fixture
   (fn [t]
-    ;; Same package set as registry-test — shares its golden template.
+    ;; Same package set as registry-{publish,install}-test — shares their golden template.
     (binding [*bootstrap* (setup/bootstrap-crud-graph-from-golden!
                             "hub-sync-test" ["core" "web" "app" "registry" "mcp"])]
       (t))))

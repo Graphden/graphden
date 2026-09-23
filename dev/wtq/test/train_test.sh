@@ -190,6 +190,32 @@ check "gates: full, [a b], [a], [b], budget spent -> fresh [c d], [c], [d]" \
   eq "$(gates | tr '\n' '|')" "a b c d|a b|a|b|c d|c|d|"
 check "the budget hand-back is announced" grep -q "budget of 3 extra gate(s) spent" "$T/a.out" "$T/b.out" "$T/c.out" "$T/d.out"
 
+echo "== develop moves UNDER the gate -> re-queued, never FAILed"
+new_world moved
+feature mv mv.txt mv
+# One-shot: the first gate commits to develop behind the train's back (what
+# `wt new` / `claim` do when they fast-forward develop to an outside push).
+touch "$T/move-once"
+cat > "$WTQ_GATE_STUB" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >> "$STUB_LOG"
+if [ -e "$MOVE_ONCE" ]; then
+  rm -f "$MOVE_ONCE"
+  printf 'out\n' > "$MOVE_REPO/outside.txt"
+  git -C "$MOVE_REPO" add outside.txt && git -C "$MOVE_REPO" commit -qm outside
+fi
+exit 0
+STUB
+export MOVE_ONCE="$T/move-once" MOVE_REPO="$REPO"
+merge_bg mv
+finish mv
+unset MOVE_ONCE MOVE_REPO
+check "exit 0" eq "$(rc_of mv)" 0
+check "RESULT GREEN" eq "$(verdict mv)" GREEN
+check "two gates: the moved one, then a train on the new tip" eq "$(gates | tr '\n' '|')" "mv|mv|"
+check "both the outside commit and mv landed" eval "on_develop outside.txt && on_develop mv.txt"
+check "the train log says it re-queued" eval "grep -q 'moved under the gate' '$Q'/logs/_train-*.log"
+
 echo "== conflict with develop itself -> CONFLICT"
 new_world conflict
 feature x f.txt x

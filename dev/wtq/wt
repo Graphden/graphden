@@ -979,6 +979,9 @@ cmd_drop() {
 #     queue. Members already mid-bisection are kept: their verdict is owed.
 #   - `wt soon` lets an agent that is minutes from done ask the next train to
 #     wait for it (<= 15 min in total), instead of paying a train of its own.
+#   - develop moving UNDER a gate (an outside push fast-forwarded in by `wt
+#     new` / `claim` / refresh_target) is nobody's verdict: the members are
+#     re-queued and ride a train on the new tip, never FAILed or bisected.
 #
 # Verdicts in results/<name>: VERDICT<TAB>rc<TAB>branch<TAB>sha<TAB>train<TAB>detail
 #   final: GREEN 0, FAIL 1, CONFLICT 2, PRECOND 3, LANDED_STALE 4, STALE 5
@@ -993,6 +996,8 @@ cmd_drop() {
 CANONICAL_IMAGE="graphden-executor:latest"
 CANDIDATE_IMAGE="graphden-executor:candidate"
 
+# gate_body's "not a verdict" exit: $TARGET moved under the gate, re-queue.
+RC_TARGET_MOVED=6
 FINAL_VERDICTS=" GREEN FAIL CONFLICT PRECOND STALE LANDED_STALE "
 is_final() { case "$FINAL_VERDICTS" in *" $1 "*) return 0 ;; esac; return 1; }
 verdict_rc() {
@@ -1396,7 +1401,7 @@ gate_body() {
   [ -z "$(git -C "$wt" status --porcelain)" ] || { echo "ABORT: train worktree dirty after assembly."; return 3; }
   [ -z "$(git -C "$MAIN_WT" status --porcelain --untracked-files=no)" ] || { echo "ABORT: main worktree ($MAIN_WT) has uncommitted TRACKED changes — it must stay clean on $TARGET."; return 3; }
   git -C "$wt" merge-base --is-ancestor "$TARGET" HEAD \
-    || { echo "ABORT: $TARGET moved after the train was assembled — it no longer sits on top of it."; return 3; }
+    || { echo "REQUEUE: $TARGET moved after the train was assembled — it no longer sits on top of it."; return "$RC_TARGET_MOVED"; }
 
   if [ -n "$stub" ]; then
     step "TEST STUB instead of the suites: $stub"
@@ -1417,7 +1422,20 @@ gate_body() {
   local land_before land_want land_after
   land_before="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
   land_want="$(git -C "$wt" rev-parse HEAD)"
-  git -C "$MAIN_WT" merge --ff-only "refs/heads/$branch" || { echo "FAIL: could not ff $TARGET (did it move? it shouldn't have)"; return 1; }
+  # A failed ff is never the members' code — the suites already passed. Return
+  # 1 here and a lone member would get FAIL (a train would be bisected) for a
+  # commit somebody else put on $TARGET. The usual cause: $TARGET moved under
+  # the gate — `wt new` / `claim` / refresh_target fast-forward the local
+  # $TARGET to origin after an outside push, outside the queue lock. That is
+  # a re-queue: the next train assembles on the new tip.
+  if ! git -C "$MAIN_WT" merge --ff-only "refs/heads/$branch"; then
+    if ! git -C "$MAIN_WT" merge-base --is-ancestor "$TARGET" "$land_want"; then
+      echo "REQUEUE: $TARGET moved during the gate ($(git -C "$MAIN_WT" rev-parse --short "$land_before") -> $(git -C "$MAIN_WT" rev-parse --short "$TARGET")) — the train no longer sits on it"
+      return "$RC_TARGET_MOVED"
+    fi
+    echo "ABORT: could not ff $TARGET to the validated tip although it is an ancestor — environment (index lock? checkout?), not code"
+    return 3
+  fi
   land_after="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
   [ "$land_after" = "$land_want" ]       || { echo "FAIL(false-green guard): $TARGET is $land_after but the tested tip was $land_want — develop did NOT advance to the validated build"; return 1; }
   [ "$land_after" != "$land_before" ]       || { echo "FAIL(false-green guard): $TARGET unchanged ($land_before) — the ff was a no-op, nothing landed"; return 1; }
@@ -1762,6 +1780,15 @@ train_run() {
     4)
       for m in "${gated[@]}"; do decide "$m" LANDED_STALE "$ts" "landed in $TARGET@${landed:0:8}, but a post-land step failed — see the train log"; done
       return 20 ;;
+    "$RC_TARGET_MOVED")
+      # Nobody's verdict: $TARGET moved under the gate. Everyone goes back to
+      # the queue, keeping their place (and bisection segment, if any); the
+      # conductor refreshes $TARGET and assembles the next train on it.
+      echo "  ↻ $TARGET moved under the gate — re-queueing [ ${gated[*]} ] for a train on the new tip"
+      state_lock
+      for m in "${gated[@]}"; do qset "$m" state queued; done
+      state_unlock
+      return 0 ;;
     2|3)
       echo "!!! the gate refused the ASSEMBLED train (rc $grc) — that is an environment or tooling"
       echo "!!! problem, not any member's code. Every member gets it; fix the host, then re-run."

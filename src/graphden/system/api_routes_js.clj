@@ -16,10 +16,7 @@
    `@!cache` deref).
 
    The pure JS-templating helpers `emit-entry` + `routes->js-bundle`
-   live here as the canonical implementation; the
-   `:routes->js-bundle` base-fn in `web/reitit/impls.clj`
-   delegates to them so the graph-side primitive and the boot-time
-   cache stay byte-identical.
+   live here.
 
    See [[graphden.system.api-url-drift]] for the related sync-time
    validator that catches stale `/api/*` literals in editor JS."
@@ -106,10 +103,8 @@
 
 (defn routes->js-bundle
   "Emit a `window.API = {…}` IIFE from a vector of full route path
-   patterns. Public so both the `:routes->js-bundle` defbase
-   (request- or sync-time graph codegen) and the boot-time
-   `:exec/api-routes-js-cache` init-key can call it without
-   duplication."
+   patterns — the module the boot-time `:exec/api-routes-js-cache`
+   init-key caches."
   [paths]
   (str "// AUTO-GENERATED — do not edit. Source of truth: route\n"
        "// fn-defs in `app/routes/*`. Regenerated at every system\n"

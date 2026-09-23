@@ -145,7 +145,7 @@
     :resolve-type-fn-id :response-immutable? :rest :reverse
     :rewrite-refs-to-version
     :rich-type-of-name :ring-create-default-handler :ring-handler
-    :ring-route-paths :ring-router :routes->js-bundle
+    :ring-router
     :rule-owner-of-name :running-entry :running-state :secret-leaf :secret-path-args :semver-compatible? :service-endpoint
     :queue-publish :queue-take :queue-ack :queue-nack :queue-extend :queue-requeue
     :queue-stats :queue-dead-letters
@@ -177,7 +177,7 @@
     ;; item's content) — no taint to propagate, like seq-update.
     :try-apply-seq-append :try-apply-seq-move :try-apply-seq-update
     :try-apply-tighten
-    :try-apply-update :type-check-binding-rej
+    :try-apply-update
     :type-name-kinds :update-entity :update-in :update-keys
     :update-vals :url-decode :usage-all-org-stats
     :usage-org-daily :usage-org-fn-stats

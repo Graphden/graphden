@@ -1,7 +1,9 @@
 (ns graphden.packages.web.reitit-test
-  "Unit tests for the `:middleware` factory impl. `:proceed` is now a
-   pure fn-def composition (no impl) — its behavior is exercised by
-   the auth integration tests via the actual fn-graph executor.
+  "Unit tests for the `:middleware` factory impl, and for the route
+   enumeration + `window.API` codegen the boot-time cache builds from a
+   compiled router. `:proceed` is a pure fn-def composition (no impl) —
+   its behavior is exercised by the auth integration tests via the
+   actual fn-graph executor.
 
    Loads impls dynamically from `resources/packages/`, matching the
    pattern used by layout-test."
@@ -9,6 +11,7 @@
     [clojure.java.io :as io]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
+    [graphden.system.api-routes-js :as api-js]
     [reitit.ring :as ring]))
 
 
@@ -32,18 +35,12 @@
 
 
 (def ^:private middleware-impl (unwrap 'middleware))
-(def ^:private ring-route-paths-impl (unwrap 'ring-route-paths))
-(def ^:private routes->js-bundle-impl (unwrap 'routes->js-bundle))
 
 
-(defn- route-paths
-  [router]
-  (ring-route-paths-impl {:router router} nil))
-
-
-(defn- js-bundle
-  [paths]
-  (routes->js-bundle-impl {:paths paths} nil))
+;; The path enumeration + `window.API` templater behind the boot-time
+;; `:exec/api-routes-js-cache` (the graph reads the cached module).
+(def ^:private route-paths api-js/router-paths)
+(def ^:private js-bundle api-js/routes->js-bundle)
 
 
 (defn- call-mw
@@ -139,7 +136,7 @@
 
 
 ;; =============================================================================
-;; TESTS — ring-route-paths (path enumeration from compiled router)
+;; TESTS — router-paths (path enumeration from compiled router)
 ;; =============================================================================
 
 (deftest ring-route-paths-extracts-from-ring-handler
@@ -268,7 +265,7 @@
 
 
 (deftest js-bundle-roundtrip-from-router
-  (testing "compiled router → ring-route-paths → routes->js-bundle produces JS that mentions every path"
+  (testing "compiled router → router-paths → routes->js-bundle produces JS that mentions every path"
     (let [router (ring/router
                    [["/api/health" {:get (constantly {:status 200})}]
                     ["/api/fns/:id" {:get (constantly {:status 200})}]

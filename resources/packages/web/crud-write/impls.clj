@@ -10,7 +10,6 @@
   (:require
     [graphden.crud.entities :as entities]
     [graphden.crud.request :as request]
-    [graphden.crud.type-check :as tc]
     [graphden.crud.validation :as validation]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]))
@@ -57,31 +56,8 @@
                           entity-data)))
 
 
-(defbase type-check-binding-rej
-  "On-demand single-binding type validator. Wraps
-   `type-check/type-check-binding-direct!` which runs the full graphden
-   type system against the binding's `:value` / `:ref-fn-id` against
-   the slot's declared type. Returns nil on success or `{:reason
-   <message>}` on a type mismatch (it never throws for a mismatch).
-
-   Error-tolerance Phase 2 unhooked this from the create/update
-   Stage-2 `:cond` chains — binding writes proceed and the post-write
-   aggregate check inside the `try-apply-*` cores records failures as
-   per-branch diagnostics instead. Compose this where a verdict
-   WITHOUT a write is wanted (pre-flight validation); it records
-   nothing in the diagnostics store.
-
-   `id` is an existing binding row's id (the check then sees the
-   merged post-write state); nil to validate standalone entity-data."
-  [entity-data id]
-  (cr/record-effect! :db)
-  (when entity-data
-    (tc/type-check-binding-direct! (request/require-storage ctx) entity-data id)))
-
-
 ;; The package loader pairs each base-fn declared in this module's
 ;; `fns.edn` with its impl by looking up this map (keyword name -> impl).
 (def impls
   {:chain-has-process-effect? chain-has-process-effect?
-   :write-rej write-rej
-   :type-check-binding-rej type-check-binding-rej})
+   :write-rej write-rej})

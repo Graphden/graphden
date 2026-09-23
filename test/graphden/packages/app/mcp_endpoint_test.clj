@@ -7,7 +7,9 @@
     [cheshire.core :as json]
     [clojure.edn :as edn]
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.test-infra.golden-app :as ga]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.test-infra.golden-app :as ga]
+    [graphden.versioning.storage.core :as vs]))
 
 
 ;; mcp is its own package now (extracted from `app`, installed via the
@@ -311,6 +313,33 @@
                                          :allow-platform-overwrite true
                                          :fn-defs "[{:name :mcp-plat-own :parent :add :args {:nums [1 2]}}]"}))]
         (is (true? (:ok data)) (pr-str data))))))
+
+
+(deftest mutation-refuses-an-editor-born-same-name-fn
+  ;; The bundle IMPORT adopts an editor-born (random-id) fn onto the
+  ;; deterministic id before its sync — the pull-after-push dedup that
+  ;; stopped a same-name twin landing. The MCP upsert shares that sync
+  ;; (`:sync-fn-defs-branch!`) but not the adoption, deliberately: the
+  ;; adoption is an identity-plane repoint + purge, and an `ai/…` branch
+  ;; forks main, so adopting an fn the AI's branch INHERITS would erase it
+  ;; from main. Without it the twin cannot happen either — the resolved-view
+  ;; name check refuses the write, loudly, and nothing moves.
+  (let [branch (str "ai/mcp-adopt-" (subs (str (random-uuid)) 0 8))
+        _ (call-tool! "create-branch" {:name branch})
+        _ (call-tool! "upsert-fn-defs" {:branch branch
+                                        :fn-defs "[{:name :mcp-adopt-seed :namespace \"mcp.adopt\" :parent :add :args {:nums [1]}}]"})
+        storage (:storage ga/*bootstrap*)
+        branch-row (first (sp/query-entities (:base-storage storage) :branch {:name branch}))
+        on-branch (vs/switch-branch storage (:id branch-row))
+        ns-id (:namespace-id (first (sp/query-entities on-branch :fn {:name "mcp-adopt-seed"})))
+        editor-row (sp/create-entity on-branch :fn {:id (random-uuid) :name "mcp-adoptee" :namespace-id ns-id})
+        rpc (call-tool! "upsert-fn-defs"
+                        {:branch branch
+                         :fn-defs "[{:name :mcp-adoptee :namespace \"mcp.adopt\" :parent :add :args {:nums [7]}}]"})]
+    (is (= -32602 (get-in rpc [:error :code])) (pr-str rpc))
+    (is (re-find #"already exists" (str (get-in rpc [:error :message]))))
+    (is (= [(:id editor-row)] (mapv :id (sp/query-entities on-branch :fn {:name "mcp-adoptee"})))
+        "the editor-born row is untouched — no twin, no purge")))
 
 
 (deftest tool-run-tests-and-list-branches

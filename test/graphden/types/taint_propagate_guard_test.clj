@@ -56,11 +56,17 @@
     ;; Marketplace (docs/MARKETPLACE.md): identity + roster reads are
     ;; server-derived; :round / :url-encode / / :ui-pref-write!
     ;; return caller content and carry :taint-propagate?.
+    ;; Registry remote / import primitives (the dials and the import
+    ;; pipeline are fn-defs over these): the bearer + branch reads are
+    ;; server-derived; the bundle filters / pick / store echo caller content.
+    :semver-pick :mirror-store-package-version! :remote-auth-value
+    :branch-by-name :create-owned-branch! :drop-orphan-anon-defs
+    :adopt-bundle-identities! :prune-bundle-scope!
     :current-instant :current-user-id :current-user-label :loaded-packages
     :round :rows->csv :semver-rank :ui-pref-write! :ui-prefs-read :url-encode
     ;; the origin's marketplace card — remote, server-derived data, not the
     ;; caller's content
-    :remote-package-card
+
     ;; moderation: the flag and the queue are server-derived; the decision
     ;; answers the row with the operator's note (caller content) → tainted
     :moderation-on? :moderation-queue :moderate-package-version!
@@ -104,7 +110,7 @@
     :free-arg-entries :free-arg-slot-map :free-memory :future :get :get-entity
     :get-execution :get-in :graph-fn-defs :graph-rows :group-by :gt :gte :gzip-bytes
     :h-raw :header-get :heap-committed :heap-max :heap-used :hiccup
-    :http-request :http-server :http-stop :hub-fetch-bundle :hub-push-bundle! :if :into
+    :http-request :http-server :http-stop   :if :into
     :invalidate-after-write :invalidate-graph-cache :invoke :is-a?
     :json-to-type :jvm-uptime-ms :keys :list :list-all-graph-entities :graph-fn-defs-subtree :fn-unread-bindings :log-warn
     ;; app/views — the Explorer's filter evaluation: light fn rows (ids,
@@ -119,7 +125,7 @@
     :nil? :non-blank? :not :notify-after-write :or :os-arch
     :os-load-average :os-name :os-processors :package-upsert-pin
     :package-version-materialized? :pairs->map :parse-constraint
-    :import-bundle! :incompatible-dependency-bumps :mirror-remote-package! :parse-edn :parse-graph-edn :parse-int :parse-json :parse-uuid :pg-execute
+    :incompatible-dependency-bumps  :parse-edn :parse-graph-edn :parse-int :parse-json :parse-uuid :pg-execute
     :pg-notify :pg-query :pg-tx :pick-encoding
     ;; :pkg-delete-guard-reason reads server rows (fn name via the
     ;; owned registry) — the reason string carries no caller content.
@@ -132,10 +138,10 @@
     ;; capability names), never caller content — no taint to propagate.
     :request-capabilities
     :render-hiccup :render-value-repr :repeat :reset :resolve-branch-ref :resolve-fn
-    :resolve-fn-version-id :resolve-form :resolve-package-version
-    ;; :resolve-remote-version returns a server-picked version string off
+    :resolve-fn-version-id :resolve-form
+    ;;  returns a server-picked version string off
     ;; the remote list — no caller content flows into the return.
-    :resolve-remote-version
+
     :resolve-type-fn-id :response-immutable? :rest :reverse
     :rewrite-refs-to-version
     :rich-type-of-name :ring-create-default-handler :ring-handler
@@ -186,14 +192,17 @@
    pass/transform caller content? then it needs `:taint-propagate?`\"; for each
    REMOVED name confirm it genuinely no longer handles content."
   #{:round :ui-pref-write! :url-encode :moderate-package-version! ; marketplace: answer caller content
+    ;; registry: the pick / store / import filters echo caller content
+    :semver-pick :mirror-store-package-version! :drop-orphan-anon-defs
+    :adopt-bundle-identities! :prune-bundle-scope!
     :abs :add :and :assert :assert-eq :assert-some :assoc :assoc-in :atom :blank? :byte-len :call-with :call :call-traced :with-heartbeat
     :call-noargs :call-noargs-traced :case :cell :coalesce :comp :concat :cond :conj :cons :const
     :constant-time-equal? :constantly :contains? :count :deref :dissoc :distinct :div :do :drop
     :empty? :equal? :every? :ex-data :ex-info :filter :filter-xf :find-first
     :first :flatten :fn-signature :fn-type? :form-decode :get :get-in :gt
-    :gte :group-by :hiccup :hub-fetch-bundle :hub-push-bundle! :if :into :invoke :is-a? :keys :list :lt :lte
+    :gte :group-by :hiccup   :if :into :invoke :is-a? :keys :list :lt :lte
     :map :map-xf :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
-    :import-bundle! :list-branch-comments :parse-edn :parse-graph-edn
+    :list-branch-comments :parse-edn :parse-graph-edn
     :parse-int :parse-json :parse-uuid :platform-owned-def-names
     :position-in :postwalk :pprint-str :pr-str
     :quot :range

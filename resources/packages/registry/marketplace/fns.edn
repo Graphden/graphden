@@ -235,12 +235,62 @@
    :args {:version {:type :nullable-text :description "Version string."}}
    :return-type :int}
 
+  ;; The REMOTE registry's card for a package a mirror is about to copy —
+  ;; one GET through the registry's `:_registry-get` (`:http-request`:
+  ;; egress-guarded, rate- and byte-capped), bearer only to the
+  ;; configured registry origin.
+  {:name :_rpc-url
+   :parent :str
+   :args {:parts [:_remote-base {:value "/api/marketplace?kind=any&q="}
+                  {:parent :url-encode :args {:string {:as :pkg-name :type :text}}}]}}
+
+  {:name :_rpc-response
+   :parent :_registry-get
+   :args {:url {:ref :_rpc-url :type :url}}}
+
+  {:name :_rpc-cards-parse
+   :parent :parse-json
+   :args {:keywordize {:value true}
+          :string {:parent :get :args {:coll :_rpc-response :key {:value :body} :default {:value ""}}}}}
+
+  {:name :_rpc-cards
+   :description "The remote's card list — `[]` unless it answered 200 with a JSON list."
+   :parent :if
+   :args {:test {:parent :equal?
+                 :args {:a {:parent :get :args {:coll :_rpc-response :key {:value :status} :default nil}}
+                        :b {:value 200}}}
+          :then {:parent :coalesce
+                 :args {:value {:parent :try
+                                :args {:body :_rpc-cards-parse
+                                       :on-throw {:parent :const :args {:value nil}}}}
+                        :default {:value []}}}
+          :else {:value []}}}
+
+  {:name :_rpc-match
+   :description "The card whose `:name` is exactly the package — the remote's `q=` search is a fuzzy match."
+   :parent :first
+   :args {:coll {:parent :filter
+                 :args {:pred :_remote-row-names-package?
+                        :coll {:parent :if
+                               :args {:test {:parent :is-a? :args {:value :_rpc-cards :type {:value :sequence}}}
+                                      :then :_rpc-cards
+                                      :else {:value []}}}}}}}
+
   {:name :remote-package-card
-   :description "The REMOTE registry's marketplace card for `:pkg-name` (`GET <source>/api/marketplace?q=&kind=any`, exact name) — the rating / installs / version count a mirror snapshots as its read-only `:origin` (docs/MARKETPLACE.md § 7). nil when the remote has no marketplace, is unreachable, or lists no such package."
-   :args {:source {:type :nullable-text :description "Remote registry base URL."}
-          :pkg-name {:type :text :description "Package name."}}
-   :return-type :nullable-keyword-map
-   :effects #{:network :env}}
+   :description "The REMOTE registry's marketplace card for `:pkg-name` (`GET <source>/api/marketplace?q=&kind=any`, exact name) — the rating / installs / version count a mirror snapshots as its read-only `:origin` (docs/MARKETPLACE.md § 7), stamped with the source `:url` and `:as-of`. nil when the remote has no marketplace, is unreachable, or lists no such package."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_rpc-match}}
+          :then {:parent :assoc
+                 :args {:map {:parent :assoc
+                              :args {:map {:parent :select-keys
+                                           :args {:m {:ref :_rpc-match :type :nullable-keyword-map}
+                                                  :ks [{:value :rating} {:value :installs} {:value :version-count}
+                                                       {:value :latest} {:value :published-at}]}}
+                                     :key {:value :url}
+                                     :value :_remote-base}}
+                        :key {:value :as-of}
+                        :value {:parent :to-str :args {:value :current-instant}}}}
+          :else {:value nil}}}
 
   ;; =====================================================================
   ;; CARDS — one per package name, over the registry index

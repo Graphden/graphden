@@ -61,6 +61,13 @@
    :return-type :uuid
    :effects #{:db}}
 
+  {:name :sync-fn-defs-branch!
+   :description "Sync fn-defs into the NAMED branch `branch-id` + delta-invalidate that branch's registry — the one branch-targeted bundle sync the MCP `upsert-fn-defs` tool and the registry's bundle import share. Atomic effect boundary (same carve-out as `:merge-branch!`); the same `sync-bundle!` path as the package loader, so cycles, name collisions, seals and type-check apply. Returns the synced fn-ids as text."
+   :args {:branch-id {:type :uuid :description "Target branch — never the request's own."}
+          :fn-defs {:type [:list :keyword-map] :description "Parsed fn-def maps, exactly the fns.edn shape."}}
+   :return-type [:list :text]
+   :effects #{:db}}
+
   {:name :current-branch-chain
    :description "Branch chain (current → root) for the active request's branch. Composition over `:branch-chain` + `:current-branch-id`; bind in `:resolve-*-rows :args :branch-chain` at any versioned-read site."
    :parent :branch-chain

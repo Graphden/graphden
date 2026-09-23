@@ -7,7 +7,7 @@ The seams the multi-tenant addon plugs into (docs/TENANCY_SEAM.md) and the harde
 
 after: services
 
-[[file:index.org][index]] · ~27 min
+[[file:index.org][index]] · ~28 min
 
 * 1. platform-tier?
 :PROPERTIES:
@@ -65,13 +65,13 @@ The effect gate's registry of what a sandboxed graph must NOT do — env / io / 
 :PROPERTIES:
 :CUSTOM_ID: platform/check-target!
 :FILE: src/graphden/clients/egress.clj
-:LINE: 86
-:MINS: 1.4
+:LINE: 90
+:MINS: 1.5
 :END:
 
-The SSRF egress guard a tenant's outbound call passes before dialing: fail-closed resolution of the hostname, rejecting loopback / RFC1918 / link-local / cloud-metadata targets. Pair it with ~validating-dns~ below in the same file — the connect-time re-check that closes the DNS-rebind TOCTOU.
+The SSRF egress guard a tenant's outbound call passes before dialing: fail-closed resolution of the hostname, rejecting loopback / RFC1918 / link-local / cloud-metadata targets. Pair it with ~validating-dns~ and ~validating-socket-factory~ below in the same file — the connect-time re-checks that close the DNS-rebind TOCTOU and the redirect-to-an-IP-literal hop the Dns hook never sees.
 
-- source :: [[file:../../../src/graphden/clients/egress.clj::(defn check-target!][src/graphden/clients/egress.clj:86]]
+- source :: [[file:../../../src/graphden/clients/egress.clj::(defn check-target!][src/graphden/clients/egress.clj:90]]
 
 * 6. sanitize-hiccup
 :PROPERTIES:

@@ -524,12 +524,28 @@
   ;; update / pin graph compositions build on.
   ;; ---------------------------------------------------------------------
 
-  {:name :resolve-package-version
-   :description "Highest published version of `:pkg-name` satisfying `:spec` (exact / semver constraint / `latest`). nil when nothing matches. Self-contained constraint-resolution algorithm (same carve-out class as `:pick-encoding`) — the guards and envelopes around it are graph."
-   :args {:pkg-name {:type :text :description "Package name."}
+  {:name :semver-pick
+   :description "The highest of `:versions` satisfying `:spec` (exact / semver constraint `>=1.1` `~>1.2` / `latest`; nil or \"\" = any), ordered by parsed `[major minor patch]`; nil when nothing matches. Pure — the ONE pick the local (`:resolve-package-version`) and the remote (`:resolve-remote-version`) resolution both compose."
+   :args {:versions {:type [:list :any] :description "Candidate version strings (nil entries are skipped)."}
           :spec {:type :nullable-text :description "Exact version, a semver constraint (`>=1.1`, `~>1.2`), `latest`, or nil (any)."}}
-   :return-type :nullable-text
-   :effects #{:db}}
+   :return-type :nullable-text}
+
+  {:name :_pkg-row-version
+   :description "One `:package-version` row's (or remote index entry's) `:version`."
+   :parent :get
+   :args {:coll {:as :item} :key {:value :version} :default nil}}
+
+  {:name :resolve-package-version
+   :description "Highest version of `:pkg-name` published in THIS registry satisfying `:spec` (exact / semver constraint / `latest`); nil when nothing matches — `:semver-pick` over the name's `:package-version` rows. The guards and envelopes around it are graph."
+   :parent :semver-pick
+   :args {:versions {:parent :map
+                     :args {:func :_pkg-row-version
+                            :coll {:parent :query-entities
+                                   :args {:entity-type {:value "package-version"}
+                                          :where {:parent :assoc
+                                                  :args {:map {:value {}}
+                                                         :key {:value :name}
+                                                         :value {:as :pkg-name :type :text}}}}}}}}}
 
   {:name :breaking-changes-between
    :description "Consumer-visible incompatibilities from one bundle's fn-defs to another's — removed public fn-defs, removed / narrowed / newly-required args, unbound bindings, changed renames or parents, widened returns, added base-fn effects, reshaped type-rows (`graphden.packages.compat`). `[]` = a compatible successor. Pure."
@@ -2740,34 +2756,343 @@
   ;; snapshots land here, then ride the normal diff → review → merge flow.
   ;; Body is application/edn TEXT (EDN keeps a reference `:other-fn`
   ;; distinguishable from the string "other-fn"). Guards first, one
-  ;; predicate per rule; the §3.3 atomic write core is `:import-bundle!`.
+  ;; predicate per rule; the write is the `:import-bundle!` pipeline below.
   ;; ---------------------------------------------------------------------
-  {:name :import-bundle!
-   :description "Apply a bundle's fn-defs to the branch named `branch-name` (create it when `create?`, stamping the caller as owner with the `owner` write-policy). Platform-owned defs are skipped + reported; the rest sync through the same path the package loader uses; `prune?` adds snapshot semantics (branch tombstones for fns the bundle no longer contains, kept + reported while referenced); the TARGET branch's registry is delta-invalidated. Editor-born same-name identities are ADOPTED onto their deterministic ids first (adopt-bundle-identities! — the pull-after-push dedup). Returns {:fn-ids :skipped-owned :adopted :pruned} or {:error \"branch-not-found\"}."
-   :args {:branch-name {:type :nullable-text :description "Target branch — never the request's own, never main implicitly. nil/blank never resolves (the route's guard 400s first)."}
-          :create? {:type :bool :description "Create the branch (forked off the request's branch) when it doesn't exist."}
-          :prune? {:type :bool :description "Snapshot semantics: tombstone fns in the bundle's namespaces that the bundle no longer contains."}
-          :fn-defs {:type [:union :null [:list :keyword-map]] :description "Parsed fn-def maps, exactly the fns.edn shape."}}
+  ;; The import is a pipeline of named steps over effectful primitives:
+  ;; find / create the branch → partition out the platform-owned defs →
+  ;; drop the anons that partition orphaned → adopt editor-born identities
+  ;; → the shared branch sync (`:sync-fn-defs-branch!`, storage/branches —
+  ;; the MCP upsert's own) → optional prune. `:do` orders the writes; every
+  ;; step is a ref thunk, so the result map re-reads them without re-running.
+  {:name :branch-by-name
+   :description "The branch row named `:branch-name`, or nil — a read of the branch table (branches are not branch-versioned)."
+   :args {:branch-name {:type :nullable-text :description "Branch name."}}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
+  {:name :create-owned-branch!
+   :description "Create branch `:branch-name` off the request's branch, stamping the caller as owner with the `owner` write-policy when a user is bound (the push-branch convention). Returns the row."
+   :args {:branch-name {:type :nullable-text :description "Branch name."}}
    :return-type :keyword-map
    :effects #{:db}}
 
-  {:name :resolve-remote-version
-   :description "Resolve a spec (nil/latest/* or a semver constraint) to a CONCRETE published version of `pkg-name` on the REMOTE registry `source` — the remote twin of :resolve-package-version, so the install worklist composes resolve → mirror as two named graph steps. Concrete specs pass through without a dial. nil when nothing matches / the remote list is unreachable. Egress-guarded in restricted executions."
-   :args {:source {:type :nullable-text :description "Remote registry base URL, e.g. https://graphden.dev."}
-          :pkg-name {:type :text :description "Package name."}
-          :spec {:type :nullable-text :description "nil / \"latest\" / \"*\" / a semver constraint / a concrete version."}}
-   :return-type :nullable-text
-   :effects #{:network :env}}
+  {:name :drop-orphan-anon-defs
+   :description "`:fn-defs` without the exporter-lifted `_anon-*` defs no kept def still reaches — the hygiene step after a partition dropped some owners (syncing those orphans flooded the target with duplicate anonymous identities). Pure."
+   :args {:fn-defs {:type [:union :null [:list :keyword-map]] :description "Parsed fn-def maps."}}
+   :return-type [:list :keyword-map]}
 
+  {:name :adopt-bundle-identities!
+   :description "On branch `:branch-id`, repoint + purge each editor-born RANDOM-id row whose (namespace, name) a def in `:fn-defs` is about to sync under its deterministic id, so the sync re-creates it canonically (the pull-after-push dedup). Returns the adopted names."
+   :args {:branch-id {:type :uuid :description "Target branch."}
+          :fn-defs {:type [:list :keyword-map] :description "The defs about to sync."}}
+   :return-type [:list :text]
+   :effects #{:db}}
+
+  {:name :prune-bundle-scope!
+   :description "Snapshot semantics on branch `:branch-id`: tombstone the deterministic-id fns of the bundle's namespaces that `:fn-defs` no longer contains (a still-referenced one is kept + reported), and invalidate what went away on that branch. Returns `{:pruned [names] :kept-referenced [names]}`."
+   :args {:branch-id {:type :uuid :description "Target branch."}
+          :fn-defs {:type [:list :keyword-map] :description "The bundle's defs (the snapshot)."}}
+   :return-type {:pruned [:list :text] :kept-referenced [:list :text]}
+   :effects #{:db}}
+
+  {:name :_imp-found-branch
+   :parent :branch-by-name
+   :args {:branch-name {:as :branch-name :type :nullable-text}}}
+
+  {:name :_imp-branch
+   :description "The target branch — found by name, else created when `:create?`, else nil. Never the request's own, never main implicitly."
+   :parent :cond
+   :args {:clauses [{:parent :some? :args {:value :_imp-found-branch}} :_imp-found-branch
+                    {:as :create? :type :bool} {:parent :create-owned-branch!
+                                                :args {:branch-name {:as :branch-name :type :nullable-text}}}
+                    {:value true} {:value nil}]}}
+
+  {:name :_imp-branch-id
+   :parent :get
+   :args {:coll :_imp-branch :key {:value :id} :default nil}}
+
+  {:name :_imp-defs
+   :parent :coalesce
+   :args {:value {:as :fn-defs :type [:union :null [:list :keyword-map]]} :default {:value []}}}
+
+  {:name :_imp-owned-names
+   :description "Names of the bundle's defs whose deterministic id is PACKAGE-OWNED — skipped and reported (the boot sync would restore them anyway; silently repointing platform fns is the incident class)."
+   :parent :platform-owned-def-names
+   :args {:fn-defs :_imp-defs}}
+
+  {:name :_imp-owned-index
+   :parent :zipmap
+   :args {:keys :_imp-owned-names :vals :_imp-owned-names}}
+
+  {:name :_imp-def-not-owned?
+   :description "Is this def (`:item`) NOT one of the package-owned names?"
+   :parent :not
+   :args {:value {:parent :contains?
+                  :args {:coll :_imp-owned-index
+                         :key {:parent :name :args {:value {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}}}}}}}
+
+  {:name :_imp-wanted
+   :description "The defs to write: the bundle minus the package-owned ones, minus the `_anon-*` entries only those owned defs reached."
+   :parent :drop-orphan-anon-defs
+   :args {:fn-defs {:parent :filter :args {:pred :_imp-def-not-owned? :coll :_imp-defs}}}}
+
+  {:name :_imp-adopted
+   :parent :adopt-bundle-identities!
+   :args {:branch-id :_imp-branch-id :fn-defs :_imp-wanted}}
+
+  {:name :_imp-synced
+   :description "Adopt THEN sync (the adoption must land first — it frees the canonical ids the sync writes)."
+   :parent :do
+   :args {:steps [:_imp-adopted
+                  {:parent :sync-fn-defs-branch! :args {:branch-id :_imp-branch-id :fn-defs :_imp-wanted}}]}}
+
+  {:name :_imp-report
+   :parent :zipmap
+   :args {:keys [{:value :fn-ids} {:value :skipped-owned} {:value :adopted}]
+          :vals [:_imp-synced :_imp-owned-names :_imp-adopted]}}
+
+  {:name :_imp-pruned
+   :description "The prune, after the sync."
+   :parent :do
+   :args {:steps [:_imp-synced
+                  {:parent :prune-bundle-scope! :args {:branch-id :_imp-branch-id :fn-defs :_imp-wanted}}]}}
+
+  {:name :import-bundle!
+   :description "Apply a bundle's fn-defs to the branch named `branch-name` (create it when `create?`, stamping the caller as owner with the `owner` write-policy). Platform-owned defs are skipped + reported; the rest sync through the same path the package loader uses (`:sync-fn-defs-branch!`, the MCP upsert's own); `prune?` adds snapshot semantics (branch tombstones for fns the bundle no longer contains, kept + reported while referenced); the TARGET branch's registry is delta-invalidated. Editor-born same-name identities are ADOPTED onto their deterministic ids first (the pull-after-push dedup). Returns {:fn-ids :skipped-owned :adopted :pruned} or {:error \"branch-not-found\"}."
+   :parent :cond
+   :args {:clauses [{:parent :nil? :args {:value :_imp-branch}} {:value {:error "branch-not-found"}}
+                    {:as :prune? :type :bool} {:parent :assoc :args {:map :_imp-report :key {:value :pruned} :value :_imp-pruned}}
+                    {:value true} :_imp-report]}}
+
+  ;; ---------------------------------------------------------------------
+  ;; The remote dial — every call this package makes to ANOTHER graphden
+  ;; (the remote registry's index / version / marketplace card, the hub's
+  ;; export / import) is one `:http-request`, so a tenant's dial meets the
+  ;; same guards as any outbound call: the egress check at every hop
+  ;; (redirects included), the per-org rate cap, the response byte cap.
+  ;; What stays per-call is data: the URL, the headers, the bearer
+  ;; (`:remote-auth-value` — only to the configured
+  ;; origin) and the error-as-data envelope each caller maps.
+  ;; ---------------------------------------------------------------------
+  {:name :remote-auth-value
+   :description "The `Authorization` value for a dial to `:url` on behalf of `:endpoint` — `\"registry\"`: `Bearer <GRAPHDEN_REGISTRY_TOKEN>` when `:url`'s ORIGIN is the configured remote registry (`GRAPHDEN_REGISTRY_URL`, deploy setting `:registry-url`); `\"hub\"`: `Bearer <GRAPHDEN_HUB_TOKEN>` when it is the configured hub (`GRAPHDEN_HUB_URL`, `:hub-url`). nil for any other origin, an unset token, or an unknown endpoint — the install body's `source` is caller-chosen, and a deployment token goes only where the operator pointed it."
+   :args {:url {:type :text :description "The URL about to be dialed."}
+          :endpoint {:type :text :description "Whose token: `registry` or `hub`."}}
+   :return-type [:union :null [:secret :text]]
+   :effects #{:env}}
+
+  {:name :_remote-dial-request
+   :description "`:http-request` with its request body re-exposed as `:request-body` (`:try`, the dial's parent, owns the name `:body`) and the bearer decided here, from the URL itself (`:remote-auth-value` — only the configured origin of `:endpoint` earns its token)."
+   :parent :http-request
+   :args {:body {:as :request-body}
+          :auth-value {:parent :remote-auth-value
+                       :args {:url {:as :url :type :url}
+                              :endpoint {:as :endpoint :type :text}}}}}
+
+  {:name :_remote-dial-type
+   :description "The caught exception's `ex-data :type` as text (`\":egress/blocked\"`), \"\" for a non-ex-info throw."
+   :parent :to-str
+   :args {:value {:parent :get
+                  :args {:coll {:parent :ex-data :args {:ex {:as :exception}}}
+                         :key {:value :type}
+                         :default nil}}}}
+
+  {:name :_remote-dial-failed
+   :description "`:try` on-throw of the remote dial. An egress refusal (`:egress/*` — blocked, rate-limited, response too large) propagates; a transport failure becomes a STATUS-0 response whose body is the failure message, so each caller maps it to its own error-as-data."
+   :parent :if
+   :args {:test {:parent :str-starts-with? :args {:string :_remote-dial-type :prefix {:value ":egress/"}}}
+          :then {:parent :throw :args {:exception {:as :exception}}}
+          :else {:parent :zipmap
+                 :args {:keys [{:value :status} {:value :headers} {:value :body}]
+                        :vals [{:value 0} {:value {}}
+                               {:parent :coalesce
+                                :args {:value {:parent :throwable-message :args {:ex {:as :exception}}}
+                                       :default {:value ""}}}]}}}}
+
+  {:name :_remote-dial
+   :description "One call to a remote graphden through `:http-request` — the response, or `{:status 0 :headers {} :body <failure message>}` when the transport failed (an egress refusal still throws). Free: `:method`, `:url`, `:endpoint` (`registry` / `hub` — whose bearer, if the origin is theirs), `:headers`, `:request-body`, `:timeout-ms`."
+   :parent :try
+   :return-type :http-response-shape
+   :args {:body :_remote-dial-request
+          :on-throw :_remote-dial-failed}}
+
+  {:name :_remote-unreachable?
+   :description "The dial `:response` never got an answer — the transport failed (status 0)."
+   :parent :equal?
+   :args {:a {:parent :get :args {:coll {:as :response :type :http-response-shape} :key {:value :status} :default nil}}
+          :b {:value 0}}}
+
+  {:name :_registry-get
+   :description "A GET to the remote registry — `:_remote-dial` with the registry's bearer rule (`:endpoint \"registry\"`), no body, 60 s. Free: `:url`."
+   :parent :_remote-dial
+   :args {:method {:value "get"}
+          :endpoint {:value "registry"}
+          :headers {:value {}}
+          :request-body {:value nil}
+          :timeout-ms {:value 60000}}}
+
+  {:name :_remote-base
+   :description "`:source` without its trailing slashes — the base every remote URL is built on (\"\" for nil)."
+   :parent :coalesce
+   :args {:value {:parent :re-replace
+                  :args {:string {:as :source :type :nullable-text}
+                         :pattern {:value "/+$"}
+                         :replacement {:value ""}}}
+          :default {:value ""}}}
+
+  ;; --- :resolve-remote-version -----------------------------------------
+  {:name :_rrv-concrete?
+   :description "A CONCRETE version — not blank, not `latest`, no constraint operator (`* > < ~ ^`) or space: it passes straight through without a dial."
+   :parent :and
+   :args {:values [{:parent :not :args {:value {:parent :blank? :args {:string {:as :spec :type :nullable-text}}}}}
+                   {:parent :not :args {:value {:parent :equal? :args {:a {:as :spec :type :nullable-text} :b {:value "latest"}}}}}
+                   {:parent :not :args {:value {:parent :re-find? :args {:string {:as :spec :type :nullable-text} :pattern {:value "[*><~^ ]"}}}}}]}}
+
+  {:name :_rrv-list-url
+   :parent :str
+   :args {:parts [:_remote-base {:value "/api/packages"}]}}
+
+  {:name :_rrv-list-response
+   :description "The remote registry's `GET /api/packages` index."
+   :parent :_registry-get
+   :args {:url {:ref :_rrv-list-url :type :url}}}
+
+  {:name :_rrv-list-ok?
+   :parent :equal?
+   :args {:a {:parent :get :args {:coll :_rrv-list-response :key {:value :status} :default nil}}
+          :b {:value 200}}}
+
+  {:name :_rrv-rows-parse
+   :parent :parse-json
+   :args {:keywordize {:value true}
+          :string {:parent :get :args {:coll :_rrv-list-response :key {:value :body} :default {:value ""}}}}}
+
+  {:name :_rrv-rows
+   :description "The index body read as JSON — nil when it doesn't parse."
+   :parent :try
+   :args {:body :_rrv-rows-parse
+          :on-throw {:parent :const :args {:value nil}}}}
+
+  {:name :_rrv-entries
+   :description "The index's entries — `{:packages […]}` (a graphden registry), `{:versions […]}`, or a bare list; `[]` when the body read as nothing."
+   :parent :coalesce
+   :args {:value {:parent :if
+                  :args {:test {:parent :is-a? :args {:value :_rrv-rows :type {:value :map}}}
+                         :then {:parent :get
+                                :args {:coll :_rrv-rows
+                                       :key {:value :packages}
+                                       :default {:parent :get :args {:coll :_rrv-rows :key {:value :versions} :default nil}}}}
+                         :else :_rrv-rows}}
+          :default {:value []}}}
+
+  {:name :_remote-row-names-package?
+   :description "Does this remote row (`:item` — an index entry or a marketplace card) carry exactly the package's name?"
+   :parent :equal?
+   :args {:a {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}}}
+          :b {:parent :to-str :args {:value {:as :pkg-name :type :text}}}}}
+
+  {:name :_rrv-remote-versions
+   :parent :map
+   :args {:func :_pkg-row-version
+          :coll {:parent :filter :args {:pred :_remote-row-names-package? :coll :_rrv-entries}}}}
+
+  {:name :resolve-remote-version
+   :description "Resolve a spec (nil/latest/* or a semver constraint) to a CONCRETE published version of `pkg-name` on the REMOTE registry `source` — the remote twin of :resolve-package-version (the same `:semver-pick`, over the remote's `GET /api/packages` index), so the install worklist composes resolve → mirror as two named graph steps. Concrete specs pass through without a dial. nil when nothing matches / the remote list is unreachable. The dial is `:http-request` (egress-guarded at every hop in restricted executions)."
+   :parent :if
+   :args {:test :_rrv-concrete?
+          :then {:as :spec :type :nullable-text}
+          :else {:parent :if
+                 :args {:test :_rrv-list-ok?
+                        :then {:parent :semver-pick
+                               :args {:versions :_rrv-remote-versions
+                                      :spec {:as :spec :type :nullable-text}}}
+                        :else {:value nil}}}}}
+
+  ;; --- :mirror-remote-package! -----------------------------------------
+  {:name :mirror-store-package-version!
+   :description "The mirror's one write: store a fetched remote `:row` as the LOCAL `:package-version` (`:pkg-name`, `:version`) — idempotent (an existing row wins), never public, stamped with this org and `:origin` = `{:url :origin-url}` ∪ the `:origin` signals. Returns `{:name :version}`."
+   :args {:pkg-name {:type :text :description "Package name."}
+          :version {:type :nullable-text :description "The concrete version fetched."}
+          :row {:type :keyword-map :description "The remote's `:package-version` row (its EDN face)."}
+          :origin-url {:type :text :description "The remote registry's base URL."}
+          :origin {:type :nullable-keyword-map :required false :value nil :description "The origin's card snapshot (`:remote-package-card`); nil = url only."}}
+   :return-type {:name :text :version :text}
+   :effects #{:db}}
+
+  {:name :_mrp-url
+   :parent :str
+   :args {:parts [:_remote-base {:value "/api/packages/"} {:as :pkg-name :type :text}
+                  {:value "/"} {:as :version :type :nullable-text} {:value "?format=edn"}]}}
+
+  {:name :_mrp-response
+   :description "The remote's `GET /api/packages/<name>/<version>?format=edn` (the EDN face keeps fn-def keywords)."
+   :parent :_registry-get
+   :args {:url {:ref :_mrp-url :type :url}}}
+
+  {:name :_mrp-status
+   :parent :get
+   :args {:coll :_mrp-response :key {:value :status} :default nil}}
+
+  {:name :_mrp-body
+   :parent :get
+   :args {:coll :_mrp-response :key {:value :body} :default {:value ""}}}
+
+  {:name :_mrp-row
+   :description "The fetched row (wire readers) — nil when the body reads as nothing or doesn't parse."
+   :parent :parse-graph-edn
+   :args {:string :_mrp-body}}
+
+  {:name :_mrp-body-is-nil?
+   :description "The remote answered a literal `nil` (or an empty body) — no such version there. Any other body that reads as nil was unreadable."
+   :parent :or
+   :args {:values [{:parent :blank? :args {:string :_mrp-body}}
+                   {:parent :equal? :args {:a {:parent :str-trim :args {:string :_mrp-body}} :b {:value "nil"}}}]}}
+
+  {:name :_mrp-stored
+   :description "Store the fetched row (idempotently) and answer `{:mirrored :version :from}`."
+   :parent :zipmap
+   :args {:keys [{:value :mirrored} {:value :version} {:value :from}]
+          :vals [{:parent :get :args {:coll :_mrp-store :key {:value :name} :default nil}}
+                 {:parent :get :args {:coll :_mrp-store :key {:value :version} :default nil}}
+                 :_remote-base]}}
+
+  {:name :_mrp-store
+   :parent :mirror-store-package-version!
+   :args {:pkg-name {:as :pkg-name :type :text}
+          :version {:as :version :type :nullable-text}
+          :row :_mrp-row
+          :origin-url :_remote-base}}
 
   {:name :mirror-remote-package!
-   :description "Fetch the CONCRETE (pkg-name, version) from the REMOTE registry `source` (?format=edn face; bearer from GRAPHDEN_REGISTRY_TOKEN) and store it as a local :package-version row — idempotent, never public, stamped with `:origin` (the source url + the `:origin` signals passed in). Constraint resolution is :resolve-remote-version and the signals snapshot :remote-package-card, both composed graph-side by the install worklist. Errors ride as data ({:error ...}) so the worklist wraps them."
-   :args {:source {:type :nullable-text :description "Remote registry base URL, e.g. https://graphden.dev."}
-          :pkg-name {:type :text :description "Package name."}
-          :version {:type :nullable-text :description "CONCRETE version; nil answers {:error \"remote-version-not-found\"} as data."}
-          :origin {:type :nullable-keyword-map :required false :description "The origin's card snapshot (`:remote-package-card`), merged under `:origin` on the mirrored row; nil = url only."}}
-   :return-type :keyword-map
-   :effects #{:network :db :env}}
+   :description "Fetch the CONCRETE (pkg-name, version) from the REMOTE registry `source` (?format=edn face; the bearer only when `source` is the configured `GRAPHDEN_REGISTRY_URL` origin) and store it as a local :package-version row — idempotent, never public, stamped with `:origin` (the source url + the `:origin` signals passed in). Constraint resolution is :resolve-remote-version and the signals snapshot :remote-package-card, both composed graph-side by the install worklist. Errors ride as data ({:error …} — remote-version-not-found / remote-unreachable / remote-fetch-failed / remote-not-found / remote-bundle-unreadable) so the worklist wraps them; an egress refusal throws."
+   :parent :cond
+   :args {:clauses [{:parent :nil? :args {:value {:as :version :type :nullable-text}}}
+                    {:parent :zipmap
+                     :args {:keys [{:value :error} {:value :name}]
+                            :vals [{:value "remote-version-not-found"} {:as :pkg-name :type :text}]}}
+
+                    {:parent :_remote-unreachable? :args {:response :_mrp-response}}
+                    {:parent :zipmap
+                     :args {:keys [{:value :error} {:value :source} {:value :detail}]
+                            :vals [{:value "remote-unreachable"} :_remote-base :_mrp-body]}}
+
+                    {:parent :not :args {:value {:parent :equal? :args {:a :_mrp-status :b {:value 200}}}}}
+                    {:parent :zipmap
+                     :args {:keys [{:value :error} {:value :source} {:value :status}]
+                            :vals [{:value "remote-fetch-failed"} :_remote-base :_mrp-status]}}
+
+                    {:parent :and :args {:values [{:parent :nil? :args {:value :_mrp-row}} :_mrp-body-is-nil?]}}
+                    {:parent :zipmap
+                     :args {:keys [{:value :error} {:value :name} {:value :version}]
+                            :vals [{:value "remote-not-found"} {:as :pkg-name :type :text} {:as :version :type :nullable-text}]}}
+
+                    {:parent :nil? :args {:value :_mrp-row}}
+                    {:parent :zipmap
+                     :args {:keys [{:value :error} {:value :source}]
+                            :vals [{:value "remote-bundle-unreadable"} :_remote-base]}}
+
+                    {:value true}
+                    :_mrp-stored]}}
 
   {:name :_import-branch-param
    :description "The target branch name (`?target=` — NOT `?branch=`, which is the branch-router's own request-scope selector); REQUIRED, imports never fall back to the request's own branch."
@@ -2825,7 +3150,7 @@
                          :coll :_import-fns}}}}
 
   {:name :_import-applied
-   :description "The §3.3 write core, referenced by BOTH the branch-not-found predicate and the ok-envelope — the per-execution result cache makes that one write, not two."
+   :description "The import pipeline, referenced by BOTH the branch-not-found predicate and the ok-envelope — the per-execution result cache makes that one write, not two."
    :parent :import-bundle!
    :args {:branch-name :_import-branch-param
           :create? :_import-create?
@@ -2903,20 +3228,121 @@
   ;; popover reveals its Hub section only when status says configured.
   ;; ---------------------------------------------------------------------
 
+  ;; The two hub adapters — the same `:_remote-dial` the registry pull
+  ;; uses, with the hub's own bearer (`:remote-auth-value` "hub": only to the
+  ;; configured GRAPHDEN_HUB_URL origin) and error vocabulary.
+  {:name :_hub-base
+   :parent :_remote-base
+   :args {:source {:as :hub-url :type :nullable-text}}}
+
+  {:name :_hub-fetch-url
+   :parent :str
+   :args {:parts [:_hub-base {:value "/api/export/graph"}]}}
+
+  {:name :_hub-branch-header-names
+   :description "The one header the hub pull sends: `X-Graphden-Branch` (typed as a list of header names, so the map built from it is a `:text-map`)."
+   :parent :const
+   :return-type [:list :text]
+   :args {:value ["X-Graphden-Branch"]}}
+
+  {:name :_hub-fetch-headers
+   :description "`X-Graphden-Branch: <branch>` — none for a nil / empty branch (the hub's default)."
+   :parent :zipmap
+   :return-type :text-map
+   :args {:keys {:parent :if
+                 :args {:test {:parent :empty? :args {:coll {:as :branch :type :nullable-text}}}
+                        :then {:value []}
+                        :else :_hub-branch-header-names}}
+          :vals [{:parent :to-str :args {:value {:as :branch :type :nullable-text}}}]}}
+
+  {:name :_hub-fetch-response
+   :description "`GET <hub>/api/export/graph`, the hub branch in `X-Graphden-Branch` (omitted → the hub's default)."
+   :parent :_remote-dial
+   :args {:method {:value "get"}
+          :url {:ref :_hub-fetch-url :type :url}
+          :request-body {:value nil}
+          :headers :_hub-fetch-headers
+          :endpoint {:value "hub"}
+          :timeout-ms {:value 120000}}}
+
+  {:name :_hub-fetch-read
+   :description "The hub's bundle, read with the graph WIRE readers (`#graphden/ref` tags round-trip); nil when unreadable."
+   :parent :parse-graph-edn
+   :args {:string {:parent :get :args {:coll :_hub-fetch-response :key {:value :body} :default {:value ""}}}}}
+
   {:name :hub-fetch-bundle
-   :description "GET <hub-url>/api/export/graph for hub branch `branch` — the pull half's read (the same wire bundle the CLI pull fetches; #graphden/ref tags decoded). Bearer from GRAPHDEN_HUB_TOKEN. Errors ride as data ({:error \"hub-unreachable\"|\"hub-fetch-failed\"|\"hub-bundle-unreadable\" …})."
-   :args {:hub-url {:type :nullable-text :description "The hub's base URL (GRAPHDEN_HUB_URL)."}
-          :branch {:type :nullable-text :description "Hub branch to fetch; nil/blank rides the hub's default (main)."}}
-   :return-type :keyword-map
-   :effects #{:network :env}}
+   :description "GET <hub-url>/api/export/graph for hub branch `branch` — the pull half's read (the same wire bundle the CLI pull fetches; #graphden/ref tags decoded). Bearer from GRAPHDEN_HUB_TOKEN, only to the configured hub origin. Errors ride as data ({:error \"hub-unreachable\"|\"hub-fetch-failed\"|\"hub-bundle-unreadable\" …})."
+   :parent :cond
+   :args {:clauses [{:parent :_remote-unreachable? :args {:response :_hub-fetch-response}}
+                    {:parent :zipmap
+                     :args {:keys [{:value :error} {:value :detail}]
+                            :vals [{:value "hub-unreachable"}
+                                   {:parent :get :args {:coll :_hub-fetch-response :key {:value :body} :default {:value ""}}}]}}
+
+                    {:parent :not :args {:value {:parent :equal? :args {:a {:parent :get :args {:coll :_hub-fetch-response :key {:value :status} :default nil}} :b {:value 200}}}}}
+                    {:parent :zipmap
+                     :args {:keys [{:value :error} {:value :status}]
+                            :vals [{:value "hub-fetch-failed"}
+                                   {:parent :get :args {:coll :_hub-fetch-response :key {:value :status} :default nil}}]}}
+
+                    {:parent :not :args {:value {:parent :is-a? :args {:value :_hub-fetch-read :type {:value :map}}}}}
+                    {:value {:error "hub-bundle-unreadable"}}
+
+                    {:value true}
+                    :_hub-fetch-read]}}
+
+  {:name :_hub-push-url
+   :parent :str
+   :args {:parts [:_hub-base {:value "/api/import/graph?create=true&prune=true&target="}
+                  {:parent :url-encode :args {:string {:as :target :type :text}}}]}}
+
+  {:name :_hub-push-response
+   :description "`POST <hub>/api/import/graph` as branch `:target` (create+prune — the push branch IS the snapshot); the body is the `{:fns […]}` EDN the import route reads (the fns are already wire-encoded by `:export-graph`)."
+   :parent :_remote-dial
+   :args {:method {:value "post"}
+          :url {:ref :_hub-push-url :type :url}
+          :headers {:value {"Content-Type" "application/edn"}}
+          :request-body {:parent :pr-str
+                         :args {:value {:parent :zipmap
+                                        :args {:keys [{:value :fns}]
+                                               :vals [{:parent :vec
+                                                       :args {:coll {:parent :coalesce
+                                                                     :args {:value {:parent :get :args {:coll {:as :bundle :type :full-graph-export-shape} :key {:value :fns} :default nil}}
+                                                                            :default {:value []}}}}}]}}}}
+          :endpoint {:value "hub"}
+          :timeout-ms {:value 300000}}}
+
+  {:name :_hub-push-body
+   :parent :get
+   :args {:coll :_hub-push-response :key {:value :body} :default {:value ""}}}
+
+  {:name :_hub-push-report
+   :description "The hub's import report (JSON)."
+   :parent :parse-json
+   :args {:string :_hub-push-body :keywordize {:value true}}}
 
   {:name :hub-push-bundle!
-   :description "POST `bundle`'s fns to <hub-url>/api/import/graph as branch `target` (create+prune — the push branch IS the snapshot, owner-stamped by the hub's import route). Bearer from GRAPHDEN_HUB_TOKEN. Returns the hub's parsed report, or {:error \"hub-unreachable\"|\"hub-import-failed\"|\"hub-response-unreadable\" …} as data."
-   :args {:hub-url {:type :nullable-text :description "The hub's base URL (GRAPHDEN_HUB_URL)."}
-          :target {:type :text :description "Hub branch name to (re)snapshot, e.g. push/main."}
-          :bundle {:type :full-graph-export-shape :description "The :export-graph bundle — its :fns are already wire-encoded."}}
-   :return-type :keyword-map
-   :effects #{:network :env}}
+   :description "POST `bundle`'s fns to <hub-url>/api/import/graph as branch `target` (create+prune — the push branch IS the snapshot, owner-stamped by the hub's import route). Bearer from GRAPHDEN_HUB_TOKEN, only to the configured hub origin. Returns the hub's parsed report, or {:error \"hub-unreachable\"|\"hub-import-failed\"|\"hub-response-unreadable\" …} as data."
+   :parent :cond
+   :args {:clauses [{:parent :_remote-unreachable? :args {:response :_hub-push-response}}
+                    {:parent :zipmap
+                     :args {:keys [{:value :error} {:value :detail}]
+                            :vals [{:value "hub-unreachable"}
+                                   {:parent :get :args {:coll :_hub-push-response :key {:value :body} :default {:value ""}}}]}}
+
+                    {:parent :not :args {:value {:parent :equal? :args {:a {:parent :get :args {:coll :_hub-push-response :key {:value :status} :default nil}} :b {:value 200}}}}}
+                    {:parent :zipmap
+                     :args {:keys [{:value :error} {:value :status} {:value :detail}]
+                            :vals [{:value "hub-import-failed"}
+                                   {:parent :get :args {:coll :_hub-push-response :key {:value :status} :default nil}}
+                                   {:parent :str-clip :args {:string :_hub-push-body :limit {:value 300}}}]}}
+
+                    {:value true}
+                    {:parent :coalesce
+                     :args {:value {:parent :try
+                                    :args {:body :_hub-push-report
+                                           :on-throw {:parent :const :args {:value nil}}}}
+                            :default {:value {:error "hub-response-unreadable"}}}}]}}
 
   {:name :_sync-not-configured?
    :parent :not
@@ -3063,7 +3489,7 @@
                      :args {:maps [{:value {:ok false :http-status 502}} :_sync-pull-fetched]}}}}
 
   {:name :_sync-pull-applied
-   :description "The §3.3 write core — the same :import-bundle! the import route uses; hub/<source> is created on demand and pruned to the hub snapshot."
+   :description "The import pipeline — the same :import-bundle! the import route uses; hub/<source> is created on demand and pruned to the hub snapshot."
    :parent :import-bundle!
    :args {:branch-name :_sync-pull-target
           :create? {:value true}

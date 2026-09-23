@@ -1060,16 +1060,20 @@
            platform tier, so it lands public + approved. Idempotent by
            (name, version), never over a name another org lists publicly.
            A change to a listing is a version bump: rows are immutable."}
-    {:file "resources/packages/registry/registry/impls.clj" :defn import-bundle!
+    {:ns graphden.packages.sync :defn adopt-bundle-identities!
      :say "The WRITE half of the export/import pair — `POST /api/import/graph`
-           applies an exported bundle to a NAMED branch: resolve/create the
-           target (owner-stamped, `owner` write-policy — the push-branch
-           convention), skip package-owned defs, adopt editor-born
-           same-name identities onto their deterministic ids, sync through
-           the SAME path the boot loader uses, optionally prune to snapshot
-           semantics, delta-invalidate that branch. Cross-install push/pull
-           and git-snapshot restores all land here, then ride the normal
-           diff → review → merge flow."}
+           applies an exported bundle to a NAMED branch. The route is a
+           fn-def pipeline (`:import-bundle!` in `registry/registry/fns.edn`)
+           over one-call primitives: find/create the target (owner-stamped,
+           `owner` write-policy — the push-branch convention), skip
+           package-owned defs, drop the anons only they reached, then THIS
+           step — adopt editor-born same-name identities onto their
+           deterministic ids — then the shared `:sync-fn-defs-branch!` (the
+           MCP upsert's own), optionally a prune to snapshot semantics.
+           Cross-install push/pull and git-snapshot restores all land here,
+           then ride the normal diff → review → merge flow. Note the
+           adoption repoints refs in the IDENTITY plane: it is why the MCP
+           upsert does not run it."}
     {:ns graphden.packages.sync :defn reconcile-bundle-scope!
      :say "Snapshot semantics for a runtime import (`?prune=true`): within
            exactly the bundle's namespaces, a deterministic-id fn the bundle
@@ -1340,12 +1344,14 @@
            `/api/types/candidates` composition (web/crud-types); the
            editor's `pickerFitTier` mirrors it for rows the server has
            not classified yet. Ranking never widens or narrows the set."}
-    {:file "resources/packages/mcp/mcp/impls.clj" :defn sync-fn-defs-branch!
+    {:file "resources/packages/storage/branches/impls.clj" :defn sync-fn-defs-branch!
      :say "The web layer has a second client: an AI. The optional `mcp`
            package serves `/mcp` (JSON-RPC) through the same per-branch
            router, and this is its only write primitive — sync fn-defs into a
            branch, then delta-invalidate THAT branch's registry, not the
            request's own (the AI writes to `ai/…` while its POST rides main).
+           It lives in `storage/branches` because the registry's bundle
+           import (`POST /api/import/graph`) runs the very same sync.
            The key design point is in the docstring: writes go through the
            very `sync-fns-to-storage!` the package loader uses, so a
            proposal from an AI meets the same cycle / collision / type
@@ -1751,8 +1757,9 @@
      :say "The SSRF egress guard a tenant's outbound call passes before dialing:
            fail-closed resolution of the hostname, rejecting loopback / RFC1918 /
            link-local / cloud-metadata targets. Pair it with `validating-dns`
-           below in the same file — the connect-time re-check that closes the
-           DNS-rebind TOCTOU."}
+           and `validating-socket-factory` below in the same file — the
+           connect-time re-checks that close the DNS-rebind TOCTOU and the
+           redirect-to-an-IP-literal hop the Dns hook never sees."}
     {:ns graphden.web.hiccup-sanitize :defn sanitize-hiccup
      :say "An allowlist walk over an EDN hiccup tree — permitted tags,
            permitted attrs, a depth cap and a node budget, returning nil for

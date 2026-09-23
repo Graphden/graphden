@@ -87,6 +87,9 @@
 (defonce ^:private restricted-client
   (delay (-> (OkHttpClient$Builder.)
              (OkHttpClient$Builder/.dns egress/validating-dns)
+             ;; Every connection — an IP-literal host, a redirect hop — is
+             ;; address-checked at connect time; the Dns hook sees hostnames only.
+             (OkHttpClient$Builder/.socketFactory egress/validating-socket-factory)
              (OkHttpClient$Builder/.build))))
 
 

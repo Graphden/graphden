@@ -5,6 +5,7 @@
    `:frontend-hash-effective` folds the overrides into every asset
    URL's `?v=` so the browser's immutable cache steps aside."
   (:require
+    [clojure.java.io :as io]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.test-setup :as setup]
@@ -30,6 +31,16 @@
         baseline (gh/exec-name :read-resource-overridable {:asset-path css-path})
         hash0 (gh/exec-name :frontend-hash-effective {})]
     (testing "without an override, the classpath baseline is served"
+      (testing "…and a multi-path bundle is exactly the files joined by a blank line"
+        ;; `:concat-resources-overridable` is the `:concat-resources` child
+        ;; that binds `:reader`; the bytes (and so the `?v=` content) must be
+        ;; the plain classpath join.
+        (let [paths (gh/exec-name :_editor-script-paths {})]
+          (is (< 1 (count paths)))
+          (is (= (str/join "\n\n" (map #(slurp (io/resource %)) paths))
+                 (gh/exec-name :_script-raw {})))))
+      (is (= (gh/exec-name :build-hash-frontend-short {}) hash0)
+          "no override rows → the asset URLs carry the baked hash")
       (is (string? baseline))
       (is (str/includes? baseline "--gd-"))
       (is (= 12 (count hash0)) "effective hash = the baked short hash"))

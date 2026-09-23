@@ -70,7 +70,10 @@ so a gap in one does not by itself cross tenants:
    byte-cap, and a wall-clock execution deadline.
 5. **Egress guard (SSRF)** — a tenant's outbound network call is validated
    against a fail-closed classifier that rejects internal / private / loopback
-   / cloud-metadata targets (and names that resolve to them) before dialing.
+   / cloud-metadata targets (and names that resolve to them) before dialing —
+   and again at connect time for EVERY connection, so neither a DNS rebind
+   nor a redirect hop (to a name or an IP literal) reaches an internal
+   address.
    This covers **both** outbound HTTP and a tenant's connection to its **own
    external database** (`web/sql`): the JDBC host is checked the same way,
    the platform's own DB is refused as a target (no cross-tenant reach), and a

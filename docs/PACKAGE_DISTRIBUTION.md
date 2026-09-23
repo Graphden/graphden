@@ -556,7 +556,8 @@ per version) — the browse `<details>` also carries a **remote-install form**
 (source URL / name / version) posting to the same `panel-install` route with
 `source`, so pulling a package from another graphden's registry (e.g.
 graphden.dev → a self-hosted install, § 13) is one form away; the remote
-bearer stays the server's `GRAPHDEN_REGISTRY_TOKEN`, never a browser value.
+bearer stays the server's `GRAPHDEN_REGISTRY_TOKEN`, never a browser value
+(and rides only dials to `GRAPHDEN_REGISTRY_URL`'s origin).
 Server-rendered via `GET /partials/packages-panel`; the chip +
 popover lifecycle lives in `editor-shell-chips.js` (`gdRevealPkgChip` / `gdOpenPkgPop`,
 gated on the `window.API` registry probe). **Publish is NOT on the chip** — it is
@@ -780,14 +781,20 @@ then the normal diff → review → merge flow.
 `{name, version, source}` mirrors the CONCRETE `version` from the remote
 registry at `source` (its `GET /api/packages/:name/:version?format=edn`
 face — the EDN wire keeps fn-def keywords intact; the bearer for the
-remote comes from `GRAPHDEN_REGISTRY_TOKEN`), stores it as a LOCAL
+remote comes from `GRAPHDEN_REGISTRY_TOKEN` and is sent ONLY when `source`
+has the origin of the configured `GRAPHDEN_REGISTRY_URL` — `source` is
+caller-chosen, so any other host is dialed without it), stores it as a LOCAL
 `:package-version` row (never re-marked public), and then the normal
 install worklist materializes + pins it. Missing dependencies mirror the
 same way, one worklist step at a time. A non-concrete spec (`latest` or a semver range) is resolved against
 the remote's version list first, then the concrete version is mirrored. So
 "self-host pulls a public package from the cloud" is: a free cloud
-account's token in `GRAPHDEN_REGISTRY_TOKEN` + one install call with
-`source: https://graphden.dev`.
+account's token in `GRAPHDEN_REGISTRY_TOKEN`, `GRAPHDEN_REGISTRY_URL=https://graphden.dev`
+and one install call with `source: https://graphden.dev`. Every remote dial
+(index, version, marketplace card — and the hub's push/pull) is one
+`:http-request` fn-def, so in a restricted (tenant) execution it is
+egress-checked at every hop, rate-capped and byte-capped like any other
+outbound call.
 
 **Ordering rule:** a fns-package transitively depends on an impl-package (§ 1).
 So install impl-dependencies first (Type-2, rebuild), then the fns-package

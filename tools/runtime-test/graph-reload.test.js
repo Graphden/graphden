@@ -35,7 +35,7 @@ const json = (body, status = 200) => ({
 // A fresh editor-main per case. `routes(url)` answers fetches; a route may
 // return a function (called at fetch time) to act mid-flight.
 function boot({ routes, accounts = false, tenancyClass = false }) {
-  const calls = { popover: [], entityList: 0, href: null };
+  const calls = { popover: [], entityList: 0, href: null, requery: 0 };
   const rowActions = new Map([['b1', {}]]);
   const ctx = vm.createContext({
     console,
@@ -45,6 +45,7 @@ function boot({ routes, accounts = false, tenancyClass = false }) {
     document: { addEventListener() {}, body: { classList: { contains: (c) => tenancyClass && c === 'gd-tenancy' } } },
     buildLookups: (g) => ({ fnMap: new Map(g.fns.map((f) => [f.id, f])) }),
     updateEntityList: () => { calls.entityList += 1; },
+    requerySearch: () => { calls.requery += 1; },
     clearAuthPassword() {},
     openAuthPopover: (msg) => { calls.popover.push(msg); },
     graphdenAccountsMode: () => accounts,
@@ -106,6 +107,7 @@ function racingRoutes(ctxRef, typesBody) {
     assert(b.ctx._rowActionsHtmlCache.size === 0, which + ': row-actions HTML cache cleared');
     assert(b.ctx.typeUsagesCache.size === 0, which + ': type Used-by cache cleared');
     assert(b.calls.entityList >= 1, which + ': Explorer repainted');
+    assert(b.calls.requery >= 1, which + ': an active search is asked again');
   }
 
   console.log(' unparseable /api/types: initGraph blanks, loadGraphData keeps the prior registry');

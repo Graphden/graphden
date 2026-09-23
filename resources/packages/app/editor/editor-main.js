@@ -296,6 +296,8 @@ function repaintExplorer() {
   if (typeof gdInvalidateSharedViews === 'function') gdInvalidateSharedViews();
   updateEntityList(graphData);
   if (typeof gdRefreshViewMembers === 'function') gdRefreshViewMembers();
+  // An active search shows the server's pre-write matches — re-ask.
+  if (typeof requerySearch === 'function') requerySearch();
 }
 
 /**

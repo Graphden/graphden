@@ -1,7 +1,7 @@
 (ns ^:integration graphden.system.graph-epoch-test
   "Parallel-safe: the heal's rebuild counting goes through the
    thread-local `cr/*impl-override*` seam (`binding`, with
-   `br/*epoch-heal-sync?*` keeping the heal on this thread) instead of
+   `br-epoch/*epoch-heal-sync?*` keeping the heal on this thread) instead of
    `with-redefs` — a root rebind was process-global and pinned this NS
    `^:serial` (a concurrent NS whose rebuild landed in the window never
    actually compiled its graph; serial-reduction batch 4).
@@ -26,6 +26,8 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
     [graphden.system.branch-router :as br]
+    [graphden.system.branch-router.cache :as br-cache]
+    [graphden.system.branch-router.epoch :as br-epoch]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -50,7 +52,7 @@
 
 (defn- fresh-state
   []
-  (atom (br/epoch-state-seed)))
+  (atom (br-epoch/epoch-state-seed)))
 
 
 (defn- router-over
@@ -109,9 +111,9 @@
         v (vs/wrap-with-versioning base)
         healed (atom 0)
         run (fn [state f]
-              (binding [br/*epoch-state-override* state
-                        br/*epoch-check-ttl-ms* 0
-                        br/*epoch-heal-sync?* true
+              (binding [br-epoch/*epoch-state-override* state
+                        br-epoch/*epoch-check-ttl-ms* 0
+                        br-epoch/*epoch-heal-sync?* true
                         epoch/*request-bump-log* (atom [])
                         cr/*impl-override* {:rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
                                             :rebuild! (fn [_] (swap! healed inc))}]
@@ -152,9 +154,9 @@
         v (vs/wrap-with-versioning base)
         healed (atom 0)]
     (try
-      (binding [br/*epoch-state-override* (fresh-state)
-                br/*epoch-check-ttl-ms* 0
-                br/*epoch-heal-sync?* true
+      (binding [br-epoch/*epoch-state-override* (fresh-state)
+                br-epoch/*epoch-check-ttl-ms* 0
+                br-epoch/*epoch-heal-sync?* true
                 epoch/*request-bump-log* (atom [])
                 cr/*impl-override* {:rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
                                     :rebuild! (fn [_] (swap! healed inc))}]
@@ -188,9 +190,9 @@
         v (vs/wrap-with-versioning base)
         rebuilt (atom [])]
     (try
-      (binding [br/*epoch-state-override* (fresh-state)
-                br/*epoch-check-ttl-ms* 0
-                br/*epoch-heal-sync?* true
+      (binding [br-epoch/*epoch-state-override* (fresh-state)
+                br-epoch/*epoch-check-ttl-ms* 0
+                br-epoch/*epoch-heal-sync?* true
                 epoch/*request-bump-log* (atom [])
                 cr/*impl-override* {:rebuild-optimistic! (fn [c _] (swap! rebuilt conj (:x c)) true)
                                     :rebuild! (fn [c] (swap! rebuilt conj (:x c)))}]
@@ -218,9 +220,9 @@
         v (vs/wrap-with-versioning base)
         rebuilt (atom [])]
     (try
-      (binding [br/*epoch-state-override* (fresh-state)
-                br/*epoch-check-ttl-ms* 0
-                br/*epoch-heal-sync?* true
+      (binding [br-epoch/*epoch-state-override* (fresh-state)
+                br-epoch/*epoch-check-ttl-ms* 0
+                br-epoch/*epoch-heal-sync?* true
                 epoch/*request-bump-log* (atom [])
                 cr/*impl-override* {:rebuild-optimistic! (fn [c _] (swap! rebuilt conj (:x c)) true)
                                     :rebuild! (fn [c] (swap! rebuilt conj (:x c)))}]
@@ -234,7 +236,7 @@
                                      svc-id {:ctx {:x :svc} :handler :h}
                                      other-id {:ctx {:x :other} :handler :h}
                                      gone-id {:ctx {:x :gone} :handler :h}})]
-          (br/set-pinned-branches-fn! (fn [] #{svc-id gone-id}))
+          (br-cache/set-pinned-branches-fn! (fn [] #{svc-id gone-id}))
           (try
             (foreign-bump! base)
             (br/handler-for router nil)
@@ -245,7 +247,7 @@
                 "an unpinned branch still drops")
             (is (not (contains? @(:handlers router) gone-id))
                 "a pinned id with no branch row drops (a deleted branch)")
-            (finally (br/set-pinned-branches-fn! nil)))))
+            (finally (br-cache/set-pinned-branches-fn! nil)))))
       (finally (sp/close base)))))
 
 
@@ -256,9 +258,9 @@
         v (vs/wrap-with-versioning base)
         healed (atom 0)]
     (try
-      (binding [br/*epoch-state-override* (fresh-state)
-                br/*epoch-check-ttl-ms* 0
-                br/*epoch-heal-sync?* true
+      (binding [br-epoch/*epoch-state-override* (fresh-state)
+                br-epoch/*epoch-check-ttl-ms* 0
+                br-epoch/*epoch-heal-sync?* true
                 epoch/*request-bump-log* (atom [])
                 cr/*impl-override* {:rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
                                     :rebuild! (fn [_] (swap! healed inc))}]
@@ -280,10 +282,10 @@
         v (vs/wrap-with-versioning base)
         healed (atom 0)]
     (try
-      (binding [br/*epoch-state-override* (fresh-state)
-                br/*epoch-check-ttl-ms* 0
-                br/*epoch-heal-sync?* true
-                br/*epoch-heal-grace-ms* 0
+      (binding [br-epoch/*epoch-state-override* (fresh-state)
+                br-epoch/*epoch-check-ttl-ms* 0
+                br-epoch/*epoch-heal-sync?* true
+                br-epoch/*epoch-heal-grace-ms* 0
                 epoch/*request-bump-log* (atom [])
                 cr/*impl-override* {:rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
                                     :rebuild! (fn [_] (swap! healed inc))}]
@@ -303,16 +305,16 @@
         v (vs/wrap-with-versioning base)
         healed (atom 0)]
     (try
-      (binding [br/*epoch-state-override* (fresh-state)
-                br/*epoch-check-ttl-ms* 0
-                br/*epoch-heal-sync?* true
+      (binding [br-epoch/*epoch-state-override* (fresh-state)
+                br-epoch/*epoch-check-ttl-ms* 0
+                br-epoch/*epoch-heal-sync?* true
                 epoch/*request-bump-log* (atom [])
                 cr/*impl-override* {:rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
                                     :rebuild! (fn [_] (swap! healed inc))}]
         (let [router (router-over v {(vs/current-branch-id v)
                                      {:ctx {:x 1} :handler :h}})
               foreign (foreign-bump! base)]
-          (br/note-graph-epoch-covered! v [foreign])
+          (br-epoch/note-graph-epoch-covered! v [foreign])
           (br/handler-for router nil)
           (is (zero? @healed) "covered epoch satisfies the range")))
       (finally (sp/close base)))))
@@ -326,9 +328,9 @@
         healed (atom 0)
         state (atom {:w 999999 :read {:value nil :at 0}})]
     (try
-      (binding [br/*epoch-state-override* state
-                br/*epoch-check-ttl-ms* 0
-                br/*epoch-heal-sync?* true
+      (binding [br-epoch/*epoch-state-override* state
+                br-epoch/*epoch-check-ttl-ms* 0
+                br-epoch/*epoch-heal-sync?* true
                 epoch/*request-bump-log* (atom [])
                 cr/*impl-override* {:rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
                                     :rebuild! (fn [_] (swap! healed inc))}]
@@ -354,10 +356,10 @@
         v (vs/wrap-with-versioning base)
         healed (atom 0)]
     (try
-      (binding [br/*epoch-state-override* (fresh-state)
-                br/*epoch-check-ttl-ms* 0
-                br/*epoch-heal-sync?* true
-                br/*epoch-heal-grace-ms* 0
+      (binding [br-epoch/*epoch-state-override* (fresh-state)
+                br-epoch/*epoch-check-ttl-ms* 0
+                br-epoch/*epoch-heal-sync?* true
+                br-epoch/*epoch-heal-grace-ms* 0
                 epoch/*request-bump-log* (atom [])
                 cr/*impl-override* {:rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
                                     :rebuild! (fn [_] (swap! healed inc))}]

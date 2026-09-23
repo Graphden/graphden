@@ -7,7 +7,7 @@ The VersionedStorage decorator, per-branch resolution, diff/merge and branch-loc
 
 after: storage
 
-[[file:index.org][index]] · ~102 min
+[[file:index.org][index]] · ~105 min
 
 * 1. wrap-with-versioning
 :PROPERTIES:
@@ -286,13 +286,13 @@ The graph EPOCH — freshness as a comparison, not an imperative. Every graph-sh
 :PROPERTIES:
 :CUSTOM_ID: versioning/build-branch-ctx
 :FILE: src/graphden/system/branch_router.clj
-:LINE: 134
+:LINE: 75
 :MINS: 4.3
 :END:
 
 Builds a fresh live ~ExecutionContext~ whose storage is a ~VersionedStorage~ rewrapped at the requested branch, with its own compiled-registry and graph-cache atoms — and its own RICH-TYPES SLICE, forked from the base's view at build time and bound as the registry override for the ctx's compiles and every request dispatched to it. This is how a branch gets its own executor without re-sharding the graph.
 
-- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- build-branch-ctx][src/graphden/system/branch_router.clj:134]]
+- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- build-branch-ctx][src/graphden/system/branch_router.clj:75]]
 - see also :: [[file:executor.org::#executor/create-context][create-context]]
 - same file :: [[file:versioning.org::#versioning/dispatch*][dispatch*]]
 
@@ -300,12 +300,24 @@ Builds a fresh live ~ExecutionContext~ whose storage is a ~VersionedStorage~ rew
 :PROPERTIES:
 :CUSTOM_ID: versioning/dispatch*
 :FILE: src/graphden/system/branch_router.clj
-:LINE: 1469
-:MINS: 8.6
+:LINE: 891
+:MINS: 8.2
 :END:
 
 The top-level Ring dispatch: extract the branch ref (header or query), resolve it to a branch-id, and route the request to that branch's lazily-built handler (400 on an unknown branch). Where a live request finally lands in the correct per-branch context. Its public wrapper ~dispatch~ first short-circuits ~/livez~ — the one registry-independent liveness path — so a pod busy on a full recompile still answers its probe.
 
-- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- dispatch*][src/graphden/system/branch_router.clj:1469]]
+- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- dispatch*][src/graphden/system/branch_router.clj:891]]
 - same file :: [[file:versioning.org::#versioning/build-branch-ctx][build-branch-ctx]]
 - referenced from :: [[file:storage.org::#storage/create-listener][create-listener]], [[file:web.org::#web/dispatch-to-branch][dispatch-to-branch]]
+
+* 24. validate-graph-epoch!
+:PROPERTIES:
+:CUSTOM_ID: versioning/validate-graph-epoch!
+:FILE: src/graphden/system/branch_router/epoch.clj
+:LINE: 257
+:MINS: 3.4
+:END:
+
+The other half of the epoch bump from a few steps back: on every ctx fetch the router compares the sequence against its watermark and classifies each epoch in between — applied here, covered by a sibling's NOTIFY, still in flight, or missed. A missed one heals: the base ctx rebuilds in the background (stale-while-revalidate) and every other cached branch ctx is dropped to rebuild on demand. The router namespace orchestrates; this one, ~.cache~ (eviction) and ~.recheck~ (type slices) sit underneath it.
+
+- source :: [[file:../../../src/graphden/system/branch_router/epoch.clj::(defn validate-graph-epoch!][src/graphden/system/branch_router/epoch.clj:257]]

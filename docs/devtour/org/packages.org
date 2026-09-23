@@ -306,26 +306,26 @@ The share-safety policy: vault paths are STRIPPED from bundles by default (the s
 :PROPERTIES:
 :CUSTOM_ID: packages/publish-package-apply
 :FILE: resources/packages/registry/registry/impls.clj
-:LINE: 143
+:LINE: 144
 :MINS: 2.1
 :END:
 
 Publish lands the bundle IN the graph: an immutable, content-hashed ~:package-version~ row (name + semver + fns + declared deps). Install is its mirror — ~materialize-package-fns~ syncs the pinned version's fns into a version-qualified ~@~-namespace and writes a ~:package-install~ pin; update/rollback rewrites refs between versions; fork copies copy-on-write with no pin.
 
-- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase publish-package-apply][resources/packages/registry/registry/impls.clj:143]]
+- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase publish-package-apply][resources/packages/registry/registry/impls.clj:144]]
 - same file :: [[file:packages.org::#packages/upsert-pin!][upsert-pin!]], [[file:packages.org::#packages/import-bundle!][import-bundle!]]
 
 * 24. upsert-pin!
 :PROPERTIES:
 :CUSTOM_ID: packages/upsert-pin!
 :FILE: resources/packages/registry/registry/impls.clj
-:LINE: 352
+:LINE: 353
 :MINS: 2.6
 :END:
 
 Where the marketplace's install COUNT comes from (docs/MARKETPLACE.md). A new pin is an install and bumps the global ~:package-stat~ row with an atomic ~INSERT … ON CONFLICT DO UPDATE~ over the pool — deliberately inside the pin write unit, like the invalidation an entity write owes, because a graph-side 'was it pinned?' probe is an effectful read a later ref would re-run AFTER the pin. Moving a pin (update / rollback) is not an install. Everything else the marketplace needs — listing normalisation, the cards' rating aggregate, the filters, the partials, the review upsert, the storefront bodies — is graph, four modules sharing the ~app.marketplace~ namespace: ~registry/marketplace{,-surface, -storefront,-moderation}/fns.edn~.
 
-- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defn- upsert-pin!][resources/packages/registry/registry/impls.clj:352]]
+- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defn- upsert-pin!][resources/packages/registry/registry/impls.clj:353]]
 - same file :: [[file:packages.org::#packages/publish-package-apply][publish-package-apply]], [[file:packages.org::#packages/import-bundle!][import-bundle!]]
 
 * 25. moderate-package-version!
@@ -369,13 +369,13 @@ Why a fresh marketplace is not empty (docs/MARKETPLACE.md § 11). The starter ca
 :PROPERTIES:
 :CUSTOM_ID: packages/import-bundle!
 :FILE: resources/packages/registry/registry/impls.clj
-:LINE: 713
+:LINE: 714
 :MINS: 5.2
 :END:
 
 The WRITE half of the export/import pair — ~POST /api/import/graph~ applies an exported bundle to a NAMED branch: resolve/create the target (owner-stamped, ~owner~ write-policy — the push-branch convention), skip package-owned defs, adopt editor-born same-name identities onto their deterministic ids, sync through the SAME path the boot loader uses, optionally prune to snapshot semantics, delta-invalidate that branch. Cross-install push/pull and git-snapshot restores all land here, then ride the normal diff → review → merge flow.
 
-- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase import-bundle!][resources/packages/registry/registry/impls.clj:713]]
+- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase import-bundle!][resources/packages/registry/registry/impls.clj:714]]
 - same file :: [[file:packages.org::#packages/publish-package-apply][publish-package-apply]], [[file:packages.org::#packages/upsert-pin!][upsert-pin!]]
 
 * 29. reconcile-bundle-scope!

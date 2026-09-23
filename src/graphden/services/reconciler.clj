@@ -640,7 +640,7 @@
    enabled rows pick up fresh per-branch ExecutionContexts. Wired
    into the merge endpoint so cron loops (which hold their fn-graph
    closures by reference) actually pick up post-merge fn-versions —
-   `branch-router/invalidate!` clears the per-branch ctx, but the
+   `branch-router.cache/invalidate!` clears the per-branch ctx, but the
    running closures don't observe that on their own.
 
    `running-atom` carries `:branch-id` on each entry (set by

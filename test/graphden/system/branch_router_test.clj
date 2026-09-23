@@ -31,6 +31,10 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.branch-router :as br]
+    [graphden.system.branch-router.cache :as br-cache]
+    [graphden.system.branch-router.epoch :as br-epoch]
+    [graphden.system.branch-router.recheck :as br-recheck]
+    [graphden.system.branch-router.request :as br-req]
     [graphden.test-infra.schemas :as schemas]
     [graphden.types.diagnostics :as diag]
     [graphden.versioning.storage.core :as vs]))
@@ -43,44 +47,44 @@
   (testing "X-Graphden-Branch header wins when present"
     (let [req {:headers {"x-graphden-branch" "feature-a"}
                :query-string "branch=feature-b"}]
-      (is (= "feature-a" (br/extract-branch-ref req))))))
+      (is (= "feature-a" (br-req/extract-branch-ref req))))))
 
 
 (deftest extract-branch-ref-query-fallback
   (testing "?branch=name when header is absent"
     (let [req {:headers {}
                :query-string "branch=feature-x"}]
-      (is (= "feature-x" (br/extract-branch-ref req)))))
+      (is (= "feature-x" (br-req/extract-branch-ref req)))))
 
   (testing "URL-decoded query value"
     (let [req {:headers {}
                :query-string "branch=feature%2Fa"}]
-      (is (= "feature/a" (br/extract-branch-ref req)))))
+      (is (= "feature/a" (br-req/extract-branch-ref req)))))
 
   (testing "query param is the second pair"
     (let [req {:headers {}
                :query-string "foo=1&branch=feat&other=2"}]
-      (is (= "feat" (br/extract-branch-ref req))))))
+      (is (= "feat" (br-req/extract-branch-ref req))))))
 
 
 (deftest extract-branch-ref-nil-default
   (testing "neither source set → nil (router falls back to default)"
-    (is (nil? (br/extract-branch-ref {:headers {} :query-string ""})))
-    (is (nil? (br/extract-branch-ref {:headers {} :query-string nil}))))
+    (is (nil? (br-req/extract-branch-ref {:headers {} :query-string ""})))
+    (is (nil? (br-req/extract-branch-ref {:headers {} :query-string nil}))))
 
   (testing "blank header value → nil"
-    (is (nil? (br/extract-branch-ref
+    (is (nil? (br-req/extract-branch-ref
                 {:headers {"x-graphden-branch" "   "} :query-string nil}))))
 
   (testing "blank query value → nil"
-    (is (nil? (br/extract-branch-ref
+    (is (nil? (br-req/extract-branch-ref
                 {:headers {} :query-string "branch=  "})))))
 
 
 (deftest extract-branch-ref-trims-whitespace
   (testing "leading / trailing whitespace stripped"
     (let [req {:headers {"x-graphden-branch" "  feat  "}}]
-      (is (= "feat" (br/extract-branch-ref req))))))
+      (is (= "feat" (br-req/extract-branch-ref req))))))
 
 
 ;; =============================================================================
@@ -141,10 +145,10 @@
   ;; a watermark and a fresh cached read carried over from a previous
   ;; deftest's DB must not outlive that DB (they read as a sequence
   ;; regression against the new one, one TTL later).
-  (binding [br/*epoch-state-override*
+  (binding [br-epoch/*epoch-state-override*
             (atom {:w 11 :read {:value 11 :at (System/currentTimeMillis)}})]
-    (br/reset-epoch-state!)
-    (is (= (br/epoch-state-seed) @br/*epoch-state-override*))))
+    (br-epoch/reset-epoch-state!)
+    (is (= (br-epoch/epoch-state-seed) @br-epoch/*epoch-state-override*))))
 
 
 (deftest dispatch-falls-back-to-default-branch
@@ -325,10 +329,10 @@
                                            feature-id  {:handler :feature-h}})
                                     :stub-fn-id)
           handlers (:handlers router)]
-      (br/invalidate! router feature-id)
+      (br-cache/invalidate! router feature-id)
       (is (= #{default-id} (set (keys @handlers))))
 
-      (br/invalidate-all! router)
+      (br-cache/invalidate-all! router)
       (is (empty? @handlers)))))
 
 
@@ -412,7 +416,7 @@
     (binding [br/*build-entry-override*
               (fn [r bid]
                 ;; simulate a concurrent delete landing mid-build
-                (br/invalidate! r bid)
+                (br-cache/invalidate! r bid)
                 {:handler :stub-h :last-used 1})]
       (let [built (#'br/build-and-cache! router gone-id)]
         (is (= :stub-h (:handler built))
@@ -471,7 +475,7 @@
              subsequent lookups hit the cache and skip storage entirely")
 
         (testing "invalidate! drops the ref-cache entry for that branch"
-          (br/invalidate! router feature-id)
+          (br-cache/invalidate! router feature-id)
           (br/resolve-branch-id router "feature-a")
           (is (= 4 @calls)
               "post-invalidate, the next lookup goes back to uncached
@@ -562,7 +566,7 @@
 (deftest invalidate-all-clears-ref-cache
   (let [router (-> (br/->BranchRouter nil default-id (atom {}) :stub)
                    (assoc :ref-cache (atom {"foo" feature-id "bar" feature-id})))]
-    (br/invalidate-all! router)
+    (br-cache/invalidate-all! router)
     (is (empty? @(:ref-cache router)))))
 
 
@@ -799,7 +803,7 @@
                   _ (setup/bind-value! vstorage det-id (:id slot) "also-bad")]
               (is (nil? (diag/errors-for-fn branch-id (:id broken)))
                   "post-restart baseline: nothing recorded")
-              (#'br/recheck-user-fns! {:storage vstorage} branch-id)
+              (#'br-recheck/recheck-user-fns! {:storage vstorage} branch-id)
               (is (seq (diag/errors-for-fn branch-id (:id broken)))
                   "editor-authored broken fn re-recorded by the ctx-build recheck")
               (is (nil? (diag/errors-for-fn branch-id det-id))
@@ -839,18 +843,18 @@
           (is (contains? @(:handlers router) :stale2))))
       (testing "a pinned branch (running service) is never swept, however idle"
         (swap! (:handlers router) assoc :svc {:ctx {} :last-used old})
-        (br/set-pinned-branches-fn! (fn [] #{:svc}))
+        (br-cache/set-pinned-branches-fn! (fn [] #{:svc}))
         (try
           (reset! (:idle-sweep router) 0)
           (#'br/evict-idle-ctxs! router)
           (is (contains? @(:handlers router) :svc) "pinned stays")
           (is (not (contains? @(:handlers router) :stale2)) "unpinned idle goes")
-          (finally (br/set-pinned-branches-fn! nil))))
+          (finally (br-cache/set-pinned-branches-fn! nil))))
       (testing "a throwing seam counts as no pins"
         (swap! (:handlers router) assoc :stale3 {:ctx {} :last-used old})
-        (br/set-pinned-branches-fn! (fn [] (throw (ex-info "boom" {}))))
+        (br-cache/set-pinned-branches-fn! (fn [] (throw (ex-info "boom" {}))))
         (try
           (reset! (:idle-sweep router) 0)
           (#'br/evict-idle-ctxs! router)
           (is (not (contains? @(:handlers router) :stale3)))
-          (finally (br/set-pinned-branches-fn! nil)))))))
+          (finally (br-cache/set-pinned-branches-fn! nil)))))))

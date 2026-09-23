@@ -127,7 +127,7 @@
 ;; of a missed isolation: an integration test flakes intermittently
 ;; under `bb test` but passes under `bb test-sequential`.
 (def ^:private isolation-vars
-  '[graphden.system.branch-router/*epoch-state-override*
+  '[graphden.system.branch-router.epoch/*epoch-state-override*
     graphden.types.core/*type-aliases-override*
     ;; compile-eager's always-fresh set lives behind a dynamic var so
     ;; two NS-threads racing on `compile-runtime/rebuild!` —
@@ -250,8 +250,8 @@
     ;; `current-router` returns nil until the NS's own fixture sets it.
     graphden.system.branch-router/*active-router-override*
     graphden.system.branch-router/active-router-isolation-seed
-    graphden.system.branch-router/*epoch-state-override*
-    graphden.system.branch-router/epoch-state-seed
+    graphden.system.branch-router.epoch/*epoch-state-override*
+    graphden.system.branch-router.epoch/epoch-state-seed
     graphden.system.route-collection/*active-collection-override*
     graphden.system.route-collection/active-collection-isolation-seed
     graphden.storage.protocol.redaction/*sensitive-fields-override*

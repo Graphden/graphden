@@ -633,26 +633,26 @@
    :args {:exception :_resource-not-found-error}}
 
   ;; Load multiple resource files and concatenate with separator.
-  ;; Pure composition over `:map :read-resource` + `:str-join`.
-  ;;
-  ;; NOTE (reachability audit): UNREFERENCED by first-party fn-defs —
-  ;; every editor/runtime bundle goes through the app tier's
-  ;; `:concat-resources-overridable` twin, which reads each path via
-  ;; `:read-resource-overridable`. This one stays DELIBERATELY: it is
-  ;; the plain-`core` bundling primitive for anyone composing without
-  ;; the override tier. Registered in `tools/graph-reachability.edn`
-  ;; so the audit reports it as held vocabulary, not as dead code.
+  ;; Pure composition over `:map` + `:str-join`; the per-path READER is a
+  ;; free HOF slot of the `:map` step. Bind it — `:read-resource` for the
+  ;; plain classpath, or another tier: the app's
+  ;; `:concat-resources-overridable` is the child that binds
+  ;; `:read-resource-overridable`. Deliberately NOT pre-bound here: effects
+  ;; flow parent → child monotonically, so a `:read-resource` default
+  ;; (`:io`) would stay on every child even after it rebinds the reader.
   {:name :concat-resources
-   :description "Read each path in `:paths` via `:read-resource` and join the contents with a separator (default `\\n\\n`). Used to bundle CSS/JS asset modules."
+   :description "Read each path in `:paths` with `:reader` and join the contents with a separator (default `\\n\\n`). Used to bundle CSS/JS asset modules — bind `:reader` to `:read-resource` for the plain classpath, or to another tier (`:concat-resources-overridable` binds `:read-resource-overridable`)."
    :parent :str-join
+   :return-type :text
    :args {:coll :_concat-resources-list
           :separator {:type :text :value "\n\n"}
           :paths {:type [:list :text]
-                  :description "Classpath resource paths — each is slurp'd via `:read-resource`, contents joined by `:separator`."}}}
+                  :description "Classpath resource paths — each is read via `:reader`, contents joined by `:separator`."}}}
 
   {:name :_concat-resources-list
+   :description "The `:map` step inside `:concat-resources` — `:reader` over each of `:paths`."
    :parent :map
-   :args {:func :read-resource
+   :args {:func {:as :reader}
           :coll {:as :paths}}}
 
   ;; ---------------------------------------------------------------------

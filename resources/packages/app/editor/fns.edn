@@ -1011,17 +1011,10 @@
                                   :args {:key {:value :disable-asset-overrides}}}
                           :default {:value ""}}}}}
 
-  {:name :_concat-overridable-list
-   :parent :map
-   :args {:func :read-resource-overridable
-          :coll {:as :paths}}}
-
   {:name :concat-resources-overridable
-   :description "`:concat-resources` with the override tier — each path reads through `:read-resource-overridable`. Every editor/runtime bundle builds through this."
-   :parent :str-join
-   :return-type :text
-   :args {:coll :_concat-overridable-list
-          :separator {:value "\n\n"}}}
+   :description "`:concat-resources` with the override tier — its `:reader` rebound to `:read-resource-overridable`, so each path reads the branch's override row when one exists. Every editor/runtime bundle builds through this."
+   :parent :concat-resources
+   :args {:reader :read-resource-overridable}}
 
   ;; --- effective frontend hash: baked hash ++ overrides fingerprint.
   {:name :_ro-all

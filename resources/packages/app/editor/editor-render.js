@@ -97,14 +97,28 @@ function createGraph(nodes, edges, layout, shouldFit) {
  * Render or update the graph.
  * Fetches nodes, edges, and layout from the backend in a single request.
  */
+// Render generation — bumped by every renderGraph call and checked after each
+// of its awaits, so the LAST call wins. Without it, select A then B fast drew
+// whichever layout answered last: A's graph under B's sidebar and Inspector.
+let _renderGen = 0;
+
 async function renderGraph(shouldFit = true) {
+  const gen = ++_renderGen;
+  const superseded = () => gen !== _renderGen;
   // `initGraph` only loaded the scope=tree sidebar payload (namespaces +
   // counts, no fn detail). Fetch the subtree for the selected fn so overlays /
   // edges read real slots / bindings / items out of `lookups`. ensureSubtreeFor
-  // short-circuits when the cache already matches selectedFnId.
+  // short-circuits when the cache already matches selectedFnId, and answers
+  // false when its fetch was superseded (a reload phase or another root
+  // started meanwhile) — then ask again, a bounded number of times.
   if (selectedFnId && typeof ensureSubtreeFor === 'function') {
-    try { await ensureSubtreeFor(selectedFnId); }
-    catch (err) {
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const installed = await ensureSubtreeFor(selectedFnId);
+        if (superseded()) return;
+        if (installed !== false) break;
+      }
+    } catch (err) {
       console.error('renderGraph: subtree fetch failed', err);
       return;
     }
@@ -139,6 +153,7 @@ async function renderGraph(shouldFit = true) {
   }
 
   const result = await fetchBackendLayout();
+  if (superseded()) return;
   if (!result) {
     console.error('Failed to fetch layout from backend');
     return;

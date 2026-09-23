@@ -32,6 +32,11 @@ let _subtreeRootId = null;
 // fn B's call, so B awaited A's subtree and rendered A's bindings for B. Mirror
 // of `_nsFetchInFlight` below.
 const _subtreeFetchInFlight = new Map();
+// Subtree epoch — bumped by every fetch that starts and by the reload phase.
+// A fetch installs its rows only if it is still the latest: a late subtree
+// requested BEFORE a mutation's reload used to land after it, reinstall the
+// old bindings into the fresh shell and pin them there via `_subtreeRootId`.
+let _subtreeEpoch = 0;
 
 // Merge freshly-fetched fn rows into the accumulating cache. Full (subtree)
 // rows and light (tree/namespace/search) rows coexist: a later light row
@@ -175,15 +180,19 @@ async function resolveFnByName(name) {
 }
 window.resolveFnByName = resolveFnByName;
 
+// Resolves true once `fnId`'s subtree is the installed one, false when this
+// fetch was superseded before it landed (its rows are then dropped).
 async function ensureSubtreeFor(fnId) {
-  if (!fnId) return;
-  if (_subtreeRootId === fnId && Array.isArray(graphData?.bindings)) return;
+  if (!fnId) return false;
+  if (_subtreeRootId === fnId && Array.isArray(graphData?.bindings)) return true;
   if (_subtreeFetchInFlight.has(fnId)) return _subtreeFetchInFlight.get(fnId);
+  const epoch = ++_subtreeEpoch;
   const p = (async () => {
     const r = await fetch(
       API.api_graph_entities + '?scope=subtree&root-id=' + encodeURIComponent(fnId));
     if (!r.ok) throw new Error('ensureSubtreeFor HTTP ' + r.status);
     const sub = await r.json();
+    if (epoch !== _subtreeEpoch) return false;
     // Merge the subtree's fns (the selected fn + its full transitive
     // closure) into the cache, and overlay its heavy relational rows.
     // Namespaces / counts stay from the :tree load.
@@ -194,10 +203,14 @@ async function ensureSubtreeFor(fnId) {
     graphData['list-items'] = sub['list-items'];
     _subtreeRootId = fnId;
     syncKnownFnsIntoGraph();
+    return true;
   })();
   _subtreeFetchInFlight.set(fnId, p);
-  try { await p; } finally { _subtreeFetchInFlight.delete(fnId); }
-  return p;
+  try { return await p; } finally {
+    // Only our own entry: a reload may have cleared the map and a fresh
+    // fetch for the same fn taken the slot meanwhile.
+    if (_subtreeFetchInFlight.get(fnId) === p) _subtreeFetchInFlight.delete(fnId);
+  }
 }
 window.ensureSubtreeFor = ensureSubtreeFor;
 
@@ -229,6 +242,7 @@ function graphShellFromTree(tree) {
 // re-primes the selected fn.
 function resetGraphCaches() {
   _subtreeRootId = null;
+  _subtreeEpoch += 1;
   _subtreeFetchInFlight.clear();
   _knownFns = new Map();
   _loadedNamespaceIds = new Set();

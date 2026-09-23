@@ -506,6 +506,10 @@ Adding more is one `defmethod` of
 | Path | What |
 |------|------|
 | `src/graphden/system/branch_router.clj` | Per-branch ctx registry + Ring dispatcher + singleton hook |
+| `src/graphden/system/branch_router/request.clj` | What a request asks for — branch ref (header / `?branch=`), page-load test, stale-`?branch=` redirect URL, `/livez` |
+| `src/graphden/system/branch_router/cache.clj` | Dropping cached entries (`invalidate!` / `invalidate-all!`, ref-cache sweep) + the pinned-branches seam |
+| `src/graphden/system/branch_router/epoch.clj` | Graph-epoch validation on ctx fetch + the self-heal; `note-graph-epoch-*` tails for eager paths |
+| `src/graphden/system/branch_router/recheck.clj` | Re-recording types into a ctx's own rich-types slice (`call-with-ctx-slices`, `recheck-ctx-types!`, ctx-build diagnostics recompute) |
 | `resources/packages/web/branch-router/` | `branch-routing-wrap` base-fn (the wrap installed in front of `_app-ring-response`) |
 | `src/graphden/crud/branches.clj` | Two read-side helpers only: `base-storage` + `resolve-branch-ref` (the list / create / delete / merge / diff / conflicts orchestration now lives in graph fn-defs over atomic base-fns) |
 | `resources/packages/app/branches/` | HTTP fn-defs + impls over the atomic base-fns (`:create-branch!` / `:delete-branch!` / `:diff-branches` / `:detect-conflicts` / `:merge-branch!`) |
@@ -776,7 +780,15 @@ panel keeps its inline 📍 badge on the same rows.
   value-sweep has already run. A delete landing before the recheck is
   seen (entry dropped, nil/new id returned); one landing after it sees
   the now-present entry and sweeps it. Covered by the
-  `ref-cache-toctou-*` tests in `branch_router_test`.
+  `ref-cache-toctou-*` tests in `branch_router_test`. The cache holds
+  only refs that RESOLVED, and a ref that resolved by id is keyed by the
+  canonical id — `UUID/fromString` accepts any case mix and short groups,
+  so keying by the raw text let request input grow it without bound. It
+  is therefore bounded by the number of branches.
+- A malformed percent-escape in the query string (`?%zz=1`) never fails
+  the request: a malformed key is not `branch`, a malformed `branch`
+  value is taken literally (→ the unknown-branch 400, or a redirect to
+  the default branch for a page load).
 - The `:exec/branch-router` is unit-tested at
   the dispatcher level (`branch-router-test`: header / query parsing,
   default fallback, unknown-ref rejection, invalidate) AND the full

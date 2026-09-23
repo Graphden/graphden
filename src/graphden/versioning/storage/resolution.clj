@@ -724,6 +724,18 @@
               winners)))))
 
 
+(defn live-ids
+  "Subset of `ids` (a set) with a LIVE (non-tombstone) version winning on
+   `branch-id`'s chain, merge-aware — `resolve-version` non-nil, for a
+   whole batch in one load. The tombstone GC's per-branch liveness probe."
+  [base-storage entity-name ids branch-id]
+  (if (empty? ids)
+    #{}
+    (into #{}
+          (keep (fn [[eid v]] (when-not (tombstone? v) eid)))
+          (winning-versions base-storage entity-name ids branch-id))))
+
+
 (defn ids-without-chain-version
   "Subset of `ids` (returned as a set) that resolve to NO version on
    `branch-id`'s chain — merge-aware, exactly the resolver's own

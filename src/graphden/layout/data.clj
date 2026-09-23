@@ -422,15 +422,14 @@
                                       (when-let [s (get slot-map (:slot-id fs))]
                                         [[(:fn-id fs) (keyword (:name s))] s])))
                               fn-slots)
-        ;; name (keyword) → fn-row. Lets type-row internals resolve
-        ;; `:int` / `:null` / `:text` etc. in `:constraint` payloads
-        ;; without having to walk `fn-map` linearly.
-        fn-by-name (into {} (keep (fn [f]
-                                    (when-let [n (:name f)]
-                                      [(keyword n) f])))
-                         fns)]
+        ;; bare name (keyword) → EVERY fn-row carrying it. Lets type-row
+        ;; internals resolve `:int` / `:null` / `:text` etc. in
+        ;; `:constraint` payloads without walking `fn-map` linearly — all
+        ;; rows, because a name may live in several namespaces
+        ;; (`builder-helpers/resolve-type-ref` picks among them).
+        fns-by-name (group-by #(keyword (:name %)) (filter :name fns))]
     {:fn-map fn-map
-     :fn-by-name fn-by-name
+     :fns-by-name fns-by-name
      :arg-map arg-map
      :args-by-fn args-by-fn
      :slot-map slot-map

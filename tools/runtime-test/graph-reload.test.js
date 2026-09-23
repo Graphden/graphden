@@ -54,6 +54,7 @@ function boot({ routes, accounts = false, tenancyClass = false }) {
     richTypes: { stale: true },
     VALUE_KINDS: [],
     _rowActionsUseSiteArgs: rowActions,
+    _rowActionsHtmlCache: new Map([['/partials/row-actions?fn-id=f1', '<b>old name</b>']]),
   });
   ctx.window = ctx;
   ctx.window.addEventListener = () => {};
@@ -101,6 +102,7 @@ function racingRoutes(ctxRef, typesBody) {
     assert(vm.runInContext('lookups.fnMap.has("f1")', b.ctx), which + ': lookups rebuilt from the cache');
     assert(vm.runInContext('richTypes.int !== undefined && !richTypes.stale', b.ctx), which + ': richTypes installed');
     assert(b.rowActions.size === 0, which + ': _rowActionsUseSiteArgs pruned');
+    assert(b.ctx._rowActionsHtmlCache.size === 0, which + ': row-actions HTML cache cleared');
     assert(b.calls.entityList >= 1, which + ': Explorer repainted');
   }
 
@@ -129,6 +131,22 @@ function racingRoutes(ctxRef, typesBody) {
   await ten.ctx.initGraph();
   assert(ten.calls.href === null, 'tenancy class without accounts: no redirect to a /login that does not exist');
   assert(ten.calls.popover.length === 1, 'tenancy class without accounts: admin popover');
+
+  console.log(' a description save drops the row-actions HTML it was baked into');
+  {
+    const tctx = vm.createContext({
+      console,
+      document: { addEventListener() {} },
+      graphData: { fns: [{ id: 'f1', description: 'old' }] },
+      lookups: null,
+      buildLookups: () => ({}),
+      _rowActionsHtmlCache: new Map([['u', '<button data-description="old">']]),
+    });
+    tctx.window = tctx;
+    vm.runInContext(fs.readFileSync(path.join(EDITOR, 'editor-tooltips.js'), 'utf8'), tctx);
+    tctx.patchEntityDescriptionInState('fn', 'f1', 'new');
+    assert(tctx._rowActionsHtmlCache.size === 0, 'row-actions HTML cache cleared on description save');
+  }
 
   console.log(`\n${passes} passed, ${fails} failed`);
   process.exit(fails ? 1 : 0);

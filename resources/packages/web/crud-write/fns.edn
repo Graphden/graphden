@@ -7,7 +7,7 @@
  :fns
  [;; --- entity create / update pipeline primitives. The handlers
   ;; themselves are `:if` graph fn-defs below; these base-fns are the
-  ;; parse / validate / apply stages. `_rejected?` + `_rejection-response`
+  ;; parse / validate / apply stages. `rejected?` + `_rejection-response`
   ;; are shared by both create and update. ---
   ;; --- :_create-parsed — graph composition over the
   ;; `:extract-entity-params` primitive + body→form-data
@@ -809,7 +809,7 @@
                                       :vals [{:value "Entity updated successfully"}
                                              :_update-apply-type-warnings]}}}}}}
 
-  {:name :_rejected?
+  {:name :rejected?
    :description "True when a `validate-*` stage produced a rejection. `:some? :validation`."
    :parent :some?
    :args {:value {:as :validation}}}

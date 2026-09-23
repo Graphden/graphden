@@ -768,7 +768,7 @@
    :description "A read tool names an existing branch other than the one this request runs on, and a router is installed to route it."
    :parent :and
    :args {:values [:_mcp-branch-routable-tool?
-                   :_branch-router-installed?
+                   :branch-router-installed?
                    {:parent :some? :args {:value :_mcp-arg-branch-id}}
                    {:parent :not :args {:value {:parent :equal? :args {:a :_mcp-arg-branch-id :b :current-branch-id}}}}]}}
 

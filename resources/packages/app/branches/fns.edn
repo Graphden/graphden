@@ -238,7 +238,7 @@
   {:name :_get-branch-err
    :description "Not-found shape — `{:ok false :reason :not-found :error \"Branch not found: <ref>\"}`. Same envelope as the delete-branch not-found sibling."
    :parent :_branch-err-envelope
-   :return-type :_error-result-with-reason-shape
+   :return-type :error-result-with-reason-shape
    :args {:vals [{:value false}
                  {:value :not-found}
                  {:parent :str :args {:parts ["Branch not found: " :_get-branch-ref]}}]}}
@@ -637,7 +637,7 @@
   {:name :_diff-err-target-missing
    :description "Dynamic error — cites the raw target-ref. Shared by diff / conflicts / merge via `:parent`. `:return-type` pinned so the parent `:cond`'s union of error envelopes + success envelope stays a union of PRECISE record shapes (otherwise the bare `:zipmap` inference opaques out to `[:map :any …]` and downstream `:get :key …` can't narrow per-branch)."
    :parent :zipmap
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str
@@ -649,13 +649,13 @@
 
   {:name :_diff-err-against-missing
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Query parameter 'against' is required"}}}
 
   {:name :_diff-err-source-missing
    :description "Dynamic error — cites the raw against-ref. Only diff uses `:against-ref` as the source key (conflicts/merge use `:source-ref`). Pinned `:return-type` mirrors `:_diff-err-target-missing` — keeps the cond's union of precise record shapes intact."
    :parent :zipmap
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str
@@ -954,7 +954,7 @@
 
   {:name :_create-branch-err-policy-invalid
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "write-policy must be one of: open, owner, admins"}}}
 
   {:name :_create-branch-name-blank?
@@ -1037,7 +1037,7 @@
   {:name :_create-branch-err-name-taken
    :description "Dynamic error — cites the rejected name. `:return-type` pinned so the parent cond's union stays a union of precise record shapes for downstream `:get` narrowing."
    :parent :zipmap
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str
@@ -1050,7 +1050,7 @@
   {:name :_create-branch-err-base-missing
    :description "Dynamic error — cites the base-ref that didn't resolve."
    :parent :zipmap
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str
@@ -1114,7 +1114,7 @@
   {:name :_create-branch-data
    :description "POST /api/branches — flat `:cond` of `[name-blank? → 400, name-taken? → 400-dynamic, base-missing? → 400-dynamic, true → apply]`."
    :parent :cond
-   :args {:clauses [:_create-branch-name-blank?  :_err-name-blank
+   :args {:clauses [:_create-branch-name-blank?  :err-name-blank
                     :_create-branch-policy-invalid? :_create-branch-err-policy-invalid
                     :_create-branch-name-taken?  :_create-branch-err-name-taken
                     :_create-branch-base-missing? :_create-branch-err-base-missing
@@ -1357,7 +1357,7 @@
   {:name :_branch-policy-err-missing
    :description "JSON 404-style rejection — the URL ref resolved to no branch."
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Branch not found"}}}
 
   {:name :_branch-policy-value
@@ -1383,7 +1383,7 @@
 
   {:name :_branch-policy-err-invalid
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "write-policy must be one of: open, owner, admins"}}}
 
   {:name :_branch-policy-apply-set
@@ -1441,7 +1441,7 @@
 
   {:name :_branch-protect-err-missing
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Branch not found"}}}
 
   {:name :_branch-protect-apply-set
@@ -1496,7 +1496,7 @@
 
   {:name :_branch-propose-err-missing
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Branch not found"}}}
 
   {:name :_branch-propose-apply-set
@@ -1549,7 +1549,7 @@
 
   {:name :_branch-archive-err-missing
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Branch not found"}}}
 
   {:name :_branch-archive-apply-set
@@ -1606,7 +1606,7 @@
 
   {:name :_branch-rp-err-missing
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Branch not found"}}}
 
   {:name :_branch-rp-apply-set
@@ -1651,7 +1651,7 @@
 
   {:name :_branch-approve-err-missing
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Branch not found"}}}
 
   {:name :_branch-approve-apply
@@ -1736,7 +1736,7 @@
 
   {:name :_branch-comment-err-blank
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Comment body is required"}}}
 
   {:name :_branch-comment-anchor-name
@@ -1850,7 +1850,7 @@
 
   {:name :_branch-comment-err-no-id
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Comment id is required"}}}
 
   {:name :_branch-comment-del
@@ -1951,7 +1951,7 @@
 
   {:name :_delete-branch-err-main
    :parent :const
-   :return-type :_error-result-with-reason-shape
+   :return-type :error-result-with-reason-shape
    :args {:value {:ok false :reason :root-branch-undeletable
                   :error "Cannot delete the root branch"}}}
 
@@ -1972,7 +1972,7 @@
   {:name :_delete-branch-err-not-found
    :description "Dynamic error — cites the raw branch-ref. Shared by the parse-time guard and the exception-surfaced path: same envelope (incl. `:reason :not-found`)."
    :parent :_branch-err-envelope
-   :return-type :_error-result-with-reason-shape
+   :return-type :error-result-with-reason-shape
    :args {:vals [{:value false}
                  {:value :not-found}
                  {:parent :str
@@ -2053,13 +2053,13 @@
 
   {:name :_conflicts-err-source-supplied-missing
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Query parameter 'source' is required"}}}
 
   {:name :_conflicts-err-source-missing
    :description "Dynamic error — cites the raw source-ref. Shared with `:_merge-err-source-missing` via `:parent`. `:return-type` pinned so the parent cond's union stays a union of precise record shapes for downstream `:get` narrowing."
    :parent :zipmap
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str
@@ -2316,7 +2316,7 @@
 
   {:name :_merge-err-source-not-supplied
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Required field ':source' is missing"}}}
 
   {:name :_merge-err-source-missing
@@ -2325,7 +2325,7 @@
 
   {:name :_merge-err-same
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Source and target branches must differ"}}}
 
   ;; --- :merge-branch! atomic primitive + graph-level try/catch ----
@@ -2639,7 +2639,7 @@
 
   {:name :_branch-apply-err-generic
    :parent :zipmap
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:keys [{:value :ok} {:value :error}]
           :vals [{:value false} :_branch-apply-err-generic-msg]}}
 

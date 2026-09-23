@@ -531,7 +531,7 @@
   {:name :value-form
    :description "POST /api/value-form — parse the JSON body identifying a binding/slot, validate, and on success resolve the type-aware editor form. Returns {:ok true :form :value} or {:ok false :error}."
    :parent :if
-   :args {:test :_rejected?
+   :args {:test :rejected?
           :then :_value-form-validation
           :else :_value-form-apply
           :validation :_value-form-validation

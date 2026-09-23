@@ -703,7 +703,7 @@
   {:name :_exec-err-not-found
    :description "Dynamic 404 builder — cites the raw id-segment. Shared between get + cancel. `:return-type` pinned so downstream `:cond` unions of error + success retain precise record shapes (otherwise bare `:zipmap` infers `[:map :any [:union :bool :text]]` and the per-member narrowing in `get-return-rule` opaques out)."
    :parent :zipmap
-   :return-type :_error-result-status-shape
+   :return-type :error-result-status-shape
    :args {:keys [:ok {:value :http-status :literal? true} :error]
           :vals [false
                  404
@@ -1203,7 +1203,7 @@
 
   {:name :_list-exec-err-no-anchor
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "missing or invalid ?fn-id / ?fn-version-id query parameter"}}}
 
   {:name :_list-executions-by-fn

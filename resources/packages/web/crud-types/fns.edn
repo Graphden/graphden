@@ -9,7 +9,7 @@
   ;; graph fn-defs below; these base-fns are the parse / validate /
   ;; apply stages. `validate-*` returns the `{:ok false :error}`
   ;; rejection response directly (or nil), so the `:if`'s `:then` branch
-  ;; is the validation result itself; `_rejected?` is shared with the
+  ;; is the validation result itself; `rejected?` is shared with the
   ;; entity create/update + type-row handlers. ---
   ;; --- :json-to-type — atomic boundary over `types-api/json->type`.
   {:name :json-to-type
@@ -629,7 +629,7 @@
   ;; are `:if` graph fn-defs below; these base-fns are the parse /
   ;; validate / apply stages. `validate-*` returns the `{:ok false
   ;; :error}` rejection response directly (or nil), so the `:if`'s
-  ;; `:then` branch is the validation result itself; `_rejected?` is
+  ;; `:then` branch is the validation result itself; `rejected?` is
   ;; shared with the entity create/update handlers. ---
   {:name :_type-form-name-raw
    :parent :get
@@ -711,7 +711,7 @@
    :description "`:try`'s on-throw branch for create-record-type AND create-list-type. Derefs `:journal` and replays entries in reverse. Returns the `{:ok false :error :data}` shape."
    :args {:journal {:type :any :description "Shared rollback-journal atom."}
           :exception {:type :any :description "Caught Exception, provided by `:try` at call time."}}
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :effects #{:db}}
 
   {:name :_apply-create-record-type-journal
@@ -768,7 +768,7 @@
   {:name :_create-list-type-err-element-required
    :description "Static 400 rejection payload — element-type missing."
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "element-type required"}}}
 
   {:name :_create-list-type-validation
@@ -882,13 +882,13 @@
   {:name :_update-record-type-err-id-required
    :description "Static 400 rejection — id missing or not a UUID."
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "id required (UUID)"}}}
 
   {:name :_update-record-type-err-not-found
    :description "Dynamic error builder — cites the parsed fn-id of the row that didn't exist. `:return-type` pinned to keep the parent cond's union of precise record shapes."
    :parent :zipmap
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str
@@ -935,7 +935,7 @@
    :description "`:try`'s on-throw branch — derefs `:journal` and replays entries in reverse. Returns the partial 400 response carrying the exception's message + ex-data. Both `:journal` (captured) and `:exception` (call-time) come from `:try`'s environment."
    :args {:journal {:type :any :description "Shared rollback-journal atom (captured from `:_update-record-type-apply`'s `:journal` binding)."}
           :exception {:type :any :description "Caught Exception, provided by `:try` at call time as the single lambda-param."}}
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :effects #{:db}}
 
   {:name :_update-record-type-apply

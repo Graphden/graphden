@@ -236,7 +236,7 @@
 ;; graph fn-defs (`web/crud` fns.edn) — an `:if` over the validation
 ;; result, branching to the `{:ok false :error}` rejection or to the
 ;; computation. These base-fns are the parse / validate / apply stages;
-;; `_rejected?` (below) is shared with every other `:if` handler.
+;; `rejected?` (below) is shared with every other `:if` handler.
 
 
 (defbase try-apply-create

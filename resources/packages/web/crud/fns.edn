@@ -98,16 +98,16 @@
   ;; type-row stages return (distinct from `_rejection-shape`, the
   ;; entity-CRUD `{:reason}` rejection). ---
 
-  {:name :_error-result-with-reason-shape
-   :description "Variant of `:_error-result-shape` carrying an additional `:reason` keyword tag — used by guards whose downstream consumer needs to discriminate (e.g. UI distinguishing `:missing-binding` vs `:binding-exists` to wire different recovery paths)."
+  {:name :error-result-with-reason-shape
+   :description "Variant of `:error-result-shape` carrying an additional `:reason` keyword tag — used by guards whose downstream consumer needs to discriminate (e.g. UI distinguishing `:missing-binding` vs `:binding-exists` to wire different recovery paths)."
    :type {:ok :bool :error :text :reason :keyword}}
 
-  {:name :_error-result-shape
+  {:name :error-result-shape
    :description "The `{:ok false :error}` rejection payload returned by every type-API / type-row / value-form validation stage."
    :type {:ok :bool :error :text}}
 
-  {:name :_error-result-status-shape
-   :description "`:_error-result-shape` plus the `:http-status` the envelope-response seam reads (web.errors/:json-envelope-response) — rejection builders that declare their HTTP status pin to this."
+  {:name :error-result-status-shape
+   :description "`:error-result-shape` plus the `:http-status` the envelope-response seam reads (web.errors/:json-envelope-response) — rejection builders that declare their HTTP status pin to this."
    :type {:ok :bool :error :text :http-status :int}}
 
   {:name :_types-compatible-result-shape
@@ -128,7 +128,7 @@
 
   {:name :_type-row-result-shape
    :description "What a type-row create / update apply stage returns — the success payload, or an `{:ok false :error}` map when the transactional write failed."
-   :union [:_id-name-result-shape :_error-result-shape]}
+   :union [:_id-name-result-shape :error-result-shape]}
 
   {:name :_partial-response-shape
    :description "A partial Ring response from a `process-*` / `_*-apply` stage — `:status` + `:body`, optionally `:headers` (open-record). `html-action-response` wraps it into a full response, defaulting any missing field."
@@ -142,13 +142,13 @@
   {:name :_err-name-required
    :description "JSON 400 rejection — `:name` field missing or blank. Shared between create-record-type + create-list-type endpoints."
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "name required"}}}
 
   {:name :_err-fields-required
    :description "JSON 400 rejection — `:fields` list empty. Shared between create-record-type + update-record-type endpoints."
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "fields required (a record needs ≥1 field)"}}}
 
   {:name :_html-err-invalid-body
@@ -169,10 +169,10 @@
    :return-type :_partial-response-shape
    :args {:value {:status 404 :body "<p class=\"error\">Item not found</p>"}}}
 
-  {:name :_err-name-blank
+  {:name :err-name-blank
    :description "JSON 400 rejection — required `:name` field missing. Shared admin-CRUD envelope used by create-secret + create-branch."
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Required field ':name' is missing"}}}
 
   {:name :_parsed-body

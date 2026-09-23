@@ -228,7 +228,7 @@
 ;; `process-update-record-type` are `:if` graph fn-defs (`web/crud`
 ;; fns.edn) — an `:if` over the validation result, branching to the
 ;; `{:ok false :error}` rejection or to the transactional apply.
-;; These base-fns are the parse / validate / apply stages; `_rejected?`
+;; These base-fns are the parse / validate / apply stages; `rejected?`
 ;; (below) is shared with the entity create/update handlers.
 
 
@@ -288,7 +288,7 @@
 ;; `process-create-entity` / `process-update-entity` are graph fn-defs
 ;; (`web/crud` fns.edn) — an `:if` over `parse → validate`, branching
 ;; to a 400 or to the apply (write) stage. These base-fns are the
-;; pipeline stages; `_rejected?` / `_rejection-response` are shared by
+;; pipeline stages; `rejected?` / `_rejection-response` are shared by
 ;; both handlers.
 
 

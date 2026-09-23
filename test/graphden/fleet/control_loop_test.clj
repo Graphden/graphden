@@ -135,6 +135,18 @@
         "tenant app cell + already-placed cell, each weighted")))
 
 
+(deftest discover-cells-reads-org-loads-from-the-load-storage
+  ;; `:fn-execution` is org-scoped: read at platform context through the
+  ;; scoped storage it shows only public rows, so every tenant's load was 0.
+  ;; The controller hands the RAW storage as `:load-storage`.
+  (let [scoped (fleet-storage {:app-routes {"acme" c1} :pending {}})
+        raw (fleet-storage {:pending {"acme" 4}})
+        weight-of #(:weight (first (loop/discover-cells scoped {} [] %)))]
+    (is (= 1.0 (weight-of {})) "the scoped read sees no tenant load")
+    (is (= 5.0 (weight-of {:load-storage raw}))
+        "1 fn + the 4 pending executions read off the raw storage")))
+
+
 (deftest discover-cells-tolerates-a-missing-app-route-entity
   ;; `safe-query` swallows the throw when the `:app-route` entity isn't defined
   ;; (a non-tenancy deployment), so discovery still returns the placed cells.

@@ -89,6 +89,10 @@
       (let [executors-fn (or (:executors-fn opts) fleet-discovery/fleet-executors)
             run-tick-fn (or (:run-tick-fn opts) fleet-loop/run-tick!)
             env {:storage (:storage ctx)
+                 ;; Org loads come off the org-scoped `:fn-execution`; this
+                 ;; thread carries no org/principal, so the RAW pool reads
+                 ;; every org's rows (RLS's full-access arm).
+                 :load-storage (or (:pg-storage ctx) (:storage ctx))
                  :forward-deps (:forward-deps (some-> (:compile-deps ctx) deref))
                  :executors (executors-fn)
                  :move-fn (fn [cmd] (fleet-command/execute-move! ctx cmd))}

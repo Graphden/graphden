@@ -124,13 +124,14 @@ email exists (no account enumeration), and a successful
 `POST /auth/reset` **signs the account out everywhere** (every session
 revoked) so a stolen session doesn't survive a recovery.
 
-Three **per-IP fixed-window limiters** (`crypto/fixed-window-limiter`)
+Four **per-IP fixed-window limiters** (`crypto/fixed-window-limiter`)
 guard the abuse-prone endpoints. The client IP is the entry **N
 positions from the END** of `X-Forwarded-For`, where
 `N = GRAPHDEN_TRUSTED_PROXIES` (default `0`): only the rightmost N hops
 (the ones your own trusted proxies appended) are trusted, and any hops
 a client injected to its left are ignored. With **0 trusted proxies the
-header is ignored entirely** and the socket `remote-addr` is used — so a
+header is ignored entirely** and the socket `remote-addr` is used
+(`graphden.web.client-ip`, which the tenancy addon's limiters share) — so a
 spoofed `X-Forwarded-For:` never bypasses the limiter on a
 directly-reachable deployment. The cloud runs behind Caddy with
 `GRAPHDEN_TRUSTED_PROXIES=1`. The limited endpoints:
@@ -140,6 +141,7 @@ directly-reachable deployment. The cloud runs behind Caddy with
 | `POST /auth/login` | 10/min | 401 `invalid_credentials` (same as a bad password) |
 | `POST /auth/signup` | 20/min | 429 `rate_limited` |
 | `POST /auth/forgot` + `/auth/resend-verification` | 5/min | the normal 200 body |
+| `POST /auth/totp` + `/auth/totp/confirm` + `/auth/totp/disable` | 10/min | 429 `rate_limited` |
 
 Login/forgot over-quota answers mirror the ordinary failure/success shape
 on purpose — the limiter's existence isn't probeable.

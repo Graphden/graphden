@@ -949,10 +949,11 @@
                   :api-fn-versions
                   :api-fn-usages
                   ;; The registry's `/api/packages/*` + `/api/export/*` routes
-                  ;; live in the OPTIONAL `registry` package now and install via
-                  ;; the route-collection seam (`:registry/router-install`), so
-                  ;; they are intentionally NOT listed here — this keeps `app`
-                  ;; bootable without the registry package.
+                  ;; live in the OPTIONAL `registry` package now and are served
+                  ;; per-branch through the branch-router's optional-handler
+                  ;; slot (`_registry-ring-response`), so they are intentionally
+                  ;; NOT listed here — this keeps `app` bootable without the
+                  ;; registry package.
                   :api-secrets-root
                   :api-secret-inline-binding
                   :api-secret-binding-rotate

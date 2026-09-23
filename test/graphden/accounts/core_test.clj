@@ -215,6 +215,14 @@
     (is (:linked? second-login))))
 
 
+(deftest ^:integration account-of-a-non-uuid-id-is-nil
+  ;; Account ids are minted as `(str (:id account))`. The old text-query
+  ;; fallback for a non-uuid id was rejected by the where-clause type
+  ;; validation — it threw instead of answering "no such account".
+  (is (nil? (accounts/account-of (storage) "not-a-uuid")))
+  (is (nil? (accounts/account-of (storage) nil))))
+
+
 (deftest ^:integration accounts-of-batches-and-matches-account-of
   (let [mk #(accounts/create-account! (storage) {:display-name % :primary-email (str % "@example.com")})
         a (mk "batch-a")

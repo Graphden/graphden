@@ -80,11 +80,11 @@
 
 (defn account-of
   "The `:account` row for a string account-id, or nil. `account-id` is stored
-   downstream as `(str (:id account))`, so parse it back to the uuid id."
+   downstream as `(str (:id account))`, so parse it back to the uuid id; a
+   non-uuid id names no account (the old text-query fallback was rejected by
+   the where-clause type validation — it threw)."
   [storage account-id]
-  (when account-id
-    (or (some->> (parse-uuid (str account-id)) (sp/read-entity storage :account))
-        (first (sp/query-entities storage :account {:id account-id})))))
+  (some->> account-id str parse-uuid (sp/read-entity storage :account)))
 
 
 (defn accounts-of
@@ -92,8 +92,7 @@
    that resolves (absent otherwise). One `read-entities` round trip — the
    admin-panel joins (org members, platform access) were calling `account-of`
    per subject, an N+1. A non-uuid id resolves to nothing: account ids are
-   minted as `(str (:id account))`, and `account-of`'s text-query arm is
-   rejected by the where-clause type validation anyway."
+   minted as `(str (:id account))` — the same rule as `account-of`."
   [storage account-ids]
   (let [ids (into [] (comp (remove nil?) (map str) (distinct)) account-ids)
         uuid-of (into {} (keep (fn [s] (some->> (parse-uuid s) (vector s)))) ids)

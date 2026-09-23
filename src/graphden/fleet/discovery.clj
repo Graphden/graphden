@@ -16,7 +16,8 @@
    Resolution failures degrade to an empty set (the controller then plans
    nothing that tick) rather than crashing the loop."
   (:require
-    [clojure.string :as str])
+    [clojure.string :as str]
+    [graphden.util.env :as env])
   (:import
     (java.util
       Hashtable)
@@ -24,15 +25,6 @@
       Attribute
       Attributes
       InitialDirContext)))
-
-
-(defn parse-executor-list
-  "Comma-separated executor ids → a trimmed, blank-free vec, or nil when the
-   string is nil/blank/all-blank (so the caller falls through to DNS)."
-  [s]
-  (when (seq s)
-    (let [xs (into [] (comp (map str/trim) (remove str/blank?)) (str/split s #","))]
-      (when (seq xs) xs))))
 
 
 (defn parse-srv-target
@@ -72,6 +64,6 @@
    else the SRV members of `GRAPHDEN_FLEET_DNS`, else empty (⇒ the controller
    plans nothing — there is nowhere to place)."
   []
-  (or (parse-executor-list (System/getenv "GRAPHDEN_FLEET_EXECUTORS"))
+  (or (env/csv-list (System/getenv "GRAPHDEN_FLEET_EXECUTORS"))
       (some-> (System/getenv "GRAPHDEN_FLEET_DNS") resolve-srv-targets)
       []))

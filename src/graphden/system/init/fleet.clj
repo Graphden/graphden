@@ -11,6 +11,7 @@
     [graphden.fleet.discovery :as fleet-discovery]
     [graphden.storage.postgres.advisory-lock :as pg-lock]
     [graphden.util.counters :as counters]
+    [graphden.util.env :as env]
     [graphden.util.executors :as executors]
     [integrant.core :as ig]))
 
@@ -47,12 +48,6 @@
       (String/.getBytes (str "graphden-fleet-controller/" scope) "UTF-8"))))
 
 
-(defn- csv-set
-  [s]
-  (when-not (str/blank? (str s))
-    (into #{} (comp (map str/trim) (remove str/blank?)) (str/split (str s) #","))))
-
-
 (defn- fleet-controller-opts
   "Controller knobs from env (read directly, like the other fleet vars):
    `:sustain-ticks` (imbalance must persist this many ticks before a move),
@@ -68,8 +63,8 @@
    :min-improvement (or (some-> (System/getenv "GRAPHDEN_FLEET_MIN_IMPROVEMENT") parse-double) 0.0)
    :max-moves (or (some-> (System/getenv "GRAPHDEN_FLEET_MAX_MOVES") parse-long) Integer/MAX_VALUE)
    :w-overlap (or (some-> (System/getenv "GRAPHDEN_FLEET_OVERLAP_WEIGHT") parse-double) 0.0)
-   :shard-orgs (csv-set (System/getenv "GRAPHDEN_EXECUTOR_ORGS"))
-   :exclude-orgs (csv-set (System/getenv "GRAPHDEN_FLEET_EXCLUDE_ORGS"))})
+   :shard-orgs (some-> (System/getenv "GRAPHDEN_EXECUTOR_ORGS") env/csv-list set)
+   :exclude-orgs (some-> (System/getenv "GRAPHDEN_FLEET_EXCLUDE_ORGS") env/csv-list set)})
 
 
 (defn- fleet-controller-tick!

@@ -22,6 +22,7 @@
     [graphden.system.branch-router :as br]
     [graphden.system.demo-branches :as demo]
     [graphden.system.deploy-config :as deploy-config]
+    [graphden.util.env :as env]
     [graphden.versioning.storage.core :as vs]
     [integrant.core :as ig]))
 
@@ -108,20 +109,27 @@
   auth-provider)
 
 
-(defn- parse-executor-orgs
-  "`\"public,acme,beta\"` → `#{\"public\" \"acme\" \"beta\"}`; blank / nil → nil
-   (compile the whole graph — the self-hosted default).
+(defn shard-opts
+  "The pod's shard + role as `create-context` opts, parsed from their env
+   strings (addon overrides pass through):
 
-   The operator must list the PUBLIC org explicitly if the deployment has
-   one: the platform packages live there once they are written through the
-   tenancy decorator, and a pod without them compiles nothing. Rows with a
-   NULL `:org-id` are un-owned and always in every shard, so a
-   non-tenancy deployment that sets this by accident still works."
-  [s]
-  (when (string? s)
-    (let [orgs (into #{} (comp (map str/trim) (remove str/blank?))
-                     (str/split s #","))]
-      (when (seq orgs) orgs))))
+   - `:executor-orgs` — the orgs whose fns THIS pod compiles. Absent ⇒ the
+     whole graph (self-hosted / single-tenant). A collection or predicate
+     from an addon passes through; a comma-separated env string is parsed
+     (blank ⇒ absent). The operator must list the PUBLIC org explicitly if
+     the deployment has one — the platform packages live there once written
+     through the tenancy decorator. NULL-`:org-id` rows are in every shard.
+   - `:byo-executor?` — a BYO executor serves the `:byo` orgs in its shard;
+     a hosted pod 421s them. From `GRAPHDEN_BYO_EXECUTOR` via `env-truthy?`
+     (case-insensitive like every other env flag — a case-sensitive set
+     read `TRUE` as a hosted pod), or an addon override."
+  [executor-orgs byo-executor?]
+  (let [orgs (if (string? executor-orgs)
+               (some-> (env/csv-list executor-orgs) set)
+               executor-orgs)]
+    (cond-> {}
+      orgs (assoc :executor-orgs orgs)
+      (some? byo-executor?) (assoc :byo-executor? (env/env-truthy? byo-executor?)))))
 
 
 (defmethod ig/init-key :exec/context
@@ -164,7 +172,7 @@
         ;; provider — a cell command is cross-org platform authority.
         fleet-cmd (when (seq executor-id)
                     (fleet-command/make-command-handler (fleet-command/internal-token)))
-        ctx-opts (cond-> {:storage storage}
+        ctx-opts (cond-> (merge {:storage storage} (shard-opts executor-orgs byo-executor?))
                    (and base-fns (:base-fns base-fns))
                    (assoc :base-fns (:base-fns base-fns))
                    ;; The auth seam — read by `:authenticate-request` via
@@ -187,21 +195,6 @@
                    ;; Self-serve API-token seam — mint/list/revoke a tenant's
                    ;; own long-lived bearers. Addon-only.
                    my-tokens (assoc :my-tokens my-tokens)
-                   ;; Executor shard — the orgs whose fns THIS pod compiles.
-                   ;; Absent ⇒ the whole graph (self-hosted / single-tenant).
-                   ;; A collection or predicate from an addon passes through;
-                   ;; a comma-separated env string is parsed here.
-                   executor-orgs
-                   (assoc :executor-orgs (if (string? executor-orgs)
-                                           (parse-executor-orgs executor-orgs)
-                                           executor-orgs))
-                   ;; Pod role — a BYO executor serves the `:byo` orgs in its
-                   ;; shard; a hosted pod 421s them. From `GRAPHDEN_BYO_EXECUTOR`
-                   ;; (parsed to bool) or an addon override.
-                   byo-executor?
-                   (assoc :byo-executor? (if (string? byo-executor?)
-                                           (contains? #{"true" "1" "yes"} byo-executor?)
-                                           (boolean byo-executor?)))
                    ;; This pod's fleet identity — the dialable host every other
                    ;; pod reaches it by (a pod-FQDN in k8s). The service
                    ;; reconciler records it as the `:host` of the endpoints it
@@ -303,29 +296,12 @@
 ;; a circuit breaker for test bootstraps that load a subset of
 ;; packages.
 
-(defn env-truthy?
-  "Parse a wire-friendly truthy flag. Accepts the EDN literal `true`,
-   or any of `\"1\" \"true\" \"yes\" \"on\"` (case-insensitive) when
-   the value came through an env var. Anything else (including the
-   empty string from an unset env in `system-prod.edn`) is OFF.
-
-   Used wherever an integrant arg can come from Aero `#env` (which
-   collapses unset vars to `\"\"`, a truthy value in Clojure)."
-  [raw]
-  (cond
-    (true? raw)                  true
-    (or (false? raw) (nil? raw)) false
-    (string? raw)                (contains? #{"1" "true" "yes" "on"}
-                                            (str/lower-case raw))
-    :else                        (boolean raw)))
-
-
 (defmethod ig/init-key :exec/api-url-drift-check
   [_ {:keys [context skip?]}]
   ;; `skip?` reuses `env-truthy?` — unset env collapses to `""`,
   ;; which must NOT count as truthy. Empty string / false / nil →
   ;; run the check; "1" / "true" / "yes" / "on" → skip.
-  (if (env-truthy? skip?)
+  (if (env/env-truthy? skip?)
     (do (log/info "API URL drift check skipped"
                   "— set GRAPHDEN_SKIP_URL_DRIFT_CHECK= to re-enable")
         :skipped)
@@ -416,7 +392,7 @@
 ;; See `graphden.system.demo-branches` for the declaration shape.
 
 (defmethod ig/init-key :exec/demo-branches [_ {:keys [context enabled? branches]}]
-  (let [on? (env-truthy? enabled?)]
+  (let [on? (env/env-truthy? enabled?)]
     (cond
       (not on?)
       (log/info "[demo-branches] disabled"
@@ -449,7 +425,7 @@
 ;; blind.
 
 (defmethod ig/init-key :exec/starter-catalogue [_ {:keys [context enabled?]}]
-  (let [on? (env-truthy? enabled?)
+  (let [on? (env/env-truthy? enabled?)
         registry? (boolean (some #(= "registry" (:name %)) (loaded/read-roster)))]
     (cond
       (not on?)

@@ -7,7 +7,7 @@ Entity/branch/secret writes, request parsing, type-check on write, fn-execution 
 
 after: storage, types
 
-[[file:index.org][index]] · ~71 min
+[[file:index.org][index]] · ~72 min
 
 * 1. extract-entity-params
 :PROPERTIES:
@@ -119,13 +119,13 @@ The atomic core for generic creates: create-or-humanise-error, a post-create who
 :PROPERTIES:
 :CUSTOM_ID: crud/type-check-fn-after-mutation!
 :FILE: src/graphden/crud/type_check.clj
-:LINE: 443
+:LINE: 441
 :MINS: 5.0
 :END:
 
 Reconstructs the touched fn-def and runs ~check-fn-def!~ after a mutation, recording failures in (and clearing fixes from) the per-branch diagnostics store. This is the type-check-on-write that ~apply-create-core~ relies on — an ill-typed fn persists, but never silently: every save re-derives its diagnostics. The ~:reject-secret?~ option is the security carve-out: a secret-involving failure is flagged ~:secret? true~ and NOT recorded — the caller rolls the write back and hard-rejects.
 
-- source :: [[file:../../../src/graphden/crud/type_check.clj::(defn type-check-fn-after-mutation!][src/graphden/crud/type_check.clj:443]]
+- source :: [[file:../../../src/graphden/crud/type_check.clj::(defn type-check-fn-after-mutation!][src/graphden/crud/type_check.clj:441]]
 - see also :: [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 
 * 10. notify-after-write!
@@ -292,17 +292,17 @@ Auto-run on writes: from ~invalidate!~'s seeds, walk the compile-deps REVERSE cl
 
 - source :: [[file:../../../src/graphden/crud/test_autorun.clj::(defn schedule-affected!][src/graphden/crud/test_autorun.clj:170]]
 
-* 23. list-all-graph-entities
+* 23. graph-list-env
 :PROPERTIES:
-:CUSTOM_ID: crud/list-all-graph-entities
+:CUSTOM_ID: crud/graph-list-env
 :FILE: src/graphden/crud/entities/list.clj
-:LINE: 821
-:MINS: 3.4
+:LINE: 239
+:MINS: 3.7
 :END:
 
-The read side the editor lives on. One call, one shared lazy ~graph-list-env~ over the graph-cache, and a ~scope~ that picks a projection: the sidebar tree (namespaces + counts, O(namespaces)), one namespace's leaves, a search, a subtree, or the full dump. Every fn row is tagged with a ~:role~ so Types vs Functions is decided server-side. When the editor feels slow after a write, this is where to look — it is what every refresh re-reads.
+The read side the editor lives on. One shared lazy environment over the graph-cache, and one projection per shape read off it: the sidebar tree (namespaces + counts, O(namespaces)), one namespace's leaves, a search, a subtree, or the full dump — each its own base-fn (~:graph-tree~ … ~:graph-full~), and which one a request wants is a ~:cond~ in the graph (~:all-entities-handler~). Every fn row is tagged with a ~:role~ so Types vs Functions is decided server-side. When the editor feels slow after a write, this is where to look — it is what every refresh re-reads.
 
-- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn list-all-graph-entities][src/graphden/crud/entities/list.clj:821]]
+- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn- graph-list-env][src/graphden/crud/entities/list.clj:239]]
 - same file :: [[file:crud.org::#crud/view-members][view-members]]
 
 * 24. view-members
@@ -316,4 +316,4 @@ The read side the editor lives on. One call, one shared lazy ~graph-list-env~ ov
 The Explorer's one evaluator for narrowing by GRAPH FACTS — a filter set ~{:name :uses :effects :kinds :namespaces :exclude :unused :views}~ answered as light rows. Axes AND; ~:uses~ is by fn ID over the reverse transitive closure (a rename never empties a saved view); ~:views~ intersects with other graph views' members, recursing through their own ~also~, cycle-guarded. Two callers, one projection: the editor's ad-hoc chip set (~POST /api/views/members~) and the ~:explorer-view~ base-fn — a view saved IN the graph as an fn-def, listed back by ~list-explorer-views~ with its bound slots decoded.
 
 - source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn view-members][src/graphden/crud/entities/list.clj:753]]
-- same file :: [[file:crud.org::#crud/list-all-graph-entities][list-all-graph-entities]]
+- same file :: [[file:crud.org::#crud/graph-list-env][graph-list-env]]

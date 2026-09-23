@@ -13,13 +13,13 @@ after: packages, boot
 :PROPERTIES:
 :CUSTOM_ID: web/http-server
 :FILE: resources/packages/web/http/impls.clj
-:LINE: 239
+:LINE: 233
 :MINS: 4.3
 :END:
 
 The http-kit wrapper base-fn: ~run-server~ spins the listener thread and binds the composed Ring handler to a port, recording ~:network~ / ~:process~ effects. Where a request first enters the web layer, so the natural first stop. Note it is a tiny primitive — everything else is composed from small base-fns in ~web/http/fns.edn~.
 
-- source :: [[file:../../../resources/packages/web/http/impls.clj::(defbase http-server][resources/packages/web/http/impls.clj:239]]
+- source :: [[file:../../../resources/packages/web/http/impls.clj::(defbase http-server][resources/packages/web/http/impls.clj:233]]
 - same file :: [[file:web.org::#web/realize-request-body][realize-request-body]], [[file:web.org::#web/pick-encoding-fn][pick-encoding-fn]]
 
 * 2. realize-request-body
@@ -39,39 +39,39 @@ Fully realizes the incoming request body so downstream graph handlers see plain 
 :PROPERTIES:
 :CUSTOM_ID: web/ring-handler-fn
 :FILE: resources/packages/web/reitit/impls.clj
-:LINE: 46
+:LINE: 45
 :MINS: 0.8
 :END:
 
 Composes the compiled reitit router with the default handler into the single Ring callable http-kit actually invokes per request. The seam between the server socket and routing.
 
-- source :: [[file:../../../resources/packages/web/reitit/impls.clj::(defbase ring-handler-fn][resources/packages/web/reitit/impls.clj:46]]
+- source :: [[file:../../../resources/packages/web/reitit/impls.clj::(defbase ring-handler-fn][resources/packages/web/reitit/impls.clj:45]]
 - same file :: [[file:web.org::#web/ring-router-fn][ring-router-fn]], [[file:web.org::#web/ring-create-default-handler-fn][ring-create-default-handler-fn]], [[file:web.org::#web/middleware][middleware]]
 
 * 4. ring-router-fn
 :PROPERTIES:
 :CUSTOM_ID: web/ring-router-fn
 :FILE: resources/packages/web/reitit/impls.clj
-:LINE: 22
+:LINE: 21
 :MINS: 1.1
 :END:
 
 Builds the bare ~reitit.ring/router~ from route data — which is itself graph-composed vectors and keywords. This is the routing table the handler consults to match a path to a handler.
 
-- source :: [[file:../../../resources/packages/web/reitit/impls.clj::(defbase ring-router-fn][resources/packages/web/reitit/impls.clj:22]]
+- source :: [[file:../../../resources/packages/web/reitit/impls.clj::(defbase ring-router-fn][resources/packages/web/reitit/impls.clj:21]]
 - same file :: [[file:web.org::#web/ring-handler-fn][ring-handler-fn]], [[file:web.org::#web/ring-create-default-handler-fn][ring-create-default-handler-fn]], [[file:web.org::#web/middleware][middleware]]
 
 * 5. ring-create-default-handler-fn
 :PROPERTIES:
 :CUSTOM_ID: web/ring-create-default-handler-fn
 :FILE: resources/packages/web/reitit/impls.clj
-:LINE: 33
+:LINE: 32
 :MINS: 1.2
 :END:
 
 Constructs the fallback handler reitit uses when nothing matches, wrapping the graph-composed 404 / 405 / 406 response maps. The ~no route~ branch.
 
-- source :: [[file:../../../resources/packages/web/reitit/impls.clj::(defbase ring-create-default-handler-fn][resources/packages/web/reitit/impls.clj:33]]
+- source :: [[file:../../../resources/packages/web/reitit/impls.clj::(defbase ring-create-default-handler-fn][resources/packages/web/reitit/impls.clj:32]]
 - same file :: [[file:web.org::#web/ring-handler-fn][ring-handler-fn]], [[file:web.org::#web/ring-router-fn][ring-router-fn]], [[file:web.org::#web/middleware][middleware]]
 
 * 6. middleware
@@ -130,13 +130,13 @@ The auth gate applied to a request inside the handler chain before a page or act
 :PROPERTIES:
 :CUSTOM_ID: web/write-rej
 :FILE: resources/packages/web/crud-write/impls.clj
-:LINE: 36
+:LINE: 35
 :MINS: 2.2
 :END:
 
 The CRUD HTTP surface is one namespace, ~web.crud~, spread over seven modules (~crud~, ~-types~, ~-write~, ~-delete~, ~-seq~, ~-parse~, ~-routes~) — every ~/api/entities/*~ route is a fn-def over base-fns like this one. ~write-rej~ is the whole of stage 2 as ONE library boundary: the cycle / MI / override / list-closed chain from the CRUD block, returned as ~{:reason …}~ or nil, so the parse → validate → apply pipeline is visible in the graph.
 
-- source :: [[file:../../../resources/packages/web/crud-write/impls.clj::(defbase write-rej][resources/packages/web/crud-write/impls.clj:36]]
+- source :: [[file:../../../resources/packages/web/crud-write/impls.clj::(defbase write-rej][resources/packages/web/crud-write/impls.clj:35]]
 - see also :: [[file:crud.org::#crud/write-rej][write-rej]], [[file:crud.org::#crud/apply-create-core][apply-create-core]]
 
 * 11. form-decode
@@ -249,11 +249,11 @@ Admissibility and ranking are two questions, and this is the second one. ~subtyp
 :PROPERTIES:
 :CUSTOM_ID: web/sync-fn-defs-branch!
 :FILE: resources/packages/storage/branches/impls.clj
-:LINE: 30
+:LINE: 32
 :MINS: 2.9
 :END:
 
 The web layer has a second client: an AI. The optional ~mcp~ package serves ~/mcp~ (JSON-RPC) through the same per-branch router, and this is its only write primitive — sync fn-defs into a branch, then delta-invalidate THAT branch's registry, not the request's own (the AI writes to ~ai/…~ while its POST rides main). It lives in ~storage/branches~ because the registry's bundle import (~POST /api/import/graph~) runs the very same sync. The key design point is in the docstring: writes go through the very ~sync-fns-to-storage!~ the package loader uses, so a proposal from an AI meets the same cycle / collision / type constraints as a human's ~fns.edn~.
 
-- source :: [[file:../../../resources/packages/storage/branches/impls.clj::(defbase sync-fn-defs-branch!][resources/packages/storage/branches/impls.clj:30]]
+- source :: [[file:../../../resources/packages/storage/branches/impls.clj::(defbase sync-fn-defs-branch!][resources/packages/storage/branches/impls.clj:32]]
 - see also :: [[file:executor.org::#executor/sync-fns-to-storage!][sync-fns-to-storage!]], [[file:boot.org::#boot/dispatch-first][dispatch-first]]

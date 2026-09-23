@@ -121,6 +121,16 @@ namespaces first. An addon fragment overrides indirection keys
   an identity pass-through **under** `VersionedStorage`, so the addon's
   `OrgScoped` decorator sits where `vs/unwrap` cannot bypass it:
   `Versioned(OrgScoped(Postgres))`.
+  **The decorator keeps the storage it wraps under `:base`** (or
+  `:base-storage`) and has no `:pool` of its own: that is the convention
+  `graphden.storage.tx` walks to find the pool and to bind a whole stack to
+  one transaction connection (`tx/in-transaction` rebuilds each decorator
+  around the bound backend, so every write in the transaction still passes
+  the decorator's guards). A decorator that hid its inner storage under
+  another field would silently put every versioned write back on
+  autocommit, without its collision locks. RLS holds inside the
+  transaction because its connection comes from the org-aware pool on the
+  request thread.
 - **Schema extensions** — `:db/schema {:extensions […]}` lets the addon add
   entities (`:org`, `:user`, `:grant`, `:role`, `:domain`, `:token`, …)
   without editing core schemas.

@@ -12,6 +12,7 @@
    a fresh connection per call."
   (:require
     [graphden.storage.postgres.util :as pg-util]
+    [graphden.storage.tx :as tx]
     [honey.sql :as honey]
     [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs]))
@@ -52,15 +53,9 @@
       (let [storage (or (:storage ctx)
                         (throw (ex-info "storage.pg: no storage on executor context"
                                         {:type :storage-pg/no-storage})))
-            ;; Walk :base-storage (VersionedStorage) / :base (OrgScopedStorage)
-            ;; until a backend with a :pool is found — handles arbitrary
-            ;; decorator nesting (e.g. Versioned over OrgScoped over Postgres).
-            pool    (loop [s storage]
-                      (cond
-                        (:pool s)         (:pool s)
-                        (:base-storage s) (recur (:base-storage s))
-                        (:base s)         (recur (:base s))
-                        :else             nil))]
+            ;; Through any decorator nesting (Versioned over OrgScoped over
+            ;; Postgres) down to the backend's :pool.
+            pool    (tx/datasource storage)]
         (when-not pool
           (throw (ex-info "storage.pg: storage has no :pool (datasource)"
                           {:type :storage-pg/no-datasource

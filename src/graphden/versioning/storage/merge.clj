@@ -16,11 +16,10 @@
   (:require
     [clojure.set :as set]
     [graphden.storage.protocol.core :as sp]
+    [graphden.storage.tx :as tx]
     [graphden.versioning.branch-local :as bl]
     [graphden.versioning.storage.resolution :as res]
-    [graphden.versioning.storage.uniqueness :as uniq]
-    [next.jdbc :as jdbc]
-    [next.jdbc.transaction :as jdbc-tx])
+    [graphden.versioning.storage.uniqueness :as uniq])
   (:import
     (java.time
       Instant)))
@@ -609,16 +608,25 @@
   (doseq [[entity-name version-entity id-field check!]
           [[:fn :fn-version :fn-id uniq/check-fn-name-collisions!]
            [:binding-list-item :binding-list-item-version :item-id
-            uniq/check-list-item-position-collisions!]]]
+            uniq/check-list-item-position-collisions!]
+           [:resource-override :resource-override-version :override-id
+            uniq/check-resource-override-path-collisions!]]]
     (let [src-ids (into #{} (keep id-field)
                         (sp/query-entities storage version-entity
                                            {:branch-id source-branch-id}))
           ;; ONE batch resolve of every surfaced entity on the post-merge
           ;; target (was one `resolve-entity` per id).
-          resolved (vals (res/resolve-live-entities storage entity-name
-                                                    src-ids target-branch-id))]
+          resolved (vec (vals (res/resolve-live-entities storage entity-name
+                                                         src-ids target-branch-id)))]
       (when (seq resolved)
-        (check! storage target-branch-id entity-name (vec resolved))))))
+        ;; The same collision locks a create/rename of these keys takes:
+        ;; without them a concurrent create of a surfaced name on the
+        ;; target passes its check before this merge commits, this check
+        ;; passes before that create commits, and both land. (Taken after
+        ;; the branch locks — the order every write path uses.)
+        (uniq/xact-lock! (tx/datasource storage)
+                         (keep #(uniq/collision-lock-key target-branch-id entity-name %) resolved))
+        (check! storage target-branch-id entity-name resolved)))))
 
 
 (defn branch-lock-key
@@ -641,10 +649,10 @@
    UUID string. A merge passes both endpoints (source+target); a delete
    passes its single branch. Single-lock callers never wait while holding
    another lock, and every multi-lock caller acquires in the same sorted
-   order, so no wait cycle can form. No-op off a pooled backend (`:pool`
-   nil) — matches the create/update advisory-lock path in `.core`."
+   order, so no wait cycle can form. No-op off a pooled backend — matches
+   the create/update advisory-lock path in `.core`."
   [storage & branch-ids]
-  (uniq/xact-lock! (:pool storage) (map branch-lock-key (remove nil? branch-ids))))
+  (uniq/xact-lock! (tx/datasource storage) (map branch-lock-key (remove nil? branch-ids))))
 
 
 (defn merge-branch!
@@ -689,11 +697,10 @@
          ;; surfacing for entities the user resolved as `:target`) must land
          ;; together. Committing the merge record but losing the resolutions
          ;; would silently discard the user's decisions — the source value
-         ;; would surface where they chose to keep target. `PostgresStorage`
-         ;; exposes its `:pool` as the Connectable `sp/create-entity` runs on,
-         ;; so binding the storage to a `with-transaction` connection makes
-         ;; both writes share one commit. Non-PG storages (no `:pool`) fall
-         ;; back to the prior sequential behaviour. Single `merge-ts` so the
+         ;; would surface where they chose to keep target. `tx/in-transaction`
+         ;; binds the whole storage stack to one connection, so both writes
+         ;; share one commit (a storage with no pool falls back to the
+         ;; prior sequential behaviour). Single `merge-ts` so the
          ;; resolution-wins ordering is structural, not clock-dependent.
          merge-ts (now)
          write!
@@ -763,15 +770,7 @@
                (assert-merge-preserves-uniqueness! storage source-branch-id
                                                    target-branch-id)
                merge-record)))]
-     (if-let [pool (:pool base-storage)]
-       ;; `:ignore` so a nested `with-transaction` in an inner write
-       ;; can't commit early and release the advisory locks before the
-       ;; check-then-write finishes — same reason as the `.core` create
-       ;; path and `delete-branch!`.
-       (binding [jdbc-tx/*nested-tx* :ignore]
-         (jdbc/with-transaction [tx pool]
-                                (write! (assoc base-storage :pool tx))))
-       (write! base-storage)))))
+     (tx/in-transaction base-storage write!))))
 
 
 (defn skipped-as-branch-local

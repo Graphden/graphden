@@ -39,26 +39,33 @@
          "package's fns.edn.")))
 
 
-(defn- owner-fn-id
-  "Owner fn-id of a binding-family row: `:binding` / `:fn-slot` carry
+(defn- owner-fn-ids
+  "Owner fn-ids of a binding-family row: `:binding` / `:fn-slot` carry
    `:fn-id` directly, `:binding-list-item` resolves through its
-   binding, `:slot` through the fn-slot junction that DECLARES it (the
-   slot's `:required` / `:description` are that fn's to change — a
-   base-fn's slot re-declared optional through the API would surface
-   in every fn that inherits it and be reverted by the next sync).
-   nil for other entity-types (no guard applies)."
+   binding, `:slot` through EVERY fn-slot junction that declares it (the
+   slot's `:required` / `:description` are its declarers' to change — a
+   base-fn's slot re-declared optional through the API would surface in
+   every fn that inherits it and be reverted by the next sync). A slot is
+   shared across fns, so checking only the FIRST junction let a user fn
+   that also declares a package slot unlock it. Empty for other
+   entity-types (no guard applies)."
   [storage entity-type row]
   (case entity-type
-    (:binding :fn-slot) (:fn-id row)
-    :binding-list-item (some->> (:binding-id row)
-                                (sp/read-entity storage :binding)
-                                :fn-id)
-    :slot (some->> (:id row)
-                   (hash-map :slot-id)
-                   (sp/query-entities storage :fn-slot)
-                   first
-                   :fn-id)
-    nil))
+    (:binding :fn-slot) (keep identity [(:fn-id row)])
+    :binding-list-item (keep identity [(some->> (:binding-id row)
+                                                (sp/read-entity storage :binding)
+                                                :fn-id)])
+    :slot (if-let [slot-id (:id row)]
+            (keep :fn-id (sp/query-entities storage :fn-slot {:slot-id slot-id}))
+            [])
+    []))
+
+
+(defn- package-owner
+  "The first package-synced fn among `row`'s owners, or nil."
+  [storage entity-type row]
+  (some #(when (package-owned-fn? storage %) %)
+        (owner-fn-ids storage entity-type row)))
 
 
 (defn write-rejection
@@ -76,9 +83,8 @@
   (if (= :fn entity-type)
     (when (and (:id row) (package-owned-fn? storage (:id row)))
       (rejection-reason storage (:id row) "renaming, re-describing or re-shaping it"))
-    (when-let [fid (owner-fn-id storage entity-type row)]
-      (when (package-owned-fn? storage fid)
-        (rejection-reason storage fid "editing its bindings")))))
+    (when-let [fid (package-owner storage entity-type row)]
+      (rejection-reason storage fid "editing its bindings"))))
 
 
 (defn delete-rejection
@@ -90,7 +96,6 @@
     :fn (when (and (:id row) (package-owned-fn? storage (:id row)))
           (rejection-reason storage (:id row) "deleting it"))
     (:binding :fn-slot :binding-list-item :slot)
-    (when-let [fid (owner-fn-id storage entity-type row)]
-      (when (package-owned-fn? storage fid)
-        (rejection-reason storage fid "deleting its bindings")))
+    (when-let [fid (package-owner storage entity-type row)]
+      (rejection-reason storage fid "deleting its bindings"))
     nil))

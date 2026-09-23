@@ -185,26 +185,26 @@
 
 (deftest optional-router-literals-checked-only-when-loaded
   (testing "`api-url-drift-optional: <router>` tags the literal with its router"
-    (let [lits (drift/extract-js-literals
-                 "f.js"
-                 (str "fetch('/partials/stats');\n"
-                      "fetch('/partials/marketplace'); // api-url-drift-optional: registry-router"))]
-      (is (= [nil "registry-router"] (map :optional-router lits)))
+    (let [literals (drift/extract-js-literals
+                     "f.js"
+                     (str "fetch('/partials/stats');\n"
+                          "fetch('/partials/marketplace'); // api-url-drift-optional: registry-router"))]
+      (is (= [nil "registry-router"] (map :optional-router literals)))
       (testing "router absent → the tagged literal is not checked (the package is off)"
         (is (= ["/partials/stats"]
-               (map :literal (drift/checkable-literals lits #{})))))
+               (map :literal (drift/checkable-literals literals #{})))))
       (testing "router loaded → checked against it like any other"
-        (is (= 2 (count (drift/checkable-literals lits #{"registry-router"}))))
+        (is (= 2 (count (drift/checkable-literals literals #{"registry-router"}))))
         (let [core (ring/router [["/partials/stats" {:get (constantly nil)}]])
               registry (ring/router [["/partials/marketplace" {:get (constantly nil)}]])
               allowed (drift/allowed-literal-set
                         (mapcat drift/router-paths [core registry]))]
           (is (= :ok (drift/assert-no-drift!
-                       allowed (drift/checkable-literals lits #{"registry-router"}))))
+                       allowed (drift/checkable-literals literals #{"registry-router"}))))
           (is (thrown? clojure.lang.ExceptionInfo
                 (drift/assert-no-drift!
                   (drift/allowed-literal-set (drift/router-paths core))
-                  (drift/checkable-literals lits #{"registry-router"})))
+                  (drift/checkable-literals literals #{"registry-router"})))
               "a loaded optional router that lost the route is drift"))))))
 
 

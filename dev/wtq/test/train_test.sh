@@ -42,11 +42,22 @@ new_world() {
   export WTQ_ROOT="$T/wt"
   export WTQ_GATE_STUB="$T/stub.sh" STUB_LOG="$T/gates.log"
   export WTQ_NO_PUSH=1 WTQ_LOAD_MAX=100000 WTQ_POLL_SECS=1 WTQ_SOON_POLL=1
+  export WTQ_MEM_MIN_MB=0 WTQ_AGENT_MEM_MIN_MB=0 WTQ_YIELD_POLL=1
+  export WTQ_LINT_CMD="$T/lint.sh" LINT_LOG="$T/lints.log"
+  : > "$LINT_LOG"
+  cat > "$WTQ_LINT_CMD" <<'EOF'
+#!/usr/bin/env bash
+git rev-parse HEAD >> "$LINT_LOG"
+if [ -e LINTFAIL ]; then echo "lint: LINTFAIL is present"; exit 1; fi
+exit 0
+EOF
+  chmod +x "$WTQ_LINT_CMD"
   unset WTQ_TRAIN_MAX WTQ_SOON_UNIT WTQ_TARGET
   : > "$STUB_LOG"
   cat > "$WTQ_GATE_STUB" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$STUB_LOG"
+[ -f "$(git rev-parse --git-common-dir)/wtq/gate-heavy" ] && echo heavy >> "$STUB_LOG.heavy"
 if [ -e BAD ]; then echo "stub: BAD is in the train"; exit 1; fi
 exit 0
 EOF
@@ -109,6 +120,10 @@ check "one gate, one member" eq "$(gates)" "solo-wtqtest"
 check "branch untouched, now an ancestor of develop" git -C "$REPO" merge-base --is-ancestor feature/solo-wtqtest develop
 check "queue entry removed" eval '! queued solo-wtqtest'
 check "wt log shows the train log" log_has solo-wtqtest "GREEN: [ solo-wtqtest ] landed"
+check "lint ran once, on the queued sha" eq "$(cat "$LINT_LOG")" "$(git -C "$REPO" rev-parse feature/solo-wtqtest)"
+check "lint stamp records that sha" eq "$(cat "$Q/lint-ok/solo-wtqtest")" "$(git -C "$REPO" rev-parse feature/solo-wtqtest)"
+check "the gate marked its heavy phase while the suites ran" test -s "$STUB_LOG.heavy"
+check "and cleared the marker afterwards" test ! -e "$Q/gate-heavy"
 check "wt drop accepts the landed member" eval "wt_main drop solo-wtqtest >/dev/null 2>&1"
 check "_train is not a droppable feature" eval "! wt_main drop _train >/dev/null 2>&1"
 check "wt list hides the train worktree" eval "! list_has '^_train'"
@@ -288,6 +303,51 @@ check "g2 GREEN" eq "$(rc_of g2)" 0
 check "only g2 was gated" eq "$(gates)" "g2"
 check "g1's entry is gone" eval '! queued g1'
 check "g1 never landed" eval '! on_develop g1.txt'
+
+echo "== lint red at enqueue -> refused, never queued"
+new_world lint-red
+feature lr LINTFAIL x
+merge_bg lr
+finish lr
+check "exit 3" eq "$(rc_of lr)" 3
+check "RESULT PRECOND" eq "$(verdict lr)" PRECOND
+check "the lint output reached the agent" grep -q 'LINTFAIL is present' "$T/lr.out"
+check "never queued" eval '! queued lr'
+check "no gate ran" eq "$(gates)" ""
+check "no stamp for a red lint" test ! -e "$Q/lint-ok/lr"
+
+echo "== lint stamp is reused for the same sha, re-checked by the conductor"
+new_world lint-stamp
+feature ls1 ls1.txt x
+hold_lock
+enqueue_in_order ls1
+kill -TERM "${PID[ls1]}"; finish ls1
+enqueue_in_order ls1
+check "the re-queue reused the stamp (lint ran once)" eq "$(wc -l < "$LINT_LOG")" 1
+printf 'deadbeef\n' > "$Q/lint-ok/ls1"   # a stamp for some other commit
+release_lock
+finish ls1
+check "stale stamp at the conductor -> PRECOND" eq "$(verdict ls1)" PRECOND
+check "no gate ran" eq "$(gates)" ""
+
+echo "== wt test yields to a live heavy phase, ignores a stale one"
+new_world yield
+export WTQ_KAOCHA="echo KAOCHA-RAN"
+feature y1 y1.txt x
+sleep 300 & live=$!
+printf 'phase=bb test-e2e\npid=%s\n' "$live" > "$Q/gate-heavy"
+( cd "$WTQ_ROOT/y1" && exec ./dev/wtq/wt test --focus some.ns ) > "$T/test.out" 2>&1 &
+tpid=$!
+sleep 2
+check "waits while the marker's gate is alive" eval "! grep -q KAOCHA-RAN '$T/test.out'"
+check "and says why" grep -q 'heavy phase (bb test-e2e)' "$T/test.out"
+kill "$live"; wait "$live" 2>/dev/null || true
+wait "$tpid"
+check "runs once the marker's pid is gone (stale)" grep -q 'KAOCHA-RAN --focus some.ns' "$T/test.out"
+printf 'phase=bb test-e2e\npid=999999\n' > "$Q/gate-heavy"
+out="$( (cd "$WTQ_ROOT/y1" && timeout 10 ./dev/wtq/wt test x) 2>&1 )"
+check "a stale marker never blocks" grep -q 'KAOCHA-RAN x' <<<"$out"
+unset WTQ_KAOCHA
 
 echo
 echo "train_test: $PASS passed, $FAIL failed"

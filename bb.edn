@@ -1037,7 +1037,7 @@
    :task (binding [*command-line-args* ["--groups" "sec"]] (load-file "scripts/ci.clj"))}
 
   wt
-  {:doc "Parallel feature dev + merge train (dev/wtq/README.md). Usage: bb wt <claim|new|start|task|list|status|merge|soon|watch|log|ack|up|down|drop|gc|help> ..."
+  {:doc "Parallel feature dev + merge train (dev/wtq/README.md). Usage: bb wt <claim|new|start|task|list|status|merge|soon|test|watch|log|ack|up|down|drop|gc|help> ..."
    :task (let [root (-> (p/shell {:out :string} "git" "rev-parse" "--show-toplevel")
                         :out str/trim)
                ;; :continue so a non-zero child (e.g. a failing gate) propagates

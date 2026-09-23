@@ -38,6 +38,8 @@
 #                          (inside a worktree) enqueue -> ride a merge train ->
 #                          land on develop; exits with THIS branch's verdict
 #                          --deploy: also reset the develop DB schema on landing
+#   wt test <kaocha args>  focused tests — waits while the gate is in a heavy
+#                          phase or memory is short, then runs kaocha
 #   wt soon [minutes]      (inside a worktree) "I will enqueue within N minutes"
 #                          (default 10, max 15): the next train waits for you
 #   wt up                  (inside a worktree) build + run THIS branch on its own
@@ -63,6 +65,8 @@
 #   WTQ_NO_PUSH  =1 -> gate advances develop LOCALLY only, never pushes (push yourself)
 #   WTQ_TRAIN_MAX  most branches one train gates together (default 4)
 #   WTQ_POLL_SECS  how often a queued waiter re-checks the queue (default 30)
+#   WTQ_MEM_MIN_MB  MemAvailable a gate needs to start (default 6000)
+#   WTQ_AGENT_MEM_MIN_MB  MemAvailable `wt test` / `wt up` / lint wait for (default 3000)
 #   WTQ_CI_SKIP  comma list of check names/groups force-skipped in the gate's
 #                `bb ci` (passed through as `bb ci --skip`). Announced loudly in
 #                the gate log — a GREEN with it set is a SCOPED result, use only
@@ -473,6 +477,7 @@ cmd_up() {
   # bb rebuild = uberjar + image + up + health + `bb verify` + `bb smoke`. With
   # GD_* exported it targets THIS worktree's stack, so `bb verify` compares the
   # running build against THIS branch's tree — the agent sees its own code.
+  yield_to_gate "wt up"
   ( cd "$path" && bb rebuild ) || die "instance build failed — see the output above"
 
   echo
@@ -1084,6 +1089,58 @@ queue_state() {
   else echo "QUEUED"; fi
 }
 
+# --- host memory: the gate's admission and the agents' yield -----------------
+# One 11.9 GB host runs the gate AND every agent's tests, lint and `wt up`
+# instances. Measured over 237 full gate runs (.git/wtq/logs/*.resources.csv,
+# peak mem_used minus mem_used when the gate started): the gate itself takes
+# p50 4.2 GB, p90 5.4 GB, max 8.8 GB (the e2e stack's executor + two Postgres +
+# browsers, then integration's JVM). A gate admitted with less than its own
+# footprint free does not run slower — the kernel OOM-kills a container or a
+# JVM mid-suite and the train goes red on ENVIRONMENT (the 2026-09-16 cgroup
+# OOM-kill flake). So:
+#   WTQ_MEM_MIN_MB        the gate starts only with this much MemAvailable
+#                         (default 6000 = the p90 footprint + ~0.6 GB slack;
+#                         the rare heavier run then eats into page cache, not
+#                         into a live process).
+#   WTQ_AGENT_MEM_MIN_MB  what an agent's `wt test` / `wt up` / pre-queue lint
+#                         waits for (default 3000: one kaocha JVM or one 2 GB
+#                         `wt up` stack plus slack).
+# and while the gate is in a heavy phase it says so in $GATE_HEAVY; agent-side
+# commands yield until it is gone.
+GATE_HEAVY="$WTQ_DIR/gate-heavy"
+LINT_OK_DIR="$WTQ_DIR/lint-ok"     # <name> = the HEAD sha `bb lint` last passed on
+mkdir -p "$LINT_OK_DIR"
+
+mem_avail_mb() { awk '/^MemAvailable:/{print int($2 / 1024)}' /proc/meminfo; }
+int_or() { case "$1" in ''|*[!0-9]*) echo "$2" ;; *) echo "$1" ;; esac; }
+
+# The marker names the phase and the CONDUCTOR's pid ($$ — the same in every
+# subshell of the gate), so a gate that died without its EXIT trap leaves a
+# marker that reads as stale, never as a phase that blocks agents forever.
+heavy_on()  { printf 'phase=%s\npid=%s\nsince=%s\n' "$1" "$$" "$(date +%H:%M:%S)" > "$GATE_HEAVY.tmp" && mv -f "$GATE_HEAVY.tmp" "$GATE_HEAVY"; }
+heavy_off() { rm -f "$GATE_HEAVY"; }
+heavy_live() {   # prints the live phase; false when there is none (or it is stale)
+  local pid phase
+  [ -f "$GATE_HEAVY" ] || return 1
+  pid="$(sed -n 's/^pid=//p' "$GATE_HEAVY" 2>/dev/null)"; phase="$(sed -n 's/^phase=//p' "$GATE_HEAVY" 2>/dev/null)"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
+  echo "$phase"
+}
+
+# Agent-side: wait while the gate is in a heavy phase or memory is short.
+yield_to_gate() {   # <what>
+  local min poll phase avail said=""
+  min="$(int_or "${WTQ_AGENT_MEM_MIN_MB:-}" 3000)"; poll="$(int_or "${WTQ_YIELD_POLL:-}" 15)"
+  while :; do
+    phase="$(heavy_live || true)"; avail="$(mem_avail_mb)"
+    if [ -z "$phase" ] && [ "$avail" -ge "$min" ]; then return 0; fi
+    local why="${phase:+the landing gate is in a heavy phase ($phase)}"
+    [ "$avail" -lt "$min" ] && why="${why:+$why; }MemAvailable ${avail} MB < ${min} MB"
+    if [ "$said" != "$why" ]; then warn "$1 waits: $why — retrying every ${poll}s (Ctrl-C to give up)"; said="$why"; fi
+    sleep "$poll"
+  done
+}
+
 # --- the gate ---------------------------------------------------------------
 # Sample the machine while the gate runs, into a CSV beside the gate log.
 #
@@ -1312,6 +1369,12 @@ gate_body() {
 "
     _ph_name="$*"
     _ph_t0=$SECONDS
+    # JVM / container heavy phases announce themselves, so agents' `wt test`,
+    # `wt up` and pre-queue lint yield instead of starving them.
+    case "$*" in
+      "bb ci"*|"build the CANDIDATE"*|"bb test-"*|"TEST STUB"*) heavy_on "$*" ;;
+      *) heavy_off ;;
+    esac
     echo; echo ">>> $*  [t+$((SECONDS - GATE_T0))s]"
   }
   # shellcheck disable=SC2329  # invoked indirectly, by the EXIT trap below
@@ -1328,7 +1391,7 @@ gate_body() {
   # gate_body runs in its own subshell and leaves through any of a dozen
   # `return`s. An EXIT trap is the only place that sees them all — so the
   # timings survive a red gate, which is exactly when they are wanted.
-  trap phase_summary EXIT
+  trap 'phase_summary; heavy_off' EXIT
 
   [ -z "$(git -C "$wt" status --porcelain)" ] || { echo "ABORT: train worktree dirty after assembly."; return 3; }
   [ -z "$(git -C "$MAIN_WT" status --porcelain --untracked-files=no)" ] || { echo "ABORT: main worktree ($MAIN_WT) has uncommitted TRACKED changes — it must stay clean on $TARGET."; return 3; }
@@ -1607,6 +1670,9 @@ train_run() {
       echo "    Read them, then:  bb wt ack   &&   bb wt merge"
       decide "$m" PRECOND "$ts" "unacknowledged rule change — run 'bb wt ack', then 'bb wt merge'"; continue
     fi
+    if [ "$(cat "$LINT_OK_DIR/$m" 2>/dev/null)" != "${M_SHA[$m]}" ]; then
+      decide "$m" PRECOND "$ts" "no green 'bb lint' stamp for the queued sha — re-run 'bb wt merge' (it lints first)"; continue
+    fi
     if git -C "$MAIN_WT" merge-base --is-ancestor "${M_SHA[$m]}" "$TARGET"; then
       decide "$m" GREEN "$ts" "already contained in $TARGET — nothing left to gate"; continue
     fi
@@ -1770,16 +1836,25 @@ conduct() {
 # (absolute, not per-core: the box this queue serializes is host-shared);
 # anything non-integer falls back to the default rather than wedging the
 # comparison below in an infinite error loop.
+#
+# Memory is admitted the same way: WTQ_MEM_MIN_MB of MemAvailable (see "host
+# memory" above for where the default comes from).
 wait_for_headroom() {
-  local max_load="${WTQ_LOAD_MAX:-8}" load1
+  local max_load="${WTQ_LOAD_MAX:-8}" load1 mem_min avail
   case "$max_load" in
     ''|*[!0-9]*) warn "WTQ_LOAD_MAX='$max_load' is not an integer — using 8"; max_load=8 ;;
   esac
+  mem_min="$(int_or "${WTQ_MEM_MIN_MB:-}" 6000)"
   while :; do
     load1="$(cut -d' ' -f1 /proc/loadavg | cut -d. -f1)"
-    [ "$load1" -lt "$max_load" ] && break
-    warn "host load $(cut -d' ' -f1-3 /proc/loadavg) >= $max_load — waiting for headroom before starting the gate ..."
-    sleep 120
+    avail="$(mem_avail_mb)"
+    [ "$load1" -lt "$max_load" ] && [ "$avail" -ge "$mem_min" ] && break
+    if [ "$load1" -ge "$max_load" ]; then
+      warn "host load $(cut -d' ' -f1-3 /proc/loadavg) >= $max_load — waiting for headroom before starting the gate ..."
+    else
+      warn "MemAvailable ${avail} MB < ${mem_min} MB (WTQ_MEM_MIN_MB) — waiting for memory before starting the gate (stop an idle 'bb wt up' instance to free some) ..."
+    fi
+    sleep "$(int_or "${WTQ_HEADROOM_POLL:-}" 120)"
   done
 }
 
@@ -1847,6 +1922,11 @@ waiter_abort() {
   state_unlock
 }
 
+lint_refused() {   # <name> <branch> <sha> <why> — PRECOND, never queued
+  state_lock; write_result "$1" PRECOND "$2" "$3" "" "not queued: $4"; state_unlock
+  warn "↩ NOT queued: $4"
+}
+
 cmd_merge() {
   local no_e2e=0 deploy=0 no_fleet=0 no_visual=0 release=0
   for a in "$@"; do
@@ -1869,6 +1949,34 @@ cmd_merge() {
   [ "$branch" != "$TARGET" ] || die "you are on $TARGET — run 'wt merge' from inside a feature worktree."
   local name sha; name="$(basename "$wt")"; sha="$(git -C "$wt" rev-parse HEAD)"
   MY_NAME="$name"; MY_SHA="$sha"
+
+  rm -f "$RESULT_DIR/$name"   # this run's verdict starts now, lint included
+
+  # Lint BEFORE queueing, outside the gate lock: a lint red found inside a
+  # train costs the whole serialized train a gate (and a bisection), found
+  # here it costs one agent a minute. Stamped by the exact sha, so a re-queue
+  # of the same commit does not lint twice; the conductor re-checks the stamp.
+  # (The train still lints the MERGED tree in `bb ci` — cross-branch drift
+  # like a stale devtour bake only shows there.)
+  if [ "$(cat "$LINT_OK_DIR/$name" 2>/dev/null)" = "$sha" ]; then
+    ok "lint: already green at ${sha:0:8} — reusing the stamp"
+  else
+    [ -z "$(git -C "$wt" status --porcelain)" ] \
+      || { lint_refused "$name" "$branch" "$sha" "worktree dirty — commit first (lint must see exactly the queued commit)"; return 3; }
+    bootstrap_node_modules "$wt"
+    yield_to_gate "lint"
+    info "lint: running '${WTQ_LINT_CMD:-bb lint}' at ${sha:0:8} before queueing ..."
+    local lrc=0
+    ( cd "$wt" && ${WTQ_LINT_CMD:-bb lint} ) || lrc=$?
+    if [ "$lrc" != 0 ]; then
+      lint_refused "$name" "$branch" "$sha" "'${WTQ_LINT_CMD:-bb lint}' is red (output above) — fix, commit, re-run 'bb wt merge'"; return 3
+    fi
+    if [ "$(git -C "$wt" rev-parse HEAD)" != "$sha" ] || [ -n "$(git -C "$wt" status --porcelain)" ]; then
+      lint_refused "$name" "$branch" "$sha" "the worktree changed while lint ran — re-run 'bb wt merge'"; return 3
+    fi
+    printf '%s\n' "$sha" > "$LINT_OK_DIR/$name"
+    ok "lint: green at ${sha:0:8}"
+  fi
 
   # Enqueue. A queued merge INVALIDATES the previous verdict: `wt watch` and
   # retry drivers must never report a stale verdict as this run's outcome.
@@ -1918,6 +2026,21 @@ cmd_merge() {
 }
 
 # =====================================================================
+# test — focused kaocha for agents, yielding to the gate
+# =====================================================================
+# Raw `clojure -M:dev:test -m kaocha.runner` from five agents at once, next to
+# a gate booting the e2e stack, is how this host ran out of memory. Same
+# command, but it first waits out the gate's heavy phases and a memory floor.
+cmd_test() {
+  [ "$#" -gt 0 ] || die "usage: wt test <kaocha args…>   e.g. wt test --focus graphden.executor.core-test"
+  yield_to_gate "wt test"
+  cd "$(git rev-parse --show-toplevel)"
+  # WTQ_KAOCHA: TEST-ONLY override of the runner command (train_test.sh).
+  # shellcheck disable=SC2086  # a command line, split on purpose
+  exec ${WTQ_KAOCHA:-clojure -M:dev:test -m kaocha.runner} "$@"
+}
+
+# =====================================================================
 # soon — "hold the next train for me, I am N minutes from done"
 # =====================================================================
 cmd_soon() {
@@ -1948,6 +2071,7 @@ main() {
     list|ls) cmd_list  "$@" ;;
     merge|land) cmd_merge "$@" ;;
     soon)   cmd_soon   "$@" ;;
+    test)   cmd_test   "$@" ;;
     up)     cmd_up     "$@" ;;
     down)   cmd_down   "$@" ;;
     gc)     cmd_gc     "$@" ;;

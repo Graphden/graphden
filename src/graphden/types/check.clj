@@ -584,10 +584,11 @@
 ;; -----------------------------------------------------------------------------
 
 
-(defn- ref-targets
+(defn ref-targets
   "Yield the list of fn-name keywords this binding directly references —
    bare keyword, `{:ref name}`, or vector-of-items shapes. Used by the
-   ref-effects union and the transitive free-args lift."
+   ref-effects union, the transitive free-args lift, and the narrowing
+   passes' ref-tree walk (`check.narrowing`)."
   [b-form]
   (cond
     (keyword? b-form) [b-form]

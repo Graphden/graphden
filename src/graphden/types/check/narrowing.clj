@@ -62,22 +62,13 @@
 
 
 (defn- ref-children-of
+  "The KNOWN fn-names `fd`'s own args reference (`check/ref-targets`
+   over every binding — bare keyword, `{:ref X}`, vector items)."
   [fd known-names]
-  (let [from-binding (fn [b]
-                       (cond
-                         (ref-binding-name b) [(ref-binding-name b)]
-                         (vector? b) (keep (fn [item]
-                                             (cond
-                                               (keyword? item) item
-                                               (and (map? item) (contains? item :ref))
-                                               (:ref item)
-                                               :else nil))
-                                           b)
-                         :else nil))]
-    (into #{}
-          (comp (mapcat (fn [[_ b]] (from-binding b)))
-                (filter known-names))
-          (:args fd))))
+  (into #{}
+        (comp (mapcat (fn [[_ b]] (check/ref-targets b)))
+              (filter known-names))
+        (:args fd)))
 
 
 (defn- rename-as-names-in

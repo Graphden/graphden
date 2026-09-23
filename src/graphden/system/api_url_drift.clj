@@ -25,7 +25,7 @@
    5. Throw with a per-file, per-line listing if any drift.
 
    The validator is run from an integrant init-key
-   (`:web/api-url-drift-check`) that depends on
+   (`:exec/api-url-drift-check`) that depends on
    `:exec/compiled-registry`, so it sees the same router the
    request path serves."
   (:require

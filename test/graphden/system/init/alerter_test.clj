@@ -168,3 +168,18 @@
       (is (true? (java.util.concurrent.ExecutorService/.isShutdown scheduler)))))
   (testing "halt on the OFF arm's nil is a no-op, not an NPE"
     (is (nil? (ig/halt-key! :exec/alert-scheduler nil)))))
+
+
+(deftest alert-scheduler-halt-awaits-the-in-flight-tick
+  ;; halt-key! used to `shutdown` and return at once, so a tick still
+  ;; reading the pool / POSTing ran on past the halt. It now awaits it
+  ;; (up to 5 s) like the reconcile ticker and the cleanup scheduler.
+  (let [scheduler (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)
+        started (promise)
+        finished (atom false)]
+    (java.util.concurrent.ExecutorService/.submit
+      scheduler ^Runnable (fn [] (deliver started true) (Thread/sleep 300) (reset! finished true)))
+    (deref started 2000 nil)
+    (ig/halt-key! :exec/alert-scheduler scheduler)
+    (is (true? @finished) "the tick ran to completion before halt returned")
+    (is (true? (java.util.concurrent.ExecutorService/.isTerminated scheduler)))))

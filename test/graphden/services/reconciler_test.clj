@@ -21,6 +21,8 @@
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.schema.services.schema :as svcs]
+    [graphden.services.instances :as instances]
+    [graphden.services.liveness :as liveness]
     [graphden.services.reconciler :as recon]
     [graphden.storage.postgres.advisory-lock :as pg-lock]
     [graphden.storage.protocol.core :as sp]
@@ -843,6 +845,49 @@
       (finally (sp/close storage) (br/clear-active-router!)))))
 
 
+(deftest restart-hooks-never-retry-a-failed-start-inline-test
+  ;; Every fn/binding write fires `restart-services-depending-on!`. It
+  ;; used to run a full default-opts pass even when nothing matched — and
+  ;; a pass drops `::start-failed`, so a port-conflicted service was
+  ;; re-started with 1+2+4 s of retries on EVERY edit, blocking the write
+  ;; path ~7 s under `reconcile-monitor`.
+  (let [storage (setup/create-branch-versioned-test-storage)
+        attempts (atom 0)
+        base-name "test-restart-hook-permafail"]
+    (exec/register-base-fn! (keyword base-name)
+                            (fn [_args _ctx] (swap! attempts inc) (throw (ex-info "port taken" {}))))
+    (let [base (setup/create-base-fn! storage base-name :any)
+          failing (setup/create-composed-fn! storage (str "my-" base-name) (:id base))
+          _ (make-service-row! storage (:id failing) true)
+          calls (atom [])
+          stops (atom [])
+          {ok :composed} (make-trackable-fn! storage "restart-hook-ok" calls stops)
+          _ (make-service-row! storage (:id ok) true)
+          c (setup/default-registry-ctx storage)
+          running (atom {})
+          dep-fn-id (random-uuid)]
+      (try
+        (br/clear-active-router!)
+        (recon/reconcile-once! c running {:max-retries 0 :backoff-ms 0})
+        (is (= 1 @attempts))
+        (reset! (:compile-deps c)
+                {:reverse-deps {dep-fn-id #{(:id ok)}} :forward-deps {}})
+        (testing "an edit that touches no running service runs no pass at all"
+          (is (= {:started [] :stopped [] :not-our-lock []}
+                 (recon/restart-services-depending-on! c running #{(random-uuid)})))
+          (is (= {:started [] :stopped [] :not-our-lock []}
+                 (recon/restart-services-on-branch! c running (random-uuid))))
+          (is (= 1 @attempts) "the failed service was not re-started"))
+        (testing "a real restart re-attempts the failed service ONCE, retry-free"
+          (recon/restart-services-depending-on! c running #{dep-fn-id})
+          (is (= 2 (count @calls)) "the matched service restarted")
+          (is (= 2 @attempts) "one attempt, not 1 + default retries"))
+        (finally
+          (recon/stop-all! running)
+          (sp/close storage)
+          (br/clear-active-router!))))))
+
+
 (deftest restart-on-edit-end-to-end-with-real-compile-deps-test
   ;; End-to-end coverage of the Phase-112 restart-on-dependency-edit
   ;; chain WITHOUT a fake compile-deps index. Earlier the sibling
@@ -1457,6 +1502,43 @@
       (finally (sp/close storage)))))
 
 
+(deftest reconcile-instance-carries-the-service-org-without-a-re-read-test
+  ;; The instance row is the service row's tenant — taken from the pass's
+  ;; own `:service` query row, not a per-start `read-entity` of it.
+  (let [storage (setup/create-branch-versioned-test-storage)
+        calls (atom []) stops (atom []) alive (atom true) exit (atom nil)
+        {composed :composed} (make-listener-fn! storage "inst-org" 43212 calls stops alive exit)
+        svc (make-service-row! storage (:id composed) true)
+        _ (sp/update-entity storage :service (:id svc) {:org-id "acme"})
+        service-reads (atom 0)
+        counting (reify sp/StorageCRUD
+                   (query-entities [_ en where] (sp/query-entities storage en where))
+
+                   (query-entities [_ en where opts] (sp/query-entities storage en where opts))
+
+                   (create-entity [_ en data] (sp/create-entity storage en data))
+
+                   (read-entity
+                     [_ en id]
+                     (when (= en :service) (swap! service-reads inc))
+                     (sp/read-entity storage en id))
+
+                   (update-entity [_ en id data] (sp/update-entity storage en id data))
+
+                   (delete-entity [_ en id] (sp/delete-entity storage en id))
+
+                   (query-latest-per-group [_ en where cols] (sp/query-latest-per-group storage en where cols)))
+        c (assoc (setup/default-registry-ctx storage) :executor-orgs #{"public" "acme"})
+        running (atom {})]
+    (try
+      (instances/create-instance! c counting (sp/read-entity storage :service (:id svc)) nil)
+      (is (zero? @service-reads) "no :service re-read per start")
+      (is (= ["acme"] (map :org-id (instances-of storage (:id svc)))))
+      (recon/reconcile-once! c running)
+      (is (= 2 (count (instances-of storage (:id svc)))))
+      (finally (recon/stop-all! running c) (sp/close storage)))))
+
+
 (deftest reconcile-instance-host-is-the-pod-executor-id-test
   (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom []) stops (atom []) alive (atom true) exit (atom nil)
@@ -1542,8 +1624,8 @@
         ;; copy reads as alive on the next pass.
         die! (fn [] (reset! alive false) (reset! exit :done))]
     (try
-      (binding [recon/*exit-stable-ms* (* 60 60 1000)
-                recon/*exit-backoff-cap-ms* 300]
+      (binding [liveness/*exit-stable-ms* (* 60 60 1000)
+                liveness/*exit-backoff-cap-ms* 300]
         (recon/reconcile-once! c running)
         (is (= 1 (count @calls)))
         (die!)
@@ -1568,7 +1650,7 @@
           (is (= 3 (count @calls)))
           (is (map? (get @running (:id svc)))))
         (testing "a stable run resets the counter — immediate restart again"
-          (binding [recon/*exit-stable-ms* 0]
+          (binding [liveness/*exit-stable-ms* 0]
             (die!)
             (recon/reconcile-once! c running)
             (reset! alive true)

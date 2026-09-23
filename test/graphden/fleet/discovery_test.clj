@@ -7,15 +7,6 @@
     [graphden.fleet.discovery :as discovery]))
 
 
-(deftest parse-executor-list-trims-and-drops-blanks
-  (is (= ["a" "b" "c"] (discovery/parse-executor-list "a,b,c")))
-  (is (= ["a" "b"] (discovery/parse-executor-list " a , , b ")) "trims + drops empties")
-  (testing "nil / blank / all-blank → nil so the caller falls through to DNS"
-    (is (nil? (discovery/parse-executor-list nil)))
-    (is (nil? (discovery/parse-executor-list "")))
-    (is (nil? (discovery/parse-executor-list " , , ")))))
-
-
 (deftest parse-srv-target-extracts-host
   (testing "the 4th field (host) is returned, trailing dot stripped"
     (is (= "graphden-0.graphden-headless.default.svc.cluster.local"

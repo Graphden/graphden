@@ -444,7 +444,8 @@ bound both capability and resources.
   controller that *executes* a move on command. Rebalance decisions still
   human/heuristic. Concrete tasks:
   - **T3.1 ✅** `fleet.metrics` — `cell-fn-count` (forward-closure size),
-    `org-pending-load` (the quota's own `:pending` `:fn-execution` count),
+    `pending-loads` (the quota's own `:pending` `:fn-execution` rows, one
+    query per tick, counted per org),
     `cell-weight` folding the two with overridable weights.
   - **T3.2 ✅** `fleet.controller/move-cell!` — the load→flip-epoch→evict
     orchestration with its invariants (load-before-flip, abort-before-flip,

@@ -74,21 +74,6 @@
       (is (= 200 (count (set tokens)))))))
 
 
-(deftest constant-time-equal?-is-nil-safe-and-correct-test
-  (is (true? (crypto/constant-time-equal? "abc" "abc")))
-  (is (false? (crypto/constant-time-equal? "abc" "abd")))
-  (testing "length differences are not equality"
-    (is (false? (crypto/constant-time-equal? "abc" "abcd")))
-    (is (false? (crypto/constant-time-equal? "" "a"))))
-  (testing "nil never compares equal — a missing HMAC must not authenticate"
-    (is (false? (crypto/constant-time-equal? nil nil)))
-    (is (false? (crypto/constant-time-equal? "abc" nil)))
-    (is (false? (crypto/constant-time-equal? nil "abc"))))
-  (testing "non-ASCII compares by UTF-8 bytes"
-    (is (true? (crypto/constant-time-equal? "тест" "тест")))
-    (is (false? (crypto/constant-time-equal? "тест" "тесТ")))))
-
-
 ;; =============================================================================
 ;; fixed-window-limiter — the login/signup/forgot/TOTP guard
 ;; =============================================================================

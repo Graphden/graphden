@@ -441,11 +441,26 @@
    :args {:steps [:_response-cache-maybe-store {:as :value}]}
    :return-type :ring-response-shape}
 
+  {:name :_response-cache-control
+   :description "The response's `Cache-Control` header, `\"\"` when absent."
+   :parent :coalesce
+   :args {:value {:parent :header-get
+                  :args {:headers :_response-headers
+                         :header-name {:value "Cache-Control"}}}
+          :default {:value ""}}}
+
+  {:name :_response-headers
+   :parent :get
+   :args {:coll {:as :response :type :ring-response-shape
+                 :description "Response to inspect."}
+          :key {:value :headers}
+          :default nil}}
+
   {:name :response-immutable?
-   :description "Predicate — does the response carry `Cache-Control: ... immutable ...`? Trigger for the response cache to remember the URL."
-   :args {:response {:type :ring-response-shape
-                     :description "Response to inspect."}}
-   :return-type :nullable-bool}
+   :description "Predicate — does the response carry `Cache-Control: ... immutable ...`? Trigger for the response cache to remember the URL. Pure composition: `:re-find?` of `\\bimmutable\\b` over the header."
+   :parent :re-find?
+   :args {:string :_response-cache-control
+          :pattern {:value "\\bimmutable\\b"}}}
 
   ;; =============================================================================
   ;; HANDLER-WRAP CHAIN — fn-def composition over :call + :if

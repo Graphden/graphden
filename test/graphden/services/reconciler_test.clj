@@ -843,6 +843,49 @@
       (finally (sp/close storage) (br/clear-active-router!)))))
 
 
+(deftest restart-hooks-never-retry-a-failed-start-inline-test
+  ;; Every fn/binding write fires `restart-services-depending-on!`. It
+  ;; used to run a full default-opts pass even when nothing matched — and
+  ;; a pass drops `::start-failed`, so a port-conflicted service was
+  ;; re-started with 1+2+4 s of retries on EVERY edit, blocking the write
+  ;; path ~7 s under `reconcile-monitor`.
+  (let [storage (setup/create-branch-versioned-test-storage)
+        attempts (atom 0)
+        base-name "test-restart-hook-permafail"]
+    (exec/register-base-fn! (keyword base-name)
+                            (fn [_args _ctx] (swap! attempts inc) (throw (ex-info "port taken" {}))))
+    (let [base (setup/create-base-fn! storage base-name :any)
+          failing (setup/create-composed-fn! storage (str "my-" base-name) (:id base))
+          _ (make-service-row! storage (:id failing) true)
+          calls (atom [])
+          stops (atom [])
+          {ok :composed} (make-trackable-fn! storage "restart-hook-ok" calls stops)
+          _ (make-service-row! storage (:id ok) true)
+          c (setup/default-registry-ctx storage)
+          running (atom {})
+          dep-fn-id (random-uuid)]
+      (try
+        (br/clear-active-router!)
+        (recon/reconcile-once! c running {:max-retries 0 :backoff-ms 0})
+        (is (= 1 @attempts))
+        (reset! (:compile-deps c)
+                {:reverse-deps {dep-fn-id #{(:id ok)}} :forward-deps {}})
+        (testing "an edit that touches no running service runs no pass at all"
+          (is (= {:started [] :stopped [] :not-our-lock []}
+                 (recon/restart-services-depending-on! c running #{(random-uuid)})))
+          (is (= {:started [] :stopped [] :not-our-lock []}
+                 (recon/restart-services-on-branch! c running (random-uuid))))
+          (is (= 1 @attempts) "the failed service was not re-started"))
+        (testing "a real restart re-attempts the failed service ONCE, retry-free"
+          (recon/restart-services-depending-on! c running #{dep-fn-id})
+          (is (= 2 (count @calls)) "the matched service restarted")
+          (is (= 2 @attempts) "one attempt, not 1 + default retries"))
+        (finally
+          (recon/stop-all! running)
+          (sp/close storage)
+          (br/clear-active-router!))))))
+
+
 (deftest restart-on-edit-end-to-end-with-real-compile-deps-test
   ;; End-to-end coverage of the Phase-112 restart-on-dependency-edit
   ;; chain WITHOUT a fake compile-deps index. Earlier the sibling

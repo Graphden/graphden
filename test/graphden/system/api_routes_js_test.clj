@@ -77,32 +77,6 @@
 
 
 ;; =============================================================================
-;; router-paths — wraps reitit's `r/routes` + ring/get-router
-;; =============================================================================
-
-(deftest router-paths-from-ring-handler
-  (let [handler (ring/ring-handler
-                  (ring/router
-                    [["/api/x" {:get (constantly {:status 200})}]
-                     ["/api/y/:id" {:get (constantly {:status 200})}]]))]
-    (is (= ["/api/x" "/api/y/:id"] (api-js/router-paths handler)))))
-
-
-(deftest router-paths-from-bare-router
-  (let [router (ring/router
-                 [["/api/a" {:get (constantly {:status 200})}]])]
-    (is (= ["/api/a"] (api-js/router-paths router)))))
-
-
-(deftest router-paths-tolerates-a-plain-fn-router
-  ;; A route-collection router may be ANY `(fn [req] resp-or-nil)` — the
-  ;; accounts /auth/* router is exactly that. It has no reitit route table, so
-  ;; it contributes no window.API paths and must NOT throw the `r/routes`
-  ;; protocol error (which killed rebuild-window-api! at boot).
-  (is (= [] (api-js/router-paths (fn [_req] nil)))))
-
-
-;; =============================================================================
 ;; Cache lifecycle — install / read / clear
 ;; =============================================================================
 

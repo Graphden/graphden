@@ -312,3 +312,11 @@
     (let [router (ring/router
                    [["/api/x" {:get (constantly {:status 200})}]])]
       (is (= ["/api/x"] (drift/router-paths router))))))
+
+
+(deftest router-paths-tolerates-a-plain-fn-router
+  ;; A route-collection router may be ANY `(fn [req] resp-or-nil)` — the
+  ;; accounts /auth/* router is exactly that. It has no reitit route table, so
+  ;; it contributes no window.API paths and must NOT throw the `r/routes`
+  ;; protocol error (which killed rebuild-window-api! at boot).
+  (is (= [] (drift/router-paths (fn [_req] nil)))))

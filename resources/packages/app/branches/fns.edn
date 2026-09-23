@@ -1200,7 +1200,7 @@
    :effects #{:db}}
 
   {:name :proposal-approval-status
-   :description "Read-only — the approval status of proposal `source-branch-id`: `{:required :have :satisfied :mine :approvers [{:approver-id :stale}]}` for the reviewer UI (`:mine` — the caller's own approval is recorded, so the ✅ offers to withdraw it)."
+   :description "Read-only — the approval status of proposal `source-branch-id`: `{:required :have :satisfied :mine :approvers [{:approver-id :counted :reason :stale}]}` for the reviewer UI (`:mine` — the caller's own approval is recorded, so the ✅ offers to withdraw it). Each approver row is judged by the merge gate's own rule: `:counted` false carries a `:reason` (`stale` / `other-target` / `not-an-approver` / `author` — the author's own approval under a strict target); `:stale` marks the first three."
    :args {:source-branch-id {:type :uuid :description "The proposal (source) branch to report on."}}
    :return-type :keyword-map
    :effects #{:db}}

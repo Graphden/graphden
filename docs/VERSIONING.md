@@ -153,7 +153,7 @@ read endpoints sit behind it too (matches `/api/services`).
 | POST   | `/api/branches/:ref/archive`             | `{archived}` boolean (absent ≡ true)    | `{ok, archived}` — fold a finished branch into the popover's "Merged" group / bring it back (`:archived-at`). A merge into the branch's OWN base archives it automatically; opening it from the popover un-archives it. A merged source cannot be deleted (below), so this is how the list stays short |
 | POST   | `/api/branches/:ref/review-policy`       | `{required-approvals, allow-self-approval, approver-ids}` | `{ok, policy}` — set the branch's review requirements (on the merge target); enforced open-core by the merge gate |
 | POST / DELETE | `/api/branches/:ref/approve`      | (empty)                                 | `{ok, approver}` / `{ok, removed}` — record / withdraw the caller's approval of a proposal; POST is `:authz/forbidden` (403) if the caller may not approve merges into the target |
-| GET    | `/api/branches/:ref/approvals`           |                                         | `{ok, required, have, satisfied, approvers:[{approver-id, stale}]}` — the proposal's approval status |
+| GET    | `/api/branches/:ref/approvals`           |                                         | `{ok, required, have, satisfied, approvers:[{approver-id, counted, reason, stale}]}` — the proposal's approval status; a row the merge gate ignores has `counted: false` + a `reason` (`stale` / `other-target` / `not-an-approver` / `author`) |
 | DELETE | `/api/branches/:ref`                     |                                       | `{ok, id, name}` or `{ok: false, reason, error, child-branch-ids?}`. Rejected when the branch has children (`:reason :branch-has-children`) or is a live **merge SOURCE** (`:constraint-violation/branch-is-merge-source` — deleting it would revert every target it merged into, since merge is by-reference; delete those targets first) |
 | GET    | `/api/branches/:ref/diff?against=<ref>`  |                                       | `{ok, target, source, count, diffs}` |
 | GET    | `/api/branches/:ref/conflicts?source=…`  |                                       | `{ok, target, source, fork-point, count, conflicts}` |
@@ -431,7 +431,7 @@ now-unauthorized or wrong-target approval.
 **HTTP**: `POST /api/branches/:ref/review-policy {required-approvals,
 allow-self-approval, approver-ids}`; `POST|DELETE /api/branches/:ref/approve`
 (record / withdraw the caller's approval); `GET /api/branches/:ref/approvals`
-→ `{required, have, satisfied, approvers:[{approver-id, stale}]}`.
+→ `{required, have, satisfied, approvers:[{approver-id, counted, reason, stale}]}` — each row judged by the merge gate's own rule (`merge.core/approval-rejection`), so the author's own approval under a strict target reads `counted: false, reason: "author"`.
 
 **Comments**: each proposal carries a review-comment thread —
 `:branch-comment` rows (`{source-branch-id, author-id, body, created-at,

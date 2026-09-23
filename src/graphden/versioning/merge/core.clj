@@ -165,33 +165,74 @@
     true))
 
 
+(defn approval-rejection
+  "Why one approval row does NOT count toward a merge into
+   `target-branch-id`, or nil when it counts. The ONE rule set the merge
+   gate (`count-valid-approvals*`) and the reviewer-facing status view
+   both read, checked in this order:
+     - `:stale` — its content stamp no longer matches `current-stamp` (an
+       edit after approval advances the stamp and drops it);
+     - `:other-target` — it was authorized for a DIFFERENT target branch
+       (so approvals gathered for an open decoy can't satisfy a merge into
+       a protected one — the target-agnostic-gate bypass);
+     - `:not-an-approver` — `approver-ids` (a set; empty = no restriction)
+       is non-empty and doesn't list the approver (re-verified at merge
+       time, so a policy that tightened after the approval isn't satisfied
+       by a now-unauthorized approver);
+     - `:author` — the proposal's author approved their own change and
+       the target does not `allow-self?`."
+  [current-stamp target-branch-id approver-ids author-id allow-self? approval]
+  (cond
+    (not= current-stamp (:content-stamp approval)) :stale
+    (not= target-branch-id (:target-branch-id approval)) :other-target
+    (and (seq approver-ids) (not (contains? approver-ids (:approver-id approval)))) :not-an-approver
+    (and (not allow-self?) author-id (= author-id (:approver-id approval))) :author
+    :else nil))
+
+
+(defn approval-valid?
+  "Does `approval` count toward a merge into `target-branch-id`?
+   (`approval-rejection` is nil.)"
+  [current-stamp target-branch-id approver-ids author-id allow-self? approval]
+  (nil? (approval-rejection current-stamp target-branch-id approver-ids
+                            author-id allow-self? approval)))
+
+
 (defn count-valid-approvals*
   "Pure core of `count-valid-approvals`: given the already-fetched
    `current-stamp`, the merge `target-branch-id`, the target's
    `approver-ids` (a set; empty = no restriction), and the `approvals`
-   rows, count the DISTINCT approver ids that:
-     - still match the source's content stamp (non-stale — an edit after
-       approval advances the stamp and drops it), AND
-     - were authorized for THIS target: `:target-branch-id` equals
-       `target-branch-id` (so approvals gathered for a DIFFERENT branch
-       — e.g. an open decoy — can't satisfy a merge into a protected
-       one; the target-agnostic-gate bypass), AND
-     - when `approver-ids` is non-empty, are in that restrictive
-       allow-list (re-verified here at merge time so a policy that
-       tightened after approvals were gathered isn't satisfied by a
-       now-unauthorized approver), AND
-     - aren't the author's own unless `allow-self?`.
-   Split out so the status projection can reuse the fetched stamp +
-   rows instead of re-querying."
+   rows, count the DISTINCT approver ids whose row is `approval-valid?`
+   (non-stale, bound to THIS target, in the allow-list, and not the
+   author's own unless `allow-self?`). Split out so the status projection
+   can reuse the fetched stamp + rows instead of re-querying."
   [current-stamp target-branch-id approver-ids approvals author-id allow-self?]
   (->> approvals
-       (filter #(= current-stamp (:content-stamp %)))
-       (filter #(= target-branch-id (:target-branch-id %)))
-       (filter #(or (empty? approver-ids) (contains? approver-ids (:approver-id %))))
-       (remove #(and (not allow-self?) author-id (= author-id (:approver-id %))))
+       (filter #(approval-valid? current-stamp target-branch-id approver-ids
+                                 author-id allow-self? %))
        (map :approver-id)
        distinct
        count))
+
+
+(defn approvals-report
+  "Per-row verdicts for the reviewer-facing status view — one
+   `{:approver-id :counted :reason :stale}` per approval row, judged by
+   the SAME `approval-rejection` the merge gate counts with, so a row the
+   gate ignores (the author's own approval under a strict target
+   included) never reads as valid. `:reason` is the rejection's name, nil
+   when counted; `:stale` keeps its wire meaning — the approval no longer
+   applies to this content / target / allow-list (the author case is not
+   stale, it is `:reason \"author\"`)."
+  [current-stamp target-branch-id approver-ids approvals author-id allow-self?]
+  (mapv (fn [a]
+          (let [why (approval-rejection current-stamp target-branch-id approver-ids
+                                        author-id allow-self? a)]
+            {:approver-id (:approver-id a)
+             :counted (nil? why)
+             :reason (some-> why name)
+             :stale (contains? #{:stale :other-target :not-an-approver} why)}))
+        approvals))
 
 
 (defn count-valid-approvals

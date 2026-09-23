@@ -719,7 +719,8 @@
    proposal branch `source-branch-id` — its target's `:required-approvals`,
    the current count of VALID (non-stale, distinct, author-adjusted)
    approvals, whether that satisfies the requirement, and each recorded
-   approver with a `stale` flag. Read-only, org-scoped via the source
+   approver with its merge-gate verdict (`:counted` / `:reason` / `:stale`,
+   `merge.core/approvals-report`). Read-only, org-scoped via the source
    branch id."
   [source-branch-id]
   (cr/record-effect! :db)
@@ -751,13 +752,11 @@
      :mine (boolean (some #(= (or (:user-id tc/*current-principal*) "anonymous")
                               (:approver-id %))
                           approvals))
-     :approvers (mapv (fn [a]
-                        {:approver-id (:approver-id a)
-                         :stale (or (not= stamp (:content-stamp a))
-                                    (not= target-id (:target-branch-id a))
-                                    (and (seq approver-ids)
-                                         (not (contains? approver-ids (:approver-id a)))))})
-                      approvals)}))
+     ;; Each row judged by the merge gate's own rule
+     ;; (`merge.core/approval-rejection`) — the author's own approval
+     ;; under a strict target reads `:counted false :reason "author"`.
+     :approvers (merge-policy/approvals-report stamp target-id approver-ids
+                                               approvals author-id allow-self?)}))
 
 
 (def ^:private max-comment-body-chars

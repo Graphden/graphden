@@ -537,6 +537,40 @@
     (is (zero? (mp/count-valid-approvals* stamp tgt #{"zoe"} rows nil false)) "no listed reviewer present")))
 
 
+(deftest approvals-report-judges-rows-by-the-gate-rule
+  ;; The reviewer status view used to re-implement three of the gate's four
+  ;; filters and missed the author exclusion: the author's own approval under
+  ;; a strict target read as valid while the gate did not count it. The
+  ;; report and the count now share `approval-rejection`.
+  (let [stamp "3|2026"
+        tgt "target-A"
+        rows [{:approver-id "alice" :content-stamp stamp :target-branch-id tgt}
+              {:approver-id "bob"   :content-stamp "1|old" :target-branch-id tgt}
+              {:approver-id "dave"  :content-stamp stamp :target-branch-id "target-B"}
+              {:approver-id "erin"  :content-stamp stamp :target-branch-id tgt}]
+        verdicts (fn [allow-list author allow-self?]
+                   (into {} (map (juxt :approver-id #(select-keys % [:counted :reason :stale])))
+                         (mp/approvals-report stamp tgt allow-list rows author allow-self?)))]
+    (testing "the author's own approval under a strict target is NOT counted, and says why"
+      (is (= {:counted false :reason "author" :stale false}
+             (get (verdicts #{} "alice" false) "alice")))
+      (is (= 1 (mp/count-valid-approvals* stamp tgt #{} rows "alice" false))
+          "…agreeing with the gate's count (only erin)"))
+    (testing "self-approval allowed → the author's row counts"
+      (is (= {:counted true :reason nil :stale false}
+             (get (verdicts #{} "alice" true) "alice"))))
+    (testing "stale / other-target / not-an-approver rows carry their reason and stay :stale"
+      (let [v (verdicts #{"alice" "bob" "dave"} nil false)]
+        (is (= {:counted false :reason "stale" :stale true} (v "bob")))
+        (is (= {:counted false :reason "other-target" :stale true} (v "dave")))
+        (is (= {:counted false :reason "not-an-approver" :stale true} (v "erin")))
+        (is (= {:counted true :reason nil :stale false} (v "alice")))))
+    (testing "every counted row is exactly what count-valid-approvals* counts"
+      (doseq [[allow author self?] [[#{} nil false] [#{} "alice" false] [#{"erin"} nil true]]]
+        (is (= (mp/count-valid-approvals* stamp tgt allow rows author self?)
+               (count (filter :counted (mp/approvals-report stamp tgt allow rows author self?)))))))))
+
+
 (deftest self-approval-allowed?-defaults-on
   (testing "nil :allow-self-approval? ≡ ON (author's own approval counts) —
             solo/small teams aren't locked out; explicit false opts into strict"

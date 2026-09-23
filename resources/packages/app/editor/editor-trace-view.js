@@ -118,6 +118,21 @@ function _bindTraceViewActions(panel) {
 }
 
 
+// Loading / error body. The server's header (with its ✕) only arrives with
+// the tree, so until then — and for good, when the load fails — the panel
+// carries the shared × (docs/ACCESSIBILITY.md: a cover owes a visible exit).
+function _traceViewMessage(panel, text) {
+  panel.textContent = '';
+  const msg = document.createElement('div');
+  msg.className = 'loading';
+  msg.textContent = text;
+  panel.appendChild(msg);
+  if (typeof ensurePopoverClose === 'function') {
+    ensurePopoverClose(panel, closeTraceView, 'Close call tree', { prepend: true });
+  }
+}
+
+
 async function openTraceView(execId) {
   if (!execId) return;
   // Captured before the panel is built. Taken from the live focus rather
@@ -129,7 +144,7 @@ async function openTraceView(execId) {
   panel.className = 'trace-view-panel';
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', 'Execution call tree');
-  panel.innerHTML = '<div class="loading">Loading…</div>';
+  _traceViewMessage(panel, 'Loading…');
   document.body.appendChild(panel);
   _traceViewPanelEl = panel;
   document.addEventListener('keydown', _traceViewOnKey);
@@ -138,8 +153,9 @@ async function openTraceView(execId) {
                               + encodeURIComponent(execId));
     if (!_traceViewPanelEl || _traceViewPanelEl !== panel) return;
     if (!r.ok) {
-      panel.textContent = r.status === 401
-        ? 'Sign in to view the trace.' : ('HTTP ' + r.status);
+      _traceViewMessage(panel, r.status === 401
+        ? 'Sign in to view the trace.' : ('Could not load the call tree (HTTP ' + r.status + ').'));
+      if (typeof focusIntoDialog === 'function') focusIntoDialog(panel);
       return;
     }
     panel.innerHTML = await r.text();
@@ -149,7 +165,9 @@ async function openTraceView(execId) {
     // works once focus is inside, and nothing else puts it there.
     if (typeof focusIntoDialog === 'function') focusIntoDialog(panel);
   } catch (e) {
-    if (panel.isConnected) panel.textContent = 'Failed: ' + (e?.message || 'network error');
+    if (_traceViewPanelEl === panel) {
+      _traceViewMessage(panel, 'Could not load the call tree: ' + (e?.message || 'network error'));
+    }
   }
 }
 

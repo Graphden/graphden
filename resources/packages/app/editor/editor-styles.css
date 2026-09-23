@@ -672,8 +672,6 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 .menu-header { padding: 12px 8px 10px 16px; border-bottom: 2px solid var(--border);
   background: var(--header-bg); color: var(--header-fg);
   display: flex; flex-direction: column; gap: 8px; position: relative; }
-.menu-brand { display: flex; align-items: center; gap: 8px; }
-.menu-logo { flex: 0 0 auto; display: block; color: var(--accent); }
 .menu-header h2 { font-size: 0.9375rem; font-weight: 600; margin: 0; letter-spacing: 0.2px; }
 .menu-header-actions { display: flex; flex-wrap: wrap; align-items: center;
   gap: 6px; min-height: 26px; }
@@ -684,16 +682,6 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
    !important so it beats the display:inline-flex component rules at equal
    specificity. */
 .hidden { display: none !important; }
-
-/* Prefs (theme + collapse) buttons — same shape/size as auth lock. */
-#prefs-mount { display: inline-flex; align-items: center; gap: 6px; }
-.prefs-btn {
-  background: transparent; color: var(--header-fg);
-  border: 1px solid var(--header-fg); border-radius: 3px;
-  width: 26px; height: 26px; padding: 3px; cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.prefs-btn:hover { background: var(--header-fg); color: var(--header-bg); }
 
 /* Auth lock — sits on the right of the menu header, opens a popover. */
 #auth-mount { position: relative; display: inline-flex; align-items: center; }
@@ -3635,41 +3623,6 @@ textarea.value-form-hiccup {
   letter-spacing: 0.02em;
 }
 
-/* Optional-args strip — `?name` list of optional-but-unbound args
-   (defaults in effect). Rendered by appendOptionalArgsStrip. */
-.optional-args-strip {
-  padding: 2px 8px;
-  /* FREE args share one language everywhere: amber + dashed (the
-     inspector's `free` chip, the ＋ binder circle, and this ?-row). */
-  color: var(--gd-free);
-  font-size: 0.625rem;
-  font-style: italic;
-  border-top: 1px dashed var(--gd-free);
-  background: var(--sidebar-bg);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* On an editable card each `?name` is a binder button. It has to read as
-   part of the strip's prose rather than as a control tray, so it inherits
-   the strip's type and only lifts on hover/focus. */
-.optional-arg-binder {
-  padding: 0 2px;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-.optional-arg-binder:hover,
-.optional-arg-binder:focus-visible {
-  background: var(--hover-bg);
-  text-decoration: underline;
-}
-
 /* HOF-context strips — `λname` (args the enclosing HOF supplies at
    runtime) and `⇣name` (free args threaded into the sub-tree). Same
    look for both; rendered by appendHofCapturedArgsStrip /
@@ -4014,11 +3967,6 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
    #{eff-set}]. Each row contains a `<select>` for narrower types;
    the effect set sits in a row of inline checkboxes; the Tighten
    button submits the delta. */
-.type-explainer-tighten {
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px solid var(--light-border);
-}
 .type-explainer-tighten-row {
   display: flex; flex-wrap: wrap; gap: 4px 10px;
   margin-bottom: 6px;
@@ -4421,7 +4369,6 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   /* Floating + sidebar-header buttons should hit Apple's 44pt baseline
      since they're top-level navigation, not row-level glyphs. */
   .nav-btn,
-  .prefs-btn,
   .auth-lock-btn,
   .sidebar-expand-floating {
     min-width: var(--touch-target);
@@ -4465,7 +4412,6 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
      producing a tiny dot inside a giant target. CSS wins over the
      inline width/height attributes for sizing — bump SVGs to 18px. */
   .create-btn-inline svg,
-  .prefs-btn svg,
   .auth-lock-btn svg,
   .sidebar-expand-floating svg,
   .nav-btn svg {
@@ -4480,7 +4426,6 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
      either way). */
   .fn-picker-row { min-height: var(--touch-target); padding: 8px 10px; }
   .fn-picker-search { font-size: 1rem; padding: 8px 10px; }
-  .fn-picker-section-header { padding: 6px 10px; }
 
   /* Phase 4 fn-action toolbar — buttons grow to Apple-HIG min-target
      so the user can hit Rename / Describe / Re-parent / Delete with
@@ -5325,8 +5270,6 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 
 /* Lint rows — the Inspector's Lint section (rule chip + member links +
    message + "Not an issue" / "Restore", all server-rendered). */
-.lint-rule { grid-area: rule; color: var(--muted-fg); font-family: var(--mono);
-  white-space: nowrap; }
 .lint-fns { grid-area: fns; display: flex; flex-wrap: wrap; gap: 2px 10px; }
 .lint-fn { color: var(--accent); }
 .lint-fn-ns { color: var(--muted-fg); margin-left: 4px; }
@@ -6431,37 +6374,6 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .gd-pop-item.sel { background: var(--gd-flow-wash); color: var(--gd-flow-ink); font-weight: 600; }
 .gd-pop-item .gd-pi { width: 18px; text-align: center; color: var(--gd-ink-3); font-family: var(--gd-mono); }
 .gd-pop-item.sel .gd-pi { color: var(--gd-flow); }
-.gd-pop-div { height: 1px; margin: 6px 4px; background: var(--gd-line); }
-.gd-pop-row { display: flex; align-items: center; gap: 2px; }
-.gd-pop-row .gd-pop-item { flex: 1 1 auto; }
-.gd-pop-pin {
-  flex: none;
-  width: 30px; height: 30px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--gd-ink-4);
-  font-size: 0.8125rem;
-  cursor: pointer;
-  opacity: 0.5;
-  transition: opacity 0.12s, color 0.12s, background 0.12s;
-}
-.gd-pop-pin:hover { background: var(--gd-paper-2); opacity: 1; }
-.gd-pop-pin.pinned { color: var(--gd-flow); opacity: 1; background: var(--gd-flow-wash); }
-.gd-pop-pin:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 1px; }
-.gd-pop-hint {
-  margin: 8px 6px 2px;
-  font-size: 0.6562rem;
-  line-height: 1.4;
-  color: var(--gd-ink-3);
-}
-/* Workspace popover — section caption + the project checklist rows. */
-.gd-pop-cap {
-  margin: 4px 6px;
-  font-size: 0.625rem;
-  letter-spacing: 0.04em;
-  color: var(--gd-ink-4);
-}
 /* ---- Explorer slim head (brand + mounts moved to the rail / context bar) ---- */
 .gd-exp-head {
   display: flex;
@@ -6682,14 +6594,6 @@ body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
   white-space: normal; overflow-wrap: anywhere;
 }
 .gd-insp-pure { font-size: 0.75rem; font-style: italic; color: var(--gd-ink-3); }
-.gd-insp-runs-head {
-  margin: 16px 0 8px;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--gd-ink-3);
-}
 .gd-insp-runs { font-size: 0.75rem; }
 .gd-insp-runs-loading { padding: 8px 0; font-size: 0.75rem; color: var(--gd-ink-3); }
 
@@ -6744,9 +6648,6 @@ body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
 }
 .gd-views-chip:hover { color: var(--fg); background: var(--hover-bg); }
 .gd-views-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.gd-views-chip.gd-views-active {
-  border-style: solid; border-color: var(--accent); color: var(--fg);
-}
 /* The DYNAMIC filter chips (namespace / uses / effect / unused) — same skin
    as the kind chips, always pressed, with an × that reads as "remove". */
 #gd-filter-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px; }
@@ -6783,7 +6684,6 @@ body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
   font-size: 0.6875rem; font-style: italic; color: var(--muted-fg);
   margin-bottom: 8px;
 }
-.gd-views-list { display: flex; flex-direction: column; margin-bottom: 8px; }
 .gd-views-row { display: flex; align-items: center; gap: 4px; }
 /* A row that IS a button (the All-functions row, a namespace tick, the
    uses / unused / restore rows of the add-filter menu) — the popover's
@@ -6810,13 +6710,6 @@ button.gd-views-row:focus-visible { outline: 2px solid var(--accent); outline-of
   cursor: pointer; padding: 2px 6px; border-radius: 4px;
 }
 .gd-views-del:hover { color: var(--fg); background: var(--hover-bg); }
-.gd-views-row-clear {
-  border: 0; border-radius: 4px; padding: 3px 6px; margin: 0 0 4px;
-  background: transparent; color: var(--muted-fg); cursor: pointer;
-  text-align: left; font-size: 0.75rem;
-}
-.gd-views-row-clear:hover { color: var(--fg); background: var(--hover-bg); }
-.gd-views-empty { font-size: 0.75rem; font-style: italic; color: var(--gd-ink-3); padding: 2px 6px; }
 .gd-views-form { display: flex; flex-direction: column; gap: 6px; }
 .gd-views-input {
   font-family: var(--gd-mono); font-size: 0.75rem;
@@ -6835,7 +6728,6 @@ button.gd-views-row:focus-visible { outline: 2px solid var(--accent); outline-of
 .gd-views-form-msg[hidden] { display: none; }
 .gd-views-apply:focus-visible,
 .gd-views-del:focus-visible,
-.gd-views-row-clear:focus-visible,
 .gd-views-input:focus-visible,
 .gd-views-save:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
@@ -7180,7 +7072,7 @@ body.gd-tenancy .gd-solo-only { display: none; }
 .gd-op-card input:focus-visible {
   outline: 2px solid var(--gd-flow); outline-offset: 1px; border-color: var(--gd-flow);
 }
-.gd-op-card form button, .gd-op-card .grant-create-btn, .gd-op-card .invite-btn {
+.gd-op-card form button, .gd-op-card .grant-create-btn {
   font: inherit; font-size: 0.8125rem; font-weight: 600;
   color: var(--on-accent); background: var(--gd-flow);
   border: 0; border-radius: 7px; padding: 8px 14px; cursor: pointer;
@@ -7303,12 +7195,6 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
 .gd-acct-msg { margin-top: 10px; font-size: 0.7812rem; min-height: 16px; }
 .gd-acct-msg.ok { color: var(--gd-ok); }
 .gd-acct-msg.err { color: var(--gd-crit); }
-.gd-set-acct-btns { display: flex; gap: 8px; flex: none; }
-.gd-set-badge {
-  font-size: 0.625rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
-  padding: 1px 6px; margin-left: 6px; border-radius: var(--gd-r-sm);
-  background: var(--gd-flow); color: var(--gd-on-accent);
-}
 .gd-set-code {
   font-family: var(--gd-mono); font-size: 0.75rem; color: var(--gd-ink-2);
   background: var(--gd-paper-2); padding: 2px 6px; border-radius: 4px;
@@ -7994,10 +7880,6 @@ body.gd-tour-sheet-open #side-menu {
 }
 .branch-comment-del:hover { color: var(--fg); }
 .branch-comment-empty { color: var(--muted-fg); font-size: 0.6875rem; }
-.branch-comment-error {
-  color: var(--error-fg); font-size: 0.6875rem; margin-top: 4px;
-}
-.branch-comment-error.hidden { display: none; }
 .branch-comment-form { display: flex; gap: 6px; margin-top: 6px; align-items: flex-end; }
 .branch-comment-input {
   flex: 1; resize: vertical; font-size: 0.75rem;
@@ -8061,17 +7943,6 @@ body.gd-no-write .branch-comment-form { display: none; }
 }
 .feedback-status { font-size: 0.6875rem; color: var(--muted-fg); min-height: 14px; }
 .feedback-status a { color: var(--accent); }
-
-/* Errors panel footer — the "report these failures" entry point
-   (editor-errors.js). Quiet text-button, muted → fg on hover like the
-   other footer strips. */
-.errors-report-btn {
-  margin-top: 6px;
-  background: none; border: 0; padding: 0;
-  font-size: 0.6875rem; color: var(--muted-fg);
-  cursor: pointer; text-align: left;
-}
-.errors-report-btn:hover { color: var(--fg); }
 
 /* =========================================================================
  * FOCUS VISIBILITY (WCAG 2.4.7 Focus Visible)

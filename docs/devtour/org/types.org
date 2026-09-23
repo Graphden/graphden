@@ -145,7 +145,7 @@ The ~:return-type-rule~ propagator that wraps a fn's return in ~[:secret …]~ w
 - source :: [[file:../../../src/graphden/types/core/shapes.clj::(defn taint-with-secret-if-tainted][src/graphden/types/core/shapes.clj:485]]
 - see also :: [[file:types.org::#types/subtype?][subtype?]]
 - same file :: [[file:types.org::#types/primitives][primitives]], [[file:types.org::#types/child-types][child-types]]
-- referenced from :: [[file:crud.org::#crud/create-secret][create-secret]]
+- referenced from :: [[file:crud.org::#crud/apply-create-secret-body][apply-create-secret-body]]
 
 * 11. classify-literal
 :PROPERTIES:

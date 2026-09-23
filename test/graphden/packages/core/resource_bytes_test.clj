@@ -10,7 +10,8 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
-    [graphden.executor.test-setup :as setup]))
+    [graphden.executor.test-setup :as setup]
+    [graphden.web.errors :as web-errors]))
 
 
 (def ^:dynamic *bootstrap* nil)
@@ -39,3 +40,16 @@
                    (catch clojure.lang.ExceptionInfo ex (ex-data ex)))]
         (is (= :execution/forbidden-effect (:type e)))
         (is (= :io (:effect e)))))))
+
+
+(deftest read-resource-missing-path-is-a-typed-400
+  ;; `:_resource-not-found-error` carried `{"type" "…"}` — a STRING key,
+  ;; so `ex-data`'s `:type` was nil and the error boundary answered an
+  ;; opaque 500 instead of the `execution-error/*` 400.
+  (let [{:keys [ctx all-name->id]} *bootstrap*
+        data (try (exec/execute-with-named-args ctx (get all-name->id :read-resource)
+                                                {:path "landing/does-not-exist.txt"})
+                  nil
+                  (catch clojure.lang.ExceptionInfo ex (ex-data ex)))]
+    (is (= :execution-error/resource-not-found (:type data)) (pr-str data))
+    (is (= 400 (web-errors/status-for (:type data))))))

@@ -626,7 +626,7 @@
   {:name :_resource-not-found-error
    :parent :ex-info
    :args {:message :_resource-not-found-message
-          :data {"type" "execution-error/resource-not-found"}}}
+          :data {:value {:type :execution-error/resource-not-found}}}}
 
   {:name :_resource-not-found-throw
    :parent :throw

@@ -116,6 +116,25 @@
                                  (fd "a" :url :refine {:base :text :pred :a/_pred})]))))))
 
 
+(deftest unreferenced-private-type-row-test
+  ;; `lintable?` required a composed fn-def, so a private SHAPE nothing
+  ;; declared as a type anywhere sat in the corpus unflagged.
+  (let [shape (fd "a" :_result-shape :type {:ok :bool})]
+    (testing "a private type-row nothing references is a finding"
+      (is (= [[["a" :_result-shape]]]
+             (map :fns (findings-for :unreferenced-private [shape])))))
+    (testing "declared as a fn-def's return type, it is referenced"
+      (is (empty? (findings-for :unreferenced-private
+                                [shape (fd "a" :f :parent :get :return-type :a/_result-shape)]))))
+    (testing "declared only by a base-fn declaration: the caller roots it"
+      (let [decl {:name :apply-fn :args {:x {:type :int}} :return-type :_result-shape}]
+        (is (= #{:_result-shape} (lint/names-referenced-by [shape] base-fns [decl])))
+        (is (empty? (findings-for :unreferenced-private [shape]
+                                  :roots (lint/names-referenced-by [shape] base-fns [decl]))))))
+    (testing "a public type-row is vocabulary, not a finding"
+      (is (empty? (findings-for :unreferenced-private [(fd "a" :result-shape :type {:ok :bool})]))))))
+
+
 (deftest finding-key-and-suppression-test
   (let [dup-a (fd "a" :page :parent :assoc :args {:map {:value {:class "x"}} :key {:value :t} :value :a/title} :id "id-a")
         dup-b (fd "b" :row :parent :assoc :args {:map {:value {:class "x"}} :key {:value :t} :value :a/title} :id "id-b")

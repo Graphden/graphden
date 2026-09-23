@@ -51,9 +51,12 @@
 (defn corpus-findings
   "Lint the loaded corpus."
   []
-  (let [{:keys [base-fn-defs fn-defs]} (loader/load-packages packages)]
-    (lint/lint fn-defs {:base-fn-names (keys base-fn-defs)
-                        :roots (registry-roots)
+  (let [{:keys [base-fn-defs fn-defs]} (loader/load-packages packages)
+        base-names (keys base-fn-defs)]
+    (lint/lint fn-defs {:base-fn-names base-names
+                        :roots (into (registry-roots)
+                                     (lint/names-referenced-by fn-defs base-names
+                                                               (vals base-fn-defs)))
                         :check-public? true})))
 
 

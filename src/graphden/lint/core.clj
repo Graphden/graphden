@@ -25,8 +25,9 @@
      `_`-helpers inlined at their ref sites) but different shallow
      ones: the same graph factored differently across helpers or
      namespaces. Same weighting.
-   - `:unreferenced-private` — a `_`-private composed fn-def no other
-     fn-def references (parents, args, list items, type-row fields).
+   - `:unreferenced-private` — a `_`-private composed fn-def or
+     type-row no other fn-def references (parents, args, list items,
+     return types, type-row fields).
      (warning; exemptions come from the caller as `:roots` — the
      `tools/graph-reachability.edn` registry of by-name entry points.)
    - `:unreachable-private` — a `_`-private fn-def that IS referenced,
@@ -273,6 +274,16 @@
         (into (mapcat #(walk-refs idx (get fd %))) type-row-fields))))
 
 
+(defn names-referenced-by
+  "Names of the fn-defs `decls` reference — for declarations outside the
+   linted set (the base-fn declarations: their arg and return types name
+   type-rows). A caller adds them to `:roots`, so a shape only a base-fn
+   declares is not `:unreferenced-private`."
+  [fn-defs base-fn-names decls]
+  (let [idx (build-index fn-defs base-fn-names)]
+    (into #{} (comp (mapcat #(references idx %)) (map second)) decls)))
+
+
 (defn referrers
   "Map fn-def key → set of fn-def keys that reference it, inverted from
    a `{key → references}` map."
@@ -418,11 +429,23 @@
                    " — give it a caller, or a :vocabulary line naming the lesson or doc it is for")}))
 
 
+(defn- type-row?
+  "A named type-row declaration (record / refinement / list / map /
+   union / variant / fn-type) — not a composed fn-def, not a base-fn."
+  [fd]
+  (and (not (composed? fd))
+       (not (anon-name? (:name fd)))
+       (boolean (some #(contains? fd %) type-row-fields))))
+
+
 (defn- unreferenced-private-findings
+  "A `_`-private composed fn-def OR type-row nothing references. A
+   private shape nobody declares as a return / arg type documents
+   nothing — it is a record of a contract that is no longer checked."
   [idx refs roots platform-fn?]
   (for [fd (:fn-defs idx)
         :let [k (fn-key fd)]
-        :when (and (lintable? fd)
+        :when (and (or (lintable? fd) (type-row? fd))
                    (private-name? (:name fd))
                    (empty? (get refs k))
                    (not (contains? roots (:name fd)))

@@ -33,7 +33,7 @@ often violated after a context loss:
 | **Claim before you edit** — `bb wt claim <name> "<summary>"`, then `cd` to the printed WORKTREE and work only there | Editing the main checkout on `develop` corrupts the shared baseline every other agent branches from |
 | **Stay in your worktree** — never `cd` into another agent's worktree, never edit `develop`, never touch another agent's branch | Agents change unrelated files in parallel; your view of the repo is your branch only |
 | **`bb ci` is your only local *test* command; `bb wt up` is your only live *instance*** | `bb rebuild` / `bb deploy` / `bb test-integration` / `bb test-e2e` / `bb coverage` drive the SHARED stack (`graphden-executor` on :9002) and the shared image tag that `bb test-e2e` boots — from a worktree they steal the demo and make another agent's suite test your binary. They belong to the landing gate, behind its lock. `bb wt up` gives you an isolated stack (own containers, volumes, image, ports) to see your change run |
-| **Finish the job yourself** — a complete, `bb lint`-green feature goes through `bb wt merge`, then `bb wt drop`, without asking | Neither step can lose work: the gate cannot advance `develop` on a red result, and `drop` refuses an unmerged branch. Asking to merge a finished feature is ceremony, and it stalls a serialized queue on a human's reply. (A full local `bb ci` before queueing is optional solo — the gate re-runs it on the merged result; go `bb ci`-green first only when `bb wt list` shows other claimed agents.) Stop and ask only when a real decision is yours and the answer changes what you build |
+| **Finish the job yourself** — a complete, `bb lint`-green feature goes through `bb wt merge`, then `bb wt drop`, without asking | Neither step can lose work: the gate cannot advance `develop` on a red result, and `drop` refuses an unmerged branch. `bb wt merge` may put you in a *merge train* with other ready branches — you still get your own verdict and exit code; a red train is bisected and only the culprit bounces. Asking to merge a finished feature is ceremony, and it stalls a serialized queue on a human's reply. (A full local `bb ci` before queueing is optional solo — the gate re-runs it on the merged result; go `bb ci`-green first only when `bb wt list` shows other claimed agents.) Stop and ask only when a real decision is yours and the answer changes what you build |
 
 **Recovering the contract and your place in it** — the branch, the worktree and
 the task spec all live on disk, so nothing but the *prompt* is lost with the
@@ -44,7 +44,8 @@ bb wt list             # every agent: branch, drift vs develop, last gate RESULT
 bb wt status           # same, plus the recent gate runs
 bb wt task <name>      # the task spec you were handed
 bb wt log <name>       # full transcript of your last gate run
-bb wt watch <name>     # follow a running gate: 60s ticks until RESULT, then print it
+bb wt watch <name>     # follow your queued/running train: 60s ticks until a final RESULT
+bb wt soon [minutes]   # "I'm N min from done" — the next merge train waits for you (max 15)
 bb wt bootstrap        # reprint the discussion-phase (nameless-agent) launch prompt
 bb wt kickoff <name>   # reprint the launch prompt for an already-claimed agent
 ```

@@ -3,7 +3,7 @@
 ;; Consumed by docs/devtour/devtour.el; every step carries the anchor
 ;; (:file + :head) rather than baked source, so emacs shows live code.
 (:title "Graphden — developer tour"
- :mins 765.4
+ :mins 765.7
  :blocks
  ((:id "executor" :title "Executor — how a fn runs" :status "toured" :mins 85.4 :summary "The spine: turn a graph 'description of a computation' into a value."
    :steps
@@ -305,7 +305,7 @@ Same shape as `subtype?`, so read it the same way: one `cond` over the normalise
      :say "The graph's own linter, run over the same loader output at CI time (`bb graph-lint`): duplicate definitions — exact, and after inlining `_`-private helpers — dead privates (unreferenced, and the cluster behind them), bindings that restate what a fn inherits, siblings that should share a parent, and over-deep chains. One engine over EDN-shape fn-defs, so the editor's per-branch graph is linted by the same code. docs/GRAPH_LINT.md.")
     (:key "packages/lint-branch" :n 32 :gi 135 :defn "lint-branch" :ns "graphden.lint.graph" :file "src/graphden/lint/graph.clj" :line 324 :lang "clj" :mins 2.3 :head "(defn lint-branch" :see nil :refs nil :siblings nil
      :say "The editor's side of the same engine: the per-ctx graph snapshot (org-sliced, branch-resolved) is rebuilt into loader-shaped fn-defs and linted, memoised per branch while that branch's snapshot object is unchanged. The ⚐ lint chip and the Inspector's Lint section share this one call; the suppressions it subtracts live in the graph as a `:const`.")))
-  (:id "boot" :title "Boot & lifecycle" :status "toured" :mins 22.7 :summary "How the process starts: the Integrant component graph, the Aero
+  (:id "boot" :title "Boot & lifecycle" :status "toured" :mins 23.0 :summary "How the process starts: the Integrant component graph, the Aero
              config + addon manifest, and the router seams installed at boot."
    :steps
    ((:key "boot/-main" :n 1 :gi 136 :defn "-main" :ns "graphden.executor-runtime.core" :file "src/graphden/executor_runtime/core.clj" :line 187 :lang "clj" :mins 1.2 :head "(defn -main" :see (("boot/boot!" . "boot!") ("services/reconcile-once!" . "reconcile-once!")) :refs nil :siblings (("boot/boot!" . "boot!") ("constellation/-main" . "-main"))
@@ -326,7 +326,7 @@ Same shape as `subtype?`, so read it the same way: one `cond` over the normalise
      :say "Two lines with a ~50s cost: compile every fn in the graph into a closure BEFORE the first request. This is the eager half of the executor's compile-once story — after this key, `registry` in the hot path is a warm holder read, never a cold compile.")
     (:key "boot/dispatch-first" :n 9 :gi 144 :defn "dispatch-first" :ns "graphden.system.route-collection" :file "src/graphden/system/route_collection.clj" :line 91 :lang "clj" :mins 1.2 :head "(defn dispatch-first" :see nil :refs (("web/sync-fn-defs-branch!" . "sync-fn-defs-branch!") ("constellation/merge-addon" . "merge-addon")) :siblings nil
      :say "The last boot-time seam. Optional subsystems (the `registry` package, `/mcp`) and the tenancy addon each install a `:router-or-nil` Ring callable here under a distinct key; the core handler chain tries them in turn and falls through to the app router on `nil`. With nothing installed the collection is `{}`, this short-circuits, and single-tenant behaviour is byte-for-byte unchanged — the shape every seam in this codebase aims for.")
-    (:key "boot/check-router!" :n 10 :gi 145 :defn "check-router!" :ns "graphden.system.api-url-drift" :file "src/graphden/system/api_url_drift.clj" :line 262 :lang "clj" :mins 1.3 :head "(defn check-router!" :see nil :refs nil :siblings nil
+    (:key "boot/check-router!" :n 10 :gi 145 :defn "check-router!" :ns "graphden.system.api-url-drift" :file "src/graphden/system/api_url_drift.clj" :line 285 :lang "clj" :mins 1.6 :head "(defn check-router!" :see nil :refs nil :siblings nil
      :say "A boot-time guard rather than a component: enumerate the router's paths, scan every editor JS module for `/api/*` and `/partials/*` literals, and refuse to start if one names a route the router does not serve. This is why the frontend never hardcodes a path the backend can silently move — the coupling is checked once, at boot, on the real router.")
     (:key "boot/-main~2" :n 11 :gi 146 :defn "-main" :ns "graphden.cli" :file "src/graphden/cli.clj" :line 304 :lang "clj" :mins 1.9 :head "(defn -main" :see nil :refs nil :siblings nil
      :say "The same jar has a second entry point. `graphden.cli` moves whole branches between INSTANCES over the export/import HTTP API — `export` / `import` / `diff`, and `push` / `pull` against a hub — with nothing but a URL and a token. It is how a self-hosted graph reaches a cloud org and back, and the model for any other out-of-process tool: the API is the contract, not the DB.")

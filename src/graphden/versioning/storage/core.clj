@@ -39,6 +39,7 @@
     [graphden.storage.protocol.generic-constraints :as gc]
     [graphden.storage.protocol.graph :as graph]
     [graphden.types.diagnostics :as diag]
+    [graphden.versioning.branch-local :as bl]
     [graphden.versioning.identity-repair :as idrepair]
     [graphden.versioning.storage.merge :as mrg]
     [graphden.versioning.storage.resolution :as res]
@@ -140,6 +141,23 @@
       (catch Exception t
         (when v (epoch/note-applied! base-storage [v]))
         (throw t)))))
+
+
+(defn- with-write*
+  "Every VersionedStorage write method's frame: the graph-epoch bump
+   (`with-bump*`), then the derived caches this layer owns. A `:fn`
+   write — `:branch-local?` itself, or a `:parent-ids` junction
+   replacement (which only ever happens as part of a `:fn` write) — can
+   shift the effective branch-local set, so it drops the per-storage
+   `effective-branch-local?` cache here, whoever the caller is: the CRUD
+   layer, the bundle sync behind MCP `upsert-fn-defs` / registry install,
+   or a raw storage write. Cleared AFTER the write so a concurrent reader
+   cannot re-cache the pre-write value."
+  [base-storage entity-name write!]
+  (let [result (with-bump* base-storage entity-name write!)]
+    (when (= :fn entity-name)
+      (bl/invalidate! base-storage))
+    result))
 
 
 (defn- tombstone-version!
@@ -1073,7 +1091,7 @@
   (create-entity
     [_ entity-name data]
     (assert-not-merge-protected! base-storage branch-id entity-name)
-    (with-bump* base-storage entity-name
+    (with-write* base-storage entity-name
       (fn []
         (if-not (res/versioned-entity? entity-name)
           (sp/create-entity base-storage entity-name data)
@@ -1090,7 +1108,7 @@
   (update-entity
     [_ entity-name id data]
     (assert-not-merge-protected! base-storage branch-id entity-name)
-    (with-bump* base-storage entity-name
+    (with-write* base-storage entity-name
       (fn []
         (if-not (res/versioned-entity? entity-name)
           (sp/update-entity base-storage entity-name id data)
@@ -1100,7 +1118,7 @@
   (delete-entity
     [_ entity-name id]
     (assert-not-merge-protected! base-storage branch-id entity-name)
-    (with-bump* base-storage entity-name
+    (with-write* base-storage entity-name
       (fn []
         (cond
           (not (res/versioned-entity? entity-name))
@@ -1166,7 +1184,7 @@
   (create-entities
     [_ entity-name data-seq]
     (assert-not-merge-protected! base-storage branch-id entity-name)
-    (with-bump* base-storage entity-name
+    (with-write* base-storage entity-name
       (fn []
         (if-not (res/versioned-entity? entity-name)
           (sp/create-entities base-storage entity-name data-seq)
@@ -1185,7 +1203,7 @@
   (update-entities
     [_ entity-name data-seq]
     (assert-not-merge-protected! base-storage branch-id entity-name)
-    (with-bump* base-storage entity-name
+    (with-write* base-storage entity-name
       (fn []
         (if-not (res/versioned-entity? entity-name)
           (sp/update-entities base-storage entity-name data-seq)
@@ -1221,7 +1239,7 @@
   (delete-entities
     [_ entity-name ids]
     (assert-not-merge-protected! base-storage branch-id entity-name)
-    (with-bump* base-storage entity-name
+    (with-write* base-storage entity-name
       (fn []
         (cond
           (not (res/versioned-entity? entity-name))

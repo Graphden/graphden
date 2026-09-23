@@ -15,8 +15,11 @@
 
    Cache: per-storage atom, keyed by a STABLE content key (see
    `storage-key`). Lazy compute on first access; cleared via
-   `invalidate!` on any write to the `:fn` table (CRUD layer). The
-   cache is intentionally a `defonce` process-wide map rather than an
+   `invalidate!` by `VersionedStorage` itself after every `:fn` write
+   (`versioning.storage.core/with-write*` — the only layer every writer
+   passes through), and on this pod's cross-pod freshness paths (the
+   `fn:invalidate` NOTIFY handler, the graph-epoch heal) for writes a
+   sibling pod made. The cache is intentionally a `defonce` process-wide map rather than an
    extra field on `VersionedStorage` because the resolution algorithm
    doesn't carry the versioned wrapper — it operates over
    `base-storage`."
@@ -68,8 +71,9 @@
 
 (defn invalidate!
   "Drop the cached `effective-branch-local?` map for `base-storage`.
-   Call after any write to the `:fn` table — both `:branch-local?`
-   itself and `:parent-ids` writes can shift the effective set."
+   Any write to the `:fn` table — both `:branch-local?` itself and
+   `:parent-ids` writes — can shift the effective set; VersionedStorage
+   calls this after each one."
   [base-storage]
   (let [k (storage-key base-storage)]
     (when-let [cache (get @storage-caches k)]

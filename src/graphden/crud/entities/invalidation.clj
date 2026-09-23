@@ -17,7 +17,6 @@
     [graphden.system.branch-router :as br]
     [graphden.types.diagnostics :as diag]
     [graphden.util.abort-shield :as shield]
-    [graphden.versioning.branch-local :as branch-local]
     [graphden.versioning.storage.core :as vcore]))
 
 
@@ -126,12 +125,6 @@
    that already includes `:id` (so :fn deletes pre-read the row,
    binding-list-item deletes pre-read the item).
 
-   `:fn` writes also drop the per-storage branch-local cache (in
-   `graphden.versioning.branch-local`) — `:parent-ids` and
-   `:branch-local?` changes can both shift the effective set, and
-   the cache key is the storage handle so it lives below the
-   graph-cache layer.
-
    Then sweeps sibling branch ctxs via
    `branch-router/invalidate-affected-ctxs!`: a branch that inherits
    from the written branch resolves the new rows on read but would keep
@@ -152,10 +145,6 @@
   (shield/run!
     (fn []
       (when (= entity-type :fn)
-        ;; Cache lives below the VersionedStorage wrapper and is keyed by
-        ;; the BASE storage handle; unwrap before invalidating.
-        (let [base (or (:base-storage storage) storage)]
-          (branch-local/invalidate! base))
         ;; A `:fn` write (rename / reparent / return-type / delete) can
         ;; stale a recorded type-check diagnostic for that fn on this
         ;; branch — drop the entry; the next post-mutation check

@@ -40,7 +40,8 @@
     [graphden.accounts.provider :as provider]
     [graphden.accounts.telegram :as telegram]
     [graphden.crud.request :as req]
-    [graphden.tenancy.context :as tctx]))
+    [graphden.tenancy.context :as tctx]
+    [graphden.web.client-ip :as web-ip]))
 
 
 (defn- graph-page
@@ -382,39 +383,6 @@
     (json-resp 401 {:ok false :error "unauthenticated"})))
 
 
-(def ^:private trusted-proxy-count
-  "How many trusted reverse proxies sit in front of the app, from
-   `GRAPHDEN_TRUSTED_PROXIES` (default 0).
-
-   `X-Forwarded-For` is `client, proxyA, proxyB` where each proxy
-   APPENDS the peer it saw, so the N rightmost hops are added by the N
-   proxies we control and everything to their left is client-supplied.
-   With N trusted proxies the real client is the entry N positions from
-   the end. **N=0 means the app is directly reachable: the entire
-   header is attacker-controlled** and must be ignored — otherwise a
-   rotating `X-Forwarded-For:` sails past every per-IP limiter. Cloud
-   (behind Caddy) sets `GRAPHDEN_TRUSTED_PROXIES=1`."
-  (or (some-> (System/getenv "GRAPHDEN_TRUSTED_PROXIES") parse-long) 0))
-
-
-(defn- client-ip
-  "Best-effort client IP for rate-limiting. Trusts exactly
-   `trusted-proxy-count` rightmost `X-Forwarded-For` hops; with 0
-   trusted proxies the header is ignored entirely and the socket
-   `remote-addr` is used, so a forged header can't defeat the limiter
-   on a direct-reachable deploy."
-  [request]
-  (or (when (pos? trusted-proxy-count)
-        (let [hops (some->> (get-in request [:headers "x-forwarded-for"])
-                            (#(str/split % #","))
-                            (mapv str/trim)
-                            (filterv not-empty))]
-          (when (>= (count hops) trusted-proxy-count)
-            (nth hops (- (count hops) trusted-proxy-count)))))
-      (:remote-addr request)
-      "unknown"))
-
-
 (defn- cross-site-origin?
   "CSRF guard for state-changing `/auth/*` POSTs. True when the browser
    sent an `Origin` that does NOT match the request's own host — a
@@ -600,18 +568,18 @@
               (handle-verify storage origin request)
 
               (and (= method :post) (= uri "/auth/signup"))
-              (if (signup-limit (client-ip request))
+              (if (signup-limit (web-ip/client-ip request))
                 (handle-signup storage mailer email-renderer origin link-orig request)
                 (json-resp 429 {:ok false :error "rate_limited"}))
 
               (and (= method :post) (= uri "/auth/login"))
-              (if (login-limit (client-ip request))
+              (if (login-limit (web-ip/client-ip request))
                 (handle-login storage origin request)
                 ;; same shape as bad credentials — not probeable
                 (json-resp 401 {:ok false :error "invalid_credentials"}))
 
               (and (= method :post) (= uri "/auth/forgot"))
-              (if (forgot-limit (client-ip request))
+              (if (forgot-limit (web-ip/client-ip request))
                 (handle-forgot storage mailer email-renderer link-orig request)
                 (json-resp 200 {:ok true :reset-sent true}))
 
@@ -619,7 +587,7 @@
               (handle-reset storage request)
 
               (and (= method :post) (= uri "/auth/resend-verification"))
-              (if (forgot-limit (client-ip request))
+              (if (forgot-limit (web-ip/client-ip request))
                 (handle-resend-verification storage mailer email-renderer link-orig request)
                 (json-resp 200 {:ok true}))
 
@@ -636,7 +604,7 @@
               (handle-unlink storage request)
 
               (and (= method :post) (= uri "/auth/totp"))
-              (if (totp-limit (client-ip request))
+              (if (totp-limit (web-ip/client-ip request))
                 (handle-totp storage origin request)
                 (json-resp 429 {:ok false :error "rate_limited"}))
 
@@ -644,12 +612,12 @@
               (handle-totp-enroll storage request)
 
               (and (= method :post) (= uri "/auth/totp/confirm"))
-              (if (totp-limit (client-ip request))
+              (if (totp-limit (web-ip/client-ip request))
                 (handle-totp-confirm storage request)
                 (json-resp 429 {:ok false :error "rate_limited"}))
 
               (and (= method :post) (= uri "/auth/totp/disable"))
-              (if (totp-limit (client-ip request))
+              (if (totp-limit (web-ip/client-ip request))
                 (handle-totp-disable storage request)
                 (json-resp 429 {:ok false :error "rate_limited"}))
 

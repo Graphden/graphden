@@ -320,6 +320,28 @@
                (get-in ruser [:args :x])))))))
 
 
+(deftest roundtrip-list-and-resolver-binding-metadata
+  ;; Regression: the compact list / resolver emissions dropped the
+  ;; binding's type-override and `:required`, and a seal with no items
+  ;; (`{:closed true}`) was not exported at all — each lost on
+  ;; export → import and on registry publish → install.
+  (let [fns [{:name :seqs :namespace "ex" :type {:x :any}}
+             {:name :collect :namespace "ex"
+              :args {:items {:type :sequence :required false}} :return-type :sequence}
+             {:name :rslv :namespace "ex" :args {:v :text} :return-type :text}
+             {:name :sink2 :namespace "ex"
+              :args {:x {:type :any :required false}} :return-type :any}
+             {:name :typed-list :namespace "ex" :parent :collect
+              :args {:items {:append [1 2] :type :seqs}}}
+             {:name :required-list :namespace "ex" :parent :collect
+              :args {:items {:append [1] :closed true :required true}}}
+             {:name :sealed-empty :namespace "ex" :parent :collect
+              :args {:items {:closed true}}}
+             {:name :typed-resolver :namespace "ex" :parent :sink2
+              :args {:x {:resolver :rslv :value "stored" :type :text}}}]]
+    (is (roundtrips-exactly? fns) (pr-str (diff-report fns)))))
+
+
 (deftest roundtrip-per-ns-duplicates
   ;; Stage 5: same-named fns in different namespaces round-trip — the
   ;; exporter emits QUALIFIED refs for duplicated names so re-parse

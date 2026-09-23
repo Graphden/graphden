@@ -75,5 +75,7 @@
             (str "the stream never pushed a second, different clock frame: "
                  (pr-str (frames)))))
       (finally
-        (HttpURLConnection/.disconnect conn)
-        (stop)))))
+        ;; Server first: its close gives the reader EOF, so `disconnect`
+        ;; returns at once instead of waiting out the read timeout.
+        (stop)
+        (HttpURLConnection/.disconnect conn)))))

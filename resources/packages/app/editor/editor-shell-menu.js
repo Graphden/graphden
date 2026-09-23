@@ -3,11 +3,11 @@
 // `openShellMenu` is the single
 // entry to Settings / Organization / Platform (capability-gated), the
 // interactive tutorial, feedback, and the session actions for every auth mode
-// (sign in / out, sign out everywhere — `logoutEverywhere`). A real ARIA menu:
-// focus enters on open, ↑ ↓ Home End walk the `menuitem`s, Escape / Tab close
-// and return focus to the chip, which carries `aria-haspopup` /
-// `aria-expanded`. Reads the auth mode flags (`accountsMode`, `authServedMode`,
-// …) from editor-auth.js at click time; loads right after it.
+// (sign in / out; sign out everywhere under the accounts addon). A real ARIA
+// menu: focus enters on open, ↑ ↓ Home End walk the `menuitem`s, Escape / Tab
+// close and return focus to the chip, which carries `aria-haspopup` /
+// `aria-expanded`. Reads the auth mode flags (`accountsMode`,
+// `accountsAuthed`) from editor-auth.js at click time; loads right after it.
 
 // The account chip's menu — the SETTINGS HUB (redesign, the rail
 // is retired). One menu for every auth mode: identity head (when known), the
@@ -27,14 +27,14 @@ function openShellMenu() {
   menu.setAttribute('role', 'menu');
   menu.setAttribute('aria-label', 'Account and editor');
 
-  // Identity head — accounts identity, or the bearer-session kinds.
+  // Identity head — accounts identity, or the admin-password session.
   const isOp = (typeof window.graphdenHasCap === 'function') && window.graphdenHasCap('platform-admin');
   let who = null;
   if (accountsMode && accountsAuthed) {
     const a = window.gdAccount || {};
     who = a.email || a['display-name'] || a.id || 'signed in';
   } else if (isAuthenticated()) {
-    who = loginIsTenant() ? 'Signed in' : 'Signed in as admin';
+    who = 'Signed in as admin';
   }
   if (who) {
     const head = document.createElement('div');
@@ -127,20 +127,13 @@ function openShellMenu() {
       item('Sign in', () => { window.location.href = '/login'; });
     }
   } else if (isAuthenticated()) {
-    item('Sign out', async () => {
+    item('Sign out', () => {
       if (!confirm('Sign out?')) return;
-      if (loginIsTenant()) {
-        try { await authFetch(API.api_logout, { method: 'POST' }); } catch (_) {}
-        clearAuthPassword();
-        window.location.reload();
-      } else {
-        clearAuthPassword();
-        closeAuthPopover();
-      }
+      clearAuthPassword();
+      closeAuthPopover();
     });
-    if (loginIsTenant()) item('Sign out everywhere', logoutEverywhere);
   } else {
-    // Bearer modes sign in via the popover form — swap the menu for it.
+    // The admin-password mode signs in via the popover form — swap the menu for it.
     item('Sign in', () => {
       pop.classList.add('hidden');
       pop.dataset.gdContent = '';
@@ -223,24 +216,4 @@ function openShellMenu() {
     if (typeof focusSafely === 'function') focusSafely(first);
     else first.focus();
   }
-}
-
-// Sign out of ALL sessions (server-side: POST /api/logout-all deletes every
-// :token for this user), then clear local + reload.
-async function logoutEverywhere() {
-  if (!confirm('Sign out of all your sessions, on every device?')) return;
-  if (accountsMode) {
-    // Accounts addon: revoke every session for this account server-side.
-    try { await fetch('/auth/logout-all', { method: 'POST' }); } catch (_) {}
-    window.location.reload();
-    return;
-  }
-  // Tenancy auth routes — only reached in multi-tenant mode (loginIsTenant).
-  // The tenancy-admin addon registers its routes in window.API at boot (same
-  // routing-graph codegen as core routes), so we address them by key — no
-  // hardcoded path. Single-tenant never reaches this branch, so the key being
-  // absent there is harmless.
-  try { await authFetch(API.api_logout_all, { method: 'POST' }); } catch (_) {}
-  clearAuthPassword();
-  window.location.reload();
 }

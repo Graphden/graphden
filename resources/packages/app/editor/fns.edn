@@ -1429,18 +1429,16 @@
 
   {:name :_auth-error
    :parent :hiccup
-   :args {:tag {:value "div"} :attrs {:value {:id "auth-error" :class "auth-error hidden"
-                                              :data-auth-mode "admin"}}
+   :args {:tag {:value "div"} :attrs {:value {:id "auth-error" :class "auth-error hidden"}}
           ;; Text set by JS — children pinned empty (free slot leaks conveyed args).
           :children {:value []}}}
 
 
-  ;; SINGLE-TENANT fields ONLY (admin password). The tenant variant
-  ;; (username + org + create-account) ships WITH the tenancy addon, which
-  ;; overrides this same /partials/auth-form path via the route-collection
-  ;; seam — so a self-hosted build carries no tenant markup at all.
+  ;; The admin-password fields — the only popover sign-in there is. Under
+  ;; the accounts addon the editor never mounts this form: sign-in is the
+  ;; addon's own /login page.
   {:name :_auth-form-fields
-   :description "The single-tenant auth popover fields (admin password + actions + error) as a fragment (rendered directly into `#auth-popover`, staying direct flex children). The `data-auth-mode` marker on the error div tells editor-auth.js which submit path the served form expects."
+   :description "The single-tenant auth popover fields (admin password + actions + error) as a fragment (rendered directly into `#auth-popover`, staying direct flex children)."
    :parent :list
    :args {:items [:_auth-input-wrap :_auth-popover-row :_auth-error]}}
 

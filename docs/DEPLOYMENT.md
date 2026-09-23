@@ -219,9 +219,10 @@ Auth is **provider-driven and optional**:
   (`/api/graph/*`, `/api/types*`, CRUD, execute, …) requires
   `Authorization: Bearer <token>`; the editor prompts for the token. There is
   no anonymous read-only view.
-- **Tenancy addon active → the addon wires its own storage-token provider**
-  (sessions + API keys in the `:token` table; `POST /api/login`, the public
-  `GET /login` page, self-serve signup). `AUTH_TOKEN` is not used.
+- **Tenancy addon active → pair it with the open accounts module** (below):
+  it supplies the sessions, API keys, the public `GET /login` page and
+  self-serve sign-up the org memberships are derived from. The editor's
+  sign-in is that page (the old `POST /api/login` token flow is gone).
 
 > **SECURITY:** "unconfigured" means **open**, not locked. Never expose an
 > instance to an untrusted network without either `AUTH_TOKEN` or the tenancy

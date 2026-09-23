@@ -679,11 +679,10 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   gap: 6px; min-height: 26px; }
 
 /* Global utility — many JS/partial surfaces toggle `hidden` (auth-popover
-   fields, the ⎋ logout-all button, applyAuthMode's tenant/single-tenant
-   switch). Only SCOPED rules existed before, so partial-rendered elements
-   carrying the class still displayed — single-tenant popovers showed the
-   tenant username/org fields. !important so it beats the display:inline-flex
-   component rules at equal specificity. */
+   fields and error line, menus, panels). Only SCOPED rules existed before,
+   so partial-rendered elements carrying the class still displayed.
+   !important so it beats the display:inline-flex component rules at equal
+   specificity. */
 .hidden { display: none !important; }
 
 /* Prefs (theme + collapse) buttons — same shape/size as auth lock. */
@@ -773,13 +772,6 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 .auth-menu-social a { color: var(--muted-fg); text-decoration: none; }
 .auth-menu-social a:hover { color: var(--accent); text-decoration: underline; }
 
-/* "Sign out everywhere" — same chrome as the lock, sits beside it. */
-.auth-logout-all-btn {
-  background: transparent; color: var(--header-fg); border: 1px solid var(--header-fg); border-radius: 3px;
-  width: 26px; height: 26px; padding: 3px; margin-left: 4px; cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center; font-size: 0.875rem;
-}
-.auth-logout-all-btn:hover { background: var(--header-fg); color: var(--header-bg); }
 /* Popover positioned with `position: fixed` (relative to viewport,
    set via JS in `positionAuthPopover`) so it can escape #side-menu's
    scroll context — focusing the input would otherwise cause the
@@ -801,10 +793,6 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 /* Wrapper that lets the eye-toggle button float over the right edge
    of the password input. The input gets extra right-padding so the
    typed text doesn't run under the icon. */
-/* Username field (multi-tenant login only) sits above the password wrap. */
-.auth-username-input:not(.hidden) { margin-bottom: 6px; }
-/* Login⇄signup toggle (multi-tenant). */
-.auth-mode-toggle { display: block; margin-top: 6px; font-size: 0.6875rem; color: var(--accent); cursor: pointer; text-decoration: underline; }
 /* Fatal graph-load banner (editor-main.js initGraph catch) — tokenised so
    it themes with everything else instead of the old inline hardcoded red. */
 .editor-fatal-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 99999;

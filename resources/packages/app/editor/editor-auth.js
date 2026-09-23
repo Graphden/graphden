@@ -46,21 +46,6 @@ function clearAuthPassword() {
   renderAuthLock();
 }
 
-// Multi-tenant deployments authenticate with username + password against
-// POST /api/login (the §4.1 user model) and store the returned session token
-// as the bearer. Single-tenant uses a bare admin password.
-//
-// The MODE ARRIVES WITH THE FORM: the served /partials/auth-form variant
-// (core = admin-password only; the tenancy addon shadows the path with the
-// username/org variant) stamps `data-auth-mode` on its error div, captured at
-// mount. Before the fields have mounted (the lock tooltip renders at boot)
-// fall back to the `gd-tenancy` capability class.
-let authServedMode = null; // 'admin' | 'tenant' | 'accounts' — read off the mounted partial
-function loginIsTenant() {
-  if (authServedMode) return authServedMode === 'tenant';
-  return document.body.classList.contains('gd-tenancy');
-}
-
 // The open `accounts` addon replaces the popover flow entirely: sessions ride
 // an HttpOnly gd_session cookie and sign-in lives on its own /login page. The
 // editor detects it with one boot probe of GET /auth/me — when the addon is
@@ -108,32 +93,7 @@ async function probeAccountsAuth() {
   }
 }
 
-// Multi-tenant popover mode: false = log in (username + password), true = sign
-// up (also an org field; POST /api/signup creates a new org + user). Reset to
-// false every time the popover opens.
-let authSignupMode = false;
-
-// Reflect tenant + signup mode in the popover fields: username (tenant), org
-// (tenant + signup), the submit-button label, and the login⇄signup toggle.
-// Does NOT clear values — toggling preserves what's typed.
-function applyAuthMode() {
-  const tenant = loginIsTenant();
-  const userInput = document.getElementById('auth-username-input');
-  const pwInput = document.getElementById('auth-password-input');
-  const orgInput = document.getElementById('auth-org-input');
-  const toggle = document.getElementById('auth-mode-toggle');
-  const saveBtn = document.getElementById('auth-save-btn');
-  if (userInput) userInput.classList.toggle('hidden', !tenant);
-  if (pwInput) pwInput.placeholder = tenant ? 'Password' : 'Admin password';
-  if (orgInput) orgInput.classList.toggle('hidden', !(tenant && authSignupMode));
-  if (toggle) {
-    toggle.classList.toggle('hidden', !tenant);
-    toggle.textContent = authSignupMode ? 'Have an account? Sign in' : 'Create account';
-  }
-  if (saveBtn) saveBtn.textContent = tenant ? (authSignupMode ? 'Sign up' : 'Sign in') : 'Save';
-}
-
-// Authenticated iff EITHER a stored bearer (single-token / tenancy) OR a live
+// Authenticated iff EITHER a stored bearer (the admin password) OR a live
 // accounts cookie session (`gd_session`, from the boot probe). Every editing
 // affordance + admin panel gates on this, so an accounts-cookie operator MUST
 // count as signed-in — otherwise the editor renders read-only with no admin
@@ -239,12 +199,9 @@ function initAuthLock() {
   mount.innerHTML =
     '<button id="auth-lock-btn" class="auth-lock-btn" title="Admin login"'
     + ' aria-haspopup="menu" aria-expanded="false"></button>' +
-    // Sign out of ALL sessions — multi-tenant + authenticated only.
-    '<button id="auth-logout-all-btn" class="auth-logout-all-btn hidden" title="Sign out everywhere">⎋</button>' +
     '<div id="auth-popover" class="auth-popover hidden"></div>';
 
   document.getElementById('auth-lock-btn').addEventListener('click', toggleAuthAction);
-  document.getElementById('auth-logout-all-btn').addEventListener('click', logoutEverywhere);
 
   // Close popover on outside click (works whether or not the fields are mounted).
   document.addEventListener('click', (e) => {
@@ -289,11 +246,6 @@ async function mountAuthPopoverFields() {
   }
   popover.dataset.gdContent = 'form';
 
-  // The served variant declares its submit mode (core = "admin"; the tenancy
-  // addon's shadowing partial = "tenant") — see loginIsTenant().
-  const modeEl = popover.querySelector('[data-auth-mode]');
-  authServedMode = modeEl ? modeEl.getAttribute('data-auth-mode') : 'admin';
-
   // The eye button ships empty from the partial — fill its (toggling) SVG here.
   const eyeBtn = document.getElementById('auth-toggle-visibility-btn');
   if (eyeBtn) eyeBtn.innerHTML = EYE_SVG;
@@ -312,24 +264,6 @@ async function mountAuthPopoverFields() {
     if (e.key === 'Enter') submitAuth();
     // `preventDefault` MARKS Escape as consumed — see graphden-popover.js.
     if (e.key === 'Escape') { e.preventDefault(); closeAuthPopover(); }
-  });
-  // Tenant-only elements exist ONLY when the tenancy addon's shadowing
-  // partial served the form — the core admin-password variant has none, so
-  // every wire-up here is null-guarded (an unguarded getElementById killed
-  // the whole mount on single-tenant).
-  document.getElementById('auth-username-input')?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') submitAuth();
-    if (e.key === 'Escape') { e.preventDefault(); closeAuthPopover(); }
-  });
-  document.getElementById('auth-org-input')?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') submitAuth();
-    if (e.key === 'Escape') { e.preventDefault(); closeAuthPopover(); }
-  });
-  document.getElementById('auth-mode-toggle')?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    authSignupMode = !authSignupMode;
-    applyAuthMode();
-    document.getElementById('auth-username-input')?.focus();
   });
   return true;
 }
@@ -354,13 +288,10 @@ function togglePasswordVisibility() {
 function renderAuthLock() {
   const btn = document.getElementById('auth-lock-btn');
   if (!btn) return;
-  const allBtn = document.getElementById('auth-logout-all-btn');
   // Accounts mode: the affordance is an identity CHIP (avatar initial), not a
   // lock — the lock metaphor belongs to single-token / admin-password
-  // deployments only. Sign-out + sign-out-everywhere live in the chip's menu,
-  // so the separate top-bar logout-all button is retired here.
+  // deployments only. Sign-out + sign-out-everywhere live in the chip's menu.
   if (accountsMode) {
-    if (allBtn) allBtn.classList.add('hidden');
     btn.classList.add('auth-chip');
     btn.classList.toggle('auth-lock-open', accountsAuthed);
     if (accountsAuthed && window.gdAccount) {
@@ -380,16 +311,14 @@ function renderAuthLock() {
     }
     return;
   }
-  // Single-token / tenancy bearer session: the classic lock.
+  // Admin-password session: the classic lock.
   btn.classList.remove('auth-chip');
   const authed = isAuthenticated();
   btn.innerHTML = authed ? LOCK_OPEN_SVG : LOCK_CLOSED_SVG;
   btn.classList.toggle('auth-lock-open', authed);
   // The chip opens the shell MENU now (settings + session actions) — the
   // title names the menu when authed, the primary intent when not.
-  btn.title = authed ? 'Account & settings' : (loginIsTenant() ? 'Sign in' : 'Admin login');
-  // "Sign out everywhere" only makes sense for a real server-side session.
-  if (allBtn) allBtn.classList.toggle('hidden', !(authed && loginIsTenant()));
+  btn.title = authed ? 'Account & settings' : 'Admin login';
 }
 
 
@@ -429,17 +358,11 @@ async function openAuthPopover(errorMsg) {
   // browser doesn't try to scroll the sidebar to reveal an
   // off-screen field (which would drag the popover with it).
   positionAuthPopover();
-  authSignupMode = false;
-  const userInput = document.getElementById('auth-username-input');
   const pwInput = document.getElementById('auth-password-input');
-  const orgInput = document.getElementById('auth-org-input');
-  if (userInput) userInput.value = '';
-  if (pwInput) pwInput.value = '';
-  if (orgInput) orgInput.value = '';
-  applyAuthMode();
-  // Focus the first field: username in multi-tenant, password otherwise.
-  const focusEl = loginIsTenant() ? userInput : pwInput;
-  if (focusEl) focusEl.focus();
+  if (pwInput) {
+    pwInput.value = '';
+    pwInput.focus();
+  }
   const err = document.getElementById('auth-error');
   if (err) {
     if (errorMsg) {
@@ -503,7 +426,6 @@ function closeAuthPopover() {
 }
 
 async function submitAuth() {
-  if (loginIsTenant()) { await (authSignupMode ? submitSignup() : submitLogin()); return; }
   const input = document.getElementById('auth-password-input');
   const err = document.getElementById('auth-error');
   if (!input) return;
@@ -538,81 +460,11 @@ async function submitAuth() {
   }
 }
 
-// Multi-tenant login (§4.1): exchange username + password at POST /api/login
-// for a session token, store it as the bearer, then reload so every /api/*
-// call re-runs as the logged-in user (org context + capabilities + workspace
-// come from the request scope, so a reload is the clean way to pick them up).
-async function submitLogin() {
-  const userInput = document.getElementById('auth-username-input');
-  const pwInput = document.getElementById('auth-password-input');
-  const err = document.getElementById('auth-error');
-  const username = userInput ? userInput.value.trim() : '';
-  const password = pwInput ? pwInput.value : '';
-  if (!username || !password) {
-    if (err) { err.textContent = 'Username and password required.'; err.classList.remove('hidden'); }
-    return;
-  }
-  try {
-    const body = 'username=' + encodeURIComponent(username) +
-                 '&password=' + encodeURIComponent(password);
-    const response = await fetch(API.api_login, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body,
-    });
-    const token = response.ok ? (await response.text()).trim() : '';
-    if (token) {
-      setAuthPassword(token);
-      window.location.reload();
-    } else {
-      if (err) { err.textContent = 'Invalid username or password.'; err.classList.remove('hidden'); }
-      if (pwInput) { pwInput.focus(); pwInput.select(); }
-    }
-  } catch (e) {
-    if (err) { err.textContent = 'Network error: ' + e.message; err.classList.remove('hidden'); }
-  }
-}
-
-// Multi-tenant self-serve signup (§4.1): POST username + password + a NEW org
-// to /api/signup, which creates the org + user and returns a session token
-// (auto-login). Empty body → username/org taken. Same store-token + reload as
-// login.
-async function submitSignup() {
-  const username = document.getElementById('auth-username-input')?.value.trim();
-  const password = document.getElementById('auth-password-input')?.value;
-  const org = document.getElementById('auth-org-input')?.value.trim();
-  const err = document.getElementById('auth-error');
-  if (!username || !password || !org) {
-    if (err) { err.textContent = 'Username, password and org are required.'; err.classList.remove('hidden'); }
-    return;
-  }
-  try {
-    const body = 'username=' + encodeURIComponent(username) +
-                 '&password=' + encodeURIComponent(password) +
-                 '&org=' + encodeURIComponent(org);
-    const response = await fetch(API.api_signup, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body,
-    });
-    const token = response.ok ? (await response.text()).trim() : '';
-    if (token) {
-      setAuthPassword(token);
-      window.location.reload();
-    } else {
-      if (err) { err.textContent = 'Signup failed — that username or org may be taken.'; err.classList.remove('hidden'); }
-    }
-  } catch (e) {
-    if (err) { err.textContent = 'Network error: ' + e.message; err.classList.remove('hidden'); }
-  }
-}
-
-
 // Landing demo entry (?demo=1): the landing page can't set this origin's
-// localStorage (cross-origin), so it links to the editor with ?demo=1 and the
+// session (cross-origin), so it links to the editor with ?demo=1 and the
 // editor itself mints an ephemeral anonymous-tier org via the PUBLIC
-// POST /api/demo/start (present only when a deploy enables it), stores the
-// returned bearer exactly like a login, and reloads on a clean URL. Returns
+// POST /api/demo/start (present only when a deploy enables it), whose
+// response sets the session cookie, and reloads on a clean URL. Returns
 // true when a reload was triggered (caller should stop booting). Fails soft:
 // endpoint absent (404 — self-hosted / demo off) or network error → strip the
 // param and boot signed-out as usual.
@@ -626,15 +478,13 @@ async function maybeStartLandingDemo() {
   };
   // /api/demo/start is a FIXED route-collection endpoint (the tenancy
   // auth-routes Ring router), NOT a graph route — so it is NOT in window.API.
-  // Two response shapes: the accounts addon sets an HttpOnly gd_session cookie
-  // and returns {ok, org} (no token — just reload, the cookie authenticates);
-  // the legacy tenancy path returned {token} (stored as a bearer). 404 /
-  // network error (self-hosted / demo off) → strip the param, boot signed-out.
+  // It sets an HttpOnly gd_session cookie and returns {ok, org} (no token —
+  // just reload, the cookie authenticates). 404 / network error
+  // (self-hosted / demo off) → strip the param, boot signed-out.
   try {
     const response = await fetch('/api/demo/start', { method: 'POST' }); // api-url-drift-allow: route-collection
     if (response.ok) {
       const data = await response.json().catch(() => ({}));
-      if (data?.token) { setAuthPassword(data.token); cleanUrl(); window.location.reload(); return true; }
       if (data?.ok) { cleanUrl(); window.location.reload(); return true; }
     }
   } catch (_) { /* fall through to signed-out boot */ }

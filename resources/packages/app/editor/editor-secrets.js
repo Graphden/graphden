@@ -224,6 +224,50 @@ installPopoverDismiss({
   trapFocus: true
 });
 
+// Fetch a form partial into `pop` and mount it under `anchor`. Answers true
+// when the form landed; on a failed load (network, or an error status — its
+// body is an error page, not the form) the popover shows why, with a visible
+// × (it traps Tab, so it owes a focusable way out), and answers false. A
+// dismissed / superseded open answers null and mounts nothing.
+async function mountSecretForm(pop, anchor, url) {
+  let error = null;
+  try {
+    const r = await authFetch(url);
+    if (pop !== _activePopover) return null;
+    if (r.ok) pop.innerHTML = await r.text();
+    else error = (typeof authFetchErrorMessage === 'function')
+      ? authFetchErrorMessage(r, { fallback: 'Failed to load form (HTTP ' + r.status + ').' })
+      : 'Failed to load form (HTTP ' + r.status + ').';
+  } catch (_) {
+    if (pop !== _activePopover) return null;
+    error = 'Failed to load form.';
+  }
+  if (error) {
+    pop.textContent = '';
+    const msg = document.createElement('div');
+    msg.className = 'popover-error';
+    msg.setAttribute('role', 'alert');
+    msg.textContent = error;
+    pop.appendChild(msg);
+    if (typeof ensurePopoverClose === 'function') {
+      ensurePopoverClose(pop, closeActivePopover, 'Close', { prepend: true });
+    }
+  }
+  document.body.appendChild(pop);
+  anchorBelowClamped(pop, anchor);
+  if (error && typeof focusIntoDialog === 'function') focusIntoDialog(pop);
+  return !error;
+}
+
+// Submit guard shared by both forms: the button is disabled for the whole
+// request (a double click created the secret twice) and restored when the
+// request did not close the form.
+async function submitOnce(btn, run) {
+  if (btn.disabled) return;
+  btn.disabled = true;
+  try { await run(); } finally { btn.disabled = false; }
+}
+
 async function openCreateSecretForm(anchor) {
   closeActivePopover();
   _activePopoverTrigger = anchor || null;
@@ -239,19 +283,7 @@ async function openCreateSecretForm(anchor) {
   // Fetch BEFORE mounting so the popover enters the DOM fully-formed —
   // never an empty shell that outside observers (and tests) can read
   // before the content lands.
-  let failed = false;
-  try {
-    const r = await authFetch('/partials/secret-create-form');
-    if (pop !== _activePopover) return; // dismissed / superseded while loading
-    pop.innerHTML = await r.text();
-  } catch (_) {
-    if (pop !== _activePopover) return;
-    pop.innerHTML = '<div class="popover-error">Failed to load form.</div>';
-    failed = true;
-  }
-  document.body.appendChild(pop);
-  anchorBelowClamped(pop, anchor);
-  if (failed) return;
+  if (!(await mountSecretForm(pop, anchor, '/partials/secret-create-form'))) return;
 
   const nameInput = pop.querySelector('input[name="name"]');
   const pathInput = pop.querySelector('input[name="path"]');
@@ -284,7 +316,8 @@ async function openCreateSecretForm(anchor) {
   nameInput.focus();
 
   pop.querySelector('[data-act="cancel"]').onclick = closeActivePopover;
-  pop.querySelector('[data-act="submit"]').onclick = async () => {
+  const submitBtn = pop.querySelector('[data-act="submit"]');
+  submitBtn.onclick = () => submitOnce(submitBtn, async () => {
     errEl.hidden = true;
     const name = nameInput.value.trim();
     const path = pathInput.value.trim();
@@ -336,7 +369,7 @@ async function openCreateSecretForm(anchor) {
       selectFn(createdId, true);
       if (typeof revealFnInTree === 'function') revealFnInTree(createdId);
     }
-  };
+  });
 }
 
 
@@ -358,26 +391,15 @@ async function openRotateSecretForm(anchor, secret) {
   // (§6.3). JS owns submit + refresh below. Fetch BEFORE mounting so the
   // popover enters the DOM fully-formed (never an empty shell).
   const q = new URLSearchParams({ name: secret.name || '', path: secret.path || '' });
-  let failed = false;
-  try {
-    const r = await authFetch('/partials/secret-rotate-form?' + q.toString());
-    if (pop !== _activePopover) return; // dismissed / superseded while loading
-    pop.innerHTML = await r.text();
-  } catch (_) {
-    if (pop !== _activePopover) return;
-    pop.innerHTML = '<div class="popover-error">Failed to load form.</div>';
-    failed = true;
-  }
-  document.body.appendChild(pop);
-  anchorBelowClamped(pop, anchor);
-  if (failed) return;
+  if (!(await mountSecretForm(pop, anchor, '/partials/secret-rotate-form?' + q.toString()))) return;
 
   const valueInput = pop.querySelector('input[name="value"]');
   const errEl = pop.querySelector('.popover-error');
   valueInput.focus();
 
   pop.querySelector('[data-act="cancel"]').onclick = closeActivePopover;
-  pop.querySelector('[data-act="submit"]').onclick = async () => {
+  const submitBtn = pop.querySelector('[data-act="submit"]');
+  submitBtn.onclick = () => submitOnce(submitBtn, async () => {
     errEl.hidden = true;
     const value = valueInput.value;
     if (!value) {
@@ -406,7 +428,7 @@ async function openRotateSecretForm(anchor, secret) {
     closeActivePopover();
     await loadSecrets();
     updateEntityList(graphData);
-  };
+  });
 }
 
 

@@ -1,9 +1,9 @@
 (ns graphden.executor.runtime-test
   "Unit tests for the runtime arg-resolution helpers plus
-   `hof-callable`.
+   `make-single-arg-callable`.
 
-   Parallel-safe: no `with-redefs`. The UUID branches of `hof-callable`
-   drive the REAL `make-single-arg-callable` over a container-backed
+   Parallel-safe: no `with-redefs`. The fn-id case drives the REAL
+   `make-single-arg-callable` over a container-backed
    storage (a registered `double` base-fn + a composed fn with one free
    arg), asserting the wrap actually executes — instead of stubbing the
    interface fn, which root-rebound a per-execute hot-path var
@@ -97,37 +97,20 @@
 
 
 ;; ============================================================================
-;; `hof-callable` — normalises a `:fn`-type arg into an invokable callable.
+;; `make-single-arg-callable` — a raw fn-id wrapped into an invokable callable.
 ;; ============================================================================
 
-(deftest hof-callable-passes-through-fn
-  (testing "when value is already a fn, returns it unchanged"
+(deftest make-single-arg-callable-passes-through-fn
+  (testing "an already-built callable comes back unchanged"
     (let [f (fn [item] (* 2 item))]
-      (is (identical? f (rt/hof-callable {:func f} :func nil))))))
-
-
-(deftest hof-callable-passes-through-non-uuid
-  (testing "non-UUID, non-IDeref, non-fn values pass through as-is"
-    (is (= :raw-keyword (rt/hof-callable {:func :raw-keyword} :func nil)))
-    (is (= 42 (rt/hof-callable {:func 42} :func nil)))
-    (is (nil? (rt/hof-callable {:func nil} :func nil)))))
-
-
-(deftest hof-callable-ideref-with-fn-value
-  (testing "IDeref wrapping a non-UUID returns the dereffed value as-is"
-    (let [inner (fn [x] (str "echo " x))
-          wrapped (delay inner)]
-      ;; Per `hof-callable`'s :else branch inside the IDeref clause: if
-      ;; the derefed value isn't a UUID, it's returned. Deref-and-return.
-      (is (= inner (rt/hof-callable {:func wrapped} :func nil))))))
+      (is (identical? f (exec/make-single-arg-callable nil f))))))
 
 
 (defn- doubler-ctx
   "Register a `double` base-fn impl, build the base + composed fn rows
    in `storage`, and return `[ctx composed-fn-id]` — a real graph for
-   `hof-callable`'s UUID branch to wrap through the genuine
-   `make-single-arg-callable` (one free arg `x`, so the wrap yields a
-   single-arg callable)."
+   the genuine `make-single-arg-callable` to wrap (one free arg `x`, so
+   the wrap yields a single-arg callable)."
   [storage]
   (exec/register-base-fn! :double (setup/fn-impl [x] (* 2 x)))
   (let [base-fn (setup/create-base-fn! storage "double" :int)
@@ -137,25 +120,15 @@
     [(exec/create-context {:storage storage}) (:id composed)]))
 
 
-(deftest hof-callable-uuid-resolves-via-make-callable
-  (testing "raw UUID arg → wrapped via the REAL make-single-arg-callable"
+(deftest make-single-arg-callable-wraps-a-fn-id
+  (testing "raw fn-id → a callable that executes the composed fn"
     (let [storage (setup/create-test-storage)]
       (try
         (let [[ctx fn-id] (doubler-ctx storage)
-              result (rt/hof-callable {:func fn-id} :func ctx)]
-          (is (fn? result) "the UUID took the wrap path — a callable came back")
+              result (exec/make-single-arg-callable ctx fn-id)]
+          (is (fn? result) "the fn-id took the wrap path — a callable came back")
           (is (= 10 (result 5))
-              "the callable executes the composed fn (item bound to the free arg)"))
-        (finally (sp/close storage))))))
-
-
-(deftest hof-callable-ideref-of-uuid
-  (testing "IDeref-wrapped UUID also routes through make-callable"
-    (let [storage (setup/create-test-storage)]
-      (try
-        (let [[ctx fn-id] (doubler-ctx storage)
-              result (rt/hof-callable {:func (delay fn-id)} :func ctx)]
-          (is (fn? result))
-          (is (= 14 (result 7))
-              "deref-then-wrap — same live execution as the raw-UUID path"))
+              "the callable executes the composed fn (item bound to the free arg)")
+          (is (= fn-id (:graphden.executor/fn-id (meta result)))
+              "the callable carries the wrapped fn's identity"))
         (finally (sp/close storage))))))

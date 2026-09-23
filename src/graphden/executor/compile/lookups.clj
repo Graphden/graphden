@@ -6,7 +6,7 @@
    `compile-runtime` (mapping ext-names back to slots).
 
    `cached-build-lookups` wraps `build-lookups` with a process-wide
-   reference-identity cache (bounded LRU, ~8 entries). Hits when the
+   reference-identity cache (bounded FIFO of 2 entries). Hits when the
    SAME graph map is passed — stable across calls in one ctx between
    mutations. Different per-branch ctxs each get their own entry."
   (:require
@@ -86,6 +86,20 @@
           slot-map))
 
 
+(defn children-by-fn
+  "`{parent-id → #{child-id …}}` — the inverse of every fn's
+   `:parent-ids`. A pure function of `fn-map`; `build-lookups` computes
+   it once as `:children-by-fn` so descendant walks
+   (`renames/inheritance-descendants`) don't rebuild it per call."
+  [fn-map]
+  (reduce-kv (fn [acc id f]
+               (reduce (fn [a pid] (update a pid (fnil conj #{}) id))
+                       acc
+                       (:parent-ids f)))
+             {}
+             fn-map))
+
+
 (defn build-lookups
   "Index entities for fast lookup during compile. Inputs:
      fns                 — vector of fn rows
@@ -110,6 +124,7 @@
      :bindings-by-fn       {fn-id → [binding-row …]}
      :binding-by-fn-slot   {[fn-id slot-id] → binding-row}
      :items-by-binding     {binding-id → [item-row …]}, ordered by :position
+     :children-by-fn       {parent-id → #{child-id …}} (`children-by-fn`)
      :chain-cache          atom {fn-id → chain-vector} — lazy cache for
                             `inheritance-chain*`. Multiple compile-time
                             helpers (`effective-required?`, `effective-binding`,
@@ -164,6 +179,11 @@
        :bindings-by-fn     bindings-by-fn
        :binding-by-fn-slot binding-by-fn-slot
        :items-by-binding   items-by-binding
+       ;; Inverse of `:parent-ids`, once per graph — the descendant
+       ;; walk in `renames/inheritance-descendants` rebuilt it over
+       ;; the whole fn-map per call (measured 2026-09-23 on the
+       ;; first-party corpus: 339 calls, 2.2 s of a 4.3 s compile-all).
+       :children-by-fn     (children-by-fn fn-map)
        ;; Graph-global HOF-marker set — a pure function of `fn-map`, so
        ;; computed ONCE here instead of rescanned per-fn in
        ;; `collect-bindings*` / `collect-env-bindings`. The free-arg
@@ -191,7 +211,8 @@
 
 
 (defonce ^:private cached-build-lookups-state
-  ;; Bounded LRU as a plain vector of `[graph-ref lookups]` pairs.
+  ;; Bounded FIFO as a plain vector of `[graph-ref lookups]` pairs —
+  ;; oldest first; a hit does not promote.
   ;; Reference-identity comparison via `identical?` — two same-CONTENT
   ;; graphs from different ctxs each get their own entry, which is
   ;; correct (chain-caches are per-entry, and an unrelated ctx
@@ -205,7 +226,7 @@
    calls with the same graph map identity — so a sibling caller that
    walks `inheritance-chain*` benefits from prior calls' BFS results.
 
-   Cache miss recomputes. Bounded LRU at
+   Cache miss recomputes. Bounded FIFO at
    `cached-build-lookups-max-size`; the oldest entry is evicted on
    overflow."
   [graph]

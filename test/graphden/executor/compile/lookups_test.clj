@@ -127,3 +127,16 @@
                    (:id fn-b) chain-leaf (support/lookups-for storage)))
               "closest rename (B's :double-src) wins, transitive chain reaches :value"))
         (finally (sp/close storage))))))
+
+
+(deftest children-by-fn-inverts-parent-ids-test
+  ;; Precomputed once per graph so `renames/inheritance-descendants`
+  ;; doesn't rebuild it over the whole fn-map per call.
+  (let [a (random-uuid) b (random-uuid) c (random-uuid) d (random-uuid)
+        graph {:fns [{:id a :parent-ids []}
+                     {:id b :parent-ids [a]}
+                     {:id c :parent-ids [a b]}
+                     {:id d}]
+               :slots [] :fn-slots [] :bindings [] :list-items []}]
+    (is (= {a #{b c} b #{c}} (:children-by-fn (l/build-lookups graph)))
+        "every parent maps to its direct children; MI children appear under each parent")))

@@ -14,7 +14,8 @@
   (:require
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as ctx]
-    [graphden.executor.registry :as registry]))
+    [graphden.executor.registry :as registry]
+    [graphden.executor.registry.core :as reg]))
 
 
 ;; === Execution Context ===
@@ -55,13 +56,6 @@
   (registry/get-base-fn fn-name))
 
 
-(defn clear-base-fns!
-  "Clears all registered base functions from the global registry.
-   Useful for testing."
-  []
-  (registry/clear-base-fns!))
-
-
 (defn get-default-registry
   "Returns the current state of the default global registry as a map.
    Useful for passing to create-context.
@@ -71,13 +65,6 @@
                     :base-fns (get-default-registry)})"
   []
   (registry/get-default-registry))
-
-
-(defn get-base-fn-from-context
-  "Gets a base function from the context's registry by name.
-   Returns nil if not found."
-  [context fn-name]
-  (registry/get-base-fn-from-context context fn-name))
 
 
 ;; === Execution ===
@@ -195,18 +182,10 @@
    O(1) — see the design note above `*rich-types-override*` in
    `registry.core` for why merge-on-read was unworkable.
 
-   `requiring-resolve` defers the registry.core import so this ns
-   stays out of the `interface ← registry.core ← interface` cycle
-   — registry.core requires interface for `:base-fns` plumbing.
-
    Wire in via `(use-fixtures :once exec/with-isolated-rich-types)`."
   [f]
-  (let [override-var (requiring-resolve 'graphden.executor.registry.core/*rich-types-override*)
-        snapshot-fn (requiring-resolve 'graphden.executor.registry.core/snapshot-for-isolation)
-        ;; §4 Risk-2: isolate the per-org rich-types slice together with the
-        ;; global one, or a tenant test's per-org writes leak across NSes.
-        per-org-var (requiring-resolve 'graphden.executor.registry.core/*per-org-rich-override*)
-        per-org-snap (requiring-resolve 'graphden.executor.registry.core/per-org-rich-snapshot-for-isolation)]
-    (with-bindings {override-var (atom (snapshot-fn))
-                    per-org-var (atom (per-org-snap))}
-      (f))))
+  ;; §4 Risk-2: isolate the per-org rich-types slice together with the
+  ;; global one, or a tenant test's per-org writes leak across NSes.
+  (binding [reg/*rich-types-override* (atom (reg/snapshot-for-isolation))
+            reg/*per-org-rich-override* (atom (reg/per-org-rich-snapshot-for-isolation))]
+    (f)))

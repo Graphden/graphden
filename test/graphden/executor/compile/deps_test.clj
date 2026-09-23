@@ -14,7 +14,8 @@
    implementation, not by a per-test wall-clock check."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.executor.compile.deps :as deps]))
+    [graphden.executor.compile.deps :as deps]
+    [graphden.executor.compile.lookups :as l]))
 
 
 ;; Helper: tiny graph builders so the assertions read like prose.
@@ -243,4 +244,23 @@
             s-incr (deps/incremental-update empty-state g [A B])
             s-full (deps/build-deps-state g)]
         (is (= s-full s-incr)
-            "from empty state incrementally adding all fns == full build")))))
+            "from empty state incrementally adding all fns == full build")))
+    (testing "LOOKUPS input — the compiler's build-lookups indexes stand in for the raw graph"
+      ;; delta-recompile! hands its lookups straight to incremental-update
+      ;; (no per-write re-index), so both input shapes must agree.
+      (let [SLOT #uuid "00000000-0000-0000-0000-000000000020"
+            ITEM-B #uuid "00000000-0000-0000-0000-00000000020b"
+            g0 {:fns [{:id A} {:id B :parent-ids [A]}]
+                :bindings [] :list-items [] :slots [] :fn-slots []}
+            g1 {:fns [{:id A} {:id B} {:id C :parent-ids [A]}]
+                :bindings [{:id BIND-B :fn-id B :ref-fn-id C}]
+                :list-items [{:id ITEM-B :binding-id BIND-B :ref-fn-id A :position 0}]
+                :slots [{:id SLOT :name "x" :type-fn-id A}]
+                :fn-slots [{:fn-id C :slot-id SLOT :position 0}]}
+            s0 (deps/build-deps-state g0)]
+        (is (= (deps/incremental-update s0 g1 [B C])
+               (deps/incremental-update s0 (l/build-lookups g1) [B C]))
+            "incremental over lookups == incremental over the raw graph")
+        (is (= (deps/build-deps-state g1)
+               (deps/build-deps-state (l/build-lookups g1)))
+            "full build over lookups == full build over the raw graph")))))

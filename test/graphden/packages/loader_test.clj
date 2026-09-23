@@ -86,10 +86,9 @@
 ;; =============================================================================
 ;;
 ;; The loader no longer pre-derefs args; defbase bodies use `rt/resolve-arg`
-;; which handles IDeref (and thunks) on-demand. `:fn`-type args are
-;; pre-wrapped into callables via `rt/hof-callable` so HOF impls receive a
-;; ready-to-invoke fn regardless of whether the executor is the legacy
-;; queue or the new compile path.
+;; which handles IDeref (and thunks) on-demand. `:fn`-type args arrive
+;; as compile-produced callables (`compile-eager/hof-wrap`), so HOF impls
+;; receive a ready-to-invoke fn.
 
 (deftest fn-def->base-fn-def-test
   (testing "normalizes args, preserves :return-type, passes impl through"

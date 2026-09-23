@@ -69,30 +69,3 @@
       (thunk? v) (v)
       (instance? clojure.lang.IDeref v) @v
       :else v)))
-
-
-(defn hof-callable
-  "Resolve an `:fn`-type arg into an invokable callable for HOF impls.
-
-   - Compile-produced HOF wrapper (already a callable) → return as-is.
-   - Raw fn-id (UUID, or an `IDeref` wrapping one from test code) →
-     wrap via `make-single-arg-callable`.
-
-   `make-single-arg-callable` is resolved lazily to avoid a require-cycle
-   (runtime.clj sits below executor/interface.clj)."
-  [args arg-key ctx]
-  (let [v (get args arg-key)
-        wrap-fn-id (fn [fn-id]
-                     (let [make-callable (requiring-resolve 'graphden.executor.interface/make-single-arg-callable)]
-                       (make-callable ctx fn-id)))]
-    (cond
-      (uuid? v)
-      (wrap-fn-id v)
-
-      (instance? clojure.lang.IDeref v)
-      (let [fn-id @v]
-        (if (uuid? fn-id)
-          (wrap-fn-id fn-id)
-          fn-id))
-
-      :else v)))

@@ -18,6 +18,7 @@
     [graphden.executor.compile.lookups :as l]
     [graphden.executor.compile.renames :as r]
     [graphden.executor.compile.surface :as surface]
+    [graphden.executor.registry.core :as reg]
     [graphden.packages.records.types :as record-types]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.core :as types]
@@ -325,8 +326,10 @@
    now registers EVERY org's type-rows into the process-global alias registry,
    so two orgs' same-named types collide (last-write-wins — a low-severity
    cross-org info leak limited to a validation message; the `:fn` rows
-   themselves stay org-scoped via identity-filtering). Per-org type registries
-   is the follow-up. This merely WIDENS the pre-existing global-type registry."
+   themselves stay org-scoped via identity-filtering). The per-org slice
+   (`per-org-aliases` / `org-alias-snapshot`) is what a TENANT type-check
+   reads, so the collision reaches only global (platform) checks. This merely
+   WIDENS the pre-existing global-type registry."
   [ctx]
   (or (:compile-storage ctx) (:storage ctx)))
 
@@ -398,24 +401,27 @@
    so the next CRUD can compute its delta via
    `deps/incremental-update` instead of a from-scratch sweep.
 
-   Two arities:
-   - `[ctx graph]` — full rebuild (cold start, mass migrations).
-   - `[ctx graph changed-fn-ids]` — delta: re-derive forward-deps
-     only for the changed fns, patch reverse-deps edges. ~ms vs the
-     full sweep's ~65 ms on a 3000-fn graph.
+   `lookups` is the compile's own `build-lookups` output — it carries
+   the indexes the dep walk reads, so neither arity re-indexes the
+   graph. Two arities:
+   - `[ctx lookups]` — full rebuild (cold start, mass migrations):
+     O(fns + bindings + list-items).
+   - `[ctx lookups changed-fn-ids]` — delta: re-derive forward-deps
+     only for the changed fns, patch reverse-deps edges —
+     O(changed × deps-per-fn).
 
    Delta path falls through to a full rebuild when no prior state
    exists (cold start) — the caller doesn't have to special-case
    that path."
-  ([ctx graph] (prime-compile-deps! ctx graph nil))
-  ([ctx graph changed-fn-ids]
+  ([ctx lookups] (prime-compile-deps! ctx lookups nil))
+  ([ctx lookups changed-fn-ids]
    (when-let [holder (:compile-deps ctx)]
      (let [current @holder]
        (if (and (seq changed-fn-ids)
                 (map? current)
                 (contains? current :forward-deps))
-         (reset! holder (deps/incremental-update current graph changed-fn-ids))
-         (reset! holder (deps/build-deps-state graph)))))))
+         (reset! holder (deps/incremental-update current lookups changed-fn-ids))
+         (reset! holder (deps/build-deps-state lookups)))))))
 
 
 (defn- prime-always-fresh!
@@ -424,25 +430,14 @@
    too — the set drives every `:ref` invocation's cache lookup, so it
    must reflect the current graph after a partial recompile."
   [fns]
-  ;; `registry.core` requires `executor.interface`, which requires
-  ;; `executor.context`, which requires this ns — so eagerly
-  ;; requiring it here would cycle. Deferred-resolved + asserted
-  ;; non-nil so a future rename fails loudly instead of silently
-  ;; degrading.
-  (let [type-of-id (or (requiring-resolve
-                         'graphden.executor.registry.core/rich-type-of-id)
-                       (throw (ex-info
-                                "rich-type-of-id missing — namespace rename?"
-                                {:type :compile/missing-symbol
-                                 :symbol 'graphden.executor.registry.core/rich-type-of-id})))
-        fresh-cats #{:time :random}
+  (let [fresh-cats #{:time :random}
         fresh-ids
         (into #{}
               (keep (fn [f]
                       ;; Registry entries key on the fn's IDENTITY — the
                       ;; row id in hand — so same-named fns in different
                       ;; namespaces each get their own freshness verdict.
-                      (let [eff (:effects (type-of-id (:id f)))]
+                      (let [eff (:effects (reg/rich-type-of-id (:id f)))]
                         (when (and eff (some fresh-cats eff))
                           (:id f)))))
               fns)]
@@ -582,21 +577,22 @@
   (if-let [f (impl :rebuild-optimistic!)]
     (f ctx unchanged?)
     (let [_ (counters/count! :registry/rebuild)
-          {:keys [graph compiled]}
+          {:keys [graph lookups compiled]}
           (call-with-compile-permit
             (fn []
               (let [{:keys [graph lookups]}
                     (prep-compile-inputs
                       ctx (read-graph (compile-storage ctx)
                                       (:executor-orgs ctx)))]
-                {:graph graph :compiled (ce/compile-all lookups)})))]
+                {:graph graph :lookups lookups
+                 :compiled (ce/compile-all lookups)})))]
       (call-with-invalidation-lock
         ctx
         (fn []
           (if (unchanged?)
             (do (reset! (:compiled-registry ctx) compiled)
                 (prime-graph-cache! ctx graph)
-                (prime-compile-deps! ctx graph)
+                (prime-compile-deps! ctx lookups)
                 true)
             false))))))
 
@@ -640,7 +636,7 @@
           ;; wait on locks (`call-with-compile-permit`'s contract), so a
           ;; lock-holding waiter here can't deadlock — and the reentrant
           ;; `invalidate-graph-cache! → rebuild!` path keeps working.
-          (let [{:keys [graph compiled]}
+          (let [{:keys [graph lookups compiled]}
                 (call-with-compile-permit
                   (fn []
                     (let [{:keys [graph lookups]}
@@ -649,7 +645,7 @@
                                             (:executor-orgs ctx)))
                           compiled (ce/compile-all lookups)]
                       (log-shadowed-bindings! lookups)
-                      {:graph graph :compiled compiled})))]
+                      {:graph graph :lookups lookups :compiled compiled})))]
             ;; The denominator for `:registry/delta-recompiled-fns`. Without it
             ;; "we recompiled 8000 fns via deltas" has no scale: it could be
             ;; most of the compile work or a rounding error next to the
@@ -657,7 +653,7 @@
             (counters/count! :registry/rebuilt-fns (count compiled))
             (reset! (:compiled-registry ctx) compiled)
             (prime-graph-cache! ctx graph)
-            (prime-compile-deps! ctx graph)
+            (prime-compile-deps! ctx lookups)
             compiled))))))
 
 
@@ -719,16 +715,13 @@
           ;; cron execution on a branch ctx carries no binding) compiled
           ;; the branch against the GLOBAL registry. NOT bound-fn* —
           ;; that would drag per-request bindings like the tenant org
-          ;; into a background rebuild. requiring-resolve, not :require:
-          ;; registry.core → executor.interface → executor.context → this
-          ;; ns would cycle (see `prime-always-fresh!`).
-          (let [rt-var (requiring-resolve
-                         'graphden.executor.registry.core/*rich-types-override*)
-                po-var (requiring-resolve
-                         'graphden.executor.registry.core/*per-org-rich-override*)
-                rt (or (:rich-types-atom ctx) (some-> rt-var deref))
-                po (or (:per-org-rich-atom ctx) (some-> po-var deref))
-                run' (fn [] (with-bindings* {rt-var rt po-var po} run))
+          ;; into a background rebuild.
+          (let [rt (or (:rich-types-atom ctx) reg/*rich-types-override*)
+                po (or (:per-org-rich-atom ctx) reg/*per-org-rich-override*)
+                run' (fn []
+                       (binding [reg/*rich-types-override* rt
+                                 reg/*per-org-rich-override* po]
+                         (run)))
                 t (Thread. ^Runnable run' "registry-stale-revalidate")]
             (Thread/.setDaemon t true)
             (Thread/.start t)))))))
@@ -820,9 +813,10 @@
                    (ce/compile-subset lookups pruned blast))))
         (prime-graph-cache! ctx graph)
         ;; Pass changed-fn-ids so prime-compile-deps takes the
-        ;; incremental delta path instead of rebuilding the full
-        ;; index — sub-ms vs ~65 ms on the production graph.
-        (prime-compile-deps! ctx graph changed-fn-ids)
+        ;; incremental delta path, and the lookups just built for the
+        ;; compile so it walks their indexes instead of re-indexing the
+        ;; whole graph on every write.
+        (prime-compile-deps! ctx lookups changed-fn-ids)
         @holder))))
 
 
@@ -868,7 +862,7 @@
       (when (seq cell)
         (swap! holder (fn [current] (ce/compile-subset lookups (or current {}) cell)))
         (prime-graph-cache-if-current! ctx graph epoch)
-        (prime-compile-deps! ctx graph (vec cell))
+        (prime-compile-deps! ctx lookups (vec cell))
         ;; Record the root so `evict-cell!` can reference-count shared fns.
         (when-let [roots (:loaded-roots ctx)]
           (swap! roots conj root-fn-id)))
@@ -1490,8 +1484,8 @@
   "Invoke `fn-id` via the compiled registry. `named-args` is a `{arg-name
    value}` map using the outermost external arg names (rename-aware).
 
-   HOF impls that deref a `:fn`-type arg end up with a callable (from
-   `rt/hof-callable`) rather than a UUID and hand it back in through
+   HOF impls that deref a `:fn`-type arg end up with a callable (the
+   compiler's `compile-eager/hof-wrap`) rather than a UUID and hand it back in through
    this same entry point. For single-entry args the value is unwrapped
    from the map; for empty or multi-entry args the whole map is passed
    through.
@@ -1600,15 +1594,7 @@
           closure (or (get reg fn-id) (throw-fn-not-found! fn-id))
           lookups (lookups-for-ctx ctx)
           free-names (vec (r/deep-free-ext-names fn-id lookups))]
-      (with-meta
-        (ce/make-shape-callable free-names
-                                (fn [args]
-                                  ;; A traced frame per call, as `hof-wrap`'s
-                                  ;; callables record theirs.
-                                  (ce/traced-callable-call
-                                    fn-id nil
-                                    #(closure (translate-named-args
-                                                fn-id (or args {}) lookups)
-                                              ctx))))
-        ;; Same identity tag `compile-eager/hof-wrap` puts on its callables.
-        {:graphden.executor/fn-id fn-id}))))
+      (ce/tagged-callable fn-id free-names
+                          (fn [args]
+                            (closure (translate-named-args fn-id (or args {}) lookups)
+                                     ctx))))))

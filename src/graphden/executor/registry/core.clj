@@ -21,8 +21,9 @@
   (:require
     [clojure.tools.logging :as log]
     [graphden.executor.composition.core :as composition]
-    [graphden.executor.interface :as exec]
+    [graphden.executor.registry :as base-registry]
     [graphden.packages.records :as records]
+    [graphden.types.check.literals :as literals]
     [graphden.types.core :as types]))
 
 
@@ -45,8 +46,7 @@
   [constraint]
   (fn [args _ctx]
     (let [v (force (:value args))
-          check-fn (requiring-resolve 'graphden.types.check.literals/literal-satisfies-refinement?)
-          result (check-fn v constraint)]
+          result (literals/literal-satisfies-refinement? v constraint)]
       (when (false? result)
         (throw (ex-info (str "refinement constraint failed: "
                              (pr-str constraint) " on value " (pr-str v))
@@ -60,9 +60,8 @@
   "Synthesised impl for a list-type fn-row — pass the items through,
    forcing any thunks the executor placed in `:items`. Hoisted to
    a top-level def so every call site shares one identity (otherwise
-   each `compute-base-fns-map` invocation creates a fresh closure,
-   wobbling the base-fns map's hash across boots and blocking
-   `compile-all-templates`' cross-boot template cache)."
+   each `compute-base-fns-map` invocation creates a fresh closure and
+   two maps of the same base-fns never compare equal)."
   [args _ctx]
   (force (:items args)))
 
@@ -102,9 +101,8 @@
    the user-provided `:impl`.
 
    Refinement + list impls flow through identity-stable cached
-   constructors so the resulting `compute-base-fns-map` output hashes
-   the same on repeated invocations — required for
-   `compile.compile-all-templates`' template cache to hit."
+   constructors so the resulting `compute-base-fns-map` output is
+   equal across repeated invocations."
   [fn-def]
   (cond
     (:type fn-def)   record-type-impl
@@ -140,7 +138,7 @@
    (`exec/get-base-fn` by name from REPL etc.) keep working."
   [defs]
   (doseq [[fn-name impl] (compute-base-fns-map defs)]
-    (exec/register-base-fn! fn-name impl)))
+    (base-registry/register-base-fn! fn-name impl)))
 
 
 ;; =============================================================================
@@ -698,9 +696,8 @@
    Lives HERE (not in `crud.fn-execution.persist`, its original home)
    so both consumers can reach it cycle-free: persist's audit trail
    (`stamp-touched-secret`) requires this ns already, and
-   `compile-eager`'s path-trace capture-time secret skip reaches it via
-   a `requiring-resolve` delay (a direct require would cycle through
-   interface → compile-runtime → compile-eager)."
+   `compile-eager`'s path-trace capture-time secret skip requires it
+   directly."
   ([fn-id] (touches-secret? fn-id nil))
   ([fn-id row-name]
    (when fn-id
@@ -1056,15 +1053,9 @@
   ;; storage and confuse downstream type-checking / runtime narrowing.
   (when-let [refine (:refine fn-def)]
     (let [base (:base refine)
-          constraint (:constraint refine)
-          check-fn (or (requiring-resolve
-                         'graphden.types.check.literals/constraint-compatible-with-base?)
-                       (throw (ex-info
-                                "constraint-compatible-with-base? unresolved — namespace rename?"
-                                {:type :sync/missing-symbol
-                                 :symbol 'graphden.types.check.literals/constraint-compatible-with-base?})))]
+          constraint (:constraint refine)]
       (when (and constraint
-                 (not (check-fn base constraint)))
+                 (not (literals/constraint-compatible-with-base? base constraint)))
         (throw (ex-info (str "Refinement constraint " (pr-str constraint)
                              " uses operators not valid on base " (pr-str base))
                         {:type :invalid-refinement-constraint
@@ -1121,17 +1112,11 @@
 
 
 (defn sync-primitives!
-  "Pre-seed the 14 primitive fn-rows. Should run once at storage init,
+  "Pre-seed the primitive fn-rows (`records.ids/primitive-names`).
+   Should run once at storage init,
    before any base-fns or composed fn-defs sync. Idempotent."
   [storage]
   (composition/sync-primitives! storage))
-
-
-;; =============================================================================
-;; Re-exports kept for downstream compatibility
-;; =============================================================================
-
-(def type->storage-kind types/type->storage-kind)
 
 
 (defn fn-uuid

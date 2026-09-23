@@ -32,11 +32,13 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.compile-eager :as ce]
     [graphden.executor.compile-runtime :as cr]
+    [graphden.executor.compile.renames :as r]
     [graphden.executor.registry.core :as registry]))
 
 
 (def ^:private call-with-cache #'ce/call-with-cache)
 (def ^:private hof-wrap #'ce/hof-wrap)
+(def ^:private env-arg-builder #'ce/env-arg-builder)
 
 
 (def ^:private cache-key
@@ -608,7 +610,7 @@
 
 
 ;; -----------------------------------------------------------------------------
-;; traced-callable-call — a callable handed to a HOF records a frame per call
+;; tagged-callable — a callable handed to a HOF records a frame per call
 ;; -----------------------------------------------------------------------------
 
 (deftest hof-callable-records-a-frame-per-invocation-test
@@ -646,3 +648,34 @@
     (with-redefs [ce/record-path-entry! (fn [& _] (swap! calls inc))]
       (is (= ["a"] (mapv (wrap {} {}) ["a"]))))
     (is (zero? @calls) "no trace bound → the callable runs bare")))
+
+
+(deftest env-binding-hof-callable-records-a-frame-per-invocation-test
+  ;; A `:map` whose `:func` is bound on a deep (renamed) slot compiles
+  ;; through `env-arg-builder`'s HOF case, not `hof-wrap`. Its callable
+  ;; must record the same per-call frames — it used to call the child
+  ;; bare, so the traced tree had no rows for the mapped fn.
+  (let [owner (random-uuid)
+        inner (random-uuid)
+        trace (ce/new-path-trace {:capture-values? true})
+        env-bnd {:kind :ref :ref-id inner :is-fn true :produces-callable? false
+                 :slot-id (random-uuid)}
+        child (fn [fa _ctx] (str "up:" (get fa "item")))]
+    (with-redefs [r/cache-projection-frees (fn [_ _] [])
+                  r/hof-lambda-params (fn [& _] ["item"])
+                  r/build-hof-translation (fn [& _] {})]
+      (let [build (env-arg-builder owner env-bnd {inner child} {:fn-map {}})
+            callable (build (volatile! {}) {})]
+        (is (= {:graphden.executor/fn-id inner
+                :graphden.executor/lambda-params ["item"]}
+               (meta callable))
+            "same identity tag as the root-slot hof-wrap")
+        (with-classes {}
+          (binding [cr/*path-trace* trace
+                    ce/*traced-fn-ids* (atom ce/trace-all)]
+            (is (= ["up:a" "up:b"] (mapv callable ["a" "b"])))))))
+    (is (= [{:fn-id inner :cache-hit? false :value "up:a"}
+            {:fn-id inner :cache-hit? false :value "up:b"}]
+           (mapv #(select-keys (frame-of %) [:fn-id :cache-hit? :value])
+                 (entries trace)))
+        "one fresh frame per call of the env-bound callable")))

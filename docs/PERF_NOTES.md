@@ -121,6 +121,24 @@ And a caution for whoever picks up `registry-test`'s 91 s: its 62 s of
 tests themselves are storage writes and materialisation. Measure before
 optimising; this note exists because the last person didn't.
 
+### 2026-09-23 — two whole-graph sweeps hiding in "per-fn" helpers
+
+Both found by an audit and MEASURED before fixing, on the first-party
+corpus parsed without a DB (`packages/records/parse-module` over all
+seven packages: 9043 fns, 16381 bindings, 5902 list items):
+
+| path | before | after | cause |
+|---|---|---|---|
+| `deps/incremental-update`, 1 changed fn (every CRUD write via `delta-recompile!`) | 13.3 ms | 0.007 ms | began with `index-graph` over the whole graph; now reads the compile's own lookups |
+| `compile-all` (8867 fns) | 4343 ms | 2199 ms | `renames/inheritance-descendants` rebuilt a parent→children index per call — 339 calls, 2206 ms; now `:children-by-fn` in `build-lookups` |
+| `public-free-entries` over every named fn | 5841 ms | 1139 ms | same helper, 758 calls |
+
+Same shape as the `compute-fn-typed-fn-ids` O(n²) that `build-lookups`
+now precomputes as `:fn-typed-fn-ids`: a pure function of `fn-map`
+recomputed per caller. The fix is the same too — compute it once INSIDE
+`build-lookups`, never as a process-global memo (a memo that outlives
+its lookups returns a stale set for a different fn-map).
+
 ## Diagnosis (2026-05) — "no single hot frame, GC pressure smear"
 
 Leaf-time top frames (collapsed) from a 63-second

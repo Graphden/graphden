@@ -23,6 +23,7 @@
     [graphden.executor.compile.bindings :as b]
     [graphden.executor.compile.lookups :as l]
     [graphden.executor.compile.renames :as r]
+    [graphden.executor.registry.core :as reg]
     [graphden.executor.runtime :as rt]
     [graphden.util.counters :as counters]
     [graphden.util.json-size :as json-size]))
@@ -325,15 +326,6 @@
   #{:db :network :io :process :state :raw-sql})
 
 
-(def ^:private rich-type-of-id-fn
-  "Var handle to `registry.core/rich-type-of-id` — resolved lazily to
-   break the same load cycle the other delays in this ns dodge. Read
-   only on the rare cap-eviction path, so its cost is off the hot
-   path. Honours `*rich-types-override*` (parallel-test isolation) via
-   the registry's own view."
-  (delay (requiring-resolve 'graphden.executor.registry.core/rich-type-of-id)))
-
-
 (defn- effectful-ref?
   "True iff `ref-id`'s registry rich-type declares a single-fire
    side-effect (`single-fire-effect-cats`) — the entries cap-eviction
@@ -344,7 +336,7 @@
    only bites a side-effecting fn re-pulled AFTER >cap distinct keys in
    one execute, which no real graph reaches)."
   [ref-id]
-  (boolean (some single-fire-effect-cats (:effects (@rich-type-of-id-fn ref-id)))))
+  (boolean (some single-fire-effect-cats (:effects (reg/rich-type-of-id ref-id)))))
 
 
 (defn- evict-preserving-effectful!
@@ -373,9 +365,8 @@
 ;; consults live elsewhere: `*path-trace*` in `compile-runtime` (per-
 ;; execution opt-in, bound by `crud.fn-execution.persist/run-future`)
 ;; and `*traced-fn-ids*` above (per-fn opt-in). The `requiring-resolve`
-;; delays below break the load cycle the direct `:require`s would
-;; create (compile-eager ← compile-runtime ← interface ← registry.core)
-;; — same precedent as `rich-type-of-id-or-stale-name-fn` /
+;; delay below breaks the load cycle a direct `:require` would create
+;; (compile-runtime requires this ns) — same precedent as
 ;; `make-single-arg-callable-fn` further down this file.
 ;; =============================================================================
 
@@ -386,17 +377,6 @@
    pays one delay-field read + one Var read, nothing else, when
    tracing is off."
   (delay (requiring-resolve 'graphden.executor.compile-runtime/*path-trace*)))
-
-
-(def ^:private trace-capture-class-fn
-  "Var handle to `registry.core/trace-capture-class` — the capture-time
-   frame classification (`:plain` / `:secret-output` / `:secret-input`
-   / `:unknown`) that decides value capture, `{:hidden …}` marking, and
-   ancestor poisoning. FAIL-CLOSED: a frame with no registry entry
-   classifies `:unknown` and is treated like a secret, not captured.
-   Called only on the already-opted-in slow path, never when tracing
-   is off."
-  (delay (requiring-resolve 'graphden.executor.registry.core/trace-capture-class)))
 
 
 (def max-path-trace-entries
@@ -467,7 +447,7 @@
    `{:value v, value-bytes-key n}`; oversize or unserializable →
    `{:value-truncated? true}` (no value — nothing partial leaks).
    NEVER called for secret-touching fns — their branch in
-   `path-traced-fresh-call` records `{:hidden :secret}` without
+   `path-traced-call` records `{:hidden :secret}` without
    reading the value at all (constraint 4)."
   [v]
   (if-some [n (json-size/json-bytes-up-to v max-captured-value-bytes)]
@@ -595,7 +575,7 @@
    fresh one. `ref-name` (the ref's authored row name) is the stale-id
    rescue for the classification."
   [trace ref-id ref-name]
-  (let [cls (@trace-capture-class-fn ref-id ref-name)
+  (let [cls (reg/trace-capture-class ref-id ref-name)
         [n parent] (leaf-frame! trace)
         base (cond-> {:seq n :fn-id ref-id}
                (some? parent) (assoc :parent-seq parent))]
@@ -640,7 +620,7 @@
    whose secret rich-type lives under its current name reads as
    non-secret and its return would be captured (a narrow trace leak)."
   [trace ref-id ref-name thunk]
-  (let [cls (@trace-capture-class-fn ref-id ref-name)]
+  (let [cls (reg/trace-capture-class ref-id ref-name)]
     (if (not= :plain cls)
       ;; Hidden frame (secret-touching, or fail-closed unknown): the
       ;; entry records UP-FRONT — the return value is never read into
@@ -690,58 +670,37 @@
               (record! nil))))))))
 
 
-(defn- path-traced-fresh-call
-  "`path-traced-call` for one `:ref` frame — `(child fa ctx)` is the
-   thunk."
-  [trace ref-id ref-name child fa ctx]
-  (path-traced-call trace ref-id ref-name #(child fa ctx)))
-
-
-(defn traced-root-call
-  "Run `(thunk)` as the OUTERMOST frame of the current path trace — the
-   run's own fn. A trace records `:ref` invocations, so without this
-   frame the fn the reader actually ran was the one card the path view
-   dimmed (\"Execution path: 1 fn highlighted\" with the root greyed
-   out), and the call tree had no top. The root records under exactly
-   the gating a `:ref` frame gets (`active-path-trace`: the var bound
-   AND the fn in the traced set / the trace-all sentinel), through the
-   same classification — a secret-touching root hides like any other
-   frame — so an untraced run pays the nil-check and nothing else.
-   `fn-name` is the stale-id rescue (`nil` is fine for a current id)."
-  [fn-id fn-name thunk]
-  (if-some [trace (active-path-trace fn-id)]
-    (path-traced-call trace fn-id fn-name thunk)
-    (thunk)))
-
-
-(defn traced-callable-call
+(defn traced-call
   "Run `(thunk)` as a traced frame of `fn-id` when tracing applies to it
-   (`active-path-trace`), bare otherwise — the seam for a CALLABLE handed
-   to a higher-order fn (`:map`'s `:func`, `:filter`'s `:pred`, a
-   handler). Such a call goes through no `:ref` edge — the HOF impl
-   invokes the wrapped closure directly — so before this seam a traced
-   `:map` over `:str-upper` lit `:map` and left `:str-upper` plain, and
-   the tree had no rows for the calls that did the work. Frames nest
-   under whatever frame is open when the HOF loops, so three items give
-   three rows under the mapping fn and a `3×` badge on its card. The
-   same gating and classification as a `:ref` frame; a secret-touching
-   callable hides like any other. Reached from `hof-wrap` (compile-time
-   callables) and `compile-runtime/make-single-arg-callable` (raw ids)."
+   (`active-path-trace`: `*path-trace*` bound AND the fn in the traced
+   set / the trace-all sentinel), bare otherwise — so an untraced run
+   pays the nil-check and nothing else. The ONE seam every frame kind
+   passes, under the same gating and classification (a secret-touching
+   frame hides like any other):
+
+   - a fresh `:ref` invocation (`call-with-cache`, thunk `(child fa ctx)`);
+   - the run's own fn as the OUTERMOST frame (`traced-root-call`) — a
+     trace records `:ref` invocations, so without it the fn the reader
+     actually ran was the one card the path view dimmed and the call
+     tree had no top;
+   - a CALLABLE handed to a higher-order fn (`:map`'s `:func`,
+     `:filter`'s `:pred`, a handler — `tagged-callable`). Such a call
+     goes through no `:ref` edge (the HOF impl invokes the closure
+     directly), so its frames nest under whatever frame is open when
+     the HOF loops: three items give three rows under the mapping fn.
+
+   `fn-name` (the authored row name) is threaded to the seam for the
+   stale-id secret rescue (`nil` is fine for a current id)."
   [fn-id fn-name thunk]
   (if-some [trace (active-path-trace fn-id)]
     (path-traced-call trace fn-id fn-name thunk)
     (thunk)))
 
 
-(defn- fresh-call
-  "One fresh `(child fa ctx)` invocation — through the path-trace seam
-   when capture applies to `ref-id`, bare otherwise. `ref-name` (the
-   ref's authored row name) is threaded to the seam for the stale-id
-   secret rescue."
-  [ref-id ref-name child fa ctx]
-  (if-some [trace (active-path-trace ref-id)]
-    (path-traced-fresh-call trace ref-id ref-name child fa ctx)
-    (child fa ctx)))
+(def traced-root-call
+  "`traced-call` for the run's own fn — the name the crud execution
+   paths (`fn-execution.persist` / `.trace`, `debug-capture`) call it by."
+  traced-call)
 
 
 (defn- call-with-cache
@@ -762,7 +721,7 @@
    works. The 5-arity form (no name) delegates with `nil` — used by
    focused tests and any caller without a name in hand.
 
-   Debug P1: every arm passes the path-trace seam (`fresh-call` /
+   Debug P1: every arm passes the path-trace seam (`traced-call` /
    `record-path-hit!`) — zero work beyond one nil-check unless the
    execution bound `*path-trace*` AND `ref-id` is in `*traced-fn-ids*`.
    Entries land in COMPLETION order (a callee's entry precedes its
@@ -772,14 +731,14 @@
   ([ref-id ref-frees ref-name child fa ctx]
    (let [^java.util.HashMap cache (::call-cache ctx)]
      (if (or (nil? cache) (contains? @*always-fresh-fn-ids* ref-id))
-       (fresh-call ref-id ref-name child fa ctx)
+       (traced-call ref-id ref-name #(child fa ctx))
        (let [k [ref-id (fa-key-for-cache ref-frees fa)]
              cached (java.util.HashMap/.get cache k)]
          (if (some? cached)
            (do (when-some [trace (active-path-trace ref-id)]
                  (record-path-hit! trace ref-id ref-name))
                (when-not (identical? cached ::nil) cached))
-           (let [v (fresh-call ref-id ref-name child fa ctx)]
+           (let [v (traced-call ref-id ref-name #(child fa ctx))]
              (when (>= (java.util.HashMap/.size cache) call-cache-max-size)
                (evict-preserving-effectful! cache effectful-ref?))
              (java.util.HashMap/.put cache k (if (nil? v) ::nil v))
@@ -966,6 +925,32 @@
                fa translation)))
 
 
+(defn tagged-callable
+  "The Clojure callable a HOF receives for the wrapped fn `fn-id`:
+   `make-shape-callable` over `invoke` (`lambda-args → value`), with
+   every invocation a traced frame of `fn-id` (`traced-call`) — the HOF
+   impl calls it directly, so no `:ref` seam would ever see it.
+
+   The callable carries the wrapped fn's IDENTITY as metadata
+   (`:graphden.executor/fn-id`) — an adapter that receives a callable
+   (`:http-server`'s handler) can name the fn it runs; the traced
+   listener persists the request as an execution of THAT fn — and the
+   names it takes per call (`:graphden.executor/lambda-params`), so a
+   traced adapter (`:call-traced`) can persist the argument under the
+   callee's own free-arg name.
+
+   The one builder behind all three callable sites: root-binding
+   `hof-wrap`, the env-binding HOF case of `env-arg-builder`, and
+   `compile-runtime/make-single-arg-callable`."
+  [fn-id lambda-params invoke]
+  (with-meta
+    (make-shape-callable lambda-params
+                         (fn [lambda-args]
+                           (traced-call fn-id nil #(invoke lambda-args))))
+    {:graphden.executor/fn-id fn-id
+     :graphden.executor/lambda-params (vec lambda-params)}))
+
+
 (defn- hof-wrap
   "Root-binding HOF: returns a `(fn [fa ctx])` whose call yields the
    callable. The callable closes over `fa` (the wrap-time snapshot of
@@ -979,43 +964,11 @@
    (e.g. `:method-map :handler` rename slot → `:assoc-handler :handler`
    rename slot have different ids) to survive the wrap."
   [child lambda-params translation ref-id]
-  ;; The callable carries the wrapped fn's IDENTITY as metadata
-  ;; (`:graphden.executor/fn-id`): an adapter that receives a callable
-  ;; (`:http-server`'s handler) can name the fn it runs — the traced
-  ;; listener persists the request as an execution of THAT fn.
-  (let [tag {:graphden.executor/fn-id ref-id
-             ;; …and the names it takes per call, so a traced adapter
-             ;; (`:call-traced`) can persist the argument under the
-             ;; callee's own free-arg name.
-             :graphden.executor/lambda-params (vec lambda-params)}]
-    ;; Every invocation of the callable is a traced frame of the wrapped
-    ;; fn (`traced-callable-call`) — the HOF impl calls it directly, so no
-    ;; `:ref` seam would ever see it.
-    (if (empty? translation)
-      (fn [fa ctx]
-        (with-meta
-          (make-shape-callable lambda-params
-                               (fn [lambda-args]
-                                 (traced-callable-call
-                                   ref-id nil
-                                   #(child (if lambda-args (merge fa lambda-args) fa)
-                                           ctx))))
-          tag))
-      (fn [fa ctx]
-        (let [fa* (apply-hof-translation fa translation)]
-          (with-meta
-            (make-shape-callable lambda-params
-                                 (fn [lambda-args]
-                                   (traced-callable-call
-                                     ref-id nil
-                                     #(child (if lambda-args (merge fa* lambda-args) fa*)
-                                             ctx))))
-            tag))))))
-
-
-(def ^:private rich-type-of-id-or-stale-name-fn
-  (delay (requiring-resolve
-           'graphden.executor.registry.core/rich-type-of-id-or-stale-name)))
+  (fn [fa ctx]
+    (let [fa* (apply-hof-translation fa translation)]
+      (tagged-callable ref-id lambda-params
+                       (fn [lambda-args]
+                         (child (if lambda-args (merge fa* lambda-args) fa*) ctx))))))
 
 
 (defn- compile-time-value-root?
@@ -1026,7 +979,7 @@
    persistent atom."
   [fn-id {:keys [fn-map] :as lookups}]
   (let [root (l/root-fn fn-id fn-map lookups)]
-    (boolean (some-> (@rich-type-of-id-or-stale-name-fn (:id root)
+    (boolean (some-> (reg/rich-type-of-id-or-stale-name (:id root)
                                                         (:name root))
                      :compile-time-value?))))
 
@@ -1257,16 +1210,11 @@
         (let [lambda-params (r/hof-lambda-params ref-id slot-id env-bnd fn-id lookups)
               translation (r/build-hof-translation ref-id lambda-params lookups)]
           (fn [fa-ref ctx]
-            (with-meta
-              (make-shape-callable
-                lambda-params
-                (fn [lambda-args]
-                  (let [fa* (apply-hof-translation @fa-ref translation)]
-                    (child (if lambda-args (merge fa* lambda-args) fa*)
-                           ctx))))
-              ;; Same identity tag as the root-slot `hof-wrap`.
-              {:graphden.executor/fn-id ref-id
-               :graphden.executor/lambda-params (vec lambda-params)})))
+            (tagged-callable ref-id lambda-params
+                             (fn [lambda-args]
+                               (let [fa* (apply-hof-translation @fa-ref translation)]
+                                 (child (if lambda-args (merge fa* lambda-args) fa*)
+                                        ctx))))))
 
         ;; Target evaluates to a callable (`:_router` → reitit
         ;; ring-handler). Same as the regular `arg-builder` :ref
@@ -1512,8 +1460,8 @@
 ;; same package set, sibling branches with identical graph views) hit warm
 ;; in < 1 ms.
 ;;
-;; Bounded LRU — 4 entries comfortably cover {dev system + a couple of
-;; branches + a test bootstrap} without holding stale registries forever.
+;; Bounded FIFO of `compile-all-cache-max-size` entries (see
+;; `compile-all-cache` below for why FIFO, not LRU).
 
 ;; 2 (was 4): each cached registry holds ~3000 closure references,
 ;; and each closure captures references to its parent lookups
@@ -1559,13 +1507,6 @@
   (atom []))
 
 
-(def ^:private effective-rich-types-fn
-  ;; requiring-resolve — same cycle-avoidance as
-  ;; `rich-type-of-id-or-stale-name-fn` above.
-  (delay (requiring-resolve
-           'graphden.executor.registry.core/effective-rich-types)))
-
-
 (defn- compile-all-cache-key
   "Hash of (graph shape × base-fn name set × ambient rich-types).
    Same key ⇒ same compile output. Picks the same per-entity field set
@@ -1589,7 +1530,7 @@
          (set (mapcat val bindings-by-fn))
          (set (mapcat val items-by-binding))
          (set (keys base-fns))
-         (@effective-rich-types-fn)]))
+         (reg/effective-rich-types)]))
 
 
 (defn compile-all
@@ -1599,7 +1540,7 @@
 
    `lookups` MUST already carry `:base-fns` (the impl registry).
 
-   Cached on a process-wide bounded LRU keyed by graph-shape +
+   Cached on a process-wide bounded FIFO keyed by graph-shape +
    base-fn name set — sister callers (test ns's that bootstrap the
    same package set, sibling branches with identical graph views)
    skip the compile pass entirely and just retrieve the

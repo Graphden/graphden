@@ -13,7 +13,8 @@
   (:require
     [clojure.set :as set]
     [graphden.executor.compile.bindings :as b]
-    [graphden.executor.compile.lookups :as l]))
+    [graphden.executor.compile.lookups :as l]
+    [graphden.executor.registry.core :as reg]))
 
 
 (defn chain-source-slot-ids
@@ -807,15 +808,11 @@
   "Set of fn-ids whose inheritance chain reaches `f-fn-id` — F itself
    plus every fn that has F (transitively) as a parent. These are the
    fns whose runtime free-args propagate back into F's body when they
-   are invoked through F's chain."
-  [f-fn-id {:keys [fn-map]}]
-  (let [parent->children (reduce (fn [acc [id f]]
-                                   (reduce (fn [a pid]
-                                             (update a pid (fnil conj #{}) id))
-                                           acc
-                                           (or (:parent-ids f) [])))
-                                 {}
-                                 fn-map)
+   are invoked through F's chain. Reads the precomputed
+   `:children-by-fn` index (`l/build-lookups`); hand-built lookups
+   without it get the index computed on the fly."
+  [f-fn-id {:keys [fn-map children-by-fn]}]
+  (let [parent->children (or children-by-fn (l/children-by-fn fn-map))
         out (atom #{f-fn-id})]
     (letfn [(walk
               [fid]
@@ -866,15 +863,6 @@
       (set (keys (or (second constraint) {}))))))
 
 
-(def ^:private rich-type-of-id-fn
-  (delay (requiring-resolve 'graphden.executor.registry.core/rich-type-of-id)))
-
-
-(def ^:private rich-type-of-id-or-stale-name-fn
-  (delay (requiring-resolve
-           'graphden.executor.registry.core/rich-type-of-id-or-stale-name)))
-
-
 (defn- declared-lambda-params
   "The fn-def's AUTHORED `:lambda-params` (ordered vector of its own
    free-arg names), from the rich-types registry entry — or nil when
@@ -893,16 +881,16 @@
                         (some->> (:lambda-params
                                    (get (:fn-map lookups) r-fn-id))
                                  (mapv keyword))
-                        (:lambda-params (@rich-type-of-id-fn r-fn-id))
+                        (:lambda-params (reg/rich-type-of-id r-fn-id))
                         ;; LEGACY-ROW rescue — delegated to the shared
                         ;; registry helper (audit-3: the same rescue now
                         ;; also covers produces-callable? /
                         ;; lazy-seq-args / compile-time-value?, all
                         ;; previously silent under stale identities).
                         (:lambda-params
-                          (@rich-type-of-id-or-stale-name-fn
-                           r-fn-id
-                           (:name (get (:fn-map lookups) r-fn-id)))))]
+                          (reg/rich-type-of-id-or-stale-name
+                            r-fn-id
+                            (:name (get (:fn-map lookups) r-fn-id)))))]
     (let [frees (set (deep-free-ext-names r-fn-id lookups))
           ;; The author may declare a param under the PUBLIC
           ;; (closest-chain-rename) name the editor shows

@@ -584,10 +584,11 @@
 ;; -----------------------------------------------------------------------------
 
 
-(defn- ref-targets
+(defn ref-targets
   "Yield the list of fn-name keywords this binding directly references —
    bare keyword, `{:ref name}`, or vector-of-items shapes. Used by the
-   ref-effects union and the transitive free-args lift."
+   ref-effects union, the transitive free-args lift, and the narrowing
+   passes' ref-tree walk (`check.narrowing`)."
   [b-form]
   (cond
     (keyword? b-form) [b-form]
@@ -1964,11 +1965,11 @@
   "Effects are tainted: parent ∪ every ref-binding's effects. Once
    any link in the composition reads/writes I/O the tag flows into
    the fn-def — caching / parallelism / docs all read this single
-   source of truth."
-  [args parent-info]
-  (let [ref-effects (reduce into #{} (vals (compute-per-arg-effects
-                                             args (:args parent-info))))]
-    (into ref-effects (or (:effects parent-info) #{}))))
+   source of truth. `arg-effects` is `compute-per-arg-effects`' output,
+   computed once per `check-fn-def!` and shared with the record step."
+  [arg-effects parent-info]
+  (into (reduce into #{} (vals arg-effects))
+        (or (:effects parent-info) #{})))
 
 
 (defn- compute-call-time-effects
@@ -1988,12 +1989,12 @@
    value at construction time is still a pure predicate at call time.
 
    Free args are the arg-NAMES that survive the lift — bound args
-   are everything else under `(:args fn-def)`."
-  [args parent-info free-arg-names]
-  (let [free-keys (set free-arg-names)
-        per-arg (compute-per-arg-effects args (:args parent-info))
-        call-site-arg-effects (reduce into #{}
-                                      (vals (select-keys per-arg free-keys)))
+   are everything else under `(:args fn-def)`. `arg-effects` is
+   `compute-per-arg-effects`' output (see `compute-effects`)."
+  [arg-effects parent-info free-arg-names]
+  (let [call-site-arg-effects (reduce into #{}
+                                      (vals (select-keys arg-effects
+                                                         (set free-arg-names))))
         parent-call-time (or (:call-time-effects parent-info)
                              (:effects parent-info)
                              #{})]
@@ -2065,13 +2066,15 @@
    `:nav-types` — `{slot-name → navigable-structure}` for sequence
    slots whose items index into a known shape (`:update-in`'s `:path`
    → `:m`'s record). The editor walks this against the live path to
-   type each segment position and gate the `+` append affordance."
+   type each segment position and gate the `+` append affordance.
+
+   The effects arrive as `{:effects :arg-effects}` — computed once by
+   `check-fn-def!` (`compute-per-arg-effects` → `compute-effects`)."
   [fn-name fn-def primary-parent parent-info free-args
-   computed-return effects own-resolved slot-types nav-types drift]
+   computed-return {:keys [effects arg-effects]} own-resolved slot-types nav-types drift]
   (let [expected (some-> fn-def :expects-effects set)
         resolved (merge (:resolved-bindings parent-info {}) own-resolved)
-        arg-effects (compute-per-arg-effects (:args fn-def) (:args parent-info))
-        call-time-effects (compute-call-time-effects (:args fn-def)
+        call-time-effects (compute-call-time-effects arg-effects
                                                      parent-info
                                                      (keys free-args))]
     (registry/record-rich-types-raw!
@@ -2541,14 +2544,20 @@
                                                      effective-parent static-ret)
                 recorded-return (enforce-declared-return! fn-name fn-def computed-return)
                 drift (return-type-drift fn-def computed-return)
-                effects (compute-effects (:args fn-def) parent-info)]
+                ;; Once per fn-def: both the total effects and the
+                ;; record step's per-arg / call-time split read it.
+                arg-effects (compute-per-arg-effects (:args fn-def)
+                                                     (:args parent-info))
+                effects (compute-effects arg-effects parent-info)]
             (when drift (log-return-type-drift! fn-name fn-def drift))
             (when-let [declared (some-> fn-def :effects set)]
               (when (not= declared effects)
                 (log-effects-drift! fn-name fn-def declared effects)))
             (check-effects-policy! fn-name fn-def effects)
             (record-result! fn-name fn-def primary-parent parent-info
-                            free-args recorded-return effects own-bindings
+                            free-args recorded-return
+                            {:effects effects :arg-effects arg-effects}
+                            own-bindings
                             slot-types nav-types drift)
             subst))))))
 
@@ -2586,8 +2595,8 @@
 ;; Each name here is a piece of known debt — runtime is unaffected,
 ;; the editor's effect/return strips for these names may be missing.
 ;;
-;; The sync-time check in `packages.sync/sync-fn-entities-from-packages!`
-;; gates on this set:
+;; The sync-time check (`packages.sync/run-type-check-sweep!`, via
+;; `assert-sweep-failures-match-allowlist!`) gates on this set:
 ;;   - Any failure NOT in this set is a REGRESSION — throws hard.
 ;;   - Any name in this set that's NO LONGER failing is STALE — also
 ;;     throws hard, to keep the ledger honest.
@@ -2603,13 +2612,10 @@
 ;; α' Pass-2/3 caller-context propagation landed alongside the
 ;; per-use-site anon naming fix in `packages/records/parse.clj`.
 ;;
-;; The 11 entries below are nullability gaps that α'-driven
-;; tighter return types now surface — each binding passes
-;; `[:union :null T]` into a slot expecting `T`, where the runtime
-;; is guarded by an upstream nil-check the type-checker doesn't
-;; yet see through. Closing them needs Phase #170 control-flow
-;; narrowing through `:if`/`:cond` guards OR per-fn-def
-;; `:assert-some` annotations.
+;; The 11 nullability-gap entries that followed (a binding passing
+;; `[:union :null T]` into a slot expecting `T`, guarded at runtime by
+;; an upstream nil-check the checker couldn't see) closed too — see
+;; the note inside the set: the set is EMPTY.
 (def allowed-type-check-failures
   ;; Closed — sweep down to 0 after applying author
   ;; type-assertions for runtime-guaranteed nullability narrowings
@@ -2635,7 +2641,7 @@
    - Any allowlisted name that's NO LONGER failing — STALE allowlist
      (architectural gap closed, ledger needs trimming).
 
-   Called by `system.core/sync-fn-entities-from-packages!` after the
+   Called by `packages.sync/run-type-check-sweep!` after the
    sweep; exposed as a separate fn so unit tests can exercise the
    logic without bootstrapping integrant. The optional `detail` map
    `{name → failure message}` is embedded in the regression error so

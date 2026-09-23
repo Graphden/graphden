@@ -181,7 +181,7 @@
                          :b :third-fn   ; fn ref
                          :c 42}}        ; literal (ignored)
           fn-names #{:other-fn :third-fn}
-          deps (#'deps/extract-dependencies fn-def fn-names)]
+          deps (#'deps/extract-dependencies fn-def fn-names (constantly false))]
       (is (= #{:other-fn :third-fn} deps))))
 
   (testing "ignores refs to fns not in the set"
@@ -189,12 +189,12 @@
                   :parent :base
                   :args {:a :external-fn}}  ; not in fn-names set
           fn-names #{:other-fn}
-          deps (#'deps/extract-dependencies fn-def fn-names)]
+          deps (#'deps/extract-dependencies fn-def fn-names (constantly false))]
       (is (empty? deps))))
 
   (testing "handles empty args"
     (let [fn-def {:name :my-fn :parent :base}
-          deps (#'deps/extract-dependencies fn-def #{})]
+          deps (#'deps/extract-dependencies fn-def #{} (constantly false))]
       (is (empty? deps)))))
 
 
@@ -205,7 +205,7 @@
     (let [fn-defs [{:name :a :parent :base :args {:x :b}}
                    {:name :b :parent :base :args {:x :c}}
                    {:name :c :parent :base}]
-          graph (#'deps/build-dependency-graph fn-defs)]
+          graph (#'deps/build-dependency-graph fn-defs (constantly false))]
       (is (= {:a #{:b} :b #{:c} :c #{}} graph)))))
 
 
@@ -290,7 +290,7 @@
                   :parent :parent-fn  ; parent is another fn-def
                   :args {:a 1}}
           fn-names #{:parent-fn :child-fn}
-          deps (#'deps/extract-dependencies fn-def fn-names)]
+          deps (#'deps/extract-dependencies fn-def fn-names (constantly false))]
       (is (contains? deps :parent-fn)))))
 
 

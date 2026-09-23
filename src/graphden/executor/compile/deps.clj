@@ -53,14 +53,16 @@
    blasts walk the same index — without it a test reaching a changed
    type-row only through a slot's declared type never re-ran.
 
-   `indexed-graph` must carry pre-built `:bindings-by-fn` and
-   `:items-by-binding` indexes — call `index-graph` once before
-   looping over fns. The old shape that took raw `bindings` /
-   `list-items` collections did an O(N) filter per call; on a
+   `indexes` is LOOKUPS-shaped — `:fn-map`, `:slot-map`,
+   `:fn-slots-by-fn`, `:bindings-by-fn`, `:items-by-binding` — so the
+   compiler's own `build-lookups` output serves as-is (the delta path
+   already holds it); `index-graph` builds the same keys from a raw
+   graph for the cold callers. The old shape that took raw `bindings`
+   / `list-items` collections did an O(N) filter per call; on a
    3000-fn graph that turned `build-reverse-deps` into a
    billion-operation rebuild on every CRUD write."
-  [fn-id {:keys [fns bindings-by-fn items-by-binding slots-by-id fn-slots-by-fn]}]
-  (let [f (get fns fn-id)
+  [fn-id {:keys [fn-map bindings-by-fn items-by-binding slot-map fn-slots-by-fn]}]
+  (let [f (get fn-map fn-id)
         bs (get bindings-by-fn fn-id [])
         items (mapcat #(get items-by-binding (:id %) []) bs)]
     (into #{}
@@ -68,7 +70,7 @@
           [(:parent-ids f)
            ;; The declared type of each exposed slot — a type-row edit
            ;; recompiles the fns whose slots carry it.
-           (keep (fn [fs] (some-> (get slots-by-id (:slot-id fs)) :type-fn-id))
+           (keep (fn [fs] (some-> (get slot-map (:slot-id fs)) :type-fn-id))
                  (get fn-slots-by-fn fn-id []))
            (keep f [:base-fn-id :element-fn-id :return-type-fn-id])
            ;; A ref into a `:fn-ref` slot is an IDENTITY edge — the
@@ -76,7 +78,7 @@
            ;; editing the target must not invalidate this fn and a
            ;; fleet cell's closure needn't carry it.
            (keep (fn [b]
-                   (when-not (ids/identity-edge? b (get slots-by-id (:slot-id b)))
+                   (when-not (ids/identity-edge? b (get slot-map (:slot-id b)))
                      (:ref-fn-id b)))
                  bs)
            (keep :type-override-fn-id bs)
@@ -92,32 +94,41 @@
 
 
 (defn index-graph
-  "Pre-build the indexes `forward-deps-of` needs. Pulled out so
-   `build-reverse-deps` does the indexing ONCE per call instead of
-   leaving callers to remember.
+  "Build, from a raw graph, the lookups-shaped indexes `forward-deps-of`
+   reads — the same keys `compile.lookups/build-lookups` produces, so a
+   caller already holding lookups passes them straight through and only
+   the cold paths (no lookups in hand) pay this O(graph) sweep.
 
-   Accepts either a `fns`-collection map (raw `read-graph` shape) or
-   one whose `:fns` is already a `{fn-id → fn}` map — the indexes
-   end up identical either way."
-  [{:keys [fns slots fn-slots bindings list-items] :as graph}]
-  (let [fns-map (if (map? fns) fns (into {} (map (juxt :id identity)) fns))]
-    (assoc graph
-           :fns fns-map
-           :slots-by-id (if (map? slots) slots (into {} (map (juxt :id identity)) slots))
-           :fn-slots-by-fn (group-by :fn-id fn-slots)
-           :bindings-by-fn (index-bindings-by-fn bindings)
-           :items-by-binding (index-items-by-binding list-items))))
+   Accepts `:fns` / `:slots` as collections (raw `read-graph` shape) or
+   as `{id → row}` maps — the indexes end up identical either way."
+  [{:keys [fns slots fn-slots bindings list-items]}]
+  {:fn-map (if (map? fns) fns (into {} (map (juxt :id identity)) fns))
+   :slot-map (if (map? slots) slots (into {} (map (juxt :id identity)) slots))
+   :fn-slots-by-fn (group-by :fn-id fn-slots)
+   :bindings-by-fn (index-bindings-by-fn bindings)
+   :items-by-binding (index-items-by-binding list-items)})
+
+
+(defn- ->indexes
+  "`graph-or-indexes` as the indexes `forward-deps-of` reads: a map
+   already carrying `:fn-map` (lookups, or `index-graph`'s output) is
+   used as-is; a raw graph is indexed once."
+  [graph-or-indexes]
+  (if (contains? graph-or-indexes :fn-map)
+    graph-or-indexes
+    (index-graph graph-or-indexes)))
 
 
 (defn build-reverse-deps
   "Produce `{fn-id → #{ids that depend on it}}` over the whole
-   graph. Inverts `forward-deps-of` once per full rebuild.
+   graph (raw, or already indexed — see `->indexes`). Inverts
+   `forward-deps-of` once per full rebuild.
 
-   O(fns + bindings + list-items) after `index-graph` is called
-   once at the top — was O(fns × bindings) before pre-indexing."
+   O(fns + bindings + list-items) — was O(fns × bindings) before
+   pre-indexing."
   [graph]
-  (let [indexed (index-graph graph)
-        fns-map (:fns indexed)]
+  (let [indexed (->indexes graph)
+        fns-map (:fn-map indexed)]
     (reduce
       (fn [acc f]
         (reduce (fn [a dep] (update a dep (fnil conj #{}) (:id f)))
@@ -134,10 +145,14 @@
    subsequent incremental updates.
 
    `{:forward-deps {fn-id → #{ids-it-depends-on}}
-     :reverse-deps {fn-id → #{ids-that-depend-on-it}}}`"
+     :reverse-deps {fn-id → #{ids-that-depend-on-it}}}`
+
+   `graph` is raw or already indexed (`->indexes`) — the compiler
+   passes its lookups, so a full rebuild doesn't re-index the graph it
+   just built lookups from."
   [graph]
-  (let [indexed (index-graph graph)
-        fns-map (:fns indexed)
+  (let [indexed (->indexes graph)
+        fns-map (:fn-map indexed)
         forward (reduce (fn [acc f]
                           (assoc acc (:id f)
                                  (forward-deps-of (:id f) indexed)))
@@ -159,16 +174,18 @@
    the diff against its stored forward-deps to add / drop edges in
    reverse-deps. Returns the new state.
 
-   Cost is O(changed × avg-deps-per-fn) — sub-millisecond per CRUD
-   on typical graphs, vs `build-deps-state`'s O(fns + bindings +
-   list-items) full sweep on every write.
+   Cost is O(changed × avg-deps-per-fn) GIVEN indexes — which is why
+   `delta-recompile!` passes the lookups it already built for the
+   compile. Handed a RAW graph it first pays `index-graph`'s
+   O(fns + bindings + list-items) sweep, the same order as a full
+   `build-deps-state`.
 
-   Deleted fns are detected by absence from `graph`'s `fns`; their
-   forward-deps entry is dropped and their reverse-deps edges are
+   Deleted fns are detected by absence from the indexes' `:fn-map`;
+   their forward-deps entry is dropped and their reverse-deps edges are
    removed. Created / updated fns recompute fwd-deps cleanly."
   [state graph changed-fn-ids]
-  (let [indexed (index-graph graph)
-        fns-map (:fns indexed)]
+  (let [indexed (->indexes graph)
+        fns-map (:fn-map indexed)]
     (reduce
       (fn [{:keys [forward-deps reverse-deps]} fid]
         (let [old-fwd (get forward-deps fid #{})

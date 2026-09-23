@@ -36,7 +36,7 @@
 
    ## Order Does Not Matter
 
-   Definitions are topologically sorted before sync (`deps/topo-sort`)
+   Definitions are topologically sorted before sync (`deps/topological-sort`)
    — file order is free; cycles are rejected."
   (:require
     [graphden.executor.composition.core :as core]))

@@ -41,6 +41,7 @@
     [graphden.types.check.narrowing :as types-narrowing]
     [graphden.types.core :as types]
     [graphden.types.diagnostics :as diag]
+    [graphden.util.ns-path :as ns-path]
     [graphden.versioning.identity-repair :as idrepair]
     [graphden.versioning.storage.core :as vs]
     [graphden.web.route-shape :as route-shape]))
@@ -442,16 +443,10 @@
 
 
 (defn- ns-path-index
-  "`{ns-id → dotted-path}` resolver over storage's `:ns` rows (memoised
-   walk up `:parent-id`)."
+  "`{ns-id → dotted-path}` over storage's `:ns` rows (one read; a map, so
+   it also calls as a resolver)."
   [storage]
-  (let [ns-by-id (into {} (map (juxt :id identity)) (sp/query-entities storage :ns {}))]
-    (fn ns-path
-      [nsid]
-      (when-let [r (ns-by-id nsid)]
-        (if-let [p (:parent-id r)]
-          (str (ns-path p) "." (:name r))
-          (:name r))))))
+  (ns-path/path-map (sp/query-entities storage :ns {})))
 
 
 (defn drop-orphan-anon-defs
@@ -803,14 +798,7 @@
                            (filter uuid?)
                            (vals (compute-all-fn-name-ids packages)))
         synced-by-name (group-by :name (filter :name synced-rows))
-        ns-rows (sp/query-entities base :ns {})
-        ns-by-id (into {} (map (juxt :id identity)) ns-rows)
-        ns-path (fn ns-path
-                  [nsid]
-                  (when-let [r (ns-by-id nsid)]
-                    (if-let [p (:parent-id r)]
-                      (str (ns-path p) "." (:name r))
-                      (:name r))))
+        ns-path (ns-path-index base)
         leftovers
         (for [row (sp/query-entities base :fn {})
               :when (and (:name row)

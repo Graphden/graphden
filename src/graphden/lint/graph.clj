@@ -24,6 +24,7 @@
     [graphden.lint.core :as lint]
     [graphden.packages.owned :as owned]
     [graphden.storage.protocol.core :as sp]
+    [graphden.util.ns-path :as ns-path]
     [graphden.versioning.storage.core :as vcore]))
 
 
@@ -32,16 +33,14 @@
 ;; -----------------------------------------------------------------------------
 
 (defn ns-paths
-  "Map ns-id → dotted path (`\"app.editor\"`) over `:ns` rows."
+  "Map ns-id → dotted path (`\"app.editor\"`) over `:ns` rows. A
+   dangling parent is spelled `?` DELIBERATELY: the path becomes a
+   fn-def's `:namespace` and every qualified ref to it, and a partial
+   path (`utils` under a missing `my.app`) could coincide with a real
+   namespace — the linter would then resolve refs into, and compare
+   definitions against, the wrong fns. `?` can never name a real one."
   [ns-rows]
-  (let [by-id (into {} (map (juxt :id identity)) ns-rows)
-        path (fn path
-               [id]
-               (when-let [r (get by-id id)]
-                 (if-let [p (:parent-id r)]
-                   (str (or (path p) "?") "." (:name r))
-                   (:name r))))]
-    (into {} (map (fn [r] [(:id r) (path (:id r))])) ns-rows)))
+  (ns-path/path-map ns-rows "?"))
 
 
 (defn- composed-row?

@@ -71,6 +71,7 @@
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.core :as types]
+    [graphden.util.ns-path :as ns-path]
     [graphden.versioning.storage.core :as vs])
   (:import
     (graphden.versioning.storage.core
@@ -604,15 +605,7 @@
   "Map every `:ns` row id → its dotted path (`core.arithmetic`), walking
    `parent-id` to the root. Inverts `loader/sync-namespaces!`."
   [storage]
-  (let [rows (sp/query-entities storage :ns {})
-        by-id (into {} (map (juxt :id identity)) rows)
-        path (fn path
-               [id]
-               (when-let [r (get by-id id)]
-                 (if-let [p (:parent-id r)]
-                   (str (path p) "." (:name r))
-                   (:name r))))]
-    (into {} (map (fn [r] [(:id r) (path (:id r))])) rows)))
+  (ns-path/path-map (sp/query-entities storage :ns {})))
 
 
 (defn read-graph

@@ -13,6 +13,7 @@
   (:require
     [clojure.string :as str]
     [graphden.storage.protocol.core :as sp]
+    [graphden.util.ns-path :as ns-path]
     [graphden.versioning.branch-local :as bl]
     [graphden.versioning.storage.merge :as mrg]))
 
@@ -190,14 +191,7 @@
 (defn- ns-path-fn
   "A `namespace-id → \"a.b.c\"` resolver over one read of the ns table."
   [base-storage]
-  (let [ns-by-id (into {} (map (juxt :id identity))
-                       (sp/query-entities base-storage :ns {}))]
-    (fn ns-path
-      [nsid]
-      (when-let [r (get ns-by-id nsid)]
-        (if-let [p (:parent-id r)]
-          (str (ns-path p) "." (:name r))
-          (:name r))))))
+  (ns-path/path-map (sp/query-entities base-storage :ns {})))
 
 
 (defn diff-branches-view

@@ -32,6 +32,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.system.route-collection :as rc]
     [graphden.util.counters :as counters]
+    [graphden.util.ns-path :as ns-path]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.merge :as vmerge]
     [graphden.versioning.storage.resolution :as vres]))
@@ -440,15 +441,7 @@
    already re-records them at boot."
   [storage]
   (let [fn-rows (sp/query-entities storage :fn {})
-        ns-by-id (into {}
-                       (map (juxt :id identity))
-                       (sp/query-entities storage :ns {}))
-        ns-path (fn ns-path
-                  [nsid]
-                  (when-let [r (ns-by-id nsid)]
-                    (if-let [p (:parent-id r)]
-                      (str (ns-path p) "." (:name r))
-                      (:name r))))]
+        ns-path (ns-path/path-map (sp/query-entities storage :ns {}))]
     (into []
           (keep (fn [row]
                   (when (and (:name row)

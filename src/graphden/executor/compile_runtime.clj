@@ -398,24 +398,27 @@
    so the next CRUD can compute its delta via
    `deps/incremental-update` instead of a from-scratch sweep.
 
-   Two arities:
-   - `[ctx graph]` — full rebuild (cold start, mass migrations).
-   - `[ctx graph changed-fn-ids]` — delta: re-derive forward-deps
-     only for the changed fns, patch reverse-deps edges. ~ms vs the
-     full sweep's ~65 ms on a 3000-fn graph.
+   `lookups` is the compile's own `build-lookups` output — it carries
+   the indexes the dep walk reads, so neither arity re-indexes the
+   graph. Two arities:
+   - `[ctx lookups]` — full rebuild (cold start, mass migrations):
+     O(fns + bindings + list-items).
+   - `[ctx lookups changed-fn-ids]` — delta: re-derive forward-deps
+     only for the changed fns, patch reverse-deps edges —
+     O(changed × deps-per-fn).
 
    Delta path falls through to a full rebuild when no prior state
    exists (cold start) — the caller doesn't have to special-case
    that path."
-  ([ctx graph] (prime-compile-deps! ctx graph nil))
-  ([ctx graph changed-fn-ids]
+  ([ctx lookups] (prime-compile-deps! ctx lookups nil))
+  ([ctx lookups changed-fn-ids]
    (when-let [holder (:compile-deps ctx)]
      (let [current @holder]
        (if (and (seq changed-fn-ids)
                 (map? current)
                 (contains? current :forward-deps))
-         (reset! holder (deps/incremental-update current graph changed-fn-ids))
-         (reset! holder (deps/build-deps-state graph)))))))
+         (reset! holder (deps/incremental-update current lookups changed-fn-ids))
+         (reset! holder (deps/build-deps-state lookups)))))))
 
 
 (defn- prime-always-fresh!
@@ -582,21 +585,22 @@
   (if-let [f (impl :rebuild-optimistic!)]
     (f ctx unchanged?)
     (let [_ (counters/count! :registry/rebuild)
-          {:keys [graph compiled]}
+          {:keys [graph lookups compiled]}
           (call-with-compile-permit
             (fn []
               (let [{:keys [graph lookups]}
                     (prep-compile-inputs
                       ctx (read-graph (compile-storage ctx)
                                       (:executor-orgs ctx)))]
-                {:graph graph :compiled (ce/compile-all lookups)})))]
+                {:graph graph :lookups lookups
+                 :compiled (ce/compile-all lookups)})))]
       (call-with-invalidation-lock
         ctx
         (fn []
           (if (unchanged?)
             (do (reset! (:compiled-registry ctx) compiled)
                 (prime-graph-cache! ctx graph)
-                (prime-compile-deps! ctx graph)
+                (prime-compile-deps! ctx lookups)
                 true)
             false))))))
 
@@ -640,7 +644,7 @@
           ;; wait on locks (`call-with-compile-permit`'s contract), so a
           ;; lock-holding waiter here can't deadlock — and the reentrant
           ;; `invalidate-graph-cache! → rebuild!` path keeps working.
-          (let [{:keys [graph compiled]}
+          (let [{:keys [graph lookups compiled]}
                 (call-with-compile-permit
                   (fn []
                     (let [{:keys [graph lookups]}
@@ -649,7 +653,7 @@
                                             (:executor-orgs ctx)))
                           compiled (ce/compile-all lookups)]
                       (log-shadowed-bindings! lookups)
-                      {:graph graph :compiled compiled})))]
+                      {:graph graph :lookups lookups :compiled compiled})))]
             ;; The denominator for `:registry/delta-recompiled-fns`. Without it
             ;; "we recompiled 8000 fns via deltas" has no scale: it could be
             ;; most of the compile work or a rounding error next to the
@@ -657,7 +661,7 @@
             (counters/count! :registry/rebuilt-fns (count compiled))
             (reset! (:compiled-registry ctx) compiled)
             (prime-graph-cache! ctx graph)
-            (prime-compile-deps! ctx graph)
+            (prime-compile-deps! ctx lookups)
             compiled))))))
 
 
@@ -820,9 +824,10 @@
                    (ce/compile-subset lookups pruned blast))))
         (prime-graph-cache! ctx graph)
         ;; Pass changed-fn-ids so prime-compile-deps takes the
-        ;; incremental delta path instead of rebuilding the full
-        ;; index — sub-ms vs ~65 ms on the production graph.
-        (prime-compile-deps! ctx graph changed-fn-ids)
+        ;; incremental delta path, and the lookups just built for the
+        ;; compile so it walks their indexes instead of re-indexing the
+        ;; whole graph on every write.
+        (prime-compile-deps! ctx lookups changed-fn-ids)
         @holder))))
 
 
@@ -868,7 +873,7 @@
       (when (seq cell)
         (swap! holder (fn [current] (ce/compile-subset lookups (or current {}) cell)))
         (prime-graph-cache-if-current! ctx graph epoch)
-        (prime-compile-deps! ctx graph (vec cell))
+        (prime-compile-deps! ctx lookups (vec cell))
         ;; Record the root so `evict-cell!` can reference-count shared fns.
         (when-let [roots (:loaded-roots ctx)]
           (swap! roots conj root-fn-id)))

@@ -998,6 +998,10 @@
   {:doc "Full CI: lint (fail-fast) then unit tests, over scripts/checks.edn. ~4 min. Flags: --since <ref> diff-scopes (checks with no :relevant changed files are skipped, visibly); --skip <names/groups> force-skips; --groups <g,…> restricts."
    :task (load-file "scripts/ci.clj")}
 
+  wtq-test
+  {:doc "End-to-end test of the merge train (dev/wtq/wt) in throwaway git repos — real `wt merge` waiters, conductor, assembly, bisection; only the heavy suites are stubbed (WTQ_GATE_STUB). ~30 s, no docker, no network. Runs inside bb lint / bb ci as the wtq-train check."
+   :task (p/shell "bash" "dev/wtq/test/train_test.sh")}
+
   ci-test
   {:doc "Self-test of the CI selection core (scripts/ci_select.clj) + checks.edn validation. Runs inside bb ci as the ci-selftest check."
    :task (load-file "scripts/ci_select_test.clj")}
@@ -1033,7 +1037,7 @@
    :task (binding [*command-line-args* ["--groups" "sec"]] (load-file "scripts/ci.clj"))}
 
   wt
-  {:doc "Parallel feature dev + merge queue (dev/wtq/README.md). Usage: bb wt <new|start|task|list|merge|status|log|drop|help> ..."
+  {:doc "Parallel feature dev + merge train (dev/wtq/README.md). Usage: bb wt <claim|new|start|task|list|status|merge|soon|test|watch|log|ack|up|down|drop|gc|help> ..."
    :task (let [root (-> (p/shell {:out :string} "git" "rev-parse" "--show-toplevel")
                         :out str/trim)
                ;; :continue so a non-zero child (e.g. a failing gate) propagates

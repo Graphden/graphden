@@ -88,8 +88,13 @@ You were started in one of two ways:
 2. **Implement** in small commits, inside your worktree.
 3. **Fast feedback:** run `bb lint` (~1 min, all linters, no tests) after each
    batch of edits — it catches most gate-reds for pennies. Run targeted tests
-   (`clojure -M:dev:test -m kaocha.runner --focus <ns>`) around the code you
-   actually changed. A full local `bb ci` before queueing is OPTIONAL when you
+   through **`bb wt test --focus <ns>`** (same kaocha arguments) around the code
+   you actually changed — never raw `clojure -M:dev:test -m kaocha.runner`. The
+   wrapper waits while the landing gate is in a heavy phase (image build, unit
+   suite, e2e, integration — it announces them in `.git/wtq/gate-heavy`) or
+   `MemAvailable` is below `WTQ_AGENT_MEM_MIN_MB` (default 3000): five agents'
+   JVMs next to a booting e2e stack is how this 12 GB host runs out of memory
+   and a gate goes red on environment. `bb wt up` waits the same way. A full local `bb ci` before queueing is OPTIONAL when you
    are the only agent in the pool — the gate re-runs `bb ci` on the merged
    result anyway (diff-scoped via `--since`: checks whose `:relevant` paths in
    `scripts/checks.edn` saw no change are skipped visibly; `WTQ_CI_SKIP=a,b`
@@ -101,21 +106,54 @@ You were started in one of two ways:
 4. **Land** — when the feature is complete and `bb lint` is green, run the
    gate. No sign-off needed (Rule 5):
 
-   `bb wt merge` takes **~30–50 min** for a full run, ~10 min for a
-   docs-only / diff-scoped one (merge develop → ci → build image →
-   e2e → integration → fast-forward develop → advance the demo instance — only if it was running when the gate started; a `--deploy` landing with the demo down leaves `.git/wtq/demo-needs-reset`, which the next `bb instance-up` honours) —
-   longer than a
-   foreground command may run, so **launch it with `run_in_background: true`**
-   and wait to be re-invoked when it exits. Then check the outcome:
+   `bb wt merge` first runs **`bb lint` on your worktree** (outside the queue;
+   skipped if that exact commit already passed) and refuses to queue a red or
+   uncommitted tree (PRECOND, exit 3, with the lint output) — a lint red found
+   inside a train would cost everyone in it a gate. Then it **enqueues** your
+   branch at its current commit and waits. A gate also only starts with enough
+   memory free (`WTQ_MEM_MIN_MB`, default 6000 — the gate's measured p90
+   footprint), so "waiting for memory" in the output is the queue protecting
+   the run, not a hang. It
+   may land you in a **merge train**: every branch that is ready at the same
+   time is merged on top of the latest develop together and gated ONCE
+   (ci → build image → e2e → integration → fast-forward develop → advance the
+   demo instance — only if it was running when the gate started; a `--deploy`
+   landing with the demo down leaves `.git/wtq/demo-needs-reset`, which the
+   next `bb instance-up` honours). You still get **your own** verdict and exit
+   code. A full run takes **~30–50 min**, a docs-only / diff-scoped one ~10 —
+   plus the queue — longer than a foreground command may run, so **launch it
+   with `run_in_background: true`** and wait to be re-invoked when it exits.
+
+   - **Don't commit to the branch while it is queued.** The queue pinned the
+     commit you had; a moved branch comes back **STALE** (exit 5) — re-run
+     `bb wt merge`.
+   - **Minutes from done while others are landing?** `bb wt soon [minutes]`
+     (default 10, max 15) asks the next train to wait for you instead of you
+     paying a train of your own. `bb wt merge` clears the marker.
+   - **Reading a train.** `bb wt list` shows `QUEUED` / `IN-TRAIN` /
+     `SPLITTING` and the running train's members; `bb wt log <name>` is your
+     train's log (it names every member and each one's merge). A red train
+     with several members is **bisected**: `SPLITTING` means your train went
+     red and the queue is re-gating halves to find whose change it is — keep
+     waiting. Innocent members land; only the culprit gets `FAIL`, with a log
+     of its own one-member train. A branch that changes a rule file
+     (`dev/wtq/GOVERNANCE`) always rides alone.
+
+   Then check the outcome:
    - **`✓ landed`** (exit 0, `bb wt list` RESULT `GREEN`) → feature is on
      `develop`. Go to step 5.
-   - **CONFLICT** (merging develop into your branch) → resolve in your worktree,
-     commit, re-run `bb wt merge` (background).
-   - **gate FAIL** (ci/integration/e2e on the merged result) → read
+   - **CONFLICT** (exit 2 — your branch conflicts with develop) → merge
+     develop into your branch, resolve, commit, re-run `bb wt merge`
+     (background). (A conflict only with another member of the same train is
+     not yours: you are simply deferred to the next train.)
+   - **gate FAIL** (exit 1 — ci/integration/e2e on the merged result, and
+     bisection pinned it on your branch) → read
      `bb wt log <name>`, fix on your branch (reproduce with a focused local
      run — `bb ci` for unit reds, a single `node <file>.test.js` against
      `bb wt up` for e2e reds), re-run the gate. Iterate until green. Never
-     weaken a test or skip a check to go green.
+     weaken a test or skip a check to go green. A FAIL is final for your
+     branch even though the train you started in may have landed others —
+     fix and re-queue.
    - **FLAKE in the gate's e2e** (failed once, passed on retry) — the gate
      runs `bb test-e2e` with `WTQ_FLAKE_STRICT=1` UNCONDITIONALLY, and the
      runner TRIAGES each failure at the moment it happens by probing a
@@ -123,26 +161,29 @@ You were started in one of two ways:
      server unavailability window (request-path recompile parks the
      worker pool while `/health` stays 200) — logged loudly as
      `server-window retry`, retried, NOT a strict failure; probe OK → a
-     REAL flake → RED result that bounces the branch: fix it, don't
+     REAL flake → RED result (a red train like any other, so bisection
+     finds whose change it is) that bounces the branch: fix it, don't
      re-roll the dice. Lessons already banked: a wait bound sized at the
      operation's median is a flake source (size to honest worst case —
      the poll still returns early), and file-start bursts need the
      double-probe `waitForServerHealthy`. Green-on-retry remains only
      the AD-HOC default when you run `run-edit-tests.sh` / `bb test-e2e`
      by hand outside the gate.
-   - If the queue is busy the gate blocks waiting its turn — expected; let the
-     background run wait.
+   - If the queue is busy your `bb wt merge` waits its turn (or is carried by
+     another agent's train) — expected; let the background run wait.
 
    **The gate is YOURS to watch.** Launching it is not the end of your job:
    poll its progress about once a minute until it lands — `bb wt watch <name>`
-   does exactly this (60s ticks: log tail + host load, then the fresh RESULT).
+   does exactly this (60s ticks: queue state + log tail + host load, then the
+   FINAL RESULT — it keeps watching through `SPLITTING`).
    Concretely:
    - **No output / not starting** (no log growth for a couple of minutes, no
      RESULT, not visibly waiting on the queue lock) → tell the user what you
      observe NOW — a silently stalled gate wastes a serialized slot the whole
      pool waits behind. Check the obvious causes first: host load (a killed
      gate leaves no RESULT file — `bb wt merge` is idempotent, re-run it;
-     it now waits for load headroom by itself, threshold `WTQ_LOAD_MAX`),
+     it now waits for load headroom by itself, threshold `WTQ_LOAD_MAX`, and
+     for memory, `WTQ_MEM_MIN_MB`),
      a stale queue holder, Docker down.
    - **RED / FAIL in the log** → start fixing IMMEDIATELY, before being asked:
      read the failing check's output in the gate log, reproduce with a focused
@@ -154,9 +195,10 @@ You were started in one of two ways:
 
 ## Notes
 
-- The gate merges the **latest** `develop` into your branch before testing, so
-  you are always validated against what other agents have already landed. The
+- The train is built on the **latest** `develop`, so you are always validated
+  against what other agents have already landed — and against the branches
+  landing with you. Your branch itself is never rewritten by the gate. The
   occasional real conflict or cross-feature break is expected — fixing it is
   part of the task.
-- `bb wt log <name>` = full transcript of your last gate run. `bb wt list` =
+- `bb wt log <name>` = full transcript of your last gate run (your train's log). `bb wt list` =
   every agent's branch, drift vs develop, and last RESULT.

@@ -7,14 +7,18 @@
 # the FAST loop (`bb ci` = linters + unit) freely and in parallel.
 #
 # When a feature is ready, `wt merge` (run FROM INSIDE that worktree)
-# enters a machine-wide flock queue: at most one merge runs at a time.
-# The gate merges the latest develop into the feature, runs the HEAVY
-# suite (image build + integration + e2e) on the MERGED result,
-# and only then fast-forwards develop. Green -> develop advances; red ->
-# the branch bounces back to you with the log, develop untouched.
+# ENQUEUES it. Branches that are ready at the same time ride one MERGE
+# TRAIN: they are merged on top of the latest develop together, the HEAVY
+# suite (image build + integration + e2e) runs ONCE on that combined result,
+# and a green train fast-forwards develop over all of them. A red train is
+# BISECTED — halves are re-gated until the culprit is isolated; the innocent
+# members land, only the culprit bounces back with its log. At most one gate
+# runs at a time (a machine-wide flock); whichever waiter holds it is the
+# train's CONDUCTOR and settles every member's verdict, so every waiter —
+# conductor or not — gets its own RESULT and exit code.
 #
-# The queue is stateless (the lock knows nothing about who is waiting),
-# so worktrees can be created and dropped at any time.
+# Queue state (entries, soon-markers, bisection budgets) lives under the
+# shared .git, so worktrees can still be created and dropped at any time.
 #
 # Two ways to start an agent:
 #   A) hands-off:  wt agent   -> a NAMELESS discussion session. You describe the
@@ -30,9 +34,14 @@
 #   wt start <name>        launch an autonomous agent inside an existing worktree
 #   wt task  <name>        print the feature's task spec
 #   wt list                show every worktree, branch, ahead/behind, dirty, result
-#   wt merge [--no-e2e] [--no-fleet] [--no-visual] [--deploy]
-#                                  (inside a worktree) queue + gate + land on develop
+#   wt merge [--no-e2e] [--no-fleet] [--no-visual] [--deploy] [--release]
+#                          (inside a worktree) enqueue -> ride a merge train ->
+#                          land on develop; exits with THIS branch's verdict
 #                          --deploy: also reset the develop DB schema on landing
+#   wt test <kaocha args>  focused tests — waits while the gate is in a heavy
+#                          phase or memory is short, then runs kaocha
+#   wt soon [minutes]      (inside a worktree) "I will enqueue within N minutes"
+#                          (default 10, max 15): the next train waits for you
 #   wt up                  (inside a worktree) build + run THIS branch on its own
 #                          ports — your private instance; never touches the demo
 #   wt down                (inside a worktree) stop it (keeps the DB volume)
@@ -54,6 +63,10 @@
 #   WTQ_TARGET   integration branch (default: develop)
 #   WTQ_ROOT     where worktrees live (default: <repo-parent>/graphden-wt)
 #   WTQ_NO_PUSH  =1 -> gate advances develop LOCALLY only, never pushes (push yourself)
+#   WTQ_TRAIN_MAX  most branches one train gates together (default 4)
+#   WTQ_POLL_SECS  how often a queued waiter re-checks the queue (default 30)
+#   WTQ_MEM_MIN_MB  MemAvailable a gate needs to start (default 6000)
+#   WTQ_AGENT_MEM_MIN_MB  MemAvailable `wt test` / `wt up` / lint wait for (default 3000)
 #   WTQ_CI_SKIP  comma list of check names/groups force-skipped in the gate's
 #                `bb ci` (passed through as `bb ci --skip`). Announced loudly in
 #                the gate log — a GREEN with it set is a SCOPED result, use only
@@ -71,7 +84,12 @@ HOLDER="$WTQ_DIR/holder"
 LOG_DIR="$WTQ_DIR/logs"
 TASKS_DIR="$WTQ_DIR/tasks"       # task specs — live under .git, never in the working tree
 RESULT_DIR="$WTQ_DIR/results"    # machine-readable last gate outcome per feature
-mkdir -p "$LOG_DIR" "$TASKS_DIR" "$RESULT_DIR"
+QUEUE_DIR="$WTQ_DIR/queue"       # one entry per branch waiting for a train (see "merge train")
+SOON_DIR="$WTQ_DIR/soon"         # "I will enqueue within N minutes" markers
+BISECT_DIR="$WTQ_DIR/bisect"     # per red-train bisection budget
+STATE_LOCK="$WTQ_DIR/state.lock" # short-lived lock over queue/, soon/, bisect/, results/
+TRAIN_FILE="$WTQ_DIR/train"      # the train currently being gated (id, members, log)
+mkdir -p "$LOG_DIR" "$TASKS_DIR" "$RESULT_DIR" "$QUEUE_DIR" "$SOON_DIR" "$BISECT_DIR"
 
 TARGET="${WTQ_TARGET:-develop}"
 
@@ -84,6 +102,15 @@ main_worktree() {
 MAIN_WT="$(main_worktree)"
 REPO_PARENT="$(dirname "${MAIN_WT:-$(git rev-parse --show-toplevel)}")"
 WTQ_ROOT="${WTQ_ROOT:-$REPO_PARENT/graphden-wt}"
+# The train is assembled and gated in ONE reused worktree of its own, never in
+# an agent's. The leading underscore keeps it out of the feature namespace
+# (`wt new` names must start with [a-z0-9]), so it can never be claimed,
+# dropped or handed a port block by accident.
+TRAIN_WT="$WTQ_ROOT/_train"
+# NOT `wtq/…`: git resolves a short ref name against $GIT_DIR/<name> first, and
+# .git/wtq/ is this queue's own state directory — `wtq/train` would resolve to
+# the train file there ("ignoring broken ref") instead of the branch.
+TRAIN_BRANCH="wtq-train"
 
 # --- pretty ----------------------------------------------------------------
 c()  { printf '\033[%sm' "$1"; }
@@ -98,9 +125,12 @@ branch_of() { git -C "$1" rev-parse --abbrev-ref HEAD; }
 
 # Newest-first gate logs. `find -printf` rather than `ls -t` so a filename is
 # never re-parsed by the shell: usage `newest_logs <n> [feature]`.
+# Anchored on the `<name>-<YYYYmmdd>-<HHMMSS>.log` shape: a bare `<name>-*`
+# glob made `wt log foo` answer with `foo-bar`'s newest log.
 newest_logs() {
-  local n="$1" name="${2:-}"
-  find "$LOG_DIR" -maxdepth 1 -type f -name "${name:+$name-}*.log" -printf '%T@ %p\n' 2>/dev/null \
+  local n="$1" name="${2:-}" re='.*\.log'
+  [ -n "$name" ] && re=".*/${name//./\\.}-[0-9]{8}-[0-9]{6}\\.log"
+  find "$LOG_DIR" -maxdepth 1 -type f -regextype posix-extended -regex "$re" -printf '%T@ %p\n' 2>/dev/null \
     | sort -rn | head -"$n" | cut -d' ' -f2-
 }
 
@@ -321,6 +351,7 @@ instance_env() {
 this_worktree() {
   local wt; wt="$(git rev-parse --show-toplevel)"
   [ "$wt" != "$MAIN_WT" ] || die "this command is for a feature worktree; the main checkout drives the canonical instance with 'bb rebuild'."
+  [ "$wt" != "$TRAIN_WT" ] || die "this is the merge train's own worktree, not a feature worktree."
   basename "$wt"
 }
 
@@ -446,6 +477,7 @@ cmd_up() {
   # bb rebuild = uberjar + image + up + health + `bb verify` + `bb smoke`. With
   # GD_* exported it targets THIS worktree's stack, so `bb verify` compares the
   # running build against THIS branch's tree — the agent sees its own code.
+  yield_to_gate "wt up"
   ( cd "$path" && bb rebuild ) || die "instance build failed — see the output above"
 
   echo
@@ -739,17 +771,32 @@ cmd_list() {
   # the recorded pid so a corpse doesn't hold the queue in every listing
   # (audit-6: "killed tracker != dead gate" had a sibling — dead pid,
   # live-looking lock).
+  local hpid="" alive=0
   if [ "$holder" != "—" ]; then
-    local hpid; hpid="$(printf '%s' "$holder" | sed -n 's/.*pid \([0-9]*\).*/\1/p')"
+    hpid="$(printf '%s' "$holder" | sed -n 's/.*pid \([0-9]*\).*/\1/p')"
     if [ -n "$hpid" ] && ! kill -0 "$hpid" 2>/dev/null; then
       holder="$holder ${YLW}(pid dead — gate crashed; lock auto-released)${RST}"
       : > "$HOLDER"
+    else
+      alive=1
     fi
   fi
-  printf '%sQueue lock:%s %s\n\n' "$BLD" "$RST" "$holder"
-  printf '%-20s %-24s %-12s %-9s %s\n' "WORKTREE" "BRANCH" "vs $TARGET" "RESULT" "STATE"
+  printf '%sQueue lock:%s %s\n' "$BLD" "$RST" "$holder"
+  if [ "$alive" = 1 ] && [ -f "$TRAIN_FILE" ]; then
+    printf '%sTrain:%s     %s  [ %s ]   log: %s\n' "$BLD" "$RST" \
+      "$(sed -n 's/^ts=//p' "$TRAIN_FILE")" "$(sed -n 's/^members=//p' "$TRAIN_FILE")" \
+      "$(sed -n 's/^log=//p' "$TRAIN_FILE")"
+  fi
+  local q soon; q="$(queued_names | tr '\n' ' ')"
+  state_lock; soon="$(live_soon)"; state_unlock
+  [ -n "$q" ] && printf '%sQueue:%s     %s\n' "$BLD" "$RST" "$q"
+  [ -n "$soon" ] && printf '%sSoon:%s      %s\n' "$BLD" "$RST" \
+    "$(printf '%s\n' "$soon" | awk '{printf "%s (%dm%02ds left)  ", $1, $2/60, $2%60}')"
+  echo
+  printf '%-20s %-24s %-12s %-20s %s\n' "WORKTREE" "BRANCH" "vs $TARGET" "RESULT" "STATE"
   git worktree list --porcelain | awk '/^worktree /{print $2}' | while read -r wt; do
-    local nm br dirty ab base result
+    [ "$wt" = "$TRAIN_WT" ] && continue          # the queue's own; shown as "Train:" above
+    local nm br dirty ab base result qs
     nm="$(basename "$wt")"
     br="$(branch_of "$wt" 2>/dev/null || echo '?')"
     dirty=""
@@ -759,8 +806,11 @@ cmd_list() {
       base="$(git -C "$wt" rev-list --left-right --count "$TARGET...HEAD" 2>/dev/null || echo '? ?')"
       ab="-$(echo "$base" | awk '{print $1}') +$(echo "$base" | awk '{print $2}')"
     fi
-    result="$(cut -f1 "$RESULT_DIR/$nm" 2>/dev/null || echo '·')"
-    printf '%-20s %-24s %-12s %-9s %b\n' "$nm" "$br" "$ab" "$result" "$dirty"
+    # A queued/in-train/splitting branch shows THAT; otherwise its last verdict.
+    qs="$(queue_state "$nm")"
+    result="${qs:-$(cut -f1 "$RESULT_DIR/$nm" 2>/dev/null || echo '·')}"
+    printf '%s\n' "$soon" | grep -q "^$nm " && dirty="${dirty:+$dirty }soon"
+    printf '%-20s %-24s %-12s %-20s %b\n' "$nm" "$br" "$ab" "$result" "$dirty"
   done
 }
 
@@ -771,7 +821,16 @@ cmd_status() {
   cmd_list
   echo
   printf '%sRecent gate runs:%s\n' "$BLD" "$RST"
-  newest_logs 5 | xargs -r -n1 basename | sed 's|^|  |' || say "  (none)"
+  # A member's log is a hard link to its train's; list each run once.
+  find "$LOG_DIR" -maxdepth 1 -type f -name '*.log' \( -name '_train-*' -o -links 1 \) -printf '%T@ %f\n' 2>/dev/null \
+    | sort -rn | head -5 | cut -d' ' -f2- | while read -r f; do
+      if [ "${f#_train-}" != "$f" ]; then
+        # name the members: every other link to the same inode
+        say "  $f  [ $(find "$LOG_DIR" -maxdepth 1 -samefile "$LOG_DIR/$f" ! -name "$f" -printf '%f\n' | sed -E 's/-[0-9]{8}-[0-9]{6}\.log$//' | sort | tr '\n' ' ')]"
+      else
+        say "  $f"
+      fi
+    done
 }
 cmd_log() {
   local name="${1:-}"; [ -n "$name" ] || die "usage: wt log <name>"
@@ -787,13 +846,14 @@ cmd_watch() {
   local name="${1:-}"; [ -n "$name" ] || die "usage: wt watch <name>"
   local res="$RESULT_DIR/$name"
 
-  # A RESULT is FINAL when no gate log is newer than it — a stale file from a
-  # previous landing doesn't end the watch while a fresh gate is still writing.
+  # FINAL = the branch is out of the queue AND results/ holds a final verdict.
+  # (`wt merge` clears the verdict when it enqueues, and a queued / in-train /
+  # splitting branch keeps its queue entry until its verdict is written — so a
+  # previous landing's verdict can never end the watch of a fresh run.)
   res_final() {
     [ -f "$res" ] || return 1
-    local f; f="$(newest_logs 1 "$name")"
-    [ -z "$f" ] && return 0
-    [ "$(stat -c %Y "$res")" -ge "$(stat -c %Y "$f")" ]
+    [ -f "$(qfile "$name")" ] && return 1
+    is_final "$(cut -f1 "$res")"
   }
 
   if res_final; then ok "RESULT: $(cat "$res")"; return 0; fi
@@ -803,19 +863,21 @@ cmd_watch() {
     hpid="$(printf '%s' "$h" | sed -n 's/.*pid \([0-9]*\).*/\1/p')"
     [ -n "$hpid" ] && ! kill -0 "$hpid" 2>/dev/null
   }
-  info "watching gate for '$name' — tick every 60s; Ctrl-C stops WATCHING, not the gate"
+  info "watching '$name' — tick every 60s; Ctrl-C stops WATCHING, not the gate"
   while :; do
     if res_final; then ok "RESULT: $(cat "$res")"; return 0; fi
-    if holder_dead && [ ! -f "$res" ]; then
+    if holder_dead && [ ! -f "$res" ] && [ ! -f "$(qfile "$name")" ]; then
       die "gate holder pid is dead and no RESULT was written — the gate crashed mid-run; check the newest log and re-run 'wt merge'"
     fi
-    local f now load; now="$(date +%H:%M:%S)"; load="$(cut -d' ' -f1-3 /proc/loadavg)"
+    local f now load qs; now="$(date +%H:%M:%S)"; load="$(cut -d' ' -f1-3 /proc/loadavg)"
+    qs="$(queue_state "$name")"
+    [ "$qs" = SPLITTING ] && qs="SPLITTING (train went red; bisecting — $(cut -f6 "$res" 2>/dev/null))"
     f="$(newest_logs 1 "$name")"
     if [ -n "$f" ]; then
-      echo "--- $now  load $load  $(basename "$f")"
+      echo "--- $now  load $load  ${qs:+$qs  }$(basename "$f")"
       tail -n 3 "$f"
     else
-      echo "--- $now  load $load  no gate log yet (queued, or the gate was never started)"
+      echo "--- $now  load $load  ${qs:-no gate log yet (queued, or the gate was never started)}"
     fi
     sleep 60
   done
@@ -827,6 +889,7 @@ cmd_watch() {
 cmd_drop() {
   local name="${1:-}"; local force="${2:-}"
   [ -n "$name" ] || die "usage: wt drop <name> [-f]"
+  case "$name" in _*) die "'$name' is the merge train's own worktree — it is not a feature to drop." ;; esac
   # Normalize the flag up front: anything that isn't -f/--force is a typo, and
   # letting it through used to be dangerous — the `${force:+--force}` expansion
   # below hands git --force for ANY non-empty second argument.
@@ -850,6 +913,7 @@ cmd_drop() {
   info "Tearing down the '$name' instance (containers, volumes, image, ports) ..."
   teardown_instance "$name"
   rm -f "$(ack_file "$name")"
+  state_lock; rm -f "$(qfile "$name")" "$SOON_DIR/$name"; state_unlock
 
   info "Removing worktree $path ..."
   # FG-5 (audit-7): with -f the ancestry/dirty guards were skipped — say
@@ -870,8 +934,57 @@ cmd_drop() {
 }
 
 # =====================================================================
-# merge — the gated, flock-serialized landing
+# merge — the merge TRAIN: enqueue, gate ready branches together, bisect red
 # =====================================================================
+# Until 2026-09-23 every finished branch paid a full gate of its own, one after
+# another: five branches ready at noon meant the fifth landed ~3 h later, and
+# four of those five gates re-proved the same develop. The train (the bors-ng /
+# GitHub-merge-queue shape) gates them TOGETHER:
+#
+#   wt merge   writes queue/<name> (branch, the exact sha, flags) and waits.
+#              Whoever holds the gate lock is the CONDUCTOR. It takes queued
+#              entries FIFO, up to WTQ_TRAIN_MAX, merges each on top of the
+#              latest develop in the reused `_train` worktree, runs the one
+#              gate over the combined tree, and on GREEN fast-forwards develop
+#              over all of them. Every waiter, conductor or not, then reads its
+#              own verdict from results/<name> — keyed to the sha it queued —
+#              and exits with that verdict's code.
+#   red train  is BISECTED inside the same lock hold: the members go back to
+#              the FRONT of the queue as two halves; a green half lands, a red
+#              half splits again, until the culprit is a train of one and gets
+#              the FAIL — with its own log — while the others land. When the
+#              first half is green the second is KNOWN red (it is the same tree
+#              the whole train was), so it is split without paying a gate, and a
+#              lone known-red member is re-gated once to confirm it: one
+#              culprit among N costs at most ceil(log2 N)+1 extra gates, which
+#              is also the hard budget per red train. What the budget cannot
+#              settle (a second culprit) goes back to the ordinary queue as a
+#              fresh train, so the loop always makes progress.
+#
+# Why these details, and not the obvious alternatives:
+#   - The queue ENTRY pins the sha. A branch that moves after `wt merge` is
+#     STALE, never silently gated at a newer commit nobody queued.
+#   - Members are merged by that sha into `wtq-train`; their own branches are
+#     never rewritten. They are ancestors of develop afterwards, which is all
+#     `wt drop`'s merged check asks.
+#   - A member that conflicts only with an EARLIER member is not the author's
+#     fault: it is deferred to the next train. One that conflicts with develop
+#     alone (`git merge-tree`) is a CONFLICT the author resolves.
+#   - A branch that changes a GOVERNANCE path travels ALONE. Its siblings could
+#     not have read rules that land in the same fast-forward; alone, the next
+#     train's drift check bounces them to `wt ack` exactly as the serial queue
+#     did.
+#   - An entry whose waiter died (kill -9, a lost terminal) is pruned, not
+#     landed — like the old blocking flock, where a dead waiter simply left the
+#     queue. Members already mid-bisection are kept: their verdict is owed.
+#   - `wt soon` lets an agent that is minutes from done ask the next train to
+#     wait for it (<= 15 min in total), instead of paying a train of its own.
+#
+# Verdicts in results/<name>: VERDICT<TAB>rc<TAB>branch<TAB>sha<TAB>train<TAB>detail
+#   final: GREEN 0, FAIL 1, CONFLICT 2, PRECOND 3, LANDED_STALE 4, STALE 5
+#   non-final: TRAIN_RED_SPLITTING (the member's train went red; it is being
+#   bisected — keep waiting). QUEUED / IN TRAIN are read from queue/, not here.
+#
 # The canonical tag names the last SUCCESSFULLY LANDED build — the demo instance
 # is deployed from it, and `bb rebuild` / `bb test-e2e` default to it. The gate
 # builds into the candidate tag instead, tests THAT, and only promotes it once
@@ -880,6 +993,155 @@ cmd_drop() {
 CANONICAL_IMAGE="graphden-executor:latest"
 CANDIDATE_IMAGE="graphden-executor:candidate"
 
+FINAL_VERDICTS=" GREEN FAIL CONFLICT PRECOND STALE LANDED_STALE "
+is_final() { case "$FINAL_VERDICTS" in *" $1 "*) return 0 ;; esac; return 1; }
+verdict_rc() {
+  case "$1" in
+    GREEN) echo 0 ;; CONFLICT) echo 2 ;; PRECOND) echo 3 ;;
+    LANDED_STALE) echo 4 ;; STALE) echo 5 ;; *) echo 1 ;;
+  esac
+}
+verdict_msg() {
+  local nm="$2"
+  case "$1" in
+    GREEN)        echo "✓ landed. You can now:  bb wt drop $nm" ;;
+    CONFLICT)     echo "↩ merge conflict with $TARGET — merge $TARGET into your branch, resolve, commit, re-run 'bb wt merge'." ;;
+    PRECOND)      echo "↩ precondition failed (dirty tree / detached HEAD / unacknowledged rule change) — see 'bb wt log $nm'." ;;
+    STALE)        echo "↩ your branch moved after it was queued, so the queued commit was not gated — re-run 'bb wt merge'." ;;
+    LANDED_STALE) echo "⚠ LANDED on $TARGET, but a post-land step (promote/deploy) failed — develop moved; fix the demo/tag manually, do NOT re-run the gate." ;;
+    *)            echo "✗ gate failed — fix on this branch, then re-run 'bb wt merge'. Log: bb wt log $nm" ;;
+  esac
+}
+
+# --- queue state ------------------------------------------------------------
+# Every read-modify-write of queue/, soon/, bisect/ and results/ happens under
+# this lock, held for milliseconds — never across a gate. Files are replaced by
+# rename, so a reader without the lock sees the old or the new file, never half.
+state_lock()   { exec 7>"$STATE_LOCK"; flock -x 7; }
+state_unlock() { flock -u 7; exec 7>&-; }
+
+qfile() { printf '%s/%s' "$QUEUE_DIR" "$1"; }
+qget()  { local f; f="$(qfile "$1")"; [ -f "$f" ] || return 0; sed -n "s/^$2=//p" "$f" | head -n1; }
+qset()  {   # <name> <key> <value>   (caller holds the state lock)
+  local f tmp; f="$(qfile "$1")"; [ -f "$f" ] || return 0
+  tmp="$QUEUE_DIR/.$1.tmp"
+  { grep -v "^$2=" "$f" || true; printf '%s=%s\n' "$2" "$3"; } > "$tmp" && mv -f "$tmp" "$f"
+}
+# Every queued name, oldest first.
+queued_names() {
+  local f
+  for f in "$QUEUE_DIR"/*; do
+    [ -f "$f" ] || continue
+    printf '%s %s\n' "$(sed -n 's/^ts=//p' "$f")" "$(basename "$f")"
+  done | LC_ALL=C sort -k1,1n | cut -d' ' -f2
+}
+# Queued names whose `seg` (bisection segment) equals $1 — "" = the ordinary queue.
+names_in_seg() { local n; for n in $(queued_names); do [ "$(qget "$n" seg)" = "$1" ] && echo "$n"; done; return 0; }
+
+write_result() {   # <name> <verdict> <branch> <sha> <train> <detail>
+  local tmp="$RESULT_DIR/.$1.tmp"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$2" "$(verdict_rc "$2")" "$3" "$4" "$5" "$6" > "$tmp"
+  mv -f "$tmp" "$RESULT_DIR/$1"
+}
+
+# Settle a member: final verdict into results/, entry out of the queue. If the
+# author re-queued a NEWER sha meanwhile, that entry and its fresh (empty)
+# result are left alone — this verdict is about a commit nobody waits for.
+decide() {   # <name> <verdict> <train> <detail>
+  local name="$1" verdict="$2" train="$3" detail="$4"
+  local sha="${M_SHA[$name]}" branch="${M_BRANCH[$name]}"
+  state_lock
+  if [ ! -f "$(qfile "$name")" ] || [ "$(qget "$name" sha)" = "$sha" ]; then
+    write_result "$name" "$verdict" "$branch" "$sha" "$train" "$detail"
+    rm -f "$(qfile "$name")"
+  fi
+  state_unlock
+  printf '  %-24s %s%s\n' "$name" "$verdict" "${detail:+  — $detail}"
+}
+
+# Load an entry into the M_* maps the conductor works from.
+declare -A M_SHA M_BRANCH M_WT M_NO_E2E M_NO_FLEET M_NO_VISUAL M_DEPLOY M_RELEASE
+load_entry() {
+  local n="$1"
+  M_SHA[$n]="$(qget "$n" sha)";            M_BRANCH[$n]="$(qget "$n" branch)"
+  M_WT[$n]="$(qget "$n" wt)";              M_NO_E2E[$n]="$(qget "$n" no_e2e)"
+  M_NO_FLEET[$n]="$(qget "$n" no_fleet)";  M_NO_VISUAL[$n]="$(qget "$n" no_visual)"
+  M_DEPLOY[$n]="$(qget "$n" deploy)";      M_RELEASE[$n]="$(qget "$n" release)"
+}
+
+# Live soon-markers (expired and already-enqueued ones are removed on sight).
+live_soon() {   # caller holds the state lock; prints "<name> <seconds-left>"
+  local f n dl now; now="$(date +%s)"
+  for f in "$SOON_DIR"/*; do
+    [ -f "$f" ] || continue
+    n="$(basename "$f")"; dl="$(sed -n 's/^deadline=//p' "$f")"
+    if [ -z "$dl" ] || [ "$now" -ge "$dl" ] || [ -f "$(qfile "$n")" ]; then rm -f "$f"; continue; fi
+    echo "$n $((dl - now))"
+  done
+}
+
+# Human-readable queue state of one name, for list / watch.
+queue_state() {
+  local n="$1" f; f="$(qfile "$n")"
+  [ -f "$f" ] || return 0
+  if [ "$(qget "$n" state)" = train ]; then echo "IN-TRAIN"
+  elif [ -n "$(qget "$n" seg)" ]; then echo "SPLITTING"
+  else echo "QUEUED"; fi
+}
+
+# --- host memory: the gate's admission and the agents' yield -----------------
+# One 11.9 GB host runs the gate AND every agent's tests, lint and `wt up`
+# instances. Measured over 237 full gate runs (.git/wtq/logs/*.resources.csv,
+# peak mem_used minus mem_used when the gate started): the gate itself takes
+# p50 4.2 GB, p90 5.4 GB, max 8.8 GB (the e2e stack's executor + two Postgres +
+# browsers, then integration's JVM). A gate admitted with less than its own
+# footprint free does not run slower — the kernel OOM-kills a container or a
+# JVM mid-suite and the train goes red on ENVIRONMENT (the 2026-09-16 cgroup
+# OOM-kill flake). So:
+#   WTQ_MEM_MIN_MB        the gate starts only with this much MemAvailable
+#                         (default 6000 = the p90 footprint + ~0.6 GB slack;
+#                         the rare heavier run then eats into page cache, not
+#                         into a live process).
+#   WTQ_AGENT_MEM_MIN_MB  what an agent's `wt test` / `wt up` / pre-queue lint
+#                         waits for (default 3000: one kaocha JVM or one 2 GB
+#                         `wt up` stack plus slack).
+# and while the gate is in a heavy phase it says so in $GATE_HEAVY; agent-side
+# commands yield until it is gone.
+GATE_HEAVY="$WTQ_DIR/gate-heavy"
+LINT_OK_DIR="$WTQ_DIR/lint-ok"     # <name> = the HEAD sha `bb lint` last passed on
+mkdir -p "$LINT_OK_DIR"
+
+mem_avail_mb() { awk '/^MemAvailable:/{print int($2 / 1024)}' /proc/meminfo; }
+int_or() { case "$1" in ''|*[!0-9]*) echo "$2" ;; *) echo "$1" ;; esac; }
+
+# The marker names the phase and the CONDUCTOR's pid ($$ — the same in every
+# subshell of the gate), so a gate that died without its EXIT trap leaves a
+# marker that reads as stale, never as a phase that blocks agents forever.
+heavy_on()  { printf 'phase=%s\npid=%s\nsince=%s\n' "$1" "$$" "$(date +%H:%M:%S)" > "$GATE_HEAVY.tmp" && mv -f "$GATE_HEAVY.tmp" "$GATE_HEAVY"; }
+heavy_off() { rm -f "$GATE_HEAVY"; }
+heavy_live() {   # prints the live phase; false when there is none (or it is stale)
+  local pid phase
+  [ -f "$GATE_HEAVY" ] || return 1
+  pid="$(sed -n 's/^pid=//p' "$GATE_HEAVY" 2>/dev/null)"; phase="$(sed -n 's/^phase=//p' "$GATE_HEAVY" 2>/dev/null)"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
+  echo "$phase"
+}
+
+# Agent-side: wait while the gate is in a heavy phase or memory is short.
+yield_to_gate() {   # <what>
+  local min poll phase avail said=""
+  min="$(int_or "${WTQ_AGENT_MEM_MIN_MB:-}" 3000)"; poll="$(int_or "${WTQ_YIELD_POLL:-}" 15)"
+  while :; do
+    phase="$(heavy_live || true)"; avail="$(mem_avail_mb)"
+    if [ -z "$phase" ] && [ "$avail" -ge "$min" ]; then return 0; fi
+    local why="${phase:+the landing gate is in a heavy phase ($phase)}"
+    [ "$avail" -lt "$min" ] && why="${why:+$why; }MemAvailable ${avail} MB < ${min} MB"
+    if [ "$said" != "$why" ]; then warn "$1 waits: $why — retrying every ${poll}s (Ctrl-C to give up)"; said="$why"; fi
+    sleep "$poll"
+  done
+}
+
+# --- the gate ---------------------------------------------------------------
 # Sample the machine while the gate runs, into a CSV beside the gate log.
 #
 # Every intermittent failure in this repo has been diagnosed the same way: it
@@ -915,16 +1177,169 @@ stop_sampler() {
   SAMPLER_PID=""
 }
 
-run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
-  local wt="$1" no_e2e="$2" deploy="$3" no_fleet="$4" no_visual="$5"
+# The heavy part of the gate: scope, bb ci, image build, the suites. Called by
+# gate_body (same shell — it sets built_candidate there and uses its `step`).
+gate_suites() {
+  local wt="$1" no_e2e="$2" no_fleet="$3" no_visual="$4"
+
+  # Preflight. The e2e suite needs playwright to be resolvable from
+  # tools/browser-test; a broken install there does not surface until the
+  # suite runs — 40 minutes into the gate — as a wall of
+  # "Cannot find module 'playwright'". Cost of asking now: ~50 ms.
+  step "preflight: e2e runner dependencies"
+  if [ "$no_e2e" != "1" ] && ! ( cd "$wt/tools/browser-test" && node -e "require.resolve('playwright')" ) 2>/dev/null; then
+    echo "ABORT: cannot resolve 'playwright' from $wt/tools/browser-test."
+    echo "  The e2e suite would fail an hour from now with MODULE_NOT_FOUND."
+    echo "  Fix the SOURCE tree (worktrees are hardlinked from it), then retry:"
+    echo "      (cd $MAIN_WT/tools/browser-test && npm ci)"
+    return 3
+  fi
+  echo "ok"
+
+  step "scope: what this change needs"
+  classify_changes "$wt"
+  [ "$no_e2e" = "1" ] && NEED_E2E=0     # explicit override still wins
+  [ "$no_fleet" = "1" ] && NEED_FLEET=0
+  [ "$no_visual" = "1" ] && NEED_VISUAL=0
+  echo "  $CHANGED_N file(s) changed vs $TARGET"
+  if [ "$NEED_INTEGRATION" = 1 ]; then echo "  integration: RUN"
+  else echo "  integration: SKIPPED — nothing outside docs / browser-only assets changed"; fi
+  if [ "$no_e2e" = "1" ]; then echo "  e2e:         SKIPPED — --no-e2e (every member asked for it)"
+  elif [ "$NEED_E2E" = 1 ]; then echo "  e2e:         RUN"
+  else echo "  e2e:         SKIPPED — docs only, no runtime surface"; fi
+  if [ "$no_fleet" = "1" ]; then echo "  fleet e2e:   SKIPPED — --no-fleet (every member asked for it)"
+  elif [ "$NEED_FLEET" = 1 ]; then echo "  fleet e2e:   RUN"
+  else echo "  fleet e2e:   SKIPPED — nothing touching the cross-pod control plane"; fi
+  if [ "$no_visual" = "1" ]; then echo "  visual:      SKIPPED — --no-visual (every member asked for it)"
+  elif [ "$NEED_VISUAL" = 1 ]; then echo "  visual:      RUN"
+  else echo "  visual:      SKIPPED — no rendered surface changed"; fi
+  echo "  (bb ci runs diff-scoped: checks whose scripts/checks.edn :relevant"
+  echo "   paths saw no change are skipped visibly. Unrecognised -> everything.)"
+
+  step "bb ci (diff-scoped lint + tests, on merged result)"
+  if [ -n "${WTQ_CI_SKIP:-}" ]; then
+    echo "  ⚠ MANUAL SKIP (WTQ_CI_SKIP): $WTQ_CI_SKIP — a GREEN below is a SCOPED result"
+    ( cd "$wt" && bb ci --since "$TARGET" --skip "$WTQ_CI_SKIP" ) || { echo "FAIL: bb ci"; return 1; }
+  else
+    ( cd "$wt" && bb ci --since "$TARGET" ) || { echo "FAIL: bb ci"; return 1; }
+  fi
+
+  if [ "$NEED_INTEGRATION" = 0 ] && [ "$NEED_E2E" = 0 ] && [ "$NEED_FLEET" = 0 ] \
+     && [ "$NEED_VISUAL" = 0 ]; then
+    step "no runtime surface changed — skipping image build + suites"
+    echo "ok"
+    return 0
+  fi
+
+  step "build the CANDIDATE image from the merged tree"
+  # A candidate tag, never the canonical one. `graphden-executor:latest` names
+  # the last SUCCESSFULLY LANDED build, and the demo instance is deployed from
+  # it — so a gate that goes red must not be able to leave its code sitting
+  # there. It could, and it did: a failed gate left its build tagged `:latest`,
+  # and the next gate's deploy served that un-landed code to the demo.
+  # `bb verify` caught it, which is the only reason it was a scare and not an
+  # incident.
+  #
+  # Build only, no `up` — `compose up` from a worktree collides with the
+  # canonical containers anyway. The suites below boot GD_IMAGE, so they test
+  # exactly this candidate and nothing else.
+  ( cd "$wt" && clojure -T:build uber ) || { echo "FAIL: uberjar"; return 1; }
+  ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" docker-compose build executor ) \
+    || { echo "FAIL: docker build"; return 1; }
+
+  # e2e runs BEFORE integration: the browser suite is timing-sensitive (a
+  # slow-server window trips a test's 10s waitForFunction), and running it
+  # AFTER integration's heavy JVM work (~29 min when this ordering was
+  # chosen; ~6 min since the 2026-08-17 fixture-sharing epic) left the host
+  # under residual GC / memory pressure — which surfaced as a DIFFERENT
+  # innocent e2e file AbortError-ing (and leaking a row on the abort) each
+  # gate run. On a fresh host the flake window is far narrower. A real e2e
+  # break still fails here first, before integration's minutes are spent.
+  if [ "$NEED_E2E" = 0 ]; then
+    echo; echo "(e2e skipped — see the scope step above)"
+  else
+    step "bb test-e2e"
+    # WTQ_FLAKE_STRICT=1 — at the LANDING gate a file that passes only on
+    # retry (or leaks entities) is a red result, not a green one. The
+    # retry-masked default stays for ad-hoc runs; here it bounces the
+    # train (and bisection finds whose change it is), because a flake that
+    # lands rides every later gate, and the historical pattern was retries
+    # papering over one file's leak while every investigation chased the
+    # victim file (run-edit-tests.sh documents that case).
+    #   EXCEPTION (run-edit-tests.sh run-level thrash check): when the HOST
+    #   starved the stack this run — several files ran far past the norm, or
+    #   the executor heap sat at its high-water — a retry-pass is the test
+    #   being slow, not a race, so strict flake/leak verdicts are downgraded
+    #   to report-only and the run stays green. A file that NEVER passed still
+    #   reds (you can't land what didn't pass); the banner then says to free
+    #   RAM and re-run on a quiet host. Real races reproduce on a healthy host
+    #   (DEGRADED=0), where strict stays on.
+    ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" WTQ_FLAKE_STRICT=1 bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
+  fi
+
+  # Visual goes here — after e2e, before integration. It is ~2.5 min against
+  # the same browser infrastructure e2e just used, and integration is ~6 min
+  # of JVM work that a pixel diff has nothing to do with: failing the cheap
+  # browser check first keeps the feedback loop short. (Learned the hard way:
+  # the landing that introduced this step had integration ahead of it, red on
+  # one assertion, and neither visual nor fleet ever ran.)
+  if [ "$NEED_VISUAL" = 1 ]; then
+    step "bb test-visual"
+    # Pixel diff over 24 snapshots × 3 viewports against an isolated stack.
+    # It can only run here because every baseline is instance-independent —
+    # tools/visual-tests/run-visual.sh says what that costs to keep true.
+    ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-visual ) || { echo "FAIL: visual"; return 1; }
+  fi
+
+  if [ "$NEED_INTEGRATION" = 1 ]; then
+    step "bb test-integration"
+    ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-integration ) || { echo "FAIL: integration"; return 1; }
+  fi
+
+  if [ "$NEED_FLEET" = 1 ]; then
+    step "bb test-fleet-e2e"
+    # The candidate image booted TWICE as a real two-pod fleet over one
+    # Postgres. Everything else in the gate runs a single container, so this
+    # is the only place a broken /internal/fleet contract, a placement view
+    # the two pods disagree on, or a boot that only works alone can fail.
+    ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-fleet-e2e ) || { echo "FAIL: fleet e2e"; return 1; }
+  fi
+
+  built_candidate=1
+
+  # NO coverage step. It cost 15-19 minutes of every landing — a third of the
+  # gate — and gated nothing:
+  #   - tests-coverage.edn sets no fail-threshold, so a coverage REGRESSION
+  #     cannot fail the gate;
+  #   - it re-runs the very unit suite `bb ci` already ran above, only under
+  #     cloverage instrumentation. It can therefore only fail where bb ci has
+  #     already failed.
+  # So every merge paid ~18 minutes to compute a number nobody reads at merge
+  # time. Coverage is a thing you measure when you want to look at it:
+  # `bb coverage` from the main checkout, or on a schedule.
+}
+
+# The gate over an assembled train. Runs INSIDE the flock, in a subshell of its
+# own (its EXIT trap prints the phase timings on every way out). cwd-agnostic:
+# <wt> is the train worktree, already holding $TARGET + every member.
+#
+# WTQ_GATE_STUB (TEST-ONLY — dev/wtq/test/train_test.sh): an executable run in
+# place of gate_suites with the member names as arguments; its exit status is
+# the suites' verdict. It also keeps the gate off everything machine-wide (the
+# demo instance, docker gc, the develop push), because a temp-repo test must
+# not reach the real host.
+gate_body() {
+  local wt="$1" no_e2e="$2" deploy="$3" no_fleet="$4" no_visual="$5"; shift 5
+  local members="$*"
   local built_candidate=0
+  local stub="${WTQ_GATE_STUB:-}"
   # The demo instance is advanced post-land ONLY if it was running when the
   # gate started: the demo is off-by-default on a shared box (a 3 GB JVM
   # nobody asked for is what starved three e2e phases on 2026-09-07), and a
   # gate must not turn it on behind the operator's back. `bb instance-up`
   # brings it onto the landed image whenever it is wanted.
   local demo_was_up=0
-  docker ps --format '{{.Names}}' 2>/dev/null | grep -qx graphden-executor && demo_was_up=1
+  [ -z "$stub" ] && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx graphden-executor && demo_was_up=1
   # The heavy suites refuse to run in a worktree unless this is set: they boot
   # the canonical image and saturate the machine, so only the gate — which holds
   # the queue lock — may start them. We are the gate.
@@ -935,307 +1350,581 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
   # 2026-07-25 incident). symbolic-ref FAILS on detached HEAD, which is
   # exactly the loud refusal we want.
   local head_ref
-  head_ref="$(git -C "$wt" symbolic-ref -q HEAD)"     || { echo "ABORT: $wt HEAD is detached — refusing to gate (the ff-only land would be a silent no-op). Re-attach: git -C $wt checkout <feature-branch>"; return 3; }
+  head_ref="$(git -C "$wt" symbolic-ref -q HEAD)"     || { echo "ABORT: $wt HEAD is detached — refusing to gate (the ff-only land would be a silent no-op)."; return 3; }
   local branch="${head_ref#refs/heads/}"
   [ -n "$branch" ] && [ "$branch" != "HEAD" ]     || { echo "ABORT: could not resolve a real branch for $wt"; return 3; }
-  local ts; ts="$(date +%Y%m%d-%H%M%S)"
-  local name; name="$(basename "$wt")"
-  local log="$LOG_DIR/$name-$ts.log"
-  local resources="$LOG_DIR/$name-$ts.resources.csv"
-  start_sampler "$resources"
-  printf '%s (pid %s) since %s' "$branch" "$$" "$ts" > "$HOLDER"
 
-  {
-    echo "=== gate: $branch @ $ts ==="
-    # Phases are timed, because "how long does integration take?" had no answer
-    # in this log — only kaocha's own number, which sums across four parallel
-    # threads and is not wall-clock. A gate that reports pass/fail and nothing
-    # else makes every performance question a guess, and we have paid for that
-    # guess more than once.
-    GATE_T0=$SECONDS
-    _ph_name=""
+  echo "=== gate: $branch = $TARGET + [ $members ] ==="
+  # Phases are timed, because "how long does integration take?" had no answer
+  # in this log — only kaocha's own number, which sums across four parallel
+  # threads and is not wall-clock. A gate that reports pass/fail and nothing
+  # else makes every performance question a guess, and we have paid for that
+  # guess more than once.
+  GATE_T0=$SECONDS
+  _ph_name=""
+  _ph_t0=$SECONDS
+  _ph_rows=""
+  step() {
+    [ -n "$_ph_name" ] && _ph_rows="${_ph_rows}$((SECONDS - _ph_t0))	${_ph_name}
+"
+    _ph_name="$*"
     _ph_t0=$SECONDS
-    _ph_rows=""
-    step() {
-      [ -n "$_ph_name" ] && _ph_rows="${_ph_rows}$((SECONDS - _ph_t0))	${_ph_name}
+    # JVM / container heavy phases announce themselves, so agents' `wt test`,
+    # `wt up` and pre-queue lint yield instead of starving them.
+    case "$*" in
+      "bb ci"*|"build the CANDIDATE"*|"bb test-"*|"TEST STUB"*) heavy_on "$*" ;;
+      *) heavy_off ;;
+    esac
+    echo; echo ">>> $*  [t+$((SECONDS - GATE_T0))s]"
+  }
+  # shellcheck disable=SC2329  # invoked indirectly, by the EXIT trap below
+  phase_summary() {
+    [ -n "$_ph_name" ] && _ph_rows="${_ph_rows}$((SECONDS - _ph_t0))	${_ph_name}
 "
-      _ph_name="$*"
-      _ph_t0=$SECONDS
-      echo; echo ">>> $*  [t+$((SECONDS - GATE_T0))s]"
-    }
-    # shellcheck disable=SC2329  # invoked indirectly, by the EXIT trap below
-    phase_summary() {
-      [ -n "$_ph_name" ] && _ph_rows="${_ph_rows}$((SECONDS - _ph_t0))	${_ph_name}
-"
-      _ph_name=""
-      echo
-      echo "── where the gate spent its time ──"
-      printf '%b' "$_ph_rows" | sort -rn \
-        | awk -F'\t' 'NF==2 {printf "  %5ds  %s\n", $1, $2}'
-      printf '  ------\n  %5ds  TOTAL\n' "$((SECONDS - GATE_T0))"
-    }
-    # The block below is a subshell (it is piped into tee) and leaves through any
-    # of a dozen `return`s. An EXIT trap is the only place that sees them all —
-    # so the timings survive a red gate, which is exactly when they are wanted.
-    trap phase_summary EXIT
+    _ph_name=""
+    echo
+    echo "── where the gate spent its time ──"
+    printf '%b' "$_ph_rows" | sort -rn \
+      | awk -F'\t' 'NF==2 {printf "  %5ds  %s\n", $1, $2}'
+    printf '  ------\n  %5ds  TOTAL\n' "$((SECONDS - GATE_T0))"
+  }
+  # gate_body runs in its own subshell and leaves through any of a dozen
+  # `return`s. An EXIT trap is the only place that sees them all — so the
+  # timings survive a red gate, which is exactly when they are wanted.
+  trap 'phase_summary; heavy_off' EXIT
 
-    [ -z "$(git -C "$wt" status --porcelain)" ] || { echo "ABORT: worktree dirty — commit first."; return 3; }
+  [ -z "$(git -C "$wt" status --porcelain)" ] || { echo "ABORT: train worktree dirty after assembly."; return 3; }
+  [ -z "$(git -C "$MAIN_WT" status --porcelain --untracked-files=no)" ] || { echo "ABORT: main worktree ($MAIN_WT) has uncommitted TRACKED changes — it must stay clean on $TARGET."; return 3; }
+  git -C "$wt" merge-base --is-ancestor "$TARGET" HEAD \
+    || { echo "ABORT: $TARGET moved after the train was assembled — it no longer sits on top of it."; return 3; }
 
-    # Preflight. The e2e suite needs playwright to be resolvable from
-    # tools/browser-test; a broken install there does not surface until the
-    # suite runs — 40 minutes into the gate — as a wall of
-    # "Cannot find module 'playwright'". Cost of asking now: ~50 ms.
-    step "preflight: e2e runner dependencies"
-    if [ "$no_e2e" != "1" ] && ! ( cd "$wt/tools/browser-test" && node -e "require.resolve('playwright')" ) 2>/dev/null; then
-      echo "ABORT: cannot resolve 'playwright' from $wt/tools/browser-test."
-      echo "  The e2e suite would fail an hour from now with MODULE_NOT_FOUND."
-      echo "  Fix the SOURCE tree (worktrees are hardlinked from it), then retry:"
-      echo "      (cd $MAIN_WT/tools/browser-test && npm ci)"
-      return 3
-    fi
+  if [ -n "$stub" ]; then
+    step "TEST STUB instead of the suites: $stub"
+    ( cd "$wt" && "$stub" "$@" ) || { echo "FAIL: stub gate"; return 1; }
+  else
+    gate_suites "$wt" "$no_e2e" "$no_fleet" "$no_visual" || return $?
+  fi
+
+  step "land: fast-forward $TARGET -> $branch"
+  # The train contains $TARGET as ancestor (it was assembled on top of it, and
+  # checked again above) and the queue lock keeps other GATES off $TARGET
+  # (wt new / manual commits are outside it — the postcondition below catches
+  # those loudly too).
+  # FG-2 (audit-7): "the ff didn't fail" is NOT "it landed" — a no-op
+  # ff (already-ancestor ref, or HEAD per FG-1) exits 0. The invariant
+  # that makes RESULT=GREEN honest is: $TARGET became the EXACT sha
+  # the suites validated.
+  local land_before land_want land_after
+  land_before="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
+  land_want="$(git -C "$wt" rev-parse HEAD)"
+  git -C "$MAIN_WT" merge --ff-only "refs/heads/$branch" || { echo "FAIL: could not ff $TARGET (did it move? it shouldn't have)"; return 1; }
+  land_after="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
+  [ "$land_after" = "$land_want" ]       || { echo "FAIL(false-green guard): $TARGET is $land_after but the tested tip was $land_want — develop did NOT advance to the validated build"; return 1; }
+  [ "$land_after" != "$land_before" ]       || { echo "FAIL(false-green guard): $TARGET unchanged ($land_before) — the ff was a no-op, nothing landed"; return 1; }
+  # No-push is honored from EITHER the env var (this invocation) or the
+  # persistent queue marker (every gate on this machine). The env var
+  # alone was misleading: gate A's "LOCALLY only" was true for A, but
+  # the next gate without the var pushed A's commit along with its own
+  # (develop is shared local state). Touch/remove "$WTQ_DIR/no-push"
+  # to flip the machine-wide default.
+  if [ "${WTQ_NO_PUSH:-0}" = 1 ] || [ -e "$WTQ_DIR/no-push" ] || [ -n "$stub" ]; then
+    echo "(no-push — $TARGET advanced LOCALLY; note: the next push of $TARGET carries this commit too)"
+  else
+    git -C "$MAIN_WT" push origin "$TARGET" || echo "(push failed — $TARGET advanced locally; push it yourself)"
+  fi
+
+  # ONLY NOW does the candidate become canonical. Everything above could still
+  # have gone red; `graphden-executor:latest` must never name a build that did
+  # not land. If this change touched no runtime surface we never built a
+  # candidate — and the canonical tag is already the right one, because it is
+  # by construction the last landed build.
+  if [ "${built_candidate:-0}" = 1 ]; then
+    step "promote the candidate to $CANONICAL_IMAGE"
+    docker tag "$CANDIDATE_IMAGE" "$CANONICAL_IMAGE" \
+      || { echo "FAIL(post-land): $TARGET ADVANCED but the canonical tag was NOT promoted — demo/tag stale, fix manually; do NOT naively re-run the gate"; return 4; }
     echo "ok"
+  fi
 
-    step "fetch + refresh $TARGET"
-    git -C "$MAIN_WT" fetch origin || echo "(fetch failed — using local $TARGET)"
-    git -C "$MAIN_WT" merge --ff-only "origin/$TARGET" 2>/dev/null || true
-    [ -z "$(git -C "$MAIN_WT" status --porcelain --untracked-files=no)" ] || { echo "ABORT: main worktree ($MAIN_WT) has uncommitted TRACKED changes — it must stay clean on $TARGET."; return 3; }
-
-    # Before any of the expensive work, and before we merge develop in: is this
-    # agent still operating under the rules that develop now enforces? Its
-    # contract arrived once, as a launch message. If develop has rewritten
-    # CLAUDE.md / AGENT.md / a skill since, the agent has been working to rules
-    # that no longer exist — and nothing would have told it.
-    step "governance: are you working under the current rules?"
-    local drift; drift="$(governance_drift "$name" "$branch")"
-    if [ -n "$drift" ]; then
-      echo "ABORT: $TARGET changed the rules you operate under, and you have not seen them."
-      echo
-      printf '%s\n' "$drift" | sed 's/^/    /'
-      echo
-      echo "  These govern how you must WORK — they are not ordinary docs, and"
-      echo "  nothing re-reads them into a running agent's context."
-      echo
-      echo "  Read them, then confirm and retry:"
-      echo "      bb wt ack        # prints the diff, records that you have seen it"
-      echo "      bb wt merge"
-      return 3
+  # The instance is advanced AFTER the fast-forward, from the MAIN checkout,
+  # still holding the queue lock — so it can only ever serve landed code, and
+  # two gates can never race to redeploy it. The image is already built, so
+  # this costs no second uberjar. `bb instance-up` ends in `bb verify`, which
+  # compares /version against the freshly-landed tree: proof the demo really is
+  # running what just landed. That check is what caught this whole class of bug.
+  step "advance the $TARGET instance onto the landed image"
+  if [ "$demo_was_up" != 1 ]; then
+    echo "(the demo instance was not running when the gate started — leaving it down;"
+    echo " \`bb instance-up\` brings it onto the landed image)"
+    if [ "$deploy" = 1 ]; then
+      # The schema behind the stopped demo is now stale. Leave a marker the
+      # next `bb instance-up` honours (drop + re-seed before starting), so
+      # nobody has to remember `bb instance-reset` weeks later.
+      touch "$WTQ_DIR/demo-needs-reset"
+      echo " (--deploy: marked the demo schema for reset — the next \`bb instance-up\` drops + re-seeds it first)"
     fi
-    echo "ok"
+  elif [ "$deploy" = 1 ]; then
+    echo "(--deploy: dropping the $TARGET schema first — a member changes it)"
+    ( cd "$MAIN_WT" && bb instance-reset ) || { echo "FAIL(post-land): instance-reset (LANDED, but the demo is stale)"; return 4; }
+  else
+    ( cd "$MAIN_WT" && bb instance-up ) || { echo "FAIL(post-land): instance-up (LANDED, but the demo is stale)"; return 4; }
+  fi
 
-    step "merge $TARGET -> $branch"
-    if ! git -C "$wt" merge --no-edit "$TARGET"; then
-      git -C "$wt" merge --abort || true
-      echo "CONFLICT merging $TARGET into $branch — resolve in the worktree, then re-run 'wt merge'."
-      return 2
-    fi
-    # Files the merge just materialized inherit the caller's umask; the
-    # dockerized non-root linters (shellcheck/hadolint/lychee) can't read
-    # 0600 files and fail the gate on ENVIRONMENT, not code. Same reason
-    # cmd_new chmods after checkout.
-    chmod -R a+rX "$wt" || true
-
-    step "scope: what this change needs"
-    classify_changes "$wt"
-    [ "$no_e2e" = "1" ] && NEED_E2E=0     # explicit override still wins
-    [ "$no_fleet" = "1" ] && NEED_FLEET=0
-    [ "$no_visual" = "1" ] && NEED_VISUAL=0
-    echo "  $CHANGED_N file(s) changed vs $TARGET"
-    if [ "$NEED_INTEGRATION" = 1 ]; then echo "  integration: RUN"
-    else echo "  integration: SKIPPED — nothing outside docs / browser-only assets changed"; fi
-    if [ "$no_e2e" = "1" ]; then echo "  e2e:         SKIPPED — --no-e2e"
-    elif [ "$NEED_E2E" = 1 ]; then echo "  e2e:         RUN"
-    else echo "  e2e:         SKIPPED — docs only, no runtime surface"; fi
-    if [ "$no_fleet" = "1" ]; then echo "  fleet e2e:   SKIPPED — --no-fleet"
-    elif [ "$NEED_FLEET" = 1 ]; then echo "  fleet e2e:   RUN"
-    else echo "  fleet e2e:   SKIPPED — nothing touching the cross-pod control plane"; fi
-    if [ "$no_visual" = "1" ]; then echo "  visual:      SKIPPED — --no-visual"
-    elif [ "$NEED_VISUAL" = 1 ]; then echo "  visual:      RUN"
-    else echo "  visual:      SKIPPED — no rendered surface changed"; fi
-    echo "  (bb ci runs diff-scoped: checks whose scripts/checks.edn :relevant"
-    echo "   paths saw no change are skipped visibly. Unrecognised -> everything.)"
-
-    step "bb ci (diff-scoped lint + tests, on merged result)"
-    if [ -n "${WTQ_CI_SKIP:-}" ]; then
-      echo "  ⚠ MANUAL SKIP (WTQ_CI_SKIP): $WTQ_CI_SKIP — a GREEN below is a SCOPED result"
-      ( cd "$wt" && bb ci --since "$TARGET" --skip "$WTQ_CI_SKIP" ) || { echo "FAIL: bb ci"; return 1; }
-    else
-      ( cd "$wt" && bb ci --since "$TARGET" ) || { echo "FAIL: bb ci"; return 1; }
-    fi
-
-    if [ "$NEED_INTEGRATION" = 0 ] && [ "$NEED_E2E" = 0 ] && [ "$NEED_FLEET" = 0 ] \
-       && [ "$NEED_VISUAL" = 0 ]; then
-      step "no runtime surface changed — skipping image build + suites"
-      echo "ok"
-    else
-
-    step "build the CANDIDATE image from the merged tree"
-    # A candidate tag, never the canonical one. `graphden-executor:latest` names
-    # the last SUCCESSFULLY LANDED build, and the demo instance is deployed from
-    # it — so a gate that goes red must not be able to leave its code sitting
-    # there. It could, and it did: a failed gate left its build tagged `:latest`,
-    # and the next gate's deploy served that un-landed code to the demo.
-    # `bb verify` caught it, which is the only reason it was a scare and not an
-    # incident.
-    #
-    # Build only, no `up` — `compose up` from a worktree collides with the
-    # canonical containers anyway. The suites below boot GD_IMAGE, so they test
-    # exactly this candidate and nothing else.
-    ( cd "$wt" && clojure -T:build uber ) || { echo "FAIL: uberjar"; return 1; }
-    ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" docker-compose build executor ) \
-      || { echo "FAIL: docker build"; return 1; }
-
-    # e2e runs BEFORE integration: the browser suite is timing-sensitive (a
-    # slow-server window trips a test's 10s waitForFunction), and running it
-    # AFTER integration's heavy JVM work (~29 min when this ordering was
-    # chosen; ~6 min since the 2026-08-17 fixture-sharing epic) left the host
-    # under residual GC / memory pressure — which surfaced as a DIFFERENT
-    # innocent e2e file AbortError-ing (and leaking a row on the abort) each
-    # gate run. On a fresh host the flake window is far narrower. A real e2e
-    # break still fails here first, before integration's minutes are spent.
-    if [ "$NEED_E2E" = 0 ]; then
-      echo; echo "(e2e skipped — see the scope step above)"
-    else
-      step "bb test-e2e"
-      # WTQ_FLAKE_STRICT=1 — at the LANDING gate a file that passes only on
-      # retry (or leaks entities) is a red result, not a green one. The
-      # retry-masked default stays for ad-hoc runs; here it bounces the
-      # branch, because a flake that lands rides every later gate, and the
-      # historical pattern was retries papering over one file's leak while
-      # every investigation chased the victim file (run-edit-tests.sh
-      # documents that case).
-      #   EXCEPTION (run-edit-tests.sh run-level thrash check): when the HOST
-      #   starved the stack this run — several files ran far past the norm, or
-      #   the executor heap sat at its high-water — a retry-pass is the test
-      #   being slow, not a race, so strict flake/leak verdicts are downgraded
-      #   to report-only and the run stays green. A file that NEVER passed still
-      #   reds (you can't land what didn't pass); the banner then says to free
-      #   RAM and re-run on a quiet host. Real races reproduce on a healthy host
-      #   (DEGRADED=0), where strict stays on.
-      ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" WTQ_FLAKE_STRICT=1 bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
-    fi
-
-    # Visual goes here — after e2e, before integration. It is ~2.5 min against
-    # the same browser infrastructure e2e just used, and integration is ~6 min
-    # of JVM work that a pixel diff has nothing to do with: failing the cheap
-    # browser check first keeps the feedback loop short. (Learned the hard way:
-    # the landing that introduced this step had integration ahead of it, red on
-    # one assertion, and neither visual nor fleet ever ran.)
-    if [ "$NEED_VISUAL" = 1 ]; then
-      step "bb test-visual"
-      # Pixel diff over 24 snapshots × 3 viewports against an isolated stack.
-      # It can only run here because every baseline is instance-independent —
-      # tools/visual-tests/run-visual.sh says what that costs to keep true.
-      ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-visual ) || { echo "FAIL: visual"; return 1; }
-    fi
-
-    if [ "$NEED_INTEGRATION" = 1 ]; then
-      step "bb test-integration"
-      ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-integration ) || { echo "FAIL: integration"; return 1; }
-    fi
-
-    if [ "$NEED_FLEET" = 1 ]; then
-      step "bb test-fleet-e2e"
-      # The candidate image booted TWICE as a real two-pod fleet over one
-      # Postgres. Everything else in the gate runs a single container, so this
-      # is the only place a broken /internal/fleet contract, a placement view
-      # the two pods disagree on, or a boot that only works alone can fail.
-      ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-fleet-e2e ) || { echo "FAIL: fleet e2e"; return 1; }
-    fi
-
-    built_candidate=1
-
-    fi   # end: a runtime surface changed
-
-    # NO coverage step. It cost 15-19 minutes of every landing — a third of the
-    # gate — and gated nothing:
-    #   - tests-coverage.edn sets no fail-threshold, so a coverage REGRESSION
-    #     cannot fail the gate;
-    #   - it re-runs the very unit suite `bb ci` already ran above, only under
-    #     cloverage instrumentation. It can therefore only fail where bb ci has
-    #     already failed.
-    # So every merge paid ~18 minutes to compute a number nobody reads at merge
-    # time. Coverage is a thing you measure when you want to look at it:
-    # `bb coverage` from the main checkout, or on a schedule.
-
-    step "land: fast-forward $TARGET -> $branch"
-    # feature now contains $TARGET as ancestor (we just merged it in) and
-    # the queue lock keeps other GATES off $TARGET (wt new / manual
-    # commits are outside it — the postcondition below catches those
-    # loudly too).
-    # FG-2 (audit-7): "the ff didn't fail" is NOT "it landed" — a no-op
-    # ff (already-ancestor ref, or HEAD per FG-1) exits 0. The invariant
-    # that makes RESULT=GREEN honest is: $TARGET became the EXACT sha
-    # the suites validated.
-    local land_before land_want land_after
-    land_before="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
-    land_want="$(git -C "$wt" rev-parse HEAD)"
-    git -C "$MAIN_WT" merge --ff-only "$branch" || { echo "FAIL: could not ff $TARGET (did it move? it shouldn't have)"; return 1; }
-    land_after="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
-    [ "$land_after" = "$land_want" ]       || { echo "FAIL(false-green guard): $TARGET is $land_after but the tested tip was $land_want — develop did NOT advance to the validated build"; return 1; }
-    [ "$land_after" != "$land_before" ]       || { echo "FAIL(false-green guard): $TARGET unchanged ($land_before) — the ff was a no-op, nothing landed"; return 1; }
-    # No-push is honored from EITHER the env var (this invocation) or the
-    # persistent queue marker (every gate on this machine). The env var
-    # alone was misleading: gate A's "LOCALLY only" was true for A, but
-    # the next gate without the var pushed A's commit along with its own
-    # (develop is shared local state). Touch/remove "$WTQ_DIR/no-push"
-    # to flip the machine-wide default.
-    if [ "${WTQ_NO_PUSH:-0}" = 1 ] || [ -e "$WTQ_DIR/no-push" ]; then
-      echo "(no-push — $TARGET advanced LOCALLY; note: the next push of $TARGET carries this commit too)"
-    else
-      git -C "$MAIN_WT" push origin "$TARGET" || echo "(push failed — $TARGET advanced locally; push it yourself)"
-    fi
-
-    # ONLY NOW does the candidate become canonical. Everything above could still
-    # have gone red; `graphden-executor:latest` must never name a build that did
-    # not land. If this branch changed no runtime surface we never built a
-    # candidate — and the canonical tag is already the right one, because it is
-    # by construction the last landed build.
-    if [ "${built_candidate:-0}" = 1 ]; then
-      step "promote the candidate to $CANONICAL_IMAGE"
-      docker tag "$CANDIDATE_IMAGE" "$CANONICAL_IMAGE" \
-        || { echo "FAIL(post-land): $TARGET ADVANCED but the canonical tag was NOT promoted — demo/tag stale, fix manually; do NOT naively re-run the gate"; return 4; }
-      echo "ok"
-    fi
-
-    # The instance is advanced AFTER the fast-forward, from the MAIN checkout,
-    # still holding the queue lock — so it can only ever serve landed code, and
-    # two gates can never race to redeploy it. The image is already built, so
-    # this costs no second uberjar. `bb instance-up` ends in `bb verify`, which
-    # compares /version against the freshly-landed tree: proof the demo really is
-    # running what just landed. That check is what caught this whole class of bug.
-    step "advance the $TARGET instance onto the landed image"
-    if [ "$demo_was_up" != 1 ]; then
-      echo "(the demo instance was not running when the gate started — leaving it down;"
-      echo " \`bb instance-up\` brings it onto the landed image)"
-      if [ "$deploy" = 1 ]; then
-        # The schema behind the stopped demo is now stale. Leave a marker the
-        # next `bb instance-up` honours (drop + re-seed before starting), so
-        # nobody has to remember `bb instance-reset` weeks later.
-        touch "$MAIN_WT/.git/wtq/demo-needs-reset"
-        echo " (--deploy: marked the demo schema for reset — the next \`bb instance-up\` drops + re-seeds it first)"
-      fi
-    elif [ "$deploy" = 1 ]; then
-      echo "(--deploy: dropping the $TARGET schema first — the branch changes it)"
-      ( cd "$MAIN_WT" && bb instance-reset ) || { echo "FAIL(post-land): instance-reset (LANDED, but the demo is stale)"; return 4; }
-    else
-      ( cd "$MAIN_WT" && bb instance-up ) || { echo "FAIL(post-land): instance-up (LANDED, but the demo is stale)"; return 4; }
-    fi
-
+  if [ -z "$stub" ]; then
     step "gc: reclaim the executor layers this build superseded + what the run left on the host"
     docker image prune -f --filter label=graphden.image=executor || true
     gc_gate_leftovers
+  fi
 
-    echo; echo "=== GREEN: $branch landed on $TARGET ==="
+  echo; echo "=== GREEN: [ $members ] landed on $TARGET ==="
+  return 0
+}
+
+# --- the train worktree -----------------------------------------------------
+# Created on demand, reused by every train: its node_modules / target / caches
+# survive, so a train pays no more set-up than a gate in an agent's worktree
+# did. `clean -fd` (not -x) drops a previous train's untracked leftovers while
+# keeping the ignored build caches.
+prepare_train_wt() {
+  if [ ! -d "$TRAIN_WT/.git" ] && [ ! -f "$TRAIN_WT/.git" ]; then
+    git -C "$MAIN_WT" worktree prune
+    mkdir -p "$WTQ_ROOT"
+    git -C "$MAIN_WT" worktree add -f -B "$TRAIN_BRANCH" "$TRAIN_WT" "$TARGET" >/dev/null || return 1
+  fi
+  bootstrap_node_modules "$TRAIN_WT"   # every train: heals a package.json dir added since
+  git -C "$TRAIN_WT" merge --abort >/dev/null 2>&1 || true
+  git -C "$TRAIN_WT" reset -q --hard || return 1
+  git -C "$TRAIN_WT" clean -q -fd || return 1
+  git -C "$TRAIN_WT" checkout -q -B "$TRAIN_BRANCH" "$TARGET" || return 1
+}
+
+refresh_target() {
+  git -C "$MAIN_WT" fetch --quiet origin 2>/dev/null || echo "(fetch failed — using local $TARGET)"
+  git -C "$MAIN_WT" merge --ff-only --quiet "origin/$TARGET" 2>/dev/null || true
+}
+
+# --- selecting the next train -----------------------------------------------
+# Sets SEL (names, in train order) and SEL_SEG (their bisection segment; ""
+# for a fresh train). Returns 10 when nothing is queued. Returns 0 with an
+# EMPTY SEL when it settled something without a gate (a known-red split, an
+# exhausted bisection budget) — the caller just loops.
+TRAIN_MAX="${WTQ_TRAIN_MAX:-4}"
+case "$TRAIN_MAX" in ''|*[!0-9]*|0) TRAIN_MAX=4 ;; esac
+
+ceil_log2() { local n="$1" k=0 p=1; while [ "$p" -lt "$n" ]; do p=$((p * 2)); k=$((k + 1)); done; echo "$k"; }
+
+# Split a red segment's members into two halves at the front of the queue.
+split_seg() {   # <seg> <names...>   (caller holds the state lock)
+  local seg="$1"; shift
+  local n="$#" half i=0 m
+  half=$(((n + 1) / 2))
+  for m in "$@"; do
+    if [ "$i" -lt "$half" ]; then qset "$m" seg "${seg}0"; else qset "$m" seg "${seg}1"; fi
+    qset "$m" known_red ""
+    qset "$m" state queued
+    i=$((i + 1))
+  done
+}
+
+select_train() {
+  SEL=(); SEL_SEG=""
+  local n seg="" s
+  state_lock
+  # Waiters that died (kill -9, a lost terminal) leave the queue, as they did
+  # when the queue was a blocking flock. Members mid-bisection stay: they are
+  # owed a verdict even if nobody is listening for it any more.
+  for n in $(queued_names); do
+    [ -z "$(qget "$n" seg)" ] || continue
+    s="$(qget "$n" pid)"
+    if [ -n "$s" ] && ! kill -0 "$s" 2>/dev/null; then
+      rm -f "$(qfile "$n")"
+      echo "  pruned '$n' — its 'wt merge' (pid $s) is gone"
+    fi
+  done
+  # The lowest segment key first: "<id>.0…" before "<id>.1…" — depth-first.
+  seg="$(for n in $(queued_names); do qget "$n" seg; done | grep -v '^$' | LC_ALL=C sort | head -n1 || true)"
+
+  if [ -n "$seg" ]; then
+    local members=() id budget_max budget_used
+    mapfile -t members < <(names_in_seg "$seg")
+    id="${seg%%.*}"
+    # Known red (its sibling half just went green on the very tree this half
+    # completes): more than one member → split again without paying a gate.
+    if [ "$(qget "${members[0]}" known_red)" = 1 ] && [ "${#members[@]}" -gt 1 ]; then
+      split_seg "$seg" "${members[@]}"
+      state_unlock
+      info "bisect $id: [ ${members[*]} ] is known red (its sibling half landed green) — splitting without a gate"
+      return 0
+    fi
+    read -r budget_max budget_used < "$BISECT_DIR/$id" 2>/dev/null || { budget_max=0; budget_used=0; }
+    if [ "$budget_used" -ge "$budget_max" ]; then
+      # Budget spent: what is still unresolved rejoins the ordinary queue (at
+      # the front — its enqueue time is unchanged) and becomes a fresh train.
+      for n in $(queued_names); do
+        case "$(qget "$n" seg)" in "$id".*) qset "$n" seg ""; qset "$n" known_red ""; rm -f "$RESULT_DIR/$n" ;; esac
+      done
+      rm -f "$BISECT_DIR/$id"
+      state_unlock
+      warn "bisect $id: budget of $budget_max extra gate(s) spent — the unresolved members rejoin the queue as a fresh train"
+      return 0
+    fi
+    printf '%s %s\n' "$budget_max" "$((budget_used + 1))" > "$BISECT_DIR/$id"
+    SEL=("${members[@]}"); SEL_SEG="$seg"
+    state_unlock
     return 0
-  } 2>&1 | tee "$log"
-  local rc="${PIPESTATUS[0]}"
+  fi
 
+  if [ -z "$(queued_names)" ]; then state_unlock; return 10; fi
+  state_unlock
+
+  soon_wait
+
+  state_lock
+  governance_paths
+  for n in $(names_in_seg ""); do
+    [ "${#SEL[@]}" -lt "$TRAIN_MAX" ] || break
+    # A branch that changes the rules travels alone (see the header).
+    if [ -n "$(git -C "$MAIN_WT" diff --name-only "$TARGET...$(qget "$n" sha)" -- "${GOV_PATHS[@]}" 2>/dev/null)" ]; then
+      if [ "${#SEL[@]}" -eq 0 ]; then SEL=("$n"); fi
+      break
+    fi
+    SEL+=("$n")
+  done
+  state_unlock
+  [ "${#SEL[@]}" -gt 0 ] || return 10
+}
+
+# Honour `wt soon`: hold the train while a live marker's branch is not yet
+# queued — until it is, its deadline passes, or 15 minutes are gone in total.
+soon_wait() {
+  local unit="${WTQ_SOON_UNIT:-60}" poll="${WTQ_SOON_POLL:-20}" t0=$SECONDS live
+  local cap=$((15 * unit))
+  while :; do
+    state_lock; live="$(live_soon)"; state_unlock
+    [ -n "$live" ] || return 0
+    if [ $((SECONDS - t0)) -ge "$cap" ]; then
+      warn "soon: waited the 15-minute cap — leaving without: $(printf '%s' "$live" | cut -d' ' -f1 | tr '\n' ' ')"
+      return 0
+    fi
+    info "soon: holding the train for $(printf '%s' "$live" | awk '{printf "%s (%ss left) ", $1, $2}')"
+    sleep "$poll"
+  done
+}
+
+# --- one train ---------------------------------------------------------------
+# Returns 0 to keep conducting, 10 when the queue is empty, 20 when the gate
+# itself broke (PRECOND/CONFLICT inside it, a post-land failure) — the conductor
+# stops then, loudly, rather than feed the next train into a broken host.
+train_cycle() {
+  local rc=0
+  select_train || rc=$?
+  [ "$rc" = 0 ] || return "$rc"
+  [ "${#SEL[@]}" -gt 0 ] || return 0
+
+  local ts; ts="$(date +%Y%m%d-%H%M%S)"
+  while [ -e "$LOG_DIR/_train-$ts.log" ]; do sleep 1; ts="$(date +%Y%m%d-%H%M%S)"; done
+  local id="${SEL_SEG%%.*}"; [ -n "$id" ] || id="$ts"
+  local log="$LOG_DIR/_train-$ts.log" m
+  : > "$log"
+  # Each member's own log name is a HARD link to the train log: `wt log <name>`
+  # and `wt watch <name>` find it by name, and it grows as the train does.
+  for m in "${SEL[@]}"; do
+    load_entry "$m"
+    ln -f "$log" "$LOG_DIR/$m-$ts.log" 2>/dev/null || cp "$log" "$LOG_DIR/$m-$ts.log"
+  done
+
+  { train_run "$id" "$ts" "$log"; } 2>&1 | tee -a "$log"
+  rc="${PIPESTATUS[0]}"
+  rm -f "$TRAIN_FILE"
+  return "$rc"
+}
+
+train_run() {
+  local id="$1" ts="$2" log="$3"
+  local n="${#SEL[@]}" seg="$SEL_SEG"
+  echo "=== train $ts: [ ${SEL[*]} ]${seg:+  (bisection of $id, segment ${seg#*.})} ==="
+
+  # 1. Each member must still be exactly what its author queued.
+  local ok_members=() m wt tip head drift
+  for m in "${SEL[@]}"; do
+    wt="${M_WT[$m]}"
+    tip="$(git -C "$MAIN_WT" rev-parse --verify -q "refs/heads/${M_BRANCH[$m]}" || true)"
+    if [ "$tip" != "${M_SHA[$m]}" ]; then
+      decide "$m" STALE "$ts" "${M_BRANCH[$m]} is at ${tip:0:8}, queued ${M_SHA[$m]:0:8} — branch moved after queueing, re-run wt merge"; continue
+    fi
+    if [ ! -d "$wt" ]; then decide "$m" PRECOND "$ts" "worktree $wt is gone"; continue; fi
+    head="$(git -C "$wt" symbolic-ref -q HEAD || true)"
+    if [ "$head" != "refs/heads/${M_BRANCH[$m]}" ]; then
+      decide "$m" PRECOND "$ts" "worktree HEAD is ${head:-detached}, not ${M_BRANCH[$m]} — re-attach it"; continue
+    fi
+    if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
+      decide "$m" PRECOND "$ts" "worktree dirty — commit first"; continue
+    fi
+    # Before any expensive work: is this agent still operating under the rules
+    # develop now enforces? Its contract arrived once, as a launch message. If
+    # develop has rewritten CLAUDE.md / AGENT.md / a skill since, the agent has
+    # been working to rules that no longer exist — and nothing would have told it.
+    drift="$(governance_drift "$m" "${M_BRANCH[$m]}")"
+    if [ -n "$drift" ]; then
+      echo "  $m: $TARGET changed the rules you operate under, and you have not seen them:"
+      printf '%s\n' "$drift" | sed 's/^/      /'
+      echo "    Read them, then:  bb wt ack   &&   bb wt merge"
+      decide "$m" PRECOND "$ts" "unacknowledged rule change — run 'bb wt ack', then 'bb wt merge'"; continue
+    fi
+    if [ "$(cat "$LINT_OK_DIR/$m" 2>/dev/null)" != "${M_SHA[$m]}" ]; then
+      decide "$m" PRECOND "$ts" "no green 'bb lint' stamp for the queued sha — re-run 'bb wt merge' (it lints first)"; continue
+    fi
+    if git -C "$MAIN_WT" merge-base --is-ancestor "${M_SHA[$m]}" "$TARGET"; then
+      decide "$m" GREEN "$ts" "already contained in $TARGET — nothing left to gate"; continue
+    fi
+    ok_members+=("$m")
+  done
+
+  # 2. Assemble: $TARGET + each member, in order.
+  local gated=() out
+  if [ "${#ok_members[@]}" -gt 0 ]; then
+    echo; echo ">>> assemble $TRAIN_BRANCH = $TARGET@$(git -C "$MAIN_WT" rev-parse --short "$TARGET") + [ ${ok_members[*]} ]"
+    if ! prepare_train_wt; then
+      echo "ABORT: could not prepare the train worktree $TRAIN_WT"
+      for m in "${ok_members[@]}"; do decide "$m" PRECOND "$ts" "train worktree could not be prepared — see the train log"; done
+      return 20
+    fi
+    for m in "${ok_members[@]}"; do
+      if out="$(git -C "$TRAIN_WT" merge --no-edit -m "Merge branch '${M_BRANCH[$m]}' into $TARGET" "${M_SHA[$m]}" 2>&1)"; then
+        echo "  + $m (${M_SHA[$m]:0:8})"
+        gated+=("$m")
+        continue
+      fi
+      git -C "$TRAIN_WT" merge --abort >/dev/null 2>&1 || git -C "$TRAIN_WT" reset -q --hard HEAD
+      if git -C "$MAIN_WT" merge-tree --write-tree "$TARGET" "${M_SHA[$m]}" >/dev/null 2>&1; then
+        # Clean against develop alone: it collides with an earlier member,
+        # which is nobody's mistake yet. Next train.
+        echo "  ~ $m conflicts only with an earlier member of this train — deferred to the next train"
+        state_lock; qset "$m" seg ""; qset "$m" known_red ""; qset "$m" state queued; state_unlock
+      else
+        printf '%s\n' "$out" | sed 's/^/      /'
+        decide "$m" CONFLICT "$ts" "${M_BRANCH[$m]} conflicts with $TARGET — merge $TARGET in, resolve, re-run wt merge"
+      fi
+    done
+    # Files the merges just materialized inherit the caller's umask; the
+    # dockerized non-root linters (shellcheck/hadolint/lychee) can't read
+    # 0600 files and fail the gate on ENVIRONMENT, not code.
+    chmod -R a+rX "$TRAIN_WT" || true
+  fi
+  if [ "${#gated[@]}" -eq 0 ]; then
+    echo "(no member left to gate)"
+    return 0
+  fi
+
+  # 3. Gate the whole train once. Flags: skip a suite only if EVERY member asked
+  # to; --deploy / --release if ANY did.
+  local no_e2e=1 no_fleet=1 no_visual=1 deploy=0 release=0
+  for m in "${gated[@]}"; do
+    [ "${M_NO_E2E[$m]}" = 1 ] || no_e2e=0
+    [ "${M_NO_FLEET[$m]}" = 1 ] || no_fleet=0
+    [ "${M_NO_VISUAL[$m]}" = 1 ] || no_visual=0
+    [ "${M_DEPLOY[$m]}" = 1 ] && deploy=1
+    [ "${M_RELEASE[$m]}" = 1 ] && release=1
+  done
+  state_lock
+  for m in "${gated[@]}"; do qset "$m" state train; done
+  printf 'id=%s\nts=%s\nmembers=%s\nlog=%s\npid=%s\n' "$id" "$ts" "${gated[*]}" "$log" "$$" > "$TRAIN_FILE"
+  state_unlock
+  printf 'train %s [%s] (pid %s) since %s' "$ts" "${gated[*]}" "$$" "$ts" > "$HOLDER"
+
+  local resources="$LOG_DIR/_train-$ts.resources.csv" grc=0
+  # The gate's own output is also kept apart (the outer tee may not have
+  # flushed it to $log yet when we read the failing step back).
+  local gate_out="$LOG_DIR/.gate-$ts.out"
+  start_sampler "$resources"
+  ( gate_body "$TRAIN_WT" "$no_e2e" "$deploy" "$no_fleet" "$no_visual" "${gated[@]}" ) 2>&1 | tee "$gate_out"
+  grc="${PIPESTATUS[0]}"
   stop_sampler
   # Point at it explicitly. A CSV nobody knows exists is not instrumentation.
-  printf '\nresource timeline: %s\n' "$resources" | tee -a "$log"
+  printf '\nresource timeline: %s\n' "$resources"
 
-  # propagate the gate's status, not tee's
+  # 4. Verdicts.
+  local why; why="$(grep -E '^(FAIL|ABORT)' "$gate_out" | tail -n1 || true)"; why="${why:-gate red}"
+  rm -f "$gate_out"
+  echo; echo ">>> verdicts"
+  local landed; landed="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
+  case "$grc" in
+    0)
+      for m in "${gated[@]}"; do decide "$m" GREEN "$ts" "landed in $TARGET@${landed:0:8}"; done
+      [ "$release" = 1 ] && printf '%s\n' "$landed" > "$WTQ_DIR/release-pending"
+      # First half green → the second half is the rest of the very tree that
+      # went red: known red, split without a gate.
+      if [ -n "$seg" ] && [ "${seg: -1}" = 0 ] && [ "${#gated[@]}" = "$n" ]; then
+        state_lock
+        for m in $(names_in_seg "${seg%0}1"); do qset "$m" known_red 1; done
+        state_unlock
+      fi
+      return 0 ;;
+    4)
+      for m in "${gated[@]}"; do decide "$m" LANDED_STALE "$ts" "landed in $TARGET@${landed:0:8}, but a post-land step failed — see the train log"; done
+      return 20 ;;
+    2|3)
+      echo "!!! the gate refused the ASSEMBLED train (rc $grc) — that is an environment or tooling"
+      echo "!!! problem, not any member's code. Every member gets it; fix the host, then re-run."
+      local v=PRECOND; [ "$grc" = 2 ] && v=CONFLICT
+      for m in "${gated[@]}"; do decide "$m" "$v" "$ts" "the train gate refused to run (rc $grc) — see the train log"; done
+      return 20 ;;
+  esac
+
+  if [ "${#gated[@]}" -eq 1 ]; then
+    decide "${gated[0]}" FAIL "$ts" "$why"
+    return 0
+  fi
+  # Red with several members: bisect. The halves go to the FRONT of the queue
+  # (a segment always outranks the ordinary queue) and this conductor keeps
+  # the lock to run them.
+  local root="$seg"
+  if [ -z "$root" ]; then
+    root="$id."
+    printf '%s 0\n' "$(( $(ceil_log2 "${#gated[@]}") + 1 ))" > "$BISECT_DIR/$id"
+  fi
+  state_lock
+  split_seg "$root" "${gated[@]}"
+  for m in "${gated[@]}"; do
+    write_result "$m" TRAIN_RED_SPLITTING "${M_BRANCH[$m]}" "${M_SHA[$m]}" "$ts" "train red ($why) — bisecting; red log: $log"
+  done
+  state_unlock
+  echo "  TRAIN RED with ${#gated[@]} members ($why) — bisecting:"
+  echo "    first half : $(names_in_seg "${root}0" | tr '\n' ' ')"
+  echo "    second half: $(names_in_seg "${root}1" | tr '\n' ' ')"
+  return 0
+}
+
+# --- the conductor -----------------------------------------------------------
+# Runs while holding the gate lock. Keeps running trains while its own entry is
+# undecided or a bisection is in progress; everything else waits for its own
+# waiter to take the lock.
+conductor_has_work() {
+  local own="$1" own_sha="$2" n
+  [ "$(qget "$own" sha)" = "$own_sha" ] && return 0
+  for n in $(queued_names); do [ -n "$(qget "$n" seg)" ] && return 0; done
+  return 1
+}
+
+conduct() {
+  local own="$1" own_sha="$2" guard=0 rc n
+  # Whoever held the lock before us is gone (the lock is ours now), so an entry
+  # still marked "in train" belongs to a train that died mid-gate: requeue it.
+  state_lock
+  for n in $(queued_names); do [ "$(qget "$n" state)" = train ] && qset "$n" state queued; done
+  rm -f "$TRAIN_FILE"
+  state_unlock
+  while [ "$guard" -lt 100 ]; do
+    guard=$((guard + 1))
+    conductor_has_work "$own" "$own_sha" || return 0
+    wait_for_headroom
+    refresh_target
+    rc=0; train_cycle || rc=$?
+    case "$rc" in
+      0)  : ;;
+      10) return 0 ;;
+      *)  warn "the train gate broke (rc $rc) — conducting stops; queued branches keep their place"; return 0 ;;
+    esac
+  done
+  warn "conductor: 100 trains in one hold — stopping as a safety net (this is a bug; report it)"
+}
+
+# The per-check timeouts are ceilings measured on an idle box; starting the
+# gate into an oversubscribed host doesn't run slower, it gets KILLED or
+# times out spuriously (observed: load 14-21 from leftover load generators).
+# Wait for headroom instead of burning a serialized queue slot on a doomed
+# run. Override the threshold with WTQ_LOAD_MAX — an INTEGER load1 bound
+# (absolute, not per-core: the box this queue serializes is host-shared);
+# anything non-integer falls back to the default rather than wedging the
+# comparison below in an infinite error loop.
+#
+# Memory is admitted the same way: WTQ_MEM_MIN_MB of MemAvailable (see "host
+# memory" above for where the default comes from).
+wait_for_headroom() {
+  local max_load="${WTQ_LOAD_MAX:-8}" load1 mem_min avail
+  case "$max_load" in
+    ''|*[!0-9]*) warn "WTQ_LOAD_MAX='$max_load' is not an integer — using 8"; max_load=8 ;;
+  esac
+  mem_min="$(int_or "${WTQ_MEM_MIN_MB:-}" 6000)"
+  while :; do
+    load1="$(cut -d' ' -f1 /proc/loadavg | cut -d. -f1)"
+    avail="$(mem_avail_mb)"
+    [ "$load1" -lt "$max_load" ] && [ "$avail" -ge "$mem_min" ] && break
+    if [ "$load1" -ge "$max_load" ]; then
+      warn "host load $(cut -d' ' -f1-3 /proc/loadavg) >= $max_load — waiting for headroom before starting the gate ..."
+    else
+      warn "MemAvailable ${avail} MB < ${mem_min} MB (WTQ_MEM_MIN_MB) — waiting for memory before starting the gate (stop an idle 'bb wt up' instance to free some) ..."
+    fi
+    sleep "$(int_or "${WTQ_HEADROOM_POLL:-}" 120)"
+  done
+}
+
+# --release: chain the prod release AFTER the queue lock is released, so the
+# release's own waiting (tenancy CI, cloud deploy) never extends a queue
+# slot. The release outcome does NOT change the landing verdict — RESULT is
+# about develop, and develop HAS advanced; a failed release is re-runnable
+# by hand ("bb release" is idempotent). Run once per conductor hold, for the
+# develop tip, however many members asked for it.
+release_chain() {
+  local land_sha="$1" remote_sha cloud_dir="$MAIN_WT/../graphden-cloud"
+  if [ ! -d "$cloud_dir/.git" ]; then
+    warn "--release: no graphden-cloud checkout at $cloud_dir — release SKIPPED; run 'bb release --push $land_sha' there yourself."
+    return 0
+  fi
+  # The release pins the monorepo by sha, and tenancy CI will `git
+  # checkout` that sha from GitHub — releasing a sha that never got
+  # pushed (no ssh-agent, WTQ_NO_PUSH) can only fail 5 minutes later
+  # with a worse error. Check the cheap way (public repo, anonymous).
+  remote_sha="$(git ls-remote "https://github.com/Graphden/graphden.git" "refs/heads/$TARGET" 2>/dev/null | cut -f1)"
+  if [ "$remote_sha" != "$land_sha" ]; then
+    warn "--release: origin/$TARGET is not at the landed sha ($land_sha) — the develop push failed or was skipped. Release SKIPPED; push develop, then run 'bb release --push $land_sha' from graphden-cloud."
+    return 0
+  fi
+  info "--release: landing is GREEN — running 'bb release --push $land_sha' from $cloud_dir ..."
+  if ( cd "$cloud_dir" && bb release --push "$land_sha" ); then
+    ok "✓ released to prod (graphden @ ${land_sha:0:8})"
+  else
+    warn "--release: release FAILED — the LANDING itself is green and develop has advanced. Fix the cause, then re-run 'bb release --push $land_sha' from graphden-cloud."
+  fi
+}
+
+# --- the waiter ----------------------------------------------------------------
+# "wait" while our entry (at our sha) is queued; "final" once results/ holds a
+# final verdict for our sha; "gone" when neither holds (superseded by a newer
+# `wt merge` of the same branch, or removed by hand).
+waiter_state() {
+  local name="$1" sha="$2" r=""
+  state_lock
+  if [ "$(qget "$name" sha)" = "$sha" ]; then r="wait"
+  elif [ -f "$RESULT_DIR/$name" ] && [ "$(cut -f4 "$RESULT_DIR/$name")" = "$sha" ] \
+       && is_final "$(cut -f1 "$RESULT_DIR/$name")"; then r=final
+  else r=gone; fi
+  state_unlock
+  echo "$r"
+}
+
+report_verdict() {   # <name> -> prints the verdict, returns its rc
+  local name="$1" v rc detail
+  v="$(cut -f1 "$RESULT_DIR/$name")"; rc="$(cut -f2 "$RESULT_DIR/$name")"; detail="$(cut -f6 "$RESULT_DIR/$name")"
+  echo
+  say "RESULT: $v${detail:+ — $detail}"
+  if [ "$v" = GREEN ]; then ok "$(verdict_msg "$v" "$name")"; else warn "$(verdict_msg "$v" "$name")"; fi
   return "$rc"
+}
+
+# Ctrl-C / kill of a waiter takes its entry out of the queue — unless a train
+# already took it (in a gate, or mid-bisection): that verdict is coming anyway.
+waiter_abort() {
+  state_lock
+  if [ "$(qget "$MY_NAME" sha)" = "$MY_SHA" ] && [ "$(qget "$MY_NAME" pid)" = "$$" ] \
+     && [ "$(qget "$MY_NAME" state)" != train ] && [ -z "$(qget "$MY_NAME" seg)" ]; then
+    rm -f "$(qfile "$MY_NAME")"
+  fi
+  state_unlock
+}
+
+lint_refused() {   # <name> <branch> <sha> <why> — PRECOND, never queued
+  state_lock; write_result "$1" PRECOND "$2" "$3" "" "not queued: $4"; state_unlock
+  warn "↩ NOT queued: $4"
 }
 
 cmd_merge() {
@@ -1251,97 +1940,121 @@ cmd_merge() {
     esac
   done
   local wt; wt="$(git rev-parse --show-toplevel)"
-  local branch; branch="$(branch_of "$wt")"
+  [ "$wt" != "$MAIN_WT" ]  || die "run 'wt merge' from a feature worktree, not the main checkout."
+  [ "$wt" != "$TRAIN_WT" ] || die "the train worktree is the queue's own — run 'wt merge' from a feature worktree."
+  # FG-1 at the door: a detached HEAD has no branch to land.
+  local head_ref; head_ref="$(git -C "$wt" symbolic-ref -q HEAD)" \
+    || { warn "ABORT: HEAD is detached — re-attach your feature branch (git checkout <branch>), then re-run."; return 3; }
+  local branch="${head_ref#refs/heads/}"
   [ "$branch" != "$TARGET" ] || die "you are on $TARGET — run 'wt merge' from inside a feature worktree."
-  [ "$wt" != "$MAIN_WT" ]    || die "run 'wt merge' from a feature worktree, not the main checkout."
-  bootstrap_node_modules "$wt"     # the gate runs bb ci in here — it needs the deps
+  local name sha; name="$(basename "$wt")"; sha="$(git -C "$wt" rev-parse HEAD)"
+  MY_NAME="$name"; MY_SHA="$sha"
 
-  # A queued merge INVALIDATES the previous verdict: `wt watch` and retry
-  # drivers read "no RESULT file" as "gate running/queued", and the load-wait
-  # below can hold that window open for minutes — a stale verdict here would
-  # be reported as if it were this run's outcome.
-  rm -f "$RESULT_DIR/$(basename "$wt")"
+  rm -f "$RESULT_DIR/$name"   # this run's verdict starts now, lint included
 
-  # The per-check timeouts are ceilings measured on an idle box; starting the
-  # gate into an oversubscribed host doesn't run slower, it gets KILLED or
-  # times out spuriously (observed: load 14-21 from leftover load generators).
-  # Wait for headroom instead of burning a serialized queue slot on a doomed
-  # run. Override the threshold with WTQ_LOAD_MAX — an INTEGER load1 bound
-  # (absolute, not per-core: the box this queue serializes is host-shared);
-  # anything non-integer falls back to the default rather than wedging the
-  # comparison below in an infinite error loop.
-  local max_load="${WTQ_LOAD_MAX:-8}" load1
-  case "$max_load" in
-    ''|*[!0-9]*) warn "WTQ_LOAD_MAX='$max_load' is not an integer — using 8"; max_load=8 ;;
-  esac
-  while :; do
-    load1="$(cut -d' ' -f1 /proc/loadavg | cut -d. -f1)"
-    [ "$load1" -lt "$max_load" ] && break
-    warn "host load $(cut -d' ' -f1-3 /proc/loadavg) >= $max_load — waiting for headroom before starting the gate ..."
-    sleep 120
-  done
-
-  exec 9>"$LOCK"
-  if ! flock -n -x 9; then
-    warn "Queue busy — held by: $(cat "$HOLDER" 2>/dev/null || echo '?')"
-    warn "Waiting for the lock (Ctrl-C leaves the queue; nothing is lost) ..."
-    flock -x 9            # block here until it is our turn — THIS is the queue
-  fi
-  ok "Acquired queue lock — running gate."
-
-  local rc=0
-  run_gate "$wt" "$no_e2e" "$deploy" "$no_fleet" "$no_visual" || rc=$?
-  : > "$HOLDER"
-  flock -u 9 || true      # release for the next in line
-
-  # One rc→outcome mapping for BOTH the RESULT file and the console message —
-  # the two used to be parallel case statements that could drift apart.
-  local nm verdict msg; nm="$(basename "$wt")"
-  case "$rc" in
-    0) verdict=GREEN;    msg="✓ landed. You can now:  bb wt drop $nm" ;;
-    2) verdict=CONFLICT; msg="↩ merge conflict — resolve, commit, re-run 'bb wt merge'." ;;
-    3) verdict=PRECOND;  msg="↩ precondition failed (dirty tree / unacknowledged rule change) — see log above." ;;
-    4) verdict=LANDED_STALE; msg="⚠ LANDED on $TARGET, but a post-land step (promote/deploy) failed — develop moved; fix the demo/tag manually, do NOT re-run the gate." ;;
-    *) verdict=FAIL;     msg="✗ gate failed — fix on this branch, then re-run 'bb wt merge'. Log: bb wt log $nm" ;;
-  esac
-  printf '%s\t%s\t%s\n' "$verdict" "$rc" "$branch" > "$RESULT_DIR/$nm"   # agents/`wt status` read this
-
-  echo
-  # Exit with the gate's own status, never 0 on a non-landing. A CONFLICT or a
-  # PRECOND (dirty tree, stale governance) used to return 0 to the caller, so
-  # anything scripting the gate — an agent that launches it in the background and
-  # reads its exit code — was told "landed" when develop had not moved an inch.
-  if [ "$rc" = 0 ]; then ok "$msg"; else warn "$msg"; fi
-
-  # --release: chain the prod release AFTER the queue lock is released, so the
-  # release's own waiting (tenancy CI, cloud deploy) never extends a queue
-  # slot. The release outcome does NOT change the landing verdict — RESULT is
-  # about develop, and develop HAS advanced; a failed release is re-runnable
-  # by hand ("bb release" is idempotent). Exit code stays the gate's.
-  if [ "$release" = 1 ] && [ "$rc" = 0 ]; then
-    local land_sha remote_sha cloud_dir="$MAIN_WT/../graphden-cloud"
-    land_sha="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
-    if [ ! -d "$cloud_dir/.git" ]; then
-      warn "--release: no graphden-cloud checkout at $cloud_dir — release SKIPPED; run 'bb release --push $land_sha' there yourself."
-    else
-      # The release pins the monorepo by sha, and tenancy CI will `git
-      # checkout` that sha from GitHub — releasing a sha that never got
-      # pushed (no ssh-agent, WTQ_NO_PUSH) can only fail 5 minutes later
-      # with a worse error. Check the cheap way (public repo, anonymous).
-      remote_sha="$(git ls-remote "https://github.com/Graphden/graphden.git" "refs/heads/$TARGET" 2>/dev/null | cut -f1)"
-      if [ "$remote_sha" != "$land_sha" ]; then
-        warn "--release: origin/$TARGET is not at the landed sha ($land_sha) — the develop push failed or was skipped. Release SKIPPED; push develop, then run 'bb release --push $land_sha' from graphden-cloud."
-      else
-        info "--release: landing is GREEN — running 'bb release --push $land_sha' from $cloud_dir ..."
-        if ( cd "$cloud_dir" && bb release --push "$land_sha" ); then
-          ok "✓ released to prod (graphden @ ${land_sha:0:8})"
-        else
-          warn "--release: release FAILED — the LANDING itself is green and develop has advanced. Fix the cause, then re-run 'bb release --push $land_sha' from graphden-cloud."
-        fi
-      fi
+  # Lint BEFORE queueing, outside the gate lock: a lint red found inside a
+  # train costs the whole serialized train a gate (and a bisection), found
+  # here it costs one agent a minute. Stamped by the exact sha, so a re-queue
+  # of the same commit does not lint twice; the conductor re-checks the stamp.
+  # (The train still lints the MERGED tree in `bb ci` — cross-branch drift
+  # like a stale devtour bake only shows there.)
+  if [ "$(cat "$LINT_OK_DIR/$name" 2>/dev/null)" = "$sha" ]; then
+    ok "lint: already green at ${sha:0:8} — reusing the stamp"
+  else
+    [ -z "$(git -C "$wt" status --porcelain)" ] \
+      || { lint_refused "$name" "$branch" "$sha" "worktree dirty — commit first (lint must see exactly the queued commit)"; return 3; }
+    bootstrap_node_modules "$wt"
+    yield_to_gate "lint"
+    info "lint: running '${WTQ_LINT_CMD:-bb lint}' at ${sha:0:8} before queueing ..."
+    local lrc=0
+    ( cd "$wt" && ${WTQ_LINT_CMD:-bb lint} ) || lrc=$?
+    if [ "$lrc" != 0 ]; then
+      lint_refused "$name" "$branch" "$sha" "'${WTQ_LINT_CMD:-bb lint}' is red (output above) — fix, commit, re-run 'bb wt merge'"; return 3
     fi
+    if [ "$(git -C "$wt" rev-parse HEAD)" != "$sha" ] || [ -n "$(git -C "$wt" status --porcelain)" ]; then
+      lint_refused "$name" "$branch" "$sha" "the worktree changed while lint ran — re-run 'bb wt merge'"; return 3
+    fi
+    printf '%s\n' "$sha" > "$LINT_OK_DIR/$name"
+    ok "lint: green at ${sha:0:8}"
   fi
-  return "$rc"
+
+  # Enqueue. A queued merge INVALIDATES the previous verdict: `wt watch` and
+  # retry drivers must never report a stale verdict as this run's outcome.
+  state_lock
+  local tmp="$QUEUE_DIR/.$name.tmp"
+  {
+    printf 'name=%s\nbranch=%s\nsha=%s\nwt=%s\nts=%s\npid=%s\nstate=queued\n' \
+      "$name" "$branch" "$sha" "$wt" "$(date +%s%N)" "$$"
+    printf 'no_e2e=%s\nno_fleet=%s\nno_visual=%s\ndeploy=%s\nrelease=%s\n' \
+      "$no_e2e" "$no_fleet" "$no_visual" "$deploy" "$release"
+  } > "$tmp"
+  mv -f "$tmp" "$(qfile "$name")"
+  rm -f "$RESULT_DIR/$name" "$SOON_DIR/$name"
+  state_unlock
+  trap 'waiter_abort; exit 130' INT TERM
+  ok "Queued $branch @ ${sha:0:8} — it rides the next merge train (bb wt list shows the queue)."
+
+  wait_for_headroom
+
+  local poll="${WTQ_POLL_SECS:-30}" st said=""
+  case "$poll" in ''|*[!0-9]*|0) poll=30 ;; esac
+  exec 9>"$LOCK"
+  while :; do
+    st="$(waiter_state "$name" "$sha")"
+    if [ "$st" = final ]; then local vrc=0; report_verdict "$name" || vrc=$?; return "$vrc"; fi
+    if [ "$st" = gone ]; then warn "the queue entry for $name@${sha:0:8} is gone — superseded by a newer 'wt merge', or removed. Not waiting."; return 1; fi
+    if flock -x -w "$poll" 9; then
+      st="$(waiter_state "$name" "$sha")"
+      if [ "$st" = wait ]; then
+        ok "Acquired queue lock — conducting the train."
+        printf 'conductor %s (pid %s) since %s' "$name" "$$" "$(date +%Y%m%d-%H%M%S)" > "$HOLDER"
+        conduct "$name" "$sha"
+        : > "$HOLDER"
+      fi
+      flock -u 9 || true      # release for the next in line
+      if [ -s "$WTQ_DIR/release-pending" ]; then
+        local rsha; rsha="$(cat "$WTQ_DIR/release-pending")"; rm -f "$WTQ_DIR/release-pending"
+        release_chain "$rsha"
+      fi
+      continue
+    fi
+    if [ "$said" != "$(cat "$HOLDER" 2>/dev/null)" ]; then
+      said="$(cat "$HOLDER" 2>/dev/null || true)"
+      warn "Queue busy — held by: ${said:-?}. Waiting (Ctrl-C leaves the queue; nothing is lost) ..."
+    fi
+  done
+}
+
+# =====================================================================
+# test — focused kaocha for agents, yielding to the gate
+# =====================================================================
+# Raw `clojure -M:dev:test -m kaocha.runner` from five agents at once, next to
+# a gate booting the e2e stack, is how this host ran out of memory. Same
+# command, but it first waits out the gate's heavy phases and a memory floor.
+cmd_test() {
+  [ "$#" -gt 0 ] || die "usage: wt test <kaocha args…>   e.g. wt test --focus graphden.executor.core-test"
+  yield_to_gate "wt test"
+  cd "$(git rev-parse --show-toplevel)"
+  # WTQ_KAOCHA: TEST-ONLY override of the runner command (train_test.sh).
+  # shellcheck disable=SC2086  # a command line, split on purpose
+  exec ${WTQ_KAOCHA:-clojure -M:dev:test -m kaocha.runner} "$@"
+}
+
+# =====================================================================
+# soon — "hold the next train for me, I am N minutes from done"
+# =====================================================================
+cmd_soon() {
+  local name; name="$(this_worktree)"
+  local mins="${1:-10}" unit="${WTQ_SOON_UNIT:-60}"
+  case "$mins" in ''|*[!0-9]*) die "usage: wt soon [minutes]   (1-15, default 10)" ;; esac
+  [ "$mins" -ge 1 ] || die "usage: wt soon [minutes]   (1-15, default 10)"
+  if [ "$mins" -gt 15 ]; then warn "capped at 15 minutes — a train holds for nobody longer"; mins=15; fi
+  local deadline=$(( $(date +%s) + mins * unit ))
+  state_lock
+  printf 'deadline=%s\nbranch=feature/%s\n' "$deadline" "$name" > "$SOON_DIR/.$name.tmp"
+  mv -f "$SOON_DIR/.$name.tmp" "$SOON_DIR/$name"
+  state_unlock
+  ok "✓ the next train waits up to $mins min for '$name' — run 'bb wt merge' before then (it clears this)."
 }
 
 # =====================================================================
@@ -1357,6 +2070,8 @@ main() {
     kickoff) cmd_kickoff "$@" ;;
     list|ls) cmd_list  "$@" ;;
     merge|land) cmd_merge "$@" ;;
+    soon)   cmd_soon   "$@" ;;
+    test)   cmd_test   "$@" ;;
     up)     cmd_up     "$@" ;;
     down)   cmd_down   "$@" ;;
     gc)     cmd_gc     "$@" ;;

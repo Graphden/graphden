@@ -35,6 +35,45 @@
         "no orphaned grandchild keeps running after the timeout")))
 
 
+(defn- fake-run-check
+  "ci.clj's run-check contract over a script: `outcomes` maps a check name to
+   the statuses its successive runs end in."
+  [outcomes]
+  (let [runs (atom {})]
+    (fn [c status results failed]
+      (let [n (:name c)
+            i (get (swap! runs update n (fnil inc -1)) n)
+            s (nth (get outcomes n) i)]
+        (swap! results assoc n {:exit (if (= :passed s) 0 1) :output (str n " run " i)})
+        (swap! status assoc n s)
+        (when (ci-proc/blocking-red? c s) (reset! failed true))))))
+
+
+(deftest a-check-that-passes-alone-is-not-a-red
+  (let [cs [{:name "kondo"} {:name "splint"} {:name "biome"} {:name "outdated" :group :info}]
+        status (atom {"kondo" :failed "splint" :timeout "biome" :passed "outdated" :warning})
+        results (atom {"kondo" {:exit -1 :output "Stream closed"} "splint" {:exit -1 :output "TIMEOUT"}})
+        failed (atom true)
+        run (fake-run-check {"kondo" [:passed] "splint" [:failed]})]
+    (ci-proc/retry-solo! cs status results failed run)
+    (is (= :retried (@status "kondo")) "passed alone -> environment, not code")
+    (is (= "Stream closed" (get-in @results ["kondo" :first-try :output])) "the first attempt is kept")
+    (is (= :failed (@status "splint")) "red again alone -> a real red")
+    (is (= :passed (@status "biome")) "green checks are not re-run")
+    (is (= :warning (@status "outdated")) "an :info warning is not a red, not re-run")
+    (is (true? @failed))))
+
+
+(deftest every-red-passing-alone-clears-the-run
+  (let [cs [{:name "kondo"} {:name "gitleaks"}]
+        status (atom {"kondo" :failed "gitleaks" :failed})
+        failed (atom true)]
+    (ci-proc/retry-solo! cs status (atom {}) failed
+                         (fake-run-check {"kondo" [:passed] "gitleaks" [:passed]}))
+    (is (= {"kondo" :retried "gitleaks" :retried} @status))
+    (is (false? @failed))))
+
+
 (let [{:keys [fail error]} (run-tests 'ci-proc-test)]
   (when (pos? (+ fail error))
     (System/exit 1)))

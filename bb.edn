@@ -1012,8 +1012,9 @@
              (load-file "scripts/ci_select_test.clj"))}
 
   lint
-  {:doc "Every linter, parallel, NO unit tests — the fast pre-gate check (~1 min)."
-   :task (binding [*command-line-args* ["--groups" "clj,web,infra,docs,sec,commit"]]
+  {:doc "Every linter, parallel, NO unit tests — the fast pre-gate check (~1 min). `--retry-solo` re-runs each red check alone before it counts (wt merge's pre-queue lint)."
+   :task (binding [*command-line-args* (into ["--groups" "clj,web,infra,docs,sec,commit"]
+                                             *command-line-args*)]
            (load-file "scripts/ci.clj"))}
 
   check

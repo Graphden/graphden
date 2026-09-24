@@ -1,5 +1,6 @@
 (ns ci-proc
-  "Killing a timed-out check of the CI runner (`scripts/ci.clj`).
+  "Check processes of the CI runner (`scripts/ci.clj`): killing a timed-out
+   check, and re-running a red one alone (`retry-solo!`, `--retry-solo`).
 
    A check is `bb <task>`, and most tasks start a process of their own —
    `bb kondo` a JVM, `bb wtq-test` a bash tree. The runner used to kill a
@@ -33,3 +34,33 @@
   [proc]
   (destroy-tree! proc)
   (try (deref proc 5000 nil) (catch Exception _ nil)))
+
+
+(defn blocking-red?
+  "Did check `c`, now at status `s`, fail the run? An `:info` check's
+   warnings never do (see ci.clj)."
+  [c s]
+  (boolean (or (#{:failed :timeout} s)
+               (and (= :warning s) (not= :info (:group c))))))
+
+
+(defn retry-solo!
+  "Re-run every check of `cs` that failed the run — one at a time, alone —
+   through `run-check` (ci.clj's, `[c status results failed]`). A check that
+   passes alone was killed by its surroundings, not by the code: several
+   agents' pre-queue lints overlapping at load 40-80 time each other out or
+   lose a child's stream. It ends `:retried` with its first attempt kept
+   under `:first-try` (the report prints it — logged, not hidden). One that
+   fails again is a real red and fails the run as before. `failed` is
+   recomputed from the re-runs, so it must hold only blocking reds from `cs`."
+  [cs status results failed run-check]
+  (let [reds (filterv #(blocking-red? % (get @status (:name %))) cs)]
+    (reset! failed false)
+    (doseq [c reds
+            :let [n (:name c)
+                  first-try (get @results n)]]
+      (swap! status assoc n :running)
+      (run-check c status results failed)
+      (when (= :passed (get @status n))
+        (swap! status assoc n :retried)
+        (swap! results assoc-in [n :first-try] first-try)))))

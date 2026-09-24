@@ -21,7 +21,7 @@
   ;; ---------------------------------------------------------------------
 
   {:name :view-members
-   :description "Light rows (`{:fns :total :truncated?}`, the `:search` shape, capped at 500; `:missing {:uses :views}` names ids the graph no longer holds) for every named fn of the current branch view matching ALL the given axes. Axes AND; `kinds` / `namespaces` OR within; `uses` / `effects` AND within (uses ALL of, carries ALL of). An empty filter set is an empty answer. `kinds` known here: fn / types / secrets / services / tests (`apps` is the tenancy addon's notion and matches nothing — the editor overlays it)."
+   :description "Light rows (`{:fns :total :truncated?}`, the `:search` shape, capped at 500; `:missing {:uses :views}` names ids the graph no longer holds) for every named fn of the current branch view matching ALL the given axes. Axes AND; `kinds` / `namespaces` OR within; `uses` / `effects` AND within (uses ALL of, carries ALL of). An empty filter set is an empty answer. `kinds` known here: fn / types / secrets / services / tests (`apps` is the tenancy addon's notion and matches nothing — the editor overlays it). Evaluated over the graph AS THE VIEWER SEES IT (the view-impl seam): a fn whose composition the viewer may not see matches no `uses` THROUGH its internals and ships with empty `:parent-ids`."
    :args {:name {:required false :type :nullable-text
                  :description "Case-insensitive substring of the qualified name."}
           :views {:required false :type [:list :uuid] :value []

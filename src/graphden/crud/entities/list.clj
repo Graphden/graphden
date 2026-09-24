@@ -748,7 +748,33 @@
    `:also`, the ids of the views it intersects with). Empty when the
    base-fn isn't loaded (no `app/views` module) or nothing extends it."
   [ctx]
-  (explorer-views-decoded {:base (types-api/cached-or-load-graph ctx)}))
+  ;; Over the graph AS THE VIEWER SEES IT: a view the viewer may not see
+  ;; the internals of (another org's shared one) lists with no filters —
+  ;; its bound axes ARE its composition.
+  (explorer-views-decoded {:base (apply-view-impl-filter (types-api/cached-or-load-graph ctx))}))
+
+
+(defn- concealed-list-env
+  "`env` over the graph AS THE CURRENT VIEWER MAY SEE IT (the view-impl
+   seam): a fn whose composition is hidden keeps its signature and loses
+   its parent-ids / bindings / list-items, so every axis evaluated over
+   the env — `uses` (no match THROUGH a hidden fn: the answer would be a
+   membership oracle for its internals), `unused`, a graph view's decoded
+   filters — sees only what the viewer could read, and the light rows
+   ship the concealed `:parent-ids`. Roles stay those of the full rows
+   (a hidden composed fn still reads `:composed`, as in every other light
+   scope). The same env when nothing is hidden."
+  [env]
+  (let [base (:base env)
+        seen (apply-view-impl-filter base)]
+    (if (identical? seen base)
+      env
+      (let [parents-of (into {} (map (juxt :id :parent-ids)) (:fns seen))
+            roled (:roled-fns env)]
+        (assoc env
+               :base seen
+               :roled-fns (delay (mapv #(assoc % :parent-ids (get parents-of (:id %) []))
+                                       @roled)))))))
 
 
 (defn- view-members*
@@ -816,7 +842,7 @@
    `:explorer-view` base-fn (a view saved IN the graph as a fn-def)."
   [ctx filters]
   (let [storage (:storage ctx)]
-    (view-members* (graph-list-env ctx storage) storage filters)))
+    (view-members* (concealed-list-env (graph-list-env ctx storage)) storage filters)))
 
 
 (defn- list-scope-index

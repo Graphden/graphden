@@ -142,3 +142,25 @@
         #(is (identical? pt (conceal/conceal-path-trace storage pt)))))
     (testing "no filter installed → untouched"
       (is (identical? pt (conceal/conceal-path-trace storage pt))))))
+
+
+(deftest view-uses-does-not-match-through-a-hidden-fn
+  (let [target (str (ga/fn-id :http-server))
+        members #(set (map :name (:fns (entities/view-members (ctx) {:uses [target]}))))]
+    (testing "control — web-server is built on http-server"
+      (is (contains? (members) "web-server")))
+    (with-filter* (hide-named "web-server")
+      #(is (not (contains? (members) "web-server"))
+           "no membership oracle for a hidden fn's composition"))))
+
+
+(deftest view-rows-conceal-parent-ids
+  (let [row #(first (filter (comp #{"web-server"} :name)
+                            (:fns (entities/view-members (ctx) {:name "web-server"}))))]
+    (testing "control"
+      (is (seq (:parent-ids (row)))))
+    (with-filter* (hide-named "web-server")
+      (fn []
+        (is (some? (row)) "still a member of a name view")
+        (is (empty? (:parent-ids (row))) "its parents are concealed")
+        (is (= "composed" (some-> (row) :role name)) "its role is its signature's")))))

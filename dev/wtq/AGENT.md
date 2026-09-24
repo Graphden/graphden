@@ -62,8 +62,10 @@ You were started in one of two ways:
    when your session started, this file in your first minutes — and nothing
    re-reads them. Meanwhile `develop` moves. So the gate checks: if `develop`
    has changed any path in [`dev/wtq/GOVERNANCE`](GOVERNANCE) since you last
-   looked, it **refuses to land** and sends you back. Landing work done under
-   rules that no longer exist is not a thing you can do by accident.
+   looked, it **will not land you**: a queued branch turns **NEEDS-ACK** — it
+   keeps its place in the queue, trains skip it, and your waiting `bb wt merge`
+   tells you so. Landing work done under rules that no longer exist is not a
+   thing you can do by accident.
 
    ```bash
    bb wt ack     # prints the diff of what changed, records that you have seen it
@@ -71,7 +73,9 @@ You were started in one of two ways:
 
    It prints the actual diff, not a summary — the point is that the new rules
    pass through your context on the way to being acknowledged. Read them, decide
-   whether they change what you are doing, then re-run the gate.
+   whether they change what you are doing. If they don't, that is all: the ack
+   re-arms your queued entry and the waiting `bb wt merge` carries on (no
+   re-lint). If they do, fix, commit, and re-run `bb wt merge`.
 4. **Commit as you go** — conventional-commit format, English messages.
 5. **Land it yourself. Don't ask permission to finish.** When the feature is
    complete and `bb lint` is green, run the gate (`bb wt merge`) — then, once it

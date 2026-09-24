@@ -303,18 +303,30 @@ check "exit 5" eq "$(rc_of s)" 5
 check "RESULT STALE" eq "$(verdict s)" STALE
 check "no gate ran" eq "$(gates)" ""
 
-echo "== a rule change travels alone; its sibling is sent to 'wt ack'"
+echo "== a rule change travels alone; its sibling waits for 'wt ack' in its place"
 new_world governance
 feature t1 CLAUDE.md "new rules"
 feature t2 t2.txt t2
 hold_lock
 enqueue_in_order t1 t2
+t2_ts="$(sed -n 's/^ts=//p' "$Q/queue/t2")"
 release_lock
-finish t1 t2
+finish t1
 check "t1 GREEN" eq "$(verdict t1)" GREEN
-check "t2 PRECOND (unacknowledged rule change)" eq "$(verdict t2)" PRECOND
-check "t2 exit 3" eq "$(rc_of t2)" 3
-check "gates: [t1] alone" eq "$(gates)" "t1"
+check "t2 is NEEDS-ACK, not PRECOND" wait_for 20 list_has '^t2 .*NEEDS-ACK'
+check "still queued, at its original place" eq "$(sed -n 's/^ts=//p' "$Q/queue/t2" 2>/dev/null)" "$t2_ts"
+check "its waiter is still waiting" kill -0 "${PID[t2]}"
+check "and told its author to ack" wait_for 10 grep -q 'bb wt ack' "$T/t2.out"
+check "no verdict for t2 yet" eq "$(verdict t2)" none
+ack_out="$( (cd "$WTQ_ROOT/t2" && ./dev/wtq/wt ack) 2>&1 | plain)"
+check "wt ack prints the rule diff" grep -q 'new rules' <<<"$ack_out"
+check "and re-arms the queued entry" grep -q 're-armed' <<<"$ack_out"
+finish t2
+check "t2 GREEN after the ack, same waiter" eq "$(verdict t2)" GREEN
+check "t2 exit 0" eq "$(rc_of t2)" 0
+check "gates: [t1] alone, then [t2]" eq "$(gates | tr '\n' '|')" "t1|t2|"
+check "t2 was linted once — the ack did not re-lint" \
+  eq "$(grep -c "$(git -C "$REPO" rev-parse feature/t2)" "$LINT_LOG")" 1
 
 echo "== concurrent 'wt merge's lint one at a time"
 new_world lint-serial

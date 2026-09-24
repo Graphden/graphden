@@ -519,7 +519,16 @@ cmd_ack() {
   echo
   printf '%s\n' "$tip" > "$(ack_file "$name")"
   ok "✓ acknowledged $TARGET@${tip:0:8}"
-  say "  Re-read anything above that changes what you are doing, then: ${BLD}bb wt merge${RST}"
+  local armed=""
+  state_lock
+  if [ "$(qget "$name" needs_ack)" = 1 ]; then qset "$name" needs_ack ""; armed=1; fi
+  state_unlock
+  if [ -n "$armed" ]; then
+    say "  Your queued entry is re-armed at its place — its waiting 'wt merge' carries on (no re-lint)."
+    say "  If what you just read changes your work, commit and re-run ${BLD}bb wt merge${RST} instead."
+  else
+    say "  Re-read anything above that changes what you are doing, then: ${BLD}bb wt merge${RST}"
+  fi
 }
 
 # What is on this machine that should not be? A killed test run leaves its JVM
@@ -983,8 +992,9 @@ cmd_drop() {
 #     alone (`git merge-tree`) is a CONFLICT the author resolves.
 #   - A branch that changes a GOVERNANCE path travels ALONE. Its siblings could
 #     not have read rules that land in the same fast-forward; alone, the next
-#     train's drift check bounces them to `wt ack` exactly as the serial queue
-#     did.
+#     train's drift check marks them NEEDS-ACK: skipped, but kept in their
+#     queue place with their waiters waiting, until `wt ack` re-arms them (the
+#     lint stamp for the sha still holds — no re-lint, no re-queue).
 #   - An entry whose waiter died (kill -9, a lost terminal) is pruned, not
 #     landed — like the old blocking flock, where a dead waiter simply left the
 #     queue. Members already mid-bisection are kept: their verdict is owed.
@@ -1102,6 +1112,7 @@ queue_state() {
   [ -f "$f" ] || return 0
   if [ "$(qget "$n" state)" = train ]; then echo "IN-TRAIN"
   elif [ -n "$(qget "$n" seg)" ]; then echo "SPLITTING"
+  elif [ "$(qget "$n" needs_ack)" = 1 ]; then echo "NEEDS-ACK"
   else echo "QUEUED"; fi
 }
 
@@ -1612,6 +1623,12 @@ select_train() {
   governance_paths
   for n in $(names_in_seg ""); do
     [ "${#SEL[@]}" -lt "$TRAIN_MAX" ] || break
+    # NEEDS-ACK: its author has not seen a rule change develop made. It keeps
+    # its place and is skipped until `wt ack` (re-checked on every selection).
+    if [ -n "$(governance_drift "$n" "$(qget "$n" branch)")" ]; then
+      qset "$n" needs_ack 1; continue
+    fi
+    [ -z "$(qget "$n" needs_ack)" ] || qset "$n" needs_ack ""
     # A branch that changes the rules travels alone (see the header).
     if [ -n "$(git -C "$MAIN_WT" diff --name-only "$TARGET...$(qget "$n" sha)" -- "${GOV_PATHS[@]}" 2>/dev/null)" ]; then
       if [ "${#SEL[@]}" -eq 0 ]; then SEL=("$n"); fi
@@ -1697,8 +1714,9 @@ train_run() {
     if [ -n "$drift" ]; then
       echo "  $m: $TARGET changed the rules you operate under, and you have not seen them:"
       printf '%s\n' "$drift" | sed 's/^/      /'
-      echo "    Read them, then:  bb wt ack   &&   bb wt merge"
-      decide "$m" PRECOND "$ts" "unacknowledged rule change — run 'bb wt ack', then 'bb wt merge'"; continue
+      echo "    It keeps its place in the queue as NEEDS-ACK; read them with:  bb wt ack"
+      state_lock; qset "$m" needs_ack 1; qset "$m" seg ""; qset "$m" state queued; state_unlock
+      continue
     fi
     if [ "$(cat "$LINT_OK_DIR/$m" 2>/dev/null)" != "${M_SHA[$m]}" ]; then
       decide "$m" PRECOND "$ts" "no green 'bb lint' stamp for the queued sha — re-run 'bb wt merge' (it lints first)"; continue
@@ -2074,6 +2092,14 @@ cmd_merge() {
     st="$(waiter_state "$name" "$sha")"
     if [ "$st" = final ]; then local vrc=0; report_verdict "$name" || vrc=$?; return "$vrc"; fi
     if [ "$st" = gone ]; then warn "the queue entry for $name@${sha:0:8} is gone — superseded by a newer 'wt merge', or removed. Not waiting."; return 1; fi
+    if [ "$(qget "$name" needs_ack)" = 1 ]; then
+      if [ "$said" != needs-ack ]; then
+        said=needs-ack
+        warn "NEEDS-ACK: $TARGET changed the rules you work under and you have not seen them."
+        warn "  Your place in the queue is kept. In this worktree run:  bb wt ack   — then this waiter carries on (no re-lint, no re-queue)."
+      fi
+      sleep "$poll"; continue
+    fi
     if flock -x -w "$poll" 9; then
       st="$(waiter_state "$name" "$sha")"
       if [ "$st" = wait ]; then

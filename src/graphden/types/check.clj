@@ -2188,12 +2188,42 @@
           resolved)))))
 
 
+(defn rule-return
+  "The return type the ROOT base-fn under `parent` computes for one call
+   site: its recorded `:return-type-rule` (e.g. `:assoc`'s record
+   builder), else the declared-signature fallback when the declared
+   return carries a type var (`signature-return`), else `static-ret` —
+   then tainted `:secret` when the root propagates taint
+   (`:taint-propagate?`) and an input carries it.
+
+   Walking to the root via `registry/root-base-fn-name` lets rules fire
+   even when `parent` is an intermediate fn-def (`:assoc-empty`,
+   `:_jvm-section`). `binfo` is the call site's bindings-info (`{arg
+   {:type :value :ref}}`), or a 0-arg fn producing it — called only when
+   the root has something to feed it to, so the sweep never builds one
+   for a fn under a rule-less root.
+
+   Public so the per-rule unit tests (`types.rules-test`) dispatch
+   through exactly this wiring instead of a copy of it."
+  [parent binfo static-ret]
+  (let [entry (registry/rich-type-of (registry/root-base-fn-name parent))
+        rule (:return-type-rule entry)
+        taint? (:taint-propagate? entry)
+        sig? (and (not rule) (has-type-var? (:return entry)))]
+    (if-not (or rule taint? sig?)
+      static-ret
+      (let [binfo (if (fn? binfo) (binfo) binfo)
+            structural (cond
+                         rule (rule binfo static-ret)
+                         sig? (signature-return entry binfo static-ret)
+                         :else static-ret)]
+        (if taint?
+          (types/taint-with-secret-if-tainted binfo structural)
+          structural)))))
+
+
 (defn- compute-return-type
-  "Run the ROOT base-fn's type-rule (e.g. `:assoc` record-builder) on
-   `static-ret` to produce the rich, possibly-narrowed return shape.
-   Walking to the root via `registry/root-base-fn-name` lets rules fire even
-   when the immediate parent is an intermediate fn-def
-   (`:assoc-empty`, `:_jvm-section`).
+  "Run `rule-return` for `fn-def` under `primary-parent`.
 
    `parent-args` (the parent's resolved free-arg types) flow in as a
    fallback so a rule whose key isn't bound at THIS fn-def's level
@@ -2203,20 +2233,9 @@
    rule on `:ring-method` should see `:coll`'s type as a record so
    it can lift `:request-method`'s primitive type out of the shape."
   [fn-def primary-parent parent-args static-ret]
-  (let [entry (registry/rich-type-of
-                (registry/root-base-fn-name primary-parent))
-        rule (:return-type-rule entry)
-        taint? (:taint-propagate? entry)
-        sig? (and (not rule) (has-type-var? (:return entry)))
-        binfo (when (or rule taint? sig?)
-                (bindings-info-for-rule (:args fn-def) parent-args))
-        structural (cond
-                     rule (rule binfo static-ret)
-                     sig? (signature-return entry binfo static-ret)
-                     :else static-ret)]
-    (if taint?
-      (types/taint-with-secret-if-tainted binfo structural)
-      structural)))
+  (rule-return primary-parent
+               #(bindings-info-for-rule (:args fn-def) parent-args)
+               static-ret))
 
 
 (defn- apply-args-only-rule

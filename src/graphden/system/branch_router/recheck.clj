@@ -125,13 +125,14 @@
    per-org — so every type-check / lookup / compile inside records into
    and reads from THAT ctx's view. A ctx without a slice (built before
    slice-tagging, or a test stub) keeps the ambient override (test
-   isolation)."
+   isolation). A tenant READ's request-wide type-alias view is narrowed to
+   the ctx's branch the same way (`type-check/call-with-branch-alias-view`)."
   [ctx f]
   (binding [registry-core/*rich-types-override*
             (or (:rich-types-atom ctx) registry-core/*rich-types-override*)
             registry-core/*per-org-rich-override*
             (or (:per-org-rich-atom ctx) registry-core/*per-org-rich-override*)]
-    (f)))
+    (type-check/call-with-branch-alias-view (:storage ctx) f)))
 
 
 (defn- record-fn-types!

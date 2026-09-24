@@ -3,7 +3,7 @@
    removed outright rather than tombstoned:
 
    - `purgeable-identity-ids` — which identity rows a hard delete (sync /
-     rollback, `versioning.storage.core`) may drop along with this
+     rollback, a branch delete — `versioning.storage.core`) may drop along with this
      branch's version rows, guarded by `identity-child-refs`;
    - `tombstone-gc-sweep!` — the periodic GC (`system.init.cleanup`)
      that hard-purges entities DEAD on every branch.
@@ -43,7 +43,8 @@
    current version still references."
   {:binding [[:binding-list-item :binding-id]]
    :slot    [[:fn-slot :slot-id] [:binding :slot-id]
-             [:fn-slot-version :slot-id] [:binding-version :slot-id]]
+             [:fn-slot-version :slot-id] [:binding-version :slot-id]
+             [:slot :source-slot-id]]
    :fn      [[:fn-slot :fn-id] [:binding :fn-id]
              [:binding :ref-fn-id] [:binding :type-override-fn-id]
              [:binding :resolver-fn-id]

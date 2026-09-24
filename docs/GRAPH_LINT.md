@@ -150,7 +150,8 @@ which BFS-walks from the same registry.
   org-sliced view, memoised per snapshot so its identity holds between
   writes): the last snapshot object, its `:ns`
   rows, the per-fn EDN fn-defs, the engine's memos and the findings. A
-  read with the same snapshot object answers from it. After a write the
+  read with the same snapshot object and the same `:ns` rows answers
+  from it. After a write the
   new snapshot is diffed against the old one **row by row by identity**
   (a write splices fresh row objects for the fns it touched and keeps
   every other object — `executor.context/splice-graph-cache!`), so the
@@ -164,7 +165,10 @@ which BFS-walks from the same registry.
   demand, and runs the rules as one pass of lookups and set operations
   over the memos. **A write costs its referrer closure, not the graph.**
   A namespace change (every dotted path may have moved — a `:ns` write
-  moves no graph row, so it drops the branch's state outright), a moved
+  moves no graph row and `:ns` is not branch-versioned, so every read
+  re-reads the `:ns` rows and compares them: that holds on every branch
+  and on every pod, where a write-time invalidation would reach only the
+  writer's), a moved
   type-row or base-fn (the referrer index only knows composed fn-defs),
   or a first read lints from scratch through the same code with
   everything stale, and

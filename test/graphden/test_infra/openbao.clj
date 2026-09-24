@@ -11,6 +11,15 @@
       Wait)))
 
 
+(def image
+  "The one OpenBao image every stack runs: these tests, the isolated e2e
+   stack (`graphden.dev.e2e-stack`) and the demo's `docker-compose.yml`
+   (which cannot read a Clojure var — `openbao-test` holds it to this
+   value). Pinned: `:latest` let a test pass against a server the demo
+   and the e2e stack had never run."
+  "quay.io/openbao/openbao:2.5.4")
+
+
 (def ^:dynamic *client*
   "The vault client map for the running container (bound by the fixture)."
   nil)
@@ -21,7 +30,7 @@
    OpenBao answers 200 once the listener binds AND the dev root token is
    installed."
   []
-  (doto (GenericContainer. "quay.io/openbao/openbao:latest")
+  (doto (GenericContainer. ^String image)
     (GenericContainer/.withCommand
       (into-array String ["server" "-dev"
                           "-dev-root-token-id=root"

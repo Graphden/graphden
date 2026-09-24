@@ -146,7 +146,6 @@
   ;; plus their COMPOSED referrers — a renamed type-row / base-fn left
   ;; every fn-def naming it spelled the old way. Here the rename makes two
   ;; fn-defs spell the same ref, so they become duplicates.
-  (lg/forget-branch! nil)
   (let [t-old (uid 60)
         t-new (uid 61)
         extra {:fns [{:id t-old :name "t-old" :parent-ids []}
@@ -162,13 +161,16 @@
         "after the rename both spell :t-new — the full re-lint sees it")))
 
 
-(deftest forget-branch-drops-the-memo-test
-  (lg/forget-branch! nil)
+(deftest a-namespace-write-relints-without-any-invalidation-test
+  ;; `:ns` is not branch-versioned and a namespace write moves no graph
+  ;; row: the snapshot keeps its identity. The memo used to be dropped
+  ;; only for the WRITING branch on the WRITING pod, so another branch —
+  ;; or any branch on another pod — kept the old dotted paths. The read
+  ;; compares the `:ns` rows itself.
   (let [cache (atom (graph-with (composed 70 "c-attrs" const-id) (composed 71 "d-attrs" const-id)))
         nss (atom ns-rows)
         ctx (stub-ctx cache nss)
         paths #(set (mapcat :fns (lg/lint-branch ctx #{})))]
     (is (= #{["app.editor" :c-attrs] ["app.editor" :d-attrs]} (paths)))
     (reset! nss (assoc-in ns-rows [1 :name] "pages"))
-    (lg/forget-branch! nil)
     (is (= #{["app.pages" :c-attrs] ["app.pages" :d-attrs]} (paths)))))

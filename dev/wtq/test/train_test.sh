@@ -192,6 +192,60 @@ check "gates: full, [a b], [a], [b], budget spent -> fresh [c d], [c], [d]" \
   eq "$(gates | tr '\n' '|')" "a b c d|a b|a|b|c d|c|d|"
 check "the budget hand-back is announced" grep -q "budget of 3 extra gate(s) spent" "$T/a.out" "$T/b.out" "$T/c.out" "$T/d.out"
 
+# Two members that pass ALONE and fail TOGETHER (neither holds BAD; the stub
+# reds only when both marker files are in the tree). No single culprit exists,
+# so the sane outcome is: the first of the pair to land goes green, the second
+# is gated on a develop that already holds the first and FAILs — every member
+# gets a FINAL verdict, the innocent ones land, and the red combination never
+# reaches develop. Checked with the pair in one half and split across halves.
+pair_scenario() {   # <world> <members...> — PAIR_A / PAIR_B name the pair
+  new_world "$1"; shift
+  local n
+  for n in "$@"; do
+    case "$n" in
+      "$PAIR_A") feature "$n" PAIR_X "$n" ;;
+      "$PAIR_B") feature "$n" PAIR_Y "$n" ;;
+      *) feature "$n" "$n.txt" "$n" ;;
+    esac
+  done
+  sed -i 's/-e BAD ]/-e BAD ] || { [ -e PAIR_X ] \&\& [ -e PAIR_Y ]; }/' "$WTQ_GATE_STUB"
+  hold_lock
+  enqueue_in_order "$@"
+  release_lock
+  finish "$@"
+}
+pair_checks() {   # <members...>
+  local n final=1 innocent=1
+  for n in "$@"; do
+    case "$(verdict "$n")" in GREEN|FAIL) ;; *) final=0 ;; esac
+    case "$n" in "$PAIR_A"|"$PAIR_B") ;; *) [ "$(verdict "$n")" = GREEN ] && on_develop "$n.txt" || innocent=0 ;; esac
+  done
+  check "every member got a final verdict (nothing lost mid-bisection)" eq "$final" 1
+  check "every innocent member landed" eq "$innocent" 1
+  check "the pair: first lands GREEN, second FAILs on top of it" \
+    eq "$(verdict "$PAIR_A") $(verdict "$PAIR_B")" "GREEN FAIL"
+  check "the FAILed one exits 1, the rest 0" \
+    eq "$(for n in "$@"; do printf '%s ' "$(rc_of "$n")"; done)" \
+       "$(for n in "$@"; do if [ "$n" = "$PAIR_B" ]; then printf '1 '; else printf '0 '; fi; done)"
+  check "the red combination never reached develop" eval '! { on_develop PAIR_X && on_develop PAIR_Y; }'
+  check "the queue is empty" eq "$(queued_names_count)" 0
+  check "no bisection is left open" eq "$(find "$Q/bisect" -type f 2>/dev/null | wc -l)" 0
+  check "the FAIL names its own one-member train" log_has "$PAIR_B" "gate: wtq-train = develop + [ $PAIR_B ]"
+}
+queued_names_count() { find "$Q/queue" -type f 2>/dev/null | wc -l; }
+
+echo "== two members fail only TOGETHER (same half): one lands, the other FAILs"
+PAIR_A=a PAIR_B=b
+pair_scenario pair-same a b c d
+pair_checks a b c d
+check "gates: full, [a b] red, [a], [b] confirm, [c d]" eq "$(gates | tr '\n' '|')" "a b c d|a b|a|b|c d|"
+
+echo "== two members fail only TOGETHER (across halves): one lands, the other FAILs"
+PAIR_A=b PAIR_B=c
+pair_scenario pair-split a b c d
+pair_checks a b c d
+unset PAIR_A PAIR_B
+
 echo "== develop moves UNDER the gate -> re-queued, never FAILed"
 new_world moved
 feature mv mv.txt mv

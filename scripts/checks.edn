@@ -153,7 +153,8 @@
   :relevant ["package(-lock)?\\.json$" "^bb\\.edn$"]}
  {:name "commitlint"    :bb "commitlint"    :timeout  60000 :group :commit}
  {:name "tests-js"      :bb "test-js"       :timeout  60000 :group :test
-  :relevant ["\\.(js|mjs)$" "^tools/runtime-test/" "^bb\\.edn$"]}
+  :relevant ["\\.(js|mjs)$" "^tools/runtime-test/" "^tools/browser-test/run-edit-tests\\.sh$"
+             "^bb\\.edn$"]}
  {:name "tests-unit"    :bb "test-unit"     :timeout 900000 :group :test
   :relevant ["^src/" "^test/" "^resources/" "^scripts/" "^external-packages/"
              "^(bb|deps|tests)\\.edn$" "^build\\.clj$" "^dev-resources/" "^development/src/"]}

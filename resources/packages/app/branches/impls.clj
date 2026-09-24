@@ -772,6 +772,14 @@
                                  approvals author-id allow-self?))
 
 
+(defbase self-approval-allowed?
+  "Whether the proposal author's own approval counts toward `target`'s
+   required approvals (`merge.core/self-approval-allowed?` — the merge
+   gate's own default: on unless the target turns it off)."
+  [target]
+  (merge-policy/self-approval-allowed? target))
+
+
 (defbase count-valid-approvals
   "How many DISTINCT approvers count toward the merge
    (`merge.core/count-valid-approvals*` — the merge gate's own rule)."
@@ -900,6 +908,7 @@
    :branch-approvals           branch-approvals
    :approvals-report           approvals-report
    :count-valid-approvals      count-valid-approvals
+   :self-approval-allowed?     self-approval-allowed?
    ;; taint-propagate: list returns caller-authored comment bodies.
    :add-branch-comment!        add-branch-comment!
    :list-branch-comments       {:impl list-branch-comments :taint-propagate? true}

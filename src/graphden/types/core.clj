@@ -668,49 +668,6 @@
      :failed     failed}))
 
 
-(defn type->storage-kind
-  "Reduce a (possibly structured) type to the primitive enum tag the
-   DB's `value-kind` column accepts. Storage-side enums don't carry
-   structure; the rich type lives in the in-memory rich-types registry
-   and degrades to one of these primitives on the wire.
-
-       :int            → :int
-       'a              → :any        (type vars are storage-untagged)
-       [:fn …]         → :fn
-       [:list …]       → :sequence   (canonical chain shape)
-       {…}             → :jsonb      (records are jsonb-shaped on the wire)
-       [:refine B c]   → storage-kind of B (the constraint lives only
-                                            in the type system)
-       [:union …]      → :any        (no single storage tag fits a union)
-       :never          → :any        (bottom type — no value is ever
-                                       `:never`-typed at rest)
-       :input-stream   → :any        (transient runtime object — never
-                                       stored as data)
-       :decimal        → :numeric    (storage value_kind has no
-                                       :decimal — degrades to its super)
-       <alias keyword> → resolves through `resolve-alias` first, then
-                          recurses on the structural body."
-  [t]
-  (let [t' (resolve-alias t)]
-    (cond
-      ;; `:empty-map` — classifier sentinel for the `{}` literal;
-      ;; jsonb-shaped at rest like every map value.
-      (= t' :empty-map)    :jsonb
-      ;; `:fn-ref` — the bound fn's identity; a ref-only slot, so no
-      ;; literal is ever stored under it. The id is a uuid on the wire.
-      (= t' :fn-ref)       :uuid
-      (or (= t' :never) (= t' :input-stream)) :any
-      (= t' :decimal)      :numeric
-      (primitive? t')   t'
-      (type-var? t')    :any
-      (fn-type? t')     :fn
-      (or (list-type? t') (tuple-type? t')) :sequence
-      (or (map-type? t') (record-type? t')) :jsonb
-      (refine-type? t') (recur (refine-base t'))
-      (union-type? t')  :any
-      :else             nil)))
-
-
 (defonce ^:private db-alias-sources
   ;; `{registry-atom → {source → {alias-name → body}}}` — what each source
   ;; (a branch's compile, see `compile-runtime/register-type-aliases-from-db!`)

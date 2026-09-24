@@ -41,8 +41,8 @@
 
    `:input-stream` is the type of a transient `java.io.InputStream`
    (Ring request bodies, file streams) — values are never stored as
-   data, so it's type-system-only too. `type->storage-kind` degrades
-   it to `:any`.
+   data, so it's type-system-only too (no storage type-row: a slot's
+   stored type is what `packages.records.types/resolve-type-ref` picks).
 
    `:fn-ref` is a fn IDENTITY: a slot typed `:fn-ref` is bound by an
    ordinary fn-ref binding but receives the bound fn's ID (a uuid) at

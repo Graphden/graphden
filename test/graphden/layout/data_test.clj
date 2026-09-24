@@ -55,3 +55,15 @@
          identity-keyed lookups memo downstream can hit")
     (is (not (identical? synth (data/ensure-synth-args (assoc snapshot :namespaces []))))
         "a replaced snapshot is synthesised afresh")))
+
+
+(deftest lookups-carry-the-children-index
+  ;; The executor's descendant walks (`renames/inheritance-descendants`)
+  ;; read `:children-by-fn` off the lookups they are handed; layout's lookups
+  ;; lacked it, so every call from the layout pipeline rebuilt the inverse
+  ;; of every fn's `:parent-ids`.
+  (let [lk (data/build-lookups {:fns [{:id :p :parent-ids []}
+                                      {:id :c1 :parent-ids [:p]}
+                                      {:id :c2 :parent-ids [:p :c1]}]
+                                :slots [] :fn-slots [] :bindings [] :list-items []})]
+    (is (= {:p #{:c1 :c2} :c1 #{:c2}} (:children-by-fn lk)))))

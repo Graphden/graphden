@@ -29,6 +29,20 @@
     [graphden.versioning.storage.core :as vs]))
 
 
+(def ^:dynamic *request-alias-view?*
+  "true inside a request-wide alias view — the 1-arity `with-org-alias-view*`
+   the tenancy addon wraps a tenant's READ request in, bound BEFORE the
+   branch is resolved. `call-with-branch-alias-view` narrows it to the
+   resolved branch once that is known."
+  false)
+
+
+(defn- org-alias-view-atom
+  [storage]
+  (atom (cr/org-alias-snapshot tc/public-org (tc/current-org)
+                               (some-> storage cr/storage-alias-source))))
+
+
 (defn with-org-alias-view*
   "Run `thunk` with the type-alias registry filtered to {public + current-org}
    when a TENANT is in scope (§4 Risk-2 fix) — so a tenant never resolves another
@@ -40,16 +54,35 @@
    api) so a tenant's editor display is org-filtered too.
 
    With `storage`, the view of the branch it reads (a tenant's type-row
-   declared only on another branch does not resolve here); without, every
-   branch's declarations together."
-  ([thunk] (with-org-alias-view* nil thunk))
+   declared only on another branch does not resolve here). Without — the
+   request-wide wrap, entered before the branch is known — every branch's
+   declarations together, marked so `call-with-branch-alias-view` narrows it
+   to the request's branch once resolved; that merged view is left standing
+   only when no branch ctx serves the request."
+  ([thunk]
+   (if (= (tc/current-org) tc/public-org)
+     (thunk)
+     (binding [types/*type-aliases-override* (org-alias-view-atom nil)
+               *request-alias-view?* true]
+       (thunk))))
   ([storage thunk]
    (if (= (tc/current-org) tc/public-org)
      (thunk)
-     (binding [types/*type-aliases-override*
-               (atom (cr/org-alias-snapshot tc/public-org (tc/current-org)
-                                            (some-> storage cr/storage-alias-source)))]
+     (binding [types/*type-aliases-override* (org-alias-view-atom storage)]
        (thunk)))))
+
+
+(defn call-with-branch-alias-view
+  "Call `f`; inside a request-wide alias view (`*request-alias-view?*`),
+   narrowed first to the branch `storage` reads — the branch router calls
+   this once it has resolved the request's branch, so a tenant's READ
+   (value-form, /api/types, …) sees ITS branch's type aliases, not every
+   branch's merged."
+  [storage f]
+  (if (and *request-alias-view?* storage)
+    (binding [*request-alias-view?* false]
+      (with-org-alias-view* storage f))
+    (f)))
 
 
 (defn resolve-type-fn-id

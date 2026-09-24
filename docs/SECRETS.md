@@ -101,7 +101,7 @@ Each base-fn that touches user content opts in with a declarative
 ```
 
 The checker applies the propagation CENTRALLY (in
-`compute-return-type` and `effective-ref-return-uncached`): the
+`rule-return` and `effective-ref-return-uncached`): the
 structural layer runs first — a hand `:return-type-rule` when one
 exists, else the declared-signature fallback (`signature-return`) —
 then, iff the flag is set and any input carried a marker, the result

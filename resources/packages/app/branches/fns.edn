@@ -1220,6 +1220,11 @@
           :allow-self? {:type :bool :description "Whether the author's own approval counts."}}
    :return-type [:list {:approver-id :text :counted :bool :reason :nullable-text :stale :bool}]}
 
+  {:name :self-approval-allowed?
+   :description "Whether the proposal author's own approval counts toward the target's required approvals — the merge gate's own rule: on unless the target sets `:allow-self-approval?` false."
+   :args {:target {:type [:union :null :branch-row-shape] :description "The merge target's branch row; nil (no target) → the default."}}
+   :return-type :bool}
+
   {:name :count-valid-approvals
    :description "How many DISTINCT approvers count toward the merge — the merge gate's own rule over the same inputs as `:approvals-report`."
    :args {:stamp {:type :text :description "The proposal's current content stamp."}
@@ -1261,10 +1266,8 @@
           :default {:value 0}}}
 
   {:name :_approval-status-allow-self?
-   :description "Self-approval counts unless the target says otherwise (`merge.core/self-approval-allowed?`)."
-   :parent :coalesce
-   :args {:value {:parent :_approval-status-target-field :args {:key {:value :allow-self-approval?}}}
-          :default {:value true}}}
+   :parent :self-approval-allowed?
+   :args {:target :_approval-status-target}}
 
   {:name :_approval-status-approvals
    :parent :branch-approvals}

@@ -341,7 +341,7 @@
         c (test-ctx storage)]
     (try
       (testing "returns the five graph tables + namespaces, fns carry a :role"
-        (let [_    (setup/create-base-fn! storage "lage-fn")
+        (let [_    (setup/create-base-fn! storage "graph-reads-fn")
               dump (entities/graph-full c)]
           (is (contains? dump :fns))
           (is (contains? dump :slots))
@@ -349,7 +349,7 @@
           (is (every? #(contains? % :role) (:fns dump)))))
       (testing "scope :index — drops bindings / slots / fn-slots / list-items,"
         (testing "keeps fns + namespaces; fns still carry :role"
-          (let [_    (setup/create-base-fn! storage "lage-fn-idx")
+          (let [_    (setup/create-base-fn! storage "graph-reads-fn-idx")
                 dump (entities/graph-index c)]
             (is (= #{:fns :namespaces} (set (keys dump)))
                 ":index payload is exactly {:fns :namespaces}")

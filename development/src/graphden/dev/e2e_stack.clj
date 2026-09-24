@@ -34,6 +34,7 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.clients.vault :as vault]
+    [graphden.test-infra.openbao :as openbao]
     [org.httpkit.client :as http])
   (:import
     (com.github.dockerjava.api.command
@@ -119,7 +120,7 @@
   "OpenBao dev mode — in-memory KV v2, single root token. Mirrors
    the demo's `graphden-openbao` service down to the wait-strategy."
   [^Network network]
-  (doto (GenericContainer. "quay.io/openbao/openbao:2.5.4")
+  (doto (GenericContainer. ^String openbao/image)
     (GenericContainer/.withCommand
       (into-array String ["server" "-dev"
                           "-dev-root-token-id=root"

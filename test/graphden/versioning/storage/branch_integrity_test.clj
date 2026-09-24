@@ -209,10 +209,47 @@
                         (is (nil? (raw :fn (:id ret))) "including one only the branch's own fn referenced")
                         (is (nil? (raw :fn-slot (:id fs))))
                         (is (nil? (raw :binding (:id b))))
-                        (is (nil? (raw :binding-list-item (:id item)))))
+                        (is (nil? (raw :binding-list-item (:id item))))
+                        (is (nil? (raw :slot (:id slot))) "and the slot its fn-slot exposed"))
                       (testing "a row main still versions stays, with main's content"
                         (is (raw :fn (:id kept)))
                         (is (= (:description (fn-fields v)) (:description (sp/read-entity v :fn (:id kept))))))))))
+
+
+(deftest a-branch-delete-purges-the-slots-it-minted-and-their-types
+  ;; `:slot` is not versioned: the slots a branch minted outlived it, and
+  ;; their `:type-fn-id` kept the branch's type-row fns alive — counted by
+  ;; the tenancy quota, never collected by the tombstone GC.
+  (with-versioned
+    (fn [base v]
+      (let [kept (sp/create-entity v :fn (assoc (fn-fields v) :name "kept"))
+            shared (sp/create-entity v :slot {:name "shared" :type-fn-id (:id kept)})
+            _ (sp/create-entity v :fn-slot {:fn-id (:id kept) :slot-id (:id shared) :position 0})
+            vb (fork v "scratch")
+            t1 (sp/create-entity vb :fn (assoc (fn-fields vb) :name "t1"))
+            t2 (sp/create-entity vb :fn (assoc (fn-fields vb) :name "t2"))
+            made (sp/create-entity vb :fn (assoc (fn-fields vb) :name "made"))
+            own (sp/create-entity vb :slot {:name "own" :type-fn-id (:id t1)})
+            view (sp/create-entity vb :slot {:name "renamed" :type-fn-id (:id t1)
+                                             :source-slot-id (:id own)})
+            added (sp/create-entity vb :slot {:name "added" :type-fn-id (:id t2)})
+            raw (fn [entity id] (seq (sp/query-entities base entity {:id id})))]
+        (sp/create-entity vb :fn-slot {:fn-id (:id made) :slot-id (:id own) :position 0})
+        (sp/create-entity vb :fn-slot {:fn-id (:id made) :slot-id (:id view) :position 1})
+        (sp/create-entity vb :fn-slot {:fn-id (:id made) :slot-id (:id shared) :position 2})
+        (sp/create-entity vb :fn-slot {:fn-id (:id kept) :slot-id (:id added) :position 1})
+        (is (true? (vs/delete-branch! v (vs/current-branch-id vb))))
+        (testing "the branch's slots go — a rename view and then its source too"
+          (is (nil? (raw :slot (:id own))))
+          (is (nil? (raw :slot (:id view)))))
+        (testing "a slot the branch added to a surviving fn goes"
+          (is (nil? (raw :slot (:id added)))))
+        (testing "and so do the type-row fns only those slots referenced"
+          (is (nil? (raw :fn (:id t1))))
+          (is (nil? (raw :fn (:id t2)))))
+        (testing "a slot main still exposes stays"
+          (is (raw :slot (:id shared)))
+          (is (raw :fn (:id kept))))))))
 
 
 (deftest a-branch-delete-hands-back-its-secret-bindings

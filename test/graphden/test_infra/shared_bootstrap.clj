@@ -23,15 +23,18 @@
 
    Per-package-set
    ===============
-   `ensure-golden!` caches one entry per `(vec packages)`. NSes that
-   bootstrap a different package set just get a different golden +
-   their own per-NS clones. The `test_golden_<hash>` DBs live for
+   `ensure-golden!` caches one entry per RESOLVED package set
+   (`set-key`: the dependency-ordered list `load-packages` actually
+   loads), so `[core web app]` and `[core storage web app-base app]` share
+   one golden and one sweep. NSes that bootstrap a genuinely different
+   set just get a different golden + their own per-NS clones. The `test_golden_<hash>` DBs live for
    the JVM lifetime; they're cleaned up by the shared-container
    kaocha post-run hook (via `drop-all-golden-databases!`)."
   (:require
     [clojure.tools.logging :as log]
     [graphden.executor.registry :as registry]
     [graphden.executor.registry.core :as registry-core]
+    [graphden.packages.loader :as loader]
     [graphden.packages.records :as records]
     [graphden.packages.sync :as pkg-sync]
     [graphden.storage.postgres.core :as pg]
@@ -47,8 +50,19 @@
       SQLException)))
 
 
+(defn- set-key
+  "The cache key of a package set: its resolved load order. Two name lists
+   that resolve alike are the same bootstrap — `bootstrap-from-packages!`
+   reads nothing but `(load-packages names)`, which loads exactly this
+   list — so keying on the caller's literal vector built a second ~14 s
+   golden and a second ~30 s sweep for `[core storage web app-base app
+   registry mcp]` next to `[core web app registry mcp]`."
+  [packages]
+  (loader/resolve-dependencies packages))
+
+
 (def ^:private golden-state
-  "{pkg-vec → {:db-name string, :bootstrap bootstrap-info-map}}.
+  "{resolved-pkg-vec (`set-key`) → {:db-name string, :bootstrap bootstrap-info-map}}.
    First successful `ensure-golden!` for a package set populates
    this; sibling callers read directly."
   (atom {}))
@@ -156,7 +170,7 @@
    First caller per JVM × package-set pays the ~14 s bootstrap;
    subsequent callers return the cached entry."
   [packages]
-  (let [k (vec packages)
+  (let [k (set-key packages)
         ;; Linters can't see that `lock-for` interns: the CHM guarantees
         ;; one stable Object per key, so this IS a shared monitor, not a
         ;; fresh local.
@@ -167,7 +181,7 @@
               (let [db-name (str "test_golden_" (Math/abs (hash k)))]
                 (exec-on-cluster! (str "CREATE DATABASE \"" db-name "\"")
                                   #{"42P04"})
-                (let [info (bootstrap-into-golden! packages db-name)
+                (let [info (bootstrap-into-golden! k db-name)
                       entry {:db-name db-name :bootstrap info}]
                   (swap! golden-state assoc k entry)
                   entry)))))))
@@ -188,7 +202,7 @@
 
 
 (def ^:private swept-state
-  "{pkg-vec → rich-types-map}. The topological type-check sweep inside
+  "{resolved-pkg-vec (`set-key`) → rich-types-map}. The topological type-check sweep inside
    `bootstrap-from-packages!` is the single most expensive fixture step
    (~30 s with the checker's sweep memo — it had crept to ~170 s as
    the corpus grew — vs ~14 s for the storage-sync + seed passes),
@@ -214,14 +228,14 @@
    Sweeping in a bound `*rich-types-override*` keeps the capture off
    the process-global registry, so it can't leak into a sibling NS."
   [packages]
-  (let [k (vec packages)
+  (let [k (set-key packages)
         ;; Interned monitor — see the note in `ensure-golden!`.
         set-lock (lock-for :sweep k)]
     (or (get @swept-state k)
         (locking set-lock
           (or (get @swept-state k)
               (let [{:keys [db-config]} (ensure-ns-database-from-golden!
-                                          "swept-rich-types-capture" packages)
+                                          "swept-rich-types-capture" k)
                     storage (pg/create-storage db-config)]
                 ;; The single most expensive fixture step in the suite (~30 s).
                 ;; 6840f542 landed precisely because this ran once per namespace
@@ -235,7 +249,7 @@
                                    ;; Golden clone is already synced; this re-sync is
                                    ;; idempotent — we run it only to reach the sweep,
                                    ;; which populates the bound override.
-                                   (pkg-sync/bootstrap-from-packages! versioned packages
+                                   (pkg-sync/bootstrap-from-packages! versioned k
                                                                       {:skip-type-check? false})
                                    @registry-core/*rich-types-override*)]
                     (swap! swept-state assoc k captured)

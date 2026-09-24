@@ -72,6 +72,11 @@
     (is (= (ids/primitive-fn-id :sequence) (types/resolve-type-ref [:list :int] {})))
     (is (= (ids/primitive-fn-id :any) (types/resolve-type-ref [:union :int :text] {}))))
 
+  (testing "[:map K V] is jsonb-shaped at rest; [:tuple …] is a sequence; :never is :any"
+    (is (= (ids/primitive-fn-id :jsonb) (types/resolve-type-ref [:map :keyword :int] {})))
+    (is (= (ids/primitive-fn-id :sequence) (types/resolve-type-ref [:tuple :text :int] {})))
+    (is (= (ids/primitive-fn-id :any) (types/resolve-type-ref :never {}))))
+
   (testing "[:refine B C] recurses onto the base type"
     (is (= (ids/primitive-fn-id :int)
            (types/resolve-type-ref [:refine :int [:> 0]] {}))))

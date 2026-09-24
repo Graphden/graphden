@@ -14,9 +14,10 @@
    - lookup-map construction (`build-lookups` / `cached-build-lookups`).
 
    Leaf namespace within `graphden.layout.*` — depends on nothing in
-   that hierarchy. The `ctx`-aware cache wrapper around
+   that hierarchy (only on the executor's `compile.lookups` index helpers). The `ctx`-aware cache wrapper around
    `load-graph-entities-uncached` lives in the defbase shim, not here."
   (:require
+    [graphden.executor.compile.lookups :as compile.lookups]
     [graphden.versioning.graph-rows :as graph-rows]))
 
 
@@ -463,6 +464,11 @@
      :items-by-binding items-by-binding
      :slot-owner slot-owner
      :slot-by-fn-name slot-by-fn-name
+     ;; `{parent-id → #{child-id …}}` — the index the executor's descendant
+     ;; walks (`renames/inheritance-descendants`) read off these lookups;
+     ;; without it every such call rebuilt it from `fn-map`. Built once
+     ;; per snapshot (`cached-build-lookups`).
+     :children-by-fn (compile.lookups/children-by-fn fn-map)
      ;; Per-request inheritance-chain memo. `build-graph-elements`
      ;; hits get-inheritance-chain dozens of times for the same
      ;; fn-ids; cache the BFS walk for the lifetime of one layout

@@ -58,11 +58,6 @@ unparseable = "unparseable"
 # match the test-file naming convention).
 wrk = "wrk"
 
-# `lage-fn` — abbreviated test-fixture for
-# `list-all-graph-entities` (the long fn under test); `LAGE` is
-# the same abbreviation in test docstrings.
-lage = "lage"
-
 # Image / SQL plural truncations — typos splits the trailing `s`
 # off the noun and tries to "fix" the stub (`PNGs`→`PN`+`s`,
 # `INSERTs`→`INSER`+`Ts`, `DELETEs`→`DELET`+`Es`). The stub is what

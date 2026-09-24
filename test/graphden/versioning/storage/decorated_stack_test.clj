@@ -22,8 +22,10 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
     [graphden.storage.tx :as tx]
+    [graphden.tenancy.context :as tc]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.merge :as mrg]
+    [graphden.versioning.storage.resolution :as res]
     [graphden.versioning.storage.uniqueness :as uniq]
     [next.jdbc :as jdbc])
   (:import
@@ -407,3 +409,76 @@
                   (is (= 6 (count (sp/query-entities v :binding-list-item {:binding-id (:id b)}))))
                   (is (zero? (get @(:reads deco) :binding 0))
                       "no per-item read of the owning binding")))))
+
+
+;; ============================================================================
+;; The whole-branch load memo under a decorator
+;; ============================================================================
+
+(deftest graph-load-memo-works-under-a-decorator-and-keys-on-the-org
+  ;; The memo keyed on `graph-epoch/current` of the handle it held — and a
+  ;; decorator has no pool, so on the cloud stack it never switched on: a
+  ;; tenant's [Run all] paid two whole-branch loads per test. Through the
+  ;; epoch handle it memoises there too; and because the decorator filters
+  ;; by the org in scope, another org — or the raw base — reads its own.
+  (with-stack
+    (fn [pg _deco v]
+      (let [known? (fn [storage fid]
+                     (try (contains? (:fns (sp/resolve-execution-graph storage fid)) fid)
+                          (catch clojure.lang.ExceptionInfo e
+                            (if (= :not-found (:type (ex-data e))) false (throw e)))))
+            a (sp/create-entity v :fn {:name "memo-a" :parent-ids [] :description "h"})]
+        (res/call-with-graph-load-memo
+          (fn []
+            (is (known? v (:id a)))
+            ;; Written under the versioning layer: no epoch bump, so only a
+            ;; memoised load misses it.
+            (let [raw (sp/create-entity pg :fn {:name "memo-raw" :parent-ids []
+                                                :description "h"})]
+              (testing "a second resolve through the decorator reuses the load"
+                (is (false? (known? v (:id raw)))))
+              (testing "another org in scope does not share the entry"
+                (is (true? (binding [tc/*current-org* (random-uuid)] (known? v (:id raw))))))
+              (testing "a raw (undecorated) read does not share the scoped entry"
+                (let [raw2 (sp/create-entity pg :fn {:name "memo-raw2" :parent-ids []
+                                                     :description "h"})]
+                  (is (true? (known? (vs/wrap-with-versioning pg) (:id raw2))))
+                  (is (false? (known? v (:id raw2)))))))))))))
+
+
+;; ============================================================================
+;; Branch delete vs a concurrent re-mint of a deterministic id
+;; ============================================================================
+
+(deftest a-branch-delete-waits-on-a-create-reminting-its-ids
+  ;; The delete purges the identities its branch created once no branch
+  ;; versions them. A create on main re-minting one of those deterministic
+  ;; ids found the identity still there and wrote only a version row; the
+  ;; delete — which saw no version elsewhere — then removed the identity
+  ;; under it. Both now take the identity's lock: the delete waits, and its
+  ;; re-read sees the committed version.
+  (with-stack
+    (fn [pg _deco v]
+      (let [xb (vs/create-branch! v "scratch")
+            made (sp/create-entity (vs/switch-branch v (:id xb)) :fn
+                                   {:name "made" :parent-ids [] :description "x"})
+            written (promise)
+            commit (promise)
+            remint (future
+                     (tx/in-transaction
+                       pg
+                       (fn [st]
+                         (sp/create-entity (vs/wrap-with-versioning st) :fn
+                                           {:id (:id made) :name "again" :parent-ids []
+                                            :description "main"})
+                         (deliver written true)
+                         @commit)))]
+        (deref written 15000 nil)
+        (let [del (attempt #(vs/delete-branch! v (:id xb)))]
+          (is (= 1 (await-waiters (:pool pg) 1)) "the delete waits on the id's lock")
+          (deliver commit true)
+          @remint
+          (is (= :ok @del))
+          (is (seq (sp/query-entities pg :fn {:id (:id made)})) "the identity survives")
+          (is (= "again" (:name (sp/read-entity v :fn (:id made))))
+              "main resolves the re-minted fn"))))))

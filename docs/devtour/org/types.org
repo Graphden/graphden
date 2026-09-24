@@ -7,7 +7,7 @@ Subtyping, unification, narrowing, refinements, the sweep-at-zero checker, and t
 
 after: executor
 
-[[file:index.org][index]] · ~83 min
+[[file:index.org][index]] · ~86 min
 
 * 1. primitives
 :PROPERTIES:
@@ -78,7 +78,7 @@ Rewrites ~[:variant tag T …]~ into a structural union of tag-pinned records. S
 :PROPERTIES:
 :CUSTOM_ID: types/subtype?
 :FILE: src/graphden/types/core.clj
-:LINE: 1286
+:LINE: 1243
 :MINS: 13.7
 :END:
 
@@ -86,7 +86,7 @@ The heart of assignability: reflexive / transitive subtyping across primitives, 
 
 It is one ~cond~ ladder and the ORDER is the semantics: the universal yes/no arms first (identity, ~:any~, ~:never~, the typevar → ~:jsonb~ escape), then the ~:empty-map~ sentinel, unions (EVERY member on the left, SOME member on the right), primitives, ~:jsonb~, refinements, the structural shapes, and the ~:secret~ marker last. Don't hold the whole ladder in your head — find the arm for the pair of shapes you are asking about and read the comment that argues for it.
 
-- source :: [[file:../../../src/graphden/types/core.clj::(defn subtype?][src/graphden/types/core.clj:1286]]
+- source :: [[file:../../../src/graphden/types/core.clj::(defn subtype?][src/graphden/types/core.clj:1243]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 - referenced from :: [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
@@ -94,13 +94,13 @@ It is one ~cond~ ladder and the ORDER is the semantics: the universal yes/no arm
 :PROPERTIES:
 :CUSTOM_ID: types/constraint-implies?
 :FILE: src/graphden/types/core.clj
-:LINE: 1222
+:LINE: 1179
 :MINS: 2.7
 :END:
 
 Decides when one refinement constraint entails another (numeric bounds, ~:in~ / ~:=~ / ~:not=~, ~:and~ / ~:or~). This is exactly how ~subtype?~ compares refinement types like ~:positive-int~ ⊆ ~:non-negative-int~, so read it right after.
 
-- source :: [[file:../../../src/graphden/types/core.clj::(defn constraint-implies?][src/graphden/types/core.clj:1222]]
+- source :: [[file:../../../src/graphden/types/core.clj::(defn constraint-implies?][src/graphden/types/core.clj:1179]]
 - see also :: [[file:types.org::#types/subtype?][subtype?]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 
@@ -108,7 +108,7 @@ Decides when one refinement constraint entails another (numeric bounds, ~:in~ / 
 :PROPERTIES:
 :CUSTOM_ID: types/unify
 :FILE: src/graphden/types/core.clj
-:LINE: 1714
+:LINE: 1671
 :MINS: 10.1
 :END:
 
@@ -116,7 +116,7 @@ Robinson unification with occurs-check and subtype-aware leniency, plus a union 
 
 Same shape as ~subtype?~, so read it the same way: one ~cond~ over the normalised pair — typevar arms bind first (with the occurs check), then structural recursion into fn / list / record shapes, then the union fallback. It returns a substitution map or the ~::fail~ sentinel that ~unify-ok?~ / ~unify-fail?~ just below test for.
 
-- source :: [[file:../../../src/graphden/types/core.clj::(defn unify][src/graphden/types/core.clj:1714]]
+- source :: [[file:../../../src/graphden/types/core.clj::(defn unify][src/graphden/types/core.clj:1671]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/strip-null][strip-null]]
 
 * 9. strip-null
@@ -170,7 +170,7 @@ Infers a structural type from a literal Clojure value (records, header maps, ~[:
 Verifies one binding's ~actual~ ⊆ ~expected~, running ~unify~ when type-vars are present and handling the ~:any~ / ~:never~ / refinement-on-literal escape hatches. The atomic unit of type-checking, tying together ~subtype?~, ~unify~, and ~classify-literal~.
 
 - source :: [[file:../../../src/graphden/types/check.clj::(defn- check-binding!][src/graphden/types/check.clj:490]]
-- same file :: [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
+- same file :: [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 
 * 13. signature-return
 :PROPERTIES:
@@ -183,37 +183,50 @@ Verifies one binding's ~actual~ ⊆ ~expected~, running ~unify~ when type-vars a
 The declared-signature engine: when a root base-fn has no hand ~:return-type-rule~, the polymorphic declaration itself computes the return — unify each var-carrying declared arg against the actual type at the site, resolve the declared return through the substitution. ~:coll [:list a] → [:union :null a]~ IS the rule; the hand-written rules that survive are only those reading literal values, union fan-out, or the registry.
 
 - source :: [[file:../../../src/graphden/types/check.clj::(defn signature-return][src/graphden/types/check.clj:2138]]
-- same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
+- same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 
-* 14. check-fn-def!
+* 14. rule-return
+:PROPERTIES:
+:CUSTOM_ID: types/rule-return
+:FILE: src/graphden/types/check.clj
+:LINE: 2191
+:MINS: 2.8
+:END:
+
+The one dispatch over those engines: walk to the ROOT base-fn, run its hand rule if it has one, else the declared signature, else keep the static return — then lift the result into ~[:secret …]~ when the root propagates taint and an input carries it. The sweep calls it per fn-def; ~types.rules-test~ calls the same fn, so a rule is tested through the wiring that ships.
+
+- source :: [[file:../../../src/graphden/types/check.clj::(defn rule-return][src/graphden/types/check.clj:2191]]
+- same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
+
+* 15. check-fn-def!
 :PROPERTIES:
 :CUSTOM_ID: types/check-fn-def!
 :FILE: src/graphden/types/check.clj
-:LINE: 2438
+:LINE: 2457
 :MINS: 8.8
 :END:
 
 Type-checks a single fn-def against its (single or multiple- inheritance) parents: resolve parent slots, run the monotonicity / unknown-slot / effect guards, unify bindings, compute the return via type-rules, propagate effects, and snapshot the rich-type into the registry. The per-node checker the sweep repeats.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn check-fn-def!][src/graphden/types/check.clj:2438]]
-- same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn check-fn-def!][src/graphden/types/check.clj:2457]]
+- same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 - referenced from :: [[file:crud.org::#crud/type-check-fn-after-mutation!][type-check-fn-after-mutation!]]
 
-* 15. check-all-defs!
+* 16. check-all-defs!
 :PROPERTIES:
 :CUSTOM_ID: types/check-all-defs!
 :FILE: src/graphden/types/check.clj
-:LINE: 2565
+:LINE: 2584
 :MINS: 1.9
 :END:
 
 The whole-graph sweep entry point: fold ~check-fn-def!~ over topologically-ordered fn-defs so each def's computed rich-type is registered before its dependents read it. This is how the entire graph is checked end to end.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2565]]
-- same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2584]]
+- same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 - referenced from :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]]
 
-* 16. record-rich-types!
+* 17. record-rich-types!
 :PROPERTIES:
 :CUSTOM_ID: types/record-rich-types!
 :FILE: src/graphden/executor/registry/core.clj
@@ -227,7 +240,7 @@ Where the sweep's answers are KEPT. The rich-types registry is the in-memory ~{f
 - see also :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:web.org::#web/api-rich-types][api-rich-types]]
 - same file :: [[file:types.org::#types/rich-type-of-id][rich-type-of-id]]
 
-* 17. rich-type-of-id
+* 18. rich-type-of-id
 :PROPERTIES:
 :CUSTOM_ID: types/rich-type-of-id
 :FILE: src/graphden/executor/registry/core.clj

@@ -342,7 +342,10 @@ function _seqEdgeParams(arg) {
 // time. First hover fetches; every hover after is instant from here. The URL
 // key captures the auth-derived params (editable / owned), so a sign-in/out —
 // which re-renders the graph with new params — naturally keys to fresh entries.
-// Bounded FIFO so a long session can't grow it without bound.
+// Bounded FIFO so a long session can't grow it without bound. Content the
+// URL does NOT key (fn name, description, the ⚙ Service blocked reason) goes
+// stale on a write: the reload phase (`installGraphShell`) and a description
+// save (`patchEntityDescriptionInState`) clear it.
 const _rowActionsHtmlCache = new Map();
 const _ROW_ACTIONS_CACHE_MAX = 300;
 

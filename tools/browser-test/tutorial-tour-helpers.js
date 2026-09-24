@@ -188,6 +188,28 @@ function tourTitle(page) {
 }
 
 
+// Where the tour stood, read from the tour DATA the page runs — lesson id +
+// slug + step — for a failure message. The walks' own labels are prose, and
+// after the 2026-09 renumbering half of them named the wrong lesson; a gate log
+// that says "lesson 23 (branches) · step 4/9" cannot drift that way.
+async function tourWhere(page) {
+  try {
+    return await page.evaluate(() => {
+      const t = document.querySelector('#gd-tour-pop .gd-tour-title');
+      const title = t ? t.textContent.trim() : null;
+      const lesson = (typeof _tourLesson === 'function') ? _tourLesson() : null;
+      if (!lesson) return title ? '"' + title + '" (no lesson state)' : 'no tour open';
+      const step = (typeof _tourState !== 'undefined' && _tourState) ? _tourState.step + 1 : '?';
+      return 'lesson ' + lesson.id + (lesson.slug ? ' (' + lesson.slug + ')' : '')
+        + ' · step ' + step + '/' + ((lesson.steps || []).length || '?')
+        + (title ? ' · "' + title + '"' : '');
+    });
+  } catch (e) {
+    return 'unreadable (' + e.message.split('\n')[0] + ')';
+  }
+}
+
+
 // Deadlines are sized for the GATE's shared e2e stack, not a dev laptop:
 // a write-following step there can stall >60s behind a registry recompile
 // plus GC churn (observed 2026-08-19: three 45s branch-wait timeouts and
@@ -333,19 +355,33 @@ async function waitTourTitle(page, title, timeoutMs) {
   }
 }
 
-// Wait (bounded) for the current step's effective target to be on screen,
-// then one tour tick so the audit's sampler records the ring on it. Walks
-// call it after their own "wait for X to render" when X is the step's
-// target — the title arrived before X did, so waitTourTitle's settle could
-// not see it.
+// Wait (bounded) until the audit's sampler has RECORDED the current step with
+// its effective target on screen — the ring held for a tour tick. Walks call
+// it after their own "wait for X to render" when X is the step's target — the
+// title arrived before X did, so waitTourTitle's settle could not see it.
+//
+// It used to wait for the target and then sleep a flat 650 ms (two 250 ms
+// samples plus slack) on every step — ~370 steps a gate, ~4 minutes, most of
+// it after the sampler had long committed. The sampler publishes what it
+// committed in `window.__gdTourAuditKey` (`lesson|title|eff|spotVisible|el?`),
+// so wait for exactly that: the same "held for two samples" guarantee the
+// NEVER-RINGED verdict reads (a record with an element), no sooner and no
+// later. A step with no target has nothing to ring and returns at once.
 async function settleTourRing(page, timeoutMs) {
   if (!process.env.GRAPHDEN_TOUR_AUDIT) return;
+  await installSpotlightAudit(page);
   await page.waitForFunction(() => {
     if (typeof _tourStep !== 'function' || typeof _tourEffTarget !== 'function') return true;
-    const eff = _tourEffTarget(_tourStep());
-    return !eff || !!document.querySelector(eff);
-  }, null, {timeout: timeoutMs || 5000, polling: 100}).catch(() => {});
-  await new Promise((r) => setTimeout(r, 650));
+    const step = _tourStep();
+    if (!step) return true;
+    const eff = _tourEffTarget(step);
+    if (!eff) return true;
+    if (!document.querySelector(eff)) return false;
+    const lesson = (typeof _tourLesson === 'function') ? _tourLesson() : null;
+    const recorded = window.__gdTourAuditKey || '';
+    return recorded.startsWith([lesson?.id, step.title, eff].join('|') + '|')
+      && recorded.endsWith('|1');
+  }, null, {timeout: timeoutMs || 5000, polling: 50}).catch(() => {});
 }
 
 
@@ -408,7 +444,7 @@ async function filterAndSelect(page, filterText, fnName) {
   await page.fill('input[placeholder="Filter..."]', filterText);
   // The filter is debounced and server-side; wait for the row to actually
   // be in the tree rather than for a fixed slice of time. Same observable
-  // the lens probe in `edit-tutorial-tour-ops` waits on.
+  // the lens probe in `edit-tutorial-tour-picker` waits on.
   await page.waitForFunction((name) => {
     const row = Array.from(document.querySelectorAll('#entity-list .entity-item'))
       .find((e) => e.querySelector('.name')?.textContent.trim() === name);
@@ -431,30 +467,34 @@ async function filterAndSelect(page, filterText, fnName) {
 // yet) — a PUT on the package-owned parent, 400, and a version that never
 // existed. The canvas may take a while to grow the card under load, hence
 // the long wait.
-async function openRowActionsFor(page, ownerName, timeoutMs) {
-  await page.waitForFunction(
-    (name) => Array.from(document.querySelectorAll('.node-overlay')).some((ov) =>
-      ov.textContent.trim().startsWith(name)
-      && ov.querySelector('button.more-actions-trigger')),
-    ownerName, {timeout: timeoutMs || 90000, polling: 200});
-  await page.evaluate((name) => {
-    const ov = Array.from(document.querySelectorAll('.node-overlay')).find((o) =>
-      o.textContent.trim().startsWith(name)
-      && o.querySelector('button.more-actions-trigger'));
+//
+// `root` — the card must also be the canvas ROOT (the selected fn). A name
+// alone is not enough right after a selection: the PREVIOUS canvas may hold a
+// card of that name too (tutorial-map's :func card is `str-upper`), and its
+// ⋯ → Extend is extend-IN-PLACE — a swap inside tutorial-map, not a new
+// child of str-upper. Masked until 2026-09-24 by a flat 650 ms sleep after
+// every tour title; `ownerName` null + `root` = whatever the root card is.
+async function openRowActionsFor(page, ownerName, timeoutMs, opts = {}) {
+  const pick = ({name, root}) => Array.from(document.querySelectorAll('.node-overlay')).find((ov) =>
+    (!name || ov.textContent.trim().startsWith(name))
+    && ov.querySelector('button.more-actions-trigger')
+    && (!root || !!(window.graph && window.graph.nodes.get(ov.dataset.nodeId)?.data?.isRoot)));
+  const arg = {name: ownerName || null, root: !!opts.root, src: pick.toString()};
+  await page.waitForFunction(({name, root, src}) =>
+    !!(new Function('return (' + src + ')')())({name, root}),
+  arg, {timeout: timeoutMs || 90000, polling: 200});
+  await page.evaluate(({name, root, src}) => {
+    const ov = (new Function('return (' + src + ')')())({name, root});
     ov.querySelector('button.more-actions-trigger')
       .dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
-  }, ownerName);
+  }, arg);
   await page.waitForSelector('.row-actions-popover', {timeout: 15000});
 }
 
 
 async function extendViaRowActions(page, childName, expectOwner) {
-  await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
-  if (expectOwner) {
-    await openRowActionsFor(page, expectOwner);
-  } else {
-    await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-  }
+  // Extending the SELECTED fn: its ⋯ is the root card's (see openRowActionsFor).
+  await openRowActionsFor(page, expectOwner || null, 90000, {root: true});
   await page.waitForFunction(() => !!document.querySelector(
     '.row-actions-popover [data-action="extend-fn"]'), null,
     {timeout: 15000, polling: 100});
@@ -1399,11 +1439,37 @@ async function extendInPlace(page, cardName, childName) {
 // 'list-closed': false, required: true, 'slot-optional': …}`) to the state
 // asked for, Save, wait for the popover to close. A checkbox already in the
 // wanted state is left alone — a flip is a change, not a click.
-async function setSealsViaBadge(page, argName, wanted) {
+//
+// `fnName` (optional) — the fn whose card the badge must belong to. Right
+// after a selection change the canvas re-renders asynchronously, and a badge
+// clicked in that window opens the popover for the PREVIOUS card, or for one
+// whose slot data has not landed yet (no "Close the list" box, because the
+// slot does not read as a list yet). A person clicks once the card is drawn;
+// so does this: the popover must name `fnName` and offer every wanted box,
+// else it is dismissed and the badge clicked again. (Masked until 2026-09-24
+// by a flat 650 ms sleep in every tour step's settle.)
+async function setSealsViaBadge(page, argName, wanted, fnName) {
   const badge = '.edge-label-overlay[data-arg-name="' + argName + '"] .seal-badge';
-  await page.waitForSelector(badge, {timeout: 60000});
-  await page.click(badge);
-  await page.waitForSelector('.arg-value-edit-popover .seal-popover', {timeout: 15000});
+  const deadline = Date.now() + 60000;
+  for (;;) {
+    await page.waitForSelector(badge, {timeout: 60000});
+    await page.click(badge);
+    await page.waitForSelector('.arg-value-edit-popover .seal-popover', {timeout: 15000});
+    const ready = await waitUntil(page, ({keys, fn}) => {
+      const pop = document.querySelector('.arg-value-edit-popover .seal-popover');
+      if (!pop) return false;
+      const head = pop.querySelector('.seal-popover-head')?.textContent || '';
+      if (fn && !head.endsWith(' on ' + fn)) return false;
+      return keys.every((k) => pop.querySelector('input[data-seal="' + k + '"]'));
+    }, {keys: Object.keys(wanted), fn: fnName || null}, 3000);
+    if (ready) break;
+    assert(Date.now() < deadline, 'seal popover on :' + argName + ' offers ' + Object.keys(wanted).join(', ')
+      + (fnName ? ' on ' + fnName : ''));
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('.arg-value-edit-popover'),
+      null, {timeout: 15000, polling: 100}).catch(() => {});
+    await new Promise((r) => setTimeout(r, 250));
+  }
   for (const [key, on] of Object.entries(wanted)) {
     const sel = '.arg-value-edit-popover input[data-seal="' + key + '"]';
     const state = await page.$eval(sel, (i) => ({checked: i.checked, disabled: i.disabled}));
@@ -1563,7 +1629,7 @@ async function openMarkerFormViaPlaceholder(page, argName, marker) {
 
 module.exports = {
   NS_NAME, FN_NAME,
-  retryingDelete, hardCleanup, tourTitle, waitTourTitle, settleTourRing, clickTourButton,
+  retryingDelete, hardCleanup, tourTitle, tourWhere, waitTourTitle, settleTourRing, clickTourButton,
   waitUntil, tourProgress, clickTourAdvance,
   installSpotlightAudit,
   filterAndSelect, openRowActionsFor, extendViaRowActions, bindFirstPlaceholder,

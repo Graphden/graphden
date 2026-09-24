@@ -131,15 +131,18 @@
       })
       .catch(() => { if (gen === _gen && onFail) onFail(); });
   }
+  // A failed load must not leave "Loading…" standing: say so, and forget the
+  // mount so the next visit to the surface tries again.
+  function loadFailed(root) {
+    _mounted = false;
+    root.innerHTML = '<div data-marketplace="1" class="mk-root mk-empty">The marketplace could not be loaded — are you signed in?</div>';
+  }
   function gdRenderMarket() {
     const root = document.getElementById('gd-market-root');
     if (!root || !gdMarketPresent()) return;
     if (_mounted && root.querySelector('[data-marketplace]')) return;
     root.innerHTML = PLACEHOLDER;
-    loadListing(root, PARTIAL, () => {
-      _mounted = false;
-      root.innerHTML = '<div data-marketplace="1" class="mk-root mk-empty">The marketplace could not be loaded — are you signed in?</div>';
-    });
+    loadListing(root, PARTIAL, () => loadFailed(root));
   }
   // Open the surface on a package (from the packages chip's link, Settings).
   // A `name` opens the item; a `kind` opens the listing on that tab.
@@ -155,7 +158,7 @@
     const url = query.name
       ? PARTIAL_ITEM + '?name=' + encodeURIComponent(query.name)
       : PARTIAL + '?kind=' + encodeURIComponent(query.kind || 'fns');
-    loadListing(root, url);
+    loadListing(root, url, () => loadFailed(root));
   }
 
   // After ANY swap inside the surface: an apply / install may have changed
@@ -188,6 +191,7 @@
   function closeDialog() {
     if (!_dlg) return;
     const d = _dlg; _dlg = null;
+    if (typeof setSiblingsInert === 'function') setSiblingsInert(d.el, false);
     d.el.remove();
     d.scrim.remove();
     if (typeof returnFocusTo === 'function') returnFocusTo(d.returnTo);
@@ -252,6 +256,13 @@
     nameIn.addEventListener('input', suggest);
     const returnTo = document.activeElement;
     _dlg = { el, scrim, returnTo };
+    // `aria-modal="true"` is a promise that nothing else is reachable — keep
+    // it (docs/ACCESSIBILITY.md). The scrim stays live: it is the dialog's
+    // click-outside-to-close, and an inert one swallows that click.
+    if (typeof setSiblingsInert === 'function') {
+      setSiblingsInert(el, true);
+      scrim.removeAttribute('inert');
+    }
     scrim.addEventListener('click', closeDialog);
     el.querySelector('#gd-mkpub-cancel').addEventListener('click', closeDialog);
     const result = el.querySelector('#gd-mkpub-result');

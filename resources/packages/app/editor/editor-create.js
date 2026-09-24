@@ -318,6 +318,9 @@ function openNsPublishPopover(anchorEl, nsPath) {
     resultEl.className = 'gd-nspub-result ' + (ok ? 'packages-fork-ok' : 'packages-fork-err');
   };
   const doPublish = async () => {
+    // Enter on the version field reaches here too — it must honour the
+    // button's state (in flight, or already published) like a click does.
+    if (goBtn.disabled) return;
     const name = nameInput.value.trim();
     const version = versionInput.value.trim();
     if (!name || !version) { setResult('Name and version are required.', false); return; }

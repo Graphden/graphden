@@ -25,6 +25,14 @@
 let mismatchExplainerEl = null;
 let mismatchExplainerArg = null;
 let mismatchExplainerAnchor = null;
+// Request token: bumped by every open, every close and every Escape. A
+// response carrying an older token is dropped — a slow partial used to pop
+// the explainer open AFTER the reader had pressed Escape or moved on.
+let _mismatchReq = 0;
+// A repeat click asking for the answer already in flight joins it rather
+// than superseding it (same contract as editor-provenance-popover.js).
+let _mismatchPending = null;   // {key, req}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') _mismatchReq += 1; }, true);
 
 function ensureMismatchExplainerEl() {
   if (mismatchExplainerEl) return mismatchExplainerEl;
@@ -107,14 +115,19 @@ async function showMismatchExplainer(arg, anchorEl) {
   if (!bindingId) return;
   const params = new URLSearchParams({ 'binding-id': bindingId });
   if (itemId) params.set('item-id', itemId);
+  const key = params.toString();
+  if (_mismatchPending?.key === key && _mismatchPending.req === _mismatchReq) return;
+  const req = ++_mismatchReq;
+  _mismatchPending = { key, req };
   let html;
   try {
     const r = await authFetch('/partials/mismatch-explainer?' + params.toString());
-    if (!r.ok) return;
-    html = await r.text();
+    html = r.ok ? await r.text() : null;
   } catch (_) {
-    return;
+    html = null;
   }
+  if (_mismatchPending?.req === req) _mismatchPending = null;
+  if (req !== _mismatchReq || html == null) return;   // dismissed / superseded / failed
   const el = ensureMismatchExplainerEl();
   el.innerHTML = html;
   mismatchExplainerArg = arg;
@@ -126,6 +139,7 @@ async function showMismatchExplainer(arg, anchorEl) {
 }
 
 function hideMismatchExplainer() {
+  _mismatchReq += 1;
   if (!mismatchExplainerEl) return;
   mismatchExplainerEl.classList.remove('visible');
   mismatchExplainerEl.style.display = 'none';

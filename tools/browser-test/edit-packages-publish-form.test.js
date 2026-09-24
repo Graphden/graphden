@@ -91,6 +91,17 @@ const BH = {'X-Graphden-Branch': BRANCH};
     assert(/\(\d+ fns\)/.test(note),
            'result note carries the fn-count: ' + note);
 
+    // Enter on the version field honours the (spent) Publish button: the
+    // key used to call the publish directly and POST it again.
+    let republished = 0;
+    page.on('request', (req) => {
+      if (req.method() === 'POST' && /\/api\/packages\/publish/.test(req.url())) republished += 1;
+    });
+    await page.focus('#gd-nspub-version');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(1500);
+    assert(republished === 0, 'Enter after a publish sends no second publish (got ' + republished + ')');
+
     // Server-side truth, not just DOM: the registry on this branch
     // carries the published row (the panel partial's browse list offers
     // it to install).

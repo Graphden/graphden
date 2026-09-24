@@ -302,15 +302,19 @@ async function saveEntityDescription(entityType, entityId, description) {
       body: body.toString(),
     });
     if (r?.ok) return {ok: true};
-    if (r && (r.status === 401 || r.status === 403)) {
+    if (r && r.status === 401) {
       return {ok: false, reason: 'Save failed — check that you\'re signed in.'};
     }
     // The server explains its refusals — a package-owned fn, for instance,
-    // says so and points at the fix ("extend it into a child fn"). Showing
-    // a generic failure instead threw that away and sent the reader off to
-    // re-authenticate a session that was fine.
+    // answers 403 with what to do instead ("extend it into a child fn").
+    // A 403 is a refusal of THIS write, not an expired session, so its
+    // explanation is shown as-is; a generic failure (or a sign-in hint)
+    // threw that away.
     const said = await readServerError(r);
-    return {ok: false, reason: said || ('Save failed (' + (r?.status || 'no response') + ').')};
+    if (said) return {ok: false, reason: said};
+    return {ok: false, reason: r && r.status === 403
+      ? 'Save failed — you are not allowed to change this.'
+      : ('Save failed (' + (r?.status || 'no response') + ').')};
   } catch (_) {
     return {ok: false, reason: 'Save failed — the request did not complete.'};
   }

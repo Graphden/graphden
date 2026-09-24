@@ -7,7 +7,7 @@ The ~25k lines of plain ES that draw the graph, bind the edits and mount the ser
 
 after: web, layout
 
-[[file:index.org][index]] · ~77 min
+[[file:index.org][index]] · ~76 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -106,13 +106,13 @@ The pivot from client logic to server-rendered HTML. ONE delegated listener per 
 :PROPERTIES:
 :CUSTOM_ID: editor/loadPartial
 :FILE: resources/packages/web/runtime/graphden-runtime.js
-:LINE: 123
-:MINS: 2.6
+:LINE: 139
+:MINS: 2.1
 :END:
 
 Fetch an HTML partial, swap it into a host, re-bind the dispatcher. That is the whole ~/partials/*~ client contract ([[../PARTIALS.md][docs/PARTIALS.md]]) — the migration path by which popovers that used to be hand-built DOM became graph-native fn-defs. The supersession token is the subtle part: two concurrent loads into one host must let the LATEST call win, not the fastest response.
 
-- source :: [[file:../../../resources/packages/web/runtime/graphden-runtime.js::async function loadPartial(host, url, opts) {][resources/packages/web/runtime/graphden-runtime.js:123]]
+- source :: [[file:../../../resources/packages/web/runtime/graphden-runtime.js::async function loadPartial(host, url, opts) {][resources/packages/web/runtime/graphden-runtime.js:139]]
 - same file :: [[file:editor.org::#editor/bindActionDispatch][bindActionDispatch]]
 - referenced from :: [[file:web.org::#web/hiccup-element][hiccup-element]]
 
@@ -121,7 +121,7 @@ Fetch an HTML partial, swap it into a host, re-bind the dispatcher. That is the 
 :CUSTOM_ID: editor/loadRowActionsContent
 :FILE: resources/packages/app/editor/editor-row-actions.js
 :LINE: 410
-:MINS: 3.7
+:MINS: 3.8
 :END:
 
 The migration in the concrete: the ~⋯~ row menu is a server partial in four contexts, and the client only builds the query string, caches the returned HTML per URL, and recomputes the one state that MUST be fresh (add-MI compatibility, against current ~lookups~) — see [[../EDITOR_ROW_ACTIONS.md][docs/EDITOR_ROW_ACTIONS.md]] for why this popover moved and the others stayed JS.

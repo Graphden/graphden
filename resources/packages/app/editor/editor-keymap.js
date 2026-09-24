@@ -57,11 +57,25 @@
   function stopRecording() {
     if (!_recording) return;
     window.removeEventListener('keydown', onRecordKey, true);
+    window.removeEventListener('pointerdown', onRecordPointer, true);
     _recording = null;
     render();
   }
+  // Recording swallows EVERY key through a window-level capture listener,
+  // so it must not outlive the row it records for: leaving Settings (Escape,
+  // the exit button, a leader surface key) or clicking anywhere else ends it.
+  // It used to keep swallowing keys across the whole editor, and a stray
+  // Enter saved whatever it had collected as the binding.
+  function recordingLive() {
+    return !!_recording && !!_recording.row?.isConnected
+      && document.body.getAttribute('data-surface') === _recording.surface;
+  }
+  function onRecordPointer(e) {
+    if (_recording && !_recording.row?.contains(e.target)) stopRecording();
+  }
   function onRecordKey(e) {
     if (!_recording) return;
+    if (!recordingLive()) { stopRecording(); return; }   // the key is not ours
     e.preventDefault();
     e.stopPropagation();
     const k = e.key;
@@ -156,6 +170,9 @@
       tr.appendChild(el('td', null, e.description));
       const kt = el('td', 'gd-km-keys');
       if (_recording?.id === e.id) {
+        // This render replaced the row the recording started on — follow it,
+        // or the typed keys are written into a detached node.
+        _recording.row = tr;
         kt.appendChild(el('span', 'gd-km-recording', 'Press the keys… (Enter to keep, Esc to cancel)'));
       } else {
         kt.appendChild(keycaps(e.keys, e.leader));
@@ -172,8 +189,10 @@
         change.setAttribute('aria-label', 'Change keys for ' + e.description);
         change.addEventListener('click', () => {
           if (_recording) stopRecording();
-          _recording = { id: e.id, keys: [], leader: e.leader, row: tr };
+          _recording = { id: e.id, keys: [], leader: e.leader, row: tr,
+                         surface: document.body.getAttribute('data-surface') };
           window.addEventListener('keydown', onRecordKey, true);
+          window.addEventListener('pointerdown', onRecordPointer, true);
           render();
           _root.querySelector('.gd-km-row[data-shortcut="' + e.id + '"] .gd-km-leader')?.focus();
         });

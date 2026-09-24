@@ -32,6 +32,16 @@ let _subtreeRootId = null;
 // fn B's call, so B awaited A's subtree and rendered A's bindings for B. Mirror
 // of `_nsFetchInFlight` below.
 const _subtreeFetchInFlight = new Map();
+// Subtree epochs. `_subtreeEpoch` is bumped by every fetch that starts and by
+// the reload phase: a fetch installs its RELATIONAL rows (slots / bindings /
+// items + `_subtreeRootId`) only while it is still the latest — a late
+// subtree requested BEFORE a mutation's reload used to land after it,
+// reinstall the old bindings into the fresh shell and pin them there.
+// `_subtreeResetEpoch` moves only with the reload phase: a fetch overtaken
+// by another ROOT still contributes its fn rows to the accumulating cache
+// (they are as current as any), one from before a reload contributes nothing.
+let _subtreeEpoch = 0;
+let _subtreeResetEpoch = 0;
 
 // Merge freshly-fetched fn rows into the accumulating cache. Full (subtree)
 // rows and light (tree/namespace/search) rows coexist: a later light row
@@ -175,15 +185,25 @@ async function resolveFnByName(name) {
 }
 window.resolveFnByName = resolveFnByName;
 
+// Resolves true once `fnId`'s subtree is the installed one, false when this
+// fetch was superseded before it landed (its rows are then dropped).
 async function ensureSubtreeFor(fnId) {
-  if (!fnId) return;
-  if (_subtreeRootId === fnId && Array.isArray(graphData?.bindings)) return;
+  if (!fnId) return false;
+  if (_subtreeRootId === fnId && Array.isArray(graphData?.bindings)) return true;
   if (_subtreeFetchInFlight.has(fnId)) return _subtreeFetchInFlight.get(fnId);
+  const epoch = ++_subtreeEpoch;
+  const resetEpoch = _subtreeResetEpoch;
   const p = (async () => {
     const r = await fetch(
       API.api_graph_entities + '?scope=subtree&root-id=' + encodeURIComponent(fnId));
     if (!r.ok) throw new Error('ensureSubtreeFor HTTP ' + r.status);
     const sub = await r.json();
+    if (resetEpoch !== _subtreeResetEpoch) return false;
+    if (epoch !== _subtreeEpoch) {
+      mergeKnownFns(sub.fns);
+      syncKnownFnsIntoGraph();
+      return false;
+    }
     // Merge the subtree's fns (the selected fn + its full transitive
     // closure) into the cache, and overlay its heavy relational rows.
     // Namespaces / counts stay from the :tree load.
@@ -194,10 +214,14 @@ async function ensureSubtreeFor(fnId) {
     graphData['list-items'] = sub['list-items'];
     _subtreeRootId = fnId;
     syncKnownFnsIntoGraph();
+    return true;
   })();
   _subtreeFetchInFlight.set(fnId, p);
-  try { await p; } finally { _subtreeFetchInFlight.delete(fnId); }
-  return p;
+  try { return await p; } finally {
+    // Only our own entry: a reload may have cleared the map and a fresh
+    // fetch for the same fn taken the slot meanwhile.
+    if (_subtreeFetchInFlight.get(fnId) === p) _subtreeFetchInFlight.delete(fnId);
+  }
 }
 window.ensureSubtreeFor = ensureSubtreeFor;
 
@@ -229,6 +253,8 @@ function graphShellFromTree(tree) {
 // re-primes the selected fn.
 function resetGraphCaches() {
   _subtreeRootId = null;
+  _subtreeEpoch += 1;
+  _subtreeResetEpoch += 1;
   _subtreeFetchInFlight.clear();
   _knownFns = new Map();
   _loadedNamespaceIds = new Set();
@@ -264,6 +290,11 @@ async function installGraphShell(tree, typeResp, onTypesUnparseable) {
     // otherwise accumulate for the whole session.
     if (typeof _rowActionsUseSiteArgs !== 'undefined') _rowActionsUseSiteArgs.clear();
   }
+  // The row-actions popover HTML bakes the fn's name, description and the
+  // ⚙ Service blocked reason — all of which a reload can have changed.
+  if (typeof _rowActionsHtmlCache !== 'undefined') _rowActionsHtmlCache.clear();
+  // The type panels' "Used by N" counts change with the same writes.
+  if (typeof typeUsagesCache !== 'undefined') typeUsagesCache.clear();
   // Resolve the secret-leaf base-fn id once so isSecretFn() stays
   // synchronous without a full-fns mirror to scan.
   if (typeof primeSecretLeafId === 'function') primeSecretLeafId();
@@ -277,6 +308,8 @@ function repaintExplorer() {
   if (typeof gdInvalidateSharedViews === 'function') gdInvalidateSharedViews();
   updateEntityList(graphData);
   if (typeof gdRefreshViewMembers === 'function') gdRefreshViewMembers();
+  // An active search shows the server's pre-write matches — re-ask.
+  if (typeof requerySearch === 'function') requerySearch();
 }
 
 /**

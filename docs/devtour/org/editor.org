@@ -7,19 +7,19 @@ The ~25k lines of plain ES that draw the graph, bind the edits and mount the ser
 
 after: web, layout
 
-[[file:index.org][index]] · ~76 min
+[[file:index.org][index]] · ~77 min
 
 * 1. initGraph
 :PROPERTIES:
 :CUSTOM_ID: editor/initGraph
 :FILE: resources/packages/app/editor/editor-main.js
-:LINE: 285
+:LINE: 318
 :MINS: 4.7
 :END:
 
  *Start here for anything you can click.* The editor is ~75 plain ~.js~ files concatenated into one bundle in a fixed order (no imports, no build step — the per-module map is in [[../EDITOR_MODULES.md][docs/EDITOR_MODULES.md]]), and this is the boot. Note the shape of the fetches: the namespace TREE goes out alone first, because its status answers the auth question for everyone — only a non-401 fires the three secondary loads. Fn leaves and per-fn slots/bindings arrive lazily; a 401 sends the user to sign in rather than into a red fatal banner.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-main.js::async function initGraph() {][resources/packages/app/editor/editor-main.js:285]]
+- source :: [[file:../../../resources/packages/app/editor/editor-main.js::async function initGraph() {][resources/packages/app/editor/editor-main.js:318]]
 - see also :: [[file:editor.org::#editor/authFetch][authFetch]]
 
 * 2. buildLookups
@@ -66,13 +66,13 @@ Most of its length is the sizing pass that runs AFTER the response: per-column w
 :PROPERTIES:
 :CUSTOM_ID: editor/renderGraph
 :FILE: resources/packages/app/editor/editor-render.js
-:LINE: 100
-:MINS: 9.1
+:LINE: 105
+:MINS: 9.7
 :END:
 
-One render cycle, and the reason it is not a one-liner: prime the selected fn's subtree, capture an ANCHOR node before the await so the canvas doesn't jump under the cursor, fetch the layout, diff it against the live graph, then re-measure — card heights are only known after the overlays exist, so the server's grid is corrected against measured DOM and the nodes settle onto the result.
+One render cycle, and the reason it is not a one-liner: a render GENERATION makes the last call win across its awaits, prime the selected fn's subtree, capture an ANCHOR node before the await so the canvas doesn't jump under the cursor, fetch the layout, diff it against the live graph, then re-measure — card heights are only known after the overlays exist, so the server's grid is corrected against measured DOM and the nodes settle onto the result.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-render.js::async function renderGraph(shouldFit = true) {][resources/packages/app/editor/editor-render.js:100]]
+- source :: [[file:../../../resources/packages/app/editor/editor-render.js::async function renderGraph(shouldFit = true) {][resources/packages/app/editor/editor-render.js:105]]
 
 * 6. createFnOverlay
 :PROPERTIES:
@@ -120,13 +120,13 @@ Fetch an HTML partial, swap it into a host, re-bind the dispatcher. That is the 
 :PROPERTIES:
 :CUSTOM_ID: editor/loadRowActionsContent
 :FILE: resources/packages/app/editor/editor-row-actions.js
-:LINE: 407
+:LINE: 410
 :MINS: 3.7
 :END:
 
 The migration in the concrete: the ~⋯~ row menu is a server partial in four contexts, and the client only builds the query string, caches the returned HTML per URL, and recomputes the one state that MUST be fresh (add-MI compatibility, against current ~lookups~) — see [[../EDITOR_ROW_ACTIONS.md][docs/EDITOR_ROW_ACTIONS.md]] for why this popover moved and the others stayed JS.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-row-actions.js::async function loadRowActionsContent(host, fnId, context, opts) {][resources/packages/app/editor/editor-row-actions.js:407]]
+- source :: [[file:../../../resources/packages/app/editor/editor-row-actions.js::async function loadRowActionsContent(host, fnId, context, opts) {][resources/packages/app/editor/editor-row-actions.js:410]]
 
 * 10. pickerArrange
 :PROPERTIES:
@@ -144,13 +144,13 @@ What the fn-picker shows, and in what order. ~/api/types/candidates~ answers the
 :PROPERTIES:
 :CUSTOM_ID: editor/enterArgValueEditMode
 :FILE: resources/packages/app/editor/editor-edit-modes.js
-:LINE: 215
+:LINE: 226
 :MINS: 7.2
 :END:
 
 How an edit actually happens. The control is not chosen here: the client POSTs the slot to ~/api/value-form~ and the graph's value-form registry answers with hiccup naming a widget — the editor routes on ~data-form-widget~ and knows no type tags at all. Note ~onSaved~: a value change alters binding rows, so ~lookups~ is stale and the handler re-fetches rather than re-rendering.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-edit-modes.js::function enterArgValueEditMode(arg, anchorEl) {][resources/packages/app/editor/editor-edit-modes.js:215]]
+- source :: [[file:../../../resources/packages/app/editor/editor-edit-modes.js::function enterArgValueEditMode(arg, anchorEl) {][resources/packages/app/editor/editor-edit-modes.js:226]]
 - see also :: [[file:crud.org::#crud/render-repr][render-repr]]
 
 * 12. gdEnterDiffMode

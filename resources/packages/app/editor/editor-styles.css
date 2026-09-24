@@ -8377,33 +8377,6 @@ body.gd-no-write .branch-comment-form { display: none; }
 #gd-mkpub-pop .gd-nspub-result.packages-fork-ok { color: var(--gd-ok); }
 #gd-mkpub-pop .gd-nspub-result.packages-fork-err { color: var(--gd-crit); }
 
-@media (prefers-reduced-motion: reduce) {
-  /* Near-zero rather than `none`: keeps transitionend firing for any
-     future listener while being imperceptible. */
-  *, *::before, *::after {
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-  }
-
-  .entity-item.gd-tree-flash {
-    animation: none;
-    background-color: var(--gd-flow-wash);
-  }
-
-  /* Progress indicators are exempt — but slow the rotation down. */
-  .editor-busy-banner::before {
-    animation-duration: 1.6s !important;
-    animation-iteration-count: infinite !important;
-  }
-
-  .service-badge-pending {
-    animation: none;
-    opacity: 0.75;
-  }
-}
-
 /* λ chip — the fn's call-site parameters, at the end of the return-type
    strip (editor-overlay-strips.js). A button on an editable root card
    (opens editor-edit-modes-flags.js), a plain span elsewhere. */
@@ -8463,3 +8436,33 @@ button.lambda-params-chip:focus-visible { outline: 1px solid var(--accent); }
 .gd-insp-flag-row .gd-insp-rt-rule { margin-left: 4px; }
 .gd-insp-flag-row [data-effect] { cursor: pointer; }
 .gd-insp-flag-row [data-effect]:focus-visible { outline: 1px solid var(--accent); }
+
+/* REDUCED MOTION — must stay the LAST block in this file: it overrides at
+   equal specificity, so any rule after it wins again (docs/ACCESSIBILITY.md;
+   pinned by tools/runtime-test/css-reduced-motion-last.test.js). */
+@media (prefers-reduced-motion: reduce) {
+  /* Near-zero rather than `none`: keeps transitionend firing for any
+     future listener while being imperceptible. */
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+
+  .entity-item.gd-tree-flash {
+    animation: none;
+    background-color: var(--gd-flow-wash);
+  }
+
+  /* Progress indicators are exempt — but slow the rotation down. */
+  .editor-busy-banner::before {
+    animation-duration: 1.6s !important;
+    animation-iteration-count: infinite !important;
+  }
+
+  .service-badge-pending {
+    animation: none;
+    opacity: 0.75;
+  }
+}

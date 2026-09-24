@@ -99,7 +99,9 @@
   // CM6 views hold document/window observers — an htmx swap that replaces
   // the textarea's subtree must destroy them or they leak (the Assets
   // panel re-renders on every save/revert). Tear down any enhanced
-  // textarea in the OUTGOING subtree before the swap.
+  // textarea in the OUTGOING subtree before the swap. Exported: JS-owned
+  // surfaces (inline edit, the Run form, the raw toggle) remove subtrees
+  // htmx never sees and call it themselves.
   function destroyWithin(root) {
     if (!root?.querySelectorAll) return;
     for (const ta of root.querySelectorAll('textarea[data-cm-enhanced]')) {
@@ -121,7 +123,7 @@
     ta.value = text;
   }
 
-  window.gdCode = { enhance, enhanceWithin, viewOf, get, set };
+  window.gdCode = { enhance, enhanceWithin, destroyWithin, viewOf, get, set };
 
   // Server-rendered fragments (Assets panel, future partials) arrive via
   // htmx swaps — destroy outgoing views, then upgrade the incoming

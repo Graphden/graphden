@@ -197,6 +197,11 @@ const undoToast = (page) => page.evaluate(() => {
     await page.keyboard.press('Control+z');
     await page.waitForFunction((name) => !(graphData?.fns || []).some((f) => f.name === name),
       CHILD, {timeout: 30000, polling: 200});
+    // The undo then walks back to the parent (reload, then select `add`) —
+    // wait for it to land, or the next navigation races it and the undo's
+    // late `#…add` overrides the hash the test asked for.
+    await page.waitForFunction(() => location.hash === '#core.arithmetic.add',
+      null, {timeout: 30000, polling: 100});
     console.log('  D2: Ctrl+Z ✓');
 
     // ------------------------------------------------------------ E

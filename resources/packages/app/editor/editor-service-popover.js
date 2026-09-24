@@ -55,6 +55,34 @@ function hideServicePopover() {
 }
 
 
+// Every close the user drives (×, a finished save / delete) hands focus back
+// to the ⚙ trigger — Escape does the same through installPopoverDismiss.
+function closeServicePopover() {
+  const back = servicePopoverAnchor;
+  hideServicePopover();
+  if (back && typeof returnFocusTo === 'function') returnFocusTo(back);
+}
+
+
+// Show whatever body is in `el` anchored under `anchorEl` — the ONE path for
+// the form, the tenant bodies and the load errors, so each gets the same
+// visible ×, aria-expanded and focus entry (the dialog traps Tab, so focus
+// must start inside it).
+function presentServicePopover(el, anchorEl) {
+  if (!el.querySelector('.service-popover-close') && typeof ensurePopoverClose === 'function') {
+    ensurePopoverClose(el, closeServicePopover, 'Close service settings', { prepend: true });
+  }
+  if (servicePopoverAnchor && servicePopoverAnchor !== anchorEl) {
+    try { servicePopoverAnchor.setAttribute('aria-expanded', 'false'); } catch (_) {}
+  }
+  try { anchorEl.setAttribute('aria-expanded', 'true'); } catch (_) {}
+  el.classList.add('visible');
+  anchorBelowClamped(el, anchorEl, {fallbackW: 320, fallbackH: 200});
+  servicePopoverAnchor = anchorEl;
+  if (typeof focusIntoDialog === 'function') focusIntoDialog(el);
+}
+
+
 // === Tenant mode ===========================================================
 //
 // In a multi-tenant deployment `:service` is tenant-forbidden, so the platform
@@ -309,15 +337,9 @@ async function reconcileServices() {
 // delete buttons so the handler picks PUT/POST + which row id to
 // target without a separate /api lookup.
 
-// Cache of rendered popover HTML by fn-id. Re-opening the same fn's
-// settings (common: comparing configs across fns) skips the ~30-150ms
-// server render. Invalidated wholesale on ANY service mutation
-// (`invalidateServicePopoverCache`) — a save/delete can shift sibling
-// warnings + displacement across fns, so per-fn eviction isn't enough.
-// A branch switch reloads the page, dropping this Map with it.
-const _servicePopoverCache = new Map();
-
-function invalidateServicePopoverCache() { _servicePopoverCache.clear(); }
+// Not cached: the body carries LIVE state — the service's status and the
+// "Running copies" list with each copy's heartbeat — which a cached copy
+// froze at the first open for the rest of the session.
 
 
 // Tenant-mode popover body — client-rendered (the server partial reads the
@@ -372,27 +394,15 @@ async function showTenantServicePopover(el, fnEntity, anchorEl) {
   if (servicePopoverFnId !== fnEntity.id) return; // superseded by a newer open
   el.innerHTML = tenantServicePopoverHtml(fnEntity, svc);
   wireServicePopoverHandlers(el, fnEntity);
-  if (servicePopoverAnchor && servicePopoverAnchor !== anchorEl) {
-    try { servicePopoverAnchor.setAttribute('aria-expanded', 'false'); } catch (_) {}
-  }
-  try { anchorEl.setAttribute('aria-expanded', 'true'); } catch (_) {}
-  el.classList.add('visible');
-  anchorBelowClamped(el, anchorEl, {fallbackW: 320, fallbackH: 200});
-  servicePopoverAnchor = anchorEl;
+  presentServicePopover(el, anchorEl);
 }
 
 
 function showTenantPopoverBody(el, anchorEl, bodyHtml) {
   el.innerHTML = bodyHtml;
   const close = el.querySelector('.service-popover-close');
-  if (close) close.addEventListener('click', (e) => { e.stopPropagation(); hideServicePopover(); });
-  if (servicePopoverAnchor && servicePopoverAnchor !== anchorEl) {
-    try { servicePopoverAnchor.setAttribute('aria-expanded', 'false'); } catch (_) {}
-  }
-  try { anchorEl.setAttribute('aria-expanded', 'true'); } catch (_) {}
-  el.classList.add('visible');
-  anchorBelowClamped(el, anchorEl, {fallbackW: 320, fallbackH: 200});
-  servicePopoverAnchor = anchorEl;
+  if (close) close.addEventListener('click', (e) => { e.stopPropagation(); closeServicePopover(); });
+  presentServicePopover(el, anchorEl);
 }
 
 
@@ -417,48 +427,34 @@ async function showServicePopover(fnEntity, anchorEl) {
       + '</div>');
     return;
   }
-  let html = _servicePopoverCache.get(fnEntity.id);
-  if (html == null) {
-    let resp;
-    try {
-      resp = await authFetch(
-        '/partials/service-popover?fn-id=' + encodeURIComponent(fnEntity.id));
-    } catch (err) {
-      if (servicePopoverFnId !== fnEntity.id) return; // superseded
-      el.innerHTML = '<div class="service-popover-error">'
-        + 'Failed to load service settings: ' + (err?.message || 'network error')
-        + '</div>';
-      el.classList.add('visible');
-      anchorBelowClamped(el, anchorEl, {fallbackW: 320, fallbackH: 200});
-      servicePopoverAnchor = anchorEl;
-      return;
-    }
+  const showError = (msg) => {
+    el.textContent = '';
+    const err = document.createElement('div');
+    err.className = 'service-popover-error';
+    err.setAttribute('role', 'alert');
+    err.textContent = msg;
+    el.appendChild(err);
+    presentServicePopover(el, anchorEl);
+  };
+  let resp;
+  try {
+    resp = await authFetch(
+      '/partials/service-popover?fn-id=' + encodeURIComponent(fnEntity.id));
+  } catch (err) {
     if (servicePopoverFnId !== fnEntity.id) return; // superseded
-    if (!resp.ok) {
-      el.innerHTML = '<div class="service-popover-error">'
-        + 'Failed to load service settings (HTTP ' + resp.status + ')'
-        + '</div>';
-      el.classList.add('visible');
-      anchorBelowClamped(el, anchorEl, {fallbackW: 320, fallbackH: 200});
-      servicePopoverAnchor = anchorEl;
-      return;
-    }
-    html = await resp.text();
-    _servicePopoverCache.set(fnEntity.id, html);
+    showError('Failed to load service settings: ' + (err?.message || 'network error'));
+    return;
   }
+  if (servicePopoverFnId !== fnEntity.id) return; // superseded
+  if (!resp.ok) {
+    showError('Failed to load service settings (HTTP ' + resp.status + ')');
+    return;
+  }
+  const html = await resp.text();
   if (servicePopoverFnId !== fnEntity.id) return; // superseded
   el.innerHTML = html;
   wireServicePopoverHandlers(el, fnEntity);
-
-  // Position + show
-  if (servicePopoverAnchor && servicePopoverAnchor !== anchorEl) {
-    try { servicePopoverAnchor.setAttribute('aria-expanded', 'false'); }
-    catch (_) {}
-  }
-  try { anchorEl.setAttribute('aria-expanded', 'true'); } catch (_) {}
-  el.classList.add('visible');
-  anchorBelowClamped(el, anchorEl, {fallbackW: 320, fallbackH: 200});
-  servicePopoverAnchor = anchorEl;
+  presentServicePopover(el, anchorEl);
 }
 
 
@@ -470,7 +466,7 @@ function wireServicePopoverHandlers(el, fnEntity) {
   if (close) {
     close.addEventListener('click', (e) => {
       e.stopPropagation();
-      hideServicePopover();
+      closeServicePopover();
     });
   }
 
@@ -526,8 +522,7 @@ function wireServicePopoverHandlers(el, fnEntity) {
       // or filter toggle. Re-fetch, then rebuild overlays so the badge
       // appears immediately.
       try { await refreshServicesCache(); } catch (_) { servicesCache = null; }
-      invalidateServicePopoverCache();
-      hideServicePopover();
+      closeServicePopover();
       if (typeof createNodeOverlays === 'function') createNodeOverlays();
     });
   }
@@ -552,8 +547,7 @@ function wireServicePopoverHandlers(el, fnEntity) {
         // the removed badge disappears immediately instead of every badge
         // going blank until reload.
         try { await refreshServicesCache(); } catch (_) { servicesCache = null; }
-        invalidateServicePopoverCache();
-        hideServicePopover();
+        closeServicePopover();
         if (typeof createNodeOverlays === 'function') createNodeOverlays();
       } catch (err) {
         alert('Delete failed (network error): ' + (err?.message || err));

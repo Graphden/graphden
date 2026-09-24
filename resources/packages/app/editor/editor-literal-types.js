@@ -240,18 +240,14 @@ function findSlotDeclaringFn(fnId, slotId) {
 // Returns the list in CLOSER-WINS order (leaf-first). Used for the
 // "Inherited via" chain row above the 4-tier resolution.
 function findBindingOverrideChain(fnId, slotId) {
-  if (!lookups?.fnMap || !lookups.bindingMap) return [];
+  if (!lookups?.fnMap || !lookups.bindingByFnSlot) return [];
   const chain = getInheritanceChain(fnId);
   const out = [];
   for (const fid of chain) {
-    const binding = lookups.bindingMap.get(`${fid}/${slotId}`)
-                 || (() => {
-                   // Fallback: iterate bindingMap if it's not keyed compactly
-                   for (const b of lookups.bindingMap.values()) {
-                     if (b['fn-id'] === fid && b['slot-id'] === slotId) return b;
-                   }
-                   return null;
-                 })();
+    // `bindingMap` is keyed by binding ID — `(fn, slot)` lives in its own
+    // index. The old `${fid}/${slotId}` probe never hit, so every render fell
+    // through to a scan of all bindings per chain step.
+    const binding = lookups.bindingByFnSlot.get(fid + '|' + slotId);
     if (binding?.['type-override-fn-id']) {
       const fn = lookups.fnMap.get(fid);
       out.push({
@@ -548,13 +544,10 @@ function walkNavType(navType, keys) {
 // `position` values can have HOLES — a deleted item's slot is never
 // reused — so callers must index by list ORDER, not by `position`.
 function pathSegments(fnId, slotId) {
-  if (!fnId || !slotId || !lookups?.bindingMap || !lookups.itemsByBinding) {
+  if (!fnId || !slotId || !lookups?.bindingByFnSlot || !lookups.itemsByBinding) {
     return [];
   }
-  let binding = null;
-  for (const b of lookups.bindingMap.values()) {
-    if (b['fn-id'] === fnId && b['slot-id'] === slotId) { binding = b; break; }
-  }
+  const binding = lookups.bindingByFnSlot.get(fnId + '|' + slotId);
   if (!binding) return [];
   const items = (lookups.itemsByBinding.get(binding.id) || []).slice()
                 .sort((a, b) => Number(a.position) - Number(b.position));

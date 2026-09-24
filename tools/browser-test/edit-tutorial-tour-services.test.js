@@ -14,7 +14,7 @@ const {assert, newContext} = require('./edit-test-helpers');
 const {
   hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
   extendViaRowActions, finishAndDelete, bindNamedPlaceholder, bindPlaceholderOn,
-  runWithEffectAck, waitUntil,
+  runWithEffectAck, waitUntil, tourWhere,
 } = require('./tutorial-tour-helpers');
 
 const SERVER_TRIG = '.node-overlay[data-fn-name="tutorial-server"] .ancestor-line[data-level="0"] button.more-actions-trigger';
@@ -169,6 +169,7 @@ async function serviceRowExists(page) {
   } catch (e) {
     failed = true;
     console.log('FAIL: ' + (e && e.stack ? e.stack : e));
+    console.log('  tour at failure: ' + await tourWhere(page));
   } finally {
     await browser.close();
   }

@@ -1267,8 +1267,9 @@ gate_suites() {
     # papering over one file's leak while every investigation chased the
     # victim file (run-edit-tests.sh documents that case).
     #   EXCEPTION (run-edit-tests.sh run-level thrash check): when the HOST
-    #   starved the stack this run — several files ran far past the norm, or
-    #   the executor heap sat at its high-water — a retry-pass is the test
+    #   starved the stack this run — several files ran far past their OWN
+    #   baseline (tools/browser-test/e2e-baseline.tsv), or several different
+    #   files needed a retry — a retry-pass is the test
     #   being slow, not a race, so strict flake/leak verdicts are downgraded
     #   to report-only and the run stays green. A file that NEVER passed still
     #   reds (you can't land what didn't pass); the banner then says to free

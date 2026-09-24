@@ -20,8 +20,8 @@
 // Exit 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, nodeApiJson, waitFor, waitForServerHealthy,
-       openBranchPopover} = require('./edit-test-helpers');
+const {assert, newContext, nodeApiJson, waitFor, waitForServerHealthy,
+       openBranchPopover, deleteBranches} = require('./edit-test-helpers');
 
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
@@ -29,11 +29,11 @@ const TGT = 'review-tgt' + RUN_ID;
 const SRC = 'review-src' + RUN_ID;
 
 
+// SRC is merged into its own base TGT: each now blocks the other's delete
+// (merge source / has-children), by design — so they are archived, the
+// branch-archive feature's reason to exist (see deleteBranches).
 async function cleanup() {
-  for (const b of [SRC, TGT]) {
-    try { await api(null, 'DELETE', '/api/branches/' + encodeURIComponent(b)); }
-    catch (_) {}
-  }
+  await deleteBranches([SRC, TGT], {archive: [SRC, TGT]});
 }
 
 

@@ -582,15 +582,24 @@ async function renderDiffSuggestions(body, sourceName, sourceRef) {
       loaded = true;
       pv.textContent = 'Loading…';
       try {
-        const v = await (await window.authFetch(
+        const r = await window.authFetch(
           API.api_branches_ref_diff_view(sourceRef)
-          + '?against=' + encodeURIComponent(sugg.id))).json();
+          + '?against=' + encodeURIComponent(sugg.id));
+        const v = await r.json().catch(() => null);
+        // An error body has no `groups` either — it must not read as
+        // "No differences." (and the next expand tries again).
+        if (!r.ok || !v || v.ok === false) {
+          loaded = false;
+          pv.textContent = 'Preview unavailable'
+            + (v?.error ? ': ' + v.error : ' (HTTP ' + r.status + ')') + '.';
+          return;
+        }
         pv.textContent = '';
         if (typeof gdDiffRenderGroups === 'function') {
           gdDiffRenderGroups(pv, v.groups || [], { comments: false });
         }
         if (!(v.groups || []).length) pv.textContent = 'No differences.';
-      } catch (_) { pv.textContent = 'Preview unavailable.'; }
+      } catch (_) { loaded = false; pv.textContent = 'Preview unavailable.'; }
     });
     mount.appendChild(details);
   }

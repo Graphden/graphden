@@ -189,6 +189,34 @@ test('navigate no-op when data-href missing', () => {
 })();
 
 (async () => {
+  // A target inside an already-bound host (a user page binds document.body)
+  // must NOT get a listener of its own: delegation already covers it, and a
+  // second one made every later click POST twice. An uncovered target still
+  // gets bound so its swapped-in buttons work.
+  console.log(' submit-form does not re-bind a target a bound host covers');
+  const ok = { fetch: async () => ({ ok: true, text: async () => '<button data-action="submit-form">again</button>' }) };
+  const ctx = loadActions(ok);
+  const body = makeElement('body');
+  ctx.bindActionDispatch(body);
+  const form = makeElement('form');
+  form.attributes.action = '/x';
+  body.appendChild(form);
+  const btn = makeElement('button', { 'data-action': 'submit-form' });
+  form.appendChild(btn);
+  await ctx.getActionHandler('submit-form')(btn, { preventDefault() {}, stopPropagation() {} });
+  assert(!form.listeners.click, 'no second click listener inside the bound body');
+  assert(body.listeners.click.length === 1, 'the body keeps exactly one listener');
+
+  const ctx2 = loadActions(ok);
+  const lone = makeElement('form');
+  lone.attributes.action = '/x';
+  const btn2 = makeElement('button', { 'data-action': 'submit-form' });
+  lone.appendChild(btn2);
+  await ctx2.getActionHandler('submit-form')(btn2, { preventDefault() {}, stopPropagation() {} });
+  assert(lone.listeners.click?.length === 1, 'an uncovered target is bound once');
+})();
+
+(async () => {
   // No <form> ancestor → no fetch, silent no-op.
   console.log(' submit-form no-op when not inside a form');
   let fetched = false;

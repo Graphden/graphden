@@ -1,38 +1,46 @@
 // Merge-conflict resolution modal e2e — the per-row source/target
-// picker that appears when feat → main merge surfaces a conflict.
+// picker that appears when a feat → target merge surfaces a conflict.
 //
 // Flow:
 //   1. Seed a fn on main with description="seed".
-//   2. Create feat branch (inherits the fn).
-//   3. On main: PUT description="MAIN-edit". On feat: PUT description=
-//      "FEAT-edit". Same const, different version rows → conflict.
-//   4. Switch to main, open branch popover, click ⇢ on feat row.
+//   2. Create a throwaway TARGET branch and a feat branch, both off main
+//      (siblings — both inherit the fn).
+//   3. On target: PUT description="TARGET-edit". On feat: PUT description=
+//      "FEAT-edit". Same fn, different version rows → conflict.
+//   4. Switch to target, open branch popover, click ⇢ on feat row.
 //   5. Conflict modal appears with one row + radio choice (source / target).
-//   6. Pick "target" (keep main's "MAIN-edit") and Apply merge.
-//   7. After reload, the fn's description is "MAIN-edit".
+//   6. Pick "target" (keep "TARGET-edit") and Apply merge.
+//   7. After reload, the fn's description on target is "TARGET-edit".
+//
+// The target is a throwaway sibling, not main, so cleanup can undo the
+// merge: a merged feat is undeletable while its target lives (merge is
+// by-reference), and main always lives — merging into main leaked feat
+// into every later file's branch list. Deleting the target first frees it.
 //
 // Run from this directory:  node edit-merge-conflict.test.js
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
 const {assert, newContext, api, getEntities, deleteFnByName,
-       openBranchPopover} = require('./edit-test-helpers');
+       deleteBranches, openBranchPopover} = require('./edit-test-helpers');
 
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
 const FN_NAME = 'merge-conflict-probe' + RUN_ID;
 const FEAT_BRANCH = 'merge-conflict-feat' + RUN_ID;
+const TARGET_BRANCH = 'merge-conflict-tgt' + RUN_ID;
+const BASE_URL = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 
 
 async function cleanup(page) {
-  // Delete fn on each branch; branch row last.
+  // The merge target goes first — then feat is no longer a live merge
+  // source — and the seed fn on main last.
+  await deleteBranches([TARGET_BRANCH, FEAT_BRANCH]);
   try {
     await deleteFnByName(page, FN_NAME);
-  } catch (_) {}
-  try {
-    await api(page, 'DELETE',
-              '/api/branches/' + encodeURIComponent(FEAT_BRANCH));
-  } catch (_) {}
+  } catch (e) {
+    process.stderr.write('  ! cleanup: ' + e.message + '\n');
+  }
 }
 
 
@@ -63,7 +71,7 @@ async function putDescriptionOn(page, fnId, branch, desc) {
 
   try {
     await cleanup(page);
-    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/');
+    await page.goto(BASE_URL + '/');
     await page.waitForSelector('#branch-chip-btn', {timeout: 10000});
 
     // ===================================================================
@@ -82,26 +90,29 @@ async function putDescriptionOn(page, fnId, branch, desc) {
     const fnId = created.id;
 
     // ===================================================================
-    // Phase B: create feat branch (inherits the fn), then put a
-    // diverging description on main and on feat.
+    // Phase B: create the target + feat branches (both inherit the fn),
+    // then put a diverging description on each.
     // ===================================================================
-    const branchResp = await api(page, 'POST', '/api/branches',
-                                 {name: FEAT_BRANCH});
-    assert(branchResp?.ok,
-           'feat branch created: '
-           + JSON.stringify(branchResp).slice(0, 200));
+    for (const name of [TARGET_BRANCH, FEAT_BRANCH]) {
+      const branchResp = await api(page, 'POST', '/api/branches', {name});
+      assert(branchResp?.ok,
+             name + ' branch created: '
+             + JSON.stringify(branchResp).slice(0, 200));
+    }
 
-    const mainPut = await putDescriptionOn(page, fnId, 'main', 'MAIN-edit');
-    assert(mainPut.status === 200,
-           'PUT description on main: ' + JSON.stringify(mainPut).slice(0, 200));
+    const tgtPut = await putDescriptionOn(page, fnId, TARGET_BRANCH, 'TARGET-edit');
+    assert(tgtPut.status === 200,
+           'PUT description on target: ' + JSON.stringify(tgtPut).slice(0, 200));
     const featPut = await putDescriptionOn(page, fnId, FEAT_BRANCH, 'FEAT-edit');
     assert(featPut.status === 200,
            'PUT description on feat: ' + JSON.stringify(featPut).slice(0, 200));
 
     // ===================================================================
-    // Phase C: from main, open branch popover + click ⇢ on feat row.
-    // The conflict modal should appear.
+    // Phase C: from the target, open branch popover + click ⇢ on feat
+    // row. The conflict modal should appear.
     // ===================================================================
+    await page.goto(BASE_URL + '/?branch=' + encodeURIComponent(TARGET_BRANCH));
+    await page.waitForSelector('#branch-chip-btn', {timeout: 10000});
     const opened = await openBranchPopover(page);
     assert(opened, 'branch popover opens');
 
@@ -139,8 +150,8 @@ async function putDescriptionOn(page, fnId, branch, desc) {
     assert(/FEAT-edit/.test(conflictState.firstRowSourceLabel),
            'source label shows feat description: '
            + JSON.stringify(conflictState.firstRowSourceLabel).slice(0, 200));
-    assert(/MAIN-edit/.test(conflictState.firstRowTargetLabel),
-           'target label shows main description: '
+    assert(/TARGET-edit/.test(conflictState.firstRowTargetLabel),
+           'target label shows the target\'s description: '
            + JSON.stringify(conflictState.firstRowTargetLabel).slice(0, 200));
     assert(conflictState.sourceChecked,
            'source pre-selected by default');
@@ -149,7 +160,7 @@ async function putDescriptionOn(page, fnId, branch, desc) {
 
     // ===================================================================
     // Phase D: pick "target" for each row → Apply merge → page reloads.
-    // After reload, the fn's description should be "MAIN-edit"
+    // After reload, the fn's description should be "TARGET-edit"
     // (target won).
     // ===================================================================
     await page.evaluate(() => {
@@ -186,13 +197,14 @@ async function putDescriptionOn(page, fnId, branch, desc) {
         && graphData.namespaces.length > 0;
     }, null, {timeout: 30000, polling: 100});
 
-    const finalDescription = await page.evaluate(async (id) => {
-      const r = await window.authFetch('/api/graph/entities');
+    const finalDescription = await page.evaluate(async ({id, branch}) => {
+      const r = await window.authFetch('/api/graph/entities',
+                                       {headers: {'X-Graphden-Branch': branch}});
       const ents = await r.json();
       return (ents.fns || []).find((f) => f.id === id)?.description;
-    }, fnId);
-    assert(finalDescription === 'MAIN-edit',
-           'after merge with target picked, fn description = "MAIN-edit": '
+    }, {id: fnId, branch: TARGET_BRANCH});
+    assert(finalDescription === 'TARGET-edit',
+           'after merge with target picked, fn description = "TARGET-edit": '
            + JSON.stringify(finalDescription));
 
     console.log('✓ merge-conflict modal + per-row picker + Apply verified');

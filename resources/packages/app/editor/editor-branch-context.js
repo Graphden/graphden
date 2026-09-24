@@ -179,10 +179,14 @@ window.graphdenIsFnOwned = graphdenIsFnOwned;
 // a dozen) triggers exactly one reload.
 let _branchRecoveryStarted = false;
 
-function maybeRecoverFromDeletedBranch(resp, branch) {
+// `sentBranch` is the branch the REQUEST named, not the one the tab stands
+// on: the diff ghost and compare mode ask about another branch with an
+// explicit header, and that branch being gone says nothing about ours.
+function maybeRecoverFromDeletedBranch(resp, sentBranch) {
   if (_branchRecoveryStarted) return;
   if (resp?.status !== 400) return;
-  if (!branch || branch === DEFAULT_BRANCH) return;
+  const branch = getCurrentBranchName();
+  if (!branch || branch === DEFAULT_BRANCH || sentBranch !== branch) return;
   resp.clone().json().then((body) => {
     if (_branchRecoveryStarted) return;
     if (!/unknown branch/i.test(body?.error || '')) return;
@@ -207,6 +211,7 @@ function maybeRecoverFromDeletedBranch(resp, branch) {
     const url = typeof input === 'string' ? input : (input?.url || '');
     const isInternal = url.startsWith('/api/') || url.startsWith('/partials/'); // api-url-drift-allow: prefix discriminator, not a URL we fetch
     const branch = getCurrentBranchName();
+    let sentBranch = branch;
     let promise;
     if (!isInternal) {
       promise = origFetch(input, init);
@@ -216,6 +221,7 @@ function maybeRecoverFromDeletedBranch(resp, branch) {
       if (branch !== DEFAULT_BRANCH && !headers.has(BRANCH_HEADER)) {
         headers.set(BRANCH_HEADER, branch);
       }
+      sentBranch = headers.get(BRANCH_HEADER) || DEFAULT_BRANCH;
       // Attach the stored bearer to every internal call that doesn't carry
       // one already (authFetch sets its own → left untouched). The graph-data
       // reads are auth-required now (the anonymous view was removed), and the
@@ -234,7 +240,7 @@ function maybeRecoverFromDeletedBranch(resp, branch) {
     return isInternal
       ? promise.then((resp) => {
           captureCapabilities(resp);
-          maybeRecoverFromDeletedBranch(resp, branch);
+          maybeRecoverFromDeletedBranch(resp, sentBranch);
           return resp;
         })
       : promise;

@@ -1,4 +1,4 @@
-// Lessons 34, 31, 24 — services, package distribution, asset overrides.
+// Lessons 35, 32, 25 — services, package distribution, asset overrides.
 //
 // Part of the interactive-tutorial drift guard: walks every step of its
 // lessons by doing the real UI actions, so a renamed class or a changed
@@ -8,9 +8,9 @@
 //
 // These three are the tours that CARRY a `:requires` yet still run on this
 // stack: it is single-tenant, so services are manageable, the registry is
-// open, and the Assets panel exists. The org tours (16-21) need a tenancy
-// addon and can only be checked as LOCKED — that assertion lives in
-// edit-tutorial-tour-ops.test.js.
+// open, and the Assets panel exists. The org tours (27-30, 33, 36, 37) need
+// a tenancy addon and can only be checked as LOCKED — that assertion lives
+// in edit-tutorial-tour-picker.test.js.
 //
 // Run from this directory:  node edit-tutorial-tour-platform.test.js
 // Exit code 0 = PASS, 1 = FAIL.
@@ -20,7 +20,7 @@ const {assert, newContext, api} = require('./edit-test-helpers');
 const {
   hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
   extendViaRowActions, createRootNamespace, createFnInNamespace,
-  setParentViaStrip, finishAndDelete, tourTitle, bindFirstPlaceholder,
+  setParentViaStrip, finishAndDelete, tourWhere, bindFirstPlaceholder,
   bindFnRefPlaceholder, bindPlaceholderOn, extendInPlace,
   openOperateSection, waitUntil, waitTourClosed,
 } = require('./tutorial-tour-helpers');
@@ -42,7 +42,7 @@ async function revertAssetViaApi(page, base) {
   const {browser, page} = await newContext(chromium, {boot: false});
   // Uninstall and revert both confirm natively.
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-platform — lessons 34 / 31 / 24');
+  console.log('edit-tutorial-tour-platform — lessons 35 / 32 / 25');
   let failed = false;
   const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
   try {
@@ -352,7 +352,7 @@ async function revertAssetViaApi(page, base) {
     failed = true;
     console.error('FAIL:', err.message);
     try {
-      console.error('  tour title at failure:', await tourTitle(page));
+      console.error('  tour at failure:', await tourWhere(page));
       await page.screenshot({path: '/tmp/edit-tutorial-tour-platform-fail.png'});
       console.error('  screenshot: /tmp/edit-tutorial-tour-platform-fail.png');
     } catch (_) { /* page may be gone */ }

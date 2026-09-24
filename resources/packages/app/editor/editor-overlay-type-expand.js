@@ -144,8 +144,9 @@ function appendPromoteAnonymousButton(host, fnId) {
 // ---------- Used-by back-link (one fetch per named type per panel) ----
 
 // Cache fetched usages so re-opening / re-rendering the same panel
-// doesn't refetch. The cache is per-typeName; stale state after a
-// CRUD mutation is acceptable for v1 (close + reopen to refresh).
+// doesn't refetch. Keyed by the type-fn's ID (a name is only a label per
+// namespace — ADR-identity-model) and cleared by the reload phase
+// (`installGraphShell`), so a write that adds or drops a use shows up.
 const typeUsagesCache = new Map();
 
 function appendTypeUsagesSection(host, typeName) {
@@ -222,28 +223,28 @@ function appendTypeUsagesSection(host, typeName) {
     section.appendChild(list);
   };
 
-  const cached = typeUsagesCache.get(typeName);
-  if (cached) { renderList(cached); return; }
-
-  // Need fn-id, not name. Look up via lookups.fnMap or graphData.fns.
-  let typeFnId = null;
-  if (typeof lookups !== 'undefined' && lookups?.fnMap) {
-    for (const f of lookups.fnMap.values()) {
-      if (f.name === typeName) { typeFnId = f.id; break; }
-    }
-  }
-  if (!typeFnId) return;
-
-  fetch(API.api_types_usages, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ 'type-fn-id': typeFnId })
-  })
-    .then(r => r.ok ? r.json() : null)
-    .then(d => {
-      if (!d?.ok) return;
-      typeUsagesCache.set(typeName, d.usages || []);
-      renderList(d.usages || []);
+  // The endpoint wants the type-fn's id. `resolveTypeFnIdByName` picks the
+  // parent-less TYPE row of that name (and asks the server when it is not
+  // loaded) — the first fnMap row with a matching name could be any fn.
+  const resolveId = (typeof resolveTypeFnIdByName === 'function')
+    ? resolveTypeFnIdByName(typeName) : Promise.resolve('');
+  Promise.resolve(resolveId)
+    .then((typeFnId) => {
+      if (!typeFnId) return null;
+      const cached = typeUsagesCache.get(typeFnId);
+      if (cached) return { cached };
+      return fetch(API.api_types_usages, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 'type-fn-id': typeFnId })
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(d => (d?.ok ? { fetched: d.usages || [], typeFnId } : null));
+    })
+    .then(res => {
+      if (!res) return;
+      if (!res.cached) typeUsagesCache.set(res.typeFnId, res.fetched);
+      renderList(res.cached || res.fetched);
       if (typeof repositionAllInlineHosts === 'function') {
         repositionAllInlineHosts();
       }

@@ -692,6 +692,37 @@
             "the failure names the forbidden effect")))))
 
 
+(deftest tenant-execute-narrows-a-caller-allow-list-test
+  ;; Regression: the test auto-runner submits with `:allowed-effects #{}`
+  ;; (its runtime backstop — a hidden effect must throw, not fire). For a
+  ;; tenant, `execution-plan` REPLACED that empty set with the org's plan
+  ;; allow-list, so an effect the static selection missed fired on every
+  ;; edit. The plan list may only narrow what the caller already allows.
+  (let [storage (create-full-storage)
+        nm "db-touch-sink"
+        composed-name "db-touch-composed"
+        _ (exec/register-base-fn! (keyword nm)
+                                  (fn [_args _ctx]
+                                    (cr/record-effect! :db)
+                                    :touched))
+        _ (registry/record-rich-types! (keyword nm)
+                                       {:args {} :return-type :any :effects #{:db}})
+        base (setup/create-base-fn! storage nm :any)
+        composed (setup/create-composed-fn! storage composed-name (:id base))
+        _ (registry/record-rich-types! (keyword composed-name)
+                                       {:args {} :return-type :any :effects #{:db}})
+        c (setup/default-registry-ctx storage)
+        run #(apply-and-await! % {:fn-id (:id composed) :args {}
+                                  :timeout-ms 5000 :persist? true})]
+    (is (contains? cr/default-cloud-allowed-effects :db)
+        "premise: the tenant plan list allows :db")
+    (testing "a tenant run with no caller restriction gets the plan list — :db runs"
+      (is (= :succeeded (:status (tc/with-org "acme" (run c))))))
+    (testing "a caller's empty allow-list stays empty for a tenant — :db refused"
+      (is (not= :succeeded
+                (:status (tc/with-org "acme" (run (assoc c :allowed-effects #{})))))))))
+
+
 (deftest apply-hides-result-for-tainted-fn-test
   ;; A fn-def whose registered :return carries the `:secret` marker
   ;; must NOT leak its computed value through `/api/execute`. The
@@ -2480,3 +2511,40 @@
     (is (some? eid) "persisted run returns an execution id")
     (is (= (:id composed) (:fn-id row))
         "read-time join back to the LOGICAL fn id")))
+
+
+(deftest resolve-fn-version-ids-matches-the-per-fn-resolve-test
+  ;; The /api/tests/status + Errors-panel N+1: both resolved versions one
+  ;; fn at a time (~750-1100 queries per status read with ~370 tests).
+  ;; The batch answer must be exactly the per-fn answer — deleted fns
+  ;; (tombstone winners) and unknown ids absent.
+  (let [storage (create-full-storage)
+        {a :composed} (make-pure-add-fn! storage "batch-a")
+        {b :composed} (make-pure-add-fn! storage "batch-b")
+        {gone :composed} (make-pure-add-fn! storage "batch-gone")
+        _ (sp/delete-entity storage :fn (:id gone))
+        c (setup/default-registry-ctx storage)
+        ids [(:id a) (:id b) (:id gone) (random-uuid)]
+        batch (lookup/resolve-fn-version-ids c ids)]
+    (is (= (into {} (keep (fn [id] (some->> (lookup/resolve-fn-version-id c id) (vector id)))) ids)
+           batch))
+    (is (= #{(:id a) (:id b)} (set (keys batch))))))
+
+
+(deftest renamed-fn-shows-its-current-name-in-errors-and-stats-test
+  ;; Regression: the Errors panel, the failed-runs lens, the recent-runs
+  ;; list and the Stats top-fns table read the name off the `fn` identity
+  ;; row — the name the fn was CREATED with — so a renamed fn kept showing
+  ;; its original name. The version row carries the current one.
+  (let [storage (create-full-storage)
+        {composed :composed} (make-pure-add-fn! storage "pre-rename")
+        _ (sp/update-entity storage :fn (:id composed) {:name "post-rename-add"})
+        pool (:pool @shared-storage)
+        c (assoc (setup/default-registry-ctx storage) :pg-storage @shared-storage)
+        _ (apply-and-await! c {:fn-id (:id composed) :args {:a 1 :b "boom"}
+                               :timeout-ms 5000 :persist? true})
+        name-of (fn [rows] (:fn-name (first (filter #(= (str (:id composed)) (str (:fn-id %))) rows))))]
+    (is (= "post-rename-add" (name-of (exec-errors/recent-unresolved-failures c pool nil 7 10))))
+    (is (= "post-rename-add" (name-of (exec-errors/unresolved-failure-counts c pool nil 7))))
+    (is (= "post-rename-add" (name-of (exec-errors/recent-executions c pool nil 20))))
+    (is (= "post-rename-add" (name-of (exec-stats/org-fn-stats-named pool nil 7 50))))))

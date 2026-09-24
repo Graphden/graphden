@@ -274,10 +274,8 @@
   [ctx fn-ids]
   (let [pool (:pool (:pg-storage ctx))
         vid->fid (into {}
-                       (keep (fn [fid]
-                               (when-let [vid (lookup/resolve-fn-version-id ctx fid)]
-                                 [vid fid])))
-                       fn-ids)]
+                       (map (fn [[fid vid]] [vid fid]))
+                       (lookup/resolve-fn-version-ids ctx fn-ids))]
     (into {}
           (map (fn [r]
                  [(get vid->fid (:fn_version_id r))

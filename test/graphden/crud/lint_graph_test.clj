@@ -112,3 +112,26 @@
         (entities/create-entity "binding" {:fn-id user :slot-id (slot-id storage assoc-id "map")
                                            :ref-fn-id dead} ctx)
         (is (empty? (filterv #(= :unreferenced-private (:rule %)) (findings-naming ctx dead #{}))))))))
+
+
+(deftest namespace-rename-refreshes-finding-paths-test
+  ;; Regression: a `:ns` write moves no graph row, so the snapshot kept its
+  ;; identity and the lint memo kept answering with the OLD dotted path.
+  (let [{:keys [ctx storage]} *graph*
+        title (fn-id-by-name storage "const")
+        ns-row (entities/create-entity "ns" {:name "lintnsold"} ctx)
+        a (make-assoc-child! ctx storage "lint-ns-a" "ns-probe" title)
+        b (make-assoc-child! ctx storage "lint-ns-b" "ns-probe" title)]
+    (try
+      (doseq [fid [a b]]
+        (entities/update-entity "fn" fid {:namespace-id (:id ns-row)} ctx))
+      (is (= #{["lintnsold" :lint-ns-a] ["lintnsold" :lint-ns-b]}
+             (set (:fns (first (findings-naming ctx a #{}))))))
+      (entities/update-entity "ns" (:id ns-row) {:name "lintnsnew"} ctx)
+      (is (= #{["lintnsnew" :lint-ns-a] ["lintnsnew" :lint-ns-b]}
+             (set (:fns (first (findings-naming ctx a #{}))))))
+      (finally
+        ;; The pair is a live duplicate; the other tests here assert the
+        ;; branch raises nothing beyond their own probes (random order).
+        (doseq [fid [a b]] (entities/delete-entity "fn" fid ctx))))
+    (is (empty? (findings-naming ctx a #{})) "the probes leave no finding behind")))

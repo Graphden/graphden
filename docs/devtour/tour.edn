@@ -1418,7 +1418,7 @@
     {:ns graphden.layout.strip-facts :defn annotate
      :say "The editor-facing tail: attach server-computed FACTS to each
            fn-node — the inherited return-type alias, the rule-owning
-           base-fn (`registry/rule-owner-of`), and the transitive
+           base-fn (`registry/rule-owner-info-of-id`), and the transitive
            branch-local seed (`branch-local/branch-local-seed`). These
            replaced three hand-written client mirrors of the same walks;
            the client renders facts, it doesn't re-derive them."

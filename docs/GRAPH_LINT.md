@@ -146,7 +146,9 @@ which BFS-walks from the same registry.
   from the graph it describes; `types.diagnostics` already sets the
   rule — derived, in-memory, recomputed on write. The lint follows it.
 - **Per-branch, incremental, on read.** `lint.graph/lint-branch` keeps
-  a state per branch (a small LRU): the last snapshot object, its `:ns`
+  a state per (org, branch) (a small LRU — each tenant org reads its own
+  org-sliced view, memoised per snapshot so its identity holds between
+  writes): the last snapshot object, its `:ns`
   rows, the per-fn EDN fn-defs, the engine's memos and the findings. A
   read with the same snapshot object answers from it. After a write the
   new snapshot is diffed against the old one **row by row by identity**
@@ -161,8 +163,11 @@ which BFS-walks from the same registry.
   ancestors, a chain depth off the parents — recomputes only those on
   demand, and runs the rules as one pass of lookups and set operations
   over the memos. **A write costs its referrer closure, not the graph.**
-  A namespace change (every dotted path may have moved) or a first read
-  lints from scratch through the same code with everything stale, and
+  A namespace change (every dotted path may have moved — a `:ns` write
+  moves no graph row, so it drops the branch's state outright), a moved
+  type-row or base-fn (the referrer index only knows composed fn-defs),
+  or a first read lints from scratch through the same code with
+  everything stale, and
   `incremental-state-equivalence-test` pins that the two agree.
 - **Not a write-time SQL check.** The write-time guards that exist —
   the cycle CTE, the resolved-view name / position collisions under

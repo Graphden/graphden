@@ -146,23 +146,40 @@
 (deftest rule-owner-fact-test
   (testing "a fn whose primary-parent chain roots at a base-fn carrying a
             :return-type-rule gets :ruleOwner = that base-fn's name"
-    (binding [registry/*rich-types-override*
-              (atom {:by-id {1 {:name :sf-rule-fn :primary-parent :sf-rule-base}
-                             2 {:name :sf-rule-base
-                                :return-type-rule (fn [& _] :int)}}
-                     :by-name {:sf-rule-fn 1 :sf-rule-base 2}})]
-      (let [f (random-uuid)
-            fns [{:id f :name "sf-rule-fn" :parent-ids []}]]
-        (is (= "sf-rule-base" (:ruleOwner (annotate-data fns f)))))))
+    (let [f (random-uuid)]
+      (binding [registry/*rich-types-override*
+                (atom {:by-id {f {:name :sf-rule-fn :primary-parent :sf-rule-base}
+                               2 {:name :sf-rule-base
+                                  :return-type-rule (fn [& _] :int)}}
+                       :by-name {:sf-rule-fn f :sf-rule-base 2}})]
+        (let [fns [{:id f :name "sf-rule-fn" :parent-ids []}]]
+          (is (= "sf-rule-base" (:ruleOwner (annotate-data fns f))))))))
   (testing "no :ruleOwner when the chain's root carries neither a rule nor a
             var-carrying signature (a fully concrete declaration)"
+    (let [f (random-uuid)]
+      (binding [registry/*rich-types-override*
+                (atom {:by-id {f {:name :sf-plain-fn :primary-parent :sf-plain-base}
+                               2 {:name :sf-plain-base :return :int}}
+                       :by-name {:sf-plain-fn f :sf-plain-base 2}})]
+        (let [fns [{:id f :name "sf-plain-fn" :parent-ids []}]]
+          (is (not (contains? (annotate-data fns f) :ruleOwner))))))))
+
+
+(deftest rule-owner-fact-is-by-id-not-by-bare-name-test
+  ;; Regression: the badge was looked up by the card's bare name, so of two
+  ;; same-named fns in different namespaces both got whichever one the
+  ;; name view held — a `↳` on a fn no rule computes.
+  (let [ruled (random-uuid)
+        plain (random-uuid)]
     (binding [registry/*rich-types-override*
-              (atom {:by-id {1 {:name :sf-plain-fn :primary-parent :sf-plain-base}
-                             2 {:name :sf-plain-base :return :int}}
-                     :by-name {:sf-plain-fn 1 :sf-plain-base 2}})]
-      (let [f (random-uuid)
-            fns [{:id f :name "sf-plain-fn" :parent-ids []}]]
-        (is (not (contains? (annotate-data fns f) :ruleOwner)))))))
+              (atom {:by-id {ruled {:name :sf-dup :primary-parent :sf-dup-base}
+                             plain {:name :sf-dup}
+                             2 {:name :sf-dup-base :return-type-rule (fn [& _] :int)}}
+                     :by-name {:sf-dup ruled :sf-dup-base 2}})]
+      (let [fns [{:id ruled :name "sf-dup" :parent-ids []}
+                 {:id plain :name "sf-dup" :parent-ids []}]]
+        (is (= "sf-dup-base" (:ruleOwner (annotate-data fns ruled))))
+        (is (not (contains? (annotate-data fns plain) :ruleOwner)))))))
 
 
 ;; ============================================================================

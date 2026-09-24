@@ -88,9 +88,9 @@
    "execution-error" 400
    "graph-error" 400
    "secrets" 400
-   ;; `:sequence-op/invalid-body` / `:sequence-op/fn-not-found` — the
+   ;; `:sequence-op/invalid-body` — the
    ;; client's append/insert body, rejected with a message that says how
-   ;; to fix it. Unmapped, they read as 500 "Internal error — see server
+   ;; to fix it. Unmapped, it reads as 500 "Internal error — see server
    ;; log" and the caller never sees that message.
    "sequence-op" 400
    "branch-router" 404})

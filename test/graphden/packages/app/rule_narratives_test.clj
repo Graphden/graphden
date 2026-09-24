@@ -8,7 +8,7 @@
    (`:taint-propagate?`) and shadow rules were replaced by declared
    signatures, \"has a narrative-worthy rule\" IS now observable from
    the registry (`:return-type-rule` present, or a var-carrying
-   `:return` — `registry/rule-owner-of`'s exact predicate); the
+   `:return` — `registry/rule-owner-info-of-id`'s exact predicate); the
    roster stays hand-maintained only to keep this test pure-EDN (no
    loader). When adding a `:return-type-rule` OR a polymorphic
    base-fn declaration, add its narrative to `:_rtr-narratives` AND

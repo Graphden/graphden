@@ -49,7 +49,28 @@
   (testing "a body with no root-id throws :execution-error/invalid-args"
     (let [ex (try (lc/parse-layout-request {:body {:expansions {}}})
                   (catch clojure.lang.ExceptionInfo e e))]
-      (is (= :execution-error/invalid-args (:type (ex-data ex)))))))
+      (is (= :execution-error/invalid-args (:type (ex-data ex))))))
+
+  ;; Regression: a numeric root-id was a ClassCastException (→ 500) and a
+  ;; string full-depth leaked a Java cast message from the layout walk.
+  (testing "a non-string root-id is invalid-args, not a ClassCastException"
+    (let [ex (try (lc/parse-layout-request {:body {:root-id 123}})
+                  (catch Exception e e))]
+      (is (= :execution-error/invalid-args (:type (ex-data ex))))))
+  (testing "a non-integer full-depth is invalid-args naming the field"
+    (let [ex (try (lc/parse-layout-request
+                    {:body {:root-id (str (random-uuid))
+                            :expansions {:fn-x {:full-depth "2"}}}})
+                  (catch Exception e e))]
+      (is (= {:type :execution-error/invalid-args :field :full-depth :got "2"}
+             (ex-data ex)))))
+  (testing "a non-list partial-fns is invalid-args naming the field"
+    (let [ex (try (lc/parse-layout-request
+                    {:body {:root-id (str (random-uuid))
+                            :expansions {:fn-x {:partial-fns "abc"}}}})
+                  (catch Exception e e))]
+      (is (= {:type :execution-error/invalid-args :field :partial-fns}
+             (ex-data ex))))))
 
 
 ;; ============================================================================

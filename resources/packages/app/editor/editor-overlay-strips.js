@@ -210,7 +210,7 @@ function appendRuleProvenanceButton(strip, c) {
   // (server-rendered, /partials/return-type-rule) names the rule's
   // source and lists the resolved bindings that fed into it. The
   // rule-owner walk itself runs SERVER-side (layout strip-facts →
-  // `registry/rule-owner-of`).
+  // `registry/rule-owner-info-of-id`).
   const ruleOwner = stripFacts.ruleOwner || null;
   if (ruleOwner && typeof showReturnTypeRulePopover === 'function') {
     const provBtn = document.createElement('button');
@@ -229,8 +229,8 @@ function appendRuleProvenanceButton(strip, c) {
       e.preventDefault();
       e.stopPropagation();
       // Server partial owns the rule-owner walk, narrative and
-      // Inputs table; it only needs the fn's name.
-      showReturnTypeRulePopover(cardFnEntity.name, provBtn);
+      // Inputs table; it only needs the fn's id.
+      showReturnTypeRulePopover(cardFnEntity.id, provBtn);
     });
     strip.appendChild(provBtn);
   }

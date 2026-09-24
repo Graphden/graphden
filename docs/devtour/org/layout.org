@@ -53,13 +53,13 @@ Stage 2's orchestrator — dispatches the cycle-guarded ~process-*~ walkers over
 :PROPERTIES:
 :CUSTOM_ID: layout/emit-root-deep-frees!
 :FILE: src/graphden/layout/builder_helpers.clj
-:LINE: 1122
+:LINE: 1130
 :MINS: 6.9
 :END:
 
 After the walkers: the root card's DEEPER holes — a template's frees behind ancestor-bound refs — as ~:deepArg~ placeholders on the root itself, keyed by the inner slot but naming the root fn, so the ~+~ binder writes a closure-capture binding where the Run form lists the hole. The entry set is the SURFACE walk (~compile.renames/deep-free-ext-entries~): it stops at HOF boundaries, so a listener does not sprout every knob of the app it serves.
 
-- source :: [[file:../../../src/graphden/layout/builder_helpers.clj::(defn emit-root-deep-frees!][src/graphden/layout/builder_helpers.clj:1122]]
+- source :: [[file:../../../src/graphden/layout/builder_helpers.clj::(defn emit-root-deep-frees!][src/graphden/layout/builder_helpers.clj:1130]]
 
 * 5. compute-layout-matrix
 :PROPERTIES:
@@ -78,11 +78,11 @@ Stages 3+ — grid placement: roots at column zero, dependents right of their so
 :PROPERTIES:
 :CUSTOM_ID: layout/annotate
 :FILE: src/graphden/layout/strip_facts.clj
-:LINE: 60
+:LINE: 61
 :MINS: 2.3
 :END:
 
-The editor-facing tail: attach server-computed FACTS to each fn-node — the inherited return-type alias, the rule-owning base-fn (~registry/rule-owner-of~), and the transitive branch-local seed (~branch-local/branch-local-seed~). These replaced three hand-written client mirrors of the same walks; the client renders facts, it doesn't re-derive them.
+The editor-facing tail: attach server-computed FACTS to each fn-node — the inherited return-type alias, the rule-owning base-fn (~registry/rule-owner-info-of-id~), and the transitive branch-local seed (~branch-local/branch-local-seed~). These replaced three hand-written client mirrors of the same walks; the client renders facts, it doesn't re-derive them.
 
-- source :: [[file:../../../src/graphden/layout/strip_facts.clj::(defn annotate][src/graphden/layout/strip_facts.clj:60]]
+- source :: [[file:../../../src/graphden/layout/strip_facts.clj::(defn annotate][src/graphden/layout/strip_facts.clj:61]]
 - see also :: [[file:versioning.org::#versioning/effective-branch-local?][effective-branch-local?]]

@@ -25,7 +25,7 @@
    | `:arg-unbound`         | a composed fn-def's binding is gone → a new free arg   |
    | `:arg-renamed`         | an `{:as …}` public name changed                       |
    | `:return-widened`      | the return type is not a subtype of the old one        |
-   | `:effect-added`        | a base-fn declares an effect it did not before         |
+   | `:effect-added`        | the `:expects-effects` contract gained an effect, or was dropped |
    | `:type-changed`        | a refine / list / union / … type-row's shape differs   |
    | `:dependency-incompatible` | a package dependency left its previous caret range (`incompatible-dependency-bumps`) |
 
@@ -78,18 +78,35 @@
   [:refine :list :union :map :tuple :variant :fn-type :marker])
 
 
+(def ^:private value-marker-keys
+  "Map keys that make a binding actually SUPPLY or seal the arg — what a
+   consumer relies on not having to pass. A map with none of them (a
+   no-op `{:as k}`, a `{:as k :type T}` / `{:as k :required R}` metadata
+   override, a bare `:description`) leaves the arg free."
+  (disj binding-marker-keys :as))
+
+
+(defn- effects-contract
+  "The declared effect contract (`:expects-effects`, what the exporter
+   writes) as a set, or nil when the fn-def declares none."
+  [d]
+  (some-> (:expects-effects d) set))
+
+
 (defn- composed-signature
   [d]
   (let [args (:args d)
         own-slot? (fn [v]
                     (and (map? v) (contains? v :type)
                          (not-any? #(contains? v %) binding-marker-keys)))
-        rename? (fn [k v] (and (map? v) (keyword? (:as v)) (not= (:as v) k)))]
+        rename? (fn [k v] (and (map? v) (keyword? (:as v)) (not= (:as v) k)))
+        binds? (fn [v] (or (not (map? v)) (some #(contains? v %) value-marker-keys)))]
     {:role :composed
      :parents (set (or (:parents d) (some-> (:parent d) vector)))
      :slots (declared-slots (into {} (filter (fn [[_ v]] (own-slot? v))) args))
-     :bound (set (keep (fn [[k v]] (when-not (or (own-slot? v) (rename? k v)) k)) args))
-     :renames (into {} (keep (fn [[k v]] (when (rename? k v) [k (:as v)]))) args)}))
+     :bound (set (keep (fn [[k v]] (when (and (not (own-slot? v)) (binds? v)) k)) args))
+     :renames (into {} (keep (fn [[k v]] (when (rename? k v) [k (:as v)]))) args)
+     :effects (effects-contract d)}))
 
 
 (defn signature
@@ -103,7 +120,7 @@
     {:role :base-fn
      :slots (declared-slots (:args d))
      :return (:return-type d)
-     :effects (set (:effects d))}
+     :effects (effects-contract d)}
 
     (contains? d :type)
     {:role :record
@@ -141,6 +158,16 @@
       (change :arg-required-added fn-name :arg k :new (:type n)))))
 
 
+(defn- effects-widened?
+  "A declared effect contract grew — a new effect, or the contract was
+   dropped altogether (nil: the fn may now do anything). A consumer on a
+   restricted tier (`:allowed-effects`) that ran the old version can be
+   refused by the new one. No contract before → nothing was promised."
+  [old new]
+  (and (some? old)
+       (or (nil? new) (boolean (seq (remove old new))))))
+
+
 (defn- fn-changes
   [fn-name old new]
   (if (not= (:role old) (:role new))
@@ -162,10 +189,10 @@
       (when (and (= :base-fn (:role old))
                  (not (subtype?* (:return new) (:return old))))
         [(change :return-widened fn-name :old (:return old) :new (:return new))])
-      (when (and (= :base-fn (:role old))
-                 (seq (remove (:effects old) (:effects new))))
+      (when (effects-widened? (:effects old) (:effects new))
         [(change :effect-added fn-name
-                 :old (vec (sort (:effects old))) :new (vec (sort (:effects new))))])
+                 :old (vec (sort (:effects old)))
+                 :new (some-> (:effects new) sort vec))])
       (when (and (= :type (:role old)) (not= (:shape old) (:shape new)))
         [(change :type-changed fn-name :old (:shape old) :new (:shape new))]))))
 

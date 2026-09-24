@@ -771,9 +771,10 @@
   ;; mirror of the per-base-fn `:return-type-rule` semantics); the
   ;; server renders it now and JS only mounts + anchors.
   ;;
-  ;; URL: `GET /partials/return-type-rule?fn=<name>`.
+  ;; URL: `GET /partials/return-type-rule?fn-id=<uuid>` — by id: a bare
+  ;; name can live in several namespaces and would explain the wrong fn.
   ;;
-  ;; Chain: fn name → RAW registry entry (`:rich-type-of-name` — raw,
+  ;; Chain: fn id → RAW registry entry (`:rich-type-of-id` — raw,
   ;; so rule presence is `:return-type-rule` directly, no wire
   ;; projection) → `:fix` walk up `:primary-parent` links to the
   ;; rule-owning base-fn → header + intro (owner as `data-fn-id`
@@ -783,19 +784,21 @@
   ;; the JS caller probes for `.provenance-popover-intro` and skips
   ;; showing (same UX the old client-side bail gave).
 
-  {:name :_rtr-fn-name
-   :parent :query-param
-   :args {:request {:as :request} :param-name {:value "fn"}}}
+  {:name :_rtr-fn-id
+   :description "The queried fn's id — `?fn-id=<uuid>`; nil when absent or malformed (the body then collapses to the hidden span)."
+   :parent :parse-uuid
+   :args {:string {:parent :query-param
+                   :args {:request {:as :request} :param-name {:value "fn-id"}}}}}
 
   {:name :_rtr-entry
-   :description "Full RAW rich-types registry entry for the queried fn — nil for unknown names. Raw (not the `/api/types` wire projection), so `:return-type-rule` / `:primary-parent` read directly."
-   :parent :rich-type-of-name
-   :args {:fn-name :_rtr-fn-name}}
+   :description "Full RAW rich-types registry entry for the queried fn, by id — nil for unknown ids. Raw (not the `/api/types` wire projection), so `:return-type-rule` / `:primary-parent` read directly."
+   :parent :rich-type-of-id
+   :args {:fn-id :_rtr-fn-id}}
 
   ;; --- rule owner -------------------------------------------------------
   ;; The rule lives on a BASE-FN at the root of the primary-parent
   ;; chain; the queried fn-def's immediate parent is often itself a
-  ;; fn-def (`:assoc-timestamp → :assoc`). `:rule-owner-of-name`
+  ;; fn-def (`:assoc-timestamp → :assoc`). `:rule-owner-of-id`
   ;; (web/crud) is the atomic boundary over the registry's canonical
   ;; `root-base-fn-name` walk — `{:name :fn-id}` with the id straight
   ;; off the registry entry (no name→id graph query); nil for base-fn
@@ -803,8 +806,8 @@
   ;; the body to the hidden span below.
 
   {:name :_rtr-owner-info
-   :parent :rule-owner-of-name
-   :args {:fn-name :_rtr-fn-name}}
+   :parent :rule-owner-of-id
+   :args {:fn-id :_rtr-fn-id}}
 
   {:name :_rtr-owner-some?
    :parent :some?
@@ -1086,7 +1089,7 @@
 
   {:name :_partial-rtr-handler
    :lambda-params [:request]
-   :description "Ring handler for `GET /partials/return-type-rule?fn=<name>` — returns the return-type-rule popover hiccup as `text/html`. Replaces the JS-built popover + `ruleNarrators` prose mirror; JS mounts + anchors only."
+   :description "Ring handler for `GET /partials/return-type-rule?fn-id=<uuid>` — returns the return-type-rule popover hiccup as `text/html`. Replaces the JS-built popover + `ruleNarrators` prose mirror; JS mounts + anchors only."
    :parent :html-ok-response
    :args {:body :_rtr-html}}
 
@@ -1123,14 +1126,10 @@
    :args {:entity-type {:value "fn"}
           :id {:parent :assert-some :args {:value {:ref :_insp-fn-id :type :nullable-uuid}}}}}
 
-  {:name :_insp-name
-   :parent :get
-   :args {:coll :_insp-row :key {:value :name} :default nil}}
-
   {:name :_insp-entry
-   :description "RAW rich-types registry entry (via id→name→registry); nil for anonymous / unregistered fns — the sections then collapse to their empty states."
-   :parent :rich-type-of-name
-   :args {:fn-name {:ref :_insp-name :type :nullable-text}}}
+   :description "RAW rich-types registry entry, by the fn's id; nil for unregistered fns — the sections then collapse to their empty states."
+   :parent :rich-type-of-id
+   :args {:fn-id {:ref :_insp-fn-id :type :nullable-uuid}}}
 
   ;; --- Arguments (the 3-way binding view) ------------------------------
   {:name :_insp-free-args
@@ -1442,8 +1441,8 @@
    :args {:value :_insp-primary}}
 
   {:name :_insp-rule-owner
-   :parent :rule-owner-of-name
-   :args {:fn-name {:ref :_insp-name :type :nullable-text}}}
+   :parent :rule-owner-of-id
+   :args {:fn-id {:ref :_insp-fn-id :type :nullable-uuid}}}
 
   {:name :_insp-rule-owner-name
    :parent :get

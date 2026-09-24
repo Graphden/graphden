@@ -125,11 +125,15 @@ async function cleanup(page) {
         window.__switchToBranchCalledWith = name;
       };
     });
-    await page.evaluate((nm) => {
-      const g = Array.from(document.querySelectorAll('.gd-diff-ghost'))
-        .find((el) => el.querySelector('.name')?.textContent === nm);
-      g?.click();
-    }, PROBE_FN);
+    // Through a locator, not a one-shot querySelector: any Explorer
+    // re-render drops the ghosts and re-injects them 150 ms later
+    // (editor-diff-sidebar.js's observer), and a click that landed in
+    // that window found nothing and never raised the confirm.
+    // dispatchEvent re-resolves the row until it is attached.
+    await page.locator('.gd-diff-ghost')
+      .filter({ has: page.locator('.name', { hasText: PROBE_FN }) })
+      .first()
+      .dispatchEvent('click', {}, { timeout: 20000 });
     await page.waitForFunction(
       ({ probe, feat }) => window.__switchToBranchCalledWith === feat
         && (location.hash || '').includes(probe),

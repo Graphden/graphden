@@ -142,27 +142,25 @@
   (types-lit/fn-type-bound-effects expected))
 
 
-(defbase rich-type-of-name
-  "One registry lookup — the full rich-type entry for the named fn
-   (nil-safe: nil / unknown names → nil). `:rich-return-of-fn`
-   (fns.edn) composes this with `:get-entity` + `:get` to go
-   fn-id → row → name → entry → `:return`."
-  [fn-name]
-  (when fn-name
-    (registry/rich-type-of (keyword fn-name))))
+(defbase rich-type-of-id
+  "One registry lookup by IDENTITY — the full rich-type entry for the fn
+   with id `fn-id` (nil-safe: nil / unknown ids → nil). Callers hold the
+   id; a lookup by bare name would pick an arbitrary fn when the name
+   lives in several namespaces."
+  [fn-id]
+  (when fn-id
+    (registry/rich-type-of-id fn-id)))
 
 
-(defbase rule-owner-of-name
-  "Atomic library boundary over `registry/rule-owner-info-of` —
+(defbase rule-owner-of-id
+  "Atomic library boundary over `registry/rule-owner-info-of-id` —
    `{:name … :fn-id …}` of the base-fn whose `:return-type-rule`
-   computed the named fn's return type; nil when the fn is unknown, is
-   itself a base-fn, or its root ancestor carries no rule. The `:fn-id`
-   comes off the registry entry itself (id-keyed truth), so partials
-   emit nav-links without a name→id graph query. The walk lives next to
-   `registry/root-base-fn-name` (single source of truth); the layout
-   strip-facts pass calls the name-only `registry/rule-owner-of`."
-  [fn-name]
-  (registry/rule-owner-info-of fn-name))
+   computed the return type of the fn with id `fn-id`; nil when the fn is
+   unknown, is itself a base-fn, or its root ancestor carries no rule.
+   The walk lives next to `registry/root-base-fn-name` (single source of
+   truth), shared with the layout strip-facts `↳` badge."
+  [fn-id]
+  (registry/rule-owner-info-of-id fn-id))
 
 
 (defbase declarable-effect-categories
@@ -325,8 +323,8 @@
    :diff-value-against-type diff-value-against-type
    :closed-enum-of closed-enum-of
    :fn-type-bound-effects fn-type-bound-effects
-   :rich-type-of-name rich-type-of-name
-   :rule-owner-of-name rule-owner-of-name
+   :rich-type-of-id rich-type-of-id
+   :rule-owner-of-id rule-owner-of-id
    :declarable-effect-categories declarable-effect-categories
    :type-name-kinds type-name-kinds
    :compatible-type-names compatible-type-names

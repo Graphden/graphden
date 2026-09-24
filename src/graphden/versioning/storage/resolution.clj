@@ -766,6 +766,19 @@
       (into #{} (remove #(contains? winners %)) ids))))
 
 
+(defn resolve-version-ids
+  "Batch `(:id (resolve-version …))`: `{entity-id → winning version id}`
+   for the `ids` with a LIVE version on `branch-id`'s chain, merge-aware —
+   one `load-merge-aware-cache` for the whole batch instead of one per id.
+   Ids with no version, or a tombstone winner, are absent."
+  [base-storage entity-name ids branch-id]
+  (if (empty? ids)
+    {}
+    (into {}
+          (keep (fn [[eid v]] (when-not (tombstone? v) [eid (:id v)])))
+          (winning-versions base-storage entity-name ids branch-id))))
+
+
 ;; === Batch Execution Graph Resolution ===
 ;;
 ;; Optimized algorithm that loads ALL data in 4 queries, then does BFS in memory.

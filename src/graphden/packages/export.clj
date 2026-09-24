@@ -300,6 +300,7 @@
       (:ref-fn-id b)
       (:type-override-fn-id b)
       (:list-append b)
+      (:list-closed b)
       (some? (:required b))
       (:terminal b)
       (some? (:description b))))
@@ -359,7 +360,9 @@
       (assoc :resolver (ref-kw (:resolver-fn-id b) ctx))
       (and (:value-present b) (not secret-path?)) (assoc :value (:value b))
       (:list-append b) (assoc :append (binding-items b ctx))
-      (and (:list-append b) (:list-closed b)) (assoc :closed true)
+      ;; A seal needs no items: `{:closed true}` alone is list-append
+      ;; false + list-closed true.
+      (:list-closed b) (assoc :closed true)
       type-ref (assoc :type type-ref)
       (some? (:required b)) (assoc :required (:required b))
       (:terminal b) (assoc :terminal true)
@@ -380,34 +383,24 @@
         desc (:description b)
         core
         (cond
-          ;; list-append binding. list-closed nil → bare vector (parse's
-          ;; bare-vector-on-sequence-slot path leaves list-closed nil);
-          ;; false/true → explicit {:append … :closed …} map.
-          (:list-append b)
-          (if (nil? (:list-closed b))
+          ;; list binding. Bare vector only when nothing else rides on it
+          ;; (parse's bare-vector-on-sequence-slot path leaves
+          ;; list-closed nil); a seal (with or without items), a
+          ;; type-override or `:required` needs the explicit map form.
+          (or (:list-append b) (:list-closed b))
+          (if (and (:list-append b) (nil? (:list-closed b))
+                   (nil? type-ref) (nil? (:required b)))
             items
-            (cond-> {:append items}
-              (:list-closed b) (assoc :closed true)))
+            (binding-field-map b ctx))
 
-          ;; Hidden-resolver binding: the stored `:value` is the
-          ;; OpenBao/vault PATH the executor derefs at run time, not a
-          ;; literal. Emit the dedicated `{:secret-path …}` form so the
-          ;; strip/manifest warn-policy sees it and re-parse restores the
-          ;; vault-get resolver — the plain `{:value …}` form would
-          ;; silently turn the secret into a literal string holding the
-          ;; path (broken AND path-disclosing).
-          (hidden-resolver? (:resolver-fn-id b))
-          (cond-> {:secret-path (:value b)}
-            (some? (:required b)) (assoc :required (:required b)))
-
-          ;; generic (non-hidden) resolver binding: emit
-          ;; `{:resolver <name> :value V}` so re-parse restores
-          ;; `:resolver-fn-id` — the plain `{:value …}` form would degrade
-          ;; the binding to a literal.
+          ;; Resolver binding — hidden (`{:secret-path …}`: the stored
+          ;; `:value` is the vault PATH, and the plain `{:value …}` form
+          ;; would silently turn the secret into a path-disclosing literal)
+          ;; or generic (`{:resolver <name> :value V}`, else re-parse
+          ;; degrades it to a literal). The field map carries both, plus
+          ;; any type-override / `:required` on the same binding.
           (:resolver-fn-id b)
-          (cond-> {:resolver (ref-kw (:resolver-fn-id b) ctx)
-                   :value (:value b)}
-            (some? (:required b)) (assoc :required (:required b)))
+          (binding-field-map b ctx)
 
           ;; ref binding (optionally with a type-override / required marker)
           (:ref-fn-id b)

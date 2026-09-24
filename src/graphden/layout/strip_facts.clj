@@ -16,7 +16,8 @@
                          of the unfolded structural form.
      :ruleOwner        — name of the base-fn whose `:return-type-rule`
                          computed this fn's return type
-                         (`registry/rule-owner-of`). Presence gates
+                         (`registry/rule-owner-info-of-id` — by the
+                         fn's id, never its bare name). Presence gates
                          the `↳` provenance badge.
      :branchLocal      — `{:own bool :seed name}` when the fn (or an
                          ancestor) carries `:branch-local? true`
@@ -72,7 +73,7 @@
                             row (get fns-by-id fn-id)]
                         (if-not row
                           n
-                          (let [owner (registry/rule-owner-of (:name row))
+                          (let [owner (:name (registry/rule-owner-info-of-id fn-id))
                                 rt-alias (inherited-return-type-alias fns-by-id fn-id)
                                 seed (branch-local/branch-local-seed fns-by-id fn-id)]
                             (cond-> n

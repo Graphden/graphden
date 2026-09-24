@@ -311,7 +311,7 @@
   ;; NEW rule (or a newly-polymorphic base-fn declaration) added
   ;; without a narrative previously passed both hand-side checks. The
   ;; golden registry is live here, so derive the owner set the exact
-  ;; way registry/rule-owner-of does — base-fn entries (no
+  ;; way registry/rule-owner-info-of-id does — base-fn entries (no
   ;; :primary-parent) carrying a hand :return-type-rule or a
   ;; var-carrying :return — and require narrative coverage for each.
   (let [narratives (->> (io/resource "packages/app/editor-provenance/fns.edn")

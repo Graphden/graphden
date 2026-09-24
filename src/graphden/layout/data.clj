@@ -346,13 +346,36 @@
     (assoc graph :args (derive-fn-slot-views graph))))
 
 
+(defn- identity-memo!
+  "Look `k` up by IDENTITY in the bounded LRU `state` (a vector of
+   `[k v]`, most recent last); on a miss compute `(f k)`, remember it
+   (evicting the oldest past `cap`) and return it."
+  [state cap k f]
+  (or (some (fn [[g v]] (when (identical? g k) v)) @state)
+      (let [v (f k)]
+        (swap! state (fn [entries]
+                       (conj (vec (take-last (dec cap)
+                                             (remove #(identical? (first %) k) entries)))
+                             [k v])))
+        v)))
+
+
+(defonce ^:private synth-args-state (atom []))
+
+
 (defn ensure-synth-args
   "Cached graph data may come from `compile-runtime/rebuild!` which
    doesn't carry `:args`. Synthesise the slot views on demand if
-   missing."
+   missing — memoised on the input snapshot's identity, so the same
+   snapshot yields the SAME map and `cached-build-lookups` downstream
+   hits instead of re-deriving the whole graph on every layout request
+   (the snapshot is replaced, never mutated, on a write). One entry per
+   branch ctx × org slice."
   [graph]
-  (cond-> graph
-    (not (contains? graph :args)) (assoc :args (derive-fn-slot-views graph))))
+  (if (contains? graph :args)
+    graph
+    (identity-memo! synth-args-state 16 graph
+                    #(assoc % :args (derive-fn-slot-views %)))))
 
 
 (defn build-lookups
@@ -422,15 +445,14 @@
                                       (when-let [s (get slot-map (:slot-id fs))]
                                         [[(:fn-id fs) (keyword (:name s))] s])))
                               fn-slots)
-        ;; name (keyword) → fn-row. Lets type-row internals resolve
-        ;; `:int` / `:null` / `:text` etc. in `:constraint` payloads
-        ;; without having to walk `fn-map` linearly.
-        fn-by-name (into {} (keep (fn [f]
-                                    (when-let [n (:name f)]
-                                      [(keyword n) f])))
-                         fns)]
+        ;; bare name (keyword) → EVERY fn-row carrying it. Lets type-row
+        ;; internals resolve `:int` / `:null` / `:text` etc. in
+        ;; `:constraint` payloads without walking `fn-map` linearly — all
+        ;; rows, because a name may live in several namespaces
+        ;; (`builder-helpers/resolve-type-ref` picks among them).
+        fns-by-name (group-by #(keyword (:name %)) (filter :name fns))]
     {:fn-map fn-map
-     :fn-by-name fn-by-name
+     :fns-by-name fns-by-name
      :arg-map arg-map
      :args-by-fn args-by-fn
      :slot-map slot-map
@@ -448,7 +470,7 @@
      :chain-cache (atom {})}))
 
 
-(def ^:private cached-build-lookups-max-size 8)
+(def ^:private cached-build-lookups-max-size 16)
 
 
 (defonce ^:private cached-build-lookups-state (atom []))
@@ -461,13 +483,5 @@
    mutations), reuses the result. Bounded LRU; identical to the
    policy used in `graphden.executor.compile.lookups`."
   [graph]
-  (or (some (fn [[g l]] (when (identical? g graph) l))
-            @cached-build-lookups-state)
-      (let [lookups (build-lookups graph)]
-        (swap! cached-build-lookups-state
-               (fn [v]
-                 (let [pruned (filterv (fn [[g _]] (not (identical? g graph))) v)
-                       capped (vec (take-last (dec cached-build-lookups-max-size)
-                                              pruned))]
-                   (conj capped [graph lookups]))))
-        lookups)))
+  (identity-memo! cached-build-lookups-state cached-build-lookups-max-size
+                  graph build-lookups))

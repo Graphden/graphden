@@ -11,6 +11,7 @@
     [clojure.tools.logging :as log]
     [graphden.crud.test-autorun :as test-autorun]
     [graphden.executor.context :as exec-ctx]
+    [graphden.lint.graph :as lint-graph]
     [graphden.services.reconciler :as recon]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
@@ -146,6 +147,10 @@
   ;; see create-entity's note.
   (shield/run!
     (fn []
+      ;; A namespace write moves no graph row, so the per-branch lint
+      ;; memo would keep answering with the old dotted paths.
+      (when (= entity-type :ns)
+        (lint-graph/forget-branch! (vcore/current-branch-id storage)))
       (when (= entity-type :fn)
         ;; A `:fn` write (rename / reparent / return-type / delete) can
         ;; stale a recorded type-check diagnostic for that fn on this

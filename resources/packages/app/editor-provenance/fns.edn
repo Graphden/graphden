@@ -898,6 +898,7 @@
            :sub "When every input is :int the result is :int, else widens to :numeric. Refinement constraints (e.g. :positive-int) do NOT propagate through arithmetic."
            :mul "When every input is :int the result is :int, else widens to :numeric. Refinement constraints (e.g. :positive-int) do NOT propagate through arithmetic."
            :mod "Modulo — :int when dividend and divisor are :int, else :numeric widening."
+           :quot "Integer quotient — :int when dividend and divisor are :int, else :numeric widening."
            :neg "Negation — refinement constraints don't propagate through arithmetic; a :positive-int negated is :int."
            :abs "Absolute value — constraint inference deliberately not propagated through arithmetic."}}}
 

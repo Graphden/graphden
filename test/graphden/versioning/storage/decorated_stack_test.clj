@@ -482,3 +482,41 @@
           (is (seq (sp/query-entities pg :fn {:id (:id made)})) "the identity survives")
           (is (= "again" (:name (sp/read-entity v :fn (:id made))))
               "main resolves the re-minted fn"))))))
+
+
+(deftest a-fn-slot-create-behind-a-branch-delete-sees-its-slot-gone
+  ;; The delete purges the slots only its own fn-slots exposed. A writer on
+  ;; another branch checked such a slot existed BEFORE its transaction and
+  ;; then created a fn-slot onto it: it waited on the slot's identity lock,
+  ;; and once the delete committed it inserted a fn-slot pointing at a slot
+  ;; that no longer existed. It now re-reads the slot under the lock.
+  (with-stack
+    (fn [pg _deco v]
+      (let [host (sp/create-entity v :fn {:name "host" :parent-ids [] :description "h"})
+            xb (vs/create-branch! v "scratch")
+            vb (vs/switch-branch v (:id xb))
+            made (sp/create-entity vb :fn {:name "made" :parent-ids [] :description "x"})
+            slot (sp/create-entity vb :slot {:name "own" :type-fn-id (:id host)})
+            _ (sp/create-entity vb :fn-slot {:fn-id (:id made) :slot-id (:id slot) :position 0})
+            deleted (promise)
+            commit (promise)
+            del (future
+                  (tx/in-transaction
+                    pg
+                    (fn [st]
+                      (vs/delete-branch! (vs/wrap-with-versioning st) (:id xb))
+                      (deliver deleted true)
+                      @commit)))]
+        (deref deleted 15000 nil)
+        (let [fs (attempt #(sp/create-entity v :fn-slot {:fn-id (:id host) :slot-id (:id slot)
+                                                         :position 0}))
+              b (attempt #(sp/create-entities v :binding [{:fn-id (:id host) :slot-id (:id slot)
+                                                           :value 1}]))]
+          (is (= 2 (await-waiters (:pool pg) 2)) "both writes wait on the slot's lock")
+          (deliver commit true)
+          @del
+          (is (= :constraint-violation/missing-slot @fs) "the singular create refuses")
+          (is (= :constraint-violation/missing-slot @b) "and so does a batch create")
+          (is (empty? (sp/query-entities pg :slot {:id (:id slot)})) "the slot is gone")
+          (is (empty? (sp/query-entities pg :fn-slot {:slot-id (:id slot)}))
+              "and nothing points at it"))))))

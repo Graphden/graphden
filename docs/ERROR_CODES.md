@@ -218,6 +218,18 @@ same `(binding-id, position)` in the current branch's resolved view.
 - `:branch-id` - Branch whose live view collides
 - `:colliding-item-ids` - IDs of the items already at that position
 
+### `:constraint-violation/missing-slot`
+
+**Component:** versioning (VersionedStorage)
+**Description:** A `:fn-slot` / `:binding` create names a slot that no
+longer exists — a concurrent branch delete purged it after the writer
+last looked (the create re-reads the slot inside its transaction, under
+the slot's identity lock).
+**Ex-data keys:**
+
+- `:entity-name` - `:fn-slot` or `:binding`
+- `:slot-ids` - The referenced slot ids that are gone
+
 ### `:constraint-violation/root-branch-undeletable`
 
 **Component:** versioning (VersionedStorage)

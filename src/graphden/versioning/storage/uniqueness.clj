@@ -383,6 +383,26 @@
           (identity-lock-keys :slot (keep :slot-id rows)))))
 
 
+(defn check-referenced-slots-exist!
+  "Throw unless every slot the `:fn-slot` / `:binding` `rows` reference
+   still exists. The caller checked the slot before its transaction; a
+   branch delete may have purged it since (it purges the slots only its
+   own fn-slots exposed). Run INSIDE the write transaction, after the
+   `write-identity-lock-keys` locks: the delete either committed first —
+   this read sees the slot gone — or waits for this write, whose new
+   reference then keeps the slot. One batched read; a no-op for every
+   other entity."
+  [st entity-name rows]
+  (when (#{:fn-slot :binding} entity-name)
+    (when-let [ids (not-empty (into [] (comp (keep :slot-id) (distinct)) rows))]
+      (let [found (sp/read-entities st :slot ids)]
+        (when-let [missing (not-empty (into [] (remove #(contains? found %)) ids))]
+          (throw (ex-info (str "Slot no longer exists: " (pr-str (first missing)))
+                          {:type :constraint-violation/missing-slot
+                           :entity-name entity-name
+                           :slot-ids missing})))))))
+
+
 (def ^:private advisory-buckets
   "How many locks one KEY GROUP can take in a transaction. Each advisory
    lock held takes a slot in Postgres' shared lock table

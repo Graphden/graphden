@@ -459,6 +459,51 @@
         (stop)))))
 
 
+(deftest mirror-cannot-squat-a-release-line
+  ;; Install needs no `:publish-packages`, and the mirror used to store the
+  ;; REMOTE row's own `:name` / `:version`: a tenant installing from a server
+  ;; it controls could land any (name, version) under the registry-wide
+  ;; unique key — the next release of a public holder's package included.
+  (sp/create-entity (storage) :package-version
+                    {:name "squat.popular" :version "1.0.0" :ns-root "squatpop"
+                     :fns [] :dependencies [] :content-hash "sp1"
+                     :org-id "public" :public? true})
+  (let [served (fn [n v]
+                 {:name n :version v :ns-root "squatpop"
+                  :fns [{:name :squat-hi :namespace "squatpop" :parent :const :args {:value "x"}}]
+                  :dependencies [:const] :package-dependencies [] :content-hash "evil"})
+        stop (http-kit/run-server
+               (fn [req]
+                 (let [row (case (:uri req)
+                             "/api/packages/innocent.pkg/1.0.0" (served "squat.popular" "2.0.0")
+                             "/api/packages/innocent.pkg/1.0.1" (served "innocent.pkg" "9.9.9")
+                             "/api/packages/squat.popular/2.0.0" (served "squat.popular" "2.0.0")
+                             nil)]
+                   {:status 200 :headers {"Content-Type" "application/edn"} :body (pr-str row)}))
+               {:port 0})
+        stub (str "http://127.0.0.1:" (:local-port (meta stop)))
+        mirror! (fn [n v]
+                  (binding [tc/*current-org* "squatter-org"]
+                    (run-named "mirror-remote-package!" {:source stub :pkg-name n :version v})))
+        rows (fn [n v] (sp/query-entities (storage) :package-version {:name n :version v}))]
+    (try
+      (testing "a remote serving another NAME than asked is refused, nothing stored"
+        (let [r (mirror! "innocent.pkg" "1.0.0")]
+          (is (= "remote-bundle-mismatch" (:error r)))
+          (is (= "innocent.pkg" (:name r)))
+          (is (empty? (rows "squat.popular" "2.0.0")) "the served key was not squatted")
+          (is (empty? (rows "innocent.pkg" "1.0.0")))))
+      (testing "a remote serving another VERSION than asked is refused too"
+        (is (= "remote-bundle-mismatch" (:error (mirror! "innocent.pkg" "1.0.1"))))
+        (is (empty? (rows "innocent.pkg" "9.9.9"))))
+      (testing "asking for a name another org lists publicly is refused as name-taken"
+        (let [r (mirror! "squat.popular" "2.0.0")]
+          (is (= "name-taken" (:error r)))
+          (is (= "public" (:holder r)) "the holder is named")
+          (is (empty? (rows "squat.popular" "2.0.0")))))
+      (finally (stop)))))
+
+
 (deftest panel-update-handler-updates-and-refreshes-panel
   (testing "POST /api/packages/panel-update form-encoded {name, version} repins + refreshes the panel"
     (doseq [v ["1.0.0" "2.0.0"]]

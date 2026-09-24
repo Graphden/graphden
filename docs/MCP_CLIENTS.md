@@ -13,6 +13,11 @@ Auth-required — the bearer is a normal graphden token, so every AI tool
 call carries exactly that user's rights (on the cloud: org scoping, RLS,
 grants, effect gate; on a bare self-host: the single `AUTH_TOKEN`). The
 `mcp` package is optional: absent from `:package-names` ⇒ `/mcp` 404s.
+The graph reads (`list-namespaces`, `search-fns`, `read-fn`, the
+`unread-bindings` of `describe-fn`) pass the same view-impl filter as the
+editor's `GET /api/graph/entities`: a fn whose composition the caller's org
+may not see (another org's shared fn, no `:view-impl` grant) reads as its
+signature only, and nothing it is built from rides along in `read-fn`.
 
 Tools: `list-namespaces`, `search-fns`, `read-fn`, `describe-fn`,
 `execute-fn`, `create-branch`, `upsert-fn-defs`, `run-tests`,

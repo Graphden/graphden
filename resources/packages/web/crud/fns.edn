@@ -345,6 +345,12 @@
    :return-type :keyword-map
    :effects #{}}
 
+  {:name :fn-impl-visible?
+   :description "May the current viewer see `fn-id`'s internal composition? The one-fn answer of the same view-impl seam `:strip-hidden-impl` applies to a dump — for reads that report about a fn's internals without shipping rows (`describe-fn`'s unread bindings). Always true with no tenancy addon wired; false for nil / unknown fn-id."
+   :args {:fn-id {:type :nullable-uuid :description "Target fn-id; nil → false."}}
+   :return-type :bool
+   :effects #{:db}}
+
   {:name :all-rich-types
    :description "Snapshot of the in-memory rich-type registry. Returns `{fn-name {:return type :args {arg-name type}}}` for every base-fn AND composed fn-def the type-checker has processed. FULL — every per-entry field. Internal single-source-of-truth for `/api/types/candidates` (`:_types-candidates-snapshot`); the HTTP wire-shaping (lean bulk / per-fn) lives in `:api-rich-types`."
    :args {}

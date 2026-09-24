@@ -784,7 +784,12 @@ face — the EDN wire keeps fn-def keywords intact; the bearer for the
 remote comes from `GRAPHDEN_REGISTRY_TOKEN` and is sent ONLY when `source`
 has the origin of the configured `GRAPHDEN_REGISTRY_URL` — `source` is
 caller-chosen, so any other host is dialed without it), stores it as a LOCAL
-`:package-version` row (never re-marked public), and then the normal
+`:package-version` row (never re-marked public) under the REQUESTED
+`(name, version)` — a remote serving a row that names another pair is
+refused as `remote-bundle-mismatch`, and the store runs under the same
+package-name lock and public-name holder check as a publish (`name-taken`),
+since install needs no `:publish-packages` and the key is registry-wide
+(docs/MARKETPLACE.md § 2) — and then the normal
 install worklist materializes + pins it. Missing dependencies mirror the
 same way, one worklist step at a time. A non-concrete spec (`latest` or a semver range) is resolved against
 the remote's version list first, then the concrete version is mirrored. So

@@ -208,11 +208,15 @@
   ;; ==========================================================================
   ;; Tools — adapters over existing data fns / handlers
   ;; ==========================================================================
+  ;; Every read that ships graph rows goes through `:strip-hidden-impl` —
+  ;; the same view-impl filter GET /api/graph/entities applies — so a
+  ;; tenant's token sees another org's shared fn as its signature only,
+  ;; exactly as its human does in the editor.
   ;; list-namespaces → the sidebar's ?scope=tree data, JSON-stringified.
   {:name :_mcp-tool-list-namespaces
    :parent :_mcp-tool-ok
    :args {:text {:parent :to-json-string
-                 :args {:data :graph-tree}}}}
+                 :args {:data {:parent :strip-hidden-impl :args {:graph :graph-tree}}}}}}
 
   ;; search-fns → ?scope=search&q=…
   {:name :_mcp-search-q
@@ -222,9 +226,10 @@
   {:name :_mcp-tool-search-fns
    :parent :_mcp-tool-ok
    :args {:text {:parent :to-json-string
-                 :args {:data {:parent :graph-search
-                               :args {:q :_mcp-search-q
-                                      :descriptions? {:value true}}}}}}}
+                 :args {:data {:parent :strip-hidden-impl
+                               :args {:graph {:parent :graph-search
+                                              :args {:q :_mcp-search-q
+                                                     :descriptions? {:value true}}}}}}}}}
 
   ;; read-fn → resolve name → id (current branch), then ?scope=subtree.
   {:name :_mcp-read-fn-name
@@ -246,8 +251,9 @@
    :description "read-fn `format` \"rows\" — the raw subtree row dump (fns / slots / bindings / list-items), JSON."
    :parent :_mcp-tool-ok
    :args {:text {:parent :to-json-string
-                 :args {:data {:parent :graph-subtree
-                               :args {:root-id :_mcp-read-fn-id}}}}}}
+                 :args {:data {:parent :strip-hidden-impl
+                               :args {:graph {:parent :graph-subtree
+                                              :args {:root-id :_mcp-read-fn-id}}}}}}}}
 
   ;; The default read is the fns.edn form — the AI reads exactly the
   ;; syntax it writes back through upsert-fn-defs. Pretty-printed so a
@@ -261,7 +267,7 @@
    :args {:a :_mcp-read-fn-format :b {:value "rows"}}}
 
   {:name :_mcp-read-fn-defs
-   :description "fns.edn fn-def maps of the subtree reachable from the named fn."
+   :description "fns.edn fn-def maps of the subtree reachable from the named fn — concealed inside `:graph-fn-defs-subtree` (the view-impl filter runs BEFORE the closure walk, so a hidden fn exports as its bare signature)."
    :parent :graph-fn-defs-subtree
    :args {:root-id :_mcp-read-fn-id}}
 
@@ -305,9 +311,11 @@
    :args {:fn-id :_mcp-read-fn-id}}
 
   {:name :_mcp-describe-unread
-   :description "Bindings this fn carries that nothing in its tree reads — silent no-ops the author should fix or remove."
-   :parent :fn-unread-bindings
-   :args {:fn-id :_mcp-read-fn-id}}
+   :description "Bindings this fn carries that nothing in its tree reads — silent no-ops the author should fix or remove. `[]` when the viewer may not see the fn's composition: binding names ARE its internals."
+   :parent :if
+   :args {:test {:parent :fn-impl-visible? :args {:fn-id :_mcp-read-fn-id}}
+          :then {:parent :fn-unread-bindings :args {:fn-id :_mcp-read-fn-id}}
+          :else {:value []}}}
 
   {:name :_mcp-describe-has-process?
    :parent :chain-has-process-effect?

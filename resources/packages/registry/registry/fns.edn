@@ -548,7 +548,7 @@
                                                          :value {:as :pkg-name :type :text}}}}}}}}}
 
   {:name :breaking-changes-between
-   :description "Consumer-visible incompatibilities from one bundle's fn-defs to another's — removed public fn-defs, removed / narrowed / newly-required args, unbound bindings, changed renames or parents, widened returns, added base-fn effects, reshaped type-rows (`graphden.packages.compat`). `[]` = a compatible successor. Pure."
+   :description "Consumer-visible incompatibilities from one bundle's fn-defs to another's — removed public fn-defs, removed / narrowed / newly-required args, unbound bindings, changed renames or parents, widened returns, a grown or dropped `:expects-effects` contract, reshaped type-rows (`graphden.packages.compat`). `[]` = a compatible successor. Pure."
    :args {:old-fns {:type [:list :keyword-map] :description "The previous version's fn-defs."}
           :new-fns {:type [:list :keyword-map] :description "The candidate version's fn-defs."}}
    :return-type [:list :keyword-map]}
@@ -3004,13 +3004,13 @@
 
   ;; --- :mirror-remote-package! -----------------------------------------
   {:name :mirror-store-package-version!
-   :description "The mirror's one write: store a fetched remote `:row` as the LOCAL `:package-version` (`:pkg-name`, `:version`) — idempotent (an existing row wins), never public, stamped with this org and `:origin` = `{:url :origin-url}` ∪ the `:origin` signals. Returns `{:name :version}`."
+   :description "The mirror's one write: store a fetched remote `:row` as the LOCAL `:package-version` (`:pkg-name`, `:version`) — the REQUESTED name and version, never the row's own (a remote cannot pick the release line its copy lands in) — idempotent (an existing row wins), never public, stamped with this org and `:origin` = `{:url :origin-url}` ∪ the `:origin` signals. Serialised under the package-name lock like a publish, and refused as data like one: `{:error \"name-taken\" :holder}` when another org lists the name publicly, `{:error \"version-exists\"}` when the key is held by a row this org cannot see. Returns `{:name :version}` on success."
    :args {:pkg-name {:type :text :description "Package name."}
           :version {:type :nullable-text :description "The concrete version fetched."}
           :row {:type :keyword-map :description "The remote's `:package-version` row (its EDN face)."}
           :origin-url {:type :text :description "The remote registry's base URL."}
           :origin {:type :nullable-keyword-map :required false :value nil :description "The origin's card snapshot (`:remote-package-card`); nil = url only."}}
-   :return-type {:name :text :version :text}
+   :return-type :keyword-map
    :effects #{:db}}
 
   {:name :_mrp-url
@@ -3042,8 +3042,25 @@
    :args {:values [{:parent :blank? :args {:string :_mrp-body}}
                    {:parent :equal? :args {:a {:parent :str-trim :args {:string :_mrp-body}} :b {:value "nil"}}}]}}
 
+  {:name :_mrp-row-matches?
+   :description "The served row names the (name, version) that was ASKED for. A remote serving another name or version is refused before anything is stored — otherwise a tenant's install from a server it controls would squat any (name, version) under the registry-wide unique key."
+   :parent :and
+   :args {:values [{:parent :equal?
+                    :args {:a {:parent :get :args {:coll :_mrp-row :key {:value :name} :default nil}}
+                           :b {:as :pkg-name :type :text}}}
+                   {:parent :equal?
+                    :args {:a {:parent :get :args {:coll :_mrp-row :key {:value :version} :default nil}}
+                           :b {:as :version :type :nullable-text}}}]}}
+
   {:name :_mrp-stored
-   :description "Store the fetched row (idempotently) and answer `{:mirrored :version :from}`."
+   :description "Store the fetched row — the store's own refusal (`name-taken` / `version-exists`) passes through as the answer, else `{:mirrored :version :from}`."
+   :parent :if
+   :args {:test {:parent :some? :args {:value {:parent :get :args {:coll :_mrp-store :key {:value :error} :default nil}}}}
+          :then :_mrp-store
+          :else :_mrp-stored-ok}}
+
+  {:name :_mrp-stored-ok
+   :description "The success answer of a mirror — `{:mirrored :version :from}`."
    :parent :zipmap
    :args {:keys [{:value :mirrored} {:value :version} {:value :from}]
           :vals [{:parent :get :args {:coll :_mrp-store :key {:value :name} :default nil}}
@@ -3058,7 +3075,7 @@
           :origin-url :_remote-base}}
 
   {:name :mirror-remote-package!
-   :description "Fetch the CONCRETE (pkg-name, version) from the REMOTE registry `source` (?format=edn face; the bearer only when `source` is the configured `GRAPHDEN_REGISTRY_URL` origin) and store it as a local :package-version row — idempotent, never public, stamped with `:origin` (the source url + the `:origin` signals passed in). Constraint resolution is :resolve-remote-version and the signals snapshot :remote-package-card, both composed graph-side by the install worklist. Errors ride as data ({:error …} — remote-version-not-found / remote-unreachable / remote-fetch-failed / remote-not-found / remote-bundle-unreadable) so the worklist wraps them; an egress refusal throws."
+   :description "Fetch the CONCRETE (pkg-name, version) from the REMOTE registry `source` (?format=edn face; the bearer only when `source` is the configured `GRAPHDEN_REGISTRY_URL` origin) and store it as a local :package-version row — idempotent, never public, stamped with `:origin` (the source url + the `:origin` signals passed in). Constraint resolution is :resolve-remote-version and the signals snapshot :remote-package-card, both composed graph-side by the install worklist. Errors ride as data ({:error …} — remote-version-not-found / remote-unreachable / remote-fetch-failed / remote-not-found / remote-bundle-unreadable / remote-bundle-mismatch / name-taken / version-exists) so the worklist wraps them; an egress refusal throws."
    :parent :cond
    :args {:clauses [{:parent :nil? :args {:value {:as :version :type :nullable-text}}}
                     {:parent :zipmap
@@ -3084,6 +3101,12 @@
                     {:parent :zipmap
                      :args {:keys [{:value :error} {:value :source}]
                             :vals [{:value "remote-bundle-unreadable"} :_remote-base]}}
+
+                    {:parent :not :args {:value :_mrp-row-matches?}}
+                    {:parent :zipmap
+                     :args {:keys [{:value :error} {:value :source} {:value :name} {:value :version}]
+                            :vals [{:value "remote-bundle-mismatch"} :_remote-base
+                                   {:as :pkg-name :type :text} {:as :version :type :nullable-text}]}}
 
                     {:value true}
                     :_mrp-stored]}}

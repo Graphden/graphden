@@ -673,19 +673,33 @@
         seen))))
 
 
+(defn- keep-fns
+  "`graph` with its `:fns` narrowed to the ids in `ids`."
+  [graph ids]
+  (update graph :fns (fn [fs] (filterv #(contains? ids (:id %)) fs))))
+
+
 (defn export-subtree
   "`export-graph` restricted to the closure reachable from `root-id` —
    the fn-defs an AI author reads back for ONE fn, in the syntax it
-   writes. `[]` when `root-id` is nil or names no row."
-  [storage root-id]
-  (let [graph (read-graph storage)
-        ids (subtree-fn-ids graph root-id)]
-    (if (empty? ids)
-      []
-      (records->fn-defs
-        (rows->records (update graph :fns
-                               (fn [fs] (filterv #(contains? ids (:id %)) fs)))
-                       (ns-id->path-map storage))))))
+   writes. `[]` when `root-id` is nil or names no row.
+
+   `conceal` (default `identity`) is a `graph-dump -> graph-dump` pass —
+   the view-impl filter (`crud.entities/apply-view-impl-filter`) — run over
+   the reachable rows BEFORE the closure is re-walked, so a fn whose
+   composition the viewer may not see exports as its bare signature and
+   nothing it is built from rides along."
+  ([storage root-id] (export-subtree storage root-id identity))
+  ([storage root-id conceal]
+   (let [graph (read-graph storage)
+         reach (subtree-fn-ids graph root-id)
+         reachable (keep-fns graph reach)
+         visible (conceal reachable)
+         ids (if (identical? visible reachable) reach (subtree-fn-ids visible root-id))]
+     (if (empty? ids)
+       []
+       (records->fn-defs
+         (rows->records (keep-fns visible ids) (ns-id->path-map storage)))))))
 
 
 ;; =============================================================================

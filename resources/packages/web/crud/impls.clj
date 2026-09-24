@@ -116,7 +116,8 @@
   [root-id]
   (cr/record-effect! :db)
   (if (some? root-id)
-    (export/export-subtree (request/require-storage ctx) root-id)
+    (export/export-subtree (request/require-storage ctx) root-id
+                           entities/apply-view-impl-filter)
     []))
 
 
@@ -168,6 +169,13 @@
   ;; addon installs a filter (single-tenant sees everything). No :db of its
   ;; own; the installed filter reads grants in the trusted platform ctx.
   (entities/apply-view-impl-filter graph))
+
+
+(defbase fn-impl-visible?
+  [fn-id]
+  (cr/record-effect! :db)
+  (boolean (some-> (and fn-id (sp/read-entity (request/require-storage ctx) :fn fn-id))
+                   entities/impl-visible?)))
 
 
 (defbase all-rich-types
@@ -356,6 +364,7 @@
    :graph-fn-defs-subtree   graph-fn-defs-subtree
    :fn-unread-bindings      fn-unread-bindings
    :strip-hidden-impl strip-hidden-impl
+   :fn-impl-visible? fn-impl-visible?
    :all-rich-types all-rich-types
    :api-rich-types api-rich-types
    :fn-names-with-tag fn-names-with-tag

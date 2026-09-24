@@ -296,24 +296,24 @@ Auto-run on writes: from ~invalidate!~'s seeds, walk the compile-deps REVERSE cl
 :PROPERTIES:
 :CUSTOM_ID: crud/graph-list-env
 :FILE: src/graphden/crud/entities/list.clj
-:LINE: 239
+:LINE: 268
 :MINS: 3.7
 :END:
 
 The read side the editor lives on. One shared lazy environment over the graph-cache, and one projection per shape read off it: the sidebar tree (namespaces + counts, O(namespaces)), one namespace's leaves, a search, a subtree, or the full dump — each its own base-fn (~:graph-tree~ … ~:graph-full~), and which one a request wants is a ~:cond~ in the graph (~:all-entities-handler~). Every fn row is tagged with a ~:role~ so Types vs Functions is decided server-side. When the editor feels slow after a write, this is where to look — it is what every refresh re-reads.
 
-- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn- graph-list-env][src/graphden/crud/entities/list.clj:239]]
+- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn- graph-list-env][src/graphden/crud/entities/list.clj:268]]
 - same file :: [[file:crud.org::#crud/view-members][view-members]]
 
 * 24. view-members
 :PROPERTIES:
 :CUSTOM_ID: crud/view-members
 :FILE: src/graphden/crud/entities/list.clj
-:LINE: 753
+:LINE: 782
 :MINS: 1.8
 :END:
 
 The Explorer's one evaluator for narrowing by GRAPH FACTS — a filter set ~{:name :uses :effects :kinds :namespaces :exclude :unused :views}~ answered as light rows. Axes AND; ~:uses~ is by fn ID over the reverse transitive closure (a rename never empties a saved view); ~:views~ intersects with other graph views' members, recursing through their own ~also~, cycle-guarded. Two callers, one projection: the editor's ad-hoc chip set (~POST /api/views/members~) and the ~:explorer-view~ base-fn — a view saved IN the graph as an fn-def, listed back by ~list-explorer-views~ with its bound slots decoded.
 
-- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn view-members][src/graphden/crud/entities/list.clj:753]]
+- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn view-members][src/graphden/crud/entities/list.clj:782]]
 - same file :: [[file:crud.org::#crud/graph-list-env][graph-list-env]]

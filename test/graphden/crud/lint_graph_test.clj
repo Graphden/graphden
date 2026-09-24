@@ -118,22 +118,31 @@
 (deftest branch-lint-warnings-display-rows-test
   ;; The display row is graph composition over `:branch-lint-findings`:
   ;; the wire shape the Lint tab and the problem lens read must not move.
+  ;; The graph is shared across this namespace's deftests (random order),
+  ;; so the probe pair is un-duplicated on the way out — otherwise
+  ;; `duplicate-definition-through-storage-test`'s "the platform raises
+  ;; nothing" check would see it.
   (let [{:keys [ctx storage all-name->id]} *graph*
         title (fn-id-by-name storage "const")
         a (make-assoc-child! ctx storage "lint-row-a" "row" title)
         b (make-assoc-child! ctx storage "lint-row-b" "row" title)
-        rows (exec/execute-with-named-args ctx (get all-name->id :branch-lint-warnings)
-                                           {:suppressed []})
-        row (first (filter #(= [(str a) (str b)] (:fn-ids %)) rows))]
-    (is (some? row) (pr-str rows))
-    (is (= "duplicate-definition" (:rule row)))
-    (is (string? (:message row)))
-    (is (number? (:weight row)))
-    (is (= (str a "," b) (:fn-ids-csv row)))
-    (is (= [{:id (str a) :name "lint-row-a" :ns ""} {:id (str b) :name "lint-row-b" :ns ""}]
-           (:fns row)))
-    (testing "a stored suppression drops the row"
-      (is (not-any? #(= [(str a) (str b)] (:fn-ids %))
-                    (exec/execute-with-named-args
-                      ctx (get all-name->id :branch-lint-warnings)
-                      {:suppressed [{:rule "duplicate-definition" :fn-ids [(str a) (str b)]}]}))))))
+        warnings #(exec/execute-with-named-args ctx (get all-name->id :branch-lint-warnings)
+                                                {:suppressed %})]
+    (try
+      (let [rows (warnings [])
+            row (first (filter #(= [(str a) (str b)] (:fn-ids %)) rows))]
+        (is (some? row) (pr-str rows))
+        (is (= "duplicate-definition" (:rule row)))
+        (is (string? (:message row)))
+        (is (number? (:weight row)))
+        (is (= (str a "," b) (:fn-ids-csv row)))
+        (is (= [{:id (str a) :name "lint-row-a" :ns ""} {:id (str b) :name "lint-row-b" :ns ""}]
+               (:fns row)))
+        (testing "a stored suppression drops the row"
+          (is (not-any? #(= [(str a) (str b)] (:fn-ids %))
+                        (warnings [{:rule "duplicate-definition" :fn-ids [(str a) (str b)]}])))))
+      (finally
+        (let [assoc-id (fn-id-by-name storage "assoc")
+              key-binding (first (sp/query-entities storage :binding
+                                                    {:fn-id b :slot-id (slot-id storage assoc-id "key")}))]
+          (entities/update-entity "binding" (:id key-binding) {:value "row-b-apart" :value-present true} ctx))))))

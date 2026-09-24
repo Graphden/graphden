@@ -1528,6 +1528,35 @@ gate_body() {
 # survive, so a train pays no more set-up than a gate in an agent's worktree
 # did. `clean -fd` (not -x) drops a previous train's untracked leftovers while
 # keeping the ignored build caches.
+# Generated files a merge can conflict on without anyone having made a
+# conflicting decision: the devtour bakes (`bb devtour` writes them from
+# docs/devtour/tour.edn + the source it anchors on). Every second landing
+# of the 2026-09-23/24 epics bounced on exactly these — two branches that
+# each re-baked after touching toured code. tour.edn itself is SOURCE and
+# is not in the list: a conflict there is the author's to resolve.
+GENERATED_CONFLICT_RE='^docs/devtour/(index\.html|tour\.eld|org/[^/]+\.org)$'
+
+# In a worktree left mid-merge by a conflicting `git merge`: if EVERY
+# unmerged path is a generated devtour file, take our side, re-bake from
+# the merged sources and conclude the merge. Returns 0 when the merge is
+# committed, 1 (merge left as is) otherwise. The re-bake is checked again
+# by the gate's own `devtour-check`, so a wrong bake can't land.
+# WTQ_DEVTOUR_CMD (test hook) replaces `bb devtour`.
+resolve_generated_conflicts() {
+  local wt="$1" unmerged
+  unmerged="$(git -C "$wt" diff --name-only --diff-filter=U)"
+  [ -n "$unmerged" ] || return 1
+  if printf '%s\n' "$unmerged" | grep -qvE "$GENERATED_CONFLICT_RE"; then
+    return 1
+  fi
+  printf '%s\n' "$unmerged" | xargs git -C "$wt" checkout --ours -- || return 1
+  ( cd "$wt" && ${WTQ_DEVTOUR_CMD:-bb devtour} ) >/dev/null 2>&1 || return 1
+  git -C "$wt" add -A -- docs/devtour || return 1
+  [ -z "$(git -C "$wt" diff --name-only --diff-filter=U)" ] || return 1
+  git -C "$wt" commit -q --no-edit || return 1
+}
+
+
 prepare_train_wt() {
   if [ ! -d "$TRAIN_WT/.git" ] && [ ! -f "$TRAIN_WT/.git" ]; then
     git -C "$MAIN_WT" worktree prune
@@ -1742,6 +1771,11 @@ train_run() {
     for m in "${ok_members[@]}"; do
       if out="$(git -C "$TRAIN_WT" merge --no-edit -m "Merge branch '${M_BRANCH[$m]}' into $TARGET" "${M_SHA[$m]}" 2>&1)"; then
         echo "  + $m (${M_SHA[$m]:0:8})"
+        gated+=("$m")
+        continue
+      fi
+      if resolve_generated_conflicts "$TRAIN_WT"; then
+        echo "  + $m (${M_SHA[$m]:0:8}) — conflicts only in the baked devtour; regenerated"
         gated+=("$m")
         continue
       fi

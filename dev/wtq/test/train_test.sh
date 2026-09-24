@@ -324,6 +324,51 @@ check "exit 2" eq "$(rc_of x)" 2
 check "RESULT CONFLICT" eq "$(verdict x)" CONFLICT
 check "no gate ran" eq "$(gates)" ""
 
+echo "== conflict only in the baked devtour -> regenerated, GREEN"
+new_world devtour
+mkdir -p "$REPO/docs/devtour/org"
+printf 'bake0\n' > "$REPO/docs/devtour/index.html"; printf 'o0\n' > "$REPO/docs/devtour/org/a.org"
+printf 'src\n' > "$REPO/docs/devtour/tour.edn"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm "devtour baked"
+export WTQ_DEVTOUR_CMD="$T/devtour.sh"
+cat > "$WTQ_DEVTOUR_CMD" <<'EOS'
+#!/usr/bin/env bash
+printf 'rebaked\n' > docs/devtour/index.html
+printf 'rebaked\n' > docs/devtour/org/a.org
+EOS
+chmod +x "$WTQ_DEVTOUR_CMD"
+wt_main new d >/dev/null 2>&1
+printf 'bake-d\n' > "$WTQ_ROOT/d/docs/devtour/index.html"; printf 'o-d\n' > "$WTQ_ROOT/d/docs/devtour/org/a.org"
+printf 'd\n' > "$WTQ_ROOT/d/d.txt"
+git -C "$WTQ_ROOT/d" add -A && git -C "$WTQ_ROOT/d" commit -qm "feat: d re-bakes"
+printf 'bake-dev\n' > "$REPO/docs/devtour/index.html"; printf 'o-dev\n' > "$REPO/docs/devtour/org/a.org"
+git -C "$REPO" commit -qam "develop re-bakes"
+merge_bg d
+finish d
+check "GREEN" eq "$(verdict d)" GREEN
+check "the gate ran for d" eq "$(gates)" "d"
+check "develop carries the re-bake, not either side" eq "$(git -C "$REPO" show develop:docs/devtour/index.html)" "rebaked"
+check "and d's own change" on_develop d.txt
+check "the train log says it regenerated" eval "grep -q 'baked devtour; regenerated' '$Q'/logs/_train-*.log"
+
+echo "== conflict in the devtour SOURCE (tour.edn) -> still CONFLICT"
+new_world devtour-src
+mkdir -p "$REPO/docs/devtour"
+printf 'src\n' > "$REPO/docs/devtour/tour.edn"; printf 'bake0\n' > "$REPO/docs/devtour/index.html"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm "devtour"
+export WTQ_DEVTOUR_CMD="$T/devtour.sh"
+printf '#!/usr/bin/env bash\nprintf "rebaked\\n" > docs/devtour/index.html\n' > "$WTQ_DEVTOUR_CMD"; chmod +x "$WTQ_DEVTOUR_CMD"
+wt_main new e >/dev/null 2>&1
+printf 'src-e\n' > "$WTQ_ROOT/e/docs/devtour/tour.edn"; printf 'bake-e\n' > "$WTQ_ROOT/e/docs/devtour/index.html"
+git -C "$WTQ_ROOT/e" add -A && git -C "$WTQ_ROOT/e" commit -qm "feat: e edits the tour"
+printf 'src-dev\n' > "$REPO/docs/devtour/tour.edn"; printf 'bake-dev\n' > "$REPO/docs/devtour/index.html"
+git -C "$REPO" commit -qam "develop edits the tour"
+merge_bg e
+finish e
+check "CONFLICT (tour.edn is source, not a bake)" eq "$(verdict e)" CONFLICT
+check "no gate ran" eq "$(gates)" ""
+unset WTQ_DEVTOUR_CMD
+
 echo "== conflict only with a sibling -> deferred to the next train"
 new_world sibling
 feature x g.txt x; printf 'x\n' > "$WTQ_ROOT/x/BAD"; git -C "$WTQ_ROOT/x" add -A; git -C "$WTQ_ROOT/x" commit -qm bad

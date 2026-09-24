@@ -86,7 +86,12 @@ time are gated **together** (the bors-ng / GitHub-merge-queue shape):
    merges them one by one on top of the latest `develop` in its own reused
    worktree, `graphden-wt/_train` (branch `wtq-train`). A member that conflicts
    with `develop` itself is a **CONFLICT**; one that only conflicts with an
-   earlier member of the train is **deferred** to the next train.
+   earlier member of the train is **deferred** to the next train. A conflict
+   confined to the **baked devtour** (`docs/devtour/index.html`, `tour.eld`,
+   `org/*.org`) is not a conflict anyone decided: the train re-bakes them
+   with `bb devtour` from the merged sources and goes on (the gate's
+   `devtour-check` still verifies the bake). `tour.edn` is source — a
+   conflict there is still a CONFLICT.
 3. The gate runs **once** on the assembled train. Suites are skipped only if
    *every* member passed `--no-e2e` / `--no-fleet` / `--no-visual`; `--deploy`
    and `--release` apply if *any* member asked (the release runs once, after

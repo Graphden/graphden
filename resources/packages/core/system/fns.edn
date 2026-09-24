@@ -107,9 +107,17 @@
    :return-type :any}
 
   {:name :platform-owned-def-names
-   :description "Names among `fn-defs` whose deterministic (namespace, name) fn-id was written by the package sync this boot — the fns the editor's package-guard protects. One in-memory registry lookup per def, no storage read. Every write path that syncs a bundle by deterministic id (the MCP `upsert-fn-defs` tool, the registry's fork) consults it so the sync path is never a route around that protection. Lives in core because base-fn names are globally unique and both optional packages need it."
-   :args {:fn-defs {:type [:union :null [:list :keyword-map]] :description "Parsed fn-def maps (fns.edn shape); nil treated as empty."}}
-   :return-type [:list :text]}
+   :description "Names among `fn-defs` whose deterministic (namespace, name) fn-id was written by the package sync this boot — the fns the editor's package-guard protects. One in-memory registry lookup per def, no storage read. Every write path that syncs a bundle by deterministic id (the MCP `upsert-fn-defs` tool, the registry's fork and import) consults it so the sync path is never a route around that protection. Lives in core because both optional packages need it."
+   :parent :map
+   :args {:func {:parent :name
+                 :args {:value {:parent :get :args {:coll {:as :item} :key {:value :name}}}}}
+          :coll {:parent :filter
+                 :args {:pred :platform-owned-def?
+                        :coll {:parent :coalesce
+                               :args {:value {:as :fn-defs
+                                              :type [:union :null [:list :keyword-map]]
+                                              :description "Parsed fn-def maps (fns.edn shape); nil treated as empty."}
+                                      :default {:value []}}}}}}}
 
   {:name :platform-owned-def?
    :description "Is `fn-def`'s deterministic (namespace, name) fn-id package-synced this boot? The per-def form of `:platform-owned-def-names`, for filtering a bundle by IDENTITY — a user's `my.ns/port` shares only a bare name with the platform's `:port`."

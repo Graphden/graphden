@@ -555,7 +555,20 @@
                                   data-seq)]
           ;; Full resolved-view collision protection (advisory locks +
           ;; fn-name + list-item + override), mirroring the singular update.
-          (batch-collision-guard! st branch-id entity-name merged-shapes)
+          ;; Only rows whose update can MOVE a uniqueness key (rename, ns
+          ;; move, path re-point, position move) — the same rule as the
+          ;; singular update (`collision-writes`). A re-sync that only
+          ;; changes descriptions / values / effects locks and checks
+          ;; nothing: the boot sync used to take a collision lock per fn.
+          (batch-collision-guard! st branch-id entity-name
+                                  (into []
+                                        (keep-indexed
+                                          (fn [i merged]
+                                            (when (some true? (vals (collision-writes entity-name
+                                                                                      (nth data-seq i)
+                                                                                      merged)))
+                                              merged)))
+                                        merged-shapes))
           (do-update-writes! st config branch-id entity-name data-seq
                              current-by-id version-entity version-data-fields))))))
 

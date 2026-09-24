@@ -10,6 +10,7 @@
    surface a collision — plus the advisory-lock key builders (the lock
    ACQUISITION itself needs real SQL and is not unit-testable here)."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
@@ -467,7 +468,7 @@
 (deftest collision-lock-key-list-item-test
   (testing "a list item serializes on its owning binding"
     (let [bid (random-uuid)]
-      (is (= (str bid) (uniq/collision-lock-key "b1" :binding-list-item {:binding-id bid})))))
+      (is (= (str "item|" bid) (uniq/collision-lock-key "b1" :binding-list-item {:binding-id bid})))))
   (is (nil? (uniq/collision-lock-key "b1" :binding-list-item {:position 0}))))
 
 
@@ -498,6 +499,30 @@
       (is (= (uniq/advisory-key "fn|ns|name-1") (uniq/advisory-key "fn|ns|name-1"))))
     (testing "sorted, so two transactions never lock in opposite orders"
       (is (= (sort @issued) @issued)))))
+
+
+(deftest advisory-keys-stay-in-their-group-test
+  ;; Writes take their locks group by group — branch → row → collision —
+  ;; in separate statements; that order is what rules out a wait cycle. A
+  ;; key must therefore never share a lock with another group's key
+  ;; (a19696f6 folded every group into one bucket space and made
+  ;; row-then-collision vs collision-then-row a possible deadlock).
+  (let [ks (concat ["branch|b1" "branch|b2"]
+                   (uniq/row-lock-keys "b1" :fn (repeatedly 500 random-uuid))
+                   (map #(str "fn-name|ns|n" %) (range 3000))
+                   (map #(str "item|" %) (range 3000))
+                   (map #(str "resource-override-path|p" %) (range 3000)))
+        by-group (group-by #(first (str/split (uniq/advisory-key %) #"\\|" 2)) ks)]
+    (testing "every lock stays inside the key's own group"
+      (is (every? (fn [k]
+                    (= (first (str/split k #"\\|" 2))
+                       (first (str/split (uniq/advisory-key k) #"\\|" 2))))
+                  ks)))
+    (testing "branch and row keys pass through untouched"
+      (is (= "branch|b1" (uniq/advisory-key "branch|b1"))))
+    (testing "each collision group is bounded"
+      (doseq [g ["fn-name" "item" "resource-override-path"]]
+        (is (<= (count (set (map uniq/advisory-key (get by-group g)))) 256) g)))))
 
 
 (deftest xact-lock-without-connection-is-a-no-op-test

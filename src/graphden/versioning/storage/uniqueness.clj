@@ -18,6 +18,7 @@
    over the entities a merge SURFACES onto the target without a
    `core → merge → core` require cycle."
   (:require
+    [clojure.string :as str]
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.resolution :as res]))
@@ -319,7 +320,7 @@
    `branch-id` is kept in the signature for the callers' symmetry."
   [_branch-id entity-name row]
   (case entity-name
-    :binding-list-item (some-> (:binding-id row) str)
+    :binding-list-item (some->> (:binding-id row) (str "item|"))
     :fn (when (:name row)
           (str "fn-name|" (:namespace-id row) "|" (:name row)))
     :resource-override (when (:path row)
@@ -333,7 +334,7 @@
    many locks — each advisory lock takes a slot in Postgres' shared lock
    table (`max_locks_per_transaction` × connections); two rows sharing a
    bucket only queue behind each other."
-  256)
+  64)
 
 
 (defn row-lock-keys
@@ -349,28 +350,41 @@
 
 
 (def ^:private advisory-buckets
-  "How many advisory locks one transaction can take at most, whatever it
-   writes. Every key `xact-lock!` is handed maps onto one of these, because
-   each lock held takes a slot in Postgres' shared lock table
+  "How many locks one KEY GROUP can take in a transaction. Each advisory
+   lock held takes a slot in Postgres' shared lock table
    (`max_locks_per_transaction` × `max_connections`): the boot sync of
-   ~6000 platform fns in one transaction took one lock per name and ran a
-   managed Postgres out of it (`ERROR: out of shared memory`, prod deploy
+   ~6000 platform fns took one collision lock per name and ran a managed
+   Postgres out of it (`ERROR: out of shared memory`, prod deploy
    2026-09-24). Equal keys always share a bucket, so the serialization a
-   key promises holds; unrelated keys that share a bucket only queue."
+   key promises holds; unrelated keys of one group that share a bucket
+   only queue."
   256)
 
 
 (defn advisory-key
-  "The advisory lock `k` is taken under — its bucket (`advisory-buckets`).
-   Stable across JVMs (a string hash), so pods agree on it."
+  "The advisory lock `k` is taken under. Keys come in GROUPS — the text
+   before the first `|`: `branch`, `row`, `fn-name`, `item`,
+   `resource-override-path`. Every write takes its groups in one order —
+   branch → row → collision — and that order is what keeps two
+   transactions from waiting on each other in a cycle; so a key only ever
+   shares a lock with keys of ITS OWN group. `branch` and `row` keys are
+   already bounded (one per branch touched; `row-lock-keys` buckets per
+   branch and entity) and pass through; a collision key is folded into
+   `advisory-buckets` buckets of its group. Stable across JVMs (a string
+   hash), so pods agree on it."
   [k]
-  (str "gd-lock|" (mod (hash (str k)) advisory-buckets)))
+  (let [k (str k)
+        group (first (str/split k #"\|" 2))]
+    (if (#{"branch" "row"} group)
+      k
+      (str group "|" (mod (hash k) advisory-buckets)))))
 
 
 (defn xact-lock!
   "Take a transaction-scoped `pg_advisory_xact_lock` (released at commit /
-   rollback) on the bucket (`advisory-key`) of every key in `lock-keys`, in
-   ONE statement — at most `advisory-buckets` locks. Deadlock-free:
+   rollback) on the lock (`advisory-key`) of every key in `lock-keys`, in
+   ONE statement — at most `advisory-buckets` per collision group.
+   Deadlock-free within the statement:
    the keys are de-duplicated and SORTED, and every caller locks through
    here, so no two transactions can acquire an overlapping key set in
    opposite orders (`WITH ORDINALITY … ORDER BY` keeps the array order; a

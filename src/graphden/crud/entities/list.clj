@@ -147,6 +147,35 @@
     graph))
 
 
+(defn impl-visible?
+  "Would the installed view-impl filter show `fn-row`'s composition to the
+   current viewer? Probes the seam with a one-fn dump carrying one binding
+   of that fn: the filter drops a hidden fn's bindings, so a surviving
+   binding means visible. Always true with no filter installed. For reads
+   that answer about ONE fn's internals without shipping a graph dump
+   (`describe-fn`'s unread bindings)."
+  [fn-row]
+  (boolean (seq (:bindings (apply-view-impl-filter
+                             {:fns [fn-row] :bindings [{:fn-id (:id fn-row)}]})))))
+
+
+(defn- visible-subtree
+  "The five-table slice reachable from `root-id` AS THE CURRENT VIEWER MAY
+   SEE IT: the view-impl filter runs over the raw closure, then the closure
+   is re-walked over what survived. Stripping only after the walk (as the
+   whole-dump scopes do) would still ship every fn a hidden fn is BUILT
+   from — its helpers' names and, for the ones the viewer can see, their
+   full wiring — which is exactly the composition being concealed.
+   Identity-cheap when nothing is hidden: the filter hands back the same
+   map and the second walk is skipped."
+  [base root-id]
+  (let [raw (filter-graph-to-fn-ids base (subtree-fn-id-closure base root-id))
+        seen (apply-view-impl-filter raw)]
+    (if (identical? seen raw)
+      raw
+      (filter-graph-to-fn-ids seen (subtree-fn-id-closure seen root-id)))))
+
+
 (def ^:private light-fn-fields
   "The per-fn columns the editor's sidebar / picker / search views
    actually read. Every other column (slots, bindings, and the bulk of
@@ -787,9 +816,8 @@
    reverse-ref counts (the graph-view delete/edit gate reads them off
    the fn row) and `:type-error-count` where diagnostics exist."
   [{:keys [base roled-fns rev-index diag-counts namespaces]} root-id]
-  (let [closure (subtree-fn-id-closure base root-id)
-        roled-by-id (into {} (map (juxt :id identity)) @roled-fns)
-        sub (filter-graph-to-fn-ids base closure)
+  (let [roled-by-id (into {} (map (juxt :id identity)) @roled-fns)
+        sub (visible-subtree base root-id)
         sub-roled-fns (mapv (fn [f]
                               (let [row (with-ref-counts @rev-index
                                           (or (get roled-by-id (:id f)) f))

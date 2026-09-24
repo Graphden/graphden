@@ -799,6 +799,7 @@
 ;; and clears it on halt.
 (def view-impl-filter          entity-list/view-impl-filter)
 (def apply-view-impl-filter    entity-list/apply-view-impl-filter)
+(def impl-visible?             entity-list/impl-visible?)
 (def graph-tree                entity-list/graph-tree)
 (def graph-namespace-fns       entity-list/graph-namespace-fns)
 (def graph-search              entity-list/graph-search)

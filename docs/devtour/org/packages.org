@@ -266,26 +266,26 @@ The EDN-TEXT boundary is the one place those unspellable keywords break, so exac
 :PROPERTIES:
 :CUSTOM_ID: packages/external-deps
 :FILE: src/graphden/packages/export.clj
-:LINE: 862
+:LINE: 876
 :MINS: 5.1
 :END:
 
 Scoped export: a namespace SUBTREE becomes a publishable bundle — fns under the root are the package's content, and this analysis pass turns refs pointing OUT of the subtree into its declared ~:dependencies~ (what install must already have) plus the ~:package-dependencies~ those refs' ~@~-versioned namespaces map to. The bundle ASSEMBLY around it is graph composition — the ~:export-namespace~ fn-def in registry/registry/fns.edn. This is the unit the in-graph registry versions.
 
-- source :: [[file:../../../src/graphden/packages/export.clj::(defn external-deps][src/graphden/packages/export.clj:862]]
+- source :: [[file:../../../src/graphden/packages/export.clj::(defn external-deps][src/graphden/packages/export.clj:876]]
 - same file :: [[file:packages.org::#packages/records->fn-defs][records->fn-defs]], [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/strip-secret-paths][strip-secret-paths]]
 
 * 21. strip-secret-paths
 :PROPERTIES:
 :CUSTOM_ID: packages/strip-secret-paths
 :FILE: src/graphden/packages/export.clj
-:LINE: 718
+:LINE: 732
 :MINS: 2.0
 :END:
 
 The share-safety policy: vault paths are STRIPPED from bundles by default (the slot stays a free ~[:secret :text]~ arg) and the ~:secrets~ manifest lists what was affected — the publisher sees the warning, the installer gets a ~:needs-definition~ todo. A bundle is deliberately not a full copy of your secrets.
 
-- source :: [[file:../../../src/graphden/packages/export.clj::(defn strip-secret-paths][src/graphden/packages/export.clj:718]]
+- source :: [[file:../../../src/graphden/packages/export.clj::(defn strip-secret-paths][src/graphden/packages/export.clj:732]]
 - same file :: [[file:packages.org::#packages/records->fn-defs][records->fn-defs]], [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/external-deps][external-deps]]
 
 * 22. publish-package-apply

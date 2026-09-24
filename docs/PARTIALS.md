@@ -430,7 +430,7 @@ panels. 32 partials, by consumer surface:
 | `:partial-merge-conflicts`           | POST /partials/merge-conflicts                            | editor-branches.js (conflict modal) |
 | `:partial-mismatch-explainer`        | GET /partials/mismatch-explainer?binding-id= + optional item-id   | editor-mismatch-explainer.js |
 | `:partial-provenance`                | GET /partials/provenance?binding-id= + optional item-id (public)  | editor-provenance-popover.js |
-| `:partial-return-type-rule`          | GET /partials/return-type-rule?fn= (public)               | editor-provenance-popover.js (Type-rule popover) |
+| `:partial-return-type-rule`          | GET /partials/return-type-rule?fn-id= (public)            | editor-provenance-popover.js (Type-rule popover) |
 | `:partial-inspector-detail`          | GET /partials/inspector-detail?fn-id= (public — projects structure already readable via /api/graph/entities) | editor-shell.js (inspector Bindings tab) |
 | `:partial-inspector-overview`        | GET /partials/inspector-overview?fn-id= (public — same rationale as inspector-detail) | editor-inspector.js (inspector Overview tab, `gdLoadInspectorOverview` + `formatServerTypeTexts` post-pass) |
 | `:partial-settings-build`            | GET /partials/settings-build (public — same facts as /version) | editor-shell.js (Settings "About this build" hash rows) |

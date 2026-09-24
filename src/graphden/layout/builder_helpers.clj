@@ -862,13 +862,21 @@
 
 
 (defn resolve-type-ref
-  "Resolve a type-form reference (a `:constraint`-vector element) to a
-   fn-id. Named primitives / aliases resolve via `fn-by-name`; nested
-   vectors are anonymous and skipped — they'll surface inline at a
-   later iteration."
-  [fn-by-name form]
+  "Resolve a type-form reference (a `:constraint`-vector element of the
+   type-row `owner`) to a fn-id. A name the graph holds once resolves to
+   that row. A name several namespaces define resolves to the one in
+   `owner`'s own namespace, else to the lone root-namespace (platform)
+   row — never to whichever row a last-write-wins name index kept, which
+   drew an edge to an unrelated fn. Still ambiguous → nil (no edge rather
+   than a wrong one). Nested vectors are anonymous and skipped — they'll
+   surface inline at a later iteration."
+  [{:keys [fns-by-name]} owner form]
   (when (keyword? form)
-    (:id (get fn-by-name form))))
+    (let [cands (get fns-by-name (keyword (name form)))
+          only (fn [rows] (when (= 1 (count rows)) (:id (first rows))))]
+      (or (only cands)
+          (only (filter #(= (:namespace-id owner) (:namespace-id %)) cands))
+          (only (filter #(nil? (:namespace-id %)) cands))))))
 
 
 (defn emit-type-row-internal-edge!
@@ -900,7 +908,7 @@
    edges (records render via their own fn-slots; primitives are
    leaves; composed/base-fns flow through the normal pipeline)."
   [state lookups root-fn-id node-id]
-  (let [{:keys [fn-map fn-by-name fn-slots-by-fn]} lookups
+  (let [{:keys [fn-map fn-slots-by-fn]} lookups
         f (get fn-map root-fn-id)
         has-slots? (boolean (seq (get fn-slots-by-fn root-fn-id)))
         role (when f (type-row-role f has-slots?))
@@ -917,14 +925,14 @@
       :union
       (doseq [[idx form] (map-indexed vector (rest (:constraint f)))]
         (emit-type-row-internal-edge!
-          state lookups node-id (resolve-type-ref fn-by-name form)
+          state lookups node-id (resolve-type-ref lookups f form)
           (edge-id (str "union-" idx)) ""))
 
       :variant
       (doseq [[idx [tag form]] (map-indexed vector
                                             (partition 2 (rest (:constraint f))))]
         (emit-type-row-internal-edge!
-          state lookups node-id (resolve-type-ref fn-by-name form)
+          state lookups node-id (resolve-type-ref lookups f form)
           (edge-id (str "variant-" idx))
           (str tag)))
 

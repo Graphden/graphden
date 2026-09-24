@@ -2,8 +2,8 @@
   "Executes the `/partials/return-type-rule` graph chain end-to-end —
    `:_partial-rtr-handler` against a golden-DB bootstrap. Covers the
    three response shapes: rule-owner found (intro + narrative +
-   Inputs), no rule-owning ancestor (hidden body), unknown fn name
-   (hidden body). The `:fix` rule-owner walk and the narrative lookup
+   Inputs), no rule-owning ancestor (hidden body), unknown or
+   malformed fn id (hidden body). The `:fix` rule-owner walk and the narrative lookup
    both run for real here; the sibling EDN-level coverage lives in
    `graphden.packages.app.rule-narratives-test`."
   (:require
@@ -17,10 +17,12 @@
 
 
 (defn- render-partial
-  "Run the handler with `?fn=<name>` and return the response body."
-  [fn-name]
+  "Run the handler with `?fn-id=<id>` and return the response body. By
+   id: a bare name can live in several namespaces, and the partial used
+   to explain whichever fn the name view picked."
+  [fn-id]
   (let [resp (ga/exec-handler :_partial-rtr-handler
-                              {:query-params {"fn" fn-name}})]
+                              {:query-params {"fn-id" (str fn-id)}})]
     (is (= 200 (:status resp)) "handler responds 200")
     (:body resp)))
 
@@ -29,7 +31,7 @@
   ;; `:_fibn-where` (app/lookups) has `:parent :assoc` — its
   ;; primary-parent chain reaches `:assoc`'s :return-type-rule in one
   ;; hop, so the popover attributes the computed return type to it.
-  (let [body (render-partial "_fibn-where")]
+  (let [body (render-partial (ga/fn-id :_fibn-where))]
     (testing "header + intro"
       (is (str/includes? body "Type rule"))
       (is (str/includes? body "provenance-popover-intro"))
@@ -53,13 +55,13 @@
   ;; `:add` is a base-fn — no primary parent at all, so no owner. The
   ;; body collapses to a hidden span; the JS caller probes for
   ;; `.provenance-popover-intro` and skips showing.
-  (let [body (render-partial "add")]
+  (let [body (render-partial (ga/fn-id :add))]
     (is (str/includes? body "Type rule") "header still renders")
     (is (not (str/includes? body "provenance-popover-intro"))
         "no intro marker → JS won't show the popover")))
 
 
-(deftest unknown-fn-name
-  (let [body (render-partial "no-such-fn-name-xyz")]
-    (is (not (str/includes? body "provenance-popover-intro"))
-        "unknown name degrades to the hidden-body shape")))
+(deftest unknown-or-malformed-fn-id
+  (doseq [id [(random-uuid) "not-a-uuid" "_fibn-where"]]
+    (is (not (str/includes? (render-partial id) "provenance-popover-intro"))
+        (str (pr-str id) " degrades to the hidden-body shape — a name is not accepted"))))

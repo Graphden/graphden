@@ -289,6 +289,37 @@
       (finally (sp/close storage)))))
 
 
+(deftest removal-whose-bare-name-lives-in-two-other-namespaces-is-purged
+  ;; Regression: the pre-existing same-name fns counted as move candidates,
+  ;; so with TWO of them the removed fn was "ambiguous" — never purged,
+  ;; and every boot logged `:ambiguous-move-target`. Pre-existing rows are
+  ;; not where it moved; with none left it is a plain removal.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [pkgd (ns-row! storage "pkgd" nil)
+            mx (ns-row! storage "pkgd.x" (:id pkgd))
+            my (ns-row! storage "pkgd.y" (:id pkgd))
+            mz (ns-row! storage "pkgd.z" (:id pkgd))
+            mk! (fn [path ns-row]
+                  (let [id (records/fn-id path :trifoo)]
+                    (sp/create-entity storage :fn {:id id :name "trifoo"
+                                                   :namespace-id (:id ns-row)
+                                                   :parent-ids []})
+                    id))
+            removed-id (mk! "pkgd.x" mx)
+            y-id (mk! "pkgd.y" my)
+            z-id (mk! "pkgd.z" mz)]
+        (pkg-sync/reconcile-moved-identities!
+          storage {:packages [{:name "pkgd"}]}
+          [{:name "trifoo" :id y-id} {:name "trifoo" :id z-id}]
+          {:preexisting-fn-ids #{removed-id y-id z-id}})
+        (is (nil? (sp/read-entity storage :fn removed-id))
+            "the unreferenced removal is purged")
+        (is (some? (sp/read-entity storage :fn y-id)))
+        (is (some? (sp/read-entity storage :fn z-id))))
+      (finally (sp/close storage)))))
+
+
 (deftest retired-chain-with-own-type-slot-purges-fully
   ;; A retired section whose slot is TYPED by its own type-row: the
   ;; slot has no owning fn (external by naive attribution), but every

@@ -118,7 +118,7 @@
    hide the metadata strips — still show and set the flag."
   [fn-id]
   (when fn-id
-    (let [fns-by-id (into {} (map (juxt :id identity)) (:fns (load-graph-entities ctx)))
+    (let [fns-by-id (:fn-map (lgraph/cached-build-lookups (load-graph-entities ctx)))
           seed (branch-local/branch-local-seed fns-by-id fn-id)]
       (when seed
         {:own (= (:id seed) fn-id) :seed (:name seed)}))))
@@ -134,20 +134,19 @@
   [fn-id]
   (when fn-id
     (let [lookups (lgraph/cached-build-lookups (load-graph-entities ctx))
-          {:keys [arg-map slot-map]} lookups]
+          {:keys [args-by-fn slot-map]} lookups]
       (into {}
-            (keep (fn [[aid arg]]
-                    (when (= fn-id (:fn-id arg))
-                      (let [seals (bh/edge-seal-fields lookups aid)
-                            slot (get slot-map (:slot-id arg))
-                            optional? (false? (:required slot))]
-                        (when (or (seq seals) optional?)
-                          [(keyword (or (:name arg) (:name slot)))
-                           (cond-> {:optional? optional? :note (seal-note seals optional?)}
-                             (:sealedByName seals) (assoc :sealed-by (:sealedByName seals))
-                             (:listClosedByName seals) (assoc :list-closed-by (:listClosedByName seals))
-                             (:requiredByName seals) (assoc :required-by (:requiredByName seals)))])))))
-            arg-map))))
+            (keep (fn [arg]
+                    (let [seals (bh/edge-seal-fields lookups (:id arg))
+                          slot (get slot-map (:slot-id arg))
+                          optional? (false? (:required slot))]
+                      (when (or (seq seals) optional?)
+                        [(keyword (or (:name arg) (:name slot)))
+                         (cond-> {:optional? optional? :note (seal-note seals optional?)}
+                           (:sealedByName seals) (assoc :sealed-by (:sealedByName seals))
+                           (:listClosedByName seals) (assoc :list-closed-by (:listClosedByName seals))
+                           (:requiredByName seals) (assoc :required-by (:requiredByName seals)))]))))
+            (get args-by-fn fn-id)))))
 
 
 (def impls

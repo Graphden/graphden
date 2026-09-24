@@ -861,31 +861,32 @@
                          (= (:id row)
                             (records/fn-id path (keyword (:name row)))))]
           row)
-        not-a-move? (fn [row]
-                      (let [cs (get synced-by-name (:name row))]
-                        (or (anon-name? row)
-                            (empty? cs)
-                            (and (= 1 (count cs)) (some? preexisting)
-                                 (contains? preexisting (:id (first cs)))))))
+        ;; A leftover's move TARGETS: the same-named synced rows this sync
+        ;; created. A candidate that PRE-DATES this sync is an unrelated
+        ;; fn of the same bare name in another namespace, not where this
+        ;; one moved — drop those first, then 0 → removal, 1 → move,
+        ;; >1 → ambiguous. (Counting them used to leave a removed fn whose
+        ;; bare name lives in 2+ other namespaces unpurged forever, with
+        ;; an `:ambiguous-move-target` warning on every boot.) `nil`
+        ;; preexisting = unknown → every candidate counts.
+        move-candidates (fn [row]
+                          (if (anon-name? row)
+                            []
+                            (cond->> (get synced-by-name (:name row))
+                              (some? preexisting)
+                              (filterv #(not (contains? preexisting (:id %)))))))
+        not-a-move? (fn [row] (empty? (move-candidates row)))
         removals (filterv not-a-move? leftovers)
         plan (volatile! {:moves [] :purgeable [] :kept []})]
     ;; MOVES are batched: one repoint pass over the ref surface with
     ;; the whole old→new map + one table-scan purge cascade — a bulk
     ;; namespace relocation used to pay a full repoint scan PER moved
     ;; fn (the same N-scans shape as the removal blowup).
-    (let [move-row? (fn [row]
-                      (let [cs (get synced-by-name (:name row))]
-                        (and (not (anon-name? row))
-                             (= 1 (count cs))
-                             (or (nil? preexisting)
-                                 (not (contains? preexisting
-                                                 (:id (first cs))))))))
+    (let [move-row? (fn [row] (= 1 (count (move-candidates row))))
           moves (filterv move-row? leftovers)]
       (when (seq moves)
         (let [old->new (into {}
-                             (map (fn [row]
-                                    [(:id row)
-                                     (:id (first (get synced-by-name (:name row))))]))
+                             (map (fn [row] [(:id row) (:id (first (move-candidates row)))]))
                              moves)]
           (log/info (if dry-run?
                       "DRY RUN — would reconcile moved package identities"
@@ -901,11 +902,11 @@
                                                    (:id row))))))
       (doseq [row leftovers
               :when (not (move-row? row))]
-        (let [candidates (get synced-by-name (:name row))]
-          ;; >1 same-name candidates — a move we cannot resolve
-          ;; safely. THE signal this reconciler exists for. A
-          ;; 1-candidate row whose candidate PRE-DATES this sync is
-          ;; not warned here — it falls into the removal set below.
+        (let [candidates (move-candidates row)]
+          ;; >1 same-name candidates created by this sync — a move we
+          ;; cannot resolve safely. THE signal this reconciler exists
+          ;; for. Pre-existing same-name fns are not candidates; a row
+          ;; left with none falls into the removal set below.
           (when (> (count candidates) 1)
             (log/warn "package identity leftover NOT auto-reconciled"
                       {:name (:name row) :id (:id row)

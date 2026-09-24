@@ -240,3 +240,23 @@
   (testing "`:type` is the fallback, and never overrides an explicit :arg-type"
     (is (= {:argType "int"} (bh/arg-row->node-id-fields {:type :int})))
     (is (= {:argType "text"} (bh/arg-row->node-id-fields {:arg-type :text :type :int})))))
+
+
+(deftest resolve-type-ref-never-picks-an-unrelated-namespace-twin
+  ;; Regression: a last-write-wins name index sent a union/variant branch
+  ;; edge to whichever same-named row it kept — an unrelated fn in another
+  ;; namespace.
+  (let [ns-a (random-uuid) ns-b (random-uuid)
+        mine {:id (random-uuid) :name "shape" :namespace-id ns-a}
+        theirs {:id (random-uuid) :name "shape" :namespace-id ns-b}
+        int-row {:id (random-uuid) :name "int" :namespace-id nil}
+        by-name {:fns-by-name {:shape [theirs mine] :int [int-row]}}
+        owner {:id (random-uuid) :name "u" :namespace-id ns-a}]
+    (testing "a unique name resolves to its row"
+      (is (= (:id int-row) (bh/resolve-type-ref by-name owner :int))))
+    (testing "a duplicated name resolves to the owner's own namespace"
+      (is (= (:id mine) (bh/resolve-type-ref by-name owner :shape))))
+    (testing "still ambiguous → no edge rather than a wrong one"
+      (is (nil? (bh/resolve-type-ref by-name {:namespace-id (random-uuid)} :shape))))
+    (testing "nested forms are skipped"
+      (is (nil? (bh/resolve-type-ref by-name owner [:list :int]))))))

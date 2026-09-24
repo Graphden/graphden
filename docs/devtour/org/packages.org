@@ -213,13 +213,13 @@ Closes the loop into storage: take the collected namespace paths, build the ~cor
 :PROPERTIES:
 :CUSTOM_ID: packages/sync-fn-entities-from-packages!
 :FILE: src/graphden/packages/sync.clj
-:LINE: 1022
+:LINE: 1023
 :MINS: 11.4
 :END:
 
 The other half of every boot, and the one the loader hands off to: sync composed fn-defs to storage, heal namespace-moved identities and reap retired ones nothing live references (~_anon-*~ shapes included; ~{:dry-run? true}~ previews the plan from a REPL), seed each fn-def's rich-type, then run the topological type-check sweep. Read the two long comments — the batch-size binding (a fresh-DB boot writes >10k fn rows past the guard meant for USER writes) and ~:skip-type-check?~ (~15s of sweep the test bootstrap may opt out of, production never does — which is precisely why ~bb type-sweep~ exists: EVERY fixture opts out, so before that check a corpus type regression surfaced only when a real instance booted). This is declarative sync: the packages on disk are the desired state, storage is reconciled toward it.
 
-- source :: [[file:../../../src/graphden/packages/sync.clj::(defn sync-fn-entities-from-packages!][src/graphden/packages/sync.clj:1022]]
+- source :: [[file:../../../src/graphden/packages/sync.clj::(defn sync-fn-entities-from-packages!][src/graphden/packages/sync.clj:1023]]
 - see also :: [[file:types.org::#types/check-all-defs!][check-all-defs!]], [[file:versioning.org::#versioning/repoint-refs!][repoint-refs!]]
 - same file :: [[file:packages.org::#packages/adopt-bundle-identities!][adopt-bundle-identities!]], [[file:packages.org::#packages/reconcile-bundle-scope!][reconcile-bundle-scope!]]
 - referenced from :: [[file:boot.org::#boot/packages][packages]]
@@ -228,13 +228,13 @@ The other half of every boot, and the one the loader hands off to: sync composed
 :PROPERTIES:
 :CUSTOM_ID: packages/records->fn-defs
 :FILE: src/graphden/packages/export.clj
-:LINE: 562
+:LINE: 555
 :MINS: 1.9
 :END:
 
 The loader's INVERSE: typed graph records back to fns.edn-shaped fn-def maps. Everything distribution-shaped (publish, install, whole-graph download) rides this, and its contract is a fixpoint — ~parse(export(parse(x))) == parse(x)~ — pinned by the corpus-fixpoint test over the real core/web/app packages. Read it as ~process-module~ run backwards.
 
-- source :: [[file:../../../src/graphden/packages/export.clj::(defn records->fn-defs][src/graphden/packages/export.clj:562]]
+- source :: [[file:../../../src/graphden/packages/export.clj::(defn records->fn-defs][src/graphden/packages/export.clj:555]]
 - same file :: [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/external-deps][external-deps]], [[file:packages.org::#packages/strip-secret-paths][strip-secret-paths]]
 
 * 18. ref-kw
@@ -266,26 +266,26 @@ The EDN-TEXT boundary is the one place those unspellable keywords break, so exac
 :PROPERTIES:
 :CUSTOM_ID: packages/external-deps
 :FILE: src/graphden/packages/export.clj
-:LINE: 869
+:LINE: 862
 :MINS: 5.1
 :END:
 
 Scoped export: a namespace SUBTREE becomes a publishable bundle — fns under the root are the package's content, and this analysis pass turns refs pointing OUT of the subtree into its declared ~:dependencies~ (what install must already have) plus the ~:package-dependencies~ those refs' ~@~-versioned namespaces map to. The bundle ASSEMBLY around it is graph composition — the ~:export-namespace~ fn-def in registry/registry/fns.edn. This is the unit the in-graph registry versions.
 
-- source :: [[file:../../../src/graphden/packages/export.clj::(defn external-deps][src/graphden/packages/export.clj:869]]
+- source :: [[file:../../../src/graphden/packages/export.clj::(defn external-deps][src/graphden/packages/export.clj:862]]
 - same file :: [[file:packages.org::#packages/records->fn-defs][records->fn-defs]], [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/strip-secret-paths][strip-secret-paths]]
 
 * 21. strip-secret-paths
 :PROPERTIES:
 :CUSTOM_ID: packages/strip-secret-paths
 :FILE: src/graphden/packages/export.clj
-:LINE: 725
+:LINE: 718
 :MINS: 2.0
 :END:
 
 The share-safety policy: vault paths are STRIPPED from bundles by default (the slot stays a free ~[:secret :text]~ arg) and the ~:secrets~ manifest lists what was affected — the publisher sees the warning, the installer gets a ~:needs-definition~ todo. A bundle is deliberately not a full copy of your secrets.
 
-- source :: [[file:../../../src/graphden/packages/export.clj::(defn strip-secret-paths][src/graphden/packages/export.clj:725]]
+- source :: [[file:../../../src/graphden/packages/export.clj::(defn strip-secret-paths][src/graphden/packages/export.clj:718]]
 - same file :: [[file:packages.org::#packages/records->fn-defs][records->fn-defs]], [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/external-deps][external-deps]]
 
 * 22. publish-package-apply
@@ -405,10 +405,10 @@ The graph's own linter, run over the same loader output at CI time (~bb graph-li
 :PROPERTIES:
 :CUSTOM_ID: packages/lint-branch
 :FILE: src/graphden/lint/graph.clj
-:LINE: 323
-:MINS: 2.3
+:LINE: 357
+:MINS: 2.4
 :END:
 
 The editor's side of the same engine: the per-ctx graph snapshot (org-sliced, branch-resolved) is rebuilt into loader-shaped fn-defs and linted, memoised per branch while that branch's snapshot object is unchanged. The ⚐ lint chip and the Inspector's Lint section share this one call; the suppressions it subtracts live in the graph as a ~:const~.
 
-- source :: [[file:../../../src/graphden/lint/graph.clj::(defn lint-branch][src/graphden/lint/graph.clj:323]]
+- source :: [[file:../../../src/graphden/lint/graph.clj::(defn lint-branch][src/graphden/lint/graph.clj:357]]

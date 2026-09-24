@@ -85,6 +85,30 @@
           "the cache itself keeps the FULL graph — slicing is per read"))))
 
 
+(deftest cached-or-load-graph-slice-is-stable-per-snapshot-and-org
+  ;; Every tenant read used to re-filter the whole graph into a NEW
+  ;; object, so identity-keyed memos downstream (layout lookups, the lint
+  ;; memo) never hit for tenants — POST /api/graph/layout re-derived the
+  ;; whole graph on every expansion.
+  (let [cache (atom full-graph)
+        ctx {:graph-cache cache}
+        read-as (fn [org] (tctx/with-org org (ta/cached-or-load-graph ctx)))
+        first-read (read-as "bcorp")]
+    (testing "the same snapshot + org yields the SAME slice object"
+      (is (identical? first-read (read-as "bcorp"))))
+    (testing "another org gets its own slice"
+      (is (= #{"public-fn" "acme-secret-pipeline"}
+             (into #{} (map :name) (:fns (read-as "acme")))))
+      (is (identical? first-read (read-as "bcorp"))
+          "a second org does not evict the first"))
+    (testing "a new snapshot (a write replaced it) is re-sliced"
+      (reset! cache (update full-graph :fns conj
+                            {:id (UUID/randomUUID) :name "bcorp-new-fn" :org-id "bcorp"}))
+      (let [after (read-as "bcorp")]
+        (is (not (identical? first-read after)))
+        (is (contains? (into #{} (map :name) (:fns after)) "bcorp-new-fn"))))))
+
+
 (deftest sidebar-scopes-respect-org-visibility
   ;; the `graph-*` reads take `base` off the cache; these pin the
   ;; two enumeration scopes a tenant hits on every editor init.

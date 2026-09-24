@@ -694,15 +694,14 @@
         (is (= {:value :kw :literal true}
                (entities/resolve-sequence-payload storage {:value ":kw"}))))
 
-      (testing ":ref-name resolves through storage; unknown name throws"
-        (let [f (setup/create-base-fn! storage "rsp-target")]
-          (is (= {:ref-fn-id (:id f)}
-                 (entities/resolve-sequence-payload storage {:ref-name "rsp-target"})))
-          (is (thrown? clojure.lang.ExceptionInfo
-                (entities/resolve-sequence-payload
-                  storage {:ref-name "rsp-missing"})))))
+      (testing "a bare :ref-name is refused — it resolved to an arbitrary
+                fn when the name lives in several namespaces"
+        (setup/create-base-fn! storage "rsp-target")
+        (let [ex (try (entities/resolve-sequence-payload storage {:ref-name "rsp-target"})
+                      (catch clojure.lang.ExceptionInfo e e))]
+          (is (= :sequence-op/invalid-body (:type (ex-data ex))))))
 
-      (testing "a body with none of :ref / :ref-name / :value throws"
+      (testing "a body with neither :ref nor :value throws"
         (is (thrown? clojure.lang.ExceptionInfo
               (entities/resolve-sequence-payload storage {}))))
       (finally (sp/close storage)))))

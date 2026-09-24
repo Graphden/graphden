@@ -207,16 +207,22 @@
                  :duration-ms-sum dur}))
             (jdbc/execute!
               pool
-              [(str "SELECT s.fn_id,"
-                    " f.name AS fn_name,"
+              ;; The name comes from the fn's NEWEST version: the `fn` identity
+              ;; row keeps the name the fn was CREATED with, so a renamed fn
+              ;; showed its original name. Usage rows carry no branch, so the
+              ;; newest rename wins.
+              [(str "SELECT t.fn_id, t.runs, t.failed, t.duration_ms_sum,"
+                    " (SELECT fv.name FROM \"fn_version\" fv WHERE fv.fn_id = t.fn_id"
+                    "  ORDER BY fv.created_at DESC LIMIT 1) AS fn_name"
+                    " FROM (SELECT s.fn_id,"
                     " coalesce(sum(s.count), 0) AS runs,"
                     " coalesce(sum(s.count) FILTER (WHERE s.status = 'failed'), 0) AS failed,"
                     " coalesce(sum(s.duration_ms_sum), 0) AS duration_ms_sum"
                     " FROM \"usage_stat\" s"
-                    " LEFT JOIN \"fn\" f ON f.id = s.fn_id"
                     " WHERE s.org_id = ?"
                     " AND s.bucket_start >= now() - make_interval(days => ?)"
-                    " GROUP BY s.fn_id, f.name ORDER BY runs DESC LIMIT ?")
+                    " GROUP BY s.fn_id ORDER BY runs DESC LIMIT ?) t"
+                    " ORDER BY t.runs DESC")
                (or org "public") (int (or days 7)) (int (or limit 20))]
               {:builder-fn rs/as-unqualified-lower-maps})))))
 

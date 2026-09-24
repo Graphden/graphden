@@ -92,8 +92,11 @@
   "Parses a sequence-op JSON body into the `binding-list-item` shape.
    Body shapes:
      {\"ref\":  \"fn-uuid-string\"}
-     {\"ref-name\": \"my-fn\"}
      {\"value\": <any JSON>}
+
+   There is no by-name form: a bare name can live in several namespaces,
+   and resolving it to \"the first match\" appended an arbitrary fn. The
+   editor always holds the id.
 
    A `\":foo\"`-shaped value string is the wire form of a keyword
    literal (JSON has no keyword type) — restore the keyword and set
@@ -101,25 +104,19 @@
    `{:value :kw}` item. Without the flag a read would re-emit the
    keyword colon-stripped and the editor would mis-type it as plain
    text. (The storage `:literal` column disambiguates keyword
-   literals from string text on read-back.)"
-  [storage body]
+   literals from string text on read-back.) `_storage` is unused since
+   the by-name form went; the arity stays for the callers."
+  [_storage body]
   (cond
     (contains? body :ref)
     ;; `:ref` is UNTRUSTED client JSON — a non-UUID string (or a
     ;; number / nested object the JSON decoder produced) must not
     ;; bubble a bare `IllegalArgumentException` up as a 500. Coerce
-    ;; through the soft parser and raise a mapped 400 on failure,
-    ;; matching the `:ref-name`-not-found branch below.
+    ;; through the soft parser and raise a mapped 400 on failure.
     {:ref-fn-id (or (request/parse-uuid-or-clear (:ref body))
                     (throw (ex-info (str "Invalid :ref UUID: " (pr-str (:ref body)))
                                     {:type :validation-error/invalid-uuid
                                      :ref (:ref body)})))}
-
-    (contains? body :ref-name)
-    (if-let [target (first (sp/query-entities storage :fn {:name (:ref-name body)}))]
-      {:ref-fn-id (:id target)}
-      (throw (ex-info (str "Fn not found by name: " (:ref-name body))
-                      {:type :sequence-op/fn-not-found :ref-name (:ref-name body)})))
 
     (contains? body :value)
     (let [v (:value body)]
@@ -128,7 +125,7 @@
         {:value v}))
 
     :else
-    (throw (ex-info "Sequence op body requires :ref, :ref-name, or :value"
+    (throw (ex-info "Sequence op body requires :ref (a fn id) or :value"
                     {:type :sequence-op/invalid-body :body body}))))
 
 

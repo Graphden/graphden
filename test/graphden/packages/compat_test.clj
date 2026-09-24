@@ -3,7 +3,9 @@
    exported fn-def maps."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.packages.compat :as compat]))
+    [graphden.packages.compat :as compat]
+    [graphden.packages.export :as export]
+    [graphden.packages.records.parse :as parse]))
 
 
 (defn- kinds
@@ -72,6 +74,11 @@
     (is (= [[:arg-narrowed :hello :n]]
            (kinds [{:name :hello :namespace "pkg" :parent :greet :args {:n {:type :int} :loud {:as :loud :required false}}}]
                   [{:name :hello :namespace "pkg" :parent :greet :args {:n {:type [:refine :int [:> 0]]} :loud {:as :loud}}}]))))
+  (testing "dropping a no-op `{:as k}` / metadata-only override leaves the arg as free as before"
+    (is (= [] (compat/breaking-changes
+                [{:name :hello :namespace "pkg" :parent :greet
+                  :args {:who {:as :who} :loud {:as :loud :type :bool} :n {:as :n :required true}}}]
+                [{:name :hello :namespace "pkg" :parent :greet :args {}}]))))
   (testing "role flip"
     (is (= [[:role-changed :hello nil]]
            (kinds [{:name :hello :namespace "pkg" :parent :greet :args {}}]
@@ -86,13 +93,31 @@
 
 
 (deftest added-effects-and-incompatible-dependency-bumps-are-breaking
-  (testing "a base-fn that starts declaring an effect breaks a restricted-tier consumer; dropping one does not"
+  (testing "a fn that starts declaring an effect breaks a restricted-tier consumer; dropping one does not"
+    ;; `:expects-effects` is the key the exporter writes — the rule used to
+    ;; read `:effects`, which no exported bundle carries, so it never fired.
     (is (= [[:effect-added :fetch nil]]
-           (kinds [{:name :fetch :namespace "pkg" :args {:u :text} :return-type :text :effects #{:network}}]
-                  [{:name :fetch :namespace "pkg" :args {:u :text} :return-type :text :effects #{:network :db}}])))
+           (kinds [{:name :fetch :namespace "pkg" :args {:u :text} :return-type :text :expects-effects [:network]}]
+                  [{:name :fetch :namespace "pkg" :args {:u :text} :return-type :text :expects-effects [:network :db]}])))
     (is (= [] (compat/breaking-changes
-                [{:name :fetch :namespace "pkg" :args {:u :text} :return-type :text :effects #{:network :db}}]
-                [{:name :fetch :namespace "pkg" :args {:u :text} :return-type :text :effects #{:network}}]))))
+                [{:name :fetch :namespace "pkg" :args {:u :text} :return-type :text :expects-effects [:network :db]}]
+                [{:name :fetch :namespace "pkg" :args {:u :text} :return-type :text :expects-effects [:network]}]))))
+  (testing "a composed fn-def's contract grows, or is dropped altogether"
+    (is (= [[:effect-added :hello nil]]
+           (kinds [{:name :hello :namespace "pkg" :parent :greet :args {} :expects-effects []}]
+                  [{:name :hello :namespace "pkg" :parent :greet :args {} :expects-effects [:network]}])))
+    (is (= [[:effect-added :hello nil]]
+           (kinds [{:name :hello :namespace "pkg" :parent :greet :args {} :expects-effects []}]
+                  [{:name :hello :namespace "pkg" :parent :greet :args {}}])))
+    (is (= [] (compat/breaking-changes
+                [{:name :hello :namespace "pkg" :parent :greet :args {}}]
+                [{:name :hello :namespace "pkg" :parent :greet :args {} :expects-effects [:network]}]))
+        "no contract before → nothing was promised"))
+  (testing "effect-added works on a real export round trip"
+    (let [old [{:name :fetch :namespace "pkg" :args {:u :text} :return-type :text :expects-effects [:network]}]
+          new [{:name :fetch :namespace "pkg" :args {:u :text} :return-type :text :expects-effects [:network :db]}]
+          rt #(export/records->fn-defs (parse/parse-module %))]
+      (is (= [[:effect-added :fetch nil]] (kinds (rt old) (rt new))))))
   (testing "a package dependency outside its previous caret range"
     (is (= [{:kind :dependency-incompatible :name "lib" :old "1.2.0" :new "2.0.0"}]
            (compat/incompatible-dependency-bumps

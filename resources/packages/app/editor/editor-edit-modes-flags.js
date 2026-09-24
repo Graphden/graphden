@@ -87,7 +87,7 @@ function gdBindInspectorFlagRows(host) {
       e.stopPropagation();
       const fn = fnOf(btn.closest('.gd-insp-flag-row')?.dataset.fnId);
       if (fn && typeof showReturnTypeRulePopover === 'function') {
-        showReturnTypeRulePopover(fn.name, btn);
+        showReturnTypeRulePopover(fn.id, btn);
       }
     });
   }

@@ -324,18 +324,33 @@
          :validation validation}))))
 
 
+(defn- invalid-layout-arg!
+  [msg data]
+  (throw (ex-info msg (assoc data :type :execution-error/invalid-args))))
+
+
 (defn- parse-spec
   "Parse a single expansion spec value.
-   Returns integer level or {:full-depth N :partial-fns #{uuid ...}}."
+   Returns integer level or {:full-depth N :partial-fns #{uuid ...}}.
+   A map spec's `full-depth` must be an integer and its `partial-fns` a
+   list — anything else is an `:execution-error/invalid-args` naming the
+   field, never a Java cast message from deep in the layout walk."
   [v]
   (cond
     (integer? v) v
-    (map? v) {:full-depth (or (:full-depth v) 0)
-              :partial-fns (set (map (fn [s]
-                                       (if (uuid? s)
-                                         s
-                                         (java.util.UUID/fromString (str s))))
-                                     (:partial-fns v)))}
+    (map? v) (let [{:keys [full-depth partial-fns]} v]
+               (when-not (or (nil? full-depth) (integer? full-depth))
+                 (invalid-layout-arg! "Expansion 'full-depth' must be an integer"
+                                      {:field :full-depth :got full-depth}))
+               (when-not (or (nil? partial-fns) (sequential? partial-fns))
+                 (invalid-layout-arg! "Expansion 'partial-fns' must be a list of fn ids"
+                                      {:field :partial-fns}))
+               {:full-depth (or full-depth 0)
+                :partial-fns (set (map (fn [s]
+                                         (if (uuid? s)
+                                           s
+                                           (java.util.UUID/fromString (str s))))
+                                       partial-fns))})
     :else 0))
 
 
@@ -367,12 +382,13 @@
         root-id-str (:root-id body)
         expansions-raw (:expansions body)]
     (when-not root-id-str
-      (throw (ex-info "Request body must contain 'root-id'"
-                      {:type :execution-error/invalid-args})))
+      (invalid-layout-arg! "Request body must contain 'root-id'" {}))
+    (when-not (string? root-id-str)
+      (invalid-layout-arg! "Request body 'root-id' must be a UUID string"
+                           {:got (Class/.getSimpleName (class root-id-str))}))
     (when (and (some? expansions-raw) (not (map? expansions-raw)))
-      (throw (ex-info "Request body 'expansions' must be a map of node-id → spec"
-                      {:type :execution-error/invalid-args
-                       :got (Class/.getSimpleName (class expansions-raw))})))
+      (invalid-layout-arg! "Request body 'expansions' must be a map of node-id → spec"
+                           {:got (Class/.getSimpleName (class expansions-raw))}))
     {:root-id (java.util.UUID/fromString root-id-str)
      :expansions (parse-expansions (or expansions-raw {}))}))
 

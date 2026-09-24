@@ -112,14 +112,14 @@
                      :description "Type expression to test for the fn-type shape with a bound effect set."}}
    :return-type [:union :null [:list :text]]}
 
-  {:name :rich-type-of-name
-   :description "Full rich-types registry entry for the named fn — one registry lookup; nil for nil / unknown names."
-   :args {:fn-name {:type :nullable-text :required false :description "Fn name; keywordized at the boundary."}}
+  {:name :rich-type-of-id
+   :description "Full rich-types registry entry for the fn with id `fn-id` — one registry lookup by identity (a bare name can live in several namespaces); nil for nil / unknown ids."
+   :args {:fn-id {:type :nullable-uuid :required false :description "The fn's id."}}
    :return-type :nullable-keyword-map}
 
-  {:name :rule-owner-of-name
-   :description "`{:name :fn-id}` of the base-fn whose `:return-type-rule` computed the named fn's return type — the canonical `registry/root-base-fn-name` walk over `:primary-parent`, iff that root carries a rule; `:fn-id` is the registry entry's own id (no name→id graph query). nil for unknown names, base-fns, and rule-less chains. Used by `/partials/return-type-rule`; the layout strip-facts annotation uses the name-only registry walk."
-   :args {:fn-name {:type :nullable-text :required false :description "Fn name; keywordized at the boundary."}}
+  {:name :rule-owner-of-id
+   :description "`{:name :fn-id}` of the base-fn whose `:return-type-rule` computed the return type of the fn with id `fn-id` — the canonical `registry/root-base-fn-name` walk over `:primary-parent`, iff that root carries a rule; `:fn-id` is the registry entry's own id. nil for unknown ids, base-fns, and rule-less chains. Used by `/partials/return-type-rule`; the layout strip-facts `↳` badge uses the same registry walk."
+   :args {:fn-id {:type :nullable-uuid :required false :description "The fn's id."}}
    :return-type [:union :null {:name :text :fn-id :uuid}]}
 
   {:name :declarable-effect-categories
@@ -139,7 +139,8 @@
    :return-type [:list {:name :text :kind :text}]
    :effects #{:db}}
 
-  ;; fn-id → row → name → registry entry → :return, all graph-visible.
+  ;; fn-id → registry entry (by id) → :return, all graph-visible. The row
+  ;; → name hop below feeds only the callable-shape walk (`:_rsof-*`).
   {:name :_rrof-fn-id-nil?
    :parent :nil?
    :args {:value {:as :fn-id}}}
@@ -159,8 +160,8 @@
    :args {:coll :_rrof-row :key {:value :name} :default nil}}
 
   {:name :_rrof-entry
-   :parent :rich-type-of-name
-   :args {:fn-name {:ref :_rrof-name :type :nullable-text}}}
+   :parent :rich-type-of-id
+   :args {:fn-id :_rrof-id-narrowed}}
 
   {:name :_rrof-return
    :parent :get
@@ -176,7 +177,7 @@
   ;; declared contract of the old base-fn (nil flows through consumers
   ;; that already handled it).
   {:name :rich-return-of-fn
-   :description "Rich-types registry view of the named fn's `:return` field. Pure graph composition: `:get-entity` fn-row → `:get :name` → `:rich-type-of-name` → `:get :return`. nil for nil fn-id / anonymous / unregistered / unknown fns. Used by the fn-picker incompat-explainer partial."
+   :description "Rich-types registry view of the named fn's `:return` field. Pure graph composition: `:rich-type-of-id` → `:get :return`. nil for nil fn-id / anonymous / unregistered / unknown fns. Used by the fn-picker incompat-explainer partial."
    :parent :const
    :args {:value {:ref :_rrof-resolved :type :type-expression}}
    :return-type :type-expression}

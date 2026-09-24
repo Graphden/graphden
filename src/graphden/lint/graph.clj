@@ -24,6 +24,7 @@
     [graphden.lint.core :as lint]
     [graphden.packages.owned :as owned]
     [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tctx]
     [graphden.util.ns-path :as ns-path]
     [graphden.versioning.storage.core :as vcore]))
 
@@ -204,25 +205,36 @@
 
 
 (def ^:private memo
-  "Per-branch lint state: branch-id → the last snapshot object linted for
-   it, the `:ns` rows, the per-fn EDN fn-defs, the engine's incremental
-   state, the suppression set and the findings. The snapshot is replaced
-   (not mutated) on every graph write, so identity is the freshness
+  "Per-(org, branch) lint state: `[org branch-id]` → the last snapshot
+   object linted for it, the `:ns` rows, the per-fn EDN fn-defs, the
+   engine's incremental state, the suppression set and the findings. The
+   snapshot is replaced (not mutated) on every graph write — and the
+   org-sliced view of it is memoised per snapshot + org
+   (`types-api/cached-or-load-graph`) — so identity is the freshness
    check; a new snapshot is diffed against the old one row by row and
    only the fns whose rows moved (plus their referrers) are rebuilt and
-   re-linted (`lint/lint-with-state`). Keyed per branch so two branches
-   open side by side (or two orgs on one executor) do not evict each
-   other on every read."
+   re-linted (`lint/lint-with-state`). Keyed per org AND branch: two
+   branches open side by side, or two tenant orgs on the same branch,
+   each see their own slice and must not evict each other on every read."
   (atom {}))
 
 
 (defn- remember!
-  [branch-id entry]
+  [k entry]
   (swap! memo (fn [m]
-                (let [m (assoc m branch-id (assoc entry :at (System/nanoTime)))]
+                (let [m (assoc m k (assoc entry :at (System/nanoTime)))]
                   (if (> (count m) memo-cap)
                     (dissoc m (key (apply min-key (comp :at val) m)))
                     m)))))
+
+
+(defn forget-branch!
+  "Drop every org's lint state for `branch-id`. A namespace write moves
+   no graph row (the snapshot keeps its identity, the memo would answer
+   from it), yet every fn-def's dotted path under that namespace changed —
+   the next read must lint from scratch."
+  [branch-id]
+  (swap! memo (fn [m] (into {} (remove (fn [[[_ b] _]] (= b branch-id))) m))))
 
 
 (defn- read-ns-rows
@@ -283,14 +295,11 @@
      :lint-state state :suppress suppress :findings findings}))
 
 
-(defn- delta-state
-  "Re-lint after a write: rebuild the EDN of the fns whose rows moved and
-   of the fns that reference them (a renamed target changes the referrer's
-   spelling), hand the engine those keys as changed."
-  [prev graph suppress]
+(defn- delta-state*
+  "The delta re-lint proper, given the new snapshot's `rows` and the
+   `moved` fn ids."
+  [prev graph suppress rows moved]
   (let [ix (graph-indexes graph (:ns-rows prev))
-        rows (rows-by-fn graph)
-        moved (changed-fn-ids (:rows prev) rows)
         key-of lint/fn-key
         old-keys (into {} (map (fn [[id fd]] [id (key-of fd)])) (:fn-defs prev))
         refs-of (lint/referrers (:refs (:lint-state prev)))
@@ -320,12 +329,38 @@
      :lint-state state :suppress suppress :findings findings}))
 
 
+(defn- non-composed-moved?
+  "Did a type-row or base-fn among `moved` change? The delta path finds
+   the fns to rebuild through the engine's referrer index, which only
+   knows COMPOSED fn-defs — a renamed or deleted type-row would leave
+   every fn-def that names it spelled the old way."
+  [old-rows new-rows moved]
+  (boolean (some (fn [id]
+                   (when-let [row (first (or (get new-rows id) (get old-rows id)))]
+                     (not (composed-row? row))))
+                 moved)))
+
+
+(defn- delta-state
+  "Re-lint after a write: rebuild the EDN of the fns whose rows moved and
+   of the fns that reference them (a renamed target changes the referrer's
+   spelling), hand the engine those keys as changed. nil when a type-row
+   or base-fn moved (`non-composed-moved?`) — the caller lints from
+   scratch."
+  [prev graph suppress]
+  (let [rows (rows-by-fn graph)
+        moved (changed-fn-ids (:rows prev) rows)]
+    (when-not (non-composed-moved? (:rows prev) rows moved)
+      (delta-state* prev graph suppress rows moved))))
+
+
 (defn lint-branch
   "The current branch's lint warnings over the per-ctx graph snapshot
-   (`cached-or-load-graph`). Answered from the branch's memo when the
+   (`cached-or-load-graph`). Answered from the (org, branch) memo when the
    snapshot object and the suppression set are unchanged; after a write
    only the fns whose rows moved, and their referrers, are rebuilt and
-   re-linted; a namespace change or a first read lints from scratch. The
+   re-linted; a namespace change, a moved type-row / base-fn or a first
+   read lints from scratch. The
    snapshot is what every reader sees: writes splice it inline and a
    load-on-miss that a write outran is discarded
    (`executor.context/fill-graph-cache!`), so a read right after an edit
@@ -334,13 +369,13 @@
   (let [suppress (set suppress)
         storage (request/require-storage ctx)
         graph (types-api/cached-or-load-graph ctx)
-        branch-id (vcore/current-branch-id storage)
-        prev (get @memo branch-id)]
+        k [(tctx/current-org) (vcore/current-branch-id storage)]
+        prev (get @memo k)]
     (if (and prev (identical? (:graph prev) graph) (= (:suppress prev) suppress))
       (lint/warnings (:findings prev))
       (let [nss (read-ns-rows ctx)
-            entry (if (and prev (= (:ns-rows prev) nss))
-                    (delta-state prev graph suppress)
-                    (full-state graph nss suppress))]
-        (remember! branch-id entry)
+            entry (or (when (and prev (= (:ns-rows prev) nss))
+                        (delta-state prev graph suppress))
+                      (full-state graph nss suppress))]
+        (remember! k entry)
         (lint/warnings (:findings entry))))))

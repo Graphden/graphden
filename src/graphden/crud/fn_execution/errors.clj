@@ -82,7 +82,7 @@
       pool
       (into [(str "SELECT e.id, fv.fn_id, e.fn_version_id, e.branch_id,"
                   " e.finished_at, e.error,"
-                  " e.error_data::text AS error_data, f.name AS fn_name,"
+                  " e.error_data::text AS error_data, fv.name AS fn_name,"
                   " f.namespace_id AS namespace_id"
                   " FROM \"fn_execution\" e"
                   " LEFT JOIN \"fn_version\" fv ON fv.id = e.fn_version_id"
@@ -100,14 +100,10 @@
   "Keep only rows whose failing version is STILL what the viewing
    branch resolves for that fn — a shipped fix, a branch-local
    override, or a deleted fn all clear the failure. Resolution goes
-   through `lookup/resolve-fn-version-id` (chain + merge aware); one
-   resolve per DISTINCT fn-id, not per row."
+   through `lookup/resolve-fn-version-ids` (chain + merge aware) — one
+   batched version load for every distinct fn-id, not a resolve per fn."
   [ctx rows]
-  (let [current (into {}
-                      (keep (fn [fid]
-                              (when-let [vid (lookup/resolve-fn-version-id ctx fid)]
-                                [fid vid])))
-                      (distinct (keep :fn_id rows)))]
+  (let [current (lookup/resolve-fn-version-ids ctx (keep :fn_id rows))]
     (filterv (fn [r]
                (and (:fn_id r)
                     (= (get current (:fn_id r)) (:fn_version_id r))))
@@ -241,7 +237,7 @@
               pool
               [(str "SELECT e.id, fv.fn_id, e.status, e.started_at, e.finished_at,"
                     " (e.path_trace IS NOT NULL) AS traced,"
-                    " f.name AS fn_name, f.namespace_id AS namespace_id"
+                    " fv.name AS fn_name, f.namespace_id AS namespace_id"
                     " FROM \"fn_execution\" e"
                     " LEFT JOIN \"fn_version\" fv ON fv.id = e.fn_version_id"
                     " LEFT JOIN \"fn\" f ON f.id = fv.fn_id"

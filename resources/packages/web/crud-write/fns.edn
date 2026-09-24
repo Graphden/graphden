@@ -7,7 +7,7 @@
  :fns
  [;; --- entity create / update pipeline primitives. The handlers
   ;; themselves are `:if` graph fn-defs below; these base-fns are the
-  ;; parse / validate / apply stages. `_rejected?` + `_rejection-response`
+  ;; parse / validate / apply stages. `rejected?` + `_rejection-response`
   ;; are shared by both create and update. ---
   ;; --- :_create-parsed — graph composition over the
   ;; `:extract-entity-params` primitive + body→form-data
@@ -660,23 +660,14 @@
           :else :_update-base}
    :return-type :_update-parsed-shape}
 
-  ;; --- :write-rej / :type-check-binding-rej — atomic §3.1 boundaries
-  ;; over the §3.3 validators. `:write-rej` is the STRUCTURAL gate
-  ;; both create + update chains still block on;
-  ;; `:type-check-binding-rej` is no longer wired as a blocking guard
-  ;; (error-tolerance Phase 2) but stays available as an on-demand
-  ;; pre-flight validator any graph composition can call.
+  ;; --- :write-rej — atomic §3.1 boundary over the §3.3 validator: the
+  ;; STRUCTURAL gate both create + update chains block on. (Type errors
+  ;; do not block a write — error-tolerance Phase 2 — the post-write
+  ;; aggregate check records them as per-branch diagnostics.)
   {:name :write-rej
    :description "Stage-2 write-time validation for create/update flows. Returns `{:reason …}` rejection or nil."
    :args {:entity-type {:type :text :description "Canonical entity-name as text (`fn`, `slot`, `binding`, …)."}
           :entity-data {:type :nullable-keyword-map :description "Entity row to validate (the merged post-write view on update). Nullable at type level; validation upstream guarantees non-null at runtime."}}
-   :return-type :_rejection-shape
-   :effects #{:db}}
-
-  {:name :type-check-binding-rej
-   :description "On-demand single-binding type validator. nil on success, `{:reason <message>}` on a type mismatch (never throws for a mismatch). Error-tolerance Phase 2 unhooked it from the create/update `:cond` chains — binding writes proceed and the post-write aggregate check records diagnostics instead; compose this fn where a verdict WITHOUT a write is wanted (pre-flight validation)."
-   :args {:entity-data {:type :nullable-keyword-map :description "Binding row to type-check. Nullable at type level."}
-          :id {:type :nullable-uuid :description "Existing binding id (UPDATE) or nil (CREATE)."}}
    :return-type :_rejection-shape
    :effects #{:db}}
 
@@ -753,8 +744,8 @@
   ;; `:try-apply-update` is the atomic write unit (sp/update-entity +
   ;; rename-slot + post-write type-check for binding-shaped updates —
   ;; non-blocking since error-tolerance Phase 2: failures are recorded
-  ;; as per-branch diagnostics and surfaced as `:type-warnings`, never
-  ;; rolled back).
+  ;; as per-branch diagnostics and surfaced as `:type-warnings`; only a
+  ;; secret-laundering failure is rolled back, like create's).
   {:name :_update-apply
    :description "Stage 3 of update — atomic update + invalidate + notify + 200, or the error message with the core's status (403 package-owned, 409 collision, 404 missing row, 400 default)."
    :parent :if
@@ -819,7 +810,7 @@
                                       :vals [{:value "Entity updated successfully"}
                                              :_update-apply-type-warnings]}}}}}}
 
-  {:name :_rejected?
+  {:name :rejected?
    :description "True when a `validate-*` stage produced a rejection. `:some? :validation`."
    :parent :some?
    :args {:value {:as :validation}}}

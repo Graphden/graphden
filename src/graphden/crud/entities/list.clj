@@ -229,7 +229,7 @@
   200)
 
 
-;; --- list-all-graph-entities per-scope projections -------------------------
+;; --- the graph reads' per-scope projections ----------------------------------
 ;; One shared lazily-realised env (`graph-list-env`) + one defn- per scope
 ;; (round-3 readability split of the former 6-branch cond body). Each branch
 ;; forces only the delays it needs. (The :tree scope projects no fn rows,
@@ -818,44 +818,59 @@
     (assoc sub :fns sub-roled-fns :namespaces sub-namespaces)))
 
 
-(defn list-all-graph-entities
-  "Dump every storage row the editor needs to render the graph. Routes
-   through the shared graph-cache (populated by layout / compile-
-   runtime) so editor refreshes after mutations don't re-query the
-   same five tables every time.
+(defn- env
+  "The shared lazy environment every projection below reads."
+  [ctx]
+  (graph-list-env ctx (request/require-storage ctx)))
 
-   Each fn-row is augmented with a `:role` field so the sidebar can
-   group entries into Types vs Functions sections without an extra
-   round-trip through `/api/types`.
 
-   `scope` controls payload size — one `list-scope-*` projection per
-   shape over the shared lazy `graph-list-env`:
+;; The storage rows the editor renders the graph from, one projection per
+;; shape over the shared lazy `graph-list-env` — which routes through the
+;; shared graph-cache (populated by layout / compile-runtime), so editor
+;; refreshes after mutations don't re-query the same five tables. Each
+;; fn-row carries a `:role` so the sidebar groups Types vs Functions
+;; without a round-trip through `/api/types`. Which projection a request
+;; wants is graph composition: `GET /api/graph/entities` dispatches on its
+;; `scope` in `web/crud-routes` (`:all-entities-handler`), and each MCP
+;; tool binds the one it needs.
 
-   - `nil` / `:full` (default) — every
-     `{:fns :slots :fn-slots :bindings :list-items :namespaces}`.
-     ~4.5 MB on a 3000-fn graph; the editor's initial load.
-   - `:tree` — `{:namespaces :counts}` only (O(namespaces) sidebar init).
-   - `:namespace` with `namespace-id` — one namespace's light rows.
-   - `:search` with `q` — capped light rows by name substring.
-   - `:search-text` with `q` — as `:search`, plus description matches
-     ranked last (the MCP `search-fns` tool).
-   - `:index` — `{:fns :namespaces}`, nil fields dropped (CLI/batch).
-   - `:subtree` with `root-id` — the fn-view slice; falls back to
-     `:full` shape when `root-id` is nil / unresolved."
-  ([ctx] (list-all-graph-entities ctx nil nil nil nil))
-  ([ctx scope] (list-all-graph-entities ctx scope nil nil nil))
-  ([ctx scope root-id] (list-all-graph-entities ctx scope root-id nil nil))
-  ([ctx scope root-id namespace-id q]
-   (let [storage (request/require-storage ctx)
-         env (graph-list-env ctx storage)]
-     (cond
-       (= scope :tree)               (list-scope-tree env)
-       (= scope :namespace)          (list-scope-namespace env namespace-id)
-       (= scope :search)             (list-scope-search env q false)
-       (= scope :search-text)        (list-scope-search env q true)
-       (= scope :index)              (list-scope-index env)
-       (and (= scope :subtree) root-id) (list-scope-subtree env root-id)
-       :else
-       (-> (:base env)
-           (assoc :fns @(:roled-fns env))
-           (assoc :namespaces @(:namespaces env)))))))
+(defn graph-tree
+  "`{:namespaces :counts}` — the O(namespaces) sidebar init."
+  [ctx]
+  (list-scope-tree (env ctx)))
+
+
+(defn graph-namespace-fns
+  "`{:fns}` — one namespace's light rows (nil = the root bucket)."
+  [ctx namespace-id]
+  (list-scope-namespace (env ctx) namespace-id))
+
+
+(defn graph-search
+  "`{:fns}` — capped light rows whose qualified name contains `q`; with
+   `descriptions?`, description matches too, ranked last."
+  [ctx q descriptions?]
+  (list-scope-search (env ctx) q (boolean descriptions?)))
+
+
+(defn graph-index
+  "`{:fns :namespaces}`, nil fields dropped (CLI / batch)."
+  [ctx]
+  (list-scope-index (env ctx)))
+
+
+(defn graph-subtree
+  "The fn-view slice reachable from `root-id` — empty rows for a nil or
+   unknown root."
+  [ctx root-id]
+  (list-scope-subtree (env ctx) root-id))
+
+
+(defn graph-full
+  "Every `{:fns :slots :fn-slots :bindings :list-items :namespaces}` —
+   ~4.5 MB on a 3000-fn graph; the editor's initial load."
+  [ctx]
+  (let [e (env ctx)]
+    (-> (:base e)
+        (assoc :fns @(:roled-fns e))
+        (assoc :namespaces @(:namespaces e)))))

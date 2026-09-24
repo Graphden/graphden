@@ -312,9 +312,8 @@ KEYWORD literal:
 The trap is observability: the partial silently renders empty
 sections / wrong dispatch instead of failing loudly. After this
 gotcha hit twice (execute-history `:status`, branch-diff `:change`
-and `:entity-name`), the affected fields got closed-enum types
-(`:diff-change-kw`, `:diff-entity-name-kw`) so downstream sites
-can pin the kind explicitly. `:equal?` itself stays untyped today
+and `:entity-name`), the `:change` field got a closed-enum type
+(`:diff-change-kw`) so downstream sites can pin the kind explicitly. `:equal?` itself stays untyped today
 — sync-time guard for `:kw` vs `:string` compares would need a
 typed-equal variant; deferred.
 
@@ -356,13 +355,13 @@ type-check `:count`.
 
 **Fix**: pin `:return-type :<your-record-shape>` on every error-
 branch fn-def. The record-shape type can be a shared alias
-(e.g. `:_error-result-shape` = `{:ok :bool :error :text}` in
+(e.g. `:error-result-shape` = `{:ok :bool :error :text}` in
 `web/crud/fns.edn`) so several handlers reuse it.
 
 Branch-diff example (historical — the partial itself retired in
 UX-v3, the technique stands): `:_diff-err-target-missing` and
 `:_diff-err-source-missing` both use `:parent :zipmap` —
-adding `:return-type :_error-result-shape` to each turned the
+adding `:return-type :error-result-shape` to each turned the
 cond's combined return into a union of precise records, and the
 partial fn-defs downstream type-checked cleanly without an
 allowlist band-aid.

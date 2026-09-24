@@ -16,8 +16,8 @@
           :capture-values? :bool}}
 
   {:name :_execute-rejection-shape
-   :description "Output of `:_execute-validation` — `{:ok false :error :error-data}` rejection or nil."
-   :type {:ok :bool :error :text :error-data :jsonb}}
+   :description "Output of `:_execute-validation` — `{:ok false :status :rejected :http-status :error :error-data}` rejection or nil. `:error-data` stays an open keyword map: each guard adds its own detail keys."
+   :type {:ok :bool :status :keyword :http-status :int :error :text :error-data :keyword-map}}
 
   ;; ---------------------------------------------------------------------
   ;; Base-fns — stage shims
@@ -615,7 +615,9 @@
                     :_execute-running-as-svc-rej?   :_execute-running-as-svc-err
                     :_execute-unknown-arg-rej?      :_execute-unknown-arg-err
                     :_execute-malformed-ref-rej?    :_execute-malformed-ref-err
-                    {:value true}                   {:value nil}]}}
+                    {:value true}                   {:value nil}]}
+   :return-type [:union :null :_execute-rejection-shape]
+   :return-type-wide? true}
 
   ;; `:parsed` stays FREE on the guard cond above and is pinned here, one
   ;; level down, for the HTTP pipeline. The preview (`:_pv-validation`) and
@@ -701,7 +703,7 @@
   {:name :_exec-err-not-found
    :description "Dynamic 404 builder — cites the raw id-segment. Shared between get + cancel. `:return-type` pinned so downstream `:cond` unions of error + success retain precise record shapes (otherwise bare `:zipmap` infers `[:map :any [:union :bool :text]]` and the per-member narrowing in `get-return-rule` opaques out)."
    :parent :zipmap
-   :return-type :_error-result-status-shape
+   :return-type :error-result-status-shape
    :args {:keys [:ok {:value :http-status :literal? true} :error]
           :vals [false
                  404
@@ -841,7 +843,7 @@
    :parent :zipmap
    :args {:keys [{:value :runs} {:value :failed} {:value :cancelled} {:value :avg-ms}]
           :vals [:_ufs-runs :_ufs-failed :_ufs-cancelled :_ufs-avg]}
-   :return-type {:runs :int :failed :int :cancelled :int :avg-ms :numeric}}
+   :return-type {:runs :int :failed :int :cancelled :int :avg-ms :int}}
 
   ;; Org-scoped rollups for the editor's Stats panel — every one reads ONLY
   ;; counts + durations from `:usage-stat`, always scoped to the CURRENT org
@@ -1201,7 +1203,7 @@
 
   {:name :_list-exec-err-no-anchor
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "missing or invalid ?fn-id / ?fn-version-id query parameter"}}}
 
   {:name :_list-executions-by-fn

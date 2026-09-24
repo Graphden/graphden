@@ -98,25 +98,25 @@
   ;; type-row stages return (distinct from `_rejection-shape`, the
   ;; entity-CRUD `{:reason}` rejection). ---
 
-  {:name :_error-result-with-reason-shape
-   :description "Variant of `:_error-result-shape` carrying an additional `:reason` keyword tag — used by guards whose downstream consumer needs to discriminate (e.g. UI distinguishing `:missing-binding` vs `:binding-exists` to wire different recovery paths)."
+  {:name :error-result-with-reason-shape
+   :description "Variant of `:error-result-shape` carrying an additional `:reason` keyword tag — used by guards whose downstream consumer needs to discriminate (e.g. UI distinguishing `:missing-binding` vs `:binding-exists` to wire different recovery paths)."
    :type {:ok :bool :error :text :reason :keyword}}
 
-  {:name :_error-result-shape
+  {:name :error-result-shape
    :description "The `{:ok false :error}` rejection payload returned by every type-API / type-row / value-form validation stage."
    :type {:ok :bool :error :text}}
 
-  {:name :_error-result-status-shape
-   :description "`:_error-result-shape` plus the `:http-status` the envelope-response seam reads (web.errors/:json-envelope-response) — rejection builders that declare their HTTP status pin to this."
+  {:name :error-result-status-shape
+   :description "`:error-result-shape` plus the `:http-status` the envelope-response seam reads (web.errors/:json-envelope-response) — rejection builders that declare their HTTP status pin to this."
    :type {:ok :bool :error :text :http-status :int}}
 
   {:name :_types-compatible-result-shape
    :description "Output of `:_types-compatible-apply` — the subtype-check verdict. An extra `:reason` is present when not ok (open-record — extra fields are fine)."
-   :type {:ok :bool :expected :jsonb :candidate :jsonb}}
+   :type {:ok :bool :expected :type-expression :candidate :type-expression}}
 
   {:name :_types-candidates-result-shape
    :description "Output of `:_types-candidates-apply` — the enumeration of fns whose return type is a subtype of `expected`."
-   :type {:ok :bool :expected :jsonb :count :int :candidates :jsonb}}
+   :type {:ok :bool :expected :type-expression :count :non-negative-int :candidates [:list :any]}}
 
   {:name :_types-usages-result-shape
    :description "Output of `:_types-usages-apply` — every reference to the target type-row. `:type-fn-id` is the id stringified."
@@ -128,7 +128,7 @@
 
   {:name :_type-row-result-shape
    :description "What a type-row create / update apply stage returns — the success payload, or an `{:ok false :error}` map when the transactional write failed."
-   :union [:_id-name-result-shape :_error-result-shape]}
+   :union [:_id-name-result-shape :error-result-shape]}
 
   {:name :_partial-response-shape
    :description "A partial Ring response from a `process-*` / `_*-apply` stage — `:status` + `:body`, optionally `:headers` (open-record). `html-action-response` wraps it into a full response, defaulting any missing field."
@@ -142,13 +142,13 @@
   {:name :_err-name-required
    :description "JSON 400 rejection — `:name` field missing or blank. Shared between create-record-type + create-list-type endpoints."
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "name required"}}}
 
   {:name :_err-fields-required
    :description "JSON 400 rejection — `:fields` list empty. Shared between create-record-type + update-record-type endpoints."
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "fields required (a record needs ≥1 field)"}}}
 
   {:name :_html-err-invalid-body
@@ -169,10 +169,10 @@
    :return-type :_partial-response-shape
    :args {:value {:status 404 :body "<p class=\"error\">Item not found</p>"}}}
 
-  {:name :_err-name-blank
+  {:name :err-name-blank
    :description "JSON 400 rejection — required `:name` field missing. Shared admin-CRUD envelope used by create-secret + create-branch."
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Required field ':name' is missing"}}}
 
   {:name :_parsed-body
@@ -186,10 +186,6 @@
   {:name :_storage-where-map
    :description "A storage query filter — `{column-keyword → match-value}`. Keys are entity column names; values arbitrary."
    :map {:key :keyword :value :any}}
-
-  {:name :_form-field-map
-   :description "Parsed `application/x-www-form-urlencoded` fields — `{field-keyword → string-value}`."
-   :map {:key :keyword :value :text}}
 
   {:name :_form-data-shape
    :description "Pre-parser form payload: `{field-name field-value}` keyed by FORM field name (string-or-keyword post JSONB-roundtrip). Wider than `:keyword-map` — covers the wire layer where keys may still be strings."
@@ -285,21 +281,49 @@
    :return-type [:map :keyword :uuid]
    :effects #{:db}}
 
-  {:name :list-all-graph-entities
-   :description "Dump every fn, arg, and namespace currently in storage — the payload behind `/api/graph/entities`. `scope :tree` returns `{:namespaces :counts}` (O(namespaces) sidebar init). `scope :namespace` + `namespace-id` returns one namespace's light fn rows (lazy expand). `scope :search` + `q` returns capped name-substring matches (filter box / pickers / name resolution). `scope :index` returns `{:fns :namespaces}` (legacy full-fns pull). `scope :subtree` + `root-id` returns only the transitive closure reachable from `root-id` via parent-ids + binding-refs + type-overrides + list-item-refs + own-slot type-fn-ids (~98% smaller — typical per-fn editor view)."
-   :args {:scope {:required false :type :nullable-keyword
-                  :value nil
-                  :description "`:tree` → `{:namespaces :counts}` only (sidebar init). `:namespace` (+ `namespace-id`) → one namespace's light fns. `:search` (+ `q`) → capped name matches; `:search-text` adds description matches ranked last. `:index` → `{:fns :namespaces}` full pull. `:subtree` (+ `root-id`) → subgraph reachable from it. `nil` / `:full` (default) → complete dump."}
-          :root-id {:required false :type :nullable-uuid
-                    :value nil
-                    :description "Required when `:scope :subtree`. Ignored otherwise. Anchor for the BFS closure."}
-          :namespace-id {:required false :type :nullable-uuid
-                         :value nil
-                         :description "Required when `:scope :namespace`. Ignored otherwise. Selects the namespace whose fns to return."}
-          :q {:required false :type :nullable-text
-              :value nil
-              :description "Required when `:scope :search`. Ignored otherwise. Case-insensitive substring matched against each fn's raw name."}}
-   :return-type :keyword-map
+  ;; --- The editor's graph reads — one base-fn per projection over the
+  ;; shared graph-cache. Every fn row carries a `:role` (Types vs
+  ;; Functions decided server-side); `GET /api/graph/entities` picks one
+  ;; by its `scope` (`:all-entities-handler`), each MCP tool binds its own.
+  {:name :graph-tree
+   :description "Sidebar init — the namespace list plus a per-namespace count of named fns (`:counts`, with `:type-count` / `:fn-count` / `:type-error-count` where >0). No fn rows: leaves load lazily through `:graph-namespace-fns`."
+   :args {}
+   :return-type {:namespaces [:list :keyword-map] :counts [:list :keyword-map]}
+   :effects #{:db}}
+
+  {:name :graph-namespace-fns
+   :description "One namespace's light fn rows (the sidebar's lazy expand); nil `namespace-id` selects the root bucket."
+   :args {:namespace-id {:type :nullable-uuid :description "The namespace whose named fns to return; nil = namespace-less fns."}}
+   :return-type {:fns [:list :keyword-map]}
+   :effects #{:db}}
+
+  {:name :graph-search
+   :description "Capped light fn rows whose qualified name contains `q` (case-insensitive; `/` reads as `.`). With `descriptions?`, description matches too, ranked last — what the MCP `search-fns` tool asks for."
+   :args {:q {:type :nullable-text :description "The needle; blank → no rows."}
+          :descriptions? {:type :bool :description "Also match descriptions (ranked after name matches)."}}
+   :return-type {:fns [:list :keyword-map]}
+   :effects #{:db}}
+
+  {:name :graph-index
+   :description "Every fn row and namespace — `{:fns :namespaces}`, nil fields dropped (CLI / batch pull)."
+   :args {}
+   :return-type {:fns [:list :keyword-map] :namespaces [:list :keyword-map]}
+   :effects #{:db}}
+
+  {:name :graph-subtree
+   :description "The fn-view slice: the fns transitively reachable from `root-id` via parent-ids + binding refs + type overrides + list-item refs + own-slot type-fn-ids, plus the rows they own (~98% smaller than the full dump). Empty rows for a nil / unknown root."
+   :args {:root-id {:type :nullable-uuid :description "Anchor of the closure."}}
+   :return-type {:fns [:list :keyword-map] :slots [:list :keyword-map] :fn-slots [:list :keyword-map]
+                 :bindings [:list :keyword-map] :list-items [:list :keyword-map]
+                 :namespaces [:list :keyword-map]}
+   :effects #{:db}}
+
+  {:name :graph-full
+   :description "Every fn, slot, fn-slot, binding, list item and namespace — the editor's initial load (~4.5 MB on a 3000-fn graph)."
+   :args {}
+   :return-type {:fns [:list :keyword-map] :slots [:list :keyword-map] :fn-slots [:list :keyword-map]
+                 :bindings [:list :keyword-map] :list-items [:list :keyword-map]
+                 :namespaces [:list :keyword-map]}
    :effects #{:db}}
 
   {:name :fn-unread-bindings
@@ -309,15 +333,15 @@
    :effects #{:db}}
 
   {:name :graph-fn-defs-subtree
-   :description "The fn-defs (fns.edn maps) of the subtree reachable from `root-id` — the same closure `:list-all-graph-entities` `:scope :subtree` walks, emitted through the records→EDN codec (`packages.export/export-subtree`). `[]` for nil / unknown root. What an AI author reads back through `read-fn`: the exact syntax it writes."
+   :description "The fn-defs (fns.edn maps) of the subtree reachable from `root-id` — the same closure `:graph-subtree` walks, emitted through the records→EDN codec (`packages.export/export-subtree`). `[]` for nil / unknown root. What an AI author reads back through `read-fn`: the exact syntax it writes."
    :args {:root-id {:type :nullable-uuid :description "Anchor fn-id; nil → `[]`."}}
    :return-type [:list :keyword-map]
    :effects #{:db}}
 
   {:name :strip-hidden-impl
-   :description "Apply the installed view-impl filter to a `/api/graph/entities` dump — strips the internal composition (parent-ids + bindings) of fns the current viewer lacks `:view-impl` on (own-org / grant), leaving each fn's signature. Identity when no tenancy addon is wired (single-tenant sees everything). Pure pass-through base-fn over the `graphden.crud.entities/apply-view-impl-filter` seam; the actual filter fn is installed by the tenancy addon. Compose it over `:list-all-graph-entities` in the graph-read handler."
+   :description "Apply the installed view-impl filter to a `/api/graph/entities` dump — strips the internal composition (parent-ids + bindings) of fns the current viewer lacks `:view-impl` on (own-org / grant), leaving each fn's signature. Identity when no tenancy addon is wired (single-tenant sees everything). Pure pass-through base-fn over the `graphden.crud.entities/apply-view-impl-filter` seam; the actual filter fn is installed by the tenancy addon. Compose it over the `:graph-*` reads in the graph-read handler."
    :args {:graph {:type :keyword-map
-                  :description "The graph dump from :list-all-graph-entities."}}
+                  :description "A graph dump from one of the `:graph-*` reads."}}
    :return-type :keyword-map
    :effects #{}}
 
@@ -348,11 +372,12 @@
    :return-type :keyword-map
    :effects #{:db}}
 
-  ;; Atomic update unit. Simpler than try-apply-create — no post-write
-  ;; type-check + rollback, just `sp/update-entity` + conditional
-  ;; Phase-6c rename-slot.
+  ;; Atomic update unit — `sp/update-entity` + conditional Phase-6c
+  ;; rename-slot + the post-write whole-fn type-check for binding-shaped
+  ;; writes (a type failure is a warning; a SECRET-laundering failure
+  ;; restores the touched fields — the create side's carve-out).
   {:name :try-apply-update
-   :description "Atomic update unit. Returns `{:updated <id>}` on success or `{:error <msg>}` on write failure. Rename-slot failure is logged but never escalated."
+   :description "Atomic update unit. Returns `{:updated <id>}` on success — plus `:type-warnings` when a binding-shaped write landed but the owning fn now fails the aggregate type-check — or `{:error <msg>}` on write failure or a secret-laundering rejection (whose write is rolled back). Rename-slot failure is logged but never escalated."
    :args {:entity-type {:type :text :description "Entity name as text."}
           :id-uuid {:type :uuid :description "Target row id."}
           :entity-data {:type :nullable-keyword-map :description "Pre-validated row patch. Nullable at type level; non-null at runtime."}

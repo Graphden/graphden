@@ -799,7 +799,12 @@
 ;; and clears it on halt.
 (def view-impl-filter          entity-list/view-impl-filter)
 (def apply-view-impl-filter    entity-list/apply-view-impl-filter)
-(def list-all-graph-entities   entity-list/list-all-graph-entities)
+(def graph-tree                entity-list/graph-tree)
+(def graph-namespace-fns       entity-list/graph-namespace-fns)
+(def graph-search              entity-list/graph-search)
+(def graph-index               entity-list/graph-index)
+(def graph-subtree             entity-list/graph-subtree)
+(def graph-full                entity-list/graph-full)
 (def view-members              entity-list/view-members)
 (def list-explorer-views       entity-list/list-explorer-views)
 

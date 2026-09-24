@@ -13,7 +13,6 @@
   (:require
     [graphden.executor.defbase :refer [defbase]]
     [graphden.system.api-routes-js :as api-js]
-    [reitit.core :as r]
     [reitit.ring :as ring]))
 
 
@@ -56,10 +55,11 @@
 ;; At route-compile time reitit folds `(:wrap mw)` around the route handler
 ;; producing a composed Ring callable per route.
 ;;
-;; The graph-level `body` is a fn-graph with one leftover free arg `:ctx`
-;; — a context map. We populate it with `{:request <ring-request>,
+;; The graph-level `body` is a fn-graph with two leftover free args,
+;; `:request` and `:next-handler`; the compiler hands it over as a
+;; map-callable and we call it with `{:request <ring-request>,
 ;; :next-handler <next-link>}` on each invocation. `:proceed` (a fn-def,
-;; not an impl) pulls both pieces out of `:ctx` via `:get`. No dynvar.
+;; not an impl) calls the next link with the request. No dynvar.
 
 (defbase middleware
   "Produces a reitit-compatible middleware spec. `body` is a fn-graph
@@ -75,38 +75,11 @@
              (body {:request request, :next-handler handler})))})
 
 
-;; === Route enumeration ===========================================================
-
-(defbase ring-route-paths
-  "Return the full path patterns the compiled reitit router serves,
-   in route-table order. Accepts either a bare `reitit.core/Router`
-   (from `:ring-router`) or a `reitit.ring` handler — `get-router`
-   pulls the inner router out of the latter, returns nil for the
-   former, hence the `or` coercion. Output drives
-   `:_editor-api-routes-js` (codegen of the JS constants module
-   bundled into editor.js)."
-  [router]
-  (mapv first (r/routes (or (ring/get-router router) router))))
-
-
 ;; === JS code generation =========================================================
 ;;
-;; The two JS-codegen defbases below delegate to pure helpers in
-;; `graphden.system.api-routes-js`. Same code path used by the
-;; boot-time `:exec/api-routes-js-cache` init-key, so the graph-
-;; computed bundle and the cached bundle stay byte-identical.
-
-(defbase routes->js-bundle
-  "Emit a `window.API = {…}` JS module from a vector of full route
-   path patterns. Static paths → string constants
-   (`API.api_branches = '/api/branches'`); paths containing `:param`
-   segments → functions that encodeURIComponent + concatenate
-   (`API.api_branches_ref = function(ref){return '/api/branches/' +
-   encodeURIComponent(ref);}`). IIFE wraps the assignment to keep
-   helper locals out of the global scope."
-  [paths]
-  (api-js/routes->js-bundle paths))
-
+;; The `window.API` module is built ONCE at boot by `:exec/api-routes-js-cache`
+;; (`graphden.system.api-routes-js`) from the live compiled routers; the graph
+;; reads it through the atom below.
 
 (defbase cached-api-routes-js
   "Return the pre-computed `window.API = {…}` JS module — built
@@ -126,6 +99,4 @@
    :ring-create-default-handler ring-create-default-handler-fn
    :ring-handler                ring-handler-fn
    :middleware                  middleware
-   :ring-route-paths            ring-route-paths
-   :routes->js-bundle           routes->js-bundle
    :cached-api-routes-js        cached-api-routes-js})

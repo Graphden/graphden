@@ -136,12 +136,37 @@
   ;; finding is keyed by its member ids, so a group that later gains a
   ;; member comes back on its own.
   ;; ---------------------------------------------------------------------
-  {:name :branch-lint-warnings
-   :description "The graph lint's WARNINGS over the current branch (docs/GRAPH_LINT.md) as display rows — `[{:rule :message :weight :fn-ids :fn-ids-csv :fns [{:id :name :ns} …]} …]`, minus the findings listed in `:suppressed`. One `lint.graph/lint-branch` call over the request's graph snapshot; recomputed only when the snapshot or the suppression set changed."
+  {:name :branch-lint-findings
+   :description "The graph lint's WARNINGS over the current branch (docs/GRAPH_LINT.md) as wire data — `[{:rule :message :weight :fn-ids :fns [{:id :name :ns} …]} …]`, minus the findings listed in `:suppressed`. One `lint.graph/lint-branch` call over the request's graph snapshot; recomputed only when the snapshot or the suppression set changed."
    :args {:suppressed {:type [:list :jsonb]
                        :description "Findings marked as not-an-issue — the `lint-suppressions` const's value, `[{:rule <text> :fn-ids [<uuid-text> …]} …]`."}}
-   :return-type [:list :keyword-map]
+   :return-type [:list {:rule :text :message :text :weight :numeric :fn-ids [:list :text]
+                        :fns [:list {:id :text :name :text :ns :nullable-text}]}]
    :effects #{:db}}
+
+  {:name :_lint-finding-field
+   :parent :get
+   :args {:coll {:as :item} :default nil}}
+
+  {:name :_lint-warning-row
+   :description "One finding as a display row — its fields plus `:fn-ids-csv`, the ids joined for the suppress / restore URLs."
+   :parent :zipmap
+   :args {:keys [{:value :rule} {:value :message} {:value :weight} {:value :fn-ids}
+                 {:value :fn-ids-csv} {:value :fns}]
+          :vals [{:parent :_lint-finding-field :args {:key {:value :rule}}}
+                 {:parent :_lint-finding-field :args {:key {:value :message}}}
+                 {:parent :_lint-finding-field :args {:key {:value :weight}}}
+                 {:parent :_lint-finding-field :args {:key {:value :fn-ids}}}
+                 {:parent :str-join
+                  :args {:coll {:parent :_lint-finding-field :args {:key {:value :fn-ids}}}
+                         :separator {:value ","}}}
+                 {:parent :_lint-finding-field :args {:key {:value :fns}}}]}}
+
+  {:name :branch-lint-warnings
+   :description "The graph lint's WARNINGS over the current branch as display rows — `[{:rule :message :weight :fn-ids :fn-ids-csv :fns [{:id :name :ns} …]} …]`, minus the findings listed in `:suppressed`: `:branch-lint-findings` with each row reshaped in the graph."
+   :parent :map
+   :args {:func :_lint-warning-row
+          :coll :branch-lint-findings}}
 
   ;; --- the suppression store: root fn `lint-suppressions` (:const) ------
   {:name :_plint-supp-fn-id

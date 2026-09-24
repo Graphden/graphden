@@ -112,7 +112,5 @@
   "one unit: the in-place cache patch, same lock, same invariant"
   "graphden.crud.entities.seq/apply-seq-append-core"
   "one unit: synthetic-binding materialise + position compute + pre-reject share a binding id that cannot cross a node boundary without a race"
-  "graphden.crud.type-check/type-check-binding-direct!"
-  "one unit: the write-path check — resolve, check, record-or-clear the diagnostic, as one step"
   "graphden.system.init.exec/ig/init-key :exec/context"
   "one unit: the boot wiring of the execution context; every binding is one component it needs"}}

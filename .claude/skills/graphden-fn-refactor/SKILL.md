@@ -213,7 +213,7 @@ or `:cond` (that's how C2–C4 in `web/crud` are built):
   ```clojure
   {:name :process-foo
    :parent :if
-   :args {:test :_rejected?              ; (some? validation)
+   :args {:test :rejected?              ; (some? validation)
           :then :_validate-foo            ; rejection response = the validation result itself
           :else :_apply-foo
           :validation :_validate-foo      ; shared sub-result, cached

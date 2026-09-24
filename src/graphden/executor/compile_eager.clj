@@ -1252,7 +1252,7 @@
    `B`'s value (forwards-reference, the order they're declared in
    doesn't constrain dependencies) sees the final `fa'` map — same
    semantics as the legacy compile's `augment-env`. Without this,
-   `:types-compatible`'s `:_rejected?` closure (which needs
+   `:types-compatible`'s `:rejected?` closure (which needs
    `:validation` from the same env layer) sees an empty `:validation`
    slot and reports every well-formed request as rejected, even
    though the API path is correct."

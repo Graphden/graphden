@@ -173,7 +173,7 @@
 
 (defn mod-return-rule
   [bindings-info default-ret]
-  ;; :mod takes named scalar args, not :nums.
+  ;; :mod and :quot take named scalar args, not :nums — int ÷ int stays int.
   (let [a (get-in bindings-info [:dividend :type])
         b (get-in bindings-info [:divisor :type])]
     (if (and (= :int a) (= :int b)) :int default-ret)))
@@ -189,13 +189,6 @@
   (if (= :int (get-in bindings-info [:number :type])) :int default-ret))
 
 
-;; === Registry ===
-;; A value is either a bare impl fn or a `{:impl … :*-rule …}` map.
-
-;; Numeric ops: secrets are rarely numbers, but a secret-int passing
-;; through `:add` / `:eq` / `:lt` still leaks via the result. All
-;; content-passing; bool predicates included since `(eq secret 42)`
-;; tells you what the secret IS.
 ;; === Bounds, roots, powers ===
 ;; One Math/JDK call each. `min`/`max` take the same `[:list :numeric]`
 ;; shape as `add`, so a list built for one fits the other.
@@ -230,13 +223,20 @@
   (check-numeric-result! (math/pow (double base) (double exponent)) :pow [base exponent]))
 
 
+;; === Registry ===
+;; A value is either a bare impl fn or a `{:impl … :*-rule …}` map.
+
+;; Numeric ops: secrets are rarely numbers, but a secret-int passing
+;; through `:add` / `:neq` / `:lt` still leaks via the result. All
+;; content-passing; bool predicates included since `(neq secret 42)`
+;; tells you what the secret IS.
 (def impls
   {:add {:impl add :return-type-rule add-return-rule :taint-propagate? true}
    :sub {:impl sub :return-type-rule sub-return-rule :taint-propagate? true}
    :mul {:impl mul :return-type-rule mul-return-rule :taint-propagate? true}
    :div {:impl div :taint-propagate? true}
    :mod {:impl mod-fn :return-type-rule mod-return-rule :taint-propagate? true}
-   :quot {:impl quot-fn :taint-propagate? true}
+   :quot {:impl quot-fn :return-type-rule mod-return-rule :taint-propagate? true}
    :neg {:impl neg :return-type-rule neg-return-rule :taint-propagate? true}
    :abs {:impl abs-fn :return-type-rule abs-return-rule :taint-propagate? true}
    :round {:impl round-fn :taint-propagate? true}

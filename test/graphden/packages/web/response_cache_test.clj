@@ -77,3 +77,16 @@
                                      :when? true}))
       (is (<= (count (exec/execute *context* current {})) 64)
           "the map never exceeds capacity — graph-visible eviction fired"))))
+
+
+(deftest response-immutable?-reads-the-cache-control-header
+  ;; Graph composition (`:re-find?` over `:header-get`), formerly a base-fn.
+  (let [immutable? (eh/fn-id "response-immutable?")
+        run (fn [headers]
+              (exec/execute *context* immutable?
+                            {:response {:status 200 :headers headers :body ""}}))]
+    (is (true? (run {"Cache-Control" "public, max-age=31536000, immutable"})))
+    (is (true? (run {"cache-control" "immutable"})) "the Ring lower-case spelling")
+    (is (false? (run {"Cache-Control" "no-cache"})))
+    (is (false? (run {"Cache-Control" "immutablefoo"})) "a whole word only")
+    (is (false? (run {})) "no header → false")))

@@ -6,8 +6,9 @@
  ;; `:_create-branch-*`), plus the `app-base` auth route template `:post`.
  ;; `app` does NOT depend on `mcp` (the `:mcp-route` ref was removed from
  ;; app's `:all`), so the edge is one-way and dropping `mcp` is safe.
- ;; The fn `:namespace` stays `app.mcp` and the impls ns stays
- ;; `graphden.packages.app.mcp.impls` — identity is uuid-v5(namespace,name),
- ;; so moving only the directory leaves every id + ref byte-identical.
+ ;; The fn `:namespace` stays `app.mcp` — identity is
+ ;; uuid-v5(namespace,name), so moving only the directory leaves every id
+ ;; + ref byte-identical. The module has no impls: every tool is
+ ;; composition over base-fns other packages ship.
  :dependencies ["core" "web" "app"]
  :modules ["mcp"]}

@@ -322,7 +322,7 @@ grep -rEn '^\(defn-?\s+(\S*orchestr|\S*pipeline|\S*-wrap|run-handler|process-\S+
    ```edn
    {:name :branch-routing-wrap
     :parent :if
-    :args {:test :_branch-router-installed?
+    :args {:test :branch-router-installed?
            :then :_branch-dispatched
            :else :base-handler-fallback
            :base-handler {:type [:fn …] :description "…"}}}

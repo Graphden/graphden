@@ -15,9 +15,10 @@
   ;; it pins the fn to the request scope so the result is never
   ;; call-cached across requests (the `:_reconcile-services-apply`
   ;; pattern).
-  [_request fn-ids timeout-ms]
+  [_request fn-ids timeout-ms platform?]
   (cr/record-effect! :db)
-  (test-runs/run-tests! ctx {:fn-ids fn-ids :timeout-ms timeout-ms}))
+  (test-runs/run-tests! ctx {:fn-ids fn-ids :timeout-ms timeout-ms
+                             :platform? platform?}))
 
 
 (defbase _tests-status-apply

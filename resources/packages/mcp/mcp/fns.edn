@@ -5,7 +5,7 @@
 ;; Pure graph composition: one auth-required POST /mcp endpoint, a JSON-RPC
 ;; 2.0 dispatch (:cond over the method string), and each tool is an ADAPTER
 ;; around an existing data fn-def / route handler — reads call
-;; :list-all-graph-entities directly with named args; execute synthesizes a
+;; the `:graph-*` read they need directly; execute synthesizes a
 ;; Ring request for the existing :execute-handler. No new base-fns: the MCP
 ;; layer is exactly the kind of composition the graph exists to express.
 ;;
@@ -212,11 +212,7 @@
   {:name :_mcp-tool-list-namespaces
    :parent :_mcp-tool-ok
    :args {:text {:parent :to-json-string
-                 :args {:data {:parent :list-all-graph-entities
-                               :args {:scope {:value :tree}
-                                      :root-id nil
-                                      :namespace-id nil
-                                      :q nil}}}}}}
+                 :args {:data :graph-tree}}}}
 
   ;; search-fns → ?scope=search&q=…
   {:name :_mcp-search-q
@@ -226,11 +222,9 @@
   {:name :_mcp-tool-search-fns
    :parent :_mcp-tool-ok
    :args {:text {:parent :to-json-string
-                 :args {:data {:parent :list-all-graph-entities
-                               :args {:scope {:value :search-text}
-                                      :root-id nil
-                                      :namespace-id nil
-                                      :q :_mcp-search-q}}}}}}
+                 :args {:data {:parent :graph-search
+                               :args {:q :_mcp-search-q
+                                      :descriptions? {:value true}}}}}}}
 
   ;; read-fn → resolve name → id (current branch), then ?scope=subtree.
   {:name :_mcp-read-fn-name
@@ -252,11 +246,8 @@
    :description "read-fn `format` \"rows\" — the raw subtree row dump (fns / slots / bindings / list-items), JSON."
    :parent :_mcp-tool-ok
    :args {:text {:parent :to-json-string
-                 :args {:data {:parent :list-all-graph-entities
-                               :args {:scope {:value :subtree}
-                                      :root-id :_mcp-read-fn-id
-                                      :namespace-id nil
-                                      :q nil}}}}}}
+                 :args {:data {:parent :graph-subtree
+                               :args {:root-id :_mcp-read-fn-id}}}}}}
 
   ;; The default read is the fns.edn form — the AI reads exactly the
   ;; syntax it writes back through upsert-fn-defs. Pretty-printed so a
@@ -777,7 +768,7 @@
    :description "A read tool names an existing branch other than the one this request runs on, and a router is installed to route it."
    :parent :and
    :args {:values [:_mcp-branch-routable-tool?
-                   :_branch-router-installed?
+                   :branch-router-installed?
                    {:parent :some? :args {:value :_mcp-arg-branch-id}}
                    {:parent :not :args {:value {:parent :equal? :args {:a :_mcp-arg-branch-id :b :current-branch-id}}}}]}}
 

@@ -103,7 +103,7 @@
   {:name :_layout-err-message
    :description "`{:ok false :error <exception.message>}` — the shape `:_layout-build-elements` and `:_parse-layout-request` use to surface ExceptionInfo / IllegalArgumentException messages. `:return-type` pinned to keep downstream `:if`/`:cond` unions a union of precise record shapes."
    :parent :zipmap
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :throwable-message
@@ -116,13 +116,13 @@
   {:name :_parse-layout-err-bad-json
    :description "Static err — JsonParseException leaks `Source: REDACTED` info if we surface .getMessage; replace with a generic message."
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Request body is not valid JSON"}}}
 
   {:name :_parse-layout-err-invalid-request
    :description "`{:ok false :error \"Invalid request: <msg>\"}` — IllegalArgumentException (typically from `UUID/fromString`) gets a prefix to disambiguate from server-side errors. `:return-type` pinned to keep the parent on-throw cond's union of precise record shapes."
    :parent :zipmap
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str

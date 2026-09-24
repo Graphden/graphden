@@ -45,10 +45,10 @@
     :_types-usages-apply :abs :add :all-rich-types :and :api-rich-types
     :assert :assert-eq :assert-some :assoc :assoc-in :atom :auth-active?
     :authenticate-request :blank? :branch-diagnostics-flat
-    ;; :branch-lint-warnings reads the branch's graph snapshot; its rows
+    ;; :branch-lint-findings reads the branch's graph snapshot; its rows
     ;; carry fn names / ids / the engine's message — server-derived, and
     ;; the `suppressed` arg only FILTERS them, never flows through.
-    :branch-lint-warnings
+    :branch-lint-findings
     ;; :unresolved-failure-counts tallies audit rows per fn — fn ids /
     ;; names / counts, all server-derived; `days` is a window, not content.
     :unresolved-failure-counts
@@ -112,10 +112,11 @@
     :h-raw :header-get :heap-committed :heap-max :heap-used :hiccup
     :http-request :http-server :http-stop   :if :into
     :invalidate-after-write :invalidate-graph-cache :invoke :is-a?
-    :json-to-type :jvm-uptime-ms :keys :list :list-all-graph-entities :graph-fn-defs-subtree :fn-unread-bindings :log-warn
+    :json-to-type :jvm-uptime-ms :keys :list :graph-tree :graph-namespace-fns :graph-search
+    :graph-index :graph-subtree :graph-full :graph-fn-defs-subtree :fn-unread-bindings :log-warn
     ;; app/views — the Explorer's filter evaluation: light fn rows (ids,
     ;; names, roles) projected off the graph-cache, never the caller's
-    ;; content. Same class as :list-all-graph-entities.
+    ;; content. Same class as the :graph-* reads.
     :view-members :explorer-view :explorer-views
     :loop-until-interrupted :lt :lte :map :map-xf
     :materialize-package-fns :max-memory :merge :merge-branch!
@@ -142,10 +143,10 @@
     ;;  returns a server-picked version string off
     ;; the remote list — no caller content flows into the return.
 
-    :resolve-type-fn-id :response-immutable? :rest :reverse
+    :resolve-type-fn-id :rest :reverse
     :rewrite-refs-to-version
     :rich-type-of-id :ring-create-default-handler :ring-handler
-    :ring-route-paths :ring-router :routes->js-bundle
+    :ring-router
     :rule-owner-of-id :running-entry :running-state :secret-leaf :secret-path-args :semver-compatible? :service-endpoint
     :queue-publish :queue-take :queue-ack :queue-nack :queue-extend :queue-requeue
     :queue-stats :queue-dead-letters
@@ -156,7 +157,8 @@
     ;; Cached, allow-listed read of a shipped frontend asset — no caller content.
     :shipped-asset
     :set-branch-review-policy! :approve-proposal! :dismiss-my-approval!
-    :proposal-approval-status :add-branch-comment! :list-branch-comments
+    :branch-content-stamp :branch-approvals :approvals-report :count-valid-approvals
+    :add-branch-comment! :list-branch-comments
     :delete-branch-comment! :sleep :sleep-until-ms
     :slot-type-provenance :slurp :some :some? :sort :sort-by :sql-exec
     ;; :sse-stream returns the adopted-channel response map; the
@@ -179,7 +181,7 @@
     ;; item's content) — no taint to propagate, like seq-update.
     :try-apply-seq-append :try-apply-seq-move :try-apply-seq-update
     :try-apply-tighten
-    :try-apply-update :type-check-binding-rej
+    :try-apply-update
     :type-name-kinds :update-entity :update-in :update-keys
     :update-vals :url-decode :usage-all-org-stats
     :usage-org-daily :usage-org-fn-stats

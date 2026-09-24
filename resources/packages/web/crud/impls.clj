@@ -120,24 +120,46 @@
     []))
 
 
-(defbase list-all-graph-entities
-  [scope root-id namespace-id q]
-  ;; Storage read (via `cached-or-load-graph` + an explicit `query-entities`
-  ;; for namespaces). Without the record-effect! the runtime
-  ;; `:runtime-effects` list returned by `/api/execute` would silently
-  ;; drop `:db` for this call — the declared `:effects #{:db}` in fns.edn
-  ;; says the effect IS there, the runtime audit must match.
-  ;;
-  ;; `scope :tree` — `{:namespaces :counts}`, the O(namespaces) sidebar
-  ;; init. `scope :namespace` + `namespace-id` — one namespace's light fn
-  ;; rows (lazy expand). `scope :search` + `q` — name-substring matches,
-  ;; capped (filter box + pickers + name resolution).
-  ;;
-  ;; `scope :index` — `{:fns :namespaces}` (legacy full-fns sidebar pull).
-  ;; `scope :subtree` + `root-id` — the subgraph reachable from `root-id`.
-  ;; Anything else (nil / :full) yields the unchanged full payload.
+;; The editor's graph reads — one projection each over the shared
+;; graph-cache (`crud.entities.list`). Storage reads (the cache plus an
+;; explicit `query-entities` for namespaces): each records `:db` so the
+;; runtime effect audit matches the declared `:effects #{:db}`. Which one
+;; a request wants is graph composition (`:all-entities-handler`).
+
+(defbase graph-tree
+  []
   (cr/record-effect! :db)
-  (entities/list-all-graph-entities ctx scope root-id namespace-id q))
+  (entities/graph-tree ctx))
+
+
+(defbase graph-namespace-fns
+  [namespace-id]
+  (cr/record-effect! :db)
+  (entities/graph-namespace-fns ctx namespace-id))
+
+
+(defbase graph-search
+  [q descriptions?]
+  (cr/record-effect! :db)
+  (entities/graph-search ctx q descriptions?))
+
+
+(defbase graph-index
+  []
+  (cr/record-effect! :db)
+  (entities/graph-index ctx))
+
+
+(defbase graph-subtree
+  [root-id]
+  (cr/record-effect! :db)
+  (entities/graph-subtree ctx root-id))
+
+
+(defbase graph-full
+  []
+  (cr/record-effect! :db)
+  (entities/graph-full ctx))
 
 
 (defbase strip-hidden-impl
@@ -150,7 +172,7 @@
 
 (defbase all-rich-types
   []
-  ;; Same as `list-all-graph-entities`: `rich-types-with-type-rows` calls
+  ;; Same as the `:graph-*` reads: `rich-types-with-type-rows` calls
   ;; `cached-or-load-graph` which reads the `:fn` / `:slot` / `:fn-slot`
   ;; tables. Declared `:effects #{:db}` in fns.edn; mirror at runtime.
   (cr/record-effect! :db)
@@ -214,7 +236,7 @@
 ;; graph fn-defs (`web/crud` fns.edn) — an `:if` over the validation
 ;; result, branching to the `{:ok false :error}` rejection or to the
 ;; computation. These base-fns are the parse / validate / apply stages;
-;; `_rejected?` (below) is shared with every other `:if` handler.
+;; `rejected?` (below) is shared with every other `:if` handler.
 
 
 (defbase try-apply-create
@@ -325,7 +347,12 @@
    :free-arg-slot-map free-arg-slot-map
    :free-arg-entries free-arg-entries
    :service-blocking-free-args service-blocking-free-args
-   :list-all-graph-entities list-all-graph-entities
+   :graph-tree graph-tree
+   :graph-namespace-fns graph-namespace-fns
+   :graph-search graph-search
+   :graph-index graph-index
+   :graph-subtree graph-subtree
+   :graph-full graph-full
    :graph-fn-defs-subtree   graph-fn-defs-subtree
    :fn-unread-bindings      fn-unread-bindings
    :strip-hidden-impl strip-hidden-impl

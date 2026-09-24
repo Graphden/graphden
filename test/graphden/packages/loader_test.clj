@@ -161,6 +161,29 @@
 ;; load-package-meta tests
 ;; =============================================================================
 
+(deftest unescaped-quote-in-a-description-is-refused-test
+  ;; `"… `" io "` …"` ends the string at the second quote; `io` reads as a
+  ;; SYMBOL key and the file still parses, silently truncating the text.
+  (let [problems (fn [fn-defs]
+                   (let [data (try (loader/validate-fn-def-keys! fn-defs "x/fns.edn")
+                                   nil
+                                   (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+                     (when data
+                       (is (= :package-error/malformed-fn-def (:type data))))
+                     (some->> data :problems (mapv :key))))
+        broken (read-string "{:name :f :description \"a \" any pair differs \" b\"}")]
+    (testing "a symbol key on the fn-def itself"
+      (is (= '[any differs] (problems [broken]))))
+    (testing "a symbol key in an arg spec"
+      (is (= '[io] (problems [(read-string
+                                "{:name :f :args {:x {:type :text :description \"`\" io \" nope \"}}}")]))))
+    (testing "an inline fn-def under :args is checked too"
+      (is (= '[io] (problems [{:name :f :args {:x {:parent :g :args {:y {:type :int 'io "?"}}}}}]))))
+    (testing "literal maps with string keys stay legal"
+      (is (nil? (problems [{:name :f :args {:headers {"Content-Type" "text/html"}
+                                            :maps [{:value {"type" "t"}}]}}]))))))
+
+
 (deftest load-package-meta-test
   (testing "throws for non-existent package"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo

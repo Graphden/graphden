@@ -60,16 +60,37 @@
    :args {:request {:as :request}
           :param-name {:value "q"}}}
 
+  {:name :_all-entities-scope-is?
+   :description "Is the request's `scope` the keyword bound as `:b`?"
+   :parent :equal?
+   :args {:a :_all-entities-scope}}
+
+  {:name :_all-entities-graph
+   :description "The graph read the request's `scope` names — a lazy `:cond`, so only the chosen projection runs. No scope, `full`, an unknown one, or `subtree` without a `root-id` → the full dump."
+   :parent :cond
+   :args {:clauses [{:parent :_all-entities-scope-is? :args {:b {:value :tree :literal? true}}}
+                    :graph-tree
+                    {:parent :_all-entities-scope-is? :args {:b {:value :namespace :literal? true}}}
+                    {:parent :graph-namespace-fns :args {:namespace-id :_all-entities-namespace-id}}
+                    {:parent :_all-entities-scope-is? :args {:b {:value :search :literal? true}}}
+                    {:parent :graph-search :args {:q :_all-entities-q :descriptions? {:value false}}}
+                    {:parent :_all-entities-scope-is? :args {:b {:value :search-text :literal? true}}}
+                    {:parent :graph-search :args {:q :_all-entities-q :descriptions? {:value true}}}
+                    {:parent :_all-entities-scope-is? :args {:b {:value :index :literal? true}}}
+                    :graph-index
+                    {:parent :and
+                     :args {:values [{:parent :_all-entities-scope-is? :args {:b {:value :subtree :literal? true}}}
+                                     {:parent :some? :args {:value :_all-entities-root-id}}]}}
+                    {:parent :graph-subtree :args {:root-id :_all-entities-root-id}}
+                    {:value true}
+                    :graph-full]}}
+
   {:name :all-entities-handler
    :lambda-params [:request]
-   :description "Ring handler that returns the graph dump as JSON. `?scope=tree` → `{:namespaces :counts}` (sidebar init). `?scope=namespace&namespace-id=X` → one namespace's light fns (lazy expand). `?scope=search&q=…` → capped name matches (filter / pickers). `?scope=index` → `{:fns :namespaces}` full pull. `?scope=subtree&root-id=X` → subgraph reachable from X. Bound by `app.routes.api-entities`."
+   :description "Ring handler that returns the graph dump as JSON. `?scope=tree` → `{:namespaces :counts}` (sidebar init). `?scope=namespace&namespace-id=X` → one namespace's light fns (lazy expand). `?scope=search&q=…` → capped name matches (filter / pickers); `search-text` adds description matches. `?scope=index` → `{:fns :namespaces}` full pull. `?scope=subtree&root-id=X` → subgraph reachable from X. Anything else → the full dump. Bound by `app.routes.api-entities`."
    :parent :json-handler
    :args {:data {:parent :strip-hidden-impl
-                 :args {:graph {:parent :list-all-graph-entities
-                                :args {:scope :_all-entities-scope
-                                       :root-id :_all-entities-root-id
-                                       :namespace-id :_all-entities-namespace-id
-                                       :q :_all-entities-q}}}}}}
+                 :args {:graph :_all-entities-graph}}}}
 
   {:name :all-rich-types-handler
    :description "Ring handler for `GET /api/types` — returns the rich-type registry as JSON: the lean bulk snapshot (heavy on-demand/unused fields omitted, docs/PERF_BUDGETS.md finding K). The former `?fn=<name>` FULL-entry branch died with its one consumer (the return-type-rule popover is a server partial now). Editor / external tools use it to know each slot's expected type without having to re-derive from EDN."
@@ -88,7 +109,7 @@
   {:name :types-compatible
    :description "POST /api/types/compatible — parse the JSON body `{expected, candidate}`, validate (both present), and on success run the subtype check. Returns `{:ok :expected :candidate :reason?}` or `{:ok false :error}`. The editor's fn-picker / mismatch explainers call this instead of duplicating `subtype?` in JS."
    :parent :if
-   :args {:test :_rejected?
+   :args {:test :rejected?
           :then :_types-compatible-validation
           :else :_types-compatible-apply
           :validation :_types-compatible-validation
@@ -97,7 +118,7 @@
   {:name :types-candidates
    :description "POST /api/types/candidates — parse the JSON body `{expected, effects?, name-prefix?}`, validate (`expected` present), and on success enumerate fns whose return type is a subtype of `expected`. Returns `{:ok :expected :count :candidates}` or `{:ok false :error}`. Powers type-aware fn-pickers."
    :parent :if
-   :args {:test :_rejected?
+   :args {:test :rejected?
           :then :_types-candidates-validation
           :else :_types-candidates-apply
           :validation :_types-candidates-validation
@@ -106,7 +127,7 @@
   {:name :types-usages
    :description "POST /api/types/usages — parse the JSON body `{type-fn-id}`, validate (valid UUID), and on success find every fn that references the type-row. Returns `{:ok :type-fn-id :type-name :count :usages}` or `{:ok false :error}`. Powers the editor's inline-expand 'Used by N' footer."
    :parent :if
-   :args {:test :_rejected?
+   :args {:test :rejected?
           :then :_types-usages-validation
           :else :_types-usages-apply
           :validation :_types-usages-validation
@@ -194,7 +215,7 @@
   {:name :process-create-entity
    :description "POST /api/entities/:type — parse the request, run write-time validation, and on success create the entity (with post-create whole-fn type-check + rollback). Returns a partial Ring response."
    :parent :if
-   :args {:test :_rejected?
+   :args {:test :rejected?
           :then :_rejection-response
           :else :_create-apply
           :validation :_create-validation
@@ -203,7 +224,7 @@
   {:name :process-update-entity
    :description "PUT /api/entities/:type/:id — parse the request, run write-time validation against the merged post-write view, and on success update the entity. Returns a partial Ring response."
    :parent :if
-   :args {:test :_rejected?
+   :args {:test :rejected?
           :then :_rejection-response
           :else :_update-apply
           :validation :_update-validation
@@ -217,7 +238,7 @@
   {:name :process-create-record-type
    :description "POST /api/types/record — parse the JSON body `{namespace-id?, name, description?, fields:[…]}`, validate (name + ≥1 field), and on success atomically create the record type-row. Returns `{:ok true :id :name}` or `{:ok false :error}`."
    :parent :if
-   :args {:test :_rejected?
+   :args {:test :rejected?
           :then :_create-record-type-validation
           :else :_create-record-type-apply
           :validation :_create-record-type-validation
@@ -226,7 +247,7 @@
   {:name :process-create-list-type
    :description "POST /api/types/list — parse the JSON body `{namespace-id?, name, description?, element-type}`, validate (name + element-type), and on success atomically create the list type-row. Returns `{:ok true :id :name}` or `{:ok false :error}`."
    :parent :if
-   :args {:test :_rejected?
+   :args {:test :rejected?
           :then :_create-list-type-validation
           :else :_create-list-type-apply
           :validation :_create-list-type-validation
@@ -235,7 +256,7 @@
   {:name :process-update-record-type
    :description "PUT /api/types/record — parse the JSON body `{id, name?, description?, fields:[…]}`, validate (id + ≥1 field + the fn-row exists + not package-synced (403) + is a record type-row), and on success atomically apply the field diff (journalled rollback). Returns `{:ok true :id :name}` or `{:ok false :error}`."
    :parent :if
-   :args {:test :_rejected?
+   :args {:test :rejected?
           :then :_update-record-type-validation
           :else :_update-record-type-apply
           :validation :_update-record-type-validation

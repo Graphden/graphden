@@ -116,20 +116,6 @@
   (when (some? id) (fn-exec/cancel-execution! ctx id)))
 
 
-;; --- get-execution + cancel-execution ---
-;; Both handlers share the `:_exec-id-parsed` graph parser (URL +
-;; UUID coerce in fns.edn) AND the dynamic 404 builder (same text
-;; either way); each has its own apply (read vs cancel-mutation).
-
-
-;; GET /api/execute/:id atoms
-
-
-
-;; POST /api/execute/:id/cancel atoms
-
-
-
 (defbase resolve-fn-version-id
   "Resolve a logical fn-id to its current-branch version-id. Returns
    nil when the fn has no version visible on the active branch (never
@@ -185,13 +171,6 @@
    `:port`) by composing on top — no Clojure edit."
   [service-id]
   (get @recon/running service-id))
-
-
-;; --- list-services ---
-;; Five named steps glued by a graph fn-def — pure data composition
-;; so each stage is visible: load services + fn-name-index → enrich
-;; each → maybe build legacy fallback → wrap as final response. Each
-;; atom is a 1-3-line wrap over the helpers above.
 
 
 (defbase recent-failures

@@ -48,7 +48,7 @@
     :repeat :keys :vals
     :take :drop :reverse :sort :distinct :concat
     :case :cond :coalesce :if :invoke :const
-    :add :sub :mul :mod :neg :abs
+    :add :sub :mul :mod :quot :neg :abs
     ;; signature owners — no hand rule; the declared polymorphic
     ;; signature is the narrowing (checker's `signature-return`).
     ;; `:range` left OUT deliberately: fully concrete declaration,

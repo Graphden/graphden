@@ -238,7 +238,7 @@
   {:name :_get-branch-err
    :description "Not-found shape — `{:ok false :reason :not-found :error \"Branch not found: <ref>\"}`. Same envelope as the delete-branch not-found sibling."
    :parent :_branch-err-envelope
-   :return-type :_error-result-with-reason-shape
+   :return-type :error-result-with-reason-shape
    :args {:vals [{:value false}
                  {:value :not-found}
                  {:parent :str :args {:parts ["Branch not found: " :_get-branch-ref]}}]}}
@@ -637,7 +637,7 @@
   {:name :_diff-err-target-missing
    :description "Dynamic error — cites the raw target-ref. Shared by diff / conflicts / merge via `:parent`. `:return-type` pinned so the parent `:cond`'s union of error envelopes + success envelope stays a union of PRECISE record shapes (otherwise the bare `:zipmap` inference opaques out to `[:map :any …]` and downstream `:get :key …` can't narrow per-branch)."
    :parent :zipmap
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str
@@ -649,13 +649,13 @@
 
   {:name :_diff-err-against-missing
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Query parameter 'against' is required"}}}
 
   {:name :_diff-err-source-missing
    :description "Dynamic error — cites the raw against-ref. Only diff uses `:against-ref` as the source key (conflicts/merge use `:source-ref`). Pinned `:return-type` mirrors `:_diff-err-target-missing` — keeps the cond's union of precise record shapes intact."
    :parent :zipmap
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str
@@ -678,10 +678,6 @@
   {:name :diff-change-kw
    :description "Closed enum for the `:change` field on a `:diff-branches` entry. Same keyword set the Clojure merge layer emits."
    :refine {:base :keyword :constraint [:in [:added-in-source :added-in-target :modified]]}}
-
-  {:name :diff-entity-name-kw
-   :description "Closed enum for the `:entity-name` field on a `:diff-branches` entry — the versioned entity kinds the diff walker considers."
-   :refine {:base :keyword :constraint [:in [:fn :fn-slot :binding :binding-list-item]]}}
 
   {:name :diff-branches
    :description "Atomic library boundary over `mrg/diff-branches` — returns the resolved-view diff between the two branches' ancestor chains: `{:source-branch-id :target-branch-id :diffs [...]}`."
@@ -958,7 +954,7 @@
 
   {:name :_create-branch-err-policy-invalid
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "write-policy must be one of: open, owner, admins"}}}
 
   {:name :_create-branch-name-blank?
@@ -1041,7 +1037,7 @@
   {:name :_create-branch-err-name-taken
    :description "Dynamic error — cites the rejected name. `:return-type` pinned so the parent cond's union stays a union of precise record shapes for downstream `:get` narrowing."
    :parent :zipmap
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str
@@ -1054,7 +1050,7 @@
   {:name :_create-branch-err-base-missing
    :description "Dynamic error — cites the base-ref that didn't resolve."
    :parent :zipmap
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str
@@ -1118,7 +1114,7 @@
   {:name :_create-branch-data
    :description "POST /api/branches — flat `:cond` of `[name-blank? → 400, name-taken? → 400-dynamic, base-missing? → 400-dynamic, true → apply]`."
    :parent :cond
-   :args {:clauses [:_create-branch-name-blank?  :_err-name-blank
+   :args {:clauses [:_create-branch-name-blank?  :err-name-blank
                     :_create-branch-policy-invalid? :_create-branch-err-policy-invalid
                     :_create-branch-name-taken?  :_create-branch-err-name-taken
                     :_create-branch-base-missing? :_create-branch-err-base-missing
@@ -1199,11 +1195,129 @@
    :return-type :int
    :effects #{:db}}
 
-  {:name :proposal-approval-status
-   :description "Read-only — the approval status of proposal `source-branch-id`: `{:required :have :satisfied :mine :approvers [{:approver-id :counted :reason :stale}]}` for the reviewer UI (`:mine` — the caller's own approval is recorded, so the ✅ offers to withdraw it). Each approver row is judged by the merge gate's own rule: `:counted` false carries a `:reason` (`stale` / `other-target` / `not-an-approver` / `author` — the author's own approval under a strict target); `:stale` marks the first three."
-   :args {:source-branch-id {:type :uuid :description "The proposal (source) branch to report on."}}
-   :return-type :keyword-map
+  ;; --- The approval status of a proposal — the reviewer UI's read.
+  ;; Four boundaries over `merge.core` (the stamp, the rows, and the
+  ;; merge gate's own count + per-row verdicts), composed below.
+  {:name :branch-content-stamp
+   :description "The proposal branch's content fingerprint — what an approval is stamped with; an edit advances it, which makes older approvals stale."
+   :args {:source-branch-id {:type :uuid :description "The proposal (source) branch."}}
+   :return-type :text
    :effects #{:db}}
+
+  {:name :branch-approvals
+   :description "Every recorded approval row of proposal `source-branch-id` (`:approver-id :target-branch-id :content-stamp :created-at`)."
+   :args {:source-branch-id {:type :uuid :description "The proposal (source) branch."}}
+   :return-type [:list :keyword-map]
+   :effects #{:db}}
+
+  {:name :approvals-report
+   :description "Each approval row judged by the merge gate's own rule: `{:approver-id :counted :reason :stale}`. `:counted` false carries a `:reason` (`stale` / `other-target` / `not-an-approver` / `author` — the author's own approval under a strict target); `:stale` marks the first three."
+   :args {:stamp {:type :text :description "The proposal's current content stamp (`:branch-content-stamp`)."}
+          :target-branch-id {:type :nullable-uuid :description "The merge target — the proposal's base branch."}
+          :approver-ids {:type [:list :text] :description "The target's approver allow-list; empty = no restriction."}
+          :approvals {:type [:list :keyword-map] :description "The approval rows (`:branch-approvals`)."}
+          :author-id {:type :nullable-text :description "The proposal's owner."}
+          :allow-self? {:type :bool :description "Whether the author's own approval counts."}}
+   :return-type [:list {:approver-id :text :counted :bool :reason :nullable-text :stale :bool}]}
+
+  {:name :count-valid-approvals
+   :description "How many DISTINCT approvers count toward the merge — the merge gate's own rule over the same inputs as `:approvals-report`."
+   :args {:stamp {:type :text :description "The proposal's current content stamp."}
+          :target-branch-id {:type :nullable-uuid :description "The merge target."}
+          :approver-ids {:type [:list :text] :description "The target's approver allow-list; empty = no restriction."}
+          :approvals {:type [:list :keyword-map] :description "The approval rows."}
+          :author-id {:type :nullable-text :description "The proposal's owner."}
+          :allow-self? {:type :bool :description "Whether the author's own approval counts."}}
+   :return-type :int}
+
+  {:name :_approval-status-source-ref
+   :description "The proposal's id as a branch ref."
+   :parent :to-str
+   :args {:value {:as :source-branch-id :type :uuid
+                  :description "The proposal (source) branch to report on."}}}
+
+  {:name :_approval-status-source
+   :description "The proposal branch row."
+   :parent :resolve-branch-ref
+   :args {:ref :_approval-status-source-ref}}
+
+  {:name :_approval-status-target-id
+   :description "The proposal's merge target — its base branch."
+   :parent :get
+   :args {:coll :_approval-status-source :key {:value :base-branch-id} :default nil}}
+
+  {:name :_approval-status-target
+   :parent :resolve-branch-ref
+   :args {:ref {:parent :to-str :args {:value :_approval-status-target-id}}}}
+
+  {:name :_approval-status-target-field
+   :description "One field of the target row, nil when the proposal has no target."
+   :parent :get
+   :args {:coll :_approval-status-target :default nil}}
+
+  {:name :_approval-status-required
+   :parent :coalesce
+   :args {:value {:parent :_approval-status-target-field :args {:key {:value :required-approvals}}}
+          :default {:value 0}}}
+
+  {:name :_approval-status-allow-self?
+   :description "Self-approval counts unless the target says otherwise (`merge.core/self-approval-allowed?`)."
+   :parent :coalesce
+   :args {:value {:parent :_approval-status-target-field :args {:key {:value :allow-self-approval?}}}
+          :default {:value true}}}
+
+  {:name :_approval-status-approvals
+   :parent :branch-approvals}
+
+  {:name :_approval-status-stamp
+   :parent :branch-content-stamp}
+
+  {:name :_approval-status-approver-ids
+   :parent :coalesce
+   :args {:value {:parent :_approval-status-target-field :args {:key {:value :approver-ids}}}
+          :default {:value []}}}
+
+  {:name :_approval-status-author-id
+   :description "The proposal's author — its owner."
+   :parent :get
+   :args {:coll :_approval-status-source :key {:value :owner-id} :default nil}}
+
+  {:name :_approval-status-have
+   :parent :count-valid-approvals
+   :args {:stamp :_approval-status-stamp
+          :target-branch-id :_approval-status-target-id
+          :approver-ids :_approval-status-approver-ids
+          :approvals :_approval-status-approvals
+          :author-id :_approval-status-author-id
+          :allow-self? :_approval-status-allow-self?}}
+
+  {:name :_approval-status-approvers
+   :parent :approvals-report
+   :args {:stamp :_approval-status-stamp
+          :target-branch-id :_approval-status-target-id
+          :approver-ids :_approval-status-approver-ids
+          :approvals :_approval-status-approvals
+          :author-id :_approval-status-author-id
+          :allow-self? :_approval-status-allow-self?}}
+
+  {:name :_approval-status-mine?
+   :description "Whether the caller's own approval is recorded — the ✅ in the branch popover renders pressed and offers to withdraw it."
+   :parent :some?
+   :args {:value {:parent :some
+                  :args {:pred {:parent :equal?
+                                :args {:a {:parent :get :args {:coll {:as :item} :key {:value :approver-id} :default nil}}
+                                       :b :current-user-id}}
+                         :coll :_approval-status-approvals}}}}
+
+  {:name :proposal-approval-status
+   :description "Read-only — the approval status of proposal `source-branch-id`: `{:required :have :satisfied :mine :approvers [{:approver-id :counted :reason :stale}]}` for the reviewer UI. `:have` and each approver's verdict come from the merge gate's own rule (`:count-valid-approvals` / `:approvals-report`), so the status never disagrees with the merge."
+   :parent :zipmap
+   :args {:keys [{:value :required} {:value :have} {:value :satisfied} {:value :mine} {:value :approvers}]
+          :vals [:_approval-status-required
+                 :_approval-status-have
+                 {:parent :gte :args {:nums [:_approval-status-have :_approval-status-required]}}
+                 :_approval-status-mine?
+                 :_approval-status-approvers]}}
 
   {:name :add-branch-comment!
    :description "Atomic library boundary — record a review comment on proposal `source-branch-id` by the current principal. Optional `entity-name` + `entity-id` anchor the comment to one diffed graph element (fn / fn-slot / binding / binding-list-item); both nil = the general branch thread. Returns the new comment id (text)."
@@ -1243,7 +1357,7 @@
   {:name :_branch-policy-err-missing
    :description "JSON 404-style rejection — the URL ref resolved to no branch."
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Branch not found"}}}
 
   {:name :_branch-policy-value
@@ -1269,7 +1383,7 @@
 
   {:name :_branch-policy-err-invalid
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "write-policy must be one of: open, owner, admins"}}}
 
   {:name :_branch-policy-apply-set
@@ -1327,7 +1441,7 @@
 
   {:name :_branch-protect-err-missing
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Branch not found"}}}
 
   {:name :_branch-protect-apply-set
@@ -1382,7 +1496,7 @@
 
   {:name :_branch-propose-err-missing
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Branch not found"}}}
 
   {:name :_branch-propose-apply-set
@@ -1435,7 +1549,7 @@
 
   {:name :_branch-archive-err-missing
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Branch not found"}}}
 
   {:name :_branch-archive-apply-set
@@ -1492,7 +1606,7 @@
 
   {:name :_branch-rp-err-missing
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Branch not found"}}}
 
   {:name :_branch-rp-apply-set
@@ -1537,7 +1651,7 @@
 
   {:name :_branch-approve-err-missing
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Branch not found"}}}
 
   {:name :_branch-approve-apply
@@ -1622,7 +1736,7 @@
 
   {:name :_branch-comment-err-blank
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Comment body is required"}}}
 
   {:name :_branch-comment-anchor-name
@@ -1736,7 +1850,7 @@
 
   {:name :_branch-comment-err-no-id
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Comment id is required"}}}
 
   {:name :_branch-comment-del
@@ -1837,7 +1951,7 @@
 
   {:name :_delete-branch-err-main
    :parent :const
-   :return-type :_error-result-with-reason-shape
+   :return-type :error-result-with-reason-shape
    :args {:value {:ok false :reason :root-branch-undeletable
                   :error "Cannot delete the root branch"}}}
 
@@ -1858,7 +1972,7 @@
   {:name :_delete-branch-err-not-found
    :description "Dynamic error — cites the raw branch-ref. Shared by the parse-time guard and the exception-surfaced path: same envelope (incl. `:reason :not-found`)."
    :parent :_branch-err-envelope
-   :return-type :_error-result-with-reason-shape
+   :return-type :error-result-with-reason-shape
    :args {:vals [{:value false}
                  {:value :not-found}
                  {:parent :str
@@ -1939,13 +2053,13 @@
 
   {:name :_conflicts-err-source-supplied-missing
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Query parameter 'source' is required"}}}
 
   {:name :_conflicts-err-source-missing
    :description "Dynamic error — cites the raw source-ref. Shared with `:_merge-err-source-missing` via `:parent`. `:return-type` pinned so the parent cond's union stays a union of precise record shapes for downstream `:get` narrowing."
    :parent :zipmap
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str
@@ -2202,7 +2316,7 @@
 
   {:name :_merge-err-source-not-supplied
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Required field ':source' is missing"}}}
 
   {:name :_merge-err-source-missing
@@ -2211,7 +2325,7 @@
 
   {:name :_merge-err-same
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "Source and target branches must differ"}}}
 
   ;; --- :merge-branch! atomic primitive + graph-level try/catch ----
@@ -2525,7 +2639,7 @@
 
   {:name :_branch-apply-err-generic
    :parent :zipmap
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:keys [{:value :ok} {:value :error}]
           :vals [{:value false} :_branch-apply-err-generic-msg]}}
 

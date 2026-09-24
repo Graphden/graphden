@@ -137,7 +137,8 @@
    :args {:keys [{:value :name} {:value :version} {:value :uptime-ms}]
           :vals [{:parent :system-property :args {:name {:value "java.vm.name"}}}
                  {:parent :system-property :args {:name {:value "java.version"}}}
-                 :jvm-uptime-ms]}}
+                 :jvm-uptime-ms]}
+   :return-type :jvm-version-shape}
 
   ;; Heap / process-memory primitives — one MXBean/Runtime call each,
   ;; same standard as :jvm-uptime-ms: admins compose their own memory
@@ -631,7 +632,7 @@
   {:name :_resource-not-found-error
    :parent :ex-info
    :args {:message :_resource-not-found-message
-          :data {"type" "execution-error/resource-not-found"}}}
+          :data {:value {:type :execution-error/resource-not-found}}}}
 
   {:name :_resource-not-found-throw
    :parent :throw
@@ -672,10 +673,6 @@
               :description "Text containing the integer literal, e.g. \"8081\"."}}
    :return-type :int}
 
-  ;; ONE digest primitive — the ALGORITHM is data, pinned by graph-level
-  ;; presets (same ladder shape as :http-request / :route). Deploy
-  ;; verification uses the build-time hash below instead (single source
-  ;; of truth across front- and back-end).
   {:name :parse-float
    :description "Parse a decimal number out of `:s` (`Double/parseDouble`) — `\"3.14\"`, `\"-2e3\"`. Rejects anything else with NumberFormatException; `:parse-int` is the integer sibling."
    :args {:s {:type :text :description "Text containing the number literal."}}
@@ -691,6 +688,10 @@
    :args {:s {:type :text :description "Base64 text."}}
    :return-type :text}
 
+  ;; ONE digest primitive — the ALGORITHM is data, pinned by graph-level
+  ;; presets (same ladder shape as :http-request / :route). Deploy
+  ;; verification uses the build-time hash below instead (single source
+  ;; of truth across front- and back-end).
   {:name :digest-hex
    :description "Lower-case hex digest of a UTF-8 string under `:algorithm` (any name the JVM's MessageDigest providers resolve — \"SHA-256\", \"SHA-512\", \"SHA-1\", \"MD5\", …; unknown names throw at runtime). Prefer the `:sha256-hex` preset unless the algorithm genuinely varies."
    :args {:algorithm {:type :non-blank-text

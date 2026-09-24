@@ -13,9 +13,11 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.entities :as entities]
     [graphden.crud.types-api :as types-api]
+    [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.lint.core :as lint]
     [graphden.lint.graph :as lg]
+    [graphden.packages.owned :as owned]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -85,7 +87,11 @@
       (is (= (into #{} (map :id) (:fns (types-api/cached-or-load-graph ctx)))
              (into #{} (map :id) (:fns (types-api/load-graph-entities-uncached storage))))))
     (testing "the platform's own fn-defs raise nothing (the corpus gate keeps them clean)"
-      (is (empty? (remove (fn [f] (some #{a b} (:fn-ids f))) (lg/lint-branch ctx #{})))))
+      ;; Scoped to findings made only of package-owned rows: the graph is
+      ;; shared across this namespace's deftests, so another test's probes
+      ;; may be live here.
+      (is (empty? (filter (fn [f] (every? owned/owned-fn-id? (:fn-ids f)))
+                          (lg/lint-branch ctx #{})))))
     (testing "the entry the Lint panel stores hides the finding"
       (let [[f] (findings-naming ctx a #{})
             stored {:rule "duplicate-definition" :fn-ids (mapv str (:fn-ids f))}
@@ -112,6 +118,39 @@
         (entities/create-entity "binding" {:fn-id user :slot-id (slot-id storage assoc-id "map")
                                            :ref-fn-id dead} ctx)
         (is (empty? (filterv #(= :unreferenced-private (:rule %)) (findings-naming ctx dead #{}))))))))
+
+
+(deftest branch-lint-warnings-display-rows-test
+  ;; The display row is graph composition over `:branch-lint-findings`:
+  ;; the wire shape the Lint tab and the problem lens read must not move.
+  ;; The graph is shared across this namespace's deftests (random order),
+  ;; so the probe pair is un-duplicated on the way out — otherwise
+  ;; `duplicate-definition-through-storage-test`'s "the platform raises
+  ;; nothing" check would see it.
+  (let [{:keys [ctx storage all-name->id]} *graph*
+        title (fn-id-by-name storage "const")
+        a (make-assoc-child! ctx storage "lint-row-a" "row" title)
+        b (make-assoc-child! ctx storage "lint-row-b" "row" title)
+        warnings #(exec/execute-with-named-args ctx (get all-name->id :branch-lint-warnings)
+                                                {:suppressed %})]
+    (try
+      (let [rows (warnings [])
+            row (first (filter #(= [(str a) (str b)] (:fn-ids %)) rows))]
+        (is (some? row) (pr-str rows))
+        (is (= "duplicate-definition" (:rule row)))
+        (is (string? (:message row)))
+        (is (number? (:weight row)))
+        (is (= (str a "," b) (:fn-ids-csv row)))
+        (is (= [{:id (str a) :name "lint-row-a" :ns ""} {:id (str b) :name "lint-row-b" :ns ""}]
+               (:fns row)))
+        (testing "a stored suppression drops the row"
+          (is (not-any? #(= [(str a) (str b)] (:fn-ids %))
+                        (warnings [{:rule "duplicate-definition" :fn-ids [(str a) (str b)]}])))))
+      (finally
+        (let [assoc-id (fn-id-by-name storage "assoc")
+              key-binding (first (sp/query-entities storage :binding
+                                                    {:fn-id b :slot-id (slot-id storage assoc-id "key")}))]
+          (entities/update-entity "binding" (:id key-binding) {:value "row-b-apart" :value-present true} ctx))))))
 
 
 (deftest namespace-rename-refreshes-finding-paths-test

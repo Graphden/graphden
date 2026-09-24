@@ -858,11 +858,13 @@
            intersect with the branch's tests, gate on an EMPTY effect closure,
            and re-run debounced on a conveyed-bindings future with
            `:allowed-effects #{}` as the runtime backstop."}
-    {:ns graphden.crud.entities.list :defn list-all-graph-entities
-     :say "The read side the editor lives on. One call, one shared lazy
-           `graph-list-env` over the graph-cache, and a `scope` that picks a
-           projection: the sidebar tree (namespaces + counts, O(namespaces)),
-           one namespace's leaves, a search, a subtree, or the full dump.
+    {:ns graphden.crud.entities.list :defn graph-list-env
+     :say "The read side the editor lives on. One shared lazy environment
+           over the graph-cache, and one projection per shape read off it:
+           the sidebar tree (namespaces + counts, O(namespaces)), one
+           namespace's leaves, a search, a subtree, or the full dump — each
+           its own base-fn (`:graph-tree` … `:graph-full`), and which one a
+           request wants is a `:cond` in the graph (`:all-entities-handler`).
            Every fn row is tagged with a `:role` so Types vs Functions is
            decided server-side. When the editor feels slow after a write,
            this is where to look — it is what every refresh re-reads."}

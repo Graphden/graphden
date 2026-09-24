@@ -14,7 +14,7 @@
     [clojure.pprint :as pp]
     [clojure.string :as str]
     [graphden.executor.defbase :refer [defbase]]
-    [graphden.storage.protocol.core :as sp]
+    [graphden.storage.protocol.config :as sp-config]
     [graphden.types.core :as types]))
 
 
@@ -40,49 +40,87 @@
 
 ;; === Regex Safety ===
 
-(defn- safe-compile-regex
-  "Compiles regex pattern with safety checks.
-   Returns compiled pattern or throws with descriptive error."
+(defn- check-regex-length!
   [pattern-str]
-  (let [max-len sp/*max-regex-length*
-        timeout-ms sp/*regex-compile-timeout-ms*]
+  (let [max-len sp-config/*max-regex-length*]
     (when (> (count pattern-str) max-len)
       (throw (ex-info "Regex pattern too long"
                       {:type :execution-error/regex-too-complex
                        :pattern-length (count pattern-str)
                        :max-length max-len
-                       :hint "Use simpler separator or literal string"})))
-    (let [fut (future
-                (try
-                  {:pattern (re-pattern pattern-str)}
-                  (catch java.util.regex.PatternSyntaxException e
-                    {:error :syntax :cause (Throwable/.getMessage e)})
-                  (catch Exception e
-                    {:error :engine :cause (Throwable/.getMessage e)})))
-          result (deref fut timeout-ms ::timeout)]
-      (cond
-        (= result ::timeout)
-        (do
-          (future-cancel fut)
-          (throw (ex-info "Regex pattern too complex (compilation timeout)"
-                          {:type :execution-error/regex-too-complex
-                           :separator pattern-str
-                           :timeout-ms timeout-ms})))
+                       :hint "Use simpler separator or literal string"})))))
 
-        (:pattern result)
-        (:pattern result)
 
-        (= (:error result) :syntax)
-        (throw (ex-info "Invalid regex pattern syntax"
-                        {:type :execution-error/invalid-regex
+(defn- compile-regex-timed
+  "Compiles regex pattern under a timeout (on a future, so a pathological
+   pattern cannot hang the caller). Returns the compiled pattern or throws
+   with a descriptive error."
+  [pattern-str]
+  (let [timeout-ms sp-config/*regex-compile-timeout-ms*
+        fut (future
+              (try
+                {:pattern (re-pattern pattern-str)}
+                (catch java.util.regex.PatternSyntaxException e
+                  {:error :syntax :cause (Throwable/.getMessage e)})
+                (catch Exception e
+                  {:error :engine :cause (Throwable/.getMessage e)})))
+        result (deref fut timeout-ms ::timeout)]
+    (cond
+      (= result ::timeout)
+      (do
+        (future-cancel fut)
+        (throw (ex-info "Regex pattern too complex (compilation timeout)"
+                        {:type :execution-error/regex-too-complex
                          :separator pattern-str
-                         :cause (:cause result)}))
+                         :timeout-ms timeout-ms})))
 
-        :else
-        (throw (ex-info "Regex engine error"
-                        {:type :execution-error/regex-engine-error
-                         :separator pattern-str
-                         :cause (:cause result)}))))))
+      (:pattern result)
+      (:pattern result)
+
+      (= (:error result) :syntax)
+      (throw (ex-info "Invalid regex pattern syntax"
+                      {:type :execution-error/invalid-regex
+                       :separator pattern-str
+                       :cause (:cause result)}))
+
+      :else
+      (throw (ex-info "Regex engine error"
+                      {:type :execution-error/regex-engine-error
+                       :separator pattern-str
+                       :cause (:cause result)})))))
+
+
+(def ^:private regex-cache-cap
+  "Distinct pattern strings kept compiled. Patterns in the graph are
+   literals (query / URI / metric separators, `:filter` predicates), so
+   the working set is small; a flood of distinct patterns just clears
+   the cache and starts over."
+  512)
+
+
+(def ^:private regex-cache
+  "pattern string → compiled `Pattern`. Only successful compiles are
+   kept; a rejected pattern pays the timed compile (and throws) again."
+  (java.util.concurrent.ConcurrentHashMap.))
+
+
+(defn- safe-compile-regex
+  "`compile-regex-timed` behind a bounded pattern-string cache. The timed
+   compile starts a future per call; uncached, every query-string parse,
+   URI split, Prometheus metric and `:filter` element paid one (measured
+   ~16 µs vs ~4 µs per `re-find` over a cached pattern). The length cap
+   is checked on every call — it is a dynamic var, and cheap. The limits
+   are read off `storage.protocol.config` itself: the `storage.protocol.core`
+   re-exports are separate vars holding the load-time value, so a
+   `binding` / `with-regex-limits` never reached them."
+  [pattern-str]
+  (check-regex-length! pattern-str)
+  (or (java.util.concurrent.ConcurrentHashMap/.get regex-cache pattern-str)
+      (let [p (compile-regex-timed pattern-str)]
+        (when (>= (java.util.concurrent.ConcurrentHashMap/.size regex-cache) regex-cache-cap)
+          (java.util.concurrent.ConcurrentHashMap/.clear regex-cache))
+        (java.util.concurrent.ConcurrentHashMap/.put regex-cache pattern-str p)
+        p)))
 
 
 ;; === Implementations ===
@@ -133,7 +171,7 @@
     (throw (ex-info "separator cannot be empty"
                     {:type :execution-error/invalid-separator
                      :separator separator})))
-  (let [max-input-len sp/*max-regex-input-length*]
+  (let [max-input-len sp-config/*max-regex-input-length*]
     (when (> (count string) max-input-len)
       (throw (ex-info "Input string too long for regex split"
                       {:type :execution-error/input-too-large

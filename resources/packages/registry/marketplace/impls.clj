@@ -18,14 +18,6 @@
     [graphden.tenancy.context :as tc]))
 
 
-(defbase current-user-id
-  "The current request's user id as text — the accounts principal's
-   `:user-id`, or `anonymous` on a deployment without per-user identity
-   (`tenancy.context/current-user-id`, the seam)."
-  []
-  (tc/current-user-id))
-
-
 (defbase current-user-label
   "A public-safe label for the current user (display name / email local
    part / org / `anonymous`) — what a review is signed with."
@@ -118,8 +110,7 @@
 
 
 (def impls
-  {:current-user-id current-user-id
-   :current-user-label current-user-label
+  {:current-user-label current-user-label
    :loaded-packages loaded-packages
    ;; taint-propagate: answers one of the caller's own version strings
    :semver-rank semver-rank

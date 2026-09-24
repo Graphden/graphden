@@ -208,12 +208,6 @@
     (java.io.ByteArrayOutputStream/.toByteArray out)))
 
 
-(defbase response-immutable?
-  [response]
-  (when-let [cc (header-ci (:headers response) "Cache-Control")]
-    (and (string? cc) (boolean (re-find #"\bimmutable\b" cc)))))
-
-
 (defn- http-server-tuning
   "Pod-level http-kit tuning read from env at the adapter boundary (NOT
    graph composition — it is per-deployment, like `DB_POOL_SIZE` /
@@ -308,5 +302,4 @@
    :utf8-bytes utf8-bytes-fn
    :byte-count byte-count-fn
    :gzip-bytes gzip-bytes-fn
-   :brotli-bytes brotli-bytes-fn
-   :response-immutable? response-immutable?})
+   :brotli-bytes brotli-bytes-fn})

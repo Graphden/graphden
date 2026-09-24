@@ -1,11 +1,9 @@
 // Service lifecycle e2e — full Phase-1 service flow through the
 // editor's ⚙ popover.
 //
-// Now that the HOF-forwarding type-check fix landed
-// (graphden.crud.type-check: type-check-binding-direct! accepts a
-// scalar-returning ref into a `[:fn ...]` slot when the synthesized
-// callable signature is a fn-subtype of the slot), a from-scratch
-// service-eligible probe is constructable in tests:
+// A scalar-returning ref into a `[:fn ...]` slot type-checks (the
+// synthesized callable signature is a fn-subtype of the slot), so a
+// from-scratch service-eligible probe is constructable in tests:
 //
 //   {:parent :const :args {:value "tick"}}   ; thunk
 //   {:parent :future :args {:body :thunk}}   ; service-eligible

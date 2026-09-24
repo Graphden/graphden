@@ -87,13 +87,9 @@
 
 
 (deftest stage-2-validators-skip-absent-entity-data
-  ;; A nil ctx proves the point: if either validator evaluated its
+  ;; A nil ctx proves the point: if the validator evaluated its
   ;; storage argument before the nil check, `require-storage` would
   ;; throw `:execution-error/missing-storage` here instead of answering
   ;; \"nothing to reject\".
   (testing ":write-rej on absent entity-data → nil (no rejection)"
-    (is (nil? (call :write-rej {:entity-type "fn" :entity-data nil} nil))))
-
-  (testing ":type-check-binding-rej on absent entity-data → nil"
-    (is (nil? (call :type-check-binding-rej {:entity-data nil :id nil} nil)))
-    (is (nil? (call :type-check-binding-rej {:entity-data nil :id (random-uuid)} nil)))))
+    (is (nil? (call :write-rej {:entity-type "fn" :entity-data nil} nil)))))

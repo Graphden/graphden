@@ -104,3 +104,29 @@
     (testing "already long enough → unchanged; a blank pad falls back to a space"
       (is (= "hello" (l {:string (delay "hello") :length (delay 3) :pad (delay "0")} nil)))
       (is (= "  x" (l {:string (delay "x") :length (delay 3) :pad (delay "")} nil))))))
+
+
+;; ============================================================================
+;; The compiled-pattern cache in front of the timed compile
+;; ============================================================================
+
+(deftest safe-compile-caches-the-compiled-pattern
+  ;; Uncached, every call started a future and recompiled — per query
+  ;; string parse, per Prometheus metric, per `:filter` element.
+  (let [cache @(ns-resolve 'graphden.packages.core.strings.impls 'regex-cache)
+        f (impls/impl-of :re-find?)
+        run (fn [pattern] (f {:string (delay "a=1&b=2") :pattern (delay pattern)} nil))
+        pattern (str "[&;]" (random-uuid))]
+    (is (false? (run pattern)))
+    (let [compiled (java.util.concurrent.ConcurrentHashMap/.get cache pattern)]
+      (is (instance? java.util.regex.Pattern compiled) "the first call caches the Pattern")
+      (is (false? (run pattern)))
+      (is (identical? compiled (java.util.concurrent.ConcurrentHashMap/.get cache pattern))
+          "the second call reuses it"))
+    (testing "a rejected pattern is not cached — it throws every time"
+      (dotimes [_ 2]
+        (is (thrown? clojure.lang.ExceptionInfo (run "(unclosed"))))
+      (is (nil? (java.util.concurrent.ConcurrentHashMap/.get cache "(unclosed"))))
+    (testing "the length cap still applies to a pattern already cached"
+      (binding [sp-config/*max-regex-length* 3]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"too long" (run pattern)))))))

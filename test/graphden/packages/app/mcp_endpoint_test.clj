@@ -349,6 +349,20 @@
       (is (int? (:total data)))
       (is (int? (:passed data)))
       (is (int? (:failed data)))))
+  (testing "run-tests forwards platform? — the shipped packages' self-tests join the run"
+    ;; The apply impl dropped the arg: `platform? true` ran the org's
+    ;; (empty) set just like the default.
+    (is (> (:total (tool-text (call-tool! "run-tests" {:platform? true})))
+           (:total (tool-text (call-tool! "run-tests" {}))))))
+  (testing "POST /api/tests/run forwards platform? from the body"
+    (let [post! (fn [body]
+                  (-> (ga/exec-handler :tests-run-handler
+                                       {:request-method :post :uri "/api/tests/run"
+                                        :headers {"content-type" "application/json"}
+                                        :body (json/generate-string body)})
+                      :body (json/parse-string true)))]
+      (is (> (:total (post! {:platform? true})) (:total (post! {})))
+          "the platform run adds the shipped self-tests to the org's own")))
   (testing "list-branches returns the /api/branches shape"
     (let [data (tool-text (call-tool! "list-branches" {}))]
       (is (true? (:ok data)))

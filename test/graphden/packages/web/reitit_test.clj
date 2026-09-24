@@ -1,7 +1,9 @@
 (ns graphden.packages.web.reitit-test
-  "Unit tests for the `:middleware` factory impl. `:proceed` is now a
-   pure fn-def composition (no impl) — its behavior is exercised by
-   the auth integration tests via the actual fn-graph executor.
+  "Unit tests for the `:middleware` factory impl, and for the route
+   enumeration + `window.API` codegen the boot-time cache builds from a
+   compiled router. `:proceed` is a pure fn-def composition (no impl) —
+   its behavior is exercised by the auth integration tests via the
+   actual fn-graph executor.
 
    Loads impls dynamically from `resources/packages/`, matching the
    pattern used by layout-test."
@@ -9,6 +11,8 @@
     [clojure.java.io :as io]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
+    [graphden.system.api-routes-js :as api-js]
+    [graphden.system.api-url-drift :as drift]
     [reitit.ring :as ring]))
 
 
@@ -32,18 +36,12 @@
 
 
 (def ^:private middleware-impl (unwrap 'middleware))
-(def ^:private ring-route-paths-impl (unwrap 'ring-route-paths))
-(def ^:private routes->js-bundle-impl (unwrap 'routes->js-bundle))
 
 
-(defn- route-paths
-  [router]
-  (ring-route-paths-impl {:router router} nil))
-
-
-(defn- js-bundle
-  [paths]
-  (routes->js-bundle-impl {:paths paths} nil))
+;; The path enumeration + `window.API` templater behind the boot-time
+;; `:exec/api-routes-js-cache` (the graph reads the cached module).
+(def ^:private route-paths drift/router-paths)
+(def ^:private js-bundle api-js/routes->js-bundle)
 
 
 (defn- call-mw
@@ -139,10 +137,10 @@
 
 
 ;; =============================================================================
-;; TESTS — ring-route-paths (path enumeration from compiled router)
+;; TESTS — router-paths (path enumeration from compiled router)
 ;; =============================================================================
 
-(deftest ring-route-paths-extracts-from-ring-handler
+(deftest router-paths-extracts-from-ring-handler
   (testing "given a reitit ring handler, returns all path patterns in route order"
     (let [handler (ring/ring-handler
                     (ring/router
@@ -152,7 +150,7 @@
       (is (= ["/health" "/api/users/:id"] paths)))))
 
 
-(deftest ring-route-paths-extracts-from-bare-router
+(deftest router-paths-extracts-from-bare-router
   (testing "given a bare reitit.core/Router (not wrapped as ring-handler), still works — `or get-router self` coercion"
     (let [router (ring/router
                    [["/a" {:get (constantly {:status 200})}]
@@ -161,7 +159,7 @@
       (is (= ["/a" "/b/:x"] paths)))))
 
 
-(deftest ring-route-paths-flattens-nested-groups
+(deftest router-paths-flattens-nested-groups
   (testing "nested reitit data shape — common prefix gets joined into each leaf"
     (let [router (ring/router
                    ["/api"
@@ -268,7 +266,7 @@
 
 
 (deftest js-bundle-roundtrip-from-router
-  (testing "compiled router → ring-route-paths → routes->js-bundle produces JS that mentions every path"
+  (testing "compiled router → router-paths → routes->js-bundle produces JS that mentions every path"
     (let [router (ring/router
                    [["/api/health" {:get (constantly {:status 200})}]
                     ["/api/fns/:id" {:get (constantly {:status 200})}]

@@ -19,12 +19,10 @@
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
-    [graphden.executor.registry.core :as registry]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
     [graphden.types.check :as types-check]
-    [graphden.types.check.literals :as types-lit]
     [graphden.types.core :as types]
     [graphden.types.diagnostics :as diag]
     [graphden.util.ns-path :as ns-path]
@@ -507,113 +505,3 @@
            :else
            (diag/record! branch-id fn-id [(:diagnostic result)]))
          result)))))
-
-
-(defn type-check-binding-direct!
-  "On-demand single-binding type validator. Resolves the slot's
-   expected type once, then validates EITHER the value (literal
-   compared by `subtype?`) OR the ref (the bound fn's `:return-type`
-   from the rich-types registry compared via subtype? or unify).
-   Returns nil on success or `{:reason … :diagnostic …}` on mismatch
-   (`:reason` = message string, `:diagnostic` = structured
-   `:expected`/`:actual` map). Since error-tolerance Phase 2 this is
-   NO LONGER wired as a blocking pre-write gate on
-   `/api/entities/binding` POST/PUT — those writes proceed and the
-   post-mutation `type-check-fn-after-mutation!` records the aggregate
-   result in the diagnostics store. This fn stays available (through
-   the `:type-check-binding-rej` base-fn) for pre-flight validation
-   surfaces that want a verdict WITHOUT writing; it records nothing.
-
-   Skip silently when the slot's expected type is `:any` (the
-   uninformative escape hatch — type-check can't catch anything
-   useful)."
-  [storage entity-data binding-id]
-  (with-org-alias-view*
-    storage
-    (fn []
-      (let [slot-id (or (:slot-id entity-data)
-                        (when binding-id
-                          (some-> (sp/read-entity storage :binding binding-id)
-                                  :slot-id)))
-            slot (when slot-id (sp/read-entity storage :slot slot-id))
-            tfn (when (:type-fn-id slot)
-                  (sp/read-entity storage :fn (:type-fn-id slot)))
-            expected (type-fn->rich-type storage tfn)
-            new-value (when (contains? entity-data :value) (:value entity-data))
-            new-ref-id (:ref-fn-id entity-data)]
-        (cond
-          ;; No expected type or :any escape hatch — skip.
-          (or (nil? expected) (= expected :any))
-          nil
-
-          ;; Value-binding case: literal vs expected.
-          (contains? entity-data :value)
-          (let [actual (or (types-lit/classify-literal new-value) :any)]
-            (when-not (or (nil? new-value) (= actual :any)
-                          (types/subtype? actual expected)
-                          (and (types/refine-type? expected)
-                               (types/subtype? actual (types/refine-base expected))
-                               (let [r (types-lit/literal-satisfies-refinement?
-                                         new-value (types/refine-constraint expected))]
-                                 (or (true? r) (= :unknown r)))))
-              (let [msg (str "Type mismatch on value: expected " (pr-str expected)
-                             ", got " (pr-str actual)
-                             " (value " (pr-str new-value) ")")]
-                {:reason msg
-                 :diagnostic {:type :types/check-failed
-                              :reason :value-mismatch
-                              :expected expected
-                              :actual actual
-                              :binding {:value new-value}
-                              :message msg}})))
-
-          ;; Ref-binding case: bound fn's return type vs expected.
-          (some? new-ref-id)
-          (let [target-fn (sp/read-entity storage :fn new-ref-id)
-                target-name (some-> target-fn :name keyword)
-                target-info (some-> target-fn :id registry/rich-type-of-id)
-                target-ret (or (some-> target-info :return) :any)
-                ;; Same `:any` escape on the target side — without rich-
-                ;; type info we can't reason about a freshly-created fn
-                ;; whose registry entry isn't populated yet.
-                ok? (or (= target-ret :any)
-                        (types/subtype? target-ret expected)
-                        ;; Refinement: target is base-typed, expected is
-                        ;; the refinement → need explicit validate, but a
-                        ;; lenient check passes when base subtype holds.
-                        (and (types/refine-type? expected)
-                             (types/subtype? target-ret
-                                             (types/refine-base expected)))
-                        ;; HOF-forwarding semantics: when the slot expects a
-                        ;; fn-VALUE ([:fn ...]), the ref-binding forwards the
-                        ;; target as the callable — `compile-eager`'s hof-wrap
-                        ;; turns it into a 0-arg (or single-arg) thunk that
-                        ;; closes over the caller's env. The CALLABLE's
-                        ;; signature is `[:fn (target's args) (target's
-                        ;; return) (target's effects)]` (`make-fn-type`),
-                        ;; which is what the slot must accept. Without this
-                        ;; clause a scalar-returning fn-ref like
-                        ;; `:current-time-ms` (return `:int`) into a `[:fn {}
-                        ;; :any]` slot gets rejected even though the runtime
-                        ;; would correctly hof-wrap it. The sync-time check
-                        ;; in `types/check.clj` is already HOF-aware via
-                        ;; variadic-ignore + closure-capture strip; this
-                        ;; clause brings the API spot-check in line.
-                        (and (types/fn-type? expected)
-                             (types/subtype?
-                               (types/make-fn-type
-                                 (or (:args target-info) {})
-                                 target-ret
-                                 (or (:effects target-info) :any))
-                               expected)))]
-            (when-not ok?
-              (let [msg (str "Type mismatch on ref binding: slot expects "
-                             (pr-str expected) ", but " (pr-str target-name)
-                             " returns " (pr-str target-ret))]
-                {:reason msg
-                 :diagnostic {:type :types/check-failed
-                              :reason :ref-return-mismatch
-                              :expected expected
-                              :actual target-ret
-                              :binding target-name
-                              :message msg}}))))))))

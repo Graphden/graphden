@@ -333,16 +333,16 @@
 
 
 ;; ============================================================================
-;; list-all-graph-entities
+;; the graph reads (graph-full / -index / -subtree / -tree / -namespace-fns / -search)
 ;; ============================================================================
 
-(deftest list-all-graph-entities-test
+(deftest graph-reads-test
   (let [storage (setup/create-test-storage)
         c (test-ctx storage)]
     (try
       (testing "returns the five graph tables + namespaces, fns carry a :role"
         (let [_    (setup/create-base-fn! storage "lage-fn")
-              dump (entities/list-all-graph-entities c)]
+              dump (entities/graph-full c)]
           (is (contains? dump :fns))
           (is (contains? dump :slots))
           (is (contains? dump :namespaces))
@@ -350,7 +350,7 @@
       (testing "scope :index — drops bindings / slots / fn-slots / list-items,"
         (testing "keeps fns + namespaces; fns still carry :role"
           (let [_    (setup/create-base-fn! storage "lage-fn-idx")
-                dump (entities/list-all-graph-entities c :index)]
+                dump (entities/graph-index c)]
             (is (= #{:fns :namespaces} (set (keys dump)))
                 ":index payload is exactly {:fns :namespaces}")
             (is (seq (:fns dump)) "fns are still populated")
@@ -360,10 +360,6 @@
                 ":index fns carry NO nil-valued fields — they're stripped to
                  cut ~25-40% of the sidebar payload churn (an absent key
                  reads as null client-side, full detail comes from :subtree)"))))
-      (testing "scope :full (explicit) matches the no-scope default"
-        (is (= (entities/list-all-graph-entities c)
-               (entities/list-all-graph-entities c :full))
-            ":full echoes the unchanged default behaviour"))
       (testing "scope :subtree + root-id — only the BFS closure"
         (let [parent-id (java.util.UUID/randomUUID)
               child-id  (java.util.UUID/randomUUID)
@@ -383,7 +379,7 @@
               ;; doesn't include these new fns. Drop the cache so the
               ;; next loader picks up the writes.
               _ (ctx/invalidate-graph-cache! c)
-              dump (entities/list-all-graph-entities c :subtree child-id)
+              dump (entities/graph-subtree c child-id)
               fn-ids (into #{} (map :id) (:fns dump))]
           (is (contains? fn-ids child-id) "root in subtree")
           (is (contains? fn-ids parent-id) "parent reachable via parent-ids")
@@ -391,10 +387,8 @@
               "unrelated fn excluded from subtree")
           (is (every? #(contains? % :role) (:fns dump))
               ":role still computed on subtree fns")))
-      (testing "scope :subtree without root-id falls back to full"
-        (is (= (entities/list-all-graph-entities c)
-               (entities/list-all-graph-entities c :subtree nil))
-            "nil root-id → full payload (silent fallback)"))
+      (testing "a subtree without a root is empty — the full-dump fallback is the HTTP handler's"
+        (is (empty? (:fns (entities/graph-subtree c nil)))))
       (finally (sp/close storage)))))
 
 
@@ -406,7 +400,7 @@
     :used-as-parent-count :used-as-ref-count})
 
 
-(deftest list-all-graph-entities-scoped-test
+(deftest graph-reads-scoped-test
   (let [storage (setup/create-test-storage)
         c (test-ctx storage)
         ns-a (java.util.UUID/randomUUID)
@@ -443,7 +437,7 @@
     (ctx/invalidate-graph-cache! c)
     (try
       (testing "scope :tree — {:namespaces :counts} only, NO fn rows"
-        (let [dump (entities/list-all-graph-entities c :tree)]
+        (let [dump (entities/graph-tree c)]
           (is (= #{:namespaces :counts} (set (keys dump)))
               ":tree payload is exactly {:namespaces :counts}")
           (let [count-by (into {} (map (juxt :namespace-id :count)) (:counts dump))
@@ -474,7 +468,7 @@
               (is (pos? (get fns-by nil))
                   "child-of-a1 (composed) counts in the root bucket")))))
       (testing "scope :namespace — one namespace's light named fns"
-        (let [dump (entities/list-all-graph-entities c :namespace nil ns-a nil)
+        (let [dump (entities/graph-namespace-fns c ns-a)
               ids  (into #{} (map :id) (:fns dump))
               by-id (into {} (map (juxt :id identity)) (:fns dump))]
           (is (= #{a1 a2} ids)
@@ -492,13 +486,13 @@
                 "zero counts are omitted (→ 0 client-side)")
             (is (not (contains? (by-id a2) :used-as-parent-count))))))
       (testing "scope :namespace with nil namespace-id — the (root) bucket"
-        (let [ids (into #{} (map :id) (:fns (entities/list-all-graph-entities c :namespace nil nil nil)))]
+        (let [ids (into #{} (map :id) (:fns (entities/graph-namespace-fns c nil)))]
           (is (contains? ids r1)
               "the namespace-less named fn is addressable as the root bucket")
           (is (not (contains? ids a1)) "namespaced fns are not in the root bucket")
           (is (not (contains? ids anon)) "the anonymous fn is excluded")))
       (testing "scope :search — capped, case-insensitive name-substring"
-        (let [dump (entities/list-all-graph-entities c :search nil nil "widget")]
+        (let [dump (entities/graph-search c "widget" false)]
           (is (= #{a1 b1} (into #{} (map :id) (:fns dump)))
               "both *-widget fns match across namespaces")
           (is (false? (:truncated? dump)) "well under the cap")
@@ -507,17 +501,17 @@
       (testing "scope :search is case-insensitive and matches raw name"
         (is (= #{a1 a2}
                (into #{} (map :id)
-                     (:fns (entities/list-all-graph-entities c :search nil nil "ALPHA"))))))
+                     (:fns (entities/graph-search c "ALPHA" false))))))
       (testing "scope :search-text adds description matches, ranked after name hits"
         (let [desc (java.util.UUID/randomUUID)]
           (sp/create-entity storage :fn {:id desc :name "opaque-name"
                                          :description "Frobnicates a widget quietly"})
           (ctx/invalidate-graph-cache! c)
           (is (not (contains? (into #{} (map :id)
-                                    (:fns (entities/list-all-graph-entities c :search nil nil "widget")))
+                                    (:fns (entities/graph-search c "widget" false)))
                               desc))
               "the name-only :search scope (sidebar filter) does not match descriptions")
-          (let [dump (entities/list-all-graph-entities c :search-text nil nil "widget")]
+          (let [dump (entities/graph-search c "widget" true)]
             (is (contains? (into #{} (map :id) (:fns dump)) desc)
                 "a description-only match is found")
             (is (= desc (:id (last (:fns dump))))
@@ -525,13 +519,13 @@
           (sp/delete-entity storage :fn desc)
           (ctx/invalidate-graph-cache! c)))
       (testing "scope :search with blank / nil q — no matches, not truncated"
-        (let [dump (entities/list-all-graph-entities c :search nil nil "   ")]
+        (let [dump (entities/graph-search c "   " false)]
           (is (empty? (:fns dump)))
           (is (false? (:truncated? dump)))))
       (testing "scope :search caps at the limit and flags :truncated?"
         ;; Bind the (dynamic) private cap low rather than seed 200+ rows.
         (binding [entity-list/*default-search-limit* 1]
-          (let [dump (entities/list-all-graph-entities c :search nil nil "widget")]
+          (let [dump (entities/graph-search c "widget" false)]
             (is (= 1 (count (:fns dump))) "result capped at the limit")
             (is (true? (:truncated? dump)) "more matched than were returned"))))
       (testing "view-members — the Explorer's structured filter set over the graph"
@@ -590,9 +584,7 @@
             (is (= #{a1 a2 b1 bcomp} (members {:kinds ["fn" "types"] :namespaces ["alpha" "beta"]}))
                 "kinds OR")
             (is (empty? (members {:kinds ["apps"] :namespaces ["alpha"]}))
-                "apps is the addon's notion — matches nothing here"))
-          (testing "the retired `?scope=view` rule string is no scope at all — the full dump, like any unknown scope"
-            (is (contains? (entities/list-all-graph-entities c :view nil nil "uses:alpha-widget") :bindings)))))
+                "apps is the addon's notion — matches nothing here"))))
       (finally (sp/close storage)))))
 
 

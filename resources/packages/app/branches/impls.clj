@@ -219,10 +219,14 @@
   [branch-id]
   (cr/record-effect! :db)
   (let [storage (request/require-storage ctx)
+        base (vs/unwrap storage)
+        ;; The branch's org owns every binding bound on it — the vault
+        ;; reclaim deletes in that org's scope (`secrets/delete-orphan!`).
+        branch-org (:org-id (sp/read-entity base :branch branch-id))
         result (vs/delete-branch!
                  storage branch-id
                  {:reclaim-secrets!
-                  #(secrets/sweep-orphan-secrets! (vs/unwrap storage) (secrets/secret-paths %))})]
+                  #(secrets/sweep-orphan-secrets! base (secrets/secret-refs % (constantly branch-org)))})]
     (when-let [router (br/current-router)]
       (br-cache/invalidate! router branch-id))
     ;; The type-rows the branch declared stop resolving — unless another

@@ -187,6 +187,15 @@ The runtime sandbox mechanism is entirely in core
      `default-cloud-allowed-effects` = `#{:db :state :time :random}`).
   The platform ctx stays unrestricted; the restriction is a property of
   *executing a user graph*, not a wrapper around the platform.
+- **Thread boundaries.** A fresh thread inherits no dynamic bindings, so
+  graph code run on one would execute with NO org and NO effect gate. Every
+  base-fn that runs graph code on another thread re-establishes the
+  conveyed bindings (`cr/capture-conveyed-bindings` on the starting thread
+  → `with-bindings` on the other; the addon registers `*current-org*` via
+  `cr/register-conveyed-var!`): `:future`, `:with-timeout`,
+  `:with-heartbeat`, each `:http-server` request (http-kit worker threads —
+  fixed 2026-09-24; a tenant service's requests used to run unscoped), and
+  `:sse-stream` ticks (`bound-fn*`). A new such base-fn must do the same.
 - Contract for new base-fns: any security-sensitive primitive MUST
   `record-effect!`, or it is a sandbox hole. A new sensitive category goes in
   both `types.core/known-effect-categories` and `cloud-forbidden-effects`.

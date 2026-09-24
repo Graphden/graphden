@@ -14,7 +14,7 @@ after: packages, boot
 :CUSTOM_ID: web/http-server
 :FILE: resources/packages/web/http/impls.clj
 :LINE: 233
-:MINS: 4.3
+:MINS: 4.9
 :END:
 
 The http-kit wrapper base-fn: ~run-server~ spins the listener thread and binds the composed Ring handler to a port, recording ~:network~ / ~:process~ effects. Where a request first enters the web layer, so the natural first stop. Note it is a tiny primitive — everything else is composed from small base-fns in ~web/http/fns.edn~.

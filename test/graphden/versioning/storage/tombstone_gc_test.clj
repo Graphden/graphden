@@ -319,7 +319,8 @@
                                           (swap! paths into (secrets/secret-paths-of base et id)))})]
             (is (= 2 (:binding purged)))
             (is (= #{[:binding (:id gone)] [:binding (:id shared)]} (set @seen)))
-            (is (= #{"db/pw" "shared/pw"} @paths) "both paths collected before the rows went")
+            (is (= #{"db/pw" "shared/pw"} (into #{} (map :path) @paths))
+                "both paths collected before the rows went")
             (testing "reconciliation: the orphaned path goes, the still-referenced one stays"
               (binding [vault/*impl-override*
                         {:delete-secret (fn [_client path] (swap! deleted conj path) nil)}]
@@ -329,6 +330,59 @@
               (is (= ["db/pw"] @deleted)
                   "shared/pw is still bound on db-call-2 — kept")))))
       (finally (sp/close base)))))
+
+
+(defn- reclaimed-by-gc
+  "Tombstone `bindings` (specs `{:org :value :slot}` over one owner fn),
+   purge them, run the vault reclaim with a fake delete, and return the
+   paths the vault was asked to delete. `live` specs are left live."
+  [bindings live]
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)
+        deleted (atom [])]
+    (try
+      (let [uniq #(str % "-" (random-uuid))
+            resolver (sp/create-entity v :fn {:name (uniq "vault-get") :parent-ids [] :description "r"})
+            owner    (sp/create-entity v :fn {:name (uniq "db-call") :parent-ids [] :description "o"})
+            mk! (fn [{:keys [org value]}]
+                  (let [slot (sp/create-entity v :slot {:name (str "s" (random-uuid)) :type-fn-id (:id owner)})]
+                    (sp/create-entity v :binding (cond-> {:fn-id (:id owner) :slot-id (:id slot)
+                                                          :value value :resolver-fn-id (:id resolver)}
+                                                   org (assoc :org-id org)))))
+            doomed (mapv mk! bindings)
+            _ (run! mk! live)
+            paths (atom #{})]
+        (binding [vs/*tombstone-delete?* true]
+          (doseq [b doomed] (sp/delete-entity v :binding (:id b))))
+        (purge/tombstone-gc-sweep! base -1000
+                                   {:before-purge (fn [et id]
+                                                    (swap! paths into (secrets/secret-paths-of base et id)))})
+        (binding [vault/*impl-override*
+                  {:delete-secret (fn [_client path] (swap! deleted conj path) nil)}]
+          (reset! vault/active-client {:address "fake" :token "fake"})
+          (try (secrets/sweep-orphan-secrets! base @paths)
+               (finally (reset! vault/active-client nil))))
+        @deleted)
+      (finally (sp/close base)))))
+
+
+(deftest the-vault-reclaim-deletes-in-the-owning-orgs-scope
+  ;; The GC runs on a PLATFORM thread with the unconfined vault client; a
+  ;; tenant binding's `:value` is whatever the tenant stored. Each delete
+  ;; runs under the binding's own org, so the client's prefix check
+  ;; refuses anything outside it.
+  (testing "a tenant's purged binding naming another org's secret deletes nothing"
+    (is (= [] (reclaimed-by-gc [{:org "acme" :value "/org/victim/x"}] []))))
+  (testing "nor can it reach a platform path nobody references any more"
+    (is (= [] (reclaimed-by-gc [{:org "acme" :value "stripe/api-key"}] []))))
+  (testing "the tenant's own orphaned secret is reclaimed"
+    (is (= ["org/acme/db"] (reclaimed-by-gc [{:org "acme" :value "org/acme/db"}] []))))
+  (testing "a platform-owned row keeps platform scope"
+    (is (= ["stripe/api-key"] (reclaimed-by-gc [{:value "stripe/api-key"}] []))))
+  (testing "the reference check matches every spelling of the path"
+    (is (= [] (reclaimed-by-gc [{:value "/db/pw"}] [{:value "db/pw"}]))
+        "`/db/pw` and `db/pw` are one vault secret — still referenced, kept")
+    (is (= [] (reclaimed-by-gc [{:value "db/pw"}] [{:value "//db/pw"}])))))
 
 
 (deftest one-sweep-sorts-a-mixed-batch-of-candidates

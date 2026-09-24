@@ -17,6 +17,7 @@
    OpenBao write, each step recorded for compensation), the journal
    replay that undoes them, and the rotate ownership predicate."
   (:require
+    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.clients.vault :as vault]
     [graphden.crud.entities :as crud-entities]
@@ -97,13 +98,35 @@
     (:slot-id fs)))
 
 
+(def ^:private max-leading-slashes
+  "How many leading `/`s a stored spelling of a path is matched with. The
+   client strips them all (`/db/pw` and `db/pw` are ONE vault secret), so a
+   reference check must see every spelling; tenant writes store the normal
+   form (`vault/stored-path-rejection`), so only an older or operator row
+   carries any, and matching more than it plausibly could only ever keeps a
+   secret — the safe direction."
+  8)
+
+
+(defn- path-spellings
+  "The stored `:value`s that name the same vault secret as `path`: its
+   normal form with 0..`max-leading-slashes` leading `/`s — or `path`
+   itself when it is not a valid vault path (nothing to normalise)."
+  [path]
+  (if-let [p (vault/normalised-path path)]
+    (mapv #(str (str/join (repeat % "/")) p) (range (inc max-leading-slashes)))
+    [path]))
+
+
 (defn path-still-referenced?
   "Does any binding version row — on any branch, purged rows excluded —
-   still resolve `path` through a resolver? Two fns may bind the same
-   vault path; the value goes only when the last reference is gone."
+   still resolve `path` through a resolver, under ANY spelling of it
+   (`path-spellings`)? Two fns may bind the same vault path; the value
+   goes only when the last reference is gone."
   [base-storage path]
   (boolean (some :resolver-fn-id
-                 (sp/query-entities base-storage :binding-version {:value path}))))
+                 (sp/query-entities base-storage :binding-version
+                                    {:value (path-spellings path)}))))
 
 
 (defn- claim-path!
@@ -288,41 +311,70 @@
 ;; bindings for good (the tombstone GC, `vs/delete-branch!`) collects their
 ;; paths first and hands them here after the commit.
 
-(defn secret-paths
-  "The vault paths `binding-versions` point at — an inline secret binding
-   (a `:resolver-fn-id` resolver, the `:vault-get` secret) stores its KV
-   path as `:value`."
-  [binding-versions]
-  (into #{} (comp (filter :resolver-fn-id) (map :value) (filter string?))
+(defn secret-refs
+  "The vault secrets `binding-versions` point at, as `{:path :org}` — an
+   inline secret binding (a `:resolver-fn-id` resolver, the `:vault-get`
+   secret) stores its KV path as `:value`; `org-of` names the org that
+   OWNS a version row's binding (nil = unknown / platform). The org is
+   what `sweep-orphan-secrets!` deletes under."
+  [binding-versions org-of]
+  (into #{}
+        (comp (filter :resolver-fn-id)
+              (filter (comp string? :value))
+              (map (fn [{:keys [value binding-id]}]
+                     {:path value :org (org-of binding-id)})))
         binding-versions))
 
 
 (defn secret-paths-of
-  "Vault paths the entity about to be purged points at: a `:binding`
-   through its version rows, or a `:fn` through the same rows of the
-   bindings it owns. Read BEFORE the purge (the GC's `:before-purge`
+  "Vault secrets the entity about to be purged points at, as `secret-refs`:
+   a `:binding` through its version rows, or a `:fn` through the same rows
+   of the bindings it owns — each tagged with the org owning the binding
+   (its identity row). Read BEFORE the purge (the GC's `:before-purge`
    seam), while the rows exist. Other entity kinds hold no secrets."
   [base-storage entity-name id]
-  (secret-paths (case entity-name
-                  :binding (sp/query-entities base-storage :binding-version {:binding-id id})
-                  :fn      (sp/query-entities base-storage :binding-version {:fn-id id})
-                  [])))
+  (let [versions (case entity-name
+                   :binding (sp/query-entities base-storage :binding-version {:binding-id id})
+                   :fn      (sp/query-entities base-storage :binding-version {:fn-id id})
+                   [])
+        binding-ids (into [] (comp (filter :resolver-fn-id) (map :binding-id) (distinct)) versions)
+        org-of (if (seq binding-ids)
+                 (into {} (map (juxt :id :org-id))
+                       (sp/query-entities base-storage :binding {:id binding-ids}))
+                 {})]
+    (secret-refs versions org-of)))
+
+
+(defn- delete-orphan!
+  "Delete one reclaimed secret — IN ITS OWNER'S SCOPE. A tenant-owned row
+   runs under `tctx/with-org` for that org, so the client refuses a path
+   outside the tenant's prefix (`:vault/path-forbidden`): a tenant binding
+   naming `/org/<victim>/x` or a platform path cannot reach them through
+   the GC's platform thread. A platform-owned (or unknown) row keeps the
+   ambient scope — never wider than the caller's."
+  [client {:keys [path org]}]
+  (let [delete! #(vault/delete-secret client path)]
+    (if (tctx/platform-tier? org)
+      (delete!)
+      (tctx/with-org org (delete!)))))
 
 
 (defn sweep-orphan-secrets!
   "After storage reclamation (the tombstone GC, a branch delete): delete
-   from the vault every collected `path` no binding references any more. A missing vault client (self-host
-   without OpenBao) or a failing delete is logged, never thrown — the
-   storage reclamation already happened and must not be reported as
-   failed."
-  [base-storage paths]
-  (when (seq paths)
+   from the vault every collected secret (`secret-refs` entries) no
+   binding references any more, each in its owning org's scope
+   (`delete-orphan!`). A missing vault client (self-host without OpenBao)
+   or a failing / refused delete is logged, never thrown — the storage
+   reclamation already happened and must not be reported as failed."
+  [base-storage refs]
+  (when (seq refs)
     (if-let [client @vault/active-client]
-      (doseq [path paths
+      (doseq [{:keys [path org] :as ref} refs
               :when (not (path-still-referenced? base-storage path))]
-        (try (vault/delete-secret client path)
-             (log/info "vault secret reclaimed" {:path path})
+        (try (delete-orphan! client ref)
+             (log/info "vault secret reclaimed" {:path path :org org})
              (catch Exception e
-               (log/warn e "vault delete failed — manual cleanup" {:path path}))))
+               (log/warn e "vault delete failed or refused — manual cleanup"
+                         {:path path :org org}))))
       (log/warn "secret bindings removed but no vault client — paths left in the vault"
-                {:paths paths}))))
+                {:paths (into #{} (map :path) refs)}))))

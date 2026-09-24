@@ -8,11 +8,14 @@
 
    Depends only on `graphden.crud.request` from the crud.* tree."
   (:require
+    [graphden.clients.vault :as vault]
+    [graphden.crud.secret-shape :as secret-shape]
     [graphden.executor.compile.lookups :as l]
     [graphden.executor.registry.core :as registry]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.generic-constraints :as gc]
+    [graphden.tenancy.context :as tctx]
     [graphden.types.check.literals :as types-lit]
     [graphden.types.core :as types]
     [graphden.web.route-shape :as route-shape]))
@@ -649,6 +652,18 @@
                             (pr-str (sort names)))})))))))
 
 
+(defn- with-stored-binding
+  "A binding write payload over its stored row. UPDATE payloads are
+   PARTIAL (versioned update merges over the current row) — a guard that
+   reads a field the payload does not carry (`:value-present` on a
+   `{:resolver-fn-id X}`-only PUT, the `:resolver-fn-id` of a
+   `{:value …}`-only PUT) must see the row the write will produce."
+  [storage data]
+  (if-let [row (some->> (:id data) (sp/read-entity storage :binding))]
+    (merge row data)
+    data))
+
+
 (defn- resolver-rej
   "Guard generic resolver bindings: the resolver fn must exist, and
    when its registered RETURN carries a hide-result marker (e.g.
@@ -658,15 +673,7 @@
    no-strip rule at runtime (same rationale as `secret-path-rej`)."
   [storage entity-type data]
   (when (and (#{:binding} entity-type) (:resolver-fn-id data))
-    (let [;; UPDATE payloads are PARTIAL (versioned update merges over
-          ;; the current row) — merge the existing row under the
-          ;; payload before the stored-input arm, or a legitimate
-          ;; `{:resolver-fn-id X}`-only PUT on a binding that already
-          ;; carries :value-present is falsely rejected.
-          data (if-let [row (some->> (:id data)
-                                     (sp/read-entity storage :binding))]
-                 (merge row data)
-                 data)
+    (let [data (with-stored-binding storage data)
           resolver (sp/read-entity storage :fn (:resolver-fn-id data))]
       (cond
         (nil? resolver)
@@ -711,6 +718,40 @@
                           " returns a hidden-marked value, but the target "
                           "slot's type carries no marker — binding it here "
                           "would launder the value out of the type system")}))))))
+
+
+(defn vault-path-rej
+  "Guard a TENANT's secret binding path (docs/SECRETS.md § Per-org vault
+   paths): when `vault-resolver?` holds for the binding's `:resolver-fn-id`
+   — the resolver is, or inherits from, a vault base-fn, so the stored
+   `:value` is a KV path read with the platform token — the path must be
+   in normal form and under the tenant's own `org/<org-id>/` prefix
+   (`vault/stored-path-rejection`). nil on the platform tier. Shared by the
+   entity write path (`write-rej`) and the bundle sync
+   (`packages.sync/records-vault-path-rej`), each supplying its own view of
+   the resolver's ancestry."
+  [vault-resolver? binding]
+  (when (and (not (tctx/current-platform-tier?))
+             (some-> (:resolver-fn-id binding) vault-resolver?))
+    (vault/stored-path-rejection (:value binding))))
+
+
+(defn- storage-vault-resolver?
+  "`fn-id` is a vault base-fn taking a KV path
+   (`secret-shape/find-vault-path-base-fn-ids`) or inherits from one, as
+   `storage` sees it."
+  [storage fn-id]
+  (let [vault-ids (secret-shape/find-vault-path-base-fn-ids storage)]
+    (boolean (and (seq vault-ids)
+                  (some (comp vault-ids :id)
+                        (collect-ancestor-closure storage [fn-id]))))))
+
+
+(defn- binding-vault-path-rej
+  [storage entity-type data]
+  (when (and (= :binding entity-type) (not (tctx/current-platform-tier?)))
+    (vault-path-rej #(storage-vault-resolver? storage %)
+                    (with-stored-binding storage data))))
 
 
 (defn- bare-route-fn?
@@ -857,6 +898,7 @@
               (assoc :type :constraint-violation/reparent-cross-branch))
       (some-> (resolver-rej storage entity-type entity-data)
               (assoc :type :capability/resolver-marker-laundering))
+      (binding-vault-path-rej storage entity-type entity-data)
       (some-> (route-handler-shape-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/route-handler-shape))
       (some-> (branch-local-rej storage entity-type entity-data)

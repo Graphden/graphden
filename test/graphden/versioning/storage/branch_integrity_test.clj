@@ -226,5 +226,6 @@
                           handed (atom nil)]
                       (vs/delete-branch! v (vs/current-branch-id vb)
                                          {:reclaim-secrets! #(reset! handed %)})
-                      (is (= #{"branch/pw"} (secrets/secret-paths @handed))
+                      (is (= #{{:path "branch/pw" :org nil}}
+                             (secrets/secret-refs @handed (constantly nil)))
                           "the caller gets the branch's secret bindings to reclaim the vault values")))))

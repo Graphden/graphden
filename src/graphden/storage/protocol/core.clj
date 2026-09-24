@@ -459,23 +459,6 @@
   config/*max-repeat-size*)
 
 
-;; === Regex safety configuration re-exports ===
-
-(def ^:dynamic *max-regex-length*
-  "Maximum regex pattern length to prevent complex pattern attacks. Default: 100."
-  config/*max-regex-length*)
-
-
-(def ^:dynamic *max-regex-input-length*
-  "Maximum input string length for regex operations. Default: 100000."
-  config/*max-regex-input-length*)
-
-
-(def ^:dynamic *regex-compile-timeout-ms*
-  "Timeout for regex compilation in milliseconds. Default: 100."
-  config/*regex-compile-timeout-ms*)
-
-
 ;; === Batch size validation re-exports ===
 (def ^:dynamic *max-batch-size*
   "Maximum entities in a single batch operation. Default: 10000

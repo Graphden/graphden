@@ -2046,6 +2046,10 @@ cmd_merge() {
 
   # Enqueue. A queued merge INVALIDATES the previous verdict: `wt watch` and
   # retry drivers must never report a stale verdict as this run's outcome.
+  # The abort trap goes up BEFORE the entry exists: a kill landing between the
+  # two would otherwise leave an entry nobody waits for (waiter_abort only
+  # removes an entry that carries this sha and this pid, so it is safe early).
+  trap 'waiter_abort; exit 130' INT TERM
   state_lock
   local tmp="$QUEUE_DIR/.$name.tmp"
   {
@@ -2057,7 +2061,6 @@ cmd_merge() {
   mv -f "$tmp" "$(qfile "$name")"
   rm -f "$RESULT_DIR/$name" "$SOON_DIR/$name"
   state_unlock
-  trap 'waiter_abort; exit 130' INT TERM
   ok "Queued $branch @ ${sha:0:8} — it rides the next merge train (bb wt list shows the queue)."
 
   # No wait_for_headroom here: the conductor waits for headroom before every

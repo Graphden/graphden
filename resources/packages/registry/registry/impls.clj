@@ -515,11 +515,51 @@
 ;; class as `publish-package-apply`).
 ;; ---------------------------------------------------------------------------
 
+(defn- mirror-under-lock!
+  "The check-then-insert of a mirror, run with the package's name lock held
+   — the same three steps as `publish-under-lock!`: an existing visible row
+   wins, another org's public name refuses, else insert under the
+   REQUESTED `(pkg-name, version)`."
+  [storage pkg-name version row origin-url origin]
+  (let [answer {:name pkg-name :version version}
+        holder (delay (shared/foreign-public-holder storage pkg-name))]
+    (cond
+      (seq (sp/query-entities storage :package-version {:name pkg-name :version version}))
+      answer
+
+      @holder
+      (assoc answer :error "name-taken" :holder (str @holder))
+
+      (shared/insert-or-exists!
+        storage
+        (-> row
+            (select-keys [:ns-root :fns :dependencies :package-dependencies
+                          :secrets :content-hash
+                          :kind :description :category :tags :payload])
+            (assoc :name pkg-name
+                   :version version
+                   :org-id (tc/current-org)
+                   :public? false
+                   :origin (merge {:url origin-url} origin)
+                   :published-at (java.time.Instant/now))))
+      answer
+
+      :else
+      (assoc answer :error "version-exists"))))
+
+
 (defbase mirror-store-package-version!
   "Store a fetched remote `row` as the LOCAL `:package-version`
-   `(pkg-name, version)` — idempotent (an existing row wins, nothing is
-   written) — and return the row's `{:name :version}`. The only effect of
-   the mirror: the fetch, the decode and every refusal around it are the
+   `(pkg-name, version)` — the REQUESTED key, never the row's own `:name` /
+   `:version` (a remote the caller controls must not choose which release
+   line its copy lands in: install needs no `:publish-packages`, and the
+   key is registry-wide UNIQUE) — idempotent (an existing row wins, nothing
+   is written) — and return `{:name :version}`, plus `:error` when refused:
+   `name-taken` (another org lists the name publicly, docs/MARKETPLACE.md
+   § 2 — a mirror may not join it any more than a publish may) or
+   `version-exists` (the key is held by a row this org cannot see). Run
+   under the package-name lock, like a publish. The only effect of the
+   mirror: the fetch, the decode and every other refusal are the
    `:mirror-remote-package!` fn-def. The copy keeps the bundle and its
    marketplace listing, is stamped with this org, is NEVER public (a
    mirrored copy is not re-published from here), and remembers where it
@@ -528,20 +568,11 @@
    the url alone still marks the row as a mirror)."
   [pkg-name version row origin-url origin]
   (cr/record-effect! :db)
-  (let [storage (request/require-storage ctx)]
-    (when-not (seq (sp/query-entities storage :package-version
-                                      {:name pkg-name :version version}))
-      (sp/create-entity storage :package-version
-                        (-> row
-                            (select-keys [:name :version :ns-root :fns
-                                          :dependencies :package-dependencies
-                                          :secrets :content-hash
-                                          :kind :description :category :tags :payload])
-                            (assoc :org-id (tc/current-org)
-                                   :public? false
-                                   :origin (merge {:url origin-url} origin)
-                                   :published-at (java.time.Instant/now)))))
-    {:name (str pkg-name) :version (str version)}))
+  (let [storage (request/require-storage ctx)
+        nm (str pkg-name)]
+    (shared/with-package-name-lock
+      storage nm
+      #(mirror-under-lock! storage nm (str version) row origin-url origin))))
 
 
 ;; ---------------------------------------------------------------------------

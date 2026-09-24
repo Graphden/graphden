@@ -17,7 +17,7 @@
 
    Nothing here is persisted (see `types.diagnostics` for the rule):
    findings are recomputed from the snapshot, memoised only while the
-   snapshot object itself is unchanged."
+   snapshot object itself and the `:ns` rows are unchanged."
   (:require
     [graphden.crud.request :as request]
     [graphden.crud.types-api :as types-api]
@@ -228,15 +228,6 @@
                     m)))))
 
 
-(defn forget-branch!
-  "Drop every org's lint state for `branch-id`. A namespace write moves
-   no graph row (the snapshot keeps its identity, the memo would answer
-   from it), yet every fn-def's dotted path under that namespace changed —
-   the next read must lint from scratch."
-  [branch-id]
-  (swap! memo (fn [m] (into {} (remove (fn [[[_ b] _]] (= b branch-id))) m))))
-
-
 (defn- read-ns-rows
   [ctx]
   (vec (sp/query-entities (request/require-storage ctx) :ns {})))
@@ -357,7 +348,8 @@
 (defn lint-branch
   "The current branch's lint warnings over the per-ctx graph snapshot
    (`cached-or-load-graph`). Answered from the (org, branch) memo when the
-   snapshot object and the suppression set are unchanged; after a write
+   snapshot object, the `:ns` rows and the suppression set are unchanged;
+   after a write
    only the fns whose rows moved, and their referrers, are rebuilt and
    re-linted; a namespace change, a moved type-row / base-fn or a first
    read lints from scratch. The
@@ -370,12 +362,17 @@
         storage (request/require-storage ctx)
         graph (types-api/cached-or-load-graph ctx)
         k [(tctx/current-org) (vcore/current-branch-id storage)]
-        prev (get @memo k)]
-    (if (and prev (identical? (:graph prev) graph) (= (:suppress prev) suppress))
+        prev (get @memo k)
+        ;; Read before the short-circuit: `:ns` is not branch-versioned and
+        ;; a namespace write moves no graph row, so the snapshot keeps its
+        ;; identity while every dotted path under the namespace changed —
+        ;; on every branch, and on every pod (a write on another pod
+        ;; invalidates nothing here).
+        nss (read-ns-rows ctx)
+        same-ns? (and prev (= (:ns-rows prev) nss))]
+    (if (and same-ns? (identical? (:graph prev) graph) (= (:suppress prev) suppress))
       (lint/warnings (:findings prev))
-      (let [nss (read-ns-rows ctx)
-            entry (or (when (and prev (= (:ns-rows prev) nss))
-                        (delta-state prev graph suppress))
+      (let [entry (or (when same-ns? (delta-state prev graph suppress))
                       (full-state graph nss suppress))]
         (remember! k entry)
         (lint/warnings (:findings entry))))))

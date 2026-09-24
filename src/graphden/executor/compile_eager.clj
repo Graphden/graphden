@@ -1159,24 +1159,41 @@
                     {:type :compile/unsupported-kind :binding bnd}))))
 
 
+(defn- binding-scope
+  "The env an env-binding named `env-name` evaluates in: the merged
+   env `env`, with `env-name` restored to the caller's `fa` value (or
+   absent when the caller gave none). See `env-arg-builder`."
+  [env fa env-name]
+  (if-let [e (find fa env-name)]
+    (assoc env env-name (val e))
+    (dissoc env env-name)))
+
+
 (defn- env-arg-builder
   "Build the value that lands under one env-binding's env-name in
    `fa'`. Different shape from `arg-builder` because env-bindings
    need to participate in a SHARED env (sibling env-bindings can
    reference each other in any order).
 
-   Returns `(fn [fa-ref ctx])` — a thunk that reads from the
+   Returns `(fn [fa-ref fa ctx])` — a thunk that reads from the
    volatile `fa-ref` at FORCE time, so the env map it sees is
    the final one (all env-bindings populated), not the partial
    snapshot at construction time. For `:value` bindings we just
-   return the literal — no closure needed."
-  [fn-id env-bnd child-callables lookups]
+   return the literal — no closure needed.
+
+   The value is evaluated in `binding-scope`: the shared env EXCEPT
+   under the binding's own env-name, which keeps the CALLER's value
+   (`fa`, pre-merge). A binding never sees itself — `:x :b` where
+   `:b`'s own free arg is also `:x` reads `:b`'s `:x` from the caller,
+   the lexical meaning; reading the shared env there made the thunk
+   force itself (an NPE out of the half-realized delay)."
+  [fn-id {:keys [env-name] :as env-bnd} child-callables lookups]
   (case (:kind env-bnd)
     ;; Identity edge through an env-binding — same as the root-slot
     ;; case: the value is the target's id, no child, no thunk.
     :fn-ref (let [ref-id (:ref-id env-bnd)]
-              (fn [_fa-ref _ctx] ref-id))
-    :value (let [v (:value env-bnd)] (fn [_fa-ref _ctx] v))
+              (fn [_fa-ref _fa _ctx] ref-id))
+    :value (let [v (:value env-bnd)] (fn [_fa-ref _fa _ctx] v))
 
     ;; List binding on a deep (renamed) sequence slot — same item
     ;; builders as the root `:seq` kind, reading the shared env at
@@ -1188,10 +1205,10 @@
                                                  (or binder-fn-id fn-id))
                               items)]
       (if lazy-seq?
-        (fn [fa-ref ctx]
-          (map (fn [b] (delay (b @fa-ref ctx))) item-builders))
-        (fn [fa-ref ctx]
-          (lazy-seq-of-values item-builders @fa-ref ctx))))
+        (fn [fa-ref fa ctx]
+          (map (fn [b] (delay (b (binding-scope @fa-ref fa env-name) ctx))) item-builders))
+        (fn [fa-ref fa ctx]
+          (lazy-seq-of-values item-builders (binding-scope @fa-ref fa env-name) ctx))))
 
     :ref
     (let [{:keys [ref-id is-fn produces-callable? slot-id]} env-bnd
@@ -1209,10 +1226,10 @@
         (and is-fn (not produces-callable?))
         (let [lambda-params (r/hof-lambda-params ref-id slot-id env-bnd fn-id lookups)
               translation (r/build-hof-translation ref-id lambda-params lookups)]
-          (fn [fa-ref ctx]
+          (fn [fa-ref fa ctx]
             (tagged-callable ref-id lambda-params
                              (fn [lambda-args]
-                               (let [fa* (apply-hof-translation @fa-ref translation)]
+                               (let [fa* (apply-hof-translation (binding-scope @fa-ref fa env-name) translation)]
                                  (child (if lambda-args (merge fa* lambda-args) fa*)
                                         ctx))))))
 
@@ -1220,23 +1237,23 @@
         ;; ring-handler). Same as the regular `arg-builder` :ref
         ;; path: don't hof-wrap a positional callable.
         produces-callable?
-        (fn [fa-ref ctx]
-          (rt/thunk (fn [] (call-with-cache ref-id ref-frees ref-name child @fa-ref ctx))))
+        (fn [fa-ref fa ctx]
+          (rt/thunk (fn [] (call-with-cache ref-id ref-frees ref-name child (binding-scope @fa-ref fa env-name) ctx))))
 
         :else
         (let [renames (r/build-ref-renames ref-id fn-id lookups)]
           (if (empty? renames)
-            (fn [fa-ref ctx]
-              (rt/thunk (fn [] (call-with-cache ref-id ref-frees ref-name child @fa-ref ctx))))
-            (fn [fa-ref ctx]
+            (fn [fa-ref fa ctx]
+              (rt/thunk (fn [] (call-with-cache ref-id ref-frees ref-name child (binding-scope @fa-ref fa env-name) ctx))))
+            (fn [fa-ref fa ctx]
               (rt/thunk (fn []
-                          (call-with-cache
-                            ref-id ref-frees ref-name child
-                            (reduce-kv
-                              (fn [acc cn cln] (assoc acc cn (get @fa-ref cln)))
-                              @fa-ref
-                              renames)
-                            ctx))))))))))
+                          (let [scope (binding-scope @fa-ref fa env-name)]
+                            (call-with-cache
+                              ref-id ref-frees ref-name child
+                              (reduce-kv (fn [acc cn cln] (assoc acc cn (get scope cln)))
+                                         scope
+                                         renames)
+                              ctx)))))))))))
 
 
 (defn compile-fn
@@ -1337,7 +1354,7 @@
                              merged (loop [m fa, i 0]
                                       (if (< i env-n)
                                         (recur (assoc m (nth env-names i)
-                                                      ((nth env-builders i) fa-ref ctx))
+                                                      ((nth env-builders i) fa-ref fa ctx))
                                                (inc i))
                                         m))]
                          (vreset! fa-ref merged)

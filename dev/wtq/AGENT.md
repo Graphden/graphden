@@ -112,8 +112,11 @@ You were started in one of two ways:
 4. **Land** — when the feature is complete and `bb lint` is green, run the
    gate. No sign-off needed (Rule 5):
 
-   `bb wt merge` first runs **`bb lint` on your worktree** (outside the queue;
-   skipped if that exact commit already passed) and refuses to queue a red or
+   `bb wt merge` first runs **`bb lint` on your worktree** (outside the queue,
+   one agent's lint at a time — it says so when it waits for another's; a check
+   that goes red is re-run once ALONE before it counts, and one that passes
+   alone is reported, not failed; skipped if that exact commit already passed)
+   and refuses to queue a red or
    uncommitted tree (PRECOND, exit 3, with the lint output) — a lint red found
    inside a train would cost everyone in it a gate. Then it **enqueues** your
    branch at its current commit and waits. A gate also only starts with enough

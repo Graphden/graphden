@@ -89,6 +89,8 @@ SOON_DIR="$WTQ_DIR/soon"         # "I will enqueue within N minutes" markers
 BISECT_DIR="$WTQ_DIR/bisect"     # per red-train bisection budget
 STATE_LOCK="$WTQ_DIR/state.lock" # short-lived lock over queue/, soon/, bisect/, results/
 TRAIN_FILE="$WTQ_DIR/train"      # the train currently being gated (id, members, log)
+LINT_LOCK="$WTQ_DIR/lint.lock"   # one pre-queue lint at a time (see cmd_merge)
+LINT_HOLDER="$WTQ_DIR/lint.holder"
 mkdir -p "$LOG_DIR" "$TASKS_DIR" "$RESULT_DIR" "$QUEUE_DIR" "$SOON_DIR" "$BISECT_DIR"
 
 TARGET="${WTQ_TARGET:-develop}"
@@ -1959,6 +1961,35 @@ waiter_abort() {
   state_unlock
 }
 
+# The pre-queue lint, ONE AT A TIME for every worktree of the repo. Several
+# agents running `wt merge` together used to lint side by side (load 40-80),
+# and their checks timed each other out or lost a child's stream — PRECOND for
+# code that was fine (one agent needed five attempts, 2026-09-24). Waiting a
+# few minutes for another lint is cheaper than that. `--retry-solo` then
+# re-runs a check that still went red once alone before it counts (the report
+# says which, and prints the first attempt).
+LINT_CMD="${WTQ_LINT_CMD:-bb lint --retry-solo}"
+lint_serialized() {   # <worktree> <name> <sha>
+  local wt="$1" name="$2" sha="$3"
+  (
+    exec 8>"$LINT_LOCK"
+    if ! flock -n 8; then
+      warn "lint: another pre-queue lint is running ($(cat "$LINT_HOLDER" 2>/dev/null || echo '?')) — waiting for it; side by side they time each other out ..."
+      flock 8
+    fi
+    printf '%s @ %s (pid %s) since %s' "$name" "${sha:0:8}" "$BASHPID" "$(date +%H:%M:%S)" > "$LINT_HOLDER"
+    yield_to_gate "lint"
+    info "lint: running '$LINT_CMD' at ${sha:0:8} before queueing ..."
+    local rc=0
+    # 8>&-: the lint must not inherit the lock — an orphan it leaves behind
+    # would hold every other agent's lint hostage.
+    # shellcheck disable=SC2086  # a command line, split on purpose
+    ( cd "$wt" && exec $LINT_CMD 8>&- ) || rc=$?
+    : > "$LINT_HOLDER"
+    exit "$rc"
+  )
+}
+
 lint_refused() {   # <name> <branch> <sha> <why> — PRECOND, never queued
   state_lock; write_result "$1" PRECOND "$2" "$3" "" "not queued: $4"; state_unlock
   warn "↩ NOT queued: $4"
@@ -2001,12 +2032,10 @@ cmd_merge() {
     [ -z "$(git -C "$wt" status --porcelain)" ] \
       || { lint_refused "$name" "$branch" "$sha" "worktree dirty — commit first (lint must see exactly the queued commit)"; return 3; }
     bootstrap_node_modules "$wt"
-    yield_to_gate "lint"
-    info "lint: running '${WTQ_LINT_CMD:-bb lint}' at ${sha:0:8} before queueing ..."
     local lrc=0
-    ( cd "$wt" && ${WTQ_LINT_CMD:-bb lint} ) || lrc=$?
+    lint_serialized "$wt" "$name" "$sha" || lrc=$?
     if [ "$lrc" != 0 ]; then
-      lint_refused "$name" "$branch" "$sha" "'${WTQ_LINT_CMD:-bb lint}' is red (output above) — fix, commit, re-run 'bb wt merge'"; return 3
+      lint_refused "$name" "$branch" "$sha" "'$LINT_CMD' is red (output above) — fix, commit, re-run 'bb wt merge'"; return 3
     fi
     if [ "$(git -C "$wt" rev-parse HEAD)" != "$sha" ] || [ -n "$(git -C "$wt" status --porcelain)" ]; then
       lint_refused "$name" "$branch" "$sha" "the worktree changed while lint ran — re-run 'bb wt merge'"; return 3

@@ -314,6 +314,23 @@ check "t2 PRECOND (unacknowledged rule change)" eq "$(verdict t2)" PRECOND
 check "t2 exit 3" eq "$(rc_of t2)" 3
 check "gates: [t1] alone" eq "$(gates)" "t1"
 
+echo "== concurrent 'wt merge's lint one at a time"
+new_world lint-serial
+cat > "$WTQ_LINT_CMD" <<'EOF'
+#!/usr/bin/env bash
+echo "start $(basename "$PWD")" >> "$LINT_LOG"
+sleep 1
+echo "end $(basename "$PWD")" >> "$LINT_LOG"
+EOF
+feature l1 l1.txt l1; feature l2 l2.txt l2
+merge_bg l1; merge_bg l2
+finish l1 l2
+check "both GREEN" eq "$(rc_of l1)$(rc_of l2)" 00
+check "the two lints never overlapped" \
+  eq "$(cut -d' ' -f1 "$LINT_LOG" | tr '\n' ' ')" "start end start end "
+check "the second one said what it waited for" \
+  eval "grep -q 'another pre-queue lint is running' '$T/l1.out' '$T/l2.out'"
+
 echo "== soon: the train waits for a marked branch"
 new_world soon
 export WTQ_SOON_UNIT=5

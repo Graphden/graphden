@@ -129,9 +129,14 @@ Details that are deliberate:
 - **`bb wt list` / `status`** show `QUEUED`, `IN-TRAIN`, `SPLITTING` and the
   final verdicts, the running train (id, members, log), the queue order and
   live soon-markers.
-- **Lint before the queue.** `bb wt merge` runs `bb lint` on the member's
-  worktree first (outside the lock; stamped per sha in `.git/wtq/lint-ok/`, so
-  a re-queue of the same commit does not re-lint) and refuses to queue a red
+- **Lint before the queue.** `bb wt merge` runs `bb lint --retry-solo` on the
+  member's worktree first (outside the gate lock; stamped per sha in
+  `.git/wtq/lint-ok/`, so a re-queue of the same commit does not re-lint).
+  Pre-queue lints run ONE AT A TIME (`.git/wtq/lint.lock`; a waiting one names
+  the holder): side by side at load 40-80 they timed each other out. A check
+  that still goes red is re-run once alone before it counts — one that passes
+  alone is reported as such (with its first attempt), not failed. It refuses
+  to queue a red
   or dirty tree. The conductor re-checks each member's stamp against its
   queued sha. The train still runs `bb ci` (lint included) on the MERGED tree —
   cross-branch drift such as a stale devtour bake only shows there.

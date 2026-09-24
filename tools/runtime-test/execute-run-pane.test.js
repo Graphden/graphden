@@ -6,7 +6,13 @@
 //   * the Cancel button a pending run reveals is hidden again once the run is
 //     terminal, with its exec id dropped;
 //   * two overlapping mounts (A selected, then B before A's arg forms landed)
-//     leave B's arg readers published — B's Run never sends A's values.
+//     leave B's arg readers published — B's Run never sends A's values;
+//   * a second Run while one is pending keeps the NEW run's Cancel armed;
+//   * a stale poll (the pane moved on to a newer run) writes nothing into
+//     the result host and never stops the newer run's poll — on the HTTP
+//     error, network error and terminal-result paths;
+//   * a new Run retires the previous run's poll, so an inline result is not
+//     painted over by an earlier pending run finishing.
 // Runs under node's vm over mini-dom; no browser, no stack.
 
 const fs = require('node:fs');
@@ -86,7 +92,7 @@ function boot({ effects = false } = {}) {
     },
     collectFormValue: (root) => ({ ok: true, value: root.getAttribute('data-value') }),
     renderSubmitSpinner: () => doc.createElement('span'),
-    renderErrorPane: () => doc.createElement('span'),
+    renderErrorPane: () => { const e = doc.createElement('span'); e.className = 'err'; return e; },
     renderPendingPane: () => doc.createElement('span'),
     appendRuntimeEffectsStrip() {},
     buildHistoryPanel: async () => doc.createElement('div'),
@@ -101,8 +107,12 @@ function boot({ effects = false } = {}) {
         await new Promise((r) => { ctx.__releasePost = r; });
         return res(execResponse());
       }
-      if (url.startsWith('/api/execute/')) return res({ status: pollStatus });
-      return res(null, '<p>result</p>');
+      if (url.startsWith('/api/execute/')) {
+        if (ctx.__pollHandler) return ctx.__pollHandler(url);
+        return res({ status: pollStatus });
+      }
+      if (ctx.__partialHandler) return ctx.__partialHandler(url);
+      return res(null, '<p>result ' + url + '</p>');
     },
   });
   ctx.window = ctx;
@@ -110,9 +120,10 @@ function boot({ effects = false } = {}) {
   // pane's shell is built by hand when the partial's body arrives.
   Object.defineProperty(MiniElement.prototype, 'innerHTML', {
     configurable: true,
-    get() { return ''; },
+    get() { return this.__html || ''; },
     set(v) {
       this.textContent = '';
+      this.__html = v;
       if (v === 'SHELL') buildShell(doc, this, ctx.__shell);
     },
   });
@@ -120,7 +131,9 @@ function boot({ effects = false } = {}) {
   vm.runInContext(SRC, ctx);
   const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
   const resolveForm = (fnId, value) => formWaits.get(fnId).shift()({ ok: true, value });
-  return { ctx, doc, posts, timers, flush, resolveForm,
+  // A controllable response: `hold()` returns [promise, release(value)].
+  const hold = () => { let release; const p = new Promise((r) => { release = r; }); return [p, release]; };
+  return { ctx, doc, posts, timers, flush, resolveForm, res, hold,
            setExec: (f) => { execResponse = f; }, setPoll: (s) => { pollStatus = s; } };
 }
 
@@ -204,6 +217,95 @@ function boot({ effects = false } = {}) {
     const published = vm.runInContext('argFormHosts', t.ctx);
     assert(published.length === 1 && published[0].read() === 'b-val',
       'the published readers are B\'s (' + published.length + ')');
+  }
+
+  // Mount A, click Run with the exec response `resp`; resolves once the
+  // POST landed (the pending pane + poll are armed for pending responses).
+  async function mountA(t) {
+    const p = t.ctx.gdMountRunPane('A');
+    await t.flush();
+    t.resolveForm('A', 'a-val');
+    await p;
+  }
+  async function run(t, resp) {
+    t.setExec(() => resp);
+    t.doc.querySelector('.execute-run-btn').click();
+    await t.flush();
+    t.ctx.__releasePost();
+    await t.flush();
+  }
+  const pollOf = (t) => vm.runInContext('pollState && pollState.execId', t.ctx);
+
+  console.log(' a second pending Run keeps ITS Cancel armed');
+  {
+    const t = boot();
+    await mountA(t);
+    const cancel = t.doc.querySelector('.execute-cancel-btn');
+    await run(t, { status: 'pending', 'execution-id': 'e1' });
+    await run(t, { status: 'pending', 'execution-id': 'e2' });
+    assert(cancel.style.display === '', 'Cancel visible for the second pending run');
+    assert(cancel.dataset.execId === 'e2', 'Cancel targets e2, got ' + cancel.dataset.execId);
+    assert(pollOf(t) === 'e2', 'polling e2');
+  }
+
+  console.log(' a stale poll that fails (HTTP / network) leaves the newer run alone');
+  for (const mode of ['http', 'throw']) {
+    const t = boot();
+    await mountA(t);
+    const cancel = t.doc.querySelector('.execute-cancel-btn');
+    const host = t.doc.querySelector('.execute-result-host');
+    await run(t, { status: 'pending', 'execution-id': 'e1' });
+    const [held, release] = t.hold();
+    t.ctx.__pollHandler = () => held;
+    t.timers.shift()();          // e1's first poll goes out and hangs
+    await t.flush();
+    t.ctx.__pollHandler = null;
+    await run(t, { status: 'pending', 'execution-id': 'e2' });
+    const before = host.children.length;
+    if (mode === 'http') release({ ok: false, status: 500, json: async () => ({}) });
+    else release(Promise.reject(new Error('boom')));
+    await t.flush();
+    assert(pollOf(t) === 'e2', mode + ': e2 still polled, got ' + pollOf(t));
+    assert(cancel.dataset.execId === 'e2' && cancel.style.display === '',
+      mode + ': e2\'s Cancel still armed');
+    assert(host.children.length === before && !host.querySelector('.err'),
+      mode + ': no stale error written into the pane');
+  }
+
+  console.log(' a stale terminal poll does not paint over the newer run');
+  {
+    const t = boot();
+    await mountA(t);
+    const host = t.doc.querySelector('.execute-result-host');
+    await run(t, { status: 'pending', 'execution-id': 'e1' });
+    const [held, release] = t.hold();
+    t.ctx.__partialHandler = () => held;
+    t.setPoll('succeeded');
+    t.timers.shift()();          // e1 turns terminal; its result partial hangs
+    await t.flush();
+    t.ctx.__partialHandler = null;
+    t.setPoll('pending');
+    await run(t, { status: 'pending', 'execution-id': 'e2' });
+    release(t.res(null, 'E1-RESULT'));
+    await t.flush();
+    assert(host.innerHTML !== 'E1-RESULT', 'e1\'s result did not land over e2');
+    assert(pollOf(t) === 'e2', 'e2 still polled');
+  }
+
+  console.log(' an inline result is not overwritten by an earlier run\'s poll');
+  {
+    const t = boot();
+    await mountA(t);
+    const host = t.doc.querySelector('.execute-result-host');
+    await run(t, { status: 'pending', 'execution-id': 'e1' });
+    await run(t, { status: 'succeeded', 'execution-id': 'e2', result: 2 });
+    assert(host.innerHTML.includes('id=e2'), 'e2\'s result shown, got ' + host.innerHTML);
+    t.setPoll('succeeded');
+    while (t.timers.length) t.timers.shift()();
+    await t.flush();
+    assert(host.innerHTML.includes('id=e2'), 'still e2 after e1\'s timer fired, got ' + host.innerHTML);
+    assert(t.doc.querySelector('.execute-cancel-btn').style.display === 'none',
+      'no Cancel for a finished run');
   }
 
   if (fails) { console.error(`✗ ${fails} failed, ${passes} passed`); process.exit(1); }

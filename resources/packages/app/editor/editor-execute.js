@@ -127,9 +127,16 @@ function nextPollDelay(attempt) {
 
 
 async function pollOnce(execId, resultHostEl) {
+  // The popover may have been dismissed (stopPolling nulls pollState), OR
+  // a newer Run replaced pollState with a different execId, while an await
+  // below was in flight. Every write into resultHostEl and every
+  // stopPolling() is guarded by this — a stale poll would otherwise paint
+  // over the newer run's pane, or kill its poll (and hide its Cancel).
+  const current = () => pollState?.execId === execId;
   try {
     const r = await authFetch(API.api_execute_id(execId),
                               { method: 'GET' });
+    if (!current()) return;
     if (!r.ok) {
       resultHostEl.textContent = '';
       const msg = authFetchErrorMessage(r, {
@@ -141,12 +148,7 @@ async function pollOnce(execId, resultHostEl) {
       return;
     }
     const row = await r.json();
-    // The popover may have been dismissed (stopPolling nulls pollState),
-    // OR a newer Run replaced pollState with a different execId, while
-    // this fetch was in flight. Bail unless we're still the current poll —
-    // otherwise a stale poll would either reschedule onto the wrong execId
-    // or call stopPolling() and silently kill the newer run.
-    if (!pollState || pollState.execId !== execId) return;
+    if (!current()) return;
     const status = String(row.status || '').replace(/^:/, '');
     if (status === 'succeeded' || status === 'failed' || status === 'cancelled') {
       // Body hiccup comes from `/partials/execute-result?id=…` — the
@@ -157,14 +159,17 @@ async function pollOnce(execId, resultHostEl) {
       try {
         const bodyResp = await authFetch('/partials/execute-result?id='
                                          + encodeURIComponent(execId));
+        const html = bodyResp.ok ? await bodyResp.text() : null;
+        if (!current()) return;
         resultHostEl.textContent = '';
         if (bodyResp.ok) {
-          resultHostEl.innerHTML = await bodyResp.text();
+          resultHostEl.innerHTML = html;
         } else {
           resultHostEl.appendChild(renderErrorPane('Load error: HTTP '
                                                    + bodyResp.status));
         }
       } catch (e) {
+        if (!current()) return;
         resultHostEl.textContent = '';
         resultHostEl.appendChild(renderErrorPane('Load error: ' + e.message));
       }
@@ -186,6 +191,7 @@ async function pollOnce(execId, resultHostEl) {
       () => pollOnce(execId, resultHostEl),
       nextPollDelay(pollState.attempt));
   } catch (e) {
+    if (!current()) return;
     resultHostEl.textContent = '';
     resultHostEl.appendChild(renderErrorPane('Polling error: ' + e.message));
     stopPolling();
@@ -193,8 +199,15 @@ async function pollOnce(execId, resultHostEl) {
 }
 
 
+// Arms Cancel for THIS run only after retiring the previous poll: the
+// stopPolling() below hides the (shared) Cancel button and drops its exec
+// id, so arming it before would leave a second pending run uncancellable.
 function startPolling(execId, resultHostEl, cancelBtn) {
   stopPolling();
+  if (cancelBtn) {
+    cancelBtn.style.display = '';
+    cancelBtn.dataset.execId = execId;
+  }
   pollState = { execId, attempt: 0, timer: null, cancelBtn: cancelBtn || null };
   pollState.timer = setTimeout(
     () => pollOnce(execId, resultHostEl),
@@ -274,6 +287,9 @@ document.addEventListener('click', async (e) => {
 
 async function submitExecution(fnEntity, args, persist, trace, captureValues,
                                resultHostEl, cancelBtn) {
+  // This run supersedes whatever the pane was still polling: left alive, an
+  // earlier pending run's poll would land its result over this one's.
+  stopPolling();
   resultHostEl.textContent = '';
   resultHostEl.appendChild(renderSubmitSpinner('Submitting…'));
   // The marker below describes THIS run: a lesson-11 persisted run
@@ -316,8 +332,6 @@ async function submitExecution(fnEntity, args, persist, trace, captureValues,
       resultHostEl.appendChild(renderErrorPane(body.error, body['error-data']));
     } else if (status === 'pending') {
       resultHostEl.appendChild(renderPendingPane(execId));
-      cancelBtn.style.display = '';
-      cancelBtn.dataset.execId = execId;
       startPolling(execId, resultHostEl, cancelBtn);
     } else {
       // Terminal status (succeeded / failed / tainted / cancelled) —
@@ -437,9 +451,9 @@ async function gdMountRunPane(fnId) {
     e.preventDefault();
     runBtn.click();
   });
-  // The outgoing pane may hold CodeMirror views (code-typed args) — they
-  // keep document observers alive unless destroyed before removal.
-  window.gdCode?.destroyWithin?.(host);
+  // The outgoing pane's CodeMirror views (code-typed args) are destroyed by
+  // the inspector before it replaces the tab body (editor-inspector.js
+  // renderInspTab) — by the time this runs, `host` is a fresh, empty node.
   host.textContent = '';
   host.appendChild(el);
   argFormHosts = [];

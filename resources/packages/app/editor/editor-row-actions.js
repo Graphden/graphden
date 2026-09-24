@@ -441,9 +441,12 @@ async function loadRowActionsContent(host, fnId, context, opts) {
                 : '');
   // Cache hit → render synchronously, no fetch, no "…" flash. The add-MI
   // disabled-state is recomputed against the CURRENT lookups (not cached), so a
-  // stale-graph case can't wrongly enable it.
+  // stale-graph case can't wrongly enable it. The write claims the host like
+  // loadPartial does: a slower uncached load for another row still in flight
+  // into this (shared popover) host would otherwise land over these actions.
   const cached = _rowActionsHtmlCache.get(url);
   if (cached != null) {
+    claimPartialHost(host);
     host.innerHTML = cached;
     _applyAddMICompatibilityState(host);
     _applyAppsAvailabilityState(host);

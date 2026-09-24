@@ -96,7 +96,7 @@
     :diff-affected :diff-branches-view
     :diff-value-against-type :digest-hex :dispatch-to-branch :dissoc
     :distinct :div :do :drop :empty? :env
-    :encode-unreadable-kws :equal? :error-boundary-wrap :every? :ex-data :execute-trace-rows
+    :encode-unreadable-kws :equal? :error-boundary-wrap :every? :ex-data :execute-trace-rows :viewer-path-trace
     :ex-info :extract-entity-params
     ;; :failure-ack / :failure-ack-all mutate acknowledged-at on audit
     ;; rows and return bool / count — no caller content in the return.
@@ -173,7 +173,7 @@
     :swap :sync-fn-defs-branch! :system-property :take :tenancy-active?
     :platform-owned-def-names
     ;; bool answers over the def's identity / the row's role — no content.
-    :platform-owned-def? :slot-shaped-type-row? :fn-impl-visible?
+    :platform-owned-def? :slot-shaped-type-row? :fn-impl-visible? :self-approval-allowed?
     :thread-count
     :throw :throwable-class-name :throwable-message :to-json-pretty :to-json-string
     :to-set :to-str :total-memory :transduce :try :try-apply-create

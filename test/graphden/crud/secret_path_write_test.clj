@@ -103,14 +103,14 @@
   ;; binding — but a PUT of `value` re-points an existing one.
   (let [target (secret-slot)
         row (tctx/with-org "acme"
-              (entities/create-entity :binding (secret-binding target "org/acme/db") (ctx)))
+                           (entities/create-entity :binding (secret-binding target "org/acme/db") (ctx)))
         resp (tctx/with-org "acme"
-               (setup/via-graph ga/*bootstrap* :process-update-entity
-                                {:uri (str "/api/entities/binding/" (:id row))
-                                 :request-method :put
-                                 :headers {"content-type" "application/x-www-form-urlencoded"}
-                                 ;; The form's `value` field is JSON — a string travels quoted.
-                                 :body (str "value=" (java.net.URLEncoder/encode "\"org/other/db\"" "UTF-8"))}))]
+                            (setup/via-graph ga/*bootstrap* :process-update-entity
+                                             {:uri (str "/api/entities/binding/" (:id row))
+                                              :request-method :put
+                                              :headers {"content-type" "application/x-www-form-urlencoded"}
+                                              ;; The form's `value` field is JSON — a string travels quoted.
+                                              :body (str "value=" (java.net.URLEncoder/encode "\"org/other/db\"" "UTF-8"))}))]
     (is (not= 200 (:status resp)) (pr-str resp))
     (is (str/includes? (str (:body resp)) "outside this organization") (pr-str resp))
     (is (= "org/acme/db" (:value (sp/read-entity (storage) :binding (:id row)))))))

@@ -64,6 +64,24 @@ function closeServicePopover() {
 }
 
 
+// A finished save / delete closes the dialog AND rebuilds the canvas cards
+// (so the badge reflects the new state) — which replaces the ⚙ badge focus
+// would go back to, dropping it to <body>. Rebuild first, then hand focus to
+// the trigger if it survived, else to the same fn's rebuilt root-row trigger
+// (its service badge, or — when delete removed the badge — its ⋯).
+function closeServicePopoverAndRebuild(fnId) {
+  const back = servicePopoverAnchor;
+  hideServicePopover();
+  if (typeof createNodeOverlays === 'function') createNodeOverlays();
+  if (typeof returnFocusTo !== 'function') return;
+  if (back?.isConnected && returnFocusTo(back)) return;
+  const sel = '[data-root-fn-id="' + fnId + '"]';
+  const next = document.querySelector('.service-badge' + sel)
+            || document.querySelector('.more-actions-trigger' + sel);
+  if (next) returnFocusTo(next);
+}
+
+
 // Show whatever body is in `el` anchored under `anchorEl` — the ONE path for
 // the form, the tenant bodies and the load errors, so each gets the same
 // visible ×, aria-expanded and focus entry (the dialog traps Tab, so focus
@@ -522,8 +540,7 @@ function wireServicePopoverHandlers(el, fnEntity) {
       // or filter toggle. Re-fetch, then rebuild overlays so the badge
       // appears immediately.
       try { await refreshServicesCache(); } catch (_) { servicesCache = null; }
-      closeServicePopover();
-      if (typeof createNodeOverlays === 'function') createNodeOverlays();
+      closeServicePopoverAndRebuild(fnEntity.id);
     });
   }
 
@@ -547,8 +564,7 @@ function wireServicePopoverHandlers(el, fnEntity) {
         // the removed badge disappears immediately instead of every badge
         // going blank until reload.
         try { await refreshServicesCache(); } catch (_) { servicesCache = null; }
-        closeServicePopover();
-        if (typeof createNodeOverlays === 'function') createNodeOverlays();
+        closeServicePopoverAndRebuild(fnEntity.id);
       } catch (err) {
         alert('Delete failed (network error): ' + (err?.message || err));
         delBtn.disabled = false;

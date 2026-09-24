@@ -510,6 +510,9 @@ function renderSingleFnRow(line, levelInfo, ctx) {
     if (state) {
       const badge = document.createElement('span');
       badge.className = 'service-badge service-badge-' + state;
+      // Focus lands back here after a service save rebuilds the cards
+      // (editor-service-popover.js closeServicePopoverAndRebuild).
+      badge.dataset.rootFnId = lineFnEntity.id;
       badge.textContent = '●';
       const stateLabels = {
         running:   'Running as a service',
@@ -576,6 +579,9 @@ function renderSingleFnRow(line, levelInfo, ctx) {
       onEnter: lineClearPreview,
       buildContent: buildPopoverContent
     });
+    // The root row's ⋯ is the stable way back to this fn's actions after a
+    // rebuild (editor-service-popover.js closeServicePopoverAndRebuild).
+    if (lineIsRoot) trigger.dataset.rootFnId = lineFn.fnId;
     line.appendChild(trigger);
   }
   bindFullNameHover(line, line, lineFn.name);

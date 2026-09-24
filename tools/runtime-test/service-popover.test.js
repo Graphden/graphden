@@ -6,7 +6,11 @@
 //     first open for the rest of the session;
 //   * focus moves INTO the dialog on open (it traps Tab), on the form and on
 //     the load-error body alike;
-//   * a load error still gets a visible ×, and × hands focus back to ⚙.
+//   * a load error still gets a visible ×, and × hands focus back to ⚙;
+//   * a finished save / delete rebuilds the cards (replacing ⚙) and hands
+//     focus to the fn's rebuilt badge — or its root-row ⋯ when delete
+//     removed the badge — never to a detached node (focus would fall to
+//     <body>).
 // Runs under node's vm over mini-dom; no browser, no stack.
 
 const fs = require('node:fs');
@@ -27,17 +31,36 @@ function assert(cond, msg) {
 
 function boot() {
   const doc = createDocument();
-  const seen = { fetches: 0, focusedInto: 0, returned: [], xButtons: 0 };
+  const seen = { fetches: 0, focusedInto: 0, returned: [], xButtons: 0, rebuilds: 0 };
   let reply = () => ({ ok: true, status: 200, text: async () => 'FORM heartbeat-' + seen.fetches });
   const ctx = vm.createContext({
     console, Promise, URLSearchParams,
     document: doc,
-    API: {},
+    API: { api_entities_type_id: (t, id) => '/api/entities/' + t + '/' + id,
+           api_services_reconcile: '/api/services/reconcile', api_services: '/api/services' },
     installPopoverDismiss() {},
     anchorBelowClamped() {},
     gdEscapeHtml: (s) => s,
     focusIntoDialog: () => { seen.focusedInto += 1; return true; },
-    returnFocusTo: (el) => { seen.returned.push(el); return true; },
+    // Like focusSafely: a node no longer in the document cannot take focus.
+    returnFocusTo: (el) => { seen.returned.push(el); return !!el.isConnected; },
+    confirm: () => true,
+    alert() {},
+    // The canvas rebuild after a save / delete: the ⚙ badge focus came from
+    // is replaced by a fresh one (or, when `badgeGone`, by the row's ⋯ only).
+    createNodeOverlays: () => {
+      seen.rebuilds += 1;
+      for (const n of doc.querySelectorAll('.card')) n.remove();
+      const card = doc.createElement('div');
+      card.className = 'card';
+      const kind = seen.badgeGone ? 'more-actions-trigger' : 'service-badge';
+      const rebuilt = doc.createElement('span');
+      rebuilt.className = kind;
+      rebuilt.dataset.rootFnId = 'f1';
+      card.appendChild(rebuilt);
+      doc.body.appendChild(card);
+      seen.rebuilt = rebuilt;
+    },
     ensurePopoverClose: (el, onClose) => {
       seen.xButtons += 1;
       const b = doc.createElement('button');
@@ -48,6 +71,7 @@ function boot() {
     },
     authFetch: async (url) => {
       if (url.startsWith('/partials/service-popover')) { seen.fetches += 1; return reply(); }
+      if (url.startsWith('/api/')) return { ok: true, status: 200, json: async () => ({ services: [] }) };
       return { ok: false, status: 404 };
     },
   });
@@ -63,13 +87,33 @@ function boot() {
         const x = doc.createElement('button');
         x.className = 'service-popover-close';
         this.appendChild(x);
+        // An existing service's form: Save & reconcile + Delete service.
+        for (const cls of ['service-popover-save-btn', 'service-popover-delete-btn']) {
+          const b = doc.createElement('button');
+          b.className = cls;
+          b.dataset.existingServiceId = 's1';
+          this.appendChild(b);
+        }
         this.appendChild(doc.createTextNode(String(v)));
       }
     },
   });
+  // `:checked` is beyond mini-dom's selectors — the save reads the restart
+  // policy / cardinality radios through it; none ticked → the defaults.
+  if (!MiniElement.prototype.__checkedShim) {
+    const qs = MiniElement.prototype.querySelector;
+    MiniElement.prototype.querySelector = function (sel) {
+      return String(sel).includes(':checked') ? null : qs.call(this, sel);
+    };
+    MiniElement.prototype.__checkedShim = true;
+  }
   vm.runInContext(SRC, ctx);
+  // The ⚙ trigger lives on a canvas card, which a rebuild replaces.
+  const card = doc.createElement('div');
+  card.className = 'card';
   const anchor = doc.createElement('button');
-  doc.body.appendChild(anchor);
+  card.appendChild(anchor);
+  doc.body.appendChild(card);
   return { ctx, doc, seen, anchor, setReply: (f) => { reply = f; } };
 }
 
@@ -110,6 +154,21 @@ const popover = (doc) => doc.querySelector('.service-popover');
     assert(t.seen.focusedInto === 1, 'focus moved into the error dialog');
     x?.click();
     assert(!el.classList.contains('visible') && t.seen.returned[0] === t.anchor, '× closes and returns focus');
+  }
+
+  console.log(' after save / delete rebuilds the cards, focus lands on the rebuilt trigger');
+  for (const [action, gone] of [['save', false], ['delete', false], ['delete', true]]) {
+    const t = boot();
+    t.seen.badgeGone = gone;
+    await t.ctx.showServicePopover({ id: 'f1', name: 'svc' }, t.anchor);
+    popover(t.doc).querySelector('.service-popover-' + action + '-btn').click();
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+    const label = action + (gone ? ' (badge removed)' : '');
+    assert(t.seen.rebuilds === 1, label + ': cards rebuilt once, got ' + t.seen.rebuilds);
+    assert(!popover(t.doc).classList.contains('visible'), label + ': closed');
+    const last = t.seen.returned[t.seen.returned.length - 1];
+    assert(last === t.seen.rebuilt && last?.isConnected,
+      label + ': focus handed to the rebuilt ' + (gone ? '⋯' : 'badge'));
   }
 
   if (fails) { console.error(`✗ ${fails} failed, ${passes} passed`); process.exit(1); }

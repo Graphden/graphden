@@ -144,6 +144,7 @@ function installRawToggle(hostEl, payloadValue) {
       } else { try { ta.focus(); } catch (_) {} }
     } else {
       const collected = collectFormValue(root);
+      window.gdCode?.destroyWithin?.(root);   // the raw textarea's CodeMirror view
       root.textContent = '';
       root.appendChild(stash);
       stash = null;

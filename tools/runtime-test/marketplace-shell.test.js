@@ -92,7 +92,8 @@ function loadRace() {
   };
   const pending = [];
   const fetch = (url) => new Promise((resolve) => {
-    pending.push({ url, resolve: (html) => resolve({ ok: true, text: () => Promise.resolve(html) }) });
+    pending.push({ url, resolve: (html) => resolve({ ok: true, text: () => Promise.resolve(html) }),
+                   fail: () => resolve({ ok: false, status: 500 }) });
   });
   const document = {
     addEventListener: () => {},
@@ -161,6 +162,17 @@ const settle = () => new Promise((r) => setImmediate(r));
     window.gdRenderMarket();
     assert(pending.length === 1, 'the mounted listing is kept');
     assert(root.innerHTML === '<div data-marketplace="1">fns</div>', 'and shown as is');
+  }
+
+  console.log(' a failed first open says so, and the next visit tries again');
+  {
+    const { window, root, pending } = loadRace();
+    window.gdMarketOpen({ kind: 'theme' });
+    pending[0].fail();
+    await settle();
+    assert(/could not be loaded/.test(root.innerHTML), 'no eternal "Loading…" (got ' + root.innerHTML + ')');
+    window.gdRenderMarket();
+    assert(pending.length === 2, 'the next visit refetches');
   }
 
   console.log(passes + ' passed, ' + failures + ' failed');

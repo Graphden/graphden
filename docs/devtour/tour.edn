@@ -1478,7 +1478,8 @@
      :see [[:layout "build-graph-elements"] [:layout "compute-layout-matrix"]]}
 
     {:file "resources/packages/app/editor/editor-render.js" :defn renderGraph
-     :say "One render cycle, and the reason it is not a one-liner: prime the
+     :say "One render cycle, and the reason it is not a one-liner: a render
+           GENERATION makes the last call win across its awaits, prime the
            selected fn's subtree, capture an ANCHOR node before the await so
            the canvas doesn't jump under the cursor, fetch the layout, diff it
            against the live graph, then re-measure — card heights are only

@@ -40,13 +40,21 @@
 // also read by editor-execute-history.js (Repeat re-fills these
 // widgets); the editor JS bundle concatenates the scripts so the
 // `let` is shared.
-let pollState = null;     // { execId, attempt, timer }
+let pollState = null;     // { execId, attempt, timer, cancelBtn }
 let argFormHosts = [];    // [{ slotName, slotId, hostEl, read }]
 
 
+// Ends the poll AND retires its Cancel: once the run is terminal (or the
+// pane is gone) there is nothing to cancel, and a Cancel left on screen with
+// a stale exec id would POST a cancel for a run that already ended.
 function stopPolling() {
   if (pollState?.timer) {
     clearTimeout(pollState.timer);
+  }
+  const btn = pollState?.cancelBtn;
+  if (btn) {
+    btn.style.display = 'none';
+    delete btn.dataset.execId;
   }
   pollState = null;
 }
@@ -185,9 +193,9 @@ async function pollOnce(execId, resultHostEl) {
 }
 
 
-function startPolling(execId, resultHostEl) {
+function startPolling(execId, resultHostEl, cancelBtn) {
   stopPolling();
-  pollState = { execId, attempt: 0, timer: null };
+  pollState = { execId, attempt: 0, timer: null, cancelBtn: cancelBtn || null };
   pollState.timer = setTimeout(
     () => pollOnce(execId, resultHostEl),
     nextPollDelay(0));
@@ -310,7 +318,7 @@ async function submitExecution(fnEntity, args, persist, trace, captureValues,
       resultHostEl.appendChild(renderPendingPane(execId));
       cancelBtn.style.display = '';
       cancelBtn.dataset.execId = execId;
-      startPolling(execId, resultHostEl);
+      startPolling(execId, resultHostEl, cancelBtn);
     } else {
       // Terminal status (succeeded / failed / tainted / cancelled) —
       // route the body through one of the two server partials so the
@@ -429,6 +437,9 @@ async function gdMountRunPane(fnId) {
     e.preventDefault();
     runBtn.click();
   });
+  // The outgoing pane may hold CodeMirror views (code-typed args) — they
+  // keep document observers alive unless destroyed before removal.
+  window.gdCode?.destroyWithin?.(host);
   host.textContent = '';
   host.appendChild(el);
   argFormHosts = [];
@@ -449,6 +460,9 @@ async function gdMountRunPane(fnId) {
     el.textContent = 'Could not load the run form: ' + e.message;
     return;
   }
+  // A newer mount (another fn selected, the tab re-rendered) replaced
+  // this pane while the shell was in flight — wire nothing.
+  if (!el.isConnected) return;
   el.innerHTML = html;
 
   // --- post-swap wiring ---
@@ -484,21 +498,31 @@ async function gdMountRunPane(fnId) {
   const readers = await Promise.all(
     hosts.map((host) => mountArgFormHost(fnEntity, host)),
   );
-  for (let i = 0; i < hosts.length; i++) {
-    argFormHosts.push({ slotName: hosts[i].dataset.slotName,
-                        slotId: hosts[i].dataset.slotId,
-                        hostEl: hosts[i],
-                        read: readers[i] });
-  }
+  // Built locally and published only while this pane is still the live
+  // one: two overlapping mounts (A then B selected fast) used to push into
+  // the one global list, so B's Run could send A's values.
+  if (!el.isConnected) return;
+  const formHosts = hosts.map((h, i) => ({ slotName: h.dataset.slotName,
+                                           slotId: h.dataset.slotId,
+                                           hostEl: h,
+                                           read: readers[i] }));
+  argFormHosts = formHosts;
+
+  // Run is enabled iff no submit is in flight AND (when the fn declares
+  // effects) the confirm box is ticked. One place decides, so the confirm
+  // toggle cannot re-enable Run mid-submit.
+  let submitting = false;
+  const syncRunEnabled = () => {
+    if (!runBtn) return;
+    const unconfirmed = !!confirmCb && !confirmCb.checked;
+    runBtn.disabled = submitting || unconfirmed;
+    if (confirmCb) runBtn.title = unconfirmed ? 'Confirm side-effects acknowledgement first' : 'Run';
+  };
 
   // Effect-confirm gate — the partial emits Run disabled when the fn
   // declares effects; live-toggle as the user checks/unchecks.
   if (confirmCb && runBtn) {
-    confirmCb.addEventListener('change', () => {
-      runBtn.disabled = !confirmCb.checked;
-      runBtn.title = confirmCb.checked
-        ? 'Run' : 'Confirm side-effects acknowledgement first';
-    });
+    confirmCb.addEventListener('change', syncRunEnabled);
   }
 
   // Capture-values second-step control (Debug P3, PHILOSOPHY
@@ -544,17 +568,26 @@ async function gdMountRunPane(fnId) {
 
   runBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
-    if (runBtn.disabled) return;  // defensive — gate already enforced
+    // `submitting` too: a second click can land before the disabled
+    // state is painted, and an effectful fn must not run twice.
+    if (runBtn.disabled || submitting) return;
     const args = {};
-    for (const a of argFormHosts) {
+    for (const a of formHosts) {
       const v = a.read();
       if (v !== undefined && v !== null && v !== '') {
         args[a.slotName] = v;
       }
     }
-    await submitExecution(fnEntity, args, persistCb.checked,
-                          !!traceCb?.checked, !!captureCb?.checked,
-                          resultHost, cancelBtn);
+    submitting = true;
+    syncRunEnabled();
+    try {
+      await submitExecution(fnEntity, args, persistCb.checked,
+                            !!traceCb?.checked, !!captureCb?.checked,
+                            resultHost, cancelBtn);
+    } finally {
+      submitting = false;
+      syncRunEnabled();
+    }
     // Run completed — the new row (if persisted) belongs in the runs
     // list below; refresh it in place.
     mountHistory();

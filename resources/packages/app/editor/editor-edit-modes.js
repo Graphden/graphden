@@ -49,8 +49,9 @@ installTabTrap({
 // and registered at load, so the tour's own listener sees the preventDefault.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || !inlineEditEl || e.defaultPrevented) return;
-  // A popover stacked on top of this one (the fn picker) closes first.
-  if (document.querySelector('.fn-picker-popover, .namespace-picker-popover')) return;
+  // A popover stacked on top of this one (the fn picker, and the namespace
+  // picker, which reuses its class) closes first.
+  if (document.querySelector('.fn-picker-popover')) return;
   e.preventDefault();
   closeInlineEdit();
 });
@@ -58,6 +59,9 @@ document.addEventListener('keydown', (e) => {
 function closeInlineEdit() {
   if (inlineEditEl) {
     const hadFocus = inlineEditEl.contains(document.activeElement);
+    // A code-typed value form is CodeMirror-enhanced; its view holds
+    // document observers that outlive the removed node unless destroyed.
+    window.gdCode?.destroyWithin?.(inlineEditEl);
     inlineEditEl.remove();
     inlineEditEl = null;
     if (hadFocus) returnFocusTo(inlineEditAnchor);
@@ -124,8 +128,15 @@ function openInlineEditPopover(opts) {
     errorEl.classList.remove('visible');
     // `doSave` may return a bare boolean (legacy edit modes) or a
     // `{ok, error}` result — the latter lets a save surface the
-    // server's rejection reason instead of the generic message.
-    const res = await opts.doSave(control);
+    // server's rejection reason instead of the generic message. A throw
+    // (network drop) is a failed save too — it used to leave Save and
+    // Cancel disabled with no message.
+    let res;
+    try {
+      res = await opts.doSave(control);
+    } catch (err) {
+      res = { ok: false, error: 'Save failed: ' + (err?.message || 'network error') };
+    }
     const ok = (res === true) || !!res?.ok;
     if (ok) {
       closeInlineEdit();
@@ -283,6 +294,7 @@ function enterArgValueEditMode(arg, anchorEl) {
       let fetchSeq = 0;
       const load = () => {
         const seq = ++fetchSeq;
+        window.gdCode?.destroyWithin?.(host);
         host.replaceChildren(loading);
         fetchValueForm(arg, chosenAs || undefined).then((payload) => {
           // The user may have dismissed the popover mid-fetch — `root`

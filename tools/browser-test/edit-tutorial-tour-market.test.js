@@ -45,6 +45,14 @@ const {waitTourTitle, clickTourButton, finishAndDelete, tourWhere} = require('./
     // --- Save it as a version: the share dialog.
     await page.evaluate(() => document.getElementById('gd-theme-save').click());
     await page.waitForSelector('#gd-mkpub-pop #gd-mkpub-name', {timeout: 30000});
+    // aria-modal="true" is kept: everything but the dialog, its scrim (the
+    // click-outside close) and the tour's own layers is inert while it is up.
+    const modal = await page.evaluate(() => [...document.body.children]
+      .filter((e) => !['gd-mkpub-pop', 'gd-mkpub-scrim'].includes(e.id) && !/^gd-tour-/.test(e.id || ''))
+      .filter((e) => !e.hasAttribute('inert')).map((e) => e.id || e.tagName));
+    assert(modal.length === 0, 'the page behind the share dialog is inert (live: ' + modal.join(', ') + ')');
+    assert(await page.evaluate(() => !document.getElementById('gd-mkpub-scrim').hasAttribute('inert')),
+           'the scrim stays clickable');
     await page.evaluate(() => {
       const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', {bubbles: true})); };
       set('gd-mkpub-name', 'my-board');
@@ -57,6 +65,8 @@ const {waitTourTitle, clickTourButton, finishAndDelete, tourWhere} = require('./
     // The dialog stays open on success (the reader sees the outcome) — close it.
     await page.evaluate(() => document.getElementById('gd-mkpub-cancel').click());
     await page.waitForFunction(() => !document.querySelector('#gd-mkpub-pop'), null, {timeout: 15000, polling: 200});
+    assert(await page.evaluate(() => ![...document.body.children].some((e) => e.hasAttribute('inert'))),
+           'closing the share dialog lifts the inert');
     assert(await clickTourButton(page, 'Next'), 'roll-back Next');
 
     // --- Now the keys: rebind graph-fit to f f.

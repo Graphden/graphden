@@ -337,6 +337,10 @@ function patchEntityDescriptionInState(entityType, entityId, description) {
     lookups = buildLookups(graphData);
   }
   if (typeof rebuildImplementationFnIds === 'function') rebuildImplementationFnIds();
+  // The row-actions popover bakes the description into its cached HTML
+  // (the ⓘ badge's data-description) — without this the edit showed only
+  // after a page reload.
+  if (typeof _rowActionsHtmlCache !== 'undefined') _rowActionsHtmlCache.clear();
 }
 
 function hideDescriptionTooltip(force) {

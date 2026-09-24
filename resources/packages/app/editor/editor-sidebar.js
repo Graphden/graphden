@@ -35,6 +35,9 @@ let searchFilter = '';
 // light fn rows; `_searchSeq` drops stale responses that arrive out of order.
 let _searchResults = null;
 let _searchTruncated = false;
+// The last query failed (network / HTTP): shown as such instead of an
+// eternal "Searching…".
+let _searchFailed = false;
 let _searchSeq = 0;
 let _searchDebounce = null;
 
@@ -164,6 +167,7 @@ function refreshLoadedNamespace(nsPath, searchMode) {
  */
 function onSearchInput(value) {
   searchFilter = value.trim();
+  _searchFailed = false;
   if (!searchFilter) {
     _searchResults = null;
     _searchTruncated = false;
@@ -174,27 +178,49 @@ function onSearchInput(value) {
   }
   const seq = ++_searchSeq;
   clearTimeout(_searchDebounce);
-  _searchDebounce = setTimeout(() => {
-    if (typeof searchFns !== 'function') return;
-    searchFns(searchFilter).then(({ fns, truncated }) => {
-      if (seq !== _searchSeq) return;   // a newer keystroke superseded this
-      _searchResults = fns;
-      _searchTruncated = truncated;
-      updateEntityList(graphData);
-      // The server's own count, not a DOM tally — the tree only holds rows
-      // for namespaces that happen to be expanded.
-      announceSearch(searchFilter, fns.length, truncated);
-    }).catch((err) => { console.error('sidebar search failed', err); });
-  }, 180);
+  _searchDebounce = setTimeout(() => runSearch(seq), 180);
   // Repaint immediately so the box shows a "Searching…" state without
   // waiting for the debounce + round-trip.
   updateEntityList(graphData);
 }
 
+// Query the server for the current `searchFilter`; `seq` drops a response a
+// newer keystroke (or a clear) superseded.
+function runSearch(seq) {
+  if (typeof searchFns !== 'function') return;
+  const query = searchFilter;
+  searchFns(query).then(({ fns, truncated }) => {
+    if (seq !== _searchSeq) return;   // a newer keystroke superseded this
+    _searchResults = fns;
+    _searchTruncated = truncated;
+    _searchFailed = false;
+    updateEntityList(graphData);
+    // The server's own count, not a DOM tally — the tree only holds rows
+    // for namespaces that happen to be expanded.
+    announceSearch(query, fns.length, truncated);
+  }).catch((err) => {
+    if (seq !== _searchSeq) return;
+    console.error('sidebar search failed', err);
+    _searchFailed = true;
+    updateEntityList(graphData);
+    if (typeof window.gdAnnounce === 'function') window.gdAnnounce('Search failed');
+  });
+}
+
+// After a write (rename / delete / create) the matches the tree shows are
+// the server's answer from BEFORE it — ask again, keeping the old rows on
+// screen until the new ones land. No-op without an active search.
+function requerySearch() {
+  if (!searchFilter) return;
+  runSearch(++_searchSeq);
+}
+window.requerySearch = requerySearch;
+
 function clearSearch() {
   searchFilter = '';
   _searchResults = null;
   _searchTruncated = false;
+  _searchFailed = false;
   _searchSeq++;
   const input = document.getElementById('search-input');
   if (input) input.value = '';
@@ -416,6 +442,10 @@ function updateEntityList(data) {
 
   // While a search query is in flight (debounce + round-trip) there are no
   // results yet — show a transient state rather than a misleading empty tree.
+  if (searchFilter && _searchFailed) {
+    list.innerHTML = '<div class="loading" role="alert">Search failed — edit the query to try again.</div>';
+    return;
+  }
   if (searchFilter && _searchResults === null) {
     list.innerHTML = '<div class="loading">Searching…</div>';
     return;

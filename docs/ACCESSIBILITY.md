@@ -76,7 +76,8 @@ a px floor is a real requirement (WCAG 2.5.5 hit areas), use
 **Motion.** CSS handles the declarative half through the
 `@media (prefers-reduced-motion: reduce)` block at the END of
 `editor-styles.css` (it must stay last — it overrides at equal
-specificity). JS-driven motion asks `prefersReducedMotion()`. Remove the
+specificity; `tools/runtime-test/css-reduced-motion-last.test.js` fails
+the build when a rule lands after it). JS-driven motion asks `prefersReducedMotion()`. Remove the
 movement, keep the information: the tree-flash becomes a steady wash, the
 busy spinner only slows down because it IS the progress signal.
 

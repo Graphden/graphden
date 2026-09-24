@@ -155,7 +155,11 @@ a fixed glyph lane so labels align. Consequences:
   means any NEW query param must be part of the URL at fetch time
   (added in `loadRowActionsContent`) or a cached entry for the old URL
   shape will serve stale HTML. The add-MI disabled state is recomputed
-  against CURRENT `lookups` on every open, cached or not. The graceful
+  against CURRENT `lookups` on every open, cached or not. Content the
+  URL does NOT key — the fn's name, its description, the ⚙ Service
+  blocked reason — is dropped with the whole cache by the reload phase
+  (`installGraphShell`) and by a description save
+  (`patchEntityDescriptionInState`). The graceful
   error path (`row-actions-error`) still applies when a cache-miss
   fetch fails — keep it working.
 

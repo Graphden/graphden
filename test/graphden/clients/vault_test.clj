@@ -116,7 +116,7 @@
   (let [p (scoped-path "md")]
     (vault/put-secret openbao/*client* p "v")
     (vault/put-metadata openbao/*client* p {:description "hello"
-                                    :owner "alice"})
+                                            :owner "alice"})
 
     (testing "get-metadata returns custom_metadata plus version info"
       (let [m (vault/get-metadata openbao/*client* p)]

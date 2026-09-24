@@ -213,13 +213,13 @@ Closes the loop into storage: take the collected namespace paths, build the ~cor
 :PROPERTIES:
 :CUSTOM_ID: packages/sync-fn-entities-from-packages!
 :FILE: src/graphden/packages/sync.clj
-:LINE: 1023
+:LINE: 1066
 :MINS: 11.4
 :END:
 
 The other half of every boot, and the one the loader hands off to: sync composed fn-defs to storage, heal namespace-moved identities and reap retired ones nothing live references (~_anon-*~ shapes included; ~{:dry-run? true}~ previews the plan from a REPL), seed each fn-def's rich-type, then run the topological type-check sweep. Read the two long comments — the batch-size binding (a fresh-DB boot writes >10k fn rows past the guard meant for USER writes) and ~:skip-type-check?~ (~15s of sweep the test bootstrap may opt out of, production never does — which is precisely why ~bb type-sweep~ exists: EVERY fixture opts out, so before that check a corpus type regression surfaced only when a real instance booted). This is declarative sync: the packages on disk are the desired state, storage is reconciled toward it.
 
-- source :: [[file:../../../src/graphden/packages/sync.clj::(defn sync-fn-entities-from-packages!][src/graphden/packages/sync.clj:1023]]
+- source :: [[file:../../../src/graphden/packages/sync.clj::(defn sync-fn-entities-from-packages!][src/graphden/packages/sync.clj:1066]]
 - see also :: [[file:types.org::#types/check-all-defs!][check-all-defs!]], [[file:versioning.org::#versioning/repoint-refs!][repoint-refs!]]
 - same file :: [[file:packages.org::#packages/adopt-bundle-identities!][adopt-bundle-identities!]], [[file:packages.org::#packages/reconcile-bundle-scope!][reconcile-bundle-scope!]]
 - referenced from :: [[file:boot.org::#boot/packages][packages]]
@@ -355,26 +355,26 @@ Why a fresh marketplace is not empty (docs/MARKETPLACE.md § 11). The starter ca
 :PROPERTIES:
 :CUSTOM_ID: packages/adopt-bundle-identities!
 :FILE: src/graphden/packages/sync.clj
-:LINE: 523
+:LINE: 566
 :MINS: 3.7
 :END:
 
 The WRITE half of the export/import pair — ~POST /api/import/graph~ applies an exported bundle to a NAMED branch. The route is a fn-def pipeline (~:import-bundle!~ in ~registry/registry/fns.edn~) over one-call primitives: find/create the target (owner-stamped, ~owner~ write-policy — the push-branch convention), skip package-owned defs, drop the anons only they reached, then THIS step — adopt editor-born same-name identities onto their deterministic ids — then the shared ~:sync-fn-defs-branch!~ (the MCP upsert's own), optionally a prune to snapshot semantics. Cross-install push/pull and git-snapshot restores all land here, then ride the normal diff → review → merge flow. Note the adoption repoints refs in the IDENTITY plane: it is why the MCP upsert does not run it.
 
-- source :: [[file:../../../src/graphden/packages/sync.clj::(defn adopt-bundle-identities!][src/graphden/packages/sync.clj:523]]
+- source :: [[file:../../../src/graphden/packages/sync.clj::(defn adopt-bundle-identities!][src/graphden/packages/sync.clj:566]]
 - same file :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]], [[file:packages.org::#packages/reconcile-bundle-scope!][reconcile-bundle-scope!]]
 
 * 28. reconcile-bundle-scope!
 :PROPERTIES:
 :CUSTOM_ID: packages/reconcile-bundle-scope!
 :FILE: src/graphden/packages/sync.clj
-:LINE: 566
+:LINE: 609
 :MINS: 4.7
 :END:
 
 Snapshot semantics for a runtime import (~?prune=true~): within exactly the bundle's namespaces, a deterministic-id fn the bundle no longer contains is TOMBSTONED on the branch (a ~:deleted-at~ version — so it hides an INHERITED fn too, not just a branch-local one, and the deletion propagates on merge). Never the boot reconciler's identity-plane purge, which would reach across branches. Referenced removals are kept + reported, loud.
 
-- source :: [[file:../../../src/graphden/packages/sync.clj::(defn reconcile-bundle-scope!][src/graphden/packages/sync.clj:566]]
+- source :: [[file:../../../src/graphden/packages/sync.clj::(defn reconcile-bundle-scope!][src/graphden/packages/sync.clj:609]]
 - same file :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]], [[file:packages.org::#packages/adopt-bundle-identities!][adopt-bundle-identities!]]
 
 * 29. bundle->files

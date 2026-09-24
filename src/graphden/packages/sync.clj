@@ -21,6 +21,7 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [clojure.walk]
+    [graphden.crud.secret-shape :as secret-shape]
     [graphden.crud.validation :as validation]
     [graphden.executor.composition.core :as fn-core]
     [graphden.executor.composition.deps :as deps]
@@ -37,6 +38,7 @@
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.config :as sp-config]
     [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tctx]
     [graphden.types.check :as types-check]
     [graphden.types.check.narrowing :as types-narrowing]
     [graphden.types.core :as types]
@@ -434,9 +436,49 @@
               items))))
 
 
-(defn- refuse-sealed!
+(defn- reaches-any?
+  "Does the ancestor walk from `fn-id` over `parents-of` (fn-id →
+   parent-ids) reach a member of `targets`?"
+  [parents-of targets fn-id]
+  (loop [frontier [fn-id] seen #{}]
+    (when-let [cur (first frontier)]
+      (condp contains? cur
+        targets true
+        seen (recur (rest frontier) seen)
+        (recur (concat (rest frontier) (parents-of cur)) (conj seen cur))))))
+
+
+(defn records-vault-path-rej
+  "The secret-path refusal a parsed bundle would earn in a TENANT context —
+   `{:type :reason :fn-id :slot-id}` for the first `:binding` record whose
+   resolver is (or inherits from) a vault base-fn and whose `:value` is not
+   a normal-form path under the tenant's own `org/<org-id>/` prefix
+   (`validation/vault-path-rej`, the entity write path's twin) — else nil.
+   A bundle is an AI's `upsert-fn-defs` or a registry install / fork /
+   import: without this, `{:secret-path \"org/<victim>/x\"}` would land a
+   row naming another org's secret. Nil on the platform tier."
   [storage records]
-  (when-let [rej (records-seal-rej storage records)]
+  (when-not (tctx/current-platform-tier?)
+    (let [by-kind (group-by :kind records)
+          checked (filterv :resolver-fn-id (:binding by-kind))
+          vault-ids (when (seq checked)
+                      (secret-shape/find-vault-path-base-fn-ids storage))]
+      (when (seq vault-ids)
+        (let [fns (into {} (map (juxt :id identity)) (:fn by-kind))
+              parents (ancestor-parents storage fns (map :resolver-fn-id checked))
+              vault-resolver? #(reaches-any? parents vault-ids %)]
+          (some (fn [b]
+                  (some-> (validation/vault-path-rej vault-resolver? b)
+                          (assoc :fn-id (:fn-id b) :slot-id (:slot-id b))))
+                checked))))))
+
+
+(defn- refuse-bundle-rej!
+  "The `*before-write*` guard of a bundle sync: throw the first seal or
+   secret-path refusal the records would earn."
+  [storage records]
+  (when-let [rej (or (records-seal-rej storage records)
+                     (records-vault-path-rej storage records))]
     (throw (ex-info (:reason rej) rej))))
 
 
@@ -463,12 +505,13 @@
    a registry install / fork / import), so the seals the API enforces on a
    single binding — an ancestor's value is final, `:terminal` seals a
    slot, `:list-closed` closes a list — are enforced here too, before the
-   first row lands (`records-seal-rej` via `*before-write*`). The boot
+   first row lands (`records-seal-rej` via `*before-write*`), and so is a
+   tenant's secret path (`records-vault-path-rej`). The boot
    package sync does not come through here: a package is its author's
    own tree."
   [storage fn-defs]
   (let [ns-id-map (pkg/sync-namespaces! storage (into #{} (keep :namespace) fn-defs))
-        name->id (binding [fn-core/*before-write* refuse-sealed!]
+        name->id (binding [fn-core/*before-write* refuse-bundle-rej!]
                    (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map))]
     (into (mapv #(records/fn-id (:namespace %) (:name %)) fn-defs)
           (comp (remove (set (map #(records/fn-id (:namespace %) (:name %)) fn-defs)))

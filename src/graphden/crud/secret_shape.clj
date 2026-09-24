@@ -42,6 +42,17 @@
   (or (fn-ids-with-tag storage :admin-only-vault) #{}))
 
 
+(defn find-vault-path-base-fn-ids
+  "Ids of the vault base-fns whose input is a KV PATH read or written with
+   the platform token — the admin-only vault primitives minus the
+   `:secret-shape` leaf (its input is the already-resolved VALUE). A
+   resolver binding over one of these (or a descendant) stores a vault
+   path as its `:value`. Empty when `web.vault` isn't loaded."
+  [storage]
+  (let [leaf-ids (or (fn-ids-with-tag storage :secret-shape) #{})]
+    (into #{} (remove leaf-ids) (find-admin-only-vault-base-fn-ids storage))))
+
+
 (defn secret-fn?
   "True when `fn-row`'s parents are exactly `[secret-leaf-id]`. MI
    children that inherit from anything else don't count — they aren't

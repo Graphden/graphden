@@ -111,6 +111,15 @@
     p))
 
 
+(defn normalised-path
+  "`path` in the normal form every client op uses (leading `/`s dropped),
+   or nil when it is not a valid vault path. For callers that compare
+   stored paths (the vault reclaim) rather than send them."
+  [path]
+  (try (normalise-path path "normalise")
+       (catch clojure.lang.ExceptionInfo _ nil)))
+
+
 (defn org-prefix
   "The KV prefix every secret of tenant `org` lives under. The KV mount is
    ONE flat namespace read and written with the platform token, so the
@@ -151,6 +160,29 @@
       (throw (ex-info (str "Vault " op ": path " (pr-str p) " is outside this organization's secrets")
                       {:type :vault/path-forbidden :op op :path p})))
     p))
+
+
+(defn stored-path-rejection
+  "Why `path` may not be STORED as a secret binding's vault path by the org
+   in scope — `{:type :vault/invalid-path|:vault/path-forbidden :reason …}`
+   — or nil. The platform tier is unrestricted (nil). A tenant's stored path
+   must already be in its normal form (no leading `/` for a later reader to
+   strip) and lie under the tenant's own `org/<org-id>/` prefix: the path is
+   read later by code that does not always run in the tenant's scope (the
+   tombstone GC), so the write is where a foreign path is refused."
+  [path]
+  (when-not (tctx/current-platform-tier?)
+    (try
+      (let [p (checked-path path "bind")]
+        (when-not (= p path)
+          {:type :vault/invalid-path
+           :reason (str "Vault path " (pr-str path) " is not in normal form — store "
+                        (pr-str p))}))
+      (catch clojure.lang.ExceptionInfo e
+        {:type (if (= :vault/path-forbidden (:type (ex-data e)))
+                 :vault/path-forbidden
+                 :vault/invalid-path)
+         :reason (ex-message e)}))))
 
 
 (defn- vault-url

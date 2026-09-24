@@ -241,8 +241,8 @@
    throw (DB blip / unique / RLS reject), and an unreleased permit leaks
    permanently — the org (then the JVM) would eventually hit the cap and
    reject every execution with `:over-capacity` while nothing runs.
-   `release` is idempotent, so the future's finally re-calling it is a
-   no-op."
+   `release` is idempotent, so the task's own release when the work ends
+   (`persist/release-on-done-task`) re-calling it is a no-op."
   [{:keys [storage exec-ctx fn-id fn-version-id free-slots declared-eff
            executor-args cancel-flag persist? branch-id graph-hash]}
    parsed release]
@@ -267,8 +267,9 @@
           ;; exhausted. Release the per-org slot, drop the orphan
           ;; pending row, and tell the client to retry (503 +
           ;; Retry-After) — NOT 429-reject, NOT an unbounded queue.
-          ;; run-future's finally never ran (the task never
-          ;; started), so this is the sole release.
+          ;; The rejected task never started nor reached a terminal
+          ;; state, so `release-on-done-task` never fires — this is
+          ;; the sole release.
           (release)
           (when row
             (try (sp/delete-entity storage :fn-execution (:id row))

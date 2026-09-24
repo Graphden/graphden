@@ -17,6 +17,7 @@
     [graphden.executor.test-setup :as setup]
     [graphden.lint.core :as lint]
     [graphden.lint.graph :as lg]
+    [graphden.packages.owned :as owned]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -86,7 +87,11 @@
       (is (= (into #{} (map :id) (:fns (types-api/cached-or-load-graph ctx)))
              (into #{} (map :id) (:fns (types-api/load-graph-entities-uncached storage))))))
     (testing "the platform's own fn-defs raise nothing (the corpus gate keeps them clean)"
-      (is (empty? (remove (fn [f] (some #{a b} (:fn-ids f))) (lg/lint-branch ctx #{})))))
+      ;; Scoped to findings made only of package-owned rows: the graph is
+      ;; shared across this namespace's deftests, so another test's probes
+      ;; may be live here.
+      (is (empty? (filter (fn [f] (every? owned/owned-fn-id? (:fn-ids f)))
+                          (lg/lint-branch ctx #{})))))
     (testing "the entry the Lint panel stores hides the finding"
       (let [[f] (findings-naming ctx a #{})
             stored {:rule "duplicate-definition" :fn-ids (mapv str (:fn-ids f))}

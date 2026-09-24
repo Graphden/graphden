@@ -39,7 +39,7 @@
   ;; ---------------------------------------------------------------------
 
   {:name :graph-fn-defs
-   :description "The whole stored graph (current branch/scope) as fn-def maps — the records read + records→EDN codec (inverse-of-parser library boundary)."
+   :description "The whole stored graph (current branch/scope) as fn-def maps — the records read + records→EDN codec (inverse-of-parser library boundary). A fn whose composition the viewer may not see (the view-impl seam — another org's shared fn) is left out: its internals are not the viewer's to export, and a bare signature is no re-loadable fn-def."
    :args {}
    :return-type [:list :keyword-map]
    :effects #{:db}}

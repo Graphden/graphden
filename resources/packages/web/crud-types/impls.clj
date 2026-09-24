@@ -219,7 +219,7 @@
    contract (see its docstring)."
   [parsed]
   (cr/record-effect! :db)
-  (types-api/apply-types-usages parsed ctx))
+  (types-api/apply-types-usages parsed ctx entities/apply-view-impl-filter))
 
 
 ;; === Type-row compound handlers ===

@@ -3,17 +3,24 @@
    tenancy addon installs (`crud.entities/view-impl-filter`,
    docs/TENANCY_SEAM.md): a viewer who may not see a fn's composition
    learns it neither from the call tree of a run (the fn's frame is a
-   leaf, nothing beneath it ships) nor from a view (no `uses` match
-   THROUGH it, no `:parent-ids` on its row).
+   leaf, nothing beneath it ships), nor from a view (no `uses` match
+   THROUGH it, no `:parent-ids` on its row), nor from the inspector,
+   value-form / provenance reads by binding id, usages or the
+   whole-graph export.
 
    `^:serial` — the seam is a process-global atom; a stub filter installed
    here would conceal fns from every suite running beside it."
   (:require
     [cheshire.core :as json]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.entities :as entities]
     [graphden.crud.fn-execution :as fn-exec]
     [graphden.crud.fn-execution.conceal :as conceal]
+    [graphden.crud.types-api :as types-api]
+    [graphden.crud.value-form :as value-form]
+    [graphden.packages.export :as export]
+    [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.golden-app :as ga]))
 
 
@@ -164,3 +171,61 @@
         (is (some? (row)) "still a member of a name view")
         (is (empty? (:parent-ids (row))) "its parents are concealed")
         (is (= "composed" (some-> (row) :role name)) "its role is its signature's")))))
+
+
+;; ---------------------------------------------------------------------------
+;; The rest of the surfaces that read a fn's composition
+;; ---------------------------------------------------------------------------
+
+(defn- body-of
+  [handler-name fn-name]
+  (:body (ga/exec-handler handler-name {:query-params {"fn-id" (str (ga/fn-id fn-name))}})))
+
+
+(deftest inspector-shows-a-hidden-fn-as-its-signature
+  (testing "control — captures (and the helper they are read inside), seals, parent chips"
+    (is (str/includes? (body-of :_partial-inspector-detail-handler :web-server) "gd-insp-captured"))
+    (is (str/includes? (body-of :_partial-inspector-detail-handler :health) "list closed in route"))
+    (is (str/includes? (body-of :_partial-inspector-overview-handler :web-server) "http-server")))
+  (with-filter* (hide-where #(#{"web-server" "health"} (:name %)))
+    (fn []
+      (is (not (str/includes? (body-of :_partial-inspector-detail-handler :web-server) "gd-insp-captured")))
+      (is (not (str/includes? (body-of :_partial-inspector-detail-handler :health) "list closed in route")))
+      (let [overview (body-of :_partial-inspector-overview-handler :web-server)]
+        (is (not (str/includes? overview "http-server")) "no parent chips")))))
+
+
+(deftest bound-values-of-a-hidden-fn-are-not-readable-by-id
+  (let [storage (:storage ga/*bootstrap*)
+        owner-id (ga/fn-id :health)
+        bnd (first (filter #(some? (:value %))
+                           (sp/query-entities storage :binding {:fn-id owner-id})))
+        site {:binding-id (:id bnd)}]
+    (is (some? bnd) "health binds a literal")
+    (testing "control"
+      (is (= (:value bnd) (value-form/current-value storage site)))
+      (is (some? (value-form/slot-type-provenance storage site))))
+    (with-filter* (hide-named "health")
+      (fn []
+        (is (nil? (value-form/current-value storage site)) "/api/value-form seeds nothing")
+        (is (nil? (value-form/slot-type-provenance storage site))
+            "the provenance / mismatch popovers show no chain")))))
+
+
+(deftest usages-do-not-list-a-hidden-user
+  (let [users #(set (map :fn-name (:usages (types-api/apply-types-usages
+                                             {:target-id (ga/fn-id :http-server)} (ctx)
+                                             entities/apply-view-impl-filter))))]
+    (is (contains? (users) "web-server") "control")
+    (with-filter* (hide-named "web-server")
+      #(is (not (contains? (users) "web-server"))))))
+
+
+(deftest whole-graph-export-leaves-a-hidden-fn-out
+  (let [storage (:storage ga/*bootstrap*)
+        names #(set (map :name (export/export-graph storage entities/apply-view-impl-filter)))]
+    (is (contains? (names) :web-server) "control")
+    (with-filter* (hide-named "web-server")
+      (fn []
+        (is (not (contains? (names) :web-server)) "not the viewer's to export")
+        (is (contains? (names) :http-server) "a fn with nothing concealed still exports")))))

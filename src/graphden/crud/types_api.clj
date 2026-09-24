@@ -756,19 +756,11 @@
   400)
 
 
-(defn apply-types-usages
-  "Stage 3 of types-usages — walk the graph for every reference to the
-   target fn row. Covers BOTH reference planes: the composition plane
-   (`composition-plane-usages` — children, arg refs, resolvers) and the
-   type plane (`type-plane-usages` — slots, overrides, FKs, constraint
-   branches). One walk serves `/api/types/usages` (the type-expand
-   footer) and `/api/fns/usages` (the inspector's Used-by section) —
-   kinds that don't apply to a given target simply come back empty.
-   Reached only after the graph's `types-usages` validation passes
-   (`{:target-id <uuid>}`)."
-  [parsed ctx]
+(defn- apply-types-usages*
+  "`apply-types-usages` over an already-concealed `graph`."
+  [parsed ctx graph]
   (let [target-id (:target-id parsed)
-        {:keys [fns slots fn-slots] :as graph} (cached-or-load-graph ctx)
+        {:keys [fns slots fn-slots]} graph
         fn-by-id (into {} (map (juxt :id identity)) fns)
         slot-by-id (into {} (map (juxt :id identity)) slots)
         slot-owner-by-id (into {} (map (juxt :slot-id :fn-id)) fn-slots)
@@ -791,6 +783,28 @@
      :count (count usages)
      :truncated? (> (count usages) usages-response-cap)
      :usages limited}))
+
+
+(defn apply-types-usages
+  "Stage 3 of types-usages — walk the graph for every reference to the
+   target fn row. Covers BOTH reference planes: the composition plane
+   (`composition-plane-usages` — children, arg refs, resolvers) and the
+   type plane (`type-plane-usages` — slots, overrides, FKs, constraint
+   branches). One walk serves `/api/types/usages` (the type-expand
+   footer) and `/api/fns/usages` (the inspector's Used-by section) —
+   kinds that don't apply to a given target simply come back empty.
+   Reached only after the graph's `types-usages` validation passes
+   (`{:target-id <uuid>}`).
+
+   `conceal` (default `identity`) is a `graph-dump -> graph-dump` pass —
+   the view-impl filter (`crud.entities/apply-view-impl-filter`) — run
+   over the graph BEFORE the walk, so a fn whose composition the viewer
+   may not see is never listed as using the target through its parents
+   or bindings (querying every candidate id would otherwise rebuild its
+   whole edge set)."
+  ([parsed ctx] (apply-types-usages parsed ctx identity))
+  ([parsed ctx conceal]
+   (apply-types-usages* parsed ctx (conceal (cached-or-load-graph ctx)))))
 
 
 (defn all-rich-types

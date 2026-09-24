@@ -266,52 +266,52 @@ The EDN-TEXT boundary is the one place those unspellable keywords break, so exac
 :PROPERTIES:
 :CUSTOM_ID: packages/external-deps
 :FILE: src/graphden/packages/export.clj
-:LINE: 876
+:LINE: 910
 :MINS: 5.1
 :END:
 
 Scoped export: a namespace SUBTREE becomes a publishable bundle — fns under the root are the package's content, and this analysis pass turns refs pointing OUT of the subtree into its declared ~:dependencies~ (what install must already have) plus the ~:package-dependencies~ those refs' ~@~-versioned namespaces map to. The bundle ASSEMBLY around it is graph composition — the ~:export-namespace~ fn-def in registry/registry/fns.edn. This is the unit the in-graph registry versions.
 
-- source :: [[file:../../../src/graphden/packages/export.clj::(defn external-deps][src/graphden/packages/export.clj:876]]
+- source :: [[file:../../../src/graphden/packages/export.clj::(defn external-deps][src/graphden/packages/export.clj:910]]
 - same file :: [[file:packages.org::#packages/records->fn-defs][records->fn-defs]], [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/strip-secret-paths][strip-secret-paths]]
 
 * 21. strip-secret-paths
 :PROPERTIES:
 :CUSTOM_ID: packages/strip-secret-paths
 :FILE: src/graphden/packages/export.clj
-:LINE: 732
+:LINE: 766
 :MINS: 2.0
 :END:
 
 The share-safety policy: vault paths are STRIPPED from bundles by default (the slot stays a free ~[:secret :text]~ arg) and the ~:secrets~ manifest lists what was affected — the publisher sees the warning, the installer gets a ~:needs-definition~ todo. A bundle is deliberately not a full copy of your secrets.
 
-- source :: [[file:../../../src/graphden/packages/export.clj::(defn strip-secret-paths][src/graphden/packages/export.clj:732]]
+- source :: [[file:../../../src/graphden/packages/export.clj::(defn strip-secret-paths][src/graphden/packages/export.clj:766]]
 - same file :: [[file:packages.org::#packages/records->fn-defs][records->fn-defs]], [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/external-deps][external-deps]]
 
 * 22. publish-package-apply
 :PROPERTIES:
 :CUSTOM_ID: packages/publish-package-apply
 :FILE: resources/packages/registry/registry/impls.clj
-:LINE: 140
+:LINE: 143
 :MINS: 2.1
 :END:
 
 Publish lands the bundle IN the graph: an immutable, content-hashed ~:package-version~ row (name + semver + fns + declared deps). Install is its mirror — ~materialize-package-fns~ syncs the pinned version's fns into a version-qualified ~@~-namespace and writes a ~:package-install~ pin; update/rollback rewrites refs between versions; fork copies copy-on-write with no pin.
 
-- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase publish-package-apply][resources/packages/registry/registry/impls.clj:140]]
+- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase publish-package-apply][resources/packages/registry/registry/impls.clj:143]]
 - same file :: [[file:packages.org::#packages/upsert-pin!][upsert-pin!]]
 
 * 23. upsert-pin!
 :PROPERTIES:
 :CUSTOM_ID: packages/upsert-pin!
 :FILE: resources/packages/registry/registry/impls.clj
-:LINE: 344
+:LINE: 347
 :MINS: 2.8
 :END:
 
 Where the marketplace's install COUNT comes from (docs/MARKETPLACE.md). A new pin is an install and bumps the global ~:package-stat~ row with an atomic ~INSERT … ON CONFLICT DO UPDATE~ over the pool — deliberately inside the pin write unit, like the invalidation an entity write owes, because a graph-side 'was it pinned?' probe is an effectful read a later ref would re-run AFTER the pin. Moving a pin (update / rollback) is not an install. Everything else the marketplace needs — listing normalisation, the cards' rating aggregate, the filters, the partials, the review upsert, the storefront bodies — is graph, four modules sharing the ~app.marketplace~ namespace: ~registry/marketplace{,-surface, -storefront,-moderation}/fns.edn~.
 
-- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defn- upsert-pin!][resources/packages/registry/registry/impls.clj:344]]
+- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defn- upsert-pin!][resources/packages/registry/registry/impls.clj:347]]
 - same file :: [[file:packages.org::#packages/publish-package-apply][publish-package-apply]]
 
 * 24. moderate-package-version!

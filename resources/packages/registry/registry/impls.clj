@@ -6,6 +6,7 @@
     [clojure.edn :as edn]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.crud.entities :as entities]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as exec-ctx]
@@ -36,10 +37,12 @@
 (defbase graph-fn-defs
   "The whole stored graph as fn-def maps — `export/export-graph`, the
    records read + records→EDN codec (inverse-of-parser library
-   boundary)."
+   boundary) — less the fns whose composition the viewer may not see
+   (the view-impl seam; another org's shared fn is not theirs to
+   export)."
   []
   (cr/record-effect! :db)
-  (export/export-graph (request/require-storage ctx)))
+  (export/export-graph (request/require-storage ctx) entities/apply-view-impl-filter))
 
 
 (defbase secret-path-args-fn

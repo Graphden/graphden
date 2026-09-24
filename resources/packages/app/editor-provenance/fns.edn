@@ -809,9 +809,13 @@
    :parent :rule-owner-of-id
    :args {:fn-id :_rtr-fn-id}}
 
+  ;; The rule owner and the resolved bindings the rule reads ARE the
+  ;; fn's composition: for a fn the viewer may not see the internals of
+  ;; (the view-impl seam) the popover collapses like a rule-less chain.
   {:name :_rtr-owner-some?
-   :parent :some?
-   :args {:value :_rtr-owner-info}}
+   :parent :and
+   :args {:values [{:parent :some? :args {:value :_rtr-owner-info}}
+                   {:parent :fn-impl-visible? :args {:fn-id :_rtr-fn-id}}]}}
 
   ;; Narrowed owner info — every consumer below sits inside the
   ;; `:_rtr-owner-some?` branch, so the assert never fires.
@@ -1121,6 +1125,17 @@
    :parent :nil?
    :args {:value :_insp-fn-id}}
 
+  ;; The view-impl seam (docs/TENANCY_SEAM.md): for a fn whose
+  ;; composition the viewer may not see (another org's shared fn, no
+  ;; `:view-impl` grant) the inspector shows its SIGNATURE only — free
+  ;; args, return type, effects, kind — and none of what it is built
+  ;; from: bound args, captures and the helper they are read inside,
+  ;; slot seals naming ancestors, primary parent, parent chips, the
+  ;; branch-local seed ancestor.
+  {:name :_insp-visible?
+   :parent :fn-impl-visible?
+   :args {:fn-id {:ref :_insp-fn-id :type :nullable-uuid}}}
+
   {:name :_insp-row
    :description "The selected fn's row — resolved only in the non-nil branch (`:if` short-circuits, so `:assert-some` never runs on a nil id)."
    :parent :get-entity
@@ -1138,8 +1153,11 @@
    :args {:coll :_insp-entry :key {:value :args} :default {:value {}}}}
 
   {:name :_insp-bound
-   :parent :get
-   :args {:coll :_insp-entry :key {:value :resolved-bindings} :default {:value {}}}}
+   :parent :if
+   :args {:test :_insp-visible?
+          :then {:parent :get
+                 :args {:coll :_insp-entry :key {:value :resolved-bindings} :default {:value {}}}}
+          :else {:value {}}}}
 
   {:name :_insp-arg-names
    :description "Sorted union of free + bound arg names — `(sort (keys (merge free bound)))`."
@@ -1289,8 +1307,11 @@
   ;; shows, so a reader on the Bindings tab is told what descendants may
   ;; do with a slot without opening the card.
   {:name :_insp-seals
-   :parent :_fn-slot-seals
-   :args {:fn-id {:ref :_insp-fn-id :type :nullable-uuid}}}
+   :parent :if
+   :args {:test :_insp-visible?
+          :then {:parent :_fn-slot-seals
+                 :args {:fn-id {:ref :_insp-fn-id :type :nullable-uuid}}}
+          :else {:value {}}}}
   {:name :_insp-r-seal-note
    :description "The row's seal line — `sealed in cut · optional` — nil when the slot has nothing decided on it."
    :parent :get
@@ -1353,7 +1374,10 @@
   {:name :_insp-captured-entries
    :parent :sort-by
    :args {:key-fn {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}
-          :coll {:parent :filter :args {:pred :_insp-entry-captured? :coll :_insp-entries}}}}
+          :coll {:parent :if
+                 :args {:test :_insp-visible?
+                        :then {:parent :filter :args {:pred :_insp-entry-captured? :coll :_insp-entries}}
+                        :else {:value []}}}}}
 
   {:name :_insp-cap-name
    :parent :name
@@ -1434,8 +1458,10 @@
                     {:value true} {:value "Type row"}]}}
 
   {:name :_insp-primary
-   :parent :get
-   :args {:coll :_insp-entry :key {:value :primary-parent} :default nil}}
+   :parent :if
+   :args {:test :_insp-visible?
+          :then {:parent :get :args {:coll :_insp-entry :key {:value :primary-parent} :default nil}}
+          :else nil}}
 
   {:name :_insp-primary-some?
    :parent :some?
@@ -1800,10 +1826,17 @@
   ;; Shares the `:_insp-fn-id` / `:_insp-row` / `:_insp-entry` prefix.
   ;; =====================================================================
 
+  {:name :_iov-parent-ids
+   :description "The parent chips' ids — `[]` for a fn whose composition the viewer may not see (its parents ARE its composition; the Provenance kind row still says it is composed)."
+   :parent :if
+   :args {:test :_insp-visible?
+          :then {:ref :_insp-parent-ids :type [:list :any]}
+          :else {:value []}}}
+
   {:name :_iov-has-parents?
    :parent :not
    :args {:value {:parent :empty?
-                  :args {:coll {:ref :_insp-parent-ids :type [:list :any]}}}}}
+                  :args {:coll {:ref :_iov-parent-ids :type [:list :any]}}}}}
 
   ;; --- first-NAMED-ancestor walk for an anonymous parent: the same
   ;;     depth-6 DFS the client ran, as a `:fix` worklist over
@@ -1907,7 +1940,7 @@
   {:name :_iov-parent-chips
    :parent :map
    :args {:func :_iov-parent-chip
-          :coll {:ref :_insp-parent-ids :type [:list :any]}}}
+          :coll {:ref :_iov-parent-ids :type [:list :any]}}}
 
   {:name :_iov-parents-row-shown
    :parent :hiccup
@@ -2083,7 +2116,11 @@
   {:name :_iov-bl-own?
    :parent :get :args {:coll :_iov-bl :key {:value :own} :default false}}
   {:name :_iov-bl-seed
-   :parent :get :args {:coll :_iov-bl :key {:value :seed} :default nil}}
+   :description "The ancestor the flag is inherited from — not named for a fn whose composition the viewer may not see."
+   :parent :if
+   :args {:test :_insp-visible?
+          :then {:parent :get :args {:coll :_iov-bl :key {:value :seed} :default nil}}
+          :else {:value "an ancestor"}}}
   {:name :_iov-bl-text
    :parent :cond
    :args {:clauses [{:parent :nil? :args {:value :_iov-bl}} {:value "merges across branches"}

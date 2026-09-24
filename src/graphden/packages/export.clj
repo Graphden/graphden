@@ -634,10 +634,44 @@
   (rows->records (read-graph storage) (ns-id->path-map storage)))
 
 
+(defn- without-concealed-fns
+  "`seen` (the view-impl-concealed dump of `raw`) minus every fn whose
+   composition the concealment actually stripped — blanked parent-ids or
+   dropped bindings. A whole-graph export is a RE-LOADABLE bundle, so a
+   signature-only fn-def must not ride in it (re-importing it would
+   overwrite the real fn with an empty one); a fn with nothing to strip
+   exports exactly as it is either way. Identity when nothing was hidden."
+  [raw seen]
+  (if (identical? raw seen)
+    raw
+    (let [kept-bindings (into #{} (map :id) (:bindings seen))
+          seen-parents (into {} (map (juxt :id :parent-ids)) (:fns seen))
+          stripped (into (into #{}
+                               (keep (fn [r]
+                                       (when (and (seq (:parent-ids r))
+                                                  (empty? (get seen-parents (:id r))))
+                                         (:id r))))
+                               (:fns raw))
+                         (comp (remove (comp kept-bindings :id)) (map :fn-id))
+                         (:bindings raw))]
+      (-> seen
+          (update :fns (fn [fs] (filterv #(not (contains? stripped (:id %))) fs)))
+          (update :fn-slots (fn [xs] (filterv #(not (contains? stripped (:fn-id %))) xs)))))))
+
+
 (defn export-graph
-  "Export the entire stored graph as a vector of fns.edn fn-def maps."
-  [storage]
-  (records->fn-defs (graph->records storage)))
+  "Export the entire stored graph as a vector of fns.edn fn-def maps.
+
+   `conceal` (default `identity`) is the view-impl filter
+   (`crud.entities/apply-view-impl-filter`); a fn whose composition it
+   hides is LEFT OUT of the bundle (`without-concealed-fns`) — its
+   internals are not the viewer's to export, and a bare signature is
+   not a re-loadable fn-def."
+  ([storage] (export-graph storage identity))
+  ([storage conceal]
+   (let [raw (read-graph storage)]
+     (records->fn-defs (rows->records (without-concealed-fns raw (conceal raw))
+                                      (ns-id->path-map storage))))))
 
 
 (defn subtree-fn-ids

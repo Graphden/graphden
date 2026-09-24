@@ -115,7 +115,17 @@ so a gap in one does not by itself cross tenants:
    theme / keymap is neither readable nor writable by anyone else). The
    anonymous storefront renders public + approved rows only and mutates
    nothing.
-9. **Resource isolation** — see below.
+9. **Impl concealment** — a tenant can run and extend another org's shared
+   fn (a public platform fn included) but may not see its internal
+   COMPOSITION without owning it or holding a `:view-impl` grant. The addon's
+   view-impl filter (`crud.entities/view-impl-filter`, the one seam) is
+   applied on every surface that reads composition: the graph dumps and MCP
+   reads (signature only), Explorer views (no `uses` match through it),
+   usages, the inspector and the return-type-rule popover, bound values and
+   provenance read by binding id, the whole-graph export (the fn is left
+   out), and execution traces (its frame is a leaf, nothing beneath it
+   ships). The executor still runs the full graph server-side.
+10. **Resource isolation** — see below.
 
 ## Resource isolation: shared vs dedicated
 

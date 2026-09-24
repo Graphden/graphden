@@ -29,6 +29,7 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.crud.entities.list :as entity-list]
     [graphden.crud.type-check :as tc]
     [graphden.executor.interface :as executor]
     [graphden.executor.registry.core :as registry]
@@ -379,6 +380,18 @@
     (compute-slot-type-for-row (sp/read-entity storage :fn fn-id))))
 
 
+(defn- composition-visible?
+  "May the current viewer see the internal composition of fn `fn-id`
+   (the view-impl seam, docs/TENANCY_SEAM.md)? A binding's value, its
+   override and the inheritance chain it resolves through ARE that
+   composition. True with no filter installed (no read); an unreadable
+   or nil fn fails closed under a filter."
+  [storage fn-id]
+  (or (nil? @entity-list/view-impl-filter)
+      (boolean (some-> (when fn-id (sp/read-entity storage :fn fn-id))
+                       entity-list/impl-visible?))))
+
+
 (defn slot-type-provenance
   "4-tier resolution chain + inheritance chain for the type at a
    `(fn-id, slot-id, binding-id)` edit site. Mirrors the editor's
@@ -396,7 +409,12 @@
     (let [bnd      (when binding-id (sp/read-entity storage :binding binding-id))
           fn-id    (or fn-id (:fn-id bnd))
           slot-id  (or slot-id (:slot-id bnd))]
-      (when slot-id
+      ;; The chain names the fn's ancestors and its override — nothing
+      ;; to show for a fn (or a binding of one) the viewer may not see
+      ;; the composition of.
+      (when (and slot-id
+                 (composition-visible? storage fn-id)
+                 (or (nil? bnd) (composition-visible? storage (:fn-id bnd))))
         (let [slot (sp/read-entity storage :slot slot-id)]
           (when (:type-fn-id slot)
             ;; One inheritance walk feeds BOTH the slot-declarer lookup
@@ -596,12 +614,15 @@
 (defn current-value
   "The literal currently bound at this site — from the list-item row
    when editing a sequence element, else from the binding row. nil
-   for an unbound free-arg."
+   for an unbound free-arg, and nil when the binding belongs to a fn
+   whose composition the viewer may not see (`composition-visible?` —
+   binding / item ids are derivable, so the id is no barrier)."
   [storage {:keys [binding-id item-id]}]
-  (cond
-    item-id    (:value (sp/read-entity storage :binding-list-item item-id))
-    binding-id (:value (sp/read-entity storage :binding binding-id))
-    :else      nil))
+  (let [item (when item-id (sp/read-entity storage :binding-list-item item-id))
+        bnd (some->> (or (:binding-id item) (when-not item-id binding-id))
+                     (sp/read-entity storage :binding))]
+    (when (composition-visible? storage (:fn-id bnd))
+      (if item-id (:value item) (:value bnd)))))
 
 
 ;; =============================================================================

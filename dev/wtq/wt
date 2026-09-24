@@ -91,6 +91,8 @@ STATE_LOCK="$WTQ_DIR/state.lock" # short-lived lock over queue/, soon/, bisect/,
 TRAIN_FILE="$WTQ_DIR/train"      # the train currently being gated (id, members, log)
 LINT_LOCK="$WTQ_DIR/lint.lock"   # one pre-queue lint at a time (see cmd_merge)
 LINT_HOLDER="$WTQ_DIR/lint.holder"
+E2E_RUNS_DIR="$WTQ_DIR/e2e-runs" # the e2e output of the last green gates (rolling baseline)
+E2E_BASELINE_LOCAL="$WTQ_DIR/e2e-baseline.tsv"
 mkdir -p "$LOG_DIR" "$TASKS_DIR" "$RESULT_DIR" "$QUEUE_DIR" "$SOON_DIR" "$BISECT_DIR"
 
 TARGET="${WTQ_TARGET:-develop}"
@@ -1303,7 +1305,7 @@ gate_suites() {
     #   reds (you can't land what didn't pass); the banner then says to free
     #   RAM and re-run on a quiet host. Real races reproduce on a healthy host
     #   (DEGRADED=0), where strict stays on.
-    ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" WTQ_FLAKE_STRICT=1 bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
+    ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" WTQ_FLAKE_STRICT=1 E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
   fi
 
   # Visual goes here — after e2e, before integration. It is ~2.5 min against
@@ -1793,6 +1795,7 @@ train_run() {
 
   # 4. Verdicts.
   local why; why="$(grep -E '^(FAIL|ABORT)' "$gate_out" | tail -n1 || true)"; why="${why:-gate red}"
+  [ "$grc" = 0 ] && record_e2e_baseline "$gate_out" "$ts"
   rm -f "$gate_out"
   echo; echo ">>> verdicts"
   local landed; landed="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
@@ -1850,6 +1853,36 @@ train_run() {
   echo "    first half : $(names_in_seg "${root}0" | tr '\n' ' ')"
   echo "    second half: $(names_in_seg "${root}1" | tr '\n' ' ')"
   return 0
+}
+
+# --- the rolling e2e baseline --------------------------------------------------
+# run-edit-tests.sh judges each file's duration against ITS OWN baseline
+# (tools/browser-test/e2e-baseline.tsv, refreshed by hand). A new or split file
+# has none until someone refreshes it, and meanwhile is judged against a flat
+# limit. So every GREEN gate that ran e2e keeps its e2e output here (newest
+# $E2E_RUNS_KEEP), and the per-file medians over them go to
+# .git/wtq/e2e-baseline.tsv, which the runner reads OVER the tracked file. The
+# gate never commits: the tracked file stays the reviewed default, this is the
+# machine's own fresher view. A DEGRADED run (the host starved the stack) is
+# not kept — its durations would raise every limit.
+E2E_RUNS_KEEP="$(int_or "${WTQ_E2E_RUNS_KEEP:-}" 9)"
+record_e2e_baseline() {   # <gate output> <train ts>
+  local out="$1" ts="$2" script="$MAIN_WT/tools/browser-test/e2e-baseline.js"
+  grep -q '^─── edit-.*\.test\.js ───' "$out" 2>/dev/null || return 0
+  if grep -q 'ENVIRONMENT DEGRADED' "$out"; then
+    echo "(e2e baseline: this run was DEGRADED — not recorded)"; return 0
+  fi
+  [ -f "$script" ] || return 0
+  mkdir -p "$E2E_RUNS_DIR"
+  cp "$out" "$E2E_RUNS_DIR/$ts.log"
+  # shellcheck disable=SC2012  # names are our own <ts>.log, sortable
+  ls -1t "$E2E_RUNS_DIR"/*.log | tail -n +"$((E2E_RUNS_KEEP + 1))" | xargs -r rm -f
+  if node "$script" "$E2E_RUNS_DIR"/*.log > "$E2E_BASELINE_LOCAL.tmp" 2>/dev/null; then
+    mv -f "$E2E_BASELINE_LOCAL.tmp" "$E2E_BASELINE_LOCAL"
+    echo "(e2e baseline: medians over $(find "$E2E_RUNS_DIR" -name '*.log' | wc -l) green run(s) -> $E2E_BASELINE_LOCAL)"
+  else
+    rm -f "$E2E_BASELINE_LOCAL.tmp"
+  fi
 }
 
 # --- the conductor -----------------------------------------------------------

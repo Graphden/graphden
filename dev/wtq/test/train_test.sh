@@ -268,6 +268,32 @@ git -C "$WTQ_ROOT/st" stash -q
 check "a stash entry is flagged" list_has 'stash is SHARED'
 check "naming the branch it came from" list_has 'stash@\{0\}: WIP on feature/st'
 
+echo "== a green gate that ran e2e feeds the rolling per-file baseline"
+new_world e2e-baseline
+mkdir -p "$REPO/tools/browser-test"
+cp "$SRC/../../tools/browser-test/e2e-baseline.js" "$REPO/tools/browser-test/"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm "baseline script"
+cat > "$WTQ_GATE_STUB" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >> "$STUB_LOG"
+secs="$(cat "$E2E_SECS")"
+printf '─── edit-a.test.js ───\n  [ %ss  executor=ok]\n' "$secs"
+[ -e DEGRADED ] && echo "  ⚠ ENVIRONMENT DEGRADED: 3 file(s) ran past 2.5x their baseline"
+exit 0
+STUB
+export E2E_SECS="$T/secs"
+for i in 1 2 3; do
+  echo $((i * 10)) > "$E2E_SECS"
+  feature "e$i" "e$i.txt" "e$i"; merge_bg "e$i"; finish "e$i"
+done
+check "three green runs recorded" eq "$(find "$Q/e2e-runs" -name '*.log' | wc -l)" 3
+check "the local baseline holds their median" grep -qP '^20\tedit-a\.test\.js$' "$Q/e2e-baseline.tsv"
+echo 500 > "$E2E_SECS"
+feature e4 DEGRADED e4; merge_bg e4; finish e4
+check "a DEGRADED green run is not recorded" eq "$(find "$Q/e2e-runs" -name '*.log' | wc -l)" 3
+check "and does not move the baseline" grep -qP '^20\tedit-a\.test\.js$' "$Q/e2e-baseline.tsv"
+unset E2E_SECS
+
 echo "== conflict with develop itself -> CONFLICT"
 new_world conflict
 feature x f.txt x

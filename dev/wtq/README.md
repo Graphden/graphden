@@ -151,6 +151,12 @@ Details that are deliberate:
   fleet) it writes `.git/wtq/gate-heavy` (phase + pid; stale once the pid is
   gone); `bb wt test <kaocha args>`, `bb wt up` and the pre-queue lint wait
   it out, and also wait for `WTQ_AGENT_MEM_MIN_MB` (default 3000).
+- **Rolling e2e baseline.** A GREEN gate that ran e2e (and was not
+  DEGRADED) keeps its e2e output in `.git/wtq/e2e-runs/` (newest 9,
+  `WTQ_E2E_RUNS_KEEP`) and writes the per-file medians to
+  `.git/wtq/e2e-baseline.tsv`; the gate's e2e reads it over the tracked
+  `tools/browser-test/e2e-baseline.tsv`, so a new or split file gets its own
+  slowness limit without a hand refresh. The gate commits nothing.
 - **Tested:** `dev/wtq/test/train_test.sh` (`bb wtq-test`, in `bb lint`/`bb ci`)
   drives real `wt merge` waiters in throwaway repos with only the heavy suites
   stubbed (`WTQ_GATE_STUB`, test-only).

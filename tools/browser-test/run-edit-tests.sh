@@ -351,14 +351,19 @@ host_starved() {
 }
 
 # Per-file duration baseline for the DEGRADED verdict (see the header).
+# E2E_BASELINE_LOCAL (the landing gate passes .git/wtq/e2e-baseline.tsv, the
+# rolling medians of its last green runs) is read AFTER the tracked file and
+# wins for the files it knows — so a new or split file gets its own limit
+# without anyone refreshing the tracked one.
 declare -A BASELINE
 BASELINE_FILE="${E2E_BASELINE:-e2e-baseline.tsv}"
-if [ -r "$BASELINE_FILE" ]; then
+for b_src in "$BASELINE_FILE" "${E2E_BASELINE_LOCAL:-}"; do
+  [ -n "$b_src" ] && [ -r "$b_src" ] || continue
   while IFS=$'\t' read -r b_secs b_file; do
     case "$b_secs" in ''|'#'*) continue ;; esac
     BASELINE["$b_file"]="$b_secs"
-  done < "$BASELINE_FILE"
-fi
+  done < "$b_src"
+done
 SLOW_FACTOR="${SLOW_FACTOR:-2.5}"
 SLOW_MIN_EXTRA="${SLOW_MIN_EXTRA:-30}"
 # Seconds past which a file's attempt reads as STARVED rather than slow-ish.

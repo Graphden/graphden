@@ -600,10 +600,35 @@ So the client (`graphden.clients.vault`) is where isolation lives:
   self-host runs entirely on the platform tier, so its paths are
   unchanged.
 
+- **Reading at run time** — a tenant's bound secret is read inside
+  the tenant's own RESTRICTED execution: the binding's resolver is
+  `:vault-get`, which the executor runs at arg-resolution time. The raw
+  vault base-fns are operator-only in a restricted execution
+  (`operator-only!` in `web/vault/impls.clj`) — `:vault-get` alone
+  passes when a tenant org is in scope, because the client then confines
+  it to that org's prefix (another org's path → 403). A restricted
+  execution on the platform tier stays refused. The read still records
+  `:network`, so it needs a plan whose effect set carries it
+  ([PLANS.md](PLANS.md)) — the same plans that have a sink (`:http-get`,
+  `:sql-exec`) for a secret to go to. `:vault-put` / `:vault-delete` /
+  the metadata ops stay operator-only.
+
 Secrets a tenant created BEFORE the prefix (stored at a bare path)
-are refused to that tenant from then on; an operator moves them under
-`org/<org-id>/` (vault copy + binding `:value` update) or the tenant
-re-creates them.
+are moved at boot by an idempotent migration
+(`graphden.crud.secret-org-prefix/migrate!`, init-key
+`:vault/tenant-path-migration`, run on the raw pool before the compiled
+registry is built; it logs `{:rows :paths :conflicts :failed}`). For
+every `:vault-get` resolver binding row — identity and per-branch
+version rows — whose org is a tenant and whose path is bare, it copies
+every live KV v2 version plus `custom_metadata` to
+`org/<org-id>/<path>`, stamping `graphden-migrated-from` on the target
+LAST; deletes the bare path once every row reading it is such a tenant
+row with a marked copy (a platform binding on the same path keeps it);
+then re-points the rows. A crash anywhere is finished by the next boot:
+a marked target skips the copy, an unmarked target nobody references is
+a half-finished copy and is redone, and an unmarked target another
+binding already reads is logged as a conflict and left for an operator.
+Platform-tier bindings are never touched.
 
 The slot's type reaches the registry through
 `crud.value-form/resolve-slot-effective-type`, whose tier 3 is

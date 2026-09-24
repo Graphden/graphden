@@ -23,54 +23,11 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.clients.vault :as vault]
-    [org.httpkit.client :as httpkit])
-  (:import
-    (org.testcontainers.containers
-      GenericContainer)
-    (org.testcontainers.containers.wait.strategy
-      HttpWaitStrategy
-      Wait)))
+    [graphden.test-infra.openbao :as openbao]
+    [org.httpkit.client :as httpkit]))
 
 
-(def ^:private ^:dynamic *vault* nil)
-(def ^:private ^:dynamic *client* nil)
-
-
-(defn- start-openbao!
-  "Spin up an OpenBao dev-mode container. Dev mode: in-memory KV v2,
-   single root token (`root`), auto-unsealed at startup. The wait
-   strategy hits `/v1/sys/health`, which OpenBao replies 200 to once
-   the listener binds AND the dev-root-token is installed."
-  []
-  (doto (GenericContainer. "quay.io/openbao/openbao:latest")
-    (GenericContainer/.withCommand
-      (into-array String ["server" "-dev"
-                          "-dev-root-token-id=root"
-                          "-dev-listen-address=0.0.0.0:8200"]))
-    (GenericContainer/.withExposedPorts
-      (into-array Integer [(Integer/valueOf 8200)]))
-    (GenericContainer/.waitingFor
-      (-> (Wait/forHttp "/v1/sys/health")
-          (HttpWaitStrategy/.forStatusCode 200)))
-    (GenericContainer/.start)))
-
-
-(defn- container-fixture
-  [f]
-  (let [container (start-openbao!)
-        host (GenericContainer/.getHost container)
-        port (GenericContainer/.getMappedPort container (Integer/valueOf 8200))
-        client {:address (str "http://" host ":" port)
-                :token "root"}]
-    (try
-      (binding [*vault* container
-                *client* client]
-        (f))
-      (finally
-        (GenericContainer/.stop container)))))
-
-
-(use-fixtures :once container-fixture)
+(use-fixtures :once openbao/container-fixture)
 
 
 ;; Each test scopes its paths under a fresh `(random-uuid)` prefix so
@@ -93,16 +50,19 @@
 (deftest put-get-roundtrip-test
   (let [p (scoped-path "rt")]
     (testing "put-secret returns version 1 for a fresh path"
-      (is (= 1 (vault/put-secret *client* p "first-value"))))
+      (is (= 1 (vault/put-secret openbao/*client* p "first-value"))))
 
     (testing "get-secret returns the value verbatim"
-      (is (= "first-value" (vault/get-secret *client* p))))
+      (is (= "first-value" (vault/get-secret openbao/*client* p))))
 
     (testing "put again at the same path returns version 2"
-      (is (= 2 (vault/put-secret *client* p "second-value"))))
+      (is (= 2 (vault/put-secret openbao/*client* p "second-value"))))
 
     (testing "get-secret returns the latest version"
-      (is (= "second-value" (vault/get-secret *client* p))))))
+      (is (= "second-value" (vault/get-secret openbao/*client* p))))
+
+    (testing "get-secret with a version reads that version"
+      (is (= "first-value" (vault/get-secret openbao/*client* p 1))))))
 
 
 ;; ============================================================================
@@ -111,15 +71,15 @@
 
 (deftest delete-secret-test
   (let [p (scoped-path "del")]
-    (vault/put-secret *client* p "doomed")
-    (is (= "doomed" (vault/get-secret *client* p)))
+    (vault/put-secret openbao/*client* p "doomed")
+    (is (= "doomed" (vault/get-secret openbao/*client* p)))
 
     (testing "delete-secret returns nil (204 No Content)"
-      (is (nil? (vault/delete-secret *client* p))))
+      (is (nil? (vault/delete-secret openbao/*client* p))))
 
     (testing "subsequent get-secret raises :vault/lookup-failed with 404"
       (try
-        (vault/get-secret *client* p)
+        (vault/get-secret openbao/*client* p)
         (is false "expected vault/lookup-failed")
         (catch clojure.lang.ExceptionInfo e
           (let [d (ex-data e)]
@@ -127,7 +87,7 @@
             (is (= 404 (:status d)))))))
 
     (testing "deleting an already-deleted path is idempotent"
-      (is (nil? (vault/delete-secret *client* p))))))
+      (is (nil? (vault/delete-secret openbao/*client* p))))))
 
 
 (deftest get-secret-missing-value-does-not-leak-test
@@ -154,12 +114,12 @@
 
 (deftest metadata-roundtrip-test
   (let [p (scoped-path "md")]
-    (vault/put-secret *client* p "v")
-    (vault/put-metadata *client* p {:description "hello"
+    (vault/put-secret openbao/*client* p "v")
+    (vault/put-metadata openbao/*client* p {:description "hello"
                                     :owner "alice"})
 
     (testing "get-metadata returns custom_metadata plus version info"
-      (let [m (vault/get-metadata *client* p)]
+      (let [m (vault/get-metadata openbao/*client* p)]
         (is (= 1 (:current_version m)))
         (is (string? (:created_time m)))
         (is (= {:description "hello" :owner "alice"} (:custom_metadata m)))))))
@@ -172,7 +132,7 @@
 (deftest missing-path-test
   (testing "get-secret on a missing path raises :vault/lookup-failed with 404"
     (try
-      (vault/get-secret *client* (scoped-path "missing"))
+      (vault/get-secret openbao/*client* (scoped-path "missing"))
       (is false "expected vault/lookup-failed")
       (catch clojure.lang.ExceptionInfo e
         (let [d (ex-data e)]
@@ -182,7 +142,7 @@
 
 (deftest bad-token-test
   (testing "bad token raises :vault/lookup-failed with 403"
-    (let [bad-client (assoc *client* :token "wrong-token")]
+    (let [bad-client (assoc openbao/*client* :token "wrong-token")]
       (try
         (vault/get-secret bad-client (scoped-path "bad-tok"))
         (is false "expected vault/lookup-failed")

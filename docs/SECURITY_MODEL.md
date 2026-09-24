@@ -136,6 +136,11 @@ a secret only through the `:vault-get` base-fn, whose result is typed
 the vault client confines every tenant-context op to the org's own
 `org/<org-id>/` prefix and refuses paths that could leave the mount
 ([SECRETS.md § Per-org vault paths](SECRETS.md#per-org-vault-paths)).
+In a tenant's restricted execution `:vault-get` — the resolver a secret
+binding reads through — is the one vault base-fn allowed, and only with
+a tenant org in scope (so the client's prefix check applies); the raw
+write / delete / metadata ops stay operator-only. Secrets stored at a
+bare path before the prefix are moved under it by a boot migration.
 See [SECRETS.md](SECRETS.md).
 
 ## API-token scopes (least privilege for MCP / CLI)

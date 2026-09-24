@@ -203,27 +203,30 @@
 
 (defn get-secret
   "Read `secret/data/<path>` and return the inner `data.data.value`
-   string. Raises if missing or shape doesn't match the single-value
-   convention."
-  [{:keys [address token] :as client} path]
-  (let [path (checked-path path "get-secret")]
-    (if-let [f (impl :get-secret)]
-      (f client path)
-      (let [resp @(http/get (vault-url address "data" path) (request-opts token))
-            _ (check-status! resp #{200} path "GET data")
-            parsed (json/parse-string (:body resp) true)
-            value (get-in parsed [:data :data :value])]
-        (when-not (string? value)
-          ;; Do NOT put `parsed` in ex-data — for a KV v2 read it embeds the
-          ;; secret material itself, and this ex-data is persisted verbatim into
-          ;; a fn-execution's API-readable `:error-data` (redaction only fires
-          ;; for `:secret`-typed RETURNS, so a fn that merely reads a secret
-          ;; would leak it). The path + a class hint are enough to debug.
-          (throw (ex-info (str "Vault secret at " path
-                               " is missing `data.value` (expected a string)")
-                          {:type :vault/lookup-failed :path path
-                           :value-class (some-> value class .getName)})))
-        value))))
+   string — the latest version, or KV v2 `version` when given. Raises
+   if missing or shape doesn't match the single-value convention."
+  ([client path] (get-secret client path nil))
+  ([{:keys [address token] :as client} path version]
+   (let [path (checked-path path "get-secret")]
+     (if-let [f (impl :get-secret)]
+       (if version (f client path version) (f client path))
+       (let [resp @(http/get (vault-url address "data" path)
+                             (cond-> (request-opts token)
+                               version (assoc :query-params {"version" (str version)})))
+             _ (check-status! resp #{200} path "GET data")
+             parsed (json/parse-string (:body resp) true)
+             value (get-in parsed [:data :data :value])]
+         (when-not (string? value)
+           ;; Do NOT put `parsed` in ex-data — for a KV v2 read it embeds the
+           ;; secret material itself, and this ex-data is persisted verbatim into
+           ;; a fn-execution's API-readable `:error-data` (redaction only fires
+           ;; for `:secret`-typed RETURNS, so a fn that merely reads a secret
+           ;; would leak it). The path + a class hint are enough to debug.
+           (throw (ex-info (str "Vault secret at " path
+                                " is missing `data.value` (expected a string)")
+                           {:type :vault/lookup-failed :path path
+                            :value-class (some-> value class .getName)})))
+         value)))))
 
 
 (defn put-secret

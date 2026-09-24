@@ -85,6 +85,14 @@
  {:address #or [#env VAULT_ADDR ""]
   :token #or [#env VAULT_TOKEN ""]}
 
+ ;; Tenant secrets stored before the per-org vault prefix move under
+ ;; org/<org-id>/ — raw pool (every org), after package sync, before the
+ ;; compiled registry captures the paths. docs/SECRETS.md § Per-org vault paths.
+ :vault/tenant-path-migration
+ {:storage #ig/ref :db/postgres
+  :vault-client #ig/ref :vault/client
+  :_fn-entities #ig/ref :exec/fn-entities}
+
  ;; Authentication seam (docs/TENANCY_SEAM.md § Auth seam). Default single-token
  ;; provider; the tenancy addon overrides this key with session/JWT.
  :auth/provider
@@ -134,7 +142,8 @@
  ;; traverse them.
  :exec/compiled-registry
  {:context #ig/ref :exec/context
-  :_fn-entities #ig/ref :exec/fn-entities}
+  :_fn-entities #ig/ref :exec/fn-entities
+  :_tenant-secret-paths #ig/ref :vault/tenant-path-migration}
 
  ;; Per-branch ExecutionContext registry + Ring dispatcher. Seeded
  ;; with the default branch (main) right after the compiled registry

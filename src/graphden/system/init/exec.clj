@@ -10,6 +10,7 @@
     [graphden.auth.provider :as auth]
     [graphden.clients.vault :as vault]
     [graphden.crud.fn-execution.lookup :as fn-lookup]
+    [graphden.crud.secret-org-prefix :as secret-org-prefix]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
     [graphden.fleet.command :as fleet-command]
@@ -59,6 +60,25 @@
 
 (defmethod ig/halt-key! :vault/client [_ _]
   (reset! vault/active-client nil))
+
+
+;; Boot migration: tenant secrets stored before the per-org vault prefix
+;; move under `org/<org-id>/` (docs/SECRETS.md § Per-org vault paths).
+;; Runs on the RAW pool (every org, every branch — the platform tier at
+;; boot is unrestricted) after package sync and BEFORE the compiled
+;; registry captures binding paths. Idempotent; a failure is loud but
+;; non-fatal — the affected secrets stay unreadable to their tenant
+;; until the next boot retries.
+(defmethod ig/init-key :vault/tenant-path-migration
+  [_ {:keys [storage vault-client]}]
+  (when vault-client
+    (try
+      (let [result (secret-org-prefix/migrate! storage vault-client)]
+        (log/info "Tenant secret org-prefix migration" result)
+        result)
+      (catch Exception e
+        (log/error e "Tenant secret org-prefix migration failed — retried next boot")
+        nil))))
 
 
 ;; =============================================================================

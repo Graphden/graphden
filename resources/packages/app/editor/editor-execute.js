@@ -451,9 +451,9 @@ async function gdMountRunPane(fnId) {
     e.preventDefault();
     runBtn.click();
   });
-  // The outgoing pane may hold CodeMirror views (code-typed args) — they
-  // keep document observers alive unless destroyed before removal.
-  window.gdCode?.destroyWithin?.(host);
+  // The outgoing pane's CodeMirror views (code-typed args) are destroyed by
+  // the inspector before it replaces the tab body (editor-inspector.js
+  // renderInspTab) — by the time this runs, `host` is a fresh, empty node.
   host.textContent = '';
   host.appendChild(el);
   argFormHosts = [];

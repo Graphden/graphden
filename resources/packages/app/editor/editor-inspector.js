@@ -67,6 +67,9 @@
     // lexical global directly rather than `window.lookups` (which is undefined).
     const lk = (typeof lookups !== 'undefined') ? lookups : null;
     const fn = (fnId && lk?.fnMap) ? lk.fnMap.get(fnId) : null;
+    // Every path below replaces the whole column — tear down the outgoing
+    // tab body's CodeMirror views (the Run pane's code-typed args) first.
+    window.gdCode?.destroyWithin?.(el);
     if (!fn) { el.innerHTML = INSP_EMPTY; document.body.classList.remove('gd-insp-open'); return; }
 
     // Namespace = the qualified name minus the fn's own last segment.
@@ -219,6 +222,10 @@
   function renderInspTab(fnId, fn) {
     const body = document.getElementById('gd-insp-tabbody');
     if (!body) return;
+    // Each branch below replaces the body through innerHTML: the outgoing
+    // Run pane's CodeMirror views hold document observers until destroyed,
+    // and once the body is swapped nothing can reach them any more.
+    window.gdCode?.destroyWithin?.(body);
     if (inspTab === 'overview') {
       body.innerHTML = '<div id="gd-insp-overview" class="gd-insp-overview-host">'
         + '<div class="gd-insp-runs-loading">Loading overview…</div></div>';

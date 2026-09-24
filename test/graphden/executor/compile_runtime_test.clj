@@ -102,7 +102,9 @@
         (is (= [:list :int] (:OnC (cr/org-alias-snapshot "public" "org2" :branch-c)))))
       (testing "main's view does not — it never declared it"
         (is (nil? (:OnC (cr/org-alias-snapshot "public" "org2" :main)))))
-      (testing "without a branch, a type some branch declares resolves"
+      (testing "a branch not yet compiled falls back to every branch's declarations"
+        (is (= [:list :int] (:OnC (cr/org-alias-snapshot "public" "org2" :not-compiled)))))
+      (testing "without a branch (the request-wide fallback) the same merged view"
         (is (= [:list :int] (:OnC (cr/org-alias-snapshot "public" "org2"))))))))
 
 
@@ -163,6 +165,32 @@
       (tc/with-org tc/public-org
                    (typecheck/with-org-alias-view*
                      (fn [] (is (not= [:list :int] (types/resolve-alias :Foo)))))))))
+
+
+(deftest a-tenant-read-sees-its-own-branch-aliases-once-the-branch-is-known
+  ;; The tenancy addon wraps a tenant READ in the 1-arity view before the
+  ;; branch is resolved — every branch's aliases merged, so a type declared
+  ;; only on branch C resolved on main's value-form / /api/types reads. The
+  ;; branch router narrows it to the resolved branch.
+  (binding [cr/*per-org-aliases-override* (atom {:branch-c {"A" {:OnC [:list :int]}}
+                                                 :main {"A" {:OnMain [:list :int]}}})
+            types/*type-aliases-override* (atom {})]
+    (tc/with-org "A"
+                 (typecheck/with-org-alias-view*
+                   (fn []
+                     (testing "before the branch is known: every branch's aliases"
+                       (is (= [:list :int] (types/resolve-alias :OnC))))
+                     (testing "on main: main's aliases, not branch C's"
+                       (typecheck/call-with-branch-alias-view
+                         {:branch-id :main}
+                         (fn []
+                           (is (= [:list :int] (types/resolve-alias :OnMain)))
+                           (is (= :OnC (types/resolve-alias :OnC)))))))))
+    (testing "outside a request-wide view the call is a pass-through"
+      (tc/with-org "A"
+                   (typecheck/call-with-branch-alias-view
+                     {:branch-id :main}
+                     (fn [] (is (= :OnMain (types/resolve-alias :OnMain)))))))))
 
 
 (use-fixtures :each exec/with-clean-registry)

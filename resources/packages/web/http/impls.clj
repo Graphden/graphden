@@ -254,6 +254,15 @@
         ;; a request that arrives with a trace header is persisted as an
         ;; execution of THAT fn, linked to the caller (fn-execution.trace).
         handler-fn-id (:graphden.executor/fn-id (meta handler))
+        ;; http-kit serves each request on ITS OWN worker thread, which
+        ;; inherits none of the starting execution's dynamic bindings — a
+        ;; tenant service's requests would run with NO org (the platform
+        ;; tier: an unconfined vault client) and NO effect gate. Capture the
+        ;; conveyed bindings (the effect gate + org context,
+        ;; `cr/register-conveyed-var!`) HERE, on the starting thread, and
+        ;; re-establish them per request — exactly like `:future`'s body. A
+        ;; platform server captures the unrestricted defaults, as before.
+        conveyed (cr/capture-conveyed-bindings)
         stopper
         (http-kit/run-server
           (fn [req]
@@ -263,19 +272,20 @@
             ;; build time — a ConcurrentModificationException under load (eviction
             ;; racing a concurrent put) plus a cross-request memo leak. See
             ;; compile-eager/*request-call-cache*.
-            (cr/with-fresh-call-cache
-              (fn []
-                (binding [epoch/*request-bump-log* (atom [])]
-                  ;; Boundary coercion, once, on the way OUT: header keys
-                  ;; travel the graph keyword-keyed (a literal `:headers`
-                  ;; map keywordizes on the JSONB round-trip) and http-kit's
-                  ;; writer casts each key to String. Any response fn-def is
-                  ;; a valid handler as it stands — a `text-ok-response`
-                  ;; child needs no wrap to be served (lesson 38);
-                  ;; `:stringify-response-headers` in a wrap chain stays a
-                  ;; harmless no-op.
-                  (stringify-headers
-                    (trace/run-traced! ctx handler-fn-id req #(handler req)))))))
+            (with-bindings conveyed
+              (cr/with-fresh-call-cache
+                (fn []
+                  (binding [epoch/*request-bump-log* (atom [])]
+                    ;; Boundary coercion, once, on the way OUT: header keys
+                    ;; travel the graph keyword-keyed (a literal `:headers`
+                    ;; map keywordizes on the JSONB round-trip) and http-kit's
+                    ;; writer casts each key to String. Any response fn-def is
+                    ;; a valid handler as it stands — a `text-ok-response`
+                    ;; child needs no wrap to be served (lesson 38);
+                    ;; `:stringify-response-headers` in a wrap chain stays a
+                    ;; harmless no-op.
+                    (stringify-headers
+                      (trace/run-traced! ctx handler-fn-id req #(handler req))))))))
           (assoc (http-server-tuning) :port port))]
     ;; `:alive?` — the liveness probe the reconciler runs each tick:
     ;; http-kit's own status of the listener object (`:running` while it

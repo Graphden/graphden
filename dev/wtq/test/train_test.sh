@@ -247,6 +247,7 @@ exec REAL_PGREP "$@"
 PGREP
 sed -i "s|REAL_PGREP|$(command -v pgrep)|" "$T/bin/pgrep"
 chmod +x "$T/bin/pgrep"
+sed -i '2i sleep 2   # long enough for the sampler to write a row' "$WTQ_GATE_STUB"
 feature sm sm.txt sm
 saved_path="$PATH"; export PATH="$T/bin:$PATH"
 merge_bg sm
@@ -255,6 +256,7 @@ export PATH="$saved_path"
 check "sm GREEN" eq "$(rc_of sm)" 0
 csv="$(ls "$Q"/logs/_train-*.resources.csv)"
 check "every row has 7 fields" eval "awk -F, 'NF != 7 {bad=1} END {exit bad}' '$csv'"
+check "it sampled at least once" test "$(wc -l < "$csv")" -ge 2
 check "java_procs is 0" eval "tail -n1 '$csv' | grep -q ',0\$'"
 
 echo "== wt list warns about the shared stash"

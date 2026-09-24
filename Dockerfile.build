@@ -16,18 +16,20 @@ FROM eclipse-temurin:21-jre-jammy@sha256:fa4854e6057665066cb79953616671c20f32b96
 
 # Pinned curl version — mirrors Dockerfile; see its comment for why.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl=7.81.0-1ubuntu1.27 \
+        'curl=7.81.0-*' \
     && rm -rf /var/lib/apt/lists/*
+
+# Mirror Dockerfile's non-root runtime user (trivy AVD-DS-0002) — created
+# before the COPY, which sets the owner itself (see Dockerfile: a chown after
+# it duplicates the jar layer).
+RUN useradd --system --uid 1001 --user-group --shell /sbin/nologin \
+        --home-dir /nonexistent graphden \
+    && install -d -o graphden -g graphden /app
 
 WORKDIR /app
 
 # Copy uberjar from builder
-COPY --from=builder /app/target/executor-server.jar /app/executor-server.jar
-
-# Mirror Dockerfile's non-root runtime user (trivy AVD-DS-0002).
-RUN useradd --system --uid 1001 --user-group --shell /sbin/nologin \
-        --home-dir /nonexistent graphden \
-    && chown -R graphden:graphden /app
+COPY --from=builder --chown=graphden:graphden /app/target/executor-server.jar /app/executor-server.jar
 USER graphden
 
 # Set default port

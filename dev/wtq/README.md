@@ -81,7 +81,8 @@ time are gated **together** (the bors-ng / GitHub-merge-queue shape):
 2. Whichever waiter gets the gate lock becomes the **conductor**. It takes up to
    `WTQ_TRAIN_MAX` (default 4) queued branches, oldest first, checks each is
    still exactly what was queued (moved → **STALE**; dirty worktree, detached
-   HEAD, unacknowledged rule change → **PRECOND**, for that member only), and
+   HEAD → **PRECOND**, for that member only; unacknowledged rule change →
+   **NEEDS-ACK**: skipped, kept in place until `bb wt ack`), and
    merges them one by one on top of the latest `develop` in its own reused
    worktree, `graphden-wt/_train` (branch `wtq-train`). A member that conflicts
    with `develop` itself is a **CONFLICT**; one that only conflicts with an
@@ -113,7 +114,9 @@ Details that are deliberate:
 
 - **A branch that changes a `GOVERNANCE` path travels alone.** Its siblings
   cannot have read rules that land in the same fast-forward; alone, the next
-  train's drift check sends them to `bb wt ack` exactly as the serial queue did.
+  train's drift check marks them **NEEDS-ACK**. They keep their queue place and
+  their waiters keep waiting; `bb wt ack` prints the diff and re-arms the entry
+  at the same sha (the lint stamp still holds, so no re-lint).
 - **Ctrl-C / kill of a waiter removes its queue entry**, unless a train already
   took it (in a gate or mid-bisection — that verdict is owed). An entry whose
   waiter died without the trap (`kill -9`, a lost terminal) is pruned by the
@@ -129,9 +132,17 @@ Details that are deliberate:
 - **`bb wt list` / `status`** show `QUEUED`, `IN-TRAIN`, `SPLITTING` and the
   final verdicts, the running train (id, members, log), the queue order and
   live soon-markers.
-- **Lint before the queue.** `bb wt merge` runs `bb lint` on the member's
-  worktree first (outside the lock; stamped per sha in `.git/wtq/lint-ok/`, so
-  a re-queue of the same commit does not re-lint) and refuses to queue a red
+- **Lint before the queue.** `bb wt merge` runs `bb lint --retry-solo` on the
+  member's worktree first (outside the gate lock; stamped per sha in
+  `.git/wtq/lint-ok/`, so a re-queue of the same commit does not re-lint).
+  Pre-queue lints run ONE AT A TIME (`.git/wtq/lint.lock`; a waiting one names
+  the holder): side by side at load 40-80 they timed each other out. A lint
+  still yields to the gate's heavy phases, and the gate yields back between
+  trains (`WTQ_GATE_LINT_WAIT`, default 900 s) so back-to-back trains cannot
+  starve it. A check
+  that still goes red is re-run once alone before it counts — one that passes
+  alone is reported as such (with its first attempt), not failed. It refuses
+  to queue a red
   or dirty tree. The conductor re-checks each member's stamp against its
   queued sha. The train still runs `bb ci` (lint included) on the MERGED tree —
   cross-branch drift such as a stale devtour bake only shows there.
@@ -143,6 +154,12 @@ Details that are deliberate:
   fleet) it writes `.git/wtq/gate-heavy` (phase + pid; stale once the pid is
   gone); `bb wt test <kaocha args>`, `bb wt up` and the pre-queue lint wait
   it out, and also wait for `WTQ_AGENT_MEM_MIN_MB` (default 3000).
+- **Rolling e2e baseline.** A GREEN gate that ran e2e (and was not
+  DEGRADED) keeps its e2e output in `.git/wtq/e2e-runs/` (newest 9,
+  `WTQ_E2E_RUNS_KEEP`) and writes the per-file medians to
+  `.git/wtq/e2e-baseline.tsv`; the gate's e2e reads it over the tracked
+  `tools/browser-test/e2e-baseline.tsv`, so a new or split file gets its own
+  slowness limit without a hand refresh. The gate commits nothing.
 - **Tested:** `dev/wtq/test/train_test.sh` (`bb wtq-test`, in `bb lint`/`bb ci`)
   drives real `wt merge` waiters in throwaway repos with only the heavy suites
   stubbed (`WTQ_GATE_STUB`, test-only).
@@ -245,9 +262,10 @@ rules `develop` has since replaced, and it would land that work without ever
 noticing.
 
 The gate closes that: it diffs the paths listed in `dev/wtq/GOVERNANCE` between
-the commit the agent last acknowledged and `develop`, and **refuses to land**
-while they differ. `bb wt ack` prints the diff (so the new rules actually enter
-the agent's context) and records it. A resumed agent is told about the drift in
+the commit the agent last acknowledged and `develop`, and **will not land** a
+member while they differ — it stays queued as NEEDS-ACK, in its place. `bb wt
+ack` prints the diff (so the new rules actually enter the agent's context),
+records it, and re-arms the queued entry. A resumed agent is told about the drift in
 its kickoff prompt too.
 
 This is why the list is an explicit file rather than a heuristic over the diff:

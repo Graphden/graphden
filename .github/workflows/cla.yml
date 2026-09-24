@@ -40,7 +40,11 @@ jobs:
           path-to-signatures: 'signatures/cla.json'
           path-to-document: 'https://github.com/Graphden/graphden/blob/develop/CLA.md'
           branch: 'cla-signatures'
-          allowlist: 'Izpa,dependabot[bot],dependabot,bot*'
+          # A `*` pattern becomes an UNANCHORED regex (the action escapes the
+          # rest): `bot*` exempted every login merely CONTAINING "bot" —
+          # humans included — yet no App bot. `*[bot]` matches only a literal
+          # "[bot]", which GitHub reserves for App accounts.
+          allowlist: 'Izpa,dependabot,*[bot]'
           custom-notsigned-prcomment: >-
             Thank you for the contribution. Before it can be merged, Graphden
             needs your agreement to the

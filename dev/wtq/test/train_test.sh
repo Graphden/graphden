@@ -94,10 +94,12 @@ rc_of() { echo "${RC[$1]:-none}"; }
 verdict() { cut -f1 "$Q/results/$1" 2>/dev/null || echo none; }
 gates() { cat "$STUB_LOG"; }
 hold_lock() {   # hold the gate lock until release_lock, so waiters pile up
-  mkdir -p "$Q"; rm -f "$T/release"
-  flock "$Q/queue.lock" -c "while [ ! -e '$T/release' ]; do sleep 0.1; done" &
+  mkdir -p "$Q"; rm -f "$T/release" "$T/held"
+  flock "$Q/queue.lock" -c "touch '$T/held'; while [ ! -e '$T/release' ]; do sleep 0.1; done" &
   HOLD_PID=$!
-  sleep 0.3
+  # Wait until the lock is HELD, not a fixed nap: on a loaded host a waiter
+  # started next could win the lock first and run the train early.
+  wait_for 30 test -e "$T/held"
 }
 release_lock() { touch "$T/release"; wait "$HOLD_PID" 2>/dev/null || true; }
 # Capture first, grep after: under pipefail `wt ... | grep -q` reds whenever
@@ -190,6 +192,128 @@ check "gates: full, [a b], [a], [b], budget spent -> fresh [c d], [c], [d]" \
   eq "$(gates | tr '\n' '|')" "a b c d|a b|a|b|c d|c|d|"
 check "the budget hand-back is announced" grep -q "budget of 3 extra gate(s) spent" "$T/a.out" "$T/b.out" "$T/c.out" "$T/d.out"
 
+echo "== develop moves UNDER the gate -> re-queued, never FAILed"
+new_world moved
+feature mv mv.txt mv
+# One-shot: the first gate commits to develop behind the train's back (what
+# `wt new` / `claim` do when they fast-forward develop to an outside push).
+touch "$T/move-once"
+cat > "$WTQ_GATE_STUB" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >> "$STUB_LOG"
+if [ -e "$MOVE_ONCE" ]; then
+  rm -f "$MOVE_ONCE"
+  printf 'out\n' > "$MOVE_REPO/outside.txt"
+  git -C "$MOVE_REPO" add outside.txt && git -C "$MOVE_REPO" commit -qm outside
+fi
+exit 0
+STUB
+export MOVE_ONCE="$T/move-once" MOVE_REPO="$REPO"
+merge_bg mv
+finish mv
+unset MOVE_ONCE MOVE_REPO
+check "exit 0" eq "$(rc_of mv)" 0
+check "RESULT GREEN" eq "$(verdict mv)" GREEN
+check "two gates: the moved one, then a train on the new tip" eq "$(gates | tr '\n' '|')" "mv|mv|"
+check "both the outside commit and mv landed" eval "on_develop outside.txt && on_develop mv.txt"
+check "the train log says it re-queued" eval "grep -q 'moved under the gate' '$Q'/logs/_train-*.log"
+
+echo "== a waiter reads a settled verdict without waiting for memory"
+new_world settled
+feature sv sv.txt sv
+hold_lock
+export WTQ_MEM_MIN_MB=99999999 WTQ_HEADROOM_POLL=1
+enqueue_in_order sv
+export WTQ_MEM_MIN_MB=0; unset WTQ_HEADROOM_POLL
+sv_sha="$(git -C "$REPO" rev-parse feature/sv)"
+# What a running conductor does when it settles the entry: result, then dequeue.
+printf 'GREEN\t0\tfeature/sv\t%s\tt\tlanded elsewhere\n' "$sv_sha" > "$Q/results/sv"
+rm -f "$Q/queue/sv"
+check "the waiter reports within seconds" wait_for 10 grep -q 'RESULT: GREEN' "$T/sv.out"
+grep -q 'RESULT:' "$T/sv.out" || kill "${PID[sv]}" 2>/dev/null || true   # never hang the suite
+finish sv
+check "with the conductor's verdict" eq "$(rc_of sv)" 0
+check "and never waited on memory" eval "! grep -q MemAvailable '$T/sv.out'"
+release_lock
+
+echo "== the resource sampler writes one field per column when no java runs"
+new_world sampler
+mkdir -p "$T/bin"
+cat > "$T/bin/pgrep" <<'PGREP'
+#!/usr/bin/env bash
+# pgrep -c on no match: prints 0 AND exits 1.
+if [ "${1:-}" = -c ]; then echo 0; exit 1; fi
+exec REAL_PGREP "$@"
+PGREP
+sed -i "s|REAL_PGREP|$(command -v pgrep)|" "$T/bin/pgrep"
+chmod +x "$T/bin/pgrep"
+sed -i '2i sleep 2   # long enough for the sampler to write a row' "$WTQ_GATE_STUB"
+feature sm sm.txt sm
+saved_path="$PATH"; export PATH="$T/bin:$PATH"
+merge_bg sm
+finish sm
+export PATH="$saved_path"
+check "sm GREEN" eq "$(rc_of sm)" 0
+csv="$(ls "$Q"/logs/_train-*.resources.csv)"
+check "every row has 7 fields" eval "awk -F, 'NF != 7 {bad=1} END {exit bad}' '$csv'"
+check "it sampled at least once" test "$(wc -l < "$csv")" -ge 2
+check "java_procs is 0" eval "tail -n1 '$csv' | grep -q ',0\$'"
+
+echo "== wt list warns about the shared stash"
+new_world stash
+feature st st.txt st
+check "no warning while the stash is empty" eval "! list_has 'stash is SHARED'"
+printf 'wip\n' >> "$WTQ_ROOT/st/st.txt"
+git -C "$WTQ_ROOT/st" stash -q
+check "a stash entry is flagged" list_has 'stash is SHARED'
+check "naming the branch it came from" list_has 'stash@\{0\}: WIP on feature/st'
+
+echo "== a green gate that ran e2e feeds the rolling per-file baseline"
+new_world e2e-baseline
+mkdir -p "$REPO/tools/browser-test"
+cp "$SRC/../../tools/browser-test/e2e-baseline.js" "$REPO/tools/browser-test/"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm "baseline script"
+cat > "$WTQ_GATE_STUB" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >> "$STUB_LOG"
+secs="$(cat "$E2E_SECS")"
+printf '─── edit-a.test.js ───\n  [ %ss  executor=ok]\n' "$secs"
+[ -e DEGRADED ] && echo "  ⚠ ENVIRONMENT DEGRADED: 3 file(s) ran past 2.5x their baseline"
+exit 0
+STUB
+export E2E_SECS="$T/secs"
+for i in 1 2 3; do
+  echo $((i * 10)) > "$E2E_SECS"
+  feature "e$i" "e$i.txt" "e$i"; merge_bg "e$i"; finish "e$i"
+done
+check "three green runs recorded" eq "$(find "$Q/e2e-runs" -name '*.log' | wc -l)" 3
+check "the local baseline holds their median" grep -qP '^20\tedit-a\.test\.js$' "$Q/e2e-baseline.tsv"
+echo 500 > "$E2E_SECS"
+feature e4 DEGRADED e4; merge_bg e4; finish e4
+check "a DEGRADED green run is not recorded" eq "$(find "$Q/e2e-runs" -name '*.log' | wc -l)" 3
+check "and does not move the baseline" grep -qP '^20\tedit-a\.test\.js$' "$Q/e2e-baseline.tsv"
+unset E2E_SECS
+
+echo "== between trains the gate lets a running pre-queue lint finish"
+new_world yield-lint
+feature yl yl.txt yl
+# shellcheck disable=SC2016  # expands inside the stub, not here
+sed -i '2i date +%s.%N > "$STUB_LOG.start"' "$WTQ_GATE_STUB"
+hold_lock
+enqueue_in_order yl
+# Another agent's lint holds the lint lock (it waits for the gate's heavy
+# phase to end — i.e. for exactly the gap between two trains).
+flock "$Q/lint.lock" -c "echo 'other @ deadbeef' > '$Q/lint.holder'; touch '$T/lint-held'; sleep 2; date +%s.%N > '$T/lint.end'; : > '$Q/lint.holder'" &
+lint_pid=$!
+wait_for 10 test -e "$T/lint-held"
+release_lock
+finish yl
+wait "$lint_pid" 2>/dev/null || true
+check "yl GREEN" eq "$(rc_of yl)" 0
+check "the train started only after that lint ended" \
+  awk -v a="$(cat "$STUB_LOG.start")" -v b="$(cat "$T/lint.end")" 'BEGIN {exit !(a >= b)}'
+check "and said why it waited" grep -q 'letting the pre-queue lint of other' "$T/yl.out"
+
 echo "== conflict with develop itself -> CONFLICT"
 new_world conflict
 feature x f.txt x
@@ -225,18 +349,47 @@ check "exit 5" eq "$(rc_of s)" 5
 check "RESULT STALE" eq "$(verdict s)" STALE
 check "no gate ran" eq "$(gates)" ""
 
-echo "== a rule change travels alone; its sibling is sent to 'wt ack'"
+echo "== a rule change travels alone; its sibling waits for 'wt ack' in its place"
 new_world governance
 feature t1 CLAUDE.md "new rules"
 feature t2 t2.txt t2
 hold_lock
 enqueue_in_order t1 t2
+t2_ts="$(sed -n 's/^ts=//p' "$Q/queue/t2")"
 release_lock
-finish t1 t2
+finish t1
 check "t1 GREEN" eq "$(verdict t1)" GREEN
-check "t2 PRECOND (unacknowledged rule change)" eq "$(verdict t2)" PRECOND
-check "t2 exit 3" eq "$(rc_of t2)" 3
-check "gates: [t1] alone" eq "$(gates)" "t1"
+check "t2 is NEEDS-ACK, not PRECOND" wait_for 20 list_has '^t2 .*NEEDS-ACK'
+check "still queued, at its original place" eq "$(sed -n 's/^ts=//p' "$Q/queue/t2" 2>/dev/null)" "$t2_ts"
+check "its waiter is still waiting" kill -0 "${PID[t2]}"
+check "and told its author to ack" wait_for 10 grep -q 'bb wt ack' "$T/t2.out"
+check "no verdict for t2 yet" eq "$(verdict t2)" none
+ack_out="$( (cd "$WTQ_ROOT/t2" && ./dev/wtq/wt ack) 2>&1 | plain)"
+check "wt ack prints the rule diff" grep -q 'new rules' <<<"$ack_out"
+check "and re-arms the queued entry" grep -q 're-armed' <<<"$ack_out"
+finish t2
+check "t2 GREEN after the ack, same waiter" eq "$(verdict t2)" GREEN
+check "t2 exit 0" eq "$(rc_of t2)" 0
+check "gates: [t1] alone, then [t2]" eq "$(gates | tr '\n' '|')" "t1|t2|"
+check "t2 was linted once — the ack did not re-lint" \
+  eq "$(grep -c "$(git -C "$REPO" rev-parse feature/t2)" "$LINT_LOG")" 1
+
+echo "== concurrent 'wt merge's lint one at a time"
+new_world lint-serial
+cat > "$WTQ_LINT_CMD" <<'EOF'
+#!/usr/bin/env bash
+echo "start $(basename "$PWD")" >> "$LINT_LOG"
+sleep 1
+echo "end $(basename "$PWD")" >> "$LINT_LOG"
+EOF
+feature l1 l1.txt l1; feature l2 l2.txt l2
+merge_bg l1; merge_bg l2
+finish l1 l2
+check "both GREEN" eq "$(rc_of l1)$(rc_of l2)" 00
+check "the two lints never overlapped" \
+  eq "$(cut -d' ' -f1 "$LINT_LOG" | tr '\n' ' ')" "start end start end "
+check "the second one said what it waited for" \
+  eval "grep -q 'another pre-queue lint is running' '$T/l1.out' '$T/l2.out'"
 
 echo "== soon: the train waits for a marked branch"
 new_world soon

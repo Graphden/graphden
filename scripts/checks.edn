@@ -65,7 +65,10 @@
  ;; the heavy suites stubbed: batching, bisection, conflicts, stale shas, soon
  ;; markers, waiter hand-off. The gate is the script executing, so a broken
  ;; queue would otherwise be discovered by the first landing that needs it.
- {:name "wtq-train"     :bb "wtq-test"      :timeout 180000 :group :infra
+ ;; 240 s: ~170 s under a parallel lint on this host (94% of the old 180 s
+ ;; ceiling) once the develop-moved / settled-verdict / sampler / stash
+ ;; scenarios joined; a gate running beside the lint pushed it over.
+ {:name "wtq-train"     :bb "wtq-test"      :timeout 240000 :group :infra
   :relevant ["^dev/wtq/"]}
  ;; The scoping mechanism guards itself: selector partition semantics +
  ;; checks.edn shape/regex validity + the canonical path→check drift table.
@@ -108,6 +111,8 @@
  {:name "tour-versions" :bb "tour-versions-check" :timeout 30000 :group :docs
   :relevant ["^resources/packages/app/tour/fns\\.edn$" "^test/resources/tour-versions\\.edn$"
              "^scripts/tour_versions\\.clj$"]}
+ {:name "tour-versions-selftest" :bb "tour-versions-test" :timeout 30000 :group :docs
+  :relevant ["^scripts/tour_versions(_test)?\\.clj$" "^bb\\.edn$"]}
  {:name "devtour"       :bb "devtour-check" :timeout  60000 :group :docs
   ;; `resources/packages/**/impls.clj` IS toured (~15 steps anchor on
   ;; base-fn impls like :add / :http-server / publish-package-apply), so

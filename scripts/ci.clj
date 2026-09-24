@@ -16,6 +16,7 @@
    and the suite continues so the user always gets a result line."
   (:require
     [babashka.process :as p]
+    [ci-proc]
     [ci-select]
     [clojure.string :as str])
   (:import
@@ -112,6 +113,7 @@
     :failed (str red "✗" reset)
     :timeout (str red "⏱" reset)
     :warning (str yellow "⚠" reset)
+    :retried (str yellow "↻" reset)
     :skipped (str yellow "⊘" reset)
     :scoped (str yellow "⊘" reset)
     :manual-skip (str yellow "⊘" reset)
@@ -204,7 +206,7 @@
 (defn- kill-live-procs!
   []
   (doseq [proc @live-procs]
-    (try (Process/.destroyForcibly (:proc proc)) (catch Exception _ nil))))
+    (try (ci-proc/destroy-tree! proc) (catch Exception _ nil))))
 
 
 ;; ===========================================================================
@@ -230,28 +232,28 @@
     (swap! live-procs disj proc)
     (cond
       (= result ::timeout)
-      (do (try (Process/.destroyForcibly (:proc proc)) (catch Exception _ nil))
-          ;; Salvage what the child printed BEFORE the axe: kaocha's
-          ;; dots-so-far name the namespace that was still running,
-          ;; which is the whole diagnosis. Discarding it made a
-          ;; timeout verdict contentless (audit-6).
-          (swap! results assoc check-name
-                 {:exit -1
-                  :output (let [r (deref proc 5000 nil)]
-                            (str "TIMEOUT after " (/ timeout-ms 1000) " s\n"
-                                 "Command: " (pr-str cmd)
-                                 (when (:out r) (str "\n--- partial stdout ---\n" (:out r)))
-                                 (when (seq (:err r)) (str "\n--- partial stderr ---\n" (:err r)))))
-                  :warnings false
-                  :duration-ms duration-ms})
-          ;; An `:info` check that times out is still advisory — a hung
-          ;; `outdated`/antq network call is the very "network hiccup"
-          ;; these checks are expected to have, and must NOT fail the run
-          ;; (mirrors the `:else` branch's `block!`; this arm used to
-          ;; `reset! failed` unconditionally).
-          (let [info? (= :info (:group c))]
-            (swap! status assoc check-name (if info? :warning :timeout))
-            (when-not info? (reset! failed true))))
+      ;; Kill the check's whole tree, then salvage what it printed BEFORE the
+      ;; axe: kaocha's dots-so-far name the namespace that was still running,
+      ;; which is the whole diagnosis. Discarding it made a timeout verdict
+      ;; contentless (audit-6); killing only the child made it a `Stream
+      ;; closed` runner error instead (ci-proc).
+      (let [r (ci-proc/kill-and-salvage! proc)]
+        (swap! results assoc check-name
+               {:exit -1
+                :output (str "TIMEOUT after " (/ timeout-ms 1000) " s\n"
+                             "Command: " (pr-str cmd)
+                             (when (:out r) (str "\n--- partial stdout ---\n" (:out r)))
+                             (when (seq (:err r)) (str "\n--- partial stderr ---\n" (:err r))))
+                :warnings false
+                :duration-ms duration-ms})
+        ;; An `:info` check that times out is still advisory — a hung
+        ;; `outdated`/antq network call is the very "network hiccup"
+        ;; these checks are expected to have, and must NOT fail the run
+        ;; (mirrors the `:else` branch's `block!`; this arm used to
+        ;; `reset! failed` unconditionally).
+        (let [info? (= :info (:group c))]
+          (swap! status assoc check-name (if info? :warning :timeout))
+          (when-not info? (reset! failed true))))
 
       :else
       (let [output (str (:out result) "\n" (:err result))
@@ -283,8 +285,9 @@
    failure instead of propagating.
 
    A child process whose captured stream dies mid-read (`java.io.IOException:
-   Stream closed` — seen when a loaded host kills a child, and once for
-   every agent who ran two `bb ci`s at a time) used to escape the future
+   Stream closed` — the usual cause was a TIMED-OUT check killed without its
+   grandchild, fixed in `ci-proc`; kept for anything else that closes a
+   stream under us) used to escape the future
    and blow up `run-waves!`, so a run with 28 green checks printed a stack
    trace and NO verdict: the one thing the report exists to tell you —
    which check died — was the one thing it could not say."
@@ -334,7 +337,7 @@
   (let [sep " │ "
         elapsed-part (str sep (format "%.1fs" elapsed-s))
         n-of (fn [pred] (count (filter #(pred (val %)) statuses)))
-        n-passed (n-of #(= :passed %))
+        n-passed (n-of #{:passed :retried})
         n-warn (n-of #(= :warning %))
         n-failed (n-of #{:failed :timeout})
         n-running (n-of #(= :running %))
@@ -388,8 +391,12 @@
    run's numbers — passing on a regression it never saw. A red suite
    also makes the perf report meaningless (half the scenarios may not
    have run, so every count reads low and every budget passes), so it is
-   skipped rather than reported as a reassuring lie."
-  [checks status results failed]
+   skipped rather than reported as a reassuring lie.
+
+   `retry-solo?` (`--retry-solo`, the pre-queue lint of `wt merge`): the
+   lint wave's reds are re-run one at a time before they count
+   (`ci-proc/retry-solo!`). Only that wave — a flaky TEST must stay red."
+  [checks status results failed retry-solo?]
   (let [;; Cap how many checks are in flight at once. The wave used to
         ;; launch EVERY check as a future in one go — 24 of them on a full
         ;; run, each a child process whose stdout/stderr this JVM reads.
@@ -410,6 +417,8 @@
         pre-checks (remove #(#{:test :post-test} (:group %)) checks)
         skip-all! (fn [cs] (doseq [c cs] (swap! status assoc (:name c) :skipped)))]
     (wave pre-checks)
+    (when (and retry-solo? @failed)
+      (ci-proc/retry-solo! pre-checks status results failed run-check))
     (if @failed
       (skip-all! (concat test-checks post-checks))
       (do (wave test-checks)
@@ -437,6 +446,9 @@
                     :failed (str " " red "FAILED" reset)
                     :timeout (str " " red "TIMED OUT" reset)
                     :warning (str " " yellow "WARNINGS" reset)
+                    :retried (str " " yellow "PASSED on a solo re-run" reset
+                                  " (its first run, beside the others, did not — load / runner,"
+                                  " not code; first attempt below)")
                     :skipped (str " " yellow "SKIPPED" reset " (lint failed first)")
                     :scoped (str " " yellow "SKIPPED" reset " (out of scope — no relevant files changed since " since ")")
                     :manual-skip (str " " yellow "SKIPPED" reset " (--skip: operator choice)")
@@ -448,6 +460,10 @@
     (when (#{:failed :warning :timeout} s)
       (println)
       (println (:output r))
+      (println))
+    (when (= :retried s)
+      (println)
+      (println (:output (:first-try r)))
       (println))))
 
 
@@ -469,12 +485,16 @@
   "The last line, which is what a reader trusts. A scoped or partial
    pass must SAY so."
   [checks scoped manual status failed? elapsed-s]
-  (let [passed-count (count (filter (fn [c] (= :passed (get status (:name c)))) checks))
+  (let [passed-count (count (filter (fn [c] (#{:passed :retried} (get status (:name c)))) checks))
+        retried (filterv (fn [c] (= :retried (get status (:name c)))) checks)
         ;; Skipped (unit suite gated off by a lint failure) is not "failed"
         ;; per-se, but it wasn't run — exclude it from the denominator so
         ;; the count reflects what actually executed.
         total-count (count (remove (fn [c] (= :skipped (get status (:name c)))) checks))
-        scope-note (str (when (seq scoped) (str "; " (count scoped) " out of scope"))
+        scope-note (str (when (seq retried)
+                          (str "; " (count retried) " only on a solo re-run: "
+                               (str/join ", " (map :name retried))))
+                        (when (seq scoped) (str "; " (count scoped) " out of scope"))
                         (when (seq manual) (str "; " (count manual) " SKIPPED by --skip")))]
     (println)
     (if failed?
@@ -531,7 +551,8 @@
                                             (status-line checks @status (elapsed-s) cols)))
                                 (flush)
                                 (Thread/sleep 200)))]
-        (run-waves! checks status results failed)
+        (run-waves! checks status results failed
+                    (boolean (some #{"--retry-solo"} *command-line-args*)))
         (reset! progress-running false)
         @progress-thread
         (println)                     ; close the progress row

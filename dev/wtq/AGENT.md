@@ -26,6 +26,12 @@ You were started in one of two ways:
 1. **Stay in your worktree.** Never `cd` into another worktree, never edit
    `develop` directly, never touch another agent's branch. Other agents change
    unrelated files in parallel — your view of the repo is your branch only.
+
+   **Never `git stash` in a worktree.** The stash is one list shared by every
+   worktree of the repo: another agent's `git stash pop` takes YOUR changes
+   into THEIR tree (two agents popped each other's work on 2026-09-23). To park
+   work, make a WIP commit on your branch (amend or reset it later), or save
+   `git diff > <scratch file>`. `bb wt list` shows any stash entries it finds.
 2. **Never drive the SHARED stack by hand.** Do **not** run `bb rebuild`,
    `bb deploy`, `bb test-integration`, `bb test-e2e`, `bb coverage`, or push to
    `origin`. Those address the canonical instance (`graphden-executor` on
@@ -56,8 +62,10 @@ You were started in one of two ways:
    when your session started, this file in your first minutes — and nothing
    re-reads them. Meanwhile `develop` moves. So the gate checks: if `develop`
    has changed any path in [`dev/wtq/GOVERNANCE`](GOVERNANCE) since you last
-   looked, it **refuses to land** and sends you back. Landing work done under
-   rules that no longer exist is not a thing you can do by accident.
+   looked, it **will not land you**: a queued branch turns **NEEDS-ACK** — it
+   keeps its place in the queue, trains skip it, and your waiting `bb wt merge`
+   tells you so. Landing work done under rules that no longer exist is not a
+   thing you can do by accident.
 
    ```bash
    bb wt ack     # prints the diff of what changed, records that you have seen it
@@ -65,7 +73,9 @@ You were started in one of two ways:
 
    It prints the actual diff, not a summary — the point is that the new rules
    pass through your context on the way to being acknowledged. Read them, decide
-   whether they change what you are doing, then re-run the gate.
+   whether they change what you are doing. If they don't, that is all: the ack
+   re-arms your queued entry and the waiting `bb wt merge` carries on (no
+   re-lint). If they do, fix, commit, and re-run `bb wt merge`.
 4. **Commit as you go** — conventional-commit format, English messages.
 5. **Land it yourself. Don't ask permission to finish.** When the feature is
    complete and `bb lint` is green, run the gate (`bb wt merge`) — then, once it
@@ -106,8 +116,11 @@ You were started in one of two ways:
 4. **Land** — when the feature is complete and `bb lint` is green, run the
    gate. No sign-off needed (Rule 5):
 
-   `bb wt merge` first runs **`bb lint` on your worktree** (outside the queue;
-   skipped if that exact commit already passed) and refuses to queue a red or
+   `bb wt merge` first runs **`bb lint` on your worktree** (outside the queue,
+   one agent's lint at a time — it says so when it waits for another's; a check
+   that goes red is re-run once ALONE before it counts, and one that passes
+   alone is reported, not failed; skipped if that exact commit already passed)
+   and refuses to queue a red or
    uncommitted tree (PRECOND, exit 3, with the lint output) — a lint red found
    inside a train would cost everyone in it a gate. Then it **enqueues** your
    branch at its current commit and waits. A gate also only starts with enough

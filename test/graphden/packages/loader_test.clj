@@ -165,13 +165,15 @@
   ;; `"… `" io "` …"` ends the string at the second quote; `io` reads as a
   ;; SYMBOL key and the file still parses, silently truncating the text.
   (let [problems (fn [fn-defs]
-                   (try (loader/validate-fn-def-keys! fn-defs "x/fns.edn") nil
-                        (catch clojure.lang.ExceptionInfo e
-                          (is (= :package-error/malformed-fn-def (:type (ex-data e))))
-                          (mapv :key (:problems (ex-data e))))))
-        broken (read-string "{:name :f :description \"a \" any pair \" b\"}")]
+                   (let [data (try (loader/validate-fn-def-keys! fn-defs "x/fns.edn")
+                                   nil
+                                   (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+                     (when data
+                       (is (= :package-error/malformed-fn-def (:type data))))
+                     (some->> data :problems (mapv :key))))
+        broken (read-string "{:name :f :description \"a \" any pair differs \" b\"}")]
     (testing "a symbol key on the fn-def itself"
-      (is (= '[any] (problems [broken]))))
+      (is (= '[any differs] (problems [broken]))))
     (testing "a symbol key in an arg spec"
       (is (= '[io] (problems [(read-string
                                 "{:name :f :args {:x {:type :text :description \"`\" io \" nope \"}}}")]))))

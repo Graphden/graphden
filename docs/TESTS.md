@@ -246,16 +246,29 @@ forgives:
 - **The run is DEGRADED** — every strict flake/leak verdict drops to
   report-only — when at least `THRASH_MIN_FILES` (3) files ran slow
   against their **own** baseline, or `THRASH_MIN_FLAKED` (2) different
-  files needed a retry. Slow = the passing attempt took more than
+  files needed an **environment-signed** retry (one of the file's
+  failures carried a signature from the bullet above). A retry whose
+  failures were all real candidates does not count toward it: two real
+  races in one train are two races, and counting them used to mark the
+  run degraded and drop both verdicts. Slow = the passing attempt took more than
   `SLOW_FACTOR` (2.5) × the file's median in
   `tools/browser-test/e2e-baseline.tsv` and at least `SLOW_MIN_EXTRA`
-  (30) s over it; a file with no baseline yet falls back to the
+  (30) s over it, capped just under `PER_TEST_TIMEOUT` (300 s) — no
+  attempt outlasts that, so a higher limit could never fire; a file
+  with no baseline yet falls back to the
   absolute `THRASH_FILE_SECS` (150 s). The old rule — any three files
   over 150 s — fired on every healthy run once three lesson walks grew
   past it, and strict mode silently reported nothing for weeks.
   Refresh the baseline from green gate logs after a change that moves a
   file's duration for good:
   `node e2e-baseline.js <gate logs> > e2e-baseline.tsv`.
+- **A deterministic failure is not retried to exhaustion.** A file gets
+  up to five attempts, but two consecutive real (unsigned)
+  assertion-shaped failures with the same first `✗` line (ids and
+  numbers normalised) stop it: red, tagged `(deterministic)`. Timeouts
+  keep every retry — a race and a slow window both look like one.
+  `tools/runtime-test/run-edit-tests-verdicts.test.js` (`bb test-js`)
+  drives the runner against stub files and pins these verdicts.
 - **Leaks** are counted per file as fns + namespaces + **un-archived
   branches** the file left behind. A test cleans its branches with
   `deleteBranches` (`edit-test-helpers.js`), which deletes merge targets

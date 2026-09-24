@@ -38,12 +38,22 @@
 #     (e2e-baseline.tsv: median seconds per file from green gate runs; slow
 #     = the passing attempt took > SLOW_FACTOR × baseline and at least
 #     SLOW_MIN_EXTRA seconds over it; a file with no baseline yet falls back
-#     to the absolute THRASH_FILE_SECS), or THRASH_MIN_FLAKED different
-#     files needed a retry. The old rule — any 3 files over an absolute
-#     150 s — fired on every healthy run once three tour files grew past
-#     it, so strict mode silently did nothing for weeks.
+#     to the absolute THRASH_FILE_SECS; every limit is capped just under
+#     PER_TEST_TIMEOUT, which no attempt can outlast), or THRASH_MIN_FLAKED
+#     different files needed an ENVIRONMENT-signed retry (one of its
+#     failures carried a signature above). A retry whose failures were all
+#     real candidates does not count: two real races in one train used to
+#     read as host jitter and drop both strict verdicts. The old rule — any
+#     3 files over an absolute 150 s — fired on every healthy run once
+#     three tour files grew past it, so strict mode silently did nothing
+#     for weeks.
 #     Refresh the baseline after a suite change with
 #       node e2e-baseline.js <gate log>... > e2e-baseline.tsv
+#   * A file is retried up to 5 times, except that two CONSECUTIVE real
+#     (unsigned) assertion-shaped failures with the same first `✗` line are
+#     a deterministic failure: it is red at once, tagged `(deterministic)`.
+#   * These verdicts are pinned by tools/runtime-test/run-edit-tests-verdicts.test.js
+#     (`bb test-js`), which drives this script against stub files.
 #   * Leaks are counted per file as fns + namespaces + un-archived
 #     branches left behind.
 
@@ -350,6 +360,16 @@ host_starved() {
     if (l + 0 > lmax * c) printf "load1=%s on %d cpus", l, c }'
 }
 
+# What an attempt failed ON, for the deterministic-failure early stop: the
+# first `✗ <message>` line (edit-test-helpers' assert prints it), else the first
+# thrown `…Error: …` line, with ids and numbers normalised so a fresh fixture
+# uuid / timestamp in the message does not make the same failure look new.
+# Empty when neither is found — then the file keeps its full retry budget.
+failure_signature() {
+  { grep -m1 -E '^[[:space:]]*✗ ' "$1" || grep -m1 -E '[A-Za-z]*Error: ' "$1"; } 2>/dev/null \
+    | sed -E 's/^[[:space:]]+//; s/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/<id>/g; s/[0-9]+/N/g'
+}
+
 # Per-file duration baseline for the DEGRADED verdict (see the header).
 # E2E_BASELINE_LOCAL (the landing gate passes .git/wtq/e2e-baseline.tsv, the
 # rolling medians of its last green runs) is read AFTER the tracked file and
@@ -367,17 +387,25 @@ done
 SLOW_FACTOR="${SLOW_FACTOR:-2.5}"
 SLOW_MIN_EXTRA="${SLOW_MIN_EXTRA:-30}"
 # Seconds past which a file's attempt reads as STARVED rather than slow-ish.
+# Capped just under the per-attempt hard timeout: an attempt can never run
+# longer than PER_TEST_TIMEOUT, so a limit at or past it (tour-ux: 122 s × 2.5
+# = 305 s against the 300 s cap) means that file can never be judged slow. At
+# the cap, only an attempt that ran into the timeout itself counts.
 slow_limit() {
-  local b="${BASELINE[$1]:-}"
-  if [ -z "$b" ]; then printf '%s' "$THRASH_FILE_SECS"; return; fi
-  awk -v b="$b" -v f="$SLOW_FACTOR" -v m="$SLOW_MIN_EXTRA" \
-      'BEGIN {l = b * f; if (l < b + m) l = b + m; printf "%d", l}'
+  local b="${BASELINE[$1]:-}" cap=$(( ${PER_TEST_TIMEOUT:-300} - 1 ))
+  if [ -z "$b" ]; then
+    if [ "$THRASH_FILE_SECS" -gt "$cap" ]; then printf '%s' "$cap"; else printf '%s' "$THRASH_FILE_SECS"; fi
+    return
+  fi
+  awk -v b="$b" -v f="$SLOW_FACTOR" -v m="$SLOW_MIN_EXTRA" -v c="$cap" \
+      'BEGIN {l = b * f; if (l < b + m) l = b + m; if (l > c) l = c; printf "%d", l}'
 }
 
 pos() { if [ "$1" -gt 0 ] 2>/dev/null; then echo "$1"; else echo 0; fi; }
 
 LEAKS=""
 FLAKED=""
+ENV_FLAKED=""       # the FLAKED files with an environment-signed failure (thrash trigger)
 SLOW_FILES=""       # "file(secs>limit)" for the DEGRADED banner
 
 WORST=0
@@ -403,9 +431,10 @@ HEAP_HWM_MIB=0      # executor heap high-water (docker stats), MiB — INFO ONLY
                     # of this file measured a FLAT after-GC live-set), so ~1.7GiB is normal.
 THRASH_FILE_SECS=${THRASH_FILE_SECS:-150}   # slow limit for a file with NO baseline yet (cap is 300s)
 THRASH_MIN_FILES=${THRASH_MIN_FILES:-3}     # this many slow files (vs own baseline) => degraded run
-THRASH_MIN_FLAKED=${THRASH_MIN_FLAKED:-2}   # OR this many DIFFERENT files needing a retry: a
-                                            # real race is localized to one file, so several
-                                            # innocent files flaking in one run = host jitter
+THRASH_MIN_FLAKED=${THRASH_MIN_FLAKED:-2}   # OR this many DIFFERENT files whose retry was
+                                            # ENVIRONMENT-signed (probe dead / full rebuild /
+                                            # starved host). Real-candidate retries do not
+                                            # count: two real races in one run are two races
 # Consecutive server-down counter. Demo (:9002) has docker restart-
 # policy so a single bounce recovers; an isolated testcontainer
 # stack does NOT auto-restart, so a single crash cascades through
@@ -462,7 +491,8 @@ for f in $FILES; do
   # load (heap past ~85% → >5s pauses; brief server-unavailability during
   # write-heavy tests — task #10) can hit the SAME file on several consecutive
   # tries; the extra recovery windows catch that without hiding a real break,
-  # which fails all five.
+  # which fails all five — or stops at two when it fails the same way twice
+  # with no environment signature (the deterministic stop below).
   #
   # A test that only passes AFTER a retry is a FLAKE — named LOUDLY in the
   # summary, never silently swallowed: every root cause found in this suite
@@ -476,6 +506,9 @@ for f in $FILES; do
   rc=0
   is_timeout=0
   real_flake=0
+  env_signed=0        # some failed attempt carried an environment signature
+  deterministic=0     # stopped early: the same REAL assertion failure twice in a row
+  prev_real_sig=""    # the previous attempt's REAL assertion signature, if it was one
   judged_secs=""      # the passing attempt's seconds, else the fastest failed one
   for attempt in 1 2 3 4 5; do
     if [ "$attempt" -gt 1 ]; then
@@ -531,15 +564,39 @@ for f in $FILES; do
         echo "  ($shape-shaped failure on a starved host ($starved) — not counted strict)" >&2
       else
         real_flake=1
+        attempt_real=1
         echo "  (probe OK, no rebuild, host healthy — $shape-shaped failure is a REAL flake candidate)" >&2
       fi
+      [ "${attempt_real:-0}" = 1 ] || env_signed=1
+      # A deterministic failure is not worth five attempts: two CONSECUTIVE
+      # real (no environment signature) assertion-shaped failures with the same
+      # message are the same bug twice, and three more tries only add ~10 s +
+      # a full walk each (edit-description: 96 s instead of ~15 s, repeated on
+      # every bisection re-run). Timeouts keep their retries — a race and a
+      # slow window both look like one.
+      sig=""
+      if [ "${attempt_real:-0}" = 1 ] && [ "$shape" = "assertion" ]; then
+        sig="$(failure_signature "$attempt_out")"
+      fi
       rm -f "$attempt_out"
+      attempt_real=0
+      if [ -n "$sig" ] && [ "$sig" = "$prev_real_sig" ]; then
+        deterministic=1
+        echo "  (same REAL assertion failure twice in a row — deterministic, not retrying: $sig)" >&2
+        break
+      fi
+      prev_real_sig="$sig"
     fi
   done
   if [ "$passed" = 1 ]; then
     PASS=$((PASS+1))
     if [ "$attempt" -gt 1 ]; then
       FLAKED="$FLAKED $f"
+      # Only a retry some failure of which was ENVIRONMENT-signed counts toward
+      # the run-level thrash trigger. A file whose every failure was a real
+      # candidate is a race in that file; counting it made two real races in
+      # one train read as host jitter and drop both strict verdicts.
+      if [ "$env_signed" = 1 ]; then ENV_FLAKED="$ENV_FLAKED $f"; fi
       if [ "${WTQ_FLAKE_STRICT:-0}" = "1" ] && [ "$real_flake" = 1 ]; then
         STRICT_FLAKES="$STRICT_FLAKES $f"
         echo "  (passed on attempt $attempt — REAL flake candidate; strict verdict DEFERRED to the run-level thrash check)" >&2
@@ -552,7 +609,9 @@ for f in $FILES; do
   else
     WORST=1
     FAIL=$((FAIL+1))
-    if [ "$is_timeout" -eq 1 ]; then
+    if [ "$deterministic" = 1 ]; then
+      FAILED_NAMES="$FAILED_NAMES $f(deterministic)"
+    elif [ "$is_timeout" -eq 1 ]; then
       FAILED_NAMES="$FAILED_NAMES $f(timeout)"
     else
       FAILED_NAMES="$FAILED_NAMES $f"
@@ -661,11 +720,12 @@ fi
 
 # --- run-level thrash decision (see the state block before the loop) ---
 # The run is DEGRADED when the host was starving the stack: several files ran far
-# past their OWN baseline, or several different files needed a retry. Under
-# those conditions a strict flake/leak is the environment, not the branch.
+# past their OWN baseline, or several different files needed an environment-
+# signed retry. Under those conditions a strict flake/leak is the environment,
+# not the branch.
 DEGRADED=0
 FLAKED_COUNT=0
-for _x in $FLAKED; do FLAKED_COUNT=$((FLAKED_COUNT+1)); done
+for _x in $ENV_FLAKED; do FLAKED_COUNT=$((FLAKED_COUNT+1)); done
 if [ "$DEGRADED_FILES" -ge "$THRASH_MIN_FILES" ] || [ "$FLAKED_COUNT" -ge "$THRASH_MIN_FLAKED" ]; then
   DEGRADED=1
 fi
@@ -720,7 +780,7 @@ if [ -n "$FAILED_NAMES" ]; then
   echo "  failed:$FAILED_NAMES" >&2
 fi
 if [ "$DEGRADED" = 1 ]; then
-  echo "  ⚠ ENVIRONMENT DEGRADED: ${DEGRADED_FILES} file(s) ran past ${SLOW_FACTOR}x their baseline:${SLOW_FILES:- none}; ${FLAKED_COUNT} file(s) needed a retry; executor heap high-water ${HEAP_HWM_MIB}MiB (info)." >&2
+  echo "  ⚠ ENVIRONMENT DEGRADED: ${DEGRADED_FILES} file(s) ran past ${SLOW_FACTOR}x their baseline:${SLOW_FILES:- none}; ${FLAKED_COUNT} file(s) needed an environment-signed retry; executor heap high-water ${HEAP_HWM_MIB}MiB (info)." >&2
   echo "    Strict flake/leak verdicts were downgraded to report-only — a retry-pass under thrash is a pass, not a race." >&2
   if [ "$FAIL" != "0" ]; then
     echo "    A file HARD-failed above: the host is too starved to judge it. Free RAM (e.g. 'docker stop graphden-executor' to drop the demo stack) and re-run on a quiet host — do NOT read this as a branch regression." >&2

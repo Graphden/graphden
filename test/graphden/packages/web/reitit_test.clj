@@ -140,7 +140,7 @@
 ;; TESTS — router-paths (path enumeration from compiled router)
 ;; =============================================================================
 
-(deftest ring-route-paths-extracts-from-ring-handler
+(deftest router-paths-extracts-from-ring-handler
   (testing "given a reitit ring handler, returns all path patterns in route order"
     (let [handler (ring/ring-handler
                     (ring/router
@@ -150,7 +150,7 @@
       (is (= ["/health" "/api/users/:id"] paths)))))
 
 
-(deftest ring-route-paths-extracts-from-bare-router
+(deftest router-paths-extracts-from-bare-router
   (testing "given a bare reitit.core/Router (not wrapped as ring-handler), still works — `or get-router self` coercion"
     (let [router (ring/router
                    [["/a" {:get (constantly {:status 200})}]
@@ -159,7 +159,7 @@
       (is (= ["/a" "/b/:x"] paths)))))
 
 
-(deftest ring-route-paths-flattens-nested-groups
+(deftest router-paths-flattens-nested-groups
   (testing "nested reitit data shape — common prefix gets joined into each leaf"
     (let [router (ring/router
                    ["/api"

@@ -915,7 +915,7 @@
   {:name :_update-record-type-err-pkg
    :description "403 rejection — the target fn is package-synced. `:http-status` is read by `:json-envelope-response`."
    :parent :zipmap
-   :return-type :_error-result-status-shape
+   :return-type :error-result-status-shape
    :args {:keys [:ok :error {:value :http-status :literal? true}]
           :vals [false :_update-record-type-pkg-reason 403]}}
 
@@ -935,7 +935,7 @@
   {:name :_update-record-type-err-not-record
    :description "400 rejection — the target fn is not a record type-row."
    :parent :const
-   :return-type :_error-result-shape
+   :return-type :error-result-shape
    :args {:value {:ok false :error "not a record type — only a record type-row's fields can be edited here"}}}
 
   {:name :_update-record-type-validation

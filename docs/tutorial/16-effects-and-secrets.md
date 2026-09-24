@@ -282,6 +282,12 @@ any more and the tombstone GC reclaims the binding. If your own fn needs a secre
 for one — extend a base-fn whose slot already is, or declare
 `{:type [:secret :text]}` in `fns.edn`.
 
+On the hosted cloud every organization's secrets live under its own
+vault prefix, `org/<org-id>/` — the card shows the full path, and a
+path outside your prefix is refused (403). Reading a bound secret at
+run time records `:network`, so it works on a plan that allows network
+access — the plans that also have somewhere to send it.
+
 ## The admin secrets UX
 
 The **Secrets** rows in the explorer (toggle the **secrets**

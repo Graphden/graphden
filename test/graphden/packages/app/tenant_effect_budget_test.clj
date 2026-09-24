@@ -45,7 +45,7 @@
 
 (def ^:private vault-ops
   {:effects #{:network}
-   :why "vault-backed secret op — `operator-only!` refuses every gated (tenant) execution by design; the cloud's per-org secrets are not vault paths a tenant may touch"})
+   :why "vault-backed secret write — records `:network`, which no request-level set carries, and the raw write ops (`:vault-put` / `:vault-delete`) are `operator-only!` in a gated execution; only the run-time read (`:vault-get` on the tenant's own org prefix) is open to a tenant"})
 
 
 (def ^:private outside-the-gate

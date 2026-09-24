@@ -8,7 +8,8 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.clients.vault :as vault]
-    [graphden.executor.compile-runtime :as cr]))
+    [graphden.executor.compile-runtime :as cr]
+    [graphden.tenancy.context :as tctx]))
 
 
 (def ^:dynamic *impls* nil)
@@ -58,6 +59,26 @@
           (is (not= :vault/operator-only
                     (err-type #((get *impls* op) args {})))
               (str (name op) " must NOT be operator-gated when unrestricted")))))))
+
+
+(deftest vault-get-reads-the-tenants-own-prefix-only
+  ;; `:vault-get` is the secret-binding RESOLVER, so a tenant's restricted
+  ;; execution must reach its OWN secrets; the client confines the path.
+  (binding [cr/*allowed-effects* #{:db :state :time :random :network}
+            vault/*impl-override* {:get-secret (fn [_client path] (str "value@" path))}]
+    (let [ctx {:vault {:address "http://stub" :token "t"}}
+          vault-get (:vault-get *impls*)]
+      (tctx/with-org "acme"
+                     (testing "own prefix → the value"
+                       (is (= "value@org/acme/db" (vault-get {:path "org/acme/db"} ctx))))
+                     (testing "another org's / a bare path → :vault/path-forbidden"
+                       (is (= :vault/path-forbidden (err-type #(vault-get {:path "org/other/db"} ctx))))
+                       (is (= :vault/path-forbidden (err-type #(vault-get {:path "db"} ctx)))))
+                     (testing "every other raw op stays operator-only for the tenant"
+                       (doseq [[op args] (dissoc raw-ops :vault-get)]
+                         (is (= :vault/operator-only
+                                (err-type #((get *impls* op) (assoc args :path "org/acme/db") ctx)))
+                             (name op))))))))
 
 
 (deftest secret-leaf-is-not-operator-gated

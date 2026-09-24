@@ -8,7 +8,8 @@
   (:require
     [graphden.clients.vault :as vault]
     [graphden.executor.compile-runtime :as cr]
-    [graphden.executor.defbase :refer [defbase]]))
+    [graphden.executor.defbase :refer [defbase]]
+    [graphden.tenancy.context :as tctx]))
 
 
 (defn- require-client!
@@ -35,7 +36,9 @@
    `{:parent :vault-get :args {:path \"other-org/secret\"}}` and read (or
    `:vault-put` overwrite) another org's secret. (The client itself also
    confines a tenant-context op to the org's `org/<org-id>/` prefix —
-   `vault/checked-path` — so this gate is the outer of two layers.)"
+   `vault/checked-path` — so this gate is the outer of two layers.)
+   `:vault-get` alone is opened to a tenant's own prefix
+   (`own-org-or-operator!`) — a bound secret is read through it."
   [op]
   (when (some? cr/*allowed-effects*)
     (throw (ex-info (str "Vault " op " is operator-only — a tenant graph cannot "
@@ -72,9 +75,23 @@
   (vault/delete-secret (require-client! ctx) path))
 
 
+(defn- own-org-or-operator!
+  "The `:vault-get` gate — the secret RESOLVER every secret binding runs
+   through, so a tenant's bound secret must be readable in its own
+   restricted execution. A restricted execution passes only with a TENANT
+   org in scope: the client then confines the path to that org's
+   `org/<org-id>/` prefix (`:vault/path-forbidden` 403 outside it). A
+   restricted execution on the platform tier would get the unconfined
+   client, so it stays refused like the other raw ops. Unrestricted
+   (operator / self-host) execution is unchanged."
+  [op]
+  (when (tctx/current-platform-tier?)
+    (operator-only! op)))
+
+
 (defbase vault-get
   [path]
-  (operator-only! "get")
+  (own-org-or-operator! "get")
   (cr/record-effect! :network)
   (vault/get-secret (require-client! ctx) path))
 

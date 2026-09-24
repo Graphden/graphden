@@ -548,7 +548,7 @@
                                                          :value {:as :pkg-name :type :text}}}}}}}}}
 
   {:name :breaking-changes-between
-   :description "Consumer-visible incompatibilities from one bundle's fn-defs to another's — removed public fn-defs, removed / narrowed / newly-required args, unbound bindings, changed renames or parents, widened returns, added base-fn effects, reshaped type-rows (`graphden.packages.compat`). `[]` = a compatible successor. Pure."
+   :description "Consumer-visible incompatibilities from one bundle's fn-defs to another's — removed public fn-defs, removed / narrowed / newly-required args, unbound bindings, changed renames or parents, widened returns, a grown or dropped `:expects-effects` contract, reshaped type-rows (`graphden.packages.compat`). `[]` = a compatible successor. Pure."
    :args {:old-fns {:type [:list :keyword-map] :description "The previous version's fn-defs."}
           :new-fns {:type [:list :keyword-map] :description "The candidate version's fn-defs."}}
    :return-type [:list :keyword-map]}

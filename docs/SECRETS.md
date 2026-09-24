@@ -596,7 +596,8 @@ So the client (`graphden.clients.vault`) is where isolation lives:
   `:vault/path-forbidden` (403) — whether it came from a create form,
   a rotate, a delete, or a binding whose `:value` was re-pointed
   through the generic entity API. The platform tier (operator
-  requests, the tombstone GC) is unrestricted. A single-tenant
+  requests) is unrestricted; the tombstone GC deletes each path in
+  its owning org's scope (below). A single-tenant
   self-host runs entirely on the platform tier, so its paths are
   unchanged.
 
@@ -611,24 +612,33 @@ So the client (`graphden.clients.vault`) is where isolation lives:
   `:network`, so it needs a plan whose effect set carries it
   ([PLANS.md](PLANS.md)) — the same plans that have a sink (`:http-get`,
   `:sql-exec`) for a secret to go to. `:vault-put` / `:vault-delete` /
-  the metadata ops stay operator-only.
+  the metadata ops stay operator-only. A tenant SERVICE's `:http-server`
+  handles each request on an http-kit worker thread; the server
+  re-establishes the starting execution's conveyed bindings (org +
+  effect gate, `cr/capture-conveyed-bindings`, as `:future` does) per
+  request, so a handler's `:vault-get` is confined the same way.
 
-Secrets a tenant created BEFORE the prefix (stored at a bare path)
-are moved at boot by an idempotent migration
-(`graphden.crud.secret-org-prefix/migrate!`, init-key
-`:vault/tenant-path-migration`, run on the raw pool before the compiled
-registry is built; it logs `{:rows :paths :conflicts :failed}`). For
-every `:vault-get` resolver binding row — identity and per-branch
-version rows — whose org is a tenant and whose path is bare, it copies
-every live KV v2 version plus `custom_metadata` to
-`org/<org-id>/<path>`, stamping `graphden-migrated-from` on the target
-LAST; deletes the bare path once every row reading it is such a tenant
-row with a marked copy (a platform binding on the same path keeps it);
-then re-points the rows. A crash anywhere is finished by the next boot:
-a marked target skips the copy, an unmarked target nobody references is
-a half-finished copy and is redone, and an unmarked target another
-binding already reads is logged as a conflict and left for an operator.
-Platform-tier bindings are never touched.
+- **Writing a path** — a tenant can only STORE a path it could read: a
+  write of a binding whose resolver is (or inherits from) a vault
+  base-fn taking a KV path (`:admin-only-vault`, bar `:secret-leaf`) is
+  refused unless its `:value` is in normal form (no leading `/`) and
+  under the tenant's own
+  `org/<org-id>/` prefix (`vault/stored-path-rejection`, 403
+  `:vault/path-forbidden` / 400 `:vault/invalid-path`). Every write
+  route runs it: the entity guard `crud.validation/write-rej`
+  (`POST`/`PUT /api/entities`, the inline secret flows, a `{:value}`-only
+  PUT re-pointing a secret binding) and the bundle sync
+  (`packages.sync/records-vault-path-rej` — MCP `upsert-fn-defs`, a
+  registry install / fork / import). The runtime check alone was not
+  enough: the stored path is also read by code that does NOT run in
+  the tenant's scope (the vault reclaim below).
+
+There is no migration of bare-path tenant secrets: none exist on the
+cloud (the one-off boot migration that ran on 2026-09-24 found
+`{:rows 0 :paths 0}` and was removed — as written it copied whatever
+path a tenant binding named into the tenant's prefix with the
+platform token, and could delete the source), and a self-host has no
+tenants.
 
 The slot's type reaches the registry through
 `crud.value-form/resolve-slot-effective-type`, whose tier 3 is
@@ -660,11 +670,17 @@ may still read the path. The value is reclaimed by the tombstone GC
 it is about to purge, `secret-paths-of` collects the vault paths of
 the binding (or of a purged fn's bindings) that carry a resolver, and
 `sweep-orphan-secrets!` deletes each path no other binding version
-still references (`path-still-referenced?`). Without a vault client
-the paths are logged for manual cleanup. **Deleting a branch** reclaims
+still references (`path-still-referenced?`, which matches every
+spelling of the path — `/db/pw` and `db/pw` are one vault secret).
+The GC runs on a platform thread with the unconfined client, so each
+path is collected WITH the org owning its binding and deleted under
+`tctx/with-org` for that org (`delete-orphan!`): the client's prefix
+check then refuses a tenant row naming another org's path or a
+platform path; a platform-owned row keeps platform scope. Without a
+vault client the paths are logged for manual cleanup. **Deleting a branch** reclaims
 the same way, at once: `vs/delete-branch!` hands its deleted binding
 versions to the caller after the commit, and the `:delete-branch!`
-base-fn sweeps their paths. The three helpers live in `crud.secrets`.
+base-fn sweeps their paths in the deleted branch's org scope. The three helpers live in `crud.secrets`.
 
 Verified end-to-end:
 

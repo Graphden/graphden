@@ -139,9 +139,11 @@ the vault client confines every tenant-context op to the org's own
 In a tenant's restricted execution `:vault-get` — the resolver a secret
 binding reads through — is the one vault base-fn allowed, and only with
 a tenant org in scope (so the client's prefix check applies); the raw
-write / delete / metadata ops stay operator-only. Secrets stored at a
-bare path before the prefix are moved under it by a boot migration.
-See [SECRETS.md](SECRETS.md).
+write / delete / metadata ops stay operator-only. A tenant cannot even
+STORE a secret binding naming a path outside its prefix (every write
+route refuses it), and the tombstone GC's vault reclaim — a platform
+thread — deletes each path under the org owning its binding, so the
+client's prefix check applies there too. See [SECRETS.md](SECRETS.md).
 
 ## API-token scopes (least privilege for MCP / CLI)
 

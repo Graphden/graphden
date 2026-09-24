@@ -173,7 +173,7 @@
     :swap :sync-fn-defs-branch! :system-property :take :tenancy-active?
     :platform-owned-def-names
     ;; bool answers over the def's identity / the row's role — no content.
-    :platform-owned-def? :slot-shaped-type-row? :fn-impl-visible?
+    :platform-owned-def? :slot-shaped-type-row? :fn-impl-visible? :self-approval-allowed?
     :thread-count
     :throw :throwable-class-name :throwable-message :to-json-pretty :to-json-string
     :to-set :to-str :total-memory :transduce :try :try-apply-create

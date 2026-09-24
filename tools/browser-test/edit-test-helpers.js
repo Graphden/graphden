@@ -798,6 +798,54 @@ async function deleteOrThrow(path, name) {
 }
 
 
+// Delete the test's branches, in the order given (merge TARGETS and children
+// before the branches they merged from / fork off), and say so when one stays.
+//
+// `api()` never throws, so the old `try { DELETE } catch {}` cleanups swallowed
+// every refusal — and a merged branch is REFUSED by design while its target
+// lives (merge is by-reference: deleting the source would revert the target;
+// `:constraint-violation/branch-is-merge-source`), as is a branch with
+// children. Four files left ten branches in every gate run that way, invisibly.
+// Tests that merge now merge into a throwaway TARGET they delete first. The
+// one shape that cannot be undone — a proposal merged into its own base (the
+// source is a child of its target, so each blocks the other's delete) — is
+// what the branch ARCHIVE exists for: pass `{archive: [names]}` and those are
+// folded into the popover's "Merged" group instead (the runner's leak check
+// counts only un-archived branches). Anything else that stays is printed as a
+// cleanup failure and returned.
+async function deleteBranches(names, opts = {}) {
+  const archiveOk = new Set(opts.archive || []);
+  let rows = [];
+  try {
+    rows = (await nodeApiJson('GET', '/api/branches')).branches || [];
+  } catch (e) {
+    process.stderr.write('  ! branch cleanup: could not list branches — ' + e.message + '\n');
+    return names.slice();
+  }
+  const left = [];
+  for (const name of names) {
+    const row = rows.find((r) => r.name === name);
+    if (!row) continue;   // never created, or already gone
+    // By ID: a name with "/" cannot ride the path segment.
+    const path = '/api/branches/' + encodeURIComponent(row.id);
+    const r = await api(null, 'DELETE', path).catch((e) => ({error: e.message}));
+    if (r && r.ok === true) continue;
+    const why = String((r && (r.error || r.reason || r.body)) || JSON.stringify(r)).slice(0, 160);
+    if (archiveOk.has(name)) {
+      const a = await api(null, 'POST', path + '/archive', {archived: true})
+        .catch((e) => ({error: e.message}));
+      if (a && a.ok === true) {
+        console.log('  (branch ' + name + ' archived — undeletable by design: ' + why + ')');
+        continue;
+      }
+    }
+    process.stderr.write('  ! cleanup: branch ' + name + ' NOT deleted — ' + why + '\n');
+    left.push(name);
+  }
+  return left;
+}
+
+
 // Redesign 2026-08: the ops/admin panels (packages, stats, errors, type-
 // errors, apps, grants, users) moved OUT of the explorer onto the
 // Organization surface (#gd-operate), reached through the account chip's
@@ -832,4 +880,4 @@ async function clickWhenHtmxReady(page, pick, arg, timeout = 15000) {
 module.exports = { assert, deepEqual, newContext, api, getEntities, clickWhenHtmxReady,
                    nodeApi, nodeApiJson, openBranchPopover, openOperate,
                    synthArgs, waitFor, waitForServerHealthy,
-                   deleteFnByName, AUTH, BASE };
+                   deleteFnByName, deleteBranches, AUTH, BASE };

@@ -12,7 +12,7 @@
 
 const {chromium} = require('playwright');
 const {assert, newContext, nodeApi} = require('./edit-test-helpers');
-const {waitTourTitle, clickTourButton, finishAndDelete} = require('./tutorial-tour-helpers');
+const {waitTourTitle, clickTourButton, finishAndDelete, tourWhere} = require('./tutorial-tour-helpers');
 
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
@@ -103,6 +103,7 @@ const {waitTourTitle, clickTourButton, finishAndDelete} = require('./tutorial-to
   } catch (e) {
     failed = true;
     console.error('FAIL edit-tutorial-tour-market:', e);
+    console.error('  tour at failure:', await tourWhere(page));
   } finally {
     await browser.close();
     await nodeApi('PUT', '/api/prefs/theme', {value: null}).catch(() => {});

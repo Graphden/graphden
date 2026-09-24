@@ -112,6 +112,11 @@
  ;;   packages.export-test     77 s
  ;;   everything else         <=31 s
  ;;
+ ;; (2026-09-24: both are split so neither bounds the wall alone — registry
+ ;; into registry-publish-test + registry-install-test over one golden set,
+ ;; export into a pure no-DB export-test + a 3-test export-graph-test that
+ ;; builds the whole-graph export once.)
+ ;;
  ;; So: work aimed at making this suite faster only pays inside those two.
  ;; The tempting target — the handful of namespaces whose fixture dwarfs their
  ;; assertions (7.4 s of setup for 0.5 s of checks, and five like it) — is a

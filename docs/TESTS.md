@@ -226,6 +226,48 @@ questions (`bb coverage` docstring + `feedback_coverage_measurement`):
   per editor module (comment/blank lines excluded, like cloverage's
   line %). Snapshot — see `docs/TESTS_JS_COVERAGE.md`.
 
+## The editor e2e suite at the gate
+
+`tools/browser-test/run-edit-tests.sh` runs every `edit-*.test.js`
+against a live editor; the landing gate runs it through `bb test-e2e`
+with `WTQ_FLAKE_STRICT=1`. What strict mode turns red, and what it
+forgives:
+
+- **A file that passes only on a retry** is a real flake — red — unless
+  its failure carried an environment signature at the moment it
+  happened: the compiled-path probe was dead (a server unavailability
+  window), the registry did a FULL rebuild during the attempt
+  (`registry/invalidate-full` / `registry/rebuild` moved on `/metrics`),
+  or the host was starved (`MemAvailable` under `HOST_MEM_MIN_MB`, load
+  over `HOST_LOAD_PER_CPU` per CPU). A wait **timeout** is not such a
+  signature on its own: a UI race fails exactly as a timeout, and the
+  old "every timeout is the environment" rule turned strict mode off for
+  races.
+- **The run is DEGRADED** — every strict flake/leak verdict drops to
+  report-only — when at least `THRASH_MIN_FILES` (3) files ran slow
+  against their **own** baseline, or `THRASH_MIN_FLAKED` (2) different
+  files needed a retry. Slow = the passing attempt took more than
+  `SLOW_FACTOR` (2.5) × the file's median in
+  `tools/browser-test/e2e-baseline.tsv` and at least `SLOW_MIN_EXTRA`
+  (30) s over it; a file with no baseline yet falls back to the
+  absolute `THRASH_FILE_SECS` (150 s). The old rule — any three files
+  over 150 s — fired on every healthy run once three lesson walks grew
+  past it, and strict mode silently reported nothing for weeks.
+  Refresh the baseline from green gate logs after a change that moves a
+  file's duration for good:
+  `node e2e-baseline.js <gate logs> > e2e-baseline.tsv`.
+- **Leaks** are counted per file as fns + namespaces + **un-archived
+  branches** the file left behind. A test cleans its branches with
+  `deleteBranches` (`edit-test-helpers.js`), which deletes merge targets
+  before their sources, archives the one shape that can never be
+  deleted (a proposal merged into its own base), and prints anything
+  that stays.
+
+Per-file bookkeeping is kept cheap on purpose — one `scope=index` read
+per sample for both counts, executor memory from its cgroup — and the
+lesson walks settle each spotlight ring on the audit's recorded key
+rather than a fixed sleep; see the runner's header.
+
 ## Known limitations
 
 - An unbound free arg blocks the run UNLESS its slot's DECLARED type

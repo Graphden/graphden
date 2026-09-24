@@ -45,42 +45,13 @@
     @v))
 
 
-(def ^:private return-rules
-  (let [c 'graphden.packages.core.collections.impls
-        a 'graphden.packages.core.arithmetic.impls
-        l 'graphden.packages.core.logic.impls
-        s 'graphden.packages.core.system.impls]
-    {:assoc     (rule c 'assoc-return-rule)
-     :dissoc    (rule c 'dissoc-return-rule)
-     :get       (rule c 'get-return-rule)
-     :merge     (rule c 'merge-return-rule)
-     :update-in (rule c 'update-in-return-rule)
-     :keys      (rule c 'keys-return-rule)
-     :vals      (rule c 'vals-return-rule)
-     :concat    (rule c 'concat-return-rule)
-     :list      (rule c 'list-return-rule)
-     :conj      (rule c 'conj-return-rule)
-     :into      (rule c 'into-return-rule)
-     :assoc-in  (rule c 'assoc-in-return-rule)
-     :get-in    (rule c 'get-in-return-rule)
-     :add       (rule a 'add-return-rule)
-     :sub       (rule a 'sub-return-rule)
-     :mul       (rule a 'mul-return-rule)
-     :mod       (rule a 'mod-return-rule)
-     :neg       (rule a 'neg-return-rule)
-     :abs       (rule a 'abs-return-rule)
-     :invoke    (rule s 'invoke-return-rule)
-     :cond      (rule l 'cond-return-rule)
-     :case      (rule l 'case-return-rule)
-     :coalesce  (rule l 'coalesce-return-rule)}))
-
-
 (def ^:private signature-entries
   "Declared signatures for base-fns whose hand rules were DELETED in
    favour of the checker's declared-signature fallback — the shim
-   routes them through `check/signature-return` so the old per-rule
-   assertions now exercise the engine against the same declarations
-   the loader records (mirrored from core fns.edn)."
+   routes them through `check/signature-return` on the loaded registry
+   entry. Pinned here (mirrored from core fns.edn) so a changed
+   declaration shows up as a failing drift guard, not as silently
+   different assertions."
   {:first    {:return [:union :null 'a] :args {:coll [:list 'a]}}
    :rest     {:return [:list 'a] :args {:coll [:list 'a]}}
    :cons     {:return [:list 'a] :args {:item 'a :coll [:list 'a]}}
@@ -112,32 +83,34 @@
 
 
 (defn- compute-return-type
-  "Test shim — dispatch a return-type rule by base-fn name, mirroring
-   the registry lookup the type-checker does at runtime: hand rule
-   first, declared-signature fallback second, `default-ret` through
-   otherwise."
+  "Dispatch a return-type rule by base-fn name through the PRODUCTION
+   wiring: the `:return-type-rule` the loader recorded on the base-fn's
+   rich-types registry entry (from its impls.clj registration map), else
+   the checker's declared-signature fallback, else `default-ret` —
+   the same order `graphden.types.check` uses. No hand-kept name→rule
+   table: a rule wired onto the wrong base-fn fails here."
   [base-fn-name bindings-info default-ret]
-  (if-let [r (return-rules base-fn-name)]
-    (r bindings-info default-ret)
-    (if-let [entry (signature-entries base-fn-name)]
-      (check/signature-return entry bindings-info default-ret)
-      default-ret)))
+  (let [entry (registry/rich-type-of base-fn-name)]
+    (if-let [r (:return-type-rule entry)]
+      (r bindings-info default-ret)
+      (check/signature-return entry bindings-info default-ret))))
+
+
+(defn- registry-rule
+  "The `rule-key` rule recorded on `base-fn-name`'s registry entry, or
+   a rule that narrows nothing (`{}`) when none is declared."
+  [rule-key base-fn-name]
+  (or (rule-key (registry/rich-type-of base-fn-name)) (constantly {})))
 
 
 (defn- compute-slot-types
   [base-fn-name bindings-info]
-  (if (= :update-in base-fn-name)
-    ((rule 'graphden.packages.core.collections.impls 'update-in-slot-rule)
-     bindings-info)
-    {}))
+  ((registry-rule :slot-types-rule base-fn-name) bindings-info))
 
 
 (defn- compute-nav-types
   [base-fn-name bindings-info]
-  (if (= :update-in base-fn-name)
-    ((rule 'graphden.packages.core.collections.impls 'update-in-nav-rule)
-     bindings-info)
-    {}))
+  ((registry-rule :nav-types-rule base-fn-name) bindings-info))
 
 
 ;; -----------------------------------------------------------------------------

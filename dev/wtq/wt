@@ -89,6 +89,10 @@ SOON_DIR="$WTQ_DIR/soon"         # "I will enqueue within N minutes" markers
 BISECT_DIR="$WTQ_DIR/bisect"     # per red-train bisection budget
 STATE_LOCK="$WTQ_DIR/state.lock" # short-lived lock over queue/, soon/, bisect/, results/
 TRAIN_FILE="$WTQ_DIR/train"      # the train currently being gated (id, members, log)
+LINT_LOCK="$WTQ_DIR/lint.lock"   # one pre-queue lint at a time (see cmd_merge)
+LINT_HOLDER="$WTQ_DIR/lint.holder"
+E2E_RUNS_DIR="$WTQ_DIR/e2e-runs" # the e2e output of the last green gates (rolling baseline)
+E2E_BASELINE_LOCAL="$WTQ_DIR/e2e-baseline.tsv"
 mkdir -p "$LOG_DIR" "$TASKS_DIR" "$RESULT_DIR" "$QUEUE_DIR" "$SOON_DIR" "$BISECT_DIR"
 
 TARGET="${WTQ_TARGET:-develop}"
@@ -517,7 +521,16 @@ cmd_ack() {
   echo
   printf '%s\n' "$tip" > "$(ack_file "$name")"
   ok "✓ acknowledged $TARGET@${tip:0:8}"
-  say "  Re-read anything above that changes what you are doing, then: ${BLD}bb wt merge${RST}"
+  local armed=""
+  state_lock
+  if [ "$(qget "$name" needs_ack)" = 1 ]; then qset "$name" needs_ack ""; armed=1; fi
+  state_unlock
+  if [ -n "$armed" ]; then
+    say "  Your queued entry is re-armed at its place — its waiting 'wt merge' carries on (no re-lint)."
+    say "  If what you just read changes your work, commit and re-run ${BLD}bb wt merge${RST} instead."
+  else
+    say "  Re-read anything above that changes what you are doing, then: ${BLD}bb wt merge${RST}"
+  fi
 }
 
 # What is on this machine that should not be? A killed test run leaves its JVM
@@ -812,6 +825,15 @@ cmd_list() {
     printf '%s\n' "$soon" | grep -q "^$nm " && dirty="${dirty:+$dirty }soon"
     printf '%-20s %-24s %-12s %-20s %b\n' "$nm" "$br" "$ab" "$result" "$dirty"
   done
+  # The stash is ONE list for every worktree of the repo: an agent's
+  # `git stash pop` takes whatever is on top — possibly another agent's work
+  # (2026-09-23). AGENT.md forbids stashing; any entry here is a hazard.
+  local stashes; stashes="$(git -C "$MAIN_WT" stash list 2>/dev/null || true)"
+  if [ -n "$stashes" ]; then
+    echo
+    warn "git stash is SHARED by every worktree — never stash (AGENT.md); pop only what you can name as yours:"
+    printf '%s\n' "$stashes" | sed 's/^/    /'
+  fi
 }
 
 # =====================================================================
@@ -972,13 +994,17 @@ cmd_drop() {
 #     alone (`git merge-tree`) is a CONFLICT the author resolves.
 #   - A branch that changes a GOVERNANCE path travels ALONE. Its siblings could
 #     not have read rules that land in the same fast-forward; alone, the next
-#     train's drift check bounces them to `wt ack` exactly as the serial queue
-#     did.
+#     train's drift check marks them NEEDS-ACK: skipped, but kept in their
+#     queue place with their waiters waiting, until `wt ack` re-arms them (the
+#     lint stamp for the sha still holds — no re-lint, no re-queue).
 #   - An entry whose waiter died (kill -9, a lost terminal) is pruned, not
 #     landed — like the old blocking flock, where a dead waiter simply left the
 #     queue. Members already mid-bisection are kept: their verdict is owed.
 #   - `wt soon` lets an agent that is minutes from done ask the next train to
 #     wait for it (<= 15 min in total), instead of paying a train of its own.
+#   - develop moving UNDER a gate (an outside push fast-forwarded in by `wt
+#     new` / `claim` / refresh_target) is nobody's verdict: the members are
+#     re-queued and ride a train on the new tip, never FAILed or bisected.
 #
 # Verdicts in results/<name>: VERDICT<TAB>rc<TAB>branch<TAB>sha<TAB>train<TAB>detail
 #   final: GREEN 0, FAIL 1, CONFLICT 2, PRECOND 3, LANDED_STALE 4, STALE 5
@@ -993,6 +1019,8 @@ cmd_drop() {
 CANONICAL_IMAGE="graphden-executor:latest"
 CANDIDATE_IMAGE="graphden-executor:candidate"
 
+# gate_body's "not a verdict" exit: $TARGET moved under the gate, re-queue.
+RC_TARGET_MOVED=6
 FINAL_VERDICTS=" GREEN FAIL CONFLICT PRECOND STALE LANDED_STALE "
 is_final() { case "$FINAL_VERDICTS" in *" $1 "*) return 0 ;; esac; return 1; }
 verdict_rc() {
@@ -1086,6 +1114,7 @@ queue_state() {
   [ -f "$f" ] || return 0
   if [ "$(qget "$n" state)" = train ]; then echo "IN-TRAIN"
   elif [ -n "$(qget "$n" seg)" ]; then echo "SPLITTING"
+  elif [ "$(qget "$n" needs_ack)" = 1 ]; then echo "NEEDS-ACK"
   else echo "QUEUED"; fi
 }
 
@@ -1162,7 +1191,8 @@ start_sampler() {
       mem="$(free -m | awk '/^Mem:/{printf "%s,%s",$3,$7}')"
       swap="$(free -m | awk '/^Swap:/{print $3}')"
       ctr="$(docker ps -q 2>/dev/null | wc -l)"
-      jvm="$(pgrep -c java 2>/dev/null || echo 0)"
+      # pgrep -c prints 0 AND exits 1 on no match — `|| echo 0` made that "0\n0".
+      jvm="$(pgrep -c java 2>/dev/null)" || true
       printf '%s,%s,%s,%s,%s,%s\n' "$(date +%H:%M:%S)" "$load" "$mem" "$swap" "$ctr" "$jvm"
       sleep 5
     done
@@ -1275,7 +1305,7 @@ gate_suites() {
     #   reds (you can't land what didn't pass); the banner then says to free
     #   RAM and re-run on a quiet host. Real races reproduce on a healthy host
     #   (DEGRADED=0), where strict stays on.
-    ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" WTQ_FLAKE_STRICT=1 bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
+    ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" WTQ_FLAKE_STRICT=1 E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
   fi
 
   # Visual goes here — after e2e, before integration. It is ~2.5 min against
@@ -1397,7 +1427,7 @@ gate_body() {
   [ -z "$(git -C "$wt" status --porcelain)" ] || { echo "ABORT: train worktree dirty after assembly."; return 3; }
   [ -z "$(git -C "$MAIN_WT" status --porcelain --untracked-files=no)" ] || { echo "ABORT: main worktree ($MAIN_WT) has uncommitted TRACKED changes — it must stay clean on $TARGET."; return 3; }
   git -C "$wt" merge-base --is-ancestor "$TARGET" HEAD \
-    || { echo "ABORT: $TARGET moved after the train was assembled — it no longer sits on top of it."; return 3; }
+    || { echo "REQUEUE: $TARGET moved after the train was assembled — it no longer sits on top of it."; return "$RC_TARGET_MOVED"; }
 
   if [ -n "$stub" ]; then
     step "TEST STUB instead of the suites: $stub"
@@ -1418,7 +1448,20 @@ gate_body() {
   local land_before land_want land_after
   land_before="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
   land_want="$(git -C "$wt" rev-parse HEAD)"
-  git -C "$MAIN_WT" merge --ff-only "refs/heads/$branch" || { echo "FAIL: could not ff $TARGET (did it move? it shouldn't have)"; return 1; }
+  # A failed ff is never the members' code — the suites already passed. Return
+  # 1 here and a lone member would get FAIL (a train would be bisected) for a
+  # commit somebody else put on $TARGET. The usual cause: $TARGET moved under
+  # the gate — `wt new` / `claim` / refresh_target fast-forward the local
+  # $TARGET to origin after an outside push, outside the queue lock. That is
+  # a re-queue: the next train assembles on the new tip.
+  if ! git -C "$MAIN_WT" merge --ff-only "refs/heads/$branch"; then
+    if ! git -C "$MAIN_WT" merge-base --is-ancestor "$TARGET" "$land_want"; then
+      echo "REQUEUE: $TARGET moved during the gate ($(git -C "$MAIN_WT" rev-parse --short "$land_before") -> $(git -C "$MAIN_WT" rev-parse --short "$TARGET")) — the train no longer sits on it"
+      return "$RC_TARGET_MOVED"
+    fi
+    echo "ABORT: could not ff $TARGET to the validated tip although it is an ancestor — environment (index lock? checkout?), not code"
+    return 3
+  fi
   land_after="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
   [ "$land_after" = "$land_want" ]       || { echo "FAIL(false-green guard): $TARGET is $land_after but the tested tip was $land_want — develop did NOT advance to the validated build"; return 1; }
   [ "$land_after" != "$land_before" ]       || { echo "FAIL(false-green guard): $TARGET unchanged ($land_before) — the ff was a no-op, nothing landed"; return 1; }
@@ -1583,6 +1626,12 @@ select_train() {
   governance_paths
   for n in $(names_in_seg ""); do
     [ "${#SEL[@]}" -lt "$TRAIN_MAX" ] || break
+    # NEEDS-ACK: its author has not seen a rule change develop made. It keeps
+    # its place and is skipped until `wt ack` (re-checked on every selection).
+    if [ -n "$(governance_drift "$n" "$(qget "$n" branch)")" ]; then
+      qset "$n" needs_ack 1; continue
+    fi
+    [ -z "$(qget "$n" needs_ack)" ] || qset "$n" needs_ack ""
     # A branch that changes the rules travels alone (see the header).
     if [ -n "$(git -C "$MAIN_WT" diff --name-only "$TARGET...$(qget "$n" sha)" -- "${GOV_PATHS[@]}" 2>/dev/null)" ]; then
       if [ "${#SEL[@]}" -eq 0 ]; then SEL=("$n"); fi
@@ -1668,8 +1717,9 @@ train_run() {
     if [ -n "$drift" ]; then
       echo "  $m: $TARGET changed the rules you operate under, and you have not seen them:"
       printf '%s\n' "$drift" | sed 's/^/      /'
-      echo "    Read them, then:  bb wt ack   &&   bb wt merge"
-      decide "$m" PRECOND "$ts" "unacknowledged rule change — run 'bb wt ack', then 'bb wt merge'"; continue
+      echo "    It keeps its place in the queue as NEEDS-ACK; read them with:  bb wt ack"
+      state_lock; qset "$m" needs_ack 1; qset "$m" seg ""; qset "$m" state queued; state_unlock
+      continue
     fi
     if [ "$(cat "$LINT_OK_DIR/$m" 2>/dev/null)" != "${M_SHA[$m]}" ]; then
       decide "$m" PRECOND "$ts" "no green 'bb lint' stamp for the queued sha — re-run 'bb wt merge' (it lints first)"; continue
@@ -1745,6 +1795,7 @@ train_run() {
 
   # 4. Verdicts.
   local why; why="$(grep -E '^(FAIL|ABORT)' "$gate_out" | tail -n1 || true)"; why="${why:-gate red}"
+  [ "$grc" = 0 ] && record_e2e_baseline "$gate_out" "$ts"
   rm -f "$gate_out"
   echo; echo ">>> verdicts"
   local landed; landed="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
@@ -1763,6 +1814,15 @@ train_run() {
     4)
       for m in "${gated[@]}"; do decide "$m" LANDED_STALE "$ts" "landed in $TARGET@${landed:0:8}, but a post-land step failed — see the train log"; done
       return 20 ;;
+    "$RC_TARGET_MOVED")
+      # Nobody's verdict: $TARGET moved under the gate. Everyone goes back to
+      # the queue, keeping their place (and bisection segment, if any); the
+      # conductor refreshes $TARGET and assembles the next train on it.
+      echo "  ↻ $TARGET moved under the gate — re-queueing [ ${gated[*]} ] for a train on the new tip"
+      state_lock
+      for m in "${gated[@]}"; do qset "$m" state queued; done
+      state_unlock
+      return 0 ;;
     2|3)
       echo "!!! the gate refused the ASSEMBLED train (rc $grc) — that is an environment or tooling"
       echo "!!! problem, not any member's code. Every member gets it; fix the host, then re-run."
@@ -1795,6 +1855,36 @@ train_run() {
   return 0
 }
 
+# --- the rolling e2e baseline --------------------------------------------------
+# run-edit-tests.sh judges each file's duration against ITS OWN baseline
+# (tools/browser-test/e2e-baseline.tsv, refreshed by hand). A new or split file
+# has none until someone refreshes it, and meanwhile is judged against a flat
+# limit. So every GREEN gate that ran e2e keeps its e2e output here (newest
+# $E2E_RUNS_KEEP), and the per-file medians over them go to
+# .git/wtq/e2e-baseline.tsv, which the runner reads OVER the tracked file. The
+# gate never commits: the tracked file stays the reviewed default, this is the
+# machine's own fresher view. A DEGRADED run (the host starved the stack) is
+# not kept — its durations would raise every limit.
+E2E_RUNS_KEEP="$(int_or "${WTQ_E2E_RUNS_KEEP:-}" 9)"
+record_e2e_baseline() {   # <gate output> <train ts>
+  local out="$1" ts="$2" script="$MAIN_WT/tools/browser-test/e2e-baseline.js"
+  grep -q '^─── edit-.*\.test\.js ───' "$out" 2>/dev/null || return 0
+  if grep -q 'ENVIRONMENT DEGRADED' "$out"; then
+    echo "(e2e baseline: this run was DEGRADED — not recorded)"; return 0
+  fi
+  [ -f "$script" ] || return 0
+  mkdir -p "$E2E_RUNS_DIR"
+  cp "$out" "$E2E_RUNS_DIR/$ts.log"
+  # shellcheck disable=SC2012  # names are our own <ts>.log, sortable
+  ls -1t "$E2E_RUNS_DIR"/*.log | tail -n +"$((E2E_RUNS_KEEP + 1))" | xargs -r rm -f
+  if node "$script" "$E2E_RUNS_DIR"/*.log > "$E2E_BASELINE_LOCAL.tmp" 2>/dev/null; then
+    mv -f "$E2E_BASELINE_LOCAL.tmp" "$E2E_BASELINE_LOCAL"
+    echo "(e2e baseline: medians over $(find "$E2E_RUNS_DIR" -name '*.log' | wc -l) green run(s) -> $E2E_BASELINE_LOCAL)"
+  else
+    rm -f "$E2E_BASELINE_LOCAL.tmp"
+  fi
+}
+
 # --- the conductor -----------------------------------------------------------
 # Runs while holding the gate lock. Keeps running trains while its own entry is
 # undecided or a bisection is in progress; everything else waits for its own
@@ -1817,6 +1907,7 @@ conduct() {
   while [ "$guard" -lt 100 ]; do
     guard=$((guard + 1))
     conductor_has_work "$own" "$own_sha" || return 0
+    yield_to_lint
     wait_for_headroom
     refresh_target
     rc=0; train_cycle || rc=$?
@@ -1827,6 +1918,22 @@ conduct() {
     esac
   done
   warn "conductor: 100 trains in one hold — stopping as a safety net (this is a bug; report it)"
+}
+
+# A pre-queue lint yields to the gate's heavy phases (yield_to_gate) — and with
+# trains back to back the heavy phases never end: the gap between two trains is
+# seconds, and a lint polling every 15 s starved for over an hour (2026-09-24),
+# holding the lint lock, so every agent behind it starved too. So between
+# trains the gate yields back: if a lint holds the lock (it may be waiting for
+# exactly this gap), the next train waits until it is done — at most
+# WTQ_GATE_LINT_WAIT seconds (default 900), then starts anyway.
+yield_to_lint() {
+  local cap; cap="$(int_or "${WTQ_GATE_LINT_WAIT:-}" 900)"
+  # Free lock = no lint running (a killed lint can leave its holder line behind).
+  flock -n "$LINT_LOCK" true 2>/dev/null && return 0
+  info "between trains: letting the pre-queue lint of $(cat "$LINT_HOLDER") finish first (at most ${cap}s) ..."
+  flock -w "$cap" "$LINT_LOCK" true \
+    || warn "that lint is still running after ${cap}s — starting the train anyway"
 }
 
 # The per-check timeouts are ceilings measured on an idle box; starting the
@@ -1923,6 +2030,35 @@ waiter_abort() {
   state_unlock
 }
 
+# The pre-queue lint, ONE AT A TIME for every worktree of the repo. Several
+# agents running `wt merge` together used to lint side by side (load 40-80),
+# and their checks timed each other out or lost a child's stream — PRECOND for
+# code that was fine (one agent needed five attempts, 2026-09-24). Waiting a
+# few minutes for another lint is cheaper than that. `--retry-solo` then
+# re-runs a check that still went red once alone before it counts (the report
+# says which, and prints the first attempt).
+LINT_CMD="${WTQ_LINT_CMD:-bb lint --retry-solo}"
+lint_serialized() {   # <worktree> <name> <sha>
+  local wt="$1" name="$2" sha="$3"
+  (
+    exec 8>"$LINT_LOCK"
+    if ! flock -n 8; then
+      warn "lint: another pre-queue lint is running ($(cat "$LINT_HOLDER" 2>/dev/null || echo '?')) — waiting for it; side by side they time each other out ..."
+      flock 8
+    fi
+    printf '%s @ %s (pid %s) since %s' "$name" "${sha:0:8}" "$BASHPID" "$(date +%H:%M:%S)" > "$LINT_HOLDER"
+    yield_to_gate "lint"
+    info "lint: running '$LINT_CMD' at ${sha:0:8} before queueing ..."
+    local rc=0
+    # 8>&-: the lint must not inherit the lock — an orphan it leaves behind
+    # would hold every other agent's lint hostage.
+    # shellcheck disable=SC2086  # a command line, split on purpose
+    ( cd "$wt" && exec $LINT_CMD 8>&- ) || rc=$?
+    : > "$LINT_HOLDER"
+    exit "$rc"
+  )
+}
+
 lint_refused() {   # <name> <branch> <sha> <why> — PRECOND, never queued
   state_lock; write_result "$1" PRECOND "$2" "$3" "" "not queued: $4"; state_unlock
   warn "↩ NOT queued: $4"
@@ -1965,12 +2101,10 @@ cmd_merge() {
     [ -z "$(git -C "$wt" status --porcelain)" ] \
       || { lint_refused "$name" "$branch" "$sha" "worktree dirty — commit first (lint must see exactly the queued commit)"; return 3; }
     bootstrap_node_modules "$wt"
-    yield_to_gate "lint"
-    info "lint: running '${WTQ_LINT_CMD:-bb lint}' at ${sha:0:8} before queueing ..."
     local lrc=0
-    ( cd "$wt" && ${WTQ_LINT_CMD:-bb lint} ) || lrc=$?
+    lint_serialized "$wt" "$name" "$sha" || lrc=$?
     if [ "$lrc" != 0 ]; then
-      lint_refused "$name" "$branch" "$sha" "'${WTQ_LINT_CMD:-bb lint}' is red (output above) — fix, commit, re-run 'bb wt merge'"; return 3
+      lint_refused "$name" "$branch" "$sha" "'$LINT_CMD' is red (output above) — fix, commit, re-run 'bb wt merge'"; return 3
     fi
     if [ "$(git -C "$wt" rev-parse HEAD)" != "$sha" ] || [ -n "$(git -C "$wt" status --porcelain)" ]; then
       lint_refused "$name" "$branch" "$sha" "the worktree changed while lint ran — re-run 'bb wt merge'"; return 3
@@ -1981,6 +2115,10 @@ cmd_merge() {
 
   # Enqueue. A queued merge INVALIDATES the previous verdict: `wt watch` and
   # retry drivers must never report a stale verdict as this run's outcome.
+  # The abort trap goes up BEFORE the entry exists: a kill landing between the
+  # two would otherwise leave an entry nobody waits for (waiter_abort only
+  # removes an entry that carries this sha and this pid, so it is safe early).
+  trap 'waiter_abort; exit 130' INT TERM
   state_lock
   local tmp="$QUEUE_DIR/.$name.tmp"
   {
@@ -1992,11 +2130,12 @@ cmd_merge() {
   mv -f "$tmp" "$(qfile "$name")"
   rm -f "$RESULT_DIR/$name" "$SOON_DIR/$name"
   state_unlock
-  trap 'waiter_abort; exit 130' INT TERM
   ok "Queued $branch @ ${sha:0:8} — it rides the next merge train (bb wt list shows the queue)."
 
-  wait_for_headroom
-
+  # No wait_for_headroom here: the conductor waits for headroom before every
+  # train. A waiter looping on memory instead of the loop below never read the
+  # verdict a running train already settled, nor noticed being superseded —
+  # and a running gate alone uses most of the memory floor it waited for.
   local poll="${WTQ_POLL_SECS:-30}" st said=""
   case "$poll" in ''|*[!0-9]*|0) poll=30 ;; esac
   exec 9>"$LOCK"
@@ -2004,6 +2143,14 @@ cmd_merge() {
     st="$(waiter_state "$name" "$sha")"
     if [ "$st" = final ]; then local vrc=0; report_verdict "$name" || vrc=$?; return "$vrc"; fi
     if [ "$st" = gone ]; then warn "the queue entry for $name@${sha:0:8} is gone — superseded by a newer 'wt merge', or removed. Not waiting."; return 1; fi
+    if [ "$(qget "$name" needs_ack)" = 1 ]; then
+      if [ "$said" != needs-ack ]; then
+        said=needs-ack
+        warn "NEEDS-ACK: $TARGET changed the rules you work under and you have not seen them."
+        warn "  Your place in the queue is kept. In this worktree run:  bb wt ack   — then this waiter carries on (no re-lint, no re-queue)."
+      fi
+      sleep "$poll"; continue
+    fi
     if flock -x -w "$poll" 9; then
       st="$(waiter_state "$name" "$sha")"
       if [ "$st" = wait ]; then

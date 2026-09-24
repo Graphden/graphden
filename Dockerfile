@@ -27,17 +27,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # so editing it never invalidates that (expensive) cache.
 LABEL graphden.image="executor"
 
+# Run as a non-root user — trivy AVD-DS-0002 best-practice. The
+# uberjar lives in /app, owned by `graphden`; nothing in the
+# runtime needs root. The user and /app exist BEFORE the jar is copied, and
+# the COPY sets the owner itself: a `chown -R /app` after the COPY rewrites
+# every file it touches into a new layer — a second copy of the whole jar
+# (~33 MB) in every image.
+RUN useradd --system --uid 1001 --user-group --shell /sbin/nologin \
+        --home-dir /nonexistent graphden \
+    && install -d -o graphden -g graphden /app
+
 WORKDIR /app
 
 # Copy pre-built uberjar
-COPY target/executor-server.jar /app/executor-server.jar
-
-# Run as a non-root user — trivy AVD-DS-0002 best-practice. The
-# uberjar lives in /app, owned by `graphden`; nothing in the
-# runtime needs root.
-RUN useradd --system --uid 1001 --user-group --shell /sbin/nologin \
-        --home-dir /nonexistent graphden \
-    && chown -R graphden:graphden /app
+COPY --chown=graphden:graphden target/executor-server.jar /app/executor-server.jar
 USER graphden
 
 # Set default environment variables

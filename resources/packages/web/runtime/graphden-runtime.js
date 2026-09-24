@@ -120,19 +120,26 @@ function bindActionDispatch(host) {
 // Error states render a small placeholder so the popover doesn't
 // stay empty / blow up on transient network failures.
 
+// Supersession guard: two writers into the SAME host must not let the slower
+// response win. Without a token, whichever fetch RESOLVES last writes
+// host.innerHTML — not whichever was CALLED last — so a stale fragment can
+// clobber the fresh one (e.g. fast re-open of a shared popover host). Every
+// writer claims the host first — bumping a per-host generation token — and
+// after every await bails if its claim is no longer current, leaving the
+// newer writer's content untouched. A SYNCHRONOUS writer (a cache hit) must
+// claim too, or an older in-flight load lands over it. Returns the
+// `superseded()` predicate. Mirrors the fn-versions supersession check.
+function claimPartialHost(host) {
+  const gen = (Number(host.dataset.gdPartialGen) || 0) + 1;
+  host.dataset.gdPartialGen = String(gen);
+  return () => String(host.dataset.gdPartialGen) !== String(gen);
+}
+
+
 async function loadPartial(host, url, opts) {
   opts = opts || {};
   if (!host || !url) return;
-  // Supersession guard: two concurrent loadPartial calls into the SAME host
-  // must not let the slower response win. Without a token, whichever fetch
-  // RESOLVES last writes host.innerHTML — not whichever was CALLED last — so a
-  // stale fragment can clobber the fresh one (e.g. fast re-open of a shared
-  // popover host). Each call bumps a per-host generation token; after every
-  // await we bail if this call is no longer the current generation, leaving the
-  // newer call's content untouched. Mirrors the fn-versions supersession check.
-  const gen = (Number(host.dataset.gdPartialGen) || 0) + 1;
-  host.dataset.gdPartialGen = String(gen);
-  const superseded = () => String(host.dataset.gdPartialGen) !== String(gen);
+  const superseded = claimPartialHost(host);
   host.textContent = '';
   const loading = document.createElement('span');
   loading.className = opts.loadingClass || 'partial-loading';

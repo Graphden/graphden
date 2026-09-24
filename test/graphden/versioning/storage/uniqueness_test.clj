@@ -11,6 +11,7 @@
    ACQUISITION itself needs real SQL and is not unit-testable here)."
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.resolution :as res]
     [graphden.versioning.storage.uniqueness :as uniq]))
@@ -481,6 +482,22 @@
     (testing "keys are per branch and entity"
       (is (not= (uniq/row-lock-keys "b1" :fn [(first ids)])
                 (uniq/row-lock-keys "b2" :fn [(first ids)]))))))
+
+
+(deftest xact-lock-takes-a-bounded-number-of-locks-test
+  ;; A transaction holding one lock per key ran a managed Postgres out of
+  ;; its lock table on the boot sync of ~6000 fns (prod, 2026-09-24).
+  (let [issued (atom nil)
+        ks (map #(str "fn|ns|name-" %) (range 6000))]
+    (binding [util/*jdbc-override*
+              {:execute! (fn [_ [_sql arr] _opts] (reset! issued (vec arr)) [])}]
+      (uniq/xact-lock! ::conn ks))
+    (testing "thousands of keys take a bounded number of locks"
+      (is (<= (count @issued) 256)))
+    (testing "the same key always takes the same lock"
+      (is (= (uniq/advisory-key "fn|ns|name-1") (uniq/advisory-key "fn|ns|name-1"))))
+    (testing "sorted, so two transactions never lock in opposite orders"
+      (is (= (sort @issued) @issued)))))
 
 
 (deftest xact-lock-without-connection-is-a-no-op-test

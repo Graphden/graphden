@@ -348,9 +348,29 @@
         ids))
 
 
+(def ^:private advisory-buckets
+  "How many advisory locks one transaction can take at most, whatever it
+   writes. Every key `xact-lock!` is handed maps onto one of these, because
+   each lock held takes a slot in Postgres' shared lock table
+   (`max_locks_per_transaction` × `max_connections`): the boot sync of
+   ~6000 platform fns in one transaction took one lock per name and ran a
+   managed Postgres out of it (`ERROR: out of shared memory`, prod deploy
+   2026-09-24). Equal keys always share a bucket, so the serialization a
+   key promises holds; unrelated keys that share a bucket only queue."
+  256)
+
+
+(defn advisory-key
+  "The advisory lock `k` is taken under — its bucket (`advisory-buckets`).
+   Stable across JVMs (a string hash), so pods agree on it."
+  [k]
+  (str "gd-lock|" (mod (hash (str k)) advisory-buckets)))
+
+
 (defn xact-lock!
   "Take a transaction-scoped `pg_advisory_xact_lock` (released at commit /
-   rollback) on every key in `lock-keys`, in ONE statement. Deadlock-free:
+   rollback) on the bucket (`advisory-key`) of every key in `lock-keys`, in
+   ONE statement — at most `advisory-buckets` locks. Deadlock-free:
    the keys are de-duplicated and SORTED, and every caller locks through
    here, so no two transactions can acquire an overlapping key set in
    opposite orders (`WITH ORDINALITY … ORDER BY` keeps the array order; a
@@ -359,7 +379,7 @@
    is a no-op. Runs through `util/exec!` so the parallel-test
    `*jdbc-override*` seam sees it."
   [conn lock-keys]
-  (let [ks (into-array String (->> lock-keys (remove nil?) distinct sort))]
+  (let [ks (into-array String (->> lock-keys (remove nil?) (map advisory-key) distinct sort))]
     (when (and conn (pos? (alength ks)))
       (util/exec! conn
                   [(str "SELECT pg_advisory_xact_lock(hashtext(k)::bigint)"

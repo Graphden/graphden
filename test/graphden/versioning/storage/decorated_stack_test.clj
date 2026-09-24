@@ -228,7 +228,7 @@
    `release!`."
   ^Connection [pool k]
   (let [conn (jdbc/get-connection pool)]
-    (jdbc/execute! conn ["SELECT pg_advisory_lock(hashtext(?)::bigint)" k])
+    (jdbc/execute! conn ["SELECT pg_advisory_lock(hashtext(?)::bigint)" (uniq/advisory-key k)])
     conn))
 
 

@@ -93,7 +93,12 @@ so a gap in one does not by itself cross tenants:
    reverted by the next sync — the guard makes that class impossible for
    ANY principal; the legitimate paths are extending into a child fn or
    editing the package's `fns.edn`. Renaming or re-describing the package
-   fn itself is refused for the same reason. The editor mirrors the rule
+   fn itself is refused for the same reason. The 403 holds on EVERY write
+   surface: the generic entity create/update, sequence append / update /
+   move / remove, the record-type compound update (`PUT /api/types/record`,
+   which would otherwise re-shape the fn's own slots) and the inline secret
+   bind (`POST /api/secret-bindings`); a slot shared by several fns is
+   guarded if ANY fn declaring it is package-synced. The editor mirrors the rule
    client-side (`package-owned` rides out on each fn row): no `+`
    placeholder, no rename/delete, and the edit-block reason says to
    extend instead — so the affordance is absent rather than failing.
@@ -127,7 +132,11 @@ only.
 Secrets live in Vault / OpenBao. The platform holds the root token as
 infrastructure configuration, never exposed to a tenant graph; a tenant reaches
 a secret only through the `:vault-get` base-fn, whose result is typed
-`[:secret :text]`. See [SECRETS.md](SECRETS.md).
+`[:secret :text]`. The KV mount is one flat namespace on that token, so
+the vault client confines every tenant-context op to the org's own
+`org/<org-id>/` prefix and refuses paths that could leave the mount
+([SECRETS.md § Per-org vault paths](SECRETS.md#per-org-vault-paths)).
+See [SECRETS.md](SECRETS.md).
 
 ## API-token scopes (least privilege for MCP / CLI)
 

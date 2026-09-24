@@ -41,6 +41,7 @@
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
+    [graphden.tenancy.context :as tctx]
     [org.httpkit.client :as http]))
 
 
@@ -82,30 +83,83 @@
   (get *impl-override* op))
 
 
-(defn- require-path!
-  "Reject nil / non-string / blank paths upfront with a clean
-   `:vault/lookup-failed :reason :missing-path` ex-info. The string-
-   ops in `data-url` / `metadata-url` would otherwise NPE with no
-   `:type` tag — masking the real cause (binding misconfiguration
-   upstream) as a generic NullPointerException."
+(defn- invalid-path!
+  [path op reason]
+  (throw (ex-info (str "Vault " op ": invalid path " (pr-str path)
+                       " — segments of letters, digits, `_`, `-`, `.` separated by `/`")
+                  {:type :vault/invalid-path :reason reason :op op :path path})))
+
+
+(def ^:private path-segment
+  #"[A-Za-z0-9_.\-]+")
+
+
+(defn- normalise-path
+  "`path` with leading `/`s dropped, or throw `:vault/invalid-path`. The
+   path is concatenated into the request URL against the PLATFORM token,
+   so anything that could leave the KV mount — `..` / `.` segments, empty
+   segments, `%`-escapes, `?` / `#`, backslashes, whitespace — is refused
+   rather than escaped. nil / blank keeps the `:missing-path` reason."
   [path op]
-  (when (or (nil? path) (not (string? path)) (str/blank? path))
+  (when (or (not (string? path)) (str/blank? path))
     (throw (ex-info (str "Vault " op ": path is required and must be a non-blank string")
-                    {:type :vault/lookup-failed
-                     :reason :missing-path
-                     :op op
-                     :path path}))))
+                    {:type :vault/lookup-failed :reason :missing-path :op op :path path})))
+  (let [p (str/replace path #"^/+" "")
+        segs (str/split p #"/" -1)]
+    (when-not (every? #(and (re-matches path-segment %) (not (#{"." ".."} %))) segs)
+      (invalid-path! path op :malformed))
+    p))
+
+
+(defn org-prefix
+  "The KV prefix every secret of tenant `org` lives under. The KV mount is
+   ONE flat namespace read and written with the platform token, so the
+   prefix IS the per-org isolation."
+  [org]
+  (when-not (re-matches path-segment (str org))
+    (throw (ex-info "Vault: org id is not a valid path segment"
+                    {:type :vault/invalid-path :reason :org :org org})))
+  (str "org/" org "/"))
+
+
+(defn scoped-path
+  "The path a caller-supplied secret `path` is stored at for the org in
+   scope: a tenant's lands under its `org-prefix` (idempotent — an already
+   prefixed path is kept), the platform tier's is used as given. Throws
+   `:vault/invalid-path` on a malformed path. Writers call this before
+   persisting a path; every client op then re-checks it (`checked-path`)."
+  [path]
+  (let [p (normalise-path path "scope")
+        org (tctx/current-org)]
+    (if (tctx/platform-tier? org)
+      p
+      (let [prefix (org-prefix org)]
+        (if (str/starts-with? p prefix) p (str prefix p))))))
+
+
+(defn- checked-path
+  "Validate `path` for `op` and return it normalised. In a TENANT context
+   the path must sit under that org's prefix — without this any tenant
+   could read, overwrite or wipe another org's (or the platform's) secret
+   just by naming its path. The platform tier (operator requests, the
+   tombstone GC) is unrestricted."
+  [path op]
+  (let [p (normalise-path path op)
+        org (tctx/current-org)]
+    (when-not (or (tctx/platform-tier? org)
+                  (str/starts-with? p (org-prefix org)))
+      (throw (ex-info (str "Vault " op ": path " (pr-str p) " is outside this organization's secrets")
+                      {:type :vault/path-forbidden :op op :path p})))
+    p))
 
 
 (defn- vault-url
   "Build a Vault KV v2 path-rooted URL. `kind` is `\"data\"`
    (per-version value rows) or `\"metadata\"` (version index +
-   `custom_metadata`); same address/path normalisation applies to
-   both."
+   `custom_metadata`); `path` is already `checked-path`-normalised."
   [address kind path]
   (str (str/replace address #"/+$" "")
-       "/v1/secret/" kind "/"
-       (str/replace path #"^/+" "")))
+       "/v1/secret/" kind "/" path))
 
 
 (defn- request-opts
@@ -152,10 +206,9 @@
    string. Raises if missing or shape doesn't match the single-value
    convention."
   [{:keys [address token] :as client} path]
-  (if-let [f (impl :get-secret)]
-    (f client path)
-    (do
-      (require-path! path "get-secret")
+  (let [path (checked-path path "get-secret")]
+    (if-let [f (impl :get-secret)]
+      (f client path)
       (let [resp @(http/get (vault-url address "data" path) (request-opts token))
             _ (check-status! resp #{200} path "GET data")
             parsed (json/parse-string (:body resp) true)
@@ -177,10 +230,9 @@
   "Write `secret/data/<path>` with `{value: <value>}`. Returns the
    new version number (KV v2 retains history)."
   [{:keys [address token] :as client} path value]
-  (if-let [f (impl :put-secret)]
-    (f client path value)
-    (do
-      (require-path! path "put-secret")
+  (let [path (checked-path path "put-secret")]
+    (if-let [f (impl :put-secret)]
+      (f client path value)
       (let [resp @(http/post (vault-url address "data" path)
                              (json-body token {:data {:value value}}))
             _ (check-status! resp #{200} path "POST data")
@@ -193,10 +245,9 @@
    `DELETE /v1/secret/metadata/<path>` because the data endpoint
    only soft-deletes the latest version."
   [{:keys [address token] :as client} path]
-  (if-let [f (impl :delete-secret)]
-    (f client path)
-    (do
-      (require-path! path "delete-secret")
+  (let [path (checked-path path "delete-secret")]
+    (if-let [f (impl :delete-secret)]
+      (f client path)
       (let [resp @(http/delete (vault-url address "metadata" path)
                                (request-opts token))]
         (check-status! resp #{204} path "DELETE metadata")
@@ -208,10 +259,9 @@
    list, etc. Returns the inner `:data` map (JSON-decoded, keyword
    keys). Raises with `:vault/lookup-failed` if the path is missing."
   [{:keys [address token] :as client} path]
-  (if-let [f (impl :get-metadata)]
-    (f client path)
-    (do
-      (require-path! path "get-metadata")
+  (let [path (checked-path path "get-metadata")]
+    (if-let [f (impl :get-metadata)]
+      (f client path)
       (let [resp @(http/get (vault-url address "metadata" path)
                             (request-opts token))
             _ (check-status! resp #{200} path "GET metadata")
@@ -224,10 +274,9 @@
    Vault rejects non-string values, so callers must stringify
    before calling."
   [{:keys [address token] :as client} path metadata]
-  (if-let [f (impl :put-metadata)]
-    (f client path metadata)
-    (do
-      (require-path! path "put-metadata")
+  (let [path (checked-path path "put-metadata")]
+    (if-let [f (impl :put-metadata)]
+      (f client path metadata)
       (let [resp @(http/post (vault-url address "metadata" path)
                              (json-body token {:custom_metadata metadata}))]
         (check-status! resp #{204} path "POST metadata")

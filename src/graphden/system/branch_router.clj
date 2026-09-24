@@ -900,9 +900,15 @@
         ;; reached `parse-form-body` as an unread InputStream and silently
         ;; parsed to `{}` (live cloud hit this: `POST /api/orgs name=…`
         ;; created an org named "").
+        ;;
+        ;; A fleet member also keeps the ORIGINAL bytes (`:graphden/raw-body`):
+        ;; the forward-hop re-sends the body to the cell holder, and
+        ;; re-encoding the decoded String corrupts any binary upload.
         request (let [b (:body request)]
                   (if (instance? java.io.InputStream b)
-                    (assoc request :body (slurp (java.io.InputStreamReader. b "UTF-8")))
+                    (let [bs (java.io.InputStream/.readAllBytes b)]
+                      (cond-> (assoc request :body (String. ^bytes bs "UTF-8"))
+                        (:fleet-forward base-ctx) (assoc :graphden/raw-body bs)))
                     request))
         ;; Fleet control-plane seam (docs/FLEET_RFC.md §6.3): the internal
         ;; cell load/evict command (`POST /internal/fleet/cell/...`). Checked

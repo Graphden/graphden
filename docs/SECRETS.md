@@ -561,13 +561,49 @@ On submit the form POSTs to `/api/secret-bindings` (sibling to
 `graphden.crud.secrets/apply-create-inline-binding-body`) does:
 
 1. Validate `fn-id` + `slot-id` exist; reject if a binding already
-   exists on `(fn-id, slot-id)`.
-2. `vault/put-secret` at the supplied path.
+   exists on `(fn-id, slot-id)`. A package-synced owner fn is refused
+   with **403** (the package guard, `crud.package-guard`).
+2. Claim the path: `vault/scoped-path` applies the org prefix (see
+   [§ Per-org vault paths](#per-org-vault-paths)) and checks the
+   syntax; a path another binding version already references is
+   refused with **409** (`:secrets/path-in-use`) — its value write
+   would silently replace that binding's secret.
 3. `crud-entities/create-entity :binding` with
    `:resolver-fn-id <vault-get>` and `:value <path>`. This runs the
    normal `resolver-rej` gate — the gate rejects when the slot's
-   rich-type doesn't carry `:secret`, in which case we
-   `vault/delete-secret` to keep the stores consistent.
+   rich-type doesn't carry `:secret`, and the vault is never touched.
+4. `vault/put-secret` at the claimed path — STORAGE FIRST, vault after
+   (the same order as `POST /api/secrets`), so the rollback's
+   `vault/delete-secret` only ever removes a path this request claimed.
+
+`POST /api/secrets` claims its path the same way (409 on a path in use).
+
+## Per-org vault paths
+
+The KV v2 mount is ONE flat namespace, read and written with the
+platform's token, and the path is concatenated into the request URL.
+So the client (`graphden.clients.vault`) is where isolation lives:
+
+- **Syntax** — every op refuses a path that could leave the KV mount
+  (`..` / `.` / empty segments, `%`-escapes, `?`, `#`, whitespace,
+  backslash) with `:vault/invalid-path` (400). Segments are letters,
+  digits, `_`, `-`, `.`.
+- **Org prefix** — a tenant's secrets live under `org/<org-id>/`.
+  The create flows store `vault/scoped-path` of what the user typed
+  (`db/password` → `org/acme/db/password`; the card shows the full
+  path), and every client op in a TENANT context (`tenancy.context`
+  not on the platform tier) refuses a path outside that prefix with
+  `:vault/path-forbidden` (403) — whether it came from a create form,
+  a rotate, a delete, or a binding whose `:value` was re-pointed
+  through the generic entity API. The platform tier (operator
+  requests, the tombstone GC) is unrestricted. A single-tenant
+  self-host runs entirely on the platform tier, so its paths are
+  unchanged.
+
+Secrets a tenant created BEFORE the prefix (stored at a bare path)
+are refused to that tenant from then on; an operator moves them under
+`org/<org-id>/` (vault copy + binding `:value` update) or the tenant
+re-creates them.
 
 The slot's type reaches the registry through
 `crud.value-form/resolve-slot-effective-type`, whose tier 3 is

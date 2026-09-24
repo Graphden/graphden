@@ -38,6 +38,18 @@
                                   (keyword entity-type) row))
 
 
+(defbase pkg-write-guard-reason
+  "Reason string when a create/update of `row` (entity-data, or the
+   pre-image for an update) of `entity-type` targets a package-synced
+   fn; nil when the write is fine. §3.1 thin wrapper over
+   `crud.package-guard/write-rejection` — the write twin of
+   `pkg-delete-guard-reason`."
+  [entity-type row]
+  (cr/record-effect! :db)
+  (package-guard/write-rejection (request/require-storage ctx)
+                                 (keyword entity-type) row))
+
+
 ;; `:_seq-update-item-id-invalid?` / `:_seq-update-body-invalid?` are
 ;; now graph fn-defs — see fns.edn.
 
@@ -73,6 +85,7 @@
   {:_seq-append-load-binding _seq-append-load-binding
    :_seq-remove-load-item _seq-remove-load-item
    :pkg-delete-guard-reason pkg-delete-guard-reason
+   :pkg-write-guard-reason pkg-write-guard-reason
    :_seq-update-load-item _seq-update-load-item
    :_seq-move-load-item _seq-move-load-item
    :try-apply-tighten try-apply-tighten})

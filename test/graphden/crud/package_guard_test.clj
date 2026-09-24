@@ -98,7 +98,16 @@
         (is (string? (pkg-guard/write-rejection storage :slot pkg-slot)))
         (is (nil? (pkg-guard/write-rejection storage :slot user-slot)))
         (is (nil? (pkg-guard/write-rejection storage :slot {:id (random-uuid)}))
-            "a slot no fn-slot declares has no owner to guard")))
+            "a slot no fn-slot declares has no owner to guard")
+        (testing "a slot shared with a user fn stays guarded whichever junction reads first"
+          ;; Slots are shared across fns; the guard used to read only the
+          ;; FIRST fn-slot junction, so a user fn declaring the same slot
+          ;; could be the one consulted and unlock the package's slot.
+          (let [shared (sp/create-entity storage :slot {:name "shared" :type-fn-id pkg-id})]
+            (sp/create-entity storage :fn-slot {:fn-id (:id user) :slot-id (:id shared) :position 1})
+            (sp/create-entity storage :fn-slot {:fn-id pkg-id :slot-id (:id shared) :position 2})
+            (is (string? (pkg-guard/write-rejection storage :slot shared)))
+            (is (string? (pkg-guard/delete-rejection storage :slot shared)))))))
 
     (testing "delete of the package fn row / its binding family is rejected"
       (is (string? (pkg-guard/delete-rejection storage :fn {:id pkg-id})))

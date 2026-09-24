@@ -139,9 +139,12 @@
                                                children)]
                             (into [t (sanitize-attrs (or attrs {}))] kids))))
 
-                      ;; A non-vector sequence is a child seq, not an element.
+                      ;; A non-vector sequence is a child seq, not an element —
+                      ;; it must STAY a seq. Returned as a vector, a seq whose
+                      ;; first child is a string (`(list "script" "x")`) would
+                      ;; render as a `<script>` element under hiccup2.
                       (sequential? n)
-                      (into [] (keep #(walk % (inc depth))) n)
+                      (doall (keep #(walk % (inc depth)) n))
 
                       ;; Anything else (RawString, objects) — collapse to a
                       ;; plain string; hiccup2 escapes it on render.

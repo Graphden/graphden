@@ -21,6 +21,7 @@
     [graphden.executor.context :as ctx]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.owned :as owned]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.graph-harness :as gh :refer [*graph* form-req json-req uniq]]
     [graphden.types.core :as types]
@@ -75,6 +76,11 @@
 (defn- via-seq-update
   [request]
   (setup/via-graph *graph* :process-sequence-update request))
+
+
+(defn- via-seq-move
+  [request]
+  (setup/via-graph *graph* :process-sequence-move request))
 
 
 (defn- via-create-record
@@ -619,6 +625,46 @@
         (is (= 404 (:status resp)))))))
 
 
+(deftest entity-write-errors-keep-the-core-status-test
+  ;; The apply stages rendered every core error as a hard-coded 400,
+  ;; dropping the 403 the package guard computes (and the cores of the
+  ;; sequence ops returned no status at all) — the editor could not tell
+  ;; "read-only package fn" from "malformed request".
+  (let [storage (:storage *graph*)
+        host (setup/create-base-fn! storage (uniq "pkg-seq-host"))
+        slot (setup/create-slot! storage "items" :sequence)
+        _    (setup/attach-slot! storage (:id host) (:id slot) 0)
+        bnd  (sp/create-entity storage :binding {:fn-id (:id host) :slot-id (:id slot)
+                                                 :list-append true})
+        item (sp/create-entity storage :binding-list-item {:binding-id (:id bnd)
+                                                           :position 0 :value 1})
+        _    (sp/create-entity storage :binding-list-item {:binding-id (:id bnd)
+                                                           :position 1 :value 2})
+        ;; A fresh random id no other test can touch — safe on the
+        ;; process-global registry.
+        _    (owned/record-owned-ids! [(:id host)])
+        _    (ctx/invalidate-graph-cache! (:ctx *graph*) #{(:id host)})
+        item-uri (str "/api/sequence/item/" (:id item))]
+    (testing "package-synced owner → 403 on every sequence op"
+      (is (= 403 (:status (via-seq-append
+                            (json-req (str "/api/sequence/append/" (:id host)) {:value 3})))))
+      (is (= 403 (:status (via-seq-update (json-req item-uri {:value 9} :put)))))
+      (is (= 403 (:status (via-seq-move (json-req (str "/api/sequence/move/" (:id item))
+                                                  {:direction "down"})))))
+      (is (= 1 (:value (sp/read-entity storage :binding-list-item (:id item))))))
+
+    (testing "package-synced binding update → 403"
+      (is (= 403 (:status (via-update (form-req (str "/api/entities/binding/" (:id bnd))
+                                                "terminal=true" :put))))))
+
+    (testing "a rename onto a taken name → 409"
+      (let [taken (setup/create-base-fn! storage (uniq "taken-name"))
+            other (setup/create-base-fn! storage (uniq "other-name"))
+            resp  (via-update (form-req (str "/api/entities/fn/" (:id other))
+                                        (str "name=" (:name taken)) :put))]
+        (is (= 409 (:status resp)))))))
+
+
 (deftest sequence-append-malformed-body-does-not-wedge-the-slot-test
   ;; A body carrying none of `:ref` / `:ref-name` / `:value` used to be parsed
   ;; AFTER the host `:list-append` binding was materialised, so the throw left
@@ -786,6 +832,51 @@
       (is (= 2 (count (sp/query-entities
                         storage :fn-slot
                         {:fn-id (java.util.UUID/fromString rec-id)})))))))
+
+
+(deftest process-update-record-type-refuses-non-record-targets-test
+  ;; A PUT against any fn id ran the diff-and-apply: on `:add` it deleted
+  ;; and re-created the base-fn's own slots — every descendant re-shaped
+  ;; until the next boot's sync — with no package guard and no check that
+  ;; the target is a record type-row at all.
+  (let [storage   (:storage *graph*)
+        fss-of    (fn [id]
+                    (set (map :slot-id (sp/query-entities storage :fn-slot
+                                                          {:fn-id id}))))
+        put-rec   (fn [id]
+                    (via-update-record
+                      (json-req "/api/types/record"
+                                {:id (str id) :fields [{:name "x" :type "int"}]}
+                                :put)))]
+    (testing "a package-synced record type-row → 403, slots untouched"
+      (let [created (via-create-record (json-req "/api/types/record"
+                                                 {:name (uniq "PkgRec")
+                                                  :fields [{:name "a" :type "text"}]}))
+            rec-id  (java.util.UUID/fromString (:id created))
+            before  (fss-of rec-id)
+            ;; Mark THIS fresh id package-owned — a random id no other
+            ;; test can touch, so the process-global registry is safe.
+            _       (owned/record-owned-ids! [rec-id])
+            res     (put-rec rec-id)]
+        (is (= 403 (:http-status res)))
+        (is (re-find #"package-owned" (:error res)))
+        (is (= before (fss-of rec-id)))))
+
+    (testing "a base-fn (`:add`) is refused, its slots untouched"
+      (let [add-id (:id (first (sp/query-entities storage :fn {:name "add"})))
+            before (fss-of add-id)
+            res    (put-rec add-id)]
+        (is (false? (:ok res)))
+        (is (= before (fss-of add-id)))))
+
+    (testing "a composed (user) fn is not a record type-row → refused"
+      (let [parent (sp/create-entity storage :fn {:name (uniq "RecParent")})
+            child  (sp/create-entity storage :fn {:name (uniq "RecChild")
+                                                  :parent-ids [(:id parent)]})
+            res    (put-rec (:id child))]
+        (is (false? (:ok res)))
+        (is (re-find #"not a record type" (:error res)))
+        (is (empty? (fss-of (:id child))))))))
 
 
 (deftest process-update-record-type-diff-test

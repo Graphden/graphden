@@ -899,12 +899,53 @@
                                          :default nil}}
                                  " not found"]}}]}}
 
+  ;; A PUT against a package fn id (`:add`) would delete and re-create its
+  ;; slots — every descendant in the installation re-shaped until the next
+  ;; boot's sync. Same guard as the entity-write cores, as a 403.
+  {:name :_update-record-type-pkg-reason
+   :description "Package-guard reason for rewriting the target fn row — nil when it is not package-synced."
+   :parent :pkg-write-guard-reason
+   :args {:entity-type {:value "fn"}
+          :row :_update-record-type-fn-row}}
+
+  {:name :_update-record-type-pkg-blocked?
+   :parent :some?
+   :args {:value :_update-record-type-pkg-reason}}
+
+  {:name :_update-record-type-err-pkg
+   :description "403 rejection — the target fn is package-synced. `:http-status` is read by `:json-envelope-response`."
+   :parent :zipmap
+   :return-type :_error-result-status-shape
+   :args {:keys [:ok :error {:value :http-status :literal? true}]
+          :vals [false :_update-record-type-pkg-reason 403]}}
+
+  ;; The diff-and-apply rewrites the row's OWN fn-slots — meaningful only
+  ;; for a record type-row. On a composed fn / base-fn / list / union it
+  ;; would silently re-shape something that is not a record.
+  {:name :slot-shaped-type-row?
+   :description "True when `row` is a record type-row (or a still-empty one — Create-type before its first field): no parents, no base-fn return type, no refinement / list / union / variant / fn-type marker."
+   :args {:row {:type [:union :null [:map :any :any]] :description "Resolved fn row, as `:resolve-fn-rows` yields it (the caller guards nil — a nil row reads as slot-shaped)."}}
+   :return-type :bool}
+
+  {:name :_update-record-type-not-record?
+   :parent :not
+   :args {:value {:parent :slot-shaped-type-row?
+                  :args {:row :_update-record-type-fn-row}}}}
+
+  {:name :_update-record-type-err-not-record
+   :description "400 rejection — the target fn is not a record type-row."
+   :parent :const
+   :return-type :_error-result-shape
+   :args {:value {:ok false :error "not a record type — only a record type-row's fields can be edited here"}}}
+
   {:name :_update-record-type-validation
-   :description "Stage 2 of update-record-type — guards (missing id, empty field list, fn-row not found) wired as a flat `:cond`. The third clause reads storage (`:list-entities`) lazily — runs only when the first two guards passed."
+   :description "Stage 2 of update-record-type — guards (missing id, empty field list, fn-row not found, package-synced target → 403, target not a record type-row) wired as a flat `:cond`. The storage-reading clauses run lazily — only once the earlier guards passed."
    :parent :cond
    :args {:clauses [:_update-record-type-fn-id-nil?     :_update-record-type-err-id-required
                     :_update-record-type-fields-empty?  :_err-fields-required
                     :_update-record-type-fn-not-found?  :_update-record-type-err-not-found
+                    :_update-record-type-pkg-blocked?   :_update-record-type-err-pkg
+                    :_update-record-type-not-record?    :_update-record-type-err-not-record
                     {:value true}                       {:value nil}]
           :parsed :_update-record-type-parsed}}
 

@@ -171,9 +171,9 @@
 
   {:name :types-update-record-handler
    :lambda-params [:default :request]
-   :description "Ring handler for `PUT /api/types/record` — atomic compound update for a record type-row. Wraps `process-update-record-type` in a JSON 200 response (the {:ok false :error} payload carries failures)."
-   :parent :json-handler
-   :args {:data :process-update-record-type}}
+   :description "Ring handler for `PUT /api/types/record` — atomic compound update for a record type-row. Wraps `process-update-record-type` in a JSON response: 200 with the {:ok false :error} payload for ordinary failures, the envelope's `:http-status` where a guard declares one (403 package-synced target)."
+   :parent :json-envelope-response
+   :args {:envelope :process-update-record-type}}
 
   ;; --- Action handlers: action-fn returns partial response, defaults
   ;; (status 200, body "", html headers) supplied by composition. ---
@@ -254,7 +254,7 @@
           :parsed :_create-list-type-parsed}}
 
   {:name :process-update-record-type
-   :description "PUT /api/types/record — parse the JSON body `{id, name?, description?, fields:[…]}`, validate (id + ≥1 field + the fn-row exists), and on success atomically apply the field diff (journalled rollback). Returns `{:ok true :id :name}` or `{:ok false :error}`."
+   :description "PUT /api/types/record — parse the JSON body `{id, name?, description?, fields:[…]}`, validate (id + ≥1 field + the fn-row exists + not package-synced (403) + is a record type-row), and on success atomically apply the field diff (journalled rollback). Returns `{:ok true :id :name}` or `{:ok false :error}`."
    :parent :if
    :args {:test :rejected?
           :then :_update-record-type-validation

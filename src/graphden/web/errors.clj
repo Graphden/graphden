@@ -67,6 +67,10 @@
    :execution/args-too-large 413
    ;; server-side configuration absent
    :vault/not-configured 503
+   ;; a secret path outside the caller's org prefix (the KV mount is one
+   ;; flat namespace on the platform token), or one that could leave it
+   :vault/path-forbidden 403
+   :vault/invalid-path 400
    ;; misc explicit 400s that would otherwise family-default anyway
    :grant/invalid-capability 400
    :user/invalid 400

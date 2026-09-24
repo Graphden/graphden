@@ -78,7 +78,7 @@ The SSRF egress guard a tenant's outbound call passes before dialing: fail-close
 :CUSTOM_ID: platform/sanitize-hiccup
 :FILE: src/graphden/web/hiccup_sanitize.clj
 :LINE: 116
-:MINS: 2.9
+:MINS: 3.1
 :END:
 
 An allowlist walk over an EDN hiccup tree — permitted tags, permitted attrs, a depth cap and a node budget, returning nil for 'no representable output'. This is the gate on every path where GRAPH-authored markup reaches the editor's own DOM: typed value representations, component previews, server partials rendering user content. Anything not on the list collapses to escaped text rather than being rejected loudly — the sanitizer's job is to make the surface safe, not to argue with the author.

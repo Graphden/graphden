@@ -33,9 +33,9 @@
    vault client DIRECTLY, not these base-fns, so it is unaffected.) Without
    this, a paid-tier tenant — which carries `:network` — could compose
    `{:parent :vault-get :args {:path \"other-org/secret\"}}` and read (or
-   `:vault-put` overwrite) another org's secret. `:secret-leaf` is EXEMPT: its
-   path is bound at COMPILE time from an operator-authored `:secret`, never
-   tenant-arbitrary."
+   `:vault-put` overwrite) another org's secret. (The client itself also
+   confines a tenant-context op to the org's `org/<org-id>/` prefix —
+   `vault/checked-path` — so this gate is the outer of two layers.)"
   [op]
   (when (some? cr/*allowed-effects*)
     (throw (ex-info (str "Vault " op " is operator-only — a tenant graph cannot "

@@ -27,12 +27,52 @@
   #{"content-encoding" "content-length" "transfer-encoding" "connection"})
 
 
+(def ^:private request-hop-by-hop-headers
+  "Client request headers that describe the client→us connection, not the
+   request. The body is already read in full, so a forwarded
+   `transfer-encoding: chunked` / `expect: 100-continue` made the holder wait
+   for framing that never came (30 s → 502), and `upgrade` / `connection` /
+   `te` / `keep-alive` negotiate a hop that isn't ours. http-kit frames the
+   forwarded request itself (`content-length` from the bytes we send)."
+  #{"connection" "keep-alive" "proxy-connection" "te" "trailer"
+    "transfer-encoding" "upgrade" "expect" "content-length"})
+
+
+(defn- forwardable-request-headers
+  "`headers` minus the hop-by-hop set and any header the client's
+   `Connection` names (RFC 9110 §7.6.1). Host is KEPT — see `forward-request`."
+  [headers]
+  (let [lower (into {} (map (fn [[k v]] [(str/lower-case (name k)) v])) headers)
+        named (into #{}
+                    (comp (map str/trim) (remove str/blank?) (map str/lower-case))
+                    (str/split (str (get lower "connection")) #","))]
+    (into {}
+          (remove (fn [[k _]] (or (request-hop-by-hop-headers k) (named k))))
+          lower)))
+
+
+(defn- request-body-bytes
+  "The request body as the client sent it. `branch-router/dispatch` realizes a
+   streaming body to a UTF-8 String for every downstream consumer and keeps the
+   original bytes under `:graphden/raw-body` — forwarding the String would
+   corrupt any binary upload."
+  ^bytes [request]
+  (let [b (:body request)]
+    (or (:graphden/raw-body request)
+        (cond
+          (bytes? b) b
+          (string? b) (String/.getBytes ^String b "UTF-8")
+          (instance? java.io.InputStream b) (java.io.InputStream/.readAllBytes b)
+          :else nil))))
+
+
 (defn forward-request
   "HTTP-forward `request` to the executor named `executor-id` (a DNS name) on
    `port`, and return its Ring response. A transport failure is a `502` — the
    holder is unreachable, which is the caller's problem to surface, not a
-   silent drop. Strips hop-by-hop headers so the downstream response frames
-   cleanly.
+   silent drop. Strips hop-by-hop headers both ways, so the forwarded request
+   and the returned response each frame cleanly, and sends the request body
+   as the client's original BYTES.
 
    The body crosses as BYTES (`:as :byte-array`): the old `:as :text`
    decoded every response as a string, corrupting images, downloads and
@@ -41,7 +81,7 @@
    (and the `Content-Length` of the compressed body) no longer describe
    the bytes we return — both are dropped, and the Ring server re-frames."
   [executor-id port request]
-  (let [{:keys [request-method uri query-string headers body]} request
+  (let [{:keys [request-method uri query-string headers]} request
         resp @(http/request {:method (or request-method :get)
                              :url (forward-url executor-id port uri query-string)
                              ;; PRESERVE Host — for the fleet forward-hop it is the
@@ -50,10 +90,9 @@
                              ;; plain reverse proxy rewrites Host to the target; here
                              ;; that would make the holder see its own FQDN, fail to
                              ;; resolve the org, and serve the apex editor instead of
-                             ;; the tenant's app. Only drop the framing headers
-                             ;; httpkit sets itself.
-                             :headers (dissoc headers "content-length" "connection")
-                             :body body
+                             ;; the tenant's app. Drop only the hop-by-hop set.
+                             :headers (forwardable-request-headers headers)
+                             :body (request-body-bytes request)
                              :timeout 30000
                              :as :byte-array})]
     (if (:error resp)

@@ -229,7 +229,7 @@
         ;; sync — refuse it here, whichever fn the "+" click landed on.
         pkg-reason (pkg-guard/write-rejection storage :binding {:fn-id fn-id})]
     (cond
-      pkg-reason {:error pkg-reason}
+      pkg-reason {:error pkg-reason :http-status 403}
       (:error req-pos) req-pos
       synth-rej {:error (:reason synth-rej)}
       :else
@@ -360,7 +360,7 @@
         direction (get-in parsed [:body :direction])
         pkg-reason (pkg-guard/write-rejection storage :binding-list-item item)]
     (cond
-      pkg-reason {:error pkg-reason}
+      pkg-reason {:error pkg-reason :http-status 403}
       (not (contains? #{"up" "down"} direction))
       {:error "Body requires {\"direction\": \"up\"} or {\"direction\": \"down\"}"}
       :else
@@ -413,8 +413,10 @@
         pre-rej (when-not pkg-reason
                   (validation/write-rej storage :binding-list-item
                                         (merge item changes {:id item-id})))]
-    (if (or pkg-reason pre-rej)
-      {:error (or pkg-reason (:reason pre-rej))}
+    (cond
+      pkg-reason {:error pkg-reason :http-status 403}
+      pre-rej {:error (:reason pre-rej)}
+      :else
       (do (sp/update-entity storage :binding-list-item item-id changes)
           ;; Post-write whole-fn type-check (Phase 3, Gap A) — same
           ;; record-or-clear semantics as the binding update core.

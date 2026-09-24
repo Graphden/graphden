@@ -111,6 +111,11 @@
    :args {:fn-defs {:type [:union :null [:list :keyword-map]] :description "Parsed fn-def maps (fns.edn shape); nil treated as empty."}}
    :return-type [:list :text]}
 
+  {:name :platform-owned-def?
+   :description "Is `fn-def`'s deterministic (namespace, name) fn-id package-synced this boot? The per-def form of `:platform-owned-def-names`, for filtering a bundle by IDENTITY — a user's `my.ns/port` shares only a bare name with the platform's `:port`."
+   :args {:fn-def {:type :keyword-map :description "One parsed fn-def map (fns.edn shape)."}}
+   :return-type :bool}
+
   {:name :system-property
    :description "`(System/getProperty name)` — read a JVM system property (`java.vm.name`, `java.version`, `user.dir`, etc.). Returns nil when unset. Counterpart to `:env` for environment variables."
    :args {:name {:type :text :description "Property name (`java.version`, …)."}}

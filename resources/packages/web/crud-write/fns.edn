@@ -467,7 +467,7 @@
    :description "Stage 3 of create — atomic-create-with-rollback + invalidate + notify + 200, or 400 with the error message."
    :parent :if
    :args {:test :_create-apply-error?
-          :then :_create-apply-err-response
+          :then :_apply-err-response
           :else :_create-apply-success
           :result :_create-apply-result}}
 
@@ -495,8 +495,14 @@
    :parent :get
    :args {:coll {:as :result} :key {:value :created} :default nil}}
 
-  {:name :_create-apply-err-response
-   :description "Error response for the create pipeline — status comes from the result's :http-status (central web.errors mapping: 409 name/position collisions, 403 capability, 500 storage-internal) with 400 as the malformed-input default."
+  ;; Shared by every entity-write apply stage (create / update here,
+  ;; sequence append / update / move in crud-seq): the error response takes
+  ;; its status from the core's result `:http-status` — 403 package-owned,
+  ;; 409 collisions, 404 missing row, 500 storage-internal — with 400 as the
+  ;; malformed-input default. A per-stage `{:value 400}` dropped the 403 the
+  ;; package guard computes.
+  {:name :_apply-err-response
+   :description "Error response for an entity-write apply stage — status from the result's :http-status (central web.errors mapping: 403 package-owned / capability, 409 name/position collisions, 404 missing row, 500 storage-internal) with 400 as the malformed-input default."
    :parent :html-error-response
    :args {:status {:parent :coalesce
                    :args {:value {:parent :get
@@ -741,10 +747,10 @@
   ;; as per-branch diagnostics and surfaced as `:type-warnings`; only a
   ;; secret-laundering failure is rolled back, like create's).
   {:name :_update-apply
-   :description "Stage 3 of update — atomic update + invalidate + notify + 200, or 400 with the error message."
+   :description "Stage 3 of update — atomic update + invalidate + notify + 200, or the error message with the core's status (403 package-owned, 409 collision, 404 missing row, 400 default)."
    :parent :if
    :args {:test :_update-apply-error?
-          :then :_update-apply-err-response
+          :then :_apply-err-response
           :else :_update-apply-success
           :result :_update-apply-result}}
 
@@ -760,11 +766,6 @@
   {:name :_update-apply-error?
    :parent :some?
    :args {:value :_apply-error-msg}}
-
-  {:name :_update-apply-err-response
-   :parent :html-error-response
-   :args {:status {:value 400}
-          :reason :_apply-error-msg}}
 
   {:name :_update-apply-success
    :parent :do

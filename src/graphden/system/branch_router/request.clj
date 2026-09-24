@@ -37,6 +37,15 @@
           (str/split query-string #"&"))))
 
 
+(defn- branch-pair?
+  "Is `pair` (one `k[=v]` of a query string) the branch param? Keyed on the
+   DECODED key, exactly as `parse-branch-from-query` reads it — a stripper
+   matching the raw text left `?%62ranch=gone` in place, so the redirect
+   pointed at itself forever."
+  [pair]
+  (= query-param (crud-request/safe-url-decode (first (str/split pair #"=" 2)))))
+
+
 (defn extract-branch-ref
   "Returns the branch ref the request asks for, or nil for default.
    Header wins over query param — explicit programmatic API beats
@@ -63,20 +72,35 @@
          (str/includes? accept "text/html"))))
 
 
+(def ^:private leading-separators
+  "A leading run of anything a browser may read as a path separator (or
+   drops before reading one): `/`, `\\`, whitespace/control chars, and their
+   percent-encodings. `//evil.example/` or `/\\evil.example/` in a
+   `Location` is a scheme-relative URL — an off-site redirect."
+  #"^(?:[/\\\s]|%2[fF]|%5[cC]|%0[9aAdD]|%20)+")
+
+
+(defn- same-origin-path
+  "`uri` with its leading separators collapsed to ONE `/`, so the result
+   can only ever name a path on this origin."
+  [uri]
+  (str "/" (str/replace-first (str uri) leading-separators "")))
+
+
 (defn uri-without-branch
   "The same URL with `branch` stripped from the query string — where a
-   navigation naming a dead branch gets sent."
+   navigation naming a dead branch gets sent. Pre-auth and built from the
+   request, so the path is pinned to this origin (`same-origin-path`)."
   [request]
   (let [qs (:query-string request)
         kept (when qs
                (->> (str/split qs #"&")
-                    (remove #(or (str/blank? %)
-                                 (str/starts-with? % "branch=")
-                                 (= % "branch")))
-                    (str/join "&")))]
+                    (remove #(or (str/blank? %) (branch-pair? %)))
+                    (str/join "&")))
+        path (same-origin-path (:uri request))]
     (if (str/blank? kept)
-      (:uri request)
-      (str (:uri request) "?" kept))))
+      path
+      (str path "?" kept))))
 
 
 ;; Static liveness path — the ONE endpoint that must answer WITHOUT the

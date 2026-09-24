@@ -7,7 +7,7 @@ The VersionedStorage decorator, per-branch resolution, diff/merge and branch-loc
 
 after: storage
 
-[[file:index.org][index]] · ~103 min
+[[file:index.org][index]] · ~104 min
 
 * 1. wrap-with-versioning
 :PROPERTIES:
@@ -312,7 +312,7 @@ Builds a fresh live ~ExecutionContext~ whose storage is a ~VersionedStorage~ rew
 :CUSTOM_ID: versioning/dispatch*
 :FILE: src/graphden/system/branch_router.clj
 :LINE: 891
-:MINS: 8.2
+:MINS: 8.6
 :END:
 
 The top-level Ring dispatch: extract the branch ref (header or query), resolve it to a branch-id, and route the request to that branch's lazily-built handler (400 on an unknown branch). Where a live request finally lands in the correct per-branch context. Its public wrapper ~dispatch~ first short-circuits ~/livez~ — the one registry-independent liveness path — so a pod busy on a full recompile still answers its probe.

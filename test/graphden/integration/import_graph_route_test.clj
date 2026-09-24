@@ -131,6 +131,31 @@
     (is (= 1 (count (:fn-ids json))) "the user's own def still lands")))
 
 
+(deftest import-keeps-a-user-def-sharing-a-bare-name-with-a-platform-fn
+  ;; The owned-def filter compared BARE names against the names of the
+  ;; bundle's platform-owned defs, so in a whole-graph bundle (platform defs
+  ;; ride along) a user's `imp.user/port` (lesson 08 teaches `port` / `row`)
+  ;; was skipped with the platform's `:port` — and, with prune, tombstoned.
+  ;; Ownership is the deterministic (namespace, name) id.
+  (let [branch (str "imp/bare-" (subs (str (random-uuid)) 0 8))
+        bundle (str "[{:name :port :namespace \"core.refinements\" :parent :const :args {:value 1}}"
+                    " {:name :port :namespace \"imp.user\" :parent :const :args {:value 8080}}"
+                    " {:name :imp-other :namespace \"imp.user\" :parent :add :args {:nums [1]}}]")
+        {:keys [status json]} (import! (str "target=" branch "&create=true") bundle)
+        live-on-branch? (fn [id]
+                          (let [b (first (sp/query-entities (:base-storage *storage*)
+                                                            :branch {:name branch}))]
+                            (some? (sp/read-entity (vs/switch-branch *storage* (:id b))
+                                                   :fn (parse-uuid (str id))))))]
+    (is (= 200 status) (pr-str json))
+    (is (= ["port"] (:skipped-owned json)) "only the platform's own `:port` is skipped")
+    (is (= 2 (count (:fn-ids json))))
+    (testing "a pruning re-import keeps it"
+      (let [{again :json} (import! (str "target=" branch "&prune=true") bundle)]
+        (is (empty? (get-in again [:pruned :pruned])) (pr-str again))
+        (is (every? live-on-branch? (:fn-ids json)))))))
+
+
 (deftest import-prune-gives-snapshot-semantics
   (let [branch (str "imp/prune-" (subs (str (random-uuid)) 0 8))
         both (str "[{:name :imp-keep :namespace \"imp.snap\" :parent :add :args {:nums [1]}}"

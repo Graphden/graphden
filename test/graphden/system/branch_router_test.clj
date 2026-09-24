@@ -322,6 +322,35 @@
                  (:error (json/parse-string (:body resp) true)))))))))
 
 
+(deftest dispatch-stale-branch-redirect-stays-on-origin
+  ;; A navigation naming an unknown branch is 302'd to the same URL minus
+  ;; `?branch=` — pre-auth, built from the request. `GET //evil.example/`
+  ;; answered `Location: //evil.example/`: an open redirect off-site.
+  (binding [br/*resolve-branch-id-override* (stub-resolutions {})]
+    (let [router   (fake-router {default-id
+                                 {:handler (fn [_] {:status 200 :body "main"})}})
+          location (fn [uri qs]
+                     (let [resp (br/dispatch router
+                                             {:request-method :get
+                                              :uri uri
+                                              :query-string qs
+                                              :headers {"accept" "text/html"}})]
+                       (is (= 302 (:status resp)) (str uri "?" qs))
+                       (get-in resp [:headers "Location"])))]
+      (testing "leading separators collapse to ONE `/` — never scheme-relative"
+        (doseq [uri ["//evil.example/" "/\\evil.example/" "\\\\evil.example/"
+                     "/%2Fevil.example/" "/%2f%5Cevil.example/" "/%09/evil.example/"
+                     "///evil.example/"]]
+          (is (= "/evil.example/" (location uri "branch=nope")) uri)))
+
+      (testing "an ordinary path survives unchanged"
+        (is (= "/editor?x=1" (location "/editor" "x=1&branch=nope"))))
+
+      (testing "a percent-encoded `branch` key is stripped too — no redirect loop"
+        (is (= "/" (location "/" "%62ranch=nope")))
+        (is (= "/?a=1" (location "/" "a=1&%62r%61nch=nope")))))))
+
+
 (deftest invalidate-drops-cached-entry
   (testing "invalidate! removes a per-branch entry; invalidate-all! drops everything"
     (let [router (br/->BranchRouter nil default-id

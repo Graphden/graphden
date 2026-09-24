@@ -2820,16 +2820,10 @@
    :parent :platform-owned-def-names
    :args {:fn-defs :_imp-defs}}
 
-  {:name :_imp-owned-index
-   :parent :zipmap
-   :args {:keys :_imp-owned-names :vals :_imp-owned-names}}
-
   {:name :_imp-def-not-owned?
-   :description "Is this def (`:item`) NOT one of the package-owned names?"
+   :description "Is this def (`:item`) NOT package-owned? By its deterministic (namespace, name) id — a bare-name match skipped (and, with prune, tombstoned) a user's `my.ns/port`."
    :parent :not
-   :args {:value {:parent :contains?
-                  :args {:coll :_imp-owned-index
-                         :key {:parent :name :args {:value {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}}}}}}}
+   :args {:value {:parent :platform-owned-def? :args {:fn-def {:as :item}}}}}
 
   {:name :_imp-wanted
    :description "The defs to write: the bundle minus the package-owned ones, minus the `_anon-*` entries only those owned defs reached."

@@ -266,8 +266,12 @@
                              :error-data (ex-data t)}))
                 (merge {:runtime-effects (persist/snapshot-runtime-effects effect-trace)
                         :path-trace (persist/snapshot-path-trace trace)})
+                ;; Same chain as every other persist path: the audit
+                ;; stamp FIRST — `redact-outcome` keys the secret-touched
+                ;; error hiding on it — then the tenant error scrub.
+                (persist/stamp-touched-secret handler-fn-id)
                 (persist/redact-outcome handler-fn-id)
-                (persist/stamp-touched-secret handler-fn-id)))
+                (persist/scrub-outcome handler-fn-id)))
          ;; Only a Debug TRAP capture becomes "the last capture" the panel
          ;; jumps to; a trace hop is an ordinary linked execution.
          (when-not extra

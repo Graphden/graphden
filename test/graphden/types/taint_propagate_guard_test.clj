@@ -130,7 +130,7 @@
     :pg-notify :pg-query :pg-tx :pick-encoding
     ;; :pkg-delete-guard-reason reads server rows (fn name via the
     ;; owned registry) — the reason string carries no caller content.
-    :pkg-delete-guard-reason
+    :pkg-delete-guard-reason :pkg-write-guard-reason
     :position-in :postwalk
     :pprint-str :pr-str :publish-package-apply :query-entities :query-param :recent-executions
     :query-ref-many-owners :quot :range :re-find? :read-resource-bytes :read-resource-or-nil
@@ -172,6 +172,8 @@
     :sub :subs :subtype? :svg-polyline-points :tabulate-records
     :swap :sync-fn-defs-branch! :system-property :take :tenancy-active?
     :platform-owned-def-names
+    ;; bool answers over the def's identity / the row's role — no content.
+    :platform-owned-def? :slot-shaped-type-row?
     :thread-count
     :throw :throwable-class-name :throwable-message :to-json-pretty :to-json-string
     :to-set :to-str :total-memory :transduce :try :try-apply-create

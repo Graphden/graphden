@@ -136,7 +136,10 @@ Details that are deliberate:
   member's worktree first (outside the gate lock; stamped per sha in
   `.git/wtq/lint-ok/`, so a re-queue of the same commit does not re-lint).
   Pre-queue lints run ONE AT A TIME (`.git/wtq/lint.lock`; a waiting one names
-  the holder): side by side at load 40-80 they timed each other out. A check
+  the holder): side by side at load 40-80 they timed each other out. A lint
+  still yields to the gate's heavy phases, and the gate yields back between
+  trains (`WTQ_GATE_LINT_WAIT`, default 900 s) so back-to-back trains cannot
+  starve it. A check
   that still goes red is re-run once alone before it counts — one that passes
   alone is reported as such (with its first attempt), not failed. It refuses
   to queue a red

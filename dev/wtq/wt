@@ -1907,6 +1907,7 @@ conduct() {
   while [ "$guard" -lt 100 ]; do
     guard=$((guard + 1))
     conductor_has_work "$own" "$own_sha" || return 0
+    yield_to_lint
     wait_for_headroom
     refresh_target
     rc=0; train_cycle || rc=$?
@@ -1917,6 +1918,22 @@ conduct() {
     esac
   done
   warn "conductor: 100 trains in one hold — stopping as a safety net (this is a bug; report it)"
+}
+
+# A pre-queue lint yields to the gate's heavy phases (yield_to_gate) — and with
+# trains back to back the heavy phases never end: the gap between two trains is
+# seconds, and a lint polling every 15 s starved for over an hour (2026-09-24),
+# holding the lint lock, so every agent behind it starved too. So between
+# trains the gate yields back: if a lint holds the lock (it may be waiting for
+# exactly this gap), the next train waits until it is done — at most
+# WTQ_GATE_LINT_WAIT seconds (default 900), then starts anyway.
+yield_to_lint() {
+  local cap; cap="$(int_or "${WTQ_GATE_LINT_WAIT:-}" 900)"
+  # Free lock = no lint running (a killed lint can leave its holder line behind).
+  flock -n "$LINT_LOCK" true 2>/dev/null && return 0
+  info "between trains: letting the pre-queue lint of $(cat "$LINT_HOLDER") finish first (at most ${cap}s) ..."
+  flock -w "$cap" "$LINT_LOCK" true \
+    || warn "that lint is still running after ${cap}s — starting the train anyway"
 }
 
 # The per-check timeouts are ceilings measured on an idle box; starting the

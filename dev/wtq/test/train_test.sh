@@ -294,6 +294,26 @@ check "a DEGRADED green run is not recorded" eq "$(find "$Q/e2e-runs" -name '*.l
 check "and does not move the baseline" grep -qP '^20\tedit-a\.test\.js$' "$Q/e2e-baseline.tsv"
 unset E2E_SECS
 
+echo "== between trains the gate lets a running pre-queue lint finish"
+new_world yield-lint
+feature yl yl.txt yl
+# shellcheck disable=SC2016  # expands inside the stub, not here
+sed -i '2i date +%s.%N > "$STUB_LOG.start"' "$WTQ_GATE_STUB"
+hold_lock
+enqueue_in_order yl
+# Another agent's lint holds the lint lock (it waits for the gate's heavy
+# phase to end — i.e. for exactly the gap between two trains).
+flock "$Q/lint.lock" -c "echo 'other @ deadbeef' > '$Q/lint.holder'; touch '$T/lint-held'; sleep 2; date +%s.%N > '$T/lint.end'; : > '$Q/lint.holder'" &
+lint_pid=$!
+wait_for 10 test -e "$T/lint-held"
+release_lock
+finish yl
+wait "$lint_pid" 2>/dev/null || true
+check "yl GREEN" eq "$(rc_of yl)" 0
+check "the train started only after that lint ended" \
+  awk -v a="$(cat "$STUB_LOG.start")" -v b="$(cat "$T/lint.end")" 'BEGIN {exit !(a >= b)}'
+check "and said why it waited" grep -q 'letting the pre-queue lint of other' "$T/yl.out"
+
 echo "== conflict with develop itself -> CONFLICT"
 new_world conflict
 feature x f.txt x

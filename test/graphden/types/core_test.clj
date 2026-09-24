@@ -290,10 +290,7 @@
     (is (not (t/subtype? :numeric :decimal))
         ":numeric is NOT a subtype of :decimal — supertype direction")
     (is (not (t/subtype? :int :decimal))
-        "siblings in the numeric tower don't subtype each other"))
-  (testing ":decimal storage-kind degrades to :numeric"
-    (is (= :numeric (t/type->storage-kind :decimal))
-        "storage value_kind has no :decimal enum entry; degrade to super")))
+        "siblings in the numeric tower don't subtype each other")))
 
 
 ;; -----------------------------------------------------------------------------
@@ -336,10 +333,7 @@
     (is (t/subtype? :input-stream :any))
     (is (not (t/subtype? :jsonb :input-stream)))
     (is (not (t/subtype? :input-stream :bytes))
-        ":input-stream is NOT bytes — it's a stream wrapper, not a buffer"))
-  (testing ":input-stream storage-kind degrades to :any"
-    (is (= :any (t/type->storage-kind :input-stream))
-        "transient runtime object — never stored as data")))
+        ":input-stream is NOT bytes — it's a stream wrapper, not a buffer")))
 
 
 (deftest map-type-test
@@ -368,10 +362,9 @@
     (is (t/subtype? {:data-binding-id :text} [:map 'a :any]))
     (is (t/subtype? {:a :int :b :text} [:map 'a 'b]))
     (is (t/subtype? {} [:map 'a 'b]) "empty record fits any parametric map"))
-  (testing "well-formed? + storage-kind"
+  (testing "well-formed?"
     (is (t/well-formed? [:map :keyword :int]))
-    (is (not (t/well-formed? [:map :int])))
-    (is (= :jsonb (t/type->storage-kind [:map :keyword :int])))))
+    (is (not (t/well-formed? [:map :int])))))
 
 
 (deftest tuple-type-test
@@ -388,9 +381,8 @@
         "length mismatch — not a subtype")
     (is (t/subtype? [:tuple :text :int] :jsonb))
     (is (t/subtype? [:tuple :text :int] :any)))
-  (testing "well-formed? + storage-kind"
-    (is (t/well-formed? [:tuple :text :int]))
-    (is (= :sequence (t/type->storage-kind [:tuple :text :int])))))
+  (testing "well-formed?"
+    (is (t/well-formed? [:tuple :text :int]))))
 
 
 (deftest subtype-resolves-aliases-test

@@ -91,12 +91,15 @@ All three mechanisms use the same infrastructure — fn-defs, arg entities, `com
 :never                         ← bottom type, subtype of everything
 ```
 
-Storage-kind degradation (`type->storage-kind`): `:int`/`:float` stay
-as themselves; `:decimal` degrades to `:numeric` (the value_kind enum
-has no `:decimal` entry); `:input-stream` and `:never` degrade to
-`:any` (transient / phantom — never persisted as data); `:fn-ref`
-degrades to `:uuid` (though a `:fn-ref` slot is only ever bound by a
-fn-ref, so no literal reaches the column).
+Storage degradation (`packages.records.types/resolve-type-ref`): a
+slot's stored `:type-fn-id` is a primitive row as itself; `[:list …]` /
+`[:tuple …]` degrade to `:sequence`, `[:map K V]` to `:jsonb`,
+`[:refine B …]` and marker types (`[:secret T]`) to their base, and
+`[:union …]`, type variables and `:never` to `:any` — records and
+`[:fn …]` get an anonymous row carrying their shape. The rich form
+lives in the in-memory rich-types registry. The type-system-only
+primitives (`:float`, `:keyword`, `:input-stream`, `:decimal`) never
+reach the `value_kind` column.
 
 **`:fn` vs `:fn-ref`.** A `:fn` slot means *give me something I can
 call*: the executor hof-wraps the bound fn into a callable (or, when

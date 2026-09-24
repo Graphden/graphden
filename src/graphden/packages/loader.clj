@@ -607,8 +607,13 @@
                        :present present})))))
 
 
-(defn- resolve-dependencies
+(defn resolve-dependencies
   "Returns packages in dependency order (topological sort).
+
+   Public because the order is the package set's IDENTITY: two name lists
+   that resolve alike (`[core web app]` and `[core storage web app-base
+   app]`) load the same packages in the same order and boot the same graph
+   — the test fixtures key their golden DB and type-check sweep on it.
 
    Pulls TRANSITIVE deps — if `app` declares `:dependencies [\"core\"
    \"web\" \"storage\"]` and the caller passes just `[\"app\"]`, all

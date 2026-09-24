@@ -13,13 +13,13 @@ after: executor
 :PROPERTIES:
 :CUSTOM_ID: packages/load-packages
 :FILE: src/graphden/packages/loader.clj
-:LINE: 648
+:LINE: 653
 :MINS: 5.4
 :END:
 
 The entry point and top-level orchestrator — boot calls it with the configured ~:package-names~: resolve dependency order, load each package, and fold every module's results into the combined ~{:base-fn-defs … :fn-defs … :namespaces …}~ map that seeds the graph. The hub the rest of this block drills into.
 
-- source :: [[file:../../../src/graphden/packages/loader.clj::(defn load-packages][src/graphden/packages/loader.clj:648]]
+- source :: [[file:../../../src/graphden/packages/loader.clj::(defn load-packages][src/graphden/packages/loader.clj:653]]
 - same file :: [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 - referenced from :: [[file:boot.org::#boot/packages][packages]], [[file:constellation.org::#constellation/read-manifest][read-manifest]]
 
@@ -28,12 +28,12 @@ The entry point and top-level orchestrator — boot calls it with the configured
 :CUSTOM_ID: packages/resolve-dependencies
 :FILE: src/graphden/packages/loader.clj
 :LINE: 610
-:MINS: 2.7
+:MINS: 2.9
 :END:
 
 A DFS topological sort over each ~package.edn~'s ~:dependencies~, pulling transitive deps so primitives load before their consumers. This is the dependency-driven load order.
 
-- source :: [[file:../../../src/graphden/packages/loader.clj::(defn- resolve-dependencies][src/graphden/packages/loader.clj:610]]
+- source :: [[file:../../../src/graphden/packages/loader.clj::(defn resolve-dependencies][src/graphden/packages/loader.clj:610]]
 - same file :: [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 
 * 3. validate-dep-constraints!
@@ -199,13 +199,13 @@ A concrete ~defbase~ base-fn impl — ~(defbase add [nums] (safe-arith + nums :a
 :PROPERTIES:
 :CUSTOM_ID: packages/sync-namespaces!
 :FILE: src/graphden/packages/loader.clj
-:LINE: 727
+:LINE: 732
 :MINS: 4.3
 :END:
 
 Closes the loop into storage: take the collected namespace paths, build the ~core~ → ~core.arithmetic~ parent-child ~:ns~ entity hierarchy, and return ~{ns-path → id}~ that the fn-def sync hangs the live fn rows under.
 
-- source :: [[file:../../../src/graphden/packages/loader.clj::(defn sync-namespaces!][src/graphden/packages/loader.clj:727]]
+- source :: [[file:../../../src/graphden/packages/loader.clj::(defn sync-namespaces!][src/graphden/packages/loader.clj:732]]
 - see also :: [[file:executor.org::#executor/sync-fns-to-storage!][sync-fns-to-storage!]]
 - same file :: [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]]
 

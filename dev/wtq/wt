@@ -1930,6 +1930,24 @@ conductor_has_work() {
   return 1
 }
 
+# A bisection is finished once no queued member sits in one of its segments.
+# One that settled every member inside its budget never reaches select_train's
+# spent-budget cleanup, so its budget file is dropped here — bisect/ must only
+# ever hold bisections that are still running.
+prune_finished_bisections() {
+  local f id n
+  state_lock
+  for f in "$BISECT_DIR"/*; do
+    [ -f "$f" ] || continue
+    id="$(basename "$f")"
+    for n in $(queued_names); do
+      case "$(qget "$n" seg)" in "$id".*) continue 2 ;; esac
+    done
+    rm -f "$f"
+  done
+  state_unlock
+}
+
 conduct() {
   local own="$1" own_sha="$2" guard=0 rc n
   # Whoever held the lock before us is gone (the lock is ours now), so an entry
@@ -1940,6 +1958,7 @@ conduct() {
   state_unlock
   while [ "$guard" -lt 100 ]; do
     guard=$((guard + 1))
+    prune_finished_bisections
     conductor_has_work "$own" "$own_sha" || return 0
     yield_to_lint
     wait_for_headroom

@@ -24,6 +24,7 @@
     [graphden.schema.versioned.schema :as vts]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tc]
     [graphden.versioning.branch-local :as bl]))
 
 
@@ -855,17 +856,22 @@
 ;; twice PER TEST: 368 platform tests spent ~12 min of a gate reloading the
 ;; same graph. Inside a scope that resolves many roots, the load is shared.
 ;;
-;; Keyed on the branch AND the graph epoch (`graph-epoch/current`, bumped
-;; before every graph-shaped write), so a write inside the scope — a test
-;; whose body edits the graph — reloads instead of reading a stale graph. A
-;; handle without an epoch (no pool: an in-memory test storage) is never
-;; memoised. Scope-bound, never process-wide: holding a whole graph between
-;; requests is memory the executor already spends on its compiled registry.
+;; Keyed on the graph epoch (`graph-epoch/current`, bumped before every
+;; graph-shaped write), so a write inside the scope — a test whose body
+;; edits the graph — reloads instead of reading a stale graph. The epoch is
+;; read through `epoch-handle`, so a DECORATED base (the cloud stack's
+;; `Versioned(OrgScoped(Postgres))`) memoises too; and because such a
+;; decorator filters what it returns by the org in scope, the key also
+;; carries that org and whether the base was decorated — an org-scoped read
+;; and a raw one (or two orgs' reads) never share an entry. A handle with
+;; no pool anywhere beneath (an in-memory test storage) is never memoised.
+;; Scope-bound, never process-wide: holding a whole graph between requests
+;; is memory the executor already spends on its compiled registry.
 
 (def ^:dynamic *graph-load-memo*
   "When bound to an atom, `resolve-execution-graph-batch` memoises the
-   whole-branch load per `[branch-id graph-epoch]` in it. nil outside a
-   scope (`call-with-graph-load-memo`)."
+   whole-branch load per `graph-memo-key` in it. nil outside a scope
+   (`call-with-graph-load-memo`)."
   nil)
 
 
@@ -896,20 +902,34 @@
      :slot-by-id (into {} (map (juxt :id identity)) slots)}))
 
 
+(defn- graph-memo-key
+  "`[org decorated? branch-id epoch]` — the memo key of `branch-id`'s load
+   through `base-storage`, or nil when no pool beneath reports an epoch.
+   `decorated?` is whether the pool sits under a decorator (whose reads
+   depend on the org in scope) rather than being `base-storage` itself."
+  [base-storage branch-id]
+  (let [h (epoch/epoch-handle base-storage)]
+    (when-some [e (epoch/current h)]
+      [(tc/current-org) (not (identical? h base-storage)) branch-id e])))
+
+
 (defn- branch-graph
   "`load-branch-graph`, through the scope memo when one is bound and the
    handle reports an epoch."
   [base-storage branch-id]
   (let [memo *graph-load-memo*
-        e (when memo (epoch/current base-storage))]
-    (if (and memo (some? e))
-      (let [k [branch-id e]]
-        (or (get @memo k)
-            (let [g (load-branch-graph base-storage branch-id)]
-              ;; One entry per scope is the useful case; a write mid-scope
-              ;; supersedes the old epoch's graph, so drop it.
-              (reset! memo {k g})
-              g)))
+        k (when memo (graph-memo-key base-storage branch-id))]
+    (if k
+      (or (get @memo k)
+          (let [g (load-branch-graph base-storage branch-id)
+                e (peek k)]
+            ;; A write mid-scope supersedes every older epoch's graph, so
+            ;; keep only the entries of this epoch (one per org / handle
+            ;; shape / branch the scope reads).
+            (swap! memo (fn [m]
+                          (assoc (into {} (filter (fn [[k' _]] (= e (peek k')))) m)
+                                 k g)))
+            g))
       (load-branch-graph base-storage branch-id))))
 
 

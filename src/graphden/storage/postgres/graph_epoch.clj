@@ -58,7 +58,7 @@
 (defn epoch-handle
   "The pool-bearing Postgres handle beneath `storage` — the one that owns
    the sequence's pool AND the bump ledger. Every entry point resolves
-   through it (except `current` — see there), so callers may pass
+   through it (except `current`, whose callers resolve it), so callers may pass
    whatever storage they hold. A storage
    DECORATOR (the tenancy addon's `OrgScopedStorage` under `:base`, a
    `VersionedStorage` under `:base-storage`) carries neither; without this
@@ -280,10 +280,9 @@
    or missing sequence — callers treat nil as 'cannot validate, skip
    healing'."
   [storage]
-  ;; Deliberately NOT through `epoch-handle`: the resolution load memo
-  ;; keys on `[branch epoch]` alone, so a decorator reporting its base's
-  ;; epoch would let an org-scoped read and a raw compile read share one
-  ;; memo entry. Callers that want the sequence resolve the handle first.
+  ;; Not through `epoch-handle` itself: callers that want the sequence
+  ;; beneath a decorator resolve the handle first (the resolution load
+  ;; memo does, and keys on the org + decorated-ness beside the epoch).
   (when-let [pool (:pool storage)]
     (try
       (let [row (util/exec-one!

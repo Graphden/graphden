@@ -358,11 +358,19 @@ test paid two whole-branch loads. The same cost lands on a tenant's
 [Run all], and a cold Run of any fn paid it twice.
 
 `resolution/call-with-graph-load-memo` shares the load inside a scope,
-keyed on `[branch-id graph-epoch]` — the epoch is bumped before every
-graph-shaped write, so a test that edits the graph is followed by a reload,
-not a stale read; a handle with no epoch (no pool) is never memoised.
+keyed on `[org decorated? branch-id graph-epoch]` — the epoch is bumped
+before every graph-shaped write, so a test that edits the graph is followed
+by a reload, not a stale read; a handle with no pool anywhere beneath is
+never memoised. The epoch is read through `graph-epoch/epoch-handle`: the
+first cut read it off the handle it held, and on the cloud stack
+(`Versioned(OrgScoped(Postgres))`, no `:pool` on the decorator) the memo
+never switched on, so a tenant's [Run all] still paid two loads per test.
+The org in scope and whether the base is decorated sit in the key because
+the tenancy decorator filters reads by org — an org-scoped read and a raw
+one never share an entry.
 `run-tests!` scopes the whole run, `apply-execute`'s plan scopes its two
 lookups. Measured on 40 platform tests, one JVM, no contention:
 1638 ms → 69 ms per test. Scope-bound on purpose: holding a whole graph
 across requests would duplicate what the compiled registry already holds.
-Covered by `versioning.storage.core-test/graph-load-memo-shares-one-branch-load-per-epoch-test`.
+Covered by `versioning.storage.core-test/graph-load-memo-shares-one-branch-load-per-epoch-test`
+and, for the decorated stack, `versioning.storage.decorated-stack-test/graph-load-memo-works-under-a-decorator-and-keys-on-the-org`.

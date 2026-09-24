@@ -22,8 +22,10 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
     [graphden.storage.tx :as tx]
+    [graphden.tenancy.context :as tc]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.merge :as mrg]
+    [graphden.versioning.storage.resolution :as res]
     [graphden.versioning.storage.uniqueness :as uniq]
     [next.jdbc :as jdbc])
   (:import
@@ -407,3 +409,38 @@
                   (is (= 6 (count (sp/query-entities v :binding-list-item {:binding-id (:id b)}))))
                   (is (zero? (get @(:reads deco) :binding 0))
                       "no per-item read of the owning binding")))))
+
+
+;; ============================================================================
+;; The whole-branch load memo under a decorator
+;; ============================================================================
+
+(deftest graph-load-memo-works-under-a-decorator-and-keys-on-the-org
+  ;; The memo keyed on `graph-epoch/current` of the handle it held — and a
+  ;; decorator has no pool, so on the cloud stack it never switched on: a
+  ;; tenant's [Run all] paid two whole-branch loads per test. Through the
+  ;; epoch handle it memoises there too; and because the decorator filters
+  ;; by the org in scope, another org — or the raw base — reads its own.
+  (with-stack
+    (fn [pg _deco v]
+      (let [known? (fn [storage fid]
+                     (try (contains? (:fns (sp/resolve-execution-graph storage fid)) fid)
+                          (catch clojure.lang.ExceptionInfo e
+                            (if (= :not-found (:type (ex-data e))) false (throw e)))))
+            a (sp/create-entity v :fn {:name "memo-a" :parent-ids [] :description "h"})]
+        (res/call-with-graph-load-memo
+          (fn []
+            (is (known? v (:id a)))
+            ;; Written under the versioning layer: no epoch bump, so only a
+            ;; memoised load misses it.
+            (let [raw (sp/create-entity pg :fn {:name "memo-raw" :parent-ids []
+                                                :description "h"})]
+              (testing "a second resolve through the decorator reuses the load"
+                (is (false? (known? v (:id raw)))))
+              (testing "another org in scope does not share the entry"
+                (is (true? (binding [tc/*current-org* (random-uuid)] (known? v (:id raw))))))
+              (testing "a raw (undecorated) read does not share the scoped entry"
+                (let [raw2 (sp/create-entity pg :fn {:name "memo-raw2" :parent-ids []
+                                                     :description "h"})]
+                  (is (true? (known? (vs/wrap-with-versioning pg) (:id raw2))))
+                  (is (false? (known? v (:id raw2)))))))))))))

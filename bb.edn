@@ -1007,8 +1007,9 @@
    :task (p/shell "bash" "dev/wtq/test/train_test.sh")}
 
   ci-test
-  {:doc "Self-test of the CI selection core (scripts/ci_select.clj) + checks.edn validation. Runs inside bb ci as the ci-selftest check."
-   :task (load-file "scripts/ci_select_test.clj")}
+  {:doc "Self-test of the CI runner core — the selection (scripts/ci_select.clj) + checks.edn validation, and killing a timed-out check (scripts/ci_proc.clj). Runs inside bb ci as the ci-selftest check."
+   :task (do (load-file "scripts/ci_proc_test.clj")
+             (load-file "scripts/ci_select_test.clj"))}
 
   lint
   {:doc "Every linter, parallel, NO unit tests — the fast pre-gate check (~1 min)."

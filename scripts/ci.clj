@@ -16,6 +16,7 @@
    and the suite continues so the user always gets a result line."
   (:require
     [babashka.process :as p]
+    [ci-proc]
     [ci-select]
     [clojure.string :as str])
   (:import
@@ -204,7 +205,7 @@
 (defn- kill-live-procs!
   []
   (doseq [proc @live-procs]
-    (try (Process/.destroyForcibly (:proc proc)) (catch Exception _ nil))))
+    (try (ci-proc/destroy-tree! proc) (catch Exception _ nil))))
 
 
 ;; ===========================================================================
@@ -230,28 +231,28 @@
     (swap! live-procs disj proc)
     (cond
       (= result ::timeout)
-      (do (try (Process/.destroyForcibly (:proc proc)) (catch Exception _ nil))
-          ;; Salvage what the child printed BEFORE the axe: kaocha's
-          ;; dots-so-far name the namespace that was still running,
-          ;; which is the whole diagnosis. Discarding it made a
-          ;; timeout verdict contentless (audit-6).
-          (swap! results assoc check-name
-                 {:exit -1
-                  :output (let [r (deref proc 5000 nil)]
-                            (str "TIMEOUT after " (/ timeout-ms 1000) " s\n"
-                                 "Command: " (pr-str cmd)
-                                 (when (:out r) (str "\n--- partial stdout ---\n" (:out r)))
-                                 (when (seq (:err r)) (str "\n--- partial stderr ---\n" (:err r)))))
-                  :warnings false
-                  :duration-ms duration-ms})
-          ;; An `:info` check that times out is still advisory — a hung
-          ;; `outdated`/antq network call is the very "network hiccup"
-          ;; these checks are expected to have, and must NOT fail the run
-          ;; (mirrors the `:else` branch's `block!`; this arm used to
-          ;; `reset! failed` unconditionally).
-          (let [info? (= :info (:group c))]
-            (swap! status assoc check-name (if info? :warning :timeout))
-            (when-not info? (reset! failed true))))
+      ;; Kill the check's whole tree, then salvage what it printed BEFORE the
+      ;; axe: kaocha's dots-so-far name the namespace that was still running,
+      ;; which is the whole diagnosis. Discarding it made a timeout verdict
+      ;; contentless (audit-6); killing only the child made it a `Stream
+      ;; closed` runner error instead (ci-proc).
+      (let [r (ci-proc/kill-and-salvage! proc)]
+        (swap! results assoc check-name
+               {:exit -1
+                :output (str "TIMEOUT after " (/ timeout-ms 1000) " s\n"
+                             "Command: " (pr-str cmd)
+                             (when (:out r) (str "\n--- partial stdout ---\n" (:out r)))
+                             (when (seq (:err r)) (str "\n--- partial stderr ---\n" (:err r))))
+                :warnings false
+                :duration-ms duration-ms})
+        ;; An `:info` check that times out is still advisory — a hung
+        ;; `outdated`/antq network call is the very "network hiccup"
+        ;; these checks are expected to have, and must NOT fail the run
+        ;; (mirrors the `:else` branch's `block!`; this arm used to
+        ;; `reset! failed` unconditionally).
+        (let [info? (= :info (:group c))]
+          (swap! status assoc check-name (if info? :warning :timeout))
+          (when-not info? (reset! failed true))))
 
       :else
       (let [output (str (:out result) "\n" (:err result))
@@ -283,8 +284,9 @@
    failure instead of propagating.
 
    A child process whose captured stream dies mid-read (`java.io.IOException:
-   Stream closed` — seen when a loaded host kills a child, and once for
-   every agent who ran two `bb ci`s at a time) used to escape the future
+   Stream closed` — the usual cause was a TIMED-OUT check killed without its
+   grandchild, fixed in `ci-proc`; kept for anything else that closes a
+   stream under us) used to escape the future
    and blow up `run-waves!`, so a run with 28 green checks printed a stack
    trace and NO verdict: the one thing the report exists to tell you —
    which check died — was the one thing it could not say."

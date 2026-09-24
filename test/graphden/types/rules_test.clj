@@ -84,16 +84,13 @@
 
 (defn- compute-return-type
   "Dispatch a return-type rule by base-fn name through the PRODUCTION
-   wiring: the `:return-type-rule` the loader recorded on the base-fn's
-   rich-types registry entry (from its impls.clj registration map), else
-   the checker's declared-signature fallback, else `default-ret` —
-   the same order `graphden.types.check` uses. No hand-kept name→rule
-   table: a rule wired onto the wrong base-fn fails here."
+   wiring — `check/rule-return`, the one the checker's sweep calls: the
+   `:return-type-rule` recorded on the base-fn's rich-types entry, else
+   the declared-signature fallback, else `default-ret`, plus the
+   `:taint-propagate?` wrap. No hand-kept name→rule table and no copy of
+   the dispatch: a rule wired onto the wrong base-fn fails here."
   [base-fn-name bindings-info default-ret]
-  (let [entry (registry/rich-type-of base-fn-name)]
-    (if-let [r (:return-type-rule entry)]
-      (r bindings-info default-ret)
-      (check/signature-return entry bindings-info default-ret))))
+  (check/rule-return base-fn-name bindings-info default-ret))
 
 
 (defn- registry-rule
@@ -592,6 +589,17 @@
   (is (= :numeric
          (compute-return-type :add
                               {:nums {:type [:list :numeric]}}
+                              :numeric))))
+
+
+(deftest add-over-a-secret-operand-is-secret
+  ;; The `:taint-propagate?` wrap belongs to the dispatch, not to the rule —
+  ;; the test used to call a copy of the dispatch without it, so a rule
+  ;; test could never see what the checker actually returns.
+  (is (= [:secret :numeric]
+         (compute-return-type :add
+                              {:nums {:type [:list [:secret :int]]
+                                      :elem-types [[:secret :int]]}}
                               :numeric))))
 
 

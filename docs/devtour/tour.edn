@@ -676,6 +676,13 @@
            substitution. `:coll [:list a] → [:union :null a]` IS the rule;
            the hand-written rules that survive are only those reading
            literal values, union fan-out, or the registry."}
+    {:ns graphden.types.check :defn rule-return
+     :say "The one dispatch over those engines: walk to the ROOT base-fn,
+           run its hand rule if it has one, else the declared signature,
+           else keep the static return — then lift the result into
+           `[:secret …]` when the root propagates taint and an input carries
+           it. The sweep calls it per fn-def; `types.rules-test` calls the
+           same fn, so a rule is tested through the wiring that ships."}
     {:ns graphden.types.check :defn check-fn-def!
      :say "Type-checks a single fn-def against its (single or multiple-
            inheritance) parents: resolve parent slots, run the monotonicity /

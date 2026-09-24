@@ -147,16 +147,42 @@
     graph))
 
 
+(defn hidden-fn-ids
+  "The ids among `fn-rows` whose composition the installed view-impl
+   filter conceals from the current viewer. Probes the seam ONCE with a
+   dump carrying one synthetic binding per fn: the filter drops a hidden
+   fn's bindings, so a fn whose binding did not survive is hidden. `#{}`
+   with no filter installed. For reads that must decide about MANY fns'
+   internals without shipping a graph dump (an execution trace's frames)."
+  [fn-rows]
+  (if (or (empty? fn-rows) (nil? @view-impl-filter))
+    #{}
+    (let [ids (into #{} (keep :id) fn-rows)
+          seen (into #{} (map :fn-id)
+                     (:bindings (apply-view-impl-filter
+                                  {:fns (vec fn-rows)
+                                   :bindings (mapv (fn [id] {:fn-id id}) ids)})))]
+      (into #{} (remove seen) ids))))
+
+
 (defn impl-visible?
   "Would the installed view-impl filter show `fn-row`'s composition to the
-   current viewer? Probes the seam with a one-fn dump carrying one binding
-   of that fn: the filter drops a hidden fn's bindings, so a surviving
-   binding means visible. Always true with no filter installed. For reads
-   that answer about ONE fn's internals without shipping a graph dump
-   (`describe-fn`'s unread bindings)."
+   current viewer? The one-fn case of `hidden-fn-ids`. Always true with no
+   filter installed. For reads that answer about ONE fn's internals
+   without shipping a graph dump (`describe-fn`'s unread bindings)."
   [fn-row]
-  (boolean (seq (:bindings (apply-view-impl-filter
-                             {:fns [fn-row] :bindings [{:fn-id (:id fn-row)}]})))))
+  (empty? (hidden-fn-ids [fn-row])))
+
+
+(defn unknown-fn-hidden?
+  "Would the viewer be denied the internals of a fn the reader cannot
+   identify (a row it cannot read, a frame whose ancestry is lost)? The
+   filter is asked about an ownerless, namespace-less row: a tenant sees
+   only its own org's (or granted) internals, so such a row reads as
+   hidden; no filter / the platform context sees it. Reads that must fail
+   CLOSED on missing information key on this instead of guessing."
+  []
+  (not (impl-visible? {:id (java.util.UUID/randomUUID)})))
 
 
 (defn- visible-subtree

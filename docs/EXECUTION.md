@@ -526,6 +526,21 @@ Secret handling is capture-time AND read-time:
   secret after the run stops serving its historical values, and the
   ancestor chain re-poisons via the stored `:parent-seq` links.
 
+Concealment (multi-tenant) is read-time too: a trace shows only what the
+viewer could have drawn from the graph they see. Every surface that
+serves a trace — the inline `POST /api/execute` answer,
+`GET /api/execute/:id`, `GET /api/executions`, the execute-trace
+partial, MCP `execute-fn` with `trace: true` — passes it through the
+view-impl seam (`fn-execution.conceal/conceal-path-trace`, via
+`fn-execution/viewer-path-trace`). A frame of a fn whose composition
+the viewer may not see (another org's shared fn, no `:view-impl`
+grant) stays as a **leaf** marked `:concealed? true` (its own
+duration / value stay); every frame beneath it is dropped, and the kept
+frames are renumbered so `:seq` gaps do not count them. A frame whose
+ancestry is lost (truncated parent, pre-tree entry) is dropped for a
+tenant, since it cannot be placed. The row itself keeps the raw trace:
+visibility is per viewer, and grants change.
+
 ## Debug: catch next request
 
 One-shot, TTL-bounded trap on a branch's web handler

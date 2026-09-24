@@ -1044,7 +1044,21 @@
 
   {:name :_list-exec-by-version-decoded
    :parent :map
-   :args {:func :_list-exec-decode-row :coll :_list-exec-by-version-raw}}
+   :args {:func :_list-exec-viewer-row :coll :_list-exec-by-version-raw}}
+
+  ;; The raw row's `:path-trace` goes out only through the shared trace
+  ;; read path — re-redacted and concealed for this viewer, exactly as
+  ;; GET /api/execute/:id serves the same row.
+  {:name :_list-exec-viewer-row
+   :parent :assoc
+   :return-type :fn-execution-row-shape
+   :args {:map :_list-exec-decode-row
+          :key {:value :path-trace}
+          :value {:parent :viewer-path-trace
+                  :args {:path-trace {:parent :get
+                                      :args {:coll :_list-exec-decode-row
+                                             :key {:value :path-trace}
+                                             :default nil}}}}}}
 
   {:name :_list-exec-decode-row
    :parent :decode-row
@@ -3330,6 +3344,13 @@
   ;; READ-time re-redaction applies inside). editor-trace-view.js owns
   ;; the panel lifecycle: row-click → canvas highlight, ◀/▶ stepping.
   ;; ---------------------------------------------------------------------
+
+  {:name :viewer-path-trace
+   :description "A stored `:path-trace` as the CURRENT viewer may read it: values of fns that became secret since the run re-redacted, and — under the tenancy view-impl seam — the frames inside a fn whose composition the viewer may not see dropped (the fn's own frame stays as a leaf). The read path every trace-serving surface shares (`fn-execution/viewer-path-trace`); `:get-execution` and `:execute-trace-rows` apply it inside, raw row reads apply it here."
+   :args {:path-trace {:type :nullable-jsonb
+                       :description "The row's `:path-trace` jsonb; nil passes through."}}
+   :return-type :nullable-jsonb
+   :effects #{:db}}
 
   {:name :execute-trace-rows
    :description "Display payload for one execution's stored trace: `{:found? bool, :rows [{seq, fn-id, fn-name, indent-px, chip, chip-kind, derived?, value-str?, value-truncated?} …], :truncated?, :values-dropped?}` — rows in depth-first call-tree order, fn names joined on the current branch, values re-redacted through the CURRENT registry. Single call over `fn-execution/trace-display-rows` (the tree walk + name join is one cohesive read-shaping algorithm)."

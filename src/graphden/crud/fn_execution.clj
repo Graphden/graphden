@@ -30,6 +30,7 @@
    plumbing + size caps live in `.persist`."
   (:require
     [clojure.set :as set]
+    [graphden.crud.fn-execution.conceal :as conceal]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.crud.request :as request]
@@ -377,7 +378,25 @@
           rejected
           (do (when-let [row (:row submit)]
                 (persist/register-future! (:id row) (:fut submit) (:cancel-flag plan)))
-              (await-outcome! plan parsed submit)))))))
+              ;; The row keeps the RAW trace (concealment is per viewer,
+              ;; applied on every read); the inline answer is a read.
+              (let [outcome (await-outcome! plan parsed submit)]
+                (cond-> outcome
+                  (:path-trace outcome)
+                  (update :path-trace #(conceal/conceal-path-trace storage %))))))))))
+
+
+(defn viewer-path-trace
+  "A stored `:path-trace` as the CURRENT viewer may read it: READ-time
+   secret re-redaction (`persist/re-redact-path-trace` — a fn that became
+   secret after the run stops serving its captured values) THEN the
+   view-impl concealment (`conceal/conceal-path-trace` — frames inside a
+   fn whose composition the viewer may not see are dropped). The one
+   read path every trace-serving surface goes through. nil-safe."
+  [storage pt]
+  (some->> pt
+           persist/re-redact-path-trace
+           (conceal/conceal-path-trace storage)))
 
 
 ;; =============================================================================
@@ -442,10 +461,9 @@
         row (sp/read-entity storage :fn-execution execution-id)]
     (when row
       (-> row
-          ;; READ-time re-redaction: a fn that became secret after this
-          ;; run must not keep serving captured values from the stored
-          ;; trace (persist/re-redact-path-trace).
-          (update :path-trace #(some-> % persist/re-redact-path-trace))
+          ;; READ-time re-redaction + view-impl concealment
+          ;; (`viewer-path-trace`).
+          (update :path-trace #(viewer-path-trace storage %))
           (assoc :args (args-for-execution storage execution-id))
           ;; The logical base fn behind the frozen fn-version snapshot —
           ;; drives typed-repr dispatch in the execute-result partial
@@ -542,7 +560,7 @@
   (let [storage (request/require-storage ctx)
         row (when execution-id
               (sp/read-entity storage :fn-execution execution-id))
-        pt (some-> (:path-trace row) persist/re-redact-path-trace)
+        pt (viewer-path-trace storage (:path-trace row))
         entries (:entries pt)]
     (if (empty? entries)
       {:found? false :rows []}
@@ -586,9 +604,9 @@
      ;; on the index and returns only the newest `lim` rows instead of
      ;; transferring + sorting a hot fn's whole run history.
      (mapv (fn [row]
-             ;; Same READ-time re-redaction as `get-execution` — these
-             ;; rows go to the history sidebar with their `:path-trace`.
-             (update row :path-trace #(some-> % persist/re-redact-path-trace)))
+             ;; Same READ path as `get-execution` — these rows go to the
+             ;; history sidebar with their `:path-trace`.
+             (update row :path-trace #(viewer-path-trace storage %)))
            (sp/query-entities storage :fn-execution
                               {:fn-version-id fn-version-id}
                               {:order-by [[:started-at :desc]] :limit lim})))))

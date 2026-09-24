@@ -93,6 +93,7 @@
           :user-id :nullable-uuid
           :cancel-requested? :nullable-bool
           :touched-secret? :nullable-bool
+          :path-trace :nullable-jsonb
           :graph-hash :nullable-text}}
 
   {:name :service-row-shape

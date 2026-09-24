@@ -280,6 +280,15 @@
   (fn-exec/trace-display-rows ctx id))
 
 
+(defbase viewer-path-trace
+  "A stored `:path-trace` as the current viewer may read it — READ-time
+   secret re-redaction + view-impl concealment. Single call over
+   `fn-exec/viewer-path-trace`, the read path every trace surface shares."
+  [path-trace]
+  (cr/record-effect! :db)
+  (fn-exec/viewer-path-trace (request/require-storage ctx) path-trace))
+
+
 (defbase debug-catch-arm!
   "Arm (or re-arm) the current org's one-shot request trap on
    `branch-id` — the next matching HTTP request through the branch
@@ -316,6 +325,7 @@
   {:unresolved-failure-counts unresolved-failure-counts
    :resolve-fn                 resolve-fn
    :execute-trace-rows         execute-trace-rows
+   :viewer-path-trace          viewer-path-trace
    :debug-catch-arm!           debug-catch-arm!
    :debug-catch-disarm!        debug-catch-disarm!
    :debug-catch-status         debug-catch-status

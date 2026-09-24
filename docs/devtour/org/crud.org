@@ -119,26 +119,26 @@ The atomic core for generic creates: create-or-humanise-error, a post-create who
 :PROPERTIES:
 :CUSTOM_ID: crud/type-check-fn-after-mutation!
 :FILE: src/graphden/crud/type_check.clj
-:LINE: 441
+:LINE: 474
 :MINS: 5.0
 :END:
 
 Reconstructs the touched fn-def and runs ~check-fn-def!~ after a mutation, recording failures in (and clearing fixes from) the per-branch diagnostics store. This is the type-check-on-write that ~apply-create-core~ relies on — an ill-typed fn persists, but never silently: every save re-derives its diagnostics. The ~:reject-secret?~ option is the security carve-out: a secret-involving failure is flagged ~:secret? true~ and NOT recorded — the caller rolls the write back and hard-rejects.
 
-- source :: [[file:../../../src/graphden/crud/type_check.clj::(defn type-check-fn-after-mutation!][src/graphden/crud/type_check.clj:441]]
+- source :: [[file:../../../src/graphden/crud/type_check.clj::(defn type-check-fn-after-mutation!][src/graphden/crud/type_check.clj:474]]
 - see also :: [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 
 * 10. notify-after-write!
 :PROPERTIES:
 :CUSTOM_ID: crud/notify-after-write!
 :FILE: src/graphden/crud/entities/invalidation.clj
-:LINE: 224
+:LINE: 219
 :MINS: 4.8
 :END:
 
 The post-persist step: invalidate caches and broadcast a NOTIFY delta so sibling pods rebuild the affected fns. How a committed write becomes visible fleet-wide.
 
-- source :: [[file:../../../src/graphden/crud/entities/invalidation.clj::(defn notify-after-write!][src/graphden/crud/entities/invalidation.clj:224]]
+- source :: [[file:../../../src/graphden/crud/entities/invalidation.clj::(defn notify-after-write!][src/graphden/crud/entities/invalidation.clj:219]]
 - referenced from :: [[file:storage.org::#storage/make-emitter][make-emitter]]
 
 * 11. resolve-fn

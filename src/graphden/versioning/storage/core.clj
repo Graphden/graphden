@@ -303,9 +303,14 @@
     ;; statements, and a crash between them leaves a versionless GHOST
     ;; identity — invisible to resolved reads, only healed later by the
     ;; `ids-without-chain-version` force-a-version backstop.
+    ;; The identity key rides the same statement: a re-minted
+    ;; deterministic id must not write its version onto an identity a
+    ;; concurrent branch delete is purging (`uniq/identity-lock-keys`).
     (tx/in-transaction base-storage
                        (fn [st]
-                         (uniq/xact-lock! (tx/datasource st) [lock-key])
+                         (uniq/xact-lock! (tx/datasource st)
+                                          (conj (uniq/write-identity-lock-keys entity-name [normalized])
+                                                lock-key))
                          (do-create! st)))))
 
 
@@ -350,7 +355,9 @@
   (tx/in-transaction
     base-storage
     (fn [st]
-      (uniq/xact-lock! (tx/datasource st) (uniq/row-lock-keys branch-id entity-name [id]))
+      (uniq/xact-lock! (tx/datasource st)
+                       (into (uniq/row-lock-keys branch-id entity-name [id])
+                             (uniq/identity-lock-keys entity-name [id])))
       (let [current (res/resolve-entity st entity-name id branch-id)
             _ (when-not current
                 (throw (ex-info "Entity not found"
@@ -432,9 +439,11 @@
    write are one critical section."
   [st branch-id entity-name shapes]
   ;; Every collision lock in ONE sorted statement (deadlock-free — see
-  ;; `uniq/xact-lock!`), not one round trip per fn / binding.
+  ;; `uniq/xact-lock!`), not one round trip per fn / binding — with the
+  ;; identity locks of the rows written (`uniq/identity-lock-keys`).
   (uniq/xact-lock! (tx/datasource st)
-                   (keep #(uniq/collision-lock-key branch-id entity-name %) shapes))
+                   (concat (uniq/write-identity-lock-keys entity-name shapes)
+                           (keep #(uniq/collision-lock-key branch-id entity-name %) shapes)))
   ;; Intra-batch duplicates both pass the against-storage check (neither is
   ;; committed yet), so reject them up front (pure).
   (when (= entity-name :fn)
@@ -531,7 +540,9 @@
     base-storage
     (fn [st]
       (let [ids (mapv :id data-seq)
-            _ (uniq/xact-lock! (tx/datasource st) (uniq/row-lock-keys branch-id entity-name ids))
+            _ (uniq/xact-lock! (tx/datasource st)
+                               (into (uniq/row-lock-keys branch-id entity-name ids)
+                                     (uniq/identity-lock-keys entity-name ids)))
             identity-records (vals (sp/read-entities st entity-name ids))
             current-versions (res/resolve-entities-batch st entity-name
                                                          identity-records branch-id)
@@ -1215,11 +1226,38 @@
                        :child-branch-ids (mapv :id children)})))))
 
 
-(def ^:private purge-order
-  "Leaf-first, so a parent identity's child-reference guard
-   (`purge/purgeable-identity-ids`) no longer sees children purged in the
-   same delete."
-  [:binding-list-item :binding :fn-slot :resource-override :fn])
+(defn- purge-until-stable!
+  "Delete the `candidates` of `entity-name` nothing still references
+   (`purge/purgeable-identity-ids`; slots and branch-less rows carry no
+   versions, so none is \"elsewhere\"). A self-referencing entity repeats
+   until nothing more frees up — a fn referenced only by another purged
+   fn (a return type, a parent), a rename-view slot's source once the
+   view is gone. Returns the set of ids deleted."
+  [st branch-id entity-name candidates version-id-field]
+  (loop [candidates (vec candidates)
+         purged #{}]
+    (let [p (when (seq candidates)
+              (purge/purgeable-identity-ids st entity-name candidates
+                                            branch-id [] version-id-field))]
+      (if (empty? p)
+        purged
+        (let [purged (into purged p)]
+          (sp/delete-entities st entity-name p)
+          (if (#{:fn :slot} entity-name)
+            (recur (into [] (remove purged) candidates) purged)
+            purged))))))
+
+
+(defn- purge-versionless!
+  "Purge the ids of versioned `entity-name` among `ids` that no longer
+   have a version on any branch. Returns the set of ids deleted."
+  [st branch-id entity-name ids]
+  (let [{:keys [version-entity version-id-field]} (get res/entity-config entity-name)
+        still-versioned (when (seq ids)
+                          (into #{} (map version-id-field)
+                                (sp/query-entities st version-entity {version-id-field (vec ids)})))]
+    (purge-until-stable! st branch-id entity-name
+                         (remove (or still-versioned #{}) ids) version-id-field)))
 
 
 (defn- purge-versionless-identities!
@@ -1229,24 +1267,31 @@
    counts (it counts identity rows) and nothing ever reclaims.
    `own-ids-by-entity` are the ids that had a version on the branch; an id
    still versioned elsewhere, or referenced by a surviving row
-   (`purge/purgeable-identity-ids`), stays. `:fn` repeats to a fixpoint: a
-   branch-created fn referenced only by another branch-created fn (a
-   return type, a parent) is released once that one is gone."
-  [st branch-id own-ids-by-entity]
-  (doseq [entity-name purge-order
-          :let [{:keys [version-entity version-id-field]} (get res/entity-config entity-name)
-                ids (vec (get own-ids-by-entity entity-name))]
-          :when (seq ids)]
-    (let [still-versioned (into #{} (map version-id-field)
-                                (sp/query-entities st version-entity {version-id-field ids}))]
-      (loop [candidates (into [] (remove still-versioned) ids)]
-        (let [purgeable (when (seq candidates)
-                          (purge/purgeable-identity-ids st entity-name candidates
-                                                        branch-id [] version-id-field))]
-          (when (seq purgeable)
-            (sp/delete-entities st entity-name purgeable)
-            (when (= :fn entity-name)
-              (recur (into [] (remove (set purgeable)) candidates)))))))))
+   (`purge/purgeable-identity-ids`), stays.
+
+   Leaf-first, so a parent identity's child-reference guard no longer sees
+   children purged in the same delete. Then the slots the purged fn-slots
+   exposed (`own-fn-slot-rows`, read before the purge) — a slot is not
+   versioned, so one the branch minted would outlive it, keeping the
+   type-row fn its `:type-fn-id` names alive; one still exposed or bound
+   elsewhere, or the source of a surviving rename view, stays. The `:fn`
+   pass then runs once more for the fns those slots released."
+  [st branch-id own-ids-by-entity own-fn-slot-rows]
+  (let [own (fn [e] (vec (get own-ids-by-entity e)))
+        _ (doseq [e [:binding-list-item :binding]]
+            (purge-versionless! st branch-id e (own e)))
+        purged-fs (purge-versionless! st branch-id :fn-slot (own :fn-slot))
+        _ (purge-versionless! st branch-id :resource-override (own :resource-override))
+        purged-fns (purge-versionless! st branch-id :fn (own :fn))
+        slots (purge-until-stable! st branch-id :slot
+                                   (into [] (comp (filter #(contains? purged-fs (:id %)))
+                                                  (map :slot-id)
+                                                  (distinct))
+                                         own-fn-slot-rows)
+                                   :id)]
+    (when (seq slots)
+      (purge-versionless! st branch-id :fn (into [] (remove purged-fns) (own :fn))))
+    nil))
 
 
 (defn- delete-branch-rows!
@@ -1275,18 +1320,33 @@
   ;; they were for the identity purge below.
   (let [own (into {}
                   (map (fn [[entity-name {:keys [version-entity]}]]
-                         (let [rows (sp/query-entities st version-entity {:branch-id branch-id})]
-                           (when (seq rows)
-                             (sp/delete-entities st version-entity (mapv :id rows)))
-                           [entity-name rows])))
-                  res/entity-config)]
-    (purge-versionless-identities!
-      st branch-id
-      (into {}
-            (map (fn [[entity-name rows]]
-                   (let [{:keys [version-id-field]} (get res/entity-config entity-name)]
-                     [entity-name (into #{} (map version-id-field) rows)])))
-            own))
+                         [entity-name (sp/query-entities st version-entity {:branch-id branch-id})]))
+                  res/entity-config)
+        own-ids (into {}
+                      (map (fn [[entity-name rows]]
+                             (let [{:keys [version-id-field]} (get res/entity-config entity-name)]
+                               [entity-name (into #{} (map version-id-field) rows)])))
+                      own)
+        fn-slot-rows (when-let [ids (seq (:fn-slot own-ids))]
+                       (sp/query-entities st :fn-slot {:id (vec ids)}))]
+    ;; Lock those identities, and the slots their fn-slots expose (one
+    ;; statement — see `uniq/xact-lock!`), BEFORE anything decides they
+    ;; are versioned or referenced nowhere: a create on another branch
+    ;; re-minting one of these deterministic ids — or writing a new
+    ;; fn-slot / binding onto one of the slots — takes the same key
+    ;; (`uniq/write-identity-lock-keys`). It either committed first (and
+    ;; the purge's re-read sees it) or waits and then finds the identity
+    ;; gone and writes a fresh one — never a version row onto an identity
+    ;; purged under it.
+    (uniq/xact-lock! (tx/datasource st)
+                     (concat (mapcat (fn [[entity-name ids]]
+                                       (uniq/identity-lock-keys entity-name ids))
+                                     own-ids)
+                             (uniq/identity-lock-keys :slot (keep :slot-id fn-slot-rows))))
+    (doseq [[entity-name rows] own
+            :when (seq rows)]
+      (sp/delete-entities st (:version-entity (get res/entity-config entity-name)) (mapv :id rows)))
+    (purge-versionless-identities! st branch-id own-ids fn-slot-rows)
     ;; Delete branch-merge records referencing this branch.
     (let [merge-ids (into [] (comp (map :id) (distinct))
                           (concat (sp/query-entities st :branch-merge {:source-branch-id branch-id})

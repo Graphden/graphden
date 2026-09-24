@@ -349,6 +349,40 @@
         ids))
 
 
+(def ^:private identity-lock-buckets
+  "How many advisory keys the identity locks of one entity spread over —
+   bounded like `row-lock-buckets`, for the same lock-table reason."
+  64)
+
+
+(defn identity-lock-keys
+  "Advisory keys serializing, ACROSS branches, a write that may add a
+   version to the identity rows `ids` of `entity-name` (a create re-minting
+   a deterministic id, an update flowing a version onto an existing
+   identity) against a branch delete purging those identity rows. Without
+   it the delete could see an id as versioned nowhere, a create on another
+   branch could then find the identity still there and write only a
+   version row, and the delete removed the identity under it — a version
+   with no identity. Stable across JVMs (a string hash)."
+  [entity-name ids]
+  (into #{}
+        (map #(str "ident|" (name entity-name) "|"
+                   (mod (hash (str %)) identity-lock-buckets)))
+        ids))
+
+
+(defn write-identity-lock-keys
+  "The `identity-lock-keys` a create of `rows` of `entity-name` takes: the
+   rows' own ids and, for a `:fn-slot` / `:binding`, the slot each one
+   references — a branch delete purges the slots only its own fn-slots
+   exposed, and must not do so while another branch is writing a new
+   reference to one."
+  [entity-name rows]
+  (into (identity-lock-keys entity-name (keep :id rows))
+        (when (#{:fn-slot :binding} entity-name)
+          (identity-lock-keys :slot (keep :slot-id rows)))))
+
+
 (def ^:private advisory-buckets
   "How many locks one KEY GROUP can take in a transaction. Each advisory
    lock held takes a slot in Postgres' shared lock table
@@ -363,21 +397,32 @@
 
 (defn advisory-key
   "The advisory lock `k` is taken under. Keys come in GROUPS — the text
-   before the first `|`: `branch`, `row`, `fn-name`, `item`,
+   before the first `|`: `branch`, `row`, `ident`, `fn-name`, `item`,
    `resource-override-path`. Every write takes its groups in one order —
-   branch → row → collision — and that order is what keeps two
-   transactions from waiting on each other in a cycle; so a key only ever
-   shares a lock with keys of ITS OWN group. `branch` and `row` keys are
-   already bounded (one per branch touched; `row-lock-keys` buckets per
-   branch and entity) and pass through; a collision key is folded into
-   `advisory-buckets` buckets of its group. Stable across JVMs (a string
-   hash), so pods agree on it."
+   branch → row → ident → collision (`lock-rank`) — and that order is what
+   keeps two transactions from waiting on each other in a cycle; so a key
+   only ever shares a lock with keys of ITS OWN group. `branch`, `row` and
+   `ident` keys are already bounded (one per branch touched;
+   `row-lock-keys` / `identity-lock-keys` bucket per entity) and pass
+   through; a collision key is folded into `advisory-buckets` buckets of
+   its group. Stable across JVMs (a string hash), so pods agree on it."
   [k]
   (let [k (str k)
         group (first (str/split k #"\|" 2))]
-    (if (#{"branch" "row"} group)
+    (if (#{"branch" "row" "ident"} group)
       k
       (str group "|" (mod (hash k) advisory-buckets)))))
+
+
+(defn- lock-rank
+  "Position of `k`'s group in the one order every write takes its locks
+   in: branch → row → ident → collision."
+  [k]
+  (case (first (str/split k #"\|" 2))
+    "branch" 0
+    "row" 1
+    "ident" 2
+    3))
 
 
 (defn xact-lock!
@@ -385,7 +430,7 @@
    rollback) on the lock (`advisory-key`) of every key in `lock-keys`, in
    ONE statement — at most `advisory-buckets` per collision group.
    Deadlock-free within the statement:
-   the keys are de-duplicated and SORTED, and every caller locks through
+   the keys are de-duplicated and SORTED (by group rank, then key), and every caller locks through
    here, so no two transactions can acquire an overlapping key set in
    opposite orders (`WITH ORDINALITY … ORDER BY` keeps the array order; a
    volatile target-list function is evaluated after the sort). `conn` is
@@ -393,7 +438,8 @@
    is a no-op. Runs through `util/exec!` so the parallel-test
    `*jdbc-override*` seam sees it."
   [conn lock-keys]
-  (let [ks (into-array String (->> lock-keys (remove nil?) (map advisory-key) distinct sort))]
+  (let [ks (into-array String (->> lock-keys (remove nil?) (map advisory-key) distinct
+                                   (sort-by (juxt lock-rank identity))))]
     (when (and conn (pos? (alength ks)))
       (util/exec! conn
                   [(str "SELECT pg_advisory_xact_lock(hashtext(k)::bigint)"

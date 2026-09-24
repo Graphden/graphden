@@ -444,3 +444,41 @@
                                                      :description "h"})]
                   (is (true? (known? (vs/wrap-with-versioning pg) (:id raw2))))
                   (is (false? (known? v (:id raw2)))))))))))))
+
+
+;; ============================================================================
+;; Branch delete vs a concurrent re-mint of a deterministic id
+;; ============================================================================
+
+(deftest a-branch-delete-waits-on-a-create-reminting-its-ids
+  ;; The delete purges the identities its branch created once no branch
+  ;; versions them. A create on main re-minting one of those deterministic
+  ;; ids found the identity still there and wrote only a version row; the
+  ;; delete — which saw no version elsewhere — then removed the identity
+  ;; under it. Both now take the identity's lock: the delete waits, and its
+  ;; re-read sees the committed version.
+  (with-stack
+    (fn [pg _deco v]
+      (let [xb (vs/create-branch! v "scratch")
+            made (sp/create-entity (vs/switch-branch v (:id xb)) :fn
+                                   {:name "made" :parent-ids [] :description "x"})
+            written (promise)
+            commit (promise)
+            remint (future
+                     (tx/in-transaction
+                       pg
+                       (fn [st]
+                         (sp/create-entity (vs/wrap-with-versioning st) :fn
+                                           {:id (:id made) :name "again" :parent-ids []
+                                            :description "main"})
+                         (deliver written true)
+                         @commit)))]
+        (deref written 15000 nil)
+        (let [del (attempt #(vs/delete-branch! v (:id xb)))]
+          (is (= 1 (await-waiters (:pool pg) 1)) "the delete waits on the id's lock")
+          (deliver commit true)
+          @remint
+          (is (= :ok @del))
+          (is (seq (sp/query-entities pg :fn {:id (:id made)})) "the identity survives")
+          (is (= "again" (:name (sp/read-entity v :fn (:id made))))
+              "main resolves the re-minted fn"))))))

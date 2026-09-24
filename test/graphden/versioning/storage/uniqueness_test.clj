@@ -512,17 +512,42 @@
                    (map #(str "fn-name|ns|n" %) (range 3000))
                    (map #(str "item|" %) (range 3000))
                    (map #(str "resource-override-path|p" %) (range 3000)))
-        by-group (group-by #(first (str/split (uniq/advisory-key %) #"\\|" 2)) ks)]
+        by-group (group-by #(first (str/split (uniq/advisory-key %) #"\|" 2)) ks)]
     (testing "every lock stays inside the key's own group"
       (is (every? (fn [k]
-                    (= (first (str/split k #"\\|" 2))
-                       (first (str/split (uniq/advisory-key k) #"\\|" 2))))
+                    (= (first (str/split k #"\|" 2))
+                       (first (str/split (uniq/advisory-key k) #"\|" 2))))
                   ks)))
     (testing "branch and row keys pass through untouched"
       (is (= "branch|b1" (uniq/advisory-key "branch|b1"))))
     (testing "each collision group is bounded"
       (doseq [g ["fn-name" "item" "resource-override-path"]]
         (is (<= (count (set (map uniq/advisory-key (get by-group g)))) 256) g)))))
+
+
+(deftest xact-lock-takes-groups-in-rank-order-test
+  ;; branch → row → ident → collision in ONE statement too: a create takes
+  ;; its identity and collision keys together, a branch delete its branch
+  ;; lock and then identity keys — a lexicographic sort put `fn-name|…`
+  ;; before `ident|…` and made the two orders cross.
+  (let [issued (atom nil)
+        ident (first (uniq/identity-lock-keys :fn [(random-uuid)]))]
+    (binding [util/*jdbc-override*
+              {:execute! (fn [_ [_sql arr] _opts] (reset! issued (vec arr)) [])}]
+      (uniq/xact-lock! ::conn ["fn-name|ns|a" ident "row|b1|fn|3" "branch|b1"]))
+    (is (= ["branch|b1" "row|b1|fn|3" ident] (take 3 @issued)))
+    (is (= "ident" (first (str/split ident #"\|" 2))) "identity keys pass through")
+    (is (= ident (uniq/advisory-key ident)))))
+
+
+(deftest identity-lock-keys-are-bounded-and-cover-referenced-slots-test
+  (let [ids (repeatedly 5000 random-uuid)]
+    (is (<= (count (uniq/identity-lock-keys :fn ids)) 64))
+    (is (= #{} (uniq/write-identity-lock-keys :fn [{:slot-id (first ids)}]))
+        "an fn write (no :id here) names no slot")
+    (is (contains? (uniq/write-identity-lock-keys :fn-slot [{:id (second ids) :slot-id (first ids)}])
+                   (first (uniq/identity-lock-keys :slot [(first ids)])))
+        "a fn-slot write locks the slot it exposes")))
 
 
 (deftest xact-lock-without-connection-is-a-no-op-test

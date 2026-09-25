@@ -70,7 +70,9 @@ email is created (and emailed, when the deployment can send
 mail); the moment that person signs in with the address, the
 rights are written and the invite is spent. Refine what they may
 actually do in the **Grants** panel (next lesson) — membership
-gets them in the door, grants decide the rooms.
+gets them in the door, grants decide the rooms. That org-wide
+`write` already lets them build *and run* anything in the org
+(`write` implies `execute`); narrow it there if that is too much.
 
 ## Invites
 

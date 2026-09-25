@@ -29,17 +29,20 @@ with a 400):
 |---|---|
 | `read` | discover a fn + see its SIGNATURE (slots, types, return) |
 | `view-impl` | see a fn's INTERNAL COMPOSITION (parent chain + bindings) — withhold it and the fn stays executable but its impl is hidden |
-| `write` | create / move / edit fns there |
-| `execute` | run fns there |
+| `write` | create / move / edit fns there — and run them |
+| `execute` | run fns there (and nothing else) |
 | `admin` | everything above, within the scope |
 | `bind-args` | edit only a binding's VALUE (not structure) |
 | `append-list` | append items to list-typed bindings |
 
 Implication: `admin` implies all of them; `write` implies
-`view-impl` (you can't edit a fn you can't see) plus the two
-narrow edit caps (`bind-args`, `append-list`). The narrow
-caps exist so you can hand someone "tune the parameters of my
-app" without handing them "restructure my app".
+`execute` (a writer can run what they may edit — which is why
+the org-wide `write` a new member gets in Lesson 27 is a working
+membership), `view-impl` (you can't edit a fn you can't see) and
+the two narrow edit caps (`bind-args`, `append-list`). `execute`
+on its own is a run-only grant. The narrow caps exist so you can
+hand someone "tune the parameters of my app" without handing them
+"restructure my app".
 
 One freebie needs no grant row at all: every user implicitly
 holds `admin` over their **personal namespace**
@@ -50,13 +53,19 @@ holds `admin` over their **personal namespace**
 Three enforcement layers read the same grant table:
 
 - **Write gate** — creating a fn or moving it into a namespace
-  needs `write` there; a value-only binding edit passes with
-  `bind-args`; appending a list item with `append-list`.
+  needs `write` there (a fn created outside any namespace needs a
+  root grant — blank namespace); a value-only binding edit passes
+  with `bind-args`; appending a list item with `append-list`.
+  Namespaces are gated too: creating, renaming, moving or deleting
+  one needs `write` on its *parent* namespace — on both the old
+  and the new parent for a move — so a grant on `acme.team` cannot
+  pull `acme.secrets` under it. Rotating a secret's value needs
+  `write` on the namespace of the fn that holds it.
 - **Execute gate** — running a fn needs `execute` on its
-  namespace.
+  namespace (a `write` grant there counts).
 - **Request gate** — a cheap per-request check: reads pass,
   mutations require the subject to hold SOME write-family
-  capability, `/api/execute` requires `execute`.
+  capability, `/api/execute` requires `execute` (or a `write`).
 
 The editor also *reads* the grant table indirectly: the
 `X-Graphden-Capabilities` header (Lesson 27) that unlocks
@@ -83,7 +92,8 @@ bob     | execute    | acme          |  ×
 
 Below it, the add form: a `subject` input (a member's email, or a
 **role name** — see below; with type-ahead over the org's members),
-a capability `<select>` (all seven), a `namespace` input, and
+a capability `<select>` (the seven, plus the `require-2fa` policy
+below), a `namespace` input, and
 **+ Add grant**
 (`POST /api/grants`).
 
@@ -106,11 +116,13 @@ shows the role's name in the subject cell. Resolution order for a
 typed subject: a known member's email → a role name → a pending
 email (a dormant grant, claimed on first sign-in).
 
-One special capability rides the same rows: `require-2fa`.
-Granted to a user (or, with subject-kind `org`, to a whole org)
-it doesn't *allow* anything — it *requires* the subject to enroll
-two-factor authentication before any other request passes
-([Lesson 36](36-signing-up-and-in.md) shows enrollment).
+One special capability rides the same rows: `require-2fa`, the
+**policy** group of the `<select>`. Granted to a member from the
+panel (or, through the API with subject-kind `org`, to the whole
+org) it doesn't *allow* anything — it *requires* the subject to
+enroll two-factor authentication before any other request passes
+([Lesson 36](36-signing-up-and-in.md) shows enrollment). It
+implies nothing and nothing implies it.
 
 Revoke is the row's `×` (confirm: *"Delete this grant?"*) —
 this one goes through the generic entity endpoint

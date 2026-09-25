@@ -86,36 +86,14 @@
   (try (edn/read-string string) (catch Exception _ nil)))
 
 
-(defn- owned-def?
-  "The one ownership test both base-fns below share — keyed on the def's
-   deterministic `(namespace, name)` fn-id, never its bare name."
-  [fn-def]
-  (owned/owned-fn-id? (ids/fn-id (:namespace fn-def) (:name fn-def))))
-
-
-(defbase platform-owned-def-names
-  "Names among `fn-defs` whose deterministic `(namespace, name)` fn-id was
-   written by the package sync this boot — the fns the editor API's
-   package-guard refuses to touch (`crud.package-guard`, the
-   `:add`-poisoning class). The MCP upsert guard and the registry's fork
-   consult this so no bundle-sync path stays a write route around that
-   protection. Moved here from the optional mcp package when the registry
-   needed it too — base-fn names are globally unique."
-  [fn-defs]
-  (into []
-        (comp (filter owned-def?)
-              (map #(some-> (:name %) name)))
-        fn-defs))
-
-
 (defbase platform-owned-def?
   "Is `fn-def`'s deterministic `(namespace, name)` fn-id one the package
-   sync wrote this boot? The per-def predicate behind
-   `platform-owned-def-names` — a filter over a bundle must key on the
-   IDENTITY, never the bare name (a user's `my.ns/port` is not the
-   platform's `:port`)."
+   sync wrote this boot? The per-def predicate behind the
+   `:platform-owned-def-names` fn-def — a filter over a bundle must key
+   on the IDENTITY, never the bare name (a user's `my.ns/port` is not
+   the platform's `:port`)."
   [fn-def]
-  (owned-def? fn-def))
+  (owned/owned-fn-id? (ids/fn-id (:namespace fn-def) (:name fn-def))))
 
 
 ;; === System Information ===
@@ -565,9 +543,6 @@
    :to-json-pretty {:impl to-json-pretty :taint-propagate? true}
    :parse-json {:impl parse-json :taint-propagate? true}
    :parse-edn {:impl parse-edn :taint-propagate? true}
-   ;; taint-propagate: returns the caller bundle's own :name fields —
-   ;; content passthrough (SECRETS.md § T3).
-   :platform-owned-def-names {:impl platform-owned-def-names :taint-propagate? true}
    :platform-owned-def? platform-owned-def?
    :system-property system-property-fn
    :jvm-uptime-ms jvm-uptime-ms-fn

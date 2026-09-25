@@ -148,13 +148,13 @@ Classifies each of a fn's root slots (via ~classify-slot~) into a ~:value~ / ~:f
 :PROPERTIES:
 :CUSTOM_ID: executor/compile-all
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 1536
+:LINE: 1553
 :MINS: 4.8
 :END:
 
 Topologically orders every impl-backed fn and compiles each in dependency order into ~{fn-id -> (fn [fa ctx])}~, cached process-wide by (graph-shape × base-fn set × ambient rich-types) — the rich-types component is load-bearing: ~produces-callable?~ HOF-wrap decisions depend on the swept ~:return-type~ entries, so callers under different types must not share a compile. Dependency order matters: by the time a parent compiles, its children's callables already exist to be wired in.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-all][src/graphden/executor/compile_eager.clj:1536]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-all][src/graphden/executor/compile_eager.clj:1553]]
 - see also :: [[file:executor.org::#executor/compile-fn][compile-fn]]
 - same file :: [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/call-with-cache][call-with-cache]]
 - referenced from :: [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:types.org::#types/record-rich-types!][record-rich-types!]]
@@ -163,13 +163,13 @@ Topologically orders every impl-backed fn and compiles each in dependency order 
 :PROPERTIES:
 :CUSTOM_ID: executor/compile-fn
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 1242
+:LINE: 1259
 :MINS: 8.3
 :END:
 
 Produces one fn's runtime closure ~(fn [fa ctx])~. It turns each classified binding into a *builder*, wires env-bindings and rename-aliases, and at call time assembles the args map and invokes ~(impl args ctx)~. This is the concrete anatomy of a single compiled graph node.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-fn][src/graphden/executor/compile_eager.clj:1242]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-fn][src/graphden/executor/compile_eager.clj:1259]]
 - see also :: [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]]
 - same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/call-with-cache][call-with-cache]]
 - referenced from :: [[file:executor.org::#executor/compile-all][compile-all]]

@@ -171,7 +171,6 @@
     :stringify-response-headers :strip-hidden-impl :strip-secret-paths
     :sub :subs :subtype? :svg-polyline-points :tabulate-records
     :swap :sync-fn-defs-branch! :system-property :take :tenancy-active?
-    :platform-owned-def-names
     ;; bool answers over the def's identity / the row's role — no content.
     :platform-owned-def? :slot-shaped-type-row? :fn-impl-visible? :self-approval-allowed?
     :thread-count
@@ -207,7 +206,7 @@
     :gte :group-by :hiccup   :if :into :invoke :is-a? :keys :list :lt :lte
     :map :map-xf :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
     :list-branch-comments :parse-edn :parse-graph-edn
-    :parse-int :parse-json :parse-uuid :platform-owned-def-names
+    :parse-int :parse-json :parse-uuid
     :position-in :postwalk :pprint-str :pr-str
     :quot :range
     :re-find? :re-replace :reduce :render-hiccup :render-value-repr :repeat :reset :rest :reverse :rows->csv :select-keys :digest-hex

@@ -665,7 +665,7 @@
                   r/hof-lambda-params (fn [& _] ["item"])
                   r/build-hof-translation (fn [& _] {})]
       (let [build (env-arg-builder owner env-bnd {inner child} {:fn-map {}})
-            callable (build (volatile! {}) {})]
+            callable (build (volatile! {}) {} {})]
         (is (= {:graphden.executor/fn-id inner
                 :graphden.executor/lambda-params ["item"]}
                (meta callable))

@@ -13,13 +13,13 @@ after: storage
 :PROPERTIES:
 :CUSTOM_ID: versioning/wrap-with-versioning
 :FILE: src/graphden/versioning/storage/core.clj
-:LINE: 1013
+:LINE: 1015
 :MINS: 2.2
 :END:
 
 The entry point: take any base storage, ensure a ~main~ branch exists, and return a ~VersionedStorage~ bound to it. Start here to see how the entire versioning layer is bolted onto the plain storage from the previous block.
 
-- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn wrap-with-versioning][src/graphden/versioning/storage/core.clj:1013]]
+- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn wrap-with-versioning][src/graphden/versioning/storage/core.clj:1015]]
 - same file :: [[file:versioning.org::#versioning/VersionedStorage][VersionedStorage]], [[file:versioning.org::#versioning/create-entity-versioned!][create-entity-versioned!]]
 - referenced from :: [[file:crud.org::#crud/resolve-branch-ref][resolve-branch-ref]], [[file:boot.org::#boot/postgres][postgres]]
 
@@ -27,13 +27,13 @@ The entry point: take any base storage, ensure a ~main~ branch exists, and retur
 :PROPERTIES:
 :CUSTOM_ID: versioning/VersionedStorage
 :FILE: src/graphden/versioning/storage/core.clj
-:LINE: 761
+:LINE: 763
 :MINS: 12.6
 :END:
 
 The decorator record itself. It implements every storage protocol, delegating non-versioned entities straight to the base storage and intercepting versioned ones — reads resolve to a branch view, writes append version rows. Every method is a two-line dispatch: read this for the SHAPE, then follow the versioned arm into its own function. Grasp this structure before anything else here.
 
-- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defrecord VersionedStorage][src/graphden/versioning/storage/core.clj:761]]
+- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defrecord VersionedStorage][src/graphden/versioning/storage/core.clj:763]]
 - same file :: [[file:versioning.org::#versioning/wrap-with-versioning][wrap-with-versioning]], [[file:versioning.org::#versioning/create-entity-versioned!][create-entity-versioned!]]
 
 * 3. create-entity-versioned!
@@ -41,7 +41,7 @@ The decorator record itself. It implements every storage protocol, delegating no
 :CUSTOM_ID: versioning/create-entity-versioned!
 :FILE: src/graphden/versioning/storage/core.clj
 :LINE: 236
-:MINS: 6.0
+:MINS: 6.1
 :END:
 
 The versioned arm of a single create, and the write path worth reading in full: identity row + version row, the identity-field diff for when the deterministic id already exists, and the advisory-lock branch that serialises the writes whose uniqueness is a per-branch RESOLVED-VIEW property (fn names, list-item positions) rather than a table constraint. ~update-entity-versioned!~ next to it tells the same story for the append case.

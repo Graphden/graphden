@@ -264,6 +264,7 @@
           (uniq/check-list-item-position-collision! st branch-id entity-name normalized)
           (uniq/check-fn-name-collision! st branch-id entity-name normalized)
           (uniq/check-resource-override-path-collision! st branch-id entity-name normalized)
+          (uniq/check-referenced-slots-exist! st entity-name [normalized])
           (let [existing (sp/read-entity st entity-name id)
                 base-row (strip-version-framework-cols entity-name normalized)]
             (if existing
@@ -490,6 +491,7 @@
           ;; list-item + override), mirroring the singular create-entity — the
           ;; batch path previously ran only the list-item check and no lock.
           (batch-collision-guard! st branch-id entity-name data-with-ids)
+          (uniq/check-referenced-slots-exist! st entity-name data-with-ids)
           (let [ids (mapv :id data-with-ids)
                 ;; Find which base records don't exist yet
                 existing-by-id (sp/read-entities st entity-name ids)

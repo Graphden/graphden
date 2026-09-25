@@ -413,6 +413,13 @@ When a fn-def references another fn-def with unbound arguments, those arguments 
 
 **Key insight:** This pattern enables building reusable "templates" where each level fixes some arguments while exposing others. The executor recursively resolves free arguments at runtime.
 
+**A binding never sees itself.** Binding a free arg to a fn whose OWN free
+arg has the same name is ordinary scoping, not a cycle: `{:parent :count-defs
+:args {:fn-defs :_normalized-defs}}` where `:_normalized-defs` itself reads
+`{:as :fn-defs}` feeds `:_normalized-defs` the CALLER's `:fn-defs`, and its
+result becomes the `:fn-defs` the template reads — like
+`(let [x (normalize x)] …)`. The `:fn-defs` name stays public on the caller.
+
 ### 3. Named vs Anonymous (One-off) Functions
 
 **Use named fn-def when:**

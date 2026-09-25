@@ -10,7 +10,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api} = require('./edit-test-helpers');
+const {assert, newContext, api, submitInlineRow} = require('./edit-test-helpers');
 const {
   NS_NAME, FN_NAME, hardCleanup, waitTourTitle, clickTourButton,
   filterAndSelect, extendViaRowActions, bindFirstPlaceholder,
@@ -46,9 +46,7 @@ const {
     await waitTourTitle(page, 'Create a namespace');
     await page.waitForSelector('.create-root-ns-btn', {timeout: 10000});
     await page.click('.create-root-ns-btn');
-    await page.waitForSelector('.inline-input', {timeout: 5000});
-    await page.fill('.inline-input', NS_NAME);
-    await page.press('.inline-input', 'Enter');
+    await submitInlineRow(page, NS_NAME);
     await waitTourTitle(page, 'Add a function');
     console.log('  step 2: namespace created, tour advanced');
 
@@ -70,19 +68,20 @@ const {
       const arrow = target?.querySelector('.ns-arrow');
       return arrow && /▼/.test(arrow.textContent || '');
     }, NS_NAME, {timeout: 5000, polling: 100});
-    await page.evaluate((name) => {
+    // Find-and-click in ONE poll: the tree rebuilds when the expanded
+    // namespace's fns land, and a one-shot lookup could miss the row.
+    await page.waitForFunction((name) => {
       const headers = Array.from(document.querySelectorAll('.ns-header'));
       const target = headers.find(
         (h) => h.querySelector('.ns-label')?.textContent.trim() === name);
-      const plus = target.querySelector('.ns-plus-btn');
-      if (!plus) throw new Error('ns-plus-btn not found');
+      const plus = target?.querySelector('.ns-plus-btn');
+      if (!plus) return false;
       plus.click();
-    }, NS_NAME);
+      return true;
+    }, NS_NAME, {timeout: 15000, polling: 100});
     await page.waitForSelector('.create-menu', {timeout: 5000});
     await page.click('.create-menu-item[data-type="fn"]');
-    await page.waitForSelector('.inline-input', {timeout: 5000});
-    await page.fill('.inline-input', FN_NAME);
-    await page.press('.inline-input', 'Enter');
+    await submitInlineRow(page, FN_NAME);
     await waitTourTitle(page, 'Set the parent', 150000);
     console.log('  step 3: fn created, tour advanced');
 

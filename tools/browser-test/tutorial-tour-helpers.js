@@ -8,7 +8,7 @@
 //
 // Everything shared by those files lives here.
 
-const {assert, api, deleteFnByName} = require('./edit-test-helpers');
+const {assert, api, deleteFnByName, submitInlineRow} = require('./edit-test-helpers');
 
 const NS_NAME = 'tutorial';
 const FN_NAME = 'one-plus-one';
@@ -800,9 +800,7 @@ async function runFromOpenPane(page, formValue, argName) {
 async function createRootNamespace(page, name) {
   await page.waitForSelector('.create-root-ns-btn', {timeout: 15000});
   await page.click('.create-root-ns-btn');
-  await page.waitForSelector('.inline-input', {timeout: 10000});
-  await page.fill('.inline-input', name);
-  await page.press('.inline-input', 'Enter');
+  await submitInlineRow(page, name);
 }
 
 
@@ -825,19 +823,22 @@ async function createFnInNamespace(page, nsName, fnName) {
     const arrow = target?.querySelector('.ns-arrow');
     return arrow && /▼/.test(arrow.textContent || '');
   }, nsName, {timeout: 15000, polling: 100});
-  await page.evaluate((path) => {
+  // Find-and-click in ONE poll: the tree rebuilds when the expanded
+  // namespace's fns land, and a one-shot lookup could miss the row.
+  await page.waitForFunction((path) => {
     const target = document.querySelector('.ns-header[data-ns-path="' + path + '"]');
+    const plus = target?.querySelector('.ns-plus-btn');
+    if (!plus) return false;
     // A root created after the tree has grown sits at the Explorer's bottom
     // edge, and the `+` menu opens BELOW its row — off-screen, where a click
     // waits 45s and fails. Centre the row first; a reader scrolls, so does this.
     target.scrollIntoView({block: 'center'});
-    target.querySelector('.ns-plus-btn').click();
-  }, nsName);
+    plus.click();
+    return true;
+  }, nsName, {timeout: 15000, polling: 100});
   await page.waitForSelector('.create-menu', {timeout: 10000});
   await page.click('.create-menu-item[data-type="fn"]');
-  await page.waitForSelector('.inline-input', {timeout: 10000});
-  await page.fill('.inline-input', fnName);
-  await page.press('.inline-input', 'Enter');
+  await submitInlineRow(page, fnName);
 }
 
 

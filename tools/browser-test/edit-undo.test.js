@@ -10,7 +10,7 @@
 //   G. The Explorer's namespace rename → Undo → old name; its trash on the
 //      namespace → Undo → re-created; its trash on a graph → Undo → revived.
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, deleteFnByName, waitForServerHealthy, BASE}
+const {assert, newContext, api, getEntities, deleteFnByName, waitForServerHealthy, submitInlineRow, BASE}
   = require('./edit-test-helpers');
 const {bindNamedPlaceholder} = require('./tutorial-tour-helpers');
 
@@ -305,15 +305,18 @@ const undoToast = (page) => page.evaluate(() => {
         .find((x) => x.querySelector('.ns-label')?.textContent.trim() === n);
       return h ? true : false;
     }, name);
-    // Rename the namespace through its ✎ …
-    await page.evaluate((n) => {
+    // Rename the namespace through its ✎ — find-and-click in ONE poll: a
+    // one-shot lookup could land between a tree rebuild's teardown and its
+    // repaint (the tree rebuilds on the network's schedule after a load).
+    await page.waitForFunction((n) => {
       const h = Array.from(document.querySelectorAll('.ns-header'))
         .find((x) => x.querySelector('.ns-label')?.textContent.trim() === n);
-      h.querySelector('.ns-edit-btn').click();
-    }, NS);
-    await page.waitForSelector('.inline-input-row .inline-input', {timeout: 10000});
-    await page.fill('.inline-input-row .inline-input', NS_RENAMED);
-    await page.click('.inline-input-row .inline-btn-save');
+      const btn = h?.querySelector('.ns-edit-btn');
+      if (!btn) return false;
+      btn.click();
+      return true;
+    }, NS, {timeout: 30000, polling: 200});
+    await submitInlineRow(page, NS_RENAMED);
     await page.waitForFunction((n) => Array.from(document.querySelectorAll('.ns-header'))
       .some((x) => x.querySelector('.ns-label')?.textContent.trim() === n), NS_RENAMED, {timeout: 30000, polling: 200});
     toast = await undoToast(page);

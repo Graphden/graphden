@@ -877,7 +877,25 @@ async function clickWhenHtmxReady(page, pick, arg, timeout = 15000) {
 }
 
 
+// Type `text` into the Explorer's open inline create / rename row and submit
+// it (Enter). The tree rebuilds on the network's schedule (a namespace's fns
+// landing, a cache prime); the open row survives that with its text
+// (editor-inline-row.js), and this submits only once the input holds exactly
+// `text` — re-filling if it does not — so a lost fill fails HERE, named, and
+// not as a far-off timeout on whatever the submit was meant to cause.
+async function submitInlineRow(page, text) {
+  const sel = '.inline-input-row .inline-input';
+  for (let attempt = 1; ; attempt++) {
+    await page.locator(sel).first().fill(text, {timeout: 10000});
+    const held = await page.waitForFunction(({s, t}) => document.querySelector(s)?.value === t,
+      {s: sel, t: text}, {timeout: 2000, polling: 100}).then(() => true, () => false);
+    if (held) break;
+    if (attempt >= 3) throw new Error('the inline row did not keep "' + text + '"');
+  }
+  await page.locator(sel).first().press('Enter');
+}
+
 module.exports = { assert, deepEqual, newContext, api, getEntities, clickWhenHtmxReady,
                    nodeApi, nodeApiJson, openBranchPopover, openOperate,
                    synthArgs, waitFor, waitForServerHealthy,
-                   deleteFnByName, deleteBranches, AUTH, BASE };
+                   deleteFnByName, deleteBranches, submitInlineRow, AUTH, BASE };

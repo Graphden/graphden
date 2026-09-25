@@ -157,7 +157,12 @@ function refreshLoadedNamespace(nsPath, searchMode) {
   _lastTree = buildNsTree(graphData);
   const node = treeNodeAt(nsPath);
   if (!node) return;
-  old.replaceWith(buildNsChildGroup(node, nsPath, searchMode));
+  // The group may hold an open inline row (a create under this namespace
+  // started before its fns landed) — it survives, typed text and all.
+  const kept = gdKeepInlineRow(old);
+  const fresh = buildNsChildGroup(node, nsPath, searchMode);
+  old.replaceWith(fresh);
+  gdRestoreInlineRow(fresh, kept);
   applyLensVisibility();
 }
 
@@ -413,6 +418,15 @@ function revealFnInTree(fnId) {
 
 
 function updateEntityList(data) {
+  // An open inline create / rename row outlives the rebuild — it holds
+  // what the user is typing (editor-inline-row.js).
+  const list = document.getElementById('entity-list');
+  const kept = gdKeepInlineRow(list);
+  renderEntityList(data);
+  gdRestoreInlineRow(list, kept);
+}
+
+function renderEntityList(data) {
   if (typeof renderRecentFns === 'function') renderRecentFns();
   // A search reply (or an early auth repaint) can land before the graph
   // data primes on a fresh tab — painting from null threw mid-function

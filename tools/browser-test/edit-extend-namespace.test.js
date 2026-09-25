@@ -39,27 +39,33 @@ async function cleanup(page) {
   } catch (_) {}
 }
 
-// Open the Extend popover on the CARD of `ownerName` (must be the
-// selected fn's own card on the canvas).
-async function openExtendPopover(page, ownerName) {
+// Open the ⋯ row-actions menu on the CARD of `ownerName` and pick `action`
+// in it. Each find-and-act runs inside ONE poll: the canvas re-renders its
+// card overlays (and the popover with them) on its own schedule, and a
+// one-shot lookup that landed between a teardown and its repaint found
+// nothing — `ov` undefined, a TypeError, a red gate.
+async function pickCardAction(page, ownerName, action) {
   await page.waitForFunction((name) => {
-    return Array.from(document.querySelectorAll('.node-overlay')).some((ov) =>
-      ov.textContent.trim().startsWith(name)
-      && ov.querySelector('button.more-actions-trigger'));
-  }, ownerName, {timeout: 90000, polling: 200});
-  await page.evaluate((name) => {
     const ov = Array.from(document.querySelectorAll('.node-overlay')).find((o) =>
       o.textContent.trim().startsWith(name)
       && o.querySelector('button.more-actions-trigger'));
+    if (!ov) return false;
     ov.querySelector('button.more-actions-trigger')
       .dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
-  }, ownerName);
-  await page.waitForSelector('.row-actions-popover [data-action="extend-fn"]',
-    {timeout: 15000});
-  await page.evaluate(() => {
-    document.querySelector('.row-actions-popover [data-action="extend-fn"]')
-      .dispatchEvent(new MouseEvent('click', {bubbles: true}));
-  });
+    return true;
+  }, ownerName, {timeout: 90000, polling: 200});
+  await page.waitForFunction((act) => {
+    const item = document.querySelector('.row-actions-popover [data-action="' + act + '"]');
+    if (!item) return false;
+    item.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    return true;
+  }, action, {timeout: 15000, polling: 100});
+}
+
+// Open the Extend popover on the CARD of `ownerName` (must be the
+// selected fn's own card on the canvas).
+async function openExtendPopover(page, ownerName) {
+  await pickCardAction(page, ownerName, 'extend-fn');
   await page.waitForSelector('.arg-value-edit-popover .extend-ns-select',
     {timeout: 15000});
 }
@@ -205,26 +211,8 @@ async function openExtendPopover(page, ownerName) {
     // still offer the move (the old gate hid it for in-use fns).
     // ================================================================
     await page.goto(BASE + '/#core.' + OWN_FN);
-    // The `ns` entry lives INSIDE the ⋯ row-actions popover — open it
-    // on OWN_FN's card first.
-    await page.waitForFunction((name) => {
-      return Array.from(document.querySelectorAll('.node-overlay')).some((ov) =>
-        ov.textContent.trim().startsWith(name)
-        && ov.querySelector('button.more-actions-trigger'));
-    }, OWN_FN, {timeout: 90000, polling: 200});
-    await page.evaluate((name) => {
-      const ov = Array.from(document.querySelectorAll('.node-overlay')).find((o) =>
-        o.textContent.trim().startsWith(name)
-        && o.querySelector('button.more-actions-trigger'));
-      ov.querySelector('button.more-actions-trigger')
-        .dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
-    }, OWN_FN);
-    await page.waitForSelector('.row-actions-popover [data-action="namespace-move"]',
-      {timeout: 15000});
-    await page.evaluate(() => {
-      document.querySelector('.row-actions-popover [data-action="namespace-move"]')
-        .dispatchEvent(new MouseEvent('click', {bubbles: true}));
-    });
+    // The `ns` entry lives INSIDE the ⋯ row-actions popover on OWN_FN's card.
+    await pickCardAction(page, OWN_FN, 'namespace-move');
     await page.waitForSelector('.ns-menu', {timeout: 15000});
     const nsMenu = await page.evaluate(() => ({
       buttons: Array.from(document.querySelectorAll('.ns-menu .ns-menu-btn'))

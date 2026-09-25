@@ -18,8 +18,6 @@
 
 const PLUS_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>';
 const PENCIL_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
-const CHECK_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>';
-const X_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 const TRASH_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14"/></svg>';
 
 // =============================================================================
@@ -38,97 +36,6 @@ async function deleteEntity(type, id) {
 
 async function putEntity(type, id, fields) {
   return authMutate('PUT', API.api_entities_type_id(type, id), fields);
-}
-
-// =============================================================================
-// INLINE-INPUT ROW BUILDER
-// =============================================================================
-
-// Build a row `[<input> <save> <cancel>]` indented by `indent` and
-// styled to match the sidebar. `placeholder` shows in the empty input.
-// `onSubmit(value)` is called when user hits Enter or save; it should
-// return a Promise — while pending the row is disabled. `onCancel()`
-// is called when user hits Escape, clicks cancel, or blurs (without
-// committing). `initialValue` pre-fills the input.
-// graph-first-exception: an inline single text input that must appear the
-// instant the user clicks "+" (§6.4 speed) — a partial fetch to render one
-// field would make the create gesture feel laggy. The SUBMIT already POSTs to
-// the server (POST /api/entities); only the transient input row is client-built.
-function buildInlineInputRow({ placeholder, indent, initialValue, onSubmit, onCancel }) {
-  const row = document.createElement('div');
-  row.className = 'inline-input-row';
-  row.style.paddingLeft = (indent || 0) + 'px';
-
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'inline-input';
-  input.placeholder = placeholder || '';
-  input.value = initialValue || '';
-  input.autocomplete = 'off';
-
-  const saveBtn = document.createElement('button');
-  saveBtn.className = 'inline-btn inline-btn-save';
-  saveBtn.title = 'Save';
-  saveBtn.innerHTML = CHECK_SVG;
-
-  const cancelBtn = document.createElement('button');
-  cancelBtn.className = 'inline-btn inline-btn-cancel';
-  cancelBtn.title = 'Cancel';
-  cancelBtn.innerHTML = X_SVG;
-
-  const errorEl = document.createElement('span');
-  errorEl.className = 'inline-error';
-
-  row.appendChild(input);
-  row.appendChild(saveBtn);
-  row.appendChild(cancelBtn);
-  row.appendChild(errorEl);
-
-  let pending = false;
-
-  const setPending = (p) => {
-    pending = p;
-    input.disabled = p;
-    saveBtn.disabled = p;
-    cancelBtn.disabled = p;
-  };
-
-  const showError = (msg) => {
-    errorEl.textContent = msg || '';
-    errorEl.style.display = msg ? 'inline' : 'none';
-  };
-
-  const tryCommit = async () => {
-    if (pending) return;
-    const value = input.value.trim();
-    if (!value) {
-      showError('Name required');
-      input.focus();
-      return;
-    }
-    setPending(true);
-    showError('');
-    try {
-      await onSubmit(value);
-    } catch (e) {
-      showError(e.message || 'Failed');
-      setPending(false);
-      input.focus();
-    }
-  };
-
-  saveBtn.addEventListener('click', (e) => { e.stopPropagation(); tryCommit(); });
-  cancelBtn.addEventListener('click', (e) => { e.stopPropagation(); if (!pending) onCancel(); });
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); tryCommit(); }
-    else if (e.key === 'Escape') { e.preventDefault(); if (!pending) onCancel(); }
-  });
-  input.addEventListener('click', (e) => e.stopPropagation());
-
-  // Focus on next tick so the row is in the DOM first.
-  setTimeout(() => input.focus(), 0);
-
-  return row;
 }
 
 // =============================================================================
@@ -635,14 +542,25 @@ function buildCreateRow(indent) {
 // INLINE RENAME
 // =============================================================================
 
+// Close an inline rename: drop the row (so the rebuild does not keep it —
+// `gdKeepInlineRow`), then repaint to un-hide the label it replaced.
+function closeRenameRow(row) {
+  row.remove();
+  if (typeof updateEntityList === 'function' && graphData) updateEntityList(graphData);
+}
+
+// `v` as a double-quoted CSS attribute value.
+function attrValue(v) {
+  return String(v).replace(/["\\]/g, '\\$&');
+}
+
 function startNsRename(headerEl, nsId, nsPath) {
   // Replace label + actions with input row inline.
   const segments = nsPath.split('.');
   const currentName = segments[segments.length - 1];
-  const arrow = headerEl.querySelector('.ns-arrow');
-  // Hide the original label/actions; we insert the input row after the arrow.
-  headerEl.querySelectorAll('.ns-label, .description-badge, .ns-row-actions')
-    .forEach((el) => { el.style.display = 'none'; });
+  const hides = '.ns-label, .description-badge, .ns-row-actions';
+  // Hide the original label/actions; the input row takes their place.
+  headerEl.querySelectorAll(hides).forEach((el) => { el.style.display = 'none'; });
 
   const row = buildInlineInputRow({
     placeholder: 'Namespace name — or a.dotted.path to move it',
@@ -651,6 +569,7 @@ function startNsRename(headerEl, nsId, nsPath) {
     onSubmit: async (newName) => {
       if (newName === currentName) {
         // No-op — just close.
+        row.remove();
         await initGraph();
         return;
       }
@@ -682,27 +601,22 @@ function startNsRename(headerEl, nsId, nsPath) {
         if (undoRename && typeof gdUndoRecordNsRenamed === 'function') {
           gdUndoRecordNsRenamed(nsId, currentName, fields.name);
         }
+        row.remove();
         await initGraph();
       } else {
         throw new Error(await extractResponseError(response));
       }
     },
-    onCancel: () => {
-      // Restore visibility — but updateEntityList rebuilds anyway when
-      // graphData hasn't changed. Quickest: just trigger re-render.
-      if (typeof updateEntityList === 'function' && graphData) {
-        updateEntityList(graphData);
-      }
-    }
+    onCancel: () => closeRenameRow(row)
   });
-  // Drop into the header replacing where label was.
+  gdMarkRenameRow(row, '.ns-header[data-ns-path="' + attrValue(nsPath) + '"]', hides);
   headerEl.appendChild(row);
 }
 
 function startFnRename(itemEl, fnId, currentName) {
-  // Hide name + actions; insert input row in their place.
-  itemEl.querySelectorAll('.name, .ns-row-actions')
-    .forEach((el) => { el.style.display = 'none'; });
+  const hides = '.name, .ns-row-actions';
+  // Hide name + actions; the input row takes their place.
+  itemEl.querySelectorAll(hides).forEach((el) => { el.style.display = 'none'; });
 
   const row = buildInlineInputRow({
     placeholder: 'Graph name',
@@ -710,22 +624,21 @@ function startFnRename(itemEl, fnId, currentName) {
     initialValue: currentName,
     onSubmit: async (newName) => {
       if (newName === currentName) {
+        row.remove();
         await initGraph();
         return;
       }
       const response = await putEntity('fn', fnId, { name: newName });
       if (response.status >= 200 && response.status < 300) {
+        row.remove();
         await initGraph();
       } else {
         throw new Error(await extractResponseError(response));
       }
     },
-    onCancel: () => {
-      if (typeof updateEntityList === 'function' && graphData) {
-        updateEntityList(graphData);
-      }
-    }
+    onCancel: () => closeRenameRow(row)
   });
+  gdMarkRenameRow(row, '.entity-item[data-fn-id="' + attrValue(fnId) + '"]', hides);
   itemEl.appendChild(row);
 }
 

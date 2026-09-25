@@ -120,6 +120,7 @@ the log carries a loud WARN.
 | Hub editor Run popover → `421` | Expected: execution on hub compute is exactly what the byo flip opts out of | Run through your executor's app endpoint |
 | `BYO executor started WITHOUT a live-refresh signal` WARN | No SSE url and no poll cadence | Set `GRAPHDEN_SSE_URL` or `GRAPHDEN_REFRESH_POLL_MS` |
 | Graph serves stale values | SSE stream dropped and nothing re-signalled | The source reconnects with backoff and resyncs on connect; check the LB idle-timeout in front of the relay |
+| A request logs `:execution-error/fn-concealed` (the app answers `500 Application error.`) | The app runs — or is built on — a shared fn whose composition the org may not see; the hub ships it signature-only (`:concealed? true`) and the executor refuses to run it (the error names it in `:concealed-fn-id`) | Grant the org `:view-impl` on that fn's namespace (then the next refresh ships it whole), or build the app on fns the org owns |
 | `BYO handler fn not found` at start | `GRAPHDEN_APP_HANDLER_FN` names a fn absent from the org's branch | Check the fn name and `GRAPHDEN_EXECUTOR_BRANCH` |
 | `BYO handler fn name … is defined in several namespaces` at start (`:byo/ambiguous-handler`) | Names are unique only per namespace, and more than one namespace in the org's branch defines that name | Set `GRAPHDEN_APP_HANDLER_FN` to one of the fn ids the message lists |
 

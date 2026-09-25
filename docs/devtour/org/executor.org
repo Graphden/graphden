@@ -12,7 +12,7 @@ The spine: turn a graph 'description of a computation' into a value.
 :CUSTOM_ID: executor/execute
 :FILE: src/graphden/executor/interface.clj
 :LINE: 72
-:MINS: 1.9
+:MINS: 2.0
 :END:
 
  *Start here.* ~execute~ is the public front door of the whole system. A caller hands it an execution *context*, a ~fn-id~ — the id of a row in the graph that *describes* a computation — and a map of free args. This ns is a thin, validating façade: it checks the args shape and delegates to the real machinery in ~compile-runtime~. Everything below is how that graph *description* becomes a value.
@@ -24,13 +24,13 @@ The spine: turn a graph 'description of a computation' into a value.
 :PROPERTIES:
 :CUSTOM_ID: executor/execute~2
 :FILE: src/graphden/executor/compile_runtime.clj
-:LINE: 1544
+:LINE: 1564
 :MINS: 4.0
 :END:
 
 The dispatch heart of the hot path. It checks the cancellation / effect / execute-guard gates, pulls the *compiled registry* out of the context, looks up the closure for this ~fn-id~ (or throws fn-not-found), translates the caller's name-keyed args into the dual slot-id+name shape the compiled code expects, and finally calls ~(closure translated ctx)~. This is the moment *execute a fn* becomes *call a precompiled closure*.
 
-- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn execute][src/graphden/executor/compile_runtime.clj:1544]]
+- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn execute][src/graphden/executor/compile_runtime.clj:1564]]
 - see also :: [[file:executor.org::#executor/registry][registry]]
 - same file :: [[file:executor.org::#executor/registry][registry]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 
@@ -148,13 +148,13 @@ Classifies each of a fn's root slots (via ~classify-slot~) into a ~:value~ / ~:f
 :PROPERTIES:
 :CUSTOM_ID: executor/compile-all
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 1536
+:LINE: 1557
 :MINS: 4.8
 :END:
 
 Topologically orders every impl-backed fn and compiles each in dependency order into ~{fn-id -> (fn [fa ctx])}~, cached process-wide by (graph-shape × base-fn set × ambient rich-types) — the rich-types component is load-bearing: ~produces-callable?~ HOF-wrap decisions depend on the swept ~:return-type~ entries, so callers under different types must not share a compile. Dependency order matters: by the time a parent compiles, its children's callables already exist to be wired in.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-all][src/graphden/executor/compile_eager.clj:1536]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-all][src/graphden/executor/compile_eager.clj:1557]]
 - see also :: [[file:executor.org::#executor/compile-fn][compile-fn]]
 - same file :: [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/call-with-cache][call-with-cache]]
 - referenced from :: [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:types.org::#types/record-rich-types!][record-rich-types!]]
@@ -163,13 +163,13 @@ Topologically orders every impl-backed fn and compiles each in dependency order 
 :PROPERTIES:
 :CUSTOM_ID: executor/compile-fn
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 1242
+:LINE: 1263
 :MINS: 8.3
 :END:
 
 Produces one fn's runtime closure ~(fn [fa ctx])~. It turns each classified binding into a *builder*, wires env-bindings and rename-aliases, and at call time assembles the args map and invokes ~(impl args ctx)~. This is the concrete anatomy of a single compiled graph node.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-fn][src/graphden/executor/compile_eager.clj:1242]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-fn][src/graphden/executor/compile_eager.clj:1263]]
 - see also :: [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]]
 - same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/call-with-cache][call-with-cache]]
 - referenced from :: [[file:executor.org::#executor/compile-all][compile-all]]
@@ -178,13 +178,13 @@ Produces one fn's runtime closure ~(fn [fa ctx])~. It turns each classified bind
 :PROPERTIES:
 :CUSTOM_ID: executor/arg-builder
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 1034
+:LINE: 1055
 :MINS: 8.8
 :END:
 
 Emits the per-binding ~(fn [fa ctx])~: ~:value~ becomes a constant, ~:free~ reads the slot-id (with a name fallback), ~:ref~ becomes a ~thunk~/delay that *defers* the child call, ~:seq~ becomes a lazy seq. This is the origin of graphden's laziness — refs are *wrapped, not evaluated*, so native Clojure ~if~/~and~/~or~ short-circuit for free without the executor knowing their names.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- arg-builder][src/graphden/executor/compile_eager.clj:1034]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- arg-builder][src/graphden/executor/compile_eager.clj:1055]]
 - see also :: [[file:executor.org::#executor/resolve-arg][resolve-arg]]
 - same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/call-with-cache][call-with-cache]]
 - referenced from :: [[file:executor.org::#executor/collect-bindings][collect-bindings]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/resolve-arg][resolve-arg]], [[file:executor.org::#executor/map-fn][map-fn]]
@@ -193,13 +193,13 @@ Emits the per-binding ~(fn [fa ctx])~: ~:value~ becomes a constant, ~:free~ read
 :PROPERTIES:
 :CUSTOM_ID: executor/resolve-impl
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 793
+:LINE: 814
 :MINS: 1.1
 :END:
 
 Looks the base-fn's Clojure impl out of ~lookups[:base-fns]~ by the root fn's name, throwing ~:compile/missing-impl~ on a gap. This is the concrete join between a graph node and the actual code that computes it — the point where the graph description meets a real function.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- resolve-impl][src/graphden/executor/compile_eager.clj:793]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- resolve-impl][src/graphden/executor/compile_eager.clj:814]]
 - see also :: [[file:executor.org::#executor/defbase][defbase]]
 - same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/call-with-cache][call-with-cache]]
 - referenced from :: [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]]

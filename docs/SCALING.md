@@ -273,7 +273,13 @@ our Postgres. Built in these pieces:
   the new `GET /api/export/graph-rows` (the RAW five-table rows the compiler
   wants — `/api/export/graph` emits fn-def maps, the migration shape), which
   is org-scoped so a BYO executor authenticated as its org gets exactly its
-  org + public rows. The rows live in an in-memory index, so compile + execute
+  org + public rows — and concealed like every other read
+  ([SECURITY_MODEL.md](SECURITY_MODEL.md) layer 9): a public fn whose
+  composition the org may not see (no `:view-impl` grant on its namespace)
+  ships as a signature-only row marked `:concealed? true`, the anonymous
+  helpers only it is built from are left out, and running it — or anything
+  built on it — on the executor raises `:execution-error/fn-concealed`. The
+  org's own fns and the granted ones ship whole. The rows live in an in-memory index, so compile + execute
   read from memory with no per-read round-trip (the compiled-registry model).
   Writes throw `:remote-storage/read-only` — this executor serves the graph,
   it doesn't author it; the FaaS app path is read-only and works, the
@@ -357,6 +363,10 @@ The read-only, one-org shape is deliberate:
   and RUNS through its own executor's app endpoint; the editor's Run
   popover answers 421 for it. Forwarding editor runs to the customer's
   executor is a possible future refinement, not built.
+- **Runs only what the org may see the inside of.** The bundle conceals a
+  shared fn the org has no `:view-impl` grant on, so an app built on one
+  answers `:execution-error/fn-concealed` on the executor (see the runbook's
+  troubleshooting). Granting `:view-impl` on that namespace ships it whole.
 - **Pinned to one branch.** A `RemoteStorage` bootstraps one branch
   (`GRAPHDEN_EXECUTOR_BRANCH`, default main). Serving several branches on one
   BYO executor means several RemoteStorages — out of scope for the single-org

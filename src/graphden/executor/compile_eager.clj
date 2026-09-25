@@ -790,6 +790,27 @@
             (b/collect-env-bindings fn-id lookups))))
 
 
+(defn concealed-dependency
+  "The id of a CONCEALED fn — a signature-only row (`:concealed? true`,
+   `crud.entities.list/concealed-export-rows`) standing in for a fn whose
+   composition the graph's reader may not see — that `fn-id` is, extends
+   or refs, transitively; nil when there is none. Such a fn has no parents
+   and no bindings to compile from, so it and everything built on it are
+   left out of the compiled registry (`reachable-targets`); this names the
+   reason when a run then finds no closure. Walks the same edges compile
+   does (`:parent-ids` + `ref-deps`); only ever called on that miss path."
+  [fn-id {:keys [fn-map] :as lookups}]
+  (loop [queue [fn-id] seen #{}]
+    (when-let [cur (first queue)]
+      (let [row (get fn-map cur)]
+        (cond
+          (contains? seen cur) (recur (rest queue) seen)
+          (:concealed? row) cur
+          (nil? row) (recur (rest queue) (conj seen cur))
+          :else (recur (concat (rest queue) (:parent-ids row) (ref-deps cur lookups))
+                       (conj seen cur)))))))
+
+
 (defn- resolve-impl
   [fn-id {:keys [fn-map base-fns] :as lookups}]
   (let [root-name (some-> (l/root-fn fn-id fn-map lookups) :name keyword)]

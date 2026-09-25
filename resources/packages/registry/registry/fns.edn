@@ -260,7 +260,7 @@
           :list-items [:list :keyword-map]}}
 
   {:name :graph-rows
-   :description "Read the five graph tables as RAW rows through the request storage (org-scoped → caller's org + public, the shard a BYO executor serves). Backs GET /api/export/graph-rows — the bootstrap read for a remote / BYO executor's in-memory storage."
+   :description "Read the five graph tables as RAW rows through the request storage (org-scoped → caller's org + public, the shard a BYO executor serves), as the caller may see them: a fn whose composition is concealed from the caller (view-impl seam) ships signature-only with `:concealed? true`, and helpers reachable only through it are left out (`crud.entities/concealed-export-rows`). Backs GET /api/export/graph-rows — the bootstrap read for a remote / BYO executor's in-memory storage."
    :return-type :graph-rows-shape
    :effects #{:db}}
 

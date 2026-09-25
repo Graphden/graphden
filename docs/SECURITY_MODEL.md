@@ -130,7 +130,12 @@ so a gap in one does not by itself cross tenants:
    rich-types registry read by id (its bindings / primary parent / rule
    owner are dropped), a branch-local seed or rule owner reached through
    it (left unnamed), and its version history (no composition hash, no
-   base-fn). The registry's by-id index and the `:fn-version` log carry
+   base-fn), and the raw rows a BYO executor loads
+   (`GET /api/export/graph-rows`: the fn ships signature-only, marked
+   `:concealed? true`, the anonymous helpers only it is built from are left
+   out, and the executor refuses to run it — or anything built on it — with
+   `:execution-error/fn-concealed`). The registry's by-id index and the
+   `:fn-version` log carry
    no org, so a request-facing read by id first asks the viewer's own
    storage for the fn: another org's private fn has no entry and no
    history for them (the history endpoint answers 404, as for a fn that

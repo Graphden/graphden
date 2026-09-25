@@ -283,6 +283,39 @@
         :scope scope}))))
 
 
+(defn concealed-export-rows
+  "The raw five-table `rows` (`packages.export/read-graph` — what a BYO
+   executor loads, `GET /api/export/graph-rows`) as the CURRENT viewer may
+   see them. A fn whose composition is hidden ships as a SIGNATURE-ONLY
+   row: `:parent-ids []` and `:concealed? true` (so the executor tells it
+   from a type-row and refuses to run it — `:execution-error/fn-concealed`),
+   with none of its bindings / list items and none of its fn-slots that
+   rename an inherited slot (their source slot is an internal of its
+   chain). Rows reachable ONLY through hidden composition — the anonymous
+   helpers a hidden fn is built from — are left out altogether: every row
+   that ships is visible or a named fn the viewer can already find.
+   Identity when nothing is hidden (or no filter is installed)."
+  [rows]
+  (let [{g :graph hidden :hidden} (concealed-view rows)]
+    (if (empty? hidden)
+      rows
+      (let [slot-by-id (into {} (map (juxt :id identity)) (:slots g))
+            renames-internal? (fn [fs]
+                                (and (contains? hidden (:fn-id fs))
+                                     (:source-slot-id (get slot-by-id (:slot-id fs)))))
+            g (update g :fn-slots #(filterv (complement renames-internal?) %))
+            ;; Every row roots the walk except an anonymous COMPOSED one
+            ;; (a helper — it ships only when something shipped refs it)
+            ;; and an anonymous hidden one (nothing of it is the viewer's).
+            anon-helper? #(and (nil? (:name %))
+                               (or (seq (:parent-ids %)) (contains? hidden (:id %))))
+            roots (into [] (comp (remove anon-helper?) (map :id)) (:fns g))
+            kept (filter-graph-to-fn-ids g (subtree-fn-id-closure g roots))]
+        (update kept :fns (fn [fs]
+                            (mapv #(cond-> % (contains? hidden (:id %)) (assoc :concealed? true))
+                                  fs)))))))
+
+
 (defn ancestor-ids
   "`fn-id` and every fn in its `:parent-ids` closure over the in-memory
    `{fn-id → fn-row}` map."

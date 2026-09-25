@@ -79,6 +79,8 @@
 
    Throws:
    - :execution-error/fn-not-found if `fn-id` has no compiled closure
+   - :execution-error/fn-concealed if it has none because it is (or is
+     built on) a signature-only fn concealed from this executor's graph
    - :execution-error/invalid-args if `args` is non-nil and not a map"
   [context fn-id args]
   (when (and (some? args) (not (map? args)))

@@ -405,10 +405,10 @@ The graph's own linter, run over the same loader output at CI time (~bb graph-li
 :PROPERTIES:
 :CUSTOM_ID: packages/lint-branch
 :FILE: src/graphden/lint/graph.clj
-:LINE: 348
-:MINS: 2.8
+:LINE: 350
+:MINS: 3.4
 :END:
 
 The editor's side of the same engine: the per-ctx graph snapshot (org-sliced, branch-resolved) is rebuilt into loader-shaped fn-defs and linted, memoised per branch while that branch's snapshot object is unchanged. The ⚐ lint chip and the Inspector's Lint section share this one call; the suppressions it subtracts live in the graph as a ~:const~.
 
-- source :: [[file:../../../src/graphden/lint/graph.clj::(defn lint-branch][src/graphden/lint/graph.clj:348]]
+- source :: [[file:../../../src/graphden/lint/graph.clj::(defn lint-branch][src/graphden/lint/graph.clj:350]]

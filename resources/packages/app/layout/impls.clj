@@ -23,6 +23,7 @@
    grid-place them."
   (:require
     [clojure.string :as str]
+    [graphden.crud.entities.list :as entity-list]
     [graphden.crud.types-api :as types-api]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as exec-ctx]
@@ -30,8 +31,7 @@
     [graphden.layout.builder-helpers :as bh]
     [graphden.layout.core :as layout]
     [graphden.layout.graph :as lgraph]
-    [graphden.layout.strip-facts :as strip-facts]
-    [graphden.versioning.branch-local :as branch-local]))
+    [graphden.layout.strip-facts :as strip-facts]))
 
 
 (defn- load-graph-entities
@@ -72,11 +72,12 @@
 
 (defbase _layout-build-apply
   "Single library call — build graph `{:nodes :edges}` for the
-   requested subgraph. Throws `ExceptionInfo` (`:execution-error/not-
+   requested subgraph, as the viewer may see it (a fn whose
+   composition is hidden draws as its signature). Throws `ExceptionInfo` (`:execution-error/not-
    found`) when `:root-id` doesn't resolve; the graph's `:try` turns
    that into `{:ok false :error}`."
   [graph parsed]
-  (layout/build-elements graph (:root-id parsed) (:expansions parsed)))
+  (layout/build-elements-for-viewer graph (:root-id parsed) (:expansions parsed)))
 
 
 (defbase _layout-place-apply
@@ -112,16 +113,16 @@
 (defbase _fn-branch-local-seed
   "Whether `fn-id` is branch-local and who made it so — `{:own bool
    :seed \"name\"}` when the fn or an ancestor carries `:branch-local?
-   true` (`branch-local/branch-local-seed`, the walk the card's 📍 strip
-   reads through layout strip-facts), nil when nothing in the chain
+   true` (`strip-facts/viewer-branch-local`, the walk the card's 📍
+   strip reads — the seed unnamed when it sits beyond a fn whose
+   composition the viewer may not see), nil when nothing in the chain
    does. The Inspector's Overview prints it so compact cards — which
    hide the metadata strips — still show and set the flag."
   [fn-id]
   (when fn-id
-    (let [fns-by-id (:fn-map (lgraph/cached-build-lookups (load-graph-entities ctx)))
-          seed (branch-local/branch-local-seed fns-by-id fn-id)]
-      (when seed
-        {:own (= (:id seed) fn-id) :seed (:name seed)}))))
+    (let [fns-by-id (:fn-map (lgraph/cached-build-lookups (load-graph-entities ctx)))]
+      (strip-facts/viewer-branch-local
+        fns-by-id (entity-list/conceal-parents fns-by-id [fn-id]) fn-id))))
 
 
 (defbase _fn-slot-seals
@@ -129,11 +130,13 @@
    slot's effective name — the Inspector's Bindings tab prints the
    `:note` beside each row. Per slot: `:sealed-by` / `:list-closed-by` /
    `:required-by` (the NAME of the deciding fn, from `edge-seal-fields`
-   — the same walk the canvas lock badge shows), `:optional?` (declared
-   `:required false`) and the `:note`. One cached graph read."
+   — the same walk the canvas lock badge shows, over the chain as the
+   viewer may see it), `:optional?` (declared `:required false`) and
+   the `:note`. One cached graph read."
   [fn-id]
   (when fn-id
-    (let [lookups (lgraph/cached-build-lookups (load-graph-entities ctx))
+    (let [lookups (lgraph/cached-build-lookups
+                    (:graph (layout/viewer-graph (load-graph-entities ctx) [fn-id])))
           {:keys [args-by-fn slot-map]} lookups]
       (into {}
             (keep (fn [arg]

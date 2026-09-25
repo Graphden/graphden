@@ -355,6 +355,23 @@ execute pipeline's standard redaction/scrub chain). See
 
 - `:fn-id` - The missing function's UUID
 
+### `:execution-error/fn-concealed`
+
+**Component:** executor
+**Description:** The function cannot run on this executor because it is — or
+is built on — a fn whose composition was concealed from the executor's graph:
+a BYO executor loads its org's graph as the org may SEE it
+(`GET /api/export/graph-rows`), and a shared fn the org may not see the
+internals of ships signature-only (`:concealed? true`,
+[SECURITY_MODEL.md](SECURITY_MODEL.md) layer 9). Such a fn is left out of the
+compiled registry; running it, or anything that extends or references it,
+raises this instead of `:execution-error/fn-not-found`. Grant the org
+`:view-impl` on the fn's namespace, or run it on the hub.
+**Ex-data keys:**
+
+- `:fn-id` - The function that was run
+- `:concealed-fn-id` - The concealed fn it is (same id) or is built on
+
 ### `:recursion-error/max-depth-exceeded`
 
 **Component:** executor

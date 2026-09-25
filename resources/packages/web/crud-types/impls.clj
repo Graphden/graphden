@@ -9,6 +9,7 @@
    `src/` namespaces so each base-fn impl stays a minimal primitive."
   (:require
     [graphden.crud.entities :as entities]
+    [graphden.crud.request :as request]
     [graphden.crud.types-api :as types-api]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
@@ -147,10 +148,13 @@
   "One registry lookup by IDENTITY — the full rich-type entry for the fn
    with id `fn-id` (nil-safe: nil / unknown ids → nil). Callers hold the
    id; a lookup by bare name would pick an arbitrary fn when the name
-   lives in several namespaces."
+   lives in several namespaces. Request-facing, so read as the viewer
+   may (`entities/viewer-rich-entry`): nil for a fn the viewer's storage
+   cannot read, composition fields dropped for a concealed one."
   [fn-id]
   (when fn-id
-    (registry/rich-type-of-id fn-id)))
+    (entities/viewer-rich-entry (request/require-storage ctx) fn-id
+                                (registry/rich-type-of-id fn-id))))
 
 
 (defbase rule-owner-of-id
@@ -159,9 +163,10 @@
    computed the return type of the fn with id `fn-id`; nil when the fn is
    unknown, is itself a base-fn, or its root ancestor carries no rule.
    The walk lives next to `registry/root-base-fn-name` (single source of
-   truth), shared with the layout strip-facts `↳` badge."
+   truth), shared with the layout strip-facts `↳` badge. nil when the
+   viewer may not know how the fn is built (`entities/viewer-rule-owner`)."
   [fn-id]
-  (registry/rule-owner-info-of-id fn-id))
+  (entities/viewer-rule-owner ctx fn-id))
 
 
 (defbase declarable-effect-categories

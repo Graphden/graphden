@@ -2116,16 +2116,17 @@
   {:name :_iov-bl-own?
    :parent :get :args {:coll :_iov-bl :key {:value :own} :default false}}
   {:name :_iov-bl-seed
-   :description "The ancestor the flag is inherited from — not named for a fn whose composition the viewer may not see."
-   :parent :if
-   :args {:test :_insp-visible?
-          :then {:parent :get :args {:coll :_iov-bl :key {:value :seed} :default nil}}
-          :else {:value "an ancestor"}}}
+   :description "The ancestor the flag is inherited from — nil when it sits beyond composition the viewer may not see (`:_fn-branch-local-seed` leaves it unnamed then)."
+   :parent :get
+   :args {:coll :_iov-bl :key {:value :seed} :default nil}}
+  {:name :_iov-bl-seed-text
+   :parent :coalesce
+   :args {:value :_iov-bl-seed :default {:value "an ancestor"}}}
   {:name :_iov-bl-text
    :parent :cond
    :args {:clauses [{:parent :nil? :args {:value :_iov-bl}} {:value "merges across branches"}
                     :_iov-bl-own? {:value "branch-local"}
-                    {:value true} {:parent :str :args {:parts ["branch-local — inherited from " :_iov-bl-seed]}}]}}
+                    {:value true} {:parent :str :args {:parts ["branch-local — inherited from " :_iov-bl-seed-text]}}]}}
   {:name :_iov-bl-state
    :parent :cond
    :args {:clauses [{:parent :nil? :args {:value :_iov-bl}} {:value "off"}

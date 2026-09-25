@@ -23,7 +23,8 @@
 
 
 (defn- subtree-fn-id-closure
-  "BFS the set of fn-ids transitively reachable from `root-id` via:
+  "BFS the set of fn-ids transitively reachable from `root-id` (or a
+   collection of root ids) via:
    - `parent-ids` (inheritance chain)
    - `binding.ref-fn-id` for bindings owned by an in-set fn
    - `binding.type-override-fn-id` for those same bindings
@@ -46,7 +47,7 @@
         push! (fn [^java.util.UUID id]
                 (when (and id (not (java.util.HashSet/.contains seen id)))
                   (java.util.ArrayDeque/.push stack id)))]
-    (push! root-id)
+    (if (coll? root-id) (run! push! root-id) (push! root-id))
     (while (not (java.util.ArrayDeque/.isEmpty stack))
       (let [fid (java.util.ArrayDeque/.pop stack)]
         (when-not (java.util.HashSet/.contains seen fid)
@@ -94,6 +95,24 @@
      :list-items kept-items}))
 
 
+(defonce ^:private blanked-rows
+  ;; raw fn row → the same row with `:parent-ids []`. Weak keys: an entry
+  ;; lives as long as the snapshot holding its raw row.
+  (java.util.Collections/synchronizedMap (java.util.WeakHashMap.)))
+
+
+(defn- blanked-row
+  "`row` with its parents blanked — the SAME object for the same raw row
+   across calls, so a concealed copy of the next snapshot shares it with
+   the last one and row-identity diffs over concealed copies (the lint
+   memo's delta re-lint) see an unchanged concealed fn as unchanged."
+  [row]
+  (or (java.util.Map/.get blanked-rows row)
+      (let [b (assoc row :parent-ids [])]
+        (java.util.Map/.put blanked-rows row b)
+        b)))
+
+
 (defn strip-impl-of
   "Hide the internal COMPOSITION of the fns whose ids are in `hidden-fn-ids`
    from a graph dump: blank each hidden fn's `:parent-ids` and drop its
@@ -116,7 +135,7 @@
         (:fns graph)        (update :fns
                                     (fn [fns]
                                       (mapv #(if (contains? hidden-fn-ids (:id %))
-                                               (assoc % :parent-ids [])
+                                               (blanked-row %)
                                                %)
                                             fns)))
         (:bindings graph)   (update :bindings
@@ -200,6 +219,189 @@
     (if (identical? seen raw)
       raw
       (filter-graph-to-fn-ids seen (subtree-fn-id-closure seen root-id)))))
+
+
+(defn- has-composition?
+  "Does `f` carry anything `strip-impl-of` would conceal — parents or
+   own bindings? Only such rows need the (per-fn, grant-reading)
+   filter's verdict: a base-fn or a binding-less type-row reads the
+   same concealed or not."
+  [bound-fn-ids f]
+  (boolean (or (seq (:parent-ids f)) (contains? bound-fn-ids (:id f)))))
+
+
+(def ^:private concealed-memo-cap
+  "(snapshot, hidden-set) pairs whose concealed copy is kept — one per
+   live branch ctx × distinct viewer grant set."
+  32)
+
+
+(defonce ^:private concealed-memo
+  ;; [[graph hidden concealed] …], most recent last.
+  (atom []))
+
+
+(defn- memo-strip
+  "`strip-impl-of graph hidden`, memoised on the snapshot's IDENTITY +
+   the hidden set, so the identity-keyed memos downstream (layout
+   lookups, the lint memo) keep hitting between writes for one viewer
+   grant set."
+  [graph hidden]
+  (or (some (fn [[g h c]] (when (and (identical? g graph) (= h hidden)) c))
+            @concealed-memo)
+      (let [c (strip-impl-of graph hidden)]
+        (swap! concealed-memo
+               (fn [entries]
+                 (conj (vec (take-last (dec concealed-memo-cap) entries))
+                       [graph hidden c])))
+        c)))
+
+
+(defn concealed-view
+  "`{:graph :hidden :scope}` — `graph` (a five-table dump) AS THE CURRENT
+   VIEWER MAY SEE IT, and the ids whose composition was concealed. With
+   `root-ids`, only the fns reachable from them (`subtree-fn-id-closure`
+   over the raw graph — returned as `:scope`; nil = the whole graph, as
+   is every answer with no filter installed) are put to the filter: a
+   walk from those roots
+   over the concealed copy never gets beyond that set, and a verdict
+   over the whole graph would read every fn's grants to draw one card.
+   `:graph` is the SAME map when nothing is hidden (or no filter is
+   installed) and a memoised copy otherwise."
+  ([graph] (concealed-view graph nil))
+  ([graph root-ids]
+   (if (nil? @view-impl-filter)
+     {:graph graph :hidden #{}}
+     (let [scope (when root-ids (subtree-fn-id-closure graph root-ids))
+           bound (into #{} (map :fn-id) (:bindings graph))
+           rows (filterv #(and (or (nil? scope) (contains? scope (:id %)))
+                               (has-composition? bound %))
+                         (:fns graph))
+           hidden (hidden-fn-ids rows)]
+       {:graph (if (empty? hidden) graph (memo-strip graph hidden))
+        :hidden hidden
+        :scope scope}))))
+
+
+(defn concealed-export-rows
+  "The raw five-table `rows` (`packages.export/read-graph` — what a BYO
+   executor loads, `GET /api/export/graph-rows`) as the CURRENT viewer may
+   see them. A fn whose composition is hidden ships as a SIGNATURE-ONLY
+   row: `:parent-ids []` and `:concealed? true` (so the executor tells it
+   from a type-row and refuses to run it — `:execution-error/fn-concealed`),
+   with none of its bindings / list items and none of its fn-slots that
+   rename an inherited slot (their source slot is an internal of its
+   chain). Rows reachable ONLY through hidden composition — the anonymous
+   helpers a hidden fn is built from — are left out altogether: every row
+   that ships is visible or a named fn the viewer can already find.
+   Identity when nothing is hidden (or no filter is installed)."
+  [rows]
+  (let [{g :graph hidden :hidden} (concealed-view rows)]
+    (if (empty? hidden)
+      rows
+      (let [slot-by-id (into {} (map (juxt :id identity)) (:slots g))
+            renames-internal? (fn [fs]
+                                (and (contains? hidden (:fn-id fs))
+                                     (:source-slot-id (get slot-by-id (:slot-id fs)))))
+            g (update g :fn-slots #(filterv (complement renames-internal?) %))
+            ;; Every row roots the walk except an anonymous COMPOSED one
+            ;; (a helper — it ships only when something shipped refs it)
+            ;; and an anonymous hidden one (nothing of it is the viewer's).
+            anon-helper? #(and (nil? (:name %))
+                               (or (seq (:parent-ids %)) (contains? hidden (:id %))))
+            roots (into [] (comp (remove anon-helper?) (map :id)) (:fns g))
+            kept (filter-graph-to-fn-ids g (subtree-fn-id-closure g roots))]
+        (update kept :fns (fn [fs]
+                            (mapv #(cond-> % (contains? hidden (:id %)) (assoc :concealed? true))
+                                  fs)))))))
+
+
+(defn ancestor-ids
+  "`fn-id` and every fn in its `:parent-ids` closure over the in-memory
+   `{fn-id → fn-row}` map."
+  [fns-by-id fn-id]
+  (loop [queue [fn-id] seen #{}]
+    (if-let [cur (first queue)]
+      (if (contains? seen cur)
+        (recur (rest queue) seen)
+        (recur (concat (rest queue) (:parent-ids (get fns-by-id cur))) (conj seen cur)))
+      seen)))
+
+
+(defn conceal-parents
+  "`fns-by-id` with the parents of every fn in the ancestor closures of
+   `fn-ids` whose composition the viewer may not see blanked — the
+   inheritance chains exactly as far as the viewer may follow them. A
+   walk up the result names only ancestors the viewer could have read
+   off the graph; comparing its `ancestor-ids` with the raw map's tells
+   whether a fn's chain passes through concealed composition. The same
+   map when nothing in those chains is hidden (or no filter installed)."
+  [fns-by-id fn-ids]
+  (if (nil? @view-impl-filter)
+    fns-by-id
+    (let [rows (into [] (comp (mapcat #(ancestor-ids fns-by-id %))
+                              (distinct)
+                              (keep fns-by-id)
+                              (filter (comp seq :parent-ids)))
+                     fn-ids)]
+      (reduce (fn [m id] (assoc-in m [id :parent-ids] []))
+              fns-by-id
+              (hidden-fn-ids rows)))))
+
+
+(defn chain-concealed?
+  "Does `fn-id`'s inheritance chain (itself included) run through a fn
+   whose composition the viewer may not see? `seen-by-id` is
+   `conceal-parents` of `fns-by-id` over (at least) `fn-id`; the chain
+   is concealed where the viewer's walk stops short of the raw one."
+  [fns-by-id seen-by-id fn-id]
+  (and (not (identical? seen-by-id fns-by-id))
+       (not= (ancestor-ids fns-by-id fn-id) (ancestor-ids seen-by-id fn-id))))
+
+
+(defn viewer-rule-owner
+  "`registry/rule-owner-info-of-id` as the CURRENT viewer may know it.
+   The owner is the base-fn at the root of the fn's primary-parent chain
+   — part of how the fn is built — so it is nil for a fn the viewer's
+   graph does not hold (another org's private fn) and for one whose
+   chain runs through concealed composition (`chain-concealed?`).
+   Unchanged with no filter installed."
+  [ctx fn-id]
+  (when-let [info (registry/rule-owner-info-of-id fn-id)]
+    (if (nil? @view-impl-filter)
+      info
+      (let [fns-by-id (into {} (map (juxt :id identity))
+                            (:fns (types-api/cached-or-load-graph ctx)))]
+        (when (and (contains? fns-by-id fn-id)
+                   (not (chain-concealed? fns-by-id (conceal-parents fns-by-id [fn-id]) fn-id)))
+          info)))))
+
+
+(def concealed-entry-fields
+  "Rich-types registry entry fields that ARE a fn's composition: the
+   bindings made anywhere in its chain, its primary parent (the chain
+   itself) and the per-binding effect contributions (keyed by binding
+   name). The rest — `:args` / `:return` / `:effects` / the slot types
+   of its free args — is its signature."
+  [:resolved-bindings :primary-parent :arg-effects])
+
+
+(defn viewer-rich-entry
+  "Registry `entry` of the fn `fn-id` as the CURRENT viewer may read it.
+   The registry's by-id index is org-agnostic (every org's fns land in
+   the global index, and the executor needs them there), so a
+   request-facing read by id asks the viewer's own storage first: nil
+   when it cannot read the fn (another org's private fn — not even its
+   existence is the viewer's), the entry minus `concealed-entry-fields`
+   when its composition is hidden, the entry itself otherwise. Identity
+   with no filter installed — the single-tenant path reads nothing."
+  [storage fn-id entry]
+  (if (or (nil? entry) (nil? @view-impl-filter))
+    entry
+    (when-let [row (sp/read-entity storage :fn fn-id)]
+      (if (impl-visible? row)
+        entry
+        (apply dissoc entry concealed-entry-fields)))))
 
 
 (def ^:private light-fn-fields

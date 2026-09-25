@@ -315,10 +315,28 @@
    :return-type :fn-version-row-shape
    :args {:row {:as :item} :entity-type {:value "fn-version"}}}
 
-  {:name :_lfv-versions
-   :description "Empty when fn-id is nil; otherwise the live version rows."
+  ;; --- Visibility gate. `:fn-version` carries no org column (the raw
+  ;; read above is org-blind), so the fn's OWN row is what scopes the
+  ;; log: the viewer's storage reads it (own org / public) or the fn
+  ;; has no history for them — another org's private fn is exactly as
+  ;; absent as a fn that never existed.
+  {:name :_lfv-fn-row
+   :description "The fn's row as the viewer's storage reads it — nil for a nil / unknown fn-id and for another org's private fn."
    :parent :if
    :args {:test {:parent :some? :args {:value {:as :fn-id}}}
+          :then {:parent :get-entity
+                 :args {:entity-type {:value "fn"}
+                        :id {:parent :assert-some :args {:value {:as :fn-id :type :nullable-uuid}}}}}
+          :else nil}}
+
+  {:name :_lfv-readable?
+   :parent :some?
+   :args {:value :_lfv-fn-row}}
+
+  {:name :_lfv-versions
+   :description "Empty when the viewer cannot read the fn (nil fn-id included); otherwise the live version rows."
+   :parent :if
+   :args {:test :_lfv-readable?
           :then :_lfv-versions-from-storage
           :else {:value []}}}
 
@@ -471,15 +489,20 @@
 
   ;; --- Per-row JSON shape (HOF callback over sorted versions).
   {:name :_lfv-version-selected
-   :description "Pick the bare fn-version columns. Admin extension point: add / remove keys to change the bare-row field set."
+   :description "Pick the bare fn-version columns (`:_lfv-version-fields`)."
    :parent :select-keys
    :args {:m {:as :item}
-          :ks [{:value :id} {:value :name} {:value :description}
-               {:value :constraint}
-               {:value :base-fn-id} {:value :element-fn-id}
-               {:value :return-type-fn-id} {:value :anonymous-hash}
-               {:value :expects-effects} {:value :created-at}
-               {:value :deleted-at}]}}
+          :ks :_lfv-version-fields}}
+
+  {:name :_lfv-version-fields
+   :description "The bare-row column set. Admin extension point: add / remove keys to change it. `:anonymous-hash` (the hash OF the composition) and `:base-fn-id` (the base-fn it is built on) ship only when the viewer may see the fn's composition (the view-impl seam)."
+   :parent :if
+   :args {:test {:parent :fn-impl-visible? :args {:fn-id {:as :fn-id}}}
+          :then {:value [:id :name :description :constraint :base-fn-id :element-fn-id
+                         :return-type-fn-id :anonymous-hash :expects-effects
+                         :created-at :deleted-at]}
+          :else {:value [:id :name :description :constraint :element-fn-id
+                         :return-type-fn-id :expects-effects :created-at :deleted-at]}}}
 
   {:name :_lfv-version-base
    :description "Bare fn-version JSON shape — selected columns with UUIDs and timestamps stringified via the shared `:_stringify-uuid-or-inst` helper."
@@ -562,15 +585,26 @@
 
   ;; Handler entry point.
   {:name :_list-fn-versions-data
-   :description "GET /api/fns/:fn-id/versions — URL extraction → `:list-fn-versions`."
-   :parent :list-fn-versions
-   :args {:fn-id :_list-fn-versions-fn-id}}
+   :description "GET /api/fns/:fn-id/versions — URL extraction → `:list-fn-versions`; a 404 envelope when the id names a fn the viewer cannot read (missing, or another org's private fn — the two answer alike)."
+   :parent :if
+   :args {:test :_lfv-unreadable-fn?
+          :then {:parent :const
+                 :return-type :error-result-status-shape
+                 :args {:value {:ok false :error "Function not found" :http-status 404}}}
+          :else :list-fn-versions
+          :fn-id :_list-fn-versions-fn-id}}
+
+  {:name :_lfv-unreadable-fn?
+   :description "A fn-id was given and the viewer's storage cannot read it."
+   :parent :and
+   :args {:values [{:parent :some? :args {:value {:as :fn-id}}}
+                   {:parent :not :args {:value :_lfv-readable?}}]}}
 
   {:name :list-fn-versions-handler
    :lambda-params [:storage-query :request :default]
    :description "Ring handler for GET /api/fns/:fn-id/versions."
-   :parent :json-handler
-   :args {:data :_list-fn-versions-data}}
+   :parent :json-envelope-response
+   :args {:envelope :_list-fn-versions-data}}
 
   ;; ---------------------------------------------------------------------
   ;; GET /api/branches/:ref/diff?against=<source-ref> — resolved-view

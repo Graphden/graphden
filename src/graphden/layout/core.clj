@@ -18,7 +18,9 @@
    feed it hand-built node/edge lists."
   (:require
     [clojure.string :as str]
+    [graphden.crud.entities.list :as entity-list]
     [graphden.crud.request :as request]
+    [graphden.layout.data :as ldata]
     [graphden.layout.graph :as lgraph]))
 
 
@@ -409,6 +411,46 @@
                       {:type :execution-error/not-found
                        :root-id root-id})))
     (lgraph/build-graph-elements root-id expansions lookups)))
+
+
+(defn- node-fn-ids
+  "The fn ids the built fn-nodes draw (`:originalFnId`)."
+  [{:keys [nodes]}]
+  (into #{} (keep #(some-> (get-in % [:data :originalFnId]) parse-uuid)) nodes))
+
+
+(defn viewer-graph
+  "`entity-list/concealed-view` of a layout snapshot for the fns
+   reachable from `root-ids`, its `:args` slot views re-derived from the
+   concealed rows (`:graph` is the snapshot itself when nothing is
+   hidden). For every layout read that answers about a fn's internals."
+  [graph-entities root-ids]
+  (let [{g :graph :as view} (entity-list/concealed-view graph-entities root-ids)]
+    (cond-> view
+      (not (identical? g graph-entities)) (assoc :graph (ldata/resynth-args g)))))
+
+
+(defn build-elements-for-viewer
+  "`build-elements` over the graph AS THE CURRENT VIEWER MAY SEE IT (the
+   view-impl seam, docs/SECURITY_MODEL.md layer 9): a fn whose composition
+   is hidden draws as its signature — a card with its own slots, no
+   parents, no bindings, nothing expanded beneath it. The viewer learns
+   exactly what `GET /api/graph/entities?scope=subtree` would ship.
+
+   The filter is asked only about the fns reachable from the root
+   (`entity-list/concealed-view`), and any node the build drew from
+   outside that set widens it and builds again — so no drawn fn escapes
+   a verdict, whatever edge the walk followed. Identity-cheap with no
+   filter installed or nothing hidden: the snapshot itself is built,
+   and its cached lookups hit."
+  [graph-entities root-id expansions]
+  (loop [roots #{root-id}]
+    (let [{g :graph scope :scope} (viewer-graph graph-entities roots)
+          elements (build-elements g root-id expansions)
+          outside (when scope (remove scope (node-fn-ids elements)))]
+      (if (seq outside)
+        (recur (into roots outside))
+        elements))))
 
 
 (defn place-elements

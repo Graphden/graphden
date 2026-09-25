@@ -123,8 +123,23 @@ so a gap in one does not by itself cross tenants:
    reads (signature only), Explorer views (no `uses` match through it),
    usages, the inspector and the return-type-rule popover, bound values and
    provenance read by binding id, the whole-graph export (the fn is left
-   out), and execution traces (its frame is a leaf, nothing beneath it
-   ships). The executor still runs the full graph server-side.
+   out), execution traces (its frame is a leaf, nothing beneath it
+   ships), the canvas layout (its card is its signature — no parents, no
+   bindings, nothing drawn beneath it), the graph lint (it lints as a
+   leaf, so no finding names its chain or matches its internals), the
+   rich-types registry read by id (its bindings / primary parent / rule
+   owner are dropped), a branch-local seed or rule owner reached through
+   it (left unnamed), and its version history (no composition hash, no
+   base-fn), and the raw rows a BYO executor loads
+   (`GET /api/export/graph-rows`: the fn ships signature-only, marked
+   `:concealed? true`, the anonymous helpers only it is built from are left
+   out, and the executor refuses to run it — or anything built on it — with
+   `:execution-error/fn-concealed`). The registry's by-id index and the
+   `:fn-version` log carry
+   no org, so a request-facing read by id first asks the viewer's own
+   storage for the fn: another org's private fn has no entry and no
+   history for them (the history endpoint answers 404, as for a fn that
+   never existed). The executor still runs the full graph server-side.
 10. **Resource isolation** — see below.
 
 ## Resource isolation: shared vs dedicated

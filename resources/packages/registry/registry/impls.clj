@@ -104,7 +104,7 @@
 (defbase graph-rows
   []
   (cr/record-effect! :db)
-  (export/read-graph (request/require-storage ctx)))
+  (entities/concealed-export-rows (export/read-graph (request/require-storage ctx))))
 
 
 ;; Atomic publish core: reject if `(pkg-name, pkg-version)` already

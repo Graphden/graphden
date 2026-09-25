@@ -1537,6 +1537,26 @@
                    :fn-id fn-id})))
 
 
+(defn- throw-not-compiled!
+  "A run found no compiled closure for `fn-id`. When the reason is
+   concealment — `fn-id` is, or is built on, a signature-only fn whose
+   composition this executor's graph was not given (a BYO executor serving
+   an org that may run a shared fn but not see how it is built,
+   docs/SECURITY_MODEL.md layer 9) — say so as
+   `:execution-error/fn-concealed`, naming the concealed fn; otherwise the
+   plain `:execution-error/fn-not-found`."
+  [ctx fn-id]
+  (if-let [hidden (when (uuid? fn-id)
+                    (ce/concealed-dependency fn-id (lookups-for-ctx ctx)))]
+    (throw (ex-info (str "Function " fn-id " cannot run here: "
+                         (if (= hidden fn-id) "its" (str "it is built on " hidden ", whose"))
+                         " composition is concealed from this executor")
+                    {:type :execution-error/fn-concealed
+                     :fn-id fn-id
+                     :concealed-fn-id hidden}))
+    (throw-fn-not-found! fn-id)))
+
+
 ;; =============================================================================
 ;; Execute
 ;; =============================================================================
@@ -1581,7 +1601,7 @@
               (fn-id (first (vals args)))
               (fn-id args)))
           (let [reg (registry ctx)
-                closure (or (get reg fn-id) (throw-fn-not-found! fn-id))
+                closure (or (get reg fn-id) (throw-not-compiled! ctx fn-id))
                 ;; Translate caller's name-keyed args into the dual-key
                 ;; shape (slot-id + name). Phase 4 readers prefer slot-id;
                 ;; the name half covers env-binding / lambda-arg / rename-
@@ -1652,7 +1672,7 @@
   (if (fn? fn-id)
     fn-id
     (let [reg (registry ctx)
-          closure (or (get reg fn-id) (throw-fn-not-found! fn-id))
+          closure (or (get reg fn-id) (throw-not-compiled! ctx fn-id))
           lookups (lookups-for-ctx ctx)
           free-names (vec (r/deep-free-ext-names fn-id lookups))]
       (ce/tagged-callable fn-id free-names

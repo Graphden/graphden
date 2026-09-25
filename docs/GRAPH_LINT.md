@@ -146,9 +146,11 @@ which BFS-walks from the same registry.
   from the graph it describes; `types.diagnostics` already sets the
   rule — derived, in-memory, recomputed on write. The lint follows it.
 - **Per-branch, incremental, on read.** `lint.graph/lint-branch` keeps
-  a state per (org, branch) (a small LRU — each tenant org reads its own
-  org-sliced view, memoised per snapshot so its identity holds between
-  writes): the last snapshot object, its `:ns`
+  a state per (org, branch, concealed set) (a small LRU — each tenant org
+  reads its own org-sliced view, memoised per snapshot so its identity
+  holds between writes; a fn whose composition the viewer may not see —
+  [SECURITY_MODEL.md](SECURITY_MODEL.md) layer 9 — lints as a leaf, so no
+  finding states how it is built): the last snapshot object, its `:ns`
   rows, the per-fn EDN fn-defs, the engine's memos and the findings. A
   read with the same snapshot object and the same `:ns` rows answers
   from it. After a write the

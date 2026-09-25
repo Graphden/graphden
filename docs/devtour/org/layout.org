@@ -65,24 +65,24 @@ After the walkers: the root card's DEEPER holes — a template's frees behind an
 :PROPERTIES:
 :CUSTOM_ID: layout/compute-layout-matrix
 :FILE: src/graphden/layout/core.clj
-:LINE: 306
+:LINE: 308
 :MINS: 1.8
 :END:
 
 Stages 3+ — grid placement: roots at column zero, dependents right of their sources, rows packed to avoid overlap, plus the validation summary. Pixel geometry stays client-side (measured reflow off the real DOM); the server owns the grid topology.
 
-- source :: [[file:../../../src/graphden/layout/core.clj::(defn compute-layout-matrix][src/graphden/layout/core.clj:306]]
+- source :: [[file:../../../src/graphden/layout/core.clj::(defn compute-layout-matrix][src/graphden/layout/core.clj:308]]
 - referenced from :: [[file:editor.org::#editor/fetchBackendLayout][fetchBackendLayout]]
 
 * 6. annotate
 :PROPERTIES:
 :CUSTOM_ID: layout/annotate
 :FILE: src/graphden/layout/strip_facts.clj
-:LINE: 61
+:LINE: 85
 :MINS: 2.3
 :END:
 
 The editor-facing tail: attach server-computed FACTS to each fn-node — the inherited return-type alias, the rule-owning base-fn (~registry/rule-owner-info-of-id~), and the transitive branch-local seed (~branch-local/branch-local-seed~). These replaced three hand-written client mirrors of the same walks; the client renders facts, it doesn't re-derive them.
 
-- source :: [[file:../../../src/graphden/layout/strip_facts.clj::(defn annotate][src/graphden/layout/strip_facts.clj:61]]
+- source :: [[file:../../../src/graphden/layout/strip_facts.clj::(defn annotate][src/graphden/layout/strip_facts.clj:85]]
 - see also :: [[file:versioning.org::#versioning/effective-branch-local?][effective-branch-local?]]

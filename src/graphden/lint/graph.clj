@@ -19,6 +19,7 @@
    findings are recomputed from the snapshot, memoised only while the
    snapshot object itself and the `:ns` rows are unchanged."
   (:require
+    [graphden.crud.entities.list :as entity-list]
     [graphden.crud.request :as request]
     [graphden.crud.types-api :as types-api]
     [graphden.lint.core :as lint]
@@ -205,7 +206,8 @@
 
 
 (def ^:private memo
-  "Per-(org, branch) lint state: `[org branch-id]` → the last snapshot
+  "Per-(org, branch, concealed set) lint state: `[org branch-id hidden]`
+   → the last snapshot
    object linted for it, the `:ns` rows, the per-fn EDN fn-defs, the
    engine's incremental state, the suppression set and the findings. The
    snapshot is replaced (not mutated) on every graph write — and the
@@ -347,7 +349,8 @@
 
 (defn lint-branch
   "The current branch's lint warnings over the per-ctx graph snapshot
-   (`cached-or-load-graph`). Answered from the (org, branch) memo when the
+   (`cached-or-load-graph`) as the current viewer may see it (the
+   view-impl seam — `entity-list/concealed-view`). Answered from the (org, branch) memo when the
    snapshot object, the `:ns` rows and the suppression set are unchanged;
    after a write
    only the fns whose rows moved, and their referrers, are rebuilt and
@@ -360,8 +363,16 @@
   [ctx suppress]
   (let [suppress (set suppress)
         storage (request/require-storage ctx)
-        graph (types-api/cached-or-load-graph ctx)
-        k [(tctx/current-org) (vcore/current-branch-id storage)]
+        ;; Over the graph AS THE VIEWER MAY SEE IT: a fn whose composition
+        ;; is concealed lints as a leaf (no parents, no bindings), so no
+        ;; finding can name its parent chain or match its internals
+        ;; against another fn's (a duplicate finding IS a statement
+        ;; about composition). The hidden set rides the memo key — one
+        ;; org's members may hold different grants, and a shared entry
+        ;; would thrash between their views on every read.
+        {graph :graph hidden :hidden} (entity-list/concealed-view
+                                        (types-api/cached-or-load-graph ctx))
+        k [(tctx/current-org) (vcore/current-branch-id storage) hidden]
         prev (get @memo k)
         ;; Read before the short-circuit: `:ns` is not branch-versioned and
         ;; a namespace write moves no graph row, so the snapshot keeps its

@@ -379,6 +379,21 @@
                     #(assoc % :args (derive-fn-slot-views %)))))
 
 
+(defonce ^:private resynth-args-state (atom []))
+
+
+(defn resynth-args
+  "`graph` with its `:args` slot views derived afresh from its five
+   tables — for a copy whose rows changed under the views it inherited
+   (the viewer-concealed copy of a synthesised snapshot, see
+   `graphden.layout.core/build-elements-for-viewer`). Memoised on the
+   copy's identity like `ensure-synth-args`, so `cached-build-lookups`
+   downstream keeps hitting for the same copy."
+  [graph]
+  (identity-memo! resynth-args-state 16 graph
+                  #(assoc % :args (derive-fn-slot-views %))))
+
+
 (defn build-lookups
   "Build lookup maps from raw data.
 

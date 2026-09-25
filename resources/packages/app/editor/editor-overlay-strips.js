@@ -485,8 +485,9 @@ function appendBranchLocalStrip(c) {
     strip.title = state === 'own'
       ? 'This fn is sticky-local: version rows do not propagate across branches on merge.'
       : state === 'inherited'
-        ? ('This fn inherits branch-local from `:' + (branchLocal.seed || '<anon>')
-           + '`. Version rows do not propagate across branches on merge.')
+        ? ('This fn inherits branch-local from '
+           + (branchLocal.seed ? '`:' + branchLocal.seed + '`' : 'an ancestor')
+           + '. Version rows do not propagate across branches on merge.')
         : 'Version rows of this fn propagate on merge like any other.';
     if (flagEditable && typeof enterBranchLocalEditMode === 'function') {
       strip.classList.add('branch-local-strip-editable');

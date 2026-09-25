@@ -324,7 +324,7 @@ function enterBranchLocalEditMode(fn, anchorEl, facts) {
       const hint = document.createElement('div');
       hint.className = 'branch-local-edit-hint';
       hint.textContent = inherited
-        ? ('Inherited from :' + (facts.seed || '<anon>') + ' — a sticky-local ancestor makes every descendant branch-local; re-parent off it to change that.')
+        ? ('Inherited from ' + (facts.seed ? ':' + facts.seed : 'an ancestor') + ' — a sticky-local ancestor makes every descendant branch-local; re-parent off it to change that.')
         : 'For per-environment configuration: a web-server port, a secret path, a schedule. The flag is on the fn identity — every branch sees the same setting.';
       wrap.appendChild(hint);
       wrap._cb = cb;

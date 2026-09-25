@@ -802,6 +802,8 @@
 (def impl-visible?             entity-list/impl-visible?)
 (def hidden-fn-ids             entity-list/hidden-fn-ids)
 (def unknown-fn-hidden?        entity-list/unknown-fn-hidden?)
+(def viewer-rich-entry         entity-list/viewer-rich-entry)
+(def viewer-rule-owner         entity-list/viewer-rule-owner)
 (def graph-tree                entity-list/graph-tree)
 (def graph-namespace-fns       entity-list/graph-namespace-fns)
 (def graph-search              entity-list/graph-search)

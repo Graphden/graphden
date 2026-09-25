@@ -201,23 +201,10 @@ function nodeShouldShow(node, searchMode) {
 // isSecretFn/secret paths). Prime them once per graph load and re-render
 // so the first paint is accurate.
 //
-// A prime lands on the NETWORK's schedule, not the user's, so its
-// re-render can arrive at any moment — including mid-interaction. An open
-// inline row (create OR rename) is user-owned, transient DOM: it holds the
-// text being typed, the server's rejection message, and the very button
-// the user is about to click. A full-tree repaint rebuilds the tree from
-// scratch, so it wipes that state and detaches those nodes — a click then
-// lands on an element that is no longer in the document.
-//
-// The guard is on the DOM rather than on a state flag on purpose: `create`
-// and `rename` both mount `buildInlineInputRow`, and enumerating the
-// transient states by name is how the rename case got missed the first
-// time. One row, one check, and any future inline editor is covered.
-//
-// Nothing is lost by skipping: the interaction ends in initGraph → a fresh
-// graphData → the prime re-fires and paints the classification it loaded.
+// A prime lands on the NETWORK's schedule, not the user's, so its repaint
+// can arrive mid-interaction — an open inline create / rename row survives it
+// (`updateEntityList` keeps it: editor-inline-row.js).
 function repaintAfterPrime() {
-  if (document.querySelector('#entity-list .inline-input-row')) return;
   updateEntityList(graphData);
 }
 let _serviceCachePrimed = false;

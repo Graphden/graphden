@@ -90,6 +90,10 @@
                   "packages/app/editor/editor-diff-chip.js"
                   "packages/app/editor/editor-diff-mode.js"
                   "packages/app/editor/editor-diff-ghost.js"
+                  ;; The inline input row + its survival across tree rebuilds —
+                  ;; editor-create.js builds rows with it, editor-sidebar.js
+                  ;; brackets every rebuild with its keep / restore.
+                  "packages/app/editor/editor-inline-row.js"
                   "packages/app/editor/editor-create.js"
                   ;; Per-kind field builders + prefill parsers — loaded before
                   ;; editor-create-type.js so the popover shell can call

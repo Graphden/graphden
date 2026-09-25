@@ -39,6 +39,7 @@ function boot(searchFns) {
     searchFns,
     syncKindFilterBar() {}, primeServiceCacheOnce() {}, primeAppsCacheOnce() {},
     primeSecretsOnce() {}, primeTestStatusesOnce() {}, primeProblemsOnce() {},
+    gdKeepInlineRow: () => null, gdRestoreInlineRow() {},
   });
   ctx.window = ctx;
   // innerHTML as plain text: the render's transient states are strings.

@@ -314,11 +314,13 @@
               :test-id-dep {:return 'a :args {:v 'a} :effects #{}})
           callee (setup/create-composed-fn! storage "my-test-const-dep" (:id id-base))
           v-bind (setup/bind-value! storage (:id callee) (:id v-slot) 5)
-          _ (setup/bind-ref! storage (:id composed) (:id slot-a) (:id callee))
+          ref-bind (setup/bind-ref! storage (:id composed) (:id slot-a) (:id callee))
           c (setup/default-registry-ctx storage)]
       (is (nil? (type-check/type-check-fn-after-mutation! storage (:id callee))))
       (is (nil? (type-check/type-check-fn-after-mutation! storage (:id composed))))
-      (reset! (:compile-deps c) (deps/build-deps-state (cr/graph-snapshot c)))
+      (reset! (:compile-deps c) (deps/build-deps-state
+                                  {:fns [base composed id-base callee]
+                                   :slots [slot-a v-slot] :bindings [v-bind ref-bind]}))
       (sp/update-entity storage :binding (:id v-bind) {:value "hello"})
       (is (nil? (type-check/type-check-fn-and-dependents! c storage (:id callee)))
           "the callee itself is well-typed")

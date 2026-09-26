@@ -455,9 +455,33 @@
          :constraint (types/refine-constraint expected)}))))
 
 
+(defn- unify-binding!
+  "Bind type variables, then check actual ⊆ expected after substitution.
+   Symmetric unification alone accepts wider concrete siblings of a variable.
+   A literal may satisfy a refinement even when its classified type fails
+   unification; judge its value against the existing substitution in that case."
+  [{:keys [expected actual] b-form :binding :as ctx} subst]
+  (let [next-subst (types/unify expected actual subst)
+        literal-values (if (and (some? b-form) (literal-binding? b-form))
+                         [(literal-binding-value b-form)]
+                         [])
+        fits? (fn [s]
+                (gradual/fits? (types/resolve s actual)
+                               (types/resolve s expected)
+                               literal-values))]
+    (cond
+      (and (types/fail? next-subst) (seq literal-values) (fits? subst))
+      subst
+
+      (or (types/fail? next-subst) (not (fits? next-subst)))
+      (throw-mismatch! ctx)
+
+      :else next-subst)))
+
+
 (defn- check-binding!
   "For a single binding, verify `actual ⊆ expected`. When `expected`
-   carries type variables, unify instead so the variables get bound.
+   carries type variables, bind them with unify, then check direction.
 
    Throws `:types/check-failed` with a multi-line, fn-def-named
    message on mismatch. ex-info `:data` includes the structured
@@ -518,69 +542,22 @@
                                  actual subst fn-name b-form
                                  (literal-binding-value b-form))
 
-    ;; Subtype FIRST — it handles container-into-jsonb (`[:list 'b] ⊆
-    ;; :jsonb`) regardless of inner type-vars, since the outer `list-
-    ;; type?` arm of the :jsonb sink rule doesn't recurse into the
-    ;; element type. Trying unify first would reject these
-    ;; (`unify [:list 'b] :jsonb = ::fail`).
-    ;;
-    ;; When typevars ARE present, also run unify after a successful
-    ;; subtype to extract bindings. subtype? is lenient on typevar-sup
-    ;; (`map-subtype?` / `list-subtype?` / `fn-subtype?`'s sup-side
-    ;; typevar arms) so the structural check passes WITHOUT carrying
-    ;; the binding forward. Without this follow-up, e.g. `:try`'s
-    ;; `:body [:fn {} a]` slot bound to a fn returning `[:map :keyword
-    ;; :any]` passes subtype but leaves `a` free; downstream consumers
-    ;; of `:try`'s declared `[:union a b]` see typevars instead of the
-    ;; resolved `[:map :keyword :any]`.
+    ;; Check subtype before unify: containers fit :jsonb regardless of
+    ;; inner variables, while unify may reject the same pair. On success,
+    ;; still extract any variable bindings so a callback returning a map
+    ;; does not leave :try's return variable unresolved downstream.
     (types/subtype? actual expected)
     (if (or (has-type-var? expected) (has-type-var? actual))
       (let [s (types/unify expected actual subst)]
         (if (types/fail? s) subst s))
       subst)
 
-    ;; Subtype rejected — but if EITHER side carries a type-var,
-    ;; the rejection may be because `subtype?` doesn't reason about
-    ;; type-vars (they only equal themselves). Fall back to `unify`
-    ;; so e.g. `'a ⊆ :jsonb` succeeds by binding `'a := :jsonb`.
-    ;;
-    ;; `unify` is a SYMMETRIC relation whose leniency arms accept
-    ;; either direction (`:int ↔ :numeric`, `T ↔ [:refine T c]`, the
-    ;; union chain's `(or (subtype? a b) (subtype? b a))`), so on its
-    ;; own it admitted a WIDER concrete sibling of the variable:
-    ;; `{:x :int :y a}` took `{:x :numeric :y :text}`, `[:fn {:item
-    ;; :int} b]` took a callee that only accepts `:positive-int`. The
-    ;; variable is what the fallback is for — once it is bound, the
-    ;; substituted sides are checked the way every var-free binding
-    ;; is: `actual ⊆ expected`, one direction, with the escape hatches
-    ;; (`:any`, `:jsonb`, an unbound variable, a literal's value under
-    ;; a refined field) filled first — `gradual/fits?`.
-    ;;
-    ;; A LITERAL that `unify` refuses is judged by `gradual/fits?` on
-    ;; the substitution as it stands: unify reads the literal's
-    ;; classified type only (`2000` is `:int`), so a `[:union :null
-    ;; :positive-int]` slot — `:coalesce`'s `:default` once `a` is
-    ;; pinned — has no arm for it, while the value decides it at once.
-    ;; A literal binds no variable unify could not have bound, so the
-    ;; substitution is complete either way.
+    ;; Unification binds variables; gradual/fits? then enforces direction
+    ;; on the concrete structure, retaining the literal/refinement escape.
     (or (has-type-var? expected) (has-type-var? actual))
-    (let [next-subst (types/unify expected actual subst)
-          literal-values (if (and (some? b-form) (literal-binding? b-form))
-                           [(literal-binding-value b-form)]
-                           [])
-          fits? (fn [s]
-                  (gradual/fits? (types/resolve s actual)
-                                 (types/resolve s expected)
-                                 literal-values))]
-      (cond
-        (and (types/fail? next-subst) (seq literal-values) (fits? subst))
-        subst
-
-        (or (types/fail? next-subst) (not (fits? next-subst)))
-        (throw-mismatch! (mismatch-context parent-name fn-name arg-name
-                                           b-form expected actual))
-
-        :else next-subst))
+    (unify-binding! (mismatch-context parent-name fn-name arg-name
+                                      b-form expected actual)
+                    subst)
 
     :else
     (throw-mismatch! (mismatch-context parent-name fn-name arg-name

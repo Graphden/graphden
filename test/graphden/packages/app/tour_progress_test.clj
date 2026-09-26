@@ -7,26 +7,13 @@
    key per distinct name. So the validation is the security boundary,
    not a nicety: a caller must not be able to name a counter."
   (:require
-    [clojure.java.io :as io]
     [clojure.string :as str]
-    [clojure.test :refer [deftest is testing]]
+    [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.test-infra.impls :as impls]
     [graphden.util.counters :as counters]))
 
 
-(def ^:private impls
-  (delay (-> (java.io.PushbackReader.
-               (io/reader (io/resource "packages/app/tour/impls.clj")))
-             ((fn [rdr]
-                ;; Load the module the way the package loader does — eval the
-                ;; file into its own ns — so the test exercises the shipped
-                ;; file, not a copy of its logic.
-                (let [forms (take-while some?
-                                        (repeatedly #(read {:eof nil} rdr)))
-                      ns-sym (second (first forms))]
-                  (create-ns ns-sym)
-                  (binding [*ns* (the-ns ns-sym)]
-                    (doseq [f forms] (eval f)))
-                  @(ns-resolve ns-sym 'impls)))))))
+(use-fixtures :once (impls/impls-fixture "app" "tour"))
 
 
 (defn- tour-delta
@@ -47,12 +34,12 @@
 
 (defn- count-event!
   [lesson event]
-  ((:count-tour-event! @impls) {:lesson lesson :event event} {}))
+  ((impls/impl-of :count-tour-event!) {:lesson lesson :event event} {}))
 
 
 (defn- count-step!
   [lesson step]
-  ((:count-tour-step! @impls) {:lesson lesson :step step} {}))
+  ((impls/impl-of :count-tour-step!) {:lesson lesson :step step} {}))
 
 
 (deftest counts-a-real-lesson-event

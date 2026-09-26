@@ -503,9 +503,13 @@
            the v1 API keeps the flat wire shape."}
     {:ns graphden.versioning.storage.merge :defn detect-conflicts
      :say "Finds entities modified on BOTH branches after the computed fork
-           point (skipping branch-local fns). This introduces fork-point
-           reasoning and defines exactly what a merge must resolve before it can
-           proceed."}
+           point to DIFFERENT content (skipping branch-local fns). A side
+           modified an entity when its winning row arrived there after the
+           fork — written there, or landed by a merge: the resolver's
+           `:effective-ts`, not row ownership, is what the scan compares.
+           This introduces fork-point reasoning and defines exactly what a
+           merge must resolve before it can proceed — and, through
+           `field-diff`, what the conflict row tells the reader."}
     {:ns graphden.versioning.storage.merge :defn merge-branch!
      :say "The merge itself: assert conflicts are resolved, then atomically
            write ONE `branch-merge` record — which makes the source's versions
@@ -667,7 +671,18 @@
            type-vars are present and handling the `:any` / `:never` /
            refinement-on-literal escape hatches. The atomic unit of
            type-checking, tying together `subtype?`, `unify`, and
-           `classify-literal`."}
+           `classify-literal`. Note the var fallback's last step: `unify`
+           only BINDS; the direction is judged afterwards by
+           `gradual/fits?`."}
+    {:ns graphden.types.check.gradual :defn fits?
+     :say "The directional judgement after unification. `unify` is a
+           symmetric relation with subtype-aware leniency arms, so on its
+           own it let a wider concrete sibling of a type variable through
+           (`:numeric` into `:int`, a nullable into a non-null field).
+           `erase` fills the checker's real escape hatches — `:any`,
+           `:jsonb`, an unbound variable, a literal's value under a refined
+           field — from the other side, then one `subtype?` judges what is
+           left."}
     {:ns graphden.types.check :defn signature-return
      :say "The declared-signature engine: when a root base-fn has no hand
            `:return-type-rule`, the polymorphic declaration itself computes
@@ -770,7 +785,12 @@
            silently: every save re-derives its diagnostics. The
            `:reject-secret?` option is the security carve-out: a
            secret-involving failure is flagged `:secret? true` and NOT
-           recorded — the caller rolls the write back and hard-rejects."
+           recorded — the caller rolls the write back and hard-rejects.
+           Every user write goes through `type-check-fn-and-dependents!`
+           just below: the fn's DIRECT dependents (read off the compiler's
+           reverse index, never a graph read) are re-checked too, so a
+           caller whose callee's return type moved under it gets its
+           diagnostic without being edited."
      :see [[:types "check-fn-def!"]]}
     {:ns graphden.crud.entities.invalidation :defn notify-after-write!
      :say "The post-persist step: invalidate caches and broadcast a NOTIFY delta

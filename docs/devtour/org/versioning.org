@@ -7,7 +7,7 @@ The VersionedStorage decorator, per-branch resolution, diff/merge and branch-loc
 
 after: storage
 
-[[file:index.org][index]] · ~104 min
+[[file:index.org][index]] · ~102 min
 
 * 1. wrap-with-versioning
 :PROPERTIES:
@@ -65,13 +65,13 @@ How every one of those writes gets its transaction: find the pool at the bottom 
 :PROPERTIES:
 :CUSTOM_ID: versioning/entity-config
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 144
+:LINE: 146
 :MINS: 3.1
 :END:
 
 The authoritative map of WHICH entities are versioned (fn / fn-slot / binding / binding-list-item) and how each splits across two tables: ~version-data-fields~ live in the version table, identity fields stay on the base row. Everything downstream keys off this config.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(def entity-config][src/graphden/versioning/storage/resolution.clj:144]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(def entity-config][src/graphden/versioning/storage/resolution.clj:146]]
 - same file :: [[file:versioning.org::#versioning/resolve-version][resolve-version]], [[file:versioning.org::#versioning/collect-branch-chain][collect-branch-chain]], [[file:versioning.org::#versioning/resolve-version-from-cache][resolve-version-from-cache]]
 
 * 6. derive-version-fields
@@ -90,39 +90,39 @@ Where the ~-version~ mirror entities come from: derived from the base entity's f
 :PROPERTIES:
 :CUSTOM_ID: versioning/resolve-version
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 295
+:LINE: 297
 :MINS: 1.7
 :END:
 
 The public per-branch read: for one entity, load its version chain, merge in a single batched pass, and return the winning version (nil on a tombstone). This is how a plain read becomes branch-aware.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn resolve-version][src/graphden/versioning/storage/resolution.clj:295]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn resolve-version][src/graphden/versioning/storage/resolution.clj:297]]
 - same file :: [[file:versioning.org::#versioning/entity-config][entity-config]], [[file:versioning.org::#versioning/collect-branch-chain][collect-branch-chain]], [[file:versioning.org::#versioning/resolve-version-from-cache][resolve-version-from-cache]]
 
 * 8. collect-branch-chain
 :PROPERTIES:
 :CUSTOM_ID: versioning/collect-branch-chain
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 480
+:LINE: 482
 :MINS: 1.9
 :END:
 
 The branch-chain walk: ~[branch → parent → … → root]~ via ~:base-branch-id~, memoised process-wide. This inheritance backbone is what every resolve and cache-invalidation consults to know which branches a read can see.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn collect-branch-chain][src/graphden/versioning/storage/resolution.clj:480]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn collect-branch-chain][src/graphden/versioning/storage/resolution.clj:482]]
 - same file :: [[file:versioning.org::#versioning/entity-config][entity-config]], [[file:versioning.org::#versioning/resolve-version][resolve-version]], [[file:versioning.org::#versioning/resolve-version-from-cache][resolve-version-from-cache]]
 
 * 9. resolve-version-from-cache
 :PROPERTIES:
 :CUSTOM_ID: versioning/resolve-version-from-cache
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 623
-:MINS: 2.8
+:LINE: 673
+:MINS: 1.4
 :END:
 
 The in-memory chain walk the resolver actually runs: at each branch level combine own-latest with merge candidates, pick the greatest ~effective-ts~, and recurse to the parent. One tested algorithm shared by both single-entity and whole-graph reads.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn- resolve-version-from-cache][src/graphden/versioning/storage/resolution.clj:623]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn- resolve-version-from-cache][src/graphden/versioning/storage/resolution.clj:673]]
 - same file :: [[file:versioning.org::#versioning/entity-config][entity-config]], [[file:versioning.org::#versioning/resolve-version][resolve-version]], [[file:versioning.org::#versioning/collect-branch-chain][collect-branch-chain]]
 
 * 10. effective-branch-local?
@@ -193,45 +193,45 @@ The identity-plane repair primitives for the OTHER ghost source: a package fn's 
 :PROPERTIES:
 :CUSTOM_ID: versioning/diff-branches
 :FILE: src/graphden/versioning/storage/merge.clj
-:LINE: 402
+:LINE: 500
 :MINS: 4.4
 :END:
 
 The branch-symmetric resolved-view diff: gather every entity touched on either side's visibility set, resolve both, and report added/modified. The simplest read-only comparison — it precedes the conflict-oriented framing below.
 
-- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn diff-branches][src/graphden/versioning/storage/merge.clj:402]]
+- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn diff-branches][src/graphden/versioning/storage/merge.clj:500]]
 - same file :: [[file:versioning.org::#versioning/detect-conflicts][detect-conflicts]], [[file:versioning.org::#versioning/merge-branch!][merge-branch!]]
 
 * 16. diff-branches-view
 :PROPERTIES:
 :CUSTOM_ID: versioning/diff-branches-view
 :FILE: src/graphden/versioning/storage/diff_view.clj
-:LINE: 197
-:MINS: 6.5
+:LINE: 127
+:MINS: 6.2
 :END:
 
 The DISPLAY model over diff-branches (diff v2): entries grouped under the fn that owns them (list-items chain through their binding), per-field before/after pairs for modified rows, and batch name-resolution for slots and fn-typed refs. The editor's compare mode (inspector diff panel + Review dialog) client-renders THIS shape from the :diff-branches-view base-fn's JSON endpoint; the v1 API keeps the flat wire shape.
 
-- source :: [[file:../../../src/graphden/versioning/storage/diff_view.clj::(defn diff-branches-view][src/graphden/versioning/storage/diff_view.clj:197]]
+- source :: [[file:../../../src/graphden/versioning/storage/diff_view.clj::(defn diff-branches-view][src/graphden/versioning/storage/diff_view.clj:127]]
 
 * 17. detect-conflicts
 :PROPERTIES:
 :CUSTOM_ID: versioning/detect-conflicts
 :FILE: src/graphden/versioning/storage/merge.clj
-:LINE: 182
-:MINS: 3.7
+:LINE: 293
+:MINS: 3.1
 :END:
 
-Finds entities modified on BOTH branches after the computed fork point (skipping branch-local fns). This introduces fork-point reasoning and defines exactly what a merge must resolve before it can proceed.
+Finds entities modified on BOTH branches after the computed fork point to DIFFERENT content (skipping branch-local fns). A side modified an entity when its winning row arrived there after the fork — written there, or landed by a merge: the resolver's ~:effective-ts~, not row ownership, is what the scan compares. This introduces fork-point reasoning and defines exactly what a merge must resolve before it can proceed — and, through ~field-diff~, what the conflict row tells the reader.
 
-- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn detect-conflicts][src/graphden/versioning/storage/merge.clj:182]]
+- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn detect-conflicts][src/graphden/versioning/storage/merge.clj:293]]
 - same file :: [[file:versioning.org::#versioning/diff-branches][diff-branches]], [[file:versioning.org::#versioning/merge-branch!][merge-branch!]]
 
 * 18. merge-branch!
 :PROPERTIES:
 :CUSTOM_ID: versioning/merge-branch!
 :FILE: src/graphden/versioning/storage/merge.clj
-:LINE: 658
+:LINE: 756
 :MINS: 8.3
 :END:
 
@@ -239,33 +239,33 @@ The merge itself: assert conflicts are resolved, then atomically write ONE ~bran
 
 Read it in three parts: validate (conflicts resolved, approval policy satisfied), write — the single ~branch-merge~ row plus any resolution overrides, in one transaction — then report, including ~skipped-as-branch-local~ right below it: the rows a merge deliberately does NOT carry across.
 
-- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn merge-branch!][src/graphden/versioning/storage/merge.clj:658]]
+- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn merge-branch!][src/graphden/versioning/storage/merge.clj:756]]
 - same file :: [[file:versioning.org::#versioning/diff-branches][diff-branches]], [[file:versioning.org::#versioning/detect-conflicts][detect-conflicts]]
 
 * 19. merge-transitively!
 :PROPERTIES:
 :CUSTOM_ID: versioning/merge-transitively!
 :FILE: src/graphden/versioning/merge/core.clj
-:LINE: 304
+:LINE: 308
 :MINS: 4.4
 :END:
 
 What makes a merge transitive: the storage layer surfaces only the source's OWN rows and refuses when the source inherits from a branch the target lacks, so this layer merges those branches in first — root-most first, each through the same policy gate a direct merge would face — then the source, and reports the steps as ~:merged-first~. docs/VERSIONING.md § Known gaps.
 
-- source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn merge-transitively!][src/graphden/versioning/merge/core.clj:304]]
+- source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn merge-transitively!][src/graphden/versioning/merge/core.clj:308]]
 - same file :: [[file:versioning.org::#versioning/validate-approval-policy!][validate-approval-policy!]], [[file:versioning.org::#versioning/branch-content-stamp][branch-content-stamp]]
 
 * 20. validate-approval-policy!
 :PROPERTIES:
 :CUSTOM_ID: versioning/validate-approval-policy!
 :FILE: src/graphden/versioning/merge/core.clj
-:LINE: 253
+:LINE: 257
 :MINS: 3.1
 :END:
 
 Merge GOVERNANCE — the code-review gate. When the target branch sets ~:required-approvals~, a merge into it is refused (~:branch/approval-required~, 409) until the proposal has enough VALID approvals: distinct, non-stale, BOUND to this exact merge target (~target-branch-id~), and — when the target names a restrictive ~:approver-ids~ — from that allow-list. Counting is pure/open-core (WHO may approve was enforced when each ~:branch-approval~ row was written, and re-checked here so a tightened policy or a wrong-target approval can't slip through); the live merge base-fn calls this right after the ~:forbid-invalid?~ gate. This is how 'protect main, land via reviewed merges' is enforced.
 
-- source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn validate-approval-policy!][src/graphden/versioning/merge/core.clj:253]]
+- source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn validate-approval-policy!][src/graphden/versioning/merge/core.clj:257]]
 - same file :: [[file:versioning.org::#versioning/merge-transitively!][merge-transitively!]], [[file:versioning.org::#versioning/branch-content-stamp][branch-content-stamp]]
 
 * 21. branch-content-stamp
@@ -273,7 +273,7 @@ Merge GOVERNANCE — the code-review gate. When the target branch sets ~:require
 :CUSTOM_ID: versioning/branch-content-stamp
 :FILE: src/graphden/versioning/merge/core.clj
 :LINE: 141
-:MINS: 1.6
+:MINS: 1.9
 :END:
 
 The stale-dismissal fingerprint: a branch's own version rows reduced to ~count|max(created-at)~. An approval records the source's stamp at approval time; any later edit APPENDS a version row, so the stamp advances and ~count-valid-approvals~ stops counting the now- stale approval — GitHub's 'dismiss stale reviews on a new push', expressed as a monotonic content signal rather than an event hook.

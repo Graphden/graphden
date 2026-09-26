@@ -105,13 +105,13 @@ The ~:try~ on-throw partner: replay the ~journal~ in reverse, best-effort deleti
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-core
 :FILE: src/graphden/crud/entities.clj
-:LINE: 602
+:LINE: 606
 :MINS: 5.0
 :END:
 
 The atomic core for generic creates: create-or-humanise-error, a post-create whole-fn type-check, and the rename-slot side-effect. Since error-tolerance Phase 2 an ORDINARY type-check failure no longer rolls the row back — the write is kept and the diagnostics surface as ~:type-warnings~ on the success envelope. One class is carved out: a SECRET-flow diagnostic still deletes the row and returns the legacy ~{:error …}~ (the guarantee must not rest on the derived diagnostics store — docs/SECRETS.md).
 
-- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:602]]
+- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:606]]
 - same file :: [[file:crud.org::#crud/create-entity][create-entity]]
 - referenced from :: [[file:web.org::#web/write-rej][write-rej]]
 
@@ -119,13 +119,13 @@ The atomic core for generic creates: create-or-humanise-error, a post-create who
 :PROPERTIES:
 :CUSTOM_ID: crud/type-check-fn-after-mutation!
 :FILE: src/graphden/crud/type_check.clj
-:LINE: 474
-:MINS: 5.0
+:LINE: 477
+:MINS: 5.3
 :END:
 
-Reconstructs the touched fn-def and runs ~check-fn-def!~ after a mutation, recording failures in (and clearing fixes from) the per-branch diagnostics store. This is the type-check-on-write that ~apply-create-core~ relies on — an ill-typed fn persists, but never silently: every save re-derives its diagnostics. The ~:reject-secret?~ option is the security carve-out: a secret-involving failure is flagged ~:secret? true~ and NOT recorded — the caller rolls the write back and hard-rejects.
+Reconstructs the touched fn-def and runs ~check-fn-def!~ after a mutation, recording failures in (and clearing fixes from) the per-branch diagnostics store. This is the type-check-on-write that ~apply-create-core~ relies on — an ill-typed fn persists, but never silently: every save re-derives its diagnostics. The ~:reject-secret?~ option is the security carve-out: a secret-involving failure is flagged ~:secret? true~ and NOT recorded — the caller rolls the write back and hard-rejects. Every user write goes through ~type-check-fn-and-dependents!~ just below: the fn's DIRECT dependents (read off the compiler's reverse index, never a graph read) are re-checked too, so a caller whose callee's return type moved under it gets its diagnostic without being edited.
 
-- source :: [[file:../../../src/graphden/crud/type_check.clj::(defn type-check-fn-after-mutation!][src/graphden/crud/type_check.clj:474]]
+- source :: [[file:../../../src/graphden/crud/type_check.clj::(defn type-check-fn-after-mutation!][src/graphden/crud/type_check.clj:477]]
 - see also :: [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 
 * 10. notify-after-write!
@@ -195,13 +195,13 @@ Atomically writes the ~:fn-execution~ row plus its per-arg (~:fn-execution-arg~ 
 :PROPERTIES:
 :CUSTOM_ID: crud/write-finished!
 :FILE: src/graphden/crud/fn_execution/persist.clj
-:LINE: 560
+:LINE: 585
 :MINS: 3.2
 :END:
 
 Updates the execution row with the future's terminal outcome (result / error / cancelled, with taint redaction). Closes the loop so a polled execution reflects final persisted state.
 
-- source :: [[file:../../../src/graphden/crud/fn_execution/persist.clj::(defn write-finished!][src/graphden/crud/fn_execution/persist.clj:560]]
+- source :: [[file:../../../src/graphden/crud/fn_execution/persist.clj::(defn write-finished!][src/graphden/crud/fn_execution/persist.clj:585]]
 - same file :: [[file:crud.org::#crud/create-pending-with-args!][create-pending-with-args!]]
 
 * 16. render-repr

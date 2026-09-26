@@ -292,8 +292,12 @@
   ;; =====================================================================
 
   ;; --- row accessors (`:item` = one index entry) ---
+  ;; `:item` is a package row — narrowed from `:get`'s nullable coll
+  ;; shape so `:group-by` (whose `a` is pinned by this key-fn's arg
+  ;; before its `:coll` is read) types its groups as rows, which is
+  ;; what `:index-groups-over` demands.
   {:name :_mkr-name
-   :parent :get :args {:coll {:as :item} :key {:value :name} :default {:value ""}}}
+   :parent :get :args {:coll {:as :item :type :keyword-map} :key {:value :name} :default {:value ""}}}
   {:name :_mkr-version
    :parent :get :args {:coll {:as :item} :key {:value :version} :default {:value ""}}}
   {:name :_mkr-rank

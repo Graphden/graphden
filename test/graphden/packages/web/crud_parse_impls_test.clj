@@ -84,9 +84,16 @@
     (is (= [:union :int :null]
            (call :parse-constraint {:raw "[\"union\", \"int\", \"null\"]"}))))
 
-  (testing "a comparison operator (`>=`, `!=`) keywordises too"
-    (is (= [:>= 5] (call :parse-constraint {:raw "[\">=\", 5]"})))
-    (is (= [:!= 0] (call :parse-constraint {:raw "[\"!=\", 0]"}))))
+  (testing "a comparison operator (`>=`) keywordises too"
+    (is (= [:>= 5] (call :parse-constraint {:raw "[\">=\", 5]"}))))
+
+  (testing "`!=` canonicalises to the checker's `:not=`"
+    ;; `base-allowed-ops` knows `:not=` only — a `:!=` row was
+    ;; rejected as "not legal on base type" for EVERY base.
+    (is (= [:not= 0] (call :parse-constraint {:raw "[\"!=\", 0]"})))
+    (is (= [:not= ""] (call :parse-constraint {:raw "[\":not=\", \"\"]"})))
+    (is (= [:and [:>= 1] [:not= 5]]
+           (call :parse-constraint {:raw "[\"and\", [\">=\", 1], [\"!=\", 5]]"}))))
 
   (testing "an explicit leading colon is stripped, not doubled"
     (is (= [:union :int] (call :parse-constraint {:raw "[\":union\", \":int\"]"}))))

@@ -83,6 +83,7 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.executor.registry.core :as registry]
+    [graphden.types.check.gradual :as gradual]
     [graphden.types.check.literals :as lit]
     [graphden.types.core :as types]))
 
@@ -240,39 +241,6 @@
    succeeded (e.g. record ↔ `[:map a :any]`)."
   [t]
   (types/type-any? types/type-var? t))
-
-
-(defn- any-shape?
-  "True iff `t` is `:any` OR a structural form whose every reasoned
-   position is `:any`. Such a value carries no more information than
-   the bare `:any` does, so the type-system's existing
-   `(= actual :any) → silent pass` escape hatch extends to it
-   consistently:
-   - `[:map :any :any]` — output of `merge` when sources disagree on
-     inner types; the runtime might be tighter (the author's intent),
-     but statically the shape is uninformative.
-   - `[:list :any]` — same story for sequence-producing rules that
-     widen when sources disagree.
-   - structural fn-type / tuple — analogous.
-
-   Without this hatch, a `:get`'s `:any` return (default when source
-   shape is unknown) propagates through `:merge` / `:update-in` to
-   produce `[:map :any :any]` / `:any` returns, which then strict-
-   reject against tighter declared / slot types downstream
-   (`[:map :text :text]`, `:ring-response-shape`). The author already
-   has an out for the bare-`:any` case; structural-any plugs the
-   remaining surface where return-rule chains land short of the
-   real runtime shape."
-  [t]
-  (cond
-    (= t :any)             true
-    (types/list-type? t)   (any-shape? (types/list-elem t))
-    (types/map-type? t)    (and (any-shape? (types/map-key t))
-                                (any-shape? (types/map-val t)))
-    (types/tuple-type? t)  (every? any-shape? (types/tuple-elems t))
-    (types/fn-type? t)     (and (every? any-shape? (vals (types/fn-args t)))
-                                (any-shape? (types/fn-ret t)))
-    :else                  false))
 
 
 (defn- describe-binding
@@ -507,7 +475,7 @@
     ;; from the binding IS information — that's the bind path, not
     ;; a no-op).
     (and (or (has-type-var? expected) (has-type-var? actual))
-         (any-shape? actual))
+         (gradual/any-shape? actual))
     (let [next-subst (types/unify expected actual subst)]
       (if (types/fail? next-subst) subst next-subst))
 
@@ -519,7 +487,7 @@
     ;; `:null` actual is checked normally: it satisfies a nullable /
     ;; `:any` / type-var slot via subtype? / unify, and is correctly
     ;; REJECTED by a concrete non-null slot.)
-    (any-shape? actual)
+    (gradual/any-shape? actual)
     subst
 
     ;; `:never` (bottom) actual — a divergent `:throw` branch. It fits
@@ -533,12 +501,21 @@
       (if (types/fail? s) subst s))
 
     ;; Refinement on a LITERAL value: if we know the literal AND
-    ;; can evaluate the constraint, accept-or-reject inline.
-    (and (types/refine-type? expected)
+    ;; can evaluate the constraint, accept-or-reject inline. The
+    ;; expected is read THROUGH `subst`: a slot typed by a variable an
+    ;; earlier binding (or a declared `:return-type`) pinned to a
+    ;; refinement — `:const`'s `:value a` under `:return-type
+    ;; :positive-int`, `:coalesce`'s `:default a` — is that refinement
+    ;; here, and the literal decides it, instead of falling through to
+    ;; the var fallback where its classified `:int` is only wider. A
+    ;; declared alias (`:non-negative-int`) is read through to its
+    ;; `[:refine …]` body the same way.
+    (and (types/refine-type? (types/resolve-alias (types/resolve subst expected)))
          (some? b-form)
          (literal-binding? b-form))
-    (check-refinement-on-literal parent-name arg-name expected actual
-                                 subst fn-name b-form
+    (check-refinement-on-literal parent-name arg-name
+                                 (types/resolve-alias (types/resolve subst expected))
+                                 actual subst fn-name b-form
                                  (literal-binding-value b-form))
 
     ;; Subtype FIRST — it handles container-into-jsonb (`[:list 'b] ⊆
@@ -566,12 +543,44 @@
     ;; the rejection may be because `subtype?` doesn't reason about
     ;; type-vars (they only equal themselves). Fall back to `unify`
     ;; so e.g. `'a ⊆ :jsonb` succeeds by binding `'a := :jsonb`.
+    ;;
+    ;; `unify` is a SYMMETRIC relation whose leniency arms accept
+    ;; either direction (`:int ↔ :numeric`, `T ↔ [:refine T c]`, the
+    ;; union chain's `(or (subtype? a b) (subtype? b a))`), so on its
+    ;; own it admitted a WIDER concrete sibling of the variable:
+    ;; `{:x :int :y a}` took `{:x :numeric :y :text}`, `[:fn {:item
+    ;; :int} b]` took a callee that only accepts `:positive-int`. The
+    ;; variable is what the fallback is for — once it is bound, the
+    ;; substituted sides are checked the way every var-free binding
+    ;; is: `actual ⊆ expected`, one direction, with the escape hatches
+    ;; (`:any`, `:jsonb`, an unbound variable, a literal's value under
+    ;; a refined field) filled first — `gradual/fits?`.
+    ;;
+    ;; A LITERAL that `unify` refuses is judged by `gradual/fits?` on
+    ;; the substitution as it stands: unify reads the literal's
+    ;; classified type only (`2000` is `:int`), so a `[:union :null
+    ;; :positive-int]` slot — `:coalesce`'s `:default` once `a` is
+    ;; pinned — has no arm for it, while the value decides it at once.
+    ;; A literal binds no variable unify could not have bound, so the
+    ;; substitution is complete either way.
     (or (has-type-var? expected) (has-type-var? actual))
-    (let [next-subst (types/unify expected actual subst)]
-      (if (types/fail? next-subst)
+    (let [next-subst (types/unify expected actual subst)
+          literal-values (if (and (some? b-form) (literal-binding? b-form))
+                           [(literal-binding-value b-form)]
+                           [])
+          fits? (fn [s]
+                  (gradual/fits? (types/resolve s actual)
+                                 (types/resolve s expected)
+                                 literal-values))]
+      (cond
+        (and (types/fail? next-subst) (seq literal-values) (fits? subst))
+        subst
+
+        (or (types/fail? next-subst) (not (fits? next-subst)))
         (throw-mismatch! (mismatch-context parent-name fn-name arg-name
                                            b-form expected actual))
-        next-subst))
+
+        :else next-subst))
 
     :else
     (throw-mismatch! (mismatch-context parent-name fn-name arg-name
@@ -2302,7 +2311,7 @@
                          ;; computed is unconstrained". Structural
                          ;; declared types are the contract-by-shape
                          ;; case the author owns at runtime.
-                         (and (any-shape? computed-return)
+                         (and (gradual/any-shape? computed-return)
                               declared
                               (not (types/primitive? declared)))
                          ;; Author NARROWING-assertion mode: declared

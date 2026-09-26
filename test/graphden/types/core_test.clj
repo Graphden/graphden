@@ -578,6 +578,23 @@
     (is (t/fail? (t/unify 'a [:union :null [:list 'a]])))))
 
 
+(deftest unify-endomorphic-slot-pins-the-least-solution
+  ;; `bind-var`'s union strip: a slot whose ONE variable types both the
+  ;; callable's input and its output, bound to a callee returning
+  ;; `[:union :null <its input>]`, pins that variable to `:null` — the
+  ;; least solution of `v = [:union :null v]`. Over-narrow (the input
+  ;; is pinned too), never over-wide: nothing but nil can then flow in,
+  ;; so the `:null` claim on the way out holds.
+  (let [s (t/unify [:fn {:value 'v} 'v] [:fn {:x 'b} [:union :null 'b]])]
+    (is (t/unified? s))
+    (is (= :null (t/resolve s 'v)))
+    (is (= :null (t/resolve s 'b)) "the input is pinned as well — the claim is not wider than what may enter"))
+  (testing "a callee whose output var is NOT its input var binds the output to the union"
+    (let [s (t/unify [:fn {:value 'v} 'w] [:fn {:x 'b} [:union :null 'b]])]
+      (is (= 'b (t/resolve s 'v)))
+      (is (= [:union :null 'b] (t/resolve s 'w))))))
+
+
 (deftest unify-fn-test
   (testing "map's signature against add-10's"
     (let [map-sig    [:fn {:f [:fn {:x 'a} 'b], :coll [:list 'a]} [:list 'b]]

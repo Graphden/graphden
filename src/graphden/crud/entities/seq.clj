@@ -31,9 +31,9 @@
    the caller must roll the write back and return `{:error …}`;
    non-secret rejs surface additively as `:type-warnings
    [(:diagnostic rej)]` on the success envelope."
-  [storage owner-fn-id]
+  [ctx storage owner-fn-id]
   (when owner-fn-id
-    (tc/type-check-fn-after-mutation! storage owner-fn-id
+    (tc/type-check-fn-and-dependents! ctx storage owner-fn-id
                                       {:reject-secret? true})))
 
 
@@ -275,7 +275,7 @@
               ;; item (and the synthetic host binding) back and hard-
               ;; rejects — see docs/SECRETS.md.
               (let [rej (post-write-rej
-                          storage (or (:fn-id seq-binding) fn-id))]
+                          ctx storage (or (:fn-id seq-binding) fn-id))]
                 (if (:secret? rej)
                   (do (try (sp/delete-entity storage :binding-list-item
                                              (:id new-item))
@@ -379,7 +379,7 @@
             (let [owner-fn-id (some->> (:binding-id item)
                                        (sp/read-entity storage :binding)
                                        :fn-id)
-                  rej (post-write-rej storage owner-fn-id)]
+                  rej (post-write-rej ctx storage owner-fn-id)]
               (if (:secret? rej)
                 (do (try (swap-positions!
                            storage
@@ -422,7 +422,7 @@
           (let [owner-fn-id (some->> (:binding-id item)
                                      (sp/read-entity storage :binding)
                                      :fn-id)
-                rej (post-write-rej storage owner-fn-id)]
+                rej (post-write-rej ctx storage owner-fn-id)]
             (if (:secret? rej)
               (do (try (sp/update-entity
                          storage :binding-list-item item-id

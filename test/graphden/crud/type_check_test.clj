@@ -7,6 +7,9 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.type-check :as tc]
+    [graphden.executor.compile-runtime :as cr]
+    [graphden.executor.compile.deps :as deps]
+    [graphden.executor.context :as exec-ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
@@ -454,3 +457,76 @@
             (is (nil? (diag/errors-for-fn (random-uuid) (:id child))))
             (is (nil? (diag/errors-for-fn nil (:id child)))))
           (finally (sp/close (vs/unwrap vstorage))))))))
+
+
+;; ============================================================================
+;; Dependents — a write to a callee re-checks its callers
+;; ============================================================================
+
+(defn- callee+caller!
+  "A polymorphic-identity base (`:v a → a`) with a child pinning `:v`
+   to 5 (so it returns `:int`), and an `:int`-slot base with a child
+   binding that slot to the callee. Returns the rows the test drives."
+  [storage]
+  (let [id-base (setup/create-base-fn! storage "tcdep-id")
+        v-slot (setup/create-slot! storage "v" :any)
+        _ (setup/attach-slot! storage (:id id-base) (:id v-slot) 0)
+        _ (registry/record-rich-types-raw!
+            :tcdep-id {:return 'a :args {:v 'a} :effects #{}})
+        callee (setup/create-composed-fn! storage "tcdep-callee" (:id id-base))
+        v-bind (setup/bind-value! storage (:id callee) (:id v-slot) 5)
+        int-base (setup/create-base-fn! storage "tcdep-int")
+        a-slot (setup/create-slot! storage "a" :int)
+        _ (setup/attach-slot! storage (:id int-base) (:id a-slot) 0)
+        _ (registry/record-rich-types-raw!
+            :tcdep-int {:return :int :args {:a :int} :effects #{}})
+        caller (setup/create-composed-fn! storage "tcdep-caller" (:id int-base))
+        _ (setup/bind-ref! storage (:id caller) (:id a-slot) (:id callee))]
+    {:callee callee :v-bind v-bind :caller caller}))
+
+
+(deftest direct-dependents-read-only-what-the-ctx-holds-test
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [{:keys [callee caller]} (callee+caller! storage)
+            ctx (setup/default-registry-ctx storage)]
+        (testing "a cold ctx (no index, no cache) knows no dependents — never a graph read"
+          (is (= #{} (tc/direct-dependents ctx (:id callee)))))
+        (testing "a primed graph cache is enough"
+          (exec-ctx/fill-graph-cache! ctx (cr/graph-snapshot ctx) (exec-ctx/invalidation-epoch ctx))
+          (is (= #{(:id caller)} (tc/direct-dependents ctx (:id callee)))))
+        (testing "the compiler's reverse index wins when primed"
+          (reset! (:compile-deps ctx) (deps/build-deps-state (cr/graph-snapshot ctx)))
+          (is (= #{(:id caller)} (tc/direct-dependents ctx (:id callee))))
+          (is (= #{} (tc/direct-dependents ctx (:id caller))) "nothing depends on the caller"))
+        (testing "no ctx at all (the test-only impl entry points) → none"
+          (is (= #{} (tc/direct-dependents nil (:id callee))))))
+      (finally (sp/close storage)))))
+
+
+(deftest dependents-rechecked-on-callee-change-test
+  (binding [diag/*diagnostics-override* (atom {})]
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [{:keys [callee v-bind caller]} (callee+caller! storage)
+              ctx (setup/default-registry-ctx storage)]
+          (is (nil? (tc/type-check-fn-after-mutation! storage (:id callee))))
+          (is (= :int (:return (registry/rich-type-of :tcdep-callee))))
+          (is (nil? (tc/type-check-fn-after-mutation! storage (:id caller))))
+          (reset! (:compile-deps ctx) (deps/build-deps-state (cr/graph-snapshot ctx)))
+          (testing "the callee's return moves :int → :text; the CALLER's diagnostic is recorded"
+            (sp/update-entity storage :binding (:id v-bind) {:value "hello"})
+            (is (nil? (tc/type-check-fn-and-dependents! ctx storage (:id callee)))
+                "the callee itself is well-typed")
+            (is (= :text (:return (registry/rich-type-of :tcdep-callee))))
+            (let [[d :as ds] (diag/errors-for-fn nil (:id caller))]
+              (is (= 1 (count ds)))
+              (is (= :int (:expected d)))
+              (is (= :text (:actual d)))
+              (is (= :a (:arg-name d)))))
+          (testing "moving it back clears the caller's entry"
+            (sp/update-entity storage :binding (:id v-bind) {:value 7})
+            (is (nil? (tc/type-check-fn-and-dependents! ctx storage (:id callee))))
+            (is (= :int (:return (registry/rich-type-of :tcdep-callee))))
+            (is (nil? (diag/errors-for-fn nil (:id caller))))))
+        (finally (sp/close storage))))))

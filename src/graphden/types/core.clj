@@ -1466,6 +1466,24 @@
     ;; 'b]` against `:postwalk`'s `:f [:fn {:value v} v]` slot —
     ;; without the strip, the arg-side `v := b` binding makes the
     ;; return-side `b ↔ [:union 'a 'b]` trip occurs.
+    ;;
+    ;; When the remainder is CONCRETE the binding is the LEAST solution
+    ;; of `v = [:union R v]`, i.e. `v := R` — `unify 'a [:union :null 'a]`
+    ;; binds `a := :null`. Audited 2026-09-25 for wrong registry entries:
+    ;; it is over-narrow, never over-wide. The equation only arises when
+    ;; the same variable types a callable's INPUT and its output (an
+    ;; endomorphic slot `[:fn {:value v} v]` bound to a callee `[:fn {:x
+    ;; b} [:union :null b]]` — the arg step makes `v := b`, the ret step
+    ;; then meets `b ↔ [:union :null b]`); every use of the var is then
+    ;; pinned to `:null`, INCLUDING what may enter the callable, so a
+    ;; consumer of the composed fn's `:null`-typed result cannot receive
+    ;; anything else at runtime. A composed fn built this way is
+    ;; therefore rejected (or over-constrained on its free args) rather
+    ;; than admitted with a claim the runtime breaks; the honest fix at
+    ;; such a site is a `:type` narrowing on the callee's return, not a
+    ;; wider binding here. `core-test/unify-rejects-cyclic-bindings-in-
+    ;; every-compound-shape` + `unify-endomorphic-slot-pins-the-least-
+    ;; solution` pin both.
     (and (union-type? t) (contains? (set (union-members t)) v))
     (let [rest-members (remove #{v} (union-members t))]
       (cond

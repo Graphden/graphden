@@ -242,7 +242,7 @@
                               (log/warn e "Vault metadata stamp failed"
                                         {:path path})
                               false))]
-      (tc/type-check-fn-after-mutation! storage fn-id)
+      (tc/type-check-fn-and-dependents! ctx storage fn-id)
       {:ok true
        :secret {:id (str fn-id)
                 :name nm

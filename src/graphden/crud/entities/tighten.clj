@@ -39,7 +39,7 @@
    (anon fn-row create + binding update) once the safety checks have
    passed. Pulled out so the impl's let-and-cond chain stays
    readable."
-  [storage binding-id b new-c _effects-vec]
+  [ctx storage binding-id b new-c _effects-vec]
   (let [hash-hex (records/digest-hex "SHA-1" (pr-str new-c))
         ;; The row's identity is its (org, hash): reuse the id this org
         ;; already holds for the shape (a earlier row keeps its
@@ -85,7 +85,7 @@
     ;; SECURITY CARVE-OUT: a SECRET-involving aggregate failure keeps
     ;; the pre-Phase-2 shape — revert the override (and the anon
     ;; fn-row we just materialised), no store record, hard 400.
-    (let [post-rej (tc/type-check-fn-after-mutation! storage (:fn-id b)
+    (let [post-rej (tc/type-check-fn-and-dependents! ctx storage (:fn-id b)
                                                      {:reject-secret? true})]
       (if (:secret? post-rej)
         (do (sp/update-entity storage :binding binding-id
@@ -114,71 +114,77 @@
    widenings. Then runs the bound-callable safety check (effects
    only — narrower args / ret don't introduce new escape paths the
    way effects do, and the post-write `check-fn-def!` catches deeper
-   structural mismatches)."
-  [storage binding-id delta]
-  (let [b (sp/read-entity storage :binding binding-id)]
-    (cond
-      (nil? b)
-      {:status 404 :reason "Binding not found"}
+   structural mismatches).
 
-      :else
-      (let [slot (sp/read-entity storage :slot (:slot-id b))
-            cur-tfn-id (or (:type-override-fn-id b) (:type-fn-id slot))
-            cur-tfn (when cur-tfn-id (sp/read-entity storage :fn cur-tfn-id))
-            cur-c (:constraint cur-tfn)]
-        (cond
-          (or (not (vector? cur-c)) (not= :fn (first cur-c)))
-          {:status 400
-           :reason (str "Slot's effective type is not an fn-type ("
-                        (pr-str cur-c) "); can't tighten.")}
+   `ctx` (the execution context) lets the post-write check re-check
+   the owning fn's direct dependents; the 3-arity — the test-only
+   entry — passes none, and no dependent is re-checked."
+  ([storage binding-id delta]
+   (tighten-fn-type-impl! nil storage binding-id delta))
+  ([ctx storage binding-id delta]
+   (let [b (sp/read-entity storage :binding binding-id)]
+     (cond
+       (nil? b)
+       {:status 404 :reason "Binding not found"}
 
-          :else
-          (let [cur-args (or (nth cur-c 1) {})
-                cur-ret (nth cur-c 2)
-                cur-eff (when (= 4 (count cur-c)) (nth cur-c 3))
-                {:keys [args ret effects]} delta
-                ;; Args delta is a per-name override map. Merge so
-                ;; unmentioned arg names keep their current type.
-                new-args (if (map? args)
-                           (merge cur-args (types-api/json->type args))
-                           cur-args)
-                new-ret (if (some? ret)
-                          (types-api/json->type ret)
-                          cur-ret)
-                new-eff (cond
-                          (some? effects) (into #{} (map keyword) effects)
-                          cur-eff         cur-eff
-                          :else           nil)
-                new-c (cond-> [:fn new-args new-ret] new-eff (conj new-eff))
-                ok? (types/subtype? new-c cur-c)]
-            (if-not ok?
-              {:status 400
-               :reason (str "Proposed type " (pr-str new-c)
-                            " is not a narrowing of " (pr-str cur-c)
-                            " — every component (args / ret / effects)"
-                            " must be a subtype of the current value.")}
-              ;; Bound-callable effect check — same as the
-              ;; effect-only path. Args / ret narrowings don't
-              ;; introduce new escape paths beyond what
-              ;; `check-fn-def!` covers.
-              (let [eff-set (or new-eff #{})
-                    ref-fn-id (:ref-fn-id b)
-                    ref-row (when ref-fn-id (sp/read-entity storage :fn ref-fn-id))
-                    ref-info (some-> (:id ref-row)
-                                     (registry/rich-type-of-id))
-                    ref-effects (or (:effects ref-info) #{})
-                    escapes (when (and (some? new-eff) (seq ref-effects))
-                              (clojure.set/difference (set ref-effects) eff-set))]
-                (if (seq escapes)
-                  {:status 400
-                   :reason (str "Bound fn `" (:name ref-row) "`"
-                                " produces effects " (vec (sort escapes))
-                                " that the requested constraint "
-                                (vec (sort eff-set))
-                                " forbids. Either widen the effect set"
-                                " or rebind to a fn with effects ⊆ "
-                                (vec (sort eff-set)) ".")}
-                  (commit-tighten! storage binding-id b new-c nil))))))))))
+       :else
+       (let [slot (sp/read-entity storage :slot (:slot-id b))
+             cur-tfn-id (or (:type-override-fn-id b) (:type-fn-id slot))
+             cur-tfn (when cur-tfn-id (sp/read-entity storage :fn cur-tfn-id))
+             cur-c (:constraint cur-tfn)]
+         (cond
+           (or (not (vector? cur-c)) (not= :fn (first cur-c)))
+           {:status 400
+            :reason (str "Slot's effective type is not an fn-type ("
+                         (pr-str cur-c) "); can't tighten.")}
+
+           :else
+           (let [cur-args (or (nth cur-c 1) {})
+                 cur-ret (nth cur-c 2)
+                 cur-eff (when (= 4 (count cur-c)) (nth cur-c 3))
+                 {:keys [args ret effects]} delta
+                 ;; Args delta is a per-name override map. Merge so
+                 ;; unmentioned arg names keep their current type.
+                 new-args (if (map? args)
+                            (merge cur-args (types-api/json->type args))
+                            cur-args)
+                 new-ret (if (some? ret)
+                           (types-api/json->type ret)
+                           cur-ret)
+                 new-eff (cond
+                           (some? effects) (into #{} (map keyword) effects)
+                           cur-eff         cur-eff
+                           :else           nil)
+                 new-c (cond-> [:fn new-args new-ret] new-eff (conj new-eff))
+                 ok? (types/subtype? new-c cur-c)]
+             (if-not ok?
+               {:status 400
+                :reason (str "Proposed type " (pr-str new-c)
+                             " is not a narrowing of " (pr-str cur-c)
+                             " — every component (args / ret / effects)"
+                             " must be a subtype of the current value.")}
+               ;; Bound-callable effect check — same as the
+               ;; effect-only path. Args / ret narrowings don't
+               ;; introduce new escape paths beyond what
+               ;; `check-fn-def!` covers.
+               (let [eff-set (or new-eff #{})
+                     ref-fn-id (:ref-fn-id b)
+                     ref-row (when ref-fn-id (sp/read-entity storage :fn ref-fn-id))
+                     ref-info (some-> (:id ref-row)
+                                      (registry/rich-type-of-id))
+                     ref-effects (or (:effects ref-info) #{})
+                     escapes (when (and (some? new-eff) (seq ref-effects))
+                               (clojure.set/difference (set ref-effects) eff-set))]
+                 (if (seq escapes)
+                   {:status 400
+                    :reason (str "Bound fn `" (:name ref-row) "`"
+                                 " produces effects " (vec (sort escapes))
+                                 " that the requested constraint "
+                                 (vec (sort eff-set))
+                                 " forbids. Either widen the effect set"
+                                 " or rebind to a fn with effects ⊆ "
+                                 (vec (sort eff-set)) ".")}
+                   (commit-tighten! ctx storage binding-id b new-c nil)))))))))))
 
 
 (defn tighten-effects-impl!
@@ -200,4 +206,4 @@
                              (sp/read-entity storage :binding))]
     (if-let [pkg-reason (pkg-guard/write-rejection storage :binding binding-row)]
       {:status :rejected :reason pkg-reason}
-      (tighten-fn-type-impl! storage (:binding-id parsed) (:delta parsed)))))
+      (tighten-fn-type-impl! ctx storage (:binding-id parsed) (:delta parsed)))))

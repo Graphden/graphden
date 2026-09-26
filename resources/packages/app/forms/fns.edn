@@ -443,10 +443,15 @@
   {:name :_value-form-slot-type
    :parent :resolve-slot-effective-type
    :args {:parsed {:as :parsed}}}
+  ;; `(or as slot-type)` — a text `as` or the slot's own type expression:
+  ;; the declared return pins `:coalesce`'s `a` to the wider of the two
+  ;; (first-binding-wins would pin it to `as`'s `:text` and refuse the
+  ;; default).
   {:name :_value-form-eff-type
    :parent :coalesce
    :args {:value :_value-form-as
-          :default :_value-form-slot-type}}
+          :default :_value-form-slot-type}
+   :return-type :type-expression}
 
   {:name :_value-form-current
    :parent :current-slot-value

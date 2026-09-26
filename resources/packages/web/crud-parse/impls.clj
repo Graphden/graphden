@@ -67,7 +67,11 @@
                        (or (str/starts-with? x ":")
                            (re-matches #"[a-zA-Z][a-zA-Z0-9_-]*" x)
                            (re-matches #"[!<>=]+" x)))
-                  (keyword (str/replace-first x #"^:" ""))
+                  ;; `!=` is how a hand-typed constraint spells the
+                  ;; op; the checker's name (`base-allowed-ops`) is
+                  ;; `:not=`, and the write rejected the other one.
+                  (let [k (keyword (str/replace-first x #"^:" ""))]
+                    (if (= k :!=) :not= k))
                   (or (vector? x) (sequential? x)) (mapv re-kw x)
                   :else x))]
         (re-kw parsed)))))

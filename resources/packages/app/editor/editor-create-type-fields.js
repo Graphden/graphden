@@ -48,21 +48,37 @@ function typeNameInput(placeholder, datalistId) {
 // (with an :or toggle). Advanced mode reveals the original JSON
 // input for shapes the builder can't express (nested combinators,
 // custom predicate fns, …).
+//
+// Operator names are the SERVER's (`types/check/literals.clj`
+// `base-allowed-ops`): inequality is `not=`, never `!=` — the builder
+// used to emit `:!=`, which the write rejected as "not legal on base
+// type" for every base, and an existing `[:not= …]` row prefilled
+// with no option selected. `REFINEMENT_OP_LABELS` is display only.
 const REFINEMENT_OPS_BY_BASE = {
-  int:         ['>', '>=', '<', '<=', '=', '!=', 'in', 'matches'],
-  numeric:     ['>', '>=', '<', '<=', '=', '!=', 'in', 'matches'],
-  float:       ['>', '>=', '<', '<=', '=', '!=', 'in', 'matches'],
-  text:        ['=', '!=', 'in', 'matches'],
-  bool:        ['=', '!=', 'in'],
-  keyword:     ['=', '!=', 'in'],
-  uuid:        ['=', '!=', 'in'],
-  timestamptz: ['=', '!=', 'in'],
-  null:        ['=', '!='],
+  int:         ['>', '>=', '<', '<=', '=', 'not=', 'in', 'matches'],
+  numeric:     ['>', '>=', '<', '<=', '=', 'not=', 'in', 'matches'],
+  float:       ['>', '>=', '<', '<=', '=', 'not=', 'in', 'matches'],
+  text:        ['=', 'not=', 'in', 'matches'],
+  bool:        ['=', 'not=', 'in'],
+  keyword:     ['=', 'not=', 'in'],
+  uuid:        ['=', 'not=', 'in'],
+  timestamptz: ['=', 'not=', 'in'],
+  null:        ['=', 'not='],
 };
 const REFINEMENT_DEFAULT_OPS = REFINEMENT_OPS_BY_BASE.int;
+const REFINEMENT_OP_LABELS = { 'not=': '≠' };
 
 function refinementOpsFor(baseName) {
   return REFINEMENT_OPS_BY_BASE[baseName] || REFINEMENT_DEFAULT_OPS;
+}
+
+// The `<option>` value for a constraint operator as the wire carries
+// it — `"not="` or `":not="` from a stored row, `"!="` from a hand-
+// typed raw-JSON constraint (the server canonicalises that spelling
+// too) — so a prefilled row lands on an option that exists.
+function refinementOpValue(raw) {
+  const op = String(raw).replace(/^:/, '');
+  return ':' + (op === '!=' ? 'not=' : op);
 }
 
 // Parse a string value into the right JS primitive for the
@@ -125,7 +141,7 @@ function buildRefinementFields(datalistId, prefill) {
     for (const o of refinementOpsFor(base.value.trim())) {
       const opt = document.createElement('option');
       opt.value = ':' + o;
-      opt.textContent = o;
+      opt.textContent = REFINEMENT_OP_LABELS[o] || o;
       opSel.appendChild(opt);
     }
     if (prev) opSel.value = prev;
@@ -141,7 +157,7 @@ function buildRefinementFields(datalistId, prefill) {
     const opSel = document.createElement('select');
     opSel.className = 'refinement-op';
     refreshOpOptions(opSel);
-    if (op) opSel.value = op;
+    if (op) opSel.value = refinementOpValue(op);
     const valIn = document.createElement('input');
     valIn.type = 'text';
     valIn.className = 'type-create-input refinement-val';
@@ -245,7 +261,7 @@ function buildRefinementFields(datalistId, prefill) {
           for (const c of parsed.slice(1)) addRow(String(c[0]), c[1]);
           prefilled = true;
         } else if (parsed.length === 2) {
-          addRow(parsed[0].startsWith(':') ? parsed[0] : ':' + parsed[0], parsed[1]);
+          addRow(parsed[0], parsed[1]);
           prefilled = true;
         }
       }
@@ -278,7 +294,12 @@ function buildRefinementFields(datalistId, prefill) {
           throw new Error('at least one condition required');
         }
         for (const r of rowsContainer.children) {
-          if (!r.querySelector('.refinement-val').value.trim()) {
+          const op = r.querySelector('.refinement-op').value;
+          // `= ""` / `not= ""` on text compare against the empty
+          // string — the corpus's own `:non-empty-text` is `[:not= ""]`,
+          // and it must survive a round trip through this form.
+          const emptyOk = base.value.trim() === 'text' && (op === ':=' || op === ':not=');
+          if (!emptyOk && !r.querySelector('.refinement-val').value.trim()) {
             throw new Error('value required on every condition');
           }
         }

@@ -2202,3 +2202,62 @@
     (is (= {:type :text} (get-in viewed [:args :method])) "other bindings untouched")
     (is (= [1 2] (get-in (check/checker-view (assoc-in fd [:args :items] [1 2])) [:args :items]))
         "a bare vector is already the checker's view")))
+
+
+(deftest typevar-unify-fallback-is-directional
+  ;; `check-binding!` falls back to `unify` when `subtype?` fails and a
+  ;; type variable is in play. `unify` is a SYMMETRIC relation with
+  ;; subtype-aware leniency arms (`:int ↔ :numeric`, `T ↔ [:refine T
+  ;; c]`, the union chain's `(or (subtype? a b) (subtype? b a))`), so
+  ;; the one type variable let a WIDER concrete sibling field through
+  ;; in the wrong direction. The fallback now re-runs `subtype?` on
+  ;; the substituted sides — the variable is bound, the rest is
+  ;; checked the way every var-free binding is.
+  (registry/record-rich-types! :dir-rec-int-y
+                               {:args {:rec {:type {:x :int :y 'a}}}
+                                :return-type 'a})
+  (registry/record-rich-types! :dir-rec-pos-y
+                               {:args {:rec {:type {:n :positive-int :y 'a}}}
+                                :return-type 'a})
+  (registry/record-rich-types! :dir-rec-n-y
+                               {:args {:rec {:type {:n :int :y 'a}}}
+                                :return-type 'a})
+  (registry/record-rich-types! :dir-hof
+                               {:args {:f {:type [:fn {:item :int} 'b]}}
+                                :return-type 'b})
+  (registry/record-rich-types! :dir-numeric-x
+                               {:args {} :return-type {:x :numeric :y :text}})
+  (registry/record-rich-types! :dir-int-n
+                               {:args {} :return-type {:n :int :y :text}})
+  (registry/record-rich-types! :dir-nullable-n
+                               {:args {} :return-type {:n [:union :null :int] :y :text}})
+  (registry/record-rich-types! :dir-pos-to-text
+                               {:args {:item :positive-int} :return-type :text})
+  (registry/record-rich-types! :dir-int-y-ok
+                               {:args {} :return-type {:x :int :y :text}})
+  (testing "a wider sibling field (:numeric into :int) is rejected"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"(?i)type-check failed"
+          (check/check-fn-def! {:name :dir-p1 :parent :dir-rec-int-y
+                                :args {:rec :dir-numeric-x}}))))
+  (testing "a refinement base (:int into :positive-int) is rejected"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"(?i)type-check failed"
+          (check/check-fn-def! {:name :dir-p2 :parent :dir-rec-pos-y
+                                :args {:rec :dir-int-n}}))))
+  (testing "a nullable field into a non-null one is rejected"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"(?i)type-check failed"
+          (check/check-fn-def! {:name :dir-p3 :parent :dir-rec-n-y
+                                :args {:rec :dir-nullable-n}}))))
+  (testing "a callback demanding a NARROWER arg than the slot feeds is rejected"
+    ;; The slot feeds any :int; the callee only accepts :positive-int —
+    ;; contravariant args, `fn-subtype?` refuses it once `b` is bound.
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"(?i)type-check failed"
+          (check/check-fn-def! {:name :dir-p4 :parent :dir-hof
+                                :args {:f :dir-pos-to-text}}))))
+  (testing "the var still binds and the matching shape passes"
+    (is (some? (check/check-fn-def! {:name :dir-ok :parent :dir-rec-int-y
+                                     :args {:rec :dir-int-y-ok}})))
+    (is (= :text (:return (registry/rich-type-of :dir-ok))))))

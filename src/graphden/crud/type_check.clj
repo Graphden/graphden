@@ -16,9 +16,12 @@
    in the crud.* layering; it has no crud.* require of its own."
   (:require
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
+    [graphden.executor.compile.deps :as deps]
+    [graphden.executor.context :as exec-ctx]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
@@ -538,3 +541,89 @@
            :else
            (diag/record! branch-id fn-id [(:diagnostic result)]))
          result)))))
+
+
+;; -----------------------------------------------------------------------------
+;; Dependents — a write to X re-checks the fns that read X
+;; -----------------------------------------------------------------------------
+
+(def ^:private max-dependent-recheck
+  "Upper bound on the DIRECT dependents one write re-checks inline.
+   Over it the dependents are skipped with a warn: their recorded
+   diagnostics then go stale until their own next write or the
+   ctx-build sweep (`branch_router/recheck.clj`), the same restart
+   caveat that sweep documents. Direct dependents of an editor fn are
+   a handful; the bound is for a widely-exposed type-row."
+  200)
+
+
+(defn direct-dependents
+  "The fn-ids that directly depend on `fn-id` — every fn binding a ref
+   to it (or to it inside a list), inheriting from it, or exposing a
+   slot typed by it — read from the compiler's reverse dependency index
+   (`compile.deps/forward-deps-of`, inverted). Only what `ctx` already
+   holds in memory is consulted: the primed `:compile-deps` index, else
+   the primed `:graph-cache`. Never a graph read — this runs inside
+   every CRUD write, and the delta-recompile budget (`bb perf`,
+   `:registry/delta-read-graph`) pins that a write does not read the
+   whole graph. A ctx with neither (nothing compiled, nothing cached)
+   answers `#{}`: its diagnostics store is rebuilt by the ctx-build
+   sweep anyway. `nil` ctx answers `#{}` too — the test-only impl
+   entry points that have no ctx."
+  [ctx fn-id]
+  (let [reverse-deps (or (some-> (:compile-deps ctx) deref :reverse-deps)
+                         (some-> (exec-ctx/cached-graph ctx) deps/build-reverse-deps))]
+    (disj (get reverse-deps fn-id #{}) fn-id)))
+
+
+(defn recheck-dependents!
+  "Re-run the post-mutation check for the DIRECT dependents of `fn-id`
+   after a user write changed what it computes — a callee whose return
+   type moved from `:int` to `:text` breaks every caller that bound it
+   into an `:int` slot, and nobody edits the caller. Each dependent's
+   entry in the per-branch diagnostics store is recorded or cleared
+   exactly as its own write would (`type-check-fn-after-mutation!`), so
+   the editor's problem lens shows it and the execute gate refuses it
+   (`:unresolved-type-errors`). One level only: a transitive dependent
+   is re-checked when its own callee is next written. Best-effort per
+   fn — a throw is logged, never fails the user's write. Returns the
+   set of ids re-checked.
+
+   Read the index BEFORE the write's invalidation when the write
+   removes edges (a `:fn` delete): `deps/incremental-update` drops a
+   deleted fn's reverse entry, and its callers are exactly who must be
+   re-derived (their ref now dangles)."
+  [ctx storage fn-id]
+  (let [dependents (direct-dependents ctx fn-id)]
+    (cond
+      (empty? dependents) #{}
+
+      (> (count dependents) max-dependent-recheck)
+      (do (log/warn "skipping dependent re-check — over bound; dependents' diagnostics stay as recorded until their own next write"
+                    {:fn-id fn-id :count (count dependents) :cap max-dependent-recheck})
+          #{})
+
+      :else
+      (do (doseq [id dependents]
+            (try
+              (type-check-fn-after-mutation! storage id)
+              (catch Exception e
+                (log/debug e "dependent re-check failed" {:fn-id id :of fn-id}))))
+          dependents))))
+
+
+(defn type-check-fn-and-dependents!
+  "`type-check-fn-after-mutation!` for `fn-id`, then `recheck-dependents!`
+   — the shape every USER write goes through (the package sync checks
+   the corpus in dependency order and needs no dependent walk). The
+   dependents are skipped when the result is a secret carve-out the
+   caller will roll back (`:secret?` under `:reject-secret?`): the
+   write is about to be undone, so nothing changed under them. Returns
+   the fn's own rej map (or nil) unchanged."
+  ([ctx storage fn-id]
+   (type-check-fn-and-dependents! ctx storage fn-id nil))
+  ([ctx storage fn-id {:keys [reject-secret?] :as opts}]
+   (let [rej (type-check-fn-after-mutation! storage fn-id opts)]
+     (when-not (and reject-secret? (:secret? rej))
+       (recheck-dependents! ctx storage fn-id))
+     rej)))

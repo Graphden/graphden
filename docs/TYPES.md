@@ -210,7 +210,18 @@ User creates/modifies fn-def
 └─────────────────┘
 ```
 
-When a fn that others depend on is modified, dependent fn-defs are re-checked.
+When a fn that others depend on is modified through the editor / CRUD API, its
+**direct** dependents are re-checked in the same write: every fn that binds a
+ref to it, inherits from it, or names it as a slot type (the compiler's reverse
+dependency index — `ctx-reverse-deps`). Each dependent's diagnostic is recorded
+(or cleared) in the per-branch store, so a caller whose callee's return type
+changed under it shows the error in the editor and is refused by the execute
+gate (`:unresolved-type-errors`) — without anyone editing the caller. The
+re-check is one level deep and bounded (`max-dependent-recheck`); a
+transitive dependent is re-checked when its own callee is next written, and a
+change wide enough to need everything re-run is the ctx-build sweep
+(`branch_router/recheck.clj`). The package sync path checks the whole corpus
+in dependency order, so it needs no dependent walk.
 
 ---
 
@@ -409,7 +420,6 @@ This serves as both:
 
 - **Type definition** — `computed-type` describes the structure
 - **Constructor** — binding all args creates a concrete value
-- **Runtime schema source** — system can generate malli/JSON Schema for validation
 
 No new entity needed. A type IS a fn.
 
@@ -1018,17 +1028,15 @@ Converter functions (e.g. `:parse-int`, the `:ensure-*` refinement narrowers) ar
 
 ## Runtime Validation from Types
 
-A base-fn `type-schema` can introspect any fn's `computed-type` and generate a validation schema (malli-compatible):
-
-```edn
-{:name :message-schema
- :parent :type-schema
- :args {:entity :message}}
-;; Introspects :message computed-type {:from :text, :text :text, :timestamp :int}
-;; Returns malli schema: [:map [:from :string] [:text :string] [:timestamp :int]]
-```
-
-One type definition → static checking at save time + runtime validation at execution time. No duplication.
+**Not shipped.** There is no `type-schema` base-fn and nothing turns a
+`computed-type` into a malli / JSON Schema at execution time. Types are
+checked at SAVE time only (previous sections); at runtime a value is what the
+base-fn impl returns, and the only checks that run are the explicit converters
+at the boundary (`:parse-int`, the `:ensure-*` narrowers — [Typed and Untyped
+Boundary](#typed-and-untyped-boundary)) and whatever a base-fn validates
+itself. The idea — one definition, static check at save + generated validator
+at the boundary — remains [Phase 5](#phase-5-runtime-validation-generation--not-shipped) of
+the implementation plan.
 
 ---
 
@@ -1068,7 +1076,7 @@ One type definition → static checking at save time + runtime validation at exe
 | Parametric polymorphism | Hints | No | Erased generics | **Yes** (inferred) | Yes | Yes |
 | Refinement types | No | Runtime | No | **Yes** (save time) | Liquid Haskell | Yes (proofs) |
 | Dependent-like types | No | No | No | **Partial** (literal keys) | No | Yes |
-| Runtime validation | Manual | Schema | Manual | **Auto-generated** | No | No |
+| Runtime validation | Manual | Schema | Manual | **Manual** (boundary converters; generation not shipped) | No | No |
 
 > **Soundness posture — read the table honestly.** Graphden's checker is
 > **optional and erased, not sound** — closer to TypeScript / mypy than to
@@ -1322,9 +1330,10 @@ stored column.
 
 **Catches:** missing boundary validation, invalid narrowing in inheritance.
 
-### Phase 5: Runtime validation generation
+### Phase 5: Runtime validation generation — not shipped
 
-**Goal:** one definition, static + runtime checking.
+**Goal:** one definition, static + runtime checking. Nothing below exists
+yet; see [Runtime Validation from Types](#runtime-validation-from-types).
 
 - `type-schema` base-fn: introspect `computed-type`, generate malli schema
 - Integration with `json-handler` for automatic request body validation

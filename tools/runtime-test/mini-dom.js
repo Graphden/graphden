@@ -68,6 +68,9 @@ function descendants(node, acc) {
 class MiniElement {
   constructor(tag) {
     this.tagName = tag.toUpperCase();
+    // A form control's value reads as '' until set, like the real one —
+    // code under test calls `.value.trim()` on a fresh input.
+    if (['INPUT', 'SELECT', 'TEXTAREA'].includes(this.tagName)) this.value = '';
     this.children = [];
     this.parentNode = null;
     this.attributes = {};

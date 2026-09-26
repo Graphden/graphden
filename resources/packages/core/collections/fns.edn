@@ -151,12 +151,14 @@
 
   ;; `(apply merge maps)` — variadic merge like Clojure's. `:maps` is a
   ;; sequence-arg so callers can inline refs: `{:maps [:a-ref :b-ref]}`.
-  ;; Item type is `[:map a :any]` — admits records via unify-map-record
-  ;; (heterogeneous values fit `:any`) while rejecting a stray `[:list]`
-  ;; bound by mistake.
+  ;; Item type is `[:union :null [:map a :any]]` — admits records via
+  ;; unify-map-record (heterogeneous values fit `:any`) while rejecting
+  ;; a stray `[:list]` bound by mistake; nil items are what Clojure's
+  ;; `merge` skips, so a nullable map (a `:try` result, a `:get`) merges
+  ;; without a `:coalesce` in front of it.
   {:name :merge
-   :description "Merge a sequence of maps left-to-right (Clojure's `(apply merge maps)`); later keys override earlier ones."
-   :args {:maps {:type [:list [:map a :any]] :description "Maps to merge in order."}}
+   :description "Merge a sequence of maps left-to-right (Clojure's `(apply merge maps)`); later keys override earlier ones. A nil item is skipped."
+   :args {:maps {:type [:list [:union :null [:map a :any]]] :description "Maps to merge in order; nil items are skipped."}}
    :return-type [:map :any :any]}
 
   {:name :into

@@ -108,15 +108,21 @@
   ;; `T`. This is the explicit point where a nullable narrows back to
   ;; non-null.
   {:name :coalesce
-   :description "Returns `value` if non-nil, else `default`. The null-eliminator — `coalesce-return-rule` strips `:null` from the value's type."
+   :description "Returns `value` if non-nil, else `default`. The null-eliminator when the default is non-null — `coalesce-return-rule` strips `:null` from the value's type and unions the default's; a nullable default (a chained `:coalesce`, a `:first`) keeps the result honestly nullable."
    ;; `:value` is `[:union :null a]` — pinning the contract that the
    ;; argument is either nil or some type `a` (which the default's
    ;; type also pins). Concrete non-null inputs (e.g. `:int`) still
    ;; type-check via subtype: `:int ⊆ :nullable-int` after
    ;; unification binds `a := :int`. `coalesce-return-rule` then
    ;; strips `:null` and unions with the default's type.
+   ;; `:default` is `[:union :null a]` too: `(or value default)` returns
+   ;; the default AS IS, nil included — a chain of coalesces over
+   ;; `:first` results is the ordinary shape (`:_sp-existing`), and
+   ;; declaring the default non-null was a claim the rule's result
+   ;; then had to honour by widening. The rule unions the default's
+   ;; real type, so a non-null default still narrows to non-null.
    :args {:value {:type [:union :null a] :description "Primary value; used when non-nil. Either nil or some `a` (matching the default's type)."}
-          :default {:type a :description "Fallback used when value is nil."}}
+          :default {:type [:union :null a] :description "Fallback used when value is nil — returned as is, so a nullable default keeps the result nullable."}}
    :return-type a}
 
   ;; --- :assert-some — narrow [:union :null T] → T at type-system level

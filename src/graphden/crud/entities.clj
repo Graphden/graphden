@@ -225,7 +225,7 @@
         (when (vcore/revive-entity! storage et id)
           (let [row (sp/read-entity storage et id)]
             (when (= et :fn)
-              (tc/type-check-fn-after-mutation! storage id))
+              (tc/type-check-fn-and-dependents! ctx storage id))
             (inval/invalidate! ctx storage et row)
             (inval/notify-after-write! ctx storage et :write (assoc row :id id))
             row))))))
@@ -276,13 +276,17 @@
           ;; same-named duplicate (stale-identity class) keeps its entry.
           (registry/unregister-rich-type! (keyword (:name snapshot)) id))
         ;; Diagnostics stay fresh across deletes (Phase 3, Gap B):
-        ;; a deleted fn takes its stored entry with it; a deleted
-        ;; binding / list-item re-runs the owner's aggregate check,
-        ;; which records anew or clears as appropriate.
+        ;; a deleted fn takes its stored entry with it — and its
+        ;; callers are re-derived (their ref now dangles), read off
+        ;; the reverse index BEFORE `invalidate!` drops the deleted
+        ;; fn's edges; a deleted binding / list-item re-runs the
+        ;; owner's aggregate check (+ the owner's dependents), which
+        ;; records anew or clears as appropriate.
         (if (= et :fn)
-          (diag/clear-fn! (vcore/current-branch-id storage) id)
+          (do (diag/clear-fn! (vcore/current-branch-id storage) id)
+              (tc/recheck-dependents! ctx storage id))
           (when owning-fn-id
-            (tc/type-check-fn-after-mutation! storage owning-fn-id)))
+            (tc/type-check-fn-and-dependents! ctx storage owning-fn-id)))
         (inval/invalidate! ctx storage et snapshot)
         ;; NOTIFY the full pre-read `snapshot` (not a bare `{:id id}`): sibling
         ;; pods' `affected-fn-ids` needs the row's FKs (`:binding-id` / `:fn-id`)
@@ -591,11 +595,11 @@
    failures come back as `{:diagnostic …}` the caller surfaces
    additively as `:type-warnings` on the success envelope. nil when
    the check passes or doesn't apply to this entity type."
-  [storage type-str entity-data id-uuid]
+  [ctx storage type-str entity-data id-uuid]
   (when (#{"fn" "binding" "binding-list-item"} type-str)
     (when-let [fn-id (post-write-type-check-fn-id
                        storage type-str entity-data id-uuid)]
-      (tc/type-check-fn-after-mutation! storage fn-id
+      (tc/type-check-fn-and-dependents! ctx storage fn-id
                                         {:reject-secret? true}))))
 
 
@@ -638,7 +642,7 @@
       (let [renamed (when (and (= type-str "binding")
                                (contains? form-data :rename-to))
                       (forward-rename-slot! storage form-data entity-data))
-            rej (post-write-type-rej storage type-str entity-data
+            rej (post-write-type-rej ctx storage type-str entity-data
                                      (:created create-result))]
         (if (:secret? rej)
           ;; Hard reject: roll back the just-created row (logged, not
@@ -760,7 +764,7 @@
             renamed (when (and (= type-str "binding") id-uuid
                                (contains? form-data :rename-to))
                       (forward-rename-slot-on-update! storage id-uuid form-data))
-            rej (post-write-type-rej storage type-str entity-data id-uuid)]
+            rej (post-write-type-rej ctx storage type-str entity-data id-uuid)]
         (if (:secret? rej)
           ;; Hard reject: restore every field the update touched from
           ;; the pre-image, roll back the renamed-view rows this write

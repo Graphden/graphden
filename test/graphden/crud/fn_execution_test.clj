@@ -32,8 +32,10 @@
     [graphden.crud.fn-execution.retention :as retention]
     [graphden.crud.fn-execution.stats :as exec-stats]
     [graphden.crud.test-runs :as test-runs]
+    [graphden.crud.type-check :as type-check]
     [graphden.executor.compile-eager :as ce]
     [graphden.executor.compile-runtime :as cr]
+    [graphden.executor.compile.deps :as deps]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.runtime :as rt]
@@ -294,6 +296,40 @@
                                      :args {:a 2 :b 3}
                                      :timeout-ms 5000 :persist? false})]
           (is (contains? #{:succeeded :pending} (:status out))))))))
+
+
+(deftest execute-refused-when-a-callee-changed-under-the-caller-test
+  ;; The caller was never edited: its callee's return type moved under
+  ;; it, the callee's write re-checked its direct dependents, and the
+  ;; recorded diagnostic is what the gate reads.
+  (binding [diag/*diagnostics-override* (atom {})]
+    (let [storage (create-full-storage)
+          {composed :composed slot-a :slot-a base :base} (make-pure-add-fn! storage "dep")
+          _ (registry/record-rich-types-raw!
+              (keyword (:name base)) {:return :int :args {:a :int :b :int} :effects #{}})
+          id-base (setup/create-base-fn! storage "test-id-dep")
+          v-slot (setup/create-slot! storage "v" :any)
+          _ (setup/attach-slot! storage (:id id-base) (:id v-slot) 0)
+          _ (registry/record-rich-types-raw!
+              :test-id-dep {:return 'a :args {:v 'a} :effects #{}})
+          callee (setup/create-composed-fn! storage "my-test-const-dep" (:id id-base))
+          v-bind (setup/bind-value! storage (:id callee) (:id v-slot) 5)
+          _ (setup/bind-ref! storage (:id composed) (:id slot-a) (:id callee))
+          c (setup/default-registry-ctx storage)]
+      (is (nil? (type-check/type-check-fn-after-mutation! storage (:id callee))))
+      (is (nil? (type-check/type-check-fn-after-mutation! storage (:id composed))))
+      (reset! (:compile-deps c) (deps/build-deps-state (cr/graph-snapshot c)))
+      (sp/update-entity storage :binding (:id v-bind) {:value "hello"})
+      (is (nil? (type-check/type-check-fn-and-dependents! c storage (:id callee)))
+          "the callee itself is well-typed")
+      (let [out (fn-exec/apply-execute c {:fn-id (:id composed)
+                                          :args {:b 2}
+                                          :timeout-ms 5000 :persist? false})]
+        (is (false? (:ok out)))
+        (is (= :rejected (:status out)))
+        (is (= :unresolved-type-errors (get-in out [:error-data :reason])))
+        (is (str/includes? (:error out) "my-test-add-dep") "names the CALLER")
+        (is (= :a (get-in out [:error-data :diagnostics 0 :arg-name])))))))
 
 
 (deftest recent-executions-are-branch-scoped-test

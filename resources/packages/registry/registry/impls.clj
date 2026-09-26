@@ -738,9 +738,9 @@
    :missing-package-dependencies {:impl missing-package-dependencies :taint-propagate? true}
    :package-version-materialized? {:impl package-version-materialized? :taint-propagate? true}
    :version-qualified-ns version-qualified-ns-fn
-   :fork-package-fns fork-package-fns
-   :materialize-package-fns materialize-package-fns
-   :rewrite-refs-to-version rewrite-refs-to-version
+   :fork-package-fns {:impl fork-package-fns :taint-propagate? true}
+   :materialize-package-fns {:impl materialize-package-fns :taint-propagate? true}
+   :rewrite-refs-to-version {:impl rewrite-refs-to-version :taint-propagate? true}
    :package-upsert-pin package-upsert-pin
    ;; taint-propagate: echoes the caller's pkg-name / version.
    :mirror-store-package-version! {:impl mirror-store-package-version! :taint-propagate? true}

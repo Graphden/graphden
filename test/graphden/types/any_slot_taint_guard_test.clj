@@ -48,19 +48,16 @@
   {:_reconcile-services-apply "Ignores request content; returns generated started/stopped instance IDs."
    :debug-catch-disarm! "Ignores request content; returns the disarmed status."
    :debug-catch-status "Ignores request content; returns the current org-scoped trap state."
-   :fork-package-fns "Writes package copies to storage; returns the number copied."
    :future "Starts the body asynchronously; returns a cancellation callback, not the body value."
    :http-server "Starts the handler as a network service; returns a stop handle."
    :invalidate-after-write "Invalidates executor caches; returns nil."
    :log "Logs the input as an explicit IO sink; returns nil."
    :log-warn "Logs the input as an explicit IO sink; returns nil."
    :loop-until-interrupted "Runs the effectful body repeatedly; discards its values and returns nil."
-   :materialize-package-fns "Materializes package definitions in storage; returns a count."
    :merge-post-commit! "Invalidates caches and restarts affected services; returns nil."
    :notify-after-write "Invalidates the written entity through the notifier; returns nil."
    :pg-notify "Sends the event through the explicit DB effect; returns nil."
-   :queue-publish "Stores the payload as an explicit DB effect; returns a newly generated UUID."
-   :rewrite-refs-to-version "Updates stored references; returns the number rewritten."})
+   :queue-publish "Stores the payload as an explicit DB effect; returns a newly generated UUID."})
 
 
 ;; ---------------------------------------------------------------------

@@ -349,9 +349,9 @@
   {:get-entity get-entity
    :delete-entity delete-entity
    :revive-entity revive-entity
-   :query-entities query-entities-fn
-   :create-entity create-entity-fn
-   :update-entity update-entity-fn
+   :query-entities {:impl query-entities-fn :taint-propagate? true}
+   :create-entity {:impl create-entity-fn :taint-propagate? true}
+   :update-entity {:impl update-entity-fn :taint-propagate? true}
    :free-arg-slot-map free-arg-slot-map
    :free-arg-entries free-arg-entries
    :service-blocking-free-args service-blocking-free-args
@@ -363,15 +363,15 @@
    :graph-full graph-full
    :graph-fn-defs-subtree   graph-fn-defs-subtree
    :fn-unread-bindings      fn-unread-bindings
-   :strip-hidden-impl strip-hidden-impl
+   :strip-hidden-impl {:impl strip-hidden-impl :taint-propagate? true}
    :fn-impl-visible? fn-impl-visible?
    :all-rich-types all-rich-types
    :api-rich-types api-rich-types
    :fn-names-with-tag fn-names-with-tag
    :query-ref-many-owners query-ref-many-owners
    :value-kinds value-kinds
-   :try-apply-create try-apply-create
-   :try-apply-update try-apply-update
-   :try-apply-seq-append try-apply-seq-append
-   :try-apply-seq-update try-apply-seq-update
-   :try-apply-seq-move try-apply-seq-move})
+   :try-apply-create {:impl try-apply-create :taint-propagate? true}
+   :try-apply-update {:impl try-apply-update :taint-propagate? true}
+   :try-apply-seq-append {:impl try-apply-seq-append :taint-propagate? true}
+   :try-apply-seq-update {:impl try-apply-seq-update :taint-propagate? true}
+   :try-apply-seq-move {:impl try-apply-seq-move :taint-propagate? true}})

@@ -23,4 +23,4 @@
 
 
 (def impls
-  {:error-boundary-wrap error-boundary-wrap})
+  {:error-boundary-wrap {:impl error-boundary-wrap :taint-propagate? true}})

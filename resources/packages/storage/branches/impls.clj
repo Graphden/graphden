@@ -61,4 +61,4 @@
 
 (def impls
   {:current-branch-id current-branch-id
-   :sync-fn-defs-branch! sync-fn-defs-branch!})
+   :sync-fn-defs-branch! {:impl sync-fn-defs-branch! :taint-propagate? true}})

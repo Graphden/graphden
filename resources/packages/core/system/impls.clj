@@ -543,7 +543,7 @@
    :to-json-pretty {:impl to-json-pretty :taint-propagate? true}
    :parse-json {:impl parse-json :taint-propagate? true}
    :parse-edn {:impl parse-edn :taint-propagate? true}
-   :platform-owned-def? platform-owned-def?
+   :platform-owned-def? {:impl platform-owned-def? :taint-propagate? true}
    :system-property system-property-fn
    :jvm-uptime-ms jvm-uptime-ms-fn
    :heap-used heap-used-fn

@@ -54,5 +54,5 @@
 ;; The package loader pairs each base-fn declared in this module's
 ;; `fns.edn` with its impl by looking up this map (keyword name -> impl).
 (def impls
-  {:query-param query-param
-   :extract-entity-params extract-entity-params})
+  {:query-param {:impl query-param :taint-propagate? true}
+   :extract-entity-params {:impl extract-entity-params :taint-propagate? true}})

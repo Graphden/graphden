@@ -226,11 +226,13 @@
     ;; panic surface stays a non-null sentence without a redundant
     ;; nested wrap.
     (throw (ex-info (str "Vault request failed: " (Throwable/.getMessage error))
-                    {:type :vault/lookup-failed :path path :op op}))
+                    {:type :vault/unavailable :path path :op op}))
 
     (not (contains? expected status))
     (throw (ex-info (str "Vault returned " status " for " op " " path)
-                    {:type :vault/lookup-failed :path path :op op :status status :body body}))))
+                    {:type (if (and (number? status) (>= status 500))
+                             :vault/unavailable :vault/lookup-failed)
+                     :path path :op op :status status :body body}))))
 
 
 (defn get-secret

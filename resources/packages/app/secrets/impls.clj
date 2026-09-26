@@ -60,6 +60,6 @@
 
 (def impls
   {:_apply-create-secret-body     _apply-create-secret-body
-   :_apply-inline-bind-body       _apply-inline-bind-body
-   :_apply-secret-rollback        _apply-secret-rollback
-   :_rotate-secret-not-owned?     _rotate-secret-not-owned?})
+   :_apply-inline-bind-body       {:impl _apply-inline-bind-body :taint-propagate? true}
+   :_apply-secret-rollback        {:impl _apply-secret-rollback :taint-propagate? true}
+   :_rotate-secret-not-owned?     {:impl _rotate-secret-not-owned? :taint-propagate? true}})

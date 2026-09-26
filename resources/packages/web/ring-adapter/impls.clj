@@ -32,5 +32,5 @@
 
 
 (def impls
-  {:authenticate-request authenticate-request
+  {:authenticate-request {:impl authenticate-request :taint-propagate? true}
    :auth-active? auth-active?})

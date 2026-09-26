@@ -82,10 +82,10 @@
 ;; The package loader pairs each base-fn declared in this module's
 ;; `fns.edn` with its impl by looking up this map (keyword name -> impl).
 (def impls
-  {:_seq-append-load-binding _seq-append-load-binding
+  {:_seq-append-load-binding {:impl _seq-append-load-binding :taint-propagate? true}
    :_seq-remove-load-item _seq-remove-load-item
-   :pkg-delete-guard-reason pkg-delete-guard-reason
-   :pkg-write-guard-reason pkg-write-guard-reason
-   :_seq-update-load-item _seq-update-load-item
-   :_seq-move-load-item _seq-move-load-item
-   :try-apply-tighten try-apply-tighten})
+   :pkg-delete-guard-reason {:impl pkg-delete-guard-reason :taint-propagate? true}
+   :pkg-write-guard-reason {:impl pkg-write-guard-reason :taint-propagate? true}
+   :_seq-update-load-item {:impl _seq-update-load-item :taint-propagate? true}
+   :_seq-move-load-item {:impl _seq-move-load-item :taint-propagate? true}
+   :try-apply-tighten {:impl try-apply-tighten :taint-propagate? true}})

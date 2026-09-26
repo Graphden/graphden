@@ -721,22 +721,22 @@
    ;; taint-propagate: returns the parsed caller bundle (content passthrough),
    ;; same as core :parse-edn.
    :parse-graph-edn {:impl parse-graph-edn :taint-propagate? true}
-   :secret-path-args secret-path-args-fn
-   :strip-secret-paths strip-secret-paths-fn
+   :secret-path-args {:impl secret-path-args-fn :taint-propagate? true}
+   :strip-secret-paths {:impl strip-secret-paths-fn :taint-propagate? true}
    :encode-unreadable-kws encode-unreadable-kws-fn
    :namespace-external-deps namespace-external-deps
    :current-org-id current-org-id
    :tenancy-active? tenancy-active?
    :graph-rows graph-rows
-   :publish-package-apply publish-package-apply
-   :breaking-changes-between breaking-changes-between
+   :publish-package-apply {:impl publish-package-apply :taint-propagate? true}
+   :breaking-changes-between {:impl breaking-changes-between :taint-propagate? true}
    :incompatible-dependency-bumps incompatible-dependency-bumps
    :semver-compatible? semver-compatible?
    :withdraw-package-apply withdraw-package-apply
    ;; taint-propagate: answers one of the caller's own version strings.
    :semver-pick {:impl semver-pick :taint-propagate? true}
-   :missing-package-dependencies missing-package-dependencies
-   :package-version-materialized? package-version-materialized?
+   :missing-package-dependencies {:impl missing-package-dependencies :taint-propagate? true}
+   :package-version-materialized? {:impl package-version-materialized? :taint-propagate? true}
    :version-qualified-ns version-qualified-ns-fn
    :fork-package-fns fork-package-fns
    :materialize-package-fns materialize-package-fns

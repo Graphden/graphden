@@ -110,5 +110,5 @@
 
 
 (def impls
-  {:sql-exec sql-exec
-   :sql-query sql-query})
+  {:sql-exec {:impl sql-exec :taint-propagate? true}
+   :sql-query {:impl sql-query :taint-propagate? true}})

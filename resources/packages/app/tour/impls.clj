@@ -86,5 +86,5 @@
 
 
 (def impls
-  {:count-tour-event! count-tour-event!
-   :count-tour-step! count-tour-step!})
+  {:count-tour-event! {:impl count-tour-event! :taint-propagate? true}
+   :count-tour-step! {:impl count-tour-step! :taint-propagate? true}})

@@ -47,4 +47,6 @@
 
 
 (def impls
-  {:fix fix-fn})
+  ;; `:fix` returns whatever the step computes from `:input` — a secret
+  ;; fed in (or returned by the step) comes out (SECRETS.md § T3).
+  {:fix {:impl fix-fn :taint-propagate? true}})

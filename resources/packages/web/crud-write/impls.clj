@@ -60,4 +60,4 @@
 ;; `fns.edn` with its impl by looking up this map (keyword name -> impl).
 (def impls
   {:chain-has-process-effect? chain-has-process-effect?
-   :write-rej write-rej})
+   :write-rej {:impl write-rej :taint-propagate? true}})

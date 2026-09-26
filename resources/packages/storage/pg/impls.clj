@@ -171,12 +171,13 @@
 
 
 (def impls
-  {:pg-query pg-query
-   :pg-execute pg-execute
-   :pg-tx pg-tx
-   :decode-row decode-row
+  {:pg-query {:impl pg-query :taint-propagate? true}
+   :pg-execute {:impl pg-execute :taint-propagate? true}
+   ;; the body's own return value is the transaction's — content-passing
+   :pg-tx {:impl pg-tx :taint-propagate? true}
+   :decode-row {:impl decode-row :taint-propagate? true}
    :pg-notify pg-notify
-   :storage-query-identities storage-query-identities
+   :storage-query-identities {:impl storage-query-identities :taint-propagate? true}
    :invalidate-graph-cache invalidate-graph-cache
    :invalidate-after-write invalidate-after-write
    :notify-after-write notify-after-write})

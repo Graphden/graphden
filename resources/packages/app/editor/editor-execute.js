@@ -88,8 +88,10 @@ async function mountArgFormHost(fnEntity, host) {
     if (!host.querySelector('input, textarea, select, button')) {
       const note = document.createElement('div');
       note.className = 'execute-arg-form-note';
-      note.textContent = 'Not entered here — this argument is a function, '
-        + 'resolved from the graph at run time.';
+      note.textContent = host.querySelector('[data-form-widget="secret-binding"]')
+        ? 'Secret — bind it on the card before running.'
+        : 'Not entered here — this argument is a function, '
+          + 'resolved from the graph at run time.';
       host.appendChild(note);
     }
   }

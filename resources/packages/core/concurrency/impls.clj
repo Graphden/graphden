@@ -401,7 +401,7 @@
    :with-timeout {:impl with-timeout-fn :taint-propagate? true}
    :start-all {:impl start-all-fn :lazy-seq-args #{:triggers}}
    :cron-parse cron-parse-fn
-   :cron-fire-after cron-fire-after-fn
+   :cron-fire-after {:impl cron-fire-after-fn :taint-propagate? true}
    ;; Cell taint: a secret stored in an atom/cell must stay
    ;; redacted when read back. Without propagation, `:atom`/`:cell` return
    ;; `:any` and `:deref` returns `:any`, so `(deref (atom secret))` typed

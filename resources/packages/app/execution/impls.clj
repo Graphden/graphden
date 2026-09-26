@@ -323,13 +323,13 @@
 
 (def impls
   {:unresolved-failure-counts unresolved-failure-counts
-   :resolve-fn                 resolve-fn
+   :resolve-fn                 {:impl resolve-fn :taint-propagate? true}
    :execute-trace-rows         execute-trace-rows
-   :viewer-path-trace          viewer-path-trace
+   :viewer-path-trace          {:impl viewer-path-trace :taint-propagate? true}
    :debug-catch-arm!           debug-catch-arm!
    :debug-catch-disarm!        debug-catch-disarm!
    :debug-catch-status         debug-catch-status
-   :_execute-apply             _execute-apply
+   :_execute-apply             {:impl _execute-apply :taint-propagate? true}
    :get-execution              get-execution
    :cancel-execution!          cancel-execution!
    :resolve-fn-version-id      resolve-fn-version-id

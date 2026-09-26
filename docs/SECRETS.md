@@ -11,8 +11,9 @@ actually is.
 > **Scope — read this first.** This is **best-effort taint-tracking, not a
 > proven non-interference / information-flow guarantee.** Concretely: (1)
 > propagation is a per-base-fn opt-in flag (`:taint-propagate?`), so a new
-> content-passing base-fn that forgets it will silently declassify — there is
-> no structural check that every such fn carries it (see the T3 audit below);
+> content-passing base-fn needs it. CI now scans wide value slots, including
+> nested shapes and aliases: each must propagate or have a reviewed exception
+> explaining why its return contains none of the input (see the T3 audit below);
 > (2) `[:secret T] ⊆ :any` is TRUE, so a secret flowing into any `:any`-typed
 > slot loses its marker (the escape hatch documented below); (3) covert
 > channels remain open — notably exception messages (`:throw`, see Known
@@ -311,7 +312,11 @@ Audit of `:any`-slot uses across the standard library:
 | `:slurp/:input` | InputStream/Reader source | n/a — not a content-bearing string slot |
 | `:throw/:exception` | Exception value | **Limit**: see #2 below |
 
-No `:network` / `:io` / `:db` sink uses `:any` for a content slot
+Some explicit `:io` / `:db` sinks accept arbitrary content (logging and
+queue publishing, for example). Their effects are outside result redaction.
+The reviewed exceptions are listed in `any_slot_taint_guard_test.clj`.
+
+The typed network sinks do not use `:any` for an authentication slot
 (verified by grep across `resources/packages/web/*/fns.edn`).
 The only remaining concern is `:throw` — see Known limits.
 
@@ -695,3 +700,18 @@ Verified end-to-end:
 | `test/graphden/types/check_test.clj` | `enforce-declared-return!` relaxation for tainted computed against plain declared; tainted ref bubbles into recorded return; clean inputs leave plain; structural leak rejection; auto-promote into secret slot. |
 | `test/graphden/crud/fn_execution_test.clj` | `apply-execute` hides result for `[:secret …]`-return fn-defs; persisted row stores `:result nil + :error-data {:reason :tainted}`. |
 | `test/graphden/integration/secret_flow_test.clj` | End-to-end: secret-leaf → str-upper composes (recorded return `[:secret :text]`), downstream plain-text sink rejects, plain text into secret slot auto-promotes, secret-ref into secret slot composes. |
+
+## Operational failures without exposing secret data
+
+Failed secret operations expose only a fixed hint and one of
+`:vault/lookup-failed`, `:vault/path-forbidden`, `:vault/not-configured`, or
+`:vault/unavailable`. Exception messages, paths, server responses and values
+are discarded before the result is stored or returned, including in cloud
+error scrubbing. The Run pane can therefore distinguish a bad binding, an
+organization boundary and unavailable storage without revealing secret material.
+
+The wide-slot CI guard covers the shipped package set, including aliased
+records, lists and callback return values. Content-derived results propagate
+conservatively (including type descriptions and boolean/count projections).
+The exceptions are explicit effects returning nil/status/IDs or opaque service
+handles; the guard is still not a proof against side channels or arbitrary IO.

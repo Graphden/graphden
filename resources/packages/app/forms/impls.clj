@@ -70,6 +70,7 @@
 (def impls
   {:_slot-effective-type-raw _slot-effective-type-raw
    :current-slot-value current-slot-value
-   :resolve-form resolve-form-fn
-   :build-form build-form-fn
+   :resolve-form {:impl resolve-form-fn :taint-propagate? true}
+   ;; seeds the control with `:current-value` — the value is IN the hiccup
+   :build-form {:impl build-form-fn :taint-propagate? true}
    :slot-type-provenance slot-type-provenance})

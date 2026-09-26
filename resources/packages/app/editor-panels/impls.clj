@@ -95,5 +95,5 @@
 
 (def impls
   {:branch-diagnostics-flat branch-diagnostics-flat
-   :branch-lint-findings branch-lint-findings
+   :branch-lint-findings {:impl branch-lint-findings :taint-propagate? true}
    :request-capabilities request-capabilities})

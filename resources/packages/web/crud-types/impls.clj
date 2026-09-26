@@ -317,27 +317,28 @@
 ;; The package loader pairs each base-fn declared in this module's
 ;; `fns.edn` with its impl by looking up this map (keyword name -> impl).
 (def impls
-  {:json-to-type json-to-type-fn
+  {:json-to-type {:impl json-to-type-fn :taint-propagate? true}
    :to-set to-set-fn
-   :subtype? subtype?-fn
+   :subtype? {:impl subtype?-fn :taint-propagate? true}
    :fn-type? {:impl fn-type?-fn :taint-propagate? true}
    :fn-signature {:impl fn-signature :taint-propagate? true}
-   :candidate-fit candidate-fit-fn
+   :candidate-fit {:impl candidate-fit-fn :taint-propagate? true}
    :fn-ns-index fn-ns-index-fn
-   :describe-type-mismatch describe-type-mismatch-fn
-   :classify-literal classify-literal
-   :diff-value-against-type diff-value-against-type
-   :closed-enum-of closed-enum-of
-   :fn-type-bound-effects fn-type-bound-effects
+   :describe-type-mismatch {:impl describe-type-mismatch-fn :taint-propagate? true}
+   :classify-literal {:impl classify-literal :taint-propagate? true}
+   ;; each disagreement row echoes the offending leaf as `:actual`
+   :diff-value-against-type {:impl diff-value-against-type :taint-propagate? true}
+   :closed-enum-of {:impl closed-enum-of :taint-propagate? true}
+   :fn-type-bound-effects {:impl fn-type-bound-effects :taint-propagate? true}
    :rich-type-of-id rich-type-of-id
    :rule-owner-of-id rule-owner-of-id
    :declarable-effect-categories declarable-effect-categories
    :type-name-kinds type-name-kinds
-   :compatible-type-names compatible-type-names
+   :compatible-type-names {:impl compatible-type-names :taint-propagate? true}
    :_types-usages-apply _types-usages-apply
-   :_apply-create-record-type-body _apply-create-record-type-body
-   :_apply-create-record-type-rollback _apply-create-record-type-rollback
-   :_apply-create-list-type-body _apply-create-list-type-body
-   :_apply-update-record-type-body _apply-update-record-type-body
-   :_apply-update-record-type-rollback _apply-update-record-type-rollback
-   :slot-shaped-type-row? slot-shaped-type-row?})
+   :_apply-create-record-type-body {:impl _apply-create-record-type-body :taint-propagate? true}
+   :_apply-create-record-type-rollback {:impl _apply-create-record-type-rollback :taint-propagate? true}
+   :_apply-create-list-type-body {:impl _apply-create-list-type-body :taint-propagate? true}
+   :_apply-update-record-type-body {:impl _apply-update-record-type-body :taint-propagate? true}
+   :_apply-update-record-type-rollback {:impl _apply-update-record-type-rollback :taint-propagate? true}
+   :slot-shaped-type-row? {:impl slot-shaped-type-row? :taint-propagate? true}})

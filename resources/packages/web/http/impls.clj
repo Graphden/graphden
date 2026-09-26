@@ -305,11 +305,14 @@
 (def impls
   {:http-server http-server
    :http-stop http-stop
-   :realize-request-body realize-request-body
-   :stringify-response-headers stringify-response-headers
+   :realize-request-body {:impl realize-request-body :taint-propagate? true}
+   :stringify-response-headers {:impl stringify-response-headers :taint-propagate? true}
    :header-get header-get
    :pick-encoding pick-encoding-fn
-   :utf8-bytes utf8-bytes-fn
-   :byte-count byte-count-fn
-   :gzip-bytes gzip-bytes-fn
-   :brotli-bytes brotli-bytes-fn})
+   ;; Body-encoding chain — every step is a transform OF the body it is
+   ;; handed (bytes / compressed bytes / a length, like `:str-len`), so a
+   ;; secret-typed body stays marked through it (SECRETS.md § T3).
+   :utf8-bytes {:impl utf8-bytes-fn :taint-propagate? true}
+   :byte-count {:impl byte-count-fn :taint-propagate? true}
+   :gzip-bytes {:impl gzip-bytes-fn :taint-propagate? true}
+   :brotli-bytes {:impl brotli-bytes-fn :taint-propagate? true}})

@@ -156,7 +156,7 @@
   {:_fn-branch-local-seed _fn-branch-local-seed
    :_fn-slot-seals _fn-slot-seals
    :_load-graph-cached _load-graph-cached
-   :_parse-layout-body _parse-layout-body
-   :_layout-build-apply _layout-build-apply
-   :_layout-place-apply _layout-place-apply
-   :_layout-strip-facts-apply _layout-strip-facts-apply})
+   :_parse-layout-body {:impl _parse-layout-body :taint-propagate? true}
+   :_layout-build-apply {:impl _layout-build-apply :taint-propagate? true}
+   :_layout-place-apply {:impl _layout-place-apply :taint-propagate? true}
+   :_layout-strip-facts-apply {:impl _layout-strip-facts-apply :taint-propagate? true}})

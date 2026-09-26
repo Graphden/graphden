@@ -244,4 +244,4 @@
 ;; The package loader pairs each base-fn declared in `fns.edn` with its
 ;; impl by looking up this `impls` map (keyword name -> impl fn).
 (def impls
-  {:sse-stream sse-stream})
+  {:sse-stream {:impl sse-stream :taint-propagate? true}})

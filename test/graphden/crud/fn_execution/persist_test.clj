@@ -775,3 +775,20 @@
       (deliver finish :ok)
       (is (true? (deref released 2000 false)) "released once the body ended")
       (finally (java.util.concurrent.ThreadPoolExecutor/.shutdownNow pool)))))
+
+
+(deftest vault-failure-classification-survives-redaction-without-secret-data
+  (let [id (random-uuid)]
+    (registry/record-rich-types-raw! id :vault-redaction-probe
+                                     {:return [:secret :text] :effects #{:network}})
+    (doseq [t [:vault/lookup-failed :vault/path-forbidden
+               :vault/not-configured :vault/unavailable]]
+      (let [raw {:status :failed :touched-secret? true
+                 :error "SENTINEL secret in exception"
+                 :error-data {:type t :path "SENTINEL" :body "SENTINEL"}
+                 :result "SENTINEL"}
+            redacted (persist/redact-outcome id raw)
+            scrubbed (binding [cr/*scrub-internal-errors?* true]
+                       (persist/scrub-outcome :vault-redaction-probe redacted))]
+        (is (= {:type t} (:error-data scrubbed)))
+        (is (not (str/includes? (pr-str scrubbed) "SENTINEL")))))))

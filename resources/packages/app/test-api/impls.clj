@@ -31,5 +31,5 @@
 
 
 (def impls
-  {:_tests-run-apply _tests-run-apply
-   :_tests-status-apply _tests-status-apply})
+  {:_tests-run-apply {:impl _tests-run-apply :taint-propagate? true}
+   :_tests-status-apply {:impl _tests-status-apply :taint-propagate? true}})

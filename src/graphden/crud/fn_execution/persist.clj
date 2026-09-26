@@ -399,6 +399,27 @@
     (assoc :touched-secret? true)))
 
 
+(def ^:private vault-error-hints
+  "Only fixed classifications may cross the secret-redaction boundary.
+   Neither exception messages nor arbitrary ex-data fields are safe."
+  {:vault/lookup-failed "Secret lookup failed — check the binding and path."
+   :vault/path-forbidden "Secret path is outside your organization."
+   :vault/not-configured "Secret storage is not configured."
+   :vault/unavailable "Secret storage is unavailable — try again later."})
+
+
+(defn- safe-vault-failure
+  "A failed vault operation with only a fixed hint and type code.
+   Safe even if the exception message, response body or path contains a secret."
+  [outcome]
+  (when (= :failed (:status outcome))
+    (let [t (get-in outcome [:error-data :type])]
+      (when-let [hint (get vault-error-hints t)]
+        (-> outcome
+            (dissoc :result :tainted?)
+            (assoc :error hint :error-data {:type t}))))))
+
+
 (defn redact-outcome
   "If the fn is tainted (per `tainted-fn?`), strip the secret value
    from a succeeded/failed outcome — the result body and the error
@@ -410,6 +431,8 @@
    outcomes pass through unchanged."
   [fn-id outcome]
   (cond
+    (safe-vault-failure outcome) (safe-vault-failure outcome)
+
     (tainted-fn? fn-id)
     (case (:status outcome)
       :succeeded (-> outcome
@@ -539,22 +562,24 @@
    outcome server-side under it. Runs AFTER `redact-outcome` — a
    `:secret`-tainted failure is already generic and short-circuits."
   [fn-name outcome]
-  (if (and cr/*scrub-internal-errors?*
-           (= :failed (:status outcome))
-           (not (:tainted? outcome)))
-    (let [t (:type (:error-data outcome))]
-      (if (and (keyword? t)
-               (contains? tenant-visible-error-type-namespaces (namespace t)))
-        outcome
-        (let [ref (str (random-uuid))]
-          (log/error "Scrubbed tenant-facing execution error"
-                     {:ref ref :fn fn-name
-                      :error (:error outcome)
-                      :error-data (:error-data outcome)})
-          (assoc outcome
-                 :error (str "Internal error, ref: " ref)
-                 :error-data {:reason :internal :ref ref}))))
-    outcome))
+  (if-let [safe (safe-vault-failure outcome)]
+    safe
+    (if (and cr/*scrub-internal-errors?*
+             (= :failed (:status outcome))
+             (not (:tainted? outcome)))
+      (let [t (:type (:error-data outcome))]
+        (if (and (keyword? t)
+                 (contains? tenant-visible-error-type-namespaces (namespace t)))
+          outcome
+          (let [ref (str (random-uuid))]
+            (log/error "Scrubbed tenant-facing execution error"
+                       {:ref ref :fn fn-name
+                        :error (:error outcome)
+                        :error-data (:error-data outcome)})
+            (assoc outcome
+                   :error (str "Internal error, ref: " ref)
+                   :error-data {:reason :internal :ref ref}))))
+      outcome)))
 
 
 (defn write-finished!

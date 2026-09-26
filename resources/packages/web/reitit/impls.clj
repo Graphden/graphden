@@ -95,8 +95,8 @@
 ;; === Registry ===
 
 (def impls
-  {:ring-router                 ring-router-fn
-   :ring-create-default-handler ring-create-default-handler-fn
-   :ring-handler                ring-handler-fn
-   :middleware                  middleware
+  {:ring-router                 {:impl ring-router-fn :taint-propagate? true}
+   :ring-create-default-handler {:impl ring-create-default-handler-fn :taint-propagate? true}
+   :ring-handler                {:impl ring-handler-fn :taint-propagate? true}
+   :middleware                  {:impl middleware :taint-propagate? true}
    :cached-api-routes-js        cached-api-routes-js})

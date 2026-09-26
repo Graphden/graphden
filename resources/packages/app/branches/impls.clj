@@ -894,20 +894,20 @@
    :create-branch!             create-branch!
    :delete-branch!             delete-branch!
    :detect-conflicts           detect-conflicts
-   :merge-branch!              merge-branch!
+   :merge-branch!              {:impl merge-branch! :taint-propagate? true}
    :merge-post-commit!         merge-post-commit!
    :merge-skipped-branch-local merge-skipped-branch-local
    :set-branch-policy!         set-branch-policy!
-   :set-branch-require-merge!  set-branch-require-merge!
-   :set-review-state!          set-review-state!
-   :set-branch-archived! set-branch-archived!
-   :set-branch-review-policy!  set-branch-review-policy!
+   :set-branch-require-merge!  {:impl set-branch-require-merge! :taint-propagate? true}
+   :set-review-state!          {:impl set-review-state! :taint-propagate? true}
+   :set-branch-archived! {:impl set-branch-archived! :taint-propagate? true}
+   :set-branch-review-policy!  {:impl set-branch-review-policy! :taint-propagate? true}
    :approve-proposal!          approve-proposal!
    :dismiss-my-approval!       dismiss-my-approval!
    :branch-content-stamp       branch-content-stamp
    :branch-approvals           branch-approvals
-   :approvals-report           approvals-report
-   :count-valid-approvals      count-valid-approvals
+   :approvals-report           {:impl approvals-report :taint-propagate? true}
+   :count-valid-approvals      {:impl count-valid-approvals :taint-propagate? true}
    :self-approval-allowed?     self-approval-allowed?
    ;; taint-propagate: list returns caller-authored comment bodies.
    :add-branch-comment!        add-branch-comment!

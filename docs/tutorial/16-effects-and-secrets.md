@@ -381,3 +381,8 @@ The graphden DB never holds the secret value. Only the path.
 ## Next
 
 [Lesson 17 — Tests: the `tests` namespace](17-tests.md)
+
+A secret created in the Secrets panel belongs to the current branch; merging
+that branch does not copy the secret. Bind a free secret argument on its card
+before using Run. If a lookup fails, Run shows a generic storage or binding
+hint; the value, path and original exception stay hidden.

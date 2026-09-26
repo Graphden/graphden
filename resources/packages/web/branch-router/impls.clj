@@ -38,4 +38,4 @@
 
 (def impls
   {:current-branch-router current-branch-router
-   :dispatch-to-branch dispatch-to-branch})
+   :dispatch-to-branch {:impl dispatch-to-branch :taint-propagate? true}})

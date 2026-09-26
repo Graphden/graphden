@@ -14,6 +14,7 @@
 # rule, or just a doc?" is precisely how a rule change slips past unnoticed.
 # One path or prefix per line; blank lines and #-comments ignored.
 
+AGENTS.md
 CLAUDE.md
 dev/wtq/AGENT.md
 dev/wtq/README.md

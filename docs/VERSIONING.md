@@ -54,6 +54,56 @@ per-branch compiled closure
 PG storage
 ```
 
+## The branch model in plain words
+
+Everything below the routing layer follows from three rules. They are
+what a user of the branch popover can rely on, and what
+`versioning.storage.resolution` / `versioning.storage.merge` implement
+(`merge-semantics-test` pins each one as a scenario).
+
+**A branch is a live view of its base for everything it has not
+touched.** Forking copies nothing. Reading `X` on `feat` finds `feat`'s
+own version of `X` if `feat` ever wrote one; otherwise it shows whatever
+its base shows *right now* — an edit, a deletion or a new fn on `main`
+is visible on `feat` the moment it lands, with no action on `feat`'s
+side. Only the entities `feat` edited (or deleted, or resolved in a
+conflict — those are edits too) are pinned to `feat`'s own rows.
+
+**A merge carries one branch's own changes onto another, and from then
+on they are the target's changes.** Merging `feat` into `main` writes
+one `branch_merge` record; `feat`'s own rows now resolve on `main` (and
+on every branch that follows `main`). Nothing is copied, which is why a
+merged branch cannot be deleted. Two consequences:
+
+- *A change that reached the target through a merge counts as the
+  target's change.* Siblings `A` and `B` both edit `X`; `A` merges
+  first; `B`'s merge is asked about `X`, with `A`'s version as the
+  target side — it does not silently replace it. The same holds in the
+  sync direction: syncing `main` into `feat` asks about what `main`
+  took from a sibling if `feat` edited it too.
+- *A sync (base → feature) changes nothing the feature had not
+  touched.* `feat` already follows `main` live, so the merge record
+  adds no view; what a sync does is ask about the entities BOTH sides
+  edited since the fork (or the last sync) and let you keep yours or
+  take the base's, then advance the fork point so the next sync asks
+  only about newer edits. After the sync `feat` keeps following `main`
+  for everything else — it does not freeze at the sync-time state.
+  Taking the base's side in a conflict writes that value as `feat`'s own
+  row: from then on `feat` has touched the entity and a later change on
+  `main` to it is a conflict again, not a silent update.
+
+**A conflict is one entity changed on both sides since the fork to
+different content.** "Changed on a side" means the side's winning
+version arrived there after the fork point — written there, or landed
+there by a merge. Identical content on both sides is not a conflict
+(the same edit made twice, both sides deleting, the one inherited row
+both branches show). Different fields of one entity still conflict —
+the row is the unit you resolve — and the conflict payload names which
+fields differ with each side's value (`:fields`, in the editor's
+display form), plus the slot a binding row belongs to (`:slot-name`).
+A branch-local fn is never a conflict: its rows do not cross branches
+at all.
+
 ## Per-branch routing
 
 ### Lifecycle
@@ -156,7 +206,7 @@ read endpoints sit behind it too (matches `/api/services`).
 | GET    | `/api/branches/:ref/approvals`           |                                         | `{ok, required, have, satisfied, approvers:[{approver-id, counted, reason, stale}]}` — the proposal's approval status; a row the merge gate ignores has `counted: false` + a `reason` (`stale` / `other-target` / `not-an-approver` / `author`) |
 | DELETE | `/api/branches/:ref`                     |                                       | `{ok, id, name}` or `{ok: false, reason, error, child-branch-ids?}`. Rejected when the branch has children (`:reason :branch-has-children`) or is a live **merge SOURCE** (`:constraint-violation/branch-is-merge-source` — deleting it would revert every target it merged into, since merge is by-reference; delete those targets first). Everything the branch created goes with it — identity rows left with no version on any branch are purged in the same transaction (with the slots only its fn-slots exposed, and the type-rows those slots named), and the vault values of secrets bound only on the branch are reclaimed after the commit; the type-rows it declared stop resolving |
 | GET    | `/api/branches/:ref/diff?against=<ref>`  |                                       | `{ok, target, source, count, diffs}` |
-| GET    | `/api/branches/:ref/conflicts?source=…`  |                                       | `{ok, target, source, fork-point, count, conflicts}` |
+| GET    | `/api/branches/:ref/conflicts?source=…`  |                                       | `{ok, target, source, fork-point, count, conflicts}` — each conflict is `{entity-name, entity-id, source-version, target-version, slot-name, fields}`; a side that deleted the entity is `null`, `fields` is the per-field diff `[{field, source, target}]` in display form (fn refs as `:name`, empty when a side is a deletion). See § The branch model for what counts as a conflict |
 | POST   | `/api/branches/:ref/merge`               | `{source, conflict-resolutions?}`     | `{ok, merge}`, `{ok: false, reason: :merge-conflict, conflicts}`, or `{ok: false, reason: :merge-protection-violation, error, invalid-fns}` (409 — target's `forbid-invalid?` policy over recorded type diagnostics) |
 | POST   | `/api/import/graph?target=<branch>[&create=true][&prune=true]` | `application/edn` bundle (`{:fns […]}` or a bare fn-def vector) | `{ok, branch, fn-ids, skipped-owned, pruned?}` — apply an exported bundle to a NAMED branch (registry package; `?target=` because `?branch=` is the request-scope selector; `create` forks it stamping the caller owner/`owner`-policy; `prune` = snapshot semantics; see PACKAGE_DISTRIBUTION § 13). The imported branch then rides this table's normal diff → merge flow |
 | GET    | `/api/fns/:fn-id/versions`               |                                       | `{ok, fn-id, count, versions}` — each entry carries `:execution-count` (runs that anchored to that exact version row); 404 for a fn the viewer's storage cannot read (another org's private fn reads like a missing one), and no `anonymous-hash` / `base-fn-id` for one whose composition is concealed |
@@ -769,6 +819,20 @@ panel keeps its inline 📍 badge on the same rows.
   revert a target edit made in between — `merge-candidates-from-cache`'s
   per-source eligible window, regression-tested by
   `re-merge-does-not-silently-revert-target-edit`.)
+- The conflict scan judges each side by WHEN its winning row arrived, not
+  by who wrote it (`resolution/winning-candidates`' `:effective-ts`): a
+  row a merge landed on the target after the fork is the target's
+  change. Before 2026-09-25 the target was scanned for its OWN version
+  rows only, so the second of two siblings editing the same entity merged
+  with no conflict and silently replaced the first's landed edit; and a
+  base → feature sync surfaced the base's rows with the merge's timestamp,
+  freezing the synced entities on the feature (while untouched ones kept
+  following the base) and reverting the feature's own older edit to the
+  base's pre-fork row. A merge whose source is an ancestor of the target
+  now surfaces nothing (the chain walk shows the ancestor live); what it
+  keeps is its resolutions and the fork point. `merge-semantics-test`.
+  The approval stamp (`branch-content-stamp`) counts merges INTO the
+  proposal for the same reason — content can reach it that way too.
 - Per-branch ctx cache is LRU-bounded (`default-max-cached-branches` = 16,
   `evict-lru-if-full` keyed on `:last-used`); tune via the
   `GRAPHDEN_MAX_CACHED_BRANCHES` env var (read by `:exec/branch-router`

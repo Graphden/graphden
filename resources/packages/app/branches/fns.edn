@@ -2156,14 +2156,17 @@
    :args {:coll {:as :item} :key {:value :target-version} :default nil}}
 
   {:name :_conflicts-apply-entry
-   :description "HOF callback per conflict — `{:entity-name :entity-id (str) :source-version (stringify-uuids) :target-version (stringify-uuids)}`."
+   :description "HOF callback per conflict — `{:entity-name :entity-id (str) :source-version (stringify-uuids) :target-version (stringify-uuids) :slot-name :fields}`. `:slot-name` is the slot a binding / fn-slot / list-item row belongs to (nil for a fn row); `:fields` is the per-field diff `[{:field :source :target} …]` in display form (fn refs as `:name`) — `[]` when a side deleted the entity."
    :parent :zipmap
    :args {:keys [{:value :entity-name} {:value :entity-id}
-                 {:value :source-version} {:value :target-version}]
+                 {:value :source-version} {:value :target-version}
+                 {:value :slot-name} {:value :fields}]
           :vals [{:parent :get :args {:coll {:as :item} :key {:value :entity-name} :default nil}}
                  {:parent :to-str :args {:value :_conflict-entry-entity-id}}
                  {:parent :stringify-uuids :args {:m :_conflict-entry-source-version}}
-                 {:parent :stringify-uuids :args {:m :_conflict-entry-target-version}}]}}
+                 {:parent :stringify-uuids :args {:m :_conflict-entry-target-version}}
+                 {:parent :get :args {:coll {:as :item} :key {:value :slot-name} :default nil}}
+                 {:parent :get :args {:coll {:as :item} :key {:value :fields} :default []}}]}}
 
   {:name :_conflicts-apply-list
    :parent :map
@@ -2563,7 +2566,7 @@
           :coll {:parent :get :args {:coll :_branch-apply-ex-data :key {:value :conflicts} :default []}}}}
 
   {:name :_merge-apply-err-conflict
-   :description "Merge-conflict envelope — `{:ok false :reason :merge-conflict :error \"…\" :target :source :conflicts [...]}`."
+   :description "Merge-conflict envelope — `{:ok false :reason :merge-conflict :error \"…\" :target :source :conflicts [...]}`. Each conflict row is `:_conflicts-apply-entry`'s shape: the two resolved sides plus `:slot-name` and the per-field `:fields` diff."
    :parent :zipmap
    :return-type {:ok :bool
                  :reason :keyword
@@ -2596,7 +2599,9 @@
                  :conflicts [:list {:entity-name :any
                                     :entity-id :text
                                     :source-version :jsonb
-                                    :target-version :jsonb}]}
+                                    :target-version :jsonb
+                                    :slot-name :any
+                                    :fields :any}]}
    :args {:keys [{:value :ok} {:value :reason} {:value :http-status :literal? true} {:value :error}
                  {:value :target} {:value :source} {:value :conflicts}]
           :vals [{:value false}

@@ -139,16 +139,20 @@
 
 
 (defn branch-content-stamp
-  "A cheap content fingerprint of a branch's OWN version rows: the count
-   plus the max `:created-at` across the versioned-entity tables, filtered
-   by `branch-id`. Any edit or tombstone on the branch appends a version
-   row (newer `:created-at`, higher count), so the stamp advances — which
-   is how an approval recorded against an older stamp is detected as STALE
-   at merge time. `base-storage` is the UNWRAPPED handle (still org-scoped
-   beneath versioning on a multi-tenant pod)."
+  "A cheap content fingerprint of what a branch carries of its own: the
+   count plus the max `:created-at` across its version rows in the
+   versioned-entity tables AND the `branch-merge` rows landing on it.
+   Any edit or tombstone on the branch appends a version row, and any
+   merge INTO it appends a merge row that surfaces the merged branch's
+   rows as the branch's content (newer `:created-at`, higher count) —
+   so the stamp advances for both, which is how an approval recorded
+   against an older stamp is detected as STALE at merge time.
+   `base-storage` is the UNWRAPPED handle (still org-scoped beneath
+   versioning on a multi-tenant pod)."
   [base-storage branch-id]
-  (let [rows (mapcat (fn [ve] (sp/query-entities base-storage ve {:branch-id branch-id}))
-                     branch-content-version-entities)
+  (let [rows (concat (mapcat (fn [ve] (sp/query-entities base-storage ve {:branch-id branch-id}))
+                             branch-content-version-entities)
+                     (sp/query-entities base-storage :branch-merge {:target-branch-id branch-id}))
         max-ts (->> rows (keep :created-at) (map str) sort last)]
     (str (count rows) "|" (or max-ts "0"))))
 

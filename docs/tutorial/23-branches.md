@@ -29,6 +29,23 @@ copying.
 some existing branch — its `:base-branch-id` is the branch it
 was forked from.
 
+Three rules follow, and they are all you need to predict what a
+branch shows:
+
+- **A branch is a live view of its base for everything it hasn't
+  touched.** Edit, delete or create something on `main` and every
+  branch forked from `main` sees it at once — unless that branch
+  edited the same entity itself. Only what you touched is pinned.
+- **A merge carries a branch's own changes onto the target, and from
+  then on they count as the target's.** Merging `feat` into `main`
+  writes one merge record; nothing is copied (which is why a merged
+  branch can't be deleted).
+- **A conflict is one entity edited on both sides since the fork, to
+  different content.** Identical edits on both sides are not a
+  conflict; a change that reached `main` through someone else's
+  merge IS `main`'s change, so a second branch editing the same
+  entity is asked, not silently overwritten.
+
 ## The fork → edit → diff → merge loop
 
 At the top of the Explorer there's a branch chip showing your
@@ -197,9 +214,28 @@ approvals on the target, comment threads and suggestions — is
 ## Conflicts
 
 If you edited the same entity on BOTH branches after their fork
-point, merge throws. The conflict modal asks "which side wins"
-per entity. Pick `source` (the branch you're merging in) or
-`target` (the branch you're merging into) per row, hit **Apply merge**.
+point — to different content — merge stops. The conflict modal asks
+"which side wins" per entity. Pick `source` (the branch you're merging
+in) or `target` (the branch you're merging into) per row, hit
+**Apply merge**. Two things that are NOT a conflict: the same edit
+made on both sides, and an entity only one side touched. And one
+thing that is: the other side's version arrived through a merge — a
+sibling branch landed its edit on `main` before you did. The API's
+conflict rows carry `fields` (which fields differ, each side's value)
+and `slot-name` so a reviewer can decide without reading two version
+maps.
+
+### Syncing `main` into a feature branch
+
+A long-lived branch doesn't need to "pull" `main`: it follows `main`
+live for everything it hasn't touched. Merging `main` INTO the branch
+(`⇢` on the `main` row while standing on the branch) is still
+useful — it is how you settle the entities BOTH sides edited: the
+conflict modal lets you keep yours or take `main`'s, and afterwards the
+next sync only asks about newer edits. Everything you didn't touch
+keeps following `main` after the sync, exactly as before it. Taking
+`main`'s side pins that value as the branch's own edit — a later change
+to it on `main` is a conflict again.
 
 ## What DOESN'T merge: branch-local fn-defs
 

@@ -11,7 +11,9 @@
    `slot` is intentionally NOT versioned (immutable post-create).
 
    Algorithm: find own latest version on the branch, fall back through
-   branch-merge records, then recurse to the parent branch.
+   branch-merge records, then recurse to the parent branch. A merge
+   FROM an ancestor of the branch (a sync) surfaces nothing — the chain
+   walk already shows the ancestor live (`merge-candidates-from-cache`).
 
    Branch-local filter: fn rows whose effective `:branch-local?` is
    true (per `graphden.versioning.branch-local`) get foreign-branch
@@ -267,17 +269,17 @@
 
 
 (defn- pick-latest-candidate
-  "Return the `:version` whose `:effective-ts` is greatest, or nil
-   when the candidate seq is empty."
+  "Return the `{:version :effective-ts}` candidate whose `:effective-ts`
+   is greatest, or nil when the candidate seq is empty."
   [candidates]
   (when-let [candidates (seq candidates)]
-    (:version (reduce (fn [a b]
-                        (if (pos? (compare (:effective-ts b)
-                                           (:effective-ts a)))
-                          b
-                          a))
-                      (first candidates)
-                      (rest candidates)))))
+    (reduce (fn [a b]
+              (if (pos? (compare (:effective-ts b)
+                                 (:effective-ts a)))
+                b
+                a))
+            (first candidates)
+            (rest candidates))))
 
 
 (defn resolve-latest-version
@@ -582,9 +584,22 @@
    Branch-local filter: per-candidate. For `:fn` the entity-id is
    the fn-id; for `:fn-slot` / `:binding` the version row carries
    `:fn-id` in its data fields, so the same flag suppresses child
-   rows whose owning fn is sticky-local."
-  [base-storage binding-fn-ids entity-name entity-id versions-by-branch own-latest merges]
-  (when (seq merges)
+   rows whose owning fn is sticky-local.
+
+   `above` — the branches ABOVE this chain level. A merge whose
+   source is one of them (a SYNC: base → feature) contributes no
+   candidate: the branch already sees its base's rows live through the
+   chain walk, so surfacing them here with the merge's timestamp only
+   did harm — it FROZE the synced entities at their merge-time row
+   while untouched ones kept following the base (two semantics on one
+   branch), and it outranked the branch's own OLDER edit with the
+   base's row even when the base had never touched the entity after the
+   fork (a silent revert). What a sync merge keeps: its conflict
+   resolutions, written as the branch's own rows, and the fork point it
+   advances for the next conflict scan."
+  [base-storage binding-fn-ids entity-name entity-id versions-by-branch own-latest merges
+   above]
+  (when-let [merges (seq (remove #(contains? above (:source-branch-id %)) merges))]
     (let [;; For each merge, the `:source-timestamp` of the PREVIOUS merge of the
           ;; SAME source into this target (ordered by when the merge landed). A
           ;; re-merge's eligible window starts strictly AFTER it, so source
@@ -620,22 +635,19 @@
         {:version best :effective-ts (:target-timestamp m)}))))
 
 
-(defn- resolve-version-from-cache
-  "Resolves version for an entity using pre-loaded `versions-by-id`
-   + `merges-by-target` (built by `load-merge-aware-cache`). Mirrors
-   `resolve-version`'s recursion: at each chain level, combine
-   own-latest with merge-candidates and pick the latest by
-   effective-ts; recurse to parent if nothing matched.
+(defn- resolve-candidate-from-cache
+  "The winning `{:version row :effective-ts ts}` for an entity, from the
+   pre-loaded `versions-by-id` + `merges-by-target` (built by
+   `load-merge-aware-cache`). Mirrors `resolve-version`'s recursion: at
+   each chain level, combine own-latest with merge-candidates and pick
+   the latest by effective-ts; recurse to parent if nothing matched.
 
-   The old simplified algorithm (chain priority only, no merge
-   support) silently dropped merge-record visibility on the batch
-   path — `/api/graph/entities` and the executor's compiled graph
-   load both went through here, so a `POST /api/branches/X/merge`
-   created the branch-merge row but never affected reads (#52).
-
-   `entity-name` + `base-storage` are threaded down to
-   `merge-candidates-from-cache` so the `:fn` branch-local filter can
-   call `bl/effective-branch-local?`. Non-fn entities skip the check."
+   `:effective-ts` is WHEN the winning row reached the branch it won on
+   — its own `created-at` for the branch's own row, the merge's
+   `target-timestamp` for a merge-surfaced one. That is what the
+   conflict scan compares against the fork point: a row a merge landed
+   on the target after the fork is the target's change, even though the
+   target owns no version row for it (`merge/detect-conflicts`)."
   [base-storage entity-name
    {:keys [versions-by-id merges-by-target branch-chain binding-fn-ids]} entity-id]
   (when-let [versions (get versions-by-id entity-id)]
@@ -646,7 +658,8 @@
                 merges (get merges-by-target bid)
                 merge-cands (merge-candidates-from-cache base-storage binding-fn-ids
                                                          entity-name entity-id by-branch
-                                                         own-latest merges)
+                                                         own-latest merges
+                                                         (set (rest chain)))
                 all-candidates (cond-> []
                                  own-latest
                                  (conj {:version own-latest
@@ -657,11 +670,29 @@
                 (recur (rest chain)))))))))
 
 
-(defn- winning-versions
-  "`{entity-id → winning version row}` for `ids` on `branch-id`'s chain —
-   live or tombstone, merge-aware — from ONE `load-merge-aware-cache`.
-   Ids with no version on the chain are absent. The shared core of the
-   batch resolvers below."
+(defn- resolve-version-from-cache
+  "Resolves version for an entity using pre-loaded `versions-by-id`
+   + `merges-by-target` — `resolve-candidate-from-cache`'s row.
+
+   The old simplified algorithm (chain priority only, no merge
+   support) silently dropped merge-record visibility on the batch
+   path — `/api/graph/entities` and the executor's compiled graph
+   load both went through here, so a `POST /api/branches/X/merge`
+   created the branch-merge row but never affected reads (#52).
+
+   `entity-name` + `base-storage` are threaded down to
+   `merge-candidates-from-cache` so the `:fn` branch-local filter can
+   call `bl/effective-branch-local?`. Non-fn entities skip the check."
+  [base-storage entity-name cache entity-id]
+  (:version (resolve-candidate-from-cache base-storage entity-name cache entity-id)))
+
+
+(defn winning-candidates
+  "`{entity-id → {:version row :effective-ts ts}}` for `ids` on
+   `branch-id`'s chain — live or tombstone, merge-aware — from ONE
+   `load-merge-aware-cache`. Ids with no version on the chain are
+   absent. Public for the merge module's conflict scan, which needs
+   `:effective-ts` (see `resolve-candidate-from-cache`)."
   [base-storage entity-name ids branch-id]
   (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
         cache
@@ -669,9 +700,16 @@
                                 (vec ids) branch-id)]
     (into {}
           (keep (fn [eid]
-                  (when-let [v (resolve-version-from-cache base-storage entity-name cache eid)]
-                    [eid v])))
+                  (when-let [c (resolve-candidate-from-cache base-storage entity-name cache eid)]
+                    [eid c])))
           ids)))
+
+
+(defn- winning-versions
+  "`{entity-id → winning version row}` — `winning-candidates` minus the
+   timestamps. The shared core of the batch resolvers below."
+  [base-storage entity-name ids branch-id]
+  (update-vals (winning-candidates base-storage entity-name ids branch-id) :version))
 
 
 (defn resolve-entities-batch

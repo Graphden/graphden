@@ -7,7 +7,8 @@
 
    Conflict detection: an entity is conflicted when it has been modified on both
    the source and target branches after the fork point (branch creation time or
-   last merge between the two).
+   last merge between the two) to different content. A change that reached a
+   side through a merge counts as that side's change (`detect-conflicts`).
 
    Detects conflicts in any versioned entity — see
    `graphden.versioning.storage.resolution/entity-config` for the
@@ -18,6 +19,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
     [graphden.versioning.branch-local :as bl]
+    [graphden.versioning.storage.field-diff :as fd]
     [graphden.versioning.storage.resolution :as res]
     [graphden.versioning.storage.uniqueness :as uniq])
   (:import
@@ -55,11 +57,9 @@
      edited before the source branch existed (a false negative → silent
      clobber). See `sibling-merge-detects-conflict-…-test`.
 
-   Residual (documented, not solved here): `detect-conflicts` inspects only
-   the two ENDPOINTS' own version rows, so a change on an INTERMEDIATE
-   branch of a multi-level merge (grandchild→grandparent) that is inherited
-   but not re-stamped on an endpoint is still not compared — that needs
-   examining inherited rows, a larger change than the fork-point."
+   Rows that reached an endpoint through a MERGE after this point count as
+   that endpoint's changes (`detect-conflicts` judges each side by when its
+   winning row arrived, not by who wrote it)."
   [base-storage source-branch-id target-branch-id]
   (let [source-chain (res/collect-branch-chain base-storage source-branch-id)
         target-chain (res/collect-branch-chain base-storage target-branch-id)
@@ -105,45 +105,43 @@
       branch-created)))
 
 
-(defn- modified-entities-after
-  "Returns set of entity ids that have been modified on a branch after the fork point.
-   Checks all versioned entity types (fn, slot, fn-slot, binding, list-item).
-
-   `only-ids` (optional `{entity-name #{entity-id …}}`) narrows each type's
-   query to those entity ids — `detect-conflicts` passes the SOURCE's
-   modified set when scanning the TARGET, because a conflict needs the id on
-   both sides: without it the target scan read every version row on `main`
-   (5.5k fns / 10k bindings on the golden graph) to intersect with a
-   handful. A type absent from `only-ids` contributes nothing."
-  ([base-storage branch-id after-ts]
-   (modified-entities-after base-storage branch-id after-ts nil))
-  ([base-storage branch-id after-ts only-ids]
-   (reduce-kv
-     (fn [acc entity-name {:keys [version-entity version-id-field]}]
-       (let [ids (when only-ids (get only-ids entity-name))
-             all-versions (cond
-                            (nil? only-ids)
-                            (sp/query-entities base-storage version-entity
-                                               {:branch-id branch-id})
-                            (seq ids)
-                            (sp/query-entities base-storage version-entity
-                                               {:branch-id branch-id
-                                                version-id-field (vec ids)})
-                            :else [])
-             modified (filter #(pos? (compare (:created-at %) after-ts)) all-versions)]
-         (reduce (fn [m v]
-                   (update m entity-name (fnil conj #{}) (get v version-id-field)))
-                 acc
-                 modified)))
-     {}
-     res/entity-config)))
+(defn- merged-in-after
+  "The branches whose rows a merge landed on `branch-id` after `after-ts`
+   — from then on their rows are `branch-id`'s content too."
+  [base-storage branch-id after-ts]
+  (into #{}
+        (comp (filter #(pos? (compare (:target-timestamp %) after-ts)))
+              (map :source-branch-id))
+        (sp/query-entities base-storage :branch-merge {:target-branch-id branch-id})))
 
 
-(defn batch-resolve
+(defn- candidate-ids
+  "`{entity-name #{entity-id …}}` — every entity the SOURCE side changed
+   after the fork: the ids of its own version rows written since, plus
+   every row of a branch merged into it since (`merged-in-after`). One
+   query per versioned type. An over-approximation is fine — each id is
+   then resolved on both sides and judged by when its winning row
+   arrived; an id missed here is a lost update."
+  [base-storage source-branch-id fp]
+  (let [merged (merged-in-after base-storage source-branch-id fp)
+        branches (into [source-branch-id] merged)
+        changed? (fn [row]
+                   (or (contains? merged (:branch-id row))
+                       (pos? (compare (:created-at row) fp))))]
+    (reduce-kv
+      (fn [acc entity-name {:keys [version-entity version-id-field]}]
+        (let [ids (into #{}
+                        (comp (filter changed?) (map version-id-field))
+                        (sp/query-entities base-storage version-entity
+                                           {:branch-id branches}))]
+          (cond-> acc (seq ids) (assoc entity-name ids))))
+      {}
+      res/entity-config)))
+
+
+(defn- batch-resolve
   "Resolve every `entity-id` of every `entity-name` on `branch-id` in
-   one query per type. Returns `{[entity-name entity-id] resolved}`.
-   Public so `diff-view` can resolve display names for fns a diff
-   references but does not itself contain."
+   one query per type. Returns `{[entity-name entity-id] resolved}`."
   [base-storage entity-name->ids branch-id]
   ;; Chain cache is process-wide (`resolution/global-chain-cache`)
   ;; — no per-call binding required.
@@ -162,72 +160,172 @@
     entity-name->ids))
 
 
+(defn- content
+  "What a winning candidate SAYS about the entity: its version-data
+   fields, or nil for a tombstone (deleted). Two sides with equal
+   content have nothing to resolve — the same edit made twice, or the
+   same row seen from both branches."
+  [entity-name {:keys [version]}]
+  (when-not (res/tombstone? version)
+    (select-keys version (:version-data-fields (get res/entity-config entity-name)))))
+
+
+(defn- modified-after?
+  "Did this side change the entity after `fp`? Its winning row arrived
+   on the side's own level after the fork — written there, or landed
+   by a merge (`resolution/winning-candidates` `:effective-ts`); a row
+   inherited from an ancestor that predates the fork did not."
+  [candidate fp]
+  (boolean (and candidate (pos? (compare (:effective-ts candidate) fp)))))
+
+
+(defn- divergent-ids
+  "`{entity-name #{entity-id …}}` of `candidates` that both sides
+   modified after `fp` to DIFFERENT content, with each side's winning
+   candidate: `{:src {entity-name {id cand}} :tgt {…} :ids {…}}`."
+  [base-storage candidates source-branch-id target-branch-id fp]
+  (reduce-kv
+    (fn [acc entity-name ids]
+      (let [src (res/winning-candidates base-storage entity-name ids source-branch-id)
+            tgt (res/winning-candidates base-storage entity-name ids target-branch-id)
+            divergent (into #{}
+                            (filter (fn [id]
+                                      (let [s (get src id) t (get tgt id)]
+                                        (and (modified-after? s fp)
+                                             (modified-after? t fp)
+                                             (not= (content entity-name s)
+                                                   (content entity-name t))))))
+                            ids)]
+        (cond-> acc
+          (seq divergent) (-> (assoc-in [:ids entity-name] divergent)
+                              (assoc-in [:src entity-name] (select-keys src divergent))
+                              (assoc-in [:tgt entity-name] (select-keys tgt divergent))))))
+    {:ids {} :src {} :tgt {}}
+    candidates))
+
+
+(defn- resolved-side
+  "The conflict payload's view of one side: identity + version data for
+   a live row (what `resolve-entity` answers), nil when that side
+   deleted the entity."
+  [entity-name identity-rec {:keys [version]}]
+  (when-not (res/tombstone? version)
+    (merge identity-rec
+           (res/extract-version-data version (:version-id-field (get res/entity-config entity-name))))))
+
+
 (defn- conflict-owning-fn-id
   "The fn-id whose `:branch-local?` flag governs a conflicting entity.
    `:fn` is its own owner; `:binding`/`:fn-slot` resolved rows carry
-   `:fn-id`; `:binding-list-item` chains through its owning binding.
-   `:slot` is a global identity shared across fns (no single owner),
-   so nil — never filtered as branch-local. Returns nil when no owner
-   can be determined."
-  [base-storage entity-name entity-id resolved]
+   `:fn-id`; `:binding-list-item` chains through its owning binding
+   (`bindings-by-id`, read once for the whole scan). `:slot` is a global
+   identity shared across fns (no single owner), so nil — never filtered
+   as branch-local. Returns nil when no owner can be determined."
+  [bindings-by-id entity-name entity-id resolved]
   (case entity-name
     :fn entity-id
     (:fn-slot :binding) (:fn-id resolved)
-    :binding-list-item (some->> (:binding-id resolved)
-                                (sp/read-entity base-storage :binding)
-                                :fn-id)
+    :binding-list-item (:fn-id (get bindings-by-id (:binding-id resolved)))
     nil))
 
 
+(defn- conflict-slot-id
+  [bindings-by-id entity-name resolved]
+  (case entity-name
+    (:fn-slot :binding) (:slot-id resolved)
+    :binding-list-item (:slot-id (get bindings-by-id (:binding-id resolved)))
+    nil))
+
+
+(defn- conflict-rows
+  "The `[{:entity-name :entity-id :source-version :target-version
+   :slot-name :fields} …]` payload for `divergent-ids`' result: one
+   identity read per type, one read of the list-items' bindings and of
+   the slots named, one name resolution for the fn-typed refs — all
+   batched, and none of it runs when nothing diverged. Branch-local fns
+   are dropped here (see `detect-conflicts`)."
+  [base-storage {:keys [ids src tgt]} source-branch-id target-branch-id]
+  (let [identities (into {}
+                         (map (fn [[entity-name eids]]
+                                [entity-name (sp/read-entities base-storage entity-name (vec eids))]))
+                         ids)
+        rows (for [[entity-name eids] ids
+                   eid eids
+                   :let [identity-rec (get-in identities [entity-name eid])
+                         sv (resolved-side entity-name identity-rec (get-in src [entity-name eid]))
+                         tv (resolved-side entity-name identity-rec (get-in tgt [entity-name eid]))]]
+               {:entity-name entity-name :entity-id eid
+                :source-version sv :target-version tv})
+        present (fn [{:keys [source-version target-version]}] (or source-version target-version))
+        item-binding-ids (into [] (comp (filter #(= :binding-list-item (:entity-name %)))
+                                        (keep #(:binding-id (present %)))
+                                        (distinct))
+                               rows)
+        bindings-by-id (if (seq item-binding-ids)
+                         (sp/read-entities base-storage :binding item-binding-ids)
+                         {})
+        slot-ids (into [] (comp (keep #(conflict-slot-id bindings-by-id (:entity-name %) (present %)))
+                                (distinct))
+                       rows)
+        slots-by-id (if (seq slot-ids) (sp/read-entities base-storage :slot slot-ids) {})
+        fn-names (fd/resolve-fn-names base-storage
+                                      (fd/ref-ids (mapcat (juxt :source-version :target-version) rows))
+                                      source-branch-id target-branch-id)]
+    (vec
+      (for [{:keys [entity-name entity-id source-version target-version] :as row} rows
+            :let [owner (conflict-owning-fn-id bindings-by-id entity-name entity-id (present row))
+                  slot-id (conflict-slot-id bindings-by-id entity-name (present row))]
+            ;; A branch-local fn's config is intentionally
+            ;; per-branch — it must NEVER surface as a merge
+            ;; conflict. The resolver already drops its
+            ;; cross-branch version rows on read; without
+            ;; this the user is forced to resolve a phantom
+            ;; conflict and, by picking `:source`, would
+            ;; leak the source branch's value onto the
+            ;; target (exactly what branch-local forbids).
+            :when (not (and owner (bl/effective-branch-local? base-storage owner)))]
+        (cond-> (assoc row :fields (if (and source-version target-version)
+                                     (fd/field-entries fn-names source-version target-version)
+                                     []))
+          slot-id (assoc :slot-name (:name (get slots-by-id slot-id))))))))
+
+
 (defn detect-conflicts
-  "Finds entities modified in both source and target branches after fork point.
+  "Finds entities modified on BOTH branches after the fork point, to
+   different content.
+
+   A side \"modified\" an entity when its winning row reached that side
+   after the fork — written there, or LANDED THERE BY A MERGE: after
+   sibling A merges into main, A's edit is main's content, and sibling
+   B's merge must be asked about it rather than silently replace it
+   (the target used to be scanned for its OWN version rows only — a
+   lost update on every second sibling). The source side is scanned
+   the same way (`candidate-ids`), so a sync main → feature asks about
+   what main took from a sibling too.
+
+   Identical content on both sides is not a conflict (the same edit
+   made twice, both sides deleting, the one row both branches inherit).
+   Different fields of one entity still conflict — the row is the
+   unit — but `:fields` says which fields differ and what each side
+   holds, in the editor's display form (`field-diff`).
 
    Returns a map:
    {:conflicts [{:entity-name :fn
                  :entity-id uuid
-                 :source-version <resolved version data>
-                 :target-version <resolved version data>}]
+                 :source-version <resolved version data, nil = deleted there>
+                 :target-version <resolved version data, nil = deleted there>
+                 :slot-name \"x\"           ; binding / fn-slot / list-item rows
+                 :fields [{:field \"value\" :source \"1\" :target \"2\"} …]}]
     :fork-point <Instant>}"
   [base-storage source-branch-id target-branch-id]
-  (let [fp (fork-point base-storage source-branch-id target-branch-id)
-        source-modified (modified-entities-after base-storage source-branch-id fp)
-        ;; Only the ids the source touched can conflict — scan the target for
-        ;; exactly those instead of every version row it carries.
-        target-modified (modified-entities-after base-storage target-branch-id fp
-                                                 source-modified)
-        ;; Conflicting entity-ids per type — modified on BOTH branches.
-        conflict-ids (reduce-kv
-                       (fn [acc entity-name source-ids]
-                         (let [target-ids (get target-modified entity-name #{})
-                               common (set/intersection source-ids target-ids)]
-                           (cond-> acc
-                             (seq common) (assoc entity-name common))))
-                       {}
-                       source-modified)
-        ;; Two branch resolutions, batched per entity type.
-        source-resolved (batch-resolve base-storage conflict-ids source-branch-id)
-        target-resolved (batch-resolve base-storage conflict-ids target-branch-id)
-        conflicts (for [[entity-name ids] conflict-ids
-                        entity-id ids
-                        :let [src-v (get source-resolved [entity-name entity-id])
-                              owner (conflict-owning-fn-id base-storage entity-name
-                                                           entity-id src-v)]
-                        ;; A branch-local fn's config is intentionally
-                        ;; per-branch — it must NEVER surface as a merge
-                        ;; conflict. The resolver already drops its
-                        ;; cross-branch version rows on read; without
-                        ;; this the user is forced to resolve a phantom
-                        ;; conflict and, by picking `:source`, would
-                        ;; leak the source branch's value onto the
-                        ;; target (exactly what branch-local forbids).
-                        :when (not (and owner
-                                        (bl/effective-branch-local? base-storage owner)))]
-                    {:entity-name entity-name
-                     :entity-id entity-id
-                     :source-version src-v
-                     :target-version (get target-resolved [entity-name entity-id])})]
-    {:conflicts (vec conflicts)
-     :fork-point fp}))
+  (res/call-with-merges-memo
+    (fn []
+      (let [fp (fork-point base-storage source-branch-id target-branch-id)
+            candidates (candidate-ids base-storage source-branch-id fp)
+            divergent (divergent-ids base-storage candidates
+                                     source-branch-id target-branch-id fp)]
+        {:conflicts (conflict-rows base-storage divergent source-branch-id target-branch-id)
+         :fork-point fp}))))
 
 
 (defn- assert-resolutions-cover-conflicts!

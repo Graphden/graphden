@@ -6,27 +6,30 @@
    stubbed `mrg/diff-branches` + protocol stub (the DB-backed path
    stays covered by the `^:integration` `diff-view-test`).
 
-   `^:serial` — `with-redefs` on `mrg/*` / `bl/*` mutates root vars."
+   `^:serial` — `with-redefs` on `mrg/*` / `fd/*` / `bl/*` mutates root vars."
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.branch-local :as bl]
     [graphden.versioning.storage.diff-view :as dv]
+    [graphden.versioning.storage.field-diff :as fd]
     [graphden.versioning.storage.merge :as mrg]))
 
 
-(def ^:private truncate #'dv/truncate)
-(def ^:private short-id #'dv/short-id)
-(def ^:private fn-label #'dv/fn-label)
-(def ^:private display-value #'dv/display-value)
-(def ^:private changed-fields #'dv/changed-fields)
+;; The value renderers moved to `field-diff` (shared with the merge
+;; conflict payload); their contract is pinned here, where it was.
+(def ^:private truncate fd/truncate)
+(def ^:private short-id fd/short-id)
+(def ^:private fn-label fd/fn-label)
+(def ^:private display-value fd/display-value)
+(def ^:private changed-fields fd/changed-fields)
 (def ^:private owner-fn-id #'dv/owner-fn-id)
 (def ^:private entry-slot-id #'dv/entry-slot-id)
 (def ^:private binding-preview #'dv/binding-preview)
 (def ^:private entry-preview #'dv/entry-preview)
 (def ^:private entry #'dv/entry)
-(def ^:private resolve-fn-names #'dv/resolve-fn-names)
+(def ^:private resolve-fn-names fd/resolve-fn-names)
 
 
 ;; === string massaging =======================================================
@@ -218,20 +221,20 @@
         anon #uuid "22222222-2222-4222-8222-222222222222"
         tgt-only #uuid "33333333-3333-4333-8333-333333333333"
         calls (atom [])]
-    (with-redefs [mrg/batch-resolve
-                  (fn [_ {ids :fn} branch-id]
-                    (swap! calls conj [branch-id ids])
-                    (cond
-                      (= branch-id src-b)
-                      ;; `named` resolves with a name; `anon` resolves
-                      ;; but IS anonymous; `tgt-only` doesn't resolve.
-                      (cond-> {}
-                        (ids named) (assoc [:fn named] {:name "alpha"})
-                        (ids anon) (assoc [:fn anon] {:name nil}))
-                      (= branch-id tgt-b)
-                      (cond-> {}
-                        (ids tgt-only) (assoc [:fn tgt-only]
-                                              {:name "beta"}))))]
+    (with-redefs [fd/names-on
+                  (fn [_ ids branch-id]
+                    (let [ids (set ids)]
+                      (swap! calls conj [branch-id ids])
+                      (cond
+                        (= branch-id src-b)
+                        ;; `named` resolves with a name; `anon` resolves
+                        ;; but IS anonymous; `tgt-only` doesn't resolve.
+                        (cond-> {}
+                          (ids named) (assoc named {:name "alpha"})
+                          (ids anon) (assoc anon {:name nil}))
+                        (= branch-id tgt-b)
+                        (cond-> {}
+                          (ids tgt-only) (assoc tgt-only {:name "beta"})))))]
       (let [names (resolve-fn-names :stub [named anon tgt-only] src-b tgt-b)]
         (testing "source names win; target fills only what source lacked"
           (is (= {named "alpha" tgt-only "beta"} names)))
@@ -340,19 +343,19 @@
                              {:source-branch-id s :target-branch-id t
                               :diffs diffs})
 
-                           mrg/batch-resolve
-                           (fn [_ {ids :fn} branch-id]
+                           fd/names-on
+                           (fn [_ ids branch-id]
                              (into {}
                                    (keep (fn [id]
                                            (cond
                                              (and (= id fn-a) (= branch-id src-b))
-                                             [[:fn id] {:name "alpha"}]
+                                             [id {:name "alpha"}]
                                              ;; ref-x resolves only on target.
                                              (and (= id ref-x) (= branch-id tgt-b))
-                                             [[:fn id] {:name "handler"}]
+                                             [id {:name "handler"}]
                                              ;; anon fn resolves namelessly.
                                              (= id fn-anon)
-                                             [[:fn id] {:name nil}])))
+                                             [id {:name nil}])))
                                    ids))
 
                            bl/effective-branch-local?

@@ -5,8 +5,9 @@
    result into the structure the editor's diff modal renders: entries
    GROUPED under the fn that owns them, each entry carrying human
    labels (slot name, item position) and — for `:modified` rows — the
-   per-field before/after pairs. Id-like values are resolved to names
-   where one exists (owning fn, slot, fn-typed ref fields) and ids are
+   per-field before/after pairs (`field-diff`, shared with the merge
+   conflict payload). Id-like values are resolved to names where one
+   exists (owning fn, slot, fn-typed ref fields) and ids are
    stringified: this is a read-only projection for rendering, not a
    wire schema. The JSON API keeps serving the v1 shape from
    `diff-branches` unchanged."
@@ -15,60 +16,14 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.util.ns-path :as ns-path]
     [graphden.versioning.branch-local :as bl]
+    [graphden.versioning.storage.field-diff :as fd]
     [graphden.versioning.storage.merge :as mrg]))
-
-
-(def ^:private ref-fields
-  "Version-map fields whose value is a fn-id — displayed as the
-   referenced fn's name instead of a bare uuid."
-  #{:ref-fn-id :type-override-fn-id :resolver-fn-id :return-type-fn-id
-    :base-fn-id :element-fn-id :type-fn-id})
 
 
 (defn- side-version
   "The present side of a diff row — source when it has one, else target."
   [{:keys [source-version target-version]}]
   (or source-version target-version))
-
-
-(defn- short-id
-  [id]
-  (some-> id str (subs 0 8)))
-
-
-(defn- truncate
-  [s n]
-  (let [s (str s)]
-    (if (> (count s) n) (str (subs s 0 (dec n)) "…") s)))
-
-
-(defn- fn-label
-  [fn-names id]
-  (if-let [n (get fn-names id)]
-    (str ":" n)
-    (str "#" (short-id id))))
-
-
-(defn- display-value
-  "Human form of one field value: fn-refs become `:name`, strings stay
-   bare, everything else pr-str — all truncated for row display."
-  [fn-names field v]
-  (cond
-    (nil? v) "∅"
-    (and (contains? ref-fields field) (uuid? v)) (fn-label fn-names v)
-    (string? v) (truncate v 120)
-    ;; Bound the print itself — a page-sized hiccup value must not be
-    ;; fully serialized just to keep its first 120 chars.
-    :else (truncate (binding [*print-length* 24 *print-level* 4] (pr-str v))
-                    120)))
-
-
-(defn- changed-fields
-  [sv tv]
-  (->> (into #{} (concat (keys sv) (keys tv)))
-       (remove #{:created-at})
-       (filter #(not= (get sv %) (get tv %)))
-       (sort)))
 
 
 (defn- owner-fn-id
@@ -98,16 +53,16 @@
    that exist on only one branch (nothing to pair field-by-field)."
   [fn-names m]
   (->> [(when (some? (:value m))
-          (str "value = " (display-value fn-names :value (:value m))))
+          (str "value = " (fd/display-value fn-names :value (:value m))))
         (when (:ref-fn-id m)
-          (str "ref → " (fn-label fn-names (:ref-fn-id m))))
+          (str "ref → " (fd/fn-label fn-names (:ref-fn-id m))))
         (when (:type-override-fn-id m)
-          (str "type ⇒ " (fn-label fn-names (:type-override-fn-id m))))
+          (str "type ⇒ " (fd/fn-label fn-names (:type-override-fn-id m))))
         (when (:terminal m) "terminal")
         (when (:list-append m) "list-append")
         (when (:list-closed m) "list-closed")
         (when (some? (:description m))
-          (str "“" (truncate (:description m) 60) "”"))]
+          (str "“" (fd/truncate (:description m) 60) "”"))]
        (remove nil?)
        (str/join " · ")
        (not-empty)))
@@ -117,13 +72,13 @@
   [fn-names {:keys [entity-name] :as diff}]
   (let [m (side-version diff)]
     (case entity-name
-      :fn (when-let [d (:description m)] (str "“" (truncate d 80) "”"))
+      :fn (when-let [d (:description m)] (str "“" (fd/truncate d 80) "”"))
       :fn-slot (some->> (:position m) (str "at position "))
       :binding (binding-preview fn-names m)
       :binding-list-item
       (->> [(when (some? (:value m))
-              (display-value fn-names :value (:value m)))
-            (when (:ref-fn-id m) (str "→ " (fn-label fn-names (:ref-fn-id m))))]
+              (fd/display-value fn-names :value (:value m)))
+            (when (:ref-fn-id m) (str "→ " (fd/fn-label fn-names (:ref-fn-id m))))]
            (remove nil?)
            (str/join " ")
            (not-empty))
@@ -142,10 +97,7 @@
     :as diff}]
   (let [slot-id (entry-slot-id diff bindings-by-id)
         fields (when (= :modified change)
-                 (vec (for [f (changed-fields source-version target-version)]
-                        {:field (name f)
-                         :source (display-value fn-names f (get source-version f))
-                         :target (display-value fn-names f (get target-version f))})))]
+                 (fd/field-entries fn-names source-version target-version))]
     (cond-> {:entity-name entity-name
              :entity-id (str entity-id)
              :change change}
@@ -160,28 +112,6 @@
       (seq fields) (assoc :fields fields)
       (not= :modified change)
       (assoc :preview (entry-preview fn-names diff)))))
-
-
-(defn- resolve-fn-names
-  "Best-effort `{fn-id name}` for `ids`: resolved on the source branch
-   first, then the target for the remainder. Anonymous / vanished fns
-   simply stay absent from the map."
-  [base-storage ids source-branch-id target-branch-id]
-  (if (empty? ids)
-    {}
-    (let [src (mrg/batch-resolve base-storage {:fn (set ids)} source-branch-id)
-          ;; Retry on the target only ids that did not resolve AT ALL —
-          ;; an anonymous fn resolved with a nil name stays anonymous on
-          ;; every branch; re-querying it buys nothing.
-          missing (set (remove #(some? (get src [:fn %])) ids))
-          tgt (when (seq missing)
-                (mrg/batch-resolve base-storage {:fn missing} target-branch-id))]
-      (into {}
-            (keep (fn [id]
-                    (when-let [n (or (:name (get src [:fn id]))
-                                     (:name (get tgt [:fn id])))]
-                      [id n])))
-            ids))))
 
 
 (def ^:private entry-rank
@@ -229,14 +159,10 @@
                       (sp/read-entities base-storage :slot slot-ids)
                       {})
         rows (map #(assoc % ::owner (owner-fn-id % bindings-by-id)) diffs)
-        ref-ids (set (for [d diffs
-                           side [:source-version :target-version]
-                           [k v] (get d side)
-                           :when (and (contains? ref-fields k) (uuid? v))]
-                       v))
+        ref-ids (fd/ref-ids (mapcat (juxt :source-version :target-version) diffs))
         name-ids (into ref-ids (keep ::owner rows))
-        fn-names (resolve-fn-names base-storage name-ids
-                                   source-branch-id target-branch-id)
+        fn-names (fd/resolve-fn-names base-storage name-ids
+                                      source-branch-id target-branch-id)
         ;; Namespace PATH per owning fn — the Explorer's compare-mode
         ;; aggregates and ghost rows group by it, and the CLIENT can't
         ;; derive it for a fn that exists only on the compared branch
@@ -266,7 +192,7 @@
                        {:fn-id (some-> owner str)
                         :fn-name (get fn-names owner)
                         :fn-label (if owner
-                                    (fn-label fn-names owner)
+                                    (fd/fn-label fn-names owner)
                                     (if (every? #(= :resource-override (:entity-name %)) rs)
                                       "(assets)"
                                       "(unowned)"))

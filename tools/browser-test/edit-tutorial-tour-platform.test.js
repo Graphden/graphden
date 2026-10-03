@@ -308,17 +308,17 @@ async function revertAssetViaApi(page, base) {
     assert(await clickTourButton(page, 'Next'), 'lesson 25 reload Next');
     await waitTourTitle(page, 'See exactly what you changed', 150000);
     // After the reload the shell remounts: wait for the panel's rows, not
-    // just the nav click, before hunting for the override row.
-    await page.evaluate(() => {
-      gdShellSurface('operate');
-      document.querySelector('#gd-operate-nav button[data-section="assets"]')?.click();
-    });
-    await page.waitForSelector('[data-section="assets"] .gd-asset-row', {timeout: 30000});
-    await page.waitForSelector('.gd-asset-chip-override', {timeout: 20000});
-    await page.evaluate(() => {
-      document.querySelector('.gd-asset-chip-override')
-        .closest('.gd-asset-row').querySelector('.gd-asset-edit-btn').click();
-    });
+    // just a one-shot nav click, before hunting for the specific override row.
+    await openOperateSection(page, 'assets');
+    const assetRow = page.locator('[data-section="assets"] .gd-asset-row')
+      .filter({has: page.locator('.gd-asset-edit-btn[value="' + ASSET_PATH + '"]')});
+    await assetRow.locator('.gd-asset-chip-override').waitFor({state: 'visible', timeout: 20000});
+    const editResponse = page.waitForResponse((r) =>
+      r.url().includes('/partials/asset-edit') && r.request().method() === 'GET');
+    await assetRow.locator('.gd-asset-edit-btn[value="' + ASSET_PATH + '"]').click();
+    const editResult = await editResponse;
+    assert(editResult.ok(), 'opening the overridden asset succeeds (' + editResult.status() + ')');
+    await page.waitForSelector('#gd-asset-editor form.gd-asset-edit-form', {timeout: 30000});
     await page.waitForSelector('#gd-asset-editor .gd-asset-diff-btn', {timeout: 30000});
     await page.evaluate(() => document.querySelector('#gd-asset-editor .gd-asset-diff-btn').click());
     // CodeMirror mounts only the visible lines, so the marker — the last line

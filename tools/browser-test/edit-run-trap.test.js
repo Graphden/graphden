@@ -47,7 +47,11 @@ async function openRuns(page, name) {
 
     // Make sure no trap is armed from an earlier run, then arm.
     await api(page, 'POST', '/api/debug/catch/cancel');
-    await page.evaluate(() => document.querySelector('#gd-insp-runs .gd-run-trap #gd-debug-arm').click());
+    const armResponse = page.waitForResponse((r) =>
+      r.url().includes('/api/debug/catch') && r.request().method() === 'POST');
+    await page.locator('#gd-insp-runs .gd-run-trap #gd-debug-arm').click();
+    const armResult = await armResponse;
+    assert(armResult.ok(), 'arming request succeeds (' + armResult.status() + ')');
     await page.waitForSelector('#gd-insp-runs .gd-run-trap .debug-armed-line', {timeout: 30000});
     const armed = await page.evaluate(() =>
       document.querySelector('#gd-insp-runs .gd-run-trap .debug-armed-line')?.textContent || '');

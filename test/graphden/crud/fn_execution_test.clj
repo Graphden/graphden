@@ -322,8 +322,9 @@
                                   {:fns [base composed id-base callee]
                                    :slots [slot-a v-slot] :bindings [v-bind ref-bind]}))
       (sp/update-entity storage :binding (:id v-bind) {:value "hello"})
-      (is (nil? (type-check/type-check-fn-and-dependents! c storage (:id callee)))
-          "the callee itself is well-typed")
+      (is (= {:dependent-type-warning-count 1}
+             (type-check/type-check-fn-and-dependents! c storage (:id callee)))
+          "the callee is well-typed and its unchanged caller now has a diagnostic")
       (let [out (fn-exec/apply-execute c {:fn-id (:id composed)
                                           :args {:b 2}
                                           :timeout-ms 5000 :persist? false})]

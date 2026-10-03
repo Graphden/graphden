@@ -1,0 +1,61 @@
+// editor-auth.js — a persisted type warning must be visible on the same write
+// that creates it, while preserving the response body for the caller.
+//
+// Run:  node tools/runtime-test/auth-mutate-type-warnings.test.js
+// Exit: 0 on pass, 1 on failure.
+
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const source = fs.readFileSync(path.join(__dirname, '..', '..', 'resources', 'packages', 'app', 'editor', 'editor-auth.js'), 'utf8');
+
+const messages = [];
+async function runWithToast(response) {
+  const context = vm.createContext({
+    URLSearchParams,
+    fetch: async () => response,
+    localStorage: { getItem: () => null },
+    document: { body: { addEventListener() {} } },
+    window: {},
+    gdToast: (...args) => messages.push(args),
+  });
+  context.window = context;
+  vm.runInContext(source, context);
+  const result = await context.authMutate('POST', '/api/entities/binding', { value: '1' });
+  return result;
+}
+
+function jsonResponse(body) {
+  return {
+    ok: true,
+    status: 200,
+    headers: { get: () => 'application/json' },
+    clone: () => ({ json: async () => body }),
+    json: async () => body,
+  };
+}
+
+(async () => {
+  const warning = jsonResponse({ 'created': 'id', 'type-warnings': [{ message: 'private diagnostic text' }] });
+  const preserved = await runWithToast(warning);
+  assert.equal(preserved, warning, 'the original Response is returned');
+  assert.equal(messages.length, 1, 'a successful write with warnings shows feedback');
+  assert.match(messages[0][0], /type warning/);
+  assert.match(messages[0][0], /this function/);
+  assert.doesNotMatch(messages[0][0], /private diagnostic text/, 'the toast does not expose diagnostic contents');
+
+  messages.length = 0;
+  await runWithToast(jsonResponse({ created: 'id', 'dependent-type-warning-count': 2 }));
+  assert.equal(messages.length, 1, 'dependent diagnostics are surfaced when the edited function remains valid');
+  assert.match(messages[0][0], /2 dependent functions/);
+
+  messages.length = 0;
+  await runWithToast(jsonResponse({ created: 'id' }));
+  assert.equal(messages.length, 0, 'a clean write does not show a warning');
+
+  console.log('✓ authMutate surfaces type warnings without consuming or disclosing the diagnostic body');
+})().catch((error) => { console.error(error); process.exitCode = 1; });

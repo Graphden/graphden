@@ -186,7 +186,24 @@ async function authMutate(method, url, fields) {
     opts.headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
     opts.body = body;
   }
-  return authFetch(url, opts);
+  const response = await authFetch(url, opts);
+  // Ordinary type errors are saved as warnings so users can keep editing,
+  // but a warning badge alone is easy to miss until the next graph refresh.
+  // Read a clone so callers retain the original response body for their own
+  // success/error handling. Keep the toast generic: diagnostic details may
+  // include literal values and already live in the Inspector.
+  if (response.ok && (response.headers.get('content-type') || '').includes('application/json')) {
+    const body = await response.clone().json().catch(() => null);
+    const ownWarnings = body?.['type-warnings']?.length || 0;
+    const dependentWarnings = body?.['dependent-type-warning-count'] || 0;
+    if ((ownWarnings || dependentWarnings) && typeof gdToast === 'function') {
+      const scope = ownWarnings && dependentWarnings
+        ? 'this function and ' + dependentWarnings + ' dependent function' + (dependentWarnings === 1 ? '' : 's')
+        : ownWarnings ? 'this function' : dependentWarnings + ' dependent function' + (dependentWarnings === 1 ? '' : 's');
+      gdToast('Saved with type warnings in ' + scope + '. Open the ⚠ type errors lens to see what to fix.', 'error');
+    }
+  }
+  return response;
 }
 
 // Mount the lock icon + (empty) popover shell into #auth-mount. The lock

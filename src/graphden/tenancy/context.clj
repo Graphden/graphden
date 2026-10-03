@@ -230,6 +230,19 @@
   nil)
 
 
+(def ^:dynamic *trusted-secret-audit-write* false)
+
+
+(defmacro with-trusted-secret-audit-write
+  "Permit the trusted secret-rotation implementation to append one audit row.
+   The tenancy storage decorator still scopes the row to the current org and
+   rejects all mutation routes; this capability is never exposed to graph fns."
+  [& body]
+  `(binding [*trusted-secret-audit-write* true]
+     (let [result# (do ~@body)]
+       result#)))
+
+
 (defn current-user-id
   "The current request's user identity as text — the accounts principal's
    `:user-id`, or `\"anonymous\"` when the deployment has no per-user

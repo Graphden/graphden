@@ -7,7 +7,7 @@ How the graph is stored and traversed — Postgres, recursive CTEs, the StorageC
 
 after: executor
 
-[[file:index.org][index]] · ~61 min
+[[file:index.org][index]] · ~62 min
 
 * 1. Storage
 :PROPERTIES:
@@ -79,15 +79,15 @@ What a schema exposes: the entities, their fields, and the field types (~:ref~, 
 :PROPERTIES:
 :CUSTOM_ID: storage/extend-builder
 :FILE: src/graphden/schema/graph/schema.clj
-:LINE: 637
-:MINS: 10.4
+:LINE: 641
+:MINS: 11.8
 :END:
 
 Where the graph model is actually declared: the ~ns~ / ~fn~ / ~slot~ / ~binding~ / ~binding-list-item~ entities and the ~:ref~ edges between them. This is the concrete table + foreign-key layout that every traversal walks.
 
 Long, but it is one ~->~ pipeline rather than an algorithm: an ~add-entity~ per table with its fields inline, the ~add-constraint~ calls that become real UNIQUE indexes, and at the end the ~retire-field~ entries that keep dropped columns (~binding.rename-to~, ~fn.impl-hash~) from being resurrected. Skim it entity by entity — this is DDL that happens to be data.
 
-- source :: [[file:../../../src/graphden/schema/graph/schema.clj::(defn extend-builder][src/graphden/schema/graph/schema.clj:637]]
+- source :: [[file:../../../src/graphden/schema/graph/schema.clj::(defn extend-builder][src/graphden/schema/graph/schema.clj:641]]
 
 * 7. valid-type?
 :PROPERTIES:

@@ -40,6 +40,9 @@
 (def ^:private ^:dynamic *storage* nil)
 
 
+(def ^:private ^:dynamic *ctx* nil)
+
+
 (def ^:private token "secrets-graph-test-token")
 
 
@@ -62,7 +65,8 @@
           _ (cr/rebuild! ctx)]
       (try
         (binding [*router* (br/create-router ctx "_app-ring-response")
-                  *storage* storage]
+                  *storage* storage
+                  *ctx* ctx]
           (t))
         (finally (sp/close storage))))))
 
@@ -84,6 +88,10 @@
                                   (throw (ex-info "no path"
                                                   {:type :vault/lookup-failed :path path}))))
              :put-secret    (fn [_client path value]
+                              (when (:fail-put? @state)
+                                (throw (ex-info "vault write failed"
+                                                {:type :vault/write-failed
+                                                 :value value})))
                               (swap! state assoc-in [:values path] value)
                               (count (swap! state update :versions
                                             (fnil conj []) [path value])))
@@ -164,6 +172,12 @@
 (defn- rotate-inline-binding!
   [binding-id body]
   (request! :put (str "/api/secret-bindings/" binding-id) body))
+
+
+(defn- secret-rotation-history!
+  [target-kind target-id]
+  (request! :post "/api/secret-rotations"
+            {:target-kind target-kind :target-id (str target-id)}))
 
 
 (defn- storage
@@ -344,11 +358,41 @@
           (is (:ok res))
           (testing "the response names the secret's own path"
             (is (= path (:path res)))))
+        (testing "the value-free history is scoped to this secret"
+          (let [history (secret-rotation-history! "secret" (:id secret))
+                event (first (:events history))]
+            (is (:ok history))
+            (is (= 1 (count (:events history))))
+            (is (= "succeeded" (:status event)))
+            (is (pos-int? (:vault-version event)))
+            (is (some? (:occurred-at event)))
+            (is (not-any? #(contains? event %) [:value :path]))))
         (testing "vault holds the new value at the same path"
           (is (= "v2" (get-in @vault-state [:values path]))))
         (testing "the path binding did not move"
           (is (= path (:value (first (sp/query-entities (storage) :binding
                                                         {:fn-id (parse-uuid (:id secret))}))))))))))
+
+
+(deftest rotate-secret-vault-failure-is-recorded-without-sensitive-data-test
+  (let [vault-state (fresh-vault)
+        nm (uniq "_rot-fail")
+        path (str "rot/" nm)]
+    (with-fake-vault vault-state
+      (let [{:keys [secret]} (create-secret! {:name nm :path path :value "initial"})]
+        (swap! vault-state assoc :fail-put? true)
+        (let [error (try
+                      (dispatch! :put (str "/api/secrets/" (:id secret) "/value")
+                                 {:value "sensitive-failed-value"})
+                      nil
+                      (catch clojure.lang.ExceptionInfo e e))
+              history (secret-rotation-history! "secret" (:id secret))
+              event (first (:events history))]
+          (is (= :vault/write-failed (:type (ex-data error))))
+          (is (:ok history))
+          (is (= "failed" (:status event)))
+          (is (= "vault/write-failed" (:failure-type event)))
+          (is (not-any? #(contains? event %) [:value :path])))))))
 
 
 (deftest rotate-secret-rejects-non-owner-tenant-test
@@ -411,6 +455,13 @@
         (is (= path (:path res)))
         (testing "vault holds the new value at the same path"
           (is (= "v2" (get-in @vault-state [:values path]))))
+        (testing "inline rotations are recorded against the binding, without its path or value"
+          (let [history (secret-rotation-history! "binding" (:id binding))
+                event (first (:events history))]
+            (is (:ok history))
+            (is (= 1 (count (:events history))))
+            (is (= "succeeded" (:status event)))
+            (is (not-any? #(contains? event %) [:value :path]))))
         (testing "the binding still points at the path"
           (is (= path (:value (sp/read-entity (storage) :binding
                                               (parse-uuid (:id binding)))))))))))
@@ -534,3 +585,17 @@
                                                           :path "../../sys/policy/root" :value "x"})]
                          (is (false? (:ok res)))
                          (is (re-find #"invalid path" (str (:error res))))))))))
+
+
+(deftest generic-crud-cannot-forge-or-mutate-secret-rotation-events-test
+  (let [id (random-uuid)
+        event {:target-kind "secret" :target-id (random-uuid)
+               :actor-id "attacker" :actor-label "Attacker" :status "succeeded"}]
+    (doseq [[op thunk] [[:create #(crud-entities/create-entity :secret-rotation event *ctx*)]
+                        [:update #(crud-entities/update-entity :secret-rotation id event *ctx*)]
+                        [:revive #(crud-entities/revive-entity :secret-rotation id *ctx*)]
+                        [:delete #(crud-entities/delete-entity :secret-rotation id *ctx*)]]]
+      (testing (str "generic " (name op) " cannot alter audit provenance")
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"only be written by their domain operation"
+              (thunk)))))))

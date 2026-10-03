@@ -5,9 +5,11 @@
    `:uri-segment-after` + `:parse-uuid` + `:parse-json-body` +
    `:zipmap`, so they need no defbase shim here."
   (:require
+    [graphden.crud.request :as request]
     [graphden.crud.secrets :as secrets]
     [graphden.executor.compile-runtime :as cr]
-    [graphden.executor.defbase :refer [defbase]]))
+    [graphden.executor.defbase :refer [defbase]]
+    [graphden.storage.protocol.core :as sp]))
 
 
 (defbase _apply-create-secret-body
@@ -52,6 +54,32 @@
   (secrets/rotate-secret-not-owned? fn-row))
 
 
+(defbase _rotate-secret-write
+  "Vault rotation paired with a value-free audit event."
+  [path value target-kind target-id]
+  (cr/record-effect! :db)
+  (cr/record-effect! :network)
+  (secrets/rotate-secret-value! ctx {:path path :value value
+                                     :target-kind target-kind :target-id target-id}))
+
+
+(defbase _secret-rotation-history
+  "Read at most 50 value-free rotation events for one secret or inline binding."
+  [target-kind target-id]
+  (let [kind-str (if (keyword? target-kind) (name target-kind) (str target-kind))
+        _ (when-not (contains? #{"secret" "binding"} kind-str)
+            (throw (ex-info "Invalid secret rotation target" {:type :secret-rotation/invalid-target})))
+        rows (sp/query-entities (request/require-storage ctx) :secret-rotation
+                                {:target-kind kind-str
+                                 :target-id target-id})]
+    {:ok true
+     :events (->> rows
+                  (sort-by :occurred-at #(compare %2 %1))
+                  (take 50)
+                  (mapv #(select-keys % [:actor-id :actor-label :status
+                                         :vault-version :failure-type :occurred-at])))}))
+
+
 ;; --- delete-secret ---
 ;; `:_delete-secret-vault-cleanup` (:try over :vault-delete + :log-warn)
 ;; and `:_delete-secret-storage-cleanup` (:do over two :delete-entity)
@@ -62,4 +90,6 @@
   {:_apply-create-secret-body     _apply-create-secret-body
    :_apply-inline-bind-body       {:impl _apply-inline-bind-body :taint-propagate? true}
    :_apply-secret-rollback        {:impl _apply-secret-rollback :taint-propagate? true}
-   :_rotate-secret-not-owned?     {:impl _rotate-secret-not-owned? :taint-propagate? true}})
+   :_rotate-secret-not-owned?     {:impl _rotate-secret-not-owned? :taint-propagate? true}
+   :_rotate-secret-write          _rotate-secret-write
+   :_secret-rotation-history      _secret-rotation-history})

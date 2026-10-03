@@ -166,6 +166,18 @@ function buildSecretRowActions(actionsEl, fn) {
   };
   actionsEl.appendChild(rotateBtn);
 
+  const historyBtn = document.createElement('button');
+  historyBtn.type = 'button';
+  historyBtn.className = 'sidebar-action';
+  historyBtn.textContent = '◷';
+  historyBtn.title = 'Rotation history';
+  historyBtn.setAttribute('aria-label', 'Rotation history for ' + (secret.name || 'secret'));
+  historyBtn.onclick = (e) => {
+    e.stopPropagation();
+    openSecretRotationHistory(historyBtn, secret);
+  };
+  actionsEl.appendChild(historyBtn);
+
   const delBtn = document.createElement('button');
   delBtn.type = 'button';
   delBtn.className = 'sidebar-action sidebar-action-delete';
@@ -176,6 +188,70 @@ function buildSecretRowActions(actionsEl, fn) {
     deleteSecretConfirm(secret);
   };
   actionsEl.appendChild(delBtn);
+}
+
+async function openSecretRotationHistory(anchor, secret) {
+  closeActivePopover();
+  const pop = document.createElement('div');
+  pop.className = 'popover secrets-popover secrets-history-popover';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-label', 'Rotation history');
+  pop.innerHTML = '<div class="popover-title">Rotation history</div><p class="muted">Loading history…</p>';
+  _activePopover = pop;
+  _activePopoverTrigger = anchor;
+  document.body.appendChild(pop);
+  anchorBelowClamped(anchor, pop);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'secrets-history-close';
+  close.textContent = 'Close';
+  close.onclick = closeActivePopover;
+  try { pop.querySelector('.popover-title').after(close); } catch (_) {}
+  close.focus();
+
+  try {
+    const response = await authFetch(API.api_secret_rotations, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 'target-kind': 'secret', 'target-id': secret.id })
+    });
+    if (pop !== _activePopover) return;
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const data = await response.json();
+    const loading = pop.querySelector('.muted');
+    if (loading) loading.remove();
+    const rows = data.events || [];
+    if (!rows.length) {
+      const empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.textContent = 'No rotations recorded yet.';
+      pop.appendChild(empty);
+      return;
+    }
+    const list = document.createElement('ol');
+    list.className = 'secrets-history-list';
+    rows.forEach((event) => {
+      const item = document.createElement('li');
+      const date = new Date(event['occurred-at']);
+      const when = document.createElement('time');
+      when.dateTime = event['occurred-at'];
+      when.textContent = Number.isNaN(date.getTime()) ? 'Unknown time' : date.toLocaleString();
+      const details = document.createElement('span');
+      const actor = event['actor-label'] || event['actor-id'] || 'Unknown user';
+      details.textContent = (event.status === 'succeeded' ? ' · ' + actor
+        + (event['vault-version'] ? ' · version ' + event['vault-version'] : '')
+        : event.status === 'failed' ? ' · Rotation failed'
+          : ' · Rotation status pending');
+      item.append(when, details);
+      list.appendChild(item);
+    });
+    pop.appendChild(list);
+  } catch (error) {
+    if (pop !== _activePopover) return;
+    const loading = pop.querySelector('.muted');
+    if (loading) loading.textContent = 'Could not load rotation history.';
+    console.error('secret-rotation-history', error);
+  }
 }
 
 
@@ -465,5 +541,3 @@ async function deleteSecretConfirm(secret) {
     updateEntityList(graphData);
   }
 }
-
-

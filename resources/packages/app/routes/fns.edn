@@ -903,6 +903,16 @@
    :parent :put
    :args {:path "/secret-bindings/:binding-id" :handler :rotate-inline-binding-handler}}
 
+  {:name :_api-secret-rotation-history-method
+   :description "POST /secret-rotations — read recent value-free history for one secret or inline binding. Auth-required."
+   :parent :_method-map-with-middleware
+   :args {:method "post" :handler :secret-rotation-history-handler
+          :middleware :_middleware-list}}
+
+  {:name :api-secret-rotation-history
+   :parent :list
+   :args {:items ["/secret-rotations" :_api-secret-rotation-history-method]}}
+
   ;; --- /api top group (combines all /api/* sub-groups + the standalone leaves) ---
 
   {:name :api-routes
@@ -965,6 +975,7 @@
                   :api-secret-binding-rotate
                   :api-secret-delete
                   :api-secret-rotate-value
+                  :api-secret-rotation-history
                   ;; per-user editor preferences (app-base/prefs — themes, keymaps)
                   :api-prefs-get
                   :api-prefs-put

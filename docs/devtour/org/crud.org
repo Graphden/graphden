@@ -52,13 +52,13 @@ Resolves the target branch (by UUID or name) so a write lands on the right versi
 :PROPERTIES:
 :CUSTOM_ID: crud/create-entity
 :FILE: src/graphden/crud/entities.clj
-:LINE: 157
+:LINE: 171
 :MINS: 0.8
 :END:
 
 The generic single-row write entry point, and the best first stop for the whole write path: it sequences every stage — capability gate, ~write-rej~ validation, ~sp/create-entity~, then invalidate + notify.
 
-- source :: [[file:../../../src/graphden/crud/entities.clj::(defn create-entity][src/graphden/crud/entities.clj:157]]
+- source :: [[file:../../../src/graphden/crud/entities.clj::(defn create-entity][src/graphden/crud/entities.clj:171]]
 - same file :: [[file:crud.org::#crud/apply-create-core][apply-create-core]]
 - referenced from :: [[file:constellation.org::#constellation/every-addon-facing-var-still-resolves-test][every-addon-facing-var-still-resolves-test]]
 
@@ -105,13 +105,13 @@ The ~:try~ on-throw partner: replay the ~journal~ in reverse, best-effort deleti
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-core
 :FILE: src/graphden/crud/entities.clj
-:LINE: 607
+:LINE: 624
 :MINS: 5.2
 :END:
 
 The atomic core for generic creates: create-or-humanise-error, a post-create whole-fn type-check, and the rename-slot side-effect. Since error-tolerance Phase 2 an ORDINARY type-check failure no longer rolls the row back — the write is kept and the diagnostics surface as ~:type-warnings~ on the success envelope. One class is carved out: a SECRET-flow diagnostic still deletes the row and returns the legacy ~{:error …}~ (the guarantee must not rest on the derived diagnostics store — docs/SECRETS.md).
 
-- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:607]]
+- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:624]]
 - same file :: [[file:crud.org::#crud/create-entity][create-entity]]
 - referenced from :: [[file:web.org::#web/write-rej][write-rej]]
 

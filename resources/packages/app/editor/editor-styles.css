@@ -5788,6 +5788,45 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border-color: var(--accent);
 }
 
+.secrets-history-popover {
+  max-width: min(440px, calc(100vw - 24px));
+}
+
+.secrets-history-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 3px 8px;
+  background: var(--card-bg);
+  color: var(--card-fg);
+  border: 1px solid var(--card-border);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.6875rem;
+}
+
+.secrets-history-list {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--card-fg);
+  font-size: 0.6875rem;
+}
+
+.secrets-history-list li {
+  padding: 5px 0;
+  border-bottom: 1px solid var(--light-border);
+}
+
+.secrets-history-list li:last-child {
+  border-bottom: 0;
+}
+
+.secrets-history-list time {
+  font-weight: 600;
+}
+
 .secrets-ns-chip {
   display: inline-block;
   margin-top: 2px;

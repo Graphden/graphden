@@ -113,6 +113,19 @@
   nil)
 
 
+(def ^:private immutable-operational-entities
+  "Audit records are written by their owning domain operation, never by the
+   generic entity API where callers could forge or erase provenance."
+  #{:secret-rotation})
+
+
+(defn- reject-generic-audit-write!
+  [entity-type]
+  (when (contains? immutable-operational-entities entity-type)
+    (throw (ex-info "Audit records can only be written by their domain operation"
+                    {:type :authz/forbidden :entity-type entity-type}))))
+
+
 (defn- create-entity-impl
   [entity-type data ctx]
   ;; Abort-shielded: the whole bump->write->invalidate->note pipeline
@@ -134,6 +147,7 @@
             ;; `sp/create-entity` users (tests, sync) pick it up too.
             data' (cond-> data
                     (and (= et :fn) (nil? (:id data))) (assoc :id (random-uuid)))]
+        (reject-generic-audit-write! et)
         ;; Capability gate: secret-shaped fn-defs are admin-only — see
         ;; `secret-leaf-capability-rej` for the rationale. The marker is
         ;; an in-memory contract between `crud.secrets` and this fn; it
@@ -188,6 +202,7 @@
                          (merge (select-keys (sp/read-entity storage et id) ks)
                                 (assoc data :id id))
                          (assoc data :id id))]
+        (reject-generic-audit-write! et)
         ;; Capability gate on the UPDATE path too (F2): the create path
         ;; already runs secret-leaf-capability-rej, but a tenant could
         ;; create a plain fn then PUT :parent-ids pointing at an
@@ -222,6 +237,7 @@
     (fn []
       (let [storage (request/require-storage ctx)
             et (keyword entity-type)]
+        (reject-generic-audit-write! et)
         (when (vcore/revive-entity! storage et id)
           (let [row (sp/read-entity storage et id)]
             (when (= et :fn)
@@ -261,6 +277,7 @@
                                                        (sp/read-entity storage :binding)
                                                        :fn-id)
                            nil)]
+        (reject-generic-audit-write! et)
         ;; User-facing delete → tombstone (so deleting an inherited entity on a
         ;; branch actually hides it, not a silent no-op). Sync / rollback deletes
         ;; keep the default hard-delete.

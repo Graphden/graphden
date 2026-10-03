@@ -127,6 +127,10 @@
   #uuid "05bbcb6c-da00-473a-b62a-217a7be2e38b")
 
 
+(def ^:private secret-rotation-entity-uuid
+  #uuid "7f96e254-e5b1-4e23-b59e-f17dc2f7f841")
+
+
 ;; =============================================================================
 ;; Field UUIDs — :ns
 ;; =============================================================================
@@ -781,7 +785,29 @@
       ;; (`check-resource-override-path-collision!`), not a base index.
       ;; -----------------------------------------------------------------
       (ds/add-entity :resource-override resource-override-entity-uuid
-                     resource-override-fields)))
+                     resource-override-fields)
+      ;; Append-only operational history. It deliberately stores only the
+      ;; rotated graph identity, actor, timestamp and OpenBao KV version —
+      ;; never the secret value or vault path.
+      (ds/add-entity :secret-rotation secret-rotation-entity-uuid
+                     {:org-id {:uuid #uuid "9a022b95-9156-4e24-b363-2a990c0d357a"
+                               :type :text :nullable? true :indexed? true}
+                      :target-kind {:uuid #uuid "51d72f94-8b58-4c6a-a73c-2aa80565da04"
+                                    :type :text}
+                      :target-id {:uuid #uuid "e6507a63-22eb-445e-a83a-cf26d795d421"
+                                  :type :uuid :indexed? true}
+                      :actor-id {:uuid #uuid "ebed38c2-dacc-4d38-a7d8-c54d9eeabf8f"
+                                 :type :text}
+                      :actor-label {:uuid #uuid "c5cbb248-7c9e-40d2-8ef5-997740072915"
+                                    :type :text}
+                      :status {:uuid #uuid "0f0270a7-0d61-49a5-a565-1f9342cd613b"
+                               :type :text}
+                      :vault-version {:uuid #uuid "6015eade-c802-4380-bf50-48c10102bdf5"
+                                      :type :int :nullable? true}
+                      :failure-type {:uuid #uuid "dcb9b692-68de-4c84-86de-da880984780c"
+                                     :type :text :nullable? true}
+                      :occurred-at {:uuid #uuid "bd948c2d-00dc-4954-914c-d405443e773c"
+                                    :type :timestamptz :indexed? true}})))
 
 
 (defn build-schema

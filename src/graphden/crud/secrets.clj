@@ -303,6 +303,49 @@
          (not= (tctx/current-org) (or (:org-id fn-row) tctx/public-org)))))
 
 
+(defn rotate-secret-value!
+  "Rotate a vault value and retain a value-free, org-scoped audit event.
+   A pending event is written first, so a storage failure cannot silently
+   permit an unrecorded rotation. Vault failures leave a safe failed event;
+   successful events carry only KV version and actor metadata."
+  [ctx {:keys [path value target-kind target-id]}]
+  (when-not (and (instance? UUID target-id)
+                 (contains? #{:secret :binding} target-kind))
+    (throw (ex-info "Secret rotation target is missing or invalid"
+                    {:type :secret-rotation/invalid-target})))
+  (let [storage (request/require-storage ctx)
+        actor-id (tctx/current-user-id)
+        event (tctx/with-trusted-secret-audit-write
+                (sp/create-entity storage :secret-rotation
+                                  {:target-kind (name target-kind)
+                                   :target-id target-id
+                                   :actor-id actor-id
+                                   :actor-label (tctx/current-user-label)
+                                   :status "pending"
+                                   :occurred-at (java.time.Instant/now)}))]
+    (when-not (:id event)
+      (throw (ex-info "Could not persist secret rotation audit record"
+                      {:type :secret-rotation/audit-write-failed})))
+    (let [version (try
+                    (vault/put-secret (require-vault! ctx) path value)
+                    (catch Exception e
+                      (try
+                        (tctx/with-trusted-secret-audit-write
+                          (sp/update-entity storage :secret-rotation (:id event)
+                                            {:status "failed"
+                                             :failure-type (when-let [failure-type (:type (ex-data e))]
+                                                             (if-let [type-ns (namespace failure-type)]
+                                                               (str type-ns "/" (name failure-type))
+                                                               (name failure-type)))}))
+                        (catch Exception audit-error
+                          (log-rollback-failure :secret-rotation-audit audit-error)))
+                      (throw e)))]
+      (tctx/with-trusted-secret-audit-write
+        (sp/update-entity storage :secret-rotation (:id event)
+                          {:status "succeeded" :vault-version version}))
+      version)))
+
+
 ;; =============================================================================
 ;; Reclaiming vault values whose bindings are gone
 ;; =============================================================================

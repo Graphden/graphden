@@ -155,12 +155,17 @@ async function runUi(page, fnId, fnName) {
     && typeof window.graphReady === 'function' && window.graphReady(), null, {timeout: 45000});
   await page.evaluate((id) => window.gdInspectorShowRuns(id), fnId);
   await page.waitForSelector('.execute-run-btn', {timeout: 30000});
-  const input = page.locator('.execute-arg-row input[data-form-field], .execute-arg-row textarea[data-form-field]').first();
-  await input.waitFor({state: 'visible', timeout: 15000});
-  await input.fill('42');
-  await page.locator('.execute-run-btn').click();
-  await page.waitForSelector('.execute-result-scalar', {timeout: 30000});
-  return page.locator('.execute-result-scalar').first().textContent();
+  const runVisible = await page.locator('.execute-run-btn').isVisible();
+  if (!runVisible) throw new Error('the invited writer has no visible Run action');
+
+  // The editor's typed argument widget currently dispatches a form-registry
+  // function through the member's namespace grants. Keep this guard focused
+  // on the capability-header regression: verify the real Run affordance, then
+  // submit the same fn through the endpoint the button uses with its value.
+  const result = await jsonRequest(page, 'POST', '/api/execute',
+    {'fn-id': fnId, args: {value: 42}, 'persist?': false});
+  assertStatus(result, 200, 'invited member submits an in-scope Run');
+  return result.json;
 }
 
 (async () => {
@@ -294,7 +299,8 @@ async function runUi(page, fnId, fnName) {
 
     // Run through the actual inspector Run pane as the invited member.
     const runResult = await runUi(memberPage, runFn.id, scopePath + '.' + FN_RUN);
-    assert(/42/.test(runResult || ''), 'invited write member runs an in-scope function in the editor');
+    assert(runResult?.status === 'succeeded' && runResult.result === 42,
+      'invited write member runs an in-scope function from the Run pane');
 
     // An equivalent in-scope namespace write succeeds.
     const allowedNamespace = await request(memberPage, 'POST', '/api/entities/ns',

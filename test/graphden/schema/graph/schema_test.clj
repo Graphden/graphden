@@ -18,9 +18,9 @@
 
 
 (deftest graph-schema-entities-test
-  (testing "schema contains the six core entities of the slot/binding model plus the asset-override row"
+  (testing "schema contains the core graph entities plus asset overrides and secret rotation audit"
     (is (= #{:ns :fn :slot :fn-slot :binding :binding-list-item
-             :resource-override}
+             :resource-override :secret-rotation}
            (set (ds/entities schema))))))
 
 

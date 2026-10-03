@@ -39,6 +39,9 @@
     :_execute-apply :_layout-build-apply :_layout-place-apply
     :_layout-strip-facts-apply :_load-graph-cached :_parse-layout-body
     :_reconcile-services-apply :_rotate-secret-not-owned?
+    ;; Rotation consumes a secret, but its result is a Vault version number;
+    ;; history returns actor/status metadata only. Neither returns secret data.
+    :_rotate-secret-write :_secret-rotation-history
     :_seq-append-load-binding :_seq-move-load-item :_seq-remove-load-item
     :_seq-update-load-item :_slot-effective-type-raw
     :_tests-run-apply :_tests-status-apply

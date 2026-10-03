@@ -547,14 +547,56 @@
 ;; Dependents — a write to X re-checks the fns that read X
 ;; -----------------------------------------------------------------------------
 
-(def ^:private max-dependent-recheck
-  "Upper bound on the DIRECT dependents one write re-checks inline.
-   Over it the dependents are skipped with a warn: their recorded
-   diagnostics then go stale until their own next write or the
-   ctx-build sweep (`branch_router/recheck.clj`), the same restart
-   caveat that sweep documents. Direct dependents of an editor fn are
-   a handful; the bound is for a widely-exposed type-row."
+(def ^:private large-dependent-recheck
+  "Fan-out worth mentioning in logs. We still re-check the whole
+   affected closure: skipping a derived diagnostic leaves the editor
+   and execute gate with stale type information."
   200)
+
+
+(defn- dependent-recheck-plan
+  "Return transitive dependents of `fn-id` in dependency order, using
+   the already-primed reverse dependency index. A changed callee is
+   checked before its caller, so callers observe the fresh rich type.
+   Cycles are tolerated: the closure walk terminates, and any cyclic
+   remainder is returned in stable ID order for best-effort checking."
+  [reverse-deps fn-id]
+  (let [dependents (disj (deps/transitive-blast reverse-deps [fn-id]) fn-id)
+        initial-indegree
+        (reduce (fn [degrees source]
+                  (reduce (fn [acc dependent]
+                            (if (contains? dependents dependent)
+                              (update acc dependent inc)
+                              acc))
+                          degrees
+                          (get reverse-deps source #{})))
+                (zipmap dependents (repeat 0))
+                dependents)
+        ready (into (sorted-set-by #(compare (str %1) (str %2)))
+                    (keep (fn [[id degree]] (when (zero? degree) id)))
+                    initial-indegree)]
+    (loop [ready ready
+           indegree initial-indegree
+           ordered []]
+      (if-let [id (first ready)]
+        (let [ready (disj ready id)
+              [indegree ready]
+              (reduce (fn [[degrees queue] dependent]
+                        (if-let [degree (get degrees dependent)]
+                          (let [next-degree (dec degree)]
+                            [(assoc degrees dependent next-degree)
+                             (if (zero? next-degree)
+                               (conj queue dependent)
+                               queue)])
+                          [degrees queue]))
+                      [indegree ready]
+                      (get reverse-deps id #{}))]
+          (recur ready indegree (conj ordered id)))
+        (let [cyclic (->> indegree
+                          (keep (fn [[id degree]] (when (pos? degree) id)))
+                          (sort-by str))]
+          {:ordered (into ordered cyclic)
+           :cyclic (vec cyclic)})))))
 
 
 (defn direct-dependents
@@ -576,40 +618,56 @@
     (disj (get reverse-deps fn-id #{}) fn-id)))
 
 
-(defn recheck-dependents!
-  "Re-run the post-mutation check for the DIRECT dependents of `fn-id`
+(defn- recheck-dependent-summary!
+  "Re-run the post-mutation check for every transitive dependent of `fn-id`
    after a user write changed what it computes — a callee whose return
    type moved from `:int` to `:text` breaks every caller that bound it
    into an `:int` slot, and nobody edits the caller. Each dependent's
    entry in the per-branch diagnostics store is recorded or cleared
    exactly as its own write would (`type-check-fn-after-mutation!`), so
    the editor's problem lens shows it and the execute gate refuses it
-   (`:unresolved-type-errors`). One level only: a transitive dependent
-   is re-checked when its own callee is next written. Best-effort per
-   fn — a throw is logged, never fails the user's write. Returns the
-   set of ids re-checked.
+   (`:unresolved-type-errors`). Callers are checked after their own
+   dependencies so the fresh rich types flow through the affected
+   closure. Best-effort per fn — a throw is logged, never fails the
+   user's write. Returns ids checked and the count that now have a
+   type diagnostic, without exposing diagnostic contents in a mutation
+   response.
 
    Read the index BEFORE the write's invalidation when the write
    removes edges (a `:fn` delete): `deps/incremental-update` drops a
    deleted fn's reverse entry, and its callers are exactly who must be
    re-derived (their ref now dangles)."
   [ctx storage fn-id]
-  (let [dependents (direct-dependents ctx fn-id)]
-    (cond
-      (empty? dependents) #{}
+  (let [reverse-deps (or (some-> (:compile-deps ctx) deref :reverse-deps)
+                         (some-> (:graph-cache ctx) deref deps/build-reverse-deps))
+        {:keys [ordered cyclic]} (when reverse-deps
+                                   (dependent-recheck-plan reverse-deps fn-id))]
+    (when (seq cyclic)
+      (log/warn "cycle in cached dependency index while refreshing type diagnostics; checking cyclic fns in stable order"
+                {:fn-id fn-id :cycle-fn-ids cyclic}))
+    (when (> (count ordered) large-dependent-recheck)
+      (log/info "refreshing type diagnostics for large dependent closure"
+                {:fn-id fn-id :count (count ordered)}))
+    (let [warning-count
+          (reduce (fn [n id]
+                    (try
+                      (if (type-check-fn-after-mutation! storage id)
+                        (inc n)
+                        n)
+                      (catch Exception e
+                        (log/debug e "dependent re-check failed" {:fn-id id :of fn-id})
+                        n)))
+                  0
+                  ordered)]
+      {:ids (set ordered) :warning-count warning-count})))
 
-      (> (count dependents) max-dependent-recheck)
-      (do (log/warn "skipping dependent re-check — over bound; dependents' diagnostics stay as recorded until their own next write"
-                    {:fn-id fn-id :count (count dependents) :cap max-dependent-recheck})
-          #{})
 
-      :else
-      (do (doseq [id dependents]
-            (try
-              (type-check-fn-after-mutation! storage id)
-              (catch Exception e
-                (log/debug e "dependent re-check failed" {:fn-id id :of fn-id}))))
-          dependents))))
+(defn recheck-dependents!
+  "Re-run type checks for all cached transitive dependents of `fn-id`.
+   Returns the set of ids re-checked; see `recheck-dependent-summary!`
+   for the internal warning summary used by mutation responses."
+  [ctx storage fn-id]
+  (:ids (recheck-dependent-summary! ctx storage fn-id)))
 
 
 (defn type-check-fn-and-dependents!
@@ -619,11 +677,14 @@
    dependents are skipped when the result is a secret carve-out the
    caller will roll back (`:secret?` under `:reject-secret?`): the
    write is about to be undone, so nothing changed under them. Returns
-   the fn's own rej map (or nil) unchanged."
+   the fn's own rejection map (when any), plus a safe
+   `:dependent-type-warning-count` when callers now have diagnostics."
   ([ctx storage fn-id]
    (type-check-fn-and-dependents! ctx storage fn-id nil))
   ([ctx storage fn-id {:keys [reject-secret?] :as opts}]
    (let [rej (type-check-fn-after-mutation! storage fn-id opts)]
-     (when-not (and reject-secret? (:secret? rej))
-       (recheck-dependents! ctx storage fn-id))
-     rej)))
+     (if (and reject-secret? (:secret? rej))
+       rej
+       (let [{:keys [warning-count]} (recheck-dependent-summary! ctx storage fn-id)]
+         (cond-> rej
+           (pos? warning-count) (assoc :dependent-type-warning-count warning-count)))))))

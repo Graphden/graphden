@@ -474,53 +474,62 @@
             :tcdep-id {:return 'a :args {:v 'a} :effects #{}})
         callee (setup/create-composed-fn! storage "tcdep-callee" (:id id-base))
         v-bind (setup/bind-value! storage (:id callee) (:id v-slot) 5)
+        middle (setup/create-composed-fn! storage "tcdep-middle" (:id id-base))
+        middle-bind (setup/bind-ref! storage (:id middle) (:id v-slot) (:id callee))
         int-base (setup/create-base-fn! storage "tcdep-int")
         a-slot (setup/create-slot! storage "a" :int)
         _ (setup/attach-slot! storage (:id int-base) (:id a-slot) 0)
         _ (registry/record-rich-types-raw!
             :tcdep-int {:return :int :args {:a :int} :effects #{}})
         caller (setup/create-composed-fn! storage "tcdep-caller" (:id int-base))
-        caller-bind (setup/bind-ref! storage (:id caller) (:id a-slot) (:id callee))]
+        caller-bind (setup/bind-ref! storage (:id caller) (:id a-slot) (:id middle))]
     {:callee callee :v-bind v-bind :caller caller
+     :middle middle
      ;; Retain the fixture rows instead of cold-reading the graph again.
-     :graph {:fns [id-base callee int-base caller]
-             :slots [v-slot a-slot] :bindings [v-bind caller-bind]}}))
+     :graph {:fns [id-base callee middle int-base caller]
+             :slots [v-slot a-slot] :bindings [v-bind middle-bind caller-bind]}}))
 
 
 (deftest direct-dependents-read-only-what-the-ctx-holds-test
   (let [storage (setup/create-test-storage)]
     (try
-      (let [{:keys [callee caller graph]} (callee+caller! storage)
+      (let [{:keys [callee middle caller graph]} (callee+caller! storage)
             ctx (setup/default-registry-ctx storage)]
         (testing "a cold ctx (no index, no cache) knows no dependents — never a graph read"
           (is (= #{} (tc/direct-dependents ctx (:id callee)))))
         (testing "a primed graph cache is enough"
           (exec-ctx/fill-graph-cache! ctx graph (exec-ctx/invalidation-epoch ctx))
-          (is (= #{(:id caller)} (tc/direct-dependents ctx (:id callee)))))
+          (is (= #{(:id middle)} (tc/direct-dependents ctx (:id callee)))))
         (testing "the compiler's reverse index wins when primed"
           (reset! (:compile-deps ctx) (deps/build-deps-state graph))
-          (is (= #{(:id caller)} (tc/direct-dependents ctx (:id callee))))
+          (is (= #{(:id middle)} (tc/direct-dependents ctx (:id callee))))
+          (is (= #{(:id caller)} (tc/direct-dependents ctx (:id middle))))
           (is (= #{} (tc/direct-dependents ctx (:id caller))) "nothing depends on the caller"))
         (testing "no ctx at all (the test-only impl entry points) → none"
           (is (= #{} (tc/direct-dependents nil (:id callee))))))
       (finally (sp/close storage)))))
 
 
-(deftest dependents-rechecked-on-callee-change-test
+(deftest transitive-dependents-rechecked-in-dependency-order-test
   (binding [diag/*diagnostics-override* (atom {})]
     (let [storage (setup/create-test-storage)]
       (try
-        (let [{:keys [callee v-bind caller graph]} (callee+caller! storage)
+        (let [{:keys [callee v-bind middle caller graph]} (callee+caller! storage)
               ctx (setup/default-registry-ctx storage)]
           (is (nil? (tc/type-check-fn-after-mutation! storage (:id callee))))
           (is (= :int (:return (registry/rich-type-of :tcdep-callee))))
+          (is (nil? (tc/type-check-fn-after-mutation! storage (:id middle))))
+          (is (= :int (:return (registry/rich-type-of :tcdep-middle))))
           (is (nil? (tc/type-check-fn-after-mutation! storage (:id caller))))
           (reset! (:compile-deps ctx) (deps/build-deps-state graph))
-          (testing "the callee's return moves :int → :text; the CALLER's diagnostic is recorded"
+          (testing "the callee's return moves :int → :text through an untouched middle fn"
             (sp/update-entity storage :binding (:id v-bind) {:value "hello"})
-            (is (nil? (tc/type-check-fn-and-dependents! ctx storage (:id callee)))
-                "the callee itself is well-typed")
+            (is (= {:dependent-type-warning-count 1}
+                   (tc/type-check-fn-and-dependents! ctx storage (:id callee)))
+                "the mutation reports a safe count for the newly invalid transitive caller")
             (is (= :text (:return (registry/rich-type-of :tcdep-callee))))
+            (is (= :text (:return (registry/rich-type-of :tcdep-middle)))
+                "the immediate caller is re-checked before its dependent")
             (let [[d :as ds] (diag/errors-for-fn nil (:id caller))]
               (is (= 1 (count ds)))
               (is (= :int (:expected d)))
@@ -532,3 +541,22 @@
             (is (= :int (:return (registry/rich-type-of :tcdep-callee))))
             (is (nil? (diag/errors-for-fn nil (:id caller))))))
         (finally (sp/close storage))))))
+
+
+(deftest dependent-recheck-walk-is-cycle-safe-and-does-not-truncate-large-fanout-test
+  (testing "a cycle terminates and all reachable fns are attempted once"
+    (let [seen (atom [])
+          ctx {:compile-deps
+               (atom {:reverse-deps {:seed #{:a} :a #{:b} :b #{:a :c}}})}]
+      (with-redefs [tc/type-check-fn-after-mutation!
+                    (fn [_ id] (swap! seen conj id) nil)]
+        (is (= #{:a :b :c} (tc/recheck-dependents! ctx nil :seed)))
+        (is (= 3 (count @seen)))))
+    (testing "a fan-out over the former 200-fn cap is fully checked"
+      (let [ids (into #{} (map #(keyword (str "dependent-" %))) (range 205))
+            seen (atom #{})
+            ctx {:compile-deps (atom {:reverse-deps {:seed ids}})}]
+        (with-redefs [tc/type-check-fn-after-mutation!
+                      (fn [_ id] (swap! seen conj id) nil)]
+          (is (= ids (tc/recheck-dependents! ctx nil :seed)))
+          (is (= ids @seen)))))))

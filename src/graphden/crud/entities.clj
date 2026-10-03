@@ -593,8 +593,9 @@
    is not recorded, and the caller must roll the write back and
    return the pre-Phase-2 hard `{:error …}` envelope. Non-secret
    failures come back as `{:diagnostic …}` the caller surfaces
-   additively as `:type-warnings` on the success envelope. nil when
-   the check passes or doesn't apply to this entity type."
+   additively as `:type-warnings` on the success envelope. A separate
+   count reports affected dependent fns with diagnostics without
+   exposing their diagnostic payloads."
   [ctx storage type-str entity-data id-uuid]
   (when (#{"fn" "binding" "binding-list-item"} type-str)
     (when-let [fn-id (post-write-type-check-fn-id
@@ -610,10 +611,11 @@
    Returns a uniform shape:
      `{:created <id>}` on success
      `{:created <id> :type-warnings [<diagnostic> …]}` when the write
-       landed but the owning fn now fails the aggregate type-check
-       (error-tolerance Phase 2 — the row is KEPT, the failure is
-       recorded in the per-branch diagnostics store and surfaced
-       additively; clients that ignore the key keep working)
+       landed but the owning fn now fails the aggregate type-check, and
+       `:dependent-type-warning-count` when affected callers now have
+       diagnostics (error-tolerance Phase 2 — the row is KEPT, failures
+       are recorded in the per-branch diagnostics store and surfaced
+       additively; clients that ignore the new keys keep working)
      `{:error <human-msg>}` on a write failure (capability rejection,
        storage constraint violation, …)
    so the outer graph can dispatch on the shape and run invalidate /
@@ -657,7 +659,9 @@
                                 :id (:created create-result)})))
               {:error (:reason rej)})
           (cond-> create-result
-            rej (assoc :type-warnings [(:diagnostic rej)]))))
+            (:diagnostic rej) (assoc :type-warnings [(:diagnostic rej)])
+            (pos? (or (:dependent-type-warning-count rej) 0))
+            (assoc :dependent-type-warning-count (:dependent-type-warning-count rej)))))
       ;; Preserve the error's :http-status (409 collisions, 403
       ;; capability — the central web.errors mapping) alongside the
       ;; human message.
@@ -711,7 +715,8 @@
        landed but the owning fn now fails the aggregate type-check
        (error-tolerance Phase 2 — recorded in the per-branch
        diagnostics store, surfaced additively; a later fixing write
-       clears the stored entry)
+       clears the stored entry), plus `:dependent-type-warning-count`
+       when affected callers now have diagnostics
      `{:error <msg>}` on write failure
    The rename-slot failure is logged but never escalated — the
    binding row is still useful without the rename slot, matching the
@@ -773,7 +778,9 @@
               (restore-pre-image! storage entity-type id-uuid pre-row entity-data)
               {:error (:reason rej)})
           (cond-> {:updated id-uuid}
-            rej (assoc :type-warnings [(:diagnostic rej)])))))))
+            (:diagnostic rej) (assoc :type-warnings [(:diagnostic rej)])
+            (pos? (or (:dependent-type-warning-count rej) 0))
+            (assoc :dependent-type-warning-count (:dependent-type-warning-count rej))))))))
 
 
 ;; === Re-exports from sub-namespaces ==========================================

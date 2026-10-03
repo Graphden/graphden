@@ -768,6 +768,29 @@
                                      "GRAPHDEN_ORG_PASSWORD" password}}
                         "node" "edit-tutorial-tour-org.test.js"))))}
 
+  test-e2e-org-authz
+  {:doc "Browser-authenticated invitation + namespace permission guard against the loopback-only local gdcloud stack. Creates unique local owner/member accounts and cleans up graph fixtures; account rows remain in the local gdcloud database. Never targets staging or production."
+   :task (let [cloud-dir (or (System/getenv "GRAPHDEN_CLOUD_DIR")
+                             (some (fn [d] (when (fs/exists? d) d)) ["../graphden-cloud" "../../graphden-cloud"])
+                             "../graphden-cloud")
+               script (str cloud-dir "/dev/gdcloud/gdcloud.sh")
+               run-id (subs (str (random-uuid)) 0 8)
+               email-prefix (str "org-authz-" run-id)
+               owner-email (str email-prefix "-owner@local.test")
+               member-email (str email-prefix "-member@local.test")
+               password (str "local-e2e-" (random-uuid))]
+           (if-not (fs/exists? script)
+             (println "test-e2e-org-authz: no graphden-cloud checkout at" script "— set GRAPHDEN_CLOUD_DIR")
+             (do (shell script "up")
+                 (shell script "account" owner-email password)
+                 (shell {:dir "tools/browser-test"
+                         :extra-env {"GRAPHDEN_URL" "http://127.0.0.1:9900"
+                                     "GRAPHDEN_ORG_EMAIL" owner-email
+                                     "GRAPHDEN_MEMBER_EMAIL" member-email
+                                     "GRAPHDEN_ORG_PASSWORD" password
+                                     "GDCLOUD_SCRIPT" (str (fs/canonicalize script))}}
+                        "node" "cloud-membership-authz-e2e.js"))))}
+
   test-js
   {:doc "JS tests that need NO graphden stack — tools/runtime-test/*.test.js, run under node's vm with no browser at all: the shared client runtime, and (since 2026-08-22) the editor's type helpers + the resolution-section renderer.
 

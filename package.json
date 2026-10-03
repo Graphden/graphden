@@ -16,6 +16,10 @@
     "stylelint-declaration-strict-value": "^1.12.1"
   },
   "overrides": {
+    "markdownlint-cli2": {
+      "js-yaml": "5.4.1",
+      "markdown-it": "14.3.1"
+    },
     "smol-toml": "^1.8.0"
   }
 }

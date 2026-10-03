@@ -543,6 +543,25 @@
         (finally (sp/close storage))))))
 
 
+(deftest cold-context-dependent-recheck-loads-a-safe-graph-snapshot-test
+  (binding [diag/*diagnostics-override* (atom {})]
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [{:keys [callee v-bind middle caller]} (callee+caller! storage)
+              ctx (setup/default-registry-ctx storage)]
+          (is (nil? @(:compile-deps ctx)))
+          (is (nil? @(:graph-cache ctx)))
+          (doseq [id [(:id callee) (:id middle) (:id caller)]]
+            (is (nil? (tc/type-check-fn-after-mutation! storage id))))
+          (sp/update-entity storage :binding (:id v-bind) {:value "hello"})
+          (is (= {:dependent-type-warning-count 1}
+                 (tc/type-check-fn-and-dependents! ctx storage (:id callee)))
+              "a cold editor context derives its reverse index from one privileged graph snapshot")
+          (is (= :text (:return (registry/rich-type-of :tcdep-middle))))
+          (is (= 1 (count (diag/errors-for-fn nil (:id caller))))))
+        (finally (sp/close storage))))))
+
+
 (deftest dependent-recheck-walk-is-cycle-safe-and-does-not-truncate-large-fanout-test
   (testing "a cycle terminates and all reachable fns are attempted once"
     (let [seen (atom [])

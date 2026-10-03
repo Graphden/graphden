@@ -638,8 +638,7 @@
    deleted fn's reverse entry, and its callers are exactly who must be
    re-derived (their ref now dangles)."
   [ctx storage fn-id]
-  (let [reverse-deps (or (some-> (:compile-deps ctx) deref :reverse-deps)
-                         (some-> (:graph-cache ctx) deref deps/build-reverse-deps))
+  (let [reverse-deps (when ctx (cr/ctx-reverse-deps ctx))
         {:keys [ordered cyclic]} (when reverse-deps
                                    (dependent-recheck-plan reverse-deps fn-id))]
     (when (seq cyclic)

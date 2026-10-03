@@ -38,6 +38,7 @@
     [graphden.storage.protocol.generic-constraints :as gc]
     [graphden.storage.protocol.graph :as graph]
     [graphden.storage.tx :as tx]
+    [graphden.tenancy.context :as tenancy-context]
     [graphden.types.diagnostics :as diag]
     [graphden.versioning.branch-local :as bl]
     [graphden.versioning.storage.merge :as mrg]
@@ -59,15 +60,19 @@
 (defn- prepare-version-record
   "Build a row for the version table from a versioned-entity payload:
    pull the version-data fields off `data`, stamp identity (`:id`,
-   `<version-id-field>`, `:branch-id`, `:created-at`). Used by both
-   single-entity and batch write paths."
+   `<version-id-field>`, branch/timestamp, and server-authenticated author
+   metadata. Used by both single-entity and batch write paths."
   [version-config entity-id branch-id timestamp data]
   (let [{:keys [version-id-field version-data-fields]} version-config]
     (-> (select-keys data version-data-fields)
         (assoc :id (random-uuid)
                version-id-field entity-id
                :branch-id branch-id
-               :created-at timestamp))))
+               :created-at timestamp
+               ;; Server-stamped from the authenticated request scope.
+               ;; The selected payload above prevents client spoofing.
+               :author-id (tenancy-context/current-user-id)
+               :author-label (tenancy-context/current-user-label)))))
 
 
 (defn- strip-version-framework-cols
@@ -80,7 +85,7 @@
    legitimate identity column on any versioned entity."
   [entity-name row]
   (let [{:keys [version-id-field]} (get res/entity-config entity-name)]
-    (cond-> (dissoc row :branch-id :created-at :deleted-at)
+    (cond-> (dissoc row :branch-id :created-at :deleted-at :author-id :author-label)
       version-id-field (dissoc version-id-field))))
 
 

@@ -101,11 +101,29 @@
    :parent :get
    :args {:coll {:as :item} :key {:value :description} :default {:value ""}}}
 
+  {:name :_partial-fnv-row-author-label
+   :description "Display-safe actor label stamped by the server; older versions have no author."
+   :parent :get
+   :args {:coll {:as :item} :key {:value :author-label}
+          :default {:value "unknown author"}}}
+
+  {:name :_partial-fnv-row-author-text
+   :parent :str-join
+   :args {:coll [{:value "by "} :_partial-fnv-row-author-label]
+          :separator {:value ""}}}
+
+  {:name :_partial-fnv-row-author-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "fn-versions-author"}}
+          :children [:_partial-fnv-row-author-text]}}
+
   {:name :_partial-fnv-row-meta-div
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "fn-versions-row-meta"}}
-          :children [:_partial-fnv-row-description-text]}}
+          :children [:_partial-fnv-row-description-text
+                     :_partial-fnv-row-author-span]}}
 
   ;; Restore button — always rendered. The API rejects no-op restores,
   ;; so leaving it visible on the current-branch latest is fine.

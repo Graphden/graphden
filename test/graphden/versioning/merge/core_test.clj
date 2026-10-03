@@ -26,6 +26,7 @@
     [graphden.storage.postgres.crud :as pg-crud]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
+    [graphden.tenancy.context :as tenancy-context]
     [graphden.types.diagnostics :as diag]
     [graphden.versioning.branch-local :as bl]
     [graphden.versioning.merge.core :as mp]
@@ -350,12 +351,20 @@
       ;; Merge with explicit :source resolution — apply-resolutions!
       ;; should batch-write a new binding-version row carrying
       ;; feature's value onto main.
-      (vs/merge-branch! storage (:id source)
-                        {:conflict-resolutions {[:binding (:id b)] :source}})
+      (binding [tenancy-context/*current-principal*
+                {:authenticated? true :user-id "reviewer-7"
+                 :user {:display-name "Reviewer"}}]
+        (vs/merge-branch! storage (:id source)
+                          {:conflict-resolutions {[:binding (:id b)] :source}}))
       ;; Main should now resolve to feature's value (20).
       (let [resolved (sp/read-entity storage :binding (:id b))]
         (is (= 20 (:value resolved))
             "main now sees feature's value after :source resolution"))
+      (let [versions (sp/query-entities storage :binding-version
+                                        {:binding-id (:id b)})
+            resolution (last (sort-by :created-at versions))]
+        (is (= "reviewer-7" (:author-id resolution)))
+        (is (= "Reviewer" (:author-label resolution))))
       (sp/close storage))))
 
 

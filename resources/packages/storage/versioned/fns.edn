@@ -77,7 +77,9 @@
           :element-fn-id :nullable-uuid
           :return-type-fn-id :nullable-uuid
           :anonymous-hash :nullable-text
-          :expects-effects :nullable-jsonb}}
+          :expects-effects :nullable-jsonb
+          :author-id :nullable-text
+          :author-label :nullable-text}}
 
   {:name :fn-execution-row-shape
    :description "Decoded `:fn-execution` storage row — the audit record of one run. `:started-at` / `:finished-at` are `java.sql.Timestamp` on the JVM side; omitted from the alias for the same reason `:branch-row-shape` omits `:created-at`."

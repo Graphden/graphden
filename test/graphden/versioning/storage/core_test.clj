@@ -17,6 +17,7 @@
     [graphden.storage.postgres.crud :as pg-crud]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
+    [graphden.tenancy.context :as tenancy-context]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.merge :as mrg]
     [graphden.versioning.storage.resolution :as res]))
@@ -813,6 +814,21 @@
           (is (= "vc-ns" (:name (sp/read-entity v :ns (:id ns-row)))))
           (sp/delete-entity v :ns (:id ns-row))
           (is (nil? (sp/read-entity v :ns (:id ns-row))))))
+
+      (testing "version rows record the authenticated actor server-side"
+        (let [principal {:authenticated? true
+                         :user-id "account-42"
+                         :user {:display-name "Artem"}}
+              created (binding [tenancy-context/*current-principal* principal]
+                        (sp/create-entity v :fn {:name "authored-fn"
+                                                 :parent-ids []
+                                                 :description "authored"
+                                                 :author-id "forged-id"
+                                                 :author-label "Forged"}))
+              version (first (sp/query-entities base :fn-version
+                                                {:fn-id (:id created)}))]
+          (is (= "account-42" (:author-id version)))
+          (is (= "Artem" (:author-label version)))))
       (finally (sp/close base)))))
 
 

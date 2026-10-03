@@ -1348,6 +1348,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   font-family: var(--mono);
   overflow-wrap: anywhere;
 }
+.fn-versions-author { display: block; }
 
 
 

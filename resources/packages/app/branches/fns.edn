@@ -500,9 +500,10 @@
    :args {:test {:parent :fn-impl-visible? :args {:fn-id {:as :fn-id}}}
           :then {:value [:id :name :description :constraint :base-fn-id :element-fn-id
                          :return-type-fn-id :anonymous-hash :expects-effects
-                         :created-at :deleted-at]}
+                         :created-at :deleted-at :author-id :author-label]}
           :else {:value [:id :name :description :constraint :element-fn-id
-                         :return-type-fn-id :expects-effects :created-at :deleted-at]}}}
+                         :return-type-fn-id :expects-effects :created-at :deleted-at
+                         :author-id :author-label]}}}
 
   {:name :_lfv-version-base
    :description "Bare fn-version JSON shape — selected columns with UUIDs and timestamps stringified via the shared `:_stringify-uuid-or-inst` helper."

@@ -252,6 +252,13 @@ branch re-uses that identity (`tombstoned-natural-key-id`) and the new
 version is the live one — "unbind, then bind the slot again" used to
 bounce off the index with a 409.
 
+**Version authorship.** New version rows carry a server-stamped stable
+`author-id` and a display-safe `author-label`; request payloads cannot set
+either field. Direct edits and explicit conflict resolutions are attributed
+to the acting account, while an inherited version surfaced by a merge keeps
+its original author. Old rows remain unattributed and appear as “unknown
+author” in the history panel.
+
 **Undo and branches.** The editor's 30-second Undo (`editor-undo.js`) is a
 per-tab journal of inverse WRITES, and every inverse lands on the branch
 the tab is on — the same branch the gesture landed on, since a branch

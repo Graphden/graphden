@@ -514,6 +514,20 @@
   #uuid "e67deb49-ba44-4e3a-870f-f7eddaaffbbe")
 
 
+;; Nullable for existing history and trusted system writes. New user versions
+;; are stamped server-side with a stable identity and a safe display label.
+(def ^:private fn-version-author-id-field-uuid #uuid "50000000-0000-4000-8000-000000000001")
+(def ^:private fn-version-author-label-field-uuid #uuid "50000000-0000-4000-8000-000000000002")
+(def ^:private fn-slot-version-author-id-field-uuid #uuid "50000000-0000-4000-8000-000000000003")
+(def ^:private fn-slot-version-author-label-field-uuid #uuid "50000000-0000-4000-8000-000000000004")
+(def ^:private binding-version-author-id-field-uuid #uuid "50000000-0000-4000-8000-000000000005")
+(def ^:private binding-version-author-label-field-uuid #uuid "50000000-0000-4000-8000-000000000006")
+(def ^:private binding-list-item-version-author-id-field-uuid #uuid "50000000-0000-4000-8000-000000000007")
+(def ^:private binding-list-item-version-author-label-field-uuid #uuid "50000000-0000-4000-8000-000000000008")
+(def ^:private resource-override-version-author-id-field-uuid #uuid "50000000-0000-4000-8000-000000000009")
+(def ^:private resource-override-version-author-label-field-uuid #uuid "50000000-0000-4000-8000-00000000000a")
+
+
 ;; =============================================================================
 ;; Version-mirror derivation — ONE base declaration, no hand-kept copy
 ;; =============================================================================
@@ -662,6 +676,8 @@
                   :type :ref :ref-entity :branch}
       :created-at {:uuid fn-version-created-at-field-uuid
                    :type :timestamptz}
+      :author-id {:uuid fn-version-author-id-field-uuid :type :text :nullable? true}
+      :author-label {:uuid fn-version-author-label-field-uuid :type :text :nullable? true}
       :deleted-at {:uuid fn-version-deleted-at-field-uuid
                    :type :timestamptz :nullable? true}})
    :fn-slot-version
@@ -673,6 +689,8 @@
                   :type :ref :ref-entity :branch}
       :created-at {:uuid fn-slot-version-created-at-field-uuid
                    :type :timestamptz}
+      :author-id {:uuid fn-slot-version-author-id-field-uuid :type :text :nullable? true}
+      :author-label {:uuid fn-slot-version-author-label-field-uuid :type :text :nullable? true}
       :deleted-at {:uuid fn-slot-version-deleted-at-field-uuid
                    :type :timestamptz :nullable? true}})
    :binding-version
@@ -684,6 +702,8 @@
                   :type :ref :ref-entity :branch}
       :created-at {:uuid binding-version-created-at-field-uuid
                    :type :timestamptz}
+      :author-id {:uuid binding-version-author-id-field-uuid :type :text :nullable? true}
+      :author-label {:uuid binding-version-author-label-field-uuid :type :text :nullable? true}
       :deleted-at {:uuid binding-version-deleted-at-field-uuid
                    :type :timestamptz :nullable? true}})
    :binding-list-item-version
@@ -696,6 +716,8 @@
                   :type :ref :ref-entity :branch}
       :created-at {:uuid binding-list-item-version-created-at-field-uuid
                    :type :timestamptz}
+      :author-id {:uuid binding-list-item-version-author-id-field-uuid :type :text :nullable? true}
+      :author-label {:uuid binding-list-item-version-author-label-field-uuid :type :text :nullable? true}
       :deleted-at {:uuid binding-list-item-version-deleted-at-field-uuid
                    :type :timestamptz :nullable? true}})
    :resource-override-version
@@ -708,6 +730,8 @@
                   :type :ref :ref-entity :branch}
       :created-at {:uuid resource-override-version-created-at-field-uuid
                    :type :timestamptz}
+      :author-id {:uuid resource-override-version-author-id-field-uuid :type :text :nullable? true}
+      :author-label {:uuid resource-override-version-author-label-field-uuid :type :text :nullable? true}
       :deleted-at {:uuid resource-override-version-deleted-at-field-uuid
                    :type :timestamptz :nullable? true}})})
 
@@ -715,7 +739,7 @@
 (def ^:private framework-fields
   "The version-framework columns present on every mirror — excluded from
    `version-data-fields` (they are versioning plumbing, not entity data)."
-  #{:branch-id :created-at :deleted-at})
+  #{:branch-id :created-at :deleted-at :author-id :author-label})
 
 
 ;; =============================================================================

@@ -18,6 +18,7 @@
     [clojure.set :as set]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
+    [graphden.tenancy.context :as tenancy-context]
     [graphden.versioning.branch-local :as bl]
     [graphden.versioning.storage.field-diff :as fd]
     [graphden.versioning.storage.resolution :as res]
@@ -373,7 +374,9 @@
         (assoc :id (random-uuid)
                version-id-field entity-id
                :branch-id target-branch-id
-               :created-at ts))))
+               :created-at ts
+               :author-id (tenancy-context/current-user-id)
+               :author-label (tenancy-context/current-user-label)))))
 
 
 (defn- apply-resolutions!

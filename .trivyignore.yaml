@@ -1,9 +1,20 @@
-# Path-scoped, per-finding trivy misconfig exceptions. Each is a genuinely
-# inherent requirement of a DEV/DEMO kind manifest under deploy/kind — NOT a
-# blanket skip. The production Helm chart (deploy/helm) is fully scanned +
-# hardened (non-root, read-only root fs, dropped caps, seccomp). The CRaC pods
-# were narrowed from `privileged: true` to the three CRIU caps + a read-only
-# root fs (both verified working); only the irreducible bits remain here.
+# Path-scoped, per-finding Trivy exceptions. Misconfigurations below are
+# inherent requirements of DEV/DEMO manifests under deploy/kind — NOT blanket
+# skips. The production Helm chart is fully scanned and hardened. The
+# vulnerability exception is temporary, narrowly scoped, and expires below.
+vulnerabilities:
+  - id: CVE-2026-93687
+    paths:
+      - "package-lock.json"
+    purls:
+      - "pkg:npm/braces@3.0.3"
+    expired_at: 2026-11-15
+    statement: >-
+      No upstream patched braces release exists as of 2026-10-03. This exact
+      version is reached only through markdownlint-cli2 in the root lint
+      toolchain; the toolchain is not shipped in Graphden. Recheck at expiry
+      and remove this exception as soon as upstream publishes a fix.
+
 misconfigurations:
   - id: AVD-KSV-0005
     paths:

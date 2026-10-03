@@ -545,6 +545,7 @@
                     "-w" "/repo"
                     "aquasec/trivy:0.70.0"
                     "fs" "--severity" "HIGH,CRITICAL"
+                    "--ignorefile" ".trivyignore.yaml"
                     ;; `dev: true` entries are SKIPPED by default, and every npm
                     ;; package here is one — the root lockfile is the lint
                     ;; toolchain, nothing in it ships. Without this flag the pass

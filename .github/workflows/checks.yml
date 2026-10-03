@@ -612,6 +612,7 @@ jobs:
           exit-code: '1'
           ignore-unfixed: false
           skip-dirs: node_modules,target,.tools,.playwright-mcp,.git,.lsp
+          trivyignores: .trivyignore.yaml
 
       - name: Run trivy config (Dockerfile misconfig)
         uses: aquasecurity/trivy-action@v0.36.0

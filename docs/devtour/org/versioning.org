@@ -13,13 +13,13 @@ after: storage
 :PROPERTIES:
 :CUSTOM_ID: versioning/wrap-with-versioning
 :FILE: src/graphden/versioning/storage/core.clj
-:LINE: 1015
+:LINE: 1020
 :MINS: 2.2
 :END:
 
 The entry point: take any base storage, ensure a ~main~ branch exists, and return a ~VersionedStorage~ bound to it. Start here to see how the entire versioning layer is bolted onto the plain storage from the previous block.
 
-- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn wrap-with-versioning][src/graphden/versioning/storage/core.clj:1015]]
+- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn wrap-with-versioning][src/graphden/versioning/storage/core.clj:1020]]
 - same file :: [[file:versioning.org::#versioning/VersionedStorage][VersionedStorage]], [[file:versioning.org::#versioning/create-entity-versioned!][create-entity-versioned!]]
 - referenced from :: [[file:crud.org::#crud/resolve-branch-ref][resolve-branch-ref]], [[file:boot.org::#boot/postgres][postgres]]
 
@@ -27,26 +27,26 @@ The entry point: take any base storage, ensure a ~main~ branch exists, and retur
 :PROPERTIES:
 :CUSTOM_ID: versioning/VersionedStorage
 :FILE: src/graphden/versioning/storage/core.clj
-:LINE: 763
+:LINE: 768
 :MINS: 12.6
 :END:
 
 The decorator record itself. It implements every storage protocol, delegating non-versioned entities straight to the base storage and intercepting versioned ones — reads resolve to a branch view, writes append version rows. Every method is a two-line dispatch: read this for the SHAPE, then follow the versioned arm into its own function. Grasp this structure before anything else here.
 
-- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defrecord VersionedStorage][src/graphden/versioning/storage/core.clj:763]]
+- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defrecord VersionedStorage][src/graphden/versioning/storage/core.clj:768]]
 - same file :: [[file:versioning.org::#versioning/wrap-with-versioning][wrap-with-versioning]], [[file:versioning.org::#versioning/create-entity-versioned!][create-entity-versioned!]]
 
 * 3. create-entity-versioned!
 :PROPERTIES:
 :CUSTOM_ID: versioning/create-entity-versioned!
 :FILE: src/graphden/versioning/storage/core.clj
-:LINE: 236
+:LINE: 241
 :MINS: 6.1
 :END:
 
 The versioned arm of a single create, and the write path worth reading in full: identity row + version row, the identity-field diff for when the deterministic id already exists, and the advisory-lock branch that serialises the writes whose uniqueness is a per-branch RESOLVED-VIEW property (fn names, list-item positions) rather than a table constraint. ~update-entity-versioned!~ next to it tells the same story for the append case.
 
-- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn- create-entity-versioned!][src/graphden/versioning/storage/core.clj:236]]
+- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn- create-entity-versioned!][src/graphden/versioning/storage/core.clj:241]]
 - same file :: [[file:versioning.org::#versioning/wrap-with-versioning][wrap-with-versioning]], [[file:versioning.org::#versioning/VersionedStorage][VersionedStorage]]
 
 * 4. in-transaction
@@ -78,13 +78,13 @@ The authoritative map of WHICH entities are versioned (fn / fn-slot / binding / 
 :PROPERTIES:
 :CUSTOM_ID: versioning/derive-version-fields
 :FILE: src/graphden/schema/versioned/schema.clj
-:LINE: 547
+:LINE: 561
 :MINS: 4.1
 :END:
 
 Where the ~-version~ mirror entities come from: derived from the base entity's field map (refs demote to bare uuids, framework columns spliced in), never hand-copied. A new base column without a pinned mirror uuid or an identity-level declaration fails the build loudly — the old failure mode was the decorator silently dropping that column's writes. ~version-data-fields~ above derives from the same source, so the two can never disagree.
 
-- source :: [[file:../../../src/graphden/schema/versioned/schema.clj::(defn derive-version-fields][src/graphden/schema/versioned/schema.clj:547]]
+- source :: [[file:../../../src/graphden/schema/versioned/schema.clj::(defn derive-version-fields][src/graphden/schema/versioned/schema.clj:561]]
 
 * 7. resolve-version
 :PROPERTIES:
@@ -193,13 +193,13 @@ The identity-plane repair primitives for the OTHER ghost source: a package fn's 
 :PROPERTIES:
 :CUSTOM_ID: versioning/diff-branches
 :FILE: src/graphden/versioning/storage/merge.clj
-:LINE: 500
+:LINE: 503
 :MINS: 4.4
 :END:
 
 The branch-symmetric resolved-view diff: gather every entity touched on either side's visibility set, resolve both, and report added/modified. The simplest read-only comparison — it precedes the conflict-oriented framing below.
 
-- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn diff-branches][src/graphden/versioning/storage/merge.clj:500]]
+- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn diff-branches][src/graphden/versioning/storage/merge.clj:503]]
 - same file :: [[file:versioning.org::#versioning/detect-conflicts][detect-conflicts]], [[file:versioning.org::#versioning/merge-branch!][merge-branch!]]
 
 * 16. diff-branches-view
@@ -218,20 +218,20 @@ The DISPLAY model over diff-branches (diff v2): entries grouped under the fn tha
 :PROPERTIES:
 :CUSTOM_ID: versioning/detect-conflicts
 :FILE: src/graphden/versioning/storage/merge.clj
-:LINE: 293
+:LINE: 294
 :MINS: 3.1
 :END:
 
 Finds entities modified on BOTH branches after the computed fork point to DIFFERENT content (skipping branch-local fns). A side modified an entity when its winning row arrived there after the fork — written there, or landed by a merge: the resolver's ~:effective-ts~, not row ownership, is what the scan compares. This introduces fork-point reasoning and defines exactly what a merge must resolve before it can proceed — and, through ~field-diff~, what the conflict row tells the reader.
 
-- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn detect-conflicts][src/graphden/versioning/storage/merge.clj:293]]
+- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn detect-conflicts][src/graphden/versioning/storage/merge.clj:294]]
 - same file :: [[file:versioning.org::#versioning/diff-branches][diff-branches]], [[file:versioning.org::#versioning/merge-branch!][merge-branch!]]
 
 * 18. merge-branch!
 :PROPERTIES:
 :CUSTOM_ID: versioning/merge-branch!
 :FILE: src/graphden/versioning/storage/merge.clj
-:LINE: 756
+:LINE: 759
 :MINS: 8.3
 :END:
 
@@ -239,7 +239,7 @@ The merge itself: assert conflicts are resolved, then atomically write ONE ~bran
 
 Read it in three parts: validate (conflicts resolved, approval policy satisfied), write — the single ~branch-merge~ row plus any resolution overrides, in one transaction — then report, including ~skipped-as-branch-local~ right below it: the rows a merge deliberately does NOT carry across.
 
-- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn merge-branch!][src/graphden/versioning/storage/merge.clj:756]]
+- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn merge-branch!][src/graphden/versioning/storage/merge.clj:759]]
 - same file :: [[file:versioning.org::#versioning/diff-branches][diff-branches]], [[file:versioning.org::#versioning/detect-conflicts][detect-conflicts]]
 
 * 19. merge-transitively!

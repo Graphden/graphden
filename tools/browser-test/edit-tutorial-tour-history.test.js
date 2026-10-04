@@ -97,6 +97,17 @@ async function setDescription(page, text) {
       continue;
     }
 
+    const editorColors = await page.evaluate(() => {
+      const ta = document.querySelector('.description-tooltip-textarea');
+      return {
+        dark: document.body.classList.contains('theme-dark'),
+        editor: getComputedStyle(ta).backgroundColor,
+        page: getComputedStyle(document.body).backgroundColor,
+      };
+    });
+    assert(editorColors.dark && editorColors.editor === editorColors.page,
+      'description editor uses the dark form surface: ' + JSON.stringify(editorColors));
+
     await page.evaluate((v) => {
       const ta = document.querySelector('.description-tooltip-textarea');
       ta.value = v;
@@ -209,6 +220,19 @@ async function openVersionHistory(page) {
     await waitTourTitle(page, 'Something to edit', 30000);
     await filterAndSelect(page, 'const', 'const');
     await waitTourTitle(page, 'Extend it', 150000);
+    await page.evaluate(() => applyTheme(true));
+    await openRowActionsFor(page, 'const', 30000);
+    const menu = await page.evaluate(() => {
+      const host = document.querySelector('.row-actions-popover');
+      const button = host.querySelector('[data-action="add-mi-parent"]');
+      return {width: host.getBoundingClientRect().width,
+        label: button.getAttribute('aria-label'),
+        explanation: button.getAttribute('aria-description')};
+    });
+    assert(menu.width < 400 && menu.label === 'Add another parent'
+      && /picker searches/.test(menu.explanation),
+      'const menu stays compact while retaining its explanation: ' + JSON.stringify(menu));
+    await page.keyboard.press('Escape');
     await extendViaRowActions(page, 'tutorial-versioned');
     await waitTourTitle(page, 'Give it a description', 150000);
 

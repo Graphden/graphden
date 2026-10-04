@@ -403,7 +403,8 @@ function _applyAddMICompatibilityState(host) {
   if (!addMiBtn) return;
   addMiBtn.title = 'Add another parent (multi-inheritance) — a fn sharing this '
                  + 'one\'s base that sets args of its own; the picker searches the whole graph';
-  addMiBtn.setAttribute('aria-label', addMiBtn.title);
+  addMiBtn.setAttribute('aria-label', 'Add another parent');
+  addMiBtn.setAttribute('aria-description', addMiBtn.title);
 }
 
 

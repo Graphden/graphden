@@ -59,7 +59,9 @@ function makeCtx(world) {
     if (refusal === 'throw') throw new Error('network down');
     const status = refusal ? (refusal === true ? 409 : refusal) : 200;
     let payload = {};
-    if (url.includes('scope=search')) {
+    if (url.startsWith('/api/branches/')) {
+      payload = w.branchMissing ? {ok: false, reason: 'not-found'} : {ok: !w.branchFailure};
+    } else if (url.includes('scope=search')) {
       const q = decodeURIComponent(url.split('q=')[1] || '');
       payload = {fns: w.fns.filter((f) => f.name === q)};
     } else if (url.includes('scope=namespace')) {
@@ -102,6 +104,25 @@ const FN = (name, ns) => ({id: 'id-' + name, name, 'namespace-id': ns || null});
 // --- cases ------------------------------------------------------------------
 
 const tests = [
+
+  test('branch cleanup deletes children first and reports HTTP 200 refusals', async () => {
+    const created = [{type: 'branch', name: 'parent'}, {type: 'branch', name: 'child'}];
+    const success = makeCtx({});
+    assert((await success.ctx._tourDeleteCreatedBranches(created)).length === 0,
+      'successful cleanup reports no survivors');
+    assert(success.calls.join(',') === 'DELETE /api/branches/child,DELETE /api/branches/parent',
+      'children are deleted before their parent');
+    const failure = makeCtx({branchFailure: true});
+    const failed = await failure.ctx._tourDeleteCreatedBranches(created);
+    assert(failed.length === 2, 'HTTP 200 with ok:false is a failure after retry');
+    assert(failure.calls.length === 4, 'both failed deletions are retried once');
+  }),
+
+  test('retry accepts a child removed by the previous rollback attempt', async () => {
+    const {ctx} = makeCtx({branchMissing: true});
+    assert(await ctx._tourDeleteBranch('already-removed'),
+      'the explicit not-found response means there is nothing left to delete');
+  }),
 
   test('a refused delete is REPORTED, not swallowed', async () => {
     const {ctx} = makeCtx({

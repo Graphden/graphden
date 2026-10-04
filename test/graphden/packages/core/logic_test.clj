@@ -128,3 +128,25 @@
     (is (= 8 (:expected data)))
     (testing "operand VALUES stay out of the visible message (secret-leak guard)"
       (is (not (re-find #"7|8" (ex-message ex)))))))
+
+
+(deftest ensure-type-checks-without-echoing-the-value
+  (let [f (impls/impl-of :ensure-type)
+        secret-sentinel "do-not-include-this-value"
+        error (try
+                (f {:value (delay secret-sentinel)
+                    :type (delay :int)} nil)
+                nil
+                (catch clojure.lang.ExceptionInfo e e))]
+    (is (= 42
+           (f {:value (delay 42) :type (delay :int)} nil)))
+    (is (= :execution-error/type-mismatch (:type (ex-data error))))
+    (is (= :int (:expected-type (ex-data error))))
+    (is (not (contains? (ex-data error) :value)))
+    (is (not (re-find (re-pattern secret-sentinel) (ex-message error)))))
+  (let [f (impls/impl-of :ensure-type)
+        error (try
+                (f {:value (delay 1) :type (delay :not-a-type)} nil)
+                nil
+                (catch clojure.lang.ExceptionInfo e e))]
+    (is (= :execution-error/unknown-type-tag (:type (ex-data error))))))

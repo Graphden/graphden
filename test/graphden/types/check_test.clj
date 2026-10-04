@@ -140,6 +140,21 @@
                                      :args {:a 5 :b 10}})))))
 
 
+(deftest ensure-type-narrows-from-a-literal-tag
+  (testing "the checked runtime boundary also narrows its static result"
+    (check/check-fn-def! {:name :checked-int
+                          :parent :ensure-type
+                          :args {:value {:as :incoming}
+                                 :type {:value :int}}})
+    (is (= :int (:return (registry/rich-type-of :checked-int)))))
+  (testing "a dynamic tag does not promise a static type"
+    (check/check-fn-def! {:name :checked-dynamic
+                          :parent :ensure-type
+                          :args {:value {:as :incoming}
+                                 :type {:as :expected-type}}})
+    (is (= :any (:return (registry/rich-type-of :checked-dynamic))))))
+
+
 (deftest rejects-text-where-int-expected
   (testing "literal :text into :int slot"
     (is (thrown-with-msg?

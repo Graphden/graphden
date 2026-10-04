@@ -47,6 +47,7 @@
     :_tests-run-apply :_tests-status-apply
     :_types-usages-apply :abs :add :all-rich-types :and :api-rich-types
     :assert :assert-eq :assert-some :assoc :assoc-in :atom :auth-active?
+    :ensure-type
     :authenticate-request :blank? :branch-diagnostics-flat
     ;; :branch-lint-findings reads the branch's graph snapshot; its rows
     ;; carry fn names / ids / the engine's message — server-derived, and
@@ -209,7 +210,7 @@
     :constant-time-equal? :constantly :contains? :count :deref :dissoc :distinct :div :do :drop
     :empty? :equal? :every? :ex-data :ex-info :filter :filter-xf :find-first
     :first :flatten :fn-signature :fn-type? :form-decode :get :get-in :gt
-    :gte :group-by :hiccup   :if :into :invoke :is-a? :keys :list :lt :lte
+    :gte :group-by :hiccup   :if :into :invoke :is-a? :ensure-type :keys :list :lt :lte
     :map :map-xf :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
     :list-branch-comments :parse-edn :parse-graph-edn
     :parse-int :parse-json :parse-uuid

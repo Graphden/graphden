@@ -53,6 +53,14 @@
                  :description "Canonical type-tag — a keyword like `:int` / `:keyword` / `:map`. Wrap with `{:value :foo}` in fn-def args to bypass fn-ref resolution if the tag happens to name a known fn-def."}}
    :return-type :bool}
 
+  {:name :ensure-type
+   :description "Validate `value` against a primitive runtime type and return it unchanged. Bind `type` to a literal type tag (for example `:int`) to narrow the result statically as well. On failure, throws a safe `:execution-error/type-mismatch` without including the value. For records, lists, and refinements, use the corresponding explicit validator such as `:ensure-positive-int`."
+   :args {:value {:type :any
+                  :description "Value to validate; never included in error data."}
+          :type {:type :keyword
+                 :description "Primitive type tag to check. A literal tag also determines the checked result type."}}
+   :return-type :any}
+
   ;; === Conditionals ===
   ;; `:then` and `:else` share type-var `'a` so the return narrows to
   ;; whichever concrete type both branches carry. `:else` is optional —

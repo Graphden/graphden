@@ -79,6 +79,33 @@
     (boolean (pred value))))
 
 
+(defbase ensure-type-fn
+  "Check a value against a primitive runtime type and return it unchanged.
+   Failures identify only the expected type; they never include the value."
+  [value type]
+  (let [pred (get types/runtime-predicates type)]
+    (when-not pred
+      (throw (ex-info "Unknown type tag"
+                      {:type :execution-error/unknown-type-tag
+                       :type-tag type})))
+    (when-not (pred value)
+      (throw (ex-info "Value does not match the required type"
+                      {:type :execution-error/type-mismatch
+                       :expected-type type})))
+    value))
+
+
+(defn ensure-type-return-rule
+  "A literal primitive `:type` binding is a checked cast: the runtime impl
+   throws unless the value satisfies the same primitive predicate. A dynamic
+   type tag carries no static narrowing, so retain the declared return type."
+  [bindings-info default-ret]
+  (let [expected (get-in bindings-info [:type :value])]
+    (if (and (keyword? expected) (types/primitive? expected))
+      expected
+      default-ret)))
+
+
 ;; === Conditionals ===
 
 (defbase if-fn
@@ -483,4 +510,7 @@
    :equal? {:impl equal?-fn :taint-propagate? true}
    :constant-time-equal? {:impl constant-time-equal?-fn
                           :taint-propagate? true}
-   :is-a? {:impl is-a?-fn :taint-propagate? true}})
+   :is-a? {:impl is-a?-fn :taint-propagate? true}
+   :ensure-type {:impl ensure-type-fn
+                 :return-type-rule ensure-type-return-rule
+                 :taint-propagate? true}})

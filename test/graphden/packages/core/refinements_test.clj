@@ -38,6 +38,20 @@
        (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))
 
 
+(deftest ensure-type-validates-runtime-values
+  (is (= 42 (exec/execute *context* (eh/fn-id "ensure-type")
+                          {:value 42 :type :int})))
+  (let [sentinel "must-not-appear-in-type-error"
+        error (try
+                (exec/execute *context* (eh/fn-id "ensure-type")
+                              {:value sentinel :type :int})
+                nil
+                (catch clojure.lang.ExceptionInfo e e))]
+    (is (= :execution-error/type-mismatch (:type (ex-data error))))
+    (is (= :int (:expected-type (ex-data error))))
+    (is (not (re-find (re-pattern sentinel) (ex-message error))))))
+
+
 ;; -----------------------------------------------------------------------------
 ;; :ensure-positive-int — the surviving narrower (the others were
 ;; dropped as unreachable production code, see commit message of the

@@ -1024,6 +1024,24 @@ Untyped world                    Typed world
 
 Converter functions (e.g. `:parse-int`, the `:ensure-*` refinement narrowers) are **bridges**. They may fail at runtime (if the value is not of the expected format), but after them, type guarantees hold. The user chooses where to draw the boundary.
 
+For a primitive value that should already have the right representation, use
+`:ensure-type` as a checked boundary:
+
+```edn
+{:name :checked-account-id
+ :parent :ensure-type
+ :args {:value {:as :raw-id}
+        :type {:value :uuid}}}
+;; result type is :uuid; execution throws if :raw-id is not a UUID
+```
+
+The literal `:type` tag drives both the runtime predicate and the static result
+type. A dynamic tag leaves the static result at `:any`; the checker does not
+guess. Failures include the expected tag but never echo the rejected value.
+`:ensure-type` covers primitive tags only. Structural records, lists, and
+refinements still need their explicit validators; this does not automatically
+validate every graph output or external input.
+
 ---
 
 ## Runtime Validation from Types
@@ -1032,8 +1050,8 @@ Converter functions (e.g. `:parse-int`, the `:ensure-*` refinement narrowers) ar
 `computed-type` into a malli / JSON Schema at execution time. Types are
 checked at SAVE time only (previous sections); at runtime a value is what the
 base-fn impl returns, and the only checks that run are the explicit converters
-at the boundary (`:parse-int`, the `:ensure-*` narrowers — [Typed and Untyped
-Boundary](#typed-and-untyped-boundary)) and whatever a base-fn validates
+at the boundary (`:parse-int`, `:ensure-type`, and the `:ensure-*` narrowers —
+[Typed and Untyped Boundary](#typed-and-untyped-boundary)) and whatever a base-fn validates
 itself. The idea — one definition, static check at save + generated validator
 at the boundary — remains [Phase 5](#phase-5-runtime-validation-generation--not-shipped) of
 the implementation plan.

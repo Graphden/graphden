@@ -892,6 +892,7 @@
            :assert-some ":null stripped from the input's type; :never when the input is always nil."
            :assert ":null stripped from the input's type (a nil value throws); :never when the input is always nil. `false` also throws but a :bool input keeps its :bool type — the narrowing is sound, not complete."
            :assert-eq "Returns `:actual` unchanged; the shared typevar unifies both operands, so the return follows their common type."
+           :ensure-type "Checks the value against the literal primitive tag and narrows to that type; a dynamic tag keeps the static result wide."
            :name "Keyword/text member-wise → text; :null passes through."
            :str-to-keyword "Text narrowed to keyword; :null passes through."
            :const "Identity passthrough — return type follows `:value`."

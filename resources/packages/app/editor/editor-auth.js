@@ -189,9 +189,9 @@ async function authMutate(method, url, fields) {
   const response = await authFetch(url, opts);
   // Ordinary type errors are saved as warnings so users can keep editing,
   // but a warning badge alone is easy to miss until the next graph refresh.
-  // Read a clone so callers retain the original response body for their own
-  // success/error handling. Keep the toast generic: diagnostic details may
-  // include literal values and already live in the Inspector.
+  // Read a clone so callers retain the original response body. Only render
+  // allow-listed type names and a known repair hint: diagnostic messages and
+  // bindings can contain private literal values.
   if (response.ok && (response.headers.get('content-type') || '').includes('application/json')) {
     const body = await response.clone().json().catch(() => null);
     const ownWarnings = body?.['type-warnings']?.length || 0;
@@ -200,10 +200,59 @@ async function authMutate(method, url, fields) {
       const scope = ownWarnings && dependentWarnings
         ? 'this function and ' + dependentWarnings + ' dependent function' + (dependentWarnings === 1 ? '' : 's')
         : ownWarnings ? 'this function' : dependentWarnings + ' dependent function' + (dependentWarnings === 1 ? '' : 's');
-      gdToast('Saved with type warnings in ' + scope + '. Open the ⚠ type errors lens to see what to fix.', 'error');
+      const detail = ownWarnings ? safeTypeWarningSummary(body['type-warnings'][0]) : '';
+      gdToast('Saved with type warnings in ' + scope + '.'
+        + (detail ? ' ' + detail : '')
+        + ' Open the ⚠ type errors lens for details.', 'error');
     }
   }
   return response;
+}
+
+// Turn structured type names into a short, safe save-time explanation.
+// Never use diagnostic.message, :binding, fn names, or arbitrary strings:
+// those fields can contain user-provided literals or source details.
+function safeTypeWarningSummary(warning) {
+  if (!warning || typeof warning !== 'object') return '';
+  const knownTypes = {
+    text: 'text', string: 'text', int: 'integer', integer: 'integer',
+    decimal: 'number', number: 'number', bool: 'boolean', boolean: 'boolean',
+    keyword: 'keyword', null: 'empty value', 'nil': 'empty value',
+  };
+  const primitiveType = (value, depth = 0) => {
+    if (depth > 5 || value == null) return null;
+    if (typeof value === 'string') {
+      const match = value.match(/^:?(text|string|int|integer|decimal|number|bool|boolean|keyword|null|nil)$/i);
+      return match ? knownTypes[match[1].toLowerCase()] : null;
+    }
+    if (Array.isArray(value)) {
+      for (const part of value) {
+        const found = primitiveType(part, depth + 1);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+  const expected = primitiveType(warning.expected);
+  const actual = primitiveType(warning.actual);
+  if (!expected || !actual) return '';
+  const hasRefinement = (value, depth = 0) => {
+    if (depth > 5 || !Array.isArray(value)) return false;
+    return value.some((part) => (typeof part === 'string' && /^:?refine$/i.test(part))
+      || hasRefinement(part, depth + 1));
+  };
+  if (warning.constraint || warning.reason === 'refinement-violation'
+      || (expected === actual && hasRefinement(warning.expected))) {
+    return 'The value does not meet the required constraints.';
+  }
+  const repairs = {
+    'text→integer': 'Try :parse-int before saving.',
+    'text→number': 'Try :parse-number before saving.',
+    'text→keyword': 'Try :str-to-keyword before saving.',
+  };
+  const repair = repairs[actual + '→' + expected];
+  return 'Expected ' + expected + ', but got ' + actual + '.'
+    + (repair ? ' ' + repair : '');
 }
 
 // Mount the lock icon + (empty) popover shell into #auth-mount. The lock

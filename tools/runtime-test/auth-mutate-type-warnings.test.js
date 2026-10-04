@@ -40,13 +40,26 @@ function jsonResponse(body) {
 }
 
 (async () => {
-  const warning = jsonResponse({ 'created': 'id', 'type-warnings': [{ message: 'private diagnostic text' }] });
+  const warning = jsonResponse({ 'created': 'id', 'type-warnings': [{
+    message: 'private diagnostic text; literal=TOP_SECRET_SENTINEL',
+    binding: 'TOP_SECRET_SENTINEL', expected: ':int', actual: ':text',
+  }] });
   const preserved = await runWithToast(warning);
   assert.equal(preserved, warning, 'the original Response is returned');
   assert.equal(messages.length, 1, 'a successful write with warnings shows feedback');
   assert.match(messages[0][0], /type warning/);
   assert.match(messages[0][0], /this function/);
-  assert.doesNotMatch(messages[0][0], /private diagnostic text/, 'the toast does not expose diagnostic contents');
+  assert.match(messages[0][0], /Expected integer, but got text/);
+  assert.match(messages[0][0], /:parse-int/);
+  assert.doesNotMatch(messages[0][0], /private diagnostic text|TOP_SECRET_SENTINEL/,
+    'the toast uses safe type labels, never message or binding contents');
+
+  messages.length = 0;
+  await runWithToast(jsonResponse({ created: 'id', 'type-warnings': [{
+    expected: ['refine', 'int', ['>=', 1]], actual: 'int', binding: -1,
+  }] }));
+  assert.match(messages[0][0], /does not meet the required constraints/);
+  assert.doesNotMatch(messages[0][0], /-1/, 'refinement feedback does not reveal the rejected value');
 
   messages.length = 0;
   await runWithToast(jsonResponse({ created: 'id', 'dependent-type-warning-count': 2 }));

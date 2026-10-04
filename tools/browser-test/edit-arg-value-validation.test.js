@@ -214,9 +214,17 @@ const TEST_NAME = 'test-arg-value-validation';
     assert(/refine|>=|<=|range|satisfies|fails/i.test(errStatus.text || ''),
            'error message mentions the refinement / range');
 
-    // Close the popover (Escape).
-    await page.keyboard.press('Escape');
-    // (escape dispatched; the following assertion gates the next step)
+    // Save is tolerated server-side but must immediately give a useful,
+    // value-free explanation (the diagnostic body itself includes literals).
+    await page.locator('.arg-value-edit-btn').filter({hasText: 'Save'}).click();
+    await page.waitForFunction(() => {
+      const toast = document.querySelector('.gd-toast-visible');
+      return toast && /required constraints/.test(toast.textContent || '');
+    }, null, {timeout: 10000});
+    const saveToast = await page.locator('.gd-toast-visible').textContent();
+    assert(/Saved with type warnings/.test(saveToast || ''),
+           'save-time warning is shown in the editor: ' + saveToast);
+    assert(!/-1/.test(saveToast || ''), 'save-time toast does not repeat the rejected literal');
   } finally {
     await deleteFnByName(page, TEST_NAME).catch(() => {});
     await browser.close();

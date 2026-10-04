@@ -80,7 +80,7 @@
                                          :return-type-fn-id number-type}
                                         {:id caller :name "caller" :parent-ids [base]}])
                      (update :slots into (map-indexed (fn [i id]
-                                                        {:id id :name (str "input" i)
+                                                        {:id id :name (str "input" i) :required true
                                                          :type-fn-id number-type}) slots))
                      (update :fn-slots into (map-indexed (fn [i id]
                                                            {:id (random-uuid) :fn-id base
@@ -88,7 +88,11 @@
                      (update :bindings into (map (fn [id]
                                                    {:id (random-uuid) :fn-id caller
                                                     :slot-id id :ref-fn-id child}) slots)))
-        groups (sequence-groups (build-elements caller {} entities))]
+        collapsed (build-elements caller {} entities)
+        expansions (into {} (keep (fn [{:keys [data]}]
+                                    (when (= (str child) (:originalFnId data))
+                                      [(:id data) 1]))) (:nodes collapsed))
+        groups (sequence-groups (build-elements caller expansions entities))]
     (is (= 2 (count groups)))
     (doseq [members groups]
       (is (= [2 :leaf 1 3 4]

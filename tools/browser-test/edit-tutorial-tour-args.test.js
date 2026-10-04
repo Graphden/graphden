@@ -136,6 +136,8 @@ const {
     await waitTourTitle(page, 'Append here', 150000);
     await bindPlaceholderOn(page, 'tutorial-sum-more', 'nums', 'literal', '3');
     await waitTourTitle(page, 'Run it', 150000);
+    await page.waitForFunction(() => [...graph.edges.values()]
+      .filter((e) => e.data?.seqGroup && !e.data?.isUnset).length === 4);
     const appendedOrder = await page.evaluate(() => {
       const members = [...graph.edges.values()]
         .filter((e) => e.data?.seqGroup && !e.data?.isUnset)

@@ -66,13 +66,19 @@
      :see [[:executor "create-context"]]}
 
     {:ns graphden.executor.compile-runtime :defn execute
-     :say "The dispatch heart of the hot path. It checks the cancellation /
-           effect / execute-guard gates, pulls the **compiled registry** out of
-           the context, looks up the closure for this `fn-id` (or throws
-           fn-not-found), translates the caller's name-keyed args into the dual
-           slot-id+name shape the compiled code expects, and finally calls
-           `(closure translated ctx)`. This is the moment *execute a fn* becomes
-           *call a precompiled closure*."
+     :say "Runs a graph function using code already compiled into a Clojure
+           function. Before calling it, `execute` checks whether this run was
+           cancelled and, when configured, calls `:execute-guard` to check the
+           caller's permission. It also binds the allowed effects: operations
+           such as network access or state changes check this set when they run.
+
+           The compiled registry is a map from `fn-id` to a callable Clojure
+           function (a closure that retains the dependencies prepared during
+           compilation). `execute` obtains this map from the context through
+           `registry`, finds the requested function or reports fn-not-found,
+           translates argument names into the slot-id and name keys expected
+           by that function, then calls `(closure translated ctx)`.
+           Follow the registry link below to see how the map is built and reused."
      :see [[:executor "registry"]]}
 
     {:ns graphden.executor.context :defn create-context

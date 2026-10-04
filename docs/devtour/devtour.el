@@ -148,13 +148,13 @@
   "Fontify the tour's tiny markdown between START and point-max."
   (save-excursion
     (goto-char start)
-    (while (re-search-forward "`\\([^`\n]+\\)`" nil t)
+    (while (re-search-forward "`\\([^`]+\\)`" nil t)
       (replace-match (propertize (match-string 1) 'face 'devtour-code) t t))
     (goto-char start)
-    (while (re-search-forward "\\*\\*\\([^*\n]+\\)\\*\\*" nil t)
+    (while (re-search-forward "\\*\\*\\([^*]+\\)\\*\\*" nil t)
       (replace-match (propertize (match-string 1) 'face 'devtour-strong) t t))
     (goto-char start)
-    (while (re-search-forward "\\[\\([^]\n]+\\)\\](\\([^)\n]+\\))" nil t)
+    (while (re-search-forward "\\[\\([^]]+\\)\\](\\([^)]+\\))" nil t)
       (replace-match (propertize (match-string 1) 'face 'link) t t))))
 
 (defun devtour--render (step)

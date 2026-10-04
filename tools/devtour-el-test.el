@@ -19,6 +19,20 @@
 (setq devtour-repo-root devtour-test-root
       devtour-data-file (expand-file-name "docs/devtour/tour.eld" devtour-test-root))
 
+(ert-deftest devtour-markdown-renders-wrapped-and-english-prose ()
+  "Formatting must survive source line wrapping and preserve the text."
+  (with-temp-buffer
+    (insert "`fn-name` **скомпилированный\nреестр** [definition](https://example.org) ")
+    (devtour--render-markdown (point-min))
+    (should (equal (buffer-string)
+                   "fn-name скомпилированный\nреестр definition "))
+    (goto-char (point-min))
+    (should (eq (get-text-property (point) 'face) 'devtour-code))
+    (search-forward "скомпилированный")
+    (should (eq (get-text-property (1- (point)) 'face) 'devtour-strong))
+    (search-forward "definition")
+    (should (eq (get-text-property (1- (point)) 'face) 'link))))
+
 (ert-deftest devtour-data-loads ()
   (devtour--load)
   (should (> (length devtour--steps) 100))

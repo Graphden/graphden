@@ -136,6 +136,25 @@ const {
     await waitTourTitle(page, 'Append here', 150000);
     await bindPlaceholderOn(page, 'tutorial-sum-more', 'nums', 'literal', '3');
     await waitTourTitle(page, 'Run it', 150000);
+    const appendedOrder = await page.evaluate(() => {
+      const members = [...graph.edges.values()]
+        .filter((e) => e.data?.seqGroup && !e.data?.isUnset)
+        .map((e) => graph.nodes.get(e.targetId));
+      const canvas = members.map((n) => ({value: n.data.value,
+        top: document.querySelector('.node-overlay[data-node-id="' + n.id + '"]')
+          ?.getBoundingClientRect().top}));
+      return {
+        positionsPresent: canvas.every((n) => Number.isFinite(n.top)),
+        sequence: [...members].sort((a, b) => a.data.seqIndex - b.data.seqIndex)
+          .map((n) => n.data.value),
+        canvas: canvas.sort((a, b) => a.top - b.top).map((n) => n.value),
+      };
+    });
+    assert(appendedOrder.positionsPresent, 'all list items have visible overlays');
+    assert(JSON.stringify(appendedOrder.sequence) === '[2,0,1,3]',
+      'the appended item follows all inherited items: ' + JSON.stringify(appendedOrder));
+    assert(JSON.stringify(appendedOrder.canvas) === '[2,0,1,3]',
+      'canvas order agrees with the sequence: ' + JSON.stringify(appendedOrder));
     await runViaRowActions(page);
     await waitTourTitle(page, 'Six', 150000);
     const six = await page.evaluate(() =>

@@ -96,13 +96,15 @@ Sequence groups: the items of one list are not N
 look-alike args. `expand-sequence-anchor` emits one entry per chain
 item and then the **append tail** — the anchor's own `:unset` entry,
 `:sequence-anchor? true` (+ `:seq-tail? true` after items), rendered
-as a free `+` placeholder after the last item; `list-closed-upstream?`
-drops the tail when an ancestor sealed the list, so no `+` is offered
-that the API would 409 (an EMPTY chain keeps its sentinel — the slot's
-only presence on the card). The `group-sequence-edges` post-pass then
+as a free `+` placeholder after the last item. A list closed upstream
+shows a locked tail instead of an actionable `+` (an empty chain keeps
+its sentinel — the slot's only presence on the card). The `group-sequence-edges` post-pass then
 stamps every member edge (items + tail) with `:seqGroup` (source node +
 slot), `:seqIndex` (chain order), `:seqCount` and `:seqLabel` (the bare
 slot name), and the same `:seqGroup` / `:seqIndex` on the target nodes.
+Items follow their owners' reverse BFS inheritance order, matching the
+executor, then their position within each owner's list. Synthetic anchor
+source links point at the defining slot and do not determine that order.
 The editor draws one labelled **trunk** per group that fans out AFTER
 the type chip — a plain arg splits at the bend before its chip, a list
 element after it — and the per-item `×` moves onto the item's branch.

@@ -1104,7 +1104,7 @@
                :targets [".execute-confirm-checkbox" ".execute-run-btn:not([disabled])"]
                :check {:kind "result-value" :value ["tick"]}}
               {:title "Run it again"
-               :body "One row — tick — the list the cell holds now. Click [[Run]] once more, same field: TWO rows. Nothing in the graph changed between the runs; the cell kept the value, and [[Raw]] reads [\"tick\" \"tick\"]."
+               :body "One row — tick — the list the cell holds now. Click [[Run]] once more, same field: TWO rows. Nothing in the graph changed between the runs; the cell kept the value, and [[Raw]] reads [\"tick\", \"tick\"]."
                :target ".execute-popover.visible .execute-run-btn"
                :targets [".execute-popover.visible .execute-run-btn" ".execute-result-list > li:nth-child(2)"]
                :check {:kind "result-value" :value ["tick" "tick"]}}

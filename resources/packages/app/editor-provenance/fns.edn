@@ -86,6 +86,27 @@
    :parent :to-str
    :args {:value :_partial-mismatch-current-value}}
 
+  {:name :_partial-mismatch-candidate-text
+   :description "Safe structural type name of the bound literal, used only to select an allow-listed repair hint; never includes the literal value."
+   :parent :to-str
+   :args {:value :_partial-mismatch-candidate-type}}
+
+  {:name :_partial-mismatch-repair-hint
+   :description "Empty accessible target for a reviewed repair hint. The server supplies expected and actual TYPE names only; editor-auth.js fills the text from a fixed allow-list, never from the literal or diagnostic message."
+   :parent :hiccup
+   :args {:tag {:value "p"}
+          :attrs {:parent :assoc
+                  :args {:map {:parent :assoc
+                               :args {:map {:value {:class "mismatch-repair-hint"
+                                                    :data-mismatch-repair-hint "1"
+                                                    :aria-live "polite"
+                                                    :hidden true}}
+                                      :key {:value :data-expected-type}
+                                      :value :_partial-mismatch-expected-text}}
+                         :key {:value :data-actual-type}
+                         :value :_partial-mismatch-candidate-text}}
+          :children {:value []}}}
+
   ;; Hiccup composition. Each `:hiccup`-using fn-def folds in one
   ;; dynamic child; pure-literal sub-trees use `:const`.
 
@@ -522,6 +543,7 @@
                      :_partial-mismatch-expected-row
                      :_partial-mismatch-got-row
                      :_partial-mismatch-reason-row
+                     :_partial-mismatch-repair-hint
                      :_partial-mismatch-diff-section
                      :_partial-binding-prov-section
                      :_partial-mismatch-actions]}}

@@ -9,7 +9,8 @@
 //   • Navigate. Verify `.arg-overlay-mismatch` class + `.arg-mismatch-
 //     badge` button render.
 //   • Click `!` → `.mismatch-explainer` popover opens.
-//   • Popover lists expected type, actual type, reason text.
+//   • Popover lists expected type, actual type, reason text and a safe
+//     conversion hint selected from server-provided type names.
 //   • Click the "Edit value" action → mismatch popover dismisses +
 //     the arg-value-edit popover takes its place.
 //   • Escape dismisses the explainer cleanly.
@@ -144,6 +145,20 @@ async function cleanup(page) {
     assert(initial.overlayMismatchClass,
            'parent overlay carries .arg-overlay-mismatch class');
 
+    // The public API preserves the valid DB value for this fixture, so
+    // inject only a type-name pair into the partial response. This exercises
+    // the client hint path while keeping the test literal/value untouched.
+    let repairTypesMatched = false;
+    await page.route(/\/partials\/mismatch-explainer\?/, async (route) => {
+      const response = await route.fetch();
+      const body = await response.text();
+      repairTypesMatched = body.includes('data-actual-type=":int"');
+      await route.fulfill({
+        response,
+        body: body.replace('data-actual-type=":int"', 'data-actual-type=":text"'),
+      });
+    });
+
     // ===================================================================
     // Phase B: click badge → server-rendered explainer popover opens.
     //
@@ -170,6 +185,7 @@ async function cleanup(page) {
         hasActual: text.includes('got') || text.includes('actual'),
         hasRealValue: text.includes('42'),
         hasIntType: text.includes('int'),
+        repairHint: p?.querySelector('.mismatch-repair-hint')?.textContent?.trim(),
       };
     });
     assert(popoverState.visible, 'mismatch-explainer popover visible');
@@ -183,6 +199,10 @@ async function cleanup(page) {
            'popover quotes the REAL stored value "42" (not the in-memory spoof "hello")');
     assert(popoverState.hasIntType,
            'popover names :int expected type');
+    assert(repairTypesMatched,
+           'repair selection uses a server-provided type name, not the literal');
+    assert(popoverState.repairHint === 'Try :parse-int before saving.',
+           'popover offers a safe conversion hint: ' + JSON.stringify(popoverState.repairHint));
 
     // ===================================================================
     // Phase C: Escape dismisses the popover. hideMismatchExplainer

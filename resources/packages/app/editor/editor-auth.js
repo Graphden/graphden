@@ -209,10 +209,10 @@ async function authMutate(method, url, fields) {
   return response;
 }
 
-// Turn structured type names into a short, safe save-time explanation.
+// Reduce structured type expressions to allow-listed primitive labels.
 // Never use diagnostic.message, :binding, fn names, or arbitrary strings:
 // those fields can contain user-provided literals or source details.
-function safeTypeWarningSummary(warning) {
+function safeTypeWarningLabels(warning) {
   if (!warning || typeof warning !== 'object') return '';
   const knownTypes = {
     text: 'text', string: 'text', int: 'integer', integer: 'integer',
@@ -235,22 +235,38 @@ function safeTypeWarningSummary(warning) {
   };
   const expected = primitiveType(warning.expected);
   const actual = primitiveType(warning.actual);
-  if (!expected || !actual) return '';
+  if (!expected || !actual) return null;
   const hasRefinement = (value, depth = 0) => {
     if (depth > 5 || !Array.isArray(value)) return false;
     return value.some((part) => (typeof part === 'string' && /^:?refine$/i.test(part))
       || hasRefinement(part, depth + 1));
   };
-  if (warning.constraint || warning.reason === 'refinement-violation'
-      || (expected === actual && hasRefinement(warning.expected))) {
-    return 'The value does not meet the required constraints.';
-  }
+  return { expected, actual, hasRefinement: hasRefinement(warning.expected) };
+}
+
+// Return only a fixed, reviewed repair instruction for a known primitive
+// mismatch. The same helper powers the save toast and the detailed popover.
+function safeTypeRepairHint(warning) {
+  const labels = safeTypeWarningLabels(warning);
+  if (!labels) return '';
   const repairs = {
     'text→integer': 'Try :parse-int before saving.',
     'text→number': 'Try :parse-number before saving.',
     'text→keyword': 'Try :str-to-keyword before saving.',
   };
-  const repair = repairs[actual + '→' + expected];
+  return repairs[labels.actual + '→' + labels.expected] || '';
+}
+
+// Turn structured type names into a short, safe save-time explanation.
+function safeTypeWarningSummary(warning) {
+  const labels = safeTypeWarningLabels(warning);
+  if (!labels) return '';
+  const { expected, actual, hasRefinement } = labels;
+  if (warning.constraint || warning.reason === 'refinement-violation'
+      || (expected === actual && hasRefinement)) {
+    return 'The value does not meet the required constraints.';
+  }
+  const repair = safeTypeRepairHint(warning);
   return 'Expected ' + expected + ', but got ' + actual + '.'
     + (repair ? ' ' + repair : '');
 }

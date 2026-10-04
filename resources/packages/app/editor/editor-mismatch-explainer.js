@@ -86,6 +86,20 @@ function bindExplainerCloseAndFnLinks(el, hide) {
 // not a pure render — keeping it here is correct.
 function bindPostSwap(el, arg, anchorEl) {
   bindExplainerCloseAndFnLinks(el, hideMismatchExplainer);
+  // The partial supplies only server-derived type names. Turn those into a
+  // repair hint from the shared allow-list; never infer advice from the
+  // in-memory literal, which can be stale or contain private values.
+  const hint = el.querySelector('[data-mismatch-repair-hint]');
+  if (hint && typeof safeTypeRepairHint === 'function') {
+    const text = safeTypeRepairHint({
+      expected: hint.dataset.expectedType,
+      actual: hint.dataset.actualType,
+    });
+    if (text) {
+      hint.textContent = text;
+      hint.hidden = false;
+    }
+  }
   const editBtn = el.querySelector('[data-edit-action]');
   if (editBtn && typeof enterArgValueEditMode === 'function') {
     editBtn.addEventListener('click', (e) => {

@@ -39,6 +39,16 @@ function jsonResponse(body) {
   };
 }
 
+function safeRepairHint(warning) {
+  const context = vm.createContext({
+    document: { body: { addEventListener() {} } },
+    window: {},
+  });
+  context.window = context;
+  vm.runInContext(source, context);
+  return context.safeTypeRepairHint(warning);
+}
+
 (async () => {
   const warning = jsonResponse({ 'created': 'id', 'type-warnings': [{
     message: 'private diagnostic text; literal=TOP_SECRET_SENTINEL',
@@ -53,6 +63,14 @@ function jsonResponse(body) {
   assert.match(messages[0][0], /:parse-int/);
   assert.doesNotMatch(messages[0][0], /private diagnostic text|TOP_SECRET_SENTINEL/,
     'the toast uses safe type labels, never message or binding contents');
+  assert.equal(safeRepairHint({ expected: ':int', actual: ':text' }),
+    'Try :parse-int before saving.',
+    'the detailed explainer can reuse the save toast repair hint');
+  assert.equal(safeRepairHint({ expected: ':text', actual: 'TOP_SECRET_SENTINEL' }), '',
+    'unknown type names never become repair instructions');
+  assert.equal(safeRepairHint({ expected: ':number', actual: ':text', message: 'TOP_SECRET_SENTINEL' }),
+    'Try :parse-number before saving.',
+    'repair selection ignores arbitrary diagnostic text');
 
   messages.length = 0;
   await runWithToast(jsonResponse({ created: 'id', 'type-warnings': [{

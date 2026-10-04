@@ -4059,6 +4059,15 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   line-height: 1.5;
   color: var(--card-fg);
 }
+.mismatch-repair-hint {
+  margin: 6px 0;
+  padding: 6px 8px;
+  border-left: 2px solid var(--accent);
+  background: var(--card-row-highlight);
+  color: var(--card-fg);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+}
 
 /* Leaf-level disagreement section — points at the EXACT failing
    field / element when expected and actual are structurally

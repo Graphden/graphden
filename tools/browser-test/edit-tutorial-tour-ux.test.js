@@ -328,7 +328,24 @@ const {
     await waitTourTitle(page, 'Run it', 150000);
     // Writing to a cell is the :state effect, so Run is gated behind the
     // acknowledgement checkbox — the same gate lesson 16 teaches.
-    await runWithEffectAck(page, 'tick', 'tutorial-bump');
+    await openRowActionsFor(page, 'tutorial-bump', 30000);
+    await page.click('.row-actions-popover [data-action="run-fn"]');
+    await waitTourTitle(page, 'Choose the item', 150000);
+    const itemField = '.execute-arg-form[data-slot-name="value"] [data-form-field]';
+    await page.waitForSelector(itemField, {timeout: 30000});
+    await page.fill(itemField, 'wrong');
+    // Observe at least two completion ticks: entering a different value
+    // must keep the lesson on the input step, without executing the cell.
+    await page.waitForFunction(() => performance.now() - _tourState._shownAt > 1500,
+      null, {timeout: 10000});
+    assert(await page.locator('#gd-tour-pop .gd-tour-title').textContent() === 'Choose the item',
+      'a missing or wrong tick does not skip the input step');
+    await page.fill(itemField, 'tick');
+    await waitTourTitle(page, 'Acknowledge, then run', 30000);
+    assert(await page.locator('.execute-run-btn').isDisabled(),
+      'entering tick does not bypass the side-effect acknowledgement');
+    await page.check('.execute-confirm-checkbox');
+    await page.click('.execute-popover.visible .execute-run-btn');
     // The lesson's whole claim: the SECOND run sees the first one's value —
     // and since 2026-09-13 the tour makes the reader do that second run
     // (the old single "Run it twice" step passed on the first).
@@ -355,6 +372,8 @@ const {
     };
     const before = await runViaApi();
     const after = await runViaApi();
+    assert(before.every((value) => value === 'tick') && after.every((value) => value === 'tick'),
+      'all state items are tick, including the two browser runs');
     assert(after.length > before.length,
       'the cell kept its value between runs (' + JSON.stringify(before)
       + ' → ' + JSON.stringify(after) + ')');

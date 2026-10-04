@@ -68,6 +68,7 @@
   (atom {:platform-admin-fn (constantly false)
          :platform-cap-fn (constantly false)
          :org-cap-fn (constantly false)
+         :graph-read-filter-fn identity
          ;; The presence of an installed org-cap policy IS the "tenancy
          ;; addon active" fact — the server-side twin of the editor's
          ;; capability-header probe (graphdenTenancyActive).
@@ -177,6 +178,21 @@
    `current-platform-tier?` for single-tenant-safe gates."
   [cap]
   (boolean ((seam :org-cap-fn) cap)))
+
+
+(defn install-graph-read-filter!
+  "Install the tenancy addon's `(fn [graph-dump] -> graph-dump)` filter for
+   namespace-level `:read` visibility. `nil` restores identity (the
+   single-tenant path)."
+  [f]
+  (swap! (seams-atom) assoc :graph-read-filter-fn (or f identity)))
+
+
+(defn apply-graph-read-filter
+  "Apply the installed namespace-read projection, or identity when no
+   tenancy addon is wired."
+  [graph]
+  ((seam :graph-read-filter-fn) graph))
 
 
 ;; Notification SEAM. Core raises a few domain EVENTS whose delivery is a

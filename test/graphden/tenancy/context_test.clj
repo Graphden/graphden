@@ -104,6 +104,21 @@
     (is (false? (ctx/tenancy-addon-active?)))))
 
 
+(deftest graph-read-filter-seam-is-identity-by-default-and-isolatable
+  (let [graph {:fns [{:name "visible"}]}]
+    (is (= graph (ctx/apply-graph-read-filter graph))
+        "single-tenant reads are unchanged")
+    (binding [ctx/*seams-override* (atom (ctx/seams-isolation-seed))]
+      (ctx/install-graph-read-filter! #(update % :fns (constantly [])))
+      (is (= {:fns []} (ctx/apply-graph-read-filter graph))
+          "an installed policy transforms this request's graph view")
+      (ctx/install-graph-read-filter! nil)
+      (is (= graph (ctx/apply-graph-read-filter graph))
+          "nil restores identity inside the isolated seam"))
+    (is (= graph (ctx/apply-graph-read-filter graph))
+        "the isolated install never mutates the process-global seam")))
+
+
 (deftest notify-seam-drops-without-a-sink-and-passes-the-event-through
   (is (nil? (ctx/notify! :package-moderated {:name "x"}))
       "no tenancy addon → the event is dropped")

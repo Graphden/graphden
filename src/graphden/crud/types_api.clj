@@ -129,7 +129,8 @@
 
 (defn org-visible-rich-snapshot
   "The NAME-keyed rich-type snapshot restricted to names the current
-   org may see — the registry equivalent of `org-visible-slice`. The
+   principal may read — the registry equivalent of the filtered graph
+   slice. The
    in-memory registry is name-keyed and, unlike the graph cache, has
    NO org filter (`record-rich-types-raw!` writes every tenant fn to
    the global index unconditionally), so serving it raw to a tenant
@@ -148,7 +149,8 @@
       snap
       (let [visible (into #{}
                           (comp (map :name) (filter some?) (map keyword))
-                          (:fns (cached-or-load-graph ctx)))]
+                          (:fns (tctx/apply-graph-read-filter
+                                  (cached-or-load-graph ctx))))]
         (into {}
               (filter (fn [[k _]] (contains? visible (keyword (name k)))))
               snap)))))
@@ -261,7 +263,7 @@
    so we expose the structural form alongside the existing entries."
   [ctx]
   (let [raw-snapshot (org-visible-rich-snapshot ctx)
-        graph (cached-or-load-graph ctx)
+        graph (tctx/apply-graph-read-filter (cached-or-load-graph ctx))
         ;; The org rides the identity key: `cached-or-load-graph` now
         ;; returns a per-org SLICE (fresh vectors per read for tenants),
         ;; so `identical?` on the slice would never hit for them. Keying

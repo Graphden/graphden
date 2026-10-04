@@ -115,11 +115,14 @@ so a gap in one does not by itself cross tenants:
    theme / keymap is neither readable nor writable by anyone else). The
    anonymous storefront renders public + approved rows only and mutates
    nothing.
-9. **Impl concealment** — a tenant can run and extend another org's shared
-   fn (a public platform fn included) but may not see its internal
-   COMPOSITION without owning it or holding a `:view-impl` grant. The addon's
-   view-impl filter (`crud.entities/view-impl-filter`, the one seam) is
-   applied on every surface that reads composition: the graph dumps and MCP
+9. **Namespace read + impl concealment** — private tenant fns default-deny
+   discovery and signature reads. A `:read` grant shows a fn's signature;
+   `:view-impl` also shows its internal composition and implies `:read`, while
+   `:write` implies both. `:execute` remains independent. Public/shared fns
+   stay discoverable. The addon's graph-read filter is applied to graph
+   projections and the rich-type snapshot; its view-impl filter
+   (`crud.entities/view-impl-filter`) is then applied on every surface that
+   reads composition: the graph dumps and MCP
    reads (signature only), Explorer views (no `uses` match through it),
    usages, the inspector and the return-type-rule popover, bound values and
    provenance read by binding id, the whole-graph export (the fn is left

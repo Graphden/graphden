@@ -16,6 +16,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.packages.owned :as owned]
     [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tctx]
     [graphden.types.diagnostics :as diag]
     [graphden.util.counters :as counters]
     [graphden.util.ns-path :as ns-path]
@@ -399,9 +400,10 @@
   (if (or (nil? entry) (nil? @view-impl-filter))
     entry
     (when-let [row (sp/read-entity storage :fn fn-id)]
-      (if (impl-visible? row)
-        entry
-        (apply dissoc entry concealed-entry-fields)))))
+      (when (seq (:fns (tctx/apply-graph-read-filter {:fns [row]})))
+        (if (impl-visible? row)
+          entry
+          (apply dissoc entry concealed-entry-fields))))))
 
 
 (def ^:private light-fn-fields

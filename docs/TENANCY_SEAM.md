@@ -62,6 +62,13 @@ only the hook; both are **default-deny** without the addon:
   `:publish-packages`, …); the addon implements grants + role
   bundles + owner-implies-all.
 
+The namespace discovery seam is a graph transformation rather than a
+capability predicate: `install-graph-read-filter!` /
+`apply-graph-read-filter` lets the addon remove function signatures and
+namespace names the current principal cannot read. Its default is identity,
+so single-tenant installs keep their full graph. Core uses it for both the
+graph projections and the rich-type snapshot; tenancy applies `:read` grants.
+
 Because both default to deny, a gate in core/packages MUST pair the
 capability check with a `current-platform-tier?` short-circuit to
 stay open on single-tenant / operator installs — the shape

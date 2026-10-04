@@ -623,6 +623,16 @@ So the client (`graphden.clients.vault`) is where isolation lives:
   effect gate, `cr/capture-conveyed-bindings`, as `:future` does) per
   request, so a handler's `:vault-get` is confined the same way.
 
+- **Short-lived read cache** — the latest value for a path is cached in
+  process memory for at most 2 seconds (up to 512 entries per JVM). The
+  cache key includes the Vault address, org-prefixed path, and a one-way
+  digest of the token, so separate credentials do not share values and
+  raw tokens are not retained by the cache. Explicit KV-version reads
+  bypass it. A successful write or delete invalidates all cached values
+  immediately in that JVM; a rotation made directly in OpenBao or through
+  another app process can remain visible for up to 2 seconds. Values are
+  never written to disk.
+
 - **Writing a path** — a tenant can only STORE a path it could read: a
   write of a binding whose resolver is (or inherits from) a vault
   base-fn taking a KV path (`:admin-only-vault`, bar `:secret-leaf`) is

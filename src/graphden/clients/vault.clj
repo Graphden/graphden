@@ -42,7 +42,15 @@
     [cheshire.core :as json]
     [clojure.string :as str]
     [graphden.tenancy.context :as tctx]
-    [org.httpkit.client :as http]))
+    [org.httpkit.client :as http])
+  (:import
+    (java.nio.charset
+      StandardCharsets)
+    (java.security
+      MessageDigest)
+    (java.util
+      Base64
+      Base64$Encoder)))
 
 
 ;; Process-wide vault client — set by the `:vault/client` integrant
@@ -57,6 +65,93 @@
 (defonce ^{:doc "JVM-wide active vault client `{:address … :token …}` or nil."}
   active-client
   (atom nil))
+
+
+;; OpenBao is an external dependency on every service execution. Keep only
+;; latest-version reads briefly, so a transient Vault hiccup does not turn
+;; repeated concurrent calls into repeated HTTP requests. The path already
+;; includes the tenant prefix; the credential digest keeps clients with
+;; different Vault permissions from sharing cached values without retaining
+;; the raw token in this cache.
+(def ^:private secret-cache-ttl-ms 2000)
+(def ^:private secret-cache-max-entries 512)
+(def ^:private cache-miss ::cache-miss)
+
+(defonce ^:private secret-cache (atom {:epoch 0 :entries {}}))
+
+
+(defn ^:dynamic *now-ms*
+  "Clock seam for the short-lived latest-secret cache tests."
+  []
+  (System/currentTimeMillis))
+
+
+(defn clear-secret-cache!
+  "Invalidate all cached secret reads after a successful write or delete."
+  []
+  (swap! secret-cache (fn [{:keys [epoch]}] {:epoch (inc epoch) :entries {}}))
+  nil)
+
+
+(declare ^:private impl)
+
+
+(defn- client-cache-key
+  [{:keys [address token]} path]
+  (let [digest (MessageDigest/.digest (MessageDigest/getInstance "SHA-256")
+                                      (String/.getBytes (str token) StandardCharsets/UTF_8))
+        encoded (Base64$Encoder/.withoutPadding (Base64/getEncoder))]
+    [address path (Base64$Encoder/.encodeToString encoded digest)]))
+
+
+(defn- cached-secret
+  [key]
+  (let [{:keys [value expires-at]} (get-in @secret-cache [:entries key])]
+    (if (and expires-at (> expires-at (*now-ms*))) value cache-miss)))
+
+
+(defn- cache-secret!
+  [cache-key expected-epoch value]
+  (swap! secret-cache
+         (fn [{:keys [epoch entries]}]
+           (if (not= expected-epoch epoch)
+             {:epoch epoch :entries entries}
+             (let [entries (into {} (remove (fn [[_ {:keys [expires-at]}]]
+                                              (<= expires-at (*now-ms*))) entries))
+                   entries (if (>= (count entries) secret-cache-max-entries)
+                             (dissoc entries (->> entries
+                                                  (apply min-key (comp :expires-at val))
+                                                  clojure.core/key))
+                             entries)]
+               {:epoch epoch
+                :entries (assoc entries cache-key
+                                {:value value
+                                 :expires-at (+ (*now-ms*) secret-cache-ttl-ms)})}))))
+  value)
+
+
+(declare vault-url request-opts check-status!)
+
+
+(defn- fetch-secret
+  [client path version]
+  (if-let [f (impl :get-secret)]
+    (if version (f client path version) (f client path))
+    (let [{:keys [address token]} client
+          resp @(http/get (vault-url address "data" path)
+                          (cond-> (request-opts token)
+                            version (assoc :query-params {"version" (str version)})))
+          _ (check-status! resp #{200} path "GET data")
+          parsed (json/parse-string (:body resp) true)
+          value (get-in parsed [:data :data :value])]
+      (when-not (string? value)
+        ;; Do NOT put `parsed` in ex-data — a KV v2 read embeds the secret
+        ;; material itself, and callers persist ex-data in fn-execution rows.
+        (throw (ex-info (str "Vault secret at " path
+                             " is missing `data.value` (expected a string)")
+                        {:type :vault/lookup-failed :path path
+                         :value-class (some-> value class .getName)})))
+      value)))
 
 
 ;; =============================================================================
@@ -240,41 +335,33 @@
    string — the latest version, or KV v2 `version` when given. Raises
    if missing or shape doesn't match the single-value convention."
   ([client path] (get-secret client path nil))
-  ([{:keys [address token] :as client} path version]
+  ([client path version]
    (let [path (checked-path path "get-secret")]
-     (if-let [f (impl :get-secret)]
-       (if version (f client path version) (f client path))
-       (let [resp @(http/get (vault-url address "data" path)
-                             (cond-> (request-opts token)
-                               version (assoc :query-params {"version" (str version)})))
-             _ (check-status! resp #{200} path "GET data")
-             parsed (json/parse-string (:body resp) true)
-             value (get-in parsed [:data :data :value])]
-         (when-not (string? value)
-           ;; Do NOT put `parsed` in ex-data — for a KV v2 read it embeds the
-           ;; secret material itself, and this ex-data is persisted verbatim into
-           ;; a fn-execution's API-readable `:error-data` (redaction only fires
-           ;; for `:secret`-typed RETURNS, so a fn that merely reads a secret
-           ;; would leak it). The path + a class hint are enough to debug.
-           (throw (ex-info (str "Vault secret at " path
-                                " is missing `data.value` (expected a string)")
-                           {:type :vault/lookup-failed :path path
-                            :value-class (some-> value class .getName)})))
-         value)))))
+     (if version
+       (fetch-secret client path version)
+       (let [cache-key (client-cache-key client path)
+             cached (cached-secret cache-key)]
+         (if-not (identical? cache-miss cached)
+           cached
+           (let [epoch (:epoch @secret-cache)
+                 value (fetch-secret client path nil)]
+             (cache-secret! cache-key epoch value))))))))
 
 
 (defn put-secret
   "Write `secret/data/<path>` with `{value: <value>}`. Returns the
    new version number (KV v2 retains history)."
   [{:keys [address token] :as client} path value]
-  (let [path (checked-path path "put-secret")]
-    (if-let [f (impl :put-secret)]
-      (f client path value)
-      (let [resp @(http/post (vault-url address "data" path)
-                             (json-body token {:data {:value value}}))
-            _ (check-status! resp #{200} path "POST data")
-            parsed (json/parse-string (:body resp) true)]
-        (get-in parsed [:data :version])))))
+  (let [path (checked-path path "put-secret")
+        result (if-let [f (impl :put-secret)]
+                 (f client path value)
+                 (let [resp @(http/post (vault-url address "data" path)
+                                        (json-body token {:data {:value value}}))
+                       _ (check-status! resp #{200} path "POST data")
+                       parsed (json/parse-string (:body resp) true)]
+                   (get-in parsed [:data :version])))]
+    (clear-secret-cache!)
+    result))
 
 
 (defn delete-secret
@@ -282,13 +369,15 @@
    `DELETE /v1/secret/metadata/<path>` because the data endpoint
    only soft-deletes the latest version."
   [{:keys [address token] :as client} path]
-  (let [path (checked-path path "delete-secret")]
-    (if-let [f (impl :delete-secret)]
-      (f client path)
-      (let [resp @(http/delete (vault-url address "metadata" path)
-                               (request-opts token))]
-        (check-status! resp #{204} path "DELETE metadata")
-        nil))))
+  (let [path (checked-path path "delete-secret")
+        result (if-let [f (impl :delete-secret)]
+                 (f client path)
+                 (let [resp @(http/delete (vault-url address "metadata" path)
+                                          (request-opts token))]
+                   (check-status! resp #{204} path "DELETE metadata")
+                   nil))]
+    (clear-secret-cache!)
+    result))
 
 
 (defn get-metadata

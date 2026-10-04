@@ -72,3 +72,40 @@
   (is (= ["org/acme/db/password"]
          (reached #(vault/delete-secret % "org/acme/db/password"))))
   (is (= ["shared/smtp"] (reached #(vault/get-secret % "/shared/smtp")))))
+
+
+(deftest latest-secret-reads-use-a-short-tenant-scoped-cache-test
+  (vault/clear-secret-cache!)
+  (let [now (atom 1000)
+        calls (atom 0)
+        fake-read (fn [_client _path & _]
+                    (str "value-" (swap! calls inc)))
+        fake-write (fn [& _] :written)]
+    (binding [vault/*now-ms* #(deref now)
+              vault/*impl-override* {:get-secret fake-read
+                                     :put-secret fake-write
+                                     :delete-secret (fn [& _] :deleted)}]
+      (tctx/with-org "acme"
+                     (is (= "value-1" (vault/get-secret client "org/acme/db")))
+                     (is (= "value-1" (vault/get-secret client "org/acme/db"))
+                         "a warm read reuses the latest value")
+                     (is (= 1 @calls))
+                     (vault/put-secret client "org/acme/db" "rotated")
+                     (is (= "value-2" (vault/get-secret client "org/acme/db"))
+                         "a successful write invalidates cached values")
+                     (is (= "value-3" (vault/get-secret client "org/acme/db" 1))
+                         "an explicit KV version bypasses the latest-value cache")
+                     (is (= 3 @calls) "the explicit version made its own read")
+                     (is (= "value-2" (vault/get-secret client "org/acme/db")))
+                     (reset! now 3001)
+                     (is (= "value-4" (vault/get-secret client "org/acme/db")))
+                     (is (= 4 @calls) "expired entries are fetched again")
+                     (vault/delete-secret client "org/acme/db")
+                     (is (= "value-5" (vault/get-secret client "org/acme/db"))
+                         "a successful delete invalidates cached values"))
+      (tctx/with-org "beta"
+                     (is (= "value-6" (vault/get-secret client "org/beta/db"))
+                         "another tenant has a distinct cache key")
+                     (is (= "value-7" (vault/get-secret (assoc client :token "other-token")
+                                                        "org/beta/db"))
+                         "different Vault credentials do not share cached values")))))

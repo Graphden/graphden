@@ -1050,7 +1050,7 @@
             {:id "12"
              :slug "state-cells-and-caches"
              :chapter "Composing"
-             :version 3
+             :version 4
              :title "State: cells"
              :reads "covers :swap vs :reset and cache patterns."
              :steps
@@ -1092,18 +1092,22 @@
               {:title "Run it"
                :body "[[⋯]] → [[▶ Run]]. Writing to a cell is the :state effect, so the Run pane asks you to acknowledge it first (lesson 16's gate) — the Run button is disabled until you do."
                :target ".node-overlay[data-fn-name=\"tutorial-bump\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
-               :targets [".node-overlay[data-fn-name=\"tutorial-bump\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-effects-warning"]
+              :targets [".node-overlay[data-fn-name=\"tutorial-bump\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-effects-warning"]
                :check {:kind "dom" :selector ".execute-confirm-checkbox"}}
+              {:title "Choose the item"
+               :body "In the Run pane, enter `tick` in the value field. This is the item swap-conj will append to your cell. Leave it as text; do not run with an empty field."
+               :target ".execute-arg-form[data-slot-name=\"value\"] [data-form-field]"
+               :check {:kind "input-value" :selector ".execute-arg-form[data-slot-name=\"value\"] [data-form-field]" :value "tick"}}
               {:title "Acknowledge, then run"
-               :body "Tick [[I understand this will produce side effects]], type `tick` in the field and [[Run]]."
+               :body "Tick [[I understand this will produce side effects]], then click [[Run]]. The result must contain one item: tick."
                :target ".execute-confirm-checkbox"
                :targets [".execute-confirm-checkbox" ".execute-run-btn:not([disabled])"]
-               :check {:kind "dom" :selector ".execute-result-list > li"}}
+               :check {:kind "result-value" :value ["tick"]}}
               {:title "Run it again"
                :body "One row — tick — the list the cell holds now. Click [[Run]] once more, same field: TWO rows. Nothing in the graph changed between the runs; the cell kept the value, and [[Raw]] reads [\"tick\" \"tick\"]."
                :target ".execute-popover.visible .execute-run-btn"
                :targets [".execute-popover.visible .execute-run-btn" ".execute-result-list > li:nth-child(2)"]
-               :check {:kind "dom" :selector ".execute-result-list > li:nth-child(2)"}}
+               :check {:kind "result-value" :value ["tick" "tick"]}}
               {:title "That's in-graph state"
                :body "A cell belongs to the compiled registry: any edit to its closure recompiles and resets it, and it is not shared across executor instances — which is exactly what makes it a cache and not a database. Click [[Finish]] to clean up or keep both."
                :target nil

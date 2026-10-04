@@ -259,6 +259,16 @@ function _tourCheckPasses(check) {
         // type-error badge cleared by the fixing edit), which for a reader
         // includes "is still in the DOM but hidden".
         return !_tourDomVisible(check.selector);
+      case 'result-value': {
+        // Inspect the current Run pane's raw JSON, not its item count or
+        // presentation labels. Submitting clears the result host, so an
+        // earlier result cannot complete a step while the new run is pending.
+        if (!_tourDomVisible('.execute-popover.visible .execute-result-pane')) return false;
+        const raw = document.querySelector(
+          '.execute-popover.visible .execute-result-host .execute-result-raw pre');
+        if (!raw || !Object.hasOwn(check, 'value')) return false;
+        return JSON.stringify(JSON.parse(raw.textContent)) === JSON.stringify(check.value);
+      }
       case 'input-value': {
         // A form control's CURRENT value — what `dom` cannot see, because a
         // live `value` is a property, not an attribute a selector can match.

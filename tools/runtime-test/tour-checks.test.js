@@ -287,6 +287,26 @@ test('input-value reads a control\'s LIVE value — what no selector can match',
          'no such control — never passes, rather than passing on an accident');
 });
 
+test('result-value verifies the current result, including the values in its rows', () => {
+  const pane = '.execute-popover.visible .execute-result-pane';
+  const raw = '.execute-popover.visible .execute-result-host .execute-result-raw pre';
+  const state = (json, visible = true) => ({dom: {
+    [pane]: visible ? true : 'hidden', [raw]: {textContent: json},
+  }});
+  const first = {kind: 'result-value', value: ['tick']};
+  const second = {kind: 'result-value', value: ['tick', 'tick']};
+  assert(checkIn(state('["tick"]'), first), 'first tick passes');
+  assert(!checkIn(state('[null]'), first), 'a null row does not pass');
+  assert(!checkIn(state('["wrong"]'), first), 'a different value does not pass');
+  assert(!checkIn(state('["tick"]'), second), 'the previous one-row result cannot pass the second run');
+  assert(checkIn(state('["tick", "tick"]'), second), 'two ticks pass');
+  assert(!checkIn(state('[null, null]'), second), 'two null rows do not pass');
+  assert(!checkIn(state('["tick"]', false), first), 'a hidden result does not pass');
+  assert(!checkIn(state('not JSON'), first), 'an invalid result does not pass');
+  assert(!checkIn({}, first), 'no result does not pass');
+  assert(!checkIn(state('["tick"]'), {kind: 'result-value'}), 'a missing expected value does not pass');
+});
+
 test('arg-named reads the edge label — the rename has no other client trace', () => {
   assert(checkIn({ edgeLabels: ['nums', 'greeting'] },
                  { kind: 'arg-named', arg: 'greeting' }) === true, 'label found');

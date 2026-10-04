@@ -89,23 +89,25 @@ async function _tourDeleted(call) {
 // still refuses goes round once more, after the rest unblocked it.
 // NOTE the server answers these refusals as HTTP 200 with `{ok:false}`, so
 // the body must be read — `Response.ok` alone counted them as deleted.
+async function _tourDeleteBranch(name) {
+  try {
+    const r = await authFetch(API.api_branches_ref(name), { method: 'DELETE' });
+    if (!r?.ok) return false;
+    const body = await r.json();
+    // A prior attempt may already have removed this child branch.
+    return body?.ok === true || body?.reason === 'not-found';
+  } catch (_) { return false; }
+}
+
 async function _tourDeleteCreatedBranches(created) {
-  const del = async (c) => {
-    try {
-      const r = await authFetch(API.api_branches_ref(c.name), { method: 'DELETE' });
-      if (r?.ok === false) return false;
-      const body = await r.json().catch(() => null);
-      return body?.ok !== false;
-    } catch (_) { return false; }
-  };
   const branches = (created || []).filter((c) => c.type === 'branch').reverse();
   const retry = [];
   for (const c of branches) {
-    if (!await del(c)) retry.push(c);
+    if (!await _tourDeleteBranch(c.name)) retry.push(c);
   }
   const failed = [];
   for (const c of retry) {
-    if (!await del(c)) failed.push(c);
+    if (!await _tourDeleteBranch(c.name)) failed.push(c);
   }
   return failed;
 }

@@ -79,7 +79,8 @@ async function _tourEnd() {
       try {
         // Children first — a fork the lesson itself made (lesson 23) would
         // otherwise block its parent's delete.
-        await _tourDeleteCreatedBranches(created);
+        const failedBranches = await _tourDeleteCreatedBranches(created);
+        if (failedBranches.length) ok = false;
         // Namespaces are IDENTITY rows with no branch scope — deleting
         // the branch removes every version row the lesson wrote, but a
         // namespace the lesson created would stay visible on main as an
@@ -92,19 +93,18 @@ async function _tourEnd() {
           const failedNs = await _tourDeleteNamespaces(nsOnly);
           if (failedNs.length) ok = false;
         }
-        const r = await authFetch(API.api_branches_ref(branch), { method: 'DELETE' });
-        ok = ok && !!r?.ok;
+        // Keep the sandbox available for retry when dependent cleanup failed.
+        if (ok) ok = await _tourDeleteBranch(branch);
       } catch (_) { ok = false; }
+      if (!ok) {
+        _tourReport(false, _tourCopy('branch-failed',
+          'Branch “{branch}” could not be deleted', { branch }));
+        return;
+      }
       _tourTeardown();
-      // The hash may name a fn that existed only on the deleted branch —
-      // carried to main it selects nothing and the canvas opens silently
-      // empty. Drop it before the branch switch reloads.
-      try {
-        const cur = decodeURIComponent((location.hash || '').replace(/^#/, ''));
-        if (created.some((c) => c.type === 'fn' && c.name === cur)) {
-          history.replaceState(null, '', location.pathname + location.search);
-        }
-      } catch (_) { /* keep the hash */ }
+      // A rollback leaves the lesson's selection behind, including qualified
+      // fn names and surface links. Main opens with a fresh selection.
+      history.replaceState(null, '', location.pathname + location.search);
       if (thenStart) _tourQueueNext(thenStart);
       if (typeof switchToBranch === 'function') switchToBranch(null);
       _tourReport(ok, ok ? _tourCopy('branch-done', 'Tutorial branch deleted')

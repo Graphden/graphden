@@ -87,12 +87,12 @@ function makeWorld(opts) {
       setItem: (k, v) => store.set(k, String(v)),
       removeItem: (k) => store.delete(k),
     },
-    location: { href: 'http://x/', pathname: '/', search: '', hash: '' },
-    history: { replaceState: () => {} },
+    location: { href: 'http://x/', pathname: '/', search: '', hash: o.hash || '' },
+    history: { replaceState: (_state, _title, url) => calls.push('replaceState ' + url) },
     API: { api_branches_ref: (b) => '/api/branches/' + b, api_branches: '/api/branches' },
     authFetch: async (url, init) => {
       calls.push(((init && init.method) || 'GET') + ' ' + url);
-      return { ok: true, json: async () => ({ ok: true }) };
+      return { ok: true, json: async () => ({ ok: !o.branchFailure }) };
     },
     switchToBranch: (b) => calls.push('switchToBranch ' + b),
     gdToast: (m) => calls.push('toast ' + m),
@@ -102,7 +102,7 @@ function makeWorld(opts) {
       calls.push('deleteCreated ' + created.map((c) => c.name).join(','));
       return { failed: [] };
     },
-    _tourDeleteCreatedBranches: async () => { calls.push('deleteBranches'); return []; },
+    _tourDeleteCreatedBranches: async () => { calls.push('deleteBranches'); return o.failedBranches || []; },
     _tourDeleteNamespaces: async () => { calls.push('deleteNamespaces'); return []; },
   };
   ctx.window = ctx;
@@ -114,6 +114,10 @@ function makeWorld(opts) {
   // The end-of-lesson dialogs and the spotlight geometry they hide moved to
   // their own files (2026-09-13); the browser loads them right after the engine.
   vm.runInContext(read('editor-tour-spot.js'), ctx);
+  const seams = Object.fromEntries(['_tourSurvivors', '_tourDeleteCreated',
+    '_tourDeleteCreatedBranches', '_tourDeleteNamespaces'].map((k) => [k, ctx[k]]));
+  vm.runInContext(read('editor-tour-cleanup.js'), ctx);
+  Object.assign(ctx, seams);
   vm.runInContext(read('editor-tour-end.js'), ctx);
   vm.runInContext(read('editor-tour-picker.js'), ctx);
   // `_tourLessons` / `_tourState` are script-scope `let`s — the browser's tour
@@ -175,6 +179,35 @@ const finishedOn = (id, extra) => Object.assign(
       'but queues no lesson — the reader asked for nothing next (got: '
       + w.queued() + ')');
   });
+
+  await test('rollback drops a qualified lesson selection before returning to main', async () => {
+    const w = makeWorld({ hash: '#tutorial%2Fcreated',
+      state: finishedOn('01', { branch: 'tutorial-01-qualified',
+        created: [{ type: 'fn', name: 'created' }] }) });
+    await w.ctx._tourEnd();
+    w.btn('Delete branch & return').click();
+    await new Promise((r) => setTimeout(r, 0));
+    assert(w.calls.indexOf('replaceState /') >= 0, 'the qualified selection is cleared');
+    assert(w.calls.indexOf('replaceState /') < w.calls.indexOf('switchToBranch null'),
+      'it is cleared before the reload');
+  });
+
+  for (const failure of [{ branchFailure: true },
+    { failedBranches: [{ type: 'branch', name: 'child' }] }]) {
+    await test('a refused rollback stays available for retry: ' + JSON.stringify(failure), async () => {
+      const w = makeWorld({ ...failure,
+        state: finishedOn('01', { branch: 'tutorial-01-refused' }) });
+      await w.ctx._tourEnd();
+      w.btn('Start 02 · Slots').click();
+      await new Promise((r) => setTimeout(r, 0));
+      assert(!w.calls.includes('switchToBranch null'), 'no reload hides the refusal');
+      assert(w.queued() === null, 'no next lesson starts after failed cleanup');
+      assert(w.btn('Delete branch & return'), 'the reader can retry cleanup');
+      assert(w.calls.some((c) => c.includes('could not be deleted')), 'failure is reported');
+      if (failure.failedBranches) assert(!w.calls.includes('DELETE /api/branches/tutorial-01-refused'),
+        'the sandbox is retained when a child could not be removed');
+    });
+  }
 
   await test('the queued lesson is taken exactly once', async () => {
     const w = makeWorld({ state: finishedOn('01', { branch: 'tutorial-01-ef56' }) });

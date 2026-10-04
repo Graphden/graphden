@@ -1092,7 +1092,7 @@
               {:title "Run it"
                :body "[[⋯]] → [[▶ Run]]. Writing to a cell is the :state effect, so the Run pane asks you to acknowledge it first (lesson 16's gate) — the Run button is disabled until you do."
                :target ".node-overlay[data-fn-name=\"tutorial-bump\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
-              :targets [".node-overlay[data-fn-name=\"tutorial-bump\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-effects-warning"]
+               :targets [".node-overlay[data-fn-name=\"tutorial-bump\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-effects-warning"]
                :check {:kind "dom" :selector ".execute-confirm-checkbox"}}
               {:title "Choose the item"
                :body "In the Run pane, enter `tick` in the value field. This is the item swap-conj will append to your cell. Leave it as text; do not run with an empty field."

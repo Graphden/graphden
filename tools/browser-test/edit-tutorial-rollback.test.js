@@ -5,7 +5,8 @@ const {chromium} = require('playwright');
 const {assert, newContext, nodeApi, nodeApiJson} = require('./edit-test-helpers');
 
 const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
-const BRANCH = 'tutorial-rollback-probe';
+const RUN_ID = process.pid.toString(36) + '-' + Date.now().toString(36);
+const BRANCH = 'tutorial-rollback-probe-' + RUN_ID;
 const CHILD = BRANCH + '-child';
 
 (async () => {
@@ -16,8 +17,8 @@ const CHILD = BRANCH + '-child';
     await nodeApi('POST', '/api/branches', {name: BRANCH, 'base-branch-id': 'main'});
     await nodeApi('POST', '/api/branches', {name: CHILD, 'base-branch-id': BRANCH});
     await page.goto(BASE + '/?branch=' + BRANCH);
-    await page.waitForFunction(() => typeof _tourEnd === 'function'
-      && document.querySelector('#branch-chip-name')?.textContent.trim() === 'tutorial-rollback-probe');
+    await page.waitForFunction((name) => typeof _tourEnd === 'function'
+      && document.querySelector('#branch-chip-name')?.textContent.trim() === name, BRANCH);
     await page.evaluate(async ({branch, child}) => {
       _tourLessons = {lessons: [{id: '01', steps: [{}]}]};
       _tourState = {lessonId: '01', step: 1, branch,

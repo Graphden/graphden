@@ -255,7 +255,7 @@
 
   biome
   {:doc "Lint editor JS via biome"
-   :task (p/shell "npx" "biome" "check" "resources/packages/app/editor")}
+   :task (p/shell "npx" "biome" "check" "resources/packages/app/editor" "resources/packages/app/ui-preview")}
 
   biome-fix
   {:doc "Auto-fix safe biome violations"
@@ -264,6 +264,7 @@
   stylelint
   {:doc "Lint editor CSS via stylelint (design-token discipline + standard rules)"
    :task (p/shell "npx" "stylelint" "resources/packages/app/editor/**/*.css"
+                  "resources/packages/app/ui-preview/**/*.css"
                   ;; the devtour page's stylesheet is authored the same way and
                   ;; inlined into the baked HTML — same linter, same rules.
                   "scripts/devtour/tour.css")}
@@ -271,6 +272,7 @@
   stylelint-fix
   {:doc "Auto-fix stylelint violations where possible"
    :task (p/shell "npx" "stylelint" "--fix" "resources/packages/app/editor/**/*.css"
+                  "resources/packages/app/ui-preview/**/*.css"
                   "scripts/devtour/tour.css")}
 
   ;; === Cross-cutting linters (docker-image or downloaded binary) ===

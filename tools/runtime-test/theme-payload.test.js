@@ -39,6 +39,7 @@ function styleStub() {
   return {
     props,
     setProperty(k, v) { props.set(k, v); },
+    getPropertyValue(k) { return props.get(k) || ''; },
     removeProperty(k) { props.delete(k); },
     get fontSize() { return props.get('font-size') || ''; },
     set fontSize(v) { if (v) props.set('font-size', v); else props.delete('font-size'); },
@@ -54,7 +55,7 @@ function makeCtx() {
   const html = { style: styleStub() };
   const store = {};
   const ctx = vm.createContext({
-    console,
+    console, queueMicrotask,
     document: {
       body, documentElement: html,
       getElementById: () => null, addEventListener() {}, readyState: 'complete',
@@ -68,6 +69,21 @@ function makeCtx() {
   vm.runInContext(fs.readFileSync(path.join(EDITOR, 'editor-prefs.js'), 'utf8'), ctx, { filename: 'editor-prefs.js' });
   return { ctx, body, html, classes, store };
 }
+
+test('graph theme overlay preserves personal values and rejects unsafe colors', () => {
+  const {ctx, body} = makeCtx();
+  ctx.window.gdApplyThemePayload({tokens: {'--gd-flow': '#112233', '--bg': '#223344'}});
+  ctx.window.gdApplyGraphTheme({'--gd-flow': '#445566', '--bg': 'url(https://invalid.test/image)'});
+  assert(body.style.getPropertyValue('--gd-flow') === '#445566', 'graph accent overlays the personal theme');
+  assert(body.style.getPropertyValue('--bg') === '#223344', 'invalid graph color cannot alter the canvas');
+  assert(ctx.window.gdActiveThemePayload().tokens['--gd-flow'] === '#112233', 'personal theme payload remains unchanged');
+  ctx.window.gdClearGraphTheme();
+  assert(body.style.getPropertyValue('--gd-flow') === '#112233', 'disconnecting the graph restores the exact personal value');
+  ctx.window.gdApplyGraphTheme({'--gd-flow': '#778899'});
+  ctx.window.gdApplyThemePayload({tokens: {'--gd-flow': '#aabbcc'}});
+  ctx.window.gdClearGraphTheme();
+  assert(body.style.getPropertyValue('--gd-flow') === '#aabbcc', 'a newly selected personal theme replaces the previous base');
+});
 
 test('a prefs refresh in flight never clobbers a key written after it started', async () => {
   // The boot / after-install refresh fetches the server's map; a rebind the

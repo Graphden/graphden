@@ -26,13 +26,13 @@ Lists primitive value types and the special types ~:any~ and ~:never~. ~:any~ ac
 :PROPERTIES:
 :CUSTOM_ID: types/child-types
 :FILE: src/graphden/types/core/shapes.clj
-:LINE: 417
+:LINE: 434
 :MINS: 1.7
 :END:
 
 Returns the nested types inside each compound type: records, lists, maps, tuples, refinements, secrets, unions, and functions. This traversal shows the data representation used by the rest of the type checker.
 
-- source :: [[file:../../../src/graphden/types/core/shapes.clj::(defn child-types][src/graphden/types/core/shapes.clj:417]]
+- source :: [[file:../../../src/graphden/types/core/shapes.clj::(defn child-types][src/graphden/types/core/shapes.clj:434]]
 - same file :: [[file:types.org::#types/primitives][primitives]], [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
 * 3. well-formed?
@@ -132,13 +132,13 @@ Removes null from a top-level union; a type containing only null becomes ~:never
 :PROPERTIES:
 :CUSTOM_ID: types/taint-with-secret-if-tainted
 :FILE: src/graphden/types/core/shapes.clj
-:LINE: 485
+:LINE: 502
 :MINS: 3.2
 :END:
 
 Marks a return type as secret when an input contains a secret and the function's rule propagates that marker. The ~[:secret …]~ wrapper carries information needed for subsequent type checks and result [[file:glossary.org::#term/secret][redaction]]; it does not itself store the secret value.
 
-- source :: [[file:../../../src/graphden/types/core/shapes.clj::(defn taint-with-secret-if-tainted][src/graphden/types/core/shapes.clj:485]]
+- source :: [[file:../../../src/graphden/types/core/shapes.clj::(defn taint-with-secret-if-tainted][src/graphden/types/core/shapes.clj:502]]
 - see also :: [[file:types.org::#types/subtype?][subtype?]]
 - same file :: [[file:types.org::#types/primitives][primitives]], [[file:types.org::#types/child-types][child-types]]
 - referenced from :: [[file:crud.org::#crud/apply-create-secret-body][apply-create-secret-body]]
@@ -159,13 +159,13 @@ Infers a structural type from a literal Clojure value, including collections, re
 :PROPERTIES:
 :CUSTOM_ID: types/check-binding!
 :FILE: src/graphden/types/check.clj
-:LINE: 482
+:LINE: 483
 :MINS: 5.6
 :END:
 
 Checks one [[file:glossary.org::#term/binding][binding]]'s actual type against the [[file:glossary.org::#term/slot][slot]]'s expected type. It combines literal classification, [[file:glossary.org::#term/subtype][subtype]] checks, and type-variable [[file:glossary.org::#term/unification][unification]]. Since [[file:glossary.org::#term/unification][unification]] chooses substitutions rather than proving assignment direction, ~gradual/fits?~ checks the resulting direction afterward.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn- check-binding!][src/graphden/types/check.clj:482]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn- check-binding!][src/graphden/types/check.clj:483]]
 - same file :: [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 
 * 13. fits?
@@ -184,39 +184,39 @@ Checks assignment direction after [[file:glossary.org::#term/unification][unific
 :PROPERTIES:
 :CUSTOM_ID: types/signature-return
 :FILE: src/graphden/types/check.clj
-:LINE: 2124
+:LINE: 2127
 :MINS: 3.9
 :END:
 
 Infers a return type from a [[file:glossary.org::#term/unification][polymorphic signature]] when there is no custom ~:return-type-rule~. It unifies declared argument types with actual types and substitutes the resulting variable values into the declared return type. Custom rules remain necessary when inference depends on literal values or registry data.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn signature-return][src/graphden/types/check.clj:2124]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn signature-return][src/graphden/types/check.clj:2127]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 
 * 15. rule-return
 :PROPERTIES:
 :CUSTOM_ID: types/rule-return
 :FILE: src/graphden/types/check.clj
-:LINE: 2177
+:LINE: 2180
 :MINS: 2.5
 :END:
 
 Chooses return-type inference for the root [[file:glossary.org::#term/base-function][base function]]: custom rule first, declared signature next, then static return type. If the root propagates [[file:glossary.org::#term/secret][secret markings]] and an input is secret, the result is wrapped accordingly.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn rule-return][src/graphden/types/check.clj:2177]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn rule-return][src/graphden/types/check.clj:2180]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 
 * 16. check-fn-def!
 :PROPERTIES:
 :CUSTOM_ID: types/check-fn-def!
 :FILE: src/graphden/types/check.clj
-:LINE: 2443
+:LINE: 2446
 :MINS: 8.7
 :END:
 
 Checks one function definition against its parents and inherited [[file:glossary.org::#term/slot][slots]]. It validates argument changes and [[file:glossary.org::#term/effect][effects]], checks [[file:glossary.org::#term/binding][bindings]], computes the return type, and records detailed type information for later dependent functions.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn check-fn-def!][src/graphden/types/check.clj:2443]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn check-fn-def!][src/graphden/types/check.clj:2446]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 - referenced from :: [[file:crud.org::#crud/type-check-fn-after-mutation!][type-check-fn-after-mutation!]]
 
@@ -224,13 +224,13 @@ Checks one function definition against its parents and inherited [[file:glossary
 :PROPERTIES:
 :CUSTOM_ID: types/check-all-defs!
 :FILE: src/graphden/types/check.clj
-:LINE: 2570
+:LINE: 2573
 :MINS: 1.9
 :END:
 
 Checks definitions in [[file:glossary.org::#term/topological-order][dependency order]], registering each result before dependent definitions need it. This performs the full graph type sweep using the same single-definition checker.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2570]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2573]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 - referenced from :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]]
 

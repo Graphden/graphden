@@ -71,6 +71,8 @@
                   "packages/app/editor/editor-auth.js"
                   ;; The account chip's menu — reads the auth mode flags at
                   ;; click time.
+                  "packages/app/ui-preview/browser-runtime.js"
+                  "packages/app/editor/editor-shell-menu-graph.js"
                   "packages/app/editor/editor-shell-menu.js"
                   "packages/app/editor/editor-org-switcher.js"
                   ;; Branch / org / workspace context + the fetch wrap — the

@@ -105,7 +105,12 @@
    :http-server]}
 
  :vocabulary
- {:unauthorized-response "web.response keeps the status x content-type matrix complete"
+ {:account-menu-initial "app.ui-account-menu review entry: tools/ui_preview/prepare.clj imports an editable copy; editor-shell-menu-graph.js runs it by UUID, resources/packages/app/ui-preview/README.md"
+  :account-menu-update "app.ui-account-menu review entry: imported by tools/ui_preview/prepare.clj and executed by UUID in the browser runtime, resources/packages/app/ui-preview/README.md"
+  :account-menu-view "app.ui-account-menu review entry: imported by tools/ui_preview/prepare.clj and executed by UUID in the browser runtime, resources/packages/app/ui-preview/README.md"
+  :browser-plan-export "app.ui-preview export API: tools/ui_preview/prepare.clj composes the technical harness plan over this template, resources/packages/app/ui-preview/README.md"
+  :menu-initial "app.ui-preview harness entry: tools/ui_preview/prepare.clj imports it and browser-adapter.js runs its UUID, resources/packages/app/ui-preview/README.md"
+  :unauthorized-response "web.response keeps the status x content-type matrix complete"
   :too-many-requests-response "web.response keeps the status x content-type matrix complete"
   :text-unauthorized-response "web.response keeps the status x content-type matrix complete"
   :text-too-many-requests-response "web.response keeps the status x content-type matrix complete"

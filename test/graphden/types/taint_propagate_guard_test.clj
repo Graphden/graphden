@@ -16,7 +16,9 @@
   (:require
     [clojure.set :as set]
     [clojure.test :refer [deftest is]]
-    [graphden.packages.loader :as loader]))
+    [graphden.executor.registry.core :as registry]
+    [graphden.packages.loader :as loader]
+    [graphden.types.check :as check]))
 
 
 (def ^:private package-set
@@ -32,6 +34,9 @@
    content?\" — if yes it needs `:taint-propagate?` and a `golden-tainted`
    entry; a REMOVED name just leaves both sets."
   #{:_fn-branch-local-seed :_fn-slot-seals
+    ;; Returns caller entry identities and their selected graph content;
+    ;; the exporter is not a declassification boundary.
+    :_ui-preview-export :_ui-preview-export-ids
     :_apply-create-list-type-body :_apply-create-record-type-body
     :_apply-create-record-type-rollback :_apply-create-secret-body
     :_apply-inline-bind-body :_apply-secret-rollback
@@ -199,6 +204,8 @@
    pass/transform caller content? then it needs `:taint-propagate?`\"; for each
    REMOVED name confirm it genuinely no longer handles content."
   #{:fork-package-fns :materialize-package-fns :rewrite-refs-to-version
+    ;; Entry identities select the exported content and also appear in it.
+    :_ui-preview-export :_ui-preview-export-ids
     ;; Wide-slot audit: conservatively propagate every content-derived result.
     :_apply-create-list-type-body :_apply-create-record-type-body :_apply-create-record-type-rollback :_apply-inline-bind-body :_apply-secret-rollback :_apply-update-record-type-body :_apply-update-record-type-rollback :_execute-apply :_layout-build-apply :_layout-place-apply :_layout-strip-facts-apply :_parse-layout-body :_rotate-secret-not-owned? :_seq-append-load-binding :_seq-move-load-item :_seq-update-load-item :_tests-run-apply :_tests-status-apply :approvals-report :authenticate-request :branch-lint-findings :breaking-changes-between :brotli-bytes :build-form :byte-count :candidate-fit :classify-literal :closed-enum-of :compatible-type-names :count-tour-event! :count-tour-step! :count-valid-approvals :create-entity :cron-fire-after :decode-row :describe-type-mismatch :diff-value-against-type :dispatch-to-branch :error-boundary-wrap :extract-entity-params :fix :fn-type-bound-effects :gzip-bytes :json-to-type :merge-branch! :middleware :missing-package-dependencies :package-version-materialized? :pg-execute :pg-query :pg-tx :pkg-delete-guard-reason :pkg-write-guard-reason :platform-owned-def? :publish-package-apply :query-entities :query-param :realize-request-body :resolve-fn :resolve-form :ring-create-default-handler :ring-handler :ring-router :secret-path-args :set-branch-archived! :set-branch-require-merge! :set-branch-review-policy! :set-review-state! :slot-shaped-type-row? :sql-exec :sql-query :sse-stream :storage-query-identities :stringify-response-headers :strip-hidden-impl :strip-secret-paths :subtype? :sync-fn-defs-branch! :try-apply-create :try-apply-seq-append :try-apply-seq-move :try-apply-seq-update :try-apply-tighten :try-apply-update :update-entity :utf8-bytes :viewer-path-trace :write-rej
     :round :ui-pref-write! :url-encode :moderate-package-version! ; marketplace: answer caller content
@@ -244,3 +251,22 @@
              ". No-longer-tainted (a content-passing fn that LOST the flag is a "
              "leak): " (sort (set/difference golden-tainted tainted))
              ". See docs/SECRETS.md § T3, then update the golden set."))))
+
+
+(deftest preview-export-preserves-argument-taint
+  (let [definitions (:base-fn-defs (loader/load-packages ["app"]))]
+    (doseq [[primitive input-type] [[:_ui-preview-export :fn-ref]
+                                    [:_ui-preview-export-ids :uuid]]]
+      (let [plain (zipmap [:initial :update :view] (repeat {:type input-type}))]
+        (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+                  registry/*per-org-rich-override* (atom {})]
+          ;; Production return-rule dispatch must preserve taint for both
+          ;; graph identity bindings and the HTTP parsed-UUID signature.
+          (registry/record-rich-types! primitive (get definitions primitive))
+          (is (= :jsonb (check/rule-return primitive plain :jsonb)))
+          (doseq [slot [:initial :update :view]]
+            (is (= [:secret :jsonb]
+                   (check/rule-return primitive
+                                      (assoc-in plain [slot :type] [:secret input-type])
+                                      :jsonb))
+                (str primitive " secret " slot " must taint the selected plan"))))))))

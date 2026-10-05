@@ -1,0 +1,179 @@
+{:namespace "app.ui-account-menu"
+ :fns
+ [{:name :_account-menu-event :type {:kind :text :key :text :index :int}}
+  {:name :_account-menu-state :type {:phase :text :active :int :handled :bool}}
+  {:name :_account-menu-context :type {:items [:list :text]}}
+  {:name :_account-menu-theme :type {:accent :text :canvas-background :text}}
+  {:name :account-menu-initial :parent :const :return-type :_account-menu-state
+   :args {:value {:value {:phase "closed" :active 0 :handled false}}}}
+  {:name :account-menu-phase :parent :get :return-type :text
+   :args {:coll {:as :state :type :_account-menu-state} :key {:value :phase} :default "closed"}}
+  {:name :account-menu-active-index :parent :get :return-type :int
+   :args {:coll {:as :state :type :_account-menu-state} :key {:value :active} :default 0}}
+  {:name :_account-menu-handled :parent :get :return-type :bool
+   :args {:coll {:as :state :type :_account-menu-state} :key {:value :handled} :default false}}
+  {:name :_account-menu-raw-event-kind :parent :get :return-type :text
+   :args {:coll {:as :event :type :_account-menu-event} :key {:value :kind} :default ""}}
+  {:name :_account-menu-event-key :parent :get :return-type :text
+   :args {:coll {:as :event :type :_account-menu-event} :key {:value :key} :default ""}}
+  {:name :account-menu-key-map :parent :zipmap
+   :args {:keys ["ArrowUp" "ArrowDown" "Home" "End" "Escape" "Tab"]
+          :vals ["up" "down" "first" "last" "close" "close"]}}
+  {:name :_account-menu-key-kind :parent :get :return-type :text
+   :args {:coll :account-menu-key-map :key :_account-menu-event-key :default ""}}
+  {:name :_account-menu-is-key-event :parent :equal?
+   :args {:a :_account-menu-raw-event-kind :b "keydown"}}
+  {:name :account-menu-event-kind :parent :if :return-type :text
+   :args {:test :_account-menu-is-key-event :then :_account-menu-key-kind :else :_account-menu-raw-event-kind}}
+  {:name :_account-menu-event-index :parent :get :return-type :int
+   :args {:coll {:as :event :type :_account-menu-event} :key {:value :index} :default -1}}
+  {:name :_account-menu-index-absent :parent :equal?
+   :args {:a :_account-menu-event-index :b -1}}
+  {:name :_account-menu-current-index :parent :if :return-type :int
+   :args {:test :_account-menu-index-absent :then :account-menu-active-index :else :_account-menu-event-index}}
+  {:name :_account-menu-items :parent :get :return-type [:list :text]
+   :args {:coll {:as :context :type :_account-menu-context} :key {:value :items} :default {:value []}}}
+  {:name :_account-menu-item-count :parent :count
+   :args {:coll :_account-menu-items}}
+  {:name :_account-menu-empty :parent :equal?
+   :args {:a :_account-menu-item-count :b 0}}
+  {:name :_account-menu-event-open :parent :equal?
+   :args {:a :account-menu-event-kind :b "open"}}
+  {:name :_account-menu-event-close :parent :equal?
+   :args {:a :account-menu-event-kind :b "close"}}
+  {:name :_account-menu-event-outside :parent :equal?
+   :args {:a :account-menu-event-kind :b "outside"}}
+  {:name :_account-menu-event-activate :parent :equal?
+   :args {:a :account-menu-event-kind :b "activate"}}
+  {:name :_account-menu-event-hover :parent :equal?
+   :args {:a :account-menu-event-kind :b "hover"}}
+  {:name :_account-menu-event-focus :parent :equal?
+   :args {:a :account-menu-event-kind :b "focus"}}
+  {:name :_account-menu-event-up :parent :equal?
+   :args {:a :account-menu-event-kind :b "up"}}
+  {:name :_account-menu-event-down :parent :equal?
+   :args {:a :account-menu-event-kind :b "down"}}
+  {:name :_account-menu-event-first :parent :equal?
+   :args {:a :account-menu-event-kind :b "first"}}
+  {:name :_account-menu-event-last :parent :equal?
+   :args {:a :account-menu-event-kind :b "last"}}
+  {:name :_account-menu-event-animation-finished :parent :equal?
+   :args {:a :account-menu-event-kind :b "animation-finished"}}
+  {:name :account-menu-is-closed :parent :equal?
+   :args {:a :account-menu-phase :b "closed"}}
+  {:name :account-menu-is-closing :parent :equal?
+   :args {:a :account-menu-phase :b "closing"}}
+  {:name :account-menu-is-opening :parent :equal?
+   :args {:a :account-menu-phase :b "opening"}}
+  {:name :_account-menu-unhandled-state :parent :assoc
+   :args {:map {:as :state :type :_account-menu-state} :key {:value :handled} :value false}}
+  {:name :_account-menu-handled-state :parent :assoc
+   :args {:map {:as :state :type :_account-menu-state} :key {:value :handled} :value true}}
+  {:name :account-menu-first :parent :assoc
+   :args {:map :_account-menu-handled-state :key {:value :active} :value 0}}
+  {:name :account-menu-open :parent :assoc
+   :args {:map :account-menu-first :key {:value :phase} :value "opening"}}
+  {:name :_account-menu-close-phase :parent :if :return-type :text
+   :args {:test :account-menu-is-closed :then "closed" :else "closing"}}
+  {:name :account-menu-close :parent :assoc
+   :args {:map :_account-menu-handled-state :key {:value :phase} :value :_account-menu-close-phase}}
+  {:name :_account-menu-toggle-open :parent :if
+   :args {:test :account-menu-is-closing :then :account-menu-open :else :account-menu-close}}
+  {:name :_account-menu-toggle :parent :if
+   :args {:test :account-menu-is-closed :then :account-menu-open :else :_account-menu-toggle-open}}
+  {:name :_account-menu-focus :parent :assoc
+   :args {:map :_account-menu-handled-state :key {:value :active} :value :_account-menu-current-index}}
+  {:name :_account-menu-step-delta :parent :if :return-type :int
+   :args {:test :_account-menu-event-up :then -1 :else 1}}
+  {:name :_account-menu-step-sum :parent :add
+   :args {:nums [:_account-menu-current-index :_account-menu-step-delta]}}
+  {:name :_account-menu-wrapped-index :parent :mod
+   :args {:dividend :_account-menu-step-sum :divisor :_account-menu-item-count}}
+  {:name :_account-menu-next-index :parent :if
+   :args {:test :_account-menu-empty :then 0 :else :_account-menu-wrapped-index}}
+  {:name :_account-menu-step :parent :assoc
+   :args {:map :_account-menu-handled-state :key {:value :active} :value :_account-menu-next-index}}
+  {:name :_account-menu-last-index :parent :add
+   :args {:nums [:_account-menu-item-count -1]}}
+  {:name :_account-menu-safe-last-index :parent :if
+   :args {:test :_account-menu-empty :then 0 :else :_account-menu-last-index}}
+  {:name :_account-menu-last :parent :assoc
+   :args {:map :_account-menu-handled-state :key {:value :active} :value :_account-menu-safe-last-index}}
+  {:name :_account-menu-finished-opening :parent :if :return-type :text
+   :args {:test :account-menu-is-opening :then "open" :else :account-menu-phase}}
+  {:name :_account-menu-finished-phase :parent :if :return-type :text
+   :args {:test :account-menu-is-closing :then "closed" :else :_account-menu-finished-opening}}
+  {:name :_account-menu-finished :parent :assoc
+   :args {:map :_account-menu-unhandled-state :key {:value :phase} :value :_account-menu-finished-phase}}
+  {:name :_account-menu-focus-update :parent :if
+   :args {:test :_account-menu-event-focus :then :_account-menu-focus :else :_account-menu-unhandled-state}}
+  {:name :_account-menu-hover-update :parent :if
+   :args {:test :_account-menu-event-hover :then :_account-menu-focus :else :_account-menu-focus-update}}
+  {:name :_account-menu-last-update :parent :if
+   :args {:test :_account-menu-event-last :then :_account-menu-last :else :_account-menu-hover-update}}
+  {:name :_account-menu-first-update :parent :if
+   :args {:test :_account-menu-event-first :then :account-menu-first :else :_account-menu-last-update}}
+  {:name :_account-menu-down-update :parent :if
+   :args {:test :_account-menu-event-down :then :_account-menu-step :else :_account-menu-first-update}}
+  {:name :_account-menu-up-update :parent :if
+   :args {:test :_account-menu-event-up :then :_account-menu-step :else :_account-menu-down-update}}
+  {:name :_account-menu-interactive :parent :if
+   :args {:test :account-menu-is-closing :then :_account-menu-unhandled-state :else :_account-menu-up-update}}
+  {:name :_account-menu-activate-update :parent :if
+   :args {:test :_account-menu-event-activate :then :account-menu-close :else :_account-menu-interactive}}
+  {:name :_account-menu-outside-update :parent :if
+   :args {:test :_account-menu-event-outside :then :account-menu-close :else :_account-menu-activate-update}}
+  {:name :_account-menu-close-update :parent :if
+   :args {:test :_account-menu-event-close :then :account-menu-close :else :_account-menu-outside-update}}
+  {:name :_account-menu-open-update :parent :if
+   :args {:test :_account-menu-event-open :then :_account-menu-toggle :else :_account-menu-close-update}}
+  {:name :account-menu-update :parent :if
+   :args {:test :_account-menu-event-animation-finished :then :_account-menu-finished :else :_account-menu-open-update}}
+  ;; Theme inputs are the effective built-in/saved theme BEFORE this graph layer.
+  {:name :_theme-base-accent :parent :get :return-type :text
+   :args {:coll {:as :theme :type :_account-menu-theme} :key {:value :accent} :default "#137c74"}}
+  {:name :theme-accent :parent :const :return-type :text
+   :args {:value :_theme-base-accent}}
+  {:name :_theme-base-canvas-background :parent :get :return-type :text
+   :args {:coll {:as :theme :type :_account-menu-theme} :key {:value :canvas-background} :default "#eff1f0"}}
+  {:name :theme-canvas-background :parent :const :return-type :text
+   :args {:value :_theme-base-canvas-background}}
+  {:name :account-menu-hover :parent :const :return-type :text
+   :args {:value :theme-canvas-background}}
+  {:name :_theme-tokens :parent :zipmap
+   :args {:keys [{:value "--gd-flow"} {:value "--bg"}]
+          :vals [:theme-accent :theme-canvas-background]}}
+  {:name :_account-menu-tokens :parent :zipmap
+   :args {:keys [{:value "--gd-account-menu-hover"}]
+          :vals [:account-menu-hover]}}
+  ;; These are the real common rows; the host inserts native gated/session/footer rows.
+  {:name :settings-row :parent :hiccup
+   :args {:tag "button"
+          :attrs {:value {:type "button" :class "auth-menu-item" :role "menuitem"
+                          :tabindex -1 :data-action "settings" :data-item "Settings"}}
+          :children ["Settings"]}}
+  {:name :organization-row :parent :hiccup
+   :args {:tag "button"
+          :attrs {:value {:type "button" :class "auth-menu-item" :role "menuitem"
+                          :tabindex -1 :data-action "operate" :data-item "Organization"}}
+          :children ["Organization"]}}
+  {:name :_account-menu-common-rows :parent :list
+   :args {:items [:settings-row :organization-row]}}
+  {:name :account-menu-frame :parent :hiccup
+   :args {:tag "div"
+          :attrs {:value {:class "auth-menu" :role "menu" :aria-label "Account and editor"}}
+          :children []}}
+  {:name :account-menu-animation-duration :parent :const :return-type :int
+   :args {:value 160}}
+  {:name :_account-menu-hidden-phase :parent :if :return-type :bool
+   :args {:test :account-menu-is-closed :then true :else :account-menu-is-closing}}
+  {:name :_account-menu-opacity :parent :if :return-type :non-negative-int
+   :args {:test :_account-menu-hidden-phase :then 0 :else 1}}
+  {:name :_account-menu-offset :parent :if :return-type :int
+   :args {:test :_account-menu-hidden-phase :then -4 :else 0}}
+  {:name :_account-menu-motion :parent :zipmap
+   :args {:keys [{:value :duration-ms} {:value :offset-y} {:value :opacity}]
+          :vals [:account-menu-animation-duration :_account-menu-offset :_account-menu-opacity]}}
+  {:name :account-menu-view :parent :zipmap
+   :args {:keys [{:value :frame} {:value :common-rows} {:value :active} {:value :phase} {:value :handled} {:value :theme-tokens} {:value :menu-tokens} {:value :motion}]
+          :vals [:account-menu-frame :_account-menu-common-rows :account-menu-active-index :account-menu-phase :_account-menu-handled :_theme-tokens :_account-menu-tokens :_account-menu-motion]}}]}

@@ -85,6 +85,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.types.check.gradual :as gradual]
     [graphden.types.check.literals :as lit]
+    [graphden.types.check.provenance :as provenance]
     [graphden.types.core :as types]))
 
 
@@ -2069,43 +2070,45 @@
       ;; uuid-v5(ns, name) their storage rows use.
       (registry/fn-def-registry-id fn-name fn-def)
       fn-name
-      (cond-> (merge {:return computed-return :args free-args}
-                     (source-info-for fn-def))
-        ;; `:lambda-params` — authored HOF call-site parameter list;
-        ;; must survive into the registry entry the runtime's
-        ;; wrap-arity dispatch reads (compile.renames/hof-lambda-params).
-        (contains? fn-def :lambda-params)
-        (assoc :lambda-params (vec (:lambda-params fn-def)))
-        ;; `:namespace` — the registry index dual-keys entries
-        ;; (bare + qualified) so per-ns duplicate names resolve
-        ;; precisely; without it a composed entry claims only the
-        ;; bare (last-write) key.
-        (:namespace fn-def)
-        (assoc :namespace (:namespace fn-def))
-        (seq resolved)    (assoc :resolved-bindings resolved)
-        (seq slot-types)  (assoc :slot-types slot-types)
-        (seq nav-types)   (assoc :nav-types nav-types)
-        primary-parent    (assoc :primary-parent primary-parent)
-        (seq effects)     (assoc :effects effects)
-        ;; `:arg-effects` — per-binding effect contribution. Used by
-        ;; the closure-capture strip in check-binding! to subtract
-        ;; wrap-time-only effects from the per-invocation callable
-        ;; contract when the strip removes captured-arg keys.
-        (some seq (vals arg-effects)) (assoc :arg-effects arg-effects)
-        ;; `:call-time-effects` — effects per-invocation when used as
-        ;; a HOF callable. Parent's body + free-arg ref-effects;
-        ;; EXCLUDES bound-arg ref-effects (those are wrap-time, run
-        ;; once during outer assembly). When equal to `:effects` the
-        ;; assoc is redundant — only stash on divergence.
-        (and (some seq (vals arg-effects))
-             (not= call-time-effects effects))
-        (assoc :call-time-effects call-time-effects)
-        expected          (assoc :expects-effects expected)
-        drift             (assoc :return-type-drift drift)
-        ;; Surface description so the inline-expand panel can show
-        ;; a human-readable hint under the type name.
-        (and (:description fn-def)
-             (seq (:description fn-def))) (assoc :description (:description fn-def))))))
+      (provenance/stamp
+        (cond-> (merge {:return computed-return :args free-args}
+                       (source-info-for fn-def))
+          ;; `:lambda-params` — authored HOF call-site parameter list;
+          ;; must survive into the registry entry the runtime's
+          ;; wrap-arity dispatch reads (compile.renames/hof-lambda-params).
+          (contains? fn-def :lambda-params)
+          (assoc :lambda-params (vec (:lambda-params fn-def)))
+          ;; `:namespace` — the registry index dual-keys entries
+          ;; (bare + qualified) so per-ns duplicate names resolve
+          ;; precisely; without it a composed entry claims only the
+          ;; bare (last-write) key.
+          (:namespace fn-def)
+          (assoc :namespace (:namespace fn-def))
+          (seq resolved)    (assoc :resolved-bindings resolved)
+          (seq slot-types)  (assoc :slot-types slot-types)
+          (seq nav-types)   (assoc :nav-types nav-types)
+          primary-parent    (assoc :primary-parent primary-parent)
+          (seq effects)     (assoc :effects effects)
+          ;; `:arg-effects` — per-binding effect contribution. Used by
+          ;; the closure-capture strip in check-binding! to subtract
+          ;; wrap-time-only effects from the per-invocation callable
+          ;; contract when the strip removes captured-arg keys.
+          (some seq (vals arg-effects)) (assoc :arg-effects arg-effects)
+          ;; `:call-time-effects` — effects per-invocation when used as
+          ;; a HOF callable. Parent's body + free-arg ref-effects;
+          ;; EXCLUDES bound-arg ref-effects (those are wrap-time, run
+          ;; once during outer assembly). When equal to `:effects` the
+          ;; assoc is redundant — only stash on divergence.
+          (and (some seq (vals arg-effects))
+               (not= call-time-effects effects))
+          (assoc :call-time-effects call-time-effects)
+          expected          (assoc :expects-effects expected)
+          drift             (assoc :return-type-drift drift)
+          ;; Surface description so the inline-expand panel can show
+          ;; a human-readable hint under the type name.
+          (and (:description fn-def)
+               (seq (:description fn-def))) (assoc :description (:description fn-def)))
+        fn-def))))
 
 
 ;; -----------------------------------------------------------------------------

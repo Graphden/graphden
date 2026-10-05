@@ -129,13 +129,13 @@ Resolves cached version candidates along a branch's ancestry. At each level it c
 :PROPERTIES:
 :CUSTOM_ID: versioning/effective-branch-local?
 :FILE: src/graphden/versioning/branch_local.clj
-:LINE: 115
+:LINE: 122
 :MINS: 1.6
 :END:
 
 Returns true when a function or one of its ancestors has ~:branch-local? true~. Merge resolution uses that effective flag to exclude branch-specific configuration. Setting false on a descendant does not cancel a true flag inherited from an ancestor.
 
-- source :: [[file:../../../src/graphden/versioning/branch_local.clj::(defn effective-branch-local?][src/graphden/versioning/branch_local.clj:115]]
+- source :: [[file:../../../src/graphden/versioning/branch_local.clj::(defn effective-branch-local?][src/graphden/versioning/branch_local.clj:122]]
 - referenced from :: [[file:layout.org::#layout/annotate][annotate]]
 
 * 11. check-list-item-position-collisions!

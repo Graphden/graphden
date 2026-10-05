@@ -106,32 +106,27 @@
   ([fn-id lookups] (public-free-entries fn-id lookups nil))
   ([fn-id lookups opts]
    (let [public (set (:names (surface-names fn-id lookups)))
-         ;; One hole per slot IDENTITY: a rename-view slot and its source
-         ;; share a root (`:source-slot-id` chain) — a binding on either
-         ;; end, anywhere in the fn's chain, closes both (#51), and two
-         ;; exposures of one root are one hole.
+         ;; Only aliases in this fn's inheritance scope share a reader.
+         ;; Independent calls can rename the SAME primitive slot to distinct
+         ;; inputs; following every source-slot-id to its global root merges
+         ;; those cells (e.g. get.coll as event versus context). Reuse the
+         ;; runtime reader identity, including the closest outer-chain rename.
          slot-map (:slot-map lookups)
-         root-of (fn [sid]
-                   (loop [sid sid seen #{}]
-                     (let [src (some-> (get slot-map sid) :source-slot-id)]
-                       (if (and src (not (seen src)))
-                         (recur src (conj seen sid))
-                         sid))))
-         ;; …including env-bindings: a binding on a slot the chain does not
-         ;; expose (the SOURCE end of a rename that lives in a ref target)
-         ;; binds that slot's identity all the same.
-         bound-roots (into #{}
-                           (comp (filter #(contains? #{:value :seq :resolved-value :ref :fn-ref} (:kind %)))
-                                 (keep :slot-id)
-                                 (map root-of))
-                           (concat (b/collect-bindings fn-id lookups)
-                                   (b/collect-env-bindings fn-id lookups)))
-         seen-roots (volatile! #{})
+         reader-of #(l/effective-reader-slot-id fn-id % lookups)
+         ;; A bound source and its rename still close the same outer reader,
+         ;; including env bindings, without closing a sibling call's reader.
+         bound-readers (into #{}
+                             (comp (filter #(contains? #{:value :seq :resolved-value :ref :fn-ref} (:kind %)))
+                                   (keep :slot-id)
+                                   (map reader-of))
+                             (concat (b/collect-bindings fn-id lookups)
+                                     (b/collect-env-bindings fn-id lookups)))
+         seen-readers (volatile! #{})
          open-hole? (fn [{:keys [slot-id]}]
-                      (let [r (root-of slot-id)]
-                        (when (and slot-id (not (contains? bound-roots r))
-                                   (not (contains? @seen-roots r)))
-                          (vswap! seen-roots conj r)
+                      (let [reader (reader-of slot-id)]
+                        (when (and slot-id (not (contains? bound-readers reader))
+                                   (not (contains? @seen-readers reader)))
+                          (vswap! seen-readers conj reader)
                           true)))
          by-name (reduce (fn [m {:keys [ext-name] :as e}]
                            (let [k (keyword ext-name)]

@@ -1,0 +1,261 @@
+{:namespace "app.ui-preview"
+ :fns
+ [{:name :_menu-event :type {:kind :text :key :text :index :int}}
+  {:name :_menu-state :type {:phase :text :active :int :selected :int}}
+  ;; Ordinary named values: changing a shared color changes both consumers.
+  {:name :accent-color :parent :const :return-type :text
+   :args {:value "#14b8a6"}}
+  {:name :menu-accent-color :parent :const :return-type :text
+   :args {:value :selected-accent-color}}
+  {:name :button-accent-color :parent :const :return-type :text
+   :args {:value :selected-accent-color}}
+  {:name :violet-color :parent :const :return-type :text
+   :args {:value "#a78bfa"}}
+  {:name :amber-color :parent :const :return-type :text
+   :args {:value "#fbbf24"}}
+  {:name :surface-color :parent :const :return-type :text
+   :args {:value "#171e20"}}
+  {:name :text-color :parent :const :return-type :text
+   :args {:value "#eef6f5"}}
+  {:name :theme-style :parent :zipmap
+   :args {:keys [{:value "--ui-accent"} {:value "--ui-button"}
+                 {:value "--ui-surface"} {:value "--ui-text"}]
+          :vals [:menu-accent-color :button-accent-color :surface-color :text-color]}}
+  {:name :menu-items :parent :const :return-type [:list :text]
+   :args {:value {:value ["Ocean" "Violet" "Amber"]}}}
+  {:name :menu-initial :parent :const :return-type :_menu-state
+   :args {:value {:value {:phase "closed" :active 0 :selected 0}}}}
+
+  {:name :menu-phase :parent :get :return-type :text
+   :args {:coll {:as :state :type :_menu-state} :key {:value :phase} :default "closed"}}
+  {:name :menu-active-index :parent :get :return-type :int
+   :args {:coll {:as :state :type :_menu-state} :key {:value :active} :default 0}}
+  {:name :menu-selected-index :parent :get :return-type :int
+   :args {:coll {:as :state :type :_menu-state} :key {:value :selected} :default 0}}
+  {:name :_theme-is-violet :parent :equal?
+   :args {:a :menu-selected-index :b 1}}
+  {:name :_theme-is-amber :parent :equal?
+   :args {:a :menu-selected-index :b 2}}
+  {:name :_theme-default-accent :parent :if :return-type :text
+   :args {:test :_theme-is-amber :then :amber-color :else :accent-color}}
+  {:name :selected-accent-color :parent :if :return-type :text
+   :args {:test :_theme-is-violet :then :violet-color :else :_theme-default-accent}}
+  {:name :_menu-raw-event-kind :parent :get :return-type :text
+   :args {:coll {:as :event :type :_menu-event} :key {:value :kind} :default ""}}
+  {:name :_menu-event-key :parent :get :return-type :text
+   :args {:coll {:as :event :type :_menu-event} :key {:value :key} :default ""}}
+  {:name :_menu-key-map :parent :zipmap
+   :args {:keys ["ArrowUp" "ArrowDown" "Escape" "Enter" " "]
+          :vals ["up" "down" "escape" "select" "select"]}}
+  {:name :_menu-key-kind :parent :get :return-type :text
+   :args {:coll :_menu-key-map :key :_menu-event-key :default ""}}
+  {:name :_menu-is-key-event :parent :equal?
+   :args {:a :_menu-raw-event-kind :b "keydown"}}
+  {:name :menu-event-kind :parent :if :return-type :text
+   :args {:test :_menu-is-key-event :then :_menu-key-kind :else :_menu-raw-event-kind}}
+  {:name :menu-raw-event-index :parent :get :return-type :int
+   :args {:coll {:as :event :type :_menu-event} :key {:value :index} :default -1}}
+  {:name :_menu-index-absent :parent :equal?
+   :args {:a :menu-raw-event-index :b -1}}
+  {:name :menu-event-index :parent :if :return-type :int
+   :args {:test :_menu-index-absent :then :menu-active-index :else :menu-raw-event-index}}
+  {:name :_menu-is-open-event :parent :equal?
+   :args {:a :menu-event-kind :b "open"}}
+  {:name :_menu-is-hover-event :parent :equal?
+   :args {:a :menu-event-kind :b "hover"}}
+  {:name :menu-is-up-event :parent :equal?
+   :args {:a :menu-event-kind :b "up"}}
+  {:name :_menu-is-down-event :parent :equal?
+   :args {:a :menu-event-kind :b "down"}}
+  {:name :_menu-is-select-event :parent :equal?
+   :args {:a :menu-event-kind :b "select"}}
+  {:name :_menu-is-escape-event :parent :equal?
+   :args {:a :menu-event-kind :b "escape"}}
+  {:name :_menu-is-outside-event :parent :equal?
+   :args {:a :menu-event-kind :b "outside"}}
+  {:name :_menu-is-animation-event :parent :equal?
+   :args {:a :menu-event-kind :b "animation-finished"}}
+  {:name :menu-is-closed :parent :equal?
+   :args {:a :menu-phase :b "closed"}}
+  {:name :menu-is-closing :parent :equal?
+   :args {:a :menu-phase :b "closing"}}
+
+  {:name :_menu-open-active :parent :assoc
+   :args {:map {:as :state :type :_menu-state} :key {:value :active} :value :menu-selected-index}}
+  {:name :menu-open :parent :assoc
+   :args {:map :_menu-open-active :key {:value :phase} :value "opening"}}
+  {:name :_menu-close-phase :parent :assoc
+   :args {:map {:as :state :type :_menu-state} :key {:value :phase} :value "closing"}}
+  {:name :menu-close :parent :if
+   :args {:test :menu-is-closed :then {:as :state :type :_menu-state} :else :_menu-close-phase}}
+  {:name :_menu-hover :parent :assoc
+   :args {:map {:as :state :type :_menu-state} :key {:value :active} :value :menu-event-index}}
+  {:name :_menu-selection :parent :assoc
+   :args {:map {:as :state :type :_menu-state} :key {:value :selected} :value :menu-event-index}}
+  {:name :_menu-select-phase :parent :assoc
+   :args {:map :_menu-selection :key {:value :phase} :value "closing"}}
+  {:name :_menu-select :parent :if
+   :args {:test :menu-is-closed :then :menu-open :else :_menu-select-phase}}
+  {:name :_menu-step-delta :parent :if :return-type :int
+   :args {:test :menu-is-up-event :then -1 :else 1}}
+  {:name :_menu-step-sum :parent :add
+   :args {:nums [:menu-active-index :_menu-step-delta]}}
+  {:name :_menu-item-count :parent :count
+   :args {:coll :menu-items}}
+  {:name :_menu-next-index :parent :mod
+   :args {:dividend :_menu-step-sum :divisor :_menu-item-count}}
+  {:name :_menu-step-active :parent :assoc
+   :args {:map {:as :state :type :_menu-state} :key {:value :active} :value :_menu-next-index}}
+  {:name :_menu-step-phase :parent :if :return-type :text
+   :args {:test :menu-is-closed :then "opening" :else :menu-phase}}
+  {:name :_menu-step :parent :assoc
+   :args {:map :_menu-step-active :key {:value :phase} :value :_menu-step-phase}}
+  {:name :_menu-finished-phase :parent :if :return-type :text
+   :args {:test :menu-is-closing :then "closed" :else "open"}}
+  {:name :_menu-finished :parent :assoc
+   :args {:map {:as :state :type :_menu-state} :key {:value :phase} :value :_menu-finished-phase}}
+
+  ;; Event decisions live here, not in browser event handlers.
+  {:name :_menu-navigate :parent :if
+   :args {:test :menu-is-closed :then :menu-open :else :_menu-step}}
+  {:name :_menu-outside-update :parent :if
+   :args {:test :_menu-is-outside-event :then :menu-close :else {:as :state :type :_menu-state}}}
+  {:name :_menu-escape-update :parent :if
+   :args {:test :_menu-is-escape-event :then :menu-close :else :_menu-outside-update}}
+  {:name :_menu-select-update :parent :if
+   :args {:test :_menu-is-select-event :then :_menu-select :else :_menu-escape-update}}
+  {:name :_menu-down-update :parent :if
+   :args {:test :_menu-is-down-event :then :_menu-navigate :else :_menu-select-update}}
+  {:name :_menu-up-update :parent :if
+   :args {:test :menu-is-up-event :then :_menu-navigate :else :_menu-down-update}}
+  {:name :_menu-hover-update :parent :if
+   :args {:test :_menu-is-hover-event :then :_menu-hover :else :_menu-up-update}}
+  {:name :_menu-interactive-update :parent :if
+   :args {:test :menu-is-closing :then {:as :state :type :_menu-state} :else :_menu-hover-update}}
+  {:name :_menu-toggle :parent :if
+   :args {:test :menu-is-closed :then :menu-open :else :menu-close}}
+  {:name :_menu-open-update :parent :if
+   :args {:test :_menu-is-open-event :then :_menu-toggle :else :_menu-interactive-update}}
+  {:name :menu-update :parent :if
+   :args {:test :_menu-is-animation-event :then :_menu-finished :else :_menu-open-update}}
+
+  {:name :_menu-selected-label :parent :get
+   :args {:coll :menu-items :key :menu-selected-index :default "Ocean"}}
+  {:name :_menu-expanded :parent :if :return-type :bool
+   :args {:test :menu-is-closed :then false :else true}}
+  {:name :_menu-trigger-attrs :parent :zipmap
+   :args {:keys [{:value :type} {:value :class} {:value :data-event}
+                 {:value :aria-haspopup} {:value :aria-expanded}]
+          :vals [{:value "button"} {:value "ui-preview-trigger"}
+                 {:value "open"} {:value "menu"} :_menu-expanded]}}
+  {:name :_menu-trigger :parent :hiccup
+   :args {:tag "button" :attrs :_menu-trigger-attrs :children [:_menu-selected-label]}}
+  {:name :menu-choice-index :parent :const :return-type :int
+   :args {:value {:as :index :type :int}}}
+  {:name :menu-choice-active :parent :equal?
+   :args {:a :menu-active-index :b :menu-choice-index}}
+  {:name :_menu-choice-selected :parent :equal?
+   :args {:a :menu-selected-index :b :menu-choice-index}}
+  {:name :_menu-choice-class :parent :if :return-type :text
+   :args {:test :menu-choice-active :then "ui-preview-choice active" :else "ui-preview-choice"}}
+  {:name :_menu-choice-label :parent :get
+   :args {:coll :menu-items :key :menu-choice-index :default ""}}
+  {:name :_menu-choice-attrs :parent :zipmap
+   :args {:keys [{:value :type} {:value :class} {:value :role}
+                 {:value :data-event} {:value :data-index} {:value :aria-checked} {:value :data-active}
+                 {:value :disabled}]
+          :vals [{:value "button"} :_menu-choice-class {:value "menuitemradio"}
+                 {:value "select"} :menu-choice-index :_menu-choice-selected :menu-choice-active :menu-is-closing]}}
+  {:name :menu-choice :parent :hiccup
+   :args {:tag "button" :attrs :_menu-choice-attrs :children [:_menu-choice-label]}}
+  {:name :_menu-choice-first :parent :menu-choice :args {:index 0}}
+  {:name :_menu-choice-second :parent :menu-choice :args {:index 1}}
+  {:name :_menu-choice-third :parent :menu-choice :args {:index 2}}
+  {:name :_menu-list-attrs :parent :zipmap
+   :args {:keys [{:value :class} {:value :role} {:value :hidden}]
+          :vals [{:value "ui-preview-list"} {:value "menu"} :menu-is-closed]}}
+  {:name :_menu-list :parent :hiccup
+   :args {:tag "div" :attrs :_menu-list-attrs
+          :children [:_menu-choice-first :_menu-choice-second :_menu-choice-third]}}
+  {:name :menu-animation-duration :parent :const :return-type :int
+   :args {:value 160}}
+  {:name :_menu-root-attrs :parent :zipmap
+   :args {:keys [{:value :class} {:value :data-phase} {:value :style} {:value :data-duration}]
+          :vals [{:value "ui-preview-menu"} :menu-phase :theme-style :menu-animation-duration]}}
+  {:name :menu-view :parent :hiccup
+   :args {:tag "div" :attrs :_menu-root-attrs :children [:_menu-trigger :_menu-list]}}
+
+  ;; Local preview transport. These graphs are outside the browser subset.
+  {:name :_ui-preview-export
+   :return-type :jsonb
+   :description "Export ordinary stored calls for the bounded browser backend. Self-hosted only; a repeatable database snapshot and matching checked inputs preserve visibility restrictions."
+   :args {:initial {:type :fn-ref} :update {:type :fn-ref} :view {:type :fn-ref}}
+
+   :effects #{:db}}
+  {:name :browser-plan-export :parent :_ui-preview-export
+   :description "Export three ordinary graph entries for the bounded self-hosted browser preview."}
+  {:name :_ui-preview-export-ids
+   :return-type :jsonb
+   :description "Export parsed entry UUID values. Reject missing or malformed identities before reading graph data."
+   :args {:initial {:type :nullable-uuid} :update {:type :nullable-uuid} :view {:type :nullable-uuid}}
+   :effects #{:db}}
+  {:name :_ui-preview-initial-id :parent :parse-uuid
+   :args {:string {:parent :query-param :args {:param-name "initial"}}}}
+  {:name :_ui-preview-update-id :parent :parse-uuid
+   :args {:string {:parent :query-param :args {:param-name "update"}}}}
+  {:name :_ui-preview-view-id :parent :parse-uuid
+   :args {:string {:parent :query-param :args {:param-name "view"}}}}
+  {:name :_ui-preview-plan :parent :_ui-preview-export-ids
+   :args {:initial :_ui-preview-initial-id :update :_ui-preview-update-id :view :_ui-preview-view-id}}
+  {:name :_ui-preview-exception :parent :ex-data
+   :args {:ex {:as :exception}}}
+  {:name :_ui-preview-data :parent :try
+   :args {:body :_ui-preview-plan :on-throw :_ui-preview-exception}}
+  {:name :_ui-preview-reason :parent :get
+   :args {:coll :_ui-preview-data :key {:value :reason} :default nil}}
+  {:name :_ui-preview-status :parent :if
+   :args {:test :_ui-preview-reason :then 422 :else 200}}
+  {:name :_ui-preview-json :parent :to-json-string
+   :args {:data :_ui-preview-data}}
+  {:name :_ui-preview-plan-handler :parent :ring-response
+   :args {:status {:ref :_ui-preview-status :type :http-status} :body :_ui-preview-json
+          :headers {:value {"Content-Type" "application/json; charset=utf-8"
+                            "Cache-Control" "no-store"}}}}
+  {:name :ui-preview-plan-route :parent :get-auth-required
+   :args {:path "/ui-preview/plan" :handler :_ui-preview-plan-handler}
+   :expects-effects #{:db}}
+  {:name :_ui-preview-runtime-source :parent :read-resource :return-type :js-source
+   :args {:path "packages/app/ui-preview/browser-runtime.js"}}
+  {:name :_ui-preview-adapter-source :parent :read-resource :return-type :js-source
+   :args {:path "packages/app/ui-preview/browser-adapter.js"}}
+  {:name :_ui-preview-style-source :parent :read-resource :return-type :css-source
+   :args {:path "packages/app/ui-preview/preview.css"}}
+  {:name :_ui-preview-runtime-script :parent :wrap-custom-script
+   :args {:body :_ui-preview-runtime-source}}
+  {:name :_ui-preview-adapter-script :parent :wrap-custom-script
+   :args {:body :_ui-preview-adapter-source}}
+  {:name :_ui-preview-style :parent :wrap-custom-style
+   :args {:body :_ui-preview-style-source}}
+  {:name :_ui-preview-body :parent :const
+   :args {:value {:value ["main" {}
+                          ["h1" {} "Theme and menu graph"]
+                          ["p" {} "Both menus use the same graph and keep independent state. Arrow keys choose an item, Enter selects it, and Escape closes the menu."]
+                          ["nav" {}
+                           ["a" {:href "/#app.ui-preview.accent-color" :target "_blank" :data-ui-graph-function "accent-color"} "Shared color"]
+                           " · "
+                           ["a" {:href "/#app.ui-preview.menu-view" :target "_blank" :data-ui-graph-function "menu-view"} "Menu graph"]
+                           " · "
+                           ["a" {:href "/#app.ui-preview.menu-update" :target "_blank" :data-ui-graph-function "menu-update"} "Events and state"]]
+                          ["p" {} "Edit the graph in the editor, then reload it here."]
+                          ["button" {:id "ui-preview-reload" :type "button"} "Reload graph"]
+                          ["p" {:id "ui-preview-status" :role "status"} "Loading…"]
+                          ["section" {:class "ui-preview-mounts"}
+                           ["div" {:id "ui-preview-first"}]
+                           ["div" {:id "ui-preview-second"}]]]}}}
+  {:name :_ui-preview-page-handler :parent :html-page-handler
+   :args {:title "Theme and menu graph — local prototype" :body :_ui-preview-body
+          :head [:_ui-preview-style]
+          :scripts [:_ui-preview-runtime-script :_ui-preview-adapter-script]}}
+  {:name :ui-preview-page-route :parent :get-route
+   :args {:path "/ui-preview" :handler :_ui-preview-page-handler}
+   :expects-effects #{:io}}]}

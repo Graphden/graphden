@@ -748,7 +748,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   background: var(--gd-flow, #06c);
   color: var(--gd-on-accent, #fff);
 }
-.auth-menu-item:hover { background: var(--bg); }
+.auth-menu-item:hover { background: var(--gd-account-menu-hover, var(--bg)); }
 .auth-menu-div { height: 1px; margin: 4px 2px; background: var(--border); }
 /* Community footer — support link (self-host only) + social row. Quiet by
    design: muted text, brightens on hover, sits under the last divider. */

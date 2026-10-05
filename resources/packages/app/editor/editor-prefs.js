@@ -96,12 +96,14 @@ function applyCollapsed(collapsed) {
 }
 
 function applyTheme(dark) {
+  window.gdClearGraphTheme?.();
   document.body.classList.toggle('theme-dark', dark);
   const btn = document.getElementById('theme-toggle-btn');
   if (btn) {
     btn.innerHTML = dark ? SUN_SVG : MOON_SVG;
     btn.title = dark ? 'Switch to light theme' : 'Switch to dark theme';
   }
+  queueMicrotask(() => window.gdRefreshGraphTheme?.());
   // Nothing else to do: edges are SVG (`stroke: var(--fg)`) and cards are HTML,
   // so both re-resolve their tokens when the body class flips. The canvas
   // stylesheet used to have to be rebuilt by hand here.
@@ -361,6 +363,7 @@ let _activeThemePayload = null;
 function gdApplyThemePayload(payload) {
   const body = document.body;
   if (!body) return;
+  window.gdClearGraphTheme?.();
   const clean = sanitizeThemePayload(payload);
   // clear what the previous theme set
   for (const name of THEME_TOKEN_NAMES) body.style.removeProperty(name);
@@ -368,7 +371,11 @@ function gdApplyThemePayload(payload) {
   body.style.removeProperty('--mono');
   document.documentElement.style.removeProperty('font-size');
   _activeThemePayload = clean;
-  if (!clean) { body.classList.toggle('gd-custom-theme', false); return; }
+  if (!clean) {
+    body.classList.toggle('gd-custom-theme', false);
+    queueMicrotask(() => window.gdRefreshGraphTheme?.());
+    return;
+  }
   applyTheme(clean.mode === 'dark');
   for (const [k, v] of Object.entries(clean.tokens)) body.style.setProperty(k, v);
   for (const [k, v] of Object.entries(clean.fonts)) {
@@ -377,6 +384,7 @@ function gdApplyThemePayload(payload) {
   }
   if (clean.scale !== 100) document.documentElement.style.fontSize = clean.scale + '%';
   body.classList.toggle('gd-custom-theme', true);
+  queueMicrotask(() => window.gdRefreshGraphTheme?.());
 }
 
 function gdActiveThemePayload() { return _activeThemePayload; }
@@ -486,3 +494,29 @@ window.gdPrefOnChange = gdPrefOnChange;
 
 window.initPrefsEarly = initPrefsEarly;
 window.initPrefsLate  = initPrefsLate;
+
+// The review graph overlays the effective personal theme without persisting it.
+// Keep the exact inline values so disabling it restores the user's own theme.
+const graphThemePrevious = new Map();
+function gdClearGraphTheme() {
+  for (const [name, value] of graphThemePrevious) {
+    if (value) document.body.style.setProperty(name, value);
+    else document.body.style.removeProperty(name);
+  }
+  graphThemePrevious.clear();
+}
+function gdGraphThemeBase() {
+  gdClearGraphTheme();
+  return {accent: gdThemeTokenValue('--gd-flow'), 'canvas-background': gdThemeTokenValue('--bg')};
+}
+function gdApplyGraphTheme(tokens) {
+  gdClearGraphTheme();
+  const clean = sanitizeThemePayload({tokens});
+  for (const [name, value] of Object.entries(clean.tokens)) {
+    graphThemePrevious.set(name, document.body.style.getPropertyValue(name));
+    document.body.style.setProperty(name, value);
+  }
+}
+window.gdClearGraphTheme = gdClearGraphTheme;
+window.gdGraphThemeBase = gdGraphThemeBase;
+window.gdApplyGraphTheme = gdApplyGraphTheme;

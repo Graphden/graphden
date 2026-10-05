@@ -72,6 +72,8 @@
                   :preview-page
                   :demo-contact
                   :demo-contact-clock
+                  :ui-preview-page-route
+                  :ui-preview-plan-route
                   :health
                   :metrics
                   :metrics-prometheus

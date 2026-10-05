@@ -1,0 +1,11 @@
+/* Preview shell; menu colors are supplied by ordinary theme graph functions. */
+body { font-family: system-ui, sans-serif; margin: 2rem; }
+.ui-preview-mounts { display: flex; gap: 3rem; flex-wrap: wrap; padding: 2rem 0; }
+.ui-preview-menu { position: relative; color: var(--ui-text); min-width: 12rem; }
+.ui-preview-menu button { font: inherit; color: var(--ui-text); background: var(--ui-surface); border: 2px solid var(--ui-button); border-radius: 0.5rem; padding: 0.75rem 1rem; cursor: pointer; }
+.ui-preview-menu button:focus-visible { outline: 3px solid var(--ui-accent); outline-offset: 3px; }
+.ui-preview-list { position: absolute; top: calc(100% + 0.5rem); left: 0; z-index: 1; background: var(--ui-surface); border: 2px solid var(--ui-accent); border-radius: 0.5rem; padding: 0.5rem; min-width: 12rem; }
+.ui-preview-list[hidden] { display: none; }
+.ui-preview-list button { display: block; width: 100%; text-align: left; border-color: transparent; }
+.ui-preview-list button[data-active="true"] { border-color: var(--ui-accent); }
+.ui-preview-list button:disabled { cursor: default; }

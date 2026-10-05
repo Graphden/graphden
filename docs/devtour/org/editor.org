@@ -167,13 +167,13 @@ Loads grouped differences for a selected comparison branch. Explorer badges, can
 :PROPERTIES:
 :CUSTOM_ID: editor/gdApplyThemePayload
 :FILE: resources/packages/app/editor/editor-prefs.js
-:LINE: 361
-:MINS: 1.6
+:LINE: 363
+:MINS: 1.9
 :END:
 
 Applies a validated theme payload as inline CSS custom properties on the body. The sanitizer permits known tokens and supported color values, rejecting injected declarations or URLs. A localStorage copy applies before first paint; saved server preferences reconcile afterward. See [[file:../../../docs/MARKETPLACE.md][themes]].
 
-- source :: [[file:../../../resources/packages/app/editor/editor-prefs.js::function gdApplyThemePayload(payload) {][resources/packages/app/editor/editor-prefs.js:361]]
+- source :: [[file:../../../resources/packages/app/editor/editor-prefs.js::function gdApplyThemePayload(payload) {][resources/packages/app/editor/editor-prefs.js:363]]
 
 * 14. gdApplyKeymap
 :PROPERTIES:
@@ -191,13 +191,13 @@ Applies user key overrides by stable shortcut ID. The registry keeps defaults fo
 :PROPERTIES:
 :CUSTOM_ID: editor/authFetch
 :FILE: resources/packages/app/editor/editor-auth.js
-:LINE: 108
+:LINE: 110
 :MINS: 1.2
 :END:
 
 Sends authenticated editor requests and handles 401 by clearing the stored credential and opening sign-in. HTTP 4xx responses still resolve normally: callers must inspect the response status. A ~try/catch~ alone detects network exceptions, not rejected HTTP writes.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-auth.js::async function authFetch(url, opts = {}) {][resources/packages/app/editor/editor-auth.js:108]]
+- source :: [[file:../../../resources/packages/app/editor/editor-auth.js::async function authFetch(url, opts = {}) {][resources/packages/app/editor/editor-auth.js:110]]
 - referenced from :: [[file:editor.org::#editor/initGraph][initGraph]]
 
 * 16. _tourTick

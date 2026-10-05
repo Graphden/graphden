@@ -18,6 +18,12 @@ A rename-view slot is inherited through the `parent-ids` closure like
 any other slot, so a descendant of `:wrap-custom-script` (which
 renames `content → body`) exposes `?body` — everywhere.
 
+Slot identity here is the runtime reader in the current inheritance scope
+(`effective-reader-slot-id`), not the global root of every `source-slot-id`
+chain. Two independent calls that rename `get.coll` to `left` and `right`
+remain two inputs; binding `left` does not close `right`. A source and its
+rename in the current inheritance chain still identify one input.
+
 ## Who already implemented it (before this ADR)
 
 The contract was not invented here — three of the four layers had

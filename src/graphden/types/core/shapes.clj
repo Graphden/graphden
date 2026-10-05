@@ -218,6 +218,23 @@
   (atom {:secret {:monotone? true :hide-result? true}}))
 
 
+(def ^:dynamic *marker-registry-override*
+  "Optional isolated marker view. Snapshot checking must not publish the
+   captured graph's marker declarations into the running executor."
+  nil)
+
+
+(defn- markers-atom
+  []
+  (or *marker-registry-override* marker-registry))
+
+
+(defn markers-snapshot
+  "Immutable active marker flags, for a policy captured before other reads."
+  []
+  @(markers-atom))
+
+
 (defn register-marker!
   "Register `tag` as a marker type with `flags`
    (`{:monotone? bool :hide-result? bool}`). Idempotent — re-register
@@ -231,7 +248,7 @@
   (when (false? (:monotone? flags))
     (throw (ex-info (str "non-monotone markers are not supported yet: " tag)
                     {:type :types/invalid-marker :tag tag :flags flags})))
-  (swap! marker-registry assoc tag (merge {:monotone? true} flags))
+  (swap! (markers-atom) assoc tag (merge {:monotone? true} flags))
   tag)
 
 
@@ -239,20 +256,20 @@
   "Test/cleanup counterpart. `:secret` is seeded and never removed."
   [tag]
   (when-not (= :secret tag)
-    (swap! marker-registry dissoc tag))
+    (swap! (markers-atom) dissoc tag))
   nil)
 
 
 (defn marker-flags
   [tag]
-  (get @marker-registry tag))
+  (get @(markers-atom) tag))
 
 
 (defn marker-type?
   "`[<registered-tag> <inner>]`?"
   [t]
   (and (vector? t) (= 2 (count t))
-       (contains? @marker-registry (first t))))
+       (contains? @(markers-atom) (first t))))
 
 
 (defn marker-tag

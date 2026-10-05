@@ -39,11 +39,13 @@ function getAuthPassword() {
 function setAuthPassword(pw) {
   try { localStorage.setItem(AUTH_STORAGE_KEY, pw); } catch (_) {}
   renderAuthLock();
+  window.dispatchEvent(new Event('gd-auth-changed'));
 }
 
 function clearAuthPassword() {
   try { localStorage.removeItem(AUTH_STORAGE_KEY); } catch (_) {}
   renderAuthLock();
+  window.dispatchEvent(new Event('gd-auth-changed'));
 }
 
 // The open `accounts` addon replaces the popover flow entirely: sessions ride
@@ -410,6 +412,7 @@ function renderAuthLock() {
 // to the login form). Settings stays reachable signed-out: appearance is
 // personal, not privileged.
 function toggleAuthAction() {
+  if (window.gdShellMenuGraph?.toggle()) return;
   const pop = document.getElementById('auth-popover');
   if (pop && !pop.classList.contains('hidden')) { closeAuthPopover(); return; }
   openShellMenu();
@@ -425,6 +428,7 @@ async function openAuthPopover(errorMsg) {
   const popover = document.getElementById('auth-popover');
   if (!popover) return;
   if (popover.dataset.gdContent === 'menu') {
+    window.gdShellMenuGraph?.dispose();
     popover.dataset.gdContent = '';
     popover.innerHTML = '';
   }
@@ -487,7 +491,9 @@ function positionAuthPopover() {
   popover.style.left = left + 'px';
 }
 
-function closeAuthPopover() {
+function closeAuthPopover(immediate = false) {
+  if (!immediate && window.gdShellMenuGraph?.close()) return;
+  window.gdShellMenuGraph?.dispose();
   const popover = document.getElementById('auth-popover');
   if (!popover) return;
   // Focus RETURNS to the chip — but only when it was inside the popover;

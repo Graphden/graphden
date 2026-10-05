@@ -18,14 +18,17 @@
 function openShellMenu() {
   const pop = document.getElementById('auth-popover');
   if (!pop) return;
-  const menu = document.createElement('div');
+  const graphFrame = window.gdShellMenuGraph?.ready ? window.gdShellMenuGraph.frame() : null;
+  const menu = graphFrame?.frame || document.createElement('div');
   menu.className = 'auth-menu';
   // A real ARIA menu, not a styled div: focus moves IN on open, arrows walk
   // the items (roving tabindex — Tab is not the navigator here), Escape and
   // Tab close and hand focus back to the chip. Without this the items sat at
   // the very END of the page's tab order — ~50 presses from the trigger.
-  menu.setAttribute('role', 'menu');
-  menu.setAttribute('aria-label', 'Account and editor');
+  if (!graphFrame) {
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', 'Account and editor');
+  }
 
   // Identity head — accounts identity, or the admin-password session.
   const isOp = (typeof window.graphdenHasCap === 'function') && window.graphdenHasCap('platform-admin');
@@ -71,13 +74,20 @@ function openShellMenu() {
     menu.appendChild(d);
   };
   const goSurface = (name) => {
-    closeAuthPopover();
+    closeAuthPopover(true);
     if (typeof gdShellSurface === 'function') gdShellSurface(name);
   };
 
   // Management destinations — rare places, one click deep by design.
-  item('Settings', () => goSurface('settings'));
-  item('Organization', () => goSurface('operate'));
+  if (graphFrame) {
+    for (const row of graphFrame.rows) {
+      row.addEventListener('click', () => goSurface(row.dataset.action));
+      menu.appendChild(row);
+    }
+  } else {
+    item('Settings', () => goSurface('settings'));
+    item('Organization', () => goSurface('operate'));
+  }
   // Marketplace — only with the optional registry package (docs/MARKETPLACE.md).
   if (typeof window.API === 'object' && window.API && typeof window.API.api_marketplace !== 'undefined') {
     item('Marketplace', () => goSurface('market'));
@@ -88,7 +98,7 @@ function openShellMenu() {
   // Interactive tutorial — guided in-editor lessons (editor-tour.js).
   if (typeof window.openTutorialMenu === 'function') {
     const tutorial = item('Interactive tutorial', () => {
-      closeAuthPopover();
+      closeAuthPopover(true);
       window.openTutorialMenu();
     });
     // Lessons added, or changed since the reader finished them, since they
@@ -130,11 +140,12 @@ function openShellMenu() {
     item('Sign out', () => {
       if (!confirm('Sign out?')) return;
       clearAuthPassword();
-      closeAuthPopover();
+      closeAuthPopover(true);
     });
   } else {
     // The admin-password mode signs in via the popover form — swap the menu for it.
     item('Sign in', () => {
+      window.gdShellMenuGraph?.dispose();
       pop.classList.add('hidden');
       pop.dataset.gdContent = '';
       pop.innerHTML = '';
@@ -149,7 +160,7 @@ function openShellMenu() {
   // (GRAPHDEN_FEEDBACK_URL=off → editor-feedback.js hides the affordance).
   if (typeof window.feedbackEnabled !== 'function' || window.feedbackEnabled()) {
     item('Report a problem', () => {
-      closeAuthPopover();
+      closeAuthPopover(true);
       if (typeof window.openFeedbackForm === 'function') window.openFeedbackForm();
     });
   }
@@ -194,7 +205,7 @@ function openShellMenu() {
   // Escape marks it consumed (see graphden-popover.js) so the tour and the
   // surface-level Escape handler don't also act on it.
   const menuItems = () => [...menu.querySelectorAll('[role="menuitem"]')];
-  menu.addEventListener('keydown', (e) => {
+  if (!graphFrame) menu.addEventListener('keydown', (e) => {
     const items = menuItems();
     if (!items.length) return;
     const at = items.indexOf(document.activeElement);
@@ -203,7 +214,7 @@ function openShellMenu() {
     if (e.key === 'ArrowUp') { e.preventDefault(); go(at - 1); } else
     if (e.key === 'Home') { e.preventDefault(); go(0); } else
     if (e.key === 'End') { e.preventDefault(); go(items.length - 1); } else
-    if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); closeAuthPopover(); }
+    if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); closeAuthPopover(true); }
   });
 
   pop.replaceChildren(menu);
@@ -211,6 +222,10 @@ function openShellMenu() {
   pop.classList.remove('hidden');
   positionAuthPopover();
   document.getElementById('auth-lock-btn')?.setAttribute('aria-expanded', 'true');
+  if (graphFrame) {
+    window.gdShellMenuGraph.mount(menu, pop, () => closeAuthPopover(true));
+    return;
+  }
   const first = menuItems()[0];
   if (first) {
     if (typeof focusSafely === 'function') focusSafely(first);

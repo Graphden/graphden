@@ -34,6 +34,12 @@
   (atom {}))
 
 
+(def ^:dynamic *storage-caches-override*
+  "Optional isolated cache for a consistent database snapshot. Transactional
+   readers must neither consume nor populate the live branch-local cache."
+  nil)
+
+
 (defn- storage-key
   "Stable cache/identity key for a storage handle.
 
@@ -64,10 +70,11 @@
 (defn- cache-for-storage
   "Returns the per-storage cache atom, creating one on first use."
   [base-storage]
-  (let [k (storage-key base-storage)]
-    (or (get @storage-caches k)
+  (let [caches (or *storage-caches-override* storage-caches)
+        k (storage-key base-storage)]
+    (or (get @caches k)
         (let [fresh (atom {})]
-          (swap! storage-caches assoc k fresh)
+          (swap! caches assoc k fresh)
           fresh))))
 
 

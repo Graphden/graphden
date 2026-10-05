@@ -6,11 +6,13 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.crud.branches :as branches]
+    [graphden.crud.entities.list :as entity-list]
     [graphden.crud.request :as request]
     [graphden.crud.secrets :as secrets]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
+    [graphden.lint.graph :as graph-lint]
     [graphden.services.reconciler :as recon]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.postgres.util :as pg-util]
@@ -227,6 +229,8 @@
                  storage branch-id
                  {:reclaim-secrets!
                   #(secrets/sweep-orphan-secrets! base (secrets/secret-refs % (constantly branch-org)))})]
+    (graph-lint/forget-branch! branch-id)
+    (entity-list/forget-branch! branch-id)
     (when-let [router (br/current-router)]
       (br-cache/invalidate! router branch-id))
     ;; The type-rows the branch declared stop resolving — unless another

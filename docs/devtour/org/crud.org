@@ -309,11 +309,11 @@ Builds a shared lazy read environment over the graph cache. Separate projections
 :PROPERTIES:
 :CUSTOM_ID: crud/view-members
 :FILE: src/graphden/crud/entities/list.clj
-:LINE: 1038
+:LINE: 1049
 :MINS: 1.4
 :END:
 
 Evaluates graph filters for the Explorer and saved graph views. Filter dimensions are combined with AND; ~:uses~ follows reverse dependencies by function ID, and ~:views~ intersects other views with a cycle check. Ad-hoc filtering and the saved ~:explorer-view~ function use this same evaluator.
 
-- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn view-members][src/graphden/crud/entities/list.clj:1038]]
+- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn view-members][src/graphden/crud/entities/list.clj:1049]]
 - same file :: [[file:crud.org::#crud/graph-list-env][graph-list-env]]

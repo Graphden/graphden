@@ -405,10 +405,10 @@ Checks function definitions for duplicate implementations, unused private defini
 :PROPERTIES:
 :CUSTOM_ID: packages/lint-branch
 :FILE: src/graphden/lint/graph.clj
-:LINE: 350
-:MINS: 3.2
+:LINE: 363
+:MINS: 3.3
 :END:
 
 Converts the current organisation and branch's graph snapshot into function definitions and runs the graph linter. Results are cached while the snapshot object is unchanged. The lint filter and inspector section share this result; graph-stored suppressions remove acknowledged findings.
 
-- source :: [[file:../../../src/graphden/lint/graph.clj::(defn lint-branch][src/graphden/lint/graph.clj:350]]
+- source :: [[file:../../../src/graphden/lint/graph.clj::(defn lint-branch][src/graphden/lint/graph.clj:363]]

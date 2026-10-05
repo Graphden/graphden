@@ -221,13 +221,26 @@
   (atom {}))
 
 
+(defn forget-branch!
+  "Release every viewer/org lint snapshot for a deleted branch. A new stamp
+   prevents computations begun before deletion from republishing stale rows."
+  [branch-id]
+  (swap! memo
+         (fn [entries]
+           (with-meta (into {} (remove (fn [[[_ bid _] _]] (= branch-id bid))) entries)
+             {:generation (Object.)})))
+  nil)
+
+
 (defn- remember!
-  [k entry]
+  [k entry generation]
   (swap! memo (fn [m]
-                (let [m (assoc m k (assoc entry :at (System/nanoTime)))]
-                  (if (> (count m) memo-cap)
-                    (dissoc m (key (apply min-key (comp :at val) m)))
-                    m)))))
+                (if-not (identical? generation (:generation (meta m)))
+                  m
+                  (let [m (assoc m k (assoc entry :at (System/nanoTime)))]
+                    (if (> (count m) memo-cap)
+                      (dissoc m (key (apply min-key (comp :at val) m)))
+                      m))))))
 
 
 (defn- read-ns-rows
@@ -361,7 +374,8 @@
    (`executor.context/fill-graph-cache!`), so a read right after an edit
    is the post-edit graph — no storage bypass needed."
   [ctx suppress]
-  (let [suppress (set suppress)
+  (let [generation (:generation (meta @memo))
+        suppress (set suppress)
         storage (request/require-storage ctx)
         ;; Over the graph AS THE VIEWER MAY SEE IT: a fn whose composition
         ;; is concealed lints as a leaf (no parents, no bindings), so no
@@ -385,5 +399,5 @@
       (lint/warnings (:findings prev))
       (let [entry (or (when same-ns? (delta-state prev graph suppress))
                       (full-state graph nss suppress))]
-        (remember! k entry)
+        (remember! k entry generation)
         (lint/warnings (:findings entry))))))

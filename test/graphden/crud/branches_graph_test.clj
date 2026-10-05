@@ -21,7 +21,9 @@
     [cheshire.core :as cheshire]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.crud.entities.list :as entity-list]
     [graphden.executor.test-setup :as setup]
+    [graphden.lint.graph :as graph-lint]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.graph-harness :as gh :refer [*graph* json-req uniq]]
     [graphden.versioning.storage.core :as vs]))
@@ -456,6 +458,29 @@
       (let [list-body (json-body (gh/via :list-branches-handler
                                          (get-req "/api/branches")))]
         (is (not-any? #(= name (:name %)) (:branches list-body)))))))
+
+
+(deftest delete-branch-releases-derived-editor-snapshots
+  (let [branch (mk-branch! (uniq "cache-lifecycle"))
+        id (parse-uuid (:id branch))
+        ctx (assoc (:ctx *graph*) :storage (vs/switch-branch *storage* id)
+                   :graph-cache (atom nil))
+        lint-cache @(ns-resolve 'graphden.lint.graph 'memo)
+        tree-cache @(ns-resolve 'graphden.crud.entities.list 'tree-kinds-memo)
+        lint-entry? #(some (fn [[[_ bid _] _]] (= id bid)) @lint-cache)]
+    (try
+      (graph-lint/lint-branch ctx #{})
+      (entity-list/graph-tree ctx)
+      (is (lint-entry?))
+      (is (contains? @tree-cache id))
+      (let [body (json-body (gh/via :delete-branch-handler
+                                    (delete-req (str "/api/branches/" (:name branch)))))]
+        (is (:ok body))
+        (is (not (lint-entry?)))
+        (is (not (contains? @tree-cache id))))
+      (finally
+        (graph-lint/forget-branch! id)
+        (entity-list/forget-branch! id)))))
 
 
 ;; =============================================================================

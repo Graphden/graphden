@@ -426,18 +426,23 @@ async function openTutorialMenu() {
       row.className = 'gd-tour-lesson-row' + (textOnly ? ' gd-tour-lesson-row-text' : '');
       row.setAttribute('data-lesson-id', lesson.id);
       row.appendChild(btn);
-      // Every toured lesson has a written half; the quiet ↗ opens it. What
-      // the text ADDS is spelled out only where the steps are behind the
-      // reader — under a ✓ done row (and on a text-only row).
-      const readOn = (typeof _tourReadOn === 'function') ? _tourReadOn(lesson, {compact: true}) : null;
-      let adds = null;
-      if (readOn && !textOnly) {
-        const link = _tourBtn('↗', 'gd-tour-btn-quiet gd-tour-read-btn', () => window.open(textUrl, '_blank', 'noopener'));
-        link.title = _tourCopy('read-label', 'Read the written lesson {lesson}', { lesson: lesson.id });
-        link.setAttribute('aria-label', link.title);
-        row.appendChild(link);
+      // One entry point to the written lesson; its optional summary stays
+      // in the tooltip instead of adding another row to the catalogue.
+      const readLabel = _tourCopy('read-label', 'Read the written lesson {lesson}',
+        { lesson: lesson.id });
+      const readSummary = lesson.reads
+        ? _tourCopy('read-adds', 'In the text: {adds}', { adds: lesson.reads }) : '';
+      const readControl = textOnly ? btn : (textUrl
+        ? _tourBtn('↗', 'gd-tour-btn-quiet gd-tour-read-btn',
+          () => window.open(textUrl, '_blank', 'noopener')) : null);
+      if (readControl) {
+        readControl.title = readLabel + (readSummary ? '\n' + readSummary : '');
+        if (readSummary) readControl.setAttribute('aria-description', readSummary);
+        if (!textOnly) {
+          readControl.setAttribute('aria-label', readLabel);
+          row.appendChild(readControl);
+        }
       }
-      if (readOn && (textOnly || done.has(_tourKey(lesson)))) adds = readOn;
       // A lesson the reader's last look did not list is chipped once, on the
       // look that follows the menu's count; a lesson they finished at an
       // older edition stays chipped until they finish it again — the ✓ is
@@ -493,7 +498,6 @@ async function openTutorialMenu() {
         btn.appendChild(note);
       }
       list.appendChild(row);
-      if (adds) list.appendChild(adds);
     }
     if (!shown) {
       const empty = document.createElement('div');

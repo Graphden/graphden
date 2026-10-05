@@ -3702,6 +3702,33 @@ textarea.value-form-hiccup {
 .description-tooltip-textarea:focus {
   box-shadow: 0 0 0 1px var(--tooltip-fg) inset;
 }
+/* Editing is a form surface; hover tips deliberately use an inverse palette. */
+.description-tooltip.description-tooltip-editing {
+  width: min(360px, calc(100vw - 24px));
+  box-sizing: border-box;
+  background: var(--card-bg);
+  color: var(--card-fg);
+  border: 1px solid var(--card-border);
+}
+.description-tooltip-editing .description-tooltip-textarea {
+  width: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  border-color: var(--input-border);
+}
+.description-tooltip-editing .description-tooltip-textarea:focus {
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.description-tooltip-editing .description-tooltip-btn {
+  background: var(--card-fg);
+  color: var(--card-bg);
+  border-color: var(--card-fg);
+}
+.description-tooltip-editing .description-tooltip-btn-secondary {
+  background: transparent;
+  color: var(--card-fg);
+}
+
 .description-tooltip-error {
   margin-top: 4px; font-size: 0.6875rem;
   color: var(--error-fg);

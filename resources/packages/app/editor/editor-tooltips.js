@@ -19,6 +19,7 @@ let descriptionTooltipEl = null;
 // only appears in sticky mode) can read entityType/entityId without
 // having to thread them through every render call.
 let descriptionTooltipContent = null;
+let descriptionTooltipPosition = null;
 // While editing, neither hover-out NOR document-level outside-click
 // should dismiss the tooltip — the user is mid-typing.
 let descriptionTooltipEditing = false;
@@ -45,12 +46,12 @@ function showDescriptionTooltip(content, evt) {
   // a stray hover would otherwise wipe out the textarea.
   if (descriptionTooltipEditing) return;
   descriptionTooltipContent = content;
+  descriptionTooltipPosition = {x: evt.clientX, y: evt.clientY};
   const el = ensureDescriptionTooltip();
   // Read mode: tooltip is purely informational, so it shouldn't
   // intercept clicks. Edit mode flips this so the textarea is usable.
   el.style.pointerEvents = 'none';
   renderDescriptionTooltip();
-  positionDescriptionTooltipAt(el, evt.clientX, evt.clientY);
 }
 
 // Render the tooltip body in READ mode using `descriptionTooltipContent`.
@@ -61,6 +62,7 @@ function renderDescriptionTooltip() {
   const content = descriptionTooltipContent;
   if (!el || !content) return;
   el.textContent = '';
+  el.classList.remove('description-tooltip-editing');
   const isObj = content && typeof content === 'object';
   const text = isObj ? (content.description || '') : (content || '');
   // When pinned, the tooltip needs to capture clicks (for the Edit
@@ -110,6 +112,13 @@ function renderDescriptionTooltip() {
     el.appendChild(editRow);
   }
   el.style.display = 'block';
+  repositionDescriptionTooltip();
+}
+
+function repositionDescriptionTooltip() {
+  if (!descriptionTooltipEl || !descriptionTooltipPosition) return;
+  positionDescriptionTooltipAt(descriptionTooltipEl,
+    descriptionTooltipPosition.x, descriptionTooltipPosition.y);
 }
 
 // Close button (×) sits absolute in the tooltip's top-right corner.
@@ -170,6 +179,7 @@ function enterDescriptionEditMode() {
   const content = descriptionTooltipContent;
   if (!el || !content?.entityType || !content.entityId) return;
   descriptionTooltipEditing = true;
+  el.classList.add('description-tooltip-editing');
   el.textContent = '';
   el.style.pointerEvents = 'auto';
 
@@ -184,6 +194,7 @@ function enterDescriptionEditMode() {
 
   const ta = document.createElement('textarea');
   ta.className = 'description-tooltip-textarea';
+  ta.setAttribute('aria-label', 'Description');
   ta.value = content.description || '';
   ta.rows = Math.max(3, Math.min(8, (ta.value.match(/\n/g) || []).length + 2));
   el.appendChild(ta);
@@ -242,12 +253,9 @@ function enterDescriptionEditMode() {
   if (typeof ta.focus === 'function') {
     try { ta.focus({ preventScroll: true }); } catch (_) { ta.focus(); }
   }
-  // Position the tooltip might need to grow vertically — re-measure
-  // and clamp so it doesn't fall off the bottom of the viewport.
-  const rect = el.getBoundingClientRect();
-  if (rect.bottom > window.innerHeight - 8) {
-    el.style.top = Math.max(8, window.innerHeight - rect.height - 8) + 'px';
-  }
+  // Both dimensions change between read/edit mode. Clamp the new size
+  // against the original invocation point, including after Save/Cancel.
+  repositionDescriptionTooltip();
 }
 
 // Posts the new description as a form-encoded PUT. The backend's

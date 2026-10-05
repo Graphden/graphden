@@ -846,13 +846,78 @@
                      edges)}))
 
 
+(defn- sequence-owner-ranks
+  "Per sequence call-site owner ranks in the executor's reverse BFS order."
+  [nodes sources {:keys [fn-map] :as lookups}]
+  (if (empty? sources)
+    {}
+    (let [source-fns (into {}
+                           (keep (fn [n]
+                                   (let [id (get-in n [:data :id])]
+                                     (when (contains? sources id)
+                                       (when-let [fid (some-> (get-in n [:data :originalFnId])
+                                                              parse-uuid)]
+                                         (when (contains? fn-map fid)
+                                           [id fid]))))))
+                           nodes)
+          ;; Node ids identify call sites; originalFnId identifies the function.
+          ;; Repeated uses share one ordering, but keep separate sequence groups.
+          ranks-by-fn (into {}
+                            (map (fn [fid]
+                                   [fid (zipmap (reverse (data/get-inheritance-chain* fid lookups))
+                                                (range))]))
+                            (set (vals source-fns)))]
+      (update-vals source-fns ranks-by-fn))))
+
+
+(defn- sequence-item-position
+  "Position within an owner's list, excluding its synthetic anchor."
+  [item arg-map]
+  (loop [cur item, i 0]
+    (let [prev (some-> cur :prev-arg-id arg-map)]
+      (if (and prev (:prev-arg-id prev))
+        (recur prev (inc i))
+        i))))
+
+
+(defn- sequence-source-depth
+  [arg-id arg-map]
+  (loop [cur (get arg-map arg-id), depth 0]
+    (if-let [source (some-> cur :source-id arg-map)]
+      (recur source (inc depth))
+      depth)))
+
+
+(defn- ordered-sequence-members
+  "Order one list by inheritance and item position, with its tail last."
+  [rows ranks arg-map]
+  (let [row-of #(get arg-map (get-in % [:data :sourceArgId]))
+        ;; A captured owner can be outside the consumer's ancestry. Keep the
+        ;; whole group's source-chain order instead of mixing known ranks
+        ;; with unknown owners that would interleave their item positions.
+        ranked? (every? (fn [[_ _ edge]]
+                          (let [arg (row-of edge)]
+                            (or (nil? (:item-id arg))
+                                (contains? ranks (:fn-id arg)))))
+                        rows)
+        chain-key (fn [edge]
+                    (let [arg (row-of edge)]
+                      (if (some? (:item-id arg))
+                        [(if ranked?
+                           (get ranks (:fn-id arg))
+                           (sequence-source-depth (:source-id arg) arg-map))
+                         (sequence-item-position arg arg-map)]
+                        [Long/MAX_VALUE 0])))]
+    (->> rows
+         (sort-by (fn [[_ index edge]] (conj (chain-key edge) index)))
+         (map peek))))
+
+
 (defn- group-sequence-edges
   "Stamp every edge that carries ONE ITEM of a sequence slot — an
    item row (`:item-id`) or the anchor's own placeholder (the
    empty-list sentinel / the append tail) — with the list it belongs
-   to, so the editor draws the list as one labelled trunk that fans
-   out after the type chip instead of N look-alike args:
-
+   to. The editor draws one labelled trunk with branches for its items.
      :seqGroup  \"<source-node>/<slot-id>\" — the list's identity
      :seqIndex  position in the displayed chain (inherited items
                 first, then the fn's own, then the tail)
@@ -860,17 +925,15 @@
      :seqLabel  the bare slot name — what the one shared label shows
                 (each member keeps its own :argName)
 
-   The same :seqGroup / :seqIndex land on each TARGET node so
-   `order-children` (core.clj) places the group as one contiguous
-   block in chain order — the plain fn > fixed > free sort would
-   otherwise scatter a list of mixed refs and literals. The index is
+   Target nodes carry the same group/index so `order-children` keeps
+   mixed refs and literals together in chain order. The index is
    read off the ROWS, not off emission order (the expanded walker
-   emits unsets before values): an item sorts by the depth of its
-   anchor in the `:source-id` chain (an inherited parent's items come
-   first, as `walk-anchor-chain` shows them) and then by its position
-   along `:prev-arg-id`; the anchor's own placeholder — the tail —
-   sorts last."
-  [{:keys [nodes edges]} arg-map]
+   emits unsets before values). Owners sort in reverse BFS inheritance
+   order, matching execution, then by position along `:prev-arg-id`.
+   Synthetic anchors point at the slot's defining fn, so their source
+   depth cannot distinguish parent items from a descendant's append.
+   The anchor's own placeholder — the tail — sorts last."
+  [{:keys [nodes edges]} {:keys [arg-map] :as lookups}]
   (let [member-row (fn [e]
                      (when-let [arg (get arg-map (get-in e [:data :sourceArgId]))]
                        (when (or (some? (:item-id arg)) (bnd/sequence-anchor? arg))
@@ -878,22 +941,6 @@
         group-of (fn [e]
                    (when-let [arg (member-row e)]
                      (str (get-in e [:data :source]) "/" (:slot-id arg))))
-        anchor-depth (fn [arg-id]
-                       (loop [cur (get arg-map arg-id), d 0]
-                         (if-let [src (some-> cur :source-id arg-map)]
-                           (recur src (inc d))
-                           d)))
-        chain-pos (fn [item]
-                    (loop [cur item, i 0]
-                      (let [prev (some-> cur :prev-arg-id arg-map)]
-                        (if (and prev (:prev-arg-id prev))
-                          (recur prev (inc i))
-                          i))))
-        chain-key (fn [e]
-                    (let [arg (member-row e)]
-                      (if (some? (:item-id arg))
-                        [(anchor-depth (:source-id arg)) (chain-pos arg)]
-                        [Long/MAX_VALUE 0])))
         ;; The group's label: the slot's resolved name (an item row
         ;; resolves one hop up to its anchor), falling back to the
         ;; edge's own label stripped of the `[idx]` suffix.
@@ -908,11 +955,13 @@
         members-by-group (->> (map-indexed vector edges)
                               (keep (fn [[i e]] (when-let [g (group-of e)] [g i e])))
                               (group-by first))
+        sources (set (map #(get-in (peek (first %)) [:data :source])
+                          (vals members-by-group)))
+        owner-ranks (sequence-owner-ranks nodes sources lookups)
         {:keys [counts labels indices]}
         (reduce-kv (fn [acc g rows]
-                     (let [ordered (->> rows
-                                        (sort-by (fn [[_ i e]] (conj (chain-key e) i)))
-                                        (map peek))]
+                     (let [ranks (get owner-ranks (get-in (peek (first rows)) [:data :source]))
+                           ordered (ordered-sequence-members rows ranks arg-map)]
                        (-> acc
                            (assoc-in [:counts g] (count ordered))
                            (assoc-in [:labels g] (some label-of ordered))
@@ -1021,4 +1070,4 @@
                         (:captured-edge-migrations @state))]
       (group-sequence-edges
         (dedup-overlays final-nodes final-edges (:arg-map lookups))
-        (:arg-map lookups)))))
+        lookups))))

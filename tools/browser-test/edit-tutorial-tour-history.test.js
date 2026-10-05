@@ -97,6 +97,17 @@ async function setDescription(page, text) {
       continue;
     }
 
+    const editorColors = await page.evaluate(() => {
+      const ta = document.querySelector('.description-tooltip-textarea');
+      return {
+        dark: document.body.classList.contains('theme-dark'),
+        editor: getComputedStyle(ta).backgroundColor,
+        page: getComputedStyle(document.body).backgroundColor,
+      };
+    });
+    assert(editorColors.dark && editorColors.editor === editorColors.page,
+      'description editor uses the dark form surface: ' + JSON.stringify(editorColors));
+
     await page.evaluate((v) => {
       const ta = document.querySelector('.description-tooltip-textarea');
       ta.value = v;
@@ -209,8 +220,35 @@ async function openVersionHistory(page) {
     await waitTourTitle(page, 'Something to edit', 30000);
     await filterAndSelect(page, 'const', 'const');
     await waitTourTitle(page, 'Extend it', 150000);
+    await page.evaluate(() => applyTheme(true));
+    await openRowActionsFor(page, 'const', 30000);
+    const menu = await page.evaluate(() => {
+      const host = document.querySelector('.row-actions-popover');
+      return {width: host.getBoundingClientRect().width};
+    });
+    assert(menu.width < 400, 'const menu stays compact: ' + JSON.stringify(menu));
+    await page.keyboard.press('Escape');
     await extendViaRowActions(page, 'tutorial-versioned');
     await waitTourTitle(page, 'Give it a description', 150000);
+
+    const parentTrigger = '.node-overlay[data-fn-name="tutorial-versioned"] '
+      + '.ancestor-line[data-level="1"] button.more-actions-trigger';
+    await page.waitForSelector(parentTrigger, {timeout: 30000});
+    await page.evaluate((selector) => document.querySelector(selector)
+      .dispatchEvent(new MouseEvent('mousedown', {bubbles: true})), parentTrigger);
+    await page.waitForSelector('.row-actions-popover [data-action="add-mi-parent"]',
+      {timeout: 15000});
+    const inheritedMenu = await page.evaluate(() => {
+      const host = document.querySelector('.row-actions-popover');
+      const button = host.querySelector('[data-action="add-mi-parent"]');
+      return {width: host.getBoundingClientRect().width,
+        label: button.getAttribute('aria-label'),
+        explanation: button.getAttribute('aria-description')};
+    });
+    assert(inheritedMenu.width < 400 && inheritedMenu.label === 'Add another parent'
+      && /picker searches/.test(inheritedMenu.explanation),
+      'inherited menu retains help without stretching: ' + JSON.stringify(inheritedMenu));
+    await page.keyboard.press('Escape');
 
     await setDescription(page, 'first draft');
     assert(await clickTourButton(page, 'Next'), 'lesson 26 first-edit Next');

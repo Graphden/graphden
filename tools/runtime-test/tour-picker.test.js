@@ -98,6 +98,8 @@ function makeWorld(opts) {
     _tourState: null,
     _tourLoadState: () => null,
     _tourFetchLessons: async () => o.lessons,
+    _tourCopy: (_key, fallback, vars = {}) => fallback.replace(
+      /\{(\w+)\}/g, (_match, key) => String(vars[key] ?? '')),
     _tourEnsureEls: () => ({ pop }),
     _tourSpotHide: () => {},
     _tourNarrow: () => false,

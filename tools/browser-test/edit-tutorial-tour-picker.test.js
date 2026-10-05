@@ -388,16 +388,15 @@ const {
         chapters: Array.from(document.querySelectorAll('.gd-tour-chapter'))
           .map((c) => c.textContent.trim()),
         // The text-only lessons are rows too (anchors, not start buttons),
-        // every toured row carries a quiet ↗ to its text, and the one ✓ done
-        // row (01) is followed by the "In the text: …" line.
+        // every toured row carries one quiet ↗ with its summary in the
+        // tooltip, rather than another link and paragraph beneath the row.
         textRows: Array.from(list.querySelectorAll('.gd-tour-lesson-row-text a.gd-tour-btn-text'))
           .map((a) => [a.textContent.trim().slice(0, 2), a.getAttribute('href')]),
         readBtns: list.querySelectorAll('.gd-tour-lesson-row:not(.gd-tour-lesson-row-text) .gd-tour-read-btn').length,
         tourRows: list.querySelectorAll('.gd-tour-lesson-row:not(.gd-tour-lesson-row-text)').length,
-        addsAfterDone: (() => {
-          const next = done ? done.nextElementSibling : null;
-          return next && next.classList.contains('gd-tour-read') ? next.textContent.trim() : null;
-        })(),
+        doneReadTitle: done?.querySelector('.gd-tour-read-btn')?.title || null,
+        doneReadDescription: done?.querySelector('.gd-tour-read-btn')
+          ?.getAttribute('aria-description') || null,
         addsTotal: list.querySelectorAll('.gd-tour-read').length,
         textCount: document.querySelector('.gd-tour-count-text')?.textContent || null,
       };
@@ -409,10 +408,13 @@ const {
       + JSON.stringify(cat.textRows) + ')');
     assert(cat.readBtns === cat.tourRows && cat.tourRows > 30,
       'every toured row carries a ↗ to its written lesson (' + cat.readBtns + '/' + cat.tourRows + ')');
-    assert(/^Read the written lesson 01 ↗/.test(cat.addsAfterDone || '') && /In the text: /.test(cat.addsAfterDone),
-      'the ✓ done row is followed by what the text adds (got: ' + cat.addsAfterDone + ')');
-    assert(cat.addsTotal === 7,
-      'the adds line is shown only under ✓ done and text-only rows — 1 + 6 (got ' + cat.addsTotal + ')');
+    assert(/^Read the written lesson 01/.test(cat.doneReadTitle || '')
+      && /In the text: /.test(cat.doneReadTitle),
+      'the written lesson summary is available in its tooltip');
+    assert(/In the text: /.test(cat.doneReadDescription || ''),
+      'the same summary is accessible on focus');
+    assert(cat.addsTotal === 0,
+      'the catalogue has no duplicate written links or expanded summaries');
     assert(cat.textCount === '6 text only',
       'the header counts the text-only lessons apart (got: ' + cat.textCount + ')');
     assert(/^Continue 04 · Slots and bindings — step 3\//.test(cat.resume || ''),

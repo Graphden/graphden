@@ -30,7 +30,7 @@
    reader's own Next button — no predicate."
   #{"manual" "fn-exists" "fn-parent" "ns-exists" "binding-bound" "binding-value"
     "bindings-count" "list-items" "selected" "on-branch" "arg-named" "expanded"
-    "dom" "dom-absent" "input-value" "binding-absent" "list-first" "fn-field"})
+    "dom" "dom-absent" "input-value" "result-value" "binding-absent" "list-first" "fn-field"})
 
 
 (def ^:private creates-types
@@ -169,6 +169,9 @@
         (is (and (not (str/blank? (get-in s [:check :selector])))
                  (string? (get-in s [:check :value])))
             (str "lesson " (:id l) " / “" (:title s) "”: input-value needs :selector + a string :value"))
+        "result-value"
+        (is (contains? (:check s) :value)
+            (str "lesson " (:id l) " / “" (:title s) "”: result-value needs :value"))
         "arg-named"
         (is (some? (get-in s [:check :arg]))
             (str "lesson " (:id l) " / “" (:title s) "”: arg-named needs :arg"))

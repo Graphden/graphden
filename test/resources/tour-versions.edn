@@ -33,7 +33,7 @@
  "services-talking-to-services" {:version 3, :steps "faaa646c036e3742b5e277126f5e52d6cb76e359"}
  "signing-up-and-in" {:version 2, :steps "3befd16fd917f072cf85d883b2a064a63ee46826"}
  "slots-and-bindings" {:version 2, :steps "a056b25b299a890635c16b9d9f6b4a8619bbb4b8"}
- "state-cells-and-caches" {:version 3, :steps "3e56b277d690a215a23cfeb98cf03bf7cadc2e9d"}
+ "state-cells-and-caches" {:version 4, :steps "dc3bfc39dddebd1b6634184cd1339c2da7d2cbbf"}
  "tests" {:version 1, :steps "f7418ce3b2e656ab68d3114eb9a041270720fa11"}
  "types" {:version 1, :steps "cf035f8d069e7cc531e0549c70ca90a9ac0e8877"}
  "users-admin" {:version 1, :steps "7be1e4b9306c3e9aaeb12a9a0f14ab38d0984ad7"}

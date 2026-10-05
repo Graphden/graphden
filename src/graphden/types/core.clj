@@ -618,16 +618,11 @@
    returned. Caller decides whether to log / surface them. Returns
    `{:registered #{names} :failed [{:name n :body b :reason r} ...]}`.
 
-   DELIBERATE BOUNDARY vs the singular `register-type-alias!`: the
-   batch records owner diagnostics (warn on cross-owner overwrite)
-   but does NOT register qualified `:ns/name` variants or ambiguity
-   throw-records — its production caller (`register-type-aliases-
-   from-db!`) has no namespace rows in the graph shape to derive
-   qualified names from, and flipping DB-path collisions from
-   last-write-wins+warn to throw would break existing graphs with no
-   qualified escape hatch. Collision blast radius is bounded by the
-   per-org alias slices (an org resolves only public + its own).
-   Revisit when ns rows join the read-graph shape."
+   Unlike singular `register-type-alias!`, the batch keeps legacy
+   last-write-wins + warning behavior for bare-name collisions. The
+   caller supplies qualified names as additional tuples; they are
+   validated and committed in the same batch. Branch/org alias slices
+   restrict which declarations a scoped reader can resolve."
   [pairs]
   (let [proposed-names (into #{} (keep first) pairs)
         owner-of (into {}

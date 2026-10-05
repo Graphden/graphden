@@ -56,7 +56,7 @@ function isOnDefaultBranch() {
 }
 
 // Switch to a different branch — persist + sync URL + reload.
-function switchToBranch(name) {
+function switchToBranch(name, {clearSelection = false} = {}) {
   const target = name || DEFAULT_BRANCH;
   try {
     if (target === DEFAULT_BRANCH) localStorage.removeItem(BRANCH_STORAGE_KEY);
@@ -65,6 +65,7 @@ function switchToBranch(name) {
   const url = new URL(location.href);
   if (target === DEFAULT_BRANCH) url.searchParams.delete('branch');
   else url.searchParams.set('branch', target);
+  if (clearSelection) url.hash = '';
   // Reload picks up branch context for every cached read (graph,
   // layout, types). hash component preserved.
   location.href = url.toString();
@@ -198,6 +199,7 @@ function maybeRecoverFromDeletedBranch(resp, sentBranch) {
     }
     const url = new URL(location.href);
     url.searchParams.delete('branch');
+    url.hash = '';
     location.replace(url.toString());
   }).catch(() => { /* non-JSON 400s are someone else's problem */ });
 }

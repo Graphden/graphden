@@ -33,7 +33,7 @@ function boot(currentBranch) {
   };
   const ctx = vm.createContext({
     console, URL, URLSearchParams, Headers, Promise,
-    location: { search: '', href: 'http://x/?branch=' + currentBranch,
+    location: { search: '', href: 'http://x/?branch=' + currentBranch + '#feature-only',
                 replace(u) { seen.replaced = u; } },
     localStorage: { getItem: (k) => store.get(k) ?? null, removeItem: (k) => store.delete(k),
                     setItem: (k, v) => store.set(k, v) },
@@ -70,6 +70,7 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
     await tick();
     assert(seen.sent[0] === 'feature-a', 'the current branch is stamped');
     assert(seen.replaced !== null && !seen.replaced.includes('branch='), 'reloads without ?branch');
+    assert(!seen.replaced.includes('#feature-only'), 'deleted branch recovery clears selection');
     assert(seen.toasts.length === 1 && seen.toasts[0].includes('feature-a'), 'one toast naming feature-a');
   }
 
@@ -79,6 +80,35 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
     await ctx.window.fetch('/api/types', { headers: { 'x-graphden-branch': 'feature-a' } });
     await tick();
     assert(seen.replaced !== null, 'recovery runs');
+  }
+
+  {
+    const {ctx} = boot('feature-a');
+    ctx.switchToBranch('main');
+    assert(ctx.location.href.endsWith('#feature-only'), 'ordinary branch switching keeps selection');
+    ctx.switchToBranch('main', {clearSelection: true});
+    assert(!ctx.location.href.includes('#'), 'deletion fallback explicitly clears selection');
+  }
+
+  {
+    let reply = {ok: false, error: 'Child branch blocks deletion'};
+    const switches = [];
+    const error = {classList: {remove() {}}, textContent: ''};
+    const c = vm.createContext({confirm: () => true, DEFAULT_BRANCH: 'main',
+      getCurrentBranchName: () => 'feature-only',
+      document: {getElementById: () => error},
+      API: {api_branches_ref: (value) => '/branches/' + value},
+      switchToBranch: (...args) => { switches.push(args); }});
+    c.window = c;
+    c.authFetch = async () => ({status: 200, ok: true, json: async () => reply});
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', '..', 'resources', 'packages',
+      'app', 'editor', 'editor-branches.js'), 'utf8'), c);
+    await c.deleteBranchWithConfirm('feature-only');
+    assert(switches.length === 0, 'refused deletion retains current branch and selection');
+    reply = {ok: true};
+    await c.deleteBranchWithConfirm('feature-only');
+    assert(switches.length === 1 && switches[0][0] === 'main' && switches[0][1].clearSelection === true,
+      'successful current-branch deletion requests an empty main selection');
   }
 
   if (fails) { console.error(`✗ ${fails} failed, ${passes} passed`); process.exit(1); }

@@ -696,7 +696,7 @@ async function deleteBranchWithConfirm(name, ref) {
     }
     // If we just deleted the current branch, fall back to main.
     if (name === getCurrentBranchName()) {
-      switchToBranch(DEFAULT_BRANCH);
+      switchToBranch(DEFAULT_BRANCH, {clearSelection: true});
       return;
     }
     // Otherwise just re-render the popover with the updated list.

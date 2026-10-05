@@ -66,6 +66,7 @@ function bootRender() {
   const drawn = [];
   const ctx = vm.createContext({
     console,
+    document: {getElementById: () => null},
     selectedFnId: null,
     ensureSubtreeFor: async () => true,
     rebuildImplementationFnIds() {},
@@ -146,6 +147,55 @@ function bootRender() {
     await ra;
     assert(calls === 2, 'retried once, got ' + calls);
     assert(r.drawn.join() === 'A', 'then drawn');
+  }
+
+  console.log(' renderGraph: old removal animation cannot resurrect a cleared graph');
+  {
+    const r = bootRender();
+    const c = r.ctx;
+    const animations = [];
+    c.graph.nodes.set('parent', {x: 0, y: 0});
+    c.graph.nodes.set('old', {x: 0, y: 20});
+    c.graph.edges.set('edge', {sourceId: 'parent', targetId: 'old'});
+    c.graph.incoming = new Map([['old', new Set(['edge'])]]);
+    c.userMovedNodes = new Set(); c.savedUserPositions = new Map();
+    c.ANIM_DURATION = 1;
+    c.graphStopAnimation = () => {};
+    c.graphNodeIds = () => [...c.graph.nodes.keys()];
+    c.graphSetNodeData = () => {}; c.graphSetEdgeData = () => {};
+    c.graphRemoveNode = (id) => { c.graph.nodes.delete(id); };
+    c.graphRemoveEdge = (id) => { c.graph.edges.delete(id); };
+    c.graphAddNode = ({data, position}) => { c.graph.nodes.set(data.id, {data, ...position}); };
+    c.graphAddEdge = () => {};
+    c.getNodeOverlay = () => null; c.fadeOutOverlay = () => {};
+    c.unregisterNodeOverlay = () => {};
+    c.createNodeOverlays = () => {};
+    c.reflowFromMeasuredHeights = () => false;
+    c.updateOverlayPositions = () => {};
+    c.easeInCubic = () => {};
+    c.graphAnimateNodes = () => new Promise((resolve) => animations.push(resolve));
+    const previous = c.renderGraph(false);
+    await flush(); r.layouts[0](r.layoutFor('replacement')); await previous;
+    assert(animations.length === 1, 'old removal is still animating');
+    c.graph.nodes.clear(); c.selectedFnId = null;
+    const cleared = c.renderGraph(false);
+    await flush(); r.layouts[1]({nodes: [], edges: [], layout: new Map()}); await cleared;
+    assert(c.graph.edges.size === 0, 'empty first-render path removes orphan edges');
+    animations[0](); await flush();
+    assert(c.graph.nodes.size === 0, 'late animation does not restore replacement nodes');
+  }
+
+  console.log(' empty overlay rebuild clears cards, edge labels and SVG');
+  {
+    let removed = 0; let edgesRebuilt = 0;
+    const c = vm.createContext({previewState: new Map(), gv: {ready: () => false},
+      renderEdges: () => { edgesRebuilt++; }});
+    vm.runInContext(fs.readFileSync(path.join(EDITOR, 'editor-overlay-manager.js'), 'utf8'), c);
+    c.registerNodeOverlay({dataset: {nodeId: 'old'}, remove() { removed++; }});
+    c.registerEdgeOverlay({dataset: {edgeId: 'old-edge'}, remove() { removed++; }});
+    c.createNodeOverlays();
+    assert(removed === 2, 'both node and edge label overlays removed');
+    assert(edgesRebuilt === 1, 'SVG renderer runs even when graph is empty');
   }
 
   if (fails) { console.error(`✗ ${fails} failed, ${passes} passed`); process.exit(1); }

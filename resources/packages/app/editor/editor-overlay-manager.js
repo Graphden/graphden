@@ -299,13 +299,13 @@ function createNodeOverlays() {
   // a full-DOM querySelectorAll scan).
   _removeAllNodeOverlays(preservedOverlayId);
 
+  // Empty graphs still need both edge layers cleared.
+  _removeAllEdgeOverlays();
+  renderEdges();
   if (!gv.ready()) return;
 
   const container = getGraphLayer();
   if (!container) return;
-
-  // Edges first: they live in the same layer and must paint under the cards.
-  renderEdges();
 
   // Fn nodes (with ancestor list)
   gv.fnNodes().forEach(node => {
@@ -327,7 +327,6 @@ function createNodeOverlays() {
   // Remove any stale edge label overlays then create fresh ones. A
   // sequence group gets ONE label (built from its head member) plus a
   // per-item `×` overlay; every other edge labels itself.
-  _removeAllEdgeOverlays();
   const labelledGroups = new Set();
   gv.edges().forEach(edge => {
     const groupId = edge.data('seqGroup');

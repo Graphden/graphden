@@ -535,6 +535,8 @@
             ;; here; without it the browser only scrolls and focus stays
             ;; behind in the Explorer. Not in the tab order (-1).
             [:main {:id "graph-container" :aria-label "Function graph" :tabindex "-1"}
+             [:p {:id "graph-empty-state" :class "graph-empty-state"}
+              "Choose a function in the Explorer to begin."]
              [:div {:id "graph-surface" :role "group" :aria-label "Composition graph"}]
              ;; Navigation controls \u2014 group with role="toolbar" so
              ;; screen readers announce the buttons as a related set.

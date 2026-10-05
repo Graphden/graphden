@@ -105,6 +105,8 @@ let _renderGen = 0;
 async function renderGraph(shouldFit = true) {
   const gen = ++_renderGen;
   const superseded = () => gen !== _renderGen;
+  const emptyState = document.getElementById('graph-empty-state');
+  if (emptyState) emptyState.hidden = !!selectedFnId;
   // `initGraph` only loaded the scope=tree sidebar payload (namespaces +
   // counts, no fn detail). Fetch the subtree for the selected fn so overlays /
   // edges read real slots / bindings / items out of `lookups`. ensureSubtreeFor
@@ -159,10 +161,15 @@ async function renderGraph(shouldFit = true) {
     return;
   }
   const {nodes, edges, layout} = result;
+  if (emptyState) emptyState.hidden = nodes.length > 0 || !!selectedFnId;
 
   // First render.
   if (graph.nodes.size === 0) {
     if (nodes.length > 0) createGraph(nodes, edges, layout, shouldFit);
+    else {
+      for (const id of [...graph.edges.keys()]) graphRemoveEdge(id);
+      createNodeOverlays();
+    }
     return;
   }
 
@@ -215,6 +222,7 @@ async function renderGraph(shouldFit = true) {
   }
 
   function completeUpdate() {
+    if (superseded()) return;
     // During preview, keep userMovedNodes entries (positions are saved). On
     // commit, entries are cleared via savedUserPositions.clear().
     const isPreview = previewState.size > 0;
@@ -268,6 +276,7 @@ async function renderGraph(shouldFit = true) {
 
     updateOverlayPositions();
     graphAnimateNodes(targets, ANIM_DURATION, updateOverlayPositions).then(() => {
+      if (superseded()) return;
       updateOverlayPositions();
       if (shouldFit && graph.nodes.size > 0) {
         fitInVisibleArea(50);

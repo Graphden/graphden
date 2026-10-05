@@ -273,6 +273,11 @@ const undoToast = (page) => page.evaluate(() => {
       'the toast offers to undo the delete: ' + JSON.stringify(toast));
     assert(await page.evaluate(() => document.querySelectorAll('.node-overlay[data-original-fn-id]').length) === 0,
       'deleting the selected fn leaves no card behind');
+    await page.waitForFunction(() => graph.nodes.size === 0 && graph.edges.size === 0
+      && document.querySelectorAll('#edge-lines > *, #edge-hits > *, .edge-label-overlay').length === 0,
+      null, {timeout: 30000});
+    assert(await page.locator('#graph-empty-state').isVisible(),
+      'deleted selection leaves a clean canvas with an Explorer hint');
     await page.click('#gd-undo-toast .gd-undo-toast-btn');
     await page.waitForFunction((name) => (graphData?.fns || []).some((f) => f.name === name),
       SCALAR, {timeout: 30000, polling: 200});

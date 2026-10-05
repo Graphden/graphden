@@ -8515,3 +8515,13 @@ button.lambda-params-chip:focus-visible { outline: 1px solid var(--accent); }
     opacity: 0.75;
   }
 }
+
+/* Empty canvas navigation hint; no additional toolbar control. */
+.graph-empty-state {
+  position: absolute;
+  inset: 40% 2rem auto;
+  color: var(--muted-fg);
+  text-align: center;
+  pointer-events: none;
+}
+.graph-empty-state[hidden] { display: none; }

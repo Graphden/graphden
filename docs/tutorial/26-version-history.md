@@ -38,7 +38,7 @@ every version row for that fn, newest first, across **every branch** —
 not just the one you are on:
 
 ```text
-main    2026-08-22 09:48   restore   second
+main    2026-08-22 09:48   restore [disabled]   second
 main    2026-08-22 09:48   restore   first
 feat-x  2026-08-21 17:02   switch    restore
 ```
@@ -51,6 +51,10 @@ Each row carries:
   you are currently on;
 - **switch** — move the editor to that row's branch (only on rows
   whose branch is not the current one).
+
+The heading says **field versions**. Restore is disabled when the fields
+it would write already match the current branch, even on an older row.
+Hover over the button for its scope; argument bindings are separate.
 
 Click a row to expand it: the executions recorded against that exact
 version load underneath (lesson 15's history, sliced by version rather
@@ -66,7 +70,7 @@ is explicit about the trade.
 
 ## Restore is an edit, not a rewind
 
-Click **restore** on an older row. The confirm names the branch and the
+Click **restore** on an older row with different fields. The confirm names the branch and the
 timestamp you are restoring from, and says what will happen:
 
 > This writes a new version row with the historic fn-level fields

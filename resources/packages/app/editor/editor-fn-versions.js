@@ -164,6 +164,8 @@ async function restoreFnVersion(fnEntity, versionId) {
     alert('Restore failed: version not found anymore (was it cleaned up?).');
     return;
   }
+  // The history may have stayed open while another edit restored these fields.
+  if (target['restore-needed?'] === false) return;
   const branchName = (typeof getCurrentBranchName === 'function')
     ? getCurrentBranchName() : 'main';
   const msg = 'Restore fn "' + (fnEntity.name || '(anonymous)')

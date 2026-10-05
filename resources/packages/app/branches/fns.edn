@@ -553,17 +553,49 @@
           :key {:value :branch-name}
           :value :_lfv-version-branch-name}}
 
-  {:name :_lfv-version-row
+  {:name :_lfv-row-with-execution-count
    :description "Per-row HOF callback — bare row + branch-id + branch-name + execution-count."
    :parent :assoc
    :args {:map :_lfv-row-with-branch-name
           :key {:value :execution-count}
           :value :_lfv-version-execution-count}}
 
+  {:name :_lfv-restore-field-keys
+   :description "Fields the editor's Restore action writes; argument bindings and identity metadata are separate."
+   :parent :const
+   :args {:value [:description :constraint :base-fn-id :element-fn-id
+                  :return-type-fn-id :anonymous-hash :expects-effects]}}
+
+  {:name :_lfv-current-visible-fields
+   :parent :select-keys
+   :args {:m :_lfv-fn-row :ks :_lfv-version-fields}}
+
+  {:name :_lfv-current-restore-state
+   :parent :select-keys
+   :args {:m :_lfv-current-visible-fields :ks :_lfv-restore-field-keys}}
+
+  {:name :_lfv-row-restore-state
+   :parent :select-keys
+   :args {:m :_lfv-version-selected :ks :_lfv-restore-field-keys}}
+
+  {:name :_lfv-row-restore-needed?
+   :parent :not
+   :args {:value {:parent :equal?
+                  :args {:a :_lfv-row-restore-state
+                         :b {:as :current-restore-state :type :keyword-map}}}}}
+
+  {:name :_lfv-version-row
+   :description "Version row with branch, execution count and whether its visible restorable fields differ from the effective current branch."
+   :parent :assoc
+   :args {:map :_lfv-row-with-execution-count
+          :key {:value :restore-needed?}
+          :value :_lfv-row-restore-needed?}}
+
   ;; Map the per-row builder over sorted versions.
   {:name :_lfv-versions-json
    :parent :map
-   :args {:func :_lfv-version-row :coll :_lfv-versions-sorted}}
+   :args {:func :_lfv-version-row :coll :_lfv-versions-sorted
+          :current-restore-state :_lfv-current-restore-state}}
 
   ;; --- Final envelope.
   {:name :_lfv-fn-id-str

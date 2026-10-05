@@ -42,6 +42,8 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'button)
+(require 'browse-url)
 
 (defgroup devtour nil
   "Guided read of the graphden codebase."
@@ -144,6 +146,43 @@
 
 ;;; --- prose rendering --------------------------------------------------------
 
+(defun devtour--open-prose-link (target)
+  "Follow TARGET from authored prose, without evaluating Lisp from the data."
+  (cond
+   ((string-prefix-p "#term/" target)
+    (devtour--show-term (substring target 6)))
+   ((string-prefix-p "../../" target)
+    (let* ((parts (split-string (substring target 6) "#"))
+           (path (expand-file-name (car parts) devtour-repo-root)))
+      (unless (file-in-directory-p path devtour-repo-root)
+        (user-error "devtour: document outside checkout"))
+      (unless (file-readable-p path)
+        (user-error "devtour: missing document %s" path))
+      (pop-to-buffer (find-file-noselect path))
+      (goto-char (point-min))
+      (when (cadr parts)
+        (let ((heading (replace-regexp-in-string "-" " " (cadr parts))))
+          (re-search-forward (concat "^#+ .*" (regexp-quote heading)) nil t)))))
+   ((string-match-p "\\`https?://" target) (browse-url target))
+   (t (user-error "devtour: unsupported prose link %s" target))))
+
+(defun devtour--show-term (id)
+  "Show definition ID in a separate window; leave step and progress untouched."
+  (devtour--load)
+  (let ((term (cl-find id (plist-get devtour--tour :glossary)
+                       :key (lambda (entry) (plist-get entry :id)) :test #'equal)))
+    (unless term (user-error "devtour: unknown definition %s" id))
+    (let ((help-window-select t))
+      (with-help-window "*devtour definition*"
+      (with-current-buffer standard-output
+        (insert (propertize (plist-get term :title) 'face 'devtour-title) "\n\n")
+        (let ((start (point)))
+          (insert (plist-get term :say) "\n")
+          (devtour--render-markdown start))
+        (insert "\n")
+        (insert-text-button (or (plist-get devtour--tour :definition-return) "Return to the tour") 'action
+                            (lambda (_) (quit-window)) 'follow-link t))))))
+
 (defun devtour--render-markdown (start)
   "Fontify the tour's tiny markdown between START and point-max."
   (save-excursion
@@ -155,7 +194,13 @@
       (replace-match (propertize (match-string 1) 'face 'devtour-strong) t t))
     (goto-char start)
     (while (re-search-forward "\\[\\([^]]+\\)\\](\\([^)]+\\))" nil t)
-      (replace-match (propertize (match-string 1) 'face 'link) t t))))
+      (let ((label (match-string 1))
+            (target (match-string 2))
+            (begin (match-beginning 0)))
+        (replace-match label t t)
+        (make-text-button begin (point) 'face 'link 'follow-link t
+                          'help-echo target
+                          'action (lambda (_) (devtour--open-prose-link target)))))))
 
 (defun devtour--render (step)
   "Fill the *devtour* buffer with STEP."
@@ -455,6 +500,9 @@ the same file — close enough to name the form you are looking at."
     (define-key m "o" #'devtour-source)
     (define-key m "q" #'devtour-quit)
     (define-key m "?" #'describe-mode)
+    (define-key m (kbd "TAB") #'forward-button)
+    (define-key m (kbd "<backtab>") #'backward-button)
+    (define-key m (kbd "RET") #'push-button)
     (define-key m (kbd "SPC") #'devtour-next)
     (define-key m (kbd "DEL") #'devtour-previous)
     m)
@@ -487,6 +535,9 @@ the same file — close enough to name the form you are looking at."
     "/" #'devtour-goto
     "o" #'devtour-source
     "q" #'devtour-quit
+    (kbd "TAB") #'forward-button
+    (kbd "<backtab>") #'backward-button
+    (kbd "RET") #'push-button
     (kbd "SPC") #'devtour-next
     (kbd "DEL") #'devtour-previous
     "?" #'describe-mode))

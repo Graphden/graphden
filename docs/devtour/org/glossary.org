@@ -1,0 +1,290 @@
+#+title: Definitions
+
+[[file:index.org][index]]
+
+* Graph function
+:PROPERTIES:
+:CUSTOM_ID: term/graph-function
+:END:
+
+A stored definition of a computation, identified by a function ID. It can declare arguments or specialize parent functions by [[file:glossary.org::#term/inheritance][inheritance]] and [[file:glossary.org::#term/binding][bindings]]. A function ID identifies the definition; its name is a label within a namespace.
+
+* Base function
+:PROPERTIES:
+:CUSTOM_ID: term/base-function
+:END:
+
+A [[file:glossary.org::#term/graph-function][graph function]] with a registered host-language implementation. Composed functions obtain the implementation through their parents and supply arguments through graph [[file:glossary.org::#term/binding][bindings]]. A base function is distinct from the base branch used in version resolution.
+
+* Execution context
+:PROPERTIES:
+:CUSTOM_ID: term/context
+:END:
+
+The runtime value carrying storage, implementations, caches, and execution policy. It determines the data and branch visible to a call. A branch-specific context may resolve the same function ID differently from another context.
+
+* Compiled registry
+:PROPERTIES:
+:CUSTOM_ID: term/compiled-registry
+:END:
+
+A map from [[file:glossary.org::#term/graph-function][graph function]] IDs to callable Clojure [[file:glossary.org::#term/closure][closures]] produced by compilation. It is cached in an [[file:glossary.org::#term/context][execution context]] and updated or invalidated after relevant graph changes. This is different from the type registry or package inventory.
+
+* Closure
+:PROPERTIES:
+:CUSTOM_ID: term/closure
+:END:
+
+A callable function that retains values from the environment in which it was created. In this tour, graph reachability is called the [[file:glossary.org::#term/reachable-graph][reachable graph]]; it must not be confused with a callable closure.
+
+* Argument slot
+:PROPERTIES:
+:CUSTOM_ID: term/slot
+:END:
+
+The identity of a graph argument, with a declaring function, type, and public name. Renaming may create a view linked through source-slot-id. Slot identity is different from its displayed name and from a [[file:glossary.org::#term/cardinality][concurrency permit]].
+
+* Binding
+:PROPERTIES:
+:CUSTOM_ID: term/binding
+:END:
+
+Stored information specifying an argument: a literal value, a reference, sequence items, or caller-supplied input. Effective bindings can be inherited. Clojure dynamic bindings, which temporarily associate vars with values during a call, are a separate host-language mechanism.
+
+* Free argument
+:PROPERTIES:
+:CUSTOM_ID: term/free-argument
+:END:
+
+An input that the current function has not supplied internally and exposes to its caller. Identity comes from the underlying [[file:glossary.org::#term/slot][slot]] even when its public name changes. Some free arguments reached through a callback are supplied by [[file:glossary.org::#term/capture][capture]].
+
+* Function inheritance
+:PROPERTIES:
+:CUSTOM_ID: term/inheritance
+:END:
+
+A [[file:glossary.org::#term/graph-function][graph function]] names parent functions and inherits their argument structure and [[file:glossary.org::#term/binding][bindings]], subject to the graph rules. Multiple inheritance combines several parents. This parent relation uses parent-ids; branch ancestry uses base-branch-id and is separate.
+
+* Deferred computation / thunk
+:PROPERTIES:
+:CUSTOM_ID: term/thunk
+:END:
+
+A callable wrapper representing work to perform when an argument is read. A delay also defers work and caches its result. Deferral allows a conditional to leave the unselected branch unevaluated; it is not a promise that every deferred result is cached forever.
+
+* Higher-order function / HOF
+:PROPERTIES:
+:CUSTOM_ID: term/hof
+:END:
+
+A function that accepts or returns another callable function, such as map accepting a per-element callback. Graphden uses function types and parameter metadata to distinguish arguments passed on each callback invocation from [[file:glossary.org::#term/capture][captured input]].
+
+* Closure capture
+:PROPERTIES:
+:CUSTOM_ID: term/capture
+:END:
+
+Supplying a callback [[file:glossary.org::#term/free-argument][free argument]] from the enclosing caller instead of treating it as a per-invocation parameter. For example, a callback can receive each item from map while retaining a threshold supplied by its caller.
+
+* Effect
+:PROPERTIES:
+:CUSTOM_ID: term/effect
+:END:
+
+An operation involving external state or the environment, such as network access or a database write. Declared effect information supports checks; runtime enforcement checks actual recorded effects against the currently allowed set. A pure function has no such effects.
+
+* Cache invalidation
+:PROPERTIES:
+:CUSTOM_ID: term/invalidation
+:END:
+
+Marking cached data as no longer current, removing it, or updating affected entries after a change. An epoch is a counter used to detect whether cached data was built before relevant changes. Notifications can accelerate this process but may be missed.
+
+* Memoization
+:PROPERTIES:
+:CUSTOM_ID: term/memoization
+:END:
+
+Remembering a function result under a key derived from its inputs so a repeated request can reuse it. Correctness depends on the key including relevant inputs and on the lifetime of the cache; per-execution caching differs from process-wide caching.
+
+* Dependency order
+:PROPERTIES:
+:CUSTOM_ID: term/topological-order
+:END:
+
+An ordering in which each dependency is processed before the function or package that needs it. A topological ordering exists for an acyclic directed graph. This is not necessarily the visual order of nodes on the canvas.
+
+* Reachable graph / BFS / DFS
+:PROPERTIES:
+:CUSTOM_ID: term/reachable-graph
+:END:
+
+The nodes reached by repeatedly following the relevant reference edges from a starting node. Breadth-first search (BFS) visits one distance level at a time; depth-first search (DFS) follows a path before returning. Which edges count depends on the traversal contract.
+
+* Protocol and storage decorator
+:PROPERTIES:
+:CUSTOM_ID: term/protocol
+:END:
+
+A Clojure protocol declares methods implemented by different backends. A storage decorator implements the same protocol while wrapping another storage object, adding behavior such as branch resolution without changing caller method names.
+
+* Advisory lock
+:PROPERTIES:
+:CUSTOM_ID: term/advisory-lock
+:END:
+
+A PostgreSQL lock selected explicitly by application code using a shared key. It coordinates cooperating callers, for example around a uniqueness check and write. Transaction-scoped locks release at transaction end; session locks belong to the connection.
+
+* Recursive SQL / CTE
+:PROPERTIES:
+:CUSTOM_ID: term/cte
+:END:
+
+A common table expression (CTE) gives a named intermediate query result using WITH. WITH RECURSIVE allows subsequent rows to refer to earlier results; Graphden uses it to traverse references in the database.
+
+* Resolved branch view
+:PROPERTIES:
+:CUSTOM_ID: term/branch-view
+:END:
+
+The effective entity rows visible on a branch after considering own versions, branch ancestry, merged versions, and [[file:glossary.org::#term/tombstone][deletion markers]]. Identity rows identify entities; version rows carry branch-dependent content. A comparison resolves each branch independently.
+
+* Deletion marker / tombstone
+:PROPERTIES:
+:CUSTOM_ID: term/tombstone
+:END:
+
+A version recording that an entity is deleted in a branch view. It can hide inherited content without physically deleting a shared identity. Physical deletion has stricter cross-branch safety checks.
+
+* Branch-local function
+:PROPERTIES:
+:CUSTOM_ID: term/branch-local
+:END:
+
+A function excluded from normal merge propagation when it or an ancestor has branch-local? true. The effective flag is inherited by OR: false on a descendant does not undo a true ancestor. This mechanism is intended for branch-specific configuration.
+
+* Subtyping and refinement
+:PROPERTIES:
+:CUSTOM_ID: term/subtype
+:END:
+
+Actual is a subtype of expected when every value allowed by actual is also allowed by expected. A refinement restricts a base type with a condition, such as an integer greater than zero. Nullability concerns whether null is allowed, not whether a field must be present.
+
+* Type variables and unification
+:PROPERTIES:
+:CUSTOM_ID: term/unification
+:END:
+
+A type variable stands for a type not yet fixed, such as the element type a in a list. Unification chooses compatible substitutions for variables. The occurs check rejects substitutions that make a variable contain itself. Directional assignment still needs a separate check.
+
+* Rich-types registry
+:PROPERTIES:
+:CUSTOM_ID: term/rich-types
+:END:
+
+A registry of computed argument types, return type, [[file:glossary.org::#term/effect][effects]], and related metadata for each function. It is scoped to the active branch. The compiler and UI read it, but it is separate from the [[file:glossary.org::#term/compiled-registry][compiled registry]] of executable [[file:glossary.org::#term/closure][closures]].
+
+* Secret marking and redaction
+:PROPERTIES:
+:CUSTOM_ID: term/secret
+:END:
+
+A secret type marker tracks whether a value may reveal sensitive input. Propagation keeps that marker through computations. Redaction removes sensitive data from persisted or displayed results; it does not mean the computation never used the original value.
+
+* Hiccup and DOM
+:PROPERTIES:
+:CUSTOM_ID: term/hiccup
+:END:
+
+Hiccup represents markup as Clojure data: vectors contain a tag, optional attribute map, and children. Rendering produces HTML. DOM is the browser representation of the page; constructing Hiccup does not itself install browser event handlers.
+
+* Ring, Reitit, and middleware
+:PROPERTIES:
+:CUSTOM_ID: term/ring
+:END:
+
+Ring represents HTTP requests and responses as Clojure maps; a handler maps a request to a response. Middleware wraps a handler to add processing. Reitit matches request paths and methods to route handlers.
+
+* HTMX and partial fragments
+:PROPERTIES:
+:CUSTOM_ID: term/htmx
+:END:
+
+HTMX uses HTML attributes to request and replace page fragments. In this editor, partials are server-rendered HTML inserted into an existing host element. Local action dispatch and stale-response protection are still browser-runtime responsibilities.
+
+* Reconciliation
+:PROPERTIES:
+:CUSTOM_ID: term/reconciliation
+:END:
+
+Comparing desired configuration with actual state and applying the differences. A periodic pass can recover from missed notifications or process failure. Service reconciliation starts and stops instances; package synchronization reconciles authored definitions with stored rows.
+
+* Service cardinality
+:PROPERTIES:
+:CUSTOM_ID: term/cardinality
+:END:
+
+The service placement rule: one instance across participating executors (singleton), up to N coordinated instances (pool), or an instance per executor process (per-pod). An [[file:glossary.org::#term/advisory-lock][advisory-lock]] permit enforces coordinated counts; it is unrelated to a function [[file:glossary.org::#term/slot][argument slot]].
+
+* Execution fleet and cell
+:PROPERTIES:
+:CUSTOM_ID: term/fleet
+:END:
+
+A fleet is a group of executor processes. A cell identifies the workload for an organisation and entry function. Placement maps that cell to the executor serving it; a heartbeat records that an instance is still active.
+
+* Server-sent events / SSE
+:PROPERTIES:
+:CUSTOM_ID: term/sse
+:END:
+
+A long-lived HTTP stream that lets a server deliver events to a client. Graphden uses it for [[file:glossary.org::#term/invalidation][invalidation]] and UI updates. PostgreSQL LISTEN/NOTIFY is a separate database notification mechanism that can feed these updates.
+
+* Integrant and addon
+:PROPERTIES:
+:CUSTOM_ID: term/integrant
+:END:
+
+Integrant initializes and halts application components from configuration data and dependency references. An addon supplies extra configuration and component implementations through existing interfaces. It need not be a fork of the core application.
+
+* Authentication, authorization, and capability
+:PROPERTIES:
+:CUSTOM_ID: term/auth
+:END:
+
+Authentication identifies the caller. Authorization decides whether that caller may perform an operation. A capability names one permission checked by policy. An authenticated principal is the identity information returned by an authentication provider.
+
+* SSRF and address revalidation
+:PROPERTIES:
+:CUSTOM_ID: term/ssrf
+:END:
+
+Server-side request forgery makes a server contact a destination the attacker could not reach directly. Address validation must consider DNS changes and redirects: checking a name earlier is insufficient if the actual connection later uses a different address.
+
+* CRaC checkpoint / restore
+:PROPERTIES:
+:CUSTOM_ID: term/checkpoint
+:END:
+
+An optional JVM facility for saving a prepared process state and restoring it later. Open sockets and other external resources need coordinated shutdown and reopening around the snapshot. Availability depends on the runtime and deployment setup.
+
+* EDN, keywords, and classpath
+:PROPERTIES:
+:CUSTOM_ID: term/edn
+:END:
+
+EDN is a data format used for Graphden definitions. A keyword such as :name is distinct from the string "name"; namespaced keywords can identify references. The classpath is the collection of code and resource locations visible to the JVM.
+
+* MCP
+:PROPERTIES:
+:CUSTOM_ID: term/mcp
+:END:
+
+Model Context [[file:glossary.org::#term/protocol][Protocol]]: a [[file:glossary.org::#term/protocol][protocol]] through which tools such as coding assistants call server-provided operations. Graphden exposes optional graph operations through its MCP package; those writes still use the normal branch and graph validation paths.
+
+* Semantic version and installation pin
+:PROPERTIES:
+:CUSTOM_ID: term/semver
+:END:
+
+Semantic versions describe major, minor, and patch releases and support dependency constraints. An installation pin selects a particular package version. A pin is not the [[file:glossary.org::#term/branch-local][branch-local]] flag that excludes function changes from merging.

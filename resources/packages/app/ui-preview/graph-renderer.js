@@ -35,8 +35,9 @@
     return result;
   }
 
-  function vnode(tree, idPrefix = null) {
-    let remaining = 5000;
+  function vnode(tree, idPrefix = null, nodeLimit = 5000) {
+    if (!Number.isSafeInteger(nodeLimit) || nodeLimit < 1 || nodeLimit > 10000) throw new Error('Invalid graph element budget');
+    let remaining = nodeLimit;
     function children(values, depth) {
       const result = [];
       const keys = new Set();
@@ -70,7 +71,8 @@
     return visit(tree, 0);
   }
 
-  function mount(host, {idPrefix = null} = {}) {
+  function mount(host, {idPrefix = null, nodeLimit = 5000} = {}) {
+    if (!Number.isSafeInteger(nodeLimit) || nodeLimit < 1 || nodeLimit > 10000) throw new Error('Invalid graph element budget');
     if (idPrefix !== null && (typeof idPrefix !== 'string' || !/^gd-[a-z0-9_-]{1,100}$/.test(idPrefix))) throw new Error('Invalid graph component ID prefix');
     if (!(host instanceof HTMLElement) || owners.has(host) || host.childNodes.length) throw new Error('Graph component requires its own empty DOM host');
     for (let parent = host.parentElement; parent; parent = parent.parentElement) {
@@ -83,7 +85,7 @@
       render(tree, rules = []) {
         if (disposed) throw new Error('Graph component is disposed');
         // Validate the complete next output before changing the current DOM.
-        const next = vnode(tree, idPrefix);
+        const next = vnode(tree, idPrefix, nodeLimit);
         const normalized = styles.normalize(rules);
         const nextSheet = normalized.length ? styles.acquire(normalized) : null;
         try {

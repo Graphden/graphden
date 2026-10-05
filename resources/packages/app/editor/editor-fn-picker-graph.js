@@ -26,7 +26,7 @@
       const plan = await response.json();
       if (!response.ok || plan.ok === false) throw new Error(plan.reason || 'Graph export refused');
       if (own !== generation) return;
-      runtime = api.createRuntime(plan, {operationLimit: 100000});
+      runtime = api.createRuntime(plan, {operationLimit: 150000});
       integration.ready = true;
     } catch (error) {
       if (own !== generation) return;
@@ -40,11 +40,15 @@
       if (!runtime) return null;
       const evaluator = runtime;
       const idPrefix = 'gd-picker-' + crypto.randomUUID();
-      const component = window.GraphdenRenderer.mount(host, {idPrefix});
+      const component = window.GraphdenRenderer.mount(host, {idPrefix, nodeLimit: 10000});
       const candidateKeys = new Map();
       let nextCandidateKey = 0;
       let disposed = false;
       const instance = {
+        supports(arranged) {
+          return arranged.groups.length + (arranged.exact.length ? 1 : 0) <= 120
+            && arranged.exact.length + arranged.groups.reduce((count, group) => count + (group.open ? group.rows.length : 0), 0) <= 120;
+        },
         render(arranged, options) {
           if (disposed) throw new Error('Picker graph is disposed');
           const entries = [];

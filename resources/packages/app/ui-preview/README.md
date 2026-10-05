@@ -60,9 +60,13 @@ The picker uses one managed list subtree; native search input, type checking,
 ranking, selection callbacks and mismatch explanation retain their existing
 owners. `picker-section`, `picker-row` and `picker-effect` create the actual
 markup through ordinary nested `map` calls. The runtime budget for this review
-is 100,000 operations: 120 rows with all nine supported effect badges and a
-folded group require 89,705 in the differential fixture. It is a bounded review,
-not an unrestricted browser implementation of all Graphden functions.
+is 150,000 operations with a 10,000-node renderer budget. Differential fixtures
+cover 120 rows with all nine effect badges, including 120 separate namespaces,
+and validate the live result through the DOM-tree adapter. This graph backend
+supports at most 120 visible rows and 120 sections per popup; larger category
+lists release the graph component and retain the existing native renderer, so
+namespaces remain available. This is a bounded review, not an unrestricted
+browser implementation of all Graphden functions.
 
 There is no application transpilation step or CDN dependency: Preact uses the
 existing, separate vendor-build pipeline.

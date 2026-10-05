@@ -275,7 +275,7 @@ function openFnPicker(opts) {
   list.setAttribute('role', 'listbox');
   list.setAttribute('aria-label', expected ? 'Functions, compatible first' : 'Functions');
   el.appendChild(list);
-  const graphPicker = window.gdFnPickerGraph?.ready ? window.gdFnPickerGraph.mount(list, (c, bareName) => {
+  let graphPicker = window.gdFnPickerGraph?.ready ? window.gdFnPickerGraph.mount(list, (c, bareName) => {
     const compatible = expected && serverLoaded ? c.compatible !== false : null;
     const lastDot = c.qualified.lastIndexOf('.');
     const label = (name) => typeof displayLabel === 'function' ? displayLabel(name) : name;
@@ -557,6 +557,14 @@ function openFnPicker(opts) {
       ? pickerArrange(candidates, { q, expected, openGroups, closedGroups, showOther })
       : { exact: [], groups: [{ ns: null, rows: candidates.slice(0, 120), open: true }], shown: 0, total: candidates.length, hiddenOther: 0 };
 
+    // The bounded graph backend must not hide namespaces beyond its contract.
+    // Release its DOM owner before returning this popup to the native renderer.
+    if (graphPicker && !graphPicker.supports(arranged)) {
+      const hadListFocus = list.contains(document.activeElement);
+      graphPicker.dispose();
+      graphPicker = null;
+      if (hadListFocus) search.focus();
+    }
     if (graphPicker) {
       try { visibleRows = graphPicker.render(arranged, {q, expected, showOther, activeIdx}); }
       catch (error) { closeFnPicker(); gdToast('Picker graph unavailable: ' + error.message); return; }

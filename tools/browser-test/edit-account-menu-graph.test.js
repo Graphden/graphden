@@ -63,6 +63,19 @@ const branch = 'account-menu-' + process.pid + '-' + Date.now().toString(36);
       'Escape disposes the managed picker');
     assert(await page.locator('style[data-gd-ui-styles]').count() === 0,
       'closing the picker releases its graph stylesheet');
+    await page.evaluate(() => {
+      const arrange = window.pickerArrange;
+      window.pickerArrange = () => ({exact: [], groups: Array.from({length: 1000}, (_, i) => ({
+        ns: 'large.ns' + i, rows: [], open: false, compat: 0, other: 0, truncated: false,
+      })), shown: 0, total: 1000, hiddenOther: 0});
+      try { window.openFnPicker({anchorEl: document.getElementById('auth-lock-btn'), onPick() {}}); }
+      finally { window.pickerArrange = arrange; }
+    });
+    assert(await picker.locator('.fn-picker-ns-toggle').count() === 1000,
+      'oversized category lists retain every namespace through the native renderer');
+    assert(await picker.locator('[data-gd-ui-style]').count() === 0,
+      'fallback releases the graph DOM owner before native rendering');
+    await picker.locator('.fn-picker-search').press('Escape');
     const chip = page.locator('#auth-lock-btn');
     await chip.click();
     const menu = page.locator('#auth-popover [role="menu"]');

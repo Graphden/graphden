@@ -18,6 +18,8 @@ const attrs = (value) => new Map(Object.entries(value).map(([name, item]) => [k(
 const button = (id) => [k('button'), attrs({key: id, type: 'button'}), id];
 const tree = ctx.GraphdenRenderer.vnode([k('div'), attrs({class: 'rows'}), button('a'), button('b')]);
 assert.equal(tree.type, 'div');
+for (const limit of [0, 10001, NaN]) assert.throws(() => ctx.GraphdenRenderer.vnode([k('div')], null, limit));
+assert.throws(() => ctx.GraphdenRenderer.vnode([k('div'), 'child'], null, 1));
 assert.equal(ctx.GraphdenRenderer.vnode([k('div'), attrs({id: 'gd-test-option'})], 'gd-test').props.id, 'gd-test-option');
 assert.throws(() => ctx.GraphdenRenderer.vnode([k('div'), attrs({id: 'auth-lock-btn'})], 'gd-test'));
 assert.throws(() => ctx.GraphdenRenderer.vnode([k('div'), attrs({id: 'gd-test-option'})]));

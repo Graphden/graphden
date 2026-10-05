@@ -332,11 +332,12 @@
 (defn- browser-results
   [plan cases]
   (let [request {:plan plan
-                 :cases (mapv (fn [{:keys [entry inputs operation-limit measure-operations]}]
+                 :cases (mapv (fn [{:keys [entry inputs operation-limit measure-operations render-tree]}]
                                 (cond-> {:entry (name entry)
                                          :inputs (into {} (map (fn [[k v]] [(name k) (browser/encode-value v)])) inputs)}
                                   operation-limit (assoc :operationLimit operation-limit)
-                                  measure-operations (assoc :measureOperations true))) cases)}
+                                  measure-operations (assoc :measureOperations true)
+                                  render-tree (assoc :renderTree true))) cases)}
         {:keys [exit out err]} (sh/sh "node" "tools/runtime-test/browser-plan-runner.js"
                                       :in (json/generate-string request))]
     (is (zero? exit) err)
@@ -416,13 +417,40 @@
      :operation-limit 100000}))
 
 
+(defn- distributed-picker-case
+  []
+  (let [single (full-picker-case)
+        rows (get-in single [:inputs :model :sections 0 :rows])
+        rendered (get-in single [:expected :tree 3 0 3])
+        sections (mapv (fn [index row]
+                         {:key (str "ns-" index) :kind "group" :label (str "ns-" index)
+                          :show-header true :foldable false :open true :count 1 :rows [row]})
+                       (range 120) rows)
+        trees (mapv (fn [index row]
+                      [:div {:key (str "ns-" index) :class "fn-picker-group"}
+                       [:div {:class "fn-picker-ns-header"} nil
+                        [:span {:class "fn-picker-ns-name"} (str "ns-" index)]
+                        [:span {:class "fn-picker-ns-count"} " · " 1 nil]]
+                       [row] nil]) (range 120) rendered)]
+    {:entry :picker-view
+     :inputs {:model {:sections sections :empty-kind "none" :show-other-toggle false}}
+     :expected {:tree [:div {:class "fn-picker-results"} nil trees nil] :styles browser-picker/styles}
+     :render-tree true :operation-limit 150000}))
+
+
 (deftest real-picker-matches-jvm-including-120-rows-with-all-badges
   (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-fn-picker/fns.edn")))
         {:keys [graph impls ids]} (map-fixture definitions)
         full-case (full-picker-case)
+        distributed (distributed-picker-case)
         plan (browser/export-plan graph impls (select-keys ids [:picker-view])
                                   {:allow-fn? (constantly true)})]
-    (assert-differential! graph impls ids (conj browser-picker/cases full-case))
+    (assert-differential! graph impls ids (conj browser-picker/cases full-case distributed))
+    (let [[measured] (browser-results plan [(assoc distributed :measure-operations true)])]
+      (is (nil? (:error measured)) (:error measured))
+      (when-let [operations (:operations measured)]
+        (println "Picker 120 namespaces, all badges: minimum operation budget" operations)
+        (is (<= operations 150000))))
     (let [[default-result measured]
           (browser-results plan [(dissoc full-case :operation-limit)
                                  (assoc full-case :measure-operations true)])]

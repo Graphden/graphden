@@ -25,6 +25,7 @@
     [cheshire.core :as json]
     [clojure.math :as math]
     [clojure.string :as str]
+    [clojure.walk :as walk]
     [rewrite-clj.zip :as z]))
 
 
@@ -284,6 +285,8 @@
    :lines "lines"
    :step "step"
    :after "after:"
+   :glossary "Definitions"
+   :returnToTour "Return to the tour"
    :seeAlso "see also"
    :refs "referenced from"
    :sameFile "same file"
@@ -414,6 +417,34 @@
           linked)))
 
 
+(defn- validate-terms!
+  "Definitions have stable IDs outside the numbered tour; reject broken links."
+  [tour]
+  (let [terms (:glossary tour)
+        ids (set (map :id terms))
+        prose (concat [(:intro tour)] (map :say terms)
+                      (mapcat (fn [b] (cons (:summary b) (map :say (:steps b))))
+                              (:blocks tour)))]
+    (when-not (= (count ids) (count terms))
+      (throw (ex-info "duplicate glossary IDs" {})))
+    (doseq [term terms]
+      (when-not (and (re-matches #"[a-z][a-z0-9-]*" (:id term))
+                     (not (str/blank? (:title term))) (not (str/blank? (:say term))))
+        (throw (ex-info "invalid glossary definition" {:id (:id term)}))))
+    (doseq [s prose, [_ target] (re-seq #"\]\(([^)]+)\)" (or s ""))]
+      (cond
+        (str/starts-with? target "#term/")
+        (when-not (ids (subs target 6))
+          (throw (ex-info "unknown glossary definition" {:target target})))
+
+        (str/starts-with? target "../../")
+        (when-not (fs/regular-file? (first (str/split (subs target 6) #"#")))
+          (throw (ex-info "missing prose document" {:target target})))
+
+        (not (re-find #"^https?://" target))
+        (throw (ex-info "unsupported prose link" {:target target}))))))
+
+
 (defn- build-model
   "Resolve every toured block's anchors; validate stubs + :after edges; assign
    each toured step a stable global index and a stable key, then hand the spine
@@ -423,6 +454,7 @@
    block/step context on any bad anchor, and on a see-also target that is
    missing or ambiguous."
   [tour]
+  (validate-terms! tour)
   (let [blocks (:blocks tour)
         ids (set (map :id blocks))]
     (doseq [b blocks, a (:after b)]
@@ -459,6 +491,7 @@
                         base)]
       {:title (:title tour)
        :intro (:intro tour)
+       :glossary (:glossary tour)
        :repo (:repo tour repo-url)
        :ui (merge ui-strings (:ui tour))
        :mins (reduce + 0.0 (map :mins (mapcat :steps blocks')))
@@ -487,9 +520,24 @@
        (str/join)))
 
 
+(defn- html-prose-links
+  "Rebase checkout links when a translated page is baked outside this repo."
+  [model]
+  (let [prefix (str (fs/relativize (fs/absolutize out-dir) (fs/absolutize ".")))
+        rebase #(str/replace % #"\]\(\.\./\.\./([^)]+)\)"
+                             (fn [[_ path]] (str "](" prefix "/" path ")")))]
+    (walk/postwalk
+      (fn [x]
+        (if (map? x)
+          (reduce (fn [m k] (if (string? (get m k)) (update m k rebase) m))
+                  x [:intro :summary :say])
+          x))
+      model)))
+
+
 (defn- page
   ^String [model]
-  (let [data (-> (json/generate-string model)
+  (let [data (-> (json/generate-string (html-prose-links model))
                  ;; keep the JSON safe inside a <script> element
                  (str/replace "</" "<\\/"))
         ui (:ui model)]
@@ -546,13 +594,26 @@
 ;; literal search, so the link survives edits above it just like the bake).
 ;; No elisp required; `C-c C-o` is enough.
 
+(defn- org-link-target
+  [url]
+  (cond
+    (str/starts-with? url "#term/")
+    (str "file:glossary.org::#" (subs url 1))
+
+    (str/starts-with? url "../../")
+    (str "file:" src-prefix "/" (subs url 6))
+
+    :else url))
+
+
 (defn- org-inline
   "The tour's tiny markdown -> org markup."
   [s]
   (-> (or s "")
       (str/replace #"\*\*([^*]+)\*\*" "*$1*")
       (str/replace #"`([^`]+)`" "~$1~")
-      (str/replace #"\[([^\]]+)\]\(([^)]+)\)" "[[$2][$1]]")))
+      (str/replace #"\[([^\]]+)\]\(([^)]+)\)"
+                   (fn [[_ label url]] (str "[[" (org-link-target url) "][" label "]]")))))
 
 
 (defn- org-prose
@@ -664,7 +725,13 @@
 (defn- org-files
   "Relative filename -> content for the whole org tree."
   [model]
-  (into {"index.org" (org-index model)}
+  (into {"index.org" (org-index model)
+         "glossary.org" (str "#+title: " (get-in model [:ui :glossary]) "\n\n"
+                             "[[file:index.org][index]]\n\n"
+                             (str/join "\n\n"
+                                       (for [{:keys [id title say]} (:glossary model)]
+                                         (str "* " title "\n:PROPERTIES:\n:CUSTOM_ID: term/"
+                                              id "\n:END:\n\n" (org-prose say)))) "\n")}
         (for [b (:blocks model) :when (= "toured" (:status b))]
           [(str (:id b) ".org") (org-block model b)])))
 
@@ -695,8 +762,13 @@
        ";; Consumed by docs/devtour/devtour.el; every step carries the anchor\n"
        ";; (:file + :head) rather than baked source, so emacs shows live code.\n"
        "(:title " (el-str (:title model))
+       "\n :definition-return " (el-str (get-in model [:ui :returnToTour]))
        "\n :mins " (format "%.1f" (:mins model))
-       "\n :blocks\n ("
+       "\n :glossary ("
+       (str/join "\n " (for [{:keys [id title say]} (:glossary model)]
+                         (str "(:id " (el-str id) " :title " (el-str title)
+                              " :say " (el-str (plain-prose say)) ")")))
+       ")\n :blocks\n ("
        (->> (:blocks model)
             (map (fn [b]
                    (str "(:id " (el-str (:id b))

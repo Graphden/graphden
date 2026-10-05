@@ -296,6 +296,40 @@ async function openExecutePopoverForCard(page, fnId) {
            'clear removes value badges + popover: '
            + JSON.stringify(clearedValues));
 
+    // Width depends on glyphs and the card, not only character count.
+    const leafBinding = (await getEntities(page, probeConst.id)).bindings
+      .find((binding) => binding['fn-id'] === probeConst.id
+        && binding['slot-id'] === valueSlotId);
+    assert(leafBinding, 'captured leaf binding located');
+    for (const value of ['界'.repeat(20), 'trace-value-'.repeat(20)]) {
+      await api(page, 'PUT', '/api/entities/binding/' + leafBinding.id,
+        'value=' + encodeURIComponent(JSON.stringify(value)));
+      const run = await api(page, 'POST', '/api/execute', {
+        'fn-id': probeWrap.id, args: {}, 'trace?': true, 'capture-values?': true,
+      });
+      assert(run.status === 'succeeded' && run['path-trace'], 'long value captured');
+      await page.evaluate((trace) => showExecutionPathView(trace), run['path-trace']);
+      const badge = page.locator('.node-overlay[data-original-fn-id="' + probeConst.id
+        + '"] .path-value-badge');
+      const geometry = await badge.evaluate((element) => {
+        const card = element.closest('.node-overlay').getBoundingClientRect();
+        const rect = element.getBoundingClientRect();
+        return {inside: rect.left >= card.left && rect.right <= card.right,
+          clipped: element.scrollWidth > element.clientWidth,
+          overflow: getComputedStyle(element).textOverflow,
+          text: element.textContent, popup: element.getAttribute('aria-haspopup')};
+      });
+      assert(geometry.inside && geometry.popup === 'dialog', 'value stays in its card and announces disclosure');
+      assert(geometry.text.endsWith('…') || (geometry.clipped && geometry.overflow === 'ellipsis'),
+        'clipped value has a visible ellipsis');
+      await badge.focus();
+      await page.keyboard.press('Enter');
+      assert(await page.locator('.path-value-popover-body').textContent() === JSON.stringify(value, null, 2),
+        'keyboard disclosure shows the complete captured value');
+      await page.keyboard.press('Escape');
+      await page.click('.path-view-clear');
+    }
+
     console.log('PASS');
   } catch (e) {
     console.error('FAIL:', e.message);

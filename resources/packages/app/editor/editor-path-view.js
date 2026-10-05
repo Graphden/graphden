@@ -120,7 +120,8 @@ function pathValueChipText(agg) {
   let text;
   try { text = JSON.stringify(agg.lastValue); } catch (_) { text = undefined; }
   if (text === undefined) text = 'null';
-  return text.length <= PATH_INLINE_VALUE_MAX_CHARS ? '= ' + text : '= value';
+  return '= ' + (text.length <= PATH_INLINE_VALUE_MAX_CHARS
+    ? text : text.slice(0, PATH_INLINE_VALUE_MAX_CHARS) + '…');
 }
 
 
@@ -315,7 +316,8 @@ function showExecutionPathView(pathTrace) {
         ? 'Show this fn\'s captured return value'
         : 'Value not captured — over the 4 KB per-value cap';
       valBadge.setAttribute('aria-label',
-        'Captured value for ' + (_pathViewOffCanvasLabel(fnId) || 'fn'));
+        'Show captured value for ' + (_pathViewOffCanvasLabel(fnId) || 'fn'));
+      valBadge.setAttribute('aria-haspopup', 'dialog');
       valBadge.addEventListener('pointerdown', (e) => e.stopPropagation());
       valBadge.addEventListener('click', (e) => {
         e.stopPropagation();

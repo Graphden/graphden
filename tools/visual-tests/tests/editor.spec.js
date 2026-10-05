@@ -322,10 +322,23 @@ test.describe('Editor — visual baselines', () => {
     await waitForGraphRendered(page);
     await setTheme(page, 'light');
     await page.evaluate(() => gdClearFilters());
+    // Snapshot the shipped roots, independently of user namespaces retained
+    // on this instance. Supply a deterministic namespace input before rendering
+    // the menu; do not change its DOM or delete persisted user graphs.
+    const roots = ['app', 'core', 'mathx', 'storage', 'web'];
+    const presentRoots = await page.evaluate((names) => {
+      const namespaces = graphData.namespaces.filter((n) =>
+        !n['parent-id'] && names.includes(n.name));
+      graphData.namespaces = namespaces;
+      return namespaces.map((n) => n.name).sort();
+    }, roots);
+    expect(presentRoots).toEqual(roots);
     await domClick(page.locator('#gd-filter-add'));
     await page.waitForSelector('.gd-filter-add-pop [data-action="add-uses"]',
                               { state: 'visible', timeout: 10000 });
     await page.evaluate(() => new Promise(requestAnimationFrame));
+    await expect(page.locator('.gd-filter-add-pop [data-ws]'))
+      .toHaveCount(roots.length);
     await expect(page.locator('.gd-filter-add-pop')).toHaveScreenshot('05b-add-filter-menu.png');
   });
 });

@@ -555,6 +555,15 @@
 (def ^:private tree-kinds-memo-cap 16)
 
 
+(defn forget-branch!
+  "Release a deleted branch's sidebar snapshots without clearing other
+   branches. The stamp also vetoes publication by an in-flight old read."
+  [branch-id]
+  (swap! tree-kinds-memo
+         #(with-meta (dissoc % branch-id) {:generation (Object.)}))
+  nil)
+
+
 (defn- ns-kind-counts
   "`{namespace-id {:count n :types n :plain n}}` over the named fns —
    the memoised half of the tree payload."
@@ -580,7 +589,7 @@
 
 
 (defn- tree-kinds
-  [branch-id base rich-snapshot roled-fns]
+  [branch-id base rich-snapshot roled-fns generation]
   (let [rich @rich-snapshot
         hit (get @tree-kinds-memo branch-id)]
     (if (and hit (identical? (:base hit) base) (identical? (:rich hit) rich))
@@ -588,10 +597,12 @@
       (let [kinds (ns-kind-counts base roled-fns)]
         (swap! tree-kinds-memo
                (fn [m]
-                 (let [m (assoc m branch-id {:base base :rich rich :kinds kinds :at (System/nanoTime)})]
-                   (if (> (count m) tree-kinds-memo-cap)
-                     (dissoc m (key (apply min-key (comp :at val) m)))
-                     m))))
+                 (if-not (identical? generation (:generation (meta m)))
+                   m
+                   (let [m (assoc m branch-id {:base base :rich rich :kinds kinds :at (System/nanoTime)})]
+                     (if (> (count m) tree-kinds-memo-cap)
+                       (dissoc m (key (apply min-key (comp :at val) m)))
+                       m)))))
         kinds))))
 
 
@@ -614,7 +625,7 @@
    namespace whose leaves were never fetched. (A service-backed or
    app-routed fn still counts here — the server doesn't classify those
    kinds; the rare namespace holding ONLY such fns over-shows.)"
-  [{:keys [base diag-counts namespaces roled-fns rich-snapshot branch-id]}]
+  [{:keys [base diag-counts namespaces roled-fns rich-snapshot branch-id tree-generation]}]
   (let [ns-of-fn (when (seq @diag-counts)
                    (into {} (map (juxt :id :namespace-id)) (:fns base)))
         ;; Count ONLY fns present in `base` (the viewer's own+public
@@ -636,7 +647,7 @@
                            (pos? errs) (assoc :type-error-count errs)
                            (pos? types) (assoc :type-count types)
                            (pos? plain) (assoc :fn-count plain))))
-                     (tree-kinds branch-id base rich-snapshot roled-fns))
+                     (tree-kinds branch-id base rich-snapshot roled-fns tree-generation))
         ;; Namespaces whose only diagnosed fns are anonymous still
         ;; get a chip row (count 0 reads falsy client-side).
         covered (into #{} (map :namespace-id) counts)
@@ -1121,7 +1132,8 @@
 (defn graph-tree
   "`{:namespaces :counts}` — the O(namespaces) sidebar init."
   [ctx]
-  (list-scope-tree (env ctx)))
+  (let [generation (:generation (meta @tree-kinds-memo))]
+    (list-scope-tree (assoc (env ctx) :tree-generation generation))))
 
 
 (defn graph-namespace-fns

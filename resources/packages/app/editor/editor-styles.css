@@ -5586,6 +5586,10 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border: 1px solid var(--accent);
   pointer-events: auto;
   white-space: nowrap;
+  max-width: calc(50% - 4px);
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* Secret-hidden node — a11y-strong error tone (the --error-fg-strong
    precedent from the type-errors panel). */
@@ -5657,6 +5661,10 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   cursor: pointer;
   pointer-events: auto;
   white-space: nowrap;
+  max-width: calc(50% - 4px);
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .path-value-badge:hover,
 .path-value-badge:focus-visible { background: var(--hover-bg); outline: 2px solid var(--gd-flow); outline-offset: 1px; }

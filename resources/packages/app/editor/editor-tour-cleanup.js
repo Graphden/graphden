@@ -50,7 +50,9 @@ async function _tourSurvivors(created) {
       // at all), so a lexical miss means "not loaded here", not "gone" — and
       // a row missing from this report is never offered for deletion.
       case 'fn':
-        if (_tourFindFn(c.name) || await _tourFnIdByName(c.name)) out.push(c);
+        try {
+          if (_tourFindFn(c.name) || await _tourFnIdByName(c.name)) out.push(c);
+        } catch (_) { out.push(c); }
         break;
       case 'ns':
         if (await _tourNsByName(c.name)) out.push(c);
@@ -117,38 +119,37 @@ async function _tourDeleteCreatedBranches(created) {
 // absent from it by cleanup time — and an absent row reads as "already gone",
 // which is how the first fn of every chain used to survive.
 async function _tourFnIdByName(name) {
-  try {
-    const r = await authFetch(API.api_graph_entities
-      + '?scope=search&q=' + encodeURIComponent(name));
-    const payload = await r.json();
-    return (payload.fns || []).find((f) => f.name === name)?.id || null;
-  } catch (_) { return null; }
+  const r = await authFetch(API.api_graph_entities
+    + '?scope=search&q=' + encodeURIComponent(name));
+  if (!r.ok) throw new Error('Function lookup failed');
+  const payload = await r.json();
+  if (!Array.isArray(payload.fns)) throw new Error('Invalid function lookup response');
+  return payload.fns.find((f) => f.name === name)?.id || null;
 }
 
 // NEWEST FIRST. A lesson that builds a chain creates the target before the fn
 // that points at it (lesson 12: the cell, then the swap that writes to it),
 // and the server refuses to delete a fn something still references — correctly.
 // Creation order therefore left the FIRST fn of every chain behind. Whatever
-// still refuses goes round once more, after the rest of the pass unblocked it.
+// still refuses is retried while other removals unblock it. The lesson can
+// create a caller before the function it later references, so reverse creation
+// order alone is insufficient. A stalled pass gets one retry, then reports it.
 async function _tourDeleteFns(created) {
-  const fns = created.filter((c) => c.type === 'fn').reverse();
-  const retry = [];
-  for (const c of fns) {
-    const id = await _tourFnIdByName(c.name);
-    if (!id) continue;
-    const ok = await _tourDeleted(
-      () => authMutate('DELETE', API.api_entities_type_id('fn', id)));
-    if (!ok) retry.push(c);
+  let pending = created.filter((c) => c.type === 'fn').reverse();
+  for (let pass = 0; pending.length; pass++) {
+    const failed = [];
+    for (const c of pending) {
+      try {
+        const id = await _tourFnIdByName(c.name);
+        if (!id) continue;
+        if (!await _tourDeleted(
+          () => authMutate('DELETE', API.api_entities_type_id('fn', id)))) failed.push(c);
+      } catch (_) { failed.push(c); }
+    }
+    if (pass > 0 && failed.length === pending.length) return failed;
+    pending = failed;
   }
-  const failed = [];
-  for (const c of retry) {
-    const id = await _tourFnIdByName(c.name);
-    if (!id) continue;
-    const ok = await _tourDeleted(
-      () => authMutate('DELETE', API.api_entities_type_id('fn', id)));
-    if (!ok) failed.push(c);
-  }
-  return failed;
+  return [];
 }
 
 // A published version outlives the namespace it was cut from — and once that

@@ -159,13 +159,15 @@ async function _tourEnd() {
   const listOf = (rows) => rows.map((c) => c.type + ' “' + c.name + '”').join(', ');
   const cleanup = async () => {
     const { failed } = await _tourDeleteCreated(created);
+    if (failed.length) {
+      _tourReport(false, _tourCopy('cleanup-failed',
+                                 'Kept: {items} — the server refused',
+                                 { items: listOf(failed) }));
+      return false;
+    }
     _tourTeardown();
-    _tourReport(!failed.length,
-                failed.length
-                  ? _tourCopy('cleanup-failed',
-                              'Kept: {items} — the server refused',
-                              { items: listOf(failed) })
-                  : _tourCopy('cleanup-done', 'Tutorial items deleted'));
+    _tourReport(true, _tourCopy('cleanup-done', 'Tutorial items deleted'));
+    return true;
   };
   _tourDialog({
     title: _tourCopy('cleanup-title', 'Clean up tutorial items?'),
@@ -179,7 +181,7 @@ async function _tourEnd() {
       lessonId,
       _tourCopy('next-note-items',
                 'Deletes the items above first, then opens the next lesson.'),
-      async (id) => { await cleanup(); startTutorialIsolated(id); }),
+      async (id) => { if (await cleanup()) startTutorialIsolated(id); }),
   });
 }
 

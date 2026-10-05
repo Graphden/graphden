@@ -166,6 +166,38 @@ const tests = [
            'the LAST-created fn goes first (got: ' + order.join(' | ') + ')');
   }),
 
+  test('a reverse dependency chain longer than two passes is completely removed', async () => {
+    const names = ['caller', 'middle', 'leaf'];
+    const alive = new Set(names);
+    const {ctx, calls} = makeCtx({
+      fns: names.map((name) => FN(name)),
+      refuse: (method, url) => {
+        if (method !== 'DELETE') return false;
+        const name = url.split('/id-')[1];
+        const index = names.indexOf(name);
+        if (index > 0 && alive.has(names[index - 1])) return true;
+        alive.delete(name);
+        return false;
+      },
+    });
+    const failed = await ctx._tourDeleteFns(names.map((name) => ({type: 'fn', name})));
+    assert(failed.length === 0 && alive.size === 0, 'all three dependency levels are deleted');
+    assert(calls.filter((c) => c.startsWith('DELETE')).length === 6,
+      'cleanup continues only while previous removals unblock another level');
+  }),
+
+  test('failed lookups stay in the cleanup offer and failure ledger', async () => {
+    for (const refusal of [503, 'throw']) {
+      const {ctx} = makeCtx({refuse: () => refusal});
+      ctx._tourFindFn = () => null;
+      const created = [{type: 'fn', name: 'unresolved'}];
+      assert((await ctx._tourSurvivors(created)).length === 1,
+        'an unavailable search does not hide the function');
+      assert((await ctx._tourDeleteFns(created)).length === 1,
+        'an unavailable search is not evidence of deletion');
+    }
+  }),
+
   test('a fn absent from the client is resolved through the server', async () => {
     // `_tourFindFn` is lexical — the client holds only the selected subtree.
     const {ctx, calls} = makeCtx({fns: [FN('tutorial-a')]});

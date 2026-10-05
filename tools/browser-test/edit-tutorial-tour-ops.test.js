@@ -27,6 +27,7 @@ const {
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
   console.log('edit-tutorial-tour-ops — lessons 23 / 24 / 16');
   let failed = false;
+  const scrollBranches = [];
   try {
     await hardCleanup(page);
     const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
@@ -98,6 +99,15 @@ const {
     console.log('  lesson 23: walked + cleaned (branch too, compare mode entered)');
 
     // ---------- lesson 24 — review: refusal → propose → approve → land ----------
+    // Keep the release row below the initial viewport on the feature
+    // branch, as it is for a reader with many existing branches.
+    const scrollPrefix = 'a-tour-scroll-' + process.pid + '-' + Date.now().toString(36);
+    for (let i = 0; i < 16; i++) {
+      const name = scrollPrefix + '-' + i;
+      scrollBranches.push(name);
+      const created = await api(page, 'POST', '/api/branches', {name, 'base-branch-id': 'main'});
+      assert(created.ok === true, 'scroll fixture branch created');
+    }
     await page.goto(BASE + '/?tutorial=24');
     await waitTourTitle(page, "Review is the target's policy", 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 24 Next');
@@ -154,7 +164,7 @@ const {
     await waitTourTitle(page, 'Change the value here', 150000);
     await editBoundValue(page, '2');
     await waitTourTitle(page, 'Back to the release branch', 150000);
-    await switchBranchViaChip(page, 'tutorial-release');
+    await switchBranchViaChip(page, 'tutorial-release', {expectClipped: true});
     await waitTourTitle(page, 'Try to merge — refused', 150000);
     await waitClickable(page, '#branch-chip-btn');
     await page.evaluate(() => document.getElementById('branch-chip-btn').click());
@@ -250,6 +260,15 @@ const {
       console.error('  screenshot: /tmp/edit-tutorial-tour-fail.png');
     } catch (_) { /* page may be gone */ }
   } finally {
+    for (const name of scrollBranches.reverse()) {
+      try {
+        const removed = await api(page, 'DELETE', '/api/branches/' + encodeURIComponent(name));
+        assert(removed.ok === true || removed.reason === 'not-found', 'scroll fixture branch removed');
+      } catch (err) {
+        failed = true;
+        console.error('Scroll fixture cleanup failed:', err.message);
+      }
+    }
     await hardCleanup(page);
     await browser.close();
   }

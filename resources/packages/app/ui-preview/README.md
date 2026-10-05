@@ -38,6 +38,10 @@ hover changes. `theme-accent` similarly controls the real shared accent token.
 `account-menu-key-map` exposes the ordinary keyboard mapping; changing its
 ArrowUp key to `k` changes navigation in the real menu.
 
+After saving an edit, reload the browser document to load its updated plan.
+Selecting another graph only changes the editor selection; this bounded review
+does not yet refresh the running menu plan automatically after every save.
+
 The browser backend still supports only `const`, `if`, `equal?`, `list`, `get`,
 `assoc`, `zipmap`, `count`, `add`, `mod`, and `hiccup`. The server resolves
 inheritance, bindings and renames with the existing compiler helpers. The client

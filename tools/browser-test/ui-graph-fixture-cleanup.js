@@ -4,7 +4,8 @@ const {api, assert} = require('./edit-test-helpers');
 // created by this fixture; the ordinary API still checks cross-branch liveness.
 async function captureFixtureNamespaces(page) {
   const index = await api(page, 'GET', '/api/graph/entities?scope=index');
-  return new Set((index.namespaces || []).map((row) => row.id));
+  assert(Array.isArray(index.namespaces), 'fixture namespace baseline loaded');
+  return new Set(index.namespaces.map((row) => row.id));
 }
 
 async function cleanupGraphFixture(page, prepared, baseline) {

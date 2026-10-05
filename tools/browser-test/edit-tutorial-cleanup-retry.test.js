@@ -1,10 +1,12 @@
 // A real external reference must keep in-place cleanup available for retry.
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, waitForServerHealthy, BASE} = require('./edit-test-helpers');
+const {assert, newContext, api, nodeApiJson, waitForServerHealthy, BASE} = require('./edit-test-helpers');
 const suffix = process.pid + '-' + Date.now().toString(36);
 const branch = 'cleanup-retry-' + suffix;
 const ownedName = 'cleanup-owned-' + suffix;
 const externalName = 'cleanup-dependent-' + suffix;
+const branchApi = (method, path, body) => nodeApiJson(method, path, body, {'X-Graphden-Branch': branch});
+const search = (name) => branchApi('GET', '/api/graph/entities?scope=search&q=' + encodeURIComponent(name));
 
 (async () => {
   await waitForServerHealthy();
@@ -18,17 +20,17 @@ const externalName = 'cleanup-dependent-' + suffix;
     await page.goto(BASE + '/?branch=' + branch + '#core.logic.const');
     await page.waitForFunction(() => !!selectedFnId && graph.nodes.size > 0,
       null, {timeout: 120000});
-    const entities = await getEntities(page, 'const');
-    const parent = entities.fns.find((fn) => fn.name === 'const');
+    const parent = (await search('const')).fns.find((fn) => fn.name === 'const');
+    const entities = await branchApi('GET', '/api/graph/entities?scope=subtree&root-id=' + parent.id);
     const slots = new Map(entities.slots.map((slot) => [slot.id, slot]));
     const valueSlot = entities['fn-slots'].find((slot) => slot['fn-id'] === parent.id
       && slots.get(slot['slot-id'])?.name === 'value')['slot-id'];
     for (const name of [ownedName, externalName]) {
-      await api(page, 'POST', '/api/entities/fn', 'name=' + name + '&parent-ids=' + parent.id);
+      await branchApi('POST', '/api/entities/fn', 'name=' + name + '&parent-ids=' + parent.id);
     }
-    const owned = (await getEntities(page, ownedName)).fns.find((fn) => fn.name === ownedName);
-    const external = (await getEntities(page, externalName)).fns.find((fn) => fn.name === externalName);
-    await api(page, 'POST', '/api/entities/binding',
+    const owned = (await search(ownedName)).fns.find((fn) => fn.name === ownedName);
+    const external = (await search(externalName)).fns.find((fn) => fn.name === externalName);
+    await branchApi('POST', '/api/entities/binding',
       'fn-id=' + external.id + '&slot-id=' + valueSlot + '&ref-fn-id=' + owned.id);
     // Start at the end-dialog seam with one ledger entry. The other graph
     // represents work the reader kept outside this lesson and must survive.
@@ -44,13 +46,13 @@ const externalName = 'cleanup-dependent-' + suffix;
       'refusal retains the original cleanup ledger');
     assert(await page.getByRole('button', {name: 'Delete them', exact: true}).isVisible(),
       'the same cleanup action remains available');
-    assert((await getEntities(page, externalName)).fns.some((fn) => fn.id === external.id),
+    assert((await search(externalName)).fns.some((fn) => fn.id === external.id),
       'cleanup did not delete the external dependent');
-    const removed = await api(page, 'DELETE', '/api/entities/fn/' + external.id);
+    const removed = await branchApi('DELETE', '/api/entities/fn/' + external.id);
     assert(removed.ok !== false, 'external dependency removed separately');
     await page.getByRole('button', {name: 'Delete them', exact: true}).click();
     await page.waitForSelector('#gd-tour-pop', {state: 'detached', timeout: 60000});
-    assert(!(await getEntities(page, ownedName)).fns.some((fn) => fn.id === owned.id),
+    assert(!(await search(ownedName)).fns.some((fn) => fn.id === owned.id),
       'successful retry deleted the lesson graph');
     assert(await page.evaluate(() => _tourState === null), 'successful retry releases the session');
   } finally {

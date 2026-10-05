@@ -568,14 +568,16 @@
 
 
 ;; --- :zipmap ----------------------------------------------------------------
-;; When `:keys` is a literal vector of `{:value <kw-or-string>}` items,
+;; When `:keys` is a literal vector of `{:value <keyword>}` items,
 ;; the result is a record-type whose fields are exactly those keys and
 ;; whose value-types come from `:vals`'s per-item `:elem-types`. This
 ;; is the canonical Ring-response builder pattern
 ;; (`:zipmap :keys [{:value :status} {:value :body}] :vals [...]`) —
 ;; preserving the record shape lets downstream `:assoc` / `:merge`
 ;; chains keep per-field type info instead of collapsing the inherited
-;; `[:map :keyword :any]` declared return.
+;; `[:map :keyword :any]` declared return. String keys stay a homogeneous
+;; map: wrapping a stored literal must not turn its string key into a
+;; keyword field or change the type after save/load.
 
 (defn zipmap-return-rule
   [bindings-info default-ret]
@@ -584,7 +586,8 @@
         literal-kws (when (vector? keys-form)
                       (mapv (fn [item]
                               (when (and (map? item) (contains? item :value))
-                                (field-keyword-from-literal (:value item))))
+                                (when (keyword? (:value item))
+                                  (:value item))))
                             keys-form))]
     (if (and (vector? keys-form)
              (seq keys-form)

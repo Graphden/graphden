@@ -18,6 +18,7 @@
     [graphden.executor.registry.core :as registry-core]
     [graphden.packages.sync :as pkg-sync]
     [graphden.system.branch-router :as br]
+    [graphden.system.branch-router.recheck :as recheck]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -27,6 +28,22 @@
   []
   (cr/record-effect! :db)
   (vs/current-branch-id (request/require-storage ctx)))
+
+
+(defn- import-context
+  "Use the cached target context when routing is installed. Standalone
+   imports into another branch get fresh caches and forked type slices;
+   none of that branch's derived state belongs to the request context."
+  [ctx storage branch-id]
+  (or (when-let [router (br/current-router)] (br/ctx-for router branch-id))
+      (when (= branch-id (vs/current-branch-id (:storage ctx))) ctx)
+      (assoc (exec-ctx/create-context (assoc ctx :storage storage))
+             :rich-types-atom
+             (registry-core/fork-rich-types-atom
+               (or (:rich-types-atom ctx) (registry-core/active-rich-types-atom)))
+             :per-org-rich-atom
+             (registry-core/fork-per-org-rich-atom
+               (or (:per-org-rich-atom ctx) (registry-core/active-per-org-rich-atom))))))
 
 
 (defbase sync-fn-defs-branch!
@@ -50,13 +67,13 @@
   (cr/record-effect! :db)
   (let [storage (vs/switch-branch (request/require-storage ctx) branch-id)
         defs (vec fn-defs)
-        target-ctx (when-let [router (br/current-router)] (br/ctx-for router branch-id))
-        fn-ids (if-let [slice (:rich-types-atom target-ctx)]
-                 (binding [registry-core/*rich-types-override* slice]
-                   (pkg-sync/sync-bundle! storage defs))
-                 (pkg-sync/sync-bundle! storage defs))]
-    (exec-ctx/invalidate-graph-cache! (or target-ctx ctx) fn-ids)
-    (mapv str fn-ids)))
+        target-ctx (import-context ctx storage branch-id)]
+    (recheck/call-with-ctx-slices
+      target-ctx
+      #(let [fn-ids (pkg-sync/sync-bundle! storage defs)]
+         (exec-ctx/invalidate-graph-cache! target-ctx fn-ids)
+         (recheck/record-imported-fn-types! target-ctx branch-id fn-ids)
+         (mapv str fn-ids)))))
 
 
 (def impls

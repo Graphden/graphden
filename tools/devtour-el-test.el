@@ -17,7 +17,8 @@
 (setq devtour-progress-file (make-temp-file "devtour-progress" nil ".eld"))
 (load (expand-file-name "docs/devtour/devtour.el" devtour-test-root) nil t)
 (setq devtour-repo-root devtour-test-root
-      devtour-data-file (expand-file-name "docs/devtour/tour.eld" devtour-test-root))
+      devtour-data-file (or (getenv "DEVTOUR_DATA")
+                            (expand-file-name "docs/devtour/tour.eld" devtour-test-root)))
 
 (ert-deftest devtour-markdown-renders-wrapped-and-english-prose ()
   "Formatting must survive source line wrapping and preserve the text."
@@ -179,6 +180,8 @@ state every one of them is already an evil command."
     (evil-motion-state)
     (should (eq (key-binding "n") 'devtour-next))
     (should (eq (key-binding "i") 'devtour-index))
+    (should (eq (key-binding (kbd "TAB")) 'forward-button))
+    (should (eq (key-binding (kbd "RET")) 'push-button))
     ;; …without stealing evil's own motions
     (should (eq (key-binding "j") 'evil-next-line))
     (should (keymapp (key-binding "g")))))
@@ -208,7 +211,7 @@ state every one of them is already an evil command."
   "The generated org tree must link back into THIS checkout: the relative
 prefix resolves, and org's `::<head>' search lands on the anchored form."
   (require 'org)
-  (let* ((org-dir (expand-file-name "docs/devtour/org" devtour-test-root))
+  (let* ((org-dir (expand-file-name "org" (file-name-directory devtour-data-file)))
          (file (expand-file-name "executor.org" org-dir))
          (src '()) (xrefs '()))
     (should (file-readable-p file))
@@ -245,6 +248,86 @@ prefix resolves, and org's `::<head>' search lands on the anchored form."
     (should (string-suffix-p ".clj" (or buffer-file-name "")))
     (beginning-of-line)
     (should (looking-at-p "(def"))))
+
+
+(ert-deftest devtour-definition-button-preserves-reading-progress ()
+  "A prose link must follow a definition, not merely look like a link."
+  (devtour--show 0)
+  (let ((pos devtour--pos) (last devtour--last)
+        (seen (hash-table-count devtour--seen)))
+    (with-current-buffer "*devtour*"
+      (goto-char (point-min))
+      (let ((button (next-button (point-min))))
+        (while (and button (not (equal (button-get button 'help-echo) "#term/context")))
+          (setq button (next-button (button-end button))))
+        (should button)
+        (button-activate button)))
+    (should (equal devtour--pos pos))
+    (should (equal devtour--last last))
+    (should (= (hash-table-count devtour--seen) seen))
+    (with-current-buffer "*devtour definition*"
+      (should (string-match-p
+               (regexp-quote (plist-get (cl-find "context" (plist-get devtour--tour :glossary)
+                                                :key (lambda (x) (plist-get x :id)) :test #'equal)
+                                       :title))
+               (buffer-string)))
+      (goto-char (point-min))
+      (search-forward (plist-get devtour--tour :definition-return))
+      (should (button-at (1- (point)))))))
+
+(ert-deftest devtour-definition-keyboard-round-trip-preserves-point ()
+  (devtour--show 0)
+  (select-window (get-buffer-window "*devtour*"))
+  (goto-char (point-min))
+  (execute-kbd-macro (kbd "TAB"))
+  (should (button-at (point)))
+  (let ((origin (current-buffer)) (origin-point (point))
+        (pos devtour--pos) (last devtour--last)
+        (seen (hash-table-count devtour--seen)))
+    (execute-kbd-macro (kbd "RET"))
+    (should (equal (buffer-name) "*devtour definition*"))
+    (goto-char (point-max))
+    (search-backward (plist-get devtour--tour :definition-return))
+    (execute-kbd-macro (kbd "RET"))
+    (should (eq (current-buffer) origin))
+    (should (= (point) origin-point))
+    (should (= devtour--pos pos))
+    (should (equal devtour--last last))
+    (should (= (hash-table-count devtour--seen) seen))))
+
+
+(ert-deftest devtour-prose-document-and-external-links-are-actionable ()
+  (save-window-excursion
+    (devtour--open-prose-link "../../docs/EXECUTION.md")
+    (should (equal (file-truename buffer-file-name)
+                   (file-truename (expand-file-name "docs/EXECUTION.md" devtour-repo-root)))))
+  (let (opened)
+    (cl-letf (((symbol-function 'browse-url) (lambda (url &rest _) (setq opened url))))
+      (with-temp-buffer
+        (insert "[reference](https://example.org)")
+        (devtour--render-markdown (point-min))
+        (button-activate (button-at (point-min)))))
+    (should (equal opened "https://example.org")))
+  (should-error (devtour--open-prose-link "elisp:(message \"no\")") :type 'user-error))
+
+(ert-deftest devtour-org-prose-documents-and-definitions-resolve ()
+  "Check prose links too: their base differs from the HTML output directory."
+  (let ((dir (expand-file-name "org" (file-name-directory devtour-data-file)))
+        (documents 0) (definitions 0))
+    (dolist (file (directory-files dir t "\\.org\\'"))
+      (with-temp-buffer
+        (insert-file-contents file)
+        (goto-char (point-min))
+        (while (re-search-forward "\\[\\[file:\\([^]#]+\\.md\\)\\]" nil t)
+          (setq documents (1+ documents))
+          (should (file-readable-p (expand-file-name (match-string 1) dir))))))
+    (with-temp-buffer
+      (insert-file-contents (expand-file-name "glossary.org" dir))
+      (goto-char (point-min))
+      (while (re-search-forward "^:CUSTOM_ID: term/" nil t)
+        (setq definitions (1+ definitions))))
+    (should (> documents 20))
+    (should (= definitions (length (plist-get devtour--tour :glossary))))))
 
 
 (let ((ert-quiet nil))

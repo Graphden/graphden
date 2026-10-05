@@ -215,9 +215,23 @@ function nav(gi) {
   else location.hash = '#' + encKey(key);
 }
 
+function renderTerm(id) {
+  const term = (MODEL.glossary || []).find(t => t.id === id);
+  if (!term) return renderIntro();
+  cur = -1;
+  document.getElementById('crumb').textContent = T.glossary + ' › ' + term.title;
+  document.getElementById('stage').innerHTML = '<div class="intro">' +
+    '<h1>' + esc(term.title) + '</h1><div class="say">' + md(term.say) + '</div>' +
+    '<div class="links">' + MODEL.glossary.map(t =>
+      '<a href="#term/' + attr(t.id) + '">' + esc(t.title) + '</a>').join(' · ') + '</div></div>';
+  document.getElementById('stage').scrollTop = 0;
+  paint();
+}
+
 function route() {
   const h = decodeURIComponent(location.hash.slice(1));
   if (!h) return renderIntro();
+  if (h.startsWith('term/')) return renderTerm(h.slice(5));
   if (h.charAt(0) === '!') {                       // #!<block-id> — a stub block
     const b = MODEL.blocks.find(x => x.id === h.slice(1));
     return b ? renderStub(b) : renderIntro();

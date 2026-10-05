@@ -63,6 +63,34 @@ const branch = 'account-menu-' + process.pid + '-' + Date.now().toString(36);
       'Escape disposes the managed picker');
     assert(await page.locator('style[data-gd-ui-styles]').count() === 0,
       'closing the picker releases its graph stylesheet');
+    await page.waitForSelector('.node-overlay button.more-actions-trigger');
+    const anchorBaseline = await page.evaluate(() => _viewportListeners.length);
+    await page.evaluate(() => openFnPicker({
+      anchorEl: document.querySelector('.node-overlay button.more-actions-trigger'), onPick() {},
+    }));
+    const panBefore = await page.evaluate(() => gv.pan());
+    await page.evaluate((pan) => setViewportPan(pan.x + 60, pan.y), panBefore);
+    await page.waitForFunction(() => {
+      const popup = document.querySelector('.fn-picker-popover');
+      const anchor = document.querySelector('.node-overlay button.more-actions-trigger');
+      if (!popup || !anchor) return false;
+      const expected = Math.max(8, Math.min(anchor.getBoundingClientRect().left,
+        innerWidth - popup.offsetWidth - 8));
+      return Math.abs(popup.getBoundingClientRect().left - expected) < 1;
+    });
+    assert(true, 'picker follows its graph anchor during canvas pan');
+    const viewportBefore = page.viewportSize();
+    await page.setViewportSize({width: 800, height: 700});
+    await page.waitForFunction(() => {
+      const rect = document.querySelector('.fn-picker-popover').getBoundingClientRect();
+      return rect.left >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight;
+    });
+    assert(true, 'open picker stays inside the resized viewport');
+    await picker.locator('.fn-picker-search').press('Escape');
+    assert(await page.evaluate(() => _viewportListeners.length) === anchorBaseline,
+      'closing picker releases its canvas-position subscription');
+    await page.setViewportSize(viewportBefore);
+    await page.evaluate((pan) => setViewportPan(pan.x, pan.y), panBefore);
     await page.evaluate(() => {
       const arrange = window.pickerArrange;
       window.pickerArrange = () => ({exact: [], groups: Array.from({length: 1000}, (_, i) => ({

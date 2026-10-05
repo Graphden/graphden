@@ -50,7 +50,7 @@ function anchorBelowClamped(el, anchorEl, opts) {
 
 // Follow a mounted popup's anchor, coalescing layout changes into one frame.
 // The owner must stop observation before hiding or removing its popup.
-function observePopoverAnchor(el, anchor, place) {
+function observePopoverAnchor(el, anchor, place, subscribePositionChange) {
   const controller = new AbortController();
   let frame = null;
   const schedule = () => {
@@ -60,6 +60,7 @@ function observePopoverAnchor(el, anchor, place) {
       if (el.isConnected && anchor.isConnected) place();
     });
   };
+  const stopPositionChange = subscribePositionChange?.(schedule);
   const options = {signal: controller.signal, passive: true};
   window.addEventListener('resize', schedule, options);
   document.addEventListener('scroll', schedule, {...options, capture: true});
@@ -71,6 +72,7 @@ function observePopoverAnchor(el, anchor, place) {
   return () => {
     controller.abort();
     observer?.disconnect();
+    stopPositionChange?.();
     if (frame !== null) cancelAnimationFrame(frame);
     frame = null;
   };

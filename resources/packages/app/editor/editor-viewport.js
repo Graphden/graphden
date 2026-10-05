@@ -33,6 +33,10 @@ let _viewportInputInstalled = false;
 /** Register a handler for pan/zoom. Handlers must stay O(1) — these fire hot. */
 function onViewportChanged(cb) {
   _viewportListeners.push(cb);
+  return () => {
+    const index = _viewportListeners.indexOf(cb);
+    if (index >= 0) _viewportListeners.splice(index, 1);
+  };
 }
 
 function _notifyViewportChanged() {

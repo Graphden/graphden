@@ -313,7 +313,7 @@ function openFnPicker(opts) {
 
   document.body.appendChild(el);
   fnPickerEl = el;
-  stopFnPickerAnchorObservation = observePopoverAnchor(el, opts.anchorEl, place);
+  stopFnPickerAnchorObservation = observePopoverAnchor(el, opts.anchorEl, place, onViewportChanged);
 
   // -------- Pick / explainer wiring --------
 

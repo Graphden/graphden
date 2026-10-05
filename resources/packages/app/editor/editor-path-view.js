@@ -263,7 +263,7 @@ function _showPathViewPanel(highlightedCount, offCanvasIds, truncated, valuesDro
 // load so the tour's listener sees the preventDefault.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || !_pathViewPanelEl || e.defaultPrevented) return;
-  if (document.querySelector('.path-value-popover')) return;   // its own dismiss first
+  if (_pathValuePopoverEl && _pathValuePopoverEl.style.display !== 'none') return;
   e.preventDefault();
   clearExecutionPathView();
 });

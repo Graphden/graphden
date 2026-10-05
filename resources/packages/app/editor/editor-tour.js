@@ -550,7 +550,7 @@ const TOUR_ESCAPE_OWNERS = [
   // listener — so their preventDefault runs too late to be seen here.
   '#fn-versions-popover:not(.hidden)',
   '.trace-view-panel',
-  '.path-value-popover',
+  '.path-value-popover:not([style*="display: none"])',
   '.path-view-panel',               // the "rest dims" mode — Escape clears it
   '.description-tooltip .description-tooltip-close',   // a PINNED tooltip has the ×
   '#branch-diff-modal:not(.hidden)',

@@ -3376,7 +3376,7 @@ textarea.value-form-hiccup {
   border: 1px solid var(--card-border); border-radius: 3px;
 }
 .fn-picker-status {
-  font-size: 0.5625rem; color: var(--muted-fg); opacity: 0.8;
+  font-size: 0.5625rem; color: var(--muted-fg);
   padding: 0 4px; min-height: 0.75rem;
 }
 /* A namespace group header — a fold in browse mode (button), a plain label
@@ -3391,10 +3391,10 @@ textarea.value-form-hiccup {
 }
 .fn-picker-ns-toggle:hover,
 .fn-picker-ns-toggle.fn-picker-row-active { background: var(--hover-bg); }
-.fn-picker-ns-count { opacity: 0.7; }
+.fn-picker-ns-count { color: var(--muted-fg); }
 .fn-picker-group + .fn-picker-group,
 .fn-picker-exact + .fn-picker-group { border-top: 1px dashed var(--card-border); }
-.fn-picker-exact .fn-picker-ns-header { color: var(--success-fg); opacity: 1; }
+.fn-picker-exact .fn-picker-ns-header { color: var(--fg); font-weight: 600; }
 /* The fit-tier chip on a compatible row that is NOT an exact fit. */
 .fn-picker-row-fit {
   flex-shrink: 0;
@@ -3428,7 +3428,7 @@ textarea.value-form-hiccup {
 }
 .fn-picker-row-main { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .fn-picker-row-rt {
-  font-style: italic; opacity: 0.7;
+  font-style: italic;
   flex-shrink: 0;
   font-size: 0.625rem;
   color: var(--muted-fg);
@@ -3492,11 +3492,11 @@ textarea.value-form-hiccup {
    below carry the bare name only. */
 .fn-picker-ns-header {
   font-size: 0.5625rem; padding: 3px 8px 2px;
-  color: var(--muted-fg); opacity: 0.85;
+  color: var(--muted-fg);
   font-family: var(--mono, monospace);
 }
 .fn-picker-more {
-  padding: 4px 8px; font-size: 0.625rem; opacity: 0.6; font-style: italic;
+  padding: 4px 8px; font-size: 0.625rem; color: var(--muted-fg); font-style: italic;
 }
 .fn-picker-cancel-row {
   display: flex; justify-content: flex-end;

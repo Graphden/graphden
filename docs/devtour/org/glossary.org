@@ -42,14 +42,21 @@ A callable function that retains values from the environment in which it was cre
 :CUSTOM_ID: term/slot
 :END:
 
-The identity of a graph argument, with a declaring function, type, and public name. Renaming may create a view linked through source-slot-id. Slot identity is different from its displayed name and from a [[file:glossary.org::#term/cardinality][concurrency permit]].
+The identity of a graph argument, with a declaring function, type, and public name. Renaming may create a view linked through source-slot-id. Slot identity is different from its displayed name and from a [[file:glossary.org::#term/concurrency-permit][concurrency permit]].
 
 * Binding
 :PROPERTIES:
 :CUSTOM_ID: term/binding
 :END:
 
-Stored information specifying an argument: a literal value, a reference, sequence items, or caller-supplied input. Effective bindings can be inherited. Clojure dynamic bindings, which temporarily associate vars with values during a call, are a separate host-language mechanism.
+Stored information specifying a graph argument: a literal value, a reference, sequence items, or caller-supplied input. Effective bindings can be inherited. This differs from Clojure [[file:glossary.org::#term/dynamic-binding][dynamic bindings]], which temporarily supply values to dynamic vars during execution.
+
+* Clojure dynamic binding
+:PROPERTIES:
+:CUSTOM_ID: term/dynamic-binding
+:END:
+
+A Clojure var declared ~^:dynamic~ can receive a temporary, thread-local value through ~binding~. Nested calls see that value until the scope exits and restores the earlier value. Graphden uses this for execution policy, tracing, and cancellation. Asynchronous work must convey these bindings when it needs the same context. This does not create a stored graph [[file:glossary.org::#term/binding][binding]] or a lexical [[file:glossary.org::#term/capture][closure capture]].
 
 * Free argument
 :PROPERTIES:
@@ -218,6 +225,13 @@ HTMX uses HTML attributes to request and replace page fragments. In this editor,
 :END:
 
 Comparing desired configuration with actual state and applying the differences. A periodic pass can recover from missed notifications or process failure. Service reconciliation starts and stops instances; package synchronization reconciles authored definitions with stored rows.
+
+* Execution concurrency permit
+:PROPERTIES:
+:CUSTOM_ID: term/concurrency-permit
+:END:
+
+An admission token used to limit concurrent execution requests, such as runs admitted for an organisation or process. A run acquires it before submission and releases it on completion or failed submission. It is not an argument [[file:glossary.org::#term/slot][slot]], and it is separate from the advisory-lock permits coordinating [[file:glossary.org::#term/cardinality][service instances]].
 
 * Service cardinality
 :PROPERTIES:

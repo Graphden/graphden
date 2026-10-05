@@ -226,7 +226,7 @@ Defines a base implementation whose argument symbols read from the runtime argum
 :MINS: 1.4
 :END:
 
-Reads one argument: evaluates a [[file:glossary.org::#term/thunk][thunk]] when needed, dereferences a delay or other ~IDeref~, or returns an ordinary value. The base implementation triggers referenced computations only by reading the corresponding argument. Compare with ~arg-builder~, which prepared that deferred value.
+Reads one argument: evaluates a [[file:glossary.org::#term/thunk][thunk]] when needed, dereferences a delay or another value implementing ~IDeref~ (the Clojure interface for ~deref~/~@~), or returns an ordinary value. The base implementation triggers referenced computations only by reading the corresponding argument. Compare with ~arg-builder~, which prepared that deferred value.
 
 - source :: [[file:../../../src/graphden/executor/runtime.clj::(defn resolve-arg][src/graphden/executor/runtime.clj:59]]
 - see also :: [[file:executor.org::#executor/arg-builder][arg-builder]]
@@ -253,7 +253,7 @@ Caches referenced-function results during one top-level execution. The key inclu
 :MINS: 1.4
 :END:
 
-~map-fn~ is a [[file:glossary.org::#term/hof][higher-order function]]: ~func~ receives a callable prepared by ~hof-wrap~. ~doall~ realizes the result sequence while the [[file:glossary.org::#term/effect][effect]] checks, tracing, and cancellation [[file:glossary.org::#term/binding][bindings]] are still active. Deferring realization beyond this scope would run the callbacks after those [[file:glossary.org::#term/binding][bindings]] had ended.
+~map-fn~ is a [[file:glossary.org::#term/hof][higher-order function]]: ~func~ receives a callable prepared by ~hof-wrap~. ~doall~ realizes the result sequence while the Clojure [[file:glossary.org::#term/dynamic-binding][dynamic bindings]] for [[file:glossary.org::#term/effect][effect]] checks, tracing, and cancellation are still active. Deferring realization beyond this scope would run the callbacks after those [[file:glossary.org::#term/dynamic-binding][dynamic bindings]] had ended.
 
 - source :: [[file:../../../resources/packages/core/hof/impls.clj::(defbase map-fn ][resources/packages/core/hof/impls.clj:11]]
 - see also :: [[file:executor.org::#executor/arg-builder][arg-builder]]

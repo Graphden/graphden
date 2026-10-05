@@ -174,7 +174,7 @@ Computes public [[file:glossary.org::#term/free-argument][free arguments]] for e
 :MINS: 2.0
 :END:
 
-Coordinates ~/api/execute~: resolves the function, version, and [[file:glossary.org::#term/free-argument][free arguments]]; acquires a [[file:glossary.org::#term/cardinality][concurrency permit]]; submits execution to a future; then handles pending, successful, or failed results. This is a request-management layer around the executor from the first block.
+Coordinates ~/api/execute~: resolves the function, version, and [[file:glossary.org::#term/free-argument][free arguments]]; acquires a [[file:glossary.org::#term/concurrency-permit][concurrency permit]]; submits execution to a future; then handles pending, successful, or failed results. This is a request-management layer around the executor from the first block.
 
 - source :: [[file:../../../src/graphden/crud/fn_execution.clj::(defn apply-execute][src/graphden/crud/fn_execution.clj:123]]
 
@@ -251,7 +251,7 @@ Renders a form descriptor as [[file:glossary.org::#term/hiccup][Hiccup]]: record
 :MINS: 2.4
 :END:
 
-Runs the next matching HTTP request with tracing when a one-shot [[file:glossary.org::#term/capture][capture]] is armed for its organisation and branch. The [[file:glossary.org::#term/capture][capture]] expires after a limited time. Sanitized request and response data are stored as an execution so the existing call-tree interface can display the handler run. See [[file:../../../docs/EXECUTION.md][debugging]].
+Runs the next matching HTTP request with tracing when a one-shot debugger interception is armed for its organisation and branch. The interception expires after a limited time. Sanitized request and response data are stored as an execution so the existing call-tree interface can display the handler run. See [[file:../../../docs/EXECUTION.md][debugging]].
 
 - source :: [[file:../../../src/graphden/crud/debug_capture.clj::(defn run-captured!][src/graphden/crud/debug_capture.clj:292]]
 
@@ -288,7 +288,7 @@ Runs functions from ~tests~ namespaces through the ordinary execution API with e
 :MINS: 2.4
 :END:
 
-Finds tests affected by a write through reverse dependencies. It selects tests with no [[file:glossary.org::#term/effect][effects]], combines closely spaced requests into one delayed run, and runs them with conveyed dynamic bindings. ~:allowed-effects #{}~ enforces the no-effects restriction during execution as well.
+Finds tests affected by a write through reverse dependencies. It selects tests with no [[file:glossary.org::#term/effect][effects]], combines closely spaced requests into one delayed run, and runs them with conveyed [[file:glossary.org::#term/dynamic-binding][dynamic bindings]]. ~:allowed-effects #{}~ enforces the no-effects restriction during execution as well.
 
 - source :: [[file:../../../src/graphden/crud/test_autorun.clj::(defn schedule-affected!][src/graphden/crud/test_autorun.clj:170]]
 

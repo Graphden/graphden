@@ -90,10 +90,10 @@ Builds an absolutely positioned HTML function card; edges are separate SVG eleme
 :CUSTOM_ID: editor/bindActionDispatch
 :FILE: resources/packages/web/runtime/graphden-runtime.js
 :LINE: 78
-:MINS: 2.0
+:MINS: 2.1
 :END:
 
-Registers one delegated event listener on a host and resolves ~data-action~ through the action-handler registry. Newly inserted server fragments become interactive without individual listener registration. [[file:glossary.org::#term/binding][Binding]] once prevents repeated openings of a reused popover from executing the same action multiple times.
+Registers one delegated event listener on a host and resolves ~data-action~ through the action-handler registry. Newly inserted server fragments become interactive without individual listener registration. Registering the listener once prevents repeated openings of a reused popover from executing the same action multiple times.
 
 - source :: [[file:../../../resources/packages/web/runtime/graphden-runtime.js::function bindActionDispatch(host) {][resources/packages/web/runtime/graphden-runtime.js:78]]
 - see also :: [[file:web.org::#web/hiccup-element][hiccup-element]]

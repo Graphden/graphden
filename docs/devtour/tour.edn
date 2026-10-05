@@ -58,12 +58,18 @@
   {:id "slot" :title "Argument slot"
    :say "The identity of a graph argument, with a declaring function, type, and public name.
            Renaming may create a view linked through source-slot-id. Slot identity is different from
-           its displayed name and from a [concurrency permit](#term/cardinality)."}
+           its displayed name and from a [concurrency permit](#term/concurrency-permit)."}
   {:id "binding" :title "Binding"
-   :say "Stored information specifying an argument: a literal value, a reference, sequence items, or
-           caller-supplied input. Effective bindings can be inherited. Clojure dynamic bindings, which
-           temporarily associate vars with values during a call, are a separate host-language
-           mechanism."}
+   :say "Stored information specifying a graph argument: a literal value, a reference, sequence
+           items, or caller-supplied input. Effective bindings can be inherited. This differs from
+           Clojure [dynamic bindings](#term/dynamic-binding), which temporarily supply values to
+           dynamic vars during execution."}
+  {:id "dynamic-binding" :title "Clojure dynamic binding"
+   :say "A Clojure var declared `^:dynamic` can receive a temporary, thread-local value through
+           `binding`. Nested calls see that value until the scope exits and restores the earlier
+           value. Graphden uses this for execution policy, tracing, and cancellation. Asynchronous
+           work must convey these bindings when it needs the same context. This does not create a
+           stored graph [binding](#term/binding) or a lexical [closure capture](#term/capture)."}
   {:id "free-argument" :title "Free argument"
    :say "An input that the current function has not supplied internally and exposes to its caller.
            Identity comes from the underlying [slot](#term/slot) even when its public name changes.
@@ -168,6 +174,12 @@
            pass can recover from missed notifications or process failure. Service reconciliation
            starts and stops instances; package synchronization reconciles authored definitions with
            stored rows."}
+  {:id "concurrency-permit" :title "Execution concurrency permit"
+   :say "An admission token used to limit concurrent execution requests, such as runs admitted for
+           an organisation or process. A run acquires it before submission and releases it on
+           completion or failed submission. It is not an argument [slot](#term/slot), and it is
+           separate from the advisory-lock permits coordinating [service
+           instances](#term/cardinality)."}
   {:id "cardinality" :title "Service cardinality"
    :say "The service placement rule: one instance across participating executors (singleton), up to
            N coordinated instances (pool), or an instance per executor process (per-pod). An
@@ -329,9 +341,9 @@
 
     {:ns graphden.executor.runtime :defn resolve-arg
      :say "Reads one argument: evaluates a [thunk](#term/thunk) when needed, dereferences a delay or
-           other `IDeref`, or returns an ordinary value. The base implementation triggers referenced
-           computations only by reading the corresponding argument. Compare with `arg-builder`, which
-           prepared that deferred value."
+           another value implementing `IDeref` (the Clojure interface for `deref`/`@`), or returns an
+           ordinary value. The base implementation triggers referenced computations only by reading
+           the corresponding argument. Compare with `arg-builder`, which prepared that deferred value."
      :see [[:executor "arg-builder"]]}
 
     {:ns graphden.executor.compile-eager :defn call-with-cache
@@ -341,9 +353,10 @@
            same dependency repeatedly within that call."}
     {:file "resources/packages/core/hof/impls.clj" :defn map-fn
      :say "`map-fn` is a [higher-order function](#term/hof): `func` receives a callable prepared by
-           `hof-wrap`. `doall` realizes the result sequence while the [effect](#term/effect) checks,
-           tracing, and cancellation [bindings](#term/binding) are still active. Deferring realization
-           beyond this scope would run the callbacks after those [bindings](#term/binding) had ended."
+           `hof-wrap`. `doall` realizes the result sequence while the Clojure [dynamic
+           bindings](#term/dynamic-binding) for [effect](#term/effect) checks, tracing, and
+           cancellation are still active. Deferring realization beyond this scope would run the
+           callbacks after those [dynamic bindings](#term/dynamic-binding) had ended."
      :see [[:executor "arg-builder"]]}
     {:file "resources/packages/core/recursion/impls.clj" :defn fix-fn
      :say "Implements explicit recursion. Direct cycles through `ref-fn-id` are rejected during
@@ -756,7 +769,7 @@
            consumers therefore share one definition of required input."}
     {:ns graphden.crud.fn-execution :defn apply-execute
      :say "Coordinates `/api/execute`: resolves the function, version, and [free
-           arguments](#term/free-argument); acquires a [concurrency permit](#term/cardinality);
+           arguments](#term/free-argument); acquires a [concurrency permit](#term/concurrency-permit);
            submits execution to a future; then handles pending, successful, or failed results. This is
            a request-management layer around the executor from the first block."}
     {:ns graphden.crud.fn-execution.persist :defn create-pending-with-args!
@@ -783,11 +796,10 @@
            /partials/value-form` returns this [server-rendered fragment](#term/htmx), which
            [HTMX](#term/htmx) inserts into the inspector. See [partials](../../docs/PARTIALS.md)."}
     {:ns graphden.crud.debug-capture :defn run-captured!
-     :say "Runs the next matching HTTP request with tracing when a one-shot [capture](#term/capture)
-           is armed for its organisation and branch. The [capture](#term/capture) expires after a
-           limited time. Sanitized request and response data are stored as an execution so the
-           existing call-tree interface can display the handler run. See
-           [debugging](../../docs/EXECUTION.md)."}
+     :say "Runs the next matching HTTP request with tracing when a one-shot debugger interception is
+           armed for its organisation and branch. The interception expires after a limited time.
+           Sanitized request and response data are stored as an execution so the existing call-tree
+           interface can display the handler run. See [debugging](../../docs/EXECUTION.md)."}
     {:ns graphden.crud.secrets :defn apply-create-secret-body
      :say "Creates graph rows containing a secret path, then stores the value and metadata in OpenBao.
            The value never enters the graph rows. A journal supports compensating rollback if a later
@@ -803,7 +815,7 @@
     {:ns graphden.crud.test-autorun :defn schedule-affected!
      :say "Finds tests affected by a write through reverse dependencies. It selects tests with no
            [effects](#term/effect), combines closely spaced requests into one delayed run, and runs
-           them with conveyed dynamic bindings. `:allowed-effects #{}` enforces the no-effects
+           them with conveyed [dynamic bindings](#term/dynamic-binding). `:allowed-effects #{}` enforces the no-effects
            restriction during execution as well."}
     {:ns graphden.crud.entities.list :defn graph-list-env
      :say "Builds a shared lazy read environment over the graph cache. Separate projections produce
@@ -1236,7 +1248,7 @@
     {:file "resources/packages/web/runtime/graphden-runtime.js" :defn bindActionDispatch
      :say "Registers one delegated event listener on a host and resolves `data-action` through the
            action-handler registry. Newly inserted server fragments become interactive without
-           individual listener registration. [Binding](#term/binding) once prevents repeated openings
+           individual listener registration. Registering the listener once prevents repeated openings
            of a reused popover from executing the same action multiple times."
      :see [[:web "hiccup-element"]]}
 

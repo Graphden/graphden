@@ -689,7 +689,7 @@ async function createBranchViaChip(page, name) {
 }
 
 
-async function switchBranchViaChip(page, name) {
+async function switchBranchViaChip(page, name, {expectClipped = false} = {}) {
   await waitClickable(page, '#branch-chip-btn');
   // dispatch, not page.click: the tour popover re-positions on a tick, and
   // Playwright's actionability wait can race it forever even though the chip
@@ -698,6 +698,14 @@ async function switchBranchViaChip(page, name) {
   await page.waitForSelector('.branch-row[data-branch-name]', {timeout: 15000});
   const rowSelector = await page.evaluate((n) =>
     '.branch-row[data-branch-name="' + CSS.escape(n) + '"]', name);
+  if (expectClipped) {
+    const clipped = await page.locator(rowSelector).evaluate((row) => {
+      const list = row.closest('.branch-popover-list').getBoundingClientRect();
+      const rect = row.getBoundingClientRect();
+      return rect.top >= list.bottom || rect.bottom <= list.top;
+    });
+    assert(clipped, 'the requested branch starts outside the list viewport');
+  }
   // A real pointer click scrolls the list and verifies that the row is
   // hittable. Calling row.click() in page JS hid clipped-row regressions.
   await page.locator(rowSelector).click({timeout: 120000});

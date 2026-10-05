@@ -334,8 +334,8 @@ async function newContext(chromium, opts = {}) {
 // arg is kept for backward signature compat but unused. Returns
 // the parsed JSON on success, or `{status, body}` on a 4xx/5xx so
 // error-path tests can assert on the response shape.
-async function api(_page, method, path, body) {
-  const r = await nodeApi(method, path, body);
+async function api(_page, method, path, body, extraHeaders) {
+  const r = await nodeApi(method, path, body, extraHeaders);
   const txt = await r.text();
   if (r.ok) {
     try { return JSON.parse(txt); } catch (_) { return { status: r.status, body: txt }; }

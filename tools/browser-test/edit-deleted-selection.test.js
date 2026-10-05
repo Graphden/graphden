@@ -22,9 +22,9 @@ const child = 'deleted-selection-fn-' + suffix;
     await extendViaRowActions(page, child, 'const');
     await page.waitForFunction((name) => decodeURIComponent(location.hash).includes(name), child, {timeout: 30000});
     assert(await openBranchPopover(page), 'current branch menu opens');
-    await page.click('.branch-row[data-branch-name="' + branch + '"] .branch-row-more');
-    await page.waitForSelector('.branch-row-more-menu.open .branch-row-delete', {timeout: 10000});
-    await page.click('.branch-row-more-menu.open .branch-row-delete');
+    // The menu hides deletion of the active branch. Exercise its existing
+    // deletion handler directly to cover cleanup initiated outside that menu.
+    await page.evaluate((name) => deleteBranchWithConfirm(name), branch);
     await page.waitForURL((url) => !url.searchParams.has('branch') && !url.hash, {timeout: 60000});
     await page.waitForSelector('#graph-empty-state', {state: 'visible', timeout: 120000});
     assert(await page.evaluate(() => selectedFnId === null && graph.nodes.size === 0 && graph.edges.size === 0),

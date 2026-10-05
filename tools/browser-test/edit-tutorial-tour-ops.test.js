@@ -229,6 +229,8 @@ const {
     await waitTourTitle(page, 'Extend it', 150000);
     await extendViaRowActions(page, 'tutorial-db-call', 'sql-exec');
     await waitTourTitle(page, 'A secret-typed slot', 150000);
+    await page.waitForSelector('.placeholder-binder[data-arg-name="password"]',
+      {timeout: 60000});
     const hint = await page.evaluate(() =>
       document.querySelector('.placeholder-binder[data-arg-name="password"]')?.title || '');
     assert(/secret-typed/.test(hint), 'the + on :password says it is secret-typed (got: ' + hint + ')');

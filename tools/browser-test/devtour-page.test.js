@@ -4,7 +4,7 @@
 // `edit-*.test.js`.
 const path = require('path');
 const { chromium } = require('playwright');
-const PAGE = path.resolve(__dirname, '../../docs/devtour/index.html');
+const PAGE = process.env.DEVTOUR_PAGE || path.resolve(__dirname, '../../docs/devtour/index.html');
 const URL = 'file://' + PAGE;
 const fails = [];
 const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails.push(m); };
@@ -16,6 +16,7 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails.p
   p.on('pageerror', e => errs.push('pageerror: ' + e.message));
   await p.goto(URL);
   await p.waitForTimeout(300);
+  const model = await p.evaluate(() => JSON.parse(document.getElementById('tour-data').textContent));
 
   ok(await p.locator('#map .blk').count() === 14, 'map shows 14 blocks');
   // The step count is whatever tour.edn says today — the page, the intro
@@ -42,6 +43,21 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails.p
   await p.click('#back'); await p.waitForTimeout(150);
   ok(decodeURIComponent(p.url()).endsWith('#executor/execute'), 'footer Back = history.back');
 
+  // Definitions are linked prose, outside step numbering and progress.
+  const beforeDefinition = await p.evaluate(() => ({
+    seen: localStorage.getItem('devtour:v1:seen'), last: localStorage.getItem('devtour:v1:last')
+  }));
+  await p.locator('.say a[href="#term/context"]').first().click();
+  await p.waitForFunction(() => location.hash === '#term/context');
+  ok((await p.locator('#stage h1').innerText()) === model.glossary.find(t => t.id === 'context').title, 'definition opens from prose');
+  const afterDefinition = await p.evaluate(() => ({
+    seen: localStorage.getItem('devtour:v1:seen'), last: localStorage.getItem('devtour:v1:last')
+  }));
+  ok(JSON.stringify(beforeDefinition) === JSON.stringify(afterDefinition), 'definition leaves step progress unchanged');
+  await p.click('#back');
+  await p.waitForFunction(() => location.hash === '#executor/execute');
+  ok(await p.locator('.fhead').count() === 1, 'Back restores the source step');
+
   // progress
   const seen = await p.evaluate(() => JSON.parse(localStorage.getItem('devtour:v1:seen') || '[]').length);
   ok(seen >= 2, 'progress persisted: ' + seen + ' steps');
@@ -52,7 +68,7 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails.p
   await p.goto(URL + '#types/subtype%3F'); await p.waitForTimeout(250);
   ok((await p.locator('#crumb').innerText()).includes('subtype?'), 'deep link opens a step');
   const folded = await p.locator('#foldbtn').innerText();
-  ok(/show all \d+ lines/.test(folded), 'long form folded: ' + folded);
+  ok(/\d+/.test(folded), 'long form folded: ' + folded);
   const shortLines = await p.locator('pre.code .ln').count();
   await p.click('#foldbtn'); await p.waitForTimeout(150);
   const fullLines = await p.locator('pre.code .ln').count();
@@ -61,8 +77,8 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails.p
   // see also + referenced from
   await p.goto(URL + '#executor/create-context'); await p.waitForTimeout(200);
   const links = await p.locator('.links').innerText();
-  ok(links.includes('referenced from'), 'backlinks shown');
-  ok(links.includes('same file'), 'same-file steps shown');
+  ok(links.includes(model.ui.refs), 'backlinks shown');
+  ok(links.includes(model.ui.sameFile), 'same-file steps shown');
   const sib = p.locator('.links .grp').last().locator('a').first();
   const sibName = await sib.innerText();
   await sib.click(); await p.waitForTimeout(200);
@@ -105,6 +121,11 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails.p
   p.once('dialog', d => d.accept());
   await p.click('#btn-clear'); await p.waitForTimeout(200);
   ok((await p.locator('#pnum').innerText()).startsWith('0/'), 'confirmed reset clears progress');
+
+  if (process.env.DEVTOUR_SCREENSHOT) {
+    await p.goto(URL + '#executor/execute~2');
+    await p.screenshot({ path: process.env.DEVTOUR_SCREENSHOT });
+  }
 
   ok(errs.length === 0, 'no console errors' + (errs.length ? ': ' + errs.join(' | ') : ''));
   await b.close();

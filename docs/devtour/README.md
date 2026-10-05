@@ -89,24 +89,30 @@ registers the `devtour` sub-protocol that opens `file` at `line`.
 ### 3. Org
 
 `docs/devtour/org/` is the same tour as plain org files (one per block, plus
-`index.org`) — prose, and a `- source ::` link that opens the real file at the
+`index.org` and `glossary.org`) — prose, and a `- source ::` link that opens the real file at the
 form (`C-c C-o`). No elisp required; useful if you would rather read in org,
 fold with the outline, or keep your own notes next to the steps.
 
 ### Where to start
 
-Blocks are listed roughly in reading order; each block's `after:` line names
-what it assumes you have already seen. Start with the **Executor** (the spine
-everything else hangs off), then follow the dependency order: Storage, Branches,
-Types, CRUD, Packages, Boot, Web, Layout, Editor frontend, Services, Platform
-seams, Accounts, and last the Constellation — the six repositories around this
-one and the seams they plug into.
+Read the blocks in dependency order, starting with Executor. Boot explains
+process startup and is a useful alternative starting point. Editor reads
+JavaScript; the remaining blocks primarily read Clojure.
 
-**Boot & lifecycle** is the block to jump to early if you would rather start
-from a running process than from a hot path — it walks `-main` → the Integrant
-component graph → the router seams, which is the shortest route to seeing how
-the other blocks are wired together. **Editor frontend** tours JavaScript rather
-than Clojure, on the same anchor-and-bake contract.
+Technical terms link to definitions outside the numbered steps. Opening a
+browser definition leaves progress unchanged; Back returns to the prior step.
+In Emacs, prose links are buttons (`TAB`, `RET`, or mouse); a definition opens
+in a help window whose return button closes it. Document links open files in
+`devtour-repo-root`. Org definitions live in `org/glossary.org`, with ordinary
+file links to documents rebased from the Org directory.
+
+The source's `:glossary` is an ordered vector of `{:id :title :say}` maps.
+Use `[term](#term/stable-id)` in prose. Definitions may reference one another;
+the generator rejects duplicate IDs, unknown definitions, and missing local
+documents. Use `../../docs/...` for checkout-relative document links in the
+source; the HTML and Org generators adjust their output paths, including
+translated output outside this repository. Adding a definition never adds a
+step, changes a source anchor, or changes saved progress.
 
 ## How it works
 

@@ -493,7 +493,6 @@ function positionAuthPopover() {
 
 function closeAuthPopover(immediate = false) {
   if (!immediate && window.gdShellMenuGraph?.close()) return;
-  window.gdShellMenuGraph?.dispose();
   const popover = document.getElementById('auth-popover');
   if (!popover) return;
   // Focus RETURNS to the chip — but only when it was inside the popover;
@@ -501,6 +500,7 @@ function closeAuthPopover(immediate = false) {
   // semantics, inlined since this close path predates the primitives).
   const chip = document.getElementById('auth-lock-btn');
   const hadFocus = popover.contains(document.activeElement);
+  window.gdShellMenuGraph?.dispose();
   popover.classList.add('hidden');
   chip?.setAttribute('aria-expanded', 'false');
   if (hadFocus && chip && typeof focusSafely === 'function') focusSafely(chip);

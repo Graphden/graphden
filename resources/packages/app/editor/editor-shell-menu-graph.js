@@ -15,9 +15,7 @@
   let ready = false;
 
   function report(error) {
-    const close = mounted?.closeNow;
-    dispose();
-    close?.();
+    closeMounted();
     window.gdClearGraphTheme();
     runtime = null;
     window.gdShellMenuGraph.ready = false;
@@ -103,12 +101,17 @@
     mounted.component.dispose();
     mounted = null;
   }
+  function closeMounted() {
+    const close = mounted?.closeNow;
+    if (close) close();
+    else dispose();
+  }
   function mount(menu, pop, closeNow, graphFrame) {
     dispose();
     const controller = new AbortController();
     let initial;
     try { state = runtime.run('initial'); initial = validate(view()); }
-    catch (error) { controller.abort(); graphFrame.component.dispose(); closeNow(); report(error); return; }
+    catch (error) { controller.abort(); closeNow(); graphFrame.component.dispose(); report(error); return; }
     mounted = {menu, pop, controller, component: graphFrame.component, generation: 0, animation: null, closeNow, phase: 'closed', motion: initial};
     const own = mounted;
     const options = {signal: controller.signal};
@@ -122,7 +125,7 @@
       const previousMotion = own.motion;
       own.motion = checked;
       own.phase = phase;
-      if (phase === 'closed') { dispose(); closeNow(); return; }
+      if (phase === 'closed') { closeNow(); return; }
       const active = items()[get(value, 'active')];
       if (active && get(value, 'handled') && phase !== 'closing') active.focus();
       if (!animate || previous === phase || (phase !== 'opening' && phase !== 'closing')) return;
@@ -154,7 +157,7 @@
     menu.addEventListener('click', (event) => {
       if (!event.target.closest('[role="menuitem"]')) return;
       if (mounted === own) {
-        try { dispatch('activate'); dispose(); closeNow(); } catch (error) { report(error); }
+        try { dispatch('activate'); closeNow(); } catch (error) { report(error); }
       }
     }, options);
     own.apply = apply;
@@ -185,7 +188,7 @@
     },
     close(immediate = false) {
       if (!mounted) return false;
-      if (immediate) { const close = mounted.closeNow; dispatch('close'); dispose(); close(); }
+      if (immediate) { dispatch('close'); closeMounted(); }
       else mounted.apply(dispatch('outside'));
       return true;
     },
@@ -202,7 +205,7 @@
         const plan = await response.json();
         if (!response.ok || plan.ok === false) throw new Error(plan.reason || 'Graph export refused');
         if (generation !== requestGeneration) return;
-        if (mounted) { const close = mounted.closeNow; dispose(); close(); }
+        if (mounted) closeMounted();
         runtime = api.createRuntime(plan);
         state = runtime.run('initial');
         theme = new Map(Object.entries(window.gdGraphThemeBase()).map(([name, value]) => [key(name), value]));
@@ -220,7 +223,7 @@
   document.addEventListener('DOMContentLoaded', () => { if (isAuthenticated() || accountsAuthed) void integration.reload(); }, {once: true});
   window.addEventListener('gd-auth-changed', () => {
     requestGeneration++;
-    if (ready || runtime) { dispose(); window.gdClearGraphTheme(); runtime = null; integration.ready = false; }
+    if (ready || runtime) { closeMounted(); window.gdClearGraphTheme(); runtime = null; integration.ready = false; }
     if (isAuthenticated() || accountsAuthed) void integration.reload();
   });
 })();

@@ -229,9 +229,12 @@
         const result = new Thunk(() => {
           const fn = functions.get(fnId);
           if (!fn) throw new Error('Missing browser graph function: ' + fnId);
-          const frame = {slots: incoming.slots, names: new Map(incoming.names)};
+          // Transparent pure calls share the immutable incoming frame and its memo.
+          // Aliases and local bindings still require an isolated names map.
+          const frame = fn.aliases.length || fn.env.length
+            ? {slots: incoming.slots, names: new Map(incoming.names)} : incoming;
           for (const {fromName, toName} of fn.aliases) if (frame.names.has(fromName) && !frame.names.has(toName)) frame.names.set(toName, frame.names.get(fromName));
-          const aliasedNames = new Map(frame.names);
+          const aliasedNames = fn.env.length ? new Map(frame.names) : null;
           for (const binding of fn.env) frame.names.set(binding.name, new Thunk(() => {
             const scope = {slots: frame.slots, names: new Map(frame.names)};
             if (aliasedNames.has(binding.name)) scope.names.set(binding.name, aliasedNames.get(binding.name));

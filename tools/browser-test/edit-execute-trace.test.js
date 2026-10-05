@@ -326,6 +326,11 @@ async function openExecutePopoverForCard(page, fnId) {
       await page.keyboard.press('Enter');
       assert(await page.locator('.path-value-popover-body').textContent() === JSON.stringify(value, null, 2),
         'keyboard disclosure shows the complete captured value');
+      const valueBody = page.locator('.path-value-popover-body');
+      await valueBody.focus();
+      await page.keyboard.press('ArrowRight');
+      assert(await valueBody.evaluate((element) => document.activeElement === element
+        && element.tabIndex === 0), 'captured value can receive keyboard scrolling');
       await page.keyboard.press('Escape');
       await page.keyboard.press('Escape');
       assert(await page.locator('.path-view-panel').count() === 0,

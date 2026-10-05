@@ -170,6 +170,8 @@ function _showPathValuePopover(anchorEl, fnName, agg) {
   if (agg.hasValue) {
     const pre = document.createElement('pre');
     pre.className = 'path-value-popover-body';
+    pre.tabIndex = 0;
+    pre.setAttribute('aria-label', 'Captured value');
     let text;
     try { text = JSON.stringify(agg.lastValue, null, 2); }
     catch (_) { text = String(agg.lastValue); }

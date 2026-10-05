@@ -1,10 +1,10 @@
 // Editor Auth — admin password popover + authFetch wrapper.
 //
 // The backend uses static-bearer-token middleware: a single `AUTH_TOKEN`
-// env var on the server is the admin password. Mutating routes
-// (POST /api/entities/..., DELETE /api/sequence/item/..., etc.) reject
-// requests whose `Authorization` header doesn't match. Read routes
-// (GET /, /api/graph/entities, /api/graph/layout) are open.
+// env var on the server is the admin password. Protected routes reject
+// requests whose `Authorization` header doesn't match. With authentication
+// enabled, graph loading can also stop at the sign-in wall; the public editor
+// page and assets remain available to display that form.
 //
 // UX:
 //   1. Lock icon in the sidebar header (closed = anonymous, open = signed in).
@@ -530,6 +530,9 @@ async function submitAuth() {
     if (response.status === 200) {
       setAuthPassword(pw);
       closeAuthPopover();
+      if (typeof graphData !== 'undefined' && graphData === null && typeof initGraph === 'function') {
+        void initGraph().catch((error) => console.error('Editor initialization after sign-in failed', error));
+      }
     } else if (response.status === 401) {
       if (err) { err.textContent = 'Wrong password.'; err.classList.remove('hidden'); }
       input.focus();

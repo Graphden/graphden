@@ -32,7 +32,7 @@ async function freshContext() {
   // NO password seeded — we want the locked initial state.
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('  [pageerror]', e.message));
-  await page.goto(BASE + '/');
+  await page.goto(BASE + '/#const');
   await page.waitForSelector('#auth-lock-btn', {timeout: 10000});
   // Wait for the BOOT to settle before normalizing state: on an auth-active
   // stack a fresh (tokenless) context 401s on the graph load and the editor
@@ -190,6 +190,9 @@ async function freshContext() {
            'tooltip flips to the menu name: ' + unlocked.title);
     assert(unlocked.storedPw === AUTH,
            'password stored in localStorage');
+    await page.waitForSelector('.node-overlay', {timeout: 15000});
+    assert(await page.locator('.node-overlay').count() > 0,
+           'first sign-in loads the bookmarked graph without a manual reload');
 
     // ===================================================================
     // Phase E: sign-out via the menu's Sign out → confirm() auto-accepted.

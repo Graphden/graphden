@@ -1342,7 +1342,10 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   border: 1px solid var(--border); border-radius: 2px;
 }
 .fn-versions-switch:hover,
-.fn-versions-restore:hover { background: var(--hover-bg); }
+.fn-versions-restore:not(:disabled):hover { background: var(--hover-bg); }
+.fn-versions-restore:disabled {
+  color: var(--muted-fg); cursor: default;
+}
 .fn-versions-row-meta {
   font-size: 0.625rem; color: var(--muted-fg);
   font-family: var(--mono);

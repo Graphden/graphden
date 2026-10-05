@@ -125,12 +125,24 @@
           :children [:_partial-fnv-row-description-text
                      :_partial-fnv-row-author-span]}}
 
-  ;; Restore button — always rendered. The API rejects no-op restores,
-  ;; so leaving it visible on the current-branch latest is fine.
+  ;; Disable Restore when the fields it writes already match this branch.
+  ;; Comparing the effective fields also handles inherited branch versions.
+  {:name :_partial-fnv-row-restore-needed?
+   :parent :get
+   :args {:coll {:as :item} :key {:value :restore-needed?}
+          :default {:value false}}}
+
+  {:name :_partial-fnv-row-restore-base-attrs
+   :parent :if
+   :args {:test :_partial-fnv-row-restore-needed?
+          :then {:value {:class "fn-versions-restore"
+                         :title "Restore function fields on this branch; argument bindings stay unchanged"}}
+          :else {:value {:class "fn-versions-restore" :disabled true
+                         :title "These function fields already match this branch; argument bindings are separate"}}}}
+
   {:name :_partial-fnv-row-restore-attrs
    :parent :assoc
-   :args {:map {:value {:class "fn-versions-restore"
-                        :title "Restore this version’s fn-level fields on the current branch"}}
+   :args {:map :_partial-fnv-row-restore-base-attrs
           :key {:value :data-fn-version-id}
           :value :_partial-fnv-row-version-id}}
 
@@ -280,13 +292,14 @@
    :args {:coll [:_partial-fnv-header-title
                  {:value " · "}
                  :_partial-fnv-count-text
-                 {:value " versions"}]
+                 {:value " field versions"}]
           :separator {:value ""}}}
 
   {:name :_partial-fnv-header
    :parent :hiccup
    :args {:tag {:value "div"}
-          :attrs {:value {:class "fn-versions-header"}}
+          :attrs {:value {:class "fn-versions-header"
+                          :title "History of function fields: description, result type, constraint and effects. Argument values and inherited structure have separate changes."}}
           :children [:_partial-fnv-header-text]}}
 
   {:name :_partial-fnv-empty-msg

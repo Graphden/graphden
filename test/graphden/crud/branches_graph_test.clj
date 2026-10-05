@@ -218,6 +218,7 @@
     (let [v (first (:versions body))]
       (is (= name (:name v)))
       (is (= "main" (:branch-name v)) "joined branch-name")
+      (is (false? (:restore-needed? v)) "current fields cannot be restored to themselves")
       (is (zero? (:execution-count v))
           "no executions yet → count 0")
       (is (string? (:id v)) "uuids stringified")
@@ -240,7 +241,29 @@
       (is (= 2 (:count body)))
       (is (= (:name feat) (-> body :versions first :branch-name))
           "latest version (feat) wins the first slot")
-      (is (= "main" (-> body :versions second :branch-name))))))
+      (is (= "main" (-> body :versions second :branch-name)))
+      (is (true? (-> body :versions first :restore-needed?))
+          "another branch's changed fields can be restored on main")
+      (is (false? (-> body :versions second :restore-needed?))
+          "global newest does not define the current state of main"))))
+
+
+(deftest fn-version-restore-state-ignores-name-and-matches-older-equal-fields
+  (let [fn-id (mk-fn! (uniq "restore-fields"))
+        versions #(-> (gh/via :list-fn-versions-handler
+                              (get-req (str "/api/fns/" fn-id "/versions")))
+                      json-body :versions)]
+    (sp/update-entity *storage* :fn fn-id {:description "first"})
+    (sp/update-entity *storage* :fn fn-id {:description "other"})
+    (sp/update-entity *storage* :fn fn-id {:description "first"})
+    (sp/update-entity *storage* :fn fn-id {:name (uniq "renamed")})
+    (let [rows (versions)
+          first-states (filter #(= "first" (:description %)) rows)
+          other-state (first (filter #(= "other" (:description %)) rows))]
+      (is (= 3 (count first-states)))
+      (is (every? #(false? (:restore-needed? %)) first-states)
+          "Restore does not rewrite identity labels or create duplicate field states")
+      (is (true? (:restore-needed? other-state))))))
 
 
 ;; =============================================================================

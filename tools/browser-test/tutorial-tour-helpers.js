@@ -689,7 +689,7 @@ async function createBranchViaChip(page, name) {
 }
 
 
-async function switchBranchViaChip(page, name, {expectClipped = false} = {}) {
+async function switchBranchViaChip(page, name, {expectClipped = false, clickBlankActions = false} = {}) {
   await waitClickable(page, '#branch-chip-btn');
   // dispatch, not page.click: the tour popover re-positions on a tick, and
   // Playwright's actionability wait can race it forever even though the chip
@@ -708,11 +708,29 @@ async function switchBranchViaChip(page, name, {expectClipped = false} = {}) {
   }
   // A real pointer click scrolls the list and verifies that the row is
   // hittable. Calling row.click() in page JS hid clipped-row regressions.
-  await page.locator(rowSelector).click({timeout: 120000});
-  await page.waitForFunction((n) => {
-    const cur = new URLSearchParams(location.search).get('branch');
-    return n === 'main' ? !cur : cur === n;
-  }, name, {timeout: 120000, polling: 300});
+  const row = page.locator(rowSelector);
+  if (clickBlankActions) {
+    await row.scrollIntoViewIfNeeded();
+    const point = await row.evaluate((element) => {
+      const actions = element.querySelector('.branch-row-actions');
+      const rect = actions.getBoundingClientRect();
+      for (let x = rect.right - 3; x > rect.left; x -= 3) {
+        const y = rect.top + rect.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        if (hit === actions) return {x, y};
+      }
+      return null;
+    });
+    assert(point, 'the branch row has a hittable blank area beside its actions');
+    await page.mouse.click(point.x, point.y);
+  } else {
+    // A row's centre can be a merge button when its name is long.
+    await row.locator('.branch-row-name').click({timeout: 120000});
+  }
+  await page.waitForURL((url) => {
+    const cur = url.searchParams.get('branch');
+    return name === 'main' ? !cur : cur === name;
+  }, {timeout: 120000, waitUntil: 'load'});
 }
 
 

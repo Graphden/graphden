@@ -47,7 +47,7 @@ const {
     await waitTourTitle(page, 'Change the value here', 150000);
     await editBoundValue(page, 'branch version');
     await waitTourTitle(page, 'Go back to main', 150000);
-    await switchBranchViaChip(page, 'main');
+    await switchBranchViaChip(page, 'main', {clickBlankActions: true});
     await waitTourTitle(page, 'main never saw it', 150000);
     // main still reads the original literal — the whole point of the lesson.
     const mainValue = await page.evaluate(() => {

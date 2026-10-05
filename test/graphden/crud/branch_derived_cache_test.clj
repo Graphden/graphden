@@ -34,9 +34,25 @@
   [branch-id]
   {:storage (vs/->VersionedStorage
               (reify sp/StorageCRUD
+                (create-entity
+                  [_ _ _]
+                  (throw (UnsupportedOperationException. "Read-only test storage")))
+
+                (read-entity [_ _ _] nil)
+
+                (update-entity
+                  [_ _ _ _]
+                  (throw (UnsupportedOperationException. "Read-only test storage")))
+
+                (delete-entity
+                  [_ _ _]
+                  (throw (UnsupportedOperationException. "Read-only test storage")))
+
                 (query-entities [_ _ _] [])
 
-                (query-entities [_ _ _ _] []))
+                (query-entities [_ _ _ _] [])
+
+                (query-latest-per-group [_ _ _ _] []))
               branch-id)
    :graph-cache (atom {:fns [] :slots [] :fn-slots [] :bindings [] :list-items []})})
 

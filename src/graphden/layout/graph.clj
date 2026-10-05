@@ -880,6 +880,39 @@
         i))))
 
 
+(defn- sequence-source-depth
+  [arg-id arg-map]
+  (loop [cur (get arg-map arg-id), depth 0]
+    (if-let [source (some-> cur :source-id arg-map)]
+      (recur source (inc depth))
+      depth)))
+
+
+(defn- ordered-sequence-members
+  "Order one list by inheritance and item position, with its tail last."
+  [rows ranks arg-map]
+  (let [row-of #(get arg-map (get-in % [:data :sourceArgId]))
+        ;; A captured owner can be outside the consumer's ancestry. Keep the
+        ;; whole group's source-chain order instead of mixing known ranks
+        ;; with unknown owners that would interleave their item positions.
+        ranked? (every? (fn [[_ _ edge]]
+                          (let [arg (row-of edge)]
+                            (or (nil? (:item-id arg))
+                                (contains? ranks (:fn-id arg)))))
+                        rows)
+        chain-key (fn [edge]
+                    (let [arg (row-of edge)]
+                      (if (some? (:item-id arg))
+                        [(if ranked?
+                           (get ranks (:fn-id arg))
+                           (sequence-source-depth (:source-id arg) arg-map))
+                         (sequence-item-position arg arg-map)]
+                        [Long/MAX_VALUE 0])))]
+    (->> rows
+         (sort-by (fn [[_ index edge]] (conj (chain-key edge) index)))
+         (map peek))))
+
+
 (defn- group-sequence-edges
   "Stamp every edge that carries ONE ITEM of a sequence slot — an
    item row (`:item-id`) or the anchor's own placeholder (the
@@ -908,11 +941,6 @@
         group-of (fn [e]
                    (when-let [arg (member-row e)]
                      (str (get-in e [:data :source]) "/" (:slot-id arg))))
-        anchor-depth (fn [arg-id]
-                       (loop [cur (get arg-map arg-id), d 0]
-                         (if-let [src (some-> cur :source-id arg-map)]
-                           (recur src (inc d))
-                           d)))
         ;; The group's label: the slot's resolved name (an item row
         ;; resolves one hop up to its anchor), falling back to the
         ;; edge's own label stripped of the `[idx]` suffix.
@@ -933,26 +961,7 @@
         {:keys [counts labels indices]}
         (reduce-kv (fn [acc g rows]
                      (let [ranks (get owner-ranks (get-in (peek (first rows)) [:data :source]))
-                           ;; Captured bindings may be drawn on a consumer outside
-                           ;; their owner's ancestry. Preserve source-chain ordering
-                           ;; for that entire group rather than assigning unknown
-                           ;; owners one rank and interleaving their item positions.
-                           ranked? (every? (fn [[_ _ e]]
-                                             (let [arg (member-row e)]
-                                               (or (nil? (:item-id arg))
-                                                   (contains? ranks (:fn-id arg)))))
-                                           rows)
-                           chain-key (fn [e]
-                                       (let [arg (member-row e)]
-                                         (if (some? (:item-id arg))
-                                           [(if ranked?
-                                              (get ranks (:fn-id arg))
-                                              (anchor-depth (:source-id arg)))
-                                            (sequence-item-position arg arg-map)]
-                                           [Long/MAX_VALUE 0])))
-                           ordered (->> rows
-                                        (sort-by (fn [[_ i e]] (conj (chain-key e) i)))
-                                        (map peek))]
+                           ordered (ordered-sequence-members rows ranks arg-map)]
                        (-> acc
                            (assoc-in [:counts g] (count ordered))
                            (assoc-in [:labels g] (some label-of ordered))
